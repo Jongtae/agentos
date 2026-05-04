@@ -29,6 +29,23 @@ class CleanupBuildArtifactsTests(unittest.TestCase):
             check=False,
         )
 
+    def test_missing_build_root_passes_with_no_candidates(self):
+        missing_root = Path(self.tempdir.name) / "missing-build-output"
+        result = subprocess.run(
+            ["python3", str(SCRIPT), "--build-root", str(missing_root), "--json"],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["policy_status"], "pass")
+        self.assertEqual(payload["stale_candidate_count"], 0)
+        self.assertEqual(payload["build_root"], str(missing_root.resolve()))
+
     def test_detects_old_releases_and_smoke_artifacts(self):
         for version in ("0.36.60", "0.36.61", "0.36.62"):
             (self.build_root / "release" / f"agentos-v{version}-amd64.iso").write_bytes(b"x" * 8)

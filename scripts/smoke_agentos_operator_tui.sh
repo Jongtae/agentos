@@ -34,8 +34,8 @@ AGENTOS_GO_BIN="$GO_BIN" AGENTOS_OPERATOR_TUI_GOOS="$("$GO_BIN" env GOOS)" AGENT
   "$ROOT_DIR/scripts/build_agentos_operator_tui.sh" "$OUT_BIN" >/dev/null
 
 "$OUT_BIN" --workspace "$TMP_DIR/ws" --kernelctl "$FAKE_KERNELCTL" --self-test > "$TMP_DIR/render.txt"
-rg -q 'AgentOS' "$TMP_DIR/render.txt"
-rg -q 'Actions:' "$TMP_DIR/render.txt"
-rg -q 'Ask AgentOS' "$TMP_DIR/render.txt"
+grep -q 'AgentOS' "$TMP_DIR/render.txt"
+grep -q 'Actions:' "$TMP_DIR/render.txt"
+grep -q 'Ask AgentOS' "$TMP_DIR/render.txt"
 
 echo "operator tui smoke: PASS"

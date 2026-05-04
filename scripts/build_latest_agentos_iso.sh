@@ -31,6 +31,8 @@ STEP_STATUS=(
   "pending"
 )
 STEP_DETAIL=("" "" "" "" "" "" "")
+SPINNER_CHARS=("|" "/" "-" "\\")
+SPINNER_INDEX=0
 
 usage() {
   cat <<USAGE
@@ -166,6 +168,10 @@ progress_status_text() {
   printf "%s" "$status"
 }
 
+spinner() {
+  printf "%s" "${SPINNER_CHARS[$SPINNER_INDEX]}"
+}
+
 render_progress() {
   if [ -t 1 ] && [ "$RENDERED_PROGRESS_LINES" -gt 0 ]; then
     printf "\033[%dA" "$RENDERED_PROGRESS_LINES"
@@ -188,8 +194,8 @@ render_progress() {
     local bar
     bar="$(progress_bar "$status")"
     if [ -n "$bar" ]; then
-      printf "[%d/%d] %-19s %s %s\n" \
-        "$idx" "$TOTAL_STEPS" "$label" "$bar" "$(progress_status_text "$status" "$detail")"
+      printf "[%d/%d] %-19s %s %s %s\n" \
+        "$idx" "$TOTAL_STEPS" "$label" "$bar" "$(spinner)" "$(progress_status_text "$status" "$detail")"
     else
       printf "[%d/%d] %-19s %s\n" \
         "$idx" "$TOTAL_STEPS" "$label" "$(progress_status_text "$status" "$detail")"
@@ -205,6 +211,7 @@ set_step() {
   local detail="${3:-}"
   STEP_STATUS[$((step - 1))]="$status"
   STEP_DETAIL[$((step - 1))]="$detail"
+  SPINNER_INDEX=$(((SPINNER_INDEX + 1) % ${#SPINNER_CHARS[@]}))
   render_progress
 }
 
@@ -264,11 +271,9 @@ set +e
 build_pid=$!
 elapsed=0
 while kill -0 "$build_pid" 2>/dev/null; do
-  sleep 10
-  elapsed=$((elapsed + 10))
-  if [ "$elapsed" -eq 10 ] || [ $((elapsed % 60)) -eq 0 ]; then
-    set_step 4 "running" "$(format_elapsed "$elapsed")"
-  fi
+  sleep 2
+  elapsed=$((elapsed + 2))
+  set_step 4 "running" "$(format_elapsed "$elapsed")"
 done
 wait "$build_pid"
 build_status=$?

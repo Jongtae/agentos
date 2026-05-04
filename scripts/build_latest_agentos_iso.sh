@@ -11,6 +11,7 @@ CLEANUP=1
 RUN_SMOKE=1
 LOG_DIR="$ROOT_DIR/build-output/logs"
 TOTAL_STEPS=7
+BUILD_AGENTOS_ISO_CMD="${AGENTOS_BUILD_AGENTOS_ISO_CMD:-$ROOT_DIR/scripts/build_agentos_iso.sh}"
 RENDERED_PROGRESS_LINES=0
 STEP_LABELS=(
   "cleanup"
@@ -246,7 +247,7 @@ BUILD_LOG="$LOG_DIR/build-agentos-${VERSION}-${ARCH}.log"
 set_step 3 "done" ""
 
 build_cmd=(
-  "$ROOT_DIR/scripts/build_agentos_iso.sh"
+  "$BUILD_AGENTOS_ISO_CMD"
   --version "$VERSION"
   --output-dir "$OUTPUT_DIR"
   --arch "$ARCH"

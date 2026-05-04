@@ -1,0 +1,19 @@
+services:
+  agent-os:
+    build: .
+    image: agent-os:latest
+    # TUI requires interactive terminal
+    stdin_open: true
+    tty: true
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DEFAULT_WORKSPACE=/app/workspaces/default
+      - LOG_LEVEL=${LOG_LEVEL:-WARNING}
+    volumes:
+      # Persist workspace data (memory DB, session state) on host
+      - ./workspaces:/app/workspaces
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

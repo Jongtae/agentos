@@ -1,0 +1,4096 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+INSTALLED_RUNTIME_ROOT="${AGENTOS_INSTALLED_RUNTIME_ROOT:-/usr/lib/agentos}"
+INSTALLED_DEFAULT_WORKSPACE="${AGENTOS_INSTALLED_DEFAULT_WORKSPACE:-/home/ubuntu/agentos-ws}"
+INSTALLED_SEED_WORKSPACE="${AGENTOS_INSTALLED_SEED_WORKSPACE:-/var/lib/agentos/workspaces/default}"
+ROOT_DIR="${AGENTOS_RUNTIME_ROOT:-${AGENTOS_REPO_ROOT:-}}"
+if [ -n "$ROOT_DIR" ] && [ -f "$ROOT_DIR/src/main.py" ]; then
+  ROOT_DIR="$(cd "$ROOT_DIR" && pwd)"
+elif [ -f "$SCRIPT_DIR/../src/main.py" ]; then
+  ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+elif [ -f "$INSTALLED_RUNTIME_ROOT/src/main.py" ]; then
+  ROOT_DIR="$INSTALLED_RUNTIME_ROOT"
+else
+  ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
+SHELL_CMD="$SCRIPT_DIR/agentos-shell"
+
+SERVICE_NAME="${AGENTOS_KERNEL_SERVICE_NAME:-agentos-kernel.service}"
+SYSTEMCTL_CMD="${AGENTOS_SYSTEMCTL_CMD:-systemctl}"
+JOURNALCTL_CMD="${AGENTOS_JOURNALCTL_CMD:-journalctl}"
+EXPORT_DIAG_CMD="${AGENTOS_EXPORT_DIAG_CMD:-$ROOT_DIR/scripts/export_diagnostics_bundle.sh}"
+HEALTHCHECK_CMD="${AGENTOS_KERNEL_HEALTHCHECK_CMD:-$ROOT_DIR/scripts/kernel_boot_healthcheck.py}"
+AUDIT_CMD="${AGENTOS_KERNEL_AUDIT_CMD:-$ROOT_DIR/scripts/kernel_boot_audit.py}"
+AUDIT_SHADOW_CMD="${AGENTOS_KERNEL_AUDIT_SHADOW_CMD:-$ROOT_DIR/scripts/kernel_policy_shadow_report.py}"
+REPAIR_CMD="${AGENTOS_KERNEL_REPAIR_CMD:-$ROOT_DIR/scripts/kernel_boot_repair.py}"
+REPORT_STATUS_CMD="${AGENTOS_KERNEL_REPORT_STATUS_CMD:-$ROOT_DIR/scripts/kernel_repair_report_status.py}"
+FIRSTRUN_RESET_CMD="${AGENTOS_KERNEL_FIRSTRUN_RESET_CMD:-$ROOT_DIR/scripts/kernel_firstrun_reset.py}"
+POLICY_BRIDGE_CMD="${AGENTOS_KERNEL_POLICY_BRIDGE_CMD:-$ROOT_DIR/scripts/kernel_policy_bridge.py}"
+POLICY_SHADOW_CMD="${AGENTOS_KERNEL_POLICY_SHADOW_CMD:-$ROOT_DIR/scripts/kernel_policy_shadow_report.py}"
+POLICY_ENFORCE_CMD="${AGENTOS_KERNEL_POLICY_ENFORCE_CMD:-$ROOT_DIR/scripts/kernel_policy_enforced_pilot.py}"
+POLICY_READY_CMD="${AGENTOS_KERNEL_POLICY_READY_CMD:-$ROOT_DIR/scripts/kernel_policy_readiness.py}"
+EVENTS_CMD="${AGENTOS_KERNEL_EVENTS_CMD:-$ROOT_DIR/scripts/kernel_event_fabric_events.py}"
+SESSIONS_CMD="${AGENTOS_KERNEL_SESSIONS_CMD:-$ROOT_DIR/scripts/kernel_event_fabric_sessions.py}"
+DOCUMENT_ACCESS_CMD="${AGENTOS_KERNEL_DOCUMENT_ACCESS_CMD:-$ROOT_DIR/scripts/kernel_document_access.py}"
+WEB_ACCESS_CMD="${AGENTOS_KERNEL_WEB_ACCESS_CMD:-$ROOT_DIR/scripts/kernel_web_access.py}"
+INTAKE_SURFACE_CMD="${AGENTOS_KERNEL_INTAKE_SURFACE_CMD:-$ROOT_DIR/scripts/kernel_intake_surface.py}"
+INBOX_CAPABILITY_CMD="${AGENTOS_KERNEL_INBOX_CAPABILITY_CMD:-$ROOT_DIR/scripts/kernel_inbox_capability.py}"
+INBOX_NORMALIZED_INTAKE_CMD="${AGENTOS_KERNEL_INBOX_NORMALIZED_INTAKE_CMD:-$ROOT_DIR/scripts/kernel_inbox_normalized_intake.py}"
+INBOX_ROUTING_CONTRACT_CMD="${AGENTOS_KERNEL_INBOX_ROUTING_CONTRACT_CMD:-$ROOT_DIR/scripts/kernel_inbox_routing_contract.py}"
+INBOX_PROOF_BASELINE_CMD="${AGENTOS_KERNEL_INBOX_PROOF_BASELINE_CMD:-$ROOT_DIR/scripts/kernel_inbox_proof_baseline.py}"
+TELEGRAM_CONTRACT_CMD="${AGENTOS_KERNEL_TELEGRAM_CONTRACT_CMD:-$ROOT_DIR/scripts/kernel_telegram_contract.py}"
+BUILT_IN_WORKFLOW_CONTRACT_CMD="${AGENTOS_KERNEL_BUILT_IN_WORKFLOW_CONTRACT_CMD:-$ROOT_DIR/scripts/kernel_built_in_workflow_contract.py}"
+WORKFLOW_STATUS_CMD="${AGENTOS_KERNEL_WORKFLOW_STATUS_CMD:-$ROOT_DIR/scripts/kernel_workflow_status.py}"
+ASK_CMD="${AGENTOS_KERNEL_ASK_CMD:-$ROOT_DIR/scripts/kernel_ask.py}"
+ACTIVITY_FEED_CMD="${AGENTOS_KERNEL_ACTIVITY_FEED_CMD:-$ROOT_DIR/scripts/kernel_activity_feed.py}"
+INTENT_DISPATCH_CMD="${AGENTOS_KERNEL_INTENT_DISPATCH_CMD:-$ROOT_DIR/scripts/kernel_intent_dispatch.py}"
+RESEARCH_WORKFLOW_CMD="${AGENTOS_KERNEL_RESEARCH_WORKFLOW_CMD:-$ROOT_DIR/scripts/kernel_research_workflow.py}"
+RESEARCH_BRIEF_CMD="${AGENTOS_KERNEL_RESEARCH_BRIEF_CMD:-$ROOT_DIR/scripts/kernel_research_brief.py}"
+INBOX_WORKFLOW_CMD="${AGENTOS_KERNEL_INBOX_WORKFLOW_CMD:-$ROOT_DIR/scripts/kernel_inbox_workflow.py}"
+INBOX_REPLY_WORKFLOW_CMD="${AGENTOS_KERNEL_INBOX_REPLY_WORKFLOW_CMD:-$ROOT_DIR/scripts/kernel_inbox_reply_workflow.py}"
+TELEGRAM_ROUTING_CMD="${AGENTOS_KERNEL_TELEGRAM_ROUTING_CMD:-$ROOT_DIR/scripts/kernel_telegram_routing_contract.py}"
+TELEGRAM_STATUS_CMD="${AGENTOS_KERNEL_TELEGRAM_STATUS_CMD:-$ROOT_DIR/scripts/kernel_telegram_status.py}"
+TELEGRAM_PROOF_BASELINE_CMD="${AGENTOS_KERNEL_TELEGRAM_PROOF_BASELINE_CMD:-$ROOT_DIR/scripts/kernel_telegram_proof_baseline.py}"
+TELEGRAM_WEB_EXECUTION_CMD="${AGENTOS_KERNEL_TELEGRAM_WEB_EXECUTION_CMD:-$ROOT_DIR/scripts/kernel_telegram_web_execution.py}"
+TELEGRAM_REPLY_SURFACE_CMD="${AGENTOS_KERNEL_TELEGRAM_REPLY_SURFACE_CMD:-$ROOT_DIR/scripts/kernel_telegram_reply_surface.py}"
+TELEGRAM_THREAD_STATUS_CMD="${AGENTOS_KERNEL_TELEGRAM_THREAD_STATUS_CMD:-$ROOT_DIR/scripts/kernel_telegram_thread_status.py}"
+TELEGRAM_LIVE_LOOP_CMD="${AGENTOS_KERNEL_TELEGRAM_LIVE_LOOP_CMD:-$ROOT_DIR/scripts/kernel_telegram_live_loop.py}"
+TELEGRAM_SETUP_CMD="${AGENTOS_KERNEL_TELEGRAM_SETUP_CMD:-$ROOT_DIR/scripts/kernel_telegram_setup.py}"
+LLM_SETUP_CMD="${AGENTOS_KERNEL_LLM_SETUP_CMD:-$ROOT_DIR/scripts/kernel_llm_setup.py}"
+ENGINE_AVAILABILITY_CMD="${AGENTOS_KERNEL_ENGINE_AVAILABILITY_CMD:-$ROOT_DIR/scripts/kernel_engine_availability.py}"
+CAPABILITY_PROOF_SURFACE_CMD="${AGENTOS_KERNEL_CAPABILITY_PROOF_SURFACE_CMD:-$ROOT_DIR/scripts/kernel_capability_proof_surface.py}"
+SERVICE_CAPABILITY_CMD="${AGENTOS_KERNEL_SERVICE_CAPABILITY_CMD:-$ROOT_DIR/scripts/kernel_service_capability.py}"
+PERMISSION_CAPABILITY_CMD="${AGENTOS_KERNEL_PERMISSION_CAPABILITY_CMD:-$ROOT_DIR/scripts/kernel_permission_capability.py}"
+CAPABILITY_EXECUTION_CMD="${AGENTOS_KERNEL_CAPABILITY_EXECUTION_CMD:-$ROOT_DIR/scripts/kernel_capability_execution.py}"
+FIRST_RUN_SUMMARY_CMD="${AGENTOS_KERNEL_FIRST_RUN_SUMMARY_CMD:-$ROOT_DIR/scripts/kernel_first_run_summary.py}"
+VM_E2E_PROOF_CMD="${AGENTOS_KERNEL_VM_E2E_PROOF_CMD:-$ROOT_DIR/scripts/kernel_vm_e2e_proof.py}"
+VM_E2E_SCENARIO_CMD="${AGENTOS_KERNEL_VM_E2E_SCENARIO_CMD:-$ROOT_DIR/scripts/kernel_vm_e2e_scenario.py}"
+VM_UTM_OBSERVE_CMD="${AGENTOS_KERNEL_VM_UTM_OBSERVE_CMD:-$ROOT_DIR/scripts/vm_utmctl_observation.py}"
+POLICY_CORRELATION_CMD="${AGENTOS_KERNEL_POLICY_CORRELATION_CMD:-$ROOT_DIR/scripts/kernel_policy_evidence_report.py}"
+BROKER_STATUS_CMD="${AGENTOS_KERNEL_BROKER_STATUS_CMD:-$ROOT_DIR/scripts/kernel_broker_status.py}"
+EVIDENCE_CMD="${AGENTOS_KERNEL_EVIDENCE_CMD:-$ROOT_DIR/scripts/kernel_operator_evidence.py}"
+REPLAY_CMD="${AGENTOS_KERNEL_REPLAY_CMD:-$ROOT_DIR/scripts/kernel_session_replay.py}"
+APPROVAL_FORENSICS_CMD="${AGENTOS_KERNEL_APPROVAL_FORENSICS_CMD:-$ROOT_DIR/scripts/kernel_approval_forensics.py}"
+CASE_EXPORT_CMD="${AGENTOS_KERNEL_CASE_EXPORT_CMD:-$ROOT_DIR/scripts/kernel_operator_case_export.py}"
+VALIDATION_WINDOW_CMD="${AGENTOS_KERNEL_VALIDATION_WINDOW_CMD:-$ROOT_DIR/scripts/kernel_validation_window.py}"
+CONTROL_HISTORY_CMD="${AGENTOS_KERNEL_CONTROL_HISTORY_CMD:-$ROOT_DIR/scripts/kernel_control_history.py}"
+REVIEW_PACK_CMD="${AGENTOS_KERNEL_REVIEW_PACK_CMD:-$ROOT_DIR/scripts/kernel_operator_review_pack.py}"
+REVIEW_PACK_HISTORY_CMD="${AGENTOS_KERNEL_REVIEW_PACK_HISTORY_CMD:-$ROOT_DIR/scripts/kernel_operator_review_pack_history.py}"
+REVIEW_PACKET_CMD="${AGENTOS_KERNEL_REVIEW_PACKET_CMD:-$ROOT_DIR/scripts/kernel_operator_review_packet.py}"
+REVIEW_BUNDLE_CMD="${AGENTOS_KERNEL_REVIEW_BUNDLE_CMD:-$ROOT_DIR/scripts/kernel_operator_review_bundle.py}"
+REVIEW_BUNDLE_HISTORY_CMD="${AGENTOS_KERNEL_REVIEW_BUNDLE_HISTORY_CMD:-$ROOT_DIR/scripts/kernel_operator_review_bundle_history.py}"
+MILESTONE_BUNDLE_CMD="${AGENTOS_KERNEL_MILESTONE_BUNDLE_CMD:-$ROOT_DIR/scripts/kernel_milestone_bundle.py}"
+PREVIEW_EVAL_KIT_CMD="${AGENTOS_KERNEL_PREVIEW_EVAL_KIT_CMD:-$ROOT_DIR/scripts/kernel_preview_evaluation_kit.py}"
+EVALUATOR_COHORT_PACK_CMD="${AGENTOS_KERNEL_EVALUATOR_COHORT_PACK_CMD:-$ROOT_DIR/scripts/kernel_evaluator_cohort_pack.py}"
+FEEDBACK_INTAKE_CMD="${AGENTOS_KERNEL_FEEDBACK_INTAKE_CMD:-$ROOT_DIR/scripts/kernel_evaluator_feedback_intake.py}"
+FEEDBACK_TRIAGE_CMD="${AGENTOS_KERNEL_FEEDBACK_TRIAGE_CMD:-$ROOT_DIR/scripts/kernel_feedback_triage.py}"
+DIRECT_BOOT_UX_BURNDOWN_CMD="${AGENTOS_KERNEL_DIRECT_BOOT_UX_BURNDOWN_CMD:-$ROOT_DIR/scripts/kernel_direct_boot_ux_burndown.py}"
+RECOVERY_CLARITY_FIX_LOOP_CMD="${AGENTOS_KERNEL_RECOVERY_CLARITY_FIX_LOOP_CMD:-$ROOT_DIR/scripts/kernel_recovery_clarity_fix_loop.py}"
+RECOVERY_COPY_CONSISTENCY_CMD="${AGENTOS_KERNEL_RECOVERY_COPY_CONSISTENCY_CMD:-$ROOT_DIR/scripts/kernel_recovery_copy_consistency.py}"
+RECOVERY_WATCH_REEVALUATION_CMD="${AGENTOS_KERNEL_RECOVERY_WATCH_REEVALUATION_CMD:-$ROOT_DIR/scripts/kernel_recovery_watch_reevaluation.py}"
+DIRECT_BOOT_MESSAGING_CONSISTENCY_CMD="${AGENTOS_KERNEL_DIRECT_BOOT_MESSAGING_CONSISTENCY_CMD:-$ROOT_DIR/scripts/kernel_direct_boot_messaging_consistency.py}"
+LIMITED_PREVIEW_ITERATION_LEDGER_CMD="${AGENTOS_KERNEL_LIMITED_PREVIEW_ITERATION_LEDGER_CMD:-$ROOT_DIR/scripts/kernel_limited_preview_iteration_ledger.py}"
+BROADER_PREVIEW_READINESS_CMD="${AGENTOS_KERNEL_BROADER_PREVIEW_READINESS_CMD:-$ROOT_DIR/scripts/kernel_broader_preview_readiness_scoreboard.py}"
+BROADER_PREVIEW_LAUNCH_PACK_CMD="${AGENTOS_KERNEL_BROADER_PREVIEW_LAUNCH_PACK_CMD:-$ROOT_DIR/scripts/kernel_broader_preview_launch_pack.py}"
+PREVIEW_POSTURE_RESCORE_CMD="${AGENTOS_KERNEL_PREVIEW_POSTURE_RESCORE_CMD:-$ROOT_DIR/scripts/kernel_preview_posture_rescore.py}"
+UPDATED_BROADER_PREVIEW_LAUNCH_PACK_CMD="${AGENTOS_KERNEL_UPDATED_BROADER_PREVIEW_LAUNCH_PACK_CMD:-$ROOT_DIR/scripts/kernel_updated_broader_preview_launch_pack.py}"
+BROADER_PREVIEW_COHORT_OPERATIONS_CMD="${AGENTOS_KERNEL_BROADER_PREVIEW_COHORT_OPERATIONS_CMD:-$ROOT_DIR/scripts/kernel_broader_preview_cohort_operations.py}"
+BROADER_PREVIEW_ISSUE_LEDGER_CMD="${AGENTOS_KERNEL_BROADER_PREVIEW_ISSUE_LEDGER_CMD:-$ROOT_DIR/scripts/kernel_broader_preview_issue_ledger.py}"
+BROADER_PREVIEW_HEALTH_SUMMARY_CMD="${AGENTOS_KERNEL_BROADER_PREVIEW_HEALTH_SUMMARY_CMD:-$ROOT_DIR/scripts/kernel_broader_preview_health_summary.py}"
+BROADER_PREVIEW_CONTINUATION_PACK_CMD="${AGENTOS_KERNEL_BROADER_PREVIEW_CONTINUATION_PACK_CMD:-$ROOT_DIR/scripts/kernel_broader_preview_continuation_pack.py}"
+PUBLIC_PREVIEW_POSITION_UPDATE_CMD="${AGENTOS_KERNEL_PUBLIC_PREVIEW_POSITION_UPDATE_CMD:-$ROOT_DIR/scripts/kernel_public_preview_position_update.py}"
+PUBLIC_PREVIEW_ESCALATION_PACK_CMD="${AGENTOS_KERNEL_PUBLIC_PREVIEW_ESCALATION_PACK_CMD:-$ROOT_DIR/scripts/kernel_public_preview_escalation_pack.py}"
+PUBLIC_PREVIEW_ANNOUNCEMENT_READINESS_CMD="${AGENTOS_KERNEL_PUBLIC_PREVIEW_ANNOUNCEMENT_READINESS_CMD:-$ROOT_DIR/scripts/kernel_public_preview_announcement_readiness.py}"
+PUBLIC_PREVIEW_DECISION_LEDGER_CMD="${AGENTOS_KERNEL_PUBLIC_PREVIEW_DECISION_LEDGER_CMD:-$ROOT_DIR/scripts/kernel_public_preview_decision_ledger.py}"
+PUBLIC_PREVIEW_MESSAGING_REVIEW_CMD="${AGENTOS_KERNEL_PUBLIC_PREVIEW_MESSAGING_REVIEW_CMD:-$ROOT_DIR/scripts/kernel_public_preview_messaging_review.py}"
+PUBLIC_PREVIEW_OPERATING_BRIEF_CMD="${AGENTOS_KERNEL_PUBLIC_PREVIEW_OPERATING_BRIEF_CMD:-$ROOT_DIR/scripts/kernel_public_preview_operating_brief.py}"
+PUBLIC_PREVIEW_DECISION_PACK_CMD="${AGENTOS_KERNEL_PUBLIC_PREVIEW_DECISION_PACK_CMD:-$ROOT_DIR/scripts/kernel_public_preview_decision_pack.py}"
+PUBLIC_PREVIEW_LAUNCH_READINESS_REVIEW_CMD="${AGENTOS_KERNEL_PUBLIC_PREVIEW_LAUNCH_READINESS_REVIEW_CMD:-$ROOT_DIR/scripts/kernel_public_preview_launch_readiness_review.py}"
+PUBLIC_PREVIEW_GO_NO_GO_CMD="${AGENTOS_KERNEL_PUBLIC_PREVIEW_GO_NO_GO_CMD:-$ROOT_DIR/scripts/kernel_public_preview_go_no_go.py}"
+BROADER_PREVIEW_SIGNAL_SNAPSHOT_CMD="${AGENTOS_KERNEL_BROADER_PREVIEW_SIGNAL_SNAPSHOT_CMD:-$ROOT_DIR/scripts/kernel_broader_preview_signal_snapshot.py}"
+BROADER_PREVIEW_DRIFT_LEDGER_CMD="${AGENTOS_KERNEL_BROADER_PREVIEW_DRIFT_LEDGER_CMD:-$ROOT_DIR/scripts/kernel_broader_preview_drift_ledger.py}"
+BROADER_PREVIEW_WEEKLY_SUMMARY_CMD="${AGENTOS_KERNEL_BROADER_PREVIEW_WEEKLY_SUMMARY_CMD:-$ROOT_DIR/scripts/kernel_broader_preview_weekly_summary.py}"
+LIMITED_PREVIEW_READINESS_CMD="${AGENTOS_KERNEL_LIMITED_PREVIEW_READINESS_CMD:-$ROOT_DIR/scripts/kernel_limited_preview_readiness_scoreboard.py}"
+BROADER_PREVIEW_CANDIDATE_CMD="${AGENTOS_KERNEL_BROADER_PREVIEW_CANDIDATE_CMD:-$ROOT_DIR/scripts/kernel_broader_preview_candidate_pack.py}"
+EXTERNAL_EVAL_CHECKLIST_CMD="${AGENTOS_KERNEL_EXTERNAL_EVAL_CHECKLIST_CMD:-$ROOT_DIR/scripts/kernel_external_evaluation_checklist.py}"
+SESSION_CONTRACT_CMD="${AGENTOS_KERNEL_SESSION_CONTRACT_CMD:-$ROOT_DIR/scripts/kernel_session_contract.py}"
+CODEX_PRIMARY_RUNTIME_CMD="${AGENTOS_KERNEL_CODEX_PRIMARY_RUNTIME_CMD:-$ROOT_DIR/scripts/kernel_codex_primary_runtime.py}"
+CODEX_PERSISTENT_STATE_CMD="${AGENTOS_KERNEL_CODEX_PERSISTENT_STATE_CMD:-$ROOT_DIR/scripts/kernel_codex_persistent_state.py}"
+CODEX_RUNTIME_CONTRACT_CMD="${AGENTOS_KERNEL_CODEX_RUNTIME_CONTRACT_CMD:-$ROOT_DIR/scripts/kernel_codex_runtime_contract.py}"
+CODEX_PRIMARY_RUNTIME_PROOF_CMD="${AGENTOS_KERNEL_CODEX_PRIMARY_RUNTIME_PROOF_CMD:-$ROOT_DIR/scripts/kernel_codex_primary_runtime_proof.py}"
+CODEX_LAUNCH_SUPERVISION_CMD="${AGENTOS_KERNEL_CODEX_LAUNCH_SUPERVISION_CMD:-$ROOT_DIR/scripts/kernel_codex_launch_supervision.py}"
+CODEX_RECOVERY_TO_CODEX_CMD="${AGENTOS_KERNEL_CODEX_RECOVERY_TO_CODEX_CMD:-$ROOT_DIR/scripts/kernel_codex_recovery_to_codex.py}"
+CODEX_RUNTIME_HEALTH_EVIDENCE_CMD="${AGENTOS_KERNEL_CODEX_RUNTIME_HEALTH_EVIDENCE_CMD:-$ROOT_DIR/scripts/kernel_codex_runtime_health_evidence.py}"
+CODEX_SLOT_TRANSITION_COMPATIBILITY_CMD="${AGENTOS_KERNEL_CODEX_SLOT_TRANSITION_COMPATIBILITY_CMD:-$ROOT_DIR/scripts/kernel_codex_slot_transition_compatibility.py}"
+CODEX_WELCOME_RUNTIME_LAUNCHER_CMD="${AGENTOS_KERNEL_CODEX_WELCOME_RUNTIME_LAUNCHER_CMD:-$ROOT_DIR/scripts/kernel_codex_welcome_runtime_launcher.py}"
+CODEX_RUNTIME_COPY_LOCK_CMD="${AGENTOS_KERNEL_CODEX_RUNTIME_COPY_LOCK_CMD:-$ROOT_DIR/scripts/kernel_codex_runtime_copy_lock.py}"
+CODEX_VM_DEMO_PATH_CMD="${AGENTOS_KERNEL_CODEX_VM_DEMO_PATH_CMD:-$ROOT_DIR/scripts/kernel_codex_vm_demo_path.py}"
+CODEX_RUNTIME_SIGNOFF_PACK_CMD="${AGENTOS_KERNEL_CODEX_RUNTIME_SIGNOFF_PACK_CMD:-$ROOT_DIR/scripts/kernel_codex_runtime_signoff_pack.py}"
+CODEX_EXECUTION_WINDOW_DISCIPLINE_CMD="${AGENTOS_KERNEL_CODEX_EXECUTION_WINDOW_DISCIPLINE_CMD:-$ROOT_DIR/scripts/kernel_codex_execution_window_discipline.py}"
+MEDIATION_COVERAGE_CMD="${AGENTOS_KERNEL_MEDIATION_COVERAGE_CMD:-$ROOT_DIR/scripts/kernel_mediation_coverage.py}"
+MEDIATION_TAXONOMY_CMD="${AGENTOS_KERNEL_MEDIATION_TAXONOMY_CMD:-$ROOT_DIR/scripts/kernel_mediation_taxonomy.py}"
+UNIFIED_EVENT_SCHEMA_CMD="${AGENTOS_KERNEL_UNIFIED_EVENT_SCHEMA_CMD:-$ROOT_DIR/scripts/kernel_unified_event_schema.py}"
+SERVICE_GOVERNANCE_CMD="${AGENTOS_KERNEL_SERVICE_GOVERNANCE_CMD:-$ROOT_DIR/scripts/kernel_service_governance.py}"
+AUTOMATION_GOVERNANCE_CMD="${AGENTOS_KERNEL_AUTOMATION_GOVERNANCE_CMD:-$ROOT_DIR/scripts/kernel_automation_governance.py}"
+POLICY_MATURITY_CMD="${AGENTOS_KERNEL_POLICY_MATURITY_CMD:-$ROOT_DIR/scripts/kernel_policy_maturity.py}"
+PROVENANCE_GRAPH_CMD="${AGENTOS_KERNEL_PROVENANCE_GRAPH_CMD:-$ROOT_DIR/scripts/kernel_provenance_graph.py}"
+USER_SPACE_SOVEREIGNTY_CMD="${AGENTOS_KERNEL_USER_SPACE_SOVEREIGNTY_CMD:-$ROOT_DIR/scripts/kernel_user_space_sovereignty.py}"
+MEDIATION_PILOT_CMD="${AGENTOS_KERNEL_MEDIATION_PILOT_CMD:-$ROOT_DIR/scripts/kernel_mediation_pilot.py}"
+APPLIANCE_LIFECYCLE_CMD="${AGENTOS_KERNEL_APPLIANCE_LIFECYCLE_CMD:-$ROOT_DIR/scripts/kernel_appliance_lifecycle.py}"
+SYSTEM_IMAGE_LAYOUT_CMD="${AGENTOS_KERNEL_SYSTEM_IMAGE_LAYOUT_CMD:-$ROOT_DIR/scripts/kernel_system_image_layout.py}"
+SLOT_UPDATE_CONTRACT_CMD="${AGENTOS_KERNEL_SLOT_UPDATE_CONTRACT_CMD:-$ROOT_DIR/scripts/kernel_slot_update_contract.py}"
+SLOT_RECOVERY_LOGIC_CMD="${AGENTOS_KERNEL_SLOT_RECOVERY_LOGIC_CMD:-$ROOT_DIR/scripts/kernel_slot_recovery_logic.py}"
+NEXT_BOOT_TARGET_INTEGRATION_CMD="${AGENTOS_KERNEL_NEXT_BOOT_TARGET_INTEGRATION_CMD:-$ROOT_DIR/scripts/kernel_next_boot_target_integration.py}"
+RECOVERY_MODE_CONTRACT_CMD="${AGENTOS_KERNEL_RECOVERY_MODE_CONTRACT_CMD:-$ROOT_DIR/scripts/kernel_recovery_mode_contract.py}"
+STATE_PARTITION_CONTRACT_CMD="${AGENTOS_KERNEL_STATE_PARTITION_CONTRACT_CMD:-$ROOT_DIR/scripts/kernel_state_partition_contract.py}"
+IMAGE_RELEASE_IDENTITY_CMD="${AGENTOS_KERNEL_IMAGE_RELEASE_IDENTITY_CMD:-$ROOT_DIR/scripts/kernel_image_release_identity.py}"
+IMAGE_UPDATE_PROTOTYPE_CMD="${AGENTOS_KERNEL_IMAGE_UPDATE_PROTOTYPE_CMD:-$ROOT_DIR/scripts/kernel_image_update_prototype.py}"
+INSTALLED_SLOT_SWITCH_EVIDENCE_CMD="${AGENTOS_KERNEL_INSTALLED_SLOT_SWITCH_EVIDENCE_CMD:-$ROOT_DIR/scripts/kernel_installed_slot_switch_evidence.py}"
+INSTALLED_BOOT_TO_CODEX_CMD="${AGENTOS_KERNEL_INSTALLED_BOOT_TO_CODEX_CMD:-$ROOT_DIR/scripts/kernel_installed_boot_to_codex.py}"
+REMASTERED_VM_BOOT_CHECKLIST_CMD="${AGENTOS_KERNEL_REMASTERED_VM_BOOT_CHECKLIST_CMD:-$ROOT_DIR/scripts/kernel_remastered_vm_boot_checklist.py}"
+WELCOME_FIRST_VM_PROOF_PACK_CMD="${AGENTOS_KERNEL_WELCOME_FIRST_VM_PROOF_PACK_CMD:-$ROOT_DIR/scripts/kernel_welcome_first_vm_proof_pack.py}"
+INSTALLED_REBOOT_SLOT_PROOF_CMD="${AGENTOS_KERNEL_INSTALLED_REBOOT_SLOT_PROOF_CMD:-$ROOT_DIR/scripts/kernel_installed_reboot_slot_proof.py}"
+RECOVERY_REENTRY_AFTER_SLOT_SWITCH_CMD="${AGENTOS_KERNEL_RECOVERY_REENTRY_AFTER_SLOT_SWITCH_CMD:-$ROOT_DIR/scripts/kernel_recovery_reentry_after_slot_switch.py}"
+APPLIANCE_BOOT_SIGNOFF_PACK_CMD="${AGENTOS_KERNEL_APPLIANCE_BOOT_SIGNOFF_PACK_CMD:-$ROOT_DIR/scripts/kernel_appliance_boot_signoff_pack.py}"
+PLATFORM_VALIDATION_CMD="${AGENTOS_KERNEL_PLATFORM_VALIDATION_CMD:-$ROOT_DIR/scripts/kernel_platform_validation.py}"
+RUNTIME_ENTRY_CMD="${AGENTOS_KERNEL_RUNTIME_ENTRY_CMD:-$ROOT_DIR/scripts/kernel_runtime_entry.py}"
+OPERATOR_MODE_CMD="${AGENTOS_KERNEL_OPERATOR_MODE_CMD:-$ROOT_DIR/scripts/kernel_operator_mode.py}"
+GUIDED_OPERATOR_CMD="${AGENTOS_KERNEL_GUIDED_OPERATOR_CMD:-$ROOT_DIR/scripts/kernel_guided_operator.py}"
+PREVIEW_READINESS_SCORECARD_CMD="${AGENTOS_KERNEL_PREVIEW_READINESS_SCORECARD_CMD:-$ROOT_DIR/scripts/kernel_preview_readiness_scorecard.py}"
+PREVIEW_REHEARSAL_LOOP_CMD="${AGENTOS_KERNEL_PREVIEW_REHEARSAL_LOOP_CMD:-$ROOT_DIR/scripts/kernel_preview_rehearsal_loop.py}"
+PREVIEW_CANDIDATE_CMD="${AGENTOS_KERNEL_PREVIEW_CANDIDATE_CMD:-$ROOT_DIR/scripts/kernel_preview_candidate.py}"
+
+usage() {
+  cat <<USAGE
+Usage:
+  agentos-kernelctl status [--workspace <path>] [--policy-dir <path>] [--parser-cmd <cmd>] [--json]
+  agentos-kernelctl doctor [--workspace <path>] [--json]
+  agentos-kernelctl preflight [--workspace <path>]
+  agentos-kernelctl health [--workspace <path>] [--policy-dir <path>] [--parser-cmd <cmd>] [--json]
+  agentos-kernelctl audit [--workspace <path>] [--install-root <path>] [--json]
+  agentos-kernelctl repair [--workspace <path>] [--install-root <path>] [--checks <names>] [--list-checks] [--report-file <path>] [--report-dir <path>] [--report-retain <N>] [--dry-run] [--json]
+  agentos-kernelctl report-status [--report-dir <path>] [--json]
+  agentos-kernelctl broker-status [--workspace <path>] [--json]
+  agentos-kernelctl evidence [--workspace <path>] [--install-root <path>] [--metadata <path>] [--json]
+  agentos-kernelctl replay [--workspace <path>] [--session-id <id>] [--limit <N>] [--json]
+  agentos-kernelctl approval-forensics [--workspace <path>] [--session-id <id>] [--limit <N>] [--json]
+  agentos-kernelctl case-export [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--output <path>] [--json]
+  agentos-kernelctl validation-window [--workspace <path>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--output <path>] [--json]
+  agentos-kernelctl control-history [--workspace <path>] [--limit <N>] [--output <path>] [--json]
+  agentos-kernelctl review-pack [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--output <path>] [--json]
+  agentos-kernelctl review-pack-history [--report-dir <path>] [--limit <N>] [--output <path>] [--json]
+  agentos-kernelctl review-packet [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--output <path>] [--json]
+  agentos-kernelctl review-bundle [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--output <path>] [--json]
+  agentos-kernelctl review-bundle-history [--report-dir <path>] [--limit <N>] [--output <path>] [--json]
+  agentos-kernelctl milestone-bundle [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--output <path>] [--json]
+  agentos-kernelctl preview-eval-kit [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--output <path>] [--json]
+  agentos-kernelctl evaluator-cohort-pack [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl feedback-intake [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--output <path>] [--json]
+  agentos-kernelctl feedback-triage [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl direct-boot-ux-burndown [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl recovery-clarity-fix-loop [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl recovery-copy-consistency [--workspace <path>] [--report-dir <path>] [--snapshot-label <label>] [--output <path>] [--json]
+  agentos-kernelctl recovery-watch-reevaluation [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl direct-boot-messaging-consistency [--workspace <path>] [--report-dir <path>] [--snapshot-label <label>] [--output <path>] [--json]
+  agentos-kernelctl limited-preview-iteration-ledger [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl broader-preview-readiness [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl broader-preview-launch-pack [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl preview-posture-rescore [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl updated-broader-preview-launch-pack [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl broader-preview-cohort-operations [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl broader-preview-issue-ledger [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl broader-preview-health-summary [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl broader-preview-continuation-pack [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl public-preview-position-update [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl public-preview-escalation-pack [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl public-preview-announcement-readiness [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl public-preview-decision-ledger [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl public-preview-messaging-review [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl public-preview-operating-brief [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl public-preview-decision-pack [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl public-preview-launch-readiness-review [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl public-preview-go-no-go [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl broader-preview-signal-snapshot [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl broader-preview-drift-ledger [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl broader-preview-weekly-summary [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl limited-preview-readiness [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl broader-preview-candidate [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl external-eval-checklist [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--feedback-file <path>] [--output <path>] [--json]
+  agentos-kernelctl preview-readiness [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--report-file <path>] [--output <path>] [--json]
+  agentos-kernelctl preview-rehearsal [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--report-file <path>] [--output <path>] [--json]
+  agentos-kernelctl preview-candidate [--workspace <path>] [--session-id <id>] [--limit <N>] [--install-root <path>] [--metadata <path>] [--diagnostics-manifest <path>] [--report-dir <path>] [--snapshot-label <label>] [--report-file <path>] [--output <path>] [--json]
+  agentos-kernelctl session-contract [--workspace <path>] [--output <path>] [--json]
+  agentos-kernelctl codex-primary-runtime [--workspace <path>] [--output <path>] [--json]
+  agentos-kernelctl codex-persistent-state [--workspace <path>] [--output <path>] [--json]
+  agentos-kernelctl codex-runtime-contract [--workspace <path>] [--output <path>] [--json]
+  agentos-kernelctl codex-primary-runtime-proof [--workspace <path>] [--output <path>] [--json]
+  agentos-kernelctl codex-launch-supervision [--workspace <path>] [--output <path>] [--json]
+  agentos-kernelctl codex-recovery-to-codex [--workspace <path>] [--output <path>] [--json]
+  agentos-kernelctl codex-runtime-health-evidence [--workspace <path>] [--output <path>] [--json]
+  agentos-kernelctl codex-slot-transition-compatibility [--workspace <path>] [--output <path>] [--json]
+  agentos-kernelctl codex-welcome-runtime-launcher [--workspace <path>] [--output <path>] [--json]
+  agentos-kernelctl codex-runtime-copy-lock [--output <path>] [--json]
+  agentos-kernelctl codex-vm-demo-path [--workspace <path>] [--output <path>] [--json]
+  agentos-kernelctl codex-runtime-signoff-pack [--workspace <path>] [--output <path>] [--json]
+  agentos-kernelctl codex-execution-window-discipline [--output <path>] [--json]
+  agentos-kernelctl mediation-coverage [--workspace <path>] [--output <path>] [--json]
+  agentos-kernelctl mediation-taxonomy [--workspace <path>] [--output <path>] [--json]
+  agentos-kernelctl unified-event-schema [--output <path>] [--json]
+  agentos-kernelctl service-governance [--workspace <path>] [--output <path>] [--json]
+  agentos-kernelctl automation-governance [--workspace <path>] [--output <path>] [--json]
+  agentos-kernelctl policy-maturity [--workspace <path>] [--policy-dir <path>] [--parser-cmd <cmd>] [--output <path>] [--json]
+  agentos-kernelctl provenance-graph [--workspace <path>] [--session-id <id>] [--limit <N>] [--output <path>] [--json]
+  agentos-kernelctl user-space-sovereignty [--output <path>] [--json]
+  agentos-kernelctl mediation-pilot [--workspace <path>] [--output <path>] [--json]
+  agentos-kernelctl appliance-lifecycle [--workspace <path>] [--report-dir <path>] [--install-root <path>] [--metadata <path>] [--snapshot-label <label>] [--output <path>] [--json]
+  agentos-kernelctl system-image-layout [--output <path>] [--json]
+  agentos-kernelctl slot-update-contract [--output <path>] [--json]
+  agentos-kernelctl slot-recovery-logic [--output <path>] [--json]
+  agentos-kernelctl next-boot-target-integration [--output <path>] [--json]
+  agentos-kernelctl installed-slot-switch-evidence [--output <path>] [--json]
+  agentos-kernelctl installed-boot-to-codex [--workspace <path>] [--output <path>] [--json]
+  agentos-kernelctl remastered-vm-boot-checklist [--report-dir <path>] [--snapshot-label <label>] [--boot-flow-proof <path>] [--boot-target-activation <path>] [--vm-first-screen-evidence <path>] [--output <path>] [--json]
+  agentos-kernelctl welcome-first-vm-proof-pack [--report-dir <path>] [--snapshot-label <label>] [--checklist-manifest <path>] [--vm-first-screen-evidence <path>] [--boot-target-activation <path>] [--output <path>] [--json]
+  agentos-kernelctl installed-reboot-slot-proof [--report-dir <path>] [--snapshot-label <label>] [--next-boot-target <path>] [--installed-slot-switch-evidence <path>] [--output <path>] [--json]
+  agentos-kernelctl recovery-reentry-after-slot-switch [--report-dir <path>] [--snapshot-label <label>] [--installed-reboot-slot-proof <path>] [--slot-recovery-logic <path>] [--output <path>] [--json]
+  agentos-kernelctl appliance-boot-signoff-pack [--report-dir <path>] [--snapshot-label <label>] [--welcome-first-vm-proof-pack <path>] [--installed-reboot-slot-proof <path>] [--recovery-reentry-after-slot-switch <path>] [--output <path>] [--json]
+  agentos-kernelctl recovery-mode-contract [--output <path>] [--json]
+  agentos-kernelctl state-partition-contract [--output <path>] [--json]
+  agentos-kernelctl image-release-identity [--version <v>] [--channel <name>] [--output <path>] [--json]
+  agentos-kernelctl image-update-prototype [--version <v>] [--channel <name>] [--target-slot <slot>] [--dry-run] [--output <path>] [--json]
+  agentos-kernelctl platform-validation [--workspace <path>] [--report-dir <path>] [--install-root <path>] [--metadata <path>] [--snapshot-label <label>] [--output <path>] [--json]
+  agentos-kernelctl runtime-entry [--output <path>] [--json]
+  agentos-kernelctl operator-mode [--output <path>] [--json]
+  agentos-kernelctl guided-operator [--workspace <path>] [--output <path>] [--json]
+  agentos-kernelctl ask [--workspace <path>] --message <text> [--output <path>] [--json]
+  agentos-kernelctl document-access [--workspace <path>] --path <relative-path> [--json]
+  agentos-kernelctl web-access [--workspace <path>] --url <https-url> [--allow-domain <domain>] [--requires-authentication] [--interactive] [--compatibility-required] [--json]
+  agentos-kernelctl intake [--workspace <path>] [--report-dir <path>] [--session-id <id>] [--limit <N>] [--json]
+  agentos-kernelctl inbox-capability [--workspace <path>] [--fixture-path <relative-path>] [--maildir <relative-path>] [--session-id <id>] [--json]
+  agentos-kernelctl inbox-intake [--workspace <path>] [--fixture-path <relative-path>] [--maildir <relative-path>] [--session-id <id>] [--json]
+  agentos-kernelctl inbox-routing [--workspace <path>] [--session-id <id>] [--json]
+  agentos-kernelctl inbox-proof [--workspace <path>] [--maildir <relative-path>] [--session-id <id>] [--json]
+  agentos-kernelctl telegram-contract [--workspace <path>] [--session-id <id>] [--output <path>] [--json]
+  agentos-kernelctl workflow-contract [--workspace <path>] [--session-id <id>] [--output <path>] [--json]
+  agentos-kernelctl workflow-status [--workspace <path>] [--session-id <id>] [--output <path>] [--json]
+  agentos-kernelctl research-workflow [--workspace <path>] [--message-text <text>] [--chat-id <id>] [--request-id <id>] [--message-id <id>] [--session-id <id>] [--allow-domain <domain>] [--send] [--output <path>] [--json]
+  agentos-kernelctl activity-feed [--workspace <path>] [--limit <N>] [--output <path>] [--json]
+  agentos-kernelctl intent-dispatch [--workspace <path>] [--source telegram|operator] --message <text> [--chat-id <id>] [--request-id <id>] [--message-id <id>] [--session-id <id>] [--allow-domain <domain>] [--send] [--output <path>] [--json]
+  agentos-kernelctl research-brief [--workspace <path>] [--message-text <text>] [--chat-id <id>] [--request-id <id>] [--message-id <id>] [--session-id <id>] [--allow-domain <domain>] [--send] [--output <path>] [--json]
+  agentos-kernelctl inbox-workflow [--workspace <path>] [--maildir <relative-path>] [--session-id <id>] [--output <path>] [--json]
+  agentos-kernelctl inbox-reply-workflow [--workspace <path>] [--maildir <relative-path>] [--session-id <id>] [--output <path>] [--json]
+  agentos-kernelctl telegram-routing [--workspace <path>] [--message-text <text>] [--chat-id <id>] [--request-id <id>] [--message-id <id>] [--session-id <id>] [--output <path>] [--json]
+  agentos-kernelctl telegram-status [--workspace <path>] [--session-id <id>] [--output <path>] [--json]
+  agentos-kernelctl telegram-proof [--workspace <path>] [--message-text <text>] [--chat-id <id>] [--request-id <id>] [--message-id <id>] [--reply-sent] [--session-id <id>] [--output <path>] [--json]
+  agentos-kernelctl telegram-web-execution [--workspace <path>] [--message-text <text>] [--chat-id <id>] [--request-id <id>] [--message-id <id>] [--session-id <id>] [--allow-domain <domain>] [--output <path>] [--json]
+  agentos-kernelctl telegram-reply [--workspace <path>] [--message-text <text>] [--chat-id <id>] [--request-id <id>] [--message-id <id>] [--session-id <id>] [--allow-domain <domain>] [--send] [--output <path>] [--json]
+  agentos-kernelctl telegram-thread-status [--workspace <path>] [--message-text <text>] [--chat-id <id>] [--request-id <id>] [--message-id <id>] [--session-id <id>] [--follow-up] [--output <path>] [--json]
+  agentos-kernelctl telegram-live-loop [--workspace <path>] [--once] [--send] [--session-id <id>] [--allow-domain <domain>] [--output <path>] [--json]
+  agentos-kernelctl telegram-setup [--workspace <path>] [--env-file <path>] [--token <token>] [--chat-id <id>] [--api-base-url <url>] [--serve-http] [--background] [--host <host>] [--display-host <host>] [--port <port>] [--timeout-sec <sec>] [--url-file <path>] [--output <path>] [--json]
+  agentos-kernelctl llm-setup [--workspace <path>] [--env-file <path>] [--set-provider ollama|codex|none] [--openai-api-key <key>] [--serve-http] [--background] [--host <host>] [--display-host <host>] [--port <port>] [--timeout-sec <sec>] [--url-file <path>] [--json]
+  agentos-kernelctl engine-availability [--workspace <path>] [--output <path>] [--no-bootstrap] [--json]
+  agentos-kernelctl capability-proof [--workspace <path>] [--json]
+  agentos-kernelctl service-capability [--workspace <path>] [--output <path>] [--json]
+  agentos-kernelctl permission-capability [--workspace <path>] [--output <path>] [--json]
+  agentos-kernelctl capability-execution [--workspace <path>] [--output <path>] [--json]
+  agentos-kernelctl first-run-summary [--workspace <path>] [--path <relative-path>] [--url <https-url>] [--allow-domain <domain>] [--output <path>] [--json]
+  agentos-kernelctl vm-e2e-scenario [--workspace <path>] [--session-id <id>] [--output <path>] [--json]
+  agentos-kernelctl vm-e2e-proof [--workspace <path>] [--session-id <id>] [--output <path>] [--json]
+  agentos-kernelctl vm-utm-observe --vm <identifier> [--workspace <path>] [--session-id <id>] [--output <path>] [--json]
+  agentos-kernelctl events [--workspace <path>] [--source <event-source>] [--kind <event-kind>] [--unit <systemd-unit>] [--limit <N>] [--lineage] [--correlation-key <key>] [--correlation-value <value>] [--json]
+  agentos-kernelctl sessions [--workspace <path>] [--session-id <id>] [--limit <N>] [--json]
+  agentos-kernelctl policy-correlation [--workspace <path>] [--json]
+  agentos-kernelctl firstrun-reset [--workspace <path>] [--user-home <path>] [--json]
+  agentos-kernelctl policy-bridge [--workspace <path>] [--output-dir <path>] [--reload] [--disable] [--parser-cmd <cmd>] [--json]
+  agentos-kernelctl policy-shadow [--workspace <path>] [--out-dir <path>] [--json]
+  agentos-kernelctl policy-enforce [--workspace <path>] [--enable|--disable|--status] [--confirm] [--require-ready] [--policy-target <id>] [--policy-dir <path>] [--parser-cmd <cmd>] [--json]
+  agentos-kernelctl policy-ready [--workspace <path>] [--policy-dir <path>] [--parser-cmd <cmd>] [--json]
+  agentos-kernelctl restart
+  agentos-kernelctl logs [--lines N]
+  agentos-kernelctl bundle [--workspace <path>] [--out-dir <path>]
+USAGE
+}
+
+if [ "$#" -lt 1 ]; then
+  usage
+  exit 2
+fi
+
+subcmd="$1"
+shift
+
+if [ -n "${AGENTOS_DEFAULT_WORKSPACE:-}" ]; then
+  workspace="$AGENTOS_DEFAULT_WORKSPACE"
+elif [ -n "${DEFAULT_WORKSPACE:-}" ]; then
+  workspace="$DEFAULT_WORKSPACE"
+elif [ "$ROOT_DIR" = "$INSTALLED_RUNTIME_ROOT" ]; then
+  workspace="$INSTALLED_DEFAULT_WORKSPACE"
+else
+  workspace="$ROOT_DIR/workspaces/default"
+fi
+lines=200
+out_dir=""
+as_json=0
+dry_run=0
+install_root="${AGENTOS_INSTALL_ROOT:-/}"
+checks_csv=""
+list_checks=0
+report_file=""
+feedback_file=""
+report_dir=""
+report_retain=0
+user_home="${HOME:-}"
+reload_profile=0
+metadata_path=""
+diagnostics_manifest=""
+snapshot_label=""
+event_kind=""
+event_unit=""
+event_source=""
+event_limit=20
+event_lineage=0
+event_correlation_key=""
+event_correlation_value=""
+session_id_filter=""
+document_path=""
+inbox_fixture_path=""
+inbox_maildir_path=""
+web_url=""
+web_allow_domains=()
+web_requires_authentication=0
+web_interactive=0
+web_compatibility_required=0
+telegram_message_text=""
+telegram_chat_id=""
+telegram_request_id=""
+telegram_message_id=""
+telegram_reply_sent=0
+telegram_send_reply=0
+telegram_follow_up=0
+telegram_once=0
+telegram_setup_token=""
+telegram_setup_env_file=""
+telegram_setup_api_base_url=""
+telegram_setup_serve_http=0
+telegram_setup_background=0
+telegram_setup_host=""
+telegram_setup_display_host=""
+telegram_setup_port=""
+telegram_setup_timeout_sec=""
+telegram_setup_url_file=""
+llm_setup_set_provider=""
+llm_setup_openai_api_key=""
+ask_message=""
+intent_source="operator"
+vm_identifier=""
+policy_enable=0
+policy_disable=0
+policy_status=0
+policy_confirm=0
+policy_require_ready=0
+policy_target=""
+policy_dir=""
+policy_parser_cmd=""
+image_version="development"
+image_channel="preview"
+target_slot=""
+boot_flow_proof=""
+boot_target_activation=""
+vm_first_screen_evidence=""
+checklist_manifest=""
+next_boot_target=""
+installed_slot_switch_evidence=""
+installed_reboot_slot_proof=""
+slot_recovery_logic=""
+welcome_first_vm_proof_pack=""
+recovery_reentry_after_slot_switch=""
+engine_no_bootstrap=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --workspace)
+      shift
+      workspace="${1:-}"
+      ;;
+    --lines)
+      shift
+      lines="${1:-200}"
+      ;;
+    --out-dir|--output-dir|--output)
+      shift
+      out_dir="${1:-}"
+      ;;
+    --json)
+      as_json=1
+      ;;
+    --no-bootstrap)
+      engine_no_bootstrap=1
+      ;;
+    --dry-run)
+      dry_run=1
+      ;;
+    --install-root)
+      shift
+      install_root="${1:-/}"
+      ;;
+    --metadata)
+      shift
+      metadata_path="${1:-}"
+      ;;
+    --diagnostics-manifest)
+      shift
+      diagnostics_manifest="${1:-}"
+      ;;
+    --snapshot-label)
+      shift
+      snapshot_label="${1:-}"
+      ;;
+    --boot-flow-proof)
+      shift
+      boot_flow_proof="${1:-}"
+      ;;
+    --boot-target-activation)
+      shift
+      boot_target_activation="${1:-}"
+      ;;
+    --vm-first-screen-evidence)
+      shift
+      vm_first_screen_evidence="${1:-}"
+      ;;
+    --checklist-manifest)
+      shift
+      checklist_manifest="${1:-}"
+      ;;
+    --next-boot-target)
+      shift
+      next_boot_target="${1:-}"
+      ;;
+    --installed-slot-switch-evidence)
+      shift
+      installed_slot_switch_evidence="${1:-}"
+      ;;
+    --installed-reboot-slot-proof)
+      shift
+      installed_reboot_slot_proof="${1:-}"
+      ;;
+    --slot-recovery-logic)
+      shift
+      slot_recovery_logic="${1:-}"
+      ;;
+    --welcome-first-vm-proof-pack)
+      shift
+      welcome_first_vm_proof_pack="${1:-}"
+      ;;
+    --recovery-reentry-after-slot-switch)
+      shift
+      recovery_reentry_after_slot_switch="${1:-}"
+      ;;
+    --checks)
+      shift
+      checks_csv="${1:-}"
+      ;;
+    --list-checks)
+      list_checks=1
+      ;;
+    --report-file)
+      shift
+      report_file="${1:-}"
+      ;;
+    --feedback-file)
+      shift
+      feedback_file="${1:-}"
+      ;;
+    --report-dir)
+      shift
+      report_dir="${1:-}"
+      ;;
+    --report-retain)
+      shift
+      report_retain="${1:-0}"
+      ;;
+    --user-home)
+      shift
+      user_home="${1:-}"
+      ;;
+    --reload)
+      reload_profile=1
+      ;;
+    --disable)
+      policy_disable=1
+      ;;
+    --kind)
+      shift
+      event_kind="${1:-}"
+      ;;
+    --source)
+      shift
+      event_source="${1:-}"
+      intent_source="$event_source"
+      ;;
+    --unit)
+      shift
+      event_unit="${1:-}"
+      ;;
+    --limit)
+      shift
+      event_limit="${1:-20}"
+      ;;
+    --path)
+      shift
+      document_path="${1:-}"
+      ;;
+    --fixture-path)
+      shift
+      inbox_fixture_path="${1:-}"
+      ;;
+    --maildir)
+      shift
+      inbox_maildir_path="${1:-}"
+      ;;
+    --url)
+      shift
+      web_url="${1:-}"
+      ;;
+    --allow-domain)
+      shift
+      web_allow_domains+=("${1:-}")
+      ;;
+    --requires-authentication)
+      web_requires_authentication=1
+      ;;
+    --interactive)
+      web_interactive=1
+      ;;
+    --compatibility-required)
+      web_compatibility_required=1
+      ;;
+    --message-text)
+      shift
+      telegram_message_text="${1:-}"
+      ;;
+    --message)
+      shift
+      ask_message="${1:-}"
+      ;;
+    --chat-id)
+      shift
+      telegram_chat_id="${1:-}"
+      ;;
+    --request-id)
+      shift
+      telegram_request_id="${1:-}"
+      ;;
+    --message-id)
+      shift
+      telegram_message_id="${1:-}"
+      ;;
+    --reply-sent)
+      telegram_reply_sent=1
+      ;;
+    --send)
+      telegram_send_reply=1
+      ;;
+    --follow-up)
+      telegram_follow_up=1
+      ;;
+    --once)
+      telegram_once=1
+      ;;
+    --token)
+      shift
+      telegram_setup_token="${1:-}"
+      ;;
+    --set-provider)
+      shift
+      llm_setup_set_provider="${1:-}"
+      ;;
+    --openai-api-key)
+      shift
+      llm_setup_openai_api_key="${1:-}"
+      ;;
+    --env-file)
+      shift
+      telegram_setup_env_file="${1:-}"
+      ;;
+    --api-base-url)
+      shift
+      telegram_setup_api_base_url="${1:-}"
+      ;;
+    --serve-http)
+      telegram_setup_serve_http=1
+      ;;
+    --background)
+      telegram_setup_background=1
+      ;;
+    --host)
+      shift
+      telegram_setup_host="${1:-}"
+      ;;
+    --display-host)
+      shift
+      telegram_setup_display_host="${1:-}"
+      ;;
+    --port)
+      shift
+      telegram_setup_port="${1:-}"
+      ;;
+    --timeout-sec)
+      shift
+      telegram_setup_timeout_sec="${1:-}"
+      ;;
+    --url-file)
+      shift
+      telegram_setup_url_file="${1:-}"
+      ;;
+    --vm)
+      shift
+      vm_identifier="${1:-}"
+      ;;
+    --lineage)
+      event_lineage=1
+      ;;
+    --correlation-key)
+      shift
+      event_correlation_key="${1:-}"
+      ;;
+    --correlation-value)
+      shift
+      event_correlation_value="${1:-}"
+      ;;
+    --session-id)
+      shift
+      session_id_filter="${1:-}"
+      ;;
+    --enable)
+      policy_enable=1
+      ;;
+    --disable)
+      policy_disable=1
+      ;;
+    --status)
+      policy_status=1
+      ;;
+    --confirm)
+      policy_confirm=1
+      ;;
+    --require-ready)
+      policy_require_ready=1
+      ;;
+    --policy-target)
+      shift
+      policy_target="${1:-}"
+      ;;
+    --policy-dir)
+      shift
+      policy_dir="${1:-}"
+      ;;
+    --parser-cmd)
+      shift
+      policy_parser_cmd="${1:-}"
+      ;;
+    --version)
+      shift
+      image_version="${1:-development}"
+      ;;
+    --channel)
+      shift
+      image_channel="${1:-preview}"
+      ;;
+    --target-slot)
+      shift
+      target_slot="${1:-}"
+      ;;
+    *)
+      echo "unknown argument: $1"
+      usage
+      exit 2
+      ;;
+  esac
+  shift || true
+done
+
+run_systemctl() {
+  if ! command -v "$SYSTEMCTL_CMD" >/dev/null 2>&1; then
+    return 127
+  fi
+  "$SYSTEMCTL_CMD" "$@"
+}
+
+case "$subcmd" in
+  status)
+    if command -v "$SYSTEMCTL_CMD" >/dev/null 2>&1; then
+      state="$(run_systemctl is-active "$SERVICE_NAME" 2>/dev/null || true)"
+      enabled="$(run_systemctl is-enabled "$SERVICE_NAME" 2>/dev/null || true)"
+      svc_available=1
+    else
+      state="unavailable (systemctl not found)"
+      enabled="unavailable (systemctl not found)"
+      svc_available=0
+    fi
+
+    shell_json="$("$SHELL_CMD" --workspace "$workspace" --status --json 2>/dev/null || true)"
+    ready_args=(--workspace "$workspace" --json)
+    if [ -n "$policy_dir" ]; then
+      ready_args+=(--policy-dir "$policy_dir")
+    fi
+    if [ -n "$policy_parser_cmd" ]; then
+      ready_args+=(--parser-cmd "$policy_parser_cmd")
+    fi
+    policy_json="$("$POLICY_READY_CMD" "${ready_args[@]}" 2>/dev/null || true)"
+
+    if [ "$as_json" -eq 1 ]; then
+      python3 - "$SERVICE_NAME" "$state" "$enabled" "$svc_available" "$shell_json" "$policy_json" <<'PY'
+import json
+import sys
+
+service_name = sys.argv[1]
+state = sys.argv[2]
+enabled = sys.argv[3]
+svc_available = bool(int(sys.argv[4]))
+shell_raw = sys.argv[5]
+policy_raw = sys.argv[6]
+
+def _parse(raw: str) -> dict:
+    if not raw:
+        return {}
+    try:
+        obj = json.loads(raw)
+        return obj if isinstance(obj, dict) else {}
+    except Exception:
+        return {}
+
+runtime = _parse(shell_raw)
+policy = _parse(policy_raw)
+
+ok = bool(runtime.get("ok", False))
+if not svc_available:
+    service_healthy = True
+else:
+    service_healthy = state in {"active", "activating"}
+ok = ok and bool(service_healthy)
+if policy:
+    overall = str(policy.get("overall_status", "warn")).lower()
+    ok = ok and overall in {"pass", "warn"}
+
+payload = {
+    "ok": bool(ok),
+    "exit_code": 0 if ok else 1,
+    "service": {
+        "name": service_name,
+        "available": svc_available,
+        "active": state,
+        "enabled": enabled,
+        "healthy": bool(service_healthy),
+    },
+    "runtime_status": runtime,
+    "policy_ready": policy,
+    "recovery_hints": {
+        "path_label": "AgentOS Recovery",
+        "path_description": "Beginner-safe recovery path for reaching a normal shell, bypassing broker mediation temporarily, or removing managed entry assets.",
+        "recommended_rejoin_summary": [
+            "AgentOS Recovery",
+            "Return to AgentOS",
+            "ai>",
+        ],
+        "recommended_rejoin_path": [
+            "AgentOS Recovery",
+            "AgentOS Setup",
+            "AgentOS Managed Session",
+            "ai>",
+        ],
+        "tty_bypass_env": "AGENTOS_BOOT_AUTOSTART=0",
+        "broker_bypass_env": "AGENTOS_BROKER_BYPASS=1",
+        "broker_override_env": "AGENTOS_BROKER_OVERRIDE=1",
+        "uninstall_cmd": "sudo scripts/uninstall_kernel_boot_integration.sh",
+        "recovery_ladder": [
+            {
+                "level": 1,
+                "name": "normal_shell_fallback",
+                "trigger": "AGENTOS_BOOT_AUTOSTART=0",
+                "use_when": "managed tty1 entry must be skipped entirely",
+            },
+            {
+                "level": 2,
+                "name": "managed_entry_broker_bypass",
+                "trigger": "AGENTOS_BROKER_BYPASS=1",
+                "use_when": "managed entry should continue while broker mediation is temporarily bypassed",
+            },
+            {
+                "level": 3,
+                "name": "managed_entry_override",
+                "trigger": "AGENTOS_BROKER_OVERRIDE=1",
+                "use_when": "managed entry should continue while override evidence is still emitted",
+            },
+            {
+                "level": 4,
+                "name": "full_uninstall",
+                "trigger": "sudo scripts/uninstall_kernel_boot_integration.sh",
+                "use_when": "managed entry assets must be removed completely",
+            },
+        ],
+    },
+}
+
+print(json.dumps(payload, ensure_ascii=True))
+raise SystemExit(int(payload["exit_code"]))
+PY
+      exit $?
+    fi
+
+    echo "managed_session_service: $SERVICE_NAME"
+    echo "active: ${state:-unknown}"
+    echo "enabled: ${enabled:-unknown}"
+    if [ -n "$policy_json" ]; then
+      python3 - "$policy_json" <<'PY'
+import json
+import sys
+
+raw = sys.argv[1]
+try:
+    payload = json.loads(raw)
+except Exception:
+    payload = {}
+
+if payload:
+    print(f"policy_ready: {payload.get('overall_status', 'unknown')}")
+    print(f"policy_ready_enforced: {bool((payload.get('enforced_pilot', {}) or {}).get('effective_enabled', False))}")
+else:
+    print("policy_ready: unavailable")
+PY
+    fi
+    echo "Recovery path: AgentOS Recovery"
+    echo "Recovery hints:"
+    echo "  - AGENTOS_BOOT_AUTOSTART=0 keeps tty1 on the normal login shell"
+    echo "  - AGENTOS_BROKER_BYPASS=1 bypasses broker mediation during recovery sessions"
+    echo "  - AGENTOS_BROKER_OVERRIDE=1 keeps AgentOS entry active while emitting override events"
+    echo "  - sudo scripts/uninstall_kernel_boot_integration.sh removes managed entry assets"
+    echo "  - recovery summary: AgentOS Recovery -> Return to AgentOS -> ai>"
+    echo "  - detailed rejoin path: AgentOS Recovery -> AgentOS Setup -> AgentOS Managed Session -> ai>"
+    echo "Recovery ladder:"
+    echo "  1. normal shell fallback -> AGENTOS_BOOT_AUTOSTART=0"
+    echo "  2. managed entry with broker bypass -> AGENTOS_BROKER_BYPASS=1"
+    echo "  3. managed entry with override evidence -> AGENTOS_BROKER_OVERRIDE=1"
+    echo "  4. full uninstall of managed entry assets -> sudo scripts/uninstall_kernel_boot_integration.sh"
+    exec "$SHELL_CMD" --workspace "$workspace" --status
+    ;;
+  preflight)
+    if [ "$as_json" -eq 1 ]; then
+      exec "$SHELL_CMD" --workspace "$workspace" --preflight --json
+    fi
+    exec "$SHELL_CMD" --workspace "$workspace" --preflight
+    ;;
+  doctor)
+    if [ "$as_json" -eq 1 ]; then
+      exec "$SHELL_CMD" --workspace "$workspace" --doctor --json
+    fi
+    exec "$SHELL_CMD" --workspace "$workspace" --doctor
+    ;;
+  health)
+    if [ ! -x "$HEALTHCHECK_CMD" ] && ! command -v "$HEALTHCHECK_CMD" >/dev/null 2>&1; then
+      echo "healthcheck tool not found: $HEALTHCHECK_CMD"
+      exit 1
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      health_args=(--workspace "$workspace" --service-name "$SERVICE_NAME" --systemctl-cmd "$SYSTEMCTL_CMD")
+      if [ -n "$policy_dir" ]; then
+        health_args+=(--policy-dir "$policy_dir")
+      fi
+      if [ -n "$policy_parser_cmd" ]; then
+        health_args+=(--policy-parser-cmd "$policy_parser_cmd")
+      fi
+      health_args+=(--json)
+      exec "$HEALTHCHECK_CMD" "${health_args[@]}"
+    fi
+    health_args=(--workspace "$workspace" --service-name "$SERVICE_NAME" --systemctl-cmd "$SYSTEMCTL_CMD")
+    if [ -n "$policy_dir" ]; then
+      health_args+=(--policy-dir "$policy_dir")
+    fi
+    if [ -n "$policy_parser_cmd" ]; then
+      health_args+=(--policy-parser-cmd "$policy_parser_cmd")
+    fi
+    exec "$HEALTHCHECK_CMD" "${health_args[@]}"
+    ;;
+  audit)
+    if [ ! -x "$AUDIT_CMD" ] && ! command -v "$AUDIT_CMD" >/dev/null 2>&1; then
+      echo "audit tool not found: $AUDIT_CMD"
+      exit 1
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      exec "$AUDIT_CMD" --install-root "$install_root" --workspace "$workspace" --shadow-cmd "$AUDIT_SHADOW_CMD" --json
+    fi
+    exec "$AUDIT_CMD" --install-root "$install_root" --workspace "$workspace" --shadow-cmd "$AUDIT_SHADOW_CMD"
+    ;;
+  repair)
+    if [ ! -x "$REPAIR_CMD" ] && ! command -v "$REPAIR_CMD" >/dev/null 2>&1; then
+      echo "repair tool not found: $REPAIR_CMD"
+      exit 1
+    fi
+    repair_args=(--workspace "$workspace" --install-root "$install_root")
+    if [ -n "$checks_csv" ]; then
+      repair_args+=(--checks "$checks_csv")
+    fi
+    if [ "$list_checks" -eq 1 ]; then
+      repair_args+=(--list-checks)
+    fi
+    if [ "$dry_run" -eq 1 ]; then
+      repair_args+=(--dry-run)
+    fi
+    if [ -n "$report_file" ]; then
+      repair_args+=(--report-file "$report_file")
+    fi
+    if [ -n "$report_dir" ]; then
+      repair_args+=(--report-dir "$report_dir")
+    fi
+    if [ "${report_retain}" != "0" ]; then
+      repair_args+=(--report-retain "$report_retain")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      repair_args+=(--json)
+    fi
+    exec "$REPAIR_CMD" "${repair_args[@]}"
+    ;;
+  report-status)
+    if [ ! -x "$REPORT_STATUS_CMD" ] && ! command -v "$REPORT_STATUS_CMD" >/dev/null 2>&1; then
+      echo "report status tool not found: $REPORT_STATUS_CMD"
+      exit 1
+    fi
+    status_args=()
+    if [ -n "$report_dir" ]; then
+      status_args+=(--report-dir "$report_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      status_args+=(--json)
+    fi
+    exec "$REPORT_STATUS_CMD" "${status_args[@]}"
+    ;;
+  broker-status)
+    if [ ! -x "$BROKER_STATUS_CMD" ] && ! command -v "$BROKER_STATUS_CMD" >/dev/null 2>&1; then
+      echo "broker status tool not found: $BROKER_STATUS_CMD"
+      exit 1
+    fi
+    broker_args=(--workspace "$workspace")
+    if [ "$as_json" -eq 1 ]; then
+      broker_args+=(--json)
+    fi
+    exec "$BROKER_STATUS_CMD" "${broker_args[@]}"
+    ;;
+  evidence)
+    if [ ! -x "$EVIDENCE_CMD" ] && ! command -v "$EVIDENCE_CMD" >/dev/null 2>&1; then
+      echo "evidence tool not found: $EVIDENCE_CMD"
+      exit 1
+    fi
+    evidence_args=(--workspace "$workspace")
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      evidence_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      evidence_args+=(--metadata "$metadata_path")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      evidence_args+=(--json)
+    fi
+    exec "$EVIDENCE_CMD" "${evidence_args[@]}"
+    ;;
+  replay)
+    if [ ! -x "$REPLAY_CMD" ] && ! command -v "$REPLAY_CMD" >/dev/null 2>&1; then
+      echo "replay tool not found: $REPLAY_CMD"
+      exit 1
+    fi
+    replay_args=(--workspace "$workspace" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      replay_args+=(--session-id "$session_id_filter")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      replay_args+=(--json)
+    fi
+    exec "$REPLAY_CMD" "${replay_args[@]}"
+    ;;
+  approval-forensics)
+    if [ ! -x "$APPROVAL_FORENSICS_CMD" ] && ! command -v "$APPROVAL_FORENSICS_CMD" >/dev/null 2>&1; then
+      echo "approval forensics tool not found: $APPROVAL_FORENSICS_CMD"
+      exit 1
+    fi
+    approval_args=(--workspace "$workspace" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      approval_args+=(--session-id "$session_id_filter")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      approval_args+=(--json)
+    fi
+    exec "$APPROVAL_FORENSICS_CMD" "${approval_args[@]}"
+    ;;
+  case-export)
+    if [ ! -x "$CASE_EXPORT_CMD" ] && ! command -v "$CASE_EXPORT_CMD" >/dev/null 2>&1; then
+      echo "case export tool not found: $CASE_EXPORT_CMD"
+      exit 1
+    fi
+    case_args=(--workspace "$workspace" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      case_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      case_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      case_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      case_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$out_dir" ]; then
+      case_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      case_args+=(--json)
+    fi
+    exec "$CASE_EXPORT_CMD" "${case_args[@]}"
+    ;;
+  validation-window)
+    if [ ! -x "$VALIDATION_WINDOW_CMD" ] && ! command -v "$VALIDATION_WINDOW_CMD" >/dev/null 2>&1; then
+      echo "validation window tool not found: $VALIDATION_WINDOW_CMD"
+      exit 1
+    fi
+    window_args=(--workspace "$workspace")
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      window_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      window_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      window_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$report_dir" ]; then
+      window_args+=(--history-dir "$report_dir")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      window_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$out_dir" ]; then
+      window_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      window_args+=(--json)
+    fi
+    exec "$VALIDATION_WINDOW_CMD" "${window_args[@]}"
+    ;;
+  control-history)
+    if [ ! -x "$CONTROL_HISTORY_CMD" ] && ! command -v "$CONTROL_HISTORY_CMD" >/dev/null 2>&1; then
+      echo "control history tool not found: $CONTROL_HISTORY_CMD"
+      exit 1
+    fi
+    history_args=(--workspace "$workspace" --limit "$event_limit")
+    if [ -n "$out_dir" ]; then
+      history_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      history_args+=(--json)
+    fi
+    exec "$CONTROL_HISTORY_CMD" "${history_args[@]}"
+    ;;
+  review-pack)
+    if [ ! -x "$REVIEW_PACK_CMD" ] && ! command -v "$REVIEW_PACK_CMD" >/dev/null 2>&1; then
+      echo "review pack tool not found: $REVIEW_PACK_CMD"
+      exit 1
+    fi
+    review_args=(--workspace "$workspace" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      review_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      review_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      review_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      review_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$report_dir" ]; then
+      review_args+=(--history-dir "$report_dir")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      review_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$out_dir" ]; then
+      review_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      review_args+=(--json)
+    fi
+    exec "$REVIEW_PACK_CMD" "${review_args[@]}"
+    ;;
+  review-pack-history)
+    if [ ! -x "$REVIEW_PACK_HISTORY_CMD" ] && ! command -v "$REVIEW_PACK_HISTORY_CMD" >/dev/null 2>&1; then
+      echo "review pack history tool not found: $REVIEW_PACK_HISTORY_CMD"
+      exit 1
+    fi
+    history_args=(--limit "$event_limit")
+    if [ -n "$report_dir" ]; then
+      history_args+=(--history-dir "$report_dir")
+    fi
+    if [ -n "$out_dir" ]; then
+      history_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      history_args+=(--json)
+    fi
+    exec "$REVIEW_PACK_HISTORY_CMD" "${history_args[@]}"
+    ;;
+  review-packet)
+    if [ ! -x "$REVIEW_PACKET_CMD" ] && ! command -v "$REVIEW_PACKET_CMD" >/dev/null 2>&1; then
+      echo "review packet tool not found: $REVIEW_PACKET_CMD"
+      exit 1
+    fi
+    packet_args=(--workspace "$workspace" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      packet_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      packet_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      packet_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      packet_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$report_dir" ]; then
+      packet_args+=(--history-dir "$report_dir")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      packet_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$out_dir" ]; then
+      packet_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      packet_args+=(--json)
+    fi
+    exec "$REVIEW_PACKET_CMD" "${packet_args[@]}"
+    ;;
+  review-bundle)
+    if [ ! -x "$REVIEW_BUNDLE_CMD" ] && ! command -v "$REVIEW_BUNDLE_CMD" >/dev/null 2>&1; then
+      echo "review bundle tool not found: $REVIEW_BUNDLE_CMD"
+      exit 1
+    fi
+    bundle_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      bundle_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      bundle_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      bundle_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      bundle_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$report_dir" ]; then
+      bundle_args+=(--history-dir "$report_dir")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      bundle_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$out_dir" ]; then
+      bundle_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      bundle_args+=(--json)
+    fi
+    exec "$REVIEW_BUNDLE_CMD" "${bundle_args[@]}"
+    ;;
+  review-bundle-history)
+    if [ ! -x "$REVIEW_BUNDLE_HISTORY_CMD" ] && ! command -v "$REVIEW_BUNDLE_HISTORY_CMD" >/dev/null 2>&1; then
+      echo "review bundle history tool not found: $REVIEW_BUNDLE_HISTORY_CMD"
+      exit 1
+    fi
+    bundle_history_args=(--limit "$event_limit")
+    if [ -n "$report_dir" ]; then
+      bundle_history_args+=(--history-dir "$report_dir")
+    fi
+    if [ -n "$out_dir" ]; then
+      bundle_history_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      bundle_history_args+=(--json)
+    fi
+    exec "$REVIEW_BUNDLE_HISTORY_CMD" "${bundle_history_args[@]}"
+    ;;
+  milestone-bundle)
+    if [ ! -x "$MILESTONE_BUNDLE_CMD" ] && ! command -v "$MILESTONE_BUNDLE_CMD" >/dev/null 2>&1; then
+      echo "milestone bundle tool not found: $MILESTONE_BUNDLE_CMD"
+      exit 1
+    fi
+    milestone_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      milestone_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      milestone_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      milestone_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      milestone_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$report_dir" ]; then
+      milestone_args+=(--history-dir "$report_dir")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      milestone_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$out_dir" ]; then
+      milestone_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      milestone_args+=(--json)
+    fi
+    exec "$MILESTONE_BUNDLE_CMD" "${milestone_args[@]}"
+    ;;
+  preview-eval-kit)
+    if [ ! -x "$PREVIEW_EVAL_KIT_CMD" ] && ! command -v "$PREVIEW_EVAL_KIT_CMD" >/dev/null 2>&1; then
+      echo "preview evaluation kit tool not found: $PREVIEW_EVAL_KIT_CMD"
+      exit 1
+    fi
+    preview_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      preview_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      preview_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      preview_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      preview_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$report_dir" ]; then
+      preview_args+=(--history-dir "$report_dir")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      preview_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$out_dir" ]; then
+      preview_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      preview_args+=(--json)
+    fi
+    exec "$PREVIEW_EVAL_KIT_CMD" "${preview_args[@]}"
+    ;;
+  evaluator-cohort-pack)
+    if [ ! -x "$EVALUATOR_COHORT_PACK_CMD" ] && ! command -v "$EVALUATOR_COHORT_PACK_CMD" >/dev/null 2>&1; then
+      echo "evaluator cohort pack tool not found: $EVALUATOR_COHORT_PACK_CMD"
+      exit 1
+    fi
+    cohort_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      cohort_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      cohort_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      cohort_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      cohort_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$report_dir" ]; then
+      cohort_args+=(--history-dir "$report_dir")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      cohort_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      cohort_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      cohort_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      cohort_args+=(--json)
+    fi
+    exec "$EVALUATOR_COHORT_PACK_CMD" "${cohort_args[@]}"
+    ;;
+  feedback-intake)
+    if [ ! -x "$FEEDBACK_INTAKE_CMD" ] && ! command -v "$FEEDBACK_INTAKE_CMD" >/dev/null 2>&1; then
+      echo "feedback intake tool not found: $FEEDBACK_INTAKE_CMD"
+      exit 1
+    fi
+    intake_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      intake_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      intake_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      intake_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      intake_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$report_dir" ]; then
+      intake_args+=(--history-dir "$report_dir")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      intake_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$out_dir" ]; then
+      intake_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      intake_args+=(--json)
+    fi
+    exec "$FEEDBACK_INTAKE_CMD" "${intake_args[@]}"
+    ;;
+  feedback-triage)
+    if [ ! -x "$FEEDBACK_TRIAGE_CMD" ] && ! command -v "$FEEDBACK_TRIAGE_CMD" >/dev/null 2>&1; then
+      echo "feedback triage tool not found: $FEEDBACK_TRIAGE_CMD"
+      exit 1
+    fi
+    triage_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      triage_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      triage_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      triage_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      triage_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$report_dir" ]; then
+      triage_args+=(--history-dir "$report_dir")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      triage_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      triage_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      triage_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      triage_args+=(--json)
+    fi
+    exec "$FEEDBACK_TRIAGE_CMD" "${triage_args[@]}"
+    ;;
+  direct-boot-ux-burndown)
+    if [ ! -x "$DIRECT_BOOT_UX_BURNDOWN_CMD" ] && ! command -v "$DIRECT_BOOT_UX_BURNDOWN_CMD" >/dev/null 2>&1; then
+      echo "direct-boot ux burndown tool not found: $DIRECT_BOOT_UX_BURNDOWN_CMD"
+      exit 1
+    fi
+    burndown_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      burndown_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      burndown_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      burndown_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      burndown_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$report_dir" ]; then
+      burndown_args+=(--history-dir "$report_dir")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      burndown_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      burndown_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      burndown_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      burndown_args+=(--json)
+    fi
+    exec "$DIRECT_BOOT_UX_BURNDOWN_CMD" "${burndown_args[@]}"
+    ;;
+  recovery-clarity-fix-loop)
+    if [ ! -x "$RECOVERY_CLARITY_FIX_LOOP_CMD" ] && ! command -v "$RECOVERY_CLARITY_FIX_LOOP_CMD" >/dev/null 2>&1; then
+      echo "recovery clarity fix loop tool not found: $RECOVERY_CLARITY_FIX_LOOP_CMD"
+      exit 1
+    fi
+    recovery_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      recovery_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      recovery_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      recovery_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      recovery_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$report_dir" ]; then
+      recovery_args+=(--history-dir "$report_dir")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      recovery_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      recovery_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      recovery_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      recovery_args+=(--json)
+    fi
+    exec "$RECOVERY_CLARITY_FIX_LOOP_CMD" "${recovery_args[@]}"
+    ;;
+  recovery-copy-consistency)
+    if [ ! -x "$RECOVERY_COPY_CONSISTENCY_CMD" ] && ! command -v "$RECOVERY_COPY_CONSISTENCY_CMD" >/dev/null 2>&1; then
+      echo "recovery copy consistency tool not found: $RECOVERY_COPY_CONSISTENCY_CMD"
+      exit 1
+    fi
+    recovery_copy_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}")
+    if [ -n "$snapshot_label" ]; then
+      recovery_copy_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$out_dir" ]; then
+      recovery_copy_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      recovery_copy_args+=(--json)
+    fi
+    exec "$RECOVERY_COPY_CONSISTENCY_CMD" "${recovery_copy_args[@]}"
+    ;;
+  recovery-watch-reevaluation)
+    if [ ! -x "$RECOVERY_WATCH_REEVALUATION_CMD" ] && ! command -v "$RECOVERY_WATCH_REEVALUATION_CMD" >/dev/null 2>&1; then
+      echo "recovery watch re-evaluation tool not found: $RECOVERY_WATCH_REEVALUATION_CMD"
+      exit 1
+    fi
+    recovery_watch_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      recovery_watch_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      recovery_watch_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      recovery_watch_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      recovery_watch_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$report_dir" ]; then
+      recovery_watch_args+=(--history-dir "$report_dir")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      recovery_watch_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      recovery_watch_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      recovery_watch_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      recovery_watch_args+=(--json)
+    fi
+    exec "$RECOVERY_WATCH_REEVALUATION_CMD" "${recovery_watch_args[@]}"
+    ;;
+  direct-boot-messaging-consistency)
+    if [ ! -x "$DIRECT_BOOT_MESSAGING_CONSISTENCY_CMD" ] && ! command -v "$DIRECT_BOOT_MESSAGING_CONSISTENCY_CMD" >/dev/null 2>&1; then
+      echo "direct-boot messaging consistency tool not found: $DIRECT_BOOT_MESSAGING_CONSISTENCY_CMD"
+      exit 1
+    fi
+    consistency_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}")
+    if [ -n "$snapshot_label" ]; then
+      consistency_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$out_dir" ]; then
+      consistency_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      consistency_args+=(--json)
+    fi
+    exec "$DIRECT_BOOT_MESSAGING_CONSISTENCY_CMD" "${consistency_args[@]}"
+    ;;
+  limited-preview-iteration-ledger)
+    if [ ! -x "$LIMITED_PREVIEW_ITERATION_LEDGER_CMD" ] && ! command -v "$LIMITED_PREVIEW_ITERATION_LEDGER_CMD" >/dev/null 2>&1; then
+      echo "limited preview iteration ledger tool not found: $LIMITED_PREVIEW_ITERATION_LEDGER_CMD"
+      exit 1
+    fi
+    ledger_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      ledger_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      ledger_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      ledger_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      ledger_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$report_dir" ]; then
+      ledger_args+=(--history-dir "$report_dir")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      ledger_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      ledger_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      ledger_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      ledger_args+=(--json)
+    fi
+    exec "$LIMITED_PREVIEW_ITERATION_LEDGER_CMD" "${ledger_args[@]}"
+    ;;
+  broader-preview-readiness)
+    if [ ! -x "$BROADER_PREVIEW_READINESS_CMD" ] && ! command -v "$BROADER_PREVIEW_READINESS_CMD" >/dev/null 2>&1; then
+      echo "broader preview readiness tool not found: $BROADER_PREVIEW_READINESS_CMD"
+      exit 1
+    fi
+    broader_ready_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      broader_ready_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      broader_ready_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      broader_ready_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      broader_ready_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$report_dir" ]; then
+      broader_ready_args+=(--history-dir "$report_dir")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      broader_ready_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      broader_ready_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      broader_ready_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      broader_ready_args+=(--json)
+    fi
+    exec "$BROADER_PREVIEW_READINESS_CMD" "${broader_ready_args[@]}"
+    ;;
+  broader-preview-launch-pack)
+    if [ ! -x "$BROADER_PREVIEW_LAUNCH_PACK_CMD" ] && ! command -v "$BROADER_PREVIEW_LAUNCH_PACK_CMD" >/dev/null 2>&1; then
+      echo "broader preview launch pack tool not found: $BROADER_PREVIEW_LAUNCH_PACK_CMD"
+      exit 1
+    fi
+    launch_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      launch_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      launch_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      launch_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      launch_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$report_dir" ]; then
+      launch_args+=(--history-dir "$report_dir")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      launch_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      launch_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      launch_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      launch_args+=(--json)
+    fi
+    exec "$BROADER_PREVIEW_LAUNCH_PACK_CMD" "${launch_args[@]}"
+    ;;
+  preview-posture-rescore)
+    if [ ! -x "$PREVIEW_POSTURE_RESCORE_CMD" ] && ! command -v "$PREVIEW_POSTURE_RESCORE_CMD" >/dev/null 2>&1; then
+      echo "preview posture rescore tool not found: $PREVIEW_POSTURE_RESCORE_CMD"
+      exit 1
+    fi
+    rescore_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      rescore_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      rescore_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      rescore_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      rescore_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$report_dir" ]; then
+      rescore_args+=(--history-dir "$report_dir")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      rescore_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      rescore_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      rescore_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      rescore_args+=(--json)
+    fi
+    exec "$PREVIEW_POSTURE_RESCORE_CMD" "${rescore_args[@]}"
+    ;;
+  updated-broader-preview-launch-pack)
+    if [ ! -x "$UPDATED_BROADER_PREVIEW_LAUNCH_PACK_CMD" ] && ! command -v "$UPDATED_BROADER_PREVIEW_LAUNCH_PACK_CMD" >/dev/null 2>&1; then
+      echo "updated broader preview launch pack tool not found: $UPDATED_BROADER_PREVIEW_LAUNCH_PACK_CMD"
+      exit 1
+    fi
+    updated_launch_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      updated_launch_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      updated_launch_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      updated_launch_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      updated_launch_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$report_dir" ]; then
+      updated_launch_args+=(--history-dir "$report_dir")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      updated_launch_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      updated_launch_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      updated_launch_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      updated_launch_args+=(--json)
+    fi
+    exec "$UPDATED_BROADER_PREVIEW_LAUNCH_PACK_CMD" "${updated_launch_args[@]}"
+    ;;
+  broader-preview-cohort-operations)
+    if [ ! -x "$BROADER_PREVIEW_COHORT_OPERATIONS_CMD" ] && ! command -v "$BROADER_PREVIEW_COHORT_OPERATIONS_CMD" >/dev/null 2>&1; then
+      echo "broader preview cohort operations tool not found: $BROADER_PREVIEW_COHORT_OPERATIONS_CMD"
+      exit 1
+    fi
+    cohort_ops_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      cohort_ops_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      cohort_ops_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      cohort_ops_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      cohort_ops_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      cohort_ops_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      cohort_ops_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      cohort_ops_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      cohort_ops_args+=(--json)
+    fi
+    exec "$BROADER_PREVIEW_COHORT_OPERATIONS_CMD" "${cohort_ops_args[@]}"
+    ;;
+  broader-preview-issue-ledger)
+    if [ ! -x "$BROADER_PREVIEW_ISSUE_LEDGER_CMD" ] && ! command -v "$BROADER_PREVIEW_ISSUE_LEDGER_CMD" >/dev/null 2>&1; then
+      echo "broader preview issue ledger tool not found: $BROADER_PREVIEW_ISSUE_LEDGER_CMD"
+      exit 1
+    fi
+    issue_ledger_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      issue_ledger_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      issue_ledger_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      issue_ledger_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      issue_ledger_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      issue_ledger_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      issue_ledger_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      issue_ledger_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      issue_ledger_args+=(--json)
+    fi
+    exec "$BROADER_PREVIEW_ISSUE_LEDGER_CMD" "${issue_ledger_args[@]}"
+    ;;
+  broader-preview-health-summary)
+    if [ ! -x "$BROADER_PREVIEW_HEALTH_SUMMARY_CMD" ] && ! command -v "$BROADER_PREVIEW_HEALTH_SUMMARY_CMD" >/dev/null 2>&1; then
+      echo "broader preview health summary tool not found: $BROADER_PREVIEW_HEALTH_SUMMARY_CMD"
+      exit 1
+    fi
+    health_summary_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      health_summary_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      health_summary_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      health_summary_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      health_summary_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      health_summary_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      health_summary_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      health_summary_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      health_summary_args+=(--json)
+    fi
+    exec "$BROADER_PREVIEW_HEALTH_SUMMARY_CMD" "${health_summary_args[@]}"
+    ;;
+  broader-preview-continuation-pack)
+    if [ ! -x "$BROADER_PREVIEW_CONTINUATION_PACK_CMD" ] && ! command -v "$BROADER_PREVIEW_CONTINUATION_PACK_CMD" >/dev/null 2>&1; then
+      echo "broader preview continuation pack tool not found: $BROADER_PREVIEW_CONTINUATION_PACK_CMD"
+      exit 1
+    fi
+    continuation_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      continuation_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      continuation_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      continuation_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      continuation_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      continuation_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      continuation_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      continuation_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      continuation_args+=(--json)
+    fi
+    exec "$BROADER_PREVIEW_CONTINUATION_PACK_CMD" "${continuation_args[@]}"
+    ;;
+  public-preview-escalation-pack)
+    if [ ! -x "$PUBLIC_PREVIEW_ESCALATION_PACK_CMD" ] && ! command -v "$PUBLIC_PREVIEW_ESCALATION_PACK_CMD" >/dev/null 2>&1; then
+      echo "public preview escalation pack tool not found: $PUBLIC_PREVIEW_ESCALATION_PACK_CMD"
+      exit 1
+    fi
+    public_escalation_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      public_escalation_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      public_escalation_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      public_escalation_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      public_escalation_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      public_escalation_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      public_escalation_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      public_escalation_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      public_escalation_args+=(--json)
+    fi
+    exec "$PUBLIC_PREVIEW_ESCALATION_PACK_CMD" "${public_escalation_args[@]}"
+    ;;
+  public-preview-announcement-readiness)
+    if [ ! -x "$PUBLIC_PREVIEW_ANNOUNCEMENT_READINESS_CMD" ] && ! command -v "$PUBLIC_PREVIEW_ANNOUNCEMENT_READINESS_CMD" >/dev/null 2>&1; then
+      echo "public preview announcement readiness tool not found: $PUBLIC_PREVIEW_ANNOUNCEMENT_READINESS_CMD"
+      exit 1
+    fi
+    public_announcement_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      public_announcement_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      public_announcement_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      public_announcement_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      public_announcement_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      public_announcement_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      public_announcement_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      public_announcement_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      public_announcement_args+=(--json)
+    fi
+    exec "$PUBLIC_PREVIEW_ANNOUNCEMENT_READINESS_CMD" "${public_announcement_args[@]}"
+    ;;
+  public-preview-position-update)
+    if [ ! -x "$PUBLIC_PREVIEW_POSITION_UPDATE_CMD" ] && ! command -v "$PUBLIC_PREVIEW_POSITION_UPDATE_CMD" >/dev/null 2>&1; then
+      echo "public preview position update tool not found: $PUBLIC_PREVIEW_POSITION_UPDATE_CMD"
+      exit 1
+    fi
+    public_position_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      public_position_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      public_position_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      public_position_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      public_position_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      public_position_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      public_position_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      public_position_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      public_position_args+=(--json)
+    fi
+    exec "$PUBLIC_PREVIEW_POSITION_UPDATE_CMD" "${public_position_args[@]}"
+    ;;
+  public-preview-messaging-review)
+    if [ ! -x "$PUBLIC_PREVIEW_MESSAGING_REVIEW_CMD" ] && ! command -v "$PUBLIC_PREVIEW_MESSAGING_REVIEW_CMD" >/dev/null 2>&1; then
+      echo "public preview messaging review tool not found: $PUBLIC_PREVIEW_MESSAGING_REVIEW_CMD"
+      exit 1
+    fi
+    public_messaging_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      public_messaging_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      public_messaging_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      public_messaging_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      public_messaging_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      public_messaging_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      public_messaging_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      public_messaging_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      public_messaging_args+=(--json)
+    fi
+    exec "$PUBLIC_PREVIEW_MESSAGING_REVIEW_CMD" "${public_messaging_args[@]}"
+    ;;
+  public-preview-launch-readiness-review)
+    if [ ! -x "$PUBLIC_PREVIEW_LAUNCH_READINESS_REVIEW_CMD" ] && ! command -v "$PUBLIC_PREVIEW_LAUNCH_READINESS_REVIEW_CMD" >/dev/null 2>&1; then
+      echo "public preview launch readiness review tool not found: $PUBLIC_PREVIEW_LAUNCH_READINESS_REVIEW_CMD"
+      exit 1
+    fi
+    public_launch_readiness_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      public_launch_readiness_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      public_launch_readiness_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      public_launch_readiness_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      public_launch_readiness_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      public_launch_readiness_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      public_launch_readiness_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      public_launch_readiness_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      public_launch_readiness_args+=(--json)
+    fi
+    exec "$PUBLIC_PREVIEW_LAUNCH_READINESS_REVIEW_CMD" "${public_launch_readiness_args[@]}"
+    ;;
+  public-preview-go-no-go)
+    if [ ! -x "$PUBLIC_PREVIEW_GO_NO_GO_CMD" ] && ! command -v "$PUBLIC_PREVIEW_GO_NO_GO_CMD" >/dev/null 2>&1; then
+      echo "public preview go no go tool not found: $PUBLIC_PREVIEW_GO_NO_GO_CMD"
+      exit 1
+    fi
+    public_go_no_go_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      public_go_no_go_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      public_go_no_go_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      public_go_no_go_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      public_go_no_go_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      public_go_no_go_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      public_go_no_go_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      public_go_no_go_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      public_go_no_go_args+=(--json)
+    fi
+    exec "$PUBLIC_PREVIEW_GO_NO_GO_CMD" "${public_go_no_go_args[@]}"
+    ;;
+  public-preview-decision-pack)
+    if [ ! -x "$PUBLIC_PREVIEW_DECISION_PACK_CMD" ] && ! command -v "$PUBLIC_PREVIEW_DECISION_PACK_CMD" >/dev/null 2>&1; then
+      echo "public preview decision pack tool not found: $PUBLIC_PREVIEW_DECISION_PACK_CMD"
+      exit 1
+    fi
+    public_decision_pack_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      public_decision_pack_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      public_decision_pack_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      public_decision_pack_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      public_decision_pack_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      public_decision_pack_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      public_decision_pack_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      public_decision_pack_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      public_decision_pack_args+=(--json)
+    fi
+    exec "$PUBLIC_PREVIEW_DECISION_PACK_CMD" "${public_decision_pack_args[@]}"
+    ;;
+  public-preview-operating-brief)
+    if [ ! -x "$PUBLIC_PREVIEW_OPERATING_BRIEF_CMD" ] && ! command -v "$PUBLIC_PREVIEW_OPERATING_BRIEF_CMD" >/dev/null 2>&1; then
+      echo "public preview operating brief tool not found: $PUBLIC_PREVIEW_OPERATING_BRIEF_CMD"
+      exit 1
+    fi
+    public_brief_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      public_brief_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      public_brief_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      public_brief_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      public_brief_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      public_brief_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      public_brief_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      public_brief_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      public_brief_args+=(--json)
+    fi
+    exec "$PUBLIC_PREVIEW_OPERATING_BRIEF_CMD" "${public_brief_args[@]}"
+    ;;
+  public-preview-decision-ledger)
+    if [ ! -x "$PUBLIC_PREVIEW_DECISION_LEDGER_CMD" ] && ! command -v "$PUBLIC_PREVIEW_DECISION_LEDGER_CMD" >/dev/null 2>&1; then
+      echo "public preview decision ledger tool not found: $PUBLIC_PREVIEW_DECISION_LEDGER_CMD"
+      exit 1
+    fi
+    public_decision_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      public_decision_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      public_decision_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      public_decision_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      public_decision_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      public_decision_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      public_decision_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      public_decision_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      public_decision_args+=(--json)
+    fi
+    exec "$PUBLIC_PREVIEW_DECISION_LEDGER_CMD" "${public_decision_args[@]}"
+    ;;
+  broader-preview-signal-snapshot)
+    if [ ! -x "$BROADER_PREVIEW_SIGNAL_SNAPSHOT_CMD" ] && ! command -v "$BROADER_PREVIEW_SIGNAL_SNAPSHOT_CMD" >/dev/null 2>&1; then
+      echo "broader preview signal snapshot tool not found: $BROADER_PREVIEW_SIGNAL_SNAPSHOT_CMD"
+      exit 1
+    fi
+    signal_snapshot_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      signal_snapshot_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      signal_snapshot_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      signal_snapshot_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      signal_snapshot_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      signal_snapshot_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      signal_snapshot_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      signal_snapshot_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      signal_snapshot_args+=(--json)
+    fi
+    exec "$BROADER_PREVIEW_SIGNAL_SNAPSHOT_CMD" "${signal_snapshot_args[@]}"
+    ;;
+  broader-preview-drift-ledger)
+    if [ ! -x "$BROADER_PREVIEW_DRIFT_LEDGER_CMD" ] && ! command -v "$BROADER_PREVIEW_DRIFT_LEDGER_CMD" >/dev/null 2>&1; then
+      echo "broader preview drift ledger tool not found: $BROADER_PREVIEW_DRIFT_LEDGER_CMD"
+      exit 1
+    fi
+    drift_ledger_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      drift_ledger_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      drift_ledger_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      drift_ledger_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      drift_ledger_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      drift_ledger_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      drift_ledger_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      drift_ledger_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      drift_ledger_args+=(--json)
+    fi
+    exec "$BROADER_PREVIEW_DRIFT_LEDGER_CMD" "${drift_ledger_args[@]}"
+    ;;
+  broader-preview-weekly-summary)
+    if [ ! -x "$BROADER_PREVIEW_WEEKLY_SUMMARY_CMD" ] && ! command -v "$BROADER_PREVIEW_WEEKLY_SUMMARY_CMD" >/dev/null 2>&1; then
+      echo "broader preview weekly summary tool not found: $BROADER_PREVIEW_WEEKLY_SUMMARY_CMD"
+      exit 1
+    fi
+    weekly_summary_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      weekly_summary_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      weekly_summary_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      weekly_summary_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      weekly_summary_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      weekly_summary_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      weekly_summary_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      weekly_summary_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      weekly_summary_args+=(--json)
+    fi
+    exec "$BROADER_PREVIEW_WEEKLY_SUMMARY_CMD" "${weekly_summary_args[@]}"
+    ;;
+  limited-preview-readiness)
+    if [ ! -x "$LIMITED_PREVIEW_READINESS_CMD" ] && ! command -v "$LIMITED_PREVIEW_READINESS_CMD" >/dev/null 2>&1; then
+      echo "limited preview readiness tool not found: $LIMITED_PREVIEW_READINESS_CMD"
+      exit 1
+    fi
+    lp_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      lp_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      lp_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      lp_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      lp_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$report_dir" ]; then
+      lp_args+=(--history-dir "$report_dir")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      lp_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      lp_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      lp_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      lp_args+=(--json)
+    fi
+    exec "$LIMITED_PREVIEW_READINESS_CMD" "${lp_args[@]}"
+    ;;
+  broader-preview-candidate)
+    if [ ! -x "$BROADER_PREVIEW_CANDIDATE_CMD" ] && ! command -v "$BROADER_PREVIEW_CANDIDATE_CMD" >/dev/null 2>&1; then
+      echo "broader preview candidate tool not found: $BROADER_PREVIEW_CANDIDATE_CMD"
+      exit 1
+    fi
+    broader_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      broader_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      broader_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      broader_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      broader_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$report_dir" ]; then
+      broader_args+=(--history-dir "$report_dir")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      broader_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      broader_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      broader_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      broader_args+=(--json)
+    fi
+    exec "$BROADER_PREVIEW_CANDIDATE_CMD" "${broader_args[@]}"
+    ;;
+  external-eval-checklist)
+    if [ ! -x "$EXTERNAL_EVAL_CHECKLIST_CMD" ] && ! command -v "$EXTERNAL_EVAL_CHECKLIST_CMD" >/dev/null 2>&1; then
+      echo "external evaluation checklist tool not found: $EXTERNAL_EVAL_CHECKLIST_CMD"
+      exit 1
+    fi
+    checklist_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      checklist_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      checklist_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      checklist_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      checklist_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$report_dir" ]; then
+      checklist_args+=(--history-dir "$report_dir")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      checklist_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      checklist_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      checklist_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      checklist_args+=(--json)
+    fi
+    exec "$EXTERNAL_EVAL_CHECKLIST_CMD" "${checklist_args[@]}"
+    ;;
+  preview-readiness)
+    if [ ! -x "$PREVIEW_READINESS_SCORECARD_CMD" ] && ! command -v "$PREVIEW_READINESS_SCORECARD_CMD" >/dev/null 2>&1; then
+      echo "preview readiness tool not found: $PREVIEW_READINESS_SCORECARD_CMD"
+      exit 1
+    fi
+    readiness_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      readiness_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      readiness_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      readiness_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      readiness_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$report_dir" ]; then
+      readiness_args+=(--history-dir "$report_dir")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      readiness_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      readiness_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      readiness_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      readiness_args+=(--json)
+    fi
+    exec "$PREVIEW_READINESS_SCORECARD_CMD" "${readiness_args[@]}"
+    ;;
+  preview-rehearsal)
+    if [ ! -x "$PREVIEW_REHEARSAL_LOOP_CMD" ] && ! command -v "$PREVIEW_REHEARSAL_LOOP_CMD" >/dev/null 2>&1; then
+      echo "preview rehearsal tool not found: $PREVIEW_REHEARSAL_LOOP_CMD"
+      exit 1
+    fi
+    rehearsal_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      rehearsal_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      rehearsal_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      rehearsal_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      rehearsal_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$report_dir" ]; then
+      rehearsal_args+=(--history-dir "$report_dir")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      rehearsal_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      rehearsal_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      rehearsal_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      rehearsal_args+=(--json)
+    fi
+    exec "$PREVIEW_REHEARSAL_LOOP_CMD" "${rehearsal_args[@]}"
+    ;;
+  preview-candidate)
+    if [ ! -x "$PREVIEW_CANDIDATE_CMD" ] && ! command -v "$PREVIEW_CANDIDATE_CMD" >/dev/null 2>&1; then
+      echo "preview candidate tool not found: $PREVIEW_CANDIDATE_CMD"
+      exit 1
+    fi
+    candidate_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      candidate_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      candidate_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      candidate_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$diagnostics_manifest" ]; then
+      candidate_args+=(--diagnostics-manifest "$diagnostics_manifest")
+    fi
+    if [ -n "$report_dir" ]; then
+      candidate_args+=(--history-dir "$report_dir")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      candidate_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$feedback_file" ]; then
+      candidate_args+=(--feedback-file "$feedback_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      candidate_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      candidate_args+=(--json)
+    fi
+    exec "$PREVIEW_CANDIDATE_CMD" "${candidate_args[@]}"
+    ;;
+  session-contract)
+    if [ ! -x "$SESSION_CONTRACT_CMD" ] && ! command -v "$SESSION_CONTRACT_CMD" >/dev/null 2>&1; then
+      echo "session contract tool not found: $SESSION_CONTRACT_CMD"
+      exit 1
+    fi
+    contract_args=(--workspace "$workspace")
+    if [ -n "$out_dir" ]; then
+      contract_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      contract_args+=(--json)
+    fi
+    exec "$SESSION_CONTRACT_CMD" "${contract_args[@]}"
+    ;;
+  codex-primary-runtime)
+    if [ ! -x "$CODEX_PRIMARY_RUNTIME_CMD" ] && ! command -v "$CODEX_PRIMARY_RUNTIME_CMD" >/dev/null 2>&1; then
+      echo "codex primary runtime tool not found: $CODEX_PRIMARY_RUNTIME_CMD"
+      exit 1
+    fi
+    runtime_args=(--workspace "$workspace")
+    if [ -n "$out_dir" ]; then
+      runtime_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      runtime_args+=(--json)
+    fi
+    exec "$CODEX_PRIMARY_RUNTIME_CMD" "${runtime_args[@]}"
+    ;;
+  codex-persistent-state)
+    if [ ! -x "$CODEX_PERSISTENT_STATE_CMD" ] && ! command -v "$CODEX_PERSISTENT_STATE_CMD" >/dev/null 2>&1; then
+      echo "codex persistent state tool not found: $CODEX_PERSISTENT_STATE_CMD"
+      exit 1
+    fi
+    runtime_args=(--workspace "$workspace")
+    if [ -n "$out_dir" ]; then
+      runtime_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      runtime_args+=(--json)
+    fi
+    exec "$CODEX_PERSISTENT_STATE_CMD" "${runtime_args[@]}"
+    ;;
+  codex-runtime-contract)
+    if [ ! -x "$CODEX_RUNTIME_CONTRACT_CMD" ] && ! command -v "$CODEX_RUNTIME_CONTRACT_CMD" >/dev/null 2>&1; then
+      echo "codex runtime contract tool not found: $CODEX_RUNTIME_CONTRACT_CMD"
+      exit 1
+    fi
+    runtime_args=(--workspace "$workspace")
+    if [ -n "$out_dir" ]; then
+      runtime_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      runtime_args+=(--json)
+    fi
+    exec "$CODEX_RUNTIME_CONTRACT_CMD" "${runtime_args[@]}"
+    ;;
+  codex-primary-runtime-proof)
+    if [ ! -x "$CODEX_PRIMARY_RUNTIME_PROOF_CMD" ] && ! command -v "$CODEX_PRIMARY_RUNTIME_PROOF_CMD" >/dev/null 2>&1; then
+      echo "codex primary runtime proof tool not found: $CODEX_PRIMARY_RUNTIME_PROOF_CMD"
+      exit 1
+    fi
+    runtime_args=(--workspace "$workspace")
+    if [ -n "$out_dir" ]; then
+      runtime_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      runtime_args+=(--json)
+    fi
+    exec "$CODEX_PRIMARY_RUNTIME_PROOF_CMD" "${runtime_args[@]}"
+    ;;
+  codex-launch-supervision)
+    if [ ! -x "$CODEX_LAUNCH_SUPERVISION_CMD" ] && ! command -v "$CODEX_LAUNCH_SUPERVISION_CMD" >/dev/null 2>&1; then
+      echo "codex launch supervision tool not found: $CODEX_LAUNCH_SUPERVISION_CMD"
+      exit 1
+    fi
+    runtime_args=(--workspace "$workspace")
+    if [ -n "$out_dir" ]; then
+      runtime_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      runtime_args+=(--json)
+    fi
+    exec "$CODEX_LAUNCH_SUPERVISION_CMD" "${runtime_args[@]}"
+    ;;
+  codex-recovery-to-codex)
+    if [ ! -x "$CODEX_RECOVERY_TO_CODEX_CMD" ] && ! command -v "$CODEX_RECOVERY_TO_CODEX_CMD" >/dev/null 2>&1; then
+      echo "codex recovery to codex tool not found: $CODEX_RECOVERY_TO_CODEX_CMD"
+      exit 1
+    fi
+    runtime_args=(--workspace "$workspace")
+    if [ -n "$out_dir" ]; then
+      runtime_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      runtime_args+=(--json)
+    fi
+    exec "$CODEX_RECOVERY_TO_CODEX_CMD" "${runtime_args[@]}"
+    ;;
+  codex-runtime-health-evidence)
+    if [ ! -x "$CODEX_RUNTIME_HEALTH_EVIDENCE_CMD" ] && ! command -v "$CODEX_RUNTIME_HEALTH_EVIDENCE_CMD" >/dev/null 2>&1; then
+      echo "codex runtime health evidence tool not found: $CODEX_RUNTIME_HEALTH_EVIDENCE_CMD"
+      exit 1
+    fi
+    runtime_args=(--workspace "$workspace")
+    if [ -n "$out_dir" ]; then
+      runtime_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      runtime_args+=(--json)
+    fi
+    exec "$CODEX_RUNTIME_HEALTH_EVIDENCE_CMD" "${runtime_args[@]}"
+    ;;
+  codex-slot-transition-compatibility)
+    if [ ! -x "$CODEX_SLOT_TRANSITION_COMPATIBILITY_CMD" ] && ! command -v "$CODEX_SLOT_TRANSITION_COMPATIBILITY_CMD" >/dev/null 2>&1; then
+      echo "codex slot transition compatibility tool not found: $CODEX_SLOT_TRANSITION_COMPATIBILITY_CMD"
+      exit 1
+    fi
+    runtime_args=(--workspace "$workspace")
+    if [ -n "$out_dir" ]; then
+      runtime_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      runtime_args+=(--json)
+    fi
+    exec "$CODEX_SLOT_TRANSITION_COMPATIBILITY_CMD" "${runtime_args[@]}"
+    ;;
+  codex-welcome-runtime-launcher)
+    if [ ! -x "$CODEX_WELCOME_RUNTIME_LAUNCHER_CMD" ] && ! command -v "$CODEX_WELCOME_RUNTIME_LAUNCHER_CMD" >/dev/null 2>&1; then
+      echo "codex welcome runtime launcher tool not found: $CODEX_WELCOME_RUNTIME_LAUNCHER_CMD"
+      exit 1
+    fi
+    runtime_args=(--workspace "$workspace")
+    if [ -n "$out_dir" ]; then
+      runtime_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      runtime_args+=(--json)
+    fi
+    exec "$CODEX_WELCOME_RUNTIME_LAUNCHER_CMD" "${runtime_args[@]}"
+    ;;
+  codex-runtime-copy-lock)
+    if [ ! -x "$CODEX_RUNTIME_COPY_LOCK_CMD" ] && ! command -v "$CODEX_RUNTIME_COPY_LOCK_CMD" >/dev/null 2>&1; then
+      echo "codex runtime copy lock tool not found: $CODEX_RUNTIME_COPY_LOCK_CMD"
+      exit 1
+    fi
+    copy_args=()
+    if [ -n "$out_dir" ]; then
+      copy_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      copy_args+=(--json)
+    fi
+    exec "$CODEX_RUNTIME_COPY_LOCK_CMD" "${copy_args[@]}"
+    ;;
+  codex-vm-demo-path)
+    if [ ! -x "$CODEX_VM_DEMO_PATH_CMD" ] && ! command -v "$CODEX_VM_DEMO_PATH_CMD" >/dev/null 2>&1; then
+      echo "codex vm demo path tool not found: $CODEX_VM_DEMO_PATH_CMD"
+      exit 1
+    fi
+    runtime_args=(--workspace "$workspace")
+    if [ -n "$out_dir" ]; then
+      runtime_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      runtime_args+=(--json)
+    fi
+    exec "$CODEX_VM_DEMO_PATH_CMD" "${runtime_args[@]}"
+    ;;
+  codex-runtime-signoff-pack)
+    if [ ! -x "$CODEX_RUNTIME_SIGNOFF_PACK_CMD" ] && ! command -v "$CODEX_RUNTIME_SIGNOFF_PACK_CMD" >/dev/null 2>&1; then
+      echo "codex runtime signoff pack tool not found: $CODEX_RUNTIME_SIGNOFF_PACK_CMD"
+      exit 1
+    fi
+    runtime_args=(--workspace "$workspace")
+    if [ -n "$out_dir" ]; then
+      runtime_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      runtime_args+=(--json)
+    fi
+    exec "$CODEX_RUNTIME_SIGNOFF_PACK_CMD" "${runtime_args[@]}"
+    ;;
+  codex-execution-window-discipline)
+    if [ ! -x "$CODEX_EXECUTION_WINDOW_DISCIPLINE_CMD" ] && ! command -v "$CODEX_EXECUTION_WINDOW_DISCIPLINE_CMD" >/dev/null 2>&1; then
+      echo "codex execution window discipline tool not found: $CODEX_EXECUTION_WINDOW_DISCIPLINE_CMD"
+      exit 1
+    fi
+    discipline_args=()
+    if [ -n "$out_dir" ]; then
+      discipline_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      discipline_args+=(--json)
+    fi
+    exec "$CODEX_EXECUTION_WINDOW_DISCIPLINE_CMD" "${discipline_args[@]}"
+    ;;
+  mediation-coverage)
+    if [ ! -x "$MEDIATION_COVERAGE_CMD" ] && ! command -v "$MEDIATION_COVERAGE_CMD" >/dev/null 2>&1; then
+      echo "mediation coverage tool not found: $MEDIATION_COVERAGE_CMD"
+      exit 1
+    fi
+    coverage_args=(--workspace "$workspace")
+    if [ -n "$out_dir" ]; then
+      coverage_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      coverage_args+=(--json)
+    fi
+    exec "$MEDIATION_COVERAGE_CMD" "${coverage_args[@]}"
+    ;;
+  mediation-taxonomy)
+    if [ ! -x "$MEDIATION_TAXONOMY_CMD" ] && ! command -v "$MEDIATION_TAXONOMY_CMD" >/dev/null 2>&1; then
+      echo "mediation taxonomy tool not found: $MEDIATION_TAXONOMY_CMD"
+      exit 1
+    fi
+    taxonomy_args=(--workspace "$workspace")
+    if [ -n "$out_dir" ]; then
+      taxonomy_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      taxonomy_args+=(--json)
+    fi
+    exec "$MEDIATION_TAXONOMY_CMD" "${taxonomy_args[@]}"
+    ;;
+  unified-event-schema)
+    if [ ! -x "$UNIFIED_EVENT_SCHEMA_CMD" ] && ! command -v "$UNIFIED_EVENT_SCHEMA_CMD" >/dev/null 2>&1; then
+      echo "unified event schema tool not found: $UNIFIED_EVENT_SCHEMA_CMD"
+      exit 1
+    fi
+    schema_args=()
+    if [ -n "$out_dir" ]; then
+      schema_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      schema_args+=(--json)
+    fi
+    exec "$UNIFIED_EVENT_SCHEMA_CMD" "${schema_args[@]}"
+    ;;
+  service-governance)
+    if [ ! -x "$SERVICE_GOVERNANCE_CMD" ] && ! command -v "$SERVICE_GOVERNANCE_CMD" >/dev/null 2>&1; then
+      echo "service governance tool not found: $SERVICE_GOVERNANCE_CMD"
+      exit 1
+    fi
+    governance_args=(--workspace "$workspace")
+    if [ -n "$out_dir" ]; then
+      governance_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      governance_args+=(--json)
+    fi
+    exec "$SERVICE_GOVERNANCE_CMD" "${governance_args[@]}"
+    ;;
+  automation-governance)
+    if [ ! -x "$AUTOMATION_GOVERNANCE_CMD" ] && ! command -v "$AUTOMATION_GOVERNANCE_CMD" >/dev/null 2>&1; then
+      echo "automation governance tool not found: $AUTOMATION_GOVERNANCE_CMD"
+      exit 1
+    fi
+    automation_args=(--workspace "$workspace")
+    if [ -n "$out_dir" ]; then
+      automation_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      automation_args+=(--json)
+    fi
+    exec "$AUTOMATION_GOVERNANCE_CMD" "${automation_args[@]}"
+    ;;
+  policy-maturity)
+    if [ ! -x "$POLICY_MATURITY_CMD" ] && ! command -v "$POLICY_MATURITY_CMD" >/dev/null 2>&1; then
+      echo "policy maturity tool not found: $POLICY_MATURITY_CMD"
+      exit 1
+    fi
+    maturity_args=()
+    if [ -n "$workspace" ]; then
+      maturity_args+=(--workspace "$workspace")
+    fi
+    if [ -n "$policy_dir" ]; then
+      maturity_args+=(--policy-dir "$policy_dir")
+    fi
+    if [ -n "$policy_parser_cmd" ]; then
+      maturity_args+=(--parser-cmd "$policy_parser_cmd")
+    fi
+    if [ -n "$out_dir" ]; then
+      maturity_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      maturity_args+=(--json)
+    fi
+    exec "$POLICY_MATURITY_CMD" "${maturity_args[@]}"
+    ;;
+  provenance-graph)
+    if [ ! -x "$PROVENANCE_GRAPH_CMD" ] && ! command -v "$PROVENANCE_GRAPH_CMD" >/dev/null 2>&1; then
+      echo "provenance graph tool not found: $PROVENANCE_GRAPH_CMD"
+      exit 1
+    fi
+    provenance_args=()
+    if [ -n "$workspace" ]; then
+      provenance_args+=(--workspace "$workspace")
+    fi
+    if [ -n "$session_id_filter" ]; then
+      provenance_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$event_limit" ]; then
+      provenance_args+=(--limit "$event_limit")
+    fi
+    if [ -n "$out_dir" ]; then
+      provenance_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      provenance_args+=(--json)
+    fi
+    exec "$PROVENANCE_GRAPH_CMD" "${provenance_args[@]}"
+    ;;
+  user-space-sovereignty)
+    if [ ! -x "$USER_SPACE_SOVEREIGNTY_CMD" ] && ! command -v "$USER_SPACE_SOVEREIGNTY_CMD" >/dev/null 2>&1; then
+      echo "user space sovereignty tool not found: $USER_SPACE_SOVEREIGNTY_CMD"
+      exit 1
+    fi
+    sovereignty_args=()
+    if [ -n "$out_dir" ]; then
+      sovereignty_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      sovereignty_args+=(--json)
+    fi
+    exec "$USER_SPACE_SOVEREIGNTY_CMD" "${sovereignty_args[@]}"
+    ;;
+  mediation-pilot)
+    if [ ! -x "$MEDIATION_PILOT_CMD" ] && ! command -v "$MEDIATION_PILOT_CMD" >/dev/null 2>&1; then
+      echo "mediation pilot tool not found: $MEDIATION_PILOT_CMD"
+      exit 1
+    fi
+    pilot_args=()
+    if [ -n "$workspace" ]; then
+      pilot_args+=(--workspace "$workspace")
+    fi
+    if [ -n "$out_dir" ]; then
+      pilot_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      pilot_args+=(--json)
+    fi
+    exec "$MEDIATION_PILOT_CMD" "${pilot_args[@]}"
+    ;;
+  appliance-lifecycle)
+    if [ ! -x "$APPLIANCE_LIFECYCLE_CMD" ] && ! command -v "$APPLIANCE_LIFECYCLE_CMD" >/dev/null 2>&1; then
+      echo "appliance lifecycle tool not found: $APPLIANCE_LIFECYCLE_CMD"
+      exit 1
+    fi
+    if [ -z "$report_dir" ]; then
+      report_dir="$workspace/artifacts"
+    fi
+    lifecycle_args=(--workspace "$workspace" --report-dir "$report_dir")
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      lifecycle_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      lifecycle_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      lifecycle_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$out_dir" ]; then
+      lifecycle_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      lifecycle_args+=(--json)
+    fi
+    exec "$APPLIANCE_LIFECYCLE_CMD" "${lifecycle_args[@]}"
+    ;;
+  system-image-layout)
+    if [ ! -x "$SYSTEM_IMAGE_LAYOUT_CMD" ] && ! command -v "$SYSTEM_IMAGE_LAYOUT_CMD" >/dev/null 2>&1; then
+      echo "system image layout tool not found: $SYSTEM_IMAGE_LAYOUT_CMD"
+      exit 1
+    fi
+    layout_args=()
+    if [ -n "$out_dir" ]; then
+      layout_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      layout_args+=(--json)
+    fi
+    exec "$SYSTEM_IMAGE_LAYOUT_CMD" "${layout_args[@]}"
+    ;;
+  slot-update-contract)
+    if [ ! -x "$SLOT_UPDATE_CONTRACT_CMD" ] && ! command -v "$SLOT_UPDATE_CONTRACT_CMD" >/dev/null 2>&1; then
+      echo "slot update contract tool not found: $SLOT_UPDATE_CONTRACT_CMD"
+      exit 1
+    fi
+    slot_args=()
+    if [ -n "$out_dir" ]; then
+      slot_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      slot_args+=(--json)
+    fi
+    exec "$SLOT_UPDATE_CONTRACT_CMD" "${slot_args[@]}"
+    ;;
+  slot-recovery-logic)
+    if [ ! -x "$SLOT_RECOVERY_LOGIC_CMD" ] && ! command -v "$SLOT_RECOVERY_LOGIC_CMD" >/dev/null 2>&1; then
+      echo "slot recovery logic tool not found: $SLOT_RECOVERY_LOGIC_CMD"
+      exit 1
+    fi
+    slot_recovery_args=()
+    if [ -n "$out_dir" ]; then
+      slot_recovery_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      slot_recovery_args+=(--json)
+    fi
+    exec "$SLOT_RECOVERY_LOGIC_CMD" "${slot_recovery_args[@]}"
+    ;;
+  next-boot-target-integration)
+    if [ ! -x "$NEXT_BOOT_TARGET_INTEGRATION_CMD" ] && ! command -v "$NEXT_BOOT_TARGET_INTEGRATION_CMD" >/dev/null 2>&1; then
+      echo "next-boot target integration tool not found: $NEXT_BOOT_TARGET_INTEGRATION_CMD"
+      exit 1
+    fi
+    next_boot_args=()
+    if [ -n "$out_dir" ]; then
+      next_boot_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      next_boot_args+=(--json)
+    fi
+    exec "$NEXT_BOOT_TARGET_INTEGRATION_CMD" "${next_boot_args[@]}"
+    ;;
+  welcome-first-vm-proof-pack)
+    if [ ! -x "$WELCOME_FIRST_VM_PROOF_PACK_CMD" ] && ! command -v "$WELCOME_FIRST_VM_PROOF_PACK_CMD" >/dev/null 2>&1; then
+      echo "welcome-first VM proof pack tool not found: $WELCOME_FIRST_VM_PROOF_PACK_CMD"
+      exit 1
+    fi
+    proof_pack_args=(--report-dir "${report_dir:-$workspace/artifacts}" --snapshot-label "${snapshot_label:-current}")
+    if [ -n "$out_dir" ]; then
+      proof_pack_args+=(--output "$out_dir")
+    fi
+    if [ -n "$checklist_manifest" ]; then
+      proof_pack_args+=(--checklist-manifest "$checklist_manifest")
+    fi
+    if [ -n "$vm_first_screen_evidence" ]; then
+      proof_pack_args+=(--vm-first-screen-evidence "$vm_first_screen_evidence")
+    fi
+    if [ -n "$boot_target_activation" ]; then
+      proof_pack_args+=(--boot-target-activation "$boot_target_activation")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      proof_pack_args+=(--json)
+    fi
+    exec "$WELCOME_FIRST_VM_PROOF_PACK_CMD" "${proof_pack_args[@]}"
+    ;;
+  installed-reboot-slot-proof)
+    if [ ! -x "$INSTALLED_REBOOT_SLOT_PROOF_CMD" ] && ! command -v "$INSTALLED_REBOOT_SLOT_PROOF_CMD" >/dev/null 2>&1; then
+      echo "installed reboot slot proof tool not found: $INSTALLED_REBOOT_SLOT_PROOF_CMD"
+      exit 1
+    fi
+    reboot_args=(--report-dir "${report_dir:-$workspace/artifacts}" --snapshot-label "${snapshot_label:-current}")
+    if [ -n "$out_dir" ]; then
+      reboot_args+=(--output "$out_dir")
+    fi
+    if [ -n "$next_boot_target" ]; then
+      reboot_args+=(--next-boot-target "$next_boot_target")
+    fi
+    if [ -n "$installed_slot_switch_evidence" ]; then
+      reboot_args+=(--installed-slot-switch-evidence "$installed_slot_switch_evidence")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      reboot_args+=(--json)
+    fi
+    exec "$INSTALLED_REBOOT_SLOT_PROOF_CMD" "${reboot_args[@]}"
+    ;;
+  recovery-reentry-after-slot-switch)
+    if [ ! -x "$RECOVERY_REENTRY_AFTER_SLOT_SWITCH_CMD" ] && ! command -v "$RECOVERY_REENTRY_AFTER_SLOT_SWITCH_CMD" >/dev/null 2>&1; then
+      echo "recovery re-entry after slot switch tool not found: $RECOVERY_REENTRY_AFTER_SLOT_SWITCH_CMD"
+      exit 1
+    fi
+    recovery_args=(--report-dir "${report_dir:-$workspace/artifacts}" --snapshot-label "${snapshot_label:-current}")
+    if [ -n "$out_dir" ]; then
+      recovery_args+=(--output "$out_dir")
+    fi
+    if [ -n "$installed_reboot_slot_proof" ]; then
+      recovery_args+=(--installed-reboot-slot-proof "$installed_reboot_slot_proof")
+    fi
+    if [ -n "$slot_recovery_logic" ]; then
+      recovery_args+=(--slot-recovery-logic "$slot_recovery_logic")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      recovery_args+=(--json)
+    fi
+    exec "$RECOVERY_REENTRY_AFTER_SLOT_SWITCH_CMD" "${recovery_args[@]}"
+    ;;
+  appliance-boot-signoff-pack)
+    if [ ! -x "$APPLIANCE_BOOT_SIGNOFF_PACK_CMD" ] && ! command -v "$APPLIANCE_BOOT_SIGNOFF_PACK_CMD" >/dev/null 2>&1; then
+      echo "appliance boot signoff pack tool not found: $APPLIANCE_BOOT_SIGNOFF_PACK_CMD"
+      exit 1
+    fi
+    signoff_args=(--report-dir "${report_dir:-$workspace/artifacts}" --snapshot-label "${snapshot_label:-current}")
+    if [ -n "$out_dir" ]; then
+      signoff_args+=(--output "$out_dir")
+    fi
+    if [ -n "$welcome_first_vm_proof_pack" ]; then
+      signoff_args+=(--welcome-first-vm-proof-pack "$welcome_first_vm_proof_pack")
+    fi
+    if [ -n "$installed_reboot_slot_proof" ]; then
+      signoff_args+=(--installed-reboot-slot-proof "$installed_reboot_slot_proof")
+    fi
+    if [ -n "$recovery_reentry_after_slot_switch" ]; then
+      signoff_args+=(--recovery-reentry-after-slot-switch "$recovery_reentry_after_slot_switch")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      signoff_args+=(--json)
+    fi
+    exec "$APPLIANCE_BOOT_SIGNOFF_PACK_CMD" "${signoff_args[@]}"
+    ;;
+  remastered-vm-boot-checklist)
+    if [ ! -x "$REMASTERED_VM_BOOT_CHECKLIST_CMD" ] && ! command -v "$REMASTERED_VM_BOOT_CHECKLIST_CMD" >/dev/null 2>&1; then
+      echo "remastered VM boot checklist tool not found: $REMASTERED_VM_BOOT_CHECKLIST_CMD"
+      exit 1
+    fi
+    checklist_args=(--report-dir "${report_dir:-$workspace/artifacts}" --snapshot-label "${snapshot_label:-current}")
+    if [ -n "$out_dir" ]; then
+      checklist_args+=(--output "$out_dir")
+    fi
+    if [ -n "$boot_flow_proof" ]; then
+      checklist_args+=(--boot-flow-proof "$boot_flow_proof")
+    fi
+    if [ -n "$boot_target_activation" ]; then
+      checklist_args+=(--boot-target-activation "$boot_target_activation")
+    fi
+    if [ -n "$vm_first_screen_evidence" ]; then
+      checklist_args+=(--vm-first-screen-evidence "$vm_first_screen_evidence")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      checklist_args+=(--json)
+    fi
+    exec "$REMASTERED_VM_BOOT_CHECKLIST_CMD" "${checklist_args[@]}"
+    ;;
+  installed-slot-switch-evidence)
+    if [ ! -x "$INSTALLED_SLOT_SWITCH_EVIDENCE_CMD" ] && ! command -v "$INSTALLED_SLOT_SWITCH_EVIDENCE_CMD" >/dev/null 2>&1; then
+      echo "installed slot switch evidence tool not found: $INSTALLED_SLOT_SWITCH_EVIDENCE_CMD"
+      exit 1
+    fi
+    switch_evidence_args=()
+    if [ -n "$out_dir" ]; then
+      switch_evidence_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      switch_evidence_args+=(--json)
+    fi
+    exec "$INSTALLED_SLOT_SWITCH_EVIDENCE_CMD" "${switch_evidence_args[@]}"
+    ;;
+  installed-boot-to-codex)
+    if [ ! -x "$INSTALLED_BOOT_TO_CODEX_CMD" ] && ! command -v "$INSTALLED_BOOT_TO_CODEX_CMD" >/dev/null 2>&1; then
+      echo "installed boot to codex tool not found: $INSTALLED_BOOT_TO_CODEX_CMD"
+      exit 1
+    fi
+    runtime_args=(--workspace "$workspace")
+    if [ -n "$out_dir" ]; then
+      runtime_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      runtime_args+=(--json)
+    fi
+    exec "$INSTALLED_BOOT_TO_CODEX_CMD" "${runtime_args[@]}"
+    ;;
+  recovery-mode-contract)
+    if [ ! -x "$RECOVERY_MODE_CONTRACT_CMD" ] && ! command -v "$RECOVERY_MODE_CONTRACT_CMD" >/dev/null 2>&1; then
+      echo "recovery mode contract tool not found: $RECOVERY_MODE_CONTRACT_CMD"
+      exit 1
+    fi
+    recovery_contract_args=()
+    if [ -n "$out_dir" ]; then
+      recovery_contract_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      recovery_contract_args+=(--json)
+    fi
+    exec "$RECOVERY_MODE_CONTRACT_CMD" "${recovery_contract_args[@]}"
+    ;;
+  state-partition-contract)
+    if [ ! -x "$STATE_PARTITION_CONTRACT_CMD" ] && ! command -v "$STATE_PARTITION_CONTRACT_CMD" >/dev/null 2>&1; then
+      echo "state partition contract tool not found: $STATE_PARTITION_CONTRACT_CMD"
+      exit 1
+    fi
+    state_args=()
+    if [ -n "$out_dir" ]; then
+      state_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      state_args+=(--json)
+    fi
+    exec "$STATE_PARTITION_CONTRACT_CMD" "${state_args[@]}"
+    ;;
+  image-release-identity)
+    if [ ! -x "$IMAGE_RELEASE_IDENTITY_CMD" ] && ! command -v "$IMAGE_RELEASE_IDENTITY_CMD" >/dev/null 2>&1; then
+      echo "image release identity tool not found: $IMAGE_RELEASE_IDENTITY_CMD"
+      exit 1
+    fi
+    image_args=(--version "$image_version" --channel "$image_channel")
+    if [ -n "$out_dir" ]; then
+      image_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      image_args+=(--json)
+    fi
+    exec "$IMAGE_RELEASE_IDENTITY_CMD" "${image_args[@]}"
+    ;;
+  image-update-prototype)
+    if [ ! -x "$IMAGE_UPDATE_PROTOTYPE_CMD" ] && ! command -v "$IMAGE_UPDATE_PROTOTYPE_CMD" >/dev/null 2>&1; then
+      echo "image update prototype tool not found: $IMAGE_UPDATE_PROTOTYPE_CMD"
+      exit 1
+    fi
+    update_args=(--version "$image_version" --channel "$image_channel")
+    if [ -n "$target_slot" ]; then
+      update_args+=(--target-slot "$target_slot")
+    fi
+    if [ "$dry_run" -eq 1 ]; then
+      update_args+=(--dry-run)
+    fi
+    if [ -n "$out_dir" ]; then
+      update_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      update_args+=(--json)
+    fi
+    exec "$IMAGE_UPDATE_PROTOTYPE_CMD" "${update_args[@]}"
+    ;;
+  platform-validation)
+    if [ ! -x "$PLATFORM_VALIDATION_CMD" ] && ! command -v "$PLATFORM_VALIDATION_CMD" >/dev/null 2>&1; then
+      echo "platform validation tool not found: $PLATFORM_VALIDATION_CMD"
+      exit 1
+    fi
+    platform_args=(--workspace "$workspace" --report-dir "${report_dir:-$workspace/artifacts}")
+    if [ -n "$install_root" ] && [ "$install_root" != "/" ]; then
+      platform_args+=(--install-root "$install_root")
+    fi
+    if [ -n "$metadata_path" ]; then
+      platform_args+=(--metadata "$metadata_path")
+    fi
+    if [ -n "$snapshot_label" ]; then
+      platform_args+=(--snapshot-label "$snapshot_label")
+    fi
+    if [ -n "$out_dir" ]; then
+      platform_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      platform_args+=(--json)
+    fi
+    exec "$PLATFORM_VALIDATION_CMD" "${platform_args[@]}"
+    ;;
+  runtime-entry)
+    if [ ! -x "$RUNTIME_ENTRY_CMD" ] && ! command -v "$RUNTIME_ENTRY_CMD" >/dev/null 2>&1; then
+      echo "runtime entry tool not found: $RUNTIME_ENTRY_CMD"
+      exit 1
+    fi
+    runtime_entry_args=()
+    if [ -n "$out_dir" ]; then
+      runtime_entry_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      runtime_entry_args+=(--json)
+    fi
+    exec "$RUNTIME_ENTRY_CMD" "${runtime_entry_args[@]}"
+    ;;
+  operator-mode)
+    if [ ! -x "$OPERATOR_MODE_CMD" ] && ! command -v "$OPERATOR_MODE_CMD" >/dev/null 2>&1; then
+      echo "operator mode tool not found: $OPERATOR_MODE_CMD"
+      exit 1
+    fi
+    operator_mode_args=()
+    if [ -n "$out_dir" ]; then
+      operator_mode_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      operator_mode_args+=(--json)
+    fi
+    exec "$OPERATOR_MODE_CMD" "${operator_mode_args[@]}"
+    ;;
+  guided-operator)
+    if [ ! -x "$GUIDED_OPERATOR_CMD" ] && ! command -v "$GUIDED_OPERATOR_CMD" >/dev/null 2>&1; then
+      echo "guided operator tool not found: $GUIDED_OPERATOR_CMD"
+      exit 1
+    fi
+    guided_operator_args=(--workspace "$workspace")
+    if [ -n "$out_dir" ]; then
+      guided_operator_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      guided_operator_args+=(--json)
+    fi
+    exec "$GUIDED_OPERATOR_CMD" "${guided_operator_args[@]}"
+    ;;
+  workflow-status)
+    if [ ! -x "$WORKFLOW_STATUS_CMD" ] && ! command -v "$WORKFLOW_STATUS_CMD" >/dev/null 2>&1; then
+      echo "workflow status tool not found: $WORKFLOW_STATUS_CMD"
+      exit 1
+    fi
+    workflow_status_args=(--workspace "$workspace")
+    if [ -n "$session_id_filter" ]; then
+      workflow_status_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$out_dir" ]; then
+      workflow_status_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      workflow_status_args+=(--json)
+    fi
+    exec "$WORKFLOW_STATUS_CMD" "${workflow_status_args[@]}"
+    ;;
+  ask)
+    if [ ! -x "$ASK_CMD" ] && ! command -v "$ASK_CMD" >/dev/null 2>&1; then
+      echo "ask tool not found: $ASK_CMD"
+      exit 1
+    fi
+    ask_args=(--workspace "$workspace" --message "$ask_message")
+    if [ -n "$out_dir" ]; then
+      ask_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      ask_args+=(--json)
+    fi
+    exec "$ASK_CMD" "${ask_args[@]}"
+    ;;
+  activity-feed)
+    if [ ! -x "$ACTIVITY_FEED_CMD" ] && ! command -v "$ACTIVITY_FEED_CMD" >/dev/null 2>&1; then
+      echo "activity feed tool not found: $ACTIVITY_FEED_CMD"
+      exit 1
+    fi
+    activity_args=(--workspace "$workspace" --limit "$event_limit")
+    if [ -n "$out_dir" ]; then
+      activity_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      activity_args+=(--json)
+    fi
+    exec "$ACTIVITY_FEED_CMD" "${activity_args[@]}"
+    ;;
+  intent-dispatch)
+    if [ ! -x "$INTENT_DISPATCH_CMD" ] && ! command -v "$INTENT_DISPATCH_CMD" >/dev/null 2>&1; then
+      echo "intent dispatch tool not found: $INTENT_DISPATCH_CMD"
+      exit 1
+    fi
+    intent_args=(--workspace "$workspace" --source "${intent_source:-operator}" --message "$ask_message")
+    if [ -n "$telegram_chat_id" ]; then
+      intent_args+=(--chat-id "$telegram_chat_id")
+    fi
+    if [ -n "$telegram_request_id" ]; then
+      intent_args+=(--request-id "$telegram_request_id")
+    fi
+    if [ -n "$telegram_message_id" ]; then
+      intent_args+=(--message-id "$telegram_message_id")
+    fi
+    if [ -n "$session_id_filter" ]; then
+      intent_args+=(--session-id "$session_id_filter")
+    fi
+    if [ "${#web_allow_domains[@]}" -gt 0 ]; then
+      for domain in "${web_allow_domains[@]}"; do
+        if [ -n "$domain" ]; then
+          intent_args+=(--allow-domain "$domain")
+        fi
+      done
+    fi
+    if [ "$telegram_send_reply" -eq 1 ]; then
+      intent_args+=(--send)
+    fi
+    if [ -n "$out_dir" ]; then
+      intent_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      intent_args+=(--json)
+    fi
+    exec "$INTENT_DISPATCH_CMD" "${intent_args[@]}"
+    ;;
+  document-access)
+    if [ ! -x "$DOCUMENT_ACCESS_CMD" ] && ! command -v "$DOCUMENT_ACCESS_CMD" >/dev/null 2>&1; then
+      echo "document access tool not found: $DOCUMENT_ACCESS_CMD"
+      exit 1
+    fi
+    if [ -z "$document_path" ]; then
+      echo "--path is required for document-access"
+      exit 2
+    fi
+    document_args=(--workspace "$workspace" --path "$document_path")
+    if [ "$as_json" -eq 1 ]; then
+      document_args+=(--json)
+    fi
+    exec "$DOCUMENT_ACCESS_CMD" "${document_args[@]}"
+    ;;
+  web-access)
+    if [ ! -x "$WEB_ACCESS_CMD" ] && ! command -v "$WEB_ACCESS_CMD" >/dev/null 2>&1; then
+      echo "web access tool not found: $WEB_ACCESS_CMD"
+      exit 1
+    fi
+    if [ -z "$web_url" ]; then
+      echo "--url is required for web-access"
+      exit 2
+    fi
+    web_args=(--workspace "$workspace" --url "$web_url")
+    if [ "${#web_allow_domains[@]}" -gt 0 ]; then
+      for domain in "${web_allow_domains[@]}"; do
+        if [ -n "$domain" ]; then
+          web_args+=(--allow-domain "$domain")
+        fi
+      done
+    fi
+    if [ "$web_requires_authentication" -eq 1 ]; then
+      web_args+=(--requires-authentication)
+    fi
+    if [ "$web_interactive" -eq 1 ]; then
+      web_args+=(--interactive)
+    fi
+    if [ "$web_compatibility_required" -eq 1 ]; then
+      web_args+=(--compatibility-required)
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      web_args+=(--json)
+    fi
+    exec "$WEB_ACCESS_CMD" "${web_args[@]}"
+    ;;
+  intake)
+    if [ ! -x "$INTAKE_SURFACE_CMD" ] && ! command -v "$INTAKE_SURFACE_CMD" >/dev/null 2>&1; then
+      echo "intake surface tool not found: $INTAKE_SURFACE_CMD"
+      exit 1
+    fi
+    intake_args=(--workspace "$workspace" --limit "$event_limit")
+    if [ -n "$report_dir" ]; then
+      intake_args+=(--report-dir "$report_dir")
+    fi
+    if [ -n "$session_id_filter" ]; then
+      intake_args+=(--session-id "$session_id_filter")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      intake_args+=(--json)
+    fi
+    exec "$INTAKE_SURFACE_CMD" "${intake_args[@]}"
+    ;;
+  inbox-capability)
+    if [ ! -x "$INBOX_CAPABILITY_CMD" ] && ! command -v "$INBOX_CAPABILITY_CMD" >/dev/null 2>&1; then
+      echo "inbox capability tool not found: $INBOX_CAPABILITY_CMD"
+      exit 1
+    fi
+    inbox_args=(--workspace "$workspace")
+    if [ -n "$inbox_fixture_path" ]; then
+      inbox_args+=(--fixture-path "$inbox_fixture_path")
+    fi
+    if [ -n "$inbox_maildir_path" ]; then
+      inbox_args+=(--maildir "$inbox_maildir_path")
+    fi
+    if [ -n "$session_id_filter" ]; then
+      inbox_args+=(--session-id "$session_id_filter")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      inbox_args+=(--json)
+    fi
+    exec "$INBOX_CAPABILITY_CMD" "${inbox_args[@]}"
+    ;;
+  inbox-intake)
+    if [ ! -x "$INBOX_NORMALIZED_INTAKE_CMD" ] && ! command -v "$INBOX_NORMALIZED_INTAKE_CMD" >/dev/null 2>&1; then
+      echo "inbox normalized intake tool not found: $INBOX_NORMALIZED_INTAKE_CMD"
+      exit 1
+    fi
+    inbox_args=(--workspace "$workspace")
+    if [ -n "$inbox_fixture_path" ]; then
+      inbox_args+=(--fixture-path "$inbox_fixture_path")
+    fi
+    if [ -n "$inbox_maildir_path" ]; then
+      inbox_args+=(--maildir "$inbox_maildir_path")
+    fi
+    if [ -n "$session_id_filter" ]; then
+      inbox_args+=(--session-id "$session_id_filter")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      inbox_args+=(--json)
+    fi
+    exec "$INBOX_NORMALIZED_INTAKE_CMD" "${inbox_args[@]}"
+    ;;
+  inbox-routing)
+    if [ ! -x "$INBOX_ROUTING_CONTRACT_CMD" ] && ! command -v "$INBOX_ROUTING_CONTRACT_CMD" >/dev/null 2>&1; then
+      echo "inbox routing contract tool not found: $INBOX_ROUTING_CONTRACT_CMD"
+      exit 1
+    fi
+    inbox_args=(--workspace "$workspace")
+    if [ -n "$session_id_filter" ]; then
+      inbox_args+=(--session-id "$session_id_filter")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      inbox_args+=(--json)
+    fi
+    exec "$INBOX_ROUTING_CONTRACT_CMD" "${inbox_args[@]}"
+    ;;
+  inbox-proof)
+    if [ ! -x "$INBOX_PROOF_BASELINE_CMD" ] && ! command -v "$INBOX_PROOF_BASELINE_CMD" >/dev/null 2>&1; then
+      echo "inbox proof baseline tool not found: $INBOX_PROOF_BASELINE_CMD"
+      exit 1
+    fi
+    inbox_args=(--workspace "$workspace")
+    if [ -n "$inbox_maildir_path" ]; then
+      inbox_args+=(--maildir "$inbox_maildir_path")
+    fi
+    if [ -n "$session_id_filter" ]; then
+      inbox_args+=(--session-id "$session_id_filter")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      inbox_args+=(--json)
+    fi
+    exec "$INBOX_PROOF_BASELINE_CMD" "${inbox_args[@]}"
+    ;;
+  telegram-contract)
+    if [ ! -x "$TELEGRAM_CONTRACT_CMD" ] && ! command -v "$TELEGRAM_CONTRACT_CMD" >/dev/null 2>&1; then
+      echo "telegram contract tool not found: $TELEGRAM_CONTRACT_CMD"
+      exit 1
+    fi
+    telegram_args=(--workspace "$workspace")
+    if [ -n "$session_id_filter" ]; then
+      telegram_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$out_dir" ]; then
+      telegram_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      telegram_args+=(--json)
+    fi
+    exec "$TELEGRAM_CONTRACT_CMD" "${telegram_args[@]}"
+    ;;
+  workflow-contract)
+    if [ ! -x "$BUILT_IN_WORKFLOW_CONTRACT_CMD" ] && ! command -v "$BUILT_IN_WORKFLOW_CONTRACT_CMD" >/dev/null 2>&1; then
+      echo "built-in workflow contract tool not found: $BUILT_IN_WORKFLOW_CONTRACT_CMD"
+      exit 1
+    fi
+    workflow_args=(--workspace "$workspace")
+    if [ -n "$session_id_filter" ]; then
+      workflow_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$out_dir" ]; then
+      workflow_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      workflow_args+=(--json)
+    fi
+    exec "$BUILT_IN_WORKFLOW_CONTRACT_CMD" "${workflow_args[@]}"
+    ;;
+  research-workflow)
+    if [ ! -x "$RESEARCH_WORKFLOW_CMD" ] && ! command -v "$RESEARCH_WORKFLOW_CMD" >/dev/null 2>&1; then
+      echo "research workflow tool not found: $RESEARCH_WORKFLOW_CMD"
+      exit 1
+    fi
+    workflow_args=(--workspace "$workspace" --message-text "$telegram_message_text")
+    if [ -n "$telegram_chat_id" ]; then
+      workflow_args+=(--chat-id "$telegram_chat_id")
+    fi
+    if [ -n "$telegram_request_id" ]; then
+      workflow_args+=(--request-id "$telegram_request_id")
+    fi
+    if [ -n "$telegram_message_id" ]; then
+      workflow_args+=(--message-id "$telegram_message_id")
+    fi
+    if [ -n "$session_id_filter" ]; then
+      workflow_args+=(--session-id "$session_id_filter")
+    fi
+    if [ "${#web_allow_domains[@]}" -gt 0 ]; then
+      for domain in "${web_allow_domains[@]}"; do
+        workflow_args+=(--allow-domain "$domain")
+      done
+    fi
+    if [ "$dry_run" -eq 0 ] && [ "$telegram_send_reply" -eq 1 ]; then
+      workflow_args+=(--send)
+    fi
+    if [ -n "$out_dir" ]; then
+      workflow_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      workflow_args+=(--json)
+    fi
+    exec "$RESEARCH_WORKFLOW_CMD" "${workflow_args[@]}"
+    ;;
+  research-brief)
+    if [ ! -x "$RESEARCH_BRIEF_CMD" ] && ! command -v "$RESEARCH_BRIEF_CMD" >/dev/null 2>&1; then
+      echo "research brief tool not found: $RESEARCH_BRIEF_CMD"
+      exit 1
+    fi
+    workflow_args=(--workspace "$workspace" --message-text "$telegram_message_text")
+    if [ -n "$telegram_chat_id" ]; then
+      workflow_args+=(--chat-id "$telegram_chat_id")
+    fi
+    if [ -n "$telegram_request_id" ]; then
+      workflow_args+=(--request-id "$telegram_request_id")
+    fi
+    if [ -n "$telegram_message_id" ]; then
+      workflow_args+=(--message-id "$telegram_message_id")
+    fi
+    if [ -n "$session_id_filter" ]; then
+      workflow_args+=(--session-id "$session_id_filter")
+    fi
+    if [ "${#web_allow_domains[@]}" -gt 0 ]; then
+      for domain in "${web_allow_domains[@]}"; do
+        workflow_args+=(--allow-domain "$domain")
+      done
+    fi
+    if [ "$dry_run" -eq 0 ] && [ "$telegram_send_reply" -eq 1 ]; then
+      workflow_args+=(--send)
+    fi
+    if [ -n "$out_dir" ]; then
+      workflow_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      workflow_args+=(--json)
+    fi
+    exec "$RESEARCH_BRIEF_CMD" "${workflow_args[@]}"
+    ;;
+  inbox-workflow)
+    if [ ! -x "$INBOX_WORKFLOW_CMD" ] && ! command -v "$INBOX_WORKFLOW_CMD" >/dev/null 2>&1; then
+      echo "inbox workflow tool not found: $INBOX_WORKFLOW_CMD"
+      exit 1
+    fi
+    workflow_args=(--workspace "$workspace")
+    if [ -n "$inbox_maildir_path" ]; then
+      workflow_args+=(--maildir "$inbox_maildir_path")
+    fi
+    if [ -n "$session_id_filter" ]; then
+      workflow_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$out_dir" ]; then
+      workflow_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      workflow_args+=(--json)
+    fi
+    exec "$INBOX_WORKFLOW_CMD" "${workflow_args[@]}"
+    ;;
+  inbox-reply-workflow)
+    if [ ! -x "$INBOX_REPLY_WORKFLOW_CMD" ] && ! command -v "$INBOX_REPLY_WORKFLOW_CMD" >/dev/null 2>&1; then
+      echo "inbox reply workflow tool not found: $INBOX_REPLY_WORKFLOW_CMD"
+      exit 1
+    fi
+    workflow_args=(--workspace "$workspace")
+    if [ -n "$inbox_maildir_path" ]; then
+      workflow_args+=(--maildir "$inbox_maildir_path")
+    fi
+    if [ -n "$session_id_filter" ]; then
+      workflow_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$out_dir" ]; then
+      workflow_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      workflow_args+=(--json)
+    fi
+    exec "$INBOX_REPLY_WORKFLOW_CMD" "${workflow_args[@]}"
+    ;;
+  telegram-status)
+    if [ ! -x "$TELEGRAM_STATUS_CMD" ] && ! command -v "$TELEGRAM_STATUS_CMD" >/dev/null 2>&1; then
+      echo "telegram status tool not found: $TELEGRAM_STATUS_CMD"
+      exit 1
+    fi
+    telegram_args=(--workspace "$workspace")
+    if [ -n "$session_id_filter" ]; then
+      telegram_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$out_dir" ]; then
+      telegram_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      telegram_args+=(--json)
+    fi
+    exec "$TELEGRAM_STATUS_CMD" "${telegram_args[@]}"
+    ;;
+  telegram-routing)
+    if [ ! -x "$TELEGRAM_ROUTING_CMD" ] && ! command -v "$TELEGRAM_ROUTING_CMD" >/dev/null 2>&1; then
+      echo "telegram routing tool not found: $TELEGRAM_ROUTING_CMD"
+      exit 1
+    fi
+    telegram_args=(--workspace "$workspace" --message-text "$telegram_message_text")
+    if [ -n "$telegram_chat_id" ]; then
+      telegram_args+=(--chat-id "$telegram_chat_id")
+    fi
+    if [ -n "$telegram_request_id" ]; then
+      telegram_args+=(--request-id "$telegram_request_id")
+    fi
+    if [ -n "$telegram_message_id" ]; then
+      telegram_args+=(--message-id "$telegram_message_id")
+    fi
+    if [ -n "$session_id_filter" ]; then
+      telegram_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$out_dir" ]; then
+      telegram_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      telegram_args+=(--json)
+    fi
+    exec "$TELEGRAM_ROUTING_CMD" "${telegram_args[@]}"
+    ;;
+  telegram-proof)
+    if [ ! -x "$TELEGRAM_PROOF_BASELINE_CMD" ] && ! command -v "$TELEGRAM_PROOF_BASELINE_CMD" >/dev/null 2>&1; then
+      echo "telegram proof baseline tool not found: $TELEGRAM_PROOF_BASELINE_CMD"
+      exit 1
+    fi
+    telegram_args=(--workspace "$workspace")
+    if [ -n "$session_id_filter" ]; then
+      telegram_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$telegram_message_text" ]; then
+      telegram_args+=(--message-text "$telegram_message_text")
+    fi
+    if [ -n "$telegram_chat_id" ]; then
+      telegram_args+=(--chat-id "$telegram_chat_id")
+    fi
+    if [ -n "$telegram_request_id" ]; then
+      telegram_args+=(--request-id "$telegram_request_id")
+    fi
+    if [ -n "$telegram_message_id" ]; then
+      telegram_args+=(--message-id "$telegram_message_id")
+    fi
+    if [ "$telegram_reply_sent" -eq 1 ]; then
+      telegram_args+=(--reply-sent)
+    fi
+    if [ -n "$out_dir" ]; then
+      telegram_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      telegram_args+=(--json)
+    fi
+    exec "$TELEGRAM_PROOF_BASELINE_CMD" "${telegram_args[@]}"
+    ;;
+  telegram-web-execution)
+    if [ ! -x "$TELEGRAM_WEB_EXECUTION_CMD" ] && ! command -v "$TELEGRAM_WEB_EXECUTION_CMD" >/dev/null 2>&1; then
+      echo "telegram web execution tool not found: $TELEGRAM_WEB_EXECUTION_CMD"
+      exit 1
+    fi
+    telegram_args=(--workspace "$workspace" --message-text "$telegram_message_text")
+    if [ -n "$telegram_chat_id" ]; then
+      telegram_args+=(--chat-id "$telegram_chat_id")
+    fi
+    if [ -n "$telegram_request_id" ]; then
+      telegram_args+=(--request-id "$telegram_request_id")
+    fi
+    if [ -n "$telegram_message_id" ]; then
+      telegram_args+=(--message-id "$telegram_message_id")
+    fi
+    if [ -n "$session_id_filter" ]; then
+      telegram_args+=(--session-id "$session_id_filter")
+    fi
+    if [ "${#web_allow_domains[@]}" -gt 0 ]; then
+      for domain in "${web_allow_domains[@]}"; do
+        if [ -n "$domain" ]; then
+          telegram_args+=(--allow-domain "$domain")
+        fi
+      done
+    fi
+    if [ -n "$out_dir" ]; then
+      telegram_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      telegram_args+=(--json)
+    fi
+    exec "$TELEGRAM_WEB_EXECUTION_CMD" "${telegram_args[@]}"
+    ;;
+  telegram-reply)
+    if [ ! -x "$TELEGRAM_REPLY_SURFACE_CMD" ] && ! command -v "$TELEGRAM_REPLY_SURFACE_CMD" >/dev/null 2>&1; then
+      echo "telegram reply surface tool not found: $TELEGRAM_REPLY_SURFACE_CMD"
+      exit 1
+    fi
+    telegram_args=(--workspace "$workspace" --message-text "$telegram_message_text")
+    if [ -n "$telegram_chat_id" ]; then
+      telegram_args+=(--chat-id "$telegram_chat_id")
+    fi
+    if [ -n "$telegram_request_id" ]; then
+      telegram_args+=(--request-id "$telegram_request_id")
+    fi
+    if [ -n "$telegram_message_id" ]; then
+      telegram_args+=(--message-id "$telegram_message_id")
+    fi
+    if [ -n "$session_id_filter" ]; then
+      telegram_args+=(--session-id "$session_id_filter")
+    fi
+    if [ "${#web_allow_domains[@]}" -gt 0 ]; then
+      for domain in "${web_allow_domains[@]}"; do
+        if [ -n "$domain" ]; then
+          telegram_args+=(--allow-domain "$domain")
+        fi
+      done
+    fi
+    if [ "$telegram_send_reply" -eq 1 ]; then
+      telegram_args+=(--send)
+    fi
+    if [ -n "$out_dir" ]; then
+      telegram_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      telegram_args+=(--json)
+    fi
+    exec "$TELEGRAM_REPLY_SURFACE_CMD" "${telegram_args[@]}"
+    ;;
+  telegram-thread-status)
+    if [ ! -x "$TELEGRAM_THREAD_STATUS_CMD" ] && ! command -v "$TELEGRAM_THREAD_STATUS_CMD" >/dev/null 2>&1; then
+      echo "telegram thread status tool not found: $TELEGRAM_THREAD_STATUS_CMD"
+      exit 1
+    fi
+    telegram_args=(--workspace "$workspace" --message-text "$telegram_message_text")
+    if [ -n "$telegram_chat_id" ]; then
+      telegram_args+=(--chat-id "$telegram_chat_id")
+    fi
+    if [ -n "$telegram_request_id" ]; then
+      telegram_args+=(--request-id "$telegram_request_id")
+    fi
+    if [ -n "$telegram_message_id" ]; then
+      telegram_args+=(--message-id "$telegram_message_id")
+    fi
+    if [ -n "$session_id_filter" ]; then
+      telegram_args+=(--session-id "$session_id_filter")
+    fi
+    if [ "$telegram_follow_up" -eq 1 ]; then
+      telegram_args+=(--follow-up)
+    fi
+    if [ -n "$out_dir" ]; then
+      telegram_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      telegram_args+=(--json)
+    fi
+    exec "$TELEGRAM_THREAD_STATUS_CMD" "${telegram_args[@]}"
+    ;;
+  telegram-live-loop)
+    if [ ! -x "$TELEGRAM_LIVE_LOOP_CMD" ] && ! command -v "$TELEGRAM_LIVE_LOOP_CMD" >/dev/null 2>&1; then
+      echo "telegram live loop tool not found: $TELEGRAM_LIVE_LOOP_CMD"
+      exit 1
+    fi
+    telegram_args=(--workspace "$workspace")
+    if [ "$telegram_once" -eq 1 ]; then
+      telegram_args+=(--once)
+    fi
+    if [ "$telegram_send_reply" -eq 1 ]; then
+      telegram_args+=(--send)
+    fi
+    if [ -n "$session_id_filter" ]; then
+      telegram_args+=(--session-id "$session_id_filter")
+    fi
+    if [ "${#web_allow_domains[@]}" -gt 0 ]; then
+      for domain in "${web_allow_domains[@]}"; do
+        if [ -n "$domain" ]; then
+          telegram_args+=(--allow-domain "$domain")
+        fi
+      done
+    fi
+    if [ -n "$out_dir" ]; then
+      telegram_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      telegram_args+=(--json)
+    fi
+    exec "$TELEGRAM_LIVE_LOOP_CMD" "${telegram_args[@]}"
+    ;;
+  telegram-setup)
+    if [ ! -x "$TELEGRAM_SETUP_CMD" ] && ! command -v "$TELEGRAM_SETUP_CMD" >/dev/null 2>&1; then
+      echo "telegram setup tool not found: $TELEGRAM_SETUP_CMD"
+      exit 1
+    fi
+    telegram_args=(--workspace "$workspace")
+    if [ -n "$telegram_setup_env_file" ]; then
+      telegram_args+=(--env-file "$telegram_setup_env_file")
+    fi
+    if [ -n "$telegram_setup_token" ]; then
+      telegram_args+=(--token "$telegram_setup_token")
+    fi
+    if [ -n "$telegram_chat_id" ]; then
+      telegram_args+=(--chat-id "$telegram_chat_id")
+    fi
+    if [ -n "$telegram_setup_api_base_url" ]; then
+      telegram_args+=(--api-base-url "$telegram_setup_api_base_url")
+    fi
+    if [ "$telegram_setup_serve_http" -eq 1 ]; then
+      telegram_args+=(--serve-http)
+    fi
+    if [ "$telegram_setup_background" -eq 1 ]; then
+      telegram_args+=(--background)
+    fi
+    if [ -n "$telegram_setup_host" ]; then
+      telegram_args+=(--host "$telegram_setup_host")
+    fi
+    if [ -n "$telegram_setup_display_host" ]; then
+      telegram_args+=(--display-host "$telegram_setup_display_host")
+    fi
+    if [ -n "$telegram_setup_port" ]; then
+      telegram_args+=(--port "$telegram_setup_port")
+    fi
+    if [ -n "$telegram_setup_timeout_sec" ]; then
+      telegram_args+=(--timeout-sec "$telegram_setup_timeout_sec")
+    fi
+    if [ -n "$telegram_setup_url_file" ]; then
+      telegram_args+=(--url-file "$telegram_setup_url_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      telegram_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      telegram_args+=(--json)
+    fi
+    exec "$TELEGRAM_SETUP_CMD" "${telegram_args[@]}"
+    ;;
+  llm-setup)
+    if [ ! -x "$LLM_SETUP_CMD" ] && ! command -v "$LLM_SETUP_CMD" >/dev/null 2>&1; then
+      echo "llm setup tool not found: $LLM_SETUP_CMD"
+      exit 1
+    fi
+    llm_args=(--workspace "$workspace")
+    if [ -n "$telegram_setup_env_file" ]; then
+      llm_args+=(--env-file "$telegram_setup_env_file")
+    fi
+    if [ -n "$llm_setup_set_provider" ]; then
+      llm_args+=(--set-provider "$llm_setup_set_provider")
+    fi
+    if [ -n "$llm_setup_openai_api_key" ]; then
+      llm_args+=(--openai-api-key "$llm_setup_openai_api_key")
+    fi
+    if [ "$telegram_setup_serve_http" -eq 1 ]; then
+      llm_args+=(--serve-http)
+    fi
+    if [ "$telegram_setup_background" -eq 1 ]; then
+      llm_args+=(--background)
+    fi
+    if [ -n "$telegram_setup_host" ]; then
+      llm_args+=(--host "$telegram_setup_host")
+    fi
+    if [ -n "$telegram_setup_display_host" ]; then
+      llm_args+=(--display-host "$telegram_setup_display_host")
+    fi
+    if [ -n "$telegram_setup_port" ]; then
+      llm_args+=(--port "$telegram_setup_port")
+    fi
+    if [ -n "$telegram_setup_timeout_sec" ]; then
+      llm_args+=(--timeout-sec "$telegram_setup_timeout_sec")
+    fi
+    if [ -n "$telegram_setup_url_file" ]; then
+      llm_args+=(--url-file "$telegram_setup_url_file")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      llm_args+=(--json)
+    fi
+    exec "$LLM_SETUP_CMD" "${llm_args[@]}"
+    ;;
+  engine-availability)
+    if [ ! -x "$ENGINE_AVAILABILITY_CMD" ] && ! command -v "$ENGINE_AVAILABILITY_CMD" >/dev/null 2>&1; then
+      echo "engine availability tool not found: $ENGINE_AVAILABILITY_CMD"
+      exit 1
+    fi
+    engine_args=(--workspace "$workspace")
+    if [ -n "$out_dir" ]; then
+      engine_args+=(--output "$out_dir")
+    fi
+    if [ "$engine_no_bootstrap" -eq 1 ]; then
+      engine_args+=(--no-bootstrap)
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      engine_args+=(--json)
+    fi
+    exec "$ENGINE_AVAILABILITY_CMD" "${engine_args[@]}"
+    ;;
+  capability-proof)
+    if [ ! -x "$CAPABILITY_PROOF_SURFACE_CMD" ] && ! command -v "$CAPABILITY_PROOF_SURFACE_CMD" >/dev/null 2>&1; then
+      echo "capability proof tool not found: $CAPABILITY_PROOF_SURFACE_CMD"
+      exit 1
+    fi
+    capability_args=(--workspace "$workspace")
+    if [ "$as_json" -eq 1 ]; then
+      capability_args+=(--json)
+    fi
+    exec "$CAPABILITY_PROOF_SURFACE_CMD" "${capability_args[@]}"
+    ;;
+  service-capability)
+    if [ ! -x "$SERVICE_CAPABILITY_CMD" ] && ! command -v "$SERVICE_CAPABILITY_CMD" >/dev/null 2>&1; then
+      echo "service capability tool not found: $SERVICE_CAPABILITY_CMD"
+      exit 1
+    fi
+    capability_args=(--workspace "$workspace")
+    if [ -n "$out_dir" ]; then
+      capability_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      capability_args+=(--json)
+    fi
+    exec "$SERVICE_CAPABILITY_CMD" "${capability_args[@]}"
+    ;;
+  permission-capability)
+    if [ ! -x "$PERMISSION_CAPABILITY_CMD" ] && ! command -v "$PERMISSION_CAPABILITY_CMD" >/dev/null 2>&1; then
+      echo "permission capability tool not found: $PERMISSION_CAPABILITY_CMD"
+      exit 1
+    fi
+    capability_args=(--workspace "$workspace")
+    if [ -n "$out_dir" ]; then
+      capability_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      capability_args+=(--json)
+    fi
+    exec "$PERMISSION_CAPABILITY_CMD" "${capability_args[@]}"
+    ;;
+  capability-execution)
+    if [ ! -x "$CAPABILITY_EXECUTION_CMD" ] && ! command -v "$CAPABILITY_EXECUTION_CMD" >/dev/null 2>&1; then
+      echo "capability execution tool not found: $CAPABILITY_EXECUTION_CMD"
+      exit 1
+    fi
+    capability_args=(--workspace "$workspace")
+    if [ -n "$out_dir" ]; then
+      capability_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      capability_args+=(--json)
+    fi
+    exec "$CAPABILITY_EXECUTION_CMD" "${capability_args[@]}"
+    ;;
+  first-run-summary)
+    if [ ! -x "$FIRST_RUN_SUMMARY_CMD" ] && ! command -v "$FIRST_RUN_SUMMARY_CMD" >/dev/null 2>&1; then
+      echo "first run summary tool not found: $FIRST_RUN_SUMMARY_CMD"
+      exit 1
+    fi
+    summary_args=(--workspace "$workspace" --url "${web_url:-https://example.com}")
+    if [ -n "$document_path" ]; then
+      summary_args+=(--path "$document_path")
+    fi
+    if [ "${#web_allow_domains[@]}" -gt 0 ]; then
+      for domain in "${web_allow_domains[@]}"; do
+        if [ -n "$domain" ]; then
+          summary_args+=(--allow-domain "$domain")
+        fi
+      done
+    fi
+    if [ -n "$out_dir" ]; then
+      summary_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      summary_args+=(--json)
+    fi
+    exec "$FIRST_RUN_SUMMARY_CMD" "${summary_args[@]}"
+    ;;
+  vm-e2e-scenario)
+    if [ ! -x "$VM_E2E_SCENARIO_CMD" ] && ! command -v "$VM_E2E_SCENARIO_CMD" >/dev/null 2>&1; then
+      echo "vm e2e scenario tool not found: $VM_E2E_SCENARIO_CMD"
+      exit 1
+    fi
+    scenario_args=(--workspace "$workspace")
+    if [ -n "$session_id_filter" ]; then
+      scenario_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$out_dir" ]; then
+      scenario_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      scenario_args+=(--json)
+    fi
+    exec "$VM_E2E_SCENARIO_CMD" "${scenario_args[@]}"
+    ;;
+  vm-e2e-proof)
+    if [ ! -x "$VM_E2E_PROOF_CMD" ] && ! command -v "$VM_E2E_PROOF_CMD" >/dev/null 2>&1; then
+      echo "vm e2e proof tool not found: $VM_E2E_PROOF_CMD"
+      exit 1
+    fi
+    proof_args=(--workspace "$workspace")
+    if [ -n "$session_id_filter" ]; then
+      proof_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$out_dir" ]; then
+      proof_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      proof_args+=(--json)
+    fi
+    exec "$VM_E2E_PROOF_CMD" "${proof_args[@]}"
+    ;;
+  vm-utm-observe)
+    if [ ! -x "$VM_UTM_OBSERVE_CMD" ] && ! command -v "$VM_UTM_OBSERVE_CMD" >/dev/null 2>&1; then
+      echo "vm utm observe tool not found: $VM_UTM_OBSERVE_CMD"
+      exit 1
+    fi
+    if [ -z "$vm_identifier" ]; then
+      echo "vm-utm-observe requires --vm <identifier>" >&2
+      exit 2
+    fi
+    observe_args=(--vm-name "$vm_identifier" --workspace "$workspace")
+    if [ -n "$session_id_filter" ]; then
+      observe_args+=(--session-id "$session_id_filter")
+    fi
+    if [ -n "$out_dir" ]; then
+      observe_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      observe_args+=(--json)
+    fi
+    exec "$VM_UTM_OBSERVE_CMD" "${observe_args[@]}"
+    ;;
+  events)
+    if [ ! -x "$EVENTS_CMD" ] && ! command -v "$EVENTS_CMD" >/dev/null 2>&1; then
+      echo "events tool not found: $EVENTS_CMD"
+      exit 1
+    fi
+    events_args=(--workspace "$workspace" --limit "$event_limit")
+    if [ -n "$event_kind" ]; then
+      events_args+=(--kind "$event_kind")
+    fi
+    if [ -n "$event_source" ]; then
+      events_args+=(--source "$event_source")
+    fi
+    if [ -n "$event_unit" ]; then
+      events_args+=(--unit "$event_unit")
+    fi
+    if [ "$event_lineage" -eq 1 ]; then
+      events_args+=(--lineage)
+    fi
+    if [ -n "$event_correlation_key" ]; then
+      events_args+=(--correlation-key "$event_correlation_key")
+    fi
+    if [ -n "$event_correlation_value" ]; then
+      events_args+=(--correlation-value "$event_correlation_value")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      events_args+=(--json)
+    fi
+    exec "$EVENTS_CMD" "${events_args[@]}"
+    ;;
+  sessions)
+    if [ ! -x "$SESSIONS_CMD" ] && ! command -v "$SESSIONS_CMD" >/dev/null 2>&1; then
+      echo "sessions tool not found: $SESSIONS_CMD"
+      exit 1
+    fi
+    sessions_args=(--workspace "$workspace" --limit "$event_limit")
+    if [ -n "$session_id_filter" ]; then
+      sessions_args+=(--session-id "$session_id_filter")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      sessions_args+=(--json)
+    fi
+    exec "$SESSIONS_CMD" "${sessions_args[@]}"
+    ;;
+  policy-correlation)
+    if [ ! -x "$POLICY_CORRELATION_CMD" ] && ! command -v "$POLICY_CORRELATION_CMD" >/dev/null 2>&1; then
+      echo "policy correlation tool not found: $POLICY_CORRELATION_CMD"
+      exit 1
+    fi
+    correlation_args=(--workspace "$workspace")
+    if [ "$as_json" -eq 1 ]; then
+      correlation_args+=(--json)
+    fi
+    exec "$POLICY_CORRELATION_CMD" "${correlation_args[@]}"
+    ;;
+  firstrun-reset)
+    if [ ! -x "$FIRSTRUN_RESET_CMD" ] && ! command -v "$FIRSTRUN_RESET_CMD" >/dev/null 2>&1; then
+      echo "firstrun reset tool not found: $FIRSTRUN_RESET_CMD"
+      exit 1
+    fi
+    reset_args=(--workspace "$workspace")
+    if [ -n "$user_home" ]; then
+      reset_args+=(--user-home "$user_home")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      reset_args+=(--json)
+    fi
+    exec "$FIRSTRUN_RESET_CMD" "${reset_args[@]}"
+    ;;
+  policy-bridge)
+    if [ ! -x "$POLICY_BRIDGE_CMD" ] && ! command -v "$POLICY_BRIDGE_CMD" >/dev/null 2>&1; then
+      echo "kernel policy bridge tool not found: $POLICY_BRIDGE_CMD"
+      exit 1
+    fi
+    bridge_args=(--workspace "$workspace")
+    if [ -n "$out_dir" ]; then
+      bridge_args+=(--output-dir "$out_dir")
+    fi
+    if [ "$reload_profile" -eq 1 ]; then
+      bridge_args+=(--reload)
+    fi
+    if [ "$policy_disable" -eq 1 ]; then
+      bridge_args+=(--disable)
+    fi
+    if [ -n "$policy_parser_cmd" ]; then
+      bridge_args+=(--parser-cmd "$policy_parser_cmd")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      bridge_args+=(--json)
+    fi
+    exec "$POLICY_BRIDGE_CMD" "${bridge_args[@]}"
+    ;;
+  policy-shadow)
+    if [ ! -x "$POLICY_SHADOW_CMD" ] && ! command -v "$POLICY_SHADOW_CMD" >/dev/null 2>&1; then
+      echo "kernel policy shadow tool not found: $POLICY_SHADOW_CMD"
+      exit 1
+    fi
+    shadow_args=(--workspace "$workspace")
+    if [ -n "$out_dir" ]; then
+      shadow_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      shadow_args+=(--json)
+    fi
+    exec "$POLICY_SHADOW_CMD" "${shadow_args[@]}"
+    ;;
+  policy-enforce)
+    if [ ! -x "$POLICY_ENFORCE_CMD" ] && ! command -v "$POLICY_ENFORCE_CMD" >/dev/null 2>&1; then
+      echo "kernel policy enforce tool not found: $POLICY_ENFORCE_CMD"
+      exit 1
+    fi
+    enforce_args=(--workspace "$workspace")
+    if [ "$policy_enable" -eq 1 ]; then
+      enforce_args+=(--enable)
+    fi
+    if [ "$policy_disable" -eq 1 ]; then
+      enforce_args+=(--disable)
+    fi
+    if [ "$policy_status" -eq 1 ]; then
+      enforce_args+=(--status)
+    fi
+    if [ "$policy_confirm" -eq 1 ]; then
+      enforce_args+=(--confirm)
+    fi
+    if [ "$policy_require_ready" -eq 1 ]; then
+      enforce_args+=(--require-ready)
+    fi
+    if [ -n "$policy_target" ]; then
+      enforce_args+=(--policy-target "$policy_target")
+    fi
+    if [ -n "$policy_dir" ]; then
+      enforce_args+=(--policy-dir "$policy_dir")
+    fi
+    if [ -n "$policy_parser_cmd" ]; then
+      enforce_args+=(--parser-cmd "$policy_parser_cmd")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      enforce_args+=(--json)
+    fi
+    exec "$POLICY_ENFORCE_CMD" "${enforce_args[@]}"
+    ;;
+  policy-ready)
+    if [ ! -x "$POLICY_READY_CMD" ] && ! command -v "$POLICY_READY_CMD" >/dev/null 2>&1; then
+      echo "kernel policy readiness tool not found: $POLICY_READY_CMD"
+      exit 1
+    fi
+    ready_args=(--workspace "$workspace")
+    if [ -n "$policy_dir" ]; then
+      ready_args+=(--policy-dir "$policy_dir")
+    fi
+    if [ -n "$policy_parser_cmd" ]; then
+      ready_args+=(--parser-cmd "$policy_parser_cmd")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      ready_args+=(--json)
+    fi
+    exec "$POLICY_READY_CMD" "${ready_args[@]}"
+    ;;
+  restart)
+    if ! command -v "$SYSTEMCTL_CMD" >/dev/null 2>&1; then
+      echo "systemctl not found"
+      exit 1
+    fi
+    exec "$SYSTEMCTL_CMD" restart "$SERVICE_NAME"
+    ;;
+  logs)
+    if ! command -v "$JOURNALCTL_CMD" >/dev/null 2>&1; then
+      echo "journalctl not found"
+      exit 1
+    fi
+    exec "$JOURNALCTL_CMD" -u "$SERVICE_NAME" -n "$lines" --no-pager
+    ;;
+  bundle)
+    if [ ! -x "$EXPORT_DIAG_CMD" ] && ! command -v "$EXPORT_DIAG_CMD" >/dev/null 2>&1; then
+      echo "diagnostics exporter not found: $EXPORT_DIAG_CMD"
+      exit 1
+    fi
+    if [ -n "$out_dir" ]; then
+      exec "$EXPORT_DIAG_CMD" "$workspace" "$out_dir"
+    fi
+    exec "$EXPORT_DIAG_CMD" "$workspace"
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac

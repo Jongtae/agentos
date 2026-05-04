@@ -1,0 +1,328 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+RUNTIME_ROOT="${AGENTOS_RUNTIME_ROOT:-/usr/lib/agentos}"
+WORKSPACE="${AGENTOS_DEFAULT_WORKSPACE:-/home/ubuntu/agentos-ws}"
+SEED_WORKSPACE="${AGENTOS_SEED_WORKSPACE:-/var/lib/agentos/workspaces/default}"
+RUN_USER="${AGENTOS_ACCEPTANCE_USER:-ubuntu}"
+TELEGRAM_MESSAGE_TEXT="${AGENTOS_ACCEPTANCE_TELEGRAM_MESSAGE_TEXT:-search agentos roadmap}"
+TELEGRAM_CHAT_ID="${AGENTOS_ACCEPTANCE_TELEGRAM_CHAT_ID:-1001}"
+TELEGRAM_REQUEST_ID="${AGENTOS_ACCEPTANCE_TELEGRAM_REQUEST_ID:-telegram-request-acceptance}"
+TELEGRAM_MESSAGE_ID="${AGENTOS_ACCEPTANCE_TELEGRAM_MESSAGE_ID:-telegram-message-acceptance}"
+SERIAL_DIAG_TTY="${AGENTOS_SERIAL_DIAG_TTY:-/dev/ttyS0}"
+
+STATUS_DIR="$WORKSPACE/artifacts/acceptance-proof"
+STATUS_PATH="$STATUS_DIR/latest-acceptance-proof-collector.json"
+LOG_PATH="$STATUS_DIR/collector.log"
+
+serial_log() {
+  if [ -n "$SERIAL_DIAG_TTY" ] && [ -w "$SERIAL_DIAG_TTY" ]; then
+    printf '%s\n' "$*" >>"$SERIAL_DIAG_TTY" 2>/dev/null || true
+  fi
+}
+
+mkdir -p \
+  "$WORKSPACE" \
+  "$WORKSPACE/documents" \
+  "$WORKSPACE/artifacts" \
+  "$WORKSPACE/data" \
+  "$STATUS_DIR"
+
+if [ -f "$SEED_WORKSPACE/spec.yaml" ] && [ ! -f "$WORKSPACE/spec.yaml" ]; then
+  cp "$SEED_WORKSPACE/spec.yaml" "$WORKSPACE/spec.yaml"
+fi
+if [ -f "$SEED_WORKSPACE/documents/agentos-first-run.md" ] && [ ! -f "$WORKSPACE/documents/agentos-first-run.md" ]; then
+  cp "$SEED_WORKSPACE/documents/agentos-first-run.md" "$WORKSPACE/documents/agentos-first-run.md"
+fi
+
+if id "$RUN_USER" >/dev/null 2>&1; then
+  chown -R "$RUN_USER:$RUN_USER" "$WORKSPACE" 2>/dev/null || true
+fi
+chmod -R u+rwX "$WORKSPACE" 2>/dev/null || true
+
+write_status() {
+  local state="$1"
+  local step="$2"
+  local ok="$3"
+  local reason="${4:-}"
+  mkdir -p "$STATUS_DIR"
+  python3 - "$STATUS_PATH" "$state" "$step" "$ok" "$reason" <<'PY'
+import json
+import os
+import sys
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+
+path = Path(sys.argv[1])
+payload = {
+    "schema_version": "agentos-acceptance-proof-collector.v1",
+    "generated_at_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    "state": sys.argv[2],
+    "latest_step": sys.argv[3],
+    "latest_step_ok": sys.argv[4] == "true",
+    "reason": sys.argv[5],
+}
+path.parent.mkdir(parents=True, exist_ok=True)
+with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False) as handle:
+    json.dump(payload, handle, ensure_ascii=True)
+    handle.write("\n")
+    tmp_name = handle.name
+os.replace(tmp_name, path)
+PY
+  if id "$RUN_USER" >/dev/null 2>&1; then
+    chown "$RUN_USER:$RUN_USER" "$STATUS_PATH" 2>/dev/null || true
+  fi
+}
+
+run_as_user() {
+  if id "$RUN_USER" >/dev/null 2>&1; then
+    runuser -u "$RUN_USER" -- env \
+      HOME="/home/$RUN_USER" \
+      PYTHONPATH="$RUNTIME_ROOT/src" \
+      OLLAMA_MODELS="${OLLAMA_MODELS:-/var/lib/agentos/models}" \
+      AGENTOS_RUNTIME_ROOT="$RUNTIME_ROOT" \
+      "$@"
+  else
+    env \
+      PYTHONPATH="$RUNTIME_ROOT/src" \
+      OLLAMA_MODELS="${OLLAMA_MODELS:-/var/lib/agentos/models}" \
+      AGENTOS_RUNTIME_ROOT="$RUNTIME_ROOT" \
+      "$@"
+  fi
+}
+
+write_json() {
+  local step="$1"
+  local output="$2"
+  shift 2
+  mkdir -p "$(dirname "$output")"
+  write_status "running" "$step" "false" ""
+  if run_as_user "$@" >"$output.tmp" 2>>"$LOG_PATH"; then
+    mv "$output.tmp" "$output"
+    if id "$RUN_USER" >/dev/null 2>&1; then
+      chown "$RUN_USER:$RUN_USER" "$output" 2>/dev/null || true
+    fi
+    write_status "running" "$step" "true" ""
+    return 0
+  fi
+  local status=$?
+  rm -f "$output.tmp"
+  write_status "degraded" "$step" "false" "command_failed:$status"
+  return "$status"
+}
+
+write_runtime_entry() {
+  local output="$WORKSPACE/artifacts/runtime-entry/latest-runtime-entry-status.json"
+  mkdir -p "$(dirname "$output")" "$WORKSPACE/data"
+  write_status "running" "runtime_entry" "false" ""
+  if run_as_user python3 - "$WORKSPACE" >"$output.tmp" 2>>"$LOG_PATH" <<'PY'
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+workspace = Path(sys.argv[1])
+probe = workspace / "data" / ".agentos-write-probe"
+workspace_writable = True
+write_error = ""
+try:
+    workspace.mkdir(parents=True, exist_ok=True)
+    (workspace / "documents").mkdir(parents=True, exist_ok=True)
+    (workspace / "artifacts").mkdir(parents=True, exist_ok=True)
+    (workspace / "data").mkdir(parents=True, exist_ok=True)
+    probe.write_text("ok", encoding="utf-8")
+    probe.unlink()
+except Exception as exc:
+    workspace_writable = False
+    write_error = str(exc)
+
+def svc(name: str) -> dict:
+    proc = subprocess.run(
+        ["systemctl", "show", name, "--property=ActiveState,SubState,Result,ExecMainStatus"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    payload = {}
+    for line in proc.stdout.splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            payload[key] = value
+    payload["returncode"] = proc.returncode
+    payload["stderr"] = proc.stderr.strip()
+    return payload
+
+print(json.dumps({
+    "runtime_entry_mode": "tty",
+    "workspace": str(workspace),
+    "workspace_writable": workspace_writable,
+    "write_error": write_error,
+    "seed_spec_present": (workspace / "spec.yaml").is_file(),
+    "seed_document_present": (workspace / "documents" / "agentos-first-run.md").is_file(),
+    "services": {
+        "agentos_ollama": svc("agentos-ollama.service"),
+        "agentos_firstrun": svc("agentos-firstrun.service"),
+        "agentos_acceptance_proof": svc("agentos-acceptance-proof.service"),
+    },
+}, ensure_ascii=True))
+PY
+  then
+    mv "$output.tmp" "$output"
+    if id "$RUN_USER" >/dev/null 2>&1; then
+      chown "$RUN_USER:$RUN_USER" "$output" 2>/dev/null || true
+    fi
+    write_status "running" "runtime_entry" "true" ""
+    return 0
+  fi
+  rm -f "$output.tmp"
+  write_status "degraded" "runtime_entry" "false" "runtime_entry_failed"
+  return 1
+}
+
+main() {
+  serial_log "[AgentOS][acceptance-proof] state=start workspace=$WORKSPACE"
+  write_status "running" "start" "true" ""
+  write_runtime_entry || true
+
+  write_json guided_operator "$WORKSPACE/artifacts/runtime-entry/latest-guided-operator-surface.json" \
+    /usr/local/bin/agentos-kernelctl guided-operator --workspace "$WORKSPACE" --json || true
+  write_json engine_availability "$WORKSPACE/artifacts/kernel-engine/latest-kernel-engine-availability.json" \
+    /usr/local/bin/agentos-kernelctl engine-availability --workspace "$WORKSPACE" --no-bootstrap --json || true
+  write_json first_run_summary "$WORKSPACE/artifacts/repo-free-first-run/latest-first-run-summary.json" \
+    /usr/local/bin/agentos-kernelctl first-run-summary --workspace "$WORKSPACE" --json || true
+  write_json inbox_proof "$WORKSPACE/artifacts/capability-substrate/latest-inbox-proof-baseline.json" \
+    /usr/local/bin/agentos-kernelctl inbox-proof --workspace "$WORKSPACE" --json || true
+  write_json telegram_proof "$WORKSPACE/artifacts/capability-substrate/latest-telegram-proof-baseline.json" \
+    /usr/local/bin/agentos-kernelctl telegram-proof --workspace "$WORKSPACE" \
+      --message-text "$TELEGRAM_MESSAGE_TEXT" --chat-id "$TELEGRAM_CHAT_ID" \
+      --request-id "$TELEGRAM_REQUEST_ID" --message-id "$TELEGRAM_MESSAGE_ID" --json || true
+  write_json telegram_web_execution "$WORKSPACE/artifacts/capability-substrate/latest-telegram-web-execution.json" \
+    /usr/local/bin/agentos-kernelctl telegram-web-execution --workspace "$WORKSPACE" \
+      --message-text "$TELEGRAM_MESSAGE_TEXT" --chat-id "$TELEGRAM_CHAT_ID" \
+      --request-id "$TELEGRAM_REQUEST_ID" --message-id "$TELEGRAM_MESSAGE_ID" --json || true
+  write_json telegram_reply "$WORKSPACE/artifacts/capability-substrate/latest-telegram-reply-surface.json" \
+    /usr/local/bin/agentos-kernelctl telegram-reply --workspace "$WORKSPACE" \
+      --message-text "$TELEGRAM_MESSAGE_TEXT" --chat-id "$TELEGRAM_CHAT_ID" \
+      --request-id "$TELEGRAM_REQUEST_ID" --message-id "$TELEGRAM_MESSAGE_ID" --json || true
+  write_json research_workflow "$WORKSPACE/artifacts/capability-substrate/latest-research-request-response-workflow.json" \
+    /usr/local/bin/agentos-kernelctl research-workflow --workspace "$WORKSPACE" \
+      --message-text "$TELEGRAM_MESSAGE_TEXT" --chat-id "$TELEGRAM_CHAT_ID" \
+      --request-id "$TELEGRAM_REQUEST_ID" --message-id "$TELEGRAM_MESSAGE_ID" --json || true
+  write_json inbox_workflow "$WORKSPACE/artifacts/capability-substrate/latest-inbox-triage-summary-response-workflow.json" \
+    /usr/local/bin/agentos-kernelctl inbox-workflow --workspace "$WORKSPACE" --json || true
+  write_json telegram_thread_status "$WORKSPACE/artifacts/capability-substrate/latest-telegram-thread-status.json" \
+    /usr/local/bin/agentos-kernelctl telegram-thread-status --workspace "$WORKSPACE" \
+      --message-text "$TELEGRAM_MESSAGE_TEXT" --chat-id "$TELEGRAM_CHAT_ID" \
+      --request-id "$TELEGRAM_REQUEST_ID" --message-id "$TELEGRAM_MESSAGE_ID" --json || true
+  write_json inbox_reply_workflow "$WORKSPACE/artifacts/capability-substrate/latest-inbox-reply-workflow.json" \
+    /usr/local/bin/agentos-kernelctl inbox-reply-workflow --workspace "$WORKSPACE" --json || true
+  write_json research_brief "$WORKSPACE/artifacts/capability-substrate/latest-research-brief-response.json" \
+    /usr/local/bin/agentos-kernelctl research-brief --workspace "$WORKSPACE" \
+      --message-text "$TELEGRAM_MESSAGE_TEXT" --chat-id "$TELEGRAM_CHAT_ID" \
+      --request-id "$TELEGRAM_REQUEST_ID" --message-id "$TELEGRAM_MESSAGE_ID" --json || true
+  write_json workflow_status "$WORKSPACE/artifacts/runtime-entry/latest-workflow-status.json" \
+    /usr/local/bin/agentos-kernelctl workflow-status --workspace "$WORKSPACE" --json || true
+  write_json vm_e2e_proof "$WORKSPACE/artifacts/control-plane-capabilities/latest-vm-e2e-proof.json" \
+    /usr/local/bin/agentos-kernelctl vm-e2e-proof --workspace "$WORKSPACE" --json || true
+
+  python3 - "$WORKSPACE" >"$STATUS_DIR/serial-summary.json.tmp" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+workspace = Path(sys.argv[1])
+
+def read_json(relative: str) -> dict:
+    path = workspace / relative
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+runtime_entry = read_json("artifacts/runtime-entry/latest-runtime-entry-status.json")
+guided = read_json("artifacts/runtime-entry/latest-guided-operator-surface.json")
+workflow_status = read_json("artifacts/runtime-entry/latest-workflow-status.json")
+engine = read_json("artifacts/kernel-engine/latest-kernel-engine-availability.json")
+document = read_json("artifacts/repo-free-first-run/latest-first-run-summary.json")
+inbox_proof = read_json("artifacts/capability-substrate/latest-inbox-proof-baseline.json")
+telegram = read_json("artifacts/capability-substrate/latest-telegram-proof-baseline.json")
+telegram_execution = read_json("artifacts/capability-substrate/latest-telegram-web-execution.json")
+telegram_reply = read_json("artifacts/capability-substrate/latest-telegram-reply-surface.json")
+research = read_json("artifacts/capability-substrate/latest-research-request-response-workflow.json")
+inbox_workflow = read_json("artifacts/capability-substrate/latest-inbox-triage-summary-response-workflow.json")
+telegram_thread = read_json("artifacts/capability-substrate/latest-telegram-thread-status.json")
+inbox_reply = read_json("artifacts/capability-substrate/latest-inbox-reply-workflow.json")
+research_brief = read_json("artifacts/capability-substrate/latest-research-brief-response.json")
+
+engine_summary = dict(engine.get("summary") or {})
+telegram_summary = dict(telegram.get("summary") or {})
+execution_summary = dict(telegram_execution.get("summary") or {})
+reply_summary = dict(telegram_reply.get("summary") or {})
+workflow_summary = dict(workflow_status.get("summary") or {})
+
+payload = {
+    "schema_version": "agentos-serial-acceptance-proof.v1",
+    "workspace": str(workspace),
+    "runtime_entry_mode": "tty",
+    "guest_reachable": True,
+    "workspace_writable": bool(runtime_entry.get("workspace_writable", False)),
+    "guided_operator_surface_reachable": bool(guided.get("guided_operator_surface_reachable", False)),
+    "workflow_status_ready": bool(workflow_summary.get("workflow_status_ready", False)),
+    "operator_next_action_visible": bool(workflow_status.get("next_actions")),
+    "provider_ready": bool(engine_summary.get("provider_ready", False)),
+    "first_prompt_success": bool(engine_summary.get("first_prompt_success", False)),
+    "managed_reentry_ready": bool(engine_summary.get("managed_reentry_ready", False)),
+    "usable_runtime_entry": bool(engine_summary.get("usable_runtime_entry", False)),
+    "first_run_summary_ready": bool(document.get("first_run_summary_ready", False)),
+    "telegram_ingress_received": bool(telegram_summary.get("telegram_ingress_received", False)),
+    "telegram_chat_allowed": bool(telegram_summary.get("telegram_chat_allowed", False)),
+    "telegram_request_routed": bool(telegram_summary.get("telegram_request_routed", False)),
+    "internal_web_query_success": bool(execution_summary.get("internal_web_query_success", False)),
+    "browser_escalation_used": bool(execution_summary.get("browser_escalation_used", False)),
+    "telegram_reply_ready": bool(reply_summary.get("telegram_reply_ready", False)),
+    "telegram_reply_sent": bool(reply_summary.get("telegram_reply_sent", False)),
+    "telegram_loop_ready": bool(telegram_summary.get("telegram_loop_ready", False)),
+    "research_workflow_ready": bool(research.get("workflow_ready", False)),
+    "inbox_workflow_ready": bool(inbox_workflow.get("workflow_ready", False)),
+    "telegram_thread_continuity_ready": bool(telegram_thread.get("telegram_thread_continuity_ready", False)),
+    "inbox_reply_workflow_ready": bool(inbox_reply.get("inbox_reply_workflow_ready", False)),
+    "research_brief_ready": bool(research_brief.get("research_brief_ready", False)),
+    "brief_artifact_exported": bool(research_brief.get("brief_artifact_exported", False)),
+    "inbox_execution_ready": bool((inbox_proof.get("summary") or {}).get("inbox_execution_ready", False)),
+}
+payload["top_task_success"] = bool(
+    payload["guided_operator_surface_reachable"]
+    and (payload["internal_web_query_success"] or payload["inbox_execution_ready"])
+)
+payload["pass"] = all(
+    payload.get(key, False)
+    for key in (
+        "guest_reachable",
+        "workspace_writable",
+        "guided_operator_surface_reachable",
+        "workflow_status_ready",
+        "operator_next_action_visible",
+        "provider_ready",
+        "first_prompt_success",
+        "managed_reentry_ready",
+        "usable_runtime_entry",
+        "research_workflow_ready",
+        "inbox_workflow_ready",
+        "telegram_thread_continuity_ready",
+        "inbox_reply_workflow_ready",
+        "research_brief_ready",
+        "brief_artifact_exported",
+    )
+)
+print(json.dumps(payload, ensure_ascii=True))
+PY
+  mv "$STATUS_DIR/serial-summary.json.tmp" "$STATUS_DIR/serial-summary.json"
+  if [ -s "$STATUS_DIR/serial-summary.json" ]; then
+    serial_log "AGENTOS_ACCEPTANCE_PROOF_JSON=$(cat "$STATUS_DIR/serial-summary.json")"
+  fi
+  write_status "complete" "complete" "true" ""
+  serial_log "[AgentOS][acceptance-proof] state=complete workspace=$WORKSPACE"
+}
+
+main "$@"

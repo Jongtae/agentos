@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+STATE_ROOT="${AGENTOS_STATE_ROOT:-/var/lib/agentos}"
+SLOTS_DIR="${AGENTOS_SLOTS_DIR:-$STATE_ROOT/slots}"
+METADATA_FILE="${AGENTOS_SLOT_METADATA_FILE:-$SLOTS_DIR/slot-state.env}"
+NEXT_BOOT_FILE="${AGENTOS_NEXT_BOOT_FILE:-$SLOTS_DIR/next-boot.env}"
+BOOT_FILE="${AGENTOS_INSTALLED_BOOT_FILE:-/tmp/agentos-installed-boot.env}"
+EVIDENCE_FILE="${AGENTOS_SLOT_SWITCH_EVIDENCE_FILE:-/tmp/agentos-slot-switch-evidence.env}"
+EVIDENCE_DIR="$(dirname "$EVIDENCE_FILE")"
+
+read_env_value() {
+  local file="$1"
+  local key="$2"
+  if [ ! -f "$file" ]; then
+    return 0
+  fi
+  awk -F= -v key="$key" '$1 == key {print substr($0, index($0, "=") + 1)}' "$file" | tail -n1
+}
+
+ACTIVE_SLOT="$(read_env_value "$METADATA_FILE" active_slot)"
+NEXT_SLOT="$(read_env_value "$METADATA_FILE" next_slot)"
+BOOTABLE_SLOT="$(read_env_value "$NEXT_BOOT_FILE" bootable_slot)"
+PAYLOAD_VERSION="$(read_env_value "$NEXT_BOOT_FILE" payload_version)"
+PAYLOAD_CHANNEL="$(read_env_value "$NEXT_BOOT_FILE" payload_channel)"
+IDENTITY_PATH="$(read_env_value "$BOOT_FILE" identity_path)"
+
+if [ -z "$ACTIVE_SLOT" ]; then
+  ACTIVE_SLOT="${AGENTOS_ACTIVE_SLOT:-A}"
+fi
+if [ -z "$BOOTABLE_SLOT" ]; then
+  BOOTABLE_SLOT="$NEXT_SLOT"
+fi
+if [ -z "$IDENTITY_PATH" ]; then
+  IDENTITY_PATH="AgentOS Setup -> AgentOS Managed Session -> ai>"
+fi
+
+PLANNED_SLOT="$BOOTABLE_SLOT"
+OBSERVED_SLOT="$ACTIVE_SLOT"
+SWITCH_CONFIRMED="false"
+EVIDENCE_STATUS="pending"
+TRANSITION_KIND="no_staged_target"
+
+if [ -n "$PLANNED_SLOT" ]; then
+  if [ "$PLANNED_SLOT" = "$OBSERVED_SLOT" ]; then
+    SWITCH_CONFIRMED="true"
+    EVIDENCE_STATUS="ready"
+  else
+    SWITCH_CONFIRMED="false"
+    EVIDENCE_STATUS="mismatch"
+  fi
+  if [ "$PLANNED_SLOT" = "$OBSERVED_SLOT" ]; then
+    TRANSITION_KIND="booted_planned_slot"
+  else
+    TRANSITION_KIND="planned_slot_mismatch"
+  fi
+fi
+
+mkdir -p "$EVIDENCE_DIR"
+cat > "$EVIDENCE_FILE" <<EOF2
+planned_slot=$PLANNED_SLOT
+observed_slot=$OBSERVED_SLOT
+switch_confirmed=$SWITCH_CONFIRMED
+evidence_status=$EVIDENCE_STATUS
+transition_kind=$TRANSITION_KIND
+payload_version=$PAYLOAD_VERSION
+payload_channel=$PAYLOAD_CHANNEL
+identity_path=$IDENTITY_PATH
+written_by=agentos-slot-switch-evidence.v1
+EOF2
+
+printf '%s\n' "AgentOS slot switch evidence prepared: planned=$PLANNED_SLOT observed=$OBSERVED_SLOT confirmed=$SWITCH_CONFIRMED"

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+RUNTIME_ROOT="${AGENTOS_RUNTIME_ROOT:-/usr/lib/agentos}"
+WORKSPACE="${AGENTOS_DEFAULT_WORKSPACE:-${DEFAULT_WORKSPACE:-/home/ubuntu/agentos-ws}}"
+
+if [ -f /etc/agentos/daemon.env ]; then
+  # shellcheck disable=SC1091
+  . /etc/agentos/daemon.env
+fi
+if [ -f /home/ubuntu/.config/agentos/env ]; then
+  # shellcheck disable=SC1091
+  . /home/ubuntu/.config/agentos/env
+fi
+
+export PYTHONPATH="${PYTHONPATH:-$RUNTIME_ROOT/src}"
+exec python3 "$RUNTIME_ROOT/scripts/kernel_telegram_webhookd.py" \
+  --workspace "$WORKSPACE" \
+  --host "${AGENTOS_TELEGRAM_WEBHOOK_HOST:-0.0.0.0}" \
+  --port "${AGENTOS_TELEGRAM_WEBHOOK_PORT:-8790}" \
+  --path "${AGENTOS_TELEGRAM_WEBHOOK_PATH:-/telegram/webhook}"

@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+RUN_USER="${AGENTOS_LIVE_USER:-${AGENTOS_USER:-ubuntu}}"
+RUN_HOME="${AGENTOS_LIVE_USER_HOME:-/home/$RUN_USER}"
+WORKSPACE="${AGENTOS_DEFAULT_WORKSPACE:-${DEFAULT_WORKSPACE:-$RUN_HOME/agentos-ws}}"
+FIRSTRUN_BIN="${AGENTOS_FIRSTRUN_BIN:-/usr/local/bin/agentos-firstrun}"
+OPERATOR_CONSOLE="${AGENTOS_OPERATOR_CONSOLE_BIN:-/usr/local/bin/agentos-operator-console}"
+WAIT_SEC="${AGENTOS_LIVE_USER_WAIT_SEC:-60}"
+MODE="${AGENTOS_LIVE_FIRSTRUN_MODE:-interactive}"
+
+log() {
+  printf '[agentos-live-firstrun] %s\n' "$*" >&2
+}
+
+ensure_user() {
+  local waited=0
+  while ! id "$RUN_USER" >/dev/null 2>&1; do
+    if [ "$waited" -ge "$WAIT_SEC" ]; then
+      break
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  if id "$RUN_USER" >/dev/null 2>&1; then
+    return 0
+  fi
+  log "live user '$RUN_USER' did not exist after ${WAIT_SEC}s; creating fallback user"
+  if command -v useradd >/dev/null 2>&1; then
+    useradd -m -s /bin/bash "$RUN_USER"
+    if getent group sudo >/dev/null 2>&1; then
+      usermod -aG sudo "$RUN_USER" >/dev/null 2>&1 || true
+    fi
+    return 0
+  fi
+  log "useradd is unavailable; cannot prepare live user"
+  return 1
+}
+
+ensure_paths() {
+  mkdir -p "$RUN_HOME" "$RUN_HOME/.config/agentos" "$WORKSPACE" "$WORKSPACE/documents" "$WORKSPACE/artifacts" "$WORKSPACE/data"
+  if id "$RUN_USER" >/dev/null 2>&1; then
+    chown -R "$RUN_USER:$RUN_USER" "$RUN_HOME" "$WORKSPACE" 2>/dev/null || true
+  fi
+  chmod -R u+rwX "$RUN_HOME" "$WORKSPACE" 2>/dev/null || true
+}
+
+activate_tty1() {
+  if command -v chvt >/dev/null 2>&1; then
+    chvt 1 2>/dev/null || true
+  fi
+  printf '\033c' >/dev/tty1 2>/dev/null || true
+}
+
+if [ "$(id -u)" -ne 0 ]; then
+  activate_tty1
+  "$FIRSTRUN_BIN" --workspace "$WORKSPACE"
+  exec "$OPERATOR_CONSOLE"
+fi
+
+ensure_user
+ensure_paths
+activate_tty1
+
+if [ "$MODE" = "prep-only" ]; then
+  log "prepared live user/workspace for operator handoff"
+  exit 0
+fi
+
+if command -v runuser >/dev/null 2>&1; then
+  exec runuser -u "$RUN_USER" -- env \
+    HOME="$RUN_HOME" \
+    USER="$RUN_USER" \
+    LOGNAME="$RUN_USER" \
+    AGENTOS_FIRSTRUN_BIN="$FIRSTRUN_BIN" \
+    AGENTOS_OPERATOR_CONSOLE_BIN="$OPERATOR_CONSOLE" \
+    AGENTOS_DEFAULT_WORKSPACE="$WORKSPACE" \
+    DEFAULT_WORKSPACE="$WORKSPACE" \
+    AGENTOS_RUNTIME_ROOT="${AGENTOS_RUNTIME_ROOT:-/usr/lib/agentos}" \
+    AGENTOS_REPO_ROOT="${AGENTOS_REPO_ROOT:-/usr/lib/agentos}" \
+    PYTHONPATH="${PYTHONPATH:-/usr/lib/agentos/src}" \
+    /bin/sh -lc '"$AGENTOS_FIRSTRUN_BIN" --workspace "$AGENTOS_DEFAULT_WORKSPACE"; exec "$AGENTOS_OPERATOR_CONSOLE_BIN"'
+fi
+
+exec su - "$RUN_USER" -c "HOME='$RUN_HOME' USER='$RUN_USER' LOGNAME='$RUN_USER' AGENTOS_FIRSTRUN_BIN='$FIRSTRUN_BIN' AGENTOS_OPERATOR_CONSOLE_BIN='$OPERATOR_CONSOLE' AGENTOS_DEFAULT_WORKSPACE='$WORKSPACE' DEFAULT_WORKSPACE='$WORKSPACE' /bin/sh -lc '\"\$AGENTOS_FIRSTRUN_BIN\" --workspace \"\$AGENTOS_DEFAULT_WORKSPACE\"; exec \"\$AGENTOS_OPERATOR_CONSOLE_BIN\"'"

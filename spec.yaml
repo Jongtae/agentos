@@ -1,0 +1,25 @@
+name: default
+ai_model:
+  provider: openai
+  model: gpt-4o-mini
+tools:
+  bash: true
+  file: true
+  web: true
+permissions:
+  require_approval: true
+memory:
+  checkpointer: sqlite
+  db_path: ./data/session.sqlite
+  store_path: ./data/memory.sqlite
+runtime:
+  max_steps: 12
+  max_message_window: 20
+  workspace_root: ./
+kernel_engine:
+  provider: ''
+  mode: single
+  codex:
+    command: codex
+    timeout_sec: 90
+    model: gpt-4o-mini

@@ -1,0 +1,12 @@
+{
+  "schema_version": "agentos-ubuntu-base-image.v1",
+  "ubuntu_version": "24.04.4",
+  "release_codename": "noble",
+  "artifact_type": "live-server-iso",
+  "arch": "amd64",
+  "filename": "ubuntu-24.04.4-live-server-amd64.iso",
+  "download_url": "https://releases.ubuntu.com/noble/ubuntu-24.04.4-live-server-amd64.iso",
+  "sha256_url": "https://releases.ubuntu.com/noble/SHA256SUMS",
+  "source_page": "https://releases.ubuntu.com/noble/",
+  "sha256": "e907d92eeec9df64163a7e454cbc8d7755e8ddc7ed42f99dbc80c40f1a138433"
+}

@@ -1,0 +1,21 @@
+[Unit]
+Description=AgentOS Managed Shell Bootstrap Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=__AGENTOS_USER__
+WorkingDirectory=__AGENTOS_REPO_ROOT__
+Environment=PYTHONPATH=__AGENTOS_REPO_ROOT__/src
+Environment=AGENTOS_REPO_ROOT=__AGENTOS_REPO_ROOT__
+Environment=AGENTOS_RUNTIME_ROOT=__AGENTOS_REPO_ROOT__
+Environment=DEFAULT_WORKSPACE=__AGENTOS_WORKSPACE__
+ExecStart=/usr/local/bin/agentos-shell --workspace __AGENTOS_WORKSPACE__ --doctor
+ExecStartPost=/usr/local/bin/agentos-shell --workspace __AGENTOS_WORKSPACE__ --preflight
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

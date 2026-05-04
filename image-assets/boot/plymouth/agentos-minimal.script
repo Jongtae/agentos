@@ -1,0 +1,35 @@
+Window.SetBackgroundTopColor(0.03, 0.03, 0.04);
+Window.SetBackgroundBottomColor(0.03, 0.03, 0.04);
+
+wordmark_image = Image("agentos-wordmark.png");
+wordmark_sprite = Sprite(wordmark_image);
+
+fun center_wordmark() {
+  wordmark_sprite.SetX((Window.GetWidth() - wordmark_image.GetWidth()) / 2);
+  wordmark_sprite.SetY((Window.GetHeight() * 0.34) - (wordmark_image.GetHeight() / 2));
+}
+
+center_wordmark();
+
+progress_width = 280;
+progress_height = 4;
+progress_x = (Window.GetWidth() - progress_width) / 2;
+progress_y = (Window.GetHeight() * 0.62);
+progress = 0;
+
+fun draw_progress() {
+  Window.SetColor(0.24, 0.24, 0.26, 1.0);
+  Window.DrawRectangle(progress_x, progress_y, progress_width, progress_height);
+  Window.SetColor(0.86, 0.86, 0.88, 1.0);
+  Window.DrawRectangle(progress_x, progress_y, progress_width * progress, progress_height);
+}
+
+draw_progress();
+
+fun refresh_callback() {
+  progress = Plymouth.GetBootProgress();
+  draw_progress();
+  center_wordmark();
+}
+
+Plymouth.SetRefreshFunction(refresh_callback);

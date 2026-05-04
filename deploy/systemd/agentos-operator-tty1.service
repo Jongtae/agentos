@@ -1,0 +1,33 @@
+[Unit]
+Description=AgentOS Visible TTY1 Operator Handoff
+After=agentos-firstrun.service agentos-ollama.service
+Wants=agentos-firstrun.service agentos-ollama.service
+Conflicts=getty@tty1.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/
+Environment=HOME=/home/ubuntu
+Environment=AGENTOS_OPERATOR_USER=ubuntu
+Environment=AGENTOS_OPERATOR_HOME=/home/ubuntu
+Environment=AGENTOS_RUNTIME_ROOT=/usr/lib/agentos
+Environment=AGENTOS_REPO_ROOT=/usr/lib/agentos
+Environment=AGENTOS_DEFAULT_WORKSPACE=/home/ubuntu/agentos-ws
+Environment=DEFAULT_WORKSPACE=/home/ubuntu/agentos-ws
+Environment=PYTHONPATH=/usr/lib/agentos/src
+Environment=OLLAMA_MODELS=/var/lib/agentos/models
+EnvironmentFile=-/etc/agentos/daemon.env
+ExecStart=/usr/local/bin/agentos-operator-console
+Restart=on-failure
+RestartSec=2
+StandardInput=tty
+StandardOutput=tty
+StandardError=journal+console
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+
+[Install]
+WantedBy=multi-user.target

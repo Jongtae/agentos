@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+INSTALLED_RUNTIME_ROOT="${AGENTOS_INSTALLED_RUNTIME_ROOT:-/usr/lib/agentos}"
+ROOT_DIR="${AGENTOS_RUNTIME_ROOT:-${AGENTOS_REPO_ROOT:-}}"
+if [ -n "$ROOT_DIR" ] && [ -f "$ROOT_DIR/src/eventd.py" ]; then
+  ROOT_DIR="$(cd "$ROOT_DIR" && pwd)"
+elif [ -f "$SCRIPT_DIR/../src/eventd.py" ]; then
+  ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+elif [ -f "$INSTALLED_RUNTIME_ROOT/src/eventd.py" ]; then
+  ROOT_DIR="$INSTALLED_RUNTIME_ROOT"
+else
+  ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
+
+if [ ! -f "$ROOT_DIR/src/eventd.py" ]; then
+  echo "[agentos-eventd] missing daemon entrypoint: $ROOT_DIR/src/eventd.py" >&2
+  echo "[agentos-eventd] set AGENTOS_RUNTIME_ROOT or AGENTOS_REPO_ROOT to the AgentOS runtime root." >&2
+  exit 127
+fi
+
+export PYTHONPATH="$ROOT_DIR/src"
+exec python3 "$ROOT_DIR/src/eventd.py" "$@"

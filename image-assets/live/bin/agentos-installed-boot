@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BOOT_FILE="${AGENTOS_INSTALLED_BOOT_FILE:-/tmp/agentos-installed-boot.env}"
+BOOT_DIR="$(dirname "$BOOT_FILE")"
+HANDOFF_BIN="${AGENTOS_HANDOFF_BIN:-/usr/local/bin/agentos-handoff}"
+STATE_ROOT_INIT_BIN="${AGENTOS_STATE_ROOT_INIT_BIN:-/usr/local/bin/agentos-state-root-init}"
+SLOT_METADATA_INIT_BIN="${AGENTOS_SLOT_METADATA_INIT_BIN:-/usr/local/bin/agentos-slot-metadata-init}"
+SLOT_SWITCH_EVIDENCE_BIN="${AGENTOS_SLOT_SWITCH_EVIDENCE_BIN:-/usr/local/bin/agentos-slot-switch-evidence}"
+
+mkdir -p "$BOOT_DIR"
+if [ -x "$STATE_ROOT_INIT_BIN" ]; then
+  "$STATE_ROOT_INIT_BIN" >/dev/null || true
+fi
+if [ -x "$SLOT_METADATA_INIT_BIN" ]; then
+  "$SLOT_METADATA_INIT_BIN" >/dev/null || true
+fi
+cat > "$BOOT_FILE" <<EOF2
+origin=installed_appliance_boot
+identity_label=Installed AgentOS Boot
+identity_path=AgentOS Setup -> AgentOS Managed Session -> ai>
+recovery_path=AgentOS Recovery -> Return to AgentOS -> ai>
+next_managed_entry=ai_shell
+runtime_owner=codex_cli_managed_session
+runtime_continuity=true
+runtime_target=codex_cli_managed_session
+written_by=agentos-installed-boot.v1
+EOF2
+
+if [ -x "$HANDOFF_BIN" ]; then
+  AGENTOS_HANDOFF_ORIGIN=agentos_installed_boot "$HANDOFF_BIN" installed_appliance_boot agentos_setup 'Installed AgentOS Boot -> AgentOS Setup -> AgentOS Managed Session -> ai>' >/dev/null || true
+fi
+if [ -x "$SLOT_SWITCH_EVIDENCE_BIN" ]; then
+  "$SLOT_SWITCH_EVIDENCE_BIN" >/dev/null || true
+fi
+
+printf '%s\n' 'Installed AgentOS boot prepared.'
+printf '%s\n' 'Codex runtime target: codex_cli_managed_session'
+printf '%s\n' 'Installed identity: AgentOS Setup -> AgentOS Managed Session -> ai>'
+exit 0

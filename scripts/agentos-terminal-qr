@@ -1,0 +1,338 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import sys
+
+WHITE = "\033[47m  \033[0m"
+BLACK = "\033[40m  \033[0m"
+COMPACT_PREFIX = "\033[30;47m"
+RESET = "\033[0m"
+
+STATIC_QR = {
+    "https://t.me/BotFather": [
+        "1111111011000000101111111",
+        "1000001000000010001000001",
+        "1011101010011111001011101",
+        "1011101011010111001011101",
+        "1011101011110000101011101",
+        "1000001001001110101000001",
+        "1111111010101010101111111",
+        "0000000001010010100000000",
+        "1111001010000010010011101",
+        "0111110101000100100000010",
+        "0111001000000010101010000",
+        "1101010000011101001001100",
+        "0101111001010110011110111",
+        "0001000110110011111110001",
+        "0111101000101110111010110",
+        "1011000001001010011110001",
+        "0010101001010100111111111",
+        "0000000010001110100010101",
+        "1111111001011101101010111",
+        "1000001000101011100010011",
+        "1011101001111100111111010",
+        "1011101011001100111011111",
+        "1011101010011101111010110",
+        "1000001011000000010010100",
+        "1111111010001011011111111",
+    ],
+    "https://web.telegram.org/": [
+        "1111111000101010101111111",
+        "1000001010100101101000001",
+        "1011101000001000101011101",
+        "1011101011101111001011101",
+        "1011101001000000101011101",
+        "1000001011011001101000001",
+        "1111111010101010101111111",
+        "0000000001110011100000000",
+        "1111101111010111010101010",
+        "1000010000101100100100010",
+        "0101101110100011011111011",
+        "0010110110001011111100001",
+        "0001011011101100011110111",
+        "1110100000000100100101010",
+        "1011111110011111101111011",
+        "1000100111110001100110001",
+        "1011011001111111111110100",
+        "0000000010101101100011000",
+        "1111111011100110101010111",
+        "1000001000110010100011011",
+        "1011101010111111111110100",
+        "1011101010111011001011111",
+        "1011101010100100000001101",
+        "1000001010010000110111001",
+        "1111111011101110000111111",
+    ],
+    "https://desktop.telegram.org/": [
+        "1111111010001000101111111",
+        "1000001001111000001000001",
+        "1011101011111110001011101",
+        "1011101011111111101011101",
+        "1011101010000111101011101",
+        "1000001000101110101000001",
+        "1111111010101010101111111",
+        "0000000000101011100000000",
+        "1111001010100011110011101",
+        "1101110100110000000100010",
+        "0001111011110000000010000",
+        "0110010001110110110001100",
+        "1000001011100111111010111",
+        "0101100101001011101110001",
+        "0101101011001010000010110",
+        "1010100001010010110110001",
+        "0001011010100101111111111",
+        "0000000010111110100010101",
+        "1111111000001100101010111",
+        "1000001000101011100010000",
+        "1011101001010010111111011",
+        "1011101010011001011011111",
+        "1011101011111011011010110",
+        "1000001010101111001010100",
+        "1111111010111110010111111",
+    ],
+}
+
+
+def _render(rows: list[str]) -> str:
+    quiet = 4
+    size = len(rows)
+    lines = []
+    for row in range(-quiet, size + quiet):
+        cells = []
+        for col in range(-quiet, size + quiet):
+            dark = False
+            if 0 <= row < size and 0 <= col < size:
+                dark = rows[row][col] == "1"
+            cells.append(BLACK if dark else WHITE)
+        lines.append("".join(cells))
+    return "\n".join(lines)
+
+
+def _render_compact(rows: list[str]) -> str:
+    quiet = 2
+    size = len(rows)
+    padded: list[list[bool]] = []
+    for row in range(-quiet, size + quiet):
+        cells: list[bool] = []
+        for col in range(-quiet, size + quiet):
+            dark = False
+            if 0 <= row < size and 0 <= col < size:
+                dark = rows[row][col] == "1"
+            cells.append(dark)
+        padded.append(cells)
+    if len(padded) % 2:
+        padded.append([False] * len(padded[0]))
+    lines = []
+    for index in range(0, len(padded), 2):
+        chars = []
+        top = padded[index]
+        bottom = padded[index + 1]
+        for col in range(len(top)):
+            if top[col] and bottom[col]:
+                chars.append("█")
+            elif top[col]:
+                chars.append("▀")
+            elif bottom[col]:
+                chars.append("▄")
+            else:
+                chars.append(" ")
+        lines.append(COMPACT_PREFIX + "".join(chars) + RESET)
+    return "\n".join(lines)
+
+
+def _gf_mul(x: int, y: int) -> int:
+    z = 0
+    while y:
+        if y & 1:
+            z ^= x
+        x <<= 1
+        if x & 0x100:
+            x ^= 0x11D
+        y >>= 1
+    return z
+
+
+def _rs_generator(degree: int) -> list[int]:
+    poly = [1]
+    root = 1
+    for _ in range(degree):
+        nxt = [0] * (len(poly) + 1)
+        for index, coefficient in enumerate(poly):
+            nxt[index] ^= coefficient
+            nxt[index + 1] ^= _gf_mul(coefficient, root)
+        poly = nxt
+        root = _gf_mul(root, 2)
+    return poly
+
+
+def _rs_remainder(data: list[int], degree: int) -> list[int]:
+    generator = _rs_generator(degree)
+    result = list(data) + [0] * degree
+    for index in range(len(data)):
+        factor = result[index]
+        if factor:
+            for offset, coefficient in enumerate(generator):
+                result[index + offset] ^= _gf_mul(coefficient, factor)
+    return result[-degree:]
+
+
+def _append_bits(bits: list[int], value: int, width: int) -> None:
+    for shift in range(width - 1, -1, -1):
+        bits.append((value >> shift) & 1)
+
+
+def _encode_version3_l(text: str) -> list[str]:
+    raw = text.encode("utf-8")
+    if len(raw) > 53:
+        raise ValueError("text is too long for AgentOS built-in TTY QR")
+    bits: list[int] = []
+    _append_bits(bits, 0b0100, 4)
+    _append_bits(bits, len(raw), 8)
+    for value in raw:
+        _append_bits(bits, value, 8)
+    bits.extend([0] * min(4, 55 * 8 - len(bits)))
+    while len(bits) % 8:
+        bits.append(0)
+    data = [sum(bits[i + bit] << (7 - bit) for bit in range(8)) for i in range(0, len(bits), 8)]
+    pad = 0
+    while len(data) < 55:
+        data.append(0xEC if pad % 2 == 0 else 0x11)
+        pad += 1
+    codewords = data + _rs_remainder(data, 15)
+    matrix, function = _blank_version3()
+    _draw_codewords(matrix, function, codewords)
+    _draw_format_bits(matrix, function, mask=0)
+    return ["".join("1" if cell else "0" for cell in row) for row in matrix]
+
+
+def _blank_version3() -> tuple[list[list[bool]], list[list[bool]]]:
+    size = 29
+    matrix = [[False] * size for _ in range(size)]
+    function = [[False] * size for _ in range(size)]
+
+    def set_module(row: int, col: int, dark: bool, func: bool = True) -> None:
+        if 0 <= row < size and 0 <= col < size:
+            matrix[row][col] = dark
+            function[row][col] = func
+
+    def finder(row: int, col: int) -> None:
+        for y in range(-1, 8):
+            for x in range(-1, 8):
+                rr, cc = row + y, col + x
+                if 0 <= rr < size and 0 <= cc < size:
+                    dark = 0 <= x <= 6 and 0 <= y <= 6 and (x in {0, 6} or y in {0, 6} or (2 <= x <= 4 and 2 <= y <= 4))
+                    set_module(rr, cc, dark)
+
+    finder(0, 0)
+    finder(0, size - 7)
+    finder(size - 7, 0)
+    for i in range(8, size - 8):
+        set_module(6, i, i % 2 == 0)
+        set_module(i, 6, i % 2 == 0)
+    for y in range(-2, 3):
+        for x in range(-2, 3):
+            set_module(22 + y, 22 + x, max(abs(x), abs(y)) != 1)
+    set_module(21, 8, True)
+    for index in range(15):
+        if index < 6:
+            function[index][8] = True
+        elif index < 8:
+            function[index + 1][8] = True
+        else:
+            function[size - 15 + index][8] = True
+        if index < 8:
+            function[8][size - index - 1] = True
+        elif index < 9:
+            function[8][15 - index] = True
+        else:
+            function[8][15 - index - 1] = True
+    return matrix, function
+
+
+def _draw_codewords(matrix: list[list[bool]], function: list[list[bool]], codewords: list[int]) -> None:
+    bits = [(word >> shift) & 1 for word in codewords for shift in range(7, -1, -1)]
+    bit_index = 0
+    size = len(matrix)
+    upward = True
+    col = size - 1
+    while col > 0:
+        if col == 6:
+            col -= 1
+        rows = range(size - 1, -1, -1) if upward else range(size)
+        for row in rows:
+            for offset in (0, 1):
+                cc = col - offset
+                if function[row][cc]:
+                    continue
+                bit = bits[bit_index] if bit_index < len(bits) else 0
+                if (row + cc) % 2 == 0:
+                    bit ^= 1
+                matrix[row][cc] = bool(bit)
+                bit_index += 1
+        upward = not upward
+        col -= 2
+
+
+def _draw_format_bits(matrix: list[list[bool]], function: list[list[bool]], mask: int) -> None:
+    data = (0b01 << 3) | mask
+    rem = data << 10
+    for bit in range(14, 9, -1):
+        if (rem >> bit) & 1:
+            rem ^= 0x537 << (bit - 10)
+    bits = ((data << 10) | rem) ^ 0x5412
+    size = len(matrix)
+    for index in range(15):
+        dark = bool((bits >> index) & 1)
+        if index < 6:
+            row, col = index, 8
+        elif index < 8:
+            row, col = index + 1, 8
+        else:
+            row, col = size - 15 + index, 8
+        matrix[row][col] = dark
+        function[row][col] = True
+    for index in range(15):
+        dark = bool((bits >> index) & 1)
+        if index < 8:
+            row, col = 8, size - index - 1
+        elif index < 9:
+            row, col = 8, 15 - index
+        else:
+            row, col = 8, 15 - index - 1
+        matrix[row][col] = dark
+        function[row][col] = True
+    matrix[size - 8][8] = True
+    function[size - 8][8] = True
+
+
+def main() -> int:
+    args = list(sys.argv[1:])
+    compact = True
+    if "--large" in args:
+        compact = False
+        args.remove("--large")
+    if "--compact" in args:
+        compact = True
+        args.remove("--compact")
+    text = " ".join(args).strip()
+    if not text:
+        print("usage: agentos-terminal-qr <url>", file=sys.stderr)
+        return 2
+    rows = STATIC_QR.get(text)
+    if rows is None:
+        try:
+            rows = _encode_version3_l(text)
+        except ValueError as exc:
+            print(f"[QR unavailable: {exc}]", file=sys.stderr)
+            print("Type or open the URL directly from your phone/host instead.", file=sys.stderr)
+            return 1
+    terminal_columns = (len(rows) + 4) if compact else (len(rows) + 8) * 2
+    if terminal_columns > 80:
+        print(f"[Built-in QR is too wide for 80-column TTY: {terminal_columns} columns]", file=sys.stderr)
+        return 1
+    print(_render_compact(rows) if compact else _render(rows))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

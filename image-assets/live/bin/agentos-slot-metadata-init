@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+STATE_ROOT="${AGENTOS_STATE_ROOT:-/var/lib/agentos}"
+SLOTS_DIR="${AGENTOS_SLOTS_DIR:-$STATE_ROOT/slots}"
+METADATA_FILE="${AGENTOS_SLOT_METADATA_FILE:-$SLOTS_DIR/slot-state.env}"
+ACTIVE_SLOT="${AGENTOS_ACTIVE_SLOT:-A}"
+INACTIVE_SLOT="${AGENTOS_INACTIVE_SLOT:-}"
+ROLLBACK_SLOT="${AGENTOS_ROLLBACK_SLOT:-$ACTIVE_SLOT}"
+NEXT_SLOT="${AGENTOS_NEXT_SLOT:-$INACTIVE_SLOT}"
+HEALTH_STATE="${AGENTOS_SLOT_HEALTH_STATE:-healthy}"
+
+if [ -z "$INACTIVE_SLOT" ]; then
+  if [ "$ACTIVE_SLOT" = "A" ]; then
+    INACTIVE_SLOT="B"
+  else
+    INACTIVE_SLOT="A"
+  fi
+fi
+if [ -z "$NEXT_SLOT" ]; then
+  NEXT_SLOT="$INACTIVE_SLOT"
+fi
+
+mkdir -p "$SLOTS_DIR/$ACTIVE_SLOT" "$SLOTS_DIR/$INACTIVE_SLOT"
+cat > "$METADATA_FILE" <<EOF2
+schema_version=agentos-slot-metadata.v1
+active_slot=$ACTIVE_SLOT
+inactive_slot=$INACTIVE_SLOT
+rollback_slot=$ROLLBACK_SLOT
+next_slot=$NEXT_SLOT
+health_state=$HEALTH_STATE
+written_by=agentos-slot-metadata-init.v1
+EOF2
+
+printf '%s\n' "AgentOS slot metadata prepared: active=$ACTIVE_SLOT inactive=$INACTIVE_SLOT rollback=$ROLLBACK_SLOT next=$NEXT_SLOT"

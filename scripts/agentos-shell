@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+INSTALLED_RUNTIME_ROOT="${AGENTOS_INSTALLED_RUNTIME_ROOT:-/usr/lib/agentos}"
+INSTALLED_DEFAULT_WORKSPACE="${AGENTOS_INSTALLED_DEFAULT_WORKSPACE:-/home/ubuntu/agentos-ws}"
+ROOT_DIR="${AGENTOS_RUNTIME_ROOT:-${AGENTOS_REPO_ROOT:-}}"
+if [ -n "$ROOT_DIR" ] && [ -f "$ROOT_DIR/src/main.py" ]; then
+  ROOT_DIR="$(cd "$ROOT_DIR" && pwd)"
+elif [ -f "$SCRIPT_DIR/../src/main.py" ]; then
+  ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+elif [ -f "$INSTALLED_RUNTIME_ROOT/src/main.py" ]; then
+  ROOT_DIR="$INSTALLED_RUNTIME_ROOT"
+else
+  ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
+
+if [ -n "${AGENTOS_DEFAULT_WORKSPACE:-}" ]; then
+  WORKSPACE="$AGENTOS_DEFAULT_WORKSPACE"
+elif [ -n "${DEFAULT_WORKSPACE:-}" ]; then
+  WORKSPACE="$DEFAULT_WORKSPACE"
+elif [ "$ROOT_DIR" = "$INSTALLED_RUNTIME_ROOT" ]; then
+  WORKSPACE="$INSTALLED_DEFAULT_WORKSPACE"
+else
+  WORKSPACE="$ROOT_DIR/workspaces/default"
+fi
+KERNEL_MODE=0
+MANAGED_RUNTIME=0
+TELEGRAM_ASK=0
+TELEGRAM_SEARCH_REPLY=0
+TELEGRAM_INGRESS_STATUS=0
+PASSTHRU=()
+OLLAMA_MODELS_PATH="${AGENTOS_OLLAMA_MODELS:-/var/lib/agentos/models}"
+KERNELCTL_BIN="${AGENTOS_KERNELCTL_BIN:-$SCRIPT_DIR/agentos-kernelctl}"
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --workspace)
+      shift
+      WORKSPACE="${1:-}"
+      ;;
+    --kernel-mode)
+      KERNEL_MODE=1
+      ;;
+    --managed-runtime)
+      MANAGED_RUNTIME=1
+      ;;
+    --telegram-ask)
+      TELEGRAM_ASK=1
+      ;;
+    --telegram-search-reply)
+      TELEGRAM_SEARCH_REPLY=1
+      ;;
+    --telegram-ingress-status)
+      TELEGRAM_INGRESS_STATUS=1
+      ;;
+    *)
+      PASSTHRU+=("$1")
+      ;;
+  esac
+  shift || true
+done
+
+export PYTHONPATH="$ROOT_DIR/src"
+export OLLAMA_MODELS="$OLLAMA_MODELS_PATH"
+export AGENTOS_OLLAMA_MODELS="$OLLAMA_MODELS_PATH"
+if [ "$TELEGRAM_ASK" -eq 1 ]; then
+  export AGENTOS_CONVERSATIONAL_INGRESS_MODE="telegram_ask"
+elif [ "$TELEGRAM_SEARCH_REPLY" -eq 1 ]; then
+  export AGENTOS_CONVERSATIONAL_INGRESS_MODE="telegram_search_reply"
+fi
+
+should_render_guided_operator() {
+  if [ "$MANAGED_RUNTIME" -eq 1 ]; then
+    return 1
+  fi
+  if [ "$KERNEL_MODE" -ne 1 ]; then
+    return 1
+  fi
+  if [ "${#PASSTHRU[@]}" -ne 0 ]; then
+    return 1
+  fi
+  if [ "${AGENTOS_SESSION_MANAGED:-0}" != "1" ]; then
+    return 1
+  fi
+  if [ "${AGENTOS_SESSION_ENTRY:-}" != "local_tty1" ]; then
+    return 1
+  fi
+  if [ ! -x "$KERNELCTL_BIN" ]; then
+    return 1
+  fi
+  return 0
+}
+
+run_main() {
+  if [ ! -f "$ROOT_DIR/src/main.py" ]; then
+    echo "[agentos-shell] missing runtime entrypoint: $ROOT_DIR/src/main.py" >&2
+    echo "[agentos-shell] set AGENTOS_RUNTIME_ROOT or AGENTOS_REPO_ROOT to the AgentOS runtime root." >&2
+    return 127
+  fi
+  if [ "${#PASSTHRU[@]}" -eq 0 ]; then
+    python3 "$ROOT_DIR/src/main.py" --workspace "$WORKSPACE"
+  else
+    python3 "$ROOT_DIR/src/main.py" --workspace "$WORKSPACE" "${PASSTHRU[@]}"
+  fi
+}
+
+if should_render_guided_operator; then
+  AGENTOS_KERNEL_GUIDED_OPERATOR_CMD="$SCRIPT_DIR/kernel_guided_operator.py" \
+    "$KERNELCTL_BIN" guided-operator --workspace "$WORKSPACE" || true
+  echo
+fi
+
+if [ "$TELEGRAM_INGRESS_STATUS" -eq 1 ]; then
+  if [ "${#PASSTHRU[@]}" -eq 0 ]; then
+    exec "$KERNELCTL_BIN" telegram-status --workspace "$WORKSPACE"
+  fi
+  exec "$KERNELCTL_BIN" telegram-status --workspace "$WORKSPACE" "${PASSTHRU[@]}"
+fi
+
+if run_main; then
+  exit 0
+fi
+
+rc=$?
+if [ "$KERNEL_MODE" -eq 1 ]; then
+  echo "[agentos-shell] kernel launch failed (exit=$rc)."
+  echo "[agentos-shell] Falling back to a standard login shell."
+  exec "${SHELL:-/bin/bash}" -l
+fi
+
+exit "$rc"

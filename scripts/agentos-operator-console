@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+RUN_USER="${AGENTOS_OPERATOR_USER:-ubuntu}"
+RUN_HOME="${AGENTOS_OPERATOR_HOME:-/home/$RUN_USER}"
+WORKSPACE="${AGENTOS_DEFAULT_WORKSPACE:-${DEFAULT_WORKSPACE:-$RUN_HOME/agentos-ws}}"
+RUNTIME_ROOT="${AGENTOS_RUNTIME_ROOT:-/usr/lib/agentos}"
+KERNELCTL="${AGENTOS_KERNELCTL_BIN:-/usr/local/bin/agentos-kernelctl}"
+SHELL_BIN="${SHELL:-/bin/bash}"
+
+export HOME="$RUN_HOME"
+export USER="$RUN_USER"
+export LOGNAME="$RUN_USER"
+export AGENTOS_RUNTIME_ROOT="$RUNTIME_ROOT"
+export AGENTOS_REPO_ROOT="${AGENTOS_REPO_ROOT:-$RUNTIME_ROOT}"
+export AGENTOS_DEFAULT_WORKSPACE="$WORKSPACE"
+export DEFAULT_WORKSPACE="$WORKSPACE"
+export PYTHONPATH="${PYTHONPATH:-$RUNTIME_ROOT/src}"
+export AGENTOS_SESSION_MANAGED=1
+export AGENTOS_SESSION_ENTRY=local_tty1
+export OLLAMA_MODELS="${OLLAMA_MODELS:-/var/lib/agentos/models}"
+export AGENTOS_OLLAMA_MODELS="${AGENTOS_OLLAMA_MODELS:-$OLLAMA_MODELS}"
+
+if [ -f /etc/agentos/daemon.env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . /etc/agentos/daemon.env
+  set +a
+fi
+
+mkdir -p "$WORKSPACE" "$WORKSPACE/artifacts" "$WORKSPACE/data" "$WORKSPACE/documents" 2>/dev/null || true
+if [ "$(id -u)" -eq 0 ] && command -v chown >/dev/null 2>&1; then
+  chown -R "$RUN_USER:$RUN_USER" "$RUN_HOME" "$WORKSPACE" 2>/dev/null || true
+fi
+
+if [ "$(id -u)" -eq 0 ] && [ "${AGENTOS_OPERATOR_DROP_PRIVILEGES:-1}" != "0" ] && id "$RUN_USER" >/dev/null 2>&1 && command -v runuser >/dev/null 2>&1; then
+  exec runuser -u "$RUN_USER" -- env \
+    HOME="$RUN_HOME" \
+    USER="$RUN_USER" \
+    LOGNAME="$RUN_USER" \
+    AGENTOS_OPERATOR_DROP_PRIVILEGES=0 \
+    AGENTOS_OPERATOR_USER="$RUN_USER" \
+    AGENTOS_OPERATOR_HOME="$RUN_HOME" \
+    AGENTOS_RUNTIME_ROOT="$RUNTIME_ROOT" \
+    AGENTOS_REPO_ROOT="${AGENTOS_REPO_ROOT:-$RUNTIME_ROOT}" \
+    AGENTOS_DEFAULT_WORKSPACE="$WORKSPACE" \
+    DEFAULT_WORKSPACE="$WORKSPACE" \
+    PYTHONPATH="${PYTHONPATH:-$RUNTIME_ROOT/src}" \
+    AGENTOS_SESSION_MANAGED=1 \
+    AGENTOS_SESSION_ENTRY=local_tty1 \
+    OLLAMA_MODELS="$OLLAMA_MODELS" \
+    AGENTOS_OLLAMA_MODELS="$AGENTOS_OLLAMA_MODELS" \
+    "$0"
+fi
+
+clear || true
+cat <<'EOF'
+AgentOS — AI-Native OS
+Talk first. Use Linux only when you need it.
+EOF
+printf '\n'
+printf 'Workspace: %s\n' "$WORKSPACE"
+printf 'Runtime:   %s\n' "$RUNTIME_ROOT"
+printf '\n'
+
+if systemctl is-active --quiet agentos-ollama.service 2>/dev/null; then
+  printf '[OK] Local LLM service: agentos-ollama.service active\n'
+else
+  printf '[..] Local LLM service: not active yet or unavailable\n'
+fi
+
+if systemctl is-active --quiet agentos-telegram-live-loop.service 2>/dev/null; then
+  printf '[OK] Telegram live loop: active\n'
+else
+  printf '[..] Telegram live loop: inactive or pending setup\n'
+fi
+
+if systemctl is-active --quiet agentos-telegram-webhookd.service 2>/dev/null; then
+  printf '[OK] Telegram webhook receiver: active\n'
+else
+  printf '[..] Telegram webhook receiver: inactive or pending setup\n'
+fi
+
+printf '\nWhat to do next:\n'
+printf '  Ask normally at ai>: search AgentOS roadmap and summarize it\n'
+printf '  Telegram setup:   agentos-kernelctl telegram-setup --workspace %s --serve-http --host 0.0.0.0 --display-host <vm-ip>\n' "$WORKSPACE"
+printf '                    First startup shows a QR that opens the setup page from your phone/host.\n'
+printf '  Webhook status:   systemctl status agentos-telegram-webhookd.service --no-pager\n'
+printf '  Live Telegram:    systemctl status agentos-telegram-live-loop.service --no-pager\n'
+printf '  Linux command:    %% systemctl status agentos-ollama.service --no-pager\n'
+printf '\nAdvanced status:\n'
+printf '  agentos-kernelctl guided-operator --workspace %s --json\n' "$WORKSPACE"
+printf '\n'
+
+if command -v agentos-operator-tui >/dev/null 2>&1; then
+  if agentos-operator-tui --workspace "$WORKSPACE"; then
+    exit 0
+  fi
+  printf '[agentos-operator-console] Bubble Tea operator TUI exited; falling back to plain runtime.\n'
+fi
+
+if [ -x /usr/local/bin/agentos-operator-tui ]; then
+  if /usr/local/bin/agentos-operator-tui --workspace "$WORKSPACE"; then
+    exit 0
+  fi
+  printf '[agentos-operator-console] Bubble Tea operator TUI exited; falling back to plain runtime.\n'
+fi
+
+if command -v agentos-shell >/dev/null 2>&1; then
+  exec agentos-shell --workspace "$WORKSPACE" --managed-runtime --no-tui
+fi
+
+if [ -x /usr/local/bin/agentos-shell ]; then
+  exec /usr/local/bin/agentos-shell --workspace "$WORKSPACE" --managed-runtime --no-tui
+fi
+
+exec "$SHELL_BIN" -l

@@ -1,0 +1,18 @@
+#cloud-config
+autoinstall:
+  version: 1
+  identity:
+    hostname: agentos
+    username: agentos
+    password: "$6$rounds=4096$agentos$placeholder.replace.this.hash"
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+  ssh:
+    install-server: true
+  late-commands:
+    - mkdir -p /target/opt/agentos
+    - cp -R /cdrom/agentos/postinstall /target/opt/agentos/
+    - cp -R /cdrom/agentos/runtime /target/opt/agentos/
+    - cp /cdrom/agentos/asset-manifest.txt /target/opt/agentos/asset-manifest.txt
+    - curtin in-target --target=/target -- bash -lc "AGENTOS_INSTALL_PREFIX=/opt/agentos AGENTOS_RUNTIME_BUNDLE_DIR=/opt/agentos/runtime/agentos /opt/agentos/postinstall/agentos-postinstall.sh"

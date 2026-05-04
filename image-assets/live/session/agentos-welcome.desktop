@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=AgentOS Welcome
+Comment=Start the AgentOS welcome shell in the live appliance session
+Exec=/usr/local/bin/agentos-live-session-bootstrap
+Terminal=false
+X-GNOME-Autostart-enabled=true
+Categories=System;

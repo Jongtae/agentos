@@ -1,0 +1,568 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+INSTALLED_RUNTIME_ROOT="${AGENTOS_INSTALLED_RUNTIME_ROOT:-/usr/lib/agentos}"
+INSTALLED_DEFAULT_WORKSPACE="${AGENTOS_INSTALLED_DEFAULT_WORKSPACE:-/home/ubuntu/agentos-ws}"
+INSTALLED_SEED_WORKSPACE="${AGENTOS_INSTALLED_SEED_WORKSPACE:-/var/lib/agentos/workspaces/default}"
+ROOT_DIR="${AGENTOS_RUNTIME_ROOT:-${AGENTOS_REPO_ROOT:-}}"
+if [ -n "$ROOT_DIR" ] && [ -f "$ROOT_DIR/src/main.py" ]; then
+  ROOT_DIR="$(cd "$ROOT_DIR" && pwd)"
+elif [ -f "$SCRIPT_DIR/../src/main.py" ]; then
+  ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+elif [ -f "$INSTALLED_RUNTIME_ROOT/src/main.py" ]; then
+  ROOT_DIR="$INSTALLED_RUNTIME_ROOT"
+else
+  ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
+
+if [ -n "${AGENTOS_DEFAULT_WORKSPACE:-}" ]; then
+  WORKSPACE="$AGENTOS_DEFAULT_WORKSPACE"
+elif [ -n "${DEFAULT_WORKSPACE:-}" ]; then
+  WORKSPACE="$DEFAULT_WORKSPACE"
+elif [ "$ROOT_DIR" = "$INSTALLED_RUNTIME_ROOT" ]; then
+  WORKSPACE="$INSTALLED_DEFAULT_WORKSPACE"
+else
+  WORKSPACE="$ROOT_DIR/workspaces/default"
+fi
+if [ -n "${AGENTOS_SEED_WORKSPACE:-}" ]; then
+  INSTALLED_SEED_WORKSPACE="$AGENTOS_SEED_WORKSPACE"
+fi
+ENV_FILE="${HOME}/.config/agentos/env"
+PYTHON_BIN="${AGENTOS_PYTHON_BIN:-python3}"
+LIVE_STATE_DIR="${AGENTOS_LIVE_BOOTSTRAP_STATE_DIR:-}"
+WELCOME_STATUS_PATH=""
+LIVE_STATUS_PATH=""
+HANDOFF_PATH="${AGENTOS_HANDOFF_PATH:-/tmp/agentos-handoff.env}"
+KERNELCTL_BIN="${AGENTOS_KERNELCTL_BIN:-/usr/local/bin/agentos-kernelctl}"
+FIRST_RUN_SUMMARY_PATH=""
+VM_E2E_PROOF_PATH=""
+RUNTIME_ENTRY_STATUS_PATH=""
+
+utc_now() {
+  date -u +%Y-%m-%dT%H:%M:%SZ
+}
+
+env_has_key() {
+  local key="$1"
+  [ -f "$ENV_FILE" ] && grep -Eq "^${key}=" "$ENV_FILE"
+}
+
+env_append_or_replace() {
+  local key="$1"
+  local value="$2"
+  mkdir -p "$(dirname "$ENV_FILE")"
+  if [ -f "$ENV_FILE" ] && grep -Eq "^${key}=" "$ENV_FILE"; then
+    tmp_file="$(mktemp)"
+    awk -v key="$key" -v value="$value" '
+      BEGIN { replacement = key "=\"" value "\"" }
+      $0 ~ "^" key "=" { print replacement; next }
+      { print }
+    ' "$ENV_FILE" > "$tmp_file"
+    mv "$tmp_file" "$ENV_FILE"
+  else
+    printf '%s="%s"\n' "$key" "$value" >> "$ENV_FILE"
+  fi
+  chmod 0600 "$ENV_FILE"
+}
+
+print_onboarding_frame() {
+  local engine_state="$1"
+  local telegram_state="$2"
+  cat <<EOF
+
+╔══════════════════════════════════════════════════════════════╗
+║ AgentOS First Startup                                       ║
+║ Terminal-first setup for the conversational AgentOS runtime  ║
+╠══════════════════════════════════════════════════════════════╣
+║ Required before normal use, unless explicitly deferred:      ║
+║  [${engine_state}] Kernel engine: local Ollama or Codex       ║
+║  [${telegram_state}] Telegram ingress: bot token + chat id    ║
+║                                                              ║
+║ After setup you talk at ai>. Use % only for Linux commands.   ║
+╚══════════════════════════════════════════════════════════════╝
+EOF
+}
+
+ensure_runtime_workspace() {
+  mkdir -p "$WORKSPACE" "$WORKSPACE/documents" "$WORKSPACE/artifacts" "$WORKSPACE/data"
+  if [ -f "$INSTALLED_SEED_WORKSPACE/spec.yaml" ] && [ ! -f "$WORKSPACE/spec.yaml" ]; then
+    cp "$INSTALLED_SEED_WORKSPACE/spec.yaml" "$WORKSPACE/spec.yaml"
+  fi
+  if [ -f "$INSTALLED_SEED_WORKSPACE/documents/agentos-first-run.md" ] && [ ! -f "$WORKSPACE/documents/agentos-first-run.md" ]; then
+    cp "$INSTALLED_SEED_WORKSPACE/documents/agentos-first-run.md" "$WORKSPACE/documents/agentos-first-run.md"
+  fi
+  chmod -R u+rwX "$WORKSPACE" 2>/dev/null || true
+}
+
+write_runtime_entry_status() {
+  local writable="true"
+  local write_error=""
+  local probe="$WORKSPACE/data/.agentos-write-probe"
+  if ! mkdir -p "$WORKSPACE/artifacts/runtime-entry" 2>/dev/null; then
+    writable="false"
+    write_error="unable to create runtime-entry artifact directory"
+  elif ! printf 'ok\n' > "$probe" 2>/dev/null; then
+    writable="false"
+    write_error="unable to write interactive workspace probe"
+  else
+    rm -f "$probe" 2>/dev/null || true
+  fi
+  cat > "$RUNTIME_ENTRY_STATUS_PATH" <<EOF
+{"runtime_entry_mode":"tty","workspace":"${WORKSPACE}","workspace_writable":${writable},"write_error":"${write_error}","seed_spec_present":$( [ -f "$WORKSPACE/spec.yaml" ] && printf 'true' || printf 'false' ),"seed_document_present":$( [ -f "$WORKSPACE/documents/agentos-first-run.md" ] && printf 'true' || printf 'false' ),"updated_at_utc":"$(utc_now)"}
+EOF
+}
+
+init_live_state() {
+  if [ -z "$LIVE_STATE_DIR" ]; then
+    return
+  fi
+  mkdir -p "$LIVE_STATE_DIR"
+  WELCOME_STATUS_PATH="$LIVE_STATE_DIR/welcome-status.json"
+  LIVE_STATUS_PATH="$LIVE_STATE_DIR/live-session-status.json"
+}
+
+write_live_status_json() {
+  local path="$1"
+  local component="$2"
+  local state="$3"
+  local detail="${4:-}"
+  local selected_action="${5:-continue}"
+  if [ -z "$path" ]; then
+    return
+  fi
+  cat > "$path" <<EOF
+{"component":"${component}","state":"${state}","detail":"${detail}","selected_action":"${selected_action}","workspace":"${WORKSPACE}","updated_at_utc":"$(utc_now)"}
+EOF
+}
+
+record_live_bootstrap() {
+  local state="$1"
+  local detail="${2:-}"
+  write_live_status_json "$LIVE_STATUS_PATH" "agentos-live-session-bootstrap" "$state" "$detail"
+}
+
+record_welcome_status() {
+  local state="$1"
+  local detail="${2:-}"
+  local action="${3:-continue}"
+  write_live_status_json "$WELCOME_STATUS_PATH" "agentos-welcome-shell" "$state" "$detail" "$action"
+}
+
+record_handoff() {
+  mkdir -p "$(dirname "$HANDOFF_PATH")"
+  cat > "$HANDOFF_PATH" <<EOF
+route=continue_to_agentos
+next_step=agentos_setup
+summary=Continue to AgentOS -> AgentOS Setup -> Guided Operator -> Ask -> Codex CLI Managed Session -> ai>
+updated_at_utc=$(utc_now)
+EOF
+}
+
+run_kernelctl_json_export() {
+  local label="$1"
+  local output_path="$2"
+  shift 2
+  if [ ! -x "$KERNELCTL_BIN" ]; then
+    record_welcome_status "proof_export_missing" "kernelctl helper not found" "continue"
+    return 127
+  fi
+  mkdir -p "$(dirname "$output_path")"
+  if "$KERNELCTL_BIN" "$@" --json >/dev/null 2>&1 && [ -s "$output_path" ]; then
+    record_welcome_status "proof_export_completed" "${label} export completed" "continue"
+    return 0
+  fi
+  record_welcome_status "proof_export_failed" "${label} export failed" "continue"
+  return 1
+}
+
+show_terminal_link() {
+  local label="$1"
+  local url="$2"
+  echo
+  echo "--- ${label} ---"
+  echo "$url"
+  if command -v qrencode >/dev/null 2>&1; then
+    if ! qrencode -t ANSIUTF8 "$url" 2>/dev/null; then
+      echo "[QR render failed. Type or open the URL above from your phone or host.]"
+    fi
+  elif command -v agentos-terminal-qr >/dev/null 2>&1; then
+    if ! agentos-terminal-qr "$url" 2>/dev/null; then
+      echo "[AgentOS QR renderer failed. Type or open the URL above from your phone or host.]"
+    fi
+  else
+    echo "[QR unavailable: no terminal QR renderer found. Type or open the URL above from your phone or host.]"
+  fi
+}
+
+agentos_setup_host_ip() {
+  local ip=""
+  if command -v hostname >/dev/null 2>&1; then
+    ip="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+  fi
+  if [ -z "$ip" ] && command -v ip >/dev/null 2>&1; then
+    ip="$(ip route get 1.1.1.1 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i == "src") {print $(i+1); exit}}' || true)"
+  fi
+  [ -n "$ip" ] || ip="127.0.0.1"
+  printf '%s\n' "$ip"
+}
+
+run_telegram_terminal_setup() {
+  local setup_choice="${AGENTOS_FIRSTRUN_TELEGRAM_SETUP:-}"
+  local setup_token="${AGENTOS_FIRSTRUN_TELEGRAM_BOT_TOKEN:-}"
+  local setup_chat_id="${AGENTOS_FIRSTRUN_TELEGRAM_CHAT_ID:-}"
+  local setup_api_base="${AGENTOS_FIRSTRUN_TELEGRAM_API_BASE_URL:-${AGENTOS_TELEGRAM_API_BASE_URL:-}}"
+  local setup_page_port="${AGENTOS_TELEGRAM_SETUP_PAGE_PORT:-8787}"
+  local setup_page_host="${AGENTOS_TELEGRAM_SETUP_PAGE_HOST:-0.0.0.0}"
+  local setup_page_display_host="${AGENTOS_TELEGRAM_SETUP_DISPLAY_HOST:-}"
+  local setup_page_timeout="${AGENTOS_TELEGRAM_SETUP_PAGE_TIMEOUT_SEC:-900}"
+  local setup_page_url=""
+  local setup_page_url_host=""
+  local setup_args=()
+
+  echo
+  echo "╔══════════════════════════════════════════════════════════════╗"
+  echo "║ Step 2 of 2 — Telegram Setup                                ║"
+  echo "╠══════════════════════════════════════════════════════════════╣"
+  echo "║ No VM GUI is required. Use Telegram on your phone or host.   ║"
+  echo "║ Press Enter for the fastest path: connect an existing bot.   ║"
+  echo "║                                                              ║"
+  echo "║  1) Existing bot token (recommended)                        ║"
+  echo "║  2) Create a new bot with BotFather                         ║"
+  echo "║  3) Later — skip Telegram for now                           ║"
+  echo "╚══════════════════════════════════════════════════════════════╝"
+
+  if [ -z "$setup_choice" ]; then
+    if ! read -r -p "telegram [Enter=1, 3=skip]> " setup_choice; then
+      setup_choice="later"
+    elif [ -z "$setup_choice" ]; then
+      setup_choice="existing"
+    fi
+  fi
+  case "$setup_choice" in
+    1|existing|connect|yes|y|true)
+      echo "Existing bot path selected."
+      echo "AgentOS will open a small setup page so you do not have to paste the token into this console."
+      echo "After token validation, send /start to that bot from Telegram."
+      show_terminal_link "Telegram Web (host/phone, not VM GUI)" "https://web.telegram.org/"
+      ;;
+    2|new|botfather|create)
+      echo "New bot path selected."
+      show_terminal_link "BotFather" "https://t.me/BotFather"
+      show_terminal_link "Telegram Web (host/phone, not VM GUI)" "https://web.telegram.org/"
+      show_terminal_link "Telegram Desktop download" "https://desktop.telegram.org/"
+      echo "In BotFather, send /newbot, choose a name and username, then paste the generated token into the AgentOS setup page."
+      ;;
+    ""|3|later|skip|no|n|false)
+      echo "Telegram setup skipped. You can run:"
+      echo "  agentos-kernelctl telegram-setup --workspace \"$WORKSPACE\""
+      env_append_or_replace "AGENTOS_TELEGRAM_SETUP_DEFERRED" "1"
+      return 0
+      ;;
+    *)
+      echo "Unknown Telegram setup choice. Skipping optional Telegram setup."
+      return 0
+      ;;
+  esac
+
+  if [ ! -x "$KERNELCTL_BIN" ]; then
+    echo "Telegram setup helper not available: $KERNELCTL_BIN"
+    return 0
+  fi
+  setup_args=(telegram-setup --workspace "$WORKSPACE" --env-file "$ENV_FILE")
+  if [ -n "$setup_token" ]; then
+    setup_args+=(--token "$setup_token")
+  fi
+  if [ -n "$setup_chat_id" ]; then
+    setup_args+=(--chat-id "$setup_chat_id")
+  fi
+  if [ -n "$setup_api_base" ]; then
+    setup_args+=(--api-base-url "$setup_api_base")
+  fi
+  if [ -z "$setup_token" ]; then
+    setup_page_url_host="${setup_page_display_host:-$(agentos_setup_host_ip)}"
+    setup_page_url="http://${setup_page_url_host}:${setup_page_port}/setup"
+    echo
+    echo "--- AgentOS Telegram Setup Page ---"
+    echo "Scan this QR to open AgentOS setup:"
+    if command -v qrencode >/dev/null 2>&1; then
+      if ! qrencode -t ANSIUTF8 "$setup_page_url" 2>/dev/null; then
+        agentos-terminal-qr "$setup_page_url" 2>/dev/null || true
+      fi
+    elif command -v agentos-terminal-qr >/dev/null 2>&1; then
+      agentos-terminal-qr "$setup_page_url" 2>/dev/null || true
+    fi
+    echo
+    echo "Or open this setup page from your host browser:"
+    echo "  ${setup_page_url}"
+    echo
+    echo "Network note:"
+    echo "  Phone QR scan works when your phone can reach this VM IP."
+    echo "  Best UTM setting: Network Mode = Bridged."
+    echo "  If UTM is Shared/NAT, use the Mac host browser fallback URL above."
+    echo
+    echo "Then paste the BotFather token there. AgentOS will validate it and auto-detect chat id after you send /start."
+    setup_args+=(--serve-http --host "$setup_page_host" --display-host "$setup_page_url_host" --port "$setup_page_port" --timeout-sec "$setup_page_timeout")
+  fi
+  if "$KERNELCTL_BIN" "${setup_args[@]}"; then
+    env_append_or_replace "AGENTOS_TELEGRAM_SETUP_DEFERRED" "0"
+    echo "Telegram setup complete. Next live check:"
+    echo "  agentos-kernelctl telegram-live-loop --workspace \"$WORKSPACE\" --once --send --json"
+  else
+    echo "Telegram setup did not complete. AgentOS remains usable; run telegram-setup again after sending /start to your bot."
+  fi
+}
+
+emit_broker() {
+  if [ "${AGENTOS_BROKER_BYPASS:-0}" = "1" ]; then
+    return 0
+  fi
+  if [ ! -f "$ROOT_DIR/src/broker_emit.py" ]; then
+    return 0
+  fi
+  local extra=()
+  if [ -n "${AGENTOS_SESSION_ID:-}" ]; then
+    extra+=(--correlation-field "session_id=$AGENTOS_SESSION_ID")
+  fi
+  "$PYTHON_BIN" "$ROOT_DIR/src/broker_emit.py" \
+    --workspace "$WORKSPACE" \
+    ${extra[@]+"${extra[@]}"} \
+    "$@" >/dev/null 2>&1 || true
+}
+
+emit_override_if_requested() {
+  if [ "${AGENTOS_BROKER_OVERRIDE:-0}" != "1" ]; then
+    return 0
+  fi
+  emit_broker \
+    --kind override \
+    --action emergency_recovery \
+    --state override \
+    --reason "operator override requested for firstrun path" \
+    --component agentos-firstrun \
+    --path firstrun \
+    --object-field "status=override_active"
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --workspace)
+      shift
+      WORKSPACE="${1:-}"
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 2
+      ;;
+  esac
+  shift || true
+done
+
+FIRST_RUN_SUMMARY_PATH="$WORKSPACE/artifacts/repo-free-first-run/latest-first-run-summary.json"
+VM_E2E_PROOF_PATH="$WORKSPACE/artifacts/control-plane-capabilities/latest-vm-e2e-proof.json"
+RUNTIME_ENTRY_STATUS_PATH="$WORKSPACE/artifacts/runtime-entry/latest-runtime-entry-status.json"
+init_live_state
+ensure_runtime_workspace
+write_runtime_entry_status
+
+if [ -f "$ENV_FILE" ] && { { env_has_key "AGENTOS_TELEGRAM_BOT_TOKEN" && env_has_key "AGENTOS_TELEGRAM_ALLOWED_CHAT_IDS"; } || env_has_key "AGENTOS_TELEGRAM_SETUP_DEFERRED"; }; then
+  record_live_bootstrap "bootstrap_started" "firstrun skipped because env already exists"
+  record_welcome_status "setup_skipped" "env already exists" "continue"
+  emit_broker \
+    --kind firstrun \
+    --action setup_wizard \
+    --state allowed \
+    --reason "firstrun skipped because env already exists" \
+    --component agentos-firstrun \
+    --path firstrun \
+    --object-field "status=skipped" \
+    --metadata-field "env_file=$ENV_FILE"
+  exit 0
+fi
+
+mkdir -p "$(dirname "$ENV_FILE")"
+emit_override_if_requested
+record_live_bootstrap "bootstrap_started" "firstrun path entered"
+record_welcome_status "setup_invoked" "AgentOS Setup entered" "continue"
+
+engine_marker=" "
+telegram_marker=" "
+if [ -f "$ENV_FILE" ] && { env_has_key "AGENTOS_PROVIDER" || env_has_key "OPENAI_API_KEY"; }; then
+  engine_marker="✓"
+fi
+if [ -f "$ENV_FILE" ] && env_has_key "AGENTOS_TELEGRAM_BOT_TOKEN" && env_has_key "AGENTOS_TELEGRAM_ALLOWED_CHAT_IDS"; then
+  telegram_marker="✓"
+elif [ -f "$ENV_FILE" ] && env_has_key "AGENTOS_TELEGRAM_SETUP_DEFERRED"; then
+  telegram_marker="later"
+fi
+print_onboarding_frame "$engine_marker" "$telegram_marker"
+
+echo
+echo "=== Step 1 of 2 — Local AI Runtime ==="
+echo "Choose the runtime explicitly. Setup will not continue without a choice."
+echo "  1) local Ollama LLM (recommended)"
+echo "  2) Codex/OpenAI path"
+echo "  3) Later — degraded guide mode"
+
+choice=""
+if [ -n "${AGENTOS_FIRSTRUN_CHOICE:-}" ]; then
+  choice="$AGENTOS_FIRSTRUN_CHOICE"
+fi
+
+emit_broker \
+  --kind firstrun \
+  --action setup_wizard \
+  --state allowed \
+  --reason "managed firstrun path entered" \
+  --component agentos-firstrun \
+  --path firstrun \
+  --object-field "status=started" \
+  --metadata-field "env_file=$ENV_FILE"
+
+provider=""
+if [ -f "$ENV_FILE" ] && { env_has_key "AGENTOS_PROVIDER" || env_has_key "OPENAI_API_KEY"; }; then
+  echo "Kernel engine already configured in $ENV_FILE"
+  provider="$(grep -E '^AGENTOS_PROVIDER=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true)"
+  [ -n "$provider" ] || provider="codex"
+else
+  while :; do
+    if [ -z "$choice" ]; then
+      if ! read -r -p "engine [1=local, 2=codex, 3=later]> " choice; then
+        echo "No engine selection received. AgentOS setup remains incomplete."
+        exit 1
+      fi
+    fi
+    case "$choice" in
+      1|ollama|local)
+        provider="ollama"
+        break
+        ;;
+      2|codex)
+        provider="codex"
+        break
+        ;;
+      3|guide|later|none)
+        provider="none"
+        break
+        ;;
+      "")
+        echo "Please choose 1, 2, or 3. Enter alone is not a selection."
+        choice=""
+        ;;
+      *)
+        echo "Invalid selection. Choose 1 for local, 2 for codex, or 3 for later."
+        choice=""
+        ;;
+    esac
+  done
+
+  if [ "$provider" = "codex" ]; then
+    key="${AGENTOS_FIRSTRUN_OPENAI_API_KEY:-}"
+    if [ -z "$key" ]; then
+      read -r -p "OPENAI_API_KEY (leave empty to skip): " key
+    fi
+    if [ -n "$key" ]; then
+      env_append_or_replace "OPENAI_API_KEY" "$key"
+      echo "Saved key to $ENV_FILE"
+    else
+      env_append_or_replace "OPENAI_API_KEY" ""
+    fi
+  else
+    env_append_or_replace "AGENTOS_PROVIDER" "$provider"
+  fi
+fi
+
+if env_has_key "AGENTOS_TELEGRAM_BOT_TOKEN" && env_has_key "AGENTOS_TELEGRAM_ALLOWED_CHAT_IDS"; then
+  echo "Telegram ingress already configured in $ENV_FILE"
+else
+  run_telegram_terminal_setup
+fi
+
+engine_marker="✓"
+telegram_marker=" "
+if env_has_key "AGENTOS_TELEGRAM_BOT_TOKEN" && env_has_key "AGENTOS_TELEGRAM_ALLOWED_CHAT_IDS"; then
+  telegram_marker="✓"
+elif env_has_key "AGENTOS_TELEGRAM_SETUP_DEFERRED"; then
+  telegram_marker="later"
+fi
+print_onboarding_frame "$engine_marker" "$telegram_marker"
+
+record_handoff
+record_welcome_status "handoff_persisted" "continue handoff persisted" "continue"
+
+export PYTHONPATH="$ROOT_DIR/src"
+export AGENTOS_OLLAMA_MODELS="${AGENTOS_OLLAMA_MODELS:-/var/lib/agentos/models}"
+export OLLAMA_MODELS="$AGENTOS_OLLAMA_MODELS"
+
+if [ ! -f "$ROOT_DIR/src/main.py" ]; then
+  echo "Missing runtime entrypoint: $ROOT_DIR/src/main.py" >&2
+  echo "Set AGENTOS_RUNTIME_ROOT or AGENTOS_REPO_ROOT to the AgentOS runtime root." >&2
+  exit 127
+fi
+
+if [ "$provider" = "none" ]; then
+  "$PYTHON_BIN" "$ROOT_DIR/src/main.py" --workspace "$WORKSPACE" --set-engine none >/dev/null
+  record_live_bootstrap "welcome_launch_succeeded" "guide mode fallback selected"
+  record_welcome_status "guide_mode_selected" "provider setup deferred" "guide"
+  emit_broker \
+    --kind firstrun \
+    --action setup_wizard \
+    --state allowed \
+    --reason "firstrun completed with deferred provider setup" \
+    --component agentos-firstrun \
+    --path firstrun \
+    --object-field "provider=$provider" \
+    --object-field "status=completed"
+  echo "AgentOS setup complete. Provider setup is deferred."
+  echo "Guide mode is fallback-only. The next prompt will clearly mark this as degraded."
+  echo "Next path: AgentOS Managed Session -> ai>"
+  echo "At ai>, talk normally. Use % only for Linux commands."
+  exit 0
+fi
+
+if "$PYTHON_BIN" "$ROOT_DIR/src/main.py" --workspace "$WORKSPACE" --set-engine "$provider"; then
+  record_live_bootstrap "welcome_launch_succeeded" "provider configured through firstrun"
+  record_welcome_status "setup_completed" "provider configured successfully" "continue"
+  run_kernelctl_json_export \
+    "first-run-summary" \
+    "$FIRST_RUN_SUMMARY_PATH" \
+    first-run-summary --workspace "$WORKSPACE" || true
+  run_kernelctl_json_export \
+    "vm-e2e-proof" \
+    "$VM_E2E_PROOF_PATH" \
+    vm-e2e-proof --workspace "$WORKSPACE" || true
+  record_welcome_status "managed_shell_invoked" "managed runtime entry prepared" "continue"
+  emit_broker \
+    --kind firstrun \
+    --action setup_wizard \
+    --state allowed \
+    --reason "firstrun completed with provider configuration" \
+    --component agentos-firstrun \
+    --path firstrun \
+    --object-field "provider=$provider" \
+    --object-field "status=completed"
+  echo "AgentOS setup complete. Provider '$provider' is configured."
+  echo "Next path: AgentOS Managed Session -> ai>"
+  echo "At ai>, talk normally. Use % only for Linux commands."
+  exit 0
+fi
+
+emit_broker \
+  --kind firstrun \
+  --action setup_wizard \
+  --state blocked \
+  --reason "firstrun provider configuration failed health check" \
+  --component agentos-firstrun \
+  --path firstrun \
+  --object-field "provider=$provider" \
+  --object-field "status=health_failed"
+
+echo "AgentOS saved provider '$provider', but setup health checks did not pass."
+record_live_bootstrap "welcome_launch_failed" "provider configuration failed health check"
+record_welcome_status "setup_failed" "provider configuration failed health check" "continue"
+echo "AgentOS will use degraded preview mode for the next managed session unless the provider becomes available."
+echo "When runtime is healthy again, the next managed session returns to ai>."
+echo "Recovery path: AgentOS Recovery -> Return to AgentOS -> ai>"
+echo "Detailed rejoin path: AgentOS Recovery -> AgentOS Setup -> AgentOS Managed Session -> ai>"
+echo "Use 'python src/main.py --setup-engine' to retry before the next managed ai> session."
+exit 0

@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+RECOVERY_ACTION="${1:-${AGENTOS_RECOVERY_ACTION:-return}}"
+NONINTERACTIVE="${AGENTOS_RECOVERY_NONINTERACTIVE:-0}"
+HANDOFF_BIN="${AGENTOS_HANDOFF_BIN:-/usr/local/bin/agentos-handoff}"
+
+record_handoff() {
+  local route="$1"
+  local next_step="$2"
+  local summary="$3"
+  if [ -x "$HANDOFF_BIN" ]; then
+    AGENTOS_HANDOFF_ORIGIN=agentos_recovery_shell "$HANDOFF_BIN" "$route" "$next_step" "$summary" >/dev/null
+    return 0
+  fi
+  return 0
+}
+
+render_screen() {
+  clear 2>/dev/null || true
+  cat <<'EOF'
+============================================================
+                    AgentOS Recovery
+============================================================
+
+Return to AgentOS
+
+Recovery keeps a safe path available while preserving a clear
+way back into the managed Codex runtime path.
+EOF
+  printf '\n'
+}
+
+normalize_action() {
+  local value
+  value="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr ' _-' '\n' | paste -sd '_' -)"
+  case "$value" in
+    "" ) printf 'return' ;;
+    return|return_to_agentos|agentos ) printf 'return' ;;
+    * ) printf '%s' "$value" ;;
+  esac
+}
+
+select_action() {
+  if [ "$NONINTERACTIVE" = "1" ] || [ ! -t 0 ]; then
+    normalize_action "$RECOVERY_ACTION"
+    return
+  fi
+  printf 'Select action [return]: '
+  IFS= read -r response || true
+  normalize_action "$response"
+}
+
+render_screen
+ACTION="$(select_action)"
+case "$ACTION" in
+  return)
+    record_handoff return_to_agentos agentos_setup 'Return to AgentOS -> AgentOS Setup -> AgentOS Managed Session -> ai>'
+    printf '%s\n' 'Returning to AgentOS...'
+    exit 0
+    ;;
+  *)
+    printf '%s\n' "Unknown recovery action: $ACTION" >&2
+    exit 2
+    ;;
+esac

@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+STATE_ROOT="${AGENTOS_STATE_ROOT:-/var/lib/agentos}"
+MANIFEST_FILE="${AGENTOS_STATE_MANIFEST_FILE:-$STATE_ROOT/state-layout.env}"
+WORKSPACES_DIR="$STATE_ROOT/workspaces"
+LOGS_DIR="$STATE_ROOT/logs"
+EVIDENCE_DIR="$STATE_ROOT/evidence"
+MODELS_DIR="$STATE_ROOT/models"
+UPDATES_DIR="$STATE_ROOT/updates"
+ROLLBACK_DIR="$STATE_ROOT/rollback"
+RUNTIME_DIR="$STATE_ROOT/runtime"
+CODEX_RUNTIME_DIR="$RUNTIME_DIR/codex"
+CODEX_SESSION_DIR="$CODEX_RUNTIME_DIR/session"
+CODEX_LOGS_DIR="$CODEX_RUNTIME_DIR/logs"
+CODEX_EVIDENCE_DIR="$CODEX_RUNTIME_DIR/evidence"
+
+mkdir -p \
+  "$WORKSPACES_DIR" \
+  "$LOGS_DIR" \
+  "$EVIDENCE_DIR" \
+  "$MODELS_DIR" \
+  "$UPDATES_DIR" \
+  "$ROLLBACK_DIR" \
+  "$RUNTIME_DIR" \
+  "$CODEX_RUNTIME_DIR" \
+  "$CODEX_SESSION_DIR" \
+  "$CODEX_LOGS_DIR" \
+  "$CODEX_EVIDENCE_DIR"
+cat > "$MANIFEST_FILE" <<EOF2
+schema_version=agentos-state-root-layout.v1
+state_root=$STATE_ROOT
+workspaces=$WORKSPACES_DIR
+logs=$LOGS_DIR
+evidence=$EVIDENCE_DIR
+models=$MODELS_DIR
+updates=$UPDATES_DIR
+rollback=$ROLLBACK_DIR
+runtime=$RUNTIME_DIR
+codex_runtime=$CODEX_RUNTIME_DIR
+codex_session=$CODEX_SESSION_DIR
+codex_logs=$CODEX_LOGS_DIR
+codex_evidence=$CODEX_EVIDENCE_DIR
+codex_runtime_continuity=true
+written_by=agentos-state-root-init.v1
+EOF2
+
+printf '%s\n' "AgentOS state root prepared: $STATE_ROOT"

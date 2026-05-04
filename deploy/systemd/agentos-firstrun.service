@@ -1,0 +1,23 @@
+[Unit]
+Description=AgentOS Setup Session Service
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=!__AGENTOS_USER_HOME__/.config/agentos/env
+
+[Service]
+Type=oneshot
+User=__AGENTOS_USER__
+WorkingDirectory=__AGENTOS_REPO_ROOT__
+Environment=PYTHONPATH=__AGENTOS_REPO_ROOT__/src
+Environment=AGENTOS_REPO_ROOT=__AGENTOS_REPO_ROOT__
+Environment=AGENTOS_RUNTIME_ROOT=__AGENTOS_REPO_ROOT__
+Environment=DEFAULT_WORKSPACE=__AGENTOS_WORKSPACE__
+ExecStart=/usr/local/bin/agentos-firstrun --workspace __AGENTOS_WORKSPACE__
+StandardInput=tty
+TTYPath=/dev/tty1
+StandardOutput=journal+console
+StandardError=journal+console
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

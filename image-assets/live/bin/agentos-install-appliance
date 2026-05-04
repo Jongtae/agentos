@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REQUEST_FILE="${AGENTOS_INSTALL_REQUEST_FILE:-/tmp/agentos-install-request.env}"
+REQUEST_DIR="$(dirname "$REQUEST_FILE")"
+HANDOFF_BIN="${AGENTOS_HANDOFF_BIN:-/usr/local/bin/agentos-handoff}"
+STATE_ROOT_INIT_BIN="${AGENTOS_STATE_ROOT_INIT_BIN:-/usr/local/bin/agentos-state-root-init}"
+SLOT_METADATA_INIT_BIN="${AGENTOS_SLOT_METADATA_INIT_BIN:-/usr/local/bin/agentos-slot-metadata-init}"
+EXEC_INSTALLER="${AGENTOS_INSTALL_APPLIANCE_EXEC:-0}"
+INSTALLER_BIN="${AGENTOS_INSTALL_APPLIANCE_BIN:-}"
+
+mkdir -p "$REQUEST_DIR"
+if [ -x "$STATE_ROOT_INIT_BIN" ]; then
+  "$STATE_ROOT_INIT_BIN" >/dev/null
+fi
+if [ -x "$SLOT_METADATA_INIT_BIN" ]; then
+  "$SLOT_METADATA_INIT_BIN" >/dev/null
+fi
+cat > "$REQUEST_FILE" <<EOF2
+action_label=Install AgentOS
+persistence_goal=make_this_appliance_persistent
+target_origin=installed_appliance_boot
+installer_ui_hidden=true
+installer_semantics=agentos_persistence
+post_install_identity=AgentOS Setup -> AgentOS Managed Session -> ai>
+runtime_owner=codex_cli_managed_session
+runtime_continuity=true
+state_root=${AGENTOS_STATE_ROOT:-/var/lib/agentos}
+written_by=agentos-install-appliance.v1
+EOF2
+
+if [ -x "$HANDOFF_BIN" ]; then
+  AGENTOS_HANDOFF_ORIGIN=agentos_install_appliance "$HANDOFF_BIN" install_agentos persistent_install 'Install AgentOS -> make this appliance persistent -> installed AgentOS boot' >/dev/null || true
+fi
+
+printf '%s\n' 'Install AgentOS selected.'
+printf '%s\n' 'AgentOS will make this Codex appliance persistent on disk.'
+printf '%s\n' 'Codex runtime continuity will be preserved across install and reboot.'
+printf '%s\n' 'Post-install identity: AgentOS Setup -> AgentOS Managed Session -> ai>'
+
+if [ "$EXEC_INSTALLER" = "1" ] && [ -n "$INSTALLER_BIN" ] && [ -x "$INSTALLER_BIN" ]; then
+  exec "$INSTALLER_BIN"
+fi
+
+exit 10

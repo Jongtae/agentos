@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+WORKSPACE="${AGENTOS_DEFAULT_WORKSPACE:-${DEFAULT_WORKSPACE:-/home/ubuntu/agentos-ws}}"
+KERNELCTL="${AGENTOS_KERNELCTL_BIN:-/usr/local/bin/agentos-kernelctl}"
+INTERVAL="${AGENTOS_TELEGRAM_DAEMON_INTERVAL_SEC:-5}"
+
+mkdir -p "$WORKSPACE/artifacts/telegram-live-loop"
+
+while true; do
+  if [ -f /etc/agentos/daemon.env ]; then
+    # shellcheck disable=SC1091
+    . /etc/agentos/daemon.env
+  fi
+  if [ -f /home/ubuntu/.config/agentos/env ]; then
+    # shellcheck disable=SC1091
+    . /home/ubuntu/.config/agentos/env
+  fi
+  transport="${AGENTOS_TELEGRAM_TRANSPORT:-${TELEGRAM_TRANSPORT:-polling}}"
+  if [ "$transport" = "webhook" ]; then
+    printf '%s transport=webhook; polling live-loop daemon is idle. Use the webhook ingress service.\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$WORKSPACE/artifacts/telegram-live-loop/daemon.log"
+    sleep "$INTERVAL"
+    continue
+  fi
+  "$KERNELCTL" telegram-live-loop \
+    --workspace "$WORKSPACE" \
+    --once \
+    --send \
+    --json >> "$WORKSPACE/artifacts/telegram-live-loop/daemon.log" 2>&1 || true
+  sleep "$INTERVAL"
+done

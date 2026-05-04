@@ -1,0 +1,285 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+WELCOME_BIN="${AGENTOS_WELCOME_BIN:-/usr/local/bin/agentos-welcome-shell}"
+STATE_DIR="${AGENTOS_LIVE_BOOTSTRAP_STATE_DIR:-/var/lib/agentos/live-bootstrap}"
+LOG_PATH="${STATE_DIR}/guest-agent-bootstrap.log"
+STATUS_PATH="${STATE_DIR}/guest-agent-bootstrap.json"
+TAKEOVER_STATUS_PATH="${STATE_DIR}/live-session-status.json"
+WELCOME_STATUS_PATH="${STATE_DIR}/welcome-status.json"
+WELCOME_LOG_PATH="${STATE_DIR}/agentos-welcome.log"
+WELCOME_WRAPPER_PATH="${STATE_DIR}/run-agentos-welcome.sh"
+APT_POLICY_FILE="${AGENTOS_APT_POLICY_FILE:-/agentos/postinstall/apt-packages.policy}"
+WELCOME_ACTION="${AGENTOS_WELCOME_ACTION:-continue}"
+WELCOME_LAUNCHER="${AGENTOS_WELCOME_LAUNCHER:-}"
+SKIP_GUEST_AGENT_BOOTSTRAP="${AGENTOS_SKIP_GUEST_AGENT_BOOTSTRAP:-0}"
+SERIAL_DIAG_TTY="${AGENTOS_SERIAL_DIAG_TTY:-/dev/ttyS0}"
+GUEST_AGENT_PORT_PATH="${AGENTOS_GUEST_AGENT_PORT_PATH:-/dev/virtio-ports/org.qemu.guest_agent.0}"
+GUEST_AGENT_DIRECT_LOG="${STATE_DIR}/qemu-ga-direct.log"
+
+if ! mkdir -p "$STATE_DIR" 2>/dev/null; then
+  STATE_DIR="${TMPDIR:-/tmp}/agentos-live-bootstrap"
+  LOG_PATH="${STATE_DIR}/guest-agent-bootstrap.log"
+  STATUS_PATH="${STATE_DIR}/guest-agent-bootstrap.json"
+  TAKEOVER_STATUS_PATH="${STATE_DIR}/live-session-status.json"
+  WELCOME_STATUS_PATH="${STATE_DIR}/welcome-status.json"
+  WELCOME_LOG_PATH="${STATE_DIR}/agentos-welcome.log"
+  WELCOME_WRAPPER_PATH="${STATE_DIR}/run-agentos-welcome.sh"
+  GUEST_AGENT_DIRECT_LOG="${STATE_DIR}/qemu-ga-direct.log"
+  mkdir -p "$STATE_DIR"
+fi
+
+write_status() {
+  local state="$1"
+  local detail="${2:-}"
+  cat > "$STATUS_PATH" <<EOF
+{"component":"agentos-live-session-bootstrap","state":"${state}","detail":"${detail}"}
+EOF
+  serial_log "guest-agent-bootstrap" "$state" "$detail"
+}
+
+utc_now() {
+  date -u +%Y-%m-%dT%H:%M:%SZ
+}
+
+serial_log() {
+  local component="$1"
+  local state="$2"
+  local detail="${3:-}"
+  if [ -n "$SERIAL_DIAG_TTY" ] && [ -w "$SERIAL_DIAG_TTY" ]; then
+    printf '%s\n' "[AgentOS][$component][$(utc_now)] state=${state} detail=${detail}" >>"$SERIAL_DIAG_TTY" 2>/dev/null || true
+  fi
+}
+
+write_takeover_status() {
+  local state="$1"
+  local detail="${2:-}"
+  local launch_method="${3:-}"
+  cat > "$TAKEOVER_STATUS_PATH" <<EOF
+{"component":"agentos-live-session-bootstrap","state":"${state}","detail":"${detail}","launch_method":"${launch_method}","welcome_action":"${WELCOME_ACTION}","welcome_status_path":"${WELCOME_STATUS_PATH}","updated_at_utc":"$(utc_now)"}
+EOF
+  serial_log "live-session" "$state" "${detail} launch_method=${launch_method}"
+}
+
+build_welcome_wrapper() {
+  cat > "$WELCOME_WRAPPER_PATH" <<EOF
+#!/usr/bin/env bash
+export AGENTOS_LIVE_BOOTSTRAP_STATE_DIR="${STATE_DIR}"
+exec "${WELCOME_BIN}" "${WELCOME_ACTION}"
+EOF
+  chmod 0755 "$WELCOME_WRAPPER_PATH"
+}
+
+welcome_status_ready() {
+  [ -s "$WELCOME_STATUS_PATH" ]
+}
+
+welcome_log_indicates_terminal_failure() {
+  [ -f "$WELCOME_LOG_PATH" ] && grep -q 'Error constructing proxy for org.gnome.Terminal' "$WELCOME_LOG_PATH"
+}
+
+launch_with_command() {
+  local launch_method="$1"
+  shift
+  : >"$WELCOME_LOG_PATH"
+  "$@" >>"$WELCOME_LOG_PATH" 2>&1 &
+  local pid=$!
+  write_takeover_status "welcome_launch_spawned" "welcome launcher spawned" "$launch_method"
+
+  local attempts=0
+  while [ "$attempts" -lt 10 ]; do
+    if welcome_status_ready; then
+      write_takeover_status "welcome_launch_succeeded" "welcome status observed" "$launch_method"
+      return 0
+    fi
+    if welcome_log_indicates_terminal_failure; then
+      break
+    fi
+    if ! kill -0 "$pid" >/dev/null 2>&1; then
+      break
+    fi
+    attempts=$((attempts + 1))
+    sleep 1
+  done
+
+  kill "$pid" >/dev/null 2>&1 || true
+  wait "$pid" >/dev/null 2>&1 || true
+  local detail="launcher command failed"
+  if welcome_log_indicates_terminal_failure; then
+    detail="gnome-terminal session launch failed"
+  elif [ -f "$WELCOME_LOG_PATH" ] && [ -s "$WELCOME_LOG_PATH" ]; then
+    detail="$(tail -n 1 "$WELCOME_LOG_PATH" | tr -d '\r')"
+  fi
+  write_takeover_status "welcome_launch_failed" "$detail" "$launch_method"
+  return 1
+}
+
+launch_welcome() {
+  build_welcome_wrapper
+  write_takeover_status "welcome_launch_requested" "launching AgentOS Welcome" ""
+
+  if [ -n "$WELCOME_LAUNCHER" ] && [ -x "$WELCOME_LAUNCHER" ]; then
+    if launch_with_command custom_launcher "$WELCOME_LAUNCHER" "$WELCOME_WRAPPER_PATH"; then
+      return 0
+    fi
+  fi
+
+  if command -v gnome-terminal >/dev/null 2>&1; then
+    if launch_with_command gnome_terminal gnome-terminal -- "$WELCOME_WRAPPER_PATH"; then
+      return 0
+    fi
+  fi
+
+  if command -v x-terminal-emulator >/dev/null 2>&1; then
+    if launch_with_command x_terminal_emulator x-terminal-emulator -e "$WELCOME_WRAPPER_PATH"; then
+      return 0
+    fi
+  fi
+
+  if command -v xterm >/dev/null 2>&1; then
+    if launch_with_command xterm xterm -e "$WELCOME_WRAPPER_PATH"; then
+      return 0
+    fi
+  fi
+
+  # Fallback: avoid a blank desktop by running the welcome path directly.
+  launch_with_command direct_background "$WELCOME_WRAPPER_PATH"
+}
+
+package_required() {
+  if [ ! -f "$APT_POLICY_FILE" ]; then
+    return 1
+  fi
+  awk -F'|' '
+    $1 !~ /^#/ && $1 == "qemu-guest-agent" && $4 == "core" { found=1 }
+    END { exit(found ? 0 : 1) }
+  ' "$APT_POLICY_FILE"
+}
+
+start_guest_agent() {
+  sudo -n modprobe virtio_console >/dev/null 2>&1 || true
+  sudo -n systemctl start qemu-guest-agent.service >/dev/null 2>&1 || true
+  sudo -n systemctl start qemu-guest-agent.socket >/dev/null 2>&1 || true
+  sudo -n service qemu-guest-agent start >/dev/null 2>&1 || true
+  sleep 1
+  if sudo -n systemctl is-active qemu-guest-agent >/dev/null 2>&1; then
+    write_status ready "qemu-guest-agent active"
+    return 0
+  fi
+  if pgrep -x qemu-ga >/dev/null 2>&1; then
+    write_status ready "qemu-ga process present"
+    return 0
+  fi
+  if [ ! -e "$GUEST_AGENT_PORT_PATH" ]; then
+    write_status degraded "guest agent port missing at $GUEST_AGENT_PORT_PATH"
+    return 1
+  fi
+  sudo -n pkill -x qemu-ga >/dev/null 2>&1 || true
+  if sudo -n /usr/sbin/qemu-ga -m virtio-serial -p "$GUEST_AGENT_PORT_PATH" -l "$GUEST_AGENT_DIRECT_LOG" -d >/dev/null 2>&1; then
+    sleep 1
+    if pgrep -x qemu-ga >/dev/null 2>&1; then
+      write_status ready "qemu-ga direct launch fallback active"
+      return 0
+    fi
+  fi
+  write_status degraded "qemu-guest-agent installed but not active"
+  return 1
+}
+
+repair_guest_agent_install() {
+  if ! sudo -n apt-get install -y --reinstall --no-install-recommends qemu-guest-agent liburing2 >>"$LOG_PATH" 2>&1; then
+    write_status failed "apt-get repair install for qemu-guest-agent failed"
+    return 1
+  fi
+  start_guest_agent
+}
+
+wait_for_network() {
+  # Give the live session a short window to acquire NAT DHCP before the
+  # first apt-get attempt. Truthful: returns 0 when a DNS lookup succeeds,
+  # non-zero otherwise; the caller still attempts apt-get and records the
+  # real outcome.
+  local deadline=$(( $(date +%s) + 30 ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    if command -v getent >/dev/null 2>&1 && getent hosts archive.ubuntu.com >/dev/null 2>&1; then
+      return 0
+    fi
+    if command -v ip >/dev/null 2>&1 && ip route get 1.1.1.1 >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+bootstrap_guest_agent() {
+  write_status starting "bootstrapping guest agent"
+
+  if ! package_required; then
+    write_status skipped "apt policy does not require qemu-guest-agent"
+    return 0
+  fi
+
+  if command -v qemu-ga >/dev/null 2>&1; then
+    if start_guest_agent; then
+      return 0
+    fi
+    write_status degraded "qemu-ga present but inactive; attempting repair install"
+    repair_guest_agent_install
+    return 0
+  fi
+
+  if ! command -v sudo >/dev/null 2>&1; then
+    write_status failed "sudo unavailable"
+    return 1
+  fi
+
+  if ! sudo -n true >/dev/null 2>&1; then
+    write_status failed "passwordless sudo unavailable"
+    return 1
+  fi
+
+  if ! wait_for_network >>"$LOG_PATH" 2>&1; then
+    write_status degraded "network unreachable; qemu-guest-agent install deferred"
+    # Try anyway — UTM NAT occasionally delays DNS past the probe window
+    # but the apt cache mirrors may still be resolvable via fallback paths.
+  fi
+
+  local apt_update_ok=0
+  for attempt in 1 2; do
+    if sudo -n apt-get update >>"$LOG_PATH" 2>&1; then
+      apt_update_ok=1
+      break
+    fi
+    sleep 5
+  done
+  if [ "$apt_update_ok" -ne 1 ]; then
+    write_status failed "apt-get update failed after retries"
+    return 1
+  fi
+
+  if ! sudo -n apt-get install -y --no-install-recommends qemu-guest-agent liburing2 >>"$LOG_PATH" 2>&1; then
+    write_status failed "apt-get install qemu-guest-agent failed"
+    return 1
+  fi
+
+  start_guest_agent
+}
+
+write_takeover_status "bootstrap_started" "live session bootstrap entered" ""
+
+if [ "$SKIP_GUEST_AGENT_BOOTSTRAP" != "1" ]; then
+  (
+    write_takeover_status "guest_agent_bootstrap_backgrounded" "guest agent bootstrap started in background" ""
+    bootstrap_guest_agent >>"$LOG_PATH" 2>&1 || true
+  ) &
+else
+  write_takeover_status "guest_agent_bootstrap_skipped" "guest agent bootstrap disabled for this run" ""
+fi
+
+if ! launch_welcome; then
+  write_takeover_status "live_session_takeover_failure" "unable to launch AgentOS Welcome" ""
+  exit 41
+fi
+
+exit 0

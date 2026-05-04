@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=AgentOS Minimal
+Description=Minimal AgentOS appliance boot splash
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/agentos-minimal
+ScriptFile=/usr/share/plymouth/themes/agentos-minimal/agentos-minimal.script

@@ -1,0 +1,21 @@
+[Unit]
+Description=AgentOS Event Fabric Daemon
+After=network-online.target systemd-journald.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__AGENTOS_USER__
+WorkingDirectory=__AGENTOS_REPO_ROOT__
+Environment=PYTHONPATH=__AGENTOS_REPO_ROOT__/src
+Environment=AGENTOS_REPO_ROOT=__AGENTOS_REPO_ROOT__
+Environment=AGENTOS_RUNTIME_ROOT=__AGENTOS_REPO_ROOT__
+Environment=DEFAULT_WORKSPACE=__AGENTOS_WORKSPACE__
+ExecStart=/usr/local/bin/agentos-eventd --workspace __AGENTOS_WORKSPACE__
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

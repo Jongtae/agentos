@@ -1,0 +1,15 @@
+[Unit]
+Description=AgentOS Broker Control Plane
+After=network.target
+
+[Service]
+Type=simple
+User=__AGENTOS_USER__
+Environment=AGENTOS_REPO_ROOT=__AGENTOS_REPO_ROOT__
+Environment=AGENTOS_RUNTIME_ROOT=__AGENTOS_REPO_ROOT__
+ExecStart=/usr/local/bin/agentos-brokerd --workspace __AGENTOS_WORKSPACE__
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

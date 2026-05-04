@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+HANDOFF_FILE="${AGENTOS_HANDOFF_FILE:-/tmp/agentos-handoff.env}"
+HANDOFF_DIR="$(dirname "$HANDOFF_FILE")"
+ROUTE="${1:-${AGENTOS_HANDOFF_ROUTE:-}}"
+NEXT_STEP="${2:-${AGENTOS_HANDOFF_NEXT_STEP:-}}"
+SUMMARY="${3:-${AGENTOS_HANDOFF_SUMMARY:-}}"
+ORIGIN="${AGENTOS_HANDOFF_ORIGIN:-agentos_welcome_shell}"
+RUNTIME_TARGET="${AGENTOS_HANDOFF_RUNTIME_TARGET:-}"
+SUPERVISION_TARGET="${AGENTOS_HANDOFF_SUPERVISION_TARGET:-}"
+
+if [ -z "$ROUTE" ] || [ -z "$NEXT_STEP" ] || [ -z "$SUMMARY" ]; then
+  printf '%s\n' 'Usage: agentos-handoff <route> <next_step> <summary>' >&2
+  exit 2
+fi
+
+mkdir -p "$HANDOFF_DIR"
+cat > "$HANDOFF_FILE" <<EOF2
+route=$ROUTE
+next_step=$NEXT_STEP
+summary=$SUMMARY
+origin=$ORIGIN
+runtime_target=$RUNTIME_TARGET
+supervision_target=$SUPERVISION_TARGET
+written_by=agentos-handoff.v1
+EOF2
+
+printf '%s\n' "AgentOS handoff recorded: $ROUTE -> $NEXT_STEP"

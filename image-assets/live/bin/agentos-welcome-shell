@@ -1,0 +1,332 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+WELCOME_ACTION="${1:-${AGENTOS_WELCOME_ACTION:-}}"
+NO_EXEC_RECOVERY="${AGENTOS_WELCOME_NO_EXEC_RECOVERY:-0}"
+NONINTERACTIVE="${AGENTOS_WELCOME_NONINTERACTIVE:-0}"
+WELCOME_WORKSPACE="${AGENTOS_WELCOME_WORKSPACE:-/home/ubuntu/agentos-ws}"
+RECOVERY_SHELL_BIN="${AGENTOS_RECOVERY_SHELL_BIN:-/usr/local/bin/agentos-recovery-shell}"
+HANDOFF_BIN="${AGENTOS_HANDOFF_BIN:-/usr/local/bin/agentos-handoff}"
+INSTALL_APPLIANCE_BIN="${AGENTOS_INSTALL_APPLIANCE_BIN:-/usr/local/bin/agentos-install-appliance}"
+FIRSTRUN_BIN="${AGENTOS_FIRSTRUN_BIN:-/usr/local/bin/agentos-firstrun}"
+SHELL_BIN="${AGENTOS_SHELL_BIN:-/usr/local/bin/agentos-shell}"
+NETWORK_POLICY="${AGENTOS_WELCOME_NETWORK_POLICY:-offline_ok}"
+NETWORK_STATUS_HINT="${AGENTOS_WELCOME_NETWORK_STATUS:-}"
+NETWORK_ACTION="${AGENTOS_WELCOME_NETWORK_ACTION:-}"
+ALLOW_OFFLINE_LOCAL="${AGENTOS_WELCOME_ALLOW_OFFLINE_LOCAL:-1}"
+STATE_DIR="${AGENTOS_LIVE_BOOTSTRAP_STATE_DIR:-/var/lib/agentos/live-bootstrap}"
+WELCOME_STATUS_PATH="${STATE_DIR}/welcome-status.json"
+SERIAL_DIAG_TTY="${AGENTOS_SERIAL_DIAG_TTY:-/dev/ttyS0}"
+KERNELCTL_BIN="${AGENTOS_KERNELCTL_BIN:-/usr/local/bin/agentos-kernelctl}"
+FIRST_RUN_SUMMARY_PATH="${WELCOME_WORKSPACE}/artifacts/repo-free-first-run/latest-first-run-summary.json"
+VM_E2E_PROOF_PATH="${WELCOME_WORKSPACE}/artifacts/control-plane-capabilities/latest-vm-e2e-proof.json"
+
+if ! mkdir -p "$STATE_DIR" 2>/dev/null; then
+  STATE_DIR="${TMPDIR:-/tmp}/agentos-live-bootstrap"
+  WELCOME_STATUS_PATH="${STATE_DIR}/welcome-status.json"
+  mkdir -p "$STATE_DIR"
+fi
+
+utc_now() {
+  date -u +%Y-%m-%dT%H:%M:%SZ
+}
+
+serial_log() {
+  local state="$1"
+  local detail="${2:-}"
+  local selected_action="${3:-}"
+  if [ -n "$SERIAL_DIAG_TTY" ] && [ -w "$SERIAL_DIAG_TTY" ]; then
+    printf '%s\n' "[AgentOS][welcome][$(utc_now)] state=${state} action=${selected_action} detail=${detail}" >>"$SERIAL_DIAG_TTY" 2>/dev/null || true
+  fi
+}
+
+write_welcome_status() {
+  local state="$1"
+  local detail="${2:-}"
+  local selected_action="${3:-}"
+  cat > "$WELCOME_STATUS_PATH" <<EOF
+{"component":"agentos-welcome-shell","state":"${state}","detail":"${detail}","selected_action":"${selected_action}","workspace":"${WELCOME_WORKSPACE}","updated_at_utc":"$(utc_now)"}
+EOF
+  serial_log "$state" "$detail" "$selected_action"
+}
+
+run_kernelctl_json_export() {
+  local label="$1"
+  shift
+  local output_path="$1"
+  shift
+
+  if [ ! -x "$KERNELCTL_BIN" ]; then
+    write_welcome_status "proof_export_missing" "kernelctl helper not found" "continue"
+    return 127
+  fi
+
+  mkdir -p "$(dirname "$output_path")"
+  write_welcome_status "proof_export_started" "${label} export started" "continue"
+  if command -v timeout >/dev/null 2>&1; then
+    if ! timeout 120 "$KERNELCTL_BIN" "$@" --json >/dev/null 2>&1; then
+      write_welcome_status "proof_export_failed" "${label} export failed" "continue"
+      return 1
+    fi
+  else
+    if ! "$KERNELCTL_BIN" "$@" --json >/dev/null 2>&1; then
+      write_welcome_status "proof_export_failed" "${label} export failed" "continue"
+      return 1
+    fi
+  fi
+
+  if [ ! -s "$output_path" ]; then
+    write_welcome_status "proof_export_failed" "${label} manifest missing" "continue"
+    return 1
+  fi
+  write_welcome_status "proof_export_completed" "${label} export completed" "continue"
+  return 0
+}
+
+render_screen() {
+  clear 2>/dev/null || true
+  local network_status
+  network_status="$(network_status)"
+  cat <<'EOF'
+============================================================
+                         AgentOS
+============================================================
+
+Continue to AgentOS
+Install AgentOS
+Recovery
+
+Use Continue to launch the managed Codex CLI session through AgentOS Setup.
+Use Install to make this Codex appliance persistent.
+Use Recovery to restore the Codex runtime path safely.
+EOF
+  printf '%s\n' ""
+  printf '%s\n' "Network policy: $(network_policy_label)"
+  printf '%s\n' "Network status: ${network_status}"
+  printf '\n'
+}
+
+network_policy_label() {
+  case "$NETWORK_POLICY" in
+    required) printf 'online path required' ;;
+    auto) printf 'auto-detect' ;;
+    *) printf 'offline local path allowed' ;;
+  esac
+}
+
+network_status() {
+  if [ -n "$NETWORK_STATUS_HINT" ]; then
+    printf '%s' "$NETWORK_STATUS_HINT"
+    return
+  fi
+  if command -v ip >/dev/null 2>&1 && ip route get 1.1.1.1 >/dev/null 2>&1; then
+    printf 'online'
+    return
+  fi
+  printf 'offline'
+}
+
+record_handoff() {
+  local route="$1"
+  local next_step="$2"
+  local summary="$3"
+  if [ -x "$HANDOFF_BIN" ]; then
+    AGENTOS_HANDOFF_ORIGIN=agentos_welcome_shell "$HANDOFF_BIN" "$route" "$next_step" "$summary" >/dev/null
+    return 0
+  fi
+  return 0
+}
+
+normalize_action() {
+  local value
+  value="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr ' _-' '\n' | paste -sd '_' -)"
+  case "$value" in
+    "" ) printf 'continue' ;;
+    continue|continue_to_agentos|agentos|start ) printf 'continue' ;;
+    install|install_agentos|persistent|make_this_appliance_persistent ) printf 'install' ;;
+    recovery|agentos_recovery|safe_fallback ) printf 'recovery' ;;
+    * ) printf '%s' "$value" ;;
+  esac
+}
+
+select_action() {
+  if [ -n "$WELCOME_ACTION" ]; then
+    normalize_action "$WELCOME_ACTION"
+    return
+  fi
+  if [ "$NONINTERACTIVE" = "1" ] || [ ! -t 0 ]; then
+    printf 'continue'
+    return
+  fi
+
+  printf 'Select action [continue/install/recovery]: ' >&2
+  IFS= read -r response || true
+  normalize_action "$response"
+}
+
+handle_continue() {
+  local network_rc=0
+  write_welcome_status "continue_selected" "Continue to AgentOS selected" "continue"
+  ensure_network_path || network_rc=$?
+  if [ "$network_rc" -ne 0 ]; then
+    write_welcome_status "network_gate_failed" "network policy blocked continue path" "continue"
+    return "$network_rc"
+  fi
+  AGENTOS_HANDOFF_RUNTIME_TARGET="codex_cli_managed_session" \
+  AGENTOS_HANDOFF_SUPERVISION_TARGET="codex_launch_supervision" \
+    record_handoff continue_to_agentos agentos_setup 'Continue to AgentOS -> AgentOS Setup -> Codex CLI Managed Session -> ai>'
+  write_welcome_status "handoff_persisted" "continue handoff persisted" "continue"
+  printf '%s\n' 'Launching managed Codex CLI session through AgentOS Setup...'
+  if [ -x "$FIRSTRUN_BIN" ]; then
+    write_welcome_status "setup_invoked" "AgentOS Setup invocation started" "continue"
+    AGENTOS_SESSION_ID="${AGENTOS_SESSION_ID:-welcome:gui}" \
+    AGENTOS_FIRSTRUN_CHOICE="${AGENTOS_FIRSTRUN_CHOICE:-local}" \
+      "$FIRSTRUN_BIN" --workspace "$WELCOME_WORKSPACE"
+  else
+    write_welcome_status "setup_helper_missing" "AgentOS Setup helper not found" "continue"
+    printf '%s\n' "AgentOS Setup helper not found: $FIRSTRUN_BIN" >&2
+    return 22
+  fi
+  run_kernelctl_json_export \
+    "first-run-summary" \
+    "$FIRST_RUN_SUMMARY_PATH" \
+    first-run-summary --workspace "$WELCOME_WORKSPACE" || true
+  run_kernelctl_json_export \
+    "vm-e2e-proof" \
+    "$VM_E2E_PROOF_PATH" \
+    vm-e2e-proof --workspace "$WELCOME_WORKSPACE" || true
+  if [ -x "$SHELL_BIN" ]; then
+    write_welcome_status "managed_shell_invoked" "managed shell invocation started" "continue"
+    exec "$SHELL_BIN" --kernel-mode --workspace "$WELCOME_WORKSPACE" --no-tui
+  fi
+  write_welcome_status "managed_shell_missing" "managed shell helper not found" "continue"
+  printf '%s\n' "Managed shell helper not found: $SHELL_BIN" >&2
+  return 23
+}
+
+select_network_action() {
+  if [ -n "$NETWORK_ACTION" ]; then
+    printf '%s' "$NETWORK_ACTION"
+    return
+  fi
+  if [ "$NONINTERACTIVE" = "1" ] || [ ! -t 0 ]; then
+    if [ "$ALLOW_OFFLINE_LOCAL" = "1" ]; then
+      printf 'skip'
+    else
+      printf 'connect'
+    fi
+    return
+  fi
+  printf 'Network needed. Select action [connect/skip/recovery]: ' >&2
+  IFS= read -r response || true
+  printf '%s' "${response:-skip}"
+}
+
+run_recovery_shell() {
+  if [ "$NO_EXEC_RECOVERY" = "1" ]; then
+    printf '%s\n' 'Recovery shell execution disabled for this run.'
+    return 20
+  fi
+  if [ -x "$RECOVERY_SHELL_BIN" ]; then
+    exec "$RECOVERY_SHELL_BIN"
+  fi
+  printf '%s\n' "Recovery shell not found: $RECOVERY_SHELL_BIN"
+  return 21
+}
+
+ensure_network_path() {
+  local status action
+  status="$(network_status)"
+  case "$NETWORK_POLICY" in
+    offline_ok)
+      return 0
+      ;;
+    auto)
+      if [ "$status" = "online" ]; then
+        return 0
+      fi
+      if [ "$ALLOW_OFFLINE_LOCAL" = "1" ]; then
+        printf '%s\n' 'Network is offline; continuing with local AgentOS path.'
+        return 0
+      fi
+      ;;
+    required)
+      if [ "$status" = "online" ]; then
+        return 0
+      fi
+      ;;
+  esac
+
+  printf '%s\n' 'AgentOS network panel'
+  printf '%s\n' 'A network connection is needed for the online path.'
+  printf '%s\n' 'You can retry connectivity, skip to the local path, or enter recovery.'
+  action="$(select_network_action)"
+  case "$action" in
+    connect)
+      printf '%s\n' 'Retrying network check...'
+      status="$(network_status)"
+      if [ "$status" = "online" ]; then
+        printf '%s\n' 'Network is now online.'
+        return 0
+      fi
+      printf '%s\n' 'Network is still offline.'
+      return 31
+      ;;
+    skip)
+      if [ "$ALLOW_OFFLINE_LOCAL" = "1" ]; then
+        printf '%s\n' 'Skipping network and continuing with the local AgentOS path.'
+        return 0
+      fi
+      printf '%s\n' 'Offline skip is disabled for this run.'
+      return 32
+      ;;
+    recovery)
+      printf '%s\n' 'Entering recovery from the AgentOS network panel.'
+      run_recovery_shell
+      return "$?"
+      ;;
+    *)
+      printf '%s\n' "Unknown network action: $action" >&2
+      return 2
+      ;;
+  esac
+}
+
+handle_install() {
+  write_welcome_status "install_selected" "Install AgentOS selected" "install"
+  record_handoff install_agentos persistent_install 'Install AgentOS -> make this appliance persistent -> installed AgentOS boot'
+  write_welcome_status "handoff_persisted" "install handoff persisted" "install"
+  if [ -x "$INSTALL_APPLIANCE_BIN" ]; then
+    write_welcome_status "install_invoked" "install appliance helper invoked" "install"
+    exec "$INSTALL_APPLIANCE_BIN"
+  fi
+  printf '%s\n' 'Install AgentOS selected.'
+  printf '%s\n' 'AgentOS will make this appliance persistent on disk.'
+  printf '%s\n' 'Post-install identity: AgentOS Setup -> AgentOS Managed Session -> ai>'
+  exit 10
+}
+
+
+handle_recovery() {
+  write_welcome_status "recovery_selected" "Recovery selected" "recovery"
+  record_handoff recovery agentos_recovery 'Recovery -> AgentOS Recovery -> Return to AgentOS -> AgentOS Setup -> ai>'
+  write_welcome_status "handoff_persisted" "recovery handoff persisted" "recovery"
+  printf '%s\n' 'Recovery selected.'
+  run_recovery_shell
+  exit "$?"
+}
+
+render_screen
+write_welcome_status "welcome_shell_started" "AgentOS Welcome shell launched" ""
+ACTION="$(select_action)"
+write_welcome_status "action_selected" "welcome action selected" "$ACTION"
+case "$ACTION" in
+  continue) handle_continue ;;
+  install) handle_install ;;
+  recovery) handle_recovery ;;
+  *)
+    write_welcome_status "unknown_action" "Unknown AgentOS welcome action" "$ACTION"
+    printf '%s\n' "Unknown AgentOS welcome action: $ACTION" >&2
+    exit 2
+    ;;
+esac

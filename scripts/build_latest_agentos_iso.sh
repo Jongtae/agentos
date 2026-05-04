@@ -9,6 +9,7 @@ BASE_IMAGE=""
 DOWNLOAD_BASE_IMAGE=1
 CLEANUP=1
 RUN_SMOKE=1
+LOG_DIR="$ROOT_DIR/build-output/logs"
 
 usage() {
   cat <<USAGE
@@ -132,6 +133,8 @@ if [ -z "${AGENTOS_GO_BIN:-}" ]; then
   fi
 fi
 export AGENTOS_OPERATOR_TUI_GOARCH="$ARCH"
+mkdir -p "$LOG_DIR"
+BUILD_LOG="$LOG_DIR/build-agentos-${VERSION}-${ARCH}.log"
 
 build_cmd=(
   "$ROOT_DIR/scripts/build_agentos_iso.sh"
@@ -154,7 +157,28 @@ if [ "$ARCH" = "arm64" ]; then
 fi
 
 echo "[agentos-build] building AgentOS $VERSION ($ARCH)"
-"${build_cmd[@]}"
+echo "[agentos-build] log: $BUILD_LOG"
+set +e
+"${build_cmd[@]}" >"$BUILD_LOG" 2>&1 &
+build_pid=$!
+elapsed=0
+while kill -0 "$build_pid" 2>/dev/null; do
+  sleep 10
+  elapsed=$((elapsed + 10))
+  if [ "$elapsed" -eq 10 ] || [ $((elapsed % 60)) -eq 0 ]; then
+    echo "[agentos-build] still working: remaster/build pipeline (${elapsed}s elapsed)"
+  fi
+done
+wait "$build_pid"
+build_status=$?
+set -e
+if [ "$build_status" -ne 0 ]; then
+  echo "[agentos-build] build failed; last log lines:" >&2
+  tail -n 80 "$BUILD_LOG" >&2 || true
+  echo "[agentos-build] full log: $BUILD_LOG" >&2
+  exit "$build_status"
+fi
+echo "[agentos-build] build/remaster complete"
 
 ISO_PATH="$OUTPUT_DIR/agentos-${VERSION}-${ARCH}.iso"
 METADATA_PATH="$OUTPUT_DIR/agentos-release-metadata.json"

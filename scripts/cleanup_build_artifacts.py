@@ -58,6 +58,7 @@ def _iter_regular_release_isos(release_dir: Path) -> list[Path]:
 def _gather_candidates(build_root: Path, keep_release_count: int) -> list[Candidate]:
     candidates: list[Candidate] = []
     if not build_root.exists():
+        build_root.mkdir(parents=True, exist_ok=True)
         return candidates
 
     release_dir = build_root / "release"

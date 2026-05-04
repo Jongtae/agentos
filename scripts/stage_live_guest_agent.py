@@ -11,6 +11,7 @@ import subprocess
 import tarfile
 import tempfile
 import urllib.request
+import warnings
 from pathlib import Path
 
 PACKAGE_NAME = "qemu-guest-agent"
@@ -74,6 +75,19 @@ def _deb_is_valid(path: Path) -> bool:
 
 
 def _extract_deb_data(deb_path: Path, destination: Path) -> list[str]:
+    def extract_all(archive: tarfile.TarFile) -> list[str]:
+        names = archive.getnames()
+        try:
+            archive.extractall(destination, filter="fully_trusted")
+        except TypeError:
+            # Python < 3.12 does not support the filter argument. Keep the
+            # fallback narrow and quiet so normal ISO builds do not flood the
+            # operator with forward-compatibility warnings.
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                archive.extractall(destination)
+        return names
+
     with tempfile.TemporaryDirectory() as td:
         tempdir = Path(td)
         subprocess.run(["ar", "x", str(deb_path)], cwd=tempdir, check=True, capture_output=True, text=True)
@@ -86,13 +100,11 @@ def _extract_deb_data(deb_path: Path, destination: Path) -> list[str]:
             proc = subprocess.run(["zstd", "-d", "-c", str(data_member)], check=True, capture_output=True)
             tar_stream = io.BytesIO(proc.stdout)
             with tarfile.open(fileobj=tar_stream, mode="r:") as archive:
-                archive.extractall(destination)
-                return archive.getnames()
+                return extract_all(archive)
         if data_member.suffix in {".xz", ".gz"}:
             mode = "r:xz" if data_member.suffix == ".xz" else "r:gz"
             with tarfile.open(data_member, mode) as archive:
-                archive.extractall(destination)
-                return archive.getnames()
+                return extract_all(archive)
         raise RuntimeError(f"unsupported deb data member: {data_member.name}")
 
 

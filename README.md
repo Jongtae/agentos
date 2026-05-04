@@ -1,5 +1,7 @@
 # AgentOS
 
+[English](README.md) | [한국어](README.ko.md) | [日本語](README.ja.md) | [中文](README.zh.md)
+
 **A bootable, headless-first OS prototype with an agent-managed post-boot runtime.**
 
 AgentOS explores what an operating system looks like when the default post-boot

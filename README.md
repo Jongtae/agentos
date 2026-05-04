@@ -1,107 +1,293 @@
 # AgentOS
 
-AgentOS is an AI-native operating system prototype.
+**A bootable, headless-first OS prototype with an agent-managed post-boot runtime.**
 
-Instead of treating the agent as another app inside a traditional desktop, AgentOS explores a different default: the OS boots into a managed agent runtime, exposes local capabilities through kernel-style surfaces, and lets the operator talk to the system first.
+AgentOS explores what an operating system looks like when the default post-boot
+interface is not a desktop full of apps, but a managed agent runtime.
 
-Phase 1 proves the shape of that idea:
+Boot the image, reach the AgentOS operator surface, configure a local or online
+LLM path, and experiment with requests entering through TTY, Telegram, and
+runtime command surfaces. The prototype routes intent, runs local tools, replies
+when configured, and leaves proof/log artifacts behind.
 
-- bootable AgentOS ISO prototype
-- terminal-first full-screen operator surface
-- bundled local LLM path through Ollama
-- setup surfaces for LLM and Telegram credentials
-- Telegram request/reply experiments
-- intent dispatch and human-readable activity events
-- native document, web, inbox, and proof surfaces exposed through `agentos-kernelctl`
+This is a **public prototype**, not a production AI OS distribution.
 
-This repository is currently a **public prototype**, not a production distribution.
+## What Is AgentOS?
 
-## Prototype Status
+AgentOS is an experimental OS-native agent runtime. It is built around one
+question:
 
-Phase 1 is closed as an OS-native agent runtime prototype.
+> What if the operating system boots into an agent operator surface instead of a
+> traditional desktop?
 
-What works today:
+Modern operating systems still assume a human manually opens apps, copies data
+between them, and coordinates the workflow. AgentOS experiments with a different
+default: after boot, an agent runtime becomes the operator surface and
+coordinates capabilities such as status, workspace inspection, web access, LLM
+setup, Telegram setup, and proof logging.
 
-- AgentOS can boot into a terminal-first operator surface.
-- A bundled local Ollama provider can run a tiny model for baseline interaction.
-- `agentos-kernelctl` exposes runtime, capability, setup, and proof surfaces.
-- Telegram setup/reply paths exist and are wired into the operator/runtime substrate.
-- The operator TUI can show status, mode switching, shell escapes, and activity-oriented output.
-- ISO remaster/build scripts exist for local ARM64 VM experimentation.
+The intended demo is the bootable image. Running `python3 src/main.py` from the
+repo is a developer shortcut for exercising some of the same runtime surfaces
+without booting the OS image.
 
-What is intentionally still Phase 2 work:
+## Demo Idea
 
-- setup UX is not yet polished enough for non-technical users
-- Telegram receiving/replying needs a reliable always-on product loop
-- lifecycle actions such as restart, reboot, shutdown, and recovery need a clearer product surface
-- error recovery needs to be friendlier than current diagnostic output
-- TUI history, activity narration, and setup completion feedback need product-quality refinement
-- verified boot, attestation, updater hardening, and installer distribution are out of Phase 1 scope
+The small proof loop looks like this:
+
+```text
+Boot a tiny AgentOS VM
+-> reach the terminal-first AgentOS operator surface
+-> configure LLM / Telegram runtime settings
+-> send a request through TTY or Telegram
+-> classify the request intent
+-> run the matching capability or tool
+-> reply and record proof/log events
+```
+
+Example requests for the prototype:
+
+```text
+status
+search AgentOS roadmap and summarize it
+workspace 파일 목록 보여줘
+```
+
+Telegram and web-based setup paths can carry UTF-8 text. Direct multilingual TTY
+input polish is still a Phase 2/i18n usability target.
+
+## What Works Now
+
+Phase 1 proves a narrow but real OS-native loop:
+
+- Bootable AgentOS ISO prototype for local VM experimentation.
+- Headless-first, terminal operator surface on boot.
+- Full-screen Bubble Tea/Lip Gloss operator TUI.
+- Agent and shell modes:
+  - Agent mode: talk to AgentOS.
+  - Shell mode: run Linux commands directly.
+  - `% <command>`: run one Linux command from agent mode.
+- Runtime readiness display for LLM, Telegram, Web, workspace, IP, and state.
+- Bundled local Ollama path with `smollm2:135m-instruct-q5_K_M` as the tiny baseline model.
+- LLM setup surface for local Ollama or OpenAI/Codex-style provider configuration.
+- OpenAI/Codex path is pinned to `gpt-4o-mini` in the prototype.
+- Telegram setup page and QR-oriented setup flow.
+- Telegram receive/reply experiments when configured.
+- Intent dispatch for greetings, status, search-style requests, and workspace-oriented requests.
+- Human-readable activity feed hooks.
+- Proof/log artifacts under the workspace, including `artifacts/os_events.jsonl`.
+- `agentos-kernelctl` command surfaces for status, guided operator, workflow status, setup, activity, and intent dispatch.
 
 ## Quick Start
 
-The fastest path is to run the prototype locally from the repo:
+Booting the ISO shows the actual AgentOS concept; running from the repo is the
+fastest developer shortcut.
+
+### Concept Demo: Boot The OS Image
+
+Build a local ISO:
 
 ```bash
-git clone git.com:Jongtae/agentos.git
+git clone git@github.com:Jongtae/agentos.git
+cd agentos
+./scripts/build_latest_agentos_iso.sh
+```
+
+Generated images are written under:
+
+```text
+build-output/release/
+```
+
+For Apple Silicon local testing, use the ARM64 image and a Linux VM in UTM:
+
+1. Install [UTM](https://mac.getutm.app/).
+2. Create a Linux VM using ARM64 virtualization.
+3. Attach the generated AgentOS ARM64 ISO.
+4. Boot the VM.
+5. Expect the AgentOS terminal operator surface.
+
+Expected boot flow:
+
+```text
+Boot
+-> AgentOS TTY/operator surface
+-> managed agent runtime
+-> LLM / Telegram / Web readiness
+-> AgentOS prompt and command shortcuts
+```
+
+Notes:
+
+- ISO build/remaster work may require host tooling and elevated permissions.
+- Generated ISOs, `build-output/`, runtime workspaces, and artifacts are ignored by Git.
+- Do not bake personal API keys or Telegram tokens into an ISO.
+
+### Developer Shortcut: Run From Repo
+
+Use this path when you want to inspect or develop the runtime without booting a
+VM:
+
+```bash
+git clone git@github.com:Jongtae/agentos.git
 cd agentos
 cp .env.example .env
 python3 src/main.py --doctor
 python3 src/main.py --no-tui
 ```
 
-For the operator/runtime surfaces:
+Inspect the same runtime surfaces directly:
 
 ```bash
 ./scripts/agentos-kernelctl status --json
 ./scripts/agentos-kernelctl guided-operator --workspace ./workspaces/default --json
 ./scripts/agentos-kernelctl workflow-status --workspace ./workspaces/default --json
+./scripts/agentos-kernelctl activity-feed --workspace ./workspaces/default --json
 ```
 
-## Build An ISO
+## Architecture
 
-Local ISO builds are supported for experimentation. Generated ISOs and remaster workdirs are intentionally ignored by Git.
+```text
+Bootable OS image
+  |
+  v
+AgentOS runtime
+  |
+  v
+TTY / Telegram / setup page input
+  |
+  v
+Command router / intent dispatcher
+  |
+  v
+Tools and surfaces
+  - LLM provider status
+  - workspace/files
+  - web access
+  - Telegram setup/reply
+  - proof/activity log
+  |
+  v
+Reply + proof log
+```
+
+Important entrypoints:
+
+- `cmd/agentos-operator-tui/` - full-screen terminal operator frontend
+- `scripts/agentos-kernelctl` - main runtime command surface
+- `scripts/kernel_intent_dispatch.py` - intent dispatch surface
+- `scripts/kernel_activity_feed.py` - activity feed surface
+- `scripts/kernel_llm_setup.py` - LLM setup surface
+- `scripts/kernel_telegram_setup.py` - Telegram setup surface
+- `src/kernel/event_fabric/` - event/proof substrate
+
+## Commands / Operator Surface
+
+Inside the AgentOS TUI:
+
+```text
+/help              show examples and shortcuts
+/status            show human-readable runtime status
+/mode agent        talk to AgentOS normally
+/mode shell        type Linux commands directly
+/setup llm         open the LLM setup page / QR flow
+/engine ollama     force bundled local Ollama
+/engine codex      select OpenAI/Codex path using gpt-4o-mini
+/setup telegram    open the Telegram setup page / QR flow
+/test telegram     manual Telegram drain/fallback receive-send check
+/power             show restart/reboot/shutdown options
+/clear             clear the visible activity area
+% <command>        run one Linux command from agent mode
+```
+
+The TUI is the product-facing surface. Raw Python commands are mostly developer
+shortcuts.
+
+## Proof Logs
+
+AgentOS is proof-first. A request should leave a trace:
+
+```text
+request received
+-> intent classified
+-> capability started
+-> capability completed or failed
+-> reply sent or surfaced to the operator
+```
+
+Typical workspace paths:
+
+```text
+/home/ubuntu/agentos-ws/artifacts/os_events.jsonl
+/home/ubuntu/agentos-ws/artifacts/
+```
+
+From a repo checkout:
 
 ```bash
-./scripts/build_latest_agentos_iso.sh
+./scripts/agentos-kernelctl activity-feed --workspace ./workspaces/default --json
 ```
 
-Expected output is under:
+The current proof surfaces are prototype-grade. Phase 2 will make the activity
+feed more reliable, more readable, and more central to the operator UI.
 
-```text
-build-output/release/
-```
+## Roadmap
 
-Notes:
+Phase 1 is closed as a public prototype.
 
-- Apple Silicon local VM testing should use the ARM64 ISO.
-- The build/remaster path may require host tooling and, depending on the platform, elevated permissions.
-- Do not commit generated ISOs, `build-output/`, or runtime artifacts.
+Near-term Phase 2 focus:
 
-## Run In UTM
+- productized first-run setup
+- reliable always-on Telegram receiver/reply loop
+- clearer setup completion feedback
+- richer operator activity narration
+- lifecycle controls for restart, reboot, shutdown, and service recovery
+- friendlier error recovery
+- acceptance-driven demo flow
+- i18n usability, including better direct TTY multilingual input
 
-For Apple Silicon:
+Future tracks:
 
-1. Install [UTM](https://mac.getutm.app/).
-2. Create a Linux VM using ARM64 virtualization.
-3. Attach the generated AgentOS ARM64 ISO from `build-output/release/`.
-4. Boot the VM.
-5. Expect a terminal-first AgentOS operator surface.
+- broader app/message adapters
+- stronger local models
+- installer distribution
+- verified boot, attestation, updater hardening
+- production credential/security model
 
-The intended Phase 1 boot experience is:
+## Limitations
 
-```text
-AgentOS TTY/operator surface
--> local LLM status
--> Telegram/LLM setup hints
--> AgentOS prompt and command shortcuts
-```
+AgentOS is not yet:
 
-## Configure LLM And Telegram
+- a production desktop OS
+- a secure multi-user OS
+- a Linux, macOS, or ChromeOS replacement
+- a fully autonomous OS
+- a polished consumer installer
+- a production Telegram automation platform
 
-AgentOS keeps secrets out of the ISO and out of the repo.
+Known prototype limitations:
 
-Runtime setup should write user-provided secrets to local runtime env files, not to committed artifacts.
+- GUI is not the primary interface.
+- Telegram support exists, but the product-grade always-on loop is Phase 2 work.
+- Setup UX still needs polish for non-technical users.
+- Direct TTY multilingual input is not yet a polished experience.
+- Credential handling is secret-free in the repo, but the production runtime security model is still evolving.
+- Gmail, Drive, Calendar, and broader app adapters are future work unless explicitly implemented in a branch.
+
+## Security And Secrets
+
+AgentOS keeps public code and public images secret-free.
+
+Never commit:
+
+- `.env`
+- Telegram bot tokens
+- OpenAI or other provider API keys
+- generated ISO artifacts
+- runtime workspace artifacts containing local state
+- real conversation logs
+
+Runtime setup should write user-provided secrets to local runtime env files, not
+to committed artifacts.
 
 Common runtime variables:
 
@@ -111,83 +297,19 @@ AGENTOS_TELEGRAM_BOT_TOKEN=...
 AGENTOS_TELEGRAM_ALLOWED_CHAT_IDS=...
 ```
 
-From inside AgentOS, use the operator surface or kernelctl setup commands:
-
-```bash
-agentos-kernelctl llm-setup --workspace /home/ubuntu/agentos-ws --json
-agentos-kernelctl telegram-setup --workspace /home/ubuntu/agentos-ws --json
-```
-
-Telegram support is currently prototype-grade. Phase 2 will focus on making setup completion, always-on receiving, reply status, and recovery clear from the TUI.
-
-## Architecture
-
-AgentOS is organized around these ideas:
-
-- **managed runtime first**: the visible OS surface exists to launch, supervise, and rejoin the agent runtime
-- **capability substrate**: common actions such as document, web, inbox, and proof export are exposed as OS-native surfaces
-- **intent dispatch**: requests should be understood before choosing a capability
-- **activity narration**: the operator should see what the system received, understood, ran, and completed
-- **secret-free images**: public ISOs should not bake personal credentials
-
-Useful entrypoints:
-
-- `src/` — runtime and kernel substrate code
-- `scripts/agentos-kernelctl` — primary command surface
-- `cmd/agentos-operator-tui/` — terminal operator frontend
-- `docs/index.md` — documentation map
-- `docs/reference/phase1-agentos-prototype-closeout-v1.md` — Phase 1 closeout truth
-
-## Roadmap
-
-Phase 1 is closed as a public prototype.
-
-Phase 2 should productize the loop:
-
-```text
-boot AgentOS
--> configure LLM and Telegram with clear setup feedback
--> receive a user request
--> classify intent
--> run the right capability
--> narrate progress in the TUI
--> return a useful reply
--> recover clearly when something fails
-```
-
-Near-term Phase 2 focus:
-
-- productized first-run setup
-- always-on Telegram receiver/reply loop
-- reliable operator activity feed
-- lifecycle controls
-- friendly error recovery
-- acceptance-driven demo flow
-
-## Security And Secrets
-
-Never commit:
-
-- `.env`
-- Telegram bot tokens
-- OpenAI or other provider API keys
-- generated ISO artifacts
-- runtime workspace artifacts containing local state
-
-The repo ignores generated build and runtime paths by default.
-
 ## Contributing
 
+Useful early contribution areas:
+
+- TUI usability and activity feed presentation
+- command router and intent dispatch rules
+- workspace/file tools
+- web-access reliability
+- i18n and Korean/English examples
+- VM boot testing across UTM/QEMU platforms
+- docs and reproducible demo scripts
+
 See `AGENTS.md` for the repository workflow.
-
-The short version:
-
-- start from an issue
-- create a matching branch
-- commit meaningful slices
-- validate before closeout
-- merge back into the correct parent branch
-- keep generated artifacts out of Git
 
 ## License
 

@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-15] Stabilize activity feed vocabulary`
+- `[P2-16] Add lifecycle recovery acceptance surface`
 
 Runtime impact statement:
 
-- This task stabilizes the user-visible runtime narration vocabulary so Phase 2 capabilities report progress, blocks, recovery, and completion consistently.
+- This task gives Phase 2 a truthful lifecycle/recovery acceptance surface so restart/rejoin-style requests can be planned, confirmed, and blocked without pretending destructive controls ran.
 
 ## Phase 1 Closeout Truth
 

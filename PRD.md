@@ -61,14 +61,23 @@ AgentOS should narrate its work in human-readable form:
 
 Common work should move toward OS-native capability surfaces before relying on app-mediated automation. Browser and external app automation remain fallback paths, not the default product identity.
 
+### Local-first user ownership
+
+AgentOS should keep user records, generated artifacts, exported logs, diagnostics, and retrieval-ready work history under user-owned local storage by default. External services and hosted providers are explicit adapters, not hidden defaults.
+
+Secrets and provider credentials must be separated from shared user data.
+
 ## Phase 2 Requirements
 
-Phase 2 should make the prototype feel coherent:
+Phase 2 should make the prototype feel coherent as a local-first Codex runtime loop:
 
-- guided LLM and Telegram setup
-- reliable always-on Telegram request handling
-- clear setup completion feedback
-- TUI scrollback and activity feed reliability
+- golden runtime loop acceptance before broad implementation
+- Docker developer/demo runtime preview without reframing Docker as the product target
+- user-owned runtime data boundary for shared records, artifacts, logs, diagnostics, and acceptance outputs
+- prompt intent classification contract before capability dispatch
+- guided setup state for local LLM, Telegram, and explicit external adapters
+- bounded everyday-work capabilities including AgentOS status/recovery, workspace files, web/search, and Gmail read/search/summarize/draft
+- activity feed and records output reliability
 - lifecycle controls for restart, reboot, shutdown, and recovery
 - friendly errors instead of raw JSON/parser traces
 - acceptance-driven demo flow for common requests
@@ -89,5 +98,6 @@ Prototype validation should include:
 - `TASKS.md`
 - `docs/index.md`
 - `docs/next-roadmap.md`
+- `docs/roadmap/phase2-local-first-runtime-loop.md`
 - `docs/reference/phase1-agentos-prototype-closeout-v1.md`
 - `AGENTS.md`

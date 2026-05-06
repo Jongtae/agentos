@@ -22,38 +22,48 @@ Phase 1 is not a production-ready operating system release. It is the proof that
 
 ## Phase 2 Goal
 
-Phase 2 should turn the prototype into a coherent product loop:
+Phase 2 should turn the prototype into a local-first Codex runtime loop:
 
 ```text
-boot AgentOS
--> configure LLM and Telegram
--> receive a user request
--> understand intent
--> run the right capability
--> show progress in the TUI
+local or booted AgentOS runtime
+-> configure local-first runtime adapters
+-> receive a user prompt
+-> classify intent
+-> run a bounded capability
+-> narrate progress
+-> store user-visible records
 -> reply or recover clearly
 ```
 
+The detailed Phase 2 roadmap is tracked in
+`docs/roadmap/phase2-local-first-runtime-loop.md`.
+
 ## Phase 2 Priority Work
 
-1. **Productized first-run setup**
-   - LLM setup and Telegram setup should feel like one guided flow.
-   - Setup completion must be visible in the setup page, TUI, and runtime status.
+1. **Golden runtime loop acceptance**
+   - Define the repeatable proof before broad implementation.
+   - Cover setup, prompt intake, intent classification, capability dispatch, activity narration, records, reply, and recovery.
 
-2. **Always-on Telegram runtime**
-   - Telegram should not require a manual “test” command for normal operation.
-   - The TUI should show receiver state, last request, last reply, and failure reason.
+2. **Docker runtime preview**
+   - Docker should be a developer/demo runtime preview, not the product target.
+   - It should prove the runtime loop without claiming boot, installer, VM recovery, or ISO freshness proof.
 
-3. **Operator activity feed**
-   - Every request should show: received, understood, planned, running, completed, replied, or failed.
+3. **User-owned runtime data**
+   - Shared folders and bind mounts should expose user-owned records, outputs, logs, diagnostics, and acceptance artifacts.
+   - Secrets must stay outside plaintext shared user data.
+
+4. **Intent classification contract**
+   - Prompt intent classification should be a runtime contract before capability dispatch.
+   - Low-confidence, destructive, external-send, or lifecycle-changing requests should require clarification or confirmation.
+
+5. **Everyday work capabilities**
+   - Prove bounded AgentOS status/recovery, workspace files, web/search, and Gmail read/search/summarize/draft flows.
+   - Calendar should begin read-only if it fits the Phase 2 slice.
+
+6. **Activity feed, records, and recovery**
+   - Every request should show received, classified, running, completed, replied, or failed.
    - Raw JSON and parser traces should be hidden behind logs.
-
-4. **Lifecycle and recovery**
-   - Add clear controls for restarting AgentOS services, rebooting, shutting down, and recovery/rejoin.
-   - Dangerous actions should require explicit commands.
-
-5. **Golden demo acceptance**
-   - A repeatable demo should cover `/start`, greeting, status, web search, workspace/file request, and a controlled failure path.
+   - Records/retrieval should be framed as a searchable user-owned work archive, not a complete second brain.
 
 ## Later Tracks
 
@@ -69,6 +79,7 @@ boot AgentOS
 - `README.md`
 - `PRD.md`
 - `TASKS.md`
-- `.codex/context.md`
+- repo-local private context when present
 - `docs/index.md`
+- `docs/roadmap/phase2-local-first-runtime-loop.md`
 - `docs/reference/phase1-agentos-prototype-closeout-v1.md`

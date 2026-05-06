@@ -141,9 +141,22 @@ Inspect the same runtime surfaces directly:
 
 ```bash
 ./scripts/agentos-kernelctl status --json
+./scripts/agentos-kernelctl phase2-run --message "status"
+./scripts/agentos-kernelctl phase2-run --message "draft a reply to my Gmail roadmap email"
 ./scripts/agentos-kernelctl guided-operator --workspace ./workspaces/default --json
 ./scripts/agentos-kernelctl workflow-status --workspace ./workspaces/default --json
 ./scripts/agentos-kernelctl activity-feed --workspace ./workspaces/default --json
+```
+
+The Phase 2 CLI loop is local-first and safe to try without credentials. Gmail
+uses fixture data by default; live Gmail OAuth and VM/ISO proof remain explicit
+follow-up work.
+
+The same loop is the Docker developer/demo default:
+
+```bash
+docker compose run --rm agent-os --prompt "status"
+docker compose run --rm agent-os --prompt "draft a reply to my Gmail roadmap email"
 ```
 
 ## Architecture

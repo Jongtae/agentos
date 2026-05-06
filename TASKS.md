@@ -11,15 +11,15 @@ Current parent branch:
 
 Current public milestone:
 
-- **Phase 2 closeout** — Local-first Codex runtime loop
+- **Phase 2 testable runtime loop** — Local-first Codex runtime loop
 
 Current task:
 
-- `[P2-18] Write Phase 2 closeout docs and signoff pack`
+- `[P2-19] Implement testable Phase 2 runtime CLI loop`
 
 Runtime impact statement:
 
-- This task records the final Phase 2 proof pack so public readers can distinguish observed local-first runtime behavior from credential and VM/ISO blockers.
+- This task turns Phase 2 from proof scripts into a user-testable `agentos-kernelctl phase2-run` prompt loop with bounded capabilities, activity, and user-owned records.
 
 ## Phase 1 Closeout Truth
 

@@ -31,5 +31,7 @@ ENV AGENTOS_USER_DATA_ROOT=/var/lib/agentos/user
 ENV LOG_LEVEL=WARNING
 
 # TUI requires a real terminal. The default container command runs the Phase 2
-# developer/demo runtime preview harness.
-ENTRYPOINT ["python", "scripts/phase2_runtime_preview.py", "--json"]
+# developer/demo runtime loop. Example:
+# docker compose run --rm agent-os --prompt "status"
+ENTRYPOINT ["python", "scripts/kernel_phase2_run.py", "--json"]
+CMD ["--prompt", "status"]

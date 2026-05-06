@@ -98,6 +98,7 @@ Prototype validation should include:
 - `TASKS.md`
 - `docs/index.md`
 - `docs/next-roadmap.md`
+- `docs/acceptance/phase2-golden-runtime-loop.md`
 - `docs/roadmap/phase2-local-first-runtime-loop.md`
 - `docs/reference/phase1-agentos-prototype-closeout-v1.md`
 - `AGENTS.md`

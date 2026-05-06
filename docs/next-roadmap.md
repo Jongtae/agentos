@@ -43,6 +43,7 @@ The detailed Phase 2 roadmap is tracked in
 1. **Golden runtime loop acceptance**
    - Define the repeatable proof before broad implementation.
    - Cover setup, prompt intake, intent classification, capability dispatch, activity narration, records, reply, and recovery.
+   - Detailed acceptance is tracked in `docs/acceptance/phase2-golden-runtime-loop.md`.
 
 2. **Docker runtime preview**
    - Docker should be a developer/demo runtime preview, not the product target.
@@ -81,5 +82,6 @@ The detailed Phase 2 roadmap is tracked in
 - `TASKS.md`
 - repo-local private context when present
 - `docs/index.md`
+- `docs/acceptance/phase2-golden-runtime-loop.md`
 - `docs/roadmap/phase2-local-first-runtime-loop.md`
 - `docs/reference/phase1-agentos-prototype-closeout-v1.md`

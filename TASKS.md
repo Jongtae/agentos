@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-06] Define intent classification contract and eval set`
+- `[P2-07] Add Docker runtime smoke harness`
 
 Runtime impact statement:
 
-- This task defines the Phase 2 intent vocabulary and seed eval set so prompt classification can be measured before capability execution changes expand.
+- This task adds a local/Docker runtime preview harness that proves setup-adjacent prompt intake, intent dispatch, activity output, and user-owned record writing without claiming OS boot or ISO proof.
 
 ## Phase 1 Closeout Truth
 

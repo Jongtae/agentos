@@ -15,6 +15,7 @@ large build outputs are not included.
 
 ## Current Product Docs
 
+- `docs/roadmap/phase2-local-first-runtime-loop.md` - Phase 2 local-first runtime loop roadmap
 - `docs/reference/phase1-agentos-prototype-closeout-v1.md` - Phase 1 closeout and Phase 2 handoff
 
 ## Public Export Policy

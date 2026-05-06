@@ -11,15 +11,15 @@ Current parent branch:
 
 Current public milestone:
 
-- **Phase 1 closed** — AgentOS OS-native agent runtime prototype
+- **Phase 2 opened** — Local-first Codex runtime loop
 
 Current task:
 
-- `[P289-20] Phase 1 public prototype closeout and docs cleanup`
+- `[P2-02] Document Phase 2 local-first runtime roadmap`
 
 Runtime impact statement:
 
-- This task closes Phase 1 truthfully as a public prototype, removes misleading active-task wording, and makes the repository understandable to outside readers without overstating product readiness.
+- This task keeps Phase 2 centered on the Codex-native runtime loop by documenting how prompts become classified intents, bounded capabilities, narrated activity, user-owned records, and clear recovery.
 
 ## Phase 1 Closeout Truth
 
@@ -67,27 +67,29 @@ Do not commit:
 
 ## Phase 2 Recommended Work
 
-Phase 2 should productize the loop that Phase 1 exposed:
+Phase 2 should productize the local-first runtime loop that Phase 1 exposed:
 
 ```text
-boot AgentOS
--> configure LLM and Telegram
--> receive a request
+local or booted AgentOS runtime
+-> configure local-first runtime adapters
+-> receive a user prompt
 -> classify intent
--> run the correct capability
--> narrate the work in the operator TUI
+-> run a bounded capability
+-> narrate progress
+-> store user-visible records
 -> reply or fail with clear recovery guidance
 ```
 
 Recommended Phase 2 tasks:
 
-- Productized first-run setup for LLM and Telegram.
-- Always-on Telegram receiver/reply loop with clear TUI status.
-- Setup completion feedback in the setup page, TUI, and Telegram reply.
-- TUI scrollback, activity feed, and mode switching stabilization.
-- Lifecycle menu for restarting AgentOS services, rebooting, shutting down, and recovering.
-- Friendly error recovery that hides raw JSON/parser traces by default.
-- Acceptance-driven golden demo: `/start`, greeting, status, web search, workspace request, and failure recovery.
+- Golden runtime loop acceptance.
+- Docker developer/demo runtime preview boundary.
+- User-owned runtime data boundary for shared records, outputs, logs, diagnostics, and acceptance artifacts.
+- Intent classification contract and eval set.
+- Productized first-run setup state model.
+- Gmail read/search/summarize/draft capability boundary.
+- Activity feed, records output, lifecycle controls, and recovery.
+- Acceptance-driven golden demo: `/start`, greeting, status, web search, workspace request, Gmail draft, and failure recovery.
 
 ## Validation Standards
 
@@ -110,6 +112,7 @@ python3 scripts/cleanup_build_artifacts.py --delete --json
 - `README.md`
 - `PRD.md`
 - `AGENTS.md`
-- `.codex/context.md`
+- repo-local private context when present
 - `docs/index.md`
 - `docs/next-roadmap.md`
+- `docs/roadmap/phase2-local-first-runtime-loop.md`

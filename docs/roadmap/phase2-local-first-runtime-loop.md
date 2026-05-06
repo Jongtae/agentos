@@ -111,6 +111,10 @@ Intent classification is a core runtime contract, not a Telegram-specific
 feature. User prompts must be classified before capability dispatch so AgentOS
 can execute safely, narrate accurately, and recover clearly.
 
+The detailed contract is tracked in
+`docs/architecture/intent-classification-contract.md`, with the seed eval set in
+`docs/acceptance/phase2-intent-eval.json`.
+
 The Phase 2 contract should define at least:
 
 - `greeting`

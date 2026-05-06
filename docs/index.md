@@ -16,8 +16,10 @@ large build outputs are not included.
 ## Current Product Docs
 
 - `docs/architecture/docker-runtime-preview-boundary.md` - Docker developer/demo proof boundary
+- `docs/architecture/intent-classification-contract.md` - Phase 2 prompt intent contract
 - `docs/architecture/user-owned-runtime-data-boundary.md` - local-first user data ownership boundary
 - `docs/acceptance/phase2-golden-runtime-loop.md` - Phase 2 golden runtime loop acceptance
+- `docs/acceptance/phase2-intent-eval.json` - seed prompt intent eval set
 - `docs/roadmap/phase2-local-first-runtime-loop.md` - Phase 2 local-first runtime loop roadmap
 - `docs/reference/phase1-agentos-prototype-closeout-v1.md` - Phase 1 closeout and Phase 2 handoff
 

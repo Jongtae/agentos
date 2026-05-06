@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-13] Add Gmail fixture read and draft boundary`
+- `[P2-14] Add records output and lookup substrate`
 
 Runtime impact statement:
 
-- This task proves everyday email work can enter the Phase 2 loop through a safe fixture-backed read/search/summarize/draft boundary without requiring real Gmail credentials or unsafe mailbox mutations.
+- This task gives Phase 2 capabilities a user-owned searchable work archive so useful runtime outputs can be found later without promising a full second-brain product.
 
 ## Phase 1 Closeout Truth
 

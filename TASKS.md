@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-10] Implement intent taxonomy eval runner`
+- `[P2-11] Define capability result contract`
 
 Runtime impact statement:
 
-- This task wires the Phase 2 intent taxonomy into deterministic classification coverage so the seed bilingual eval set passes before capability dispatch expands.
+- This task adds a common Phase 2 capability result shape so dispatch, activity, records, and recovery can share one contract.
 
 ## Phase 1 Closeout Truth
 

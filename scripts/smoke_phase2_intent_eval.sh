@@ -12,7 +12,7 @@ from pathlib import Path
 payload = json.loads(Path("/tmp/agentos-phase2-intent-eval.json").read_text())
 assert payload["schema_version"] == "agentos-phase2-intent-eval-result.v1"
 assert payload["case_count"] >= 18
-assert payload["failed_count"] >= 1
+assert payload["failed_count"] == 0
 PY
 
 echo "phase2 intent eval seed smoke: PASS"

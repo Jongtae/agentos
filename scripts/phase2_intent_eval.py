@@ -23,6 +23,10 @@ LEGACY_TO_PHASE2 = {
     "local_workspace_search": "workspace_file_request",
     "web_search_summary": "web_search_request",
     "memory_note": "record_lookup",
+    "setup_help": "setup_help",
+    "gmail_read_or_draft": "gmail_read_or_draft",
+    "record_lookup": "record_lookup",
+    "lifecycle_recovery": "lifecycle_recovery",
     "unknown_needs_clarification": "unknown_or_unsupported",
 }
 
@@ -71,4 +75,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-16] Add lifecycle recovery acceptance surface`
+- `[P2-17] Create Phase 2 golden demo acceptance runner`
 
 Runtime impact statement:
 
-- This task gives Phase 2 a truthful lifecycle/recovery acceptance surface so restart/rejoin-style requests can be planned, confirmed, and blocked without pretending destructive controls ran.
+- This task turns Phase 2 into a repeatable golden demo proof that runs practical local/Docker-safe smokes while separating credential and VM blockers from observed runtime results.
 
 ## Phase 1 Closeout Truth
 

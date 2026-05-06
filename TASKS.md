@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-08] Productize first-run setup state model`
+- `[P2-09] Add user-owned data path smoke`
 
 Runtime impact statement:
 
-- This task adds a Phase 2 setup/status model that reports local runtime readiness and degraded external adapters without exposing secrets.
+- This task adds a smokeable data boundary proof showing user-owned records, AgentOS-managed state, cache, run state, and secrets remain separated.
 
 ## Phase 1 Closeout Truth
 

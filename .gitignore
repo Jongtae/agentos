@@ -38,3 +38,6 @@ artifacts/
 build-output/
 slots/
 workspaces/*/artifacts/
+
+# Local Phase 2 preview data
+agentos-data/

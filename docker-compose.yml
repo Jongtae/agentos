@@ -9,10 +9,13 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - DEFAULT_WORKSPACE=/app/workspaces/default
+      - AGENTOS_USER_DATA_ROOT=/var/lib/agentos/user
       - LOG_LEVEL=${LOG_LEVEL:-WARNING}
     volumes:
       # Persist workspace data (memory DB, session state) on host
       - ./workspaces:/app/workspaces
+      # Persist user-owned Phase 2 records and preview outputs on host
+      - ./agentos-data/user:/var/lib/agentos/user
     security_opt:
       - no-new-privileges:true
     cap_drop:

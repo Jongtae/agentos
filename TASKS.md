@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-12] Stabilize status workspace and web dispatch`
+- `[P2-13] Add Gmail fixture read and draft boundary`
 
 Runtime impact statement:
 
-- This task proves core Phase 2 prompts can flow through intent classification, bounded capability execution, activity narration, and proof reporting without per-implementer interpretation.
+- This task proves everyday email work can enter the Phase 2 loop through a safe fixture-backed read/search/summarize/draft boundary without requiring real Gmail credentials or unsafe mailbox mutations.
 
 ## Phase 1 Closeout Truth
 

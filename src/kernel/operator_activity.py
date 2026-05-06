@@ -15,9 +15,25 @@ ACTIVITY_EVENT_KINDS = {
     "intent.classified",
     "capability.started",
     "capability.completed",
+    "capability.blocked",
+    "capability.degraded",
     "capability.failed",
+    "recovery.suggested",
     "telegram.reply_sent",
     "setup.completed",
+}
+
+ACTIVITY_DECISION_STATES = {
+    "received",
+    "classified",
+    "running",
+    "completed",
+    "blocked",
+    "degraded",
+    "failed",
+    "sent",
+    "suggested",
+    "observed",
 }
 
 
@@ -155,8 +171,14 @@ def _message_for_kind(kind: str, obj: dict) -> str:
         return f"Running capability: {obj.get('capability', 'unknown')}"
     if kind == "capability.completed":
         return f"Completed capability: {obj.get('capability', 'unknown')}"
+    if kind == "capability.blocked":
+        return f"Capability blocked: {obj.get('capability', 'unknown')}"
+    if kind == "capability.degraded":
+        return f"Capability degraded: {obj.get('capability', 'unknown')}"
     if kind == "capability.failed":
         return f"Capability failed: {obj.get('capability', 'unknown')}"
+    if kind == "recovery.suggested":
+        return f"Recovery suggested: {obj.get('capability', 'unknown')}"
     if kind == "telegram.reply_sent":
         return "Reply sent to Telegram"
     return kind

@@ -48,6 +48,9 @@ acceptance loop should cover setup status, prompt intake, intent classification,
 capability dispatch, activity narration, user-visible records, reply, and
 friendly recovery.
 
+The detailed acceptance contract is tracked in
+`docs/acceptance/phase2-golden-runtime-loop.md`.
+
 The initial acceptance set should include:
 
 - `/start` or greeting
@@ -171,4 +174,3 @@ Phase 2 can close only when AgentOS can truthfully state:
 > that classifies user intent, executes bounded everyday-work capabilities,
 > narrates progress, stores user-visible records, and recovers clearly from
 > failure.
-

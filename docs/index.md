@@ -15,6 +15,7 @@ large build outputs are not included.
 
 ## Current Product Docs
 
+- `docs/acceptance/phase2-golden-runtime-loop.md` - Phase 2 golden runtime loop acceptance
 - `docs/roadmap/phase2-local-first-runtime-loop.md` - Phase 2 local-first runtime loop roadmap
 - `docs/reference/phase1-agentos-prototype-closeout-v1.md` - Phase 1 closeout and Phase 2 handoff
 

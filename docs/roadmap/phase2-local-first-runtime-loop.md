@@ -67,6 +67,9 @@ Docker support should make the public project easier to try and easier to smoke
 test. It should not claim to prove boot ownership, installer readiness,
 reboot/rejoin behavior, kernel-level supervision, VM recovery, or ISO freshness.
 
+The detailed boundary is tracked in
+`docs/architecture/docker-runtime-preview-boundary.md`.
+
 The Docker path should prove only the runtime preview surface: configuration
 status, intent dispatch, activity events, bounded capability execution, records
 output, and friendly failure behavior.

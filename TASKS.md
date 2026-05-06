@@ -11,15 +11,15 @@ Current parent branch:
 
 Current public milestone:
 
-- **Phase 2 opened** — Local-first Codex runtime loop
+- **Phase 2 closeout** — Local-first Codex runtime loop
 
 Current task:
 
-- `[P2-17] Create Phase 2 golden demo acceptance runner`
+- `[P2-18] Write Phase 2 closeout docs and signoff pack`
 
 Runtime impact statement:
 
-- This task turns Phase 2 into a repeatable golden demo proof that runs practical local/Docker-safe smokes while separating credential and VM blockers from observed runtime results.
+- This task records the final Phase 2 proof pack so public readers can distinguish observed local-first runtime behavior from credential and VM/ISO blockers.
 
 ## Phase 1 Closeout Truth
 
@@ -82,14 +82,9 @@ local or booted AgentOS runtime
 
 Recommended Phase 2 tasks:
 
-- Golden runtime loop acceptance.
-- Docker developer/demo runtime preview boundary.
-- User-owned runtime data boundary for shared records, outputs, logs, diagnostics, and acceptance artifacts.
-- Intent classification contract and eval set.
-- Productized first-run setup state model.
-- Gmail read/search/summarize/draft capability boundary.
-- Activity feed, records output, lifecycle controls, and recovery.
-- Acceptance-driven golden demo: `/start`, greeting, status, web search, workspace request, Gmail draft, and failure recovery.
+- Phase 2 closeout is recorded in `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`.
+- Practical local/Docker-safe proof is aggregated by `scripts/smoke_phase2_golden_demo.sh`.
+- Real Gmail OAuth and VM/ISO proof remain explicit blockers until credentials and a VM run are provided.
 
 ## Validation Standards
 
@@ -121,3 +116,4 @@ python3 scripts/cleanup_build_artifacts.py --delete --json
 - `docs/acceptance/phase2-golden-runtime-loop.md`
 - `docs/acceptance/phase2-intent-eval.json`
 - `docs/roadmap/phase2-local-first-runtime-loop.md`
+- `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`

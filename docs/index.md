@@ -22,6 +22,7 @@ large build outputs are not included.
 - `docs/acceptance/phase2-intent-eval.json` - seed prompt intent eval set
 - `docs/roadmap/phase2-local-first-runtime-loop.md` - Phase 2 local-first runtime loop roadmap
 - `docs/reference/phase1-agentos-prototype-closeout-v1.md` - Phase 1 closeout and Phase 2 handoff
+- `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md` - Phase 2 proof and blocker closeout
 
 ## Public Export Policy
 

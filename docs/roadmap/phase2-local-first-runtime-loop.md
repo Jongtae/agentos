@@ -170,11 +170,16 @@ not:
 5. `[P2-06] Define intent classification contract and eval set`
 6. `[P2-07] Add Docker runtime smoke harness`
 7. `[P2-08] Productize first-run setup state model`
-8. `[P2-09] Add Gmail read and draft capability boundary`
-9. `[P2-10] Stabilize activity feed and records output`
-10. `[P2-11] Add lifecycle and recovery controls`
-11. `[P2-12] Create Phase 2 golden demo acceptance runner`
-12. `[P2-13] Phase 2 docs and closeout`
+8. `[P2-09] Add user-owned data path smoke`
+9. `[P2-10] Implement intent taxonomy eval runner`
+10. `[P2-11] Define capability result contract`
+11. `[P2-12] Stabilize status workspace and web dispatch`
+12. `[P2-13] Add Gmail fixture read and draft boundary`
+13. `[P2-14] Add records output and lookup substrate`
+14. `[P2-15] Stabilize activity feed vocabulary`
+15. `[P2-16] Add lifecycle recovery acceptance surface`
+16. `[P2-17] Create Phase 2 golden demo acceptance runner`
+17. `[P2-18] Write Phase 2 closeout docs and signoff pack`
 
 ## Closeout Standard
 
@@ -184,3 +189,6 @@ Phase 2 can close only when AgentOS can truthfully state:
 > that classifies user intent, executes bounded everyday-work capabilities,
 > narrates progress, stores user-visible records, and recovers clearly from
 > failure.
+
+The closeout proof and remaining blockers are recorded in
+`docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`.

@@ -1,6 +1,6 @@
 # AgentOS Next Roadmap
 
-Status: Current
+Status: Phase 2 closeout recorded
 
 ## Phase 1 Closed
 
@@ -68,6 +68,9 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Later Tracks
 
+- live Gmail OAuth read/search/draft proof with explicit user consent
+- VM/ISO proof for boot, recovery, and managed Codex session rejoin
+- calendar read-only capability candidate
 - verified boot and hardware attestation
 - updater hardening
 - broader app/inbox ecosystem
@@ -85,3 +88,4 @@ The detailed Phase 2 roadmap is tracked in
 - `docs/acceptance/phase2-golden-runtime-loop.md`
 - `docs/roadmap/phase2-local-first-runtime-loop.md`
 - `docs/reference/phase1-agentos-prototype-closeout-v1.md`
+- `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`

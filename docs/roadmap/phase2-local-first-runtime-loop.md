@@ -78,6 +78,9 @@ output, and friendly failure behavior.
 
 AgentOS should separate user-owned data from AgentOS-managed state.
 
+The detailed boundary is tracked in
+`docs/architecture/user-owned-runtime-data-boundary.md`.
+
 User-owned data includes:
 
 - workspaces

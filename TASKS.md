@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-05] Define user-owned runtime data boundary`
+- `[P2-06] Define intent classification contract and eval set`
 
 Runtime impact statement:
 
-- This task defines the local-first data boundary so AgentOS records, outputs, diagnostics, and acceptance artifacts stay user-manageable while secrets and internal runtime state remain separated.
+- This task defines the Phase 2 intent vocabulary and seed eval set so prompt classification can be measured before capability execution changes expand.
 
 ## Phase 1 Closeout Truth
 
@@ -116,6 +116,8 @@ python3 scripts/cleanup_build_artifacts.py --delete --json
 - `docs/index.md`
 - `docs/next-roadmap.md`
 - `docs/architecture/docker-runtime-preview-boundary.md`
+- `docs/architecture/intent-classification-contract.md`
 - `docs/architecture/user-owned-runtime-data-boundary.md`
 - `docs/acceptance/phase2-golden-runtime-loop.md`
+- `docs/acceptance/phase2-intent-eval.json`
 - `docs/roadmap/phase2-local-first-runtime-loop.md`

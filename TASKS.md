@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-14] Add records output and lookup substrate`
+- `[P2-15] Stabilize activity feed vocabulary`
 
 Runtime impact statement:
 
-- This task gives Phase 2 capabilities a user-owned searchable work archive so useful runtime outputs can be found later without promising a full second-brain product.
+- This task stabilizes the user-visible runtime narration vocabulary so Phase 2 capabilities report progress, blocks, recovery, and completion consistently.
 
 ## Phase 1 Closeout Truth
 

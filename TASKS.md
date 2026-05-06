@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-03] Define Phase 2 golden runtime loop acceptance`
+- `[P2-04] Define Docker runtime preview boundary`
 
 Runtime impact statement:
 
-- This task turns the Phase 2 roadmap into concrete acceptance criteria so future implementation can prove the Codex-native runtime loop instead of merely adding disconnected features.
+- This task keeps Docker positioned as a developer/demo proof harness for the Codex-native runtime loop, without allowing Docker to replace OS-native boot, recovery, or supervision proof.
 
 ## Phase 1 Closeout Truth
 
@@ -115,5 +115,6 @@ python3 scripts/cleanup_build_artifacts.py --delete --json
 - repo-local private context when present
 - `docs/index.md`
 - `docs/next-roadmap.md`
+- `docs/architecture/docker-runtime-preview-boundary.md`
 - `docs/acceptance/phase2-golden-runtime-loop.md`
 - `docs/roadmap/phase2-local-first-runtime-loop.md`

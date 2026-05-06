@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-07] Add Docker runtime smoke harness`
+- `[P2-08] Productize first-run setup state model`
 
 Runtime impact statement:
 
-- This task adds a local/Docker runtime preview harness that proves setup-adjacent prompt intake, intent dispatch, activity output, and user-owned record writing without claiming OS boot or ISO proof.
+- This task adds a Phase 2 setup/status model that reports local runtime readiness and degraded external adapters without exposing secrets.
 
 ## Phase 1 Closeout Truth
 

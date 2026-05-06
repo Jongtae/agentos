@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-11] Define capability result contract`
+- `[P2-12] Stabilize status workspace and web dispatch`
 
 Runtime impact statement:
 
-- This task adds a common Phase 2 capability result shape so dispatch, activity, records, and recovery can share one contract.
+- This task proves core Phase 2 prompts can flow through intent classification, bounded capability execution, activity narration, and proof reporting without per-implementer interpretation.
 
 ## Phase 1 Closeout Truth
 

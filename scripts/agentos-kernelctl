@@ -46,6 +46,7 @@ WORKFLOW_STATUS_CMD="${AGENTOS_KERNEL_WORKFLOW_STATUS_CMD:-$ROOT_DIR/scripts/ker
 ASK_CMD="${AGENTOS_KERNEL_ASK_CMD:-$ROOT_DIR/scripts/kernel_ask.py}"
 ACTIVITY_FEED_CMD="${AGENTOS_KERNEL_ACTIVITY_FEED_CMD:-$ROOT_DIR/scripts/kernel_activity_feed.py}"
 INTENT_DISPATCH_CMD="${AGENTOS_KERNEL_INTENT_DISPATCH_CMD:-$ROOT_DIR/scripts/kernel_intent_dispatch.py}"
+PHASE2_RUN_CMD="${AGENTOS_KERNEL_PHASE2_RUN_CMD:-$ROOT_DIR/scripts/kernel_phase2_run.py}"
 RESEARCH_WORKFLOW_CMD="${AGENTOS_KERNEL_RESEARCH_WORKFLOW_CMD:-$ROOT_DIR/scripts/kernel_research_workflow.py}"
 RESEARCH_BRIEF_CMD="${AGENTOS_KERNEL_RESEARCH_BRIEF_CMD:-$ROOT_DIR/scripts/kernel_research_brief.py}"
 INBOX_WORKFLOW_CMD="${AGENTOS_KERNEL_INBOX_WORKFLOW_CMD:-$ROOT_DIR/scripts/kernel_inbox_workflow.py}"
@@ -278,6 +279,7 @@ Usage:
   agentos-kernelctl research-workflow [--workspace <path>] [--message-text <text>] [--chat-id <id>] [--request-id <id>] [--message-id <id>] [--session-id <id>] [--allow-domain <domain>] [--send] [--output <path>] [--json]
   agentos-kernelctl activity-feed [--workspace <path>] [--limit <N>] [--output <path>] [--json]
   agentos-kernelctl intent-dispatch [--workspace <path>] [--source telegram|operator] --message <text> [--chat-id <id>] [--request-id <id>] [--message-id <id>] [--session-id <id>] [--allow-domain <domain>] [--send] [--output <path>] [--json]
+  agentos-kernelctl phase2-run [--workspace <path>] [--user-root <path>] --message <text> [--gmail-fixture <path>] [--allow-domain <domain>] [--output <path>] [--json]
   agentos-kernelctl research-brief [--workspace <path>] [--message-text <text>] [--chat-id <id>] [--request-id <id>] [--message-id <id>] [--session-id <id>] [--allow-domain <domain>] [--send] [--output <path>] [--json]
   agentos-kernelctl inbox-workflow [--workspace <path>] [--maildir <relative-path>] [--session-id <id>] [--output <path>] [--json]
   agentos-kernelctl inbox-reply-workflow [--workspace <path>] [--maildir <relative-path>] [--session-id <id>] [--output <path>] [--json]
@@ -383,6 +385,8 @@ telegram_setup_url_file=""
 llm_setup_set_provider=""
 llm_setup_openai_api_key=""
 ask_message=""
+phase2_user_root="${AGENTOS_USER_DATA_ROOT:-$ROOT_DIR/agentos-data/user}"
+phase2_gmail_fixture=""
 intent_source="operator"
 vm_identifier=""
 policy_enable=0
@@ -573,6 +577,18 @@ while [ "$#" -gt 0 ]; do
     --message)
       shift
       ask_message="${1:-}"
+      ;;
+    --prompt)
+      shift
+      ask_message="${1:-}"
+      ;;
+    --user-root)
+      shift
+      phase2_user_root="${1:-}"
+      ;;
+    --gmail-fixture)
+      shift
+      phase2_gmail_fixture="${1:-}"
       ;;
     --chat-id)
       shift
@@ -3191,6 +3207,34 @@ PY
       intent_args+=(--json)
     fi
     exec "$INTENT_DISPATCH_CMD" "${intent_args[@]}"
+    ;;
+  phase2-run)
+    if [ ! -x "$PHASE2_RUN_CMD" ] && ! command -v "$PHASE2_RUN_CMD" >/dev/null 2>&1; then
+      echo "phase2 run tool not found: $PHASE2_RUN_CMD"
+      exit 1
+    fi
+    if [ -z "$ask_message" ]; then
+      echo "--message or --prompt is required for phase2-run"
+      exit 2
+    fi
+    phase2_args=(--workspace "$workspace" --user-root "$phase2_user_root" --message "$ask_message")
+    if [ -n "$phase2_gmail_fixture" ]; then
+      phase2_args+=(--gmail-fixture "$phase2_gmail_fixture")
+    fi
+    if [ "${#web_allow_domains[@]}" -gt 0 ]; then
+      for domain in "${web_allow_domains[@]}"; do
+        if [ -n "$domain" ]; then
+          phase2_args+=(--allow-domain "$domain")
+        fi
+      done
+    fi
+    if [ -n "$out_dir" ]; then
+      phase2_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      phase2_args+=(--json)
+    fi
+    exec "$PHASE2_RUN_CMD" "${phase2_args[@]}"
     ;;
   document-access)
     if [ ! -x "$DOCUMENT_ACCESS_CMD" ] && ! command -v "$DOCUMENT_ACCESS_CMD" >/dev/null 2>&1; then

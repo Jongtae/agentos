@@ -20,6 +20,7 @@ PRACTICAL_SMOKES = [
     "scripts/smoke_phase2_records.sh",
     "scripts/smoke_phase2_activity_vocabulary.sh",
     "scripts/smoke_phase2_lifecycle_recovery.sh",
+    "scripts/smoke_phase2_run_cli.sh",
 ]
 
 EXPLICIT_BLOCKERS = [

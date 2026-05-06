@@ -21,14 +21,24 @@ START_TEXTS = {"/start", "start"}
 def classify_intent(message: str, *, source: str = "operator") -> dict:
     raw = str(message or "").strip()
     normalized = re.sub(r"\s+", " ", raw.lower()).strip()
+    if any(token in normalized for token in ("delete all emails", "delete all mail", "메일 전부 삭제", "전부 삭제")):
+        return _intent("unknown_needs_clarification", "direct_reply", "deterministic_safety")
     if normalized in START_TEXTS:
         return _intent("telegram_start", "direct_reply", "deterministic_command")
     if normalized in HELP_TEXTS:
         return _intent("telegram_help", "direct_reply", "deterministic_command")
-    if normalized in STATUS_TEXTS:
+    if normalized in STATUS_TEXTS or ("status" in normalized and "agentos" in normalized) or "상태" in normalized:
         return _intent("runtime_status", "runtime_status", "deterministic_command")
     if normalized in GREETING_TEXTS:
         return _intent("greeting", "direct_reply", "deterministic_greeting")
+    if any(token in normalized for token in ("setup", "set up", "설정", "configure", "config")):
+        return _intent("setup_help", "direct_reply", "deterministic_setup")
+    if any(token in normalized for token in ("gmail", "email", "mail", "메일", "inbox", "답장 초안", "draft a reply")):
+        return _intent("gmail_read_or_draft", "gmail_read_or_draft", "deterministic_gmail")
+    if any(token in normalized for token in ("restart", "recovery", "recover", "rejoin", "서비스 재시작", "재시작")):
+        return _intent("lifecycle_recovery", "lifecycle_recovery", "deterministic_lifecycle")
+    if any(token in normalized for token in ("지난번", "회의 기록", "record", "records", "prior note", "last agentos meeting")):
+        return _intent("record_lookup", "record_lookup", "deterministic_record")
     if any(token in normalized for token in ("파일", "디렉토리", "directory", "folder", "workspace", "목록", "list files", "ls ")):
         return _intent("local_workspace_search", "local_workspace_search", "deterministic_workspace")
     if any(token in normalized for token in ("기억", "remember", "메모", "note this")):

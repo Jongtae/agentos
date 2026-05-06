@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-09] Add user-owned data path smoke`
+- `[P2-10] Implement intent taxonomy eval runner`
 
 Runtime impact statement:
 
-- This task adds a smokeable data boundary proof showing user-owned records, AgentOS-managed state, cache, run state, and secrets remain separated.
+- This task wires the Phase 2 intent taxonomy into deterministic classification coverage so the seed bilingual eval set passes before capability dispatch expands.
 
 ## Phase 1 Closeout Truth
 

@@ -23,6 +23,14 @@ if ! command -v "$GO_BIN" >/dev/null 2>&1; then
   exit 1
 fi
 
+GOROOT="$("$GO_BIN" env GOROOT 2>/dev/null || true)"
+if [ -z "$GOROOT" ] || [ ! -f "$GOROOT/src/context/context.go" ] || [ ! -f "$GOROOT/src/fmt/print.go" ]; then
+  echo "Go toolchain is incomplete or corrupted: $GO_BIN" >&2
+  echo "GOROOT: ${GOROOT:-unknown}" >&2
+  echo "Remove stale /tmp/agentos-go-* caches, install Go, set AGENTOS_GO_BIN, or set AGENTOS_OPERATOR_TUI_BIN." >&2
+  exit 1
+fi
+
 mkdir -p "$(dirname "$OUT")"
 (
   cd "$ROOT_DIR"

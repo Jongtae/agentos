@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-20] Add Gmail setup page and read-only OAuth adapter`
+- `[P2-21] Harden ISO build Go toolchain selection`
 
 Runtime impact statement:
 
-- This task brings Gmail read-only setup and live read proof into the kernel-mediated Phase 2 runtime loop so VM testers can configure OAuth through an AgentOS setup surface without leaking secrets into user-owned records or Git.
+- This task keeps the AgentOS ISO build path from selecting a corrupted cached Go toolchain, protecting the operator TUI build and the VM-testable runtime image path.
 
 ## Phase 1 Closeout Truth
 

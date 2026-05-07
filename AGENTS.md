@@ -2,24 +2,26 @@
 
 ## Purpose
 
-This repository uses an issue-first execution workflow and a repo-local Codex operating layer.
+This repository uses an issue-first, PR-centered, agent-assisted development workflow.
 
-The core autonomous operating set for this repo is:
+The public project should not depend on, advertise, or require any specific
+AI coding assistant. Contributors may use whatever tools they prefer, but the
+repository history should explain the product change, validation, and review
+path rather than the tool used to make the change.
+
+The core operating set for this repo is:
 - `PRD.md`
 - `TASKS.md`
 - `AGENTS.md`
-- `.codex/config.toml`
-- `.codex/context.md`
-- `.codex/checklists/*`
-- `.codex/prompts/*`
 - `.agents/*`
 
 Every phase, milestone slice, and task-sized issue must be tracked through:
 - a GitHub issue
 - a matching working branch
 - one or more intentional commits
-- a closeout step that closes the issue
-- a merge step that lands the branch into its parent branch
+- a pull request for public review, CI, and discussion
+- a closeout step that closes the issue after merge
+- a merge step that lands the branch into its parent branch or `main`
 
 Large host temp artifacts created by AgentOS remaster, packaging, or VM-proof work must also be tracked operationally:
 - stale AgentOS temp artifacts are not acceptable hidden debt
@@ -36,19 +38,19 @@ Large local build artifacts under `build-output/` must be tracked the same way:
 The primary product goal is not “an AgentOS-like appliance shell.”
 
 The primary product goal is:
-- make Codex CLI the kernel-mediated primary runtime of AgentOS
-- ensure boot, install, reboot, recovery, and rejoin all converge back to the managed Codex CLI session
-- treat welcome/install/recovery UX as support surfaces for the Codex runtime, not as the product itself
+- make the managed agent runtime the default post-boot interface of AgentOS
+- ensure boot, install, reboot, recovery, and rejoin converge back to a managed AgentOS runtime session
+- treat welcome/install/recovery UX as support surfaces for the runtime, not as the product itself
 
 Non-negotiables:
-- work that only improves boot resemblance, theming, or appliance polish without advancing or protecting the Codex CLI runtime is not sufficient
-- every new phase/task must explicitly state how it advances `kernel-native Codex CLI runtime` behavior, supervision, continuity, or proof
-- when a tradeoff exists between prettier appliance UX and stronger Codex runtime ownership, prefer stronger Codex runtime ownership
+- work that only improves boot resemblance, theming, or appliance polish without advancing or protecting the managed runtime is not sufficient
+- every new phase/task must explicitly state how it advances runtime behavior, supervision, continuity, or proof
+- when a tradeoff exists between prettier appliance UX and stronger runtime ownership, prefer stronger runtime ownership
 
 Post-MVP planning lock:
 - the completed MVP remains the baseline and must not be reframed as incomplete
-- post-MVP work must extend the baseline toward Codex-native capability ownership rather than reset the runtime-first proof chain
-- every post-MVP phase/task must explicitly state whether it advances `capability ownership`, `mediation cost reduction`, or `OS-native defaults for Codex`
+- post-MVP work must extend the baseline toward OS-native capability ownership rather than reset the runtime-first proof chain
+- every post-MVP phase/task must explicitly state whether it advances `capability ownership`, `mediation cost reduction`, or `OS-native runtime defaults`
 - browser and tool work should prefer turning common access patterns into internal substrate capabilities before expanding external adapter dependence
 
 ## Required workflow
@@ -67,39 +69,65 @@ Naming rules:
   - `[P<phase>-NN] <verb phrase>`
 
 Branch rules:
-- phase branch:
-  - `codex/stage<stage>-phase<phase>-<slug>`
-- task branch:
-  - `codex/p<phase>-NN-<slug>`
+- public feature branch:
+  - `feature/<short-slug>`
+- public bugfix branch:
+  - `fix/<short-slug>`
+- public docs branch:
+  - `docs/<short-slug>`
+- public release/build tooling branch:
+  - `build/<short-slug>`
+- experimental branch:
+  - `experiment/<short-slug>`
 
-### 2. Commit in meaningful slices
+Avoid naming public branches after the development tool used to create them.
+Branch names should describe product intent, user-visible behavior, or the
+technical area being changed.
+
+### 2. Commit in meaningful slices on a branch
 
 Do not hold large uncommitted blobs of work.
 
 Required:
 - commit after each meaningful implementation slice
 - commit before asking for review or summarizing completion
-- commit before issue closeout
+- commit before opening or updating a PR
 - if the slice touched remaster, packaging, acceptance, or build-output heavy paths, run cleanup checks before the final completion commit
 
-### 3. Close the issue only after completion
+Commits on a feature branch may be iterative. Prefer squash merge or a small,
+curated merge set so `main` tells a clean public story.
 
-When the issue goal is complete:
+### 3. Open a PR before merging
+
+Every public-facing change should go through a pull request unless it is an
+urgent maintainer-only repository repair.
+
+The PR must state:
+- what changed
+- why it changed
+- how it was validated
+- known limitations or follow-up work
+- whether the change touches generated artifacts, secrets, build output, or VM proof flows
+
+### 4. Close the issue only after completion
+
+When the issue goal is complete and the PR is ready:
 - run the targeted validation for that issue
 - create the final completion commit
-- close the issue with the landed commit or PR reference
+- merge the PR
+- close the issue with the landed PR reference
 - record the closeout in `docs/issue-branch-ledger.jsonl`
 
-### 4. Merge upward by structure
+### 5. Merge upward by structure
 
 Branch merges should follow the work hierarchy:
 - task branch merges into its phase branch
 - phase branch merges into its stage branch or current parent branch
-- stage branch merges into the next agreed parent branch
+- public feature branches merge into `main` through a PR
 
 Do not leave completed issue branches dangling.
 
-### 5. End every completed slice with branch cleanup
+### 6. End every completed slice with branch cleanup
 
 When a work item is done:
 - confirm which branch was completed
@@ -136,8 +164,7 @@ At the beginning of an autonomous run, read in this order:
 1. `AGENTS.md`
 2. `PRD.md`
 3. `TASKS.md`
-4. `.codex/context.md`
-5. `docs/next-roadmap.md`
+4. `docs/next-roadmap.md`
 
 Then:
 - confirm the active issue/branch state
@@ -209,32 +236,25 @@ If it can distort disk availability, System Data, remaster reliability, or fresh
 Do not treat `build-output` sprawl as harmless history either.
 If it can distort which release is current, consume significant disk, or keep obsolete boot-test artifacts around, it is signoff-relevant.
 
-### Model Fit
+### Agent/Tool Fit
 
-- main integrator: strongest general model
-- bounded code workers: codex-oriented model
-- exploration and narrow verification: mini or explorer model
-- docs-sync and closeout support: lighter model unless the wording is high-risk
-- simple, localized code edits with low architectural risk should prefer a fast small model first; default preference: `gpt-5.3-codex-spark`
-- git, branch, ledger, issue-lifecycle, and other mechanical repo-operations should default to a fast small model; default preference: `gpt-5.3-codex-spark`
-- do not spend strongest-model delegation on routine git handling, branch cleanup, simple file moves, small contract-preserving edits, or straightforward test updates unless there is a concrete risk that a smaller model will break lifecycle truth
-- model choice must match purpose, not convenience
-- default rule: if the delegated task is primarily reading, tracing, diffing, root-cause narrowing, or contract verification, use `explorer` or a smaller model first
-- default rule: if the delegated task is primarily mechanical execution rather than design judgment, prefer `gpt-5.3-codex-spark` before a larger model
-- use the strongest model for a subagent only when the delegated task is itself implementation-critical, cross-cutting, or likely to fail under a lighter model
-- when multiple subagents are spawned for similar narrow-verification work, they should normally not all use the strongest model
-- if a substantial phase uses a stronger-than-necessary subagent model for exploration or verification, the wrap-up should briefly explain why
-- if a substantial phase uses a stronger-than-necessary subagent model for simple code or git/lifecycle work, the wrap-up should briefly explain why `gpt-5.3-codex-spark` was not used
+- use the smallest reliable tool or agent for the task
+- keep mechanical git, branch, issue, and ledger work boring and auditable
+- keep architecture and runtime-proof decisions with a responsible maintainer or integrator
+- separate implementation workers from review/judge roles when both are used
+- do not name public branches, PRs, or commits after the AI tool used to produce them
+- wrap-ups should explain product impact, validation, and residual risk rather than internal assistant mechanics
 
 ## Safety rules
 
 - refuse lifecycle branch operations on a dirty worktree unless explicitly overridden
+- do not push directly to `main` for normal public work; use a branch and PR
 - do not close an issue before its completion commit exists
 - do not merge a completed branch into the wrong parent branch
 - if the branch structure is unclear, stop and realign before merging
 - do not treat full acceptance/signoff long-runs as complete unless their success was actually observed
 - when `gh` sees a stale `GITHUB_TOKEN`, prefer passing a Keychain-backed token as `GH_TOKEN` for that command invocation
-- refuse to reframe the MVP as appliance resemblance only; the MVP must stay centered on managed Codex CLI runtime reachability, supervision, and recovery
+- refuse to reframe the MVP as appliance resemblance only; the MVP must stay centered on managed runtime reachability, supervision, and recovery
 - refuse to close a phase or task unless `runtime proof completed` can be stated truthfully in the closeout
 - refuse to treat stale AgentOS remaster/bootstrap temp artifacts as harmless when they materially inflate host disk usage
 - refuse to sign off remaster/bootstrap-sensitive work unless `python3 scripts/cleanup_temp_artifacts.py --delete --json` passes or an explicit override is recorded truthfully

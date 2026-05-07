@@ -8,6 +8,8 @@ large build outputs are not included.
 ## Start Here
 
 - `README.md` - public project overview and quickstart
+- `docs/getting-started.md` - ISO boot and repo-local developer shortcut
+- `docs/operator-surface.md` - TUI commands, modes, setup surfaces, and proof logs
 - `PRD.md` - product requirements and Phase 1 truth
 - `TASKS.md` - current execution state and next work
 - `docs/next-roadmap.md` - Phase 2 roadmap
@@ -15,6 +17,7 @@ large build outputs are not included.
 
 ## Current Product Docs
 
+- `docs/architecture/runtime-overview.md` - boot/runtime/input/intent/tool/proof overview
 - `docs/architecture/docker-runtime-preview-boundary.md` - Docker developer/demo proof boundary
 - `docs/architecture/intent-classification-contract.md` - Phase 2 prompt intent contract
 - `docs/architecture/user-owned-runtime-data-boundary.md` - local-first user data ownership boundary
@@ -23,6 +26,7 @@ large build outputs are not included.
 - `docs/roadmap/phase2-local-first-runtime-loop.md` - Phase 2 local-first runtime loop roadmap
 - `docs/reference/phase1-agentos-prototype-closeout-v1.md` - Phase 1 closeout and Phase 2 handoff
 - `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md` - Phase 2 proof and blocker closeout
+- `docs/security.md` - public repo secret and artifact hygiene notes
 
 ## Public Export Policy
 

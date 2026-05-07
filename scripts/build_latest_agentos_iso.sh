@@ -10,6 +10,8 @@ DOWNLOAD_BASE_IMAGE=1
 CLEANUP=1
 RUN_SMOKE=1
 LOG_DIR="$ROOT_DIR/build-output/logs"
+GO_VERSION="${AGENTOS_GO_VERSION:-1.26.2}"
+GO_CACHE_ROOT="${AGENTOS_GO_CACHE_ROOT:-/tmp}"
 TOTAL_STEPS=7
 BUILD_AGENTOS_ISO_CMD="${AGENTOS_BUILD_AGENTOS_ISO_CMD:-$ROOT_DIR/scripts/build_agentos_iso.sh}"
 RENDERED_PROGRESS_LINES=0
@@ -216,6 +218,87 @@ set_step() {
   render_progress
 }
 
+go_toolchain_is_usable() {
+  local go_bin="$1"
+  if [ -z "$go_bin" ] || [ ! -x "$go_bin" ]; then
+    return 1
+  fi
+  local goroot
+  if ! goroot="$("$go_bin" env GOROOT 2>/dev/null)"; then
+    return 1
+  fi
+  if [ -z "$goroot" ] || [ ! -f "$goroot/src/context/context.go" ] || [ ! -f "$goroot/src/fmt/print.go" ]; then
+    return 1
+  fi
+  if ! "$go_bin" list std >/dev/null 2>&1; then
+    return 1
+  fi
+  return 0
+}
+
+select_go_toolchain() {
+  if [ -n "${AGENTOS_GO_BIN:-}" ]; then
+    if go_toolchain_is_usable "$AGENTOS_GO_BIN"; then
+      export AGENTOS_GO_BIN
+      return 0
+    fi
+    echo "AGENTOS_GO_BIN points to an unusable Go toolchain: $AGENTOS_GO_BIN" >&2
+    return 1
+  fi
+
+  local candidate
+  for candidate in \
+    "$GO_CACHE_ROOT/agentos-go-$GO_VERSION/go/bin/go" \
+    "$(command -v go 2>/dev/null || true)"
+  do
+    if go_toolchain_is_usable "$candidate"; then
+      export AGENTOS_GO_BIN="$candidate"
+      return 0
+    fi
+  done
+
+  if install_cached_go_toolchain; then
+    export AGENTOS_GO_BIN="$GO_CACHE_ROOT/agentos-go-$GO_VERSION/go/bin/go"
+    return 0
+  fi
+  return 1
+}
+
+install_cached_go_toolchain() {
+  local host_os host_arch go_os go_arch cache_dir archive url
+  if ! command -v curl >/dev/null 2>&1 || ! command -v tar >/dev/null 2>&1; then
+    return 1
+  fi
+  host_os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  host_arch="$(uname -m)"
+  case "$host_os" in
+    darwin|linux) go_os="$host_os" ;;
+    *) return 1 ;;
+  esac
+  case "$host_arch" in
+    arm64|aarch64) go_arch="arm64" ;;
+    x86_64|amd64) go_arch="amd64" ;;
+    *) return 1 ;;
+  esac
+
+  cache_dir="$GO_CACHE_ROOT/agentos-go-$GO_VERSION"
+  archive="$GO_CACHE_ROOT/agentos-go-$GO_VERSION.$go_os-$go_arch.tar.gz"
+  url="https://go.dev/dl/go$GO_VERSION.$go_os-$go_arch.tar.gz"
+
+  rm -rf "$cache_dir"
+  mkdir -p "$cache_dir"
+  if ! curl -fsSL "$url" -o "$archive"; then
+    rm -rf "$cache_dir" "$archive"
+    return 1
+  fi
+  if ! tar -C "$cache_dir" -xzf "$archive"; then
+    rm -rf "$cache_dir" "$archive"
+    return 1
+  fi
+  rm -f "$archive"
+  go_toolchain_is_usable "$cache_dir/go/bin/go"
+}
+
 if [ "$CLEANUP" -eq 1 ]; then
   set_step 1 "running" ""
   python3 "$ROOT_DIR/scripts/cleanup_temp_artifacts.py" --delete --json >/dev/null
@@ -234,12 +317,9 @@ else
 fi
 
 set_step 3 "running" "version=$VERSION arch=$ARCH"
-if [ -z "${AGENTOS_GO_BIN:-}" ]; then
-  if [ -x "/tmp/agentos-go-1.26.2/go/bin/go" ]; then
-    export AGENTOS_GO_BIN="/tmp/agentos-go-1.26.2/go/bin/go"
-  elif command -v go >/dev/null 2>&1; then
-    export AGENTOS_GO_BIN="$(command -v go)"
-  fi
+if ! select_go_toolchain; then
+  echo "No usable Go toolchain found. Install Go or set AGENTOS_OPERATOR_TUI_BIN to a prebuilt operator TUI." >&2
+  exit 1
 fi
 export AGENTOS_OPERATOR_TUI_GOARCH="$ARCH"
 mkdir -p "$LOG_DIR"

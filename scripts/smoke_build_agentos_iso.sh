@@ -585,6 +585,9 @@ if len(dynamic_rows) != 29 or len(dynamic_rows[0]) != 29:
     raise SystemExit("dynamic setup-page QR must render as QR version 3")
 if (len(dynamic_rows) + 8) * 2 > 80:
     raise SystemExit("dynamic setup-page QR must fit 80-column TTY")
+rendered = namespace["_render"](dynamic_rows)
+if "#" in rendered or "▀" in rendered or "▄" in rendered or "█" in rendered:
+    raise SystemExit("default setup-page QR should use ANSI background cells, not glyph fallback")
 PY
 
 if ! tar -tzf "$ASSET_BUNDLE_PATH" | rg -q '^iso-assets/bin/agentos-live-firstrun-service$'; then

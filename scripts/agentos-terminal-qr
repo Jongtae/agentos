@@ -307,7 +307,7 @@ def _draw_format_bits(matrix: list[list[bool]], function: list[list[bool]], mask
 
 def main() -> int:
     args = list(sys.argv[1:])
-    compact = True
+    compact = False
     if "--large" in args:
         compact = False
         args.remove("--large")

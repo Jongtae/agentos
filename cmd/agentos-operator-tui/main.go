@@ -963,7 +963,7 @@ func isGreeting(line string) bool {
 func terminalQR(url string) string {
 	candidates := []string{"/usr/local/bin/agentos-terminal-qr", "scripts/agentos-terminal-qr", "agentos-terminal-qr"}
 	for _, candidate := range candidates {
-		cmd := exec.Command(candidate, "--compact", url)
+		cmd := exec.Command(candidate, "--large", url)
 		out, err := cmd.CombinedOutput()
 		if err == nil && strings.TrimSpace(string(out)) != "" {
 			return strings.TrimRight(string(out), "\n")

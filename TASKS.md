@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-22] Fix terminal setup QR rendering`
+- `[P2-23] Restore Telegram setup to live message handling`
 
 Runtime impact statement:
 
-- This task makes setup-page QR output readable in the operator TUI so VM testers can reliably open AgentOS setup surfaces without typing long URLs.
+- This task reconnects Telegram setup completion to the background live receiver so incoming messages are handled without requiring manual `/test telegram` polling.
 
 ## Phase 1 Closeout Truth
 

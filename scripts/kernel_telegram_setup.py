@@ -5,6 +5,7 @@ import argparse
 import html
 import json
 import os
+import shutil
 import socket
 import stat
 import subprocess
@@ -31,6 +32,8 @@ BOTFATHER_URL = "https://t.me/BotFather"
 TELEGRAM_WEB_URL = "https://web.telegram.org/"
 TELEGRAM_DESKTOP_URL = "https://desktop.telegram.org/"
 SETUP_PAGE_SCHEMA = "agentos-telegram-setup-page.v1"
+TELEGRAM_POLLING_SERVICE = "agentos-telegram-live-loop.service"
+TELEGRAM_WEBHOOK_SERVICE = "agentos-telegram-webhookd.service"
 
 
 def _redact_token(token: str) -> str:
@@ -261,6 +264,8 @@ def build_telegram_setup_report(
         payload["proof"]["ok"] = bool((not write_env) or payload["env_written"])
         payload["proof"]["reason"] = "" if payload["proof"]["ok"] else "telegram_env_write_failed"
         if payload["proof"]["ok"]:
+            receiver_activation = _activate_receiver_service(target_transport)
+            payload["receiver_activation"] = receiver_activation
             append_activity_event(
                 workspace,
                 kind="setup.completed",
@@ -287,12 +292,62 @@ def build_telegram_setup_report(
         "target_transport": target_transport,
         "webhook_clear_attempted": bool(payload["webhook_clear_attempted"]),
         "webhook_clear_ok": bool(payload["webhook_clear_ok"]),
+        "receiver_activation_attempted": bool(payload.get("receiver_activation", {}).get("attempted", False)),
+        "receiver_activation_ok": bool(payload.get("receiver_activation", {}).get("ok", False)),
         "failure_class": "" if payload["proof"]["ok"] else str(payload["proof"].get("reason", "")),
     }
     if write_manifest:
         manifest = _manifest_path(workspace, TELEGRAM_SETUP_MANIFEST)
         manifest.write_text(json.dumps(payload, ensure_ascii=True) + "\n", encoding="utf-8")
         payload["artifacts"]["latest_telegram_setup_manifest_json"] = str(manifest)
+    return payload
+
+
+def _activate_receiver_service(target_transport: str) -> dict:
+    service = TELEGRAM_WEBHOOK_SERVICE if target_transport == "webhook" else TELEGRAM_POLLING_SERVICE
+    payload = {
+        "attempted": False,
+        "ok": False,
+        "service": service,
+        "method": "",
+        "returncode": None,
+        "error": "",
+    }
+    if os.environ.get("AGENTOS_TELEGRAM_ACTIVATE_RECEIVER", "1").strip().lower() in {"0", "false", "no", "off"}:
+        payload["error"] = "disabled_by_env"
+        return payload
+    command_prefixes: list[list[str]] = []
+    if command := os.environ.get("AGENTOS_SYSTEMCTL_CMD", "").strip():
+        command_prefixes.append([command])
+    command_prefixes.append(["systemctl"])
+    if os.geteuid() != 0:
+        command_prefixes.append(["sudo", "-n", "systemctl"])
+
+    for prefix in command_prefixes:
+        executable = prefix[0]
+        if not shutil.which(executable):
+            continue
+        payload["attempted"] = True
+        payload["method"] = " ".join(prefix + ["restart", service])
+        try:
+            proc = subprocess.run(
+                prefix + ["restart", service],
+                text=True,
+                capture_output=True,
+                timeout=8,
+                check=False,
+            )
+        except Exception as exc:
+            payload["error"] = _safe_error(exc)
+            continue
+        payload["returncode"] = proc.returncode
+        if proc.returncode == 0:
+            payload["ok"] = True
+            payload["error"] = ""
+            return payload
+        payload["error"] = _safe_error(RuntimeError((proc.stderr or proc.stdout or "").strip()))
+    if not payload["attempted"] and not payload["error"]:
+        payload["error"] = "systemctl_unavailable"
     return payload
 
 

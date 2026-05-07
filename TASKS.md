@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-21] Harden ISO build Go toolchain selection`
+- `[P2-22] Fix terminal setup QR rendering`
 
 Runtime impact statement:
 
-- This task keeps the AgentOS ISO build path from selecting a corrupted cached Go toolchain, protecting the operator TUI build and the VM-testable runtime image path.
+- This task makes setup-page QR output readable in the operator TUI so VM testers can reliably open AgentOS setup surfaces without typing long URLs.
 
 ## Phase 1 Closeout Truth
 

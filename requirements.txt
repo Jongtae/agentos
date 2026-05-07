@@ -21,6 +21,11 @@ textual>=0.80.0
 # Environment
 python-dotenv>=1.0.0
 
+# Gmail read-only OAuth adapter
+google-api-python-client>=2.120.0
+google-auth-httplib2>=0.2.0
+google-auth-oauthlib>=1.2.0
+
 # ──────────────────────────────────
 # Phase 2 (uncomment when needed)
 # ──────────────────────────────────

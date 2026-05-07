@@ -47,6 +47,7 @@ ASK_CMD="${AGENTOS_KERNEL_ASK_CMD:-$ROOT_DIR/scripts/kernel_ask.py}"
 ACTIVITY_FEED_CMD="${AGENTOS_KERNEL_ACTIVITY_FEED_CMD:-$ROOT_DIR/scripts/kernel_activity_feed.py}"
 INTENT_DISPATCH_CMD="${AGENTOS_KERNEL_INTENT_DISPATCH_CMD:-$ROOT_DIR/scripts/kernel_intent_dispatch.py}"
 PHASE2_RUN_CMD="${AGENTOS_KERNEL_PHASE2_RUN_CMD:-$ROOT_DIR/scripts/kernel_phase2_run.py}"
+GMAIL_SETUP_CMD="${AGENTOS_KERNEL_GMAIL_SETUP_CMD:-$ROOT_DIR/scripts/kernel_gmail_setup.py}"
 RESEARCH_WORKFLOW_CMD="${AGENTOS_KERNEL_RESEARCH_WORKFLOW_CMD:-$ROOT_DIR/scripts/kernel_research_workflow.py}"
 RESEARCH_BRIEF_CMD="${AGENTOS_KERNEL_RESEARCH_BRIEF_CMD:-$ROOT_DIR/scripts/kernel_research_brief.py}"
 INBOX_WORKFLOW_CMD="${AGENTOS_KERNEL_INBOX_WORKFLOW_CMD:-$ROOT_DIR/scripts/kernel_inbox_workflow.py}"
@@ -279,7 +280,10 @@ Usage:
   agentos-kernelctl research-workflow [--workspace <path>] [--message-text <text>] [--chat-id <id>] [--request-id <id>] [--message-id <id>] [--session-id <id>] [--allow-domain <domain>] [--send] [--output <path>] [--json]
   agentos-kernelctl activity-feed [--workspace <path>] [--limit <N>] [--output <path>] [--json]
   agentos-kernelctl intent-dispatch [--workspace <path>] [--source telegram|operator] --message <text> [--chat-id <id>] [--request-id <id>] [--message-id <id>] [--session-id <id>] [--allow-domain <domain>] [--send] [--output <path>] [--json]
-  agentos-kernelctl phase2-run [--workspace <path>] [--user-root <path>] --message <text> [--gmail-fixture <path>] [--allow-domain <domain>] [--output <path>] [--json]
+  agentos-kernelctl phase2-run [--workspace <path>] [--user-root <path>] --message <text> [--gmail-fixture <path>] [--gmail-live] [--gmail-credentials <path>] [--gmail-token <path>] [--gmail-mock-response <path>] [--allow-domain <domain>] [--output <path>] [--json]
+  agentos-kernelctl gmail-setup [--workspace <path>] [--credentials <path>] [--credentials-path <path>] [--token-path <path>] [--authorize] [--serve-http] [--background] [--host <host>] [--display-host <host>] [--port <port>] [--timeout-sec <sec>] [--url-file <path>] [--output <path>] [--json]
+  agentos-kernelctl gmail-status [--workspace <path>] [--credentials-path <path>] [--token-path <path>] [--output <path>] [--json]
+  agentos-kernelctl gmail-read [--workspace <path>] [--query <text>] [--credentials-path <path>] [--token-path <path>] [--mock-response <path>] [--output <path>] [--json]
   agentos-kernelctl research-brief [--workspace <path>] [--message-text <text>] [--chat-id <id>] [--request-id <id>] [--message-id <id>] [--session-id <id>] [--allow-domain <domain>] [--send] [--output <path>] [--json]
   agentos-kernelctl inbox-workflow [--workspace <path>] [--maildir <relative-path>] [--session-id <id>] [--output <path>] [--json]
   agentos-kernelctl inbox-reply-workflow [--workspace <path>] [--maildir <relative-path>] [--session-id <id>] [--output <path>] [--json]
@@ -387,6 +391,13 @@ llm_setup_openai_api_key=""
 ask_message=""
 phase2_user_root="${AGENTOS_USER_DATA_ROOT:-$ROOT_DIR/agentos-data/user}"
 phase2_gmail_fixture=""
+phase2_gmail_live=0
+gmail_credentials=""
+gmail_credentials_path=""
+gmail_token_path=""
+gmail_query=""
+gmail_mock_response=""
+gmail_authorize=0
 intent_source="operator"
 vm_identifier=""
 policy_enable=0
@@ -589,6 +600,32 @@ while [ "$#" -gt 0 ]; do
     --gmail-fixture)
       shift
       phase2_gmail_fixture="${1:-}"
+      ;;
+    --gmail-live)
+      phase2_gmail_live=1
+      ;;
+    --gmail-credentials|--credentials)
+      shift
+      gmail_credentials="${1:-}"
+      ;;
+    --credentials-path)
+      shift
+      gmail_credentials_path="${1:-}"
+      ;;
+    --gmail-token|--token-path)
+      shift
+      gmail_token_path="${1:-}"
+      ;;
+    --query)
+      shift
+      gmail_query="${1:-}"
+      ;;
+    --gmail-mock-response|--mock-response)
+      shift
+      gmail_mock_response="${1:-}"
+      ;;
+    --authorize)
+      gmail_authorize=1
       ;;
     --chat-id)
       shift
@@ -3221,6 +3258,21 @@ PY
     if [ -n "$phase2_gmail_fixture" ]; then
       phase2_args+=(--gmail-fixture "$phase2_gmail_fixture")
     fi
+    if [ "$phase2_gmail_live" -eq 1 ]; then
+      phase2_args+=(--gmail-live)
+    fi
+    if [ -n "$gmail_credentials" ]; then
+      phase2_args+=(--gmail-credentials "$gmail_credentials")
+    fi
+    if [ -n "$gmail_credentials_path" ]; then
+      phase2_args+=(--gmail-credentials "$gmail_credentials_path")
+    fi
+    if [ -n "$gmail_token_path" ]; then
+      phase2_args+=(--gmail-token "$gmail_token_path")
+    fi
+    if [ -n "$gmail_mock_response" ]; then
+      phase2_args+=(--gmail-mock-response "$gmail_mock_response")
+    fi
     if [ "${#web_allow_domains[@]}" -gt 0 ]; then
       for domain in "${web_allow_domains[@]}"; do
         if [ -n "$domain" ]; then
@@ -3235,6 +3287,99 @@ PY
       phase2_args+=(--json)
     fi
     exec "$PHASE2_RUN_CMD" "${phase2_args[@]}"
+    ;;
+  gmail-setup)
+    if [ ! -x "$GMAIL_SETUP_CMD" ] && ! command -v "$GMAIL_SETUP_CMD" >/dev/null 2>&1; then
+      echo "gmail setup tool not found: $GMAIL_SETUP_CMD"
+      exit 1
+    fi
+    gmail_args=(--mode setup --workspace "$workspace")
+    if [ -n "$gmail_credentials" ]; then
+      gmail_args+=(--credentials "$gmail_credentials")
+    fi
+    if [ -n "$gmail_credentials_path" ]; then
+      gmail_args+=(--credentials-path "$gmail_credentials_path")
+    fi
+    if [ -n "$gmail_token_path" ]; then
+      gmail_args+=(--token-path "$gmail_token_path")
+    fi
+    if [ "$gmail_authorize" -eq 1 ]; then
+      gmail_args+=(--authorize)
+    fi
+    if [ "$telegram_setup_serve_http" -eq 1 ]; then
+      gmail_args+=(--serve-http)
+    fi
+    if [ "$telegram_setup_background" -eq 1 ]; then
+      gmail_args+=(--background)
+    fi
+    if [ -n "$telegram_setup_host" ]; then
+      gmail_args+=(--host "$telegram_setup_host")
+    fi
+    if [ -n "$telegram_setup_display_host" ]; then
+      gmail_args+=(--display-host "$telegram_setup_display_host")
+    fi
+    if [ -n "$telegram_setup_port" ]; then
+      gmail_args+=(--port "$telegram_setup_port")
+    fi
+    if [ -n "$telegram_setup_timeout_sec" ]; then
+      gmail_args+=(--timeout-sec "$telegram_setup_timeout_sec")
+    fi
+    if [ -n "$telegram_setup_url_file" ]; then
+      gmail_args+=(--url-file "$telegram_setup_url_file")
+    fi
+    if [ -n "$out_dir" ]; then
+      gmail_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      gmail_args+=(--json)
+    fi
+    exec "$GMAIL_SETUP_CMD" "${gmail_args[@]}"
+    ;;
+  gmail-status)
+    if [ ! -x "$GMAIL_SETUP_CMD" ] && ! command -v "$GMAIL_SETUP_CMD" >/dev/null 2>&1; then
+      echo "gmail setup tool not found: $GMAIL_SETUP_CMD"
+      exit 1
+    fi
+    gmail_args=(--mode status --workspace "$workspace")
+    if [ -n "$gmail_credentials_path" ]; then
+      gmail_args+=(--credentials-path "$gmail_credentials_path")
+    fi
+    if [ -n "$gmail_token_path" ]; then
+      gmail_args+=(--token-path "$gmail_token_path")
+    fi
+    if [ -n "$out_dir" ]; then
+      gmail_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      gmail_args+=(--json)
+    fi
+    exec "$GMAIL_SETUP_CMD" "${gmail_args[@]}"
+    ;;
+  gmail-read)
+    if [ ! -x "$GMAIL_SETUP_CMD" ] && ! command -v "$GMAIL_SETUP_CMD" >/dev/null 2>&1; then
+      echo "gmail setup tool not found: $GMAIL_SETUP_CMD"
+      exit 1
+    fi
+    gmail_args=(--mode read --workspace "$workspace")
+    if [ -n "$gmail_query" ]; then
+      gmail_args+=(--query "$gmail_query")
+    fi
+    if [ -n "$gmail_credentials_path" ]; then
+      gmail_args+=(--credentials-path "$gmail_credentials_path")
+    fi
+    if [ -n "$gmail_token_path" ]; then
+      gmail_args+=(--token-path "$gmail_token_path")
+    fi
+    if [ -n "$gmail_mock_response" ]; then
+      gmail_args+=(--mock-response "$gmail_mock_response")
+    fi
+    if [ -n "$out_dir" ]; then
+      gmail_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      gmail_args+=(--json)
+    fi
+    exec "$GMAIL_SETUP_CMD" "${gmail_args[@]}"
     ;;
   document-access)
     if [ ! -x "$DOCUMENT_ACCESS_CMD" ] && ! command -v "$DOCUMENT_ACCESS_CMD" >/dev/null 2>&1; then

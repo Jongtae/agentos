@@ -13,6 +13,9 @@ venv/
 .env
 .env.*
 !.env.example
+.agentos/secrets/
+**/credentials.json
+**/token.json
 
 # Database / Memory
 *.sqlite

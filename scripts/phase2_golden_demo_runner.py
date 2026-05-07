@@ -21,6 +21,9 @@ PRACTICAL_SMOKES = [
     "scripts/smoke_phase2_activity_vocabulary.sh",
     "scripts/smoke_phase2_lifecycle_recovery.sh",
     "scripts/smoke_phase2_run_cli.sh",
+    "scripts/smoke_gmail_setup_page.sh",
+    "scripts/smoke_gmail_live_missing_credentials.sh",
+    "scripts/smoke_phase2_gmail_live_blocked.sh",
 ]
 
 EXPLICIT_BLOCKERS = [

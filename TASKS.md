@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-19] Implement testable Phase 2 runtime CLI loop`
+- `[P2-20] Add Gmail setup page and read-only OAuth adapter`
 
 Runtime impact statement:
 
-- This task turns Phase 2 from proof scripts into a user-testable `agentos-kernelctl phase2-run` prompt loop with bounded capabilities, activity, and user-owned records.
+- This task brings Gmail read-only setup and live read proof into the kernel-mediated Phase 2 runtime loop so VM testers can configure OAuth through an AgentOS setup surface without leaking secrets into user-owned records or Git.
 
 ## Phase 1 Closeout Truth
 
@@ -82,9 +82,10 @@ local or booted AgentOS runtime
 
 Recommended Phase 2 tasks:
 
+- Gmail setup is exposed through `agentos-kernelctl gmail-setup --serve-http`; live Gmail remains read-only and requires explicit user OAuth credentials.
 - Phase 2 closeout is recorded in `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`.
 - Practical local/Docker-safe proof is aggregated by `scripts/smoke_phase2_golden_demo.sh`.
-- Real Gmail OAuth and VM/ISO proof remain explicit blockers until credentials and a VM run are provided.
+- VM/ISO proof remains an explicit blocker until a VM run is observed and recorded.
 
 ## Validation Standards
 

@@ -143,14 +143,21 @@ Inspect the same runtime surfaces directly:
 ./scripts/agentos-kernelctl status --json
 ./scripts/agentos-kernelctl phase2-run --message "status"
 ./scripts/agentos-kernelctl phase2-run --message "draft a reply to my Gmail roadmap email"
+./scripts/agentos-kernelctl gmail-setup --serve-http --host 0.0.0.0 --display-host <vm-ip>
+./scripts/agentos-kernelctl gmail-status --json
+./scripts/agentos-kernelctl gmail-read --query "roadmap" --json
+./scripts/agentos-kernelctl phase2-run --gmail-live --message "summarize my latest Gmail roadmap email"
 ./scripts/agentos-kernelctl guided-operator --workspace ./workspaces/default --json
 ./scripts/agentos-kernelctl workflow-status --workspace ./workspaces/default --json
 ./scripts/agentos-kernelctl activity-feed --workspace ./workspaces/default --json
 ```
 
 The Phase 2 CLI loop is local-first and safe to try without credentials. Gmail
-uses fixture data by default; live Gmail OAuth and VM/ISO proof remain explicit
-follow-up work.
+uses fixture data by default. Live Gmail is read-only, uses Google's Desktop
+OAuth flow, stores credentials at `~/.agentos/secrets/gmail/credentials.json`
+and tokens at `~/.agentos/secrets/gmail/token.json`, and never writes secrets
+to records, workspace artifacts, Docker bind records, or Git-tracked files.
+Send, delete, archive, and Gmail draft mutation remain blocked.
 
 The same loop is the Docker developer/demo default:
 

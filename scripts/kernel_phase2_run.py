@@ -18,6 +18,7 @@ for candidate in (SRC_DIR, SCRIPTS_DIR):
 from io_utils import scrub_payload, write_json_file
 from kernel.intent_dispatch import build_intent_dispatch_report, classify_intent
 from kernel.operator_activity import append_activity_event, build_activity_feed_payload
+from kernel_gmail_setup import build_gmail_read_report, build_gmail_status_report
 from kernel_phase2_gmail_fixture import build_gmail_fixture_report
 from kernel_phase2_lifecycle_recovery import build_lifecycle_recovery_report
 from kernel_phase2_records import append_record, find_records
@@ -56,6 +57,10 @@ def run_phase2(
     user_root: str | Path,
     prompt: str,
     gmail_fixture: str | Path = "",
+    gmail_live: bool = False,
+    gmail_credentials: str | Path = "",
+    gmail_token: str | Path = "",
+    gmail_mock_response: str | Path = "",
     allow_domains: list[str] | None = None,
 ) -> dict:
     workspace_path = Path(workspace).resolve()
@@ -101,18 +106,47 @@ def run_phase2(
 
     try:
         if intent == "gmail_read_or_draft":
-            fixture = _gmail_fixture_path(workspace_path, gmail_fixture)
             query = _query_from_prompt(prompt, fallback="roadmap")
-            capability_result = build_gmail_fixture_report(fixture, query=query, action="draft")
-            response = _gmail_response(capability_result)
-            artifacts["gmail_fixture"] = str(fixture)
-            blockers.append(
-                {
-                    "id": "gmail-oauth-live",
-                    "reason": "This run used fixture-backed Gmail data, not real Gmail OAuth.",
-                    "recovery_action": "Configure a future live read-only Gmail adapter before claiming real mailbox access.",
-                }
-            )
+            if gmail_live:
+                capability_result = build_gmail_read_report(
+                    workspace_path,
+                    query=query,
+                    credentials_path=gmail_credentials or None,
+                    token_path=gmail_token or None,
+                    mock_response=gmail_mock_response,
+                )
+                artifacts["gmail_credentials_path"] = capability_result.get("credentials_path", "")
+                artifacts["gmail_token_path"] = capability_result.get("token_path", "")
+                if capability_result.get("proof", {}).get("ok"):
+                    response = _gmail_live_response(capability_result)
+                else:
+                    status = "blocked"
+                    response = _gmail_live_blocked_response(workspace_path, capability_result)
+                    setup_url = _gmail_setup_url()
+                    blockers.append(
+                        {
+                            "id": "gmail-live-oauth-required",
+                            "reason": str(capability_result.get("proof", {}).get("reason", "gmail_live_read_not_ready")),
+                            "recovery_action": (
+                                "Run agentos-kernelctl gmail-setup --serve-http"
+                                + (f" and open {setup_url}" if setup_url else "")
+                                + ", then retry with --gmail-live."
+                            ),
+                            "setup_page_url": setup_url,
+                        }
+                    )
+            else:
+                fixture = _gmail_fixture_path(workspace_path, gmail_fixture)
+                capability_result = build_gmail_fixture_report(fixture, query=query, action="draft")
+                response = _gmail_response(capability_result)
+                artifacts["gmail_fixture"] = str(fixture)
+                blockers.append(
+                    {
+                        "id": "gmail-oauth-live",
+                        "reason": "This run used fixture-backed Gmail data, not real Gmail OAuth.",
+                        "recovery_action": "Configure the read-only Gmail setup page and rerun with --gmail-live before claiming real mailbox access.",
+                    }
+                )
         elif intent == "record_lookup":
             query = _query_from_prompt(prompt, fallback="roadmap")
             capability_result = find_records(user_root_path, query=query, limit=10)
@@ -220,8 +254,14 @@ def run_phase2(
         "proof": {
             "ok": status in {"completed", "blocked"},
             "testable_cli_surface": True,
-            "gmail_fixture_mode": intent == "gmail_read_or_draft",
-            "live_gmail_oauth_completed": False,
+            "gmail_fixture_mode": bool(intent == "gmail_read_or_draft" and not gmail_live),
+            "gmail_live_read_completed": bool(gmail_live and intent == "gmail_read_or_draft" and capability_result.get("proof", {}).get("ok")),
+            "live_gmail_oauth_completed": bool(
+                gmail_live
+                and intent == "gmail_read_or_draft"
+                and capability_result.get("proof", {}).get("ok")
+                and capability_result.get("adapter") == "gmail_oauth_readonly"
+            ),
             "vm_iso_proof_completed": False,
             "destructive_action_executed": False,
         },
@@ -295,6 +335,34 @@ def _gmail_response(result: dict) -> str:
     return "\n\n".join(pieces).strip()
 
 
+def _gmail_live_response(result: dict) -> str:
+    summary = str(result.get("summary", "")).strip()
+    return "Gmail read-only summary:\n" + (summary or "No Gmail messages matched.")
+
+
+def _gmail_live_blocked_response(workspace: Path, result: dict) -> str:
+    setup_url = _gmail_setup_url()
+    reason = str(result.get("proof", {}).get("reason", "gmail_live_read_not_ready"))
+    action = str(result.get("operator_action_required", "")).strip()
+    if not action:
+        action = "Run agentos-kernelctl gmail-setup --serve-http, complete read-only OAuth, then retry with --gmail-live."
+    lines = [
+        f"Live Gmail read is blocked: {reason}",
+        action,
+        f"Credential path: {result.get('credentials_path', '')}",
+        f"Token path: {result.get('token_path', '')}",
+    ]
+    if setup_url:
+        lines.append(f"Setup page: {setup_url}")
+    else:
+        lines.append("Start setup page: agentos-kernelctl gmail-setup --serve-http --host 0.0.0.0 --display-host <vm-ip>")
+    return "\n".join(lines)
+
+
+def _gmail_setup_url() -> str:
+    return os.environ.get("AGENTOS_GMAIL_SETUP_URL", "").strip()
+
+
 def _records_response(result: dict, *, query: str) -> str:
     records = result.get("records") if isinstance(result.get("records"), list) else []
     if not records:
@@ -355,6 +423,10 @@ def main() -> int:
     parser.add_argument("--message", default="")
     parser.add_argument("--prompt", default="")
     parser.add_argument("--gmail-fixture", default="")
+    parser.add_argument("--gmail-live", action="store_true")
+    parser.add_argument("--gmail-credentials", default="")
+    parser.add_argument("--gmail-token", default="")
+    parser.add_argument("--gmail-mock-response", default="")
     parser.add_argument("--allow-domain", action="append", default=[])
     parser.add_argument("--output", default="")
     parser.add_argument("--json", action="store_true")
@@ -368,6 +440,10 @@ def main() -> int:
         user_root=args.user_root,
         prompt=prompt,
         gmail_fixture=args.gmail_fixture,
+        gmail_live=args.gmail_live,
+        gmail_credentials=args.gmail_credentials,
+        gmail_token=args.gmail_token,
+        gmail_mock_response=args.gmail_mock_response,
         allow_domains=args.allow_domain,
     )
     if args.output:

@@ -18,7 +18,15 @@ cat >"$WORKSPACE/documents/agentos-first-run.md" <<'EOF'
 EOF
 
 OUT="$WORKSPACE/workflow-status.json"
-"$ROOT_DIR/scripts/agentos-kernelctl" workflow-status --workspace "$WORKSPACE" --output "$OUT" --json >/tmp/agentos-workflow-status-smoke.out
+env -u AGENTOS_TELEGRAM_BOT_TOKEN \
+  -u TELEGRAM_BOT_TOKEN \
+  -u AGENTOS_TELEGRAM_TOKEN \
+  -u AGENTOS_TELEGRAM_ALLOWED_CHAT_IDS \
+  -u TELEGRAM_ALLOWED_CHAT_IDS \
+  -u AGENTOS_TELEGRAM_TRANSPORT \
+  -u TELEGRAM_TRANSPORT \
+  -u AGENTOS_ENV_FILE \
+  "$ROOT_DIR/scripts/agentos-kernelctl" workflow-status --workspace "$WORKSPACE" --output "$OUT" --json >/tmp/agentos-workflow-status-smoke.out
 "$ROOT_DIR/scripts/kernel_workflow_status.py" --validate "$OUT" --json | python3 -c \
   "import json,sys; payload=json.load(sys.stdin); assert payload['ok'] is True"
 
@@ -48,7 +56,7 @@ assert payload["summary"]["inbox_reply_workflow_ready"] is False
 assert payload["summary"]["research_brief_ready"] is False
 assert payload["summary"]["brief_artifact_exported"] is False
 assert any(item["id"] == "search_and_reply" for item in payload["top_tasks"])
-assert any("telegram-live-send" in action for action in payload["next_actions"])
+assert any("telegram-live-loop" in action for action in payload["next_actions"])
 assert any("telegram-thread-status" in action for action in payload["next_actions"])
 assert any("inbox-reply-workflow" in action for action in payload["next_actions"])
 assert any("research-brief" in action for action in payload["next_actions"])

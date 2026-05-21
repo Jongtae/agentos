@@ -1,6 +1,6 @@
 # AgentOS Next Roadmap
 
-Status: Phase 2 closeout recorded
+Status: Docker-first Phase 2 preview in progress
 
 ## Phase 1 Closed
 
@@ -46,8 +46,9 @@ The detailed Phase 2 roadmap is tracked in
    - Detailed acceptance is tracked in `docs/acceptance/phase2-golden-runtime-loop.md`.
 
 2. **Docker runtime preview**
-   - Docker should be a developer/demo runtime preview, not the product target.
-   - It should prove the runtime loop without claiming boot, installer, VM recovery, or ISO freshness proof.
+   - Docker is the primary public try path for the AgentOS runtime today.
+   - It should expose `docker compose up` and `http://localhost:8787`.
+   - It proves the runtime loop without claiming boot, installer, VM recovery, or ISO freshness proof.
 
 3. **User-owned runtime data**
    - Shared folders and bind mounts should expose user-owned records, outputs, logs, diagnostics, and acceptance artifacts.
@@ -86,6 +87,7 @@ The detailed Phase 2 roadmap is tracked in
 - repo-local private context when present
 - `docs/index.md`
 - `docs/acceptance/phase2-golden-runtime-loop.md`
+- `docs/acceptance/docker-runtime-preview.md`
 - `docs/roadmap/phase2-local-first-runtime-loop.md`
 - `docs/reference/phase1-agentos-prototype-closeout-v1.md`
 - `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`

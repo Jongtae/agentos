@@ -11,15 +11,15 @@ Current parent branch:
 
 Current public milestone:
 
-- **Phase 2 testable runtime loop** — Local-first Codex runtime loop
+- **Docker-first AgentOS runtime preview** — public try path for the local-first runtime loop
 
 Current task:
 
-- `[P2-23] Restore Telegram setup to live message handling`
+- `EPIC: Docker-first AgentOS runtime preview` ([#48](https://github.com/Jongtae/agentos/issues/48))
 
 Runtime impact statement:
 
-- This task reconnects Telegram setup completion to the background live receiver so incoming messages are handled without requiring manual `/test telegram` polling.
+- This work makes `docker compose up` the lowest-friction public way to try AgentOS runtime status, prompt routing, activity/proof output, and optional Telegram polling preview while preserving the ISO as the long-term OS form factor.
 
 ## Phase 1 Closeout Truth
 
@@ -82,6 +82,7 @@ local or booted AgentOS runtime
 
 Recommended Phase 2 tasks:
 
+- Docker preview is promoted as the primary public try path at `http://localhost:8787`.
 - Gmail setup is exposed through `agentos-kernelctl gmail-setup --serve-http`; live Gmail remains read-only and requires explicit user OAuth credentials.
 - Phase 2 closeout is recorded in `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`.
 - Practical local/Docker-safe proof is aggregated by `scripts/smoke_phase2_golden_demo.sh`.
@@ -115,6 +116,7 @@ python3 scripts/cleanup_build_artifacts.py --delete --json
 - `docs/architecture/intent-classification-contract.md`
 - `docs/architecture/user-owned-runtime-data-boundary.md`
 - `docs/acceptance/phase2-golden-runtime-loop.md`
+- `docs/acceptance/docker-runtime-preview.md`
 - `docs/acceptance/phase2-intent-eval.json`
 - `docs/roadmap/phase2-local-first-runtime-loop.md`
 - `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`

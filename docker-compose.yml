@@ -2,12 +2,14 @@ services:
   agent-os:
     build: .
     image: agent-os:latest
-    # TUI requires interactive terminal
-    stdin_open: true
-    tty: true
+    ports:
+      - "8787:8787"
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - AGENTOS_TELEGRAM_BOT_TOKEN=${AGENTOS_TELEGRAM_BOT_TOKEN:-}
+      - AGENTOS_TELEGRAM_ALLOWED_CHAT_IDS=${AGENTOS_TELEGRAM_ALLOWED_CHAT_IDS:-}
+      - AGENTOS_DOCKER_TELEGRAM_POLLING=${AGENTOS_DOCKER_TELEGRAM_POLLING:-true}
       - DEFAULT_WORKSPACE=/app/workspaces/default
       - AGENTOS_USER_DATA_ROOT=/var/lib/agentos/user
       - LOG_LEVEL=${LOG_LEVEL:-WARNING}
@@ -16,6 +18,28 @@ services:
       - ./workspaces:/app/workspaces
       # Persist user-owned Phase 2 records and preview outputs on host
       - ./agentos-data/user:/var/lib/agentos/user
+      # Persist runtime state that is not part of the image
+      - ./agentos-data/state:/var/lib/agentos/state
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  agentos-cli:
+    build: .
+    image: agent-os:latest
+    profiles: ["cli"]
+    command: ["--prompt", "status"]
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - DEFAULT_WORKSPACE=/app/workspaces/default
+      - AGENTOS_USER_DATA_ROOT=/var/lib/agentos/user
+      - LOG_LEVEL=${LOG_LEVEL:-WARNING}
+    volumes:
+      - ./workspaces:/app/workspaces
+      - ./agentos-data/user:/var/lib/agentos/user
+      - ./agentos-data/state:/var/lib/agentos/state
     security_opt:
       - no-new-privileges:true
     cap_drop:

@@ -22,7 +22,8 @@ This is a **public prototype**, not a production AI OS distribution.
 
 ## Demo Idea
 
-Boot the ISO, reach the AgentOS TUI, then try a request such as:
+Try the Docker preview first, then boot the ISO when you want to test the
+long-term OS form factor. In either path, the runtime loop is the point:
 
 ```text
 status
@@ -41,6 +42,7 @@ The core proof is small but concrete:
 ## What Works Now
 
 - Bootable ARM64 VM prototype for local experimentation.
+- Docker runtime preview at `http://localhost:8787`.
 - Terminal-first AgentOS operator TUI.
 - Agent and shell modes for talking to AgentOS or running Linux commands.
 - Bundled local Ollama baseline with `smollm2:135m-instruct-q5_K_M`.
@@ -50,20 +52,41 @@ The core proof is small but concrete:
 
 ## Quick Start
 
-Booting the ISO shows the actual AgentOS concept. Running from the repo is the
-fastest developer shortcut.
+Docker is the easiest way to try the AgentOS runtime today. The bootable ISO
+remains the long-term OS form factor.
 
-### Concept Demo: Boot The OS Image
+### Recommended: Docker Runtime Preview
 
 ```bash
 git clone git@github.com:Jongtae/agentos.git
 cd agentos
+cp .env.example .env
+docker compose up
+```
+
+Open:
+
+```text
+http://localhost:8787
+```
+
+The preview shows runtime status, LLM/Telegram readiness, prompt execution, and
+activity/proof output. It does **not** prove ISO boot ownership.
+
+CLI prompt runs remain available:
+
+```bash
+docker compose run --rm agent-os --prompt "status"
+docker compose run --rm agent-os --prompt "workspace 파일 목록 보여줘"
+```
+
+### Advanced: Boot The OS Image
+
+```bash
 ./scripts/build_latest_agentos_iso.sh
 ```
 
 Then boot the generated ARM64 ISO in a Linux VM, such as UTM on Apple Silicon.
-
-Expected boot flow:
 
 ```text
 Boot

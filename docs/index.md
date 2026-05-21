@@ -21,11 +21,13 @@ large build outputs are not included.
 - `docs/architecture/docker-runtime-preview-boundary.md` - Docker developer/demo proof boundary
 - `docs/architecture/intent-classification-contract.md` - Phase 2 prompt intent contract
 - `docs/architecture/user-owned-runtime-data-boundary.md` - local-first user data ownership boundary
+- `docs/acceptance/docker-runtime-preview.md` - Docker-first runtime preview acceptance
 - `docs/acceptance/phase2-golden-runtime-loop.md` - Phase 2 golden runtime loop acceptance
 - `docs/acceptance/phase2-intent-eval.json` - seed prompt intent eval set
 - `docs/roadmap/phase2-local-first-runtime-loop.md` - Phase 2 local-first runtime loop roadmap
 - `docs/reference/phase1-agentos-prototype-closeout-v1.md` - Phase 1 closeout and Phase 2 handoff
 - `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md` - Phase 2 proof and blocker closeout
+- `docs/reference/docker-runtime-preview-closeout-v1.md` - Docker-first runtime preview closeout
 - `docs/security.md` - public repo secret and artifact hygiene notes
 
 ## Public Export Policy

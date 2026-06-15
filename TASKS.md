@@ -15,17 +15,17 @@ Current public milestone:
 
 Current task:
 
-- `[P2-24] Refresh hourly hardening task status`
+- `[P2-25] Align hardening loop cadence docs`
 
 Runtime impact statement:
 
-- This task keeps the autonomous hourly hardening loop's source-of-truth state accurate after P2-23, so each regression pass starts from truthful runtime context before looking for the next actionable repair.
+- This task keeps the autonomous hardening loop's source-of-truth cadence accurate after switching from hourly checks to five-minute checks, so repeated regression passes start from truthful runtime context.
 
 Current autonomous hardening loop:
 
-- A Codex heartbeat automation runs once per hour against this thread.
+- A Codex heartbeat automation runs every five minutes against this thread.
 - Each pass starts from the repo startup order, checks the active issue/branch state, runs high-signal Phase 2 and setup smokes, cleans temp/build artifacts, and opens the next small lifecycle issue only when it finds an actionable regression or state drift.
-- The first manual pass after enabling the loop confirmed Telegram setup/live receiver, terminal QR rendering, Gmail setup page, Phase 2 CLI, golden demo, workflow status, and ISO build smoke coverage before refreshing this task status.
+- Recent manual passes confirmed Telegram setup/live receiver, terminal QR rendering, Gmail setup page, Phase 2 CLI, Gmail live-blocked recovery, golden demo, workflow status, ISO build smoke coverage, and cleanup policy before refreshing this task status.
 
 ## Phase 1 Closeout Truth
 
@@ -91,7 +91,7 @@ Recommended Phase 2 tasks:
 - Gmail setup is exposed through `agentos-kernelctl gmail-setup --serve-http`; live Gmail remains read-only and requires explicit user OAuth credentials.
 - Phase 2 closeout is recorded in `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`.
 - Practical local/Docker-safe proof is aggregated by `scripts/smoke_phase2_golden_demo.sh`.
-- Hourly hardening is active as an operational loop that repeatedly validates Telegram setup/live receive, Gmail setup/live-blocked recovery, Phase 2 runtime CLI, golden demo, workflow status, ISO build smoke, and cleanup policy.
+- Five-minute hardening is active as an operational loop that repeatedly validates Telegram setup/live receive, Gmail setup/live-blocked recovery, Phase 2 runtime CLI, golden demo, workflow status, ISO build smoke, and cleanup policy.
 - VM/ISO proof remains an explicit blocker until a VM run is observed and recorded.
 
 ## Validation Standards

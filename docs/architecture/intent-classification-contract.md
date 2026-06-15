@@ -18,6 +18,7 @@ Phase 2 uses this public vocabulary:
 - `workspace_file_request`
 - `web_search_request`
 - `gmail_read_or_draft`
+- `calendar_readonly`
 - `record_lookup`
 - `lifecycle_recovery`
 - `unknown_or_unsupported`
@@ -62,9 +63,9 @@ The eval set must include English and Korean examples for:
 - workspace/file requests
 - web/search requests
 - Gmail read/draft requests
+- Calendar read-only requests
 - record lookup
 - lifecycle/recovery
 - unsupported or unsafe prompts
 
 Stage C will wire this contract into an executable eval runner.
-

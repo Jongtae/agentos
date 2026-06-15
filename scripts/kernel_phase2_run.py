@@ -19,6 +19,7 @@ from io_utils import scrub_payload, write_json_file
 from kernel.intent_dispatch import build_intent_dispatch_report, classify_intent
 from kernel.operator_activity import append_activity_event, build_activity_feed_payload
 from kernel_gmail_setup import build_gmail_read_report, build_gmail_status_report
+from kernel_phase2_calendar_fixture import build_calendar_fixture_report
 from kernel_phase2_gmail_fixture import build_gmail_fixture_report
 from kernel_phase2_lifecycle_recovery import build_lifecycle_recovery_report
 from kernel_phase2_records import append_record, find_records
@@ -46,6 +47,29 @@ DEFAULT_GMAIL_FIXTURE = {
     ]
 }
 
+DEFAULT_CALENDAR_FIXTURE = {
+    "events": [
+        {
+            "id": "sample-calendar-roadmap-1",
+            "title": "AgentOS roadmap review",
+            "start": "2026-06-16T09:00:00+09:00",
+            "end": "2026-06-16T09:30:00+09:00",
+            "location": "local VM",
+            "description": "Review Phase 2 closeout and pick the next safe completion track.",
+            "attendees": ["operator@example.com"],
+        },
+        {
+            "id": "sample-calendar-runtime-1",
+            "title": "Runtime smoke review",
+            "start": "2026-06-16T10:00:00+09:00",
+            "end": "2026-06-16T10:15:00+09:00",
+            "location": "workspace",
+            "description": "Check the latest hardening loop output.",
+            "attendees": [],
+        },
+    ]
+}
+
 
 def default_user_root() -> Path:
     return Path(os.environ.get("AGENTOS_USER_DATA_ROOT", "./agentos-data/user")).expanduser()
@@ -57,6 +81,7 @@ def run_phase2(
     user_root: str | Path,
     prompt: str,
     gmail_fixture: str | Path = "",
+    calendar_fixture: str | Path = "",
     gmail_live: bool = False,
     gmail_credentials: str | Path = "",
     gmail_token: str | Path = "",
@@ -73,7 +98,7 @@ def run_phase2(
     classification = classify_intent(prompt, source="operator")
     intent = str(classification.get("intent", "unknown_needs_clarification"))
     capability = str(classification.get("capability", "direct_reply"))
-    custom_activity = intent in {"gmail_read_or_draft", "record_lookup", "lifecycle_recovery"}
+    custom_activity = intent in {"gmail_read_or_draft", "calendar_readonly", "record_lookup", "lifecycle_recovery"}
 
     if custom_activity:
         _event(workspace_path, "operator.request_received", request_id, "Operator", f"Operator received: {_preview(prompt)}")
@@ -147,6 +172,19 @@ def run_phase2(
                         "recovery_action": "Configure the read-only Gmail setup page and rerun with --gmail-live before claiming real mailbox access.",
                     }
                 )
+        elif intent == "calendar_readonly":
+            query = _query_from_prompt(prompt, fallback="roadmap")
+            fixture = _calendar_fixture_path(workspace_path, calendar_fixture)
+            capability_result = build_calendar_fixture_report(fixture, query=query, action="summarize")
+            response = _calendar_response(capability_result)
+            artifacts["calendar_fixture"] = str(fixture)
+            blockers.append(
+                {
+                    "id": "calendar-live-oauth",
+                    "reason": "This run used fixture-backed Calendar data, not live Calendar OAuth.",
+                    "recovery_action": "Keep Calendar read-only in fixture mode until a live adapter and explicit OAuth setup are designed.",
+                }
+            )
         elif intent == "record_lookup":
             query = _query_from_prompt(prompt, fallback="roadmap")
             capability_result = find_records(user_root_path, query=query, limit=10)
@@ -255,6 +293,7 @@ def run_phase2(
             "ok": status in {"completed", "blocked"},
             "testable_cli_surface": True,
             "gmail_fixture_mode": bool(intent == "gmail_read_or_draft" and not gmail_live),
+            "calendar_fixture_mode": bool(intent == "calendar_readonly"),
             "gmail_live_read_completed": bool(gmail_live and intent == "gmail_read_or_draft" and capability_result.get("proof", {}).get("ok")),
             "live_gmail_oauth_completed": bool(
                 gmail_live
@@ -302,6 +341,16 @@ def _gmail_fixture_path(workspace: Path, fixture: str | Path) -> Path:
     return path
 
 
+def _calendar_fixture_path(workspace: Path, fixture: str | Path) -> Path:
+    if str(fixture or "").strip():
+        return Path(fixture).expanduser().resolve()
+    path = workspace / "artifacts" / "phase2-run" / "default-calendar-fixture.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        path.write_text(json.dumps(DEFAULT_CALENDAR_FIXTURE, ensure_ascii=True) + "\n", encoding="utf-8")
+    return path
+
+
 def _query_from_prompt(prompt: str, *, fallback: str) -> str:
     normalized = str(prompt or "").lower()
     for token in ("roadmap", "agentos", "runtime", "status", "smoke"):
@@ -333,6 +382,13 @@ def _gmail_response(result: dict) -> str:
     if body:
         pieces.append("Draft reply:\n" + body)
     return "\n\n".join(pieces).strip()
+
+
+def _calendar_response(result: dict) -> str:
+    summary = str(result.get("summary", "")).strip()
+    if summary:
+        return "Calendar fixture summary:\n" + summary
+    return "No Calendar events matched."
 
 
 def _gmail_live_response(result: dict) -> str:
@@ -423,6 +479,7 @@ def main() -> int:
     parser.add_argument("--message", default="")
     parser.add_argument("--prompt", default="")
     parser.add_argument("--gmail-fixture", default="")
+    parser.add_argument("--calendar-fixture", default="")
     parser.add_argument("--gmail-live", action="store_true")
     parser.add_argument("--gmail-credentials", default="")
     parser.add_argument("--gmail-token", default="")
@@ -440,6 +497,7 @@ def main() -> int:
         user_root=args.user_root,
         prompt=prompt,
         gmail_fixture=args.gmail_fixture,
+        calendar_fixture=args.calendar_fixture,
         gmail_live=args.gmail_live,
         gmail_credentials=args.gmail_credentials,
         gmail_token=args.gmail_token,

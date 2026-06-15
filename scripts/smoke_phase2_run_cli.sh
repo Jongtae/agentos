@@ -26,6 +26,7 @@ run_phase2() {
 run_phase2 status "status"
 run_phase2 workspace "list files in workspace"
 run_phase2 gmail "draft a reply to my Gmail roadmap email"
+run_phase2 calendar "summarize my upcoming calendar roadmap meeting"
 run_phase2 records "find my roadmap records"
 run_phase2 lifecycle "restart runtime"
 
@@ -46,6 +47,7 @@ expected = {
     "status": ("runtime_status", "runtime_status", "completed"),
     "workspace": ("local_workspace_search", "local_workspace_search", "completed"),
     "gmail": ("gmail_read_or_draft", "gmail_read_or_draft", "completed"),
+    "calendar": ("calendar_readonly", "calendar_readonly", "completed"),
     "records": ("record_lookup", "record_lookup", "completed"),
     "lifecycle": ("lifecycle_recovery", "lifecycle_recovery", "blocked"),
 }
@@ -68,13 +70,19 @@ assert gmail["proof"]["gmail_fixture_mode"] is True
 assert gmail["proof"]["live_gmail_oauth_completed"] is False
 assert gmail["blockers"][0]["id"] == "gmail-oauth-live"
 
+calendar = json.loads((tmp_dir / "calendar.json").read_text())
+assert calendar["proof"]["calendar_fixture_mode"] is True
+assert calendar["capability_result"]["proof"]["read_only"] is True
+assert calendar["capability_result"]["proof"]["mutation_executed"] is False
+assert calendar["blockers"][0]["id"] == "calendar-live-oauth"
+
 lifecycle = json.loads((tmp_dir / "lifecycle.json").read_text())
 assert lifecycle["blockers"][0]["id"] == "lifecycle-confirmation-required"
 assert "confirm restart-runtime" in lifecycle["response"]
 
 records_path = user_root / "records" / "records.jsonl"
 assert records_path.exists()
-assert len(records_path.read_text().splitlines()) >= 5
+assert len(records_path.read_text().splitlines()) >= 6
 
 human = (tmp_dir / "human.txt").read_text()
 assert "AgentOS Phase 2 run" in human

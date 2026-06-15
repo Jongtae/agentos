@@ -17,6 +17,7 @@ PRACTICAL_SMOKES = [
     "scripts/smoke_phase2_capability_result.sh",
     "scripts/smoke_phase2_core_dispatch.sh",
     "scripts/smoke_phase2_gmail_fixture.sh",
+    "scripts/smoke_phase2_calendar_fixture.sh",
     "scripts/smoke_phase2_records.sh",
     "scripts/smoke_phase2_activity_vocabulary.sh",
     "scripts/smoke_phase2_lifecycle_recovery.sh",

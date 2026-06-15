@@ -201,16 +201,18 @@ def _later_tracks(roadmap: str) -> list[dict]:
 
 
 def _next_forward_candidates(snapshot: SourceSnapshot, later_tracks: list[dict]) -> list[dict]:
-    candidates = [
-        {
-            "id": "direction-judge-loop-gate",
-            "title": "Gate autonomous hardening through roadmap direction judge output",
-            "safe_without_external_state": True,
-            "advances": ["OS-native runtime defaults", "runtime proof truthfulness"],
-        }
-    ]
+    candidates = []
+    if "roadmap direction judge" not in snapshot.tasks.lower():
+        candidates.append(
+            {
+                "id": "direction-judge-loop-gate",
+                "title": "Gate autonomous hardening through roadmap direction judge output",
+                "safe_without_external_state": True,
+                "advances": ["OS-native runtime defaults", "runtime proof truthfulness"],
+            }
+        )
     track_names = " ".join(track["name"] for track in later_tracks).lower()
-    if "calendar read-only" in track_names:
+    if "calendar read-only" in track_names and "fixture-backed contract" not in snapshot.tasks.lower():
         candidates.append(
             {
                 "id": "calendar-readonly-contract",

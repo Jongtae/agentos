@@ -39,6 +39,8 @@ def classify_intent(message: str, *, source: str = "operator") -> dict:
         return _intent("lifecycle_recovery", "lifecycle_recovery", "deterministic_lifecycle")
     if any(token in normalized for token in ("지난번", "회의 기록", "record", "records", "prior note", "last agentos meeting")):
         return _intent("record_lookup", "record_lookup", "deterministic_record")
+    if any(token in normalized for token in ("calendar", "schedule", "meeting", "캘린더", "일정", "미팅")):
+        return _intent("calendar_readonly", "calendar_readonly", "deterministic_calendar")
     if any(token in normalized for token in ("파일", "디렉토리", "directory", "folder", "workspace", "목록", "list files", "ls ")):
         return _intent("local_workspace_search", "local_workspace_search", "deterministic_workspace")
     if any(token in normalized for token in ("기억", "remember", "메모", "note this")):

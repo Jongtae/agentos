@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-27] Define Calendar read-only capability contract`
+- `[P2-28] Add VM ISO proof preflight runbook smoke`
 
 Runtime impact statement:
 
-- This task advances the next safe completion candidate from the roadmap direction judge by adding a fixture-backed, read-only Calendar capability contract that broadens everyday-work capability ownership without requiring live OAuth.
+- This task advances the next safe completion candidate from the roadmap direction judge by adding a VM/ISO proof preflight that makes the observed boot/recovery/rejoin proof path explicit without falsely claiming a VM run.
 
 Current autonomous hardening loop:
 
@@ -96,6 +96,7 @@ Recommended Phase 2 tasks:
 - Five-minute hardening is active as an operational loop that repeatedly validates Telegram setup/live receive, Gmail setup/live-blocked recovery, Phase 2 runtime CLI, golden demo, workflow status, ISO build smoke, and cleanup policy.
 - Roadmap direction judging is part of that loop so stable Phase 2 validation can promote the next safe completion task instead of becoming the whole product motion.
 - Calendar read-only now has a fixture-backed contract and smoke path; live Calendar OAuth remains future work until explicit credentials and adapter design exist.
+- VM/ISO proof now has a preflight smoke and blocker contract; observed boot, reboot/recovery, and managed runtime rejoin still require a real VM run before signoff.
 - VM/ISO proof remains an explicit blocker until a VM run is observed and recorded.
 
 ## Validation Standards
@@ -131,3 +132,4 @@ python3 scripts/cleanup_build_artifacts.py --delete --json
 - `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`
 - `.agents/roadmap-direction-judge.md`
 - `docs/architecture/calendar-readonly-capability-contract.md`
+- `docs/acceptance/vm-iso-proof-preflight.md`

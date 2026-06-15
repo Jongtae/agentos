@@ -221,7 +221,7 @@ def _next_forward_candidates(snapshot: SourceSnapshot, later_tracks: list[dict])
                 "advances": ["capability ownership", "mediation cost reduction"],
             }
         )
-    if "vm/iso proof" in track_names:
+    if "vm/iso proof preflight" not in snapshot.tasks.lower() and "vm/iso proof" in track_names:
         candidates.append(
             {
                 "id": "vm-proof-runbook-smoke",

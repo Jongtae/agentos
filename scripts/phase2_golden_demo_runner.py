@@ -25,6 +25,7 @@ PRACTICAL_SMOKES = [
     "scripts/smoke_gmail_setup_page.sh",
     "scripts/smoke_gmail_live_missing_credentials.sh",
     "scripts/smoke_phase2_gmail_live_blocked.sh",
+    "scripts/smoke_vm_iso_proof_preflight.sh",
 ]
 
 EXPLICIT_BLOCKERS = [

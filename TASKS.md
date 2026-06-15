@@ -15,16 +15,18 @@ Current public milestone:
 
 Current task:
 
-- `[P2-25] Align hardening loop cadence docs`
+- `[P2-26] Add roadmap direction judge to hardening loop`
 
 Runtime impact statement:
 
-- This task keeps the autonomous hardening loop's source-of-truth cadence accurate after switching from hourly checks to five-minute checks, so repeated regression passes start from truthful runtime context.
+- This task adds a roadmap direction judge to the autonomous hardening loop so repeated smoke passes protect the runtime while also steering toward project completion instead of cycling on one closed phase.
 
 Current autonomous hardening loop:
 
 - A Codex heartbeat automation runs every five minutes against this thread.
-- Each pass starts from the repo startup order, checks the active issue/branch state, runs high-signal Phase 2 and setup smokes, cleans temp/build artifacts, and opens the next small lifecycle issue only when it finds an actionable regression or state drift.
+- Each pass starts from the repo startup order, checks the active issue/branch state, runs the roadmap direction judge, runs high-signal Phase 2 and setup smokes, cleans temp/build artifacts, and opens the next small lifecycle issue when it finds either an actionable regression/state drift or a safe forward-progress candidate after stable repetition.
+- A direction verdict of `accept_with_risk` means the loop may finish the current validation pass, but the next autonomous issue should move a project-completion track forward when that can be done without live credentials or unobserved VM proof.
+- A direction verdict of `reject` means autonomous apply work should stop and hand off or open a repair issue before continuing.
 - Recent manual passes confirmed Telegram setup/live receiver, terminal QR rendering, Gmail setup page, Phase 2 CLI, Gmail live-blocked recovery, golden demo, workflow status, ISO build smoke coverage, and cleanup policy before refreshing this task status.
 
 ## Phase 1 Closeout Truth
@@ -92,6 +94,7 @@ Recommended Phase 2 tasks:
 - Phase 2 closeout is recorded in `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`.
 - Practical local/Docker-safe proof is aggregated by `scripts/smoke_phase2_golden_demo.sh`.
 - Five-minute hardening is active as an operational loop that repeatedly validates Telegram setup/live receive, Gmail setup/live-blocked recovery, Phase 2 runtime CLI, golden demo, workflow status, ISO build smoke, and cleanup policy.
+- Roadmap direction judging is part of that loop so stable Phase 2 validation can promote the next safe completion task instead of becoming the whole product motion.
 - VM/ISO proof remains an explicit blocker until a VM run is observed and recorded.
 
 ## Validation Standards
@@ -125,3 +128,4 @@ python3 scripts/cleanup_build_artifacts.py --delete --json
 - `docs/acceptance/phase2-intent-eval.json`
 - `docs/roadmap/phase2-local-first-runtime-loop.md`
 - `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`
+- `.agents/roadmap-direction-judge.md`

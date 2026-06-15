@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -62,7 +63,17 @@ def main() -> int:
     )
 
     cadence_status = str(cadence.get("status", "hold"))
-    should_apply = bool(args.apply) and scheduler_status == "apply" and cadence_status == "allow"
+    project_direction = _project_direction_report()
+    project_direction_verdict = str(project_direction.get("verdict", "accept"))
+    project_direction_allows_apply = (
+        not bool(args.gate_project_direction) or project_direction_verdict == "accept"
+    )
+    should_apply = (
+        bool(args.apply)
+        and scheduler_status == "apply"
+        and cadence_status == "allow"
+        and project_direction_allows_apply
+    )
 
     orchestration = remediation_orchestration_report(
         workspace_dir=workspace,
@@ -143,6 +154,7 @@ def main() -> int:
         "execution_mode": "apply" if should_apply else "dry-run",
         "scheduler": scheduler,
         "cadence": cadence,
+        "project_direction": project_direction,
         "orchestration": orchestration,
         "escalation": escalation,
         "state_updates": state_updates,
@@ -154,6 +166,32 @@ def main() -> int:
     if args.apply and should_apply and execution_errors > 0:
         return 4
     return 0
+
+
+def _project_direction_report() -> dict:
+    proc = subprocess.run(
+        ["python3", "scripts/kernel_hardening_direction_judge.py", "--root", str(ROOT_DIR), "--json"],
+        cwd=ROOT_DIR,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return {
+            "schema_version": "agentos-hardening-direction-judge.v1",
+            "verdict": "reject",
+            "reason": "project_direction_judge_failed",
+            "error": (proc.stderr or proc.stdout).strip(),
+        }
+    try:
+        return json.loads(proc.stdout.strip())
+    except json.JSONDecodeError as exc:
+        return {
+            "schema_version": "agentos-hardening-direction-judge.v1",
+            "verdict": "reject",
+            "reason": "project_direction_judge_invalid_json",
+            "error": str(exc),
+        }
 
 
 def _parse_args() -> argparse.Namespace:
@@ -171,6 +209,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--cadence-max-applies-per-day", type=int, default=12)
 
     parser.add_argument("--escalation-min-interval-sec", type=int, default=900)
+    parser.add_argument(
+        "--gate-project-direction",
+        action="store_true",
+        help="Block apply when the roadmap direction judge is not accept.",
+    )
 
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true", help="Plan-only mode (default)")

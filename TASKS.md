@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-28] Add VM ISO proof preflight runbook smoke`
+- `[P2-29] Add Gmail live read-only manual acceptance pack`
 
 Runtime impact statement:
 
-- This task advances the next safe completion candidate from the roadmap direction judge by adding a VM/ISO proof preflight that makes the observed boot/recovery/rejoin proof path explicit without falsely claiming a VM run.
+- This task advances the next safe completion candidate from the roadmap direction judge by adding a Gmail live read-only manual acceptance pack that separates mock/blocker proof from real user-observed OAuth proof without exposing secrets.
 
 Current autonomous hardening loop:
 
@@ -97,6 +97,7 @@ Recommended Phase 2 tasks:
 - Roadmap direction judging is part of that loop so stable Phase 2 validation can promote the next safe completion task instead of becoming the whole product motion.
 - Calendar read-only now has a fixture-backed contract and smoke path; live Calendar OAuth remains future work until explicit credentials and adapter design exist.
 - VM/ISO proof now has a preflight smoke and blocker contract; observed boot, reboot/recovery, and managed runtime rejoin still require a real VM run before signoff.
+- Gmail live read-only proof now has a manual acceptance pack and blocker capture; automated smokes still avoid real user credentials.
 - VM/ISO proof remains an explicit blocker until a VM run is observed and recorded.
 
 ## Validation Standards
@@ -133,3 +134,4 @@ python3 scripts/cleanup_build_artifacts.py --delete --json
 - `.agents/roadmap-direction-judge.md`
 - `docs/architecture/calendar-readonly-capability-contract.md`
 - `docs/acceptance/vm-iso-proof-preflight.md`
+- `docs/acceptance/gmail-live-readonly-acceptance.md`

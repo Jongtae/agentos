@@ -25,8 +25,11 @@ assert payload["proof"]["runtime_first_language_present"] is True, payload
 assert payload["proof"]["cleanup_policy_present"] is True, payload
 assert payload["proof"]["vm_iso_blocker_explicit"] is True, payload
 assert payload["completion_tracks"], payload
-assert payload["next_forward_candidates"], payload
-assert any(candidate["safe_without_external_state"] for candidate in payload["next_forward_candidates"]), payload
+if payload["next_forward_candidates"]:
+    assert any(candidate["safe_without_external_state"] for candidate in payload["next_forward_candidates"]), payload
+else:
+    blocker_ids = {blocker.get("id") for blocker in payload.get("blockers", [])}
+    assert {"live-gmail-oauth", "vm-iso-proof"} <= blocker_ids, payload
 PY
 
 echo "hardening direction judge smoke: PASS"

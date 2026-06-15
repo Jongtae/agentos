@@ -68,7 +68,7 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Later Tracks
 
-- live Gmail OAuth read/search/draft proof with explicit user consent
+- live Gmail OAuth read/search/draft observed proof after manual acceptance pack
 - VM/ISO observed proof for boot, recovery, and managed Codex session rejoin after preflight
 - calendar read-only live adapter candidate after fixture-backed contract
 - verified boot and hardware attestation

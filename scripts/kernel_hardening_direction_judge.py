@@ -230,7 +230,7 @@ def _next_forward_candidates(snapshot: SourceSnapshot, later_tracks: list[dict])
                 "advances": ["runtime proof truthfulness", "OS-native runtime defaults"],
             }
         )
-    if "live gmail oauth" in track_names:
+    if "gmail live read-only manual acceptance pack" not in snapshot.tasks.lower() and "live gmail oauth" in track_names:
         candidates.append(
             {
                 "id": "gmail-live-manual-acceptance",

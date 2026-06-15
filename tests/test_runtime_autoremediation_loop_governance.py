@@ -58,6 +58,32 @@ class RuntimeAutoremediationLoopGovernanceTests(unittest.TestCase):
         self.assertEqual(report.get("decision"), "handoff")
         self.assertEqual(report.get("reason"), "operator_handoff_required")
 
+    def test_project_direction_risk_holds_otherwise_eligible_cycle(self):
+        report = autoremediation_loop_governance_report(
+            cycle_payload={
+                "execution_mode": "dry-run",
+                "scheduler": {"decision": {"status": "apply", "reason": "eligible"}},
+                "cadence": {"status": "allow", "reason": "eligible"},
+                "project_direction": {"verdict": "accept_with_risk", "reason": "stable phase repeat"},
+                "escalation": {"should_escalate": False, "reason": "no_escalation", "event": {}},
+            }
+        )
+        self.assertEqual(report.get("decision"), "hold")
+        self.assertEqual(report.get("reason"), "project_direction_risk")
+
+    def test_project_direction_reject_requires_handoff(self):
+        report = autoremediation_loop_governance_report(
+            cycle_payload={
+                "execution_mode": "dry-run",
+                "scheduler": {"decision": {"status": "apply", "reason": "eligible"}},
+                "cadence": {"status": "allow", "reason": "eligible"},
+                "project_direction": {"verdict": "reject", "reason": "missing runtime direction"},
+                "escalation": {"should_escalate": False, "reason": "no_escalation", "event": {}},
+            }
+        )
+        self.assertEqual(report.get("decision"), "handoff")
+        self.assertEqual(report.get("reason"), "project_direction_rejected")
+
 
 if __name__ == "__main__":
     unittest.main()

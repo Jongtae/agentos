@@ -78,6 +78,21 @@ The detailed Phase 2 roadmap is tracked in
 - distribution packaging
 - public preview operations
 
+## Autonomous Completion Loop
+
+The recurring hardening loop should protect the current runtime proof and also
+move AgentOS toward completion. Once a phase is closed and repeated smoke passes
+stay clean, the loop must run the roadmap direction judge and choose one of:
+
+- keep validating only when no safe forward-progress task exists
+- open the next small issue for a safe completion track
+- record an explicit blocker when the next proof needs credentials, a VM, or
+  external state
+- hand off when the loop is misaligned with the runtime-first product direction
+
+The direction judge must not claim live Gmail OAuth or VM/ISO proof unless those
+runs are actually observed.
+
 ## Current Source Of Truth
 
 - `README.md`

@@ -171,6 +171,13 @@ Then:
 - confirm the parent branch
 - define the targeted validation set before editing
 - record one explicit `runtime impact statement` before implementation begins
+- run or consult the roadmap direction judge before deciding that another
+  smoke-only hardening pass is sufficient
+- when the roadmap direction judge returns `accept_with_risk`, prefer opening
+  the next small safe forward-progress issue over repeating the same phase
+  indefinitely
+- when the roadmap direction judge returns `reject`, stop autonomous apply work,
+  preserve evidence, and hand off or open a repair issue before continuing
 
 ## Repo-local agent roles
 
@@ -185,6 +192,7 @@ Preferred repo-local roles:
 - `.agents/runtime-judge.md`
 - `.agents/proof-judge.md`
 - `.agents/test-judge.md`
+- `.agents/roadmap-direction-judge.md`
 
 Use subagents only for bounded, non-overlapping work that materially advances the current issue.
 
@@ -205,6 +213,11 @@ Use subagents only for bounded, non-overlapping work that materially advances th
   - each agent's ownership boundary
   - which judge verdicts are required before closeout
 - if no subagents are used for a substantial phase, the plan should briefly justify why
+
+Autonomous hardening loops are not complete when they only prove that existing
+Phase 2 smokes still pass. They must also ask whether the loop is advancing the
+project toward completion. A direction judge should identify stable-phase
+repetition, explicit blockers, and the next safe forward-progress candidate.
 
 The main agent remains responsible for:
 - lifecycle correctness

@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-26] Add roadmap direction judge to hardening loop`
+- `[P2-27] Define Calendar read-only capability contract`
 
 Runtime impact statement:
 
-- This task adds a roadmap direction judge to the autonomous hardening loop so repeated smoke passes protect the runtime while also steering toward project completion instead of cycling on one closed phase.
+- This task advances the next safe completion candidate from the roadmap direction judge by adding a fixture-backed, read-only Calendar capability contract that broadens everyday-work capability ownership without requiring live OAuth.
 
 Current autonomous hardening loop:
 
@@ -95,6 +95,7 @@ Recommended Phase 2 tasks:
 - Practical local/Docker-safe proof is aggregated by `scripts/smoke_phase2_golden_demo.sh`.
 - Five-minute hardening is active as an operational loop that repeatedly validates Telegram setup/live receive, Gmail setup/live-blocked recovery, Phase 2 runtime CLI, golden demo, workflow status, ISO build smoke, and cleanup policy.
 - Roadmap direction judging is part of that loop so stable Phase 2 validation can promote the next safe completion task instead of becoming the whole product motion.
+- Calendar read-only now has a fixture-backed contract and smoke path; live Calendar OAuth remains future work until explicit credentials and adapter design exist.
 - VM/ISO proof remains an explicit blocker until a VM run is observed and recorded.
 
 ## Validation Standards
@@ -129,3 +130,4 @@ python3 scripts/cleanup_build_artifacts.py --delete --json
 - `docs/roadmap/phase2-local-first-runtime-loop.md`
 - `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`
 - `.agents/roadmap-direction-judge.md`
+- `docs/architecture/calendar-readonly-capability-contract.md`

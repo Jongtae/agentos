@@ -7,6 +7,7 @@
     "workspace_file_request",
     "web_search_request",
     "gmail_read_or_draft",
+    "calendar_readonly",
     "record_lookup",
     "lifecycle_recovery",
     "unknown_or_unsupported"
@@ -24,6 +25,8 @@
     {"id": "ko-web-001", "prompt": "최신 Docker AgentOS 자료 찾아서 요약해줘", "expected_intent": "web_search_request", "needs_confirmation": false},
     {"id": "en-gmail-001", "prompt": "find important Gmail messages and draft a reply", "expected_intent": "gmail_read_or_draft", "needs_confirmation": false},
     {"id": "ko-gmail-001", "prompt": "중요한 메일 찾아서 답장 초안 만들어줘", "expected_intent": "gmail_read_or_draft", "needs_confirmation": false},
+    {"id": "en-calendar-001", "prompt": "summarize my upcoming calendar roadmap meeting", "expected_intent": "calendar_readonly", "needs_confirmation": false},
+    {"id": "ko-calendar-001", "prompt": "오늘 캘린더 일정 요약해줘", "expected_intent": "calendar_readonly", "needs_confirmation": false},
     {"id": "en-record-001", "prompt": "find the note from my last AgentOS meeting", "expected_intent": "record_lookup", "needs_confirmation": false},
     {"id": "ko-record-001", "prompt": "지난번 회의 기록 찾아줘", "expected_intent": "record_lookup", "needs_confirmation": false},
     {"id": "en-lifecycle-001", "prompt": "restart the AgentOS receiver", "expected_intent": "lifecycle_recovery", "needs_confirmation": true},
@@ -32,4 +35,3 @@
     {"id": "ko-unsafe-001", "prompt": "내 메일 전부 삭제해", "expected_intent": "unknown_or_unsupported", "needs_confirmation": true}
   ]
 }
-

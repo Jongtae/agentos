@@ -280,7 +280,7 @@ Usage:
   agentos-kernelctl research-workflow [--workspace <path>] [--message-text <text>] [--chat-id <id>] [--request-id <id>] [--message-id <id>] [--session-id <id>] [--allow-domain <domain>] [--send] [--output <path>] [--json]
   agentos-kernelctl activity-feed [--workspace <path>] [--limit <N>] [--output <path>] [--json]
   agentos-kernelctl intent-dispatch [--workspace <path>] [--source telegram|operator] --message <text> [--chat-id <id>] [--request-id <id>] [--message-id <id>] [--session-id <id>] [--allow-domain <domain>] [--send] [--output <path>] [--json]
-  agentos-kernelctl phase2-run [--workspace <path>] [--user-root <path>] --message <text> [--gmail-fixture <path>] [--gmail-live] [--gmail-credentials <path>] [--gmail-token <path>] [--gmail-mock-response <path>] [--allow-domain <domain>] [--output <path>] [--json]
+  agentos-kernelctl phase2-run [--workspace <path>] [--user-root <path>] --message <text> [--gmail-fixture <path>] [--calendar-fixture <path>] [--gmail-live] [--gmail-credentials <path>] [--gmail-token <path>] [--gmail-mock-response <path>] [--allow-domain <domain>] [--output <path>] [--json]
   agentos-kernelctl gmail-setup [--workspace <path>] [--credentials <path>] [--credentials-path <path>] [--token-path <path>] [--authorize] [--serve-http] [--background] [--host <host>] [--display-host <host>] [--port <port>] [--timeout-sec <sec>] [--url-file <path>] [--output <path>] [--json]
   agentos-kernelctl gmail-status [--workspace <path>] [--credentials-path <path>] [--token-path <path>] [--output <path>] [--json]
   agentos-kernelctl gmail-read [--workspace <path>] [--query <text>] [--credentials-path <path>] [--token-path <path>] [--mock-response <path>] [--output <path>] [--json]
@@ -391,6 +391,7 @@ llm_setup_openai_api_key=""
 ask_message=""
 phase2_user_root="${AGENTOS_USER_DATA_ROOT:-$ROOT_DIR/agentos-data/user}"
 phase2_gmail_fixture=""
+phase2_calendar_fixture=""
 phase2_gmail_live=0
 gmail_credentials=""
 gmail_credentials_path=""
@@ -600,6 +601,10 @@ while [ "$#" -gt 0 ]; do
     --gmail-fixture)
       shift
       phase2_gmail_fixture="${1:-}"
+      ;;
+    --calendar-fixture)
+      shift
+      phase2_calendar_fixture="${1:-}"
       ;;
     --gmail-live)
       phase2_gmail_live=1
@@ -3257,6 +3262,9 @@ PY
     phase2_args=(--workspace "$workspace" --user-root "$phase2_user_root" --message "$ask_message")
     if [ -n "$phase2_gmail_fixture" ]; then
       phase2_args+=(--gmail-fixture "$phase2_gmail_fixture")
+    fi
+    if [ -n "$phase2_calendar_fixture" ]; then
+      phase2_args+=(--calendar-fixture "$phase2_calendar_fixture")
     fi
     if [ "$phase2_gmail_live" -eq 1 ]; then
       phase2_args+=(--gmail-live)

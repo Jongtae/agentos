@@ -70,7 +70,7 @@ The detailed Phase 2 roadmap is tracked in
 
 - live Gmail OAuth read/search/draft proof with explicit user consent
 - VM/ISO proof for boot, recovery, and managed Codex session rejoin
-- calendar read-only capability candidate
+- calendar read-only live adapter candidate after fixture-backed contract
 - verified boot and hardware attestation
 - updater hardening
 - broader app/inbox ecosystem

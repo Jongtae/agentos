@@ -80,15 +80,35 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Autonomous Completion Loop
 
-The recurring hardening loop should protect the current runtime proof and also
-move AgentOS toward completion. Once a phase is closed and repeated smoke passes
-stay clean, the loop must run the roadmap direction judge and choose one of:
+The recurring completion loop should protect the current runtime proof and also
+move AgentOS toward completion. It runs every 15 minutes and starts by comparing
+README, PRD, TASKS, this roadmap, and GitHub issue/milestone state before
+choosing work.
 
 - keep validating only when no safe forward-progress task exists
-- open the next small issue for a safe completion track
+- create or continue a milestone-backed epic when the roadmap has a real gap
+- open the next small issue for a safe completion track inside that epic
 - record an explicit blocker when the next proof needs credentials, a VM, or
   external state
 - hand off when the loop is misaligned with the runtime-first product direction
+
+Every epic must define:
+
+- the milestone it advances
+- the completion goal
+- the validation plan
+- the exit condition
+- the rule for deciding whether to continue follow-up work or return to the
+  roadmap for the next epic
+
+If roadmap changes require product or architecture judgment, the loop should
+research primary or credible external sources, summarize the evidence, and
+translate that evidence into milestone, epic, and exit-condition changes before
+implementation begins.
+
+Heavy smoke checks should not become the product motion. ISO smoke is limited
+to at most once per calendar day unless ISO/build code changed or a maintainer
+explicitly requests it.
 
 The direction judge must not claim live Gmail OAuth or VM/ISO proof unless those
 runs are actually observed.

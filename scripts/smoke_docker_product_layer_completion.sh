@@ -117,6 +117,16 @@ assert {item["id"] for item in product["customer_handoff_bundle"]["handoff_check
     "run_validation_commands",
     "record_remaining_blockers",
 }
+assert product["customer_handoff_bundle"]["handoff_report"]["schema_version"] == "agentos-product-layer-customer-handoff-report.v1"
+assert {item["id"] for item in product["customer_handoff_bundle"]["handoff_report"]["sections"]} >= {
+    "reproduced_try_path",
+    "inspected_product_surfaces",
+    "local_validation_evidence",
+    "remaining_observed_proof_blockers",
+    "share_safe_non_claims",
+}
+assert product["customer_handoff_bundle"]["handoff_report"]["share_policy"]["secret_material_allowed"] is False
+assert product["customer_handoff_bundle"]["handoff_report"]["share_policy"]["automatic_claim_promotion"] is False
 assert {item["id"] for item in product["customer_handoff_bundle"]["inspect_surfaces"]} >= {
     "runtime_home",
     "onboarding_status",

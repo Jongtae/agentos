@@ -68,6 +68,23 @@ assert checklist == {
     "run_validation_commands": "ready",
     "record_remaining_blockers": "blocked_until_observed_evidence",
 }
+report = handoff["handoff_report"]
+assert report["schema_version"] == "agentos-product-layer-customer-handoff-report.v1"
+assert report["title"] == "Docker customer handoff report"
+assert {item["id"] for item in report["sections"]} == {
+    "reproduced_try_path",
+    "inspected_product_surfaces",
+    "local_validation_evidence",
+    "remaining_observed_proof_blockers",
+    "share_safe_non_claims",
+}
+assert {item["id"]: item["state"] for item in report["sections"]}["remaining_observed_proof_blockers"] == "blocked_until_observed_evidence"
+assert report["share_policy"] == {
+    "safe_to_share_without_secrets": True,
+    "secret_material_allowed": False,
+    "automatic_claim_promotion": False,
+    "requires_sanitized_observed_evidence_for_stronger_claims": True,
+}
 assert {item["id"] for item in handoff["inspect_surfaces"]} >= {
     "runtime_home",
     "onboarding_status",
@@ -108,8 +125,10 @@ assert handoff["proof"]["hardware_attestation_claimed"] is False
 assert "Customer Handoff Bundle" in home
 assert "Handoff Surfaces" in home
 assert "Handoff Checklist" in home
+assert "Handoff Report" in home
 assert "Handoff Validation" in home
 assert "Record remaining proof blockers" in home
+assert "Stronger claims require observed evidence" in home
 assert "customer handoff JSON" in home
 PY
 

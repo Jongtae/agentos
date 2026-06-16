@@ -323,6 +323,16 @@ assert {item["id"] for item in customer_handoff["handoff_checklist"]} >= {
     "run_validation_commands",
     "record_remaining_blockers",
 }
+assert customer_handoff["handoff_report"]["schema_version"] == "agentos-product-layer-customer-handoff-report.v1"
+assert {item["id"] for item in customer_handoff["handoff_report"]["sections"]} >= {
+    "reproduced_try_path",
+    "inspected_product_surfaces",
+    "local_validation_evidence",
+    "remaining_observed_proof_blockers",
+    "share_safe_non_claims",
+}
+assert customer_handoff["handoff_report"]["share_policy"]["secret_material_allowed"] is False
+assert customer_handoff["handoff_report"]["share_policy"]["automatic_claim_promotion"] is False
 assert {item["id"] for item in customer_handoff["inspect_surfaces"]} >= {
     "runtime_home",
     "onboarding_status",
@@ -357,6 +367,7 @@ assert "Packet Readiness" in home
 assert "proof packet JSON" in home
 assert "Customer Handoff Bundle" in home
 assert "Handoff Checklist" in home
+assert "Handoff Report" in home
 assert "customer handoff JSON" in home
 assert prompt["ok"] is True
 assert prompt["intent"] == "greeting", prompt

@@ -94,6 +94,7 @@ class DockerPreviewApp:
     def status(self) -> dict:
         setup = build_status(str(self.workspace), str(self.user_root))
         activity = build_activity_feed_payload(self.workspace, limit=12)
+        product_layer = self.product_layer(setup=setup, activity=activity)
         return {
             "schema_version": "agentos-docker-runtime-preview-status.v1",
             "docker_preview": True,
@@ -109,11 +110,64 @@ class DockerPreviewApp:
                 "webhook_configured": False,
             },
             "activity": activity,
+            "product_layer": product_layer,
             "proof": {
                 "ok": True,
                 "docker_preview_surface_ready": True,
+                "product_layer_runtime_home_ready": True,
                 "boot_or_iso_proof": False,
                 "secrets_redacted": True,
+            },
+        }
+
+    def product_layer(self, *, setup: dict | None = None, activity: dict | None = None) -> dict:
+        setup_payload = setup or build_status(str(self.workspace), str(self.user_root))
+        activity_payload = activity or build_activity_feed_payload(self.workspace, limit=12)
+        adapters = setup_payload.get("adapters", {}) if isinstance(setup_payload.get("adapters"), dict) else {}
+        blockers = _product_blockers(setup_payload)
+        return {
+            "schema_version": "agentos-product-layer-runtime-home.v1",
+            "surface": "Docker Runtime Home",
+            "customer_message": "AgentOS is ready for local-first runtime preview. Some live proofs still need user-provided evidence.",
+            "features": [
+                {
+                    "id": "runtime_home",
+                    "label": "Runtime Home",
+                    "state": str(setup_payload.get("overall_state", "ready")),
+                    "customer_value": "See whether the managed runtime is ready before asking AgentOS to work.",
+                },
+                {
+                    "id": "work_inbox",
+                    "label": "Work Inbox",
+                    "state": _inbox_state(adapters),
+                    "customer_value": "Try read-first inbox workflows through fixtures, Maildir boundaries, and explicit live blockers.",
+                },
+                {
+                    "id": "activity_timeline",
+                    "label": "Activity Timeline",
+                    "state": "ready" if activity_payload.get("activity_feed_ready") else "degraded",
+                    "customer_value": "Understand what AgentOS did, which capability ran, and what happened next.",
+                },
+                {
+                    "id": "recovery_center",
+                    "label": "Recovery Center",
+                    "state": "attention" if blockers else "ready",
+                    "customer_value": "Turn missing credentials, Docker daemon gaps, and observed-proof blockers into clear next steps.",
+                },
+                {
+                    "id": "evidence_dashboard",
+                    "label": "Evidence Dashboard",
+                    "state": "partial",
+                    "customer_value": "Separate completed Docker/local proof from live OAuth, VM/ISO, browser, release, and attestation evidence.",
+                },
+            ],
+            "blockers": blockers,
+            "proof": {
+                "docker_main_try_path": True,
+                "boot_or_iso_proof_claimed": False,
+                "live_oauth_claimed": False,
+                "live_browser_proof_claimed": False,
+                "customer_facing_summary_ready": True,
             },
         }
 
@@ -153,10 +207,50 @@ class DockerPreviewApp:
         return build_activity_feed_payload(self.workspace, limit=40)
 
 
+def _product_blockers(setup: dict) -> list[dict]:
+    blockers = [
+        {
+            "id": "vm-iso-observed-proof",
+            "label": "VM/ISO proof",
+            "reason": "Docker preview does not prove boot, install, reboot, recovery, or managed runtime rejoin.",
+            "recovery_action": "Run and attach a sanitized observed VM/ISO proof record before claiming OS boot proof.",
+        },
+        {
+            "id": "live-oauth-proof",
+            "label": "Live OAuth proof",
+            "reason": "Gmail and Calendar live proof require explicit user credentials and observed read-only runs.",
+            "recovery_action": "Use fixture/local proof until a tester provides credentials and sanitized observed evidence.",
+        },
+    ]
+    adapters = setup.get("adapters", {}) if isinstance(setup.get("adapters"), dict) else {}
+    llm = adapters.get("llm", {}) if isinstance(adapters.get("llm"), dict) else {}
+    if str(llm.get("state", "")).lower() not in {"ready", "available", "ok"}:
+        blockers.append(
+            {
+                "id": "llm-setup",
+                "label": "LLM setup",
+                "reason": "The local model path is not fully ready in this preview state.",
+                "recovery_action": "Follow setup status guidance or use deterministic fixture-backed capabilities.",
+            }
+        )
+    return blockers
+
+
+def _inbox_state(adapters: dict) -> str:
+    gmail = adapters.get("gmail", {}) if isinstance(adapters.get("gmail"), dict) else {}
+    calendar = adapters.get("calendar", {}) if isinstance(adapters.get("calendar"), dict) else {}
+    if gmail.get("state") == "ready" or calendar.get("state") == "ready":
+        return "ready"
+    return "preview"
+
+
 def _render_page(app: DockerPreviewApp) -> str:
     status = scrub_payload(app.status())
     adapters = status.get("runtime", {}).get("adapters", {})
     activity = status.get("activity", {}).get("events", [])
+    product_layer = status.get("product_layer", {})
+    features = product_layer.get("features", []) if isinstance(product_layer.get("features"), list) else []
+    blockers = product_layer.get("blockers", []) if isinstance(product_layer.get("blockers"), list) else []
     llm_state = adapters.get("llm", {}).get("state", "unknown")
     telegram = status.get("telegram", {})
     telegram_state = "ready" if telegram.get("token_configured") and telegram.get("allowed_chat_configured") else "setup needed"
@@ -176,6 +270,22 @@ def _render_page(app: DockerPreviewApp) -> str:
         f"<section class='card'><h3>{html.escape(title)}</h3><p>{html.escape(str(value))}</p></section>"
         for title, value in cards
     )
+    feature_html = "\n".join(
+        "<section class='feature'>"
+        f"<div><h3>{html.escape(str(feature.get('label', 'Feature')))}</h3>"
+        f"<p>{html.escape(str(feature.get('customer_value', '')))}</p></div>"
+        f"<span class='state'>{html.escape(str(feature.get('state', 'unknown')))}</span>"
+        "</section>"
+        for feature in features
+    )
+    blocker_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(blocker.get('label', blocker.get('id', 'Blocker'))))}</b> "
+        f"{html.escape(str(blocker.get('reason', '')))} "
+        f"<em>{html.escape(str(blocker.get('recovery_action', '')))}</em>"
+        "</li>"
+        for blocker in blockers
+    ) or "<li>No product-layer blockers in this Docker preview.</li>"
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -194,6 +304,12 @@ def _render_page(app: DockerPreviewApp) -> str:
     .card, .panel {{ background: color-mix(in srgb, var(--panel) 88%, transparent); border: 1px solid var(--line); border-radius: 22px; padding: 20px; box-shadow: 0 20px 80px rgba(0,0,0,.25); }}
     .card h3 {{ margin:0 0 10px; color:var(--accent); }}
     .card p {{ margin:0; color:var(--muted); overflow-wrap:anywhere; }}
+    .product {{ display:grid; grid-template-columns: minmax(0,1.35fr) minmax(280px,.65fr); gap:18px; margin: 28px 0; }}
+    .feature {{ display:flex; justify-content:space-between; gap:14px; align-items:flex-start; border-bottom:1px solid #1d332b; padding:14px 0; }}
+    .feature h3 {{ margin:0 0 6px; color:var(--text); }}
+    .feature p {{ margin:0; color:var(--muted); line-height:1.45; }}
+    .state {{ flex:0 0 auto; color:#07130c; background:var(--accent); border-radius:999px; padding:6px 10px; font-weight:850; font-size:.82rem; }}
+    .blockers li em {{ display:block; color:var(--warn); margin-top:4px; font-style:normal; }}
     textarea {{ width:100%; min-height: 92px; box-sizing:border-box; border-radius:18px; border:1px solid var(--line); background:#06100d; color:var(--text); padding:16px; font: inherit; }}
     button {{ border:0; border-radius: 999px; background:var(--accent); color:#041008; padding: 12px 18px; font-weight: 850; margin: 12px 8px 0 0; cursor:pointer; }}
     button.secondary {{ background:#20392f; color:var(--text); border: 1px solid var(--line); }}
@@ -212,6 +328,17 @@ def _render_page(app: DockerPreviewApp) -> str:
     <p class="lead">Try the AgentOS runtime without booting an ISO. This preview routes prompts through the same local-first intent/capability path and writes proof logs under mounted user data.</p>
   </header>
   <div class="grid">{card_html}</div>
+  <section class="product">
+    <div class="panel">
+      <h2>Runtime Home</h2>
+      <p class="lead">{html.escape(str(product_layer.get('customer_message', 'AgentOS runtime preview is ready.')))}</p>
+      {feature_html}
+    </div>
+    <div class="panel">
+      <h2>Recovery Center</h2>
+      <ul class="blockers">{blocker_html}</ul>
+    </div>
+  </section>
   <section class="panel">
     <h2>Run a prompt</h2>
     <textarea id="prompt">status</textarea>
@@ -287,6 +414,8 @@ def make_handler(app: DockerPreviewApp) -> type[BaseHTTPRequestHandler]:
                 _json_response(self, {"ok": True, "service": "agentos-docker-preview"})
             elif path == "/api/status":
                 _json_response(self, app.status())
+            elif path == "/api/product":
+                _json_response(self, app.product_layer())
             elif path == "/api/activity":
                 _json_response(self, app.activity())
             else:

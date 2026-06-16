@@ -26,6 +26,8 @@ http://localhost:8787
 - `docker compose up` starts a local AgentOS preview.
 - `http://localhost:8787` opens.
 - Runtime status is visible.
+- A customer-facing Runtime Home is visible.
+- Work Inbox, Activity Timeline, Recovery Center, and Evidence Dashboard states are summarized.
 - LLM setup/readiness state is visible.
 - Telegram setup/readiness state is visible.
 - Activity feed is visible.
@@ -49,6 +51,7 @@ Expected behavior:
 
 - greeting does not trigger web search
 - status returns runtime state
+- Runtime Home explains product-layer readiness and proof blockers
 - workspace request uses bounded local workspace behavior
 - search-style request routes through search-like intent
 - activity feed narrates request, intent, capability, and result
@@ -60,5 +63,6 @@ scripts/smoke_docker_runtime_preview.sh
 ```
 
 The smoke should validate compose config, build the image, start the preview,
-check `localhost:8787`, run a prompt through `/api/prompt`, verify activity, and
-check that common secret patterns are not present in the response.
+check `localhost:8787`, verify `/api/product`, run a prompt through
+`/api/prompt`, verify activity, and check that common secret patterns are not
+present in the response.

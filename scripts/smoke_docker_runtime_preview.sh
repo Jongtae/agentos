@@ -76,17 +76,26 @@ if [ "$READY" != "true" ]; then
 fi
 
 curl -fsS http://127.0.0.1:18787/healthz >/dev/null
-curl -fsS http://127.0.0.1:18787/ >/dev/null
+curl -fsS http://127.0.0.1:18787/ > /tmp/agentos-docker-home.html
 curl -fsS http://127.0.0.1:18787/api/status > /tmp/agentos-docker-status.json
+curl -fsS http://127.0.0.1:18787/api/product > /tmp/agentos-docker-product.json
 
 python3 - <<'PY'
 import json
 from pathlib import Path
 payload = json.loads(Path("/tmp/agentos-docker-status.json").read_text())
+product = json.loads(Path("/tmp/agentos-docker-product.json").read_text())
+home = Path("/tmp/agentos-docker-home.html").read_text()
 assert payload["proof"]["docker_preview_surface_ready"] is True
+assert payload["proof"]["product_layer_runtime_home_ready"] is True
 assert payload["proof"]["boot_or_iso_proof"] is False
 assert payload["proof"]["secrets_redacted"] is True
 assert payload["telegram"]["transport"] == "polling_preview"
+assert product["schema_version"] == "agentos-product-layer-runtime-home.v1"
+assert product["proof"]["docker_main_try_path"] is True
+assert product["proof"]["boot_or_iso_proof_claimed"] is False
+assert "Runtime Home" in home
+assert "Recovery Center" in home
 PY
 
 curl -fsS \

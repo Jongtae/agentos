@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-82] Define inbox workflow promotion boundary`
+- `[P2-83] Add Docker runtime home product layer`
 
 Runtime impact statement:
 
-- This task defines the broader app/inbox workflow promotion gate so AgentOS grows OS-native inbox capabilities through registry-selected, user-owned, read-first workflows before expanding browser or external app mediation.
+- This task makes Docker the default public Product Layer try path by adding a customer-facing Runtime Home with Work Inbox, Activity Timeline, Recovery Center, and Evidence Dashboard summaries backed by existing runtime proof and blockers.
 
 Current autonomous completion loop:
 
@@ -96,6 +96,7 @@ local or booted AgentOS runtime
 Recommended Phase 2 tasks:
 
 - Docker preview is promoted as the primary public try path at `http://localhost:8787`.
+- Docker preview now exposes `agentos-product-layer-runtime-home.v1` through `/api/product` and the browser Runtime Home without claiming VM/ISO boot proof.
 - Gmail setup is exposed through `agentos-kernelctl gmail-setup --serve-http`; live Gmail remains read-only and requires explicit user OAuth credentials.
 - Phase 2 closeout is recorded in `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`.
 - Practical local/Docker-safe proof is aggregated by `scripts/smoke_phase2_golden_demo.sh`.

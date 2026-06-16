@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-36] Add capability permission registry contract`
+- `[P2-37] Record capability permission epic completion`
 
 Runtime impact statement:
 
-- This task moves Phase 2 capability permission declarations into a public registry contract so future adapters must declare permission level, blocking posture, and secret defaults before runtime expansion.
+- This task records the completed capability permission boundary epic in the roadmap source of truth so the autonomous loop can stop repeating that epic and select the next milestone-backed completion track.
 
 Current autonomous completion loop:
 
@@ -108,6 +108,7 @@ Recommended Phase 2 tasks:
 - Capability result smokes now enforce permission levels and blocked outcomes for safe local reads, missing external setup, and destructive unsupported requests.
 - `phase2-run` should expose permission level, outcome, recovery, and secret-redaction proof in JSON output and user-owned records.
 - Capability permission declarations should be backed by `docs/architecture/capability-permission-registry.json`.
+- The capability permission boundary epic is closed for this Phase 2 slice; future loops should return to the roadmap before selecting the next epic.
 
 ## Validation Standards
 

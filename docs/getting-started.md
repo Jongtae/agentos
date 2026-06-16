@@ -1,11 +1,45 @@
 # Getting Started
 
-AgentOS has two practical entry paths:
+AgentOS has three practical entry paths:
 
+- Run the Docker preview to try the runtime with the least setup.
 - Boot the ISO to see the actual OS-native concept.
 - Run from the repo when developing or testing runtime surfaces quickly.
 
-## Concept Demo: Boot The OS Image
+## Recommended: Docker Runtime Preview
+
+```bash
+git clone git@github.com:Jongtae/agentos.git
+cd agentos
+cp .env.example .env
+docker compose up
+```
+
+Open:
+
+```text
+http://localhost:8787
+```
+
+The Docker preview shows:
+
+- runtime status
+- LLM and Telegram setup/readiness
+- prompt-to-intent execution
+- activity/proof events
+- mounted user data under `./agentos-data`
+
+It does not prove boot ownership, installer behavior, reboot/rejoin, recovery
+partition behavior, or ISO freshness.
+
+CLI prompt runs remain available:
+
+```bash
+docker compose run --rm agent-os --prompt "status"
+docker compose run --rm agent-os --prompt "draft a reply to my Gmail roadmap email"
+```
+
+## Advanced: Boot The OS Image
 
 Build a local ISO:
 
@@ -72,10 +106,3 @@ Inspect runtime surfaces directly:
 The Phase 2 CLI loop is local-first and safe to try without credentials. Gmail
 uses fixture data by default; live Gmail OAuth and VM/ISO proof remain explicit
 follow-up work.
-
-The same loop is the Docker developer/demo default:
-
-```bash
-docker compose run --rm agent-os --prompt "status"
-docker compose run --rm agent-os --prompt "draft a reply to my Gmail roadmap email"
-```

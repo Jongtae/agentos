@@ -11,7 +11,7 @@ Current parent branch:
 
 Current public milestone:
 
-- **Phase 2 testable runtime loop** — Local-first Codex runtime loop
+- **Docker-first AgentOS runtime preview** — public try path for the local-first runtime loop
 
 Current task:
 
@@ -95,6 +95,7 @@ local or booted AgentOS runtime
 
 Recommended Phase 2 tasks:
 
+- Docker preview is promoted as the primary public try path at `http://localhost:8787`.
 - Gmail setup is exposed through `agentos-kernelctl gmail-setup --serve-http`; live Gmail remains read-only and requires explicit user OAuth credentials.
 - Phase 2 closeout is recorded in `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`.
 - Practical local/Docker-safe proof is aggregated by `scripts/smoke_phase2_golden_demo.sh`.
@@ -135,6 +136,7 @@ python3 scripts/cleanup_build_artifacts.py --delete --json
 - `docs/architecture/capability-permission-boundary.md`
 - `docs/architecture/user-owned-runtime-data-boundary.md`
 - `docs/acceptance/phase2-golden-runtime-loop.md`
+- `docs/acceptance/docker-runtime-preview.md`
 - `docs/acceptance/phase2-intent-eval.json`
 - `docs/roadmap/phase2-local-first-runtime-loop.md`
 - `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`

@@ -20,18 +20,19 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application source
 COPY src/ ./src/
 COPY scripts/ ./scripts/
-COPY workspaces/ ./workspaces/
+COPY spec.yaml ./spec.yaml
 
-# Create data directory
-RUN mkdir -p /app/workspaces/default/data
+# Create a seed workspace. docker-compose may later mount ./workspaces over this
+# path, so the entrypoint also repairs the runtime workspace on startup.
+RUN mkdir -p /app/workspaces/default/data \
+    && cp /app/spec.yaml /app/workspaces/default/spec.yaml
 
 ENV PYTHONPATH=/app/src:/app
 ENV DEFAULT_WORKSPACE=/app/workspaces/default
 ENV AGENTOS_USER_DATA_ROOT=/var/lib/agentos/user
 ENV LOG_LEVEL=WARNING
 
-# TUI requires a real terminal. The default container command runs the Phase 2
-# developer/demo runtime loop. Example:
-# docker compose run --rm agent-os --prompt "status"
-ENTRYPOINT ["python", "scripts/kernel_phase2_run.py", "--json"]
-CMD ["--prompt", "status"]
+# Default container command serves the Docker-first runtime preview.
+# CLI prompt runs remain available through docker-compose service overrides.
+ENTRYPOINT ["python", "scripts/docker_entrypoint.py"]
+CMD ["serve", "--host", "0.0.0.0", "--port", "8787"]

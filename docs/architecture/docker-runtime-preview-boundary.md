@@ -1,12 +1,24 @@
 # Docker Runtime Preview Boundary
 
-Status: Planned
+Status: Active Preview
 
 Docker support is a developer and demo runtime preview for AgentOS. It exists
 to lower the public contribution barrier and to make Phase 2 runtime smokes
 repeatable without requiring an ISO or VM.
 
 Docker is not the AgentOS product target.
+
+Default entry:
+
+```bash
+docker compose up
+```
+
+Open:
+
+```text
+http://localhost:8787
+```
 
 ## Docker May Prove
 
@@ -34,7 +46,8 @@ The Docker preview should expose a narrow runtime harness:
 
 ```text
 host checkout
--> docker compose run agent-os
+-> docker compose up
+-> localhost:8787
 -> mounted user data path
 -> setup/status
 -> sample prompt
@@ -72,6 +85,6 @@ command that produces:
 - at least one activity feed event
 - a user-owned output path
 - a friendly degraded response for missing external credentials
+- a browser-visible preview page on `localhost:8787`
 
 Any Stage E closeout must still distinguish Docker proof from VM/ISO proof.
-

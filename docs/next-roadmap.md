@@ -133,6 +133,7 @@ runs are actually observed.
 - repo-local private context when present
 - `docs/index.md`
 - `docs/acceptance/phase2-golden-runtime-loop.md`
+- `docs/acceptance/docker-runtime-preview.md`
 - `docs/roadmap/phase2-local-first-runtime-loop.md`
 - `docs/reference/phase1-agentos-prototype-closeout-v1.md`
 - `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`

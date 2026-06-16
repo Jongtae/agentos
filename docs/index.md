@@ -23,6 +23,7 @@ large build outputs are not included.
 - `docs/architecture/capability-permission-boundary.md` - capability approval, denial, record, and recovery boundary
 - `docs/architecture/calendar-readonly-capability-contract.md` - read-only Calendar fixture capability boundary
 - `docs/architecture/user-owned-runtime-data-boundary.md` - local-first user data ownership boundary
+- `docs/acceptance/docker-runtime-preview.md` - Docker-first runtime preview acceptance
 - `docs/acceptance/phase2-golden-runtime-loop.md` - Phase 2 golden runtime loop acceptance
 - `docs/acceptance/phase2-intent-eval.json` - seed prompt intent eval set
 - `docs/acceptance/vm-iso-proof-preflight.md` - VM/ISO proof preflight and blocker contract
@@ -30,6 +31,7 @@ large build outputs are not included.
 - `docs/roadmap/phase2-local-first-runtime-loop.md` - Phase 2 local-first runtime loop roadmap
 - `docs/reference/phase1-agentos-prototype-closeout-v1.md` - Phase 1 closeout and Phase 2 handoff
 - `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md` - Phase 2 proof and blocker closeout
+- `docs/reference/docker-runtime-preview-closeout-v1.md` - Docker-first runtime preview closeout
 - `docs/security.md` - public repo secret and artifact hygiene notes
 
 ## Public Export Policy

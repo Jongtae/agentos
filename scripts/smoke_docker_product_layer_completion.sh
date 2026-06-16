@@ -131,6 +131,28 @@ assert {item["id"] for item in product["customer_handoff_bundle"]["handoff_repor
 }
 assert product["customer_handoff_bundle"]["handoff_report"]["share_policy"]["secret_material_allowed"] is False
 assert product["customer_handoff_bundle"]["handoff_report"]["share_policy"]["automatic_claim_promotion"] is False
+release_readiness = {
+    item["id"]: item["state"]
+    for item in product["release_trust_panel"]["readiness_checklist"]
+}
+assert release_readiness == {
+    "local_preflight_available": "ready",
+    "artifact_manifest_required": "blocked_until_release_artifact",
+    "checksum_publication_required": "blocked_until_checksum",
+    "signing_or_unsigned_statement_required": "blocked_until_signature_or_unsigned_statement",
+    "vm_iso_release_proof_required": "blocked_until_observed_vm_run",
+}
+release_decisions = {
+    item["id"]: item["state"]
+    for item in product["release_trust_panel"]["customer_decisions"]
+}
+assert release_decisions == {
+    "describe_local_preflight_only": "share_ready",
+    "withhold_release_readiness": "blocked_until_release_evidence",
+    "route_to_observed_proof": "blocked_until_observed_evidence",
+}
+assert "Release Readiness Checklist" in home
+assert "Release Customer Decisions" in home
 assert product["proof_promotion_center"]["proof"]["customer_facing_proof_promotion_ready"] is True
 assert product["proof_promotion_center"]["proof"]["docker_local_claims_ready"] is True
 assert product["proof_promotion_center"]["proof"]["docker_daemon_observed_claimed"] is False

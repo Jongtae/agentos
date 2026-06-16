@@ -1011,12 +1011,77 @@ class DockerPreviewApp:
                 "customer_value": "Requires an observed VM/ISO run before boot, installer, recovery, or rejoin claims are promoted.",
             },
         ]
+        readiness_checklist = [
+            {
+                "id": "local_preflight_available",
+                "label": "Local preflight is available",
+                "state": "ready",
+                "customer_value": "Customers can run local manifest/checksum preflight before discussing any release package.",
+                "validation": "scripts/release_manifest_checksum_preflight.py",
+            },
+            {
+                "id": "artifact_manifest_required",
+                "label": "Artifact manifest required",
+                "state": "blocked_until_release_artifact",
+                "customer_value": "Release freshness remains blocked until a real artifact manifest exists.",
+                "validation": "Attach the release artifact manifest before promoting release freshness.",
+            },
+            {
+                "id": "checksum_publication_required",
+                "label": "Checksum publication required",
+                "state": "blocked_until_checksum",
+                "customer_value": "Release integrity remains blocked until published checksums match real artifacts.",
+                "validation": "Publish and verify checksums for each release artifact.",
+            },
+            {
+                "id": "signing_or_unsigned_statement_required",
+                "label": "Signing or unsigned-preview statement required",
+                "state": "blocked_until_signature_or_unsigned_statement",
+                "customer_value": "Trust language must say whether the preview is signed or explicitly unsigned.",
+                "validation": "Attach signing evidence or a clear unsigned-preview statement.",
+            },
+            {
+                "id": "vm_iso_release_proof_required",
+                "label": "VM/ISO release proof required",
+                "state": "blocked_until_observed_vm_run",
+                "customer_value": "Boot, installer, recovery, and rejoin claims require observed VM/ISO evidence.",
+                "validation": "Attach sanitized VM/ISO boot, recovery, and managed runtime rejoin evidence.",
+            },
+        ]
+        customer_decisions = [
+            {
+                "id": "describe_local_preflight_only",
+                "label": "Describe local preflight only",
+                "state": "share_ready",
+                "customer_guidance": "Safe to say Docker preview exposes release trust requirements and local preflight hooks.",
+                "allowed_claim": "Release trust requirements are customer-visible in the Docker preview.",
+                "blocked_claim": "Do not claim release artifacts, signing, publication, or VM/ISO release proof.",
+            },
+            {
+                "id": "withhold_release_readiness",
+                "label": "Withhold release readiness",
+                "state": "blocked_until_release_evidence",
+                "customer_guidance": "Hold release-ready language until artifact, checksum, signing or unsigned-preview, secret review, and VM/ISO evidence exist.",
+                "allowed_claim": "Release readiness is blocked on observed release evidence.",
+                "blocked_claim": "Do not present Docker preview proof as release readiness.",
+            },
+            {
+                "id": "route_to_observed_proof",
+                "label": "Route stronger claims to observed proof",
+                "state": "blocked_until_observed_evidence",
+                "customer_guidance": "Use Observed Proof Uploader and Proof Promotion Center before stronger release, browser, VM/ISO, or attestation claims are shared.",
+                "allowed_claim": "Stronger claims have named evidence routes.",
+                "blocked_claim": "Do not auto-promote local preflight into stronger proof.",
+            },
+        ]
         return {
             "schema_version": "agentos-product-layer-release-trust-panel.v1",
             "surface": "Release Trust Panel",
             "state": "blocked",
             "customer_message": "Release Trust Panel separates local packaging preflight from real release, signing, checksum, and VM/ISO proof.",
             "checks": checks,
+            "readiness_checklist": readiness_checklist,
+            "customer_decisions": customer_decisions,
             "preflight": {
                 "local_manifest_checksum_preflight_available": True,
                 "preflight_script": "scripts/release_manifest_checksum_preflight.py",
@@ -1896,6 +1961,24 @@ def _render_page(app: DockerPreviewApp) -> str:
         for item in release_trust.get("checks", [])
         if isinstance(item, dict)
     ) or "<li>No release trust checks are configured.</li>"
+    release_readiness_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Readiness item'))))}</b> "
+        f"{html.escape(str(item.get('customer_value', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))} · {html.escape(str(item.get('validation', '')))}</em>"
+        "</li>"
+        for item in release_trust.get("readiness_checklist", [])
+        if isinstance(item, dict)
+    ) or "<li>No release readiness checklist is configured.</li>"
+    release_decision_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Release decision'))))}</b> "
+        f"{html.escape(str(item.get('customer_guidance', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))} · allowed: {html.escape(str(item.get('allowed_claim', '')))} · blocked: {html.escape(str(item.get('blocked_claim', '')))}</em>"
+        "</li>"
+        for item in release_trust.get("customer_decisions", [])
+        if isinstance(item, dict)
+    ) or "<li>No release customer decisions are configured.</li>"
     attestation_html = "\n".join(
         "<li>"
         f"<b>{html.escape(str(item.get('label', item.get('id', 'Attestation check'))))}</b> "
@@ -2195,8 +2278,12 @@ def _render_page(app: DockerPreviewApp) -> str:
       <h2>Release Trust Panel</h2>
       <p class="lead">{html.escape(str(release_trust.get('customer_message', 'Release trust requirements are available below.')))}</p>
       <ul>{release_trust_html}</ul>
+      <h3>Release Readiness Checklist</h3>
+      <ul>{release_readiness_html}</ul>
     </div>
     <div class="panel">
+      <h2>Release Customer Decisions</h2>
+      <ul>{release_decision_html}</ul>
       <h2>Release Non-Claims</h2>
       <ul>
         <li><b>Release uploaded</b> not claimed</li>

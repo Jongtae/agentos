@@ -37,7 +37,7 @@ http://localhost:8787
 - `/api/capabilities` exposes safe local capabilities, confirmation-needed capabilities, and blocked destructive capabilities from the permission registry.
 - `/api/approvals` exposes setup-needed, confirmation-needed, observed-proof-needed, and blocked approval requirements without executing them.
 - `/api/proofs` exposes future observed-proof evidence requirements and mock submission fields without accepting secrets or auto-promoting claims.
-- `/api/release-trust` exposes release artifact, manifest, checksum, signing, publication, and VM/ISO proof requirements without claiming release readiness.
+- `/api/release-trust` exposes release artifact, manifest, checksum, signing, publication, customer readiness decisions, and VM/ISO proof requirements without claiming release readiness.
 - `/api/attestation` exposes Secure Boot, TPM/PCR, event-log, IMA, and hardware attestation requirements without claiming Docker proves device trust.
 - `/api/recovery` exposes customer-facing recovery actions for VM/ISO, live OAuth, browser, release, attestation, and setup blockers without claiming observed proof.
 - `/api/evidence` exposes observed Docker/local proof and explicit non-claims for VM/ISO, live OAuth, browser, release trust, and hardware attestation.
@@ -74,7 +74,7 @@ Expected behavior:
 - Capability Store shows safe local actions, external-read setup needs, lifecycle confirmation, and destructive blocked actions
 - Approval Center shows approval-gated actions without claiming approval execution, external writes, or destructive actions
 - Observed Proof Uploader shows evidence requirements without claiming file upload execution or claim promotion
-- Release Trust Panel shows release evidence requirements without claiming upload, signing, checksum publication, or VM/ISO release proof
+- Release Trust Panel shows release evidence requirements, readiness checklist items, and customer decisions without claiming upload, signing, checksum publication, or VM/ISO release proof
 - Attestation Status shows boot-chain and hardware trust evidence requirements without claiming Secure Boot, TPM/PCR, event-log, IMA, or hardware attestation proof
 - Recovery Center shows proof blockers as next recovery actions without claiming Docker is boot, release, browser, or hardware proof
 - Evidence Dashboard separates what Docker/local smokes have observed from what still requires external evidence

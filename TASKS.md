@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-64] Attach observed proof intake status to phase2 status`
+- `[P2-65] Close observed proof intake epic`
 
 Runtime impact statement:
 
-- This task attaches observed proof intake status to `phase2-run --message "status"` so local testers can see that sanitized proof intake is ready while live credential, VM/ISO, release, browser, and boot-chain proof remain unclaimed.
+- This task closes the observed proof intake and blocker handoff epic after boundary docs, record validation, golden/CLI smokes, and runtime status visibility are in place, preventing repeated intake-boundary work while keeping real live credential, VM/ISO, release, browser, and boot-chain proof as explicit blockers.
 
 Current autonomous completion loop:
 
@@ -129,7 +129,8 @@ Recommended Phase 2 tasks:
 - The verified boot and attestation proof boundary epic is closed for this Phase 2 slice; future verified boot work should require observed VM or hardware evidence before claiming Secure Boot, TPM measured boot, PCR/event-log, IMA, or hardware attestation proof.
 - The first verified boot slice is `docs/architecture/verified-boot-attestation-proof-boundary.md`, smoke-tested by `scripts/smoke_verified_boot_attestation_boundary.sh`.
 - `phase2-run --message "status"` attaches the verified boot/attestation non-claim artifact so boot-chain trust proof remains visibly separate from local runtime proof.
-- The observed proof intake and blocker handoff epic is active; its first slice is `docs/architecture/observed-proof-intake-boundary.md`, smoke-tested by `scripts/smoke_observed_proof_intake_boundary.sh`.
+- The observed proof intake and blocker handoff epic is closed for this Phase 2 slice; future observed-proof work should require actual sanitized observed records or a new proof promotion task before claiming live credential, VM/ISO, release, browser, or boot-chain proof.
+- The first observed proof intake slice is `docs/architecture/observed-proof-intake-boundary.md`, smoke-tested by `scripts/smoke_observed_proof_intake_boundary.sh`.
 - Observed proof intake must keep secrets out of repo/workspace records, require sanitized evidence before proof promotion, and preserve explicit blockers for live credentials, VM/ISO, release, browser, and boot-chain proof.
 - Observed proof records now use `docs/architecture/observed-proof-intake-schema.json` and can be checked with `scripts/observed_proof_intake_validate.py`; `scripts/smoke_observed_proof_intake_validator.sh` covers valid, blocked, and secret-term rejection behavior.
 - `phase2-run --message "status"` attaches `agentos-observed-proof-intake-status.v1` so observed proof intake readiness and missing observed-record blockers are visible in the user-testable runtime status output.

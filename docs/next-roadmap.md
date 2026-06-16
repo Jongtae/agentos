@@ -80,17 +80,20 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
+- No active completion epic is currently open. The next automation pass should
+  re-check this roadmap, the open GitHub issue state, and the Later Tracks
+  before creating a new milestone-backed epic.
+
+## Completed Completion Epics
+
 - `observed-proof-intake-and-blocker-handoff-epic` — [EPIC: Observed proof intake and blocker handoff](https://github.com/Jongtae/agentos/issues/135)
   - Milestone: Phase 2: Local-first Codex runtime loop
   - Completion goal: define how AgentOS accepts human-observed proof for live credentials, VM/ISO, release, browser, and boot-chain proof without mixing unobserved claims into automated smoke proof.
-  - Validation plan: document the observed proof intake boundary, add a machine-checkable record schema/validator, attach intake status to `phase2-run --message "status"`, smoke-test links from README/TASKS/docs index/roadmap, and include the smokes in the Phase 2 golden demo runner.
   - Exit condition: complete when observed proof intake rules, evidence redaction rules, blocker categories, promotion gates, validator behavior, and runtime status visibility are documented and smoke-tested, and future live credential, VM/ISO, release, browser, and boot-chain proof can attach evidence without claiming unobserved proof.
-  - Active task: P2-64.
-  - Completed tasks: P2-62 and P2-63.
+  - Closed issue: #135.
+  - Completed tasks: P2-62, P2-63, P2-64, and P2-65.
   - Residual blockers: real Gmail/Calendar OAuth credentials, observed VM/ISO runs, release artifacts/signatures, live browser acceptance, Secure Boot, TPM measured boot, PCR/event-log, IMA, and hardware attestation proof remain unclaimed until a tester or maintainer attaches sanitized observed evidence.
   - Advances: runtime proof truthfulness, recovery, capability ownership, OS-native runtime defaults.
-
-## Completed Completion Epics
 
 - `verified-boot-attestation-proof-boundary-epic` — [EPIC: Verified boot and attestation proof boundary](https://github.com/Jongtae/agentos/issues/125)
   - Milestone: Phase 2: Local-first Codex runtime loop

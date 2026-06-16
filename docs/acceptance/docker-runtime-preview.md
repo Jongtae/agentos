@@ -34,6 +34,7 @@ http://localhost:8787
 - `/api/approvals` exposes setup-needed, confirmation-needed, observed-proof-needed, and blocked approval requirements without executing them.
 - `/api/proofs` exposes future observed-proof evidence requirements and mock submission fields without accepting secrets or auto-promoting claims.
 - `/api/release-trust` exposes release artifact, manifest, checksum, signing, publication, and VM/ISO proof requirements without claiming release readiness.
+- `/api/attestation` exposes Secure Boot, TPM/PCR, event-log, IMA, and hardware attestation requirements without claiming Docker proves device trust.
 - `/api/recovery` exposes customer-facing recovery actions for VM/ISO, live OAuth, browser, release, attestation, and setup blockers without claiming observed proof.
 - `/api/evidence` exposes observed Docker/local proof and explicit non-claims for VM/ISO, live OAuth, browser, release trust, and hardware attestation.
 - LLM setup/readiness state is visible.
@@ -66,6 +67,7 @@ Expected behavior:
 - Approval Center shows approval-gated actions without claiming approval execution, external writes, or destructive actions
 - Observed Proof Uploader shows evidence requirements without claiming file upload execution or claim promotion
 - Release Trust Panel shows release evidence requirements without claiming upload, signing, checksum publication, or VM/ISO release proof
+- Attestation Status shows boot-chain and hardware trust evidence requirements without claiming Secure Boot, TPM/PCR, event-log, IMA, or hardware attestation proof
 - Recovery Center shows proof blockers as next recovery actions without claiming Docker is boot, release, browser, or hardware proof
 - Evidence Dashboard separates what Docker/local smokes have observed from what still requires external evidence
 - workspace request uses bounded local workspace behavior
@@ -80,6 +82,6 @@ scripts/smoke_docker_runtime_preview.sh
 
 The smoke should validate compose config, build the image, start the preview,
 check `localhost:8787`, verify `/api/product`, `/api/work-inbox`,
-`/api/timeline`, `/api/capabilities`, `/api/approvals`, `/api/proofs`, `/api/release-trust`, `/api/recovery`, and `/api/evidence`, run a prompt through `/api/prompt`,
+`/api/timeline`, `/api/capabilities`, `/api/approvals`, `/api/proofs`, `/api/release-trust`, `/api/attestation`, `/api/recovery`, and `/api/evidence`, run a prompt through `/api/prompt`,
 verify activity, and check that common secret patterns are not present in the
 response.

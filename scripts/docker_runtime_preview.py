@@ -130,6 +130,7 @@ class DockerPreviewApp:
         approval_center = self.approval_center(capability_store=capability_store)
         proof_uploader = self.observed_proof_uploader()
         release_trust = self.release_trust_panel()
+        attestation_status = self.attestation_status()
         recovery_center = self.recovery_center(setup=setup_payload)
         evidence_dashboard = self.evidence_dashboard(setup=setup_payload, activity=activity_payload)
         blockers = recovery_center.get("blockers", [])
@@ -181,6 +182,12 @@ class DockerPreviewApp:
                     "customer_value": "See which release artifact, manifest, checksum, signing, publication, and VM proof evidence is still required.",
                 },
                 {
+                    "id": "attestation_status",
+                    "label": "Attestation Status",
+                    "state": attestation_status.get("state", "blocked"),
+                    "customer_value": "See which Secure Boot, TPM/PCR, event-log, IMA, and hardware-backed evidence is still required.",
+                },
+                {
                     "id": "recovery_center",
                     "label": "Recovery Center",
                     "state": "attention" if blockers else "ready",
@@ -200,6 +207,7 @@ class DockerPreviewApp:
             "approval_center": approval_center,
             "observed_proof_uploader": proof_uploader,
             "release_trust_panel": release_trust,
+            "attestation_status": attestation_status,
             "recovery_center": recovery_center,
             "evidence_dashboard": evidence_dashboard,
             "proof": {
@@ -208,6 +216,61 @@ class DockerPreviewApp:
                 "live_oauth_claimed": False,
                 "live_browser_proof_claimed": False,
                 "customer_facing_summary_ready": True,
+            },
+        }
+
+    def attestation_status(self) -> dict:
+        checks = [
+            {
+                "id": "secure-boot-state",
+                "label": "Secure Boot state",
+                "state": "blocked_until_observed_boot_chain",
+                "customer_value": "Requires observed firmware or bootloader evidence before Secure Boot trust is claimed.",
+            },
+            {
+                "id": "tpm-pcr-evidence",
+                "label": "TPM/PCR evidence",
+                "state": "blocked_until_tpm_measurements",
+                "customer_value": "Requires TPM-backed measurements or equivalent attestation evidence before measured boot is claimed.",
+            },
+            {
+                "id": "event-log-review",
+                "label": "Event-log review",
+                "state": "blocked_until_event_log",
+                "customer_value": "Requires sanitized boot event logs before boot-chain integrity is promoted.",
+            },
+            {
+                "id": "ima-runtime-integrity",
+                "label": "IMA/runtime integrity",
+                "state": "blocked_until_runtime_integrity_evidence",
+                "customer_value": "Requires Linux IMA or equivalent runtime integrity evidence before runtime attestation is claimed.",
+            },
+            {
+                "id": "hardware-backed-attestation",
+                "label": "Hardware-backed attestation",
+                "state": "blocked_until_device_evidence",
+                "customer_value": "Requires real VM or hardware evidence before device-level trust is promoted.",
+            },
+        ]
+        return {
+            "schema_version": "agentos-product-layer-attestation-status.v1",
+            "surface": "Attestation Status",
+            "state": "blocked",
+            "customer_message": "Attestation Status shows boot-chain and hardware trust evidence that Docker cannot prove.",
+            "checks": checks,
+            "boundary": {
+                "boundary_doc": "docs/architecture/verified-boot-attestation-proof-boundary.md",
+                "status_artifact": "agentos-verified-boot-attestation-nonclaim.v1",
+                "docker_is_attestation_proof": False,
+            },
+            "proof": {
+                "docker_preview_ready": True,
+                "secure_boot_observed": False,
+                "tpm_pcr_observed": False,
+                "event_log_observed": False,
+                "ima_runtime_integrity_observed": False,
+                "hardware_attestation_observed": False,
+                "customer_facing_attestation_status_ready": True,
             },
         }
 
@@ -839,6 +902,7 @@ def _render_page(app: DockerPreviewApp) -> str:
     approval_center = product_layer.get("approval_center", {}) if isinstance(product_layer.get("approval_center"), dict) else {}
     proof_uploader = product_layer.get("observed_proof_uploader", {}) if isinstance(product_layer.get("observed_proof_uploader"), dict) else {}
     release_trust = product_layer.get("release_trust_panel", {}) if isinstance(product_layer.get("release_trust_panel"), dict) else {}
+    attestation_status = product_layer.get("attestation_status", {}) if isinstance(product_layer.get("attestation_status"), dict) else {}
     recovery_center = product_layer.get("recovery_center", {}) if isinstance(product_layer.get("recovery_center"), dict) else {}
     evidence_dashboard = product_layer.get("evidence_dashboard", {}) if isinstance(product_layer.get("evidence_dashboard"), dict) else {}
     features = product_layer.get("features", []) if isinstance(product_layer.get("features"), list) else []
@@ -948,6 +1012,15 @@ def _render_page(app: DockerPreviewApp) -> str:
         for item in release_trust.get("checks", [])
         if isinstance(item, dict)
     ) or "<li>No release trust checks are configured.</li>"
+    attestation_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Attestation check'))))}</b> "
+        f"{html.escape(str(item.get('customer_value', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))}</em>"
+        "</li>"
+        for item in attestation_status.get("checks", [])
+        if isinstance(item, dict)
+    ) or "<li>No attestation checks are configured.</li>"
     evidence_html = "\n".join(
         "<li>"
         f"<b>{html.escape(str(item.get('label', item.get('id', 'Evidence'))))}</b> "
@@ -1114,6 +1187,22 @@ def _render_page(app: DockerPreviewApp) -> str:
   </section>
   <section class="product">
     <div class="panel">
+      <h2>Attestation Status</h2>
+      <p class="lead">{html.escape(str(attestation_status.get('customer_message', 'Attestation requirements are available below.')))}</p>
+      <ul>{attestation_html}</ul>
+    </div>
+    <div class="panel">
+      <h2>Attestation Non-Claims</h2>
+      <ul>
+        <li><b>Secure Boot</b> not claimed</li>
+        <li><b>TPM/PCR evidence</b> not claimed</li>
+        <li><b>Hardware attestation</b> not claimed</li>
+      </ul>
+      <p><a href="/api/attestation">attestation JSON</a></p>
+    </div>
+  </section>
+  <section class="product">
+    <div class="panel">
       <h2>Evidence Dashboard</h2>
       <p class="lead">{html.escape(str(evidence_dashboard.get('customer_message', 'Evidence state is available below.')))}</p>
       <ul>{evidence_html}</ul>
@@ -1213,6 +1302,8 @@ def make_handler(app: DockerPreviewApp) -> type[BaseHTTPRequestHandler]:
                 _json_response(self, app.observed_proof_uploader())
             elif path == "/api/release-trust":
                 _json_response(self, app.release_trust_panel())
+            elif path == "/api/attestation":
+                _json_response(self, app.attestation_status())
             elif path == "/api/recovery":
                 _json_response(self, app.recovery_center())
             elif path == "/api/evidence":

@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-57] Close inbox ownership boundary epic`
+- `[P2-58] Define verified boot attestation proof boundary`
 
 Runtime impact statement:
 
-- This task closes the inbox ownership epic after its documented, smoke-tested, and status-visible proof boundary is in place, preventing repeated work on a completed boundary and returning the autonomous loop to the roadmap for the next completion track.
+- This task defines the verified boot and attestation proof boundary so AgentOS can keep local runtime proof separate from Secure Boot, TPM measured boot, PCR/event-log, IMA, and observed VM/hardware trust claims.
 
 Current autonomous completion loop:
 
@@ -126,6 +126,8 @@ Recommended Phase 2 tasks:
 - The first inbox ownership slice is `docs/architecture/inbox-capability-ownership-boundary.md`, smoke-tested by `scripts/smoke_inbox_capability_ownership_boundary.sh`.
 - The inbox ownership boundary smoke is included in the Phase 2 golden demo runner so inbox capability ownership remains part of practical local/Docker-safe proof.
 - `phase2-run --message "status"` attaches the inbox routing/ownership contract artifact so inbox capability ownership is visible in the user-testable runtime status proof.
+- The verified boot and attestation proof boundary epic is active; it should keep Secure Boot, TPM measured boot, PCR/event-log, IMA, and hardware attestation claims blocked until observed VM or hardware evidence exists.
+- The first verified boot slice is `docs/architecture/verified-boot-attestation-proof-boundary.md`, smoke-tested by `scripts/smoke_verified_boot_attestation_boundary.sh`.
 
 ## Validation Standards
 
@@ -156,6 +158,7 @@ python3 scripts/cleanup_build_artifacts.py --delete --json
 - `docs/architecture/capability-permission-boundary.md`
 - `docs/architecture/capability-permission-registry.json`
 - `docs/architecture/user-owned-runtime-data-boundary.md`
+- `docs/architecture/verified-boot-attestation-proof-boundary.md`
 - `docs/acceptance/phase2-golden-runtime-loop.md`
 - `docs/acceptance/docker-runtime-preview.md`
 - `docs/acceptance/phase2-intent-eval.json`

@@ -27,6 +27,7 @@ large build outputs are not included.
 - `docs/architecture/inbox-capability-ownership-boundary.md` - OS-native inbox intake, read-only adapter, records, and mutation boundary
 - `docs/architecture/updater-hardening-state-contract.md` - updater, rollback, recovery, and runtime rejoin state proof boundary
 - `docs/architecture/user-owned-runtime-data-boundary.md` - local-first user data ownership boundary
+- `docs/architecture/verified-boot-attestation-proof-boundary.md` - Secure Boot, TPM measured boot, IMA, and hardware attestation proof boundary
 - `docs/operations/public-preview-operations.md` - public preview proof, blocker, non-claim, and promotion checklist
 - `docs/operations/distribution-packaging-proof-boundary.md` - distribution packaging local checks, release artifact requirements, blockers, and non-claims
 - `docs/acceptance/docker-runtime-preview.md` - Docker-first runtime preview acceptance

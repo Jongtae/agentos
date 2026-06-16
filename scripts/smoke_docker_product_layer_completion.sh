@@ -164,7 +164,44 @@ assert {group["id"] for group in product["product_map"]["surface_groups"]} >= {
     "blocked_until_observed",
 }
 assert "proof_promotion_center" in product["product_map"]["recommended_path"]
+reviewer_routes = {item["id"]: item for item in product["product_map"]["reviewer_routes"]}
+assert set(reviewer_routes) == {
+    "runtime_evaluator",
+    "proof_reviewer",
+    "capability_reviewer",
+    "trust_reviewer",
+}
+assert reviewer_routes["runtime_evaluator"]["route"] == [
+    "runtime_home",
+    "onboarding_status",
+    "guided_demo_journey",
+    "activity_timeline",
+    "recovery_center",
+]
+assert "VM/ISO" in reviewer_routes["runtime_evaluator"]["claim_boundary"]
+assert reviewer_routes["proof_reviewer"]["route"] == [
+    "evidence_dashboard",
+    "customer_proof_packet",
+    "customer_handoff_bundle",
+    "proof_promotion_center",
+]
+assert "sanitized observed evidence" in reviewer_routes["proof_reviewer"]["claim_boundary"]
+assert reviewer_routes["capability_reviewer"]["route"] == [
+    "work_inbox",
+    "capability_store",
+    "approval_center",
+    "activity_timeline",
+]
+assert "external writes" in reviewer_routes["capability_reviewer"]["claim_boundary"]
+assert reviewer_routes["trust_reviewer"]["route"] == [
+    "observed_proof_uploader",
+    "release_trust_panel",
+    "attestation_status",
+    "recovery_center",
+]
+assert "hardware trust proof" in reviewer_routes["trust_reviewer"]["claim_boundary"]
 assert "Product Layer Map" in home
+assert "Reviewer Routes" in home
 assert "product map JSON" in home
 assert {item["id"] for item in product["customer_handoff_bundle"]["inspect_surfaces"]} >= {
     "runtime_home",

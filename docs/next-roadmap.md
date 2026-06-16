@@ -80,16 +80,19 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
+No completion epic is currently active. The next loop should inspect Later
+Tracks and GitHub milestones before opening a new milestone-backed epic.
+
+## Completed Completion Epics
+
 - `browser-fallback-capability-boundary-epic` — [EPIC: Browser fallback capability boundary](https://github.com/Jongtae/agentos/issues/89)
   - Milestone: Phase 2: Local-first Codex runtime loop
   - Completion goal: define when browser automation is allowed as a fallback and how AgentOS moves common web/app access patterns toward internal, OS-native capabilities.
-  - Exit condition: the epic has a documented and smoke-tested browser fallback contract that distinguishes internal capability, allowed fallback, blocked external state, and future capability graduation paths.
-  - Active task: [P2-45] Attach browser fallback routing to phase2 run.
-  - First contract: `agentos-phase2-browser-fallback-contract.v1` classifies internal capability, allowed browser fallback, blocked external state, and capability graduation paths without live browser proof.
-  - Runtime integration: `phase2-run` web/search requests attach browser fallback routing artifacts and keep live browser proof unclaimed.
+  - Exit condition: completed by the documented and smoke-tested `agentos-phase2-browser-fallback-contract.v1`, plus `phase2-run` integration that records browser fallback artifacts while keeping live browser proof unclaimed.
+  - Closed issue: #89.
+  - Completed tasks: P2-43 and P2-45.
+  - Residual blocker: observed live browser fallback proof remains unclaimed until a separate user-approved browser acceptance run exists; repeated web/app patterns should graduate into internal capabilities before broad browser dependence.
   - Advances: mediation cost reduction, capability ownership, OS-native runtime defaults, runtime proof truthfulness.
-
-## Completed Completion Epics
 
 - `capability-permission-boundary-epic` — [EPIC: Capability permission boundary](https://github.com/Jongtae/agentos/issues/66)
   - Milestone: Phase 2: Local-first Codex runtime loop

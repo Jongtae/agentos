@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-45] Attach browser fallback routing to phase2 run`
+- `[P2-46] Record browser fallback epic completion`
 
 Runtime impact statement:
 
-- This task attaches the browser fallback routing contract to `phase2-run` web/search requests so runtime results expose internal capability preference, browser fallback proof boundaries, and live-browser non-claims.
+- This task closes the browser fallback capability boundary epic once its documented contract, smoke coverage, and `phase2-run` integration are recorded, so the completion loop can return to the roadmap instead of repeating the same epic.
 
 Current autonomous completion loop:
 
@@ -112,7 +112,7 @@ Recommended Phase 2 tasks:
 - The updater hardening epic is closed for this Phase 2 slice; future updater work should require an observed VM/live-updater proof issue before claiming reboot, rollback, or ISO behavior.
 - The first updater hardening slice is `agentos-phase2-updater-state.v1`, which records ready, blocked, rollback-needed, and recovery-suggested states without running destructive updater actions.
 - `phase2-run` lifecycle recovery should surface updater state artifacts for update, rollback, restart, and recovery prompts while keeping live updater and VM/ISO proof blocked until observed.
-- The browser fallback capability boundary epic is active; it should define when browser automation is allowed as fallback, when requests stay blocked, and which repeated web/app patterns should graduate into internal AgentOS capabilities.
+- The browser fallback capability boundary epic is closed for this Phase 2 slice; future browser fallback work should return to the roadmap and open a new task only when it adds observed fallback proof or graduates a repeated pattern into an internal AgentOS capability.
 - The first browser fallback slice is `agentos-phase2-browser-fallback-contract.v1`, which classifies internal capability, allowed fallback, blocked external state, and capability graduation paths without launching a browser.
 - `phase2-run` web/search requests should attach the browser fallback contract artifact and keep live browser proof unclaimed unless a separate observed browser acceptance run exists.
 

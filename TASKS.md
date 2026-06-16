@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-103] Add Docker customer proof packet readiness checklist`
+- `[P2-104] Close Docker customer proof packet epic`
 
 Runtime impact statement:
 
-- This task makes the Docker customer proof packet's readiness and blocker posture scannable by customers so local proof can be trusted without implying VM/ISO, live-provider, browser, release, mutation, or attestation proof.
+- This task closes the Docker customer proof packet epic only after the customer-facing packet, readiness checklist, validation gates, docs, and proof non-claims all align around Docker-local runtime truth.
 
 Current autonomous completion loop:
 
@@ -156,9 +156,10 @@ Recommended Phase 2 tasks:
 - P2-99 adds customer-facing expected outcomes to `/api/demo-journey`, the browser Guided Demo Journey panel, and Docker-safe smokes so successful local proof and blocked-until-observed proof claims are visible before customers try the path.
 - P2-100 adds a Docker guided demo completion summary with completed local claims and next observed-proof blockers so customers know what the demo proves and what still requires external evidence.
 - P2-101 closes the Docker guided demo journey epic after README, Docker acceptance, TASKS, roadmap, guided demo gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and the golden runner all preserve the same proof-safe customer path.
-- The Docker customer proof packet epic is active for this Phase 2 slice; it must package Docker-local Product Layer proof into a customer-readable summary before any stronger live, VM/ISO, browser, release, mutation, or attestation claim is promoted.
+- The Docker customer proof packet epic is closed for this Phase 2 slice; future proof packet work should require observed Docker daemon proof, live browser evidence, release proof, VM/ISO proof, or a new customer-facing proof promotion surface before reopening.
 - P2-102 adds `/api/proof-packet`, a browser Customer Proof Packet panel, and `scripts/smoke_docker_customer_proof_packet.sh` so customers can see completed Docker-local claims, validation commands, proof sources, next blockers, and explicit non-claims together.
 - P2-103 adds a Customer Proof Packet readiness checklist so completed claims, validation commands, proof-source links, explicit non-claims, and disabled automatic claim promotion are visible before customers rely on the packet.
+- P2-104 closes the Docker customer proof packet epic after README, TASKS, roadmap, Docker acceptance, proof packet gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and the golden runner all preserve the same proof-safe customer packet.
 - The verified boot and attestation proof boundary epic is closed for this Phase 2 slice; future verified boot work should require observed VM or hardware evidence before claiming Secure Boot, TPM measured boot, PCR/event-log, IMA, or hardware attestation proof.
 - The first verified boot slice is `docs/architecture/verified-boot-attestation-proof-boundary.md`, smoke-tested by `scripts/smoke_verified_boot_attestation_boundary.sh`.
 - `phase2-run --message "status"` attaches the verified boot/attestation non-claim artifact so boot-chain trust proof remains visibly separate from local runtime proof.

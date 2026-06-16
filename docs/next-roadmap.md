@@ -80,18 +80,21 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
+None currently. The completion loop should re-check Later Tracks and GitHub issue state before opening the next milestone-backed Product Layer epic.
+
+## Completed Completion Epics
+
 - `docker-customer-proof-packet-epic` — [EPIC: Stage 3 / Phase 2 Docker customer proof packet](https://github.com/Jongtae/agentos/issues/227)
   - Milestone: Docker customer proof packet
   - Completion goal: package Docker-local Product Layer proof into a customer-readable packet that summarizes completed local claims, validation commands, proof sources, explicit non-claims, and next observed-proof blockers without promoting Docker into VM/ISO, live OAuth, browser, release, mutation, or hardware attestation proof.
-  - Validation plan: `scripts/smoke_docker_customer_proof_packet.sh`, `scripts/smoke_docker_product_layer_completion.sh`, `scripts/smoke_docker_runtime_preview_python.sh`, `docker compose config`, and the Phase 2 golden demo runner.
-  - Exit condition: complete when the Docker preview exposes `/api/proof-packet`, the browser Runtime Home links a Customer Proof Packet panel with readiness checks, README/TASKS/roadmap/Docker acceptance reference the packet, golden smokes include the packet gate, and non-claims remain explicit for VM/ISO, live OAuth, browser, release, external mutation, automatic claim promotion, and hardware attestation proof.
-  - Active task: P2-103.
+  - Exit condition: completed by P2-102 through P2-104 after `/api/proof-packet`, the browser Customer Proof Packet panel with readiness checks, README, TASKS, roadmap, Docker acceptance, `scripts/smoke_docker_customer_proof_packet.sh`, `scripts/smoke_docker_product_layer_completion.sh`, `scripts/smoke_docker_runtime_preview_python.sh`, `docker compose config`, cleanup policy, and the Phase 2 golden demo runner all preserve completed Docker-local claims, validation commands, proof sources, explicit non-claims, and disabled automatic claim promotion.
+  - Closed issue: #227.
+  - Completed tasks: P2-102, P2-103, and P2-104.
   - First slice: P2-102 adds `agentos-product-layer-customer-proof-packet.v1` through `/api/proof-packet`, a browser Customer Proof Packet panel, and `scripts/smoke_docker_customer_proof_packet.sh`.
-  - Current slice: P2-103 adds a readiness checklist to `/api/proof-packet`, the browser Customer Proof Packet panel, and Docker-safe smokes so customers can distinguish ready packet ingredients from proof-promotion blockers.
+  - Product-layer follow-up: P2-103 adds a readiness checklist to `/api/proof-packet`, the browser Customer Proof Packet panel, and Docker-safe smokes so customers can distinguish ready packet ingredients from proof-promotion blockers.
+  - Product-layer closeout: P2-104 records the Docker customer proof packet epic as complete so future loops return to the roadmap before adding more proof packet work.
   - Residual blockers: VM/ISO boot/rejoin proof, live OAuth, live browser evidence, release artifacts/signing, Docker daemon observed proof, external mutation proof, and hardware attestation remain unclaimed until observed evidence exists.
   - Advances: Docker-first public usability, runtime proof truthfulness, recovery, OS-native runtime defaults.
-
-## Completed Completion Epics
 
 - `docker-guided-product-layer-demo-journey-epic` — [EPIC: Stage 3 / Phase 2 Docker guided Product Layer demo journey](https://github.com/Jongtae/agentos/issues/218)
   - Milestone: Docker guided Product Layer demo journey

@@ -50,6 +50,7 @@ curl -fsS "http://127.0.0.1:$PORT/api/evidence" > "$TMP_DIR/evidence.json"
 curl -fsS "http://127.0.0.1:$PORT/api/proof-packet" > "$TMP_DIR/proof-packet.json"
 curl -fsS "http://127.0.0.1:$PORT/api/customer-handoff" > "$TMP_DIR/customer-handoff.json"
 curl -fsS "http://127.0.0.1:$PORT/api/proof-promotion" > "$TMP_DIR/proof-promotion.json"
+curl -fsS "http://127.0.0.1:$PORT/api/product-map" > "$TMP_DIR/product-map.json"
 
 python3 - "$TMP_DIR" <<'PY'
 import json
@@ -76,6 +77,7 @@ surfaces = {
     "customer_proof_packet": ("proof-packet.json", "agentos-product-layer-customer-proof-packet.v1", "Customer Proof Packet"),
     "customer_handoff_bundle": ("customer-handoff.json", "agentos-product-layer-customer-handoff-bundle.v1", "Customer Handoff Bundle"),
     "proof_promotion_center": ("proof-promotion.json", "agentos-product-layer-proof-promotion-center.v1", "Proof Promotion Center"),
+    "product_map": ("product-map.json", "agentos-product-layer-map.v1", "Product Layer Map"),
 }
 
 assert product["schema_version"] == "agentos-product-layer-runtime-home.v1"
@@ -153,6 +155,17 @@ assert proof_sharing_states == {
 }
 assert "Proof Sharing Checklist" in home
 assert "Withhold stronger claims" in home
+assert product["product_map"]["proof"]["customer_facing_product_map_ready"] is True
+assert product["product_map"]["proof"]["boot_or_iso_proof_claimed"] is False
+assert {group["id"] for group in product["product_map"]["surface_groups"]} >= {
+    "start_here",
+    "do_work",
+    "prove_and_handoff",
+    "blocked_until_observed",
+}
+assert "proof_promotion_center" in product["product_map"]["recommended_path"]
+assert "Product Layer Map" in home
+assert "product map JSON" in home
 assert {item["id"] for item in product["customer_handoff_bundle"]["inspect_surfaces"]} >= {
     "runtime_home",
     "onboarding_status",
@@ -214,6 +227,12 @@ non_claims = {
     "promotion_release": product["proof_promotion_center"]["proof"]["release_trust_claimed"],
     "promotion_external_mutation": product["proof_promotion_center"]["proof"]["external_mutation_claimed"],
     "promotion_attestation": product["proof_promotion_center"]["proof"]["hardware_attestation_claimed"],
+    "product_map_vm_iso": product["product_map"]["proof"]["boot_or_iso_proof_claimed"],
+    "product_map_live_oauth": product["product_map"]["proof"]["live_oauth_claimed"],
+    "product_map_browser": product["product_map"]["proof"]["live_browser_proof_claimed"],
+    "product_map_release": product["product_map"]["proof"]["release_trust_claimed"],
+    "product_map_mutation": product["product_map"]["proof"]["external_mutation_claimed"],
+    "product_map_attestation": product["product_map"]["proof"]["hardware_attestation_claimed"],
 }
 assert all(value is False for value in non_claims.values()), non_claims
 
@@ -233,6 +252,7 @@ ready_claims = {
     "customer_proof_packet": product["customer_proof_packet"]["proof"]["customer_packet_ready"],
     "customer_handoff_bundle": product["customer_handoff_bundle"]["proof"]["customer_handoff_ready"],
     "proof_promotion_center": product["proof_promotion_center"]["proof"]["customer_facing_proof_promotion_ready"],
+    "product_map": product["product_map"]["proof"]["customer_facing_product_map_ready"],
 }
 assert all(value is True for value in ready_claims.values()), ready_claims
 PY

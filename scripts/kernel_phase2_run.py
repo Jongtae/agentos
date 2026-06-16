@@ -20,6 +20,7 @@ from kernel.intent_dispatch import build_intent_dispatch_report, classify_intent
 from kernel.operator_activity import append_activity_event, build_activity_feed_payload
 from kernel_gmail_setup import build_gmail_read_report, build_gmail_status_report
 from kernel_phase2_calendar_fixture import build_calendar_fixture_report
+from kernel_phase2_capability_result import build_result as build_capability_permission_result
 from kernel_phase2_gmail_fixture import build_gmail_fixture_report
 from kernel_phase2_lifecycle_recovery import build_lifecycle_recovery_report
 from kernel_phase2_records import append_record, find_records
@@ -128,6 +129,7 @@ def run_phase2(
     artifacts: dict = {}
     blockers: list[dict] = []
     capability_result: dict = {}
+    permission_result: dict = {}
 
     try:
         if intent == "gmail_read_or_draft":
@@ -221,12 +223,27 @@ def run_phase2(
 
         if not response:
             response = "I need one more detail before I can run that safely."
+        permission_result = build_capability_permission_result(
+            workspace_path,
+            intent=intent,
+            capability=capability,
+            status=_capability_status(status),
+            output=response,
+            requires_setup=_requires_setup(blockers),
+        )
         record_payload = append_record(
             user_root_path,
             title=f"Phase 2 run: {intent}",
-            body=_record_body(prompt=prompt, intent=intent, capability=capability, status=status, response=response),
+            body=_record_body(
+                prompt=prompt,
+                intent=intent,
+                capability=capability,
+                status=status,
+                response=response,
+                permission_result=permission_result,
+            ),
             source="phase2_run",
-            tags=["phase-2", intent, capability, status],
+            tags=["phase-2", intent, capability, status, permission_result.get("outcome", "")],
         )
         record = record_payload["records"][0]
         record_path = record_payload.get("records_path", "")
@@ -244,6 +261,8 @@ def run_phase2(
                 intent=intent,
                 capability=capability,
                 state=final_state,
+                permission=permission_result.get("permission", {}),
+                outcome=str(permission_result.get("outcome", "")),
             )
         if custom_activity and status == "blocked":
             _event(
@@ -262,7 +281,14 @@ def run_phase2(
         record_payload = append_record(
             user_root_path,
             title="Phase 2 run failed",
-            body=_record_body(prompt=prompt, intent=intent, capability=capability, status=status, response=response),
+            body=_record_body(
+                prompt=prompt,
+                intent=intent,
+                capability=capability,
+                status=status,
+                response=response,
+                permission_result=permission_result,
+            ),
             source="phase2_run",
             tags=["phase-2", intent, capability, "failed"],
         )
@@ -283,6 +309,9 @@ def run_phase2(
         "classifier": classification.get("classifier", ""),
         "capability": capability,
         "status": status,
+        "permission": permission_result.get("permission", {}),
+        "outcome": permission_result.get("outcome", ""),
+        "recovery": permission_result.get("recovery", {}),
         "response": response,
         "activity_feed": activity,
         "record": record,
@@ -303,6 +332,9 @@ def run_phase2(
             ),
             "vm_iso_proof_completed": False,
             "destructive_action_executed": False,
+            "permission_checked": bool((permission_result.get("proof") or {}).get("permission_checked", False)),
+            "outcome_checked": bool((permission_result.get("proof") or {}).get("outcome_checked", False)),
+            "secrets_redacted": bool((permission_result.get("proof") or {}).get("secrets_redacted", False)),
         },
     }
     return scrub_payload(payload)
@@ -318,7 +350,14 @@ def _event(
     intent: str = "",
     capability: str = "",
     state: str = "observed",
+    permission: dict | None = None,
+    outcome: str = "",
 ) -> None:
+    decision = {"state": state}
+    if permission:
+        decision["permission"] = permission
+    if outcome:
+        decision["outcome"] = outcome
     append_activity_event(
         workspace,
         kind=kind,
@@ -327,7 +366,7 @@ def _event(
         request_id=request_id,
         intent=intent,
         capability=capability,
-        decision={"state": state},
+        decision=decision,
     )
 
 
@@ -435,13 +474,48 @@ def _lifecycle_response(result: dict) -> str:
     return header + ("\n" + "\n".join(f"- {step}" for step in steps) if steps else "")
 
 
-def _record_body(*, prompt: str, intent: str, capability: str, status: str, response: str) -> str:
+def _capability_status(status: str) -> str:
+    if status == "completed":
+        return "ok"
+    if status == "blocked":
+        return "blocked"
+    if status == "failed":
+        return "failed"
+    return "degraded"
+
+
+def _requires_setup(blockers: list[dict]) -> bool:
+    for blocker in blockers:
+        blocker_id = str(blocker.get("id", "")).lower()
+        reason = str(blocker.get("reason", "")).lower()
+        recovery = str(blocker.get("recovery_action", "")).lower()
+        if "setup" in blocker_id or "oauth" in blocker_id or "credential" in reason or "setup" in recovery:
+            return True
+    return False
+
+
+def _record_body(
+    *,
+    prompt: str,
+    intent: str,
+    capability: str,
+    status: str,
+    response: str,
+    permission_result: dict | None = None,
+) -> str:
+    permission_result = permission_result or {}
+    permission = permission_result.get("permission") if isinstance(permission_result.get("permission"), dict) else {}
+    recovery = permission_result.get("recovery") if isinstance(permission_result.get("recovery"), dict) else {}
     return "\n".join(
         [
             f"prompt: {prompt}",
             f"intent: {intent}",
             f"capability: {capability}",
             f"status: {status}",
+            f"permission_level: {permission.get('level', '')}",
+            f"outcome: {permission_result.get('outcome', '')}",
+            f"recovery_required: {recovery.get('required', False)}",
+            f"secrets_included: {permission_result.get('record', {}).get('secrets_included', False)}",
             "",
             response,
         ]
@@ -458,6 +532,11 @@ def _print_human(payload: dict) -> None:
     print(f"intent: {payload.get('intent', '')}")
     print(f"capability: {payload.get('capability', '')}")
     print(f"status: {payload.get('status', '')}")
+    permission = payload.get("permission") if isinstance(payload.get("permission"), dict) else {}
+    if permission:
+        print(f"permission: {permission.get('level', '')}")
+    if payload.get("outcome"):
+        print(f"outcome: {payload.get('outcome', '')}")
     print("")
     print(str(payload.get("response", "")).strip())
     record_path = str(payload.get("artifacts", {}).get("record_path", "")).strip()

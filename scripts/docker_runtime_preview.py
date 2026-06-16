@@ -548,6 +548,55 @@ class DockerPreviewApp:
                 "proof_boundary": "The handoff bundle never auto-promotes stronger claims.",
             },
         ]
+        handoff_report = {
+            "schema_version": "agentos-product-layer-customer-handoff-report.v1",
+            "title": "Docker customer handoff report",
+            "audience": "customer evaluator or internal product reviewer",
+            "summary": "A shareable Docker-local report that explains what was run, what can be inspected, which local proof was reproduced, and which stronger claims remain blocked until observed evidence exists.",
+            "sections": [
+                {
+                    "id": "reproduced_try_path",
+                    "label": "Reproduced try path",
+                    "state": "ready",
+                    "customer_value": "Records the Docker command, browser URL, and first prompt a reviewer used.",
+                    "source": "try_path",
+                },
+                {
+                    "id": "inspected_product_surfaces",
+                    "label": "Inspected Product Layer surfaces",
+                    "state": "ready",
+                    "customer_value": "Lists Runtime Home, onboarding, guided demo, proof packet, recovery, and evidence surfaces.",
+                    "source": "inspect_surfaces",
+                },
+                {
+                    "id": "local_validation_evidence",
+                    "label": "Local validation evidence",
+                    "state": "ready",
+                    "customer_value": "Names Docker-safe validation commands a reviewer can rerun before trusting the handoff.",
+                    "source": "validation_commands",
+                },
+                {
+                    "id": "remaining_observed_proof_blockers",
+                    "label": "Remaining observed-proof blockers",
+                    "state": "blocked_until_observed_evidence",
+                    "customer_value": "Keeps VM/ISO, live OAuth, browser, release, mutation, Docker daemon observed proof, and attestation out of completed claims.",
+                    "source": "next_blockers",
+                },
+                {
+                    "id": "share_safe_non_claims",
+                    "label": "Share-safe non-claims",
+                    "state": "ready",
+                    "customer_value": "States that secrets are forbidden and stronger claims require sanitized observed evidence.",
+                    "source": "proof",
+                },
+            ],
+            "share_policy": {
+                "safe_to_share_without_secrets": True,
+                "secret_material_allowed": False,
+                "automatic_claim_promotion": False,
+                "requires_sanitized_observed_evidence_for_stronger_claims": True,
+            },
+        }
         return {
             "schema_version": "agentos-product-layer-customer-handoff-bundle.v1",
             "surface": "Customer Handoff Bundle",
@@ -560,6 +609,7 @@ class DockerPreviewApp:
                 "docker_is_default_public_try_path": True,
             },
             "handoff_checklist": handoff_checklist,
+            "handoff_report": handoff_report,
             "inspect_surfaces": [
                 {"id": "runtime_home", "label": "Runtime Home", "url": "/api/product"},
                 {"id": "onboarding_status", "label": "Docker Onboarding Status", "url": "/api/onboarding"},
@@ -1614,6 +1664,21 @@ def _render_page(app: DockerPreviewApp) -> str:
         for item in customer_handoff.get("handoff_checklist", [])
         if isinstance(item, dict)
     ) or "<li>No handoff checklist steps are configured.</li>"
+    handoff_report = customer_handoff.get("handoff_report", {})
+    if not isinstance(handoff_report, dict):
+        handoff_report = {}
+    handoff_report_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Report section'))))}</b> "
+        f"{html.escape(str(item.get('customer_value', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))} · source: {html.escape(str(item.get('source', 'unknown')))}</em>"
+        "</li>"
+        for item in handoff_report.get("sections", [])
+        if isinstance(item, dict)
+    ) or "<li>No handoff report sections are configured.</li>"
+    handoff_share_policy = handoff_report.get("share_policy", {})
+    if not isinstance(handoff_share_policy, dict):
+        handoff_share_policy = {}
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -1853,6 +1918,16 @@ def _render_page(app: DockerPreviewApp) -> str:
     <div class="panel">
       <h2>Handoff Validation</h2>
       <ul>{handoff_validation_html}</ul>
+    </div>
+    <div class="panel">
+      <h2>Handoff Report</h2>
+      <p class="lead">{html.escape(str(handoff_report.get('summary', 'A shareable Docker-local handoff report is available below.')))}</p>
+      <ul>{handoff_report_html}</ul>
+      <ul>
+        <li><b>Secrets allowed</b> {html.escape(str(handoff_share_policy.get('secret_material_allowed', False)))}</li>
+        <li><b>Automatic claim promotion</b> {html.escape(str(handoff_share_policy.get('automatic_claim_promotion', False)))}</li>
+        <li><b>Stronger claims require observed evidence</b> {html.escape(str(handoff_share_policy.get('requires_sanitized_observed_evidence_for_stronger_claims', True)))}</li>
+      </ul>
     </div>
   </section>
   <section class="product">

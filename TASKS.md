@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-40] Attach updater state to lifecycle recovery runs`
+- `[P2-41] Record updater hardening epic completion`
 
 Runtime impact statement:
 
-- This task attaches the updater state contract to Phase 2 lifecycle recovery runs so update, rollback, restart, and recovery prompts record managed runtime rejoin requirements without executing destructive updater actions or claiming live VM/ISO proof.
+- This task closes the safe Phase 2 updater hardening epic scope so the autonomous loop stops repeating the same updater track and returns to roadmap selection for the next milestone-backed completion epic.
 
 Current autonomous completion loop:
 
@@ -109,7 +109,7 @@ Recommended Phase 2 tasks:
 - `phase2-run` should expose permission level, outcome, recovery, and secret-redaction proof in JSON output and user-owned records.
 - Capability permission declarations should be backed by `docs/architecture/capability-permission-registry.json`.
 - The capability permission boundary epic is closed for this Phase 2 slice; future loops should return to the roadmap before selecting the next epic.
-- The updater hardening epic is active and should begin with a safe contract or smoke task before any live updater, reboot, VM, or ISO proof is claimed.
+- The updater hardening epic is closed for this Phase 2 slice; future updater work should require an observed VM/live-updater proof issue before claiming reboot, rollback, or ISO behavior.
 - The first updater hardening slice is `agentos-phase2-updater-state.v1`, which records ready, blocked, rollback-needed, and recovery-suggested states without running destructive updater actions.
 - `phase2-run` lifecycle recovery should surface updater state artifacts for update, rollback, restart, and recovery prompts while keeping live updater and VM/ISO proof blocked until observed.
 

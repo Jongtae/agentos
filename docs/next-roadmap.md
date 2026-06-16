@@ -80,14 +80,7 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
-- `updater-hardening-epic` — [EPIC: Updater hardening](https://github.com/Jongtae/agentos/issues/80)
-  - Milestone: Phase 2: Local-first Codex runtime loop
-  - Completion goal: define the updater hardening path that preserves managed runtime continuity and truthful rollback/recovery proof.
-  - Exit condition: the epic has milestone alignment, validation plan, explicit VM/ISO/live-updater blocker handling, and a first safe contract or smoke task identified.
-  - Active task: [P2-40] Attach updater state to lifecycle recovery runs.
-  - First contract: `agentos-phase2-updater-state.v1` records ready, blocked, rollback-needed, and recovery-suggested states without claiming live updater or VM/ISO proof.
-  - Runtime integration: `phase2-run` lifecycle recovery prompts should attach updater state artifacts and keep live updater/VM proof explicitly blocked.
-  - Advances: OS-native runtime defaults, recovery, runtime proof truthfulness.
+- None. The loop should inspect Later Tracks and GitHub issues before creating the next milestone-backed epic.
 
 ## Completed Completion Epics
 
@@ -97,6 +90,14 @@ The detailed Phase 2 roadmap is tracked in
   - Exit condition: completed by contract docs, public registry, smoke-enforced outcomes, `phase2-run` output, and user-owned records across P2-33 through P2-36.
   - Closed issue: #66.
   - Advances: capability ownership, OS-native runtime defaults, runtime proof truthfulness.
+
+- `updater-hardening-epic` — [EPIC: Updater hardening](https://github.com/Jongtae/agentos/issues/80)
+  - Milestone: Phase 2: Local-first Codex runtime loop
+  - Completion goal: define the updater hardening path that preserves managed runtime continuity and truthful rollback/recovery proof.
+  - Exit condition: completed by `agentos-phase2-updater-state.v1`, focused updater state smoke, `phase2-run` lifecycle integration, and explicit live-updater/VM proof blockers across P2-39 through P2-40.
+  - Closed issue: #80.
+  - Residual blocker: live updater, reboot, rollback, and VM/ISO proof remain unclaimed until an observed VM/live-updater acceptance run records them.
+  - Advances: OS-native runtime defaults, recovery, runtime proof truthfulness.
 
 ## Autonomous Completion Loop
 

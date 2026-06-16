@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-46] Record browser fallback epic completion`
+- `[P2-47] Define public preview operations checklist`
 
 Runtime impact statement:
 
-- This task closes the browser fallback capability boundary epic once its documented contract, smoke coverage, and `phase2-run` integration are recorded, so the completion loop can return to the roadmap instead of repeating the same epic.
+- This task defines the public preview operations checklist so Docker/local preview updates have smoke-verifiable proof, explicit manual blockers, and release non-claims before the loop promotes future preview work.
 
 Current autonomous completion loop:
 
@@ -115,6 +115,8 @@ Recommended Phase 2 tasks:
 - The browser fallback capability boundary epic is closed for this Phase 2 slice; future browser fallback work should return to the roadmap and open a new task only when it adds observed fallback proof or graduates a repeated pattern into an internal AgentOS capability.
 - The first browser fallback slice is `agentos-phase2-browser-fallback-contract.v1`, which classifies internal capability, allowed fallback, blocked external state, and capability graduation paths without launching a browser.
 - `phase2-run` web/search requests should attach the browser fallback contract artifact and keep live browser proof unclaimed unless a separate observed browser acceptance run exists.
+- The public preview operations epic is active; it should define the Docker/local preview promotion gate, manual proof blockers, and release non-claims before broader public preview or distribution work continues.
+- The first public preview operations slice is `docs/operations/public-preview-operations.md`, smoke-tested by `scripts/smoke_public_preview_operations.sh`.
 
 ## Validation Standards
 

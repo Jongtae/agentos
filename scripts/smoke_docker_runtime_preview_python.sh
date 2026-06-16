@@ -39,6 +39,7 @@ curl -fsS "http://127.0.0.1:$PORT/api/status" > "$TMP_DIR/status.json"
 curl -fsS "http://127.0.0.1:$PORT/api/product" > "$TMP_DIR/product.json"
 curl -fsS "http://127.0.0.1:$PORT/api/work-inbox" > "$TMP_DIR/work-inbox.json"
 curl -fsS "http://127.0.0.1:$PORT/api/recovery" > "$TMP_DIR/recovery.json"
+curl -fsS "http://127.0.0.1:$PORT/api/evidence" > "$TMP_DIR/evidence.json"
 curl -fsS \
   -H 'Content-Type: application/json' \
   -d '{"message":"hi"}' \
@@ -55,6 +56,7 @@ status = json.loads((root / "status.json").read_text())
 product = json.loads((root / "product.json").read_text())
 work_inbox = json.loads((root / "work-inbox.json").read_text())
 recovery = json.loads((root / "recovery.json").read_text())
+evidence = json.loads((root / "evidence.json").read_text())
 prompt = json.loads((root / "prompt.json").read_text())
 activity = json.loads((root / "activity.json").read_text())
 home = (root / "home.html").read_text()
@@ -69,6 +71,7 @@ assert product["proof"]["boot_or_iso_proof_claimed"] is False
 assert product["proof"]["customer_facing_summary_ready"] is True
 assert product["work_inbox"]["schema_version"] == "agentos-product-layer-work-inbox.v1"
 assert product["recovery_center"]["schema_version"] == "agentos-product-layer-recovery-center.v1"
+assert product["evidence_dashboard"]["schema_version"] == "agentos-product-layer-evidence-dashboard.v1"
 assert {feature["id"] for feature in product["features"]} >= {
     "runtime_home",
     "work_inbox",
@@ -98,11 +101,34 @@ assert {item["id"] for item in recovery["items"]} >= {
     "release-trust-proof",
     "attestation-proof",
 }
+assert evidence["schema_version"] == "agentos-product-layer-evidence-dashboard.v1"
+assert evidence["proof"]["docker_preview_ready"] is True
+assert evidence["proof"]["customer_facing_evidence_ready"] is True
+assert evidence["proof"]["boot_or_iso_proof_claimed"] is False
+assert evidence["proof"]["live_oauth_claimed"] is False
+assert evidence["proof"]["live_browser_proof_claimed"] is False
+assert evidence["proof"]["release_trust_claimed"] is False
+assert evidence["proof"]["hardware_attestation_claimed"] is False
+assert {item["id"] for item in evidence["evidence"]} >= {
+    "docker-runtime-preview",
+    "phase2-golden-runtime-loop",
+    "work-inbox-read-first",
+    "activity-timeline",
+}
+assert {item["id"] for item in evidence["non_claims"]} >= {
+    "vm-iso-boot-proof",
+    "live-oauth-proof",
+    "live-browser-proof",
+    "release-trust-proof",
+    "hardware-attestation-proof",
+}
 assert "Runtime Home" in home
 assert "Recovery Center" in home
 assert "recovery JSON" in home
 assert "Work Inbox" in home
 assert "Inbox Workflows" in home
+assert "Evidence Dashboard" in home
+assert "evidence JSON" in home
 assert prompt["ok"] is True
 assert prompt["intent"] == "greeting", prompt
 assert "DuckDuckGo" not in json.dumps(prompt)

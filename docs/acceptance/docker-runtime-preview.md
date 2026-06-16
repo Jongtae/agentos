@@ -30,6 +30,7 @@ http://localhost:8787
 - Work Inbox, Activity Timeline, Recovery Center, and Evidence Dashboard states are summarized.
 - `/api/work-inbox` exposes read-first inbox sources, workflows, live blockers, and mutation non-claims.
 - `/api/recovery` exposes customer-facing recovery actions for VM/ISO, live OAuth, browser, release, attestation, and setup blockers without claiming observed proof.
+- `/api/evidence` exposes observed Docker/local proof and explicit non-claims for VM/ISO, live OAuth, browser, release trust, and hardware attestation.
 - LLM setup/readiness state is visible.
 - Telegram setup/readiness state is visible.
 - Activity feed is visible.
@@ -56,6 +57,7 @@ Expected behavior:
 - Runtime Home explains product-layer readiness and proof blockers
 - Work Inbox shows fixture, Maildir, Gmail, and Calendar sources without claiming live OAuth or mutations
 - Recovery Center shows proof blockers as next recovery actions without claiming Docker is boot, release, browser, or hardware proof
+- Evidence Dashboard separates what Docker/local smokes have observed from what still requires external evidence
 - workspace request uses bounded local workspace behavior
 - search-style request routes through search-like intent
 - activity feed narrates request, intent, capability, and result
@@ -67,6 +69,7 @@ scripts/smoke_docker_runtime_preview.sh
 ```
 
 The smoke should validate compose config, build the image, start the preview,
-check `localhost:8787`, verify `/api/product`, `/api/work-inbox`, and
-`/api/recovery`, run a prompt through `/api/prompt`, verify activity, and check
-that common secret patterns are not present in the response.
+check `localhost:8787`, verify `/api/product`, `/api/work-inbox`,
+`/api/recovery`, and `/api/evidence`, run a prompt through `/api/prompt`,
+verify activity, and check that common secret patterns are not present in the
+response.

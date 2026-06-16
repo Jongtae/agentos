@@ -126,6 +126,7 @@ class DockerPreviewApp:
         adapters = setup_payload.get("adapters", {}) if isinstance(setup_payload.get("adapters"), dict) else {}
         work_inbox = self.work_inbox(setup=setup_payload)
         recovery_center = self.recovery_center(setup=setup_payload)
+        evidence_dashboard = self.evidence_dashboard(setup=setup_payload, activity=activity_payload)
         blockers = recovery_center.get("blockers", [])
         return {
             "schema_version": "agentos-product-layer-runtime-home.v1",
@@ -166,12 +167,97 @@ class DockerPreviewApp:
             "blockers": blockers,
             "work_inbox": work_inbox,
             "recovery_center": recovery_center,
+            "evidence_dashboard": evidence_dashboard,
             "proof": {
                 "docker_main_try_path": True,
                 "boot_or_iso_proof_claimed": False,
                 "live_oauth_claimed": False,
                 "live_browser_proof_claimed": False,
                 "customer_facing_summary_ready": True,
+            },
+        }
+
+    def evidence_dashboard(self, *, setup: dict | None = None, activity: dict | None = None) -> dict:
+        setup_payload = setup or build_status(str(self.workspace), str(self.user_root))
+        activity_payload = activity or build_activity_feed_payload(self.workspace, limit=12)
+        evidence = [
+            {
+                "id": "docker-runtime-preview",
+                "label": "Docker runtime preview",
+                "state": "observed_by_smoke",
+                "customer_claim": "AgentOS can be tried through Docker with Runtime Home, Work Inbox, Recovery Center, and activity APIs.",
+                "evidence_source": "scripts/smoke_docker_runtime_preview_python.sh and docker compose config",
+            },
+            {
+                "id": "phase2-golden-runtime-loop",
+                "label": "Phase 2 golden runtime loop",
+                "state": "observed_by_smoke",
+                "customer_claim": "Prompt intake, intent classification, bounded capability execution, records, activity narration, and recovery contracts are locally smoke-tested.",
+                "evidence_source": "scripts/smoke_phase2_golden_demo.sh",
+            },
+            {
+                "id": "work-inbox-read-first",
+                "label": "Work Inbox read-first proof",
+                "state": "docker_preview_contract",
+                "customer_claim": "Fixture, Maildir boundary, Gmail, and Calendar appear as read-first inbox sources with mutation non-claims.",
+                "evidence_source": "/api/work-inbox",
+            },
+            {
+                "id": "activity-timeline",
+                "label": "Activity Timeline",
+                "state": "ready" if activity_payload.get("activity_feed_ready") else "degraded",
+                "customer_claim": "AgentOS can show recent runtime activity and user-visible records.",
+                "evidence_source": "/api/activity",
+            },
+        ]
+        non_claims = [
+            {
+                "id": "vm-iso-boot-proof",
+                "label": "VM/ISO boot proof",
+                "state": "not_claimed",
+                "required_evidence": "Observed VM/ISO boot, install, reboot, recovery, and managed runtime rejoin record.",
+            },
+            {
+                "id": "live-oauth-proof",
+                "label": "Live OAuth proof",
+                "state": "not_claimed",
+                "required_evidence": "Explicit tester credentials plus sanitized read-only Gmail/Calendar observed runs.",
+            },
+            {
+                "id": "live-browser-proof",
+                "label": "Live browser proof",
+                "state": "not_claimed",
+                "required_evidence": "User-approved browser run and sanitized observed artifacts.",
+            },
+            {
+                "id": "release-trust-proof",
+                "label": "Release trust proof",
+                "state": "not_claimed",
+                "required_evidence": "Published release artifacts, checksums, signatures, and signoff record.",
+            },
+            {
+                "id": "hardware-attestation-proof",
+                "label": "Hardware attestation proof",
+                "state": "not_claimed",
+                "required_evidence": "Secure Boot, TPM/PCR, event-log, IMA, or equivalent hardware-backed attestation evidence.",
+            },
+        ]
+        return {
+            "schema_version": "agentos-product-layer-evidence-dashboard.v1",
+            "surface": "Evidence Dashboard",
+            "state": "partial",
+            "customer_message": "Evidence Dashboard separates Docker/local proof from proof that still requires observed external evidence.",
+            "evidence": evidence,
+            "non_claims": non_claims,
+            "proof": {
+                "docker_preview_ready": True,
+                "phase2_golden_smoke_expected": True,
+                "boot_or_iso_proof_claimed": False,
+                "live_oauth_claimed": False,
+                "live_browser_proof_claimed": False,
+                "release_trust_claimed": False,
+                "hardware_attestation_claimed": False,
+                "customer_facing_evidence_ready": True,
             },
         }
 
@@ -425,6 +511,7 @@ def _render_page(app: DockerPreviewApp) -> str:
     product_layer = status.get("product_layer", {})
     work_inbox = product_layer.get("work_inbox", {}) if isinstance(product_layer.get("work_inbox"), dict) else {}
     recovery_center = product_layer.get("recovery_center", {}) if isinstance(product_layer.get("recovery_center"), dict) else {}
+    evidence_dashboard = product_layer.get("evidence_dashboard", {}) if isinstance(product_layer.get("evidence_dashboard"), dict) else {}
     features = product_layer.get("features", []) if isinstance(product_layer.get("features"), list) else []
     blockers = product_layer.get("blockers", []) if isinstance(product_layer.get("blockers"), list) else []
     llm_state = adapters.get("llm", {}).get("state", "unknown")
@@ -486,6 +573,23 @@ def _render_page(app: DockerPreviewApp) -> str:
         for workflow in work_inbox.get("workflows", [])
         if isinstance(workflow, dict)
     ) or "<li>No Work Inbox workflows are available yet.</li>"
+    evidence_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Evidence'))))}</b> "
+        f"{html.escape(str(item.get('customer_claim', '')))} "
+        f"<em>{html.escape(str(item.get('evidence_source', '')))}</em>"
+        "</li>"
+        for item in evidence_dashboard.get("evidence", [])
+        if isinstance(item, dict)
+    ) or "<li>No customer-facing evidence is available yet.</li>"
+    non_claim_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Non-claim'))))}</b> "
+        f"{html.escape(str(item.get('required_evidence', '')))}"
+        "</li>"
+        for item in evidence_dashboard.get("non_claims", [])
+        if isinstance(item, dict)
+    ) or "<li>No explicit non-claims are available yet.</li>"
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -551,6 +655,18 @@ def _render_page(app: DockerPreviewApp) -> str:
       <h2>Inbox Workflows</h2>
       <ul>{inbox_workflow_html}</ul>
       <p><a href="/api/work-inbox">work inbox JSON</a></p>
+    </div>
+  </section>
+  <section class="product">
+    <div class="panel">
+      <h2>Evidence Dashboard</h2>
+      <p class="lead">{html.escape(str(evidence_dashboard.get('customer_message', 'Evidence state is available below.')))}</p>
+      <ul>{evidence_html}</ul>
+    </div>
+    <div class="panel">
+      <h2>Not Yet Claimed</h2>
+      <ul>{non_claim_html}</ul>
+      <p><a href="/api/evidence">evidence JSON</a></p>
     </div>
   </section>
   <section class="panel">
@@ -634,6 +750,8 @@ def make_handler(app: DockerPreviewApp) -> type[BaseHTTPRequestHandler]:
                 _json_response(self, app.work_inbox())
             elif path == "/api/recovery":
                 _json_response(self, app.recovery_center())
+            elif path == "/api/evidence":
+                _json_response(self, app.evidence_dashboard())
             elif path == "/api/activity":
                 _json_response(self, app.activity())
             else:

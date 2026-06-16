@@ -14,6 +14,7 @@ SCHEMA_VERSION = "agentos-hardening-direction-judge.v1"
 
 @dataclass(frozen=True)
 class SourceSnapshot:
+    readme: str
     prd: str
     tasks: str
     roadmap: str
@@ -40,6 +41,7 @@ def load_snapshot(root: Path) -> SourceSnapshot:
     ledger = root / "docs" / "issue-branch-ledger.jsonl"
     lines = ledger.read_text(encoding="utf-8").splitlines() if ledger.exists() else []
     return SourceSnapshot(
+        readme=read_text(root / "README.md"),
         prd=read_text(root / "PRD.md"),
         tasks=read_text(root / "TASKS.md"),
         roadmap=read_text(root / "docs" / "next-roadmap.md"),
@@ -97,7 +99,7 @@ def judge(root: Path) -> dict:
     snapshot = load_snapshot(root)
     task = current_task(snapshot.tasks)
     recent_ids = recent_task_ids(snapshot.ledger_lines)
-    combined = "\n".join([snapshot.prd, snapshot.tasks, snapshot.roadmap])
+    combined = "\n".join([snapshot.readme, snapshot.prd, snapshot.tasks, snapshot.roadmap])
 
     phase2_closed = "Phase 2 closeout recorded" in snapshot.roadmap
     old_hardening_loop = "Five-minute hardening is active" in snapshot.tasks
@@ -227,6 +229,7 @@ def _later_tracks(roadmap: str) -> list[dict]:
 def _next_forward_candidates(snapshot: SourceSnapshot, later_tracks: list[dict]) -> list[dict]:
     candidates = []
     completed = completed_task_ids(snapshot.ledger_lines)
+    combined = "\n".join([snapshot.readme, snapshot.prd, snapshot.tasks, snapshot.roadmap]).lower()
     if "roadmap direction judge" not in snapshot.tasks.lower() and "P2-26" not in completed:
         candidates.append(
             {
@@ -274,6 +277,45 @@ def _next_forward_candidates(snapshot: SourceSnapshot, later_tracks: list[dict])
                 "title": "Add live Gmail read-only manual acceptance checklist and blocker capture",
                 "safe_without_external_state": True,
                 "advances": ["capability ownership", "runtime proof truthfulness"],
+            }
+        )
+    if "permission boundaries" in combined and "capability-permission-boundary" not in combined:
+        candidates.append(
+            {
+                "id": "capability-permission-boundary-epic",
+                "title": "Create a milestone-backed epic for capability permission boundaries",
+                "safe_without_external_state": True,
+                "candidate_type": "epic",
+                "milestone": "Phase 2: Local-first Codex runtime loop",
+                "completion_goal": "Define how AgentOS declares, approves, denies, narrates, and records OS-native capability access before expanding live adapters.",
+                "exit_condition": "Epic exists with milestone alignment, validation plan, explicit blocker handling, and first safe contract task identified.",
+                "advances": ["capability ownership", "OS-native runtime defaults", "runtime proof truthfulness"],
+            }
+        )
+    if "updater hardening" in track_names and "updater-hardening" not in combined:
+        candidates.append(
+            {
+                "id": "updater-hardening-epic",
+                "title": "Create a milestone-backed epic for updater hardening",
+                "safe_without_external_state": True,
+                "candidate_type": "epic",
+                "milestone": "Phase 2: Local-first Codex runtime loop",
+                "completion_goal": "Define the updater hardening path that preserves managed runtime continuity and truthful rollback/recovery proof.",
+                "exit_condition": "Epic exists with milestone alignment, validation plan, explicit blocker handling, and first safe design/proof task identified.",
+                "advances": ["OS-native runtime defaults", "recovery", "runtime proof truthfulness"],
+            }
+        )
+    if "richer browser fallback" in track_names and "browser-fallback" not in combined:
+        candidates.append(
+            {
+                "id": "browser-fallback-epic",
+                "title": "Create a milestone-backed epic for richer browser fallback",
+                "safe_without_external_state": True,
+                "candidate_type": "epic",
+                "milestone": "Phase 2: Local-first Codex runtime loop",
+                "completion_goal": "Define when browser automation is allowed as a fallback and how AgentOS moves common patterns toward internal capabilities.",
+                "exit_condition": "Epic exists with milestone alignment, validation plan, explicit blocker handling, and first safe contract task identified.",
+                "advances": ["mediation cost reduction", "capability ownership"],
             }
         )
     return candidates

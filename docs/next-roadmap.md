@@ -88,6 +88,9 @@ choosing work.
 - keep validating only when no safe forward-progress task exists
 - create or continue a milestone-backed epic when the roadmap has a real gap
 - open the next small issue for a safe completion track inside that epic
+- when no safe task candidate exists, promote an uncovered Later Track or
+  README completion track into a missing-epic candidate before falling back to
+  status-only validation
 - record an explicit blocker when the next proof needs credentials, a VM, or
   external state
 - hand off when the loop is misaligned with the runtime-first product direction

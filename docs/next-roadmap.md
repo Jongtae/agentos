@@ -82,12 +82,13 @@ The detailed Phase 2 roadmap is tracked in
 
 - `docker-customer-handoff-bundle-epic` — [EPIC: Stage 3 / Phase 2 Docker customer handoff bundle](https://github.com/Jongtae/agentos/issues/234)
   - Milestone: Docker customer handoff bundle
-  - Completion goal: give customers one Docker-safe handoff path that explains how to run the preview, which Product Layer surfaces to inspect first, which checklist steps to follow, which validation commands reproduce local proof, which proof packet sources support the claims, and which observed-proof blockers remain before stronger VM/ISO, live OAuth, browser, release, mutation, or hardware attestation claims can be promoted.
+  - Completion goal: give customers one Docker-safe handoff path that explains how to run the preview, which Product Layer surfaces to inspect first, which checklist steps to follow, which validation commands reproduce local proof, which proof packet sources support the claims, which share-safe report sections can be handed to reviewers, and which observed-proof blockers remain before stronger VM/ISO, live OAuth, browser, release, mutation, or hardware attestation claims can be promoted.
   - Validation plan: `scripts/smoke_docker_customer_handoff_bundle.sh`, `scripts/smoke_docker_product_layer_completion.sh`, `scripts/smoke_docker_runtime_preview_python.sh`, `docker compose config`, and the Phase 2 golden demo runner.
-  - Exit condition: complete when the Docker preview exposes `/api/customer-handoff`, the browser Runtime Home links a Customer Handoff Bundle panel with a checklist, README/TASKS/roadmap/Docker acceptance reference the handoff bundle, golden smokes include the handoff gate, and non-claims remain explicit for VM/ISO, live OAuth, browser, release, external mutation, Docker daemon observed proof, and hardware attestation proof.
-  - Active task: P2-106.
+  - Exit condition: complete when the Docker preview exposes `/api/customer-handoff`, the browser Runtime Home links a Customer Handoff Bundle panel with a checklist and share-safe handoff report, README/TASKS/roadmap/Docker acceptance reference the handoff bundle, golden smokes include the handoff gate, and non-claims remain explicit for VM/ISO, live OAuth, browser, release, external mutation, Docker daemon observed proof, and hardware attestation proof.
+  - Active task: P2-107.
   - First slice: P2-105 adds `agentos-product-layer-customer-handoff-bundle.v1` through `/api/customer-handoff`, a browser Customer Handoff Bundle panel, and `scripts/smoke_docker_customer_handoff_bundle.sh`.
-  - Current slice: P2-106 adds a proof-safe handoff checklist to `/api/customer-handoff`, the browser panel, and Docker-safe smokes.
+  - Previous slice: P2-106 adds a proof-safe handoff checklist to `/api/customer-handoff`, the browser panel, and Docker-safe smokes.
+  - Current slice: P2-107 adds a share-safe handoff report to `/api/customer-handoff`, the browser panel, and Docker-safe smokes so reviewers can see reproduced local proof, inspected surfaces, validation evidence, and remaining observed-proof blockers without secrets or automatic claim promotion.
   - Residual blockers: VM/ISO boot/rejoin proof, live OAuth, live browser evidence, release artifacts/signing, Docker daemon observed proof, external mutation proof, and hardware attestation remain unclaimed until observed evidence exists.
   - Advances: Docker-first public usability, runtime proof truthfulness, recovery, OS-native runtime defaults.
 

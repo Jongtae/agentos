@@ -42,6 +42,7 @@ http://localhost:8787
 - `/api/recovery` exposes customer-facing recovery actions for VM/ISO, live OAuth, browser, release, attestation, and setup blockers without claiming observed proof.
 - `/api/evidence` exposes observed Docker/local proof and explicit non-claims for VM/ISO, live OAuth, browser, release trust, and hardware attestation.
 - `/api/proof-packet` exposes completed Docker-local claims, validation commands, proof sources, readiness checks, next blockers, and explicit non-claims without claiming automatic proof promotion.
+- `/api/customer-handoff` exposes the Docker try path, handoff checklist, share-safe handoff report, inspectable Product Layer surfaces, validation commands, proof sources, next observed-proof blockers, and explicit non-claims without claiming stronger observed proof.
 - LLM setup/readiness state is visible.
 - Telegram setup/readiness state is visible.
 - Activity feed is visible.
@@ -155,6 +156,7 @@ scripts/smoke_docker_customer_handoff_bundle.sh
 
 This gate starts the Python Docker runtime preview and verifies that
 `/api/customer-handoff` exposes the Docker try path, handoff checklist,
-inspectable Product Layer surfaces, validation commands, proof sources, next
-observed-proof blockers, and explicit non-claims without promoting Docker proof
-into VM/ISO, live OAuth, browser, release, mutation, or attestation proof.
+share-safe handoff report, inspectable Product Layer surfaces, validation
+commands, proof sources, next observed-proof blockers, and explicit non-claims
+without promoting Docker proof into VM/ISO, live OAuth, browser, release,
+mutation, or attestation proof.

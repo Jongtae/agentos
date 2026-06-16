@@ -84,8 +84,9 @@ The detailed Phase 2 roadmap is tracked in
   - Milestone: Phase 2: Local-first Codex runtime loop
   - Completion goal: define the inbox capability ownership boundary so Gmail, Calendar, Maildir, fixture, and future inbox-like adapters converge through an OS-native, read-first, user-owned intake substrate.
   - Exit condition: the epic has a documented and smoke-tested boundary that distinguishes native/local inbox intake, explicit read-only external adapters, user-owned records, activity proof, and external mutation blockers.
-  - Active task: [P2-54] Define inbox capability ownership boundary.
+  - Active task: [P2-55] Add inbox boundary smoke to golden runner.
   - First boundary: `docs/architecture/inbox-capability-ownership-boundary.md` defines native fixture, Maildir, live Gmail and Calendar OAuth blockers, user-owned records, activity/recovery expectations, and mutation non-claims.
+  - Golden runner: `scripts/smoke_inbox_capability_ownership_boundary.sh` is part of `scripts/phase2_golden_demo_runner.py`, keeping inbox capability ownership in practical Phase 2 proof.
   - Advances: capability ownership, mediation cost reduction, OS-native runtime defaults, runtime proof truthfulness.
 
 ## Completed Completion Epics

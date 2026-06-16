@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-51] Add release manifest checksum preflight`
+- `[P2-52] Add release preflight smoke to golden runner`
 
 Runtime impact statement:
 
-- This task adds a release manifest/checksum preflight so packaging work can validate observed artifact metadata while keeping release upload, signing, and VM/ISO proof as explicit non-claims.
+- This task makes distribution release preflight part of the practical Phase 2 proof chain, so public preview packaging checks cannot drift away from golden runtime validation while release upload, signing, and VM/ISO proof stay unclaimed.
 
 Current autonomous completion loop:
 
@@ -121,6 +121,7 @@ Recommended Phase 2 tasks:
 - The distribution packaging proof boundary epic is active; it should separate local packaging preflight from release artifact requirements, signing/checksum evidence, VM/ISO blockers, and packaging non-claims.
 - The first distribution packaging slice is `docs/operations/distribution-packaging-proof-boundary.md`, smoke-tested by `scripts/smoke_distribution_packaging_boundary.sh`.
 - Release manifest/checksum preflight is covered by `scripts/release_manifest_checksum_preflight.py` and `scripts/smoke_release_manifest_checksum_preflight.sh` without publishing or signing artifacts.
+- The release manifest/checksum preflight smoke is included in the Phase 2 golden demo runner so packaging non-claims remain part of practical local/Docker-safe proof.
 
 ## Validation Standards
 

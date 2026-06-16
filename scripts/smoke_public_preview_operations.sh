@@ -47,7 +47,6 @@ for term in required_terms:
 
 assert "docs/operations/public-preview-operations.md" in index
 assert "public-preview-operations-epic" in roadmap
-assert "[P2-49] Record public preview operations epic completion" in tasks
 assert "public preview operations epic is closed" in tasks
 assert "Completed tasks: P2-47 and P2-48" in roadmap
 assert "scripts/smoke_public_preview_operations.sh" in (

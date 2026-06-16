@@ -22,6 +22,8 @@ assert payload["practical_smokes_passed"] == payload["practical_smoke_count"], p
 assert payload["proof"]["docker_local_smoke_completed"] is True
 assert payload["proof"]["gmail_oauth_live_completed"] is False
 assert payload["proof"]["vm_iso_proof_completed"] is False
+smoke_names = {result["name"] for result in payload["results"]}
+assert "scripts/smoke_release_manifest_checksum_preflight.sh" in smoke_names
 blocker_ids = {blocker["id"] for blocker in payload["explicit_blockers"]}
 assert {"gmail-oauth-live", "vm-iso-proof"} <= blocker_ids
 PY

@@ -84,9 +84,10 @@ The detailed Phase 2 roadmap is tracked in
   - Milestone: Phase 2: Local-first Codex runtime loop
   - Completion goal: define the distribution packaging proof boundary for safe local checks, release artifact requirements, signing/checksum expectations, VM/ISO blockers, and explicit non-claims.
   - Exit condition: the epic has a documented and smoke-tested distribution packaging boundary that distinguishes local packaging preflight, release artifact proof, VM/ISO observed-proof blockers, and packaging non-claims.
-  - Active task: [P2-51] Add release manifest checksum preflight.
+  - Active task: [P2-52] Add release preflight smoke to golden runner.
   - First boundary: `docs/operations/distribution-packaging-proof-boundary.md` defines local packaging checks, release artifact requirements, VM/installer blockers, non-claims, and promotion gates.
   - Preflight: `scripts/release_manifest_checksum_preflight.py` validates observed artifact metadata and checksum files while keeping upload, signing, and VM/ISO proof unclaimed.
+  - Golden runner: `scripts/smoke_release_manifest_checksum_preflight.sh` is part of `scripts/phase2_golden_demo_runner.py`, keeping distribution packaging non-claims in practical Phase 2 proof.
   - Advances: runtime proof truthfulness, distribution packaging, OS-native runtime defaults.
 
 ## Completed Completion Epics

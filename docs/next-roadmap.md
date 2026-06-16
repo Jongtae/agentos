@@ -80,9 +80,13 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
-- No active completion epic is selected. The next iteration should compare the
-  completed epic list, Later Tracks, README, TASKS, and GitHub issue state
-  before creating or continuing the next milestone-backed completion epic.
+- `broader-app-inbox-workflow-promotion-epic` — [EPIC: Broader app inbox workflow promotion](https://github.com/Jongtae/agentos/issues/184)
+  - Milestone: Phase 2: Local-first Codex runtime loop
+  - Completion goal: define and smoke-test the broader app/inbox workflow promotion gate so AgentOS can choose the next inbox/app capability from the graduation registry without expanding browser automation or external app mediation as the default path.
+  - Exit condition: complete when `docs/architecture/inbox-workflow-promotion-boundary.md`, `scripts/smoke_inbox_workflow_promotion_boundary.sh`, golden runner integration, README/TASKS/roadmap updates, and registry linkage preserve local/mock proof, user-owned records, live-proof blockers, mutation non-claims, and browser non-default behavior.
+  - Active task: P2-82.
+  - Residual blockers: live Gmail/Calendar OAuth, real user Maildir proof, browser acceptance evidence, production sync, retention/compliance behavior, and external mutations remain unclaimed until observed proof and later permission models exist.
+  - Advances: capability ownership, mediation cost reduction, OS-native runtime defaults, runtime proof truthfulness.
 
 ## Completed Completion Epics
 

@@ -49,7 +49,7 @@ The focused smoke is:
 scripts/smoke_phase2_updater_state.sh
 ```
 
-The smoke validates the ready, rollback-needed, and blocked paths and asserts that live updater and VM/ISO proof are not claimed.
+The smoke validates the ready, rollback-needed, and blocked paths and asserts that live updater and VM/ISO proof are not claimed. The broader Phase 2 CLI smoke also verifies that `phase2-run` lifecycle recovery prompts attach an updater state artifact for restart, update, and rollback requests.
 
 ## Exit Condition
 

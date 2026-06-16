@@ -29,6 +29,8 @@ run_phase2 gmail "draft a reply to my Gmail roadmap email"
 run_phase2 calendar "summarize my upcoming calendar roadmap meeting"
 run_phase2 records "find my roadmap records"
 run_phase2 lifecycle "restart runtime"
+run_phase2 update "update AgentOS"
+run_phase2 rollback "rollback AgentOS"
 
 PYTHONPATH="$ROOT_DIR/src:$ROOT_DIR" scripts/agentos-kernelctl phase2-run \
   --workspace "$WORKSPACE" \
@@ -50,6 +52,8 @@ expected = {
     "calendar": ("calendar_readonly", "calendar_readonly", "completed"),
     "records": ("record_lookup", "record_lookup", "completed"),
     "lifecycle": ("lifecycle_recovery", "lifecycle_recovery", "blocked"),
+    "update": ("lifecycle_recovery", "lifecycle_recovery", "blocked"),
+    "rollback": ("lifecycle_recovery", "lifecycle_recovery", "blocked"),
 }
 
 for name, (intent, capability, status) in expected.items():
@@ -95,6 +99,24 @@ assert lifecycle["outcome"] == "blocked_needs_confirmation"
 assert lifecycle["recovery"]["required"] is True
 assert lifecycle["blockers"][0]["id"] == "lifecycle-confirmation-required"
 assert "confirm restart-runtime" in lifecycle["response"]
+assert lifecycle["proof"]["updater_state_contract_attached"] is True
+assert Path(lifecycle["artifacts"]["updater_state_manifest"]).exists()
+
+update = json.loads((tmp_dir / "update.json").read_text())
+assert update["proof"]["updater_state_contract_attached"] is True
+assert update["proof"]["live_updater_executed"] is False
+assert update["proof"]["vm_iso_proof_completed"] is False
+assert "confirm stage-update" in update["response"]
+assert Path(update["artifacts"]["updater_state_manifest"]).exists()
+assert update["capability_result"]["updater_state"]["state"]["status"] == "blocked"
+assert any(blocker["id"] == "vm-or-live-updater-proof-required" for blocker in update["blockers"])
+
+rollback = json.loads((tmp_dir / "rollback.json").read_text())
+assert rollback["proof"]["updater_state_contract_attached"] is True
+assert rollback["proof"]["live_updater_executed"] is False
+assert rollback["proof"]["destructive_action_executed"] is False
+assert "confirm rollback" in rollback["response"]
+assert rollback["capability_result"]["updater_state"]["state"]["status"] == "needs_recovery"
 
 records_path = user_root / "records" / "records.jsonl"
 assert records_path.exists()

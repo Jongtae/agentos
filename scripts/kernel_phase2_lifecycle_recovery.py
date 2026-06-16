@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SCHEMA_VERSION = "agentos-phase2-lifecycle-recovery.v1"
-CONFIRMATION_REQUIRED_ACTIONS = {"restart-runtime", "reboot", "shutdown"}
+CONFIRMATION_REQUIRED_ACTIONS = {"restart-runtime", "reboot", "shutdown", "stage-update", "rollback"}
 SUPPORTED_ACTIONS = CONFIRMATION_REQUIRED_ACTIONS | {"status", "rejoin-session", "suggest-recovery"}
 
 
@@ -54,6 +54,10 @@ def _recovery_steps(action: str) -> list[str]:
         return ["confirm reboot", "flush user-owned records", "request OS reboot", "verify managed Codex session returns"]
     if action == "shutdown":
         return ["confirm shutdown", "flush user-owned records", "request OS shutdown"]
+    if action == "stage-update":
+        return ["confirm stage-update", "inspect updater state", "stage update payload", "verify managed runtime rejoin after reboot"]
+    if action == "rollback":
+        return ["confirm rollback", "inspect rollback candidate", "request rollback through updater control", "verify managed runtime rejoin"]
     if action == "rejoin-session":
         return ["locate managed session", "reattach operator surface", "show status"]
     return ["show current status", "suggest safest recovery action"]

@@ -84,8 +84,9 @@ The detailed Phase 2 roadmap is tracked in
   - Milestone: Phase 2: Local-first Codex runtime loop
   - Completion goal: define the updater hardening path that preserves managed runtime continuity and truthful rollback/recovery proof.
   - Exit condition: the epic has milestone alignment, validation plan, explicit VM/ISO/live-updater blocker handling, and a first safe contract or smoke task identified.
-  - Active task: [P2-39] Define updater hardening state contract.
+  - Active task: [P2-40] Attach updater state to lifecycle recovery runs.
   - First contract: `agentos-phase2-updater-state.v1` records ready, blocked, rollback-needed, and recovery-suggested states without claiming live updater or VM/ISO proof.
+  - Runtime integration: `phase2-run` lifecycle recovery prompts should attach updater state artifacts and keep live updater/VM proof explicitly blocked.
   - Advances: OS-native runtime defaults, recovery, runtime proof truthfulness.
 
 ## Completed Completion Epics

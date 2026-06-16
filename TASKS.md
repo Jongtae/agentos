@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-39] Define updater hardening state contract`
+- `[P2-40] Attach updater state to lifecycle recovery runs`
 
 Runtime impact statement:
 
-- This task defines a smoke-verifiable updater state contract so update, rollback, restart, and recovery paths can report managed runtime rejoin requirements without claiming live updater or VM/ISO proof before observation.
+- This task attaches the updater state contract to Phase 2 lifecycle recovery runs so update, rollback, restart, and recovery prompts record managed runtime rejoin requirements without executing destructive updater actions or claiming live VM/ISO proof.
 
 Current autonomous completion loop:
 
@@ -111,6 +111,7 @@ Recommended Phase 2 tasks:
 - The capability permission boundary epic is closed for this Phase 2 slice; future loops should return to the roadmap before selecting the next epic.
 - The updater hardening epic is active and should begin with a safe contract or smoke task before any live updater, reboot, VM, or ISO proof is claimed.
 - The first updater hardening slice is `agentos-phase2-updater-state.v1`, which records ready, blocked, rollback-needed, and recovery-suggested states without running destructive updater actions.
+- `phase2-run` lifecycle recovery should surface updater state artifacts for update, rollback, restart, and recovery prompts while keeping live updater and VM/ISO proof blocked until observed.
 
 ## Validation Standards
 

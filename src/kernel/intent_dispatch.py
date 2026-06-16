@@ -35,7 +35,24 @@ def classify_intent(message: str, *, source: str = "operator") -> dict:
         return _intent("setup_help", "direct_reply", "deterministic_setup")
     if any(token in normalized for token in ("gmail", "email", "mail", "메일", "inbox", "답장 초안", "draft a reply")):
         return _intent("gmail_read_or_draft", "gmail_read_or_draft", "deterministic_gmail")
-    if any(token in normalized for token in ("restart", "recovery", "recover", "rejoin", "서비스 재시작", "재시작")):
+    if any(
+        token in normalized
+        for token in (
+            "restart",
+            "reboot",
+            "recovery",
+            "recover",
+            "rejoin",
+            "update agentos",
+            "upgrade agentos",
+            "rollback",
+            "roll back",
+            "서비스 재시작",
+            "재시작",
+            "업데이트",
+            "롤백",
+        )
+    ):
         return _intent("lifecycle_recovery", "lifecycle_recovery", "deterministic_lifecycle")
     if any(token in normalized for token in ("지난번", "회의 기록", "record", "records", "prior note", "last agentos meeting")):
         return _intent("record_lookup", "record_lookup", "deterministic_record")

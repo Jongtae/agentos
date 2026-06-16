@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-67] Close capability graduation registry epic`
+- `[P2-68] Surface Calendar read-only status artifact`
 
 Runtime impact statement:
 
-- This task closes the capability graduation registry epic after its registry document, seed JSON, smoke coverage, golden runner integration, and README/TASKS/roadmap links are in place, so future broader app/inbox work can choose a registry candidate instead of expanding browser or external app mediation by default.
+- This task surfaces Calendar read-only readiness in `phase2-run --message "status"` so fixture availability, permission level, live OAuth blockers, and mutation non-claims are visible in the user-testable runtime proof surface without claiming real Calendar access.
 
 Current autonomous completion loop:
 
@@ -136,6 +136,7 @@ Recommended Phase 2 tasks:
 - `phase2-run --message "status"` attaches `agentos-observed-proof-intake-status.v1` so observed proof intake readiness and missing observed-record blockers are visible in the user-testable runtime status output.
 - The capability graduation registry epic is closed for this Phase 2 slice; future broader app/inbox work should choose a candidate from `docs/architecture/capability-graduation-registry.json` before expanding browser or external app mediation.
 - Capability graduation must prefer internal AgentOS capabilities, keep browser/external app mediation non-default, preserve permission/data boundaries, and require observed proof before live claims.
+- The Calendar read-only live adapter readiness epic is active; its first slice attaches `agentos-calendar-readonly-status.v1` to `phase2-run --message "status"` while keeping live Calendar OAuth and mutation proof blocked until observed.
 
 ## Validation Standards
 

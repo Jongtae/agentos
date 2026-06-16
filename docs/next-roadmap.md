@@ -80,9 +80,14 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
-- No active completion epic is currently open. The next automation pass should
-  re-check this roadmap, the open GitHub issue state, and the Later Tracks
-  before creating a new milestone-backed epic.
+- `calendar-readonly-live-adapter-readiness-epic` — [EPIC: Calendar read-only live adapter readiness](https://github.com/Jongtae/agentos/issues/149)
+  - Milestone: Phase 2: Local-first Codex runtime loop
+  - Completion goal: move Calendar from a fixture-backed contract toward a read-only live adapter candidate without claiming live OAuth proof or mutating calendar behavior.
+  - Validation plan: surface Calendar read-only readiness and live OAuth blockers in the user-testable runtime status output, keep fixture-backed Calendar behavior smoke-tested through phase2-run and the golden demo runner, and preserve explicit non-claims for live Calendar OAuth, create/update/delete/invite/cancel mutations, and VM/account proof.
+  - Exit condition: complete when AgentOS status exposes Calendar fixture readiness, permission level, mutation blocks, live OAuth blocker state, and the route for future observed live proof, while Calendar fixture and Phase 2 golden smokes keep passing.
+  - Active task: P2-68.
+  - Residual blockers: live Calendar OAuth requires explicit tester credentials and a later live adapter design; Calendar mutation support remains out of scope until a future confirmed mutation model exists.
+  - Advances: capability ownership, mediation cost reduction, OS-native runtime defaults, runtime proof truthfulness.
 
 ## Completed Completion Epics
 

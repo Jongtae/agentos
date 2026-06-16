@@ -27,6 +27,7 @@ from kernel_phase2_lifecycle_recovery import build_lifecycle_recovery_report
 from kernel_phase2_updater_state import build_payload as build_updater_state_payload
 from kernel_phase2_records import append_record, find_records
 from kernel.capability_substrate import (
+    build_calendar_readonly_status,
     build_inbox_routing_contract,
     build_observed_proof_intake_status,
     build_verified_boot_attestation_nonclaim,
@@ -238,9 +239,11 @@ def run_phase2(
                 inbox_contract = build_inbox_routing_contract(workspace_path, session_id=request_id)
                 verified_boot_nonclaim = build_verified_boot_attestation_nonclaim(workspace_path, session_id=request_id)
                 observed_proof_intake = build_observed_proof_intake_status(workspace_path, session_id=request_id)
+                calendar_readonly_status = build_calendar_readonly_status(workspace_path, session_id=request_id)
                 capability_result["inbox_ownership"] = inbox_contract
                 capability_result["verified_boot_attestation"] = verified_boot_nonclaim
                 capability_result["observed_proof_intake"] = observed_proof_intake
+                capability_result["calendar_readonly_status"] = calendar_readonly_status
                 artifacts["inbox_ownership_contract"] = str(
                     inbox_contract.get("artifacts", {}).get("latest_inbox_routing_contract_json", "")
                 )
@@ -249,6 +252,9 @@ def run_phase2(
                 )
                 artifacts["observed_proof_intake_status"] = str(
                     observed_proof_intake.get("artifacts", {}).get("latest_observed_proof_intake_status_json", "")
+                )
+                artifacts["calendar_readonly_status"] = str(
+                    calendar_readonly_status.get("artifacts", {}).get("latest_calendar_readonly_status_json", "")
                 )
             if intent == "web_search_summary":
                 browser_contract = build_browser_fallback_contract(
@@ -398,6 +404,15 @@ def run_phase2(
             "observed_proof_intake_status_attached": bool(
                 intent == "runtime_status" and isinstance(capability_result.get("observed_proof_intake"), dict)
             ),
+            "calendar_readonly_status_attached": bool(
+                intent == "runtime_status" and isinstance(capability_result.get("calendar_readonly_status"), dict)
+            ),
+            "calendar_readonly_ready": bool(
+                intent == "runtime_status"
+                and (capability_result.get("calendar_readonly_status") or {}).get("summary", {}).get("calendar_readonly_ready")
+            ),
+            "live_calendar_oauth_completed": False,
+            "calendar_mutation_executed": False,
             "observed_proof_records_attached": False,
             "observed_claim_promotion_allowed": False,
             "secure_boot_observed": False,

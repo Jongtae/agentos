@@ -44,6 +44,7 @@ INBOX_PROOF_BASELINE_SCHEMA = "agentos-inbox-proof-baseline.v1"
 INBOX_NORMALIZED_INTAKE_SCHEMA = "agentos-inbox-normalized-intake.v1"
 VERIFIED_BOOT_ATTESTATION_SCHEMA = "agentos-verified-boot-attestation-nonclaim.v1"
 OBSERVED_PROOF_INTAKE_STATUS_SCHEMA = "agentos-observed-proof-intake-status.v1"
+CALENDAR_READONLY_STATUS_SCHEMA = "agentos-calendar-readonly-status.v1"
 CAPABILITY_PROOF_SCHEMA = "agentos-capability-proof-surface.v1"
 TELEGRAM_INGRESS_SCHEMA = "agentos-telegram-ingress-contract.v1"
 TELEGRAM_ROUTING_SCHEMA = "agentos-telegram-request-routing-contract.v1"
@@ -2872,6 +2873,74 @@ def build_observed_proof_intake_status(
         payload["artifacts"]["latest_observed_proof_intake_status_json"] = _write_manifest(
             workspace,
             "latest-observed-proof-intake-status.json",
+            payload,
+        )
+    return payload
+
+
+def build_calendar_readonly_status(
+    workspace_dir: str | Path,
+    *,
+    session_id: str = "",
+    write_manifest: bool = True,
+) -> dict:
+    workspace = Path(workspace_dir).resolve()
+    payload = {
+        "schema_version": CALENDAR_READONLY_STATUS_SCHEMA,
+        "generated_at_utc": _utc_now(),
+        "workspace": str(workspace),
+        "capability_family": "calendar",
+        "capability": "calendar_readonly_status",
+        "boundary_doc": "docs/architecture/calendar-readonly-capability-contract.md",
+        "current_route": "calendar_fixture",
+        "permission_level": "external_read",
+        "fixture_ready": True,
+        "live_oauth_ready": False,
+        "mutation_allowed": False,
+        "supported_actions": ["read", "search", "summarize"],
+        "blocked_actions": ["create", "update", "delete", "invite", "cancel"],
+        "proof": {
+            "read_only": True,
+            "fixture_mode_available": True,
+            "real_calendar_credentials_used": False,
+            "live_calendar_oauth_completed": False,
+            "mutation_executed": False,
+            "observed_live_proof_attached": False,
+            "claim_promotion_allowed": False,
+        },
+        "blockers": [
+            {
+                "id": "calendar-live-oauth",
+                "reason": "Live Calendar read-only proof requires explicit tester OAuth credentials and a live adapter design.",
+                "recovery_action": "Keep Calendar in fixture mode until a read-only live adapter task records sanitized observed proof.",
+            },
+            {
+                "id": "calendar-mutation-confirmation-model",
+                "reason": "Calendar create/update/delete/invite/cancel actions are not part of the Phase 2 read-only boundary.",
+                "recovery_action": "Design a later explicit confirmation model before enabling Calendar mutations.",
+            },
+        ],
+        "correlation": {
+            "session_id": str(session_id).strip(),
+            "request_id": "",
+            "approval_id": "",
+            "trace_id": "",
+            "run_id": "",
+            "boot_id": "",
+        },
+        "summary": {
+            "calendar_fixture_ready": True,
+            "calendar_readonly_ready": True,
+            "live_calendar_oauth_completed": False,
+            "calendar_mutation_executed": False,
+            "observed_live_calendar_proof_claimed": False,
+        },
+        "artifacts": {},
+    }
+    if write_manifest:
+        payload["artifacts"]["latest_calendar_readonly_status_json"] = _write_manifest(
+            workspace,
+            "latest-calendar-readonly-status.json",
             payload,
         )
     return payload

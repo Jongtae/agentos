@@ -47,6 +47,7 @@ PRACTICAL_SMOKES = [
     "scripts/smoke_docker_customer_handoff_bundle.sh",
     "scripts/smoke_docker_proof_promotion_center.sh",
     "scripts/smoke_docker_product_layer_map.sh",
+    "scripts/smoke_docker_release_trust_panel.sh",
 ]
 
 EXPLICIT_BLOCKERS = [

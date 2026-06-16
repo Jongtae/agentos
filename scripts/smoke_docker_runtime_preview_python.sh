@@ -252,6 +252,24 @@ assert {item["id"] for item in release_trust["checks"]} >= {
     "secret-free-review",
     "vm-iso-release-proof",
 }
+assert {
+    item["id"]: item["state"]
+    for item in release_trust["readiness_checklist"]
+} == {
+    "local_preflight_available": "ready",
+    "artifact_manifest_required": "blocked_until_release_artifact",
+    "checksum_publication_required": "blocked_until_checksum",
+    "signing_or_unsigned_statement_required": "blocked_until_signature_or_unsigned_statement",
+    "vm_iso_release_proof_required": "blocked_until_observed_vm_run",
+}
+assert {
+    item["id"]: item["state"]
+    for item in release_trust["customer_decisions"]
+} == {
+    "describe_local_preflight_only": "share_ready",
+    "withhold_release_readiness": "blocked_until_release_evidence",
+    "route_to_observed_proof": "blocked_until_observed_evidence",
+}
 assert attestation["schema_version"] == "agentos-product-layer-attestation-status.v1"
 assert attestation["proof"]["docker_preview_ready"] is True
 assert attestation["proof"]["secure_boot_observed"] is False
@@ -417,6 +435,8 @@ assert "approvals JSON" in home
 assert "Observed Proof Uploader" in home
 assert "proofs JSON" in home
 assert "Release Trust Panel" in home
+assert "Release Readiness Checklist" in home
+assert "Release Customer Decisions" in home
 assert "release trust JSON" in home
 assert "Attestation Status" in home
 assert "attestation JSON" in home

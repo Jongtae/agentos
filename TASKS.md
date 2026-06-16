@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-32] Register capability permission epic state`
+- `[P2-33] Define capability permission boundary contract`
 
 Runtime impact statement:
 
-- This task records the newly created capability permission boundary epic in the roadmap source of truth so the autonomous completion loop advances into that epic instead of repeatedly proposing the same missing epic.
+- This task defines the Phase 2 capability permission boundary so live adapters and OS-native actions declare approval, denial, recovery, and record behavior before capability expansion.
 
 Current autonomous completion loop:
 
@@ -131,6 +131,7 @@ python3 scripts/cleanup_build_artifacts.py --delete --json
 - `docs/next-roadmap.md`
 - `docs/architecture/docker-runtime-preview-boundary.md`
 - `docs/architecture/intent-classification-contract.md`
+- `docs/architecture/capability-permission-boundary.md`
 - `docs/architecture/user-owned-runtime-data-boundary.md`
 - `docs/acceptance/phase2-golden-runtime-loop.md`
 - `docs/acceptance/phase2-intent-eval.json`

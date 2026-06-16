@@ -20,6 +20,7 @@ large build outputs are not included.
 - `docs/architecture/runtime-overview.md` - boot/runtime/input/intent/tool/proof overview
 - `docs/architecture/docker-runtime-preview-boundary.md` - Docker developer/demo proof boundary
 - `docs/architecture/intent-classification-contract.md` - Phase 2 prompt intent contract
+- `docs/architecture/capability-permission-boundary.md` - capability approval, denial, record, and recovery boundary
 - `docs/architecture/calendar-readonly-capability-contract.md` - read-only Calendar fixture capability boundary
 - `docs/architecture/user-owned-runtime-data-boundary.md` - local-first user data ownership boundary
 - `docs/acceptance/phase2-golden-runtime-loop.md` - Phase 2 golden runtime loop acceptance

@@ -80,9 +80,12 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
-No active completion epic is currently recorded. The next loop should compare
-the roadmap, open GitHub epics, and direction judge candidates before creating
-or continuing another epic.
+- `updater-hardening-epic` — [EPIC: Updater hardening](https://github.com/Jongtae/agentos/issues/80)
+  - Milestone: Phase 2: Local-first Codex runtime loop
+  - Completion goal: define the updater hardening path that preserves managed runtime continuity and truthful rollback/recovery proof.
+  - Exit condition: the epic has milestone alignment, validation plan, explicit VM/ISO/live-updater blocker handling, and a first safe contract or smoke task identified.
+  - Active task: [P2-38] Create updater hardening completion epic.
+  - Advances: OS-native runtime defaults, recovery, runtime proof truthfulness.
 
 ## Completed Completion Epics
 

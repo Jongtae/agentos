@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-37] Record capability permission epic completion`
+- `[P2-38] Create updater hardening completion epic`
 
 Runtime impact statement:
 
-- This task records the completed capability permission boundary epic in the roadmap source of truth so the autonomous loop can stop repeating that epic and select the next milestone-backed completion track.
+- This task opens and records the updater hardening epic so update, rollback, restart, and recovery work can converge back to the managed AgentOS runtime with truthful proof boundaries.
 
 Current autonomous completion loop:
 
@@ -109,6 +109,7 @@ Recommended Phase 2 tasks:
 - `phase2-run` should expose permission level, outcome, recovery, and secret-redaction proof in JSON output and user-owned records.
 - Capability permission declarations should be backed by `docs/architecture/capability-permission-registry.json`.
 - The capability permission boundary epic is closed for this Phase 2 slice; future loops should return to the roadmap before selecting the next epic.
+- The updater hardening epic is active and should begin with a safe contract or smoke task before any live updater, reboot, VM, or ISO proof is claimed.
 
 ## Validation Standards
 

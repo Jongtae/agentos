@@ -80,7 +80,15 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
-- None.
+- `docker-release-trust-customer-checklist-epic` — [EPIC: Stage 3 / Phase 2 Docker release trust customer checklist](https://github.com/Jongtae/agentos/issues/267)
+  - Milestone: Docker release trust customer checklist
+  - Completion goal: make release trust decisions customer-readable in Docker by showing which local preflight language is share-ready, which release artifact/checksum/signing/upload/VM/ISO claims are blocked, and which observed evidence is required before stronger release trust claims can be promoted.
+  - Validation plan: `scripts/smoke_docker_release_trust_panel.sh`, `scripts/smoke_docker_product_layer_completion.sh`, `scripts/smoke_docker_runtime_preview_python.sh`, `docker compose config`, and the Phase 2 golden demo runner.
+  - Exit condition: complete when `/api/release-trust` exposes release readiness checklist items and customer decisions, the browser Release Trust Panel renders them, README/TASKS/roadmap/Docker acceptance reference the checklist, golden smokes include the release trust gate, and non-claims remain explicit for release artifacts, checksums, signing, upload, VM/ISO release proof, external mutation, live browser, and hardware attestation.
+  - Active task: P2-115.
+  - First slice: P2-115 adds a release readiness checklist, customer decisions, a browser panel section, and `scripts/smoke_docker_release_trust_panel.sh`.
+  - Residual blockers: real release artifact, published checksum, signing evidence or unsigned-preview statement, secret-free artifact review, observed VM/ISO release proof, live browser evidence, external mutation proof, and hardware attestation remain unclaimed until observed evidence exists.
+  - Advances: Docker-first public usability, runtime proof truthfulness, recovery, OS-native runtime defaults.
 
 ## Completed Completion Epics
 

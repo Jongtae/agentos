@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-31] Promote missing roadmap tracks into epic candidates`
+- `[P2-32] Register capability permission epic state`
 
 Runtime impact statement:
 
-- This task makes the autonomous completion loop convert uncovered roadmap tracks into milestone-backed epic candidates with completion goals and exit conditions instead of stopping at a clean status check.
+- This task records the newly created capability permission boundary epic in the roadmap source of truth so the autonomous completion loop advances into that epic instead of repeatedly proposing the same missing epic.
 
 Current autonomous completion loop:
 
@@ -27,6 +27,7 @@ Current autonomous completion loop:
 - Each pass starts from the repo startup order, compares README, PRD, TASKS, roadmap, and GitHub milestone/issue state, runs the roadmap direction judge, and decides whether to continue an epic, create a missing milestone-backed epic, or defer because a blocker requires user/external input.
 - Every epic must declare a completion goal, roadmap milestone alignment, validation plan, and exit condition before implementation work proceeds.
 - When the direction judge finds no safe task candidate, it should inspect uncovered completion tracks and propose the next missing epic candidate before falling back to lightweight status checks.
+- Created epic candidates must be registered in the roadmap state before the loop chooses the next task, so repeated passes do not create duplicate epics.
 - Roadmap changes that require product or architecture judgment should be backed by primary or credible external research before they become milestone, epic, or exit-condition updates.
 - A direction verdict of `accept_with_risk` means the loop may finish lightweight validation, but should not repeat heavy smoke-only passes when no safe forward-progress candidate exists.
 - A direction verdict of `reject` means autonomous apply work should stop and hand off or open a repair issue before continuing.

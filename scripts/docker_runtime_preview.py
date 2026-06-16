@@ -511,6 +511,43 @@ class DockerPreviewApp:
         packet = proof_packet or self.customer_proof_packet()
         recovery = recovery_center or self.recovery_center()
         next_blockers = recovery.get("items", []) if isinstance(recovery.get("items"), list) else []
+        handoff_checklist = [
+            {
+                "id": "run_preview",
+                "label": "Run the Docker preview",
+                "state": "ready",
+                "customer_action": "Start the public try path with docker compose up --build.",
+                "proof_boundary": "Proves only that the Docker-local preview can be started when Docker is available.",
+            },
+            {
+                "id": "open_runtime_home",
+                "label": "Open Runtime Home",
+                "state": "ready",
+                "customer_action": "Open http://localhost:8787 and confirm Runtime Home loads before trying a prompt.",
+                "proof_boundary": "Does not prove ISO boot, install, reboot, recovery, or managed runtime rejoin.",
+            },
+            {
+                "id": "inspect_guided_path",
+                "label": "Inspect the guided path",
+                "state": "ready",
+                "customer_action": "Review onboarding, Guided Demo Journey, Evidence Dashboard, Recovery Center, and Customer Proof Packet.",
+                "proof_boundary": "Keeps live OAuth, browser, release, mutation, and attestation proof unclaimed.",
+            },
+            {
+                "id": "run_validation_commands",
+                "label": "Run validation commands",
+                "state": "ready",
+                "customer_action": "Run the listed smoke commands to reproduce Docker-safe proof locally.",
+                "proof_boundary": "Full Docker smoke requires an available Docker daemon; VM/ISO proof still requires observed VM evidence.",
+            },
+            {
+                "id": "record_remaining_blockers",
+                "label": "Record remaining proof blockers",
+                "state": "blocked_until_observed_evidence",
+                "customer_action": "Attach sanitized observed evidence before promoting VM/ISO, live OAuth, browser, release, mutation, or attestation claims.",
+                "proof_boundary": "The handoff bundle never auto-promotes stronger claims.",
+            },
+        ]
         return {
             "schema_version": "agentos-product-layer-customer-handoff-bundle.v1",
             "surface": "Customer Handoff Bundle",
@@ -522,6 +559,7 @@ class DockerPreviewApp:
                 "first_prompt": "status",
                 "docker_is_default_public_try_path": True,
             },
+            "handoff_checklist": handoff_checklist,
             "inspect_surfaces": [
                 {"id": "runtime_home", "label": "Runtime Home", "url": "/api/product"},
                 {"id": "onboarding_status", "label": "Docker Onboarding Status", "url": "/api/onboarding"},
@@ -1567,6 +1605,15 @@ def _render_page(app: DockerPreviewApp) -> str:
         f"<li><code>{html.escape(str(command))}</code></li>"
         for command in customer_handoff.get("validation_commands", [])
     ) or "<li>No handoff validation commands are configured.</li>"
+    handoff_checklist_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Handoff step'))))}</b> "
+        f"{html.escape(str(item.get('customer_action', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))} · {html.escape(str(item.get('proof_boundary', '')))}</em>"
+        "</li>"
+        for item in customer_handoff.get("handoff_checklist", [])
+        if isinstance(item, dict)
+    ) or "<li>No handoff checklist steps are configured.</li>"
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -1798,6 +1845,10 @@ def _render_page(app: DockerPreviewApp) -> str:
     <div class="panel">
       <h2>Handoff Surfaces</h2>
       <ul>{handoff_surface_html}</ul>
+    </div>
+    <div class="panel">
+      <h2>Handoff Checklist</h2>
+      <ul>{handoff_checklist_html}</ul>
     </div>
     <div class="panel">
       <h2>Handoff Validation</h2>

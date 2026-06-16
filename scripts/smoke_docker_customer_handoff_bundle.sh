@@ -60,6 +60,14 @@ assert handoff["try_path"] == {
     "first_prompt": "status",
     "docker_is_default_public_try_path": True,
 }
+checklist = {item["id"]: item["state"] for item in handoff["handoff_checklist"]}
+assert checklist == {
+    "run_preview": "ready",
+    "open_runtime_home": "ready",
+    "inspect_guided_path": "ready",
+    "run_validation_commands": "ready",
+    "record_remaining_blockers": "blocked_until_observed_evidence",
+}
 assert {item["id"] for item in handoff["inspect_surfaces"]} >= {
     "runtime_home",
     "onboarding_status",
@@ -99,7 +107,9 @@ assert handoff["proof"]["hardware_attestation_claimed"] is False
 
 assert "Customer Handoff Bundle" in home
 assert "Handoff Surfaces" in home
+assert "Handoff Checklist" in home
 assert "Handoff Validation" in home
+assert "Record remaining proof blockers" in home
 assert "customer handoff JSON" in home
 PY
 

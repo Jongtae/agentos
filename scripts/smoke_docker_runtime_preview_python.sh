@@ -316,6 +316,13 @@ assert customer_handoff["schema_version"] == "agentos-product-layer-customer-han
 assert customer_handoff["proof"]["customer_handoff_ready"] is True
 assert customer_handoff["proof"]["boot_or_iso_proof_claimed"] is False
 assert customer_handoff["try_path"]["url"] == "http://localhost:8787"
+assert {item["id"] for item in customer_handoff["handoff_checklist"]} >= {
+    "run_preview",
+    "open_runtime_home",
+    "inspect_guided_path",
+    "run_validation_commands",
+    "record_remaining_blockers",
+}
 assert {item["id"] for item in customer_handoff["inspect_surfaces"]} >= {
     "runtime_home",
     "onboarding_status",
@@ -349,6 +356,7 @@ assert "Customer Proof Packet" in home
 assert "Packet Readiness" in home
 assert "proof packet JSON" in home
 assert "Customer Handoff Bundle" in home
+assert "Handoff Checklist" in home
 assert "customer handoff JSON" in home
 assert prompt["ok"] is True
 assert prompt["intent"] == "greeting", prompt

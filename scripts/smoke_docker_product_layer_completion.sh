@@ -110,6 +110,13 @@ assert product["customer_proof_packet"]["proof"]["claim_promotion_automatic"] is
 assert product["customer_handoff_bundle"]["proof"]["customer_handoff_ready"] is True
 assert product["customer_handoff_bundle"]["proof"]["boot_or_iso_proof_claimed"] is False
 assert product["customer_handoff_bundle"]["try_path"]["command"] == "docker compose up --build"
+assert {item["id"] for item in product["customer_handoff_bundle"]["handoff_checklist"]} >= {
+    "run_preview",
+    "open_runtime_home",
+    "inspect_guided_path",
+    "run_validation_commands",
+    "record_remaining_blockers",
+}
 assert {item["id"] for item in product["customer_handoff_bundle"]["inspect_surfaces"]} >= {
     "runtime_home",
     "onboarding_status",

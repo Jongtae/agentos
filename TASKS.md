@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-74] Add Calendar live read-only manual acceptance pack`
+- `[P2-75] Close Calendar live read-only acceptance epic`
 
 Runtime impact statement:
 
-- This task adds a Calendar live read-only manual acceptance pack and blocker smoke so future tester OAuth evidence can be promoted through a safe, redacted path while automated local proof still avoids real credentials and Calendar mutations.
+- This task closes the Calendar live read-only acceptance epic after docs, script, smoke, and golden runner coverage allow future tester OAuth evidence to be accepted through a safe, redacted path, preventing repeated Calendar acceptance-pack work until real Calendar evidence or a later live adapter task exists.
 
 Current autonomous completion loop:
 
@@ -139,7 +139,7 @@ Recommended Phase 2 tasks:
 - The Calendar read-only live adapter readiness epic is closed for this Phase 2 slice; future Calendar work should require explicit live OAuth adapter design, tester credentials, or a confirmed mutation model before claiming more than fixture-backed readiness.
 - The Gmail read-only live readiness epic is closed for this Phase 2 slice; future Gmail work should require explicit tester OAuth credentials, observed read-only proof, or a later confirmed mutation model before claiming more than setup readiness.
 - The VM/ISO observed proof status epic is closed for this Phase 2 slice; future VM/ISO work should require a real observed VM run, sanitized evidence, or a new release/boot proof promotion task before claiming boot, reboot/recovery, managed runtime rejoin, ISO freshness, or VM signoff.
-- The Calendar live read-only acceptance epic is active; its first slice adds a manual acceptance pack, blocker capture, and golden smoke coverage while keeping live Calendar OAuth, observed account proof, and create/update/delete/invite/cancel mutations blocked until tester evidence exists.
+- The Calendar live read-only acceptance epic is closed for this Phase 2 slice; future Calendar live work should require real tester OAuth evidence, a live read-only adapter run, or a new proof promotion task before claiming live account proof or Calendar mutations.
 
 ## Validation Standards
 

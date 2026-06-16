@@ -38,6 +38,7 @@ curl -fsS "http://127.0.0.1:$PORT/" > "$TMP_DIR/home.html"
 curl -fsS "http://127.0.0.1:$PORT/api/status" > "$TMP_DIR/status.json"
 curl -fsS "http://127.0.0.1:$PORT/api/product" > "$TMP_DIR/product.json"
 curl -fsS "http://127.0.0.1:$PORT/api/work-inbox" > "$TMP_DIR/work-inbox.json"
+curl -fsS "http://127.0.0.1:$PORT/api/timeline" > "$TMP_DIR/timeline.json"
 curl -fsS "http://127.0.0.1:$PORT/api/recovery" > "$TMP_DIR/recovery.json"
 curl -fsS "http://127.0.0.1:$PORT/api/evidence" > "$TMP_DIR/evidence.json"
 curl -fsS \
@@ -55,6 +56,7 @@ root = Path(sys.argv[1])
 status = json.loads((root / "status.json").read_text())
 product = json.loads((root / "product.json").read_text())
 work_inbox = json.loads((root / "work-inbox.json").read_text())
+timeline = json.loads((root / "timeline.json").read_text())
 recovery = json.loads((root / "recovery.json").read_text())
 evidence = json.loads((root / "evidence.json").read_text())
 prompt = json.loads((root / "prompt.json").read_text())
@@ -70,6 +72,7 @@ assert product["proof"]["docker_main_try_path"] is True
 assert product["proof"]["boot_or_iso_proof_claimed"] is False
 assert product["proof"]["customer_facing_summary_ready"] is True
 assert product["work_inbox"]["schema_version"] == "agentos-product-layer-work-inbox.v1"
+assert product["activity_timeline"]["schema_version"] == "agentos-product-layer-activity-timeline.v1"
 assert product["recovery_center"]["schema_version"] == "agentos-product-layer-recovery-center.v1"
 assert product["evidence_dashboard"]["schema_version"] == "agentos-product-layer-evidence-dashboard.v1"
 assert {feature["id"] for feature in product["features"]} >= {
@@ -86,6 +89,13 @@ assert work_inbox["proof"]["external_mutation_claimed"] is False
 assert work_inbox["proof"]["live_oauth_claimed"] is False
 assert {source["id"] for source in work_inbox["sources"]} >= {"native_fixture", "maildir", "gmail", "calendar"}
 assert {workflow["id"] for workflow in work_inbox["workflows"]} >= {"inbox_summary", "draft_preparation", "search_and_triage"}
+assert timeline["schema_version"] == "agentos-product-layer-activity-timeline.v1"
+assert timeline["proof"]["docker_preview_ready"] is True
+assert timeline["proof"]["user_visible_records_ready"] is True
+assert timeline["proof"]["external_app_execution_claimed"] is False
+assert timeline["proof"]["live_provider_proof_claimed"] is False
+assert timeline["proof"]["customer_facing_timeline_ready"] is True
+assert "os_events_jsonl" in timeline["records"]
 assert recovery["schema_version"] == "agentos-product-layer-recovery-center.v1"
 assert recovery["proof"]["docker_preview_ready"] is True
 assert recovery["proof"]["customer_facing_recovery_ready"] is True
@@ -127,6 +137,8 @@ assert "Recovery Center" in home
 assert "recovery JSON" in home
 assert "Work Inbox" in home
 assert "Inbox Workflows" in home
+assert "Activity Timeline" in home
+assert "timeline JSON" in home
 assert "Evidence Dashboard" in home
 assert "evidence JSON" in home
 assert prompt["ok"] is True

@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-86] Add Docker Evidence Dashboard product surface`
+- `[P2-87] Add Docker Activity Timeline product surface`
 
 Runtime impact statement:
 
-- This task promotes Evidence Dashboard from a Runtime Home card into a Docker product surface that separates observed Docker/local proof from VM/ISO, live OAuth, browser, release-trust, and hardware-attestation non-claims.
+- This task promotes Activity Timeline from raw activity feed into a Docker product surface that shows customer-readable runtime events, user-visible record paths, and explicit non-claims for external app execution or live-provider proof.
 
 Current autonomous completion loop:
 
@@ -98,6 +98,7 @@ Recommended Phase 2 tasks:
 - Docker preview is promoted as the primary public try path at `http://localhost:8787`.
 - Docker preview now exposes `agentos-product-layer-runtime-home.v1` through `/api/product` and the browser Runtime Home without claiming VM/ISO boot proof.
 - Docker preview now exposes `agentos-product-layer-work-inbox.v1` through `/api/work-inbox` and the browser Work Inbox without claiming live OAuth, browser-default behavior, or external mutations.
+- Docker preview now exposes `agentos-product-layer-activity-timeline.v1` through `/api/timeline` and the browser Activity Timeline without claiming external app execution or live-provider proof.
 - Docker preview now exposes `agentos-product-layer-recovery-center.v1` through `/api/recovery` and the browser Recovery Center without claiming VM/ISO, live OAuth, browser, release-trust, or hardware-attestation proof.
 - Docker preview now exposes `agentos-product-layer-evidence-dashboard.v1` through `/api/evidence` and the browser Evidence Dashboard so customers can distinguish observed Docker/local proof from explicit non-claims.
 - Gmail setup is exposed through `agentos-kernelctl gmail-setup --serve-http`; live Gmail remains read-only and requires explicit user OAuth credentials.

@@ -37,6 +37,7 @@ curl -fsS "http://127.0.0.1:$PORT/healthz" >/dev/null
 curl -fsS "http://127.0.0.1:$PORT/" > "$TMP_DIR/home.html"
 curl -fsS "http://127.0.0.1:$PORT/api/status" > "$TMP_DIR/status.json"
 curl -fsS "http://127.0.0.1:$PORT/api/product" > "$TMP_DIR/product.json"
+curl -fsS "http://127.0.0.1:$PORT/api/work-inbox" > "$TMP_DIR/work-inbox.json"
 curl -fsS \
   -H 'Content-Type: application/json' \
   -d '{"message":"hi"}' \
@@ -51,6 +52,7 @@ from pathlib import Path
 root = Path(sys.argv[1])
 status = json.loads((root / "status.json").read_text())
 product = json.loads((root / "product.json").read_text())
+work_inbox = json.loads((root / "work-inbox.json").read_text())
 prompt = json.loads((root / "prompt.json").read_text())
 activity = json.loads((root / "activity.json").read_text())
 home = (root / "home.html").read_text()
@@ -63,6 +65,7 @@ assert product["schema_version"] == "agentos-product-layer-runtime-home.v1"
 assert product["proof"]["docker_main_try_path"] is True
 assert product["proof"]["boot_or_iso_proof_claimed"] is False
 assert product["proof"]["customer_facing_summary_ready"] is True
+assert product["work_inbox"]["schema_version"] == "agentos-product-layer-work-inbox.v1"
 assert {feature["id"] for feature in product["features"]} >= {
     "runtime_home",
     "work_inbox",
@@ -70,9 +73,17 @@ assert {feature["id"] for feature in product["features"]} >= {
     "recovery_center",
     "evidence_dashboard",
 }
+assert work_inbox["schema_version"] == "agentos-product-layer-work-inbox.v1"
+assert work_inbox["proof"]["docker_preview_ready"] is True
+assert work_inbox["proof"]["read_first_only"] is True
+assert work_inbox["proof"]["external_mutation_claimed"] is False
+assert work_inbox["proof"]["live_oauth_claimed"] is False
+assert {source["id"] for source in work_inbox["sources"]} >= {"native_fixture", "maildir", "gmail", "calendar"}
+assert {workflow["id"] for workflow in work_inbox["workflows"]} >= {"inbox_summary", "draft_preparation", "search_and_triage"}
 assert "Runtime Home" in home
 assert "Recovery Center" in home
 assert "Work Inbox" in home
+assert "Inbox Workflows" in home
 assert prompt["ok"] is True
 assert prompt["intent"] == "greeting", prompt
 assert "DuckDuckGo" not in json.dumps(prompt)

@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-71] Close Gmail read-only readiness epic`
+- `[P2-72] Attach VM/ISO preflight status to phase2 status`
 
 Runtime impact statement:
 
-- This task closes the Gmail read-only readiness epic after runtime status exposes credential, token, dependency, read-only scope, setup recovery, secret-redaction, and live OAuth blocker state, preventing repeated Gmail readiness work until tester credentials or observed live proof exist.
+- This task attaches VM/ISO preflight and observed-proof blocker state to `phase2-run --message "status"` so boot, reboot/recovery, managed runtime rejoin, planned observation commands, and false proof flags are visible without claiming a VM or ISO run happened.
 
 Current autonomous completion loop:
 
@@ -138,6 +138,7 @@ Recommended Phase 2 tasks:
 - Capability graduation must prefer internal AgentOS capabilities, keep browser/external app mediation non-default, preserve permission/data boundaries, and require observed proof before live claims.
 - The Calendar read-only live adapter readiness epic is closed for this Phase 2 slice; future Calendar work should require explicit live OAuth adapter design, tester credentials, or a confirmed mutation model before claiming more than fixture-backed readiness.
 - The Gmail read-only live readiness epic is closed for this Phase 2 slice; future Gmail work should require explicit tester OAuth credentials, observed read-only proof, or a later confirmed mutation model before claiming more than setup readiness.
+- The VM/ISO observed proof status epic is active; its first slice attaches `agentos-vm-iso-proof-preflight.v1` to `phase2-run --message "status"` while keeping observed boot, reboot/recovery, managed runtime rejoin, destructive action, and ISO freshness claims blocked until a real VM run is recorded.
 
 ## Validation Standards
 

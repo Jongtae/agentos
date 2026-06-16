@@ -26,6 +26,7 @@ from kernel_phase2_gmail_fixture import build_gmail_fixture_report
 from kernel_phase2_lifecycle_recovery import build_lifecycle_recovery_report
 from kernel_phase2_updater_state import build_payload as build_updater_state_payload
 from kernel_phase2_records import append_record, find_records
+from kernel_vm_iso_proof_preflight import build_preflight_report as build_vm_iso_preflight_report
 from kernel.capability_substrate import (
     build_calendar_readonly_status,
     build_inbox_routing_contract,
@@ -245,11 +246,17 @@ def run_phase2(
                     credentials_path=gmail_credentials or None,
                     token_path=gmail_token or None,
                 )
+                vm_iso_preflight_status = build_vm_iso_preflight_report(workspace=workspace_path)
+                vm_iso_manifest = workspace_path / "artifacts" / "vm-iso-proof-preflight" / "latest-vm-iso-proof-preflight.json"
+                vm_iso_manifest.parent.mkdir(parents=True, exist_ok=True)
+                vm_iso_manifest.write_text(json.dumps(vm_iso_preflight_status, ensure_ascii=True) + "\n", encoding="utf-8")
+                vm_iso_preflight_status.setdefault("artifacts", {})["latest_vm_iso_preflight_json"] = str(vm_iso_manifest)
                 capability_result["inbox_ownership"] = inbox_contract
                 capability_result["verified_boot_attestation"] = verified_boot_nonclaim
                 capability_result["observed_proof_intake"] = observed_proof_intake
                 capability_result["calendar_readonly_status"] = calendar_readonly_status
                 capability_result["gmail_readonly_status"] = gmail_readonly_status
+                capability_result["vm_iso_preflight_status"] = vm_iso_preflight_status
                 artifacts["inbox_ownership_contract"] = str(
                     inbox_contract.get("artifacts", {}).get("latest_inbox_routing_contract_json", "")
                 )
@@ -265,6 +272,7 @@ def run_phase2(
                 artifacts["gmail_readonly_status"] = str(
                     gmail_readonly_status.get("artifacts", {}).get("latest_gmail_status_json", "")
                 )
+                artifacts["vm_iso_preflight_status"] = str(vm_iso_manifest)
             if intent == "web_search_summary":
                 browser_contract = build_browser_fallback_contract(
                     workspace_path,
@@ -393,6 +401,16 @@ def run_phase2(
                 and capability_result.get("adapter") == "gmail_oauth_readonly"
             ),
             "vm_iso_proof_completed": False,
+            "vm_iso_preflight_status_attached": bool(
+                intent == "runtime_status" and isinstance(capability_result.get("vm_iso_preflight_status"), dict)
+            ),
+            "vm_iso_preflight_completed": bool(
+                intent == "runtime_status"
+                and (capability_result.get("vm_iso_preflight_status") or {}).get("proof", {}).get("preflight_completed")
+            ),
+            "observed_vm_boot": False,
+            "observed_reboot_recovery": False,
+            "observed_managed_runtime_rejoin": False,
             "destructive_action_executed": False,
             "updater_state_contract_attached": bool(
                 intent == "lifecycle_recovery" and isinstance(capability_result.get("updater_state"), dict)

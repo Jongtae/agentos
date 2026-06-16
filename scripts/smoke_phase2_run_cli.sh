@@ -92,6 +92,12 @@ assert status_payload["proof"]["calendar_readonly_ready"] is True
 assert status_payload["proof"]["gmail_readonly_status_attached"] is True
 assert status_payload["proof"]["gmail_live_read_ready"] is False
 assert status_payload["proof"]["gmail_setup_recovery_available"] is True
+assert status_payload["proof"]["vm_iso_preflight_status_attached"] is True
+assert status_payload["proof"]["vm_iso_preflight_completed"] is True
+assert status_payload["proof"]["vm_iso_proof_completed"] is False
+assert status_payload["proof"]["observed_vm_boot"] is False
+assert status_payload["proof"]["observed_reboot_recovery"] is False
+assert status_payload["proof"]["observed_managed_runtime_rejoin"] is False
 assert status_payload["proof"]["live_calendar_oauth_completed"] is False
 assert status_payload["proof"]["calendar_mutation_executed"] is False
 assert status_payload["proof"]["observed_proof_records_attached"] is False
@@ -106,6 +112,7 @@ assert Path(status_payload["artifacts"]["verified_boot_attestation_nonclaim"]).e
 assert Path(status_payload["artifacts"]["observed_proof_intake_status"]).exists()
 assert Path(status_payload["artifacts"]["calendar_readonly_status"]).exists()
 assert Path(status_payload["artifacts"]["gmail_readonly_status"]).exists()
+assert Path(status_payload["artifacts"]["vm_iso_preflight_status"]).exists()
 inbox_ownership = status_payload["capability_result"]["inbox_ownership"]
 assert inbox_ownership["schema_version"] == "agentos-inbox-routing-contract.v1"
 assert inbox_ownership["default_selected_path"] == "native_inbox_path"
@@ -146,6 +153,17 @@ assert gmail_status["proof"]["reason"] == "gmail_credentials_missing"
 assert gmail_status["secrets_redacted"] is True
 assert "gmail-setup --serve-http" in gmail_status["operator_action_required"]
 assert "refresh_token" not in json.dumps(gmail_status, ensure_ascii=True)
+vm_iso_status = status_payload["capability_result"]["vm_iso_preflight_status"]
+assert vm_iso_status["schema_version"] == "agentos-vm-iso-proof-preflight.v1"
+assert vm_iso_status["proof"]["preflight_completed"] is True
+assert vm_iso_status["proof"]["vm_iso_proof_completed"] is False
+assert vm_iso_status["proof"]["observed_vm_boot"] is False
+assert vm_iso_status["proof"]["observed_reboot_recovery"] is False
+assert vm_iso_status["proof"]["observed_managed_runtime_rejoin"] is False
+assert vm_iso_status["proof"]["destructive_action_executed"] is False
+assert vm_iso_status["blockers"][0]["id"] == "vm-iso-proof-not-observed"
+assert any("vm-utm-observe" in command for command in vm_iso_status["planned_commands"])
+assert Path(vm_iso_status["artifacts"]["latest_vm_iso_preflight_json"]).exists()
 
 gmail = json.loads((tmp_dir / "gmail.json").read_text())
 assert gmail["permission"]["level"] == "external_read"

@@ -33,3 +33,12 @@ scripts/smoke_vm_iso_proof_preflight.sh
 
 The output includes planned commands and a blocker that tells the operator which
 evidence is still required.
+
+## Runtime Status Surface
+
+`phase2-run --message "status"` attaches the same
+`agentos-vm-iso-proof-preflight.v1` payload under
+`capability_result.vm_iso_preflight_status` and writes the latest payload under
+the workspace artifacts directory. This makes the proof path and blocker state
+visible from the normal runtime status command without running a VM, building an
+ISO, or claiming observed proof.

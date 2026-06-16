@@ -46,7 +46,10 @@ Observed proof intake must not record:
 
 ## Required Record Shape
 
-An observed proof record should be representable as:
+An observed proof record should be representable as
+`agentos-observed-proof-intake.v1`. The seed schema is tracked in
+`docs/architecture/observed-proof-intake-schema.json`, and local records can be
+checked with `scripts/observed_proof_intake_validate.py`.
 
 ```json
 {
@@ -105,8 +108,8 @@ The observed proof intake and blocker handoff epic is complete when:
 
 - this boundary is documented and linked from the public docs map
 - a smoke check verifies the boundary, roadmap, README, and TASKS state
+- observed proof records have a machine-checkable schema and validator smoke
 - the Phase 2 golden demo runner includes the intake boundary smoke
 - README and roadmap identify the active epic and its exit condition
 - future live credential, VM/ISO, release, browser, and boot-chain proof work
   can attach evidence without claiming unobserved proof
-

@@ -1,0 +1,40 @@
+{
+  "schema_version": "agentos-observed-proof-intake.v1",
+  "required_fields": [
+    "schema_version",
+    "proof_surface",
+    "claim",
+    "status",
+    "observed_by",
+    "observed_at_utc",
+    "evidence",
+    "remaining_non_claims",
+    "blockers"
+  ],
+  "allowed_statuses": [
+    "observed",
+    "blocked",
+    "rejected"
+  ],
+  "allowed_evidence_kinds": [
+    "sanitized_log",
+    "screenshot",
+    "record_path",
+    "pr",
+    "issue_comment"
+  ],
+  "secret_terms": [
+    "access_token",
+    "refresh_token",
+    "client_secret",
+    "bot_token",
+    "api_key",
+    "password"
+  ],
+  "notes": [
+    "Observed proof records must describe only claims that were actually observed.",
+    "Secrets must remain outside git-tracked files, build-output, runtime records, and Docker bind records.",
+    "Blocked records must include at least one blocker with reason and recovery_action.",
+    "Observed records must include at least one evidence item with a redaction statement."
+  ]
+}

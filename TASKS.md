@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-62] Define observed proof intake boundary`
+- `[P2-63] Add observed proof intake record validator`
 
 Runtime impact statement:
 
-- This task defines the observed proof intake boundary so live credential, VM/ISO, release, browser, and boot-chain evidence can be attached later without turning unobserved blockers into claimed runtime proof.
+- This task adds a machine-checkable observed proof intake record schema and validator so later live credential, VM/ISO, release, browser, and boot-chain evidence can be accepted only when the claimed proof, redaction, blocker, and recovery fields are explicit.
 
 Current autonomous completion loop:
 
@@ -131,6 +131,7 @@ Recommended Phase 2 tasks:
 - `phase2-run --message "status"` attaches the verified boot/attestation non-claim artifact so boot-chain trust proof remains visibly separate from local runtime proof.
 - The observed proof intake and blocker handoff epic is active; its first slice is `docs/architecture/observed-proof-intake-boundary.md`, smoke-tested by `scripts/smoke_observed_proof_intake_boundary.sh`.
 - Observed proof intake must keep secrets out of repo/workspace records, require sanitized evidence before proof promotion, and preserve explicit blockers for live credentials, VM/ISO, release, browser, and boot-chain proof.
+- Observed proof records now use `docs/architecture/observed-proof-intake-schema.json` and can be checked with `scripts/observed_proof_intake_validate.py`; `scripts/smoke_observed_proof_intake_validator.sh` covers valid, blocked, and secret-term rejection behavior.
 
 ## Validation Standards
 
@@ -163,6 +164,7 @@ python3 scripts/cleanup_build_artifacts.py --delete --json
 - `docs/architecture/user-owned-runtime-data-boundary.md`
 - `docs/architecture/verified-boot-attestation-proof-boundary.md`
 - `docs/architecture/observed-proof-intake-boundary.md`
+- `docs/architecture/observed-proof-intake-schema.json`
 - `docs/acceptance/phase2-golden-runtime-loop.md`
 - `docs/acceptance/docker-runtime-preview.md`
 - `docs/acceptance/phase2-intent-eval.json`

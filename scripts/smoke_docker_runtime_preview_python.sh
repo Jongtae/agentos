@@ -40,6 +40,7 @@ curl -fsS "http://127.0.0.1:$PORT/api/product" > "$TMP_DIR/product.json"
 curl -fsS "http://127.0.0.1:$PORT/api/work-inbox" > "$TMP_DIR/work-inbox.json"
 curl -fsS "http://127.0.0.1:$PORT/api/timeline" > "$TMP_DIR/timeline.json"
 curl -fsS "http://127.0.0.1:$PORT/api/capabilities" > "$TMP_DIR/capabilities.json"
+curl -fsS "http://127.0.0.1:$PORT/api/approvals" > "$TMP_DIR/approvals.json"
 curl -fsS "http://127.0.0.1:$PORT/api/recovery" > "$TMP_DIR/recovery.json"
 curl -fsS "http://127.0.0.1:$PORT/api/evidence" > "$TMP_DIR/evidence.json"
 curl -fsS \
@@ -59,6 +60,7 @@ product = json.loads((root / "product.json").read_text())
 work_inbox = json.loads((root / "work-inbox.json").read_text())
 timeline = json.loads((root / "timeline.json").read_text())
 capabilities = json.loads((root / "capabilities.json").read_text())
+approvals = json.loads((root / "approvals.json").read_text())
 recovery = json.loads((root / "recovery.json").read_text())
 evidence = json.loads((root / "evidence.json").read_text())
 prompt = json.loads((root / "prompt.json").read_text())
@@ -76,6 +78,7 @@ assert product["proof"]["customer_facing_summary_ready"] is True
 assert product["work_inbox"]["schema_version"] == "agentos-product-layer-work-inbox.v1"
 assert product["activity_timeline"]["schema_version"] == "agentos-product-layer-activity-timeline.v1"
 assert product["capability_store"]["schema_version"] == "agentos-product-layer-capability-store.v1"
+assert product["approval_center"]["schema_version"] == "agentos-product-layer-approval-center.v1"
 assert product["recovery_center"]["schema_version"] == "agentos-product-layer-recovery-center.v1"
 assert product["evidence_dashboard"]["schema_version"] == "agentos-product-layer-evidence-dashboard.v1"
 assert {feature["id"] for feature in product["features"]} >= {
@@ -113,6 +116,18 @@ states_by_id = {item["id"]: item["state"] for item in capabilities["capabilities
 assert states_by_id["runtime_status"] == "docker_preview_ready"
 assert states_by_id["gmail_read"] == "requires_setup_or_confirmation"
 assert states_by_id["gmail_send"] == "blocked"
+assert approvals["schema_version"] == "agentos-product-layer-approval-center.v1"
+assert approvals["proof"]["docker_preview_ready"] is True
+assert approvals["proof"]["approval_records_ready"] is True
+assert approvals["proof"]["approval_execution_claimed"] is False
+assert approvals["proof"]["destructive_action_executed_by_default"] is False
+assert approvals["proof"]["external_write_claimed"] is False
+assert approvals["proof"]["live_provider_proof_claimed"] is False
+assert approvals["proof"]["customer_facing_approval_center_ready"] is True
+approval_states = {item["id"]: item["state"] for item in approvals["items"]}
+assert approval_states["gmail_read"] == "needs_setup_or_observed_proof"
+assert approval_states["restart_runtime"] == "needs_lifecycle_confirmation"
+assert approval_states["gmail_send"] == "blocked"
 assert recovery["schema_version"] == "agentos-product-layer-recovery-center.v1"
 assert recovery["proof"]["docker_preview_ready"] is True
 assert recovery["proof"]["customer_facing_recovery_ready"] is True
@@ -158,6 +173,8 @@ assert "Activity Timeline" in home
 assert "timeline JSON" in home
 assert "Capability Store" in home
 assert "capabilities JSON" in home
+assert "Approval Center" in home
+assert "approvals JSON" in home
 assert "Evidence Dashboard" in home
 assert "evidence JSON" in home
 assert prompt["ok"] is True

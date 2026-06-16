@@ -127,6 +127,7 @@ class DockerPreviewApp:
         work_inbox = self.work_inbox(setup=setup_payload)
         activity_timeline = self.activity_timeline(activity=activity_payload)
         capability_store = self.capability_store()
+        approval_center = self.approval_center(capability_store=capability_store)
         recovery_center = self.recovery_center(setup=setup_payload)
         evidence_dashboard = self.evidence_dashboard(setup=setup_payload, activity=activity_payload)
         blockers = recovery_center.get("blockers", [])
@@ -160,6 +161,12 @@ class DockerPreviewApp:
                     "customer_value": "See which capabilities are safe local actions, user-owned writes, external reads, confirmed lifecycle actions, or blocked destructive requests.",
                 },
                 {
+                    "id": "approval_center",
+                    "label": "Approval Center",
+                    "state": approval_center.get("state", "ready"),
+                    "customer_value": "See which actions need user approval, observed proof, or are blocked before AgentOS may perform them.",
+                },
+                {
                     "id": "recovery_center",
                     "label": "Recovery Center",
                     "state": "attention" if blockers else "ready",
@@ -176,6 +183,7 @@ class DockerPreviewApp:
             "work_inbox": work_inbox,
             "activity_timeline": activity_timeline,
             "capability_store": capability_store,
+            "approval_center": approval_center,
             "recovery_center": recovery_center,
             "evidence_dashboard": evidence_dashboard,
             "proof": {
@@ -184,6 +192,43 @@ class DockerPreviewApp:
                 "live_oauth_claimed": False,
                 "live_browser_proof_claimed": False,
                 "customer_facing_summary_ready": True,
+            },
+        }
+
+    def approval_center(self, *, capability_store: dict | None = None) -> dict:
+        store = capability_store or self.capability_store()
+        capabilities = store.get("capabilities", []) if isinstance(store.get("capabilities"), list) else []
+        approval_items = []
+        for item in capabilities:
+            if not isinstance(item, dict):
+                continue
+            permission = str(item.get("permission_level", "unsupported"))
+            if permission not in {"external_read", "external_write_confirmed", "lifecycle_confirmed", "destructive_blocked"}:
+                continue
+            approval_items.append(
+                {
+                    "id": str(item.get("id", "capability")),
+                    "label": str(item.get("label", item.get("id", "Capability"))),
+                    "permission_level": permission,
+                    "state": _approval_state(permission),
+                    "approval_requirement": _approval_requirement(permission),
+                    "customer_value": str(item.get("customer_value", "")),
+                }
+            )
+        return {
+            "schema_version": "agentos-product-layer-approval-center.v1",
+            "surface": "Approval Center",
+            "state": "attention" if approval_items else "ready",
+            "customer_message": "Approval Center shows actions that need user confirmation, observed proof, or must remain blocked before AgentOS may perform them.",
+            "items": approval_items,
+            "proof": {
+                "docker_preview_ready": True,
+                "approval_records_ready": True,
+                "approval_execution_claimed": False,
+                "destructive_action_executed_by_default": False,
+                "external_write_claimed": False,
+                "live_provider_proof_claimed": False,
+                "customer_facing_approval_center_ready": True,
             },
         }
 
@@ -628,6 +673,30 @@ def _capability_customer_value(capability_id: str, permission: str) -> str:
     return f"{capability_id} is not supported by default in this preview."
 
 
+def _approval_state(permission: str) -> str:
+    if permission == "external_read":
+        return "needs_setup_or_observed_proof"
+    if permission == "external_write_confirmed":
+        return "needs_explicit_confirmation"
+    if permission == "lifecycle_confirmed":
+        return "needs_lifecycle_confirmation"
+    if permission == "destructive_blocked":
+        return "blocked"
+    return "not_required"
+
+
+def _approval_requirement(permission: str) -> str:
+    if permission == "external_read":
+        return "Requires provider setup, explicit user credentials, and observed read-only proof before live access is claimed."
+    if permission == "external_write_confirmed":
+        return "Requires explicit user confirmation and future observed proof before any external write is claimed."
+    if permission == "lifecycle_confirmed":
+        return "Requires explicit confirmation and observed runtime or OS proof before lifecycle behavior is claimed."
+    if permission == "destructive_blocked":
+        return "Blocked by default; this preview must not execute the destructive action."
+    return "No approval required in this preview."
+
+
 def _render_page(app: DockerPreviewApp) -> str:
     status = scrub_payload(app.status())
     adapters = status.get("runtime", {}).get("adapters", {})
@@ -636,6 +705,7 @@ def _render_page(app: DockerPreviewApp) -> str:
     work_inbox = product_layer.get("work_inbox", {}) if isinstance(product_layer.get("work_inbox"), dict) else {}
     activity_timeline = product_layer.get("activity_timeline", {}) if isinstance(product_layer.get("activity_timeline"), dict) else {}
     capability_store = product_layer.get("capability_store", {}) if isinstance(product_layer.get("capability_store"), dict) else {}
+    approval_center = product_layer.get("approval_center", {}) if isinstance(product_layer.get("approval_center"), dict) else {}
     recovery_center = product_layer.get("recovery_center", {}) if isinstance(product_layer.get("recovery_center"), dict) else {}
     evidence_dashboard = product_layer.get("evidence_dashboard", {}) if isinstance(product_layer.get("evidence_dashboard"), dict) else {}
     features = product_layer.get("features", []) if isinstance(product_layer.get("features"), list) else []
@@ -718,6 +788,15 @@ def _render_page(app: DockerPreviewApp) -> str:
         for item in capability_store.get("capabilities", [])[:10]
         if isinstance(item, dict)
     ) or "<p class='lead'>Capability registry is unavailable.</p>"
+    approval_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Approval'))))}</b> "
+        f"{html.escape(str(item.get('approval_requirement', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))}</em>"
+        "</li>"
+        for item in approval_center.get("items", [])[:10]
+        if isinstance(item, dict)
+    ) or "<li>No approval-gated actions are available.</li>"
     evidence_html = "\n".join(
         "<li>"
         f"<b>{html.escape(str(item.get('label', item.get('id', 'Evidence'))))}</b> "
@@ -836,6 +915,22 @@ def _render_page(app: DockerPreviewApp) -> str:
   </section>
   <section class="product">
     <div class="panel">
+      <h2>Approval Center</h2>
+      <p class="lead">{html.escape(str(approval_center.get('customer_message', 'Approval requirements are available below.')))}</p>
+      <ul>{approval_html}</ul>
+    </div>
+    <div class="panel">
+      <h2>Approval Proof</h2>
+      <ul>
+        <li><b>Approval execution</b> not claimed</li>
+        <li><b>External writes</b> not claimed</li>
+        <li><b>Destructive actions</b> blocked by default</li>
+      </ul>
+      <p><a href="/api/approvals">approvals JSON</a></p>
+    </div>
+  </section>
+  <section class="product">
+    <div class="panel">
       <h2>Evidence Dashboard</h2>
       <p class="lead">{html.escape(str(evidence_dashboard.get('customer_message', 'Evidence state is available below.')))}</p>
       <ul>{evidence_html}</ul>
@@ -929,6 +1024,8 @@ def make_handler(app: DockerPreviewApp) -> type[BaseHTTPRequestHandler]:
                 _json_response(self, app.activity_timeline())
             elif path == "/api/capabilities":
                 _json_response(self, app.capability_store())
+            elif path == "/api/approvals":
+                _json_response(self, app.approval_center())
             elif path == "/api/recovery":
                 _json_response(self, app.recovery_center())
             elif path == "/api/evidence":

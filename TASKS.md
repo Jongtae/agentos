@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-88] Add Docker Capability Store product surface`
+- `[P2-89] Add Docker Approval Center product surface`
 
 Runtime impact statement:
 
-- This task promotes the capability permission registry into a Docker Capability Store product surface that shows safe local actions, user-owned writes, external-read setup needs, lifecycle confirmation, and destructive blocked actions without claiming live-provider or external-write proof.
+- This task promotes approval-gated capabilities into a Docker Approval Center product surface that shows which actions need setup, explicit confirmation, observed proof, or remain blocked without claiming approval execution, external writes, or destructive actions.
 
 Current autonomous completion loop:
 
@@ -100,6 +100,7 @@ Recommended Phase 2 tasks:
 - Docker preview now exposes `agentos-product-layer-work-inbox.v1` through `/api/work-inbox` and the browser Work Inbox without claiming live OAuth, browser-default behavior, or external mutations.
 - Docker preview now exposes `agentos-product-layer-activity-timeline.v1` through `/api/timeline` and the browser Activity Timeline without claiming external app execution or live-provider proof.
 - Docker preview now exposes `agentos-product-layer-capability-store.v1` through `/api/capabilities` and the browser Capability Store without claiming destructive, external-write, or live-provider proof.
+- Docker preview now exposes `agentos-product-layer-approval-center.v1` through `/api/approvals` and the browser Approval Center without claiming approval execution, external writes, or destructive actions.
 - Docker preview now exposes `agentos-product-layer-recovery-center.v1` through `/api/recovery` and the browser Recovery Center without claiming VM/ISO, live OAuth, browser, release-trust, or hardware-attestation proof.
 - Docker preview now exposes `agentos-product-layer-evidence-dashboard.v1` through `/api/evidence` and the browser Evidence Dashboard so customers can distinguish observed Docker/local proof from explicit non-claims.
 - Gmail setup is exposed through `agentos-kernelctl gmail-setup --serve-http`; live Gmail remains read-only and requires explicit user OAuth credentials.

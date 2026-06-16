@@ -80,11 +80,17 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
+No active completion epic is currently recorded. The next loop should compare
+the roadmap, open GitHub epics, and direction judge candidates before creating
+or continuing another epic.
+
+## Completed Completion Epics
+
 - `capability-permission-boundary-epic` — [EPIC: Capability permission boundary](https://github.com/Jongtae/agentos/issues/66)
   - Milestone: Phase 2: Local-first Codex runtime loop
   - Completion goal: define how AgentOS declares, approves, denies, narrates, and records OS-native capability access before expanding live adapters.
-  - Exit condition: the epic has milestone alignment, validation plan, explicit blocker handling, and a first safe contract task identified.
-  - Active task: [P2-36] Add capability permission registry contract.
+  - Exit condition: completed by contract docs, public registry, smoke-enforced outcomes, `phase2-run` output, and user-owned records across P2-33 through P2-36.
+  - Closed issue: #66.
   - Advances: capability ownership, OS-native runtime defaults, runtime proof truthfulness.
 
 ## Autonomous Completion Loop

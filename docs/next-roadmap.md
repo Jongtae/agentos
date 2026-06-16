@@ -80,17 +80,20 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
+- No active completion epic is currently open. The next automation pass should
+  re-check this roadmap, the open GitHub issue state, and the Later Tracks
+  before creating a new milestone-backed epic.
+
+## Completed Completion Epics
+
 - `inbox-capability-ownership-boundary-epic` — [EPIC: Inbox capability ownership boundary](https://github.com/Jongtae/agentos/issues/116)
   - Milestone: Phase 2: Local-first Codex runtime loop
   - Completion goal: define the inbox capability ownership boundary so Gmail, Calendar, Maildir, fixture, and future inbox-like adapters converge through an OS-native, read-first, user-owned intake substrate.
-  - Exit condition: the epic has a documented and smoke-tested boundary that distinguishes native/local inbox intake, explicit read-only external adapters, user-owned records, activity proof, and external mutation blockers.
-  - Active task: [P2-56] Attach inbox ownership proof to phase2 status.
-  - First boundary: `docs/architecture/inbox-capability-ownership-boundary.md` defines native fixture, Maildir, live Gmail and Calendar OAuth blockers, user-owned records, activity/recovery expectations, and mutation non-claims.
-  - Golden runner: `scripts/smoke_inbox_capability_ownership_boundary.sh` is part of `scripts/phase2_golden_demo_runner.py`, keeping inbox capability ownership in practical Phase 2 proof.
-  - Runtime proof: `phase2-run --message "status"` attaches the inbox routing/ownership contract artifact while keeping live inbox OAuth and mutation proof unclaimed.
+  - Exit condition: completed by `docs/architecture/inbox-capability-ownership-boundary.md`, `scripts/smoke_inbox_capability_ownership_boundary.sh`, golden runner integration through `scripts/phase2_golden_demo_runner.py`, and `phase2-run --message "status"` attaching the inbox routing/ownership contract artifact while keeping live inbox OAuth and mutation proof unclaimed.
+  - Closed issue: #116.
+  - Completed tasks: P2-54, P2-55, P2-56, and P2-57.
+  - Residual blocker: live Gmail, Calendar, and broader inbox OAuth proof remain unclaimed until explicit tester credentials and observed read-only runs exist; external send/delete/archive mutations remain blocked until a later confirmation model exists.
   - Advances: capability ownership, mediation cost reduction, OS-native runtime defaults, runtime proof truthfulness.
-
-## Completed Completion Epics
 
 - `distribution-packaging-proof-boundary-epic` — [EPIC: Distribution packaging proof boundary](https://github.com/Jongtae/agentos/issues/107)
   - Milestone: Phase 2: Local-first Codex runtime loop

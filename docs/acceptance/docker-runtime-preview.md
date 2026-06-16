@@ -27,7 +27,7 @@ http://localhost:8787
 - `http://localhost:8787` opens.
 - Runtime status is visible.
 - Docker Onboarding Status is visible.
-- `/api/onboarding` exposes quickstart steps, preview entrypoints, validation smokes, and proof non-claims without requiring an API key.
+- `/api/onboarding` exposes quickstart steps, a readiness checklist, preview entrypoints, validation smokes, and proof non-claims without requiring an API key.
 - A customer-facing Runtime Home is visible.
 - Work Inbox, Activity Timeline, Recovery Center, and Evidence Dashboard states are summarized.
 - `/api/work-inbox` exposes read-first inbox sources, workflows, live blockers, and mutation non-claims.
@@ -109,3 +109,14 @@ This gate verifies that README quickstart, Docker acceptance, public preview
 operations, roadmap, and task state all point to the same Docker-first public
 try path and keep Docker proof separate from VM/ISO, live OAuth, browser,
 release, external mutation, and attestation proof.
+
+## Onboarding Status Contract Gate
+
+```bash
+scripts/smoke_docker_onboarding_status_contract.sh
+```
+
+This gate starts the Python Docker runtime preview and verifies that
+`/api/onboarding` exposes customer-facing quickstart readiness, preview
+entrypoints, no-key local preview status, Docker-safe validation, and explicit
+observed-proof blockers.

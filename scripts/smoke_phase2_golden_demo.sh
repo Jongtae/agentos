@@ -24,6 +24,7 @@ assert payload["proof"]["gmail_oauth_live_completed"] is False
 assert payload["proof"]["vm_iso_proof_completed"] is False
 smoke_names = {result["name"] for result in payload["results"]}
 assert "scripts/smoke_release_manifest_checksum_preflight.sh" in smoke_names
+assert "scripts/smoke_inbox_capability_ownership_boundary.sh" in smoke_names
 blocker_ids = {blocker["id"] for blocker in payload["explicit_blockers"]}
 assert {"gmail-oauth-live", "vm-iso-proof"} <= blocker_ids
 PY

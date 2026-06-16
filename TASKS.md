@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-70] Attach Gmail read-only status to phase2 status`
+- `[P2-71] Close Gmail read-only readiness epic`
 
 Runtime impact statement:
 
-- This task attaches Gmail read-only setup/status readiness to `phase2-run --message "status"` so credential, token, dependency, read-only scope, setup recovery, secret-redaction, and live OAuth blocker state are visible without claiming real Gmail account proof.
+- This task closes the Gmail read-only readiness epic after runtime status exposes credential, token, dependency, read-only scope, setup recovery, secret-redaction, and live OAuth blocker state, preventing repeated Gmail readiness work until tester credentials or observed live proof exist.
 
 Current autonomous completion loop:
 
@@ -137,7 +137,7 @@ Recommended Phase 2 tasks:
 - The capability graduation registry epic is closed for this Phase 2 slice; future broader app/inbox work should choose a candidate from `docs/architecture/capability-graduation-registry.json` before expanding browser or external app mediation.
 - Capability graduation must prefer internal AgentOS capabilities, keep browser/external app mediation non-default, preserve permission/data boundaries, and require observed proof before live claims.
 - The Calendar read-only live adapter readiness epic is closed for this Phase 2 slice; future Calendar work should require explicit live OAuth adapter design, tester credentials, or a confirmed mutation model before claiming more than fixture-backed readiness.
-- The Gmail read-only live readiness epic is active; its first slice attaches `agentos-gmail-status.v1` to `phase2-run --message "status"` while keeping live OAuth account proof and send/delete/archive mutations blocked until observed.
+- The Gmail read-only live readiness epic is closed for this Phase 2 slice; future Gmail work should require explicit tester OAuth credentials, observed read-only proof, or a later confirmed mutation model before claiming more than setup readiness.
 
 ## Validation Standards
 

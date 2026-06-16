@@ -80,16 +80,20 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
+- No active completion epic is selected. The next iteration should compare the
+  completed epic list, Later Tracks, README, TASKS, and GitHub issue state
+  before creating or continuing the next milestone-backed completion epic.
+
+## Completed Completion Epics
+
 - `gmail-readonly-live-readiness-status-epic` — [EPIC: Gmail live read-only readiness status](https://github.com/Jongtae/agentos/issues/154)
   - Milestone: Phase 2: Local-first Codex runtime loop
   - Completion goal: surface Gmail read-only live readiness in the user-testable runtime status path without claiming live OAuth proof or executing send/delete/archive mutations.
-  - Validation plan: attach Gmail read-only setup/status state to `phase2-run --message "status"`, keep fixture Gmail, live-missing, mock live-read, and golden smokes passing without user credentials, and preserve explicit non-claims for live OAuth, account proof, send/delete/archive, and token exposure.
-  - Exit condition: complete when AgentOS status exposes Gmail credential/token/dependency readiness, read-only scope, setup recovery action, secret redaction, and live-proof blocker state while automated smokes avoid real credentials.
-  - Active task: P2-70.
+  - Exit condition: completed by `agentos-gmail-status.v1` attached to `phase2-run --message "status"`, Gmail missing/live-blocked/CLI/golden smoke coverage, and README/TASKS/roadmap updates preserving live OAuth, account proof, token exposure, and mutation non-claims.
+  - Closed issue: #154.
+  - Completed tasks: P2-70 and P2-71.
   - Residual blockers: live Gmail OAuth requires explicit tester credentials and an observed read-only run; send/delete/archive and Gmail mutation support remain out of scope.
   - Advances: capability ownership, mediation cost reduction, OS-native runtime defaults, runtime proof truthfulness.
-
-## Completed Completion Epics
 
 - `calendar-readonly-live-adapter-readiness-epic` — [EPIC: Calendar read-only live adapter readiness](https://github.com/Jongtae/agentos/issues/149)
   - Milestone: Phase 2: Local-first Codex runtime loop

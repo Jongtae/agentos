@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-34] Enforce capability permission outcomes in Phase 2 smokes`
+- `[P2-35] Surface capability permission outcomes in phase2-run`
 
 Runtime impact statement:
 
-- This task makes Phase 2 capability results carry smoke-verified permission levels, blocked outcomes, recovery hints, and secret-redaction proof before live adapter expansion.
+- This task surfaces smoke-verified capability permission levels, outcomes, recovery, and secret-redaction proof through the user-testable `phase2-run` CLI and user-owned records.
 
 Current autonomous completion loop:
 
@@ -106,6 +106,7 @@ Recommended Phase 2 tasks:
 - Gmail live read-only proof now has a manual acceptance pack and blocker capture; automated smokes still avoid real user credentials.
 - VM/ISO proof remains an explicit blocker until a VM run is observed and recorded.
 - Capability result smokes now enforce permission levels and blocked outcomes for safe local reads, missing external setup, and destructive unsupported requests.
+- `phase2-run` should expose permission level, outcome, recovery, and secret-redaction proof in JSON output and user-owned records.
 
 ## Validation Standards
 

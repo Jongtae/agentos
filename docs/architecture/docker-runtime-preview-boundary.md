@@ -25,6 +25,7 @@ http://localhost:8787
 - the runtime can start in a local developer environment
 - setup/status can report local runtime and adapter readiness
 - the customer-facing Runtime Home can summarize product-layer readiness
+- the Work Inbox product surface can summarize read-first inbox sources without live-provider claims
 - prompt intake can reach the same intent classification path used by AgentOS
 - bounded capabilities can emit activity events
 - generated outputs can be written to user-owned mounted storage
@@ -83,6 +84,7 @@ command that produces:
 
 - a setup/status report
 - a Runtime Home product-layer summary
+- a Work Inbox read-first product-layer summary
 - at least one classified prompt
 - at least one activity feed event
 - a user-owned output path

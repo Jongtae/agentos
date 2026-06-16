@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-83] Add Docker runtime home product layer`
+- `[P2-84] Add Docker Work Inbox product surface`
 
 Runtime impact statement:
 
-- This task makes Docker the default public Product Layer try path by adding a customer-facing Runtime Home with Work Inbox, Activity Timeline, Recovery Center, and Evidence Dashboard summaries backed by existing runtime proof and blockers.
+- This task promotes Work Inbox from a Runtime Home card into a Docker product surface that summarizes fixture, Maildir, Gmail, and Calendar read-first sources, workflows, live blockers, and mutation non-claims for customers.
 
 Current autonomous completion loop:
 
@@ -97,6 +97,7 @@ Recommended Phase 2 tasks:
 
 - Docker preview is promoted as the primary public try path at `http://localhost:8787`.
 - Docker preview now exposes `agentos-product-layer-runtime-home.v1` through `/api/product` and the browser Runtime Home without claiming VM/ISO boot proof.
+- Docker preview now exposes `agentos-product-layer-work-inbox.v1` through `/api/work-inbox` and the browser Work Inbox without claiming live OAuth, browser-default behavior, or external mutations.
 - Gmail setup is exposed through `agentos-kernelctl gmail-setup --serve-http`; live Gmail remains read-only and requires explicit user OAuth credentials.
 - Phase 2 closeout is recorded in `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`.
 - Practical local/Docker-safe proof is aggregated by `scripts/smoke_phase2_golden_demo.sh`.

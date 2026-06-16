@@ -79,12 +79,14 @@ curl -fsS http://127.0.0.1:18787/healthz >/dev/null
 curl -fsS http://127.0.0.1:18787/ > /tmp/agentos-docker-home.html
 curl -fsS http://127.0.0.1:18787/api/status > /tmp/agentos-docker-status.json
 curl -fsS http://127.0.0.1:18787/api/product > /tmp/agentos-docker-product.json
+curl -fsS http://127.0.0.1:18787/api/work-inbox > /tmp/agentos-docker-work-inbox.json
 
 python3 - <<'PY'
 import json
 from pathlib import Path
 payload = json.loads(Path("/tmp/agentos-docker-status.json").read_text())
 product = json.loads(Path("/tmp/agentos-docker-product.json").read_text())
+work_inbox = json.loads(Path("/tmp/agentos-docker-work-inbox.json").read_text())
 home = Path("/tmp/agentos-docker-home.html").read_text()
 assert payload["proof"]["docker_preview_surface_ready"] is True
 assert payload["proof"]["product_layer_runtime_home_ready"] is True
@@ -94,8 +96,12 @@ assert payload["telegram"]["transport"] == "polling_preview"
 assert product["schema_version"] == "agentos-product-layer-runtime-home.v1"
 assert product["proof"]["docker_main_try_path"] is True
 assert product["proof"]["boot_or_iso_proof_claimed"] is False
+assert work_inbox["schema_version"] == "agentos-product-layer-work-inbox.v1"
+assert work_inbox["proof"]["read_first_only"] is True
+assert work_inbox["proof"]["external_mutation_claimed"] is False
 assert "Runtime Home" in home
 assert "Recovery Center" in home
+assert "Work Inbox" in home
 PY
 
 curl -fsS \

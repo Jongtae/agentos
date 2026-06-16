@@ -124,6 +124,7 @@ class DockerPreviewApp:
         setup_payload = setup or build_status(str(self.workspace), str(self.user_root))
         activity_payload = activity or build_activity_feed_payload(self.workspace, limit=12)
         adapters = setup_payload.get("adapters", {}) if isinstance(setup_payload.get("adapters"), dict) else {}
+        work_inbox = self.work_inbox(setup=setup_payload)
         blockers = _product_blockers(setup_payload)
         return {
             "schema_version": "agentos-product-layer-runtime-home.v1",
@@ -139,7 +140,7 @@ class DockerPreviewApp:
                 {
                     "id": "work_inbox",
                     "label": "Work Inbox",
-                    "state": _inbox_state(adapters),
+                    "state": work_inbox.get("state", _inbox_state(adapters)),
                     "customer_value": "Try read-first inbox workflows through fixtures, Maildir boundaries, and explicit live blockers.",
                 },
                 {
@@ -162,11 +163,103 @@ class DockerPreviewApp:
                 },
             ],
             "blockers": blockers,
+            "work_inbox": work_inbox,
             "proof": {
                 "docker_main_try_path": True,
                 "boot_or_iso_proof_claimed": False,
                 "live_oauth_claimed": False,
                 "live_browser_proof_claimed": False,
+                "customer_facing_summary_ready": True,
+            },
+        }
+
+    def work_inbox(self, *, setup: dict | None = None) -> dict:
+        setup_payload = setup or build_status(str(self.workspace), str(self.user_root))
+        adapters = setup_payload.get("adapters", {}) if isinstance(setup_payload.get("adapters"), dict) else {}
+        sources = [
+            {
+                "id": "native_fixture",
+                "label": "Fixture Inbox",
+                "state": "ready",
+                "permission": "local_read",
+                "customer_value": "Try inbox summaries and draft preparation without external credentials.",
+            },
+            {
+                "id": "maildir",
+                "label": "Maildir",
+                "state": "available_after_user_path",
+                "permission": "local_read",
+                "customer_value": "Use a user-owned local inbox path when explicit observed evidence is attached.",
+            },
+            {
+                "id": "gmail",
+                "label": "Gmail",
+                "state": _adapter_state(adapters.get("gmail")),
+                "permission": "external_read",
+                "customer_value": "Read-only Gmail can be promoted after explicit OAuth and observed proof.",
+            },
+            {
+                "id": "calendar",
+                "label": "Calendar",
+                "state": _adapter_state(adapters.get("calendar")),
+                "permission": "external_read",
+                "customer_value": "Read-only Calendar can be promoted after explicit OAuth and observed proof.",
+            },
+        ]
+        blockers = [
+            {
+                "id": "live-gmail-oauth",
+                "source": "gmail",
+                "reason": "Live Gmail proof requires explicit user OAuth credentials and a sanitized observed read-only run.",
+                "recovery_action": "Use fixture/local proof until credentials and observed evidence are provided.",
+            },
+            {
+                "id": "live-calendar-oauth",
+                "source": "calendar",
+                "reason": "Live Calendar proof requires explicit user OAuth credentials and a sanitized observed read-only run.",
+                "recovery_action": "Use fixture/local proof until credentials and observed evidence are provided.",
+            },
+            {
+                "id": "observed-maildir-user-data-proof",
+                "source": "maildir",
+                "reason": "Real user Maildir proof requires an explicit user-owned path and sanitized observed evidence.",
+                "recovery_action": "Run a future Maildir observed-proof task before claiming production user inbox proof.",
+            },
+        ]
+        workflows = [
+            {
+                "id": "inbox_summary",
+                "label": "Summarize inbox items",
+                "state": "docker_preview_ready",
+                "mutation_allowed": False,
+            },
+            {
+                "id": "draft_preparation",
+                "label": "Prepare reply drafts",
+                "state": "docker_preview_ready",
+                "mutation_allowed": False,
+            },
+            {
+                "id": "search_and_triage",
+                "label": "Search and triage work items",
+                "state": "docker_preview_ready",
+                "mutation_allowed": False,
+            },
+        ]
+        return {
+            "schema_version": "agentos-product-layer-work-inbox.v1",
+            "surface": "Work Inbox",
+            "state": "preview",
+            "customer_message": "Work Inbox is available as a read-first Docker preview. Live providers remain blocked until observed proof is attached.",
+            "sources": sources,
+            "workflows": workflows,
+            "blockers": blockers,
+            "proof": {
+                "docker_preview_ready": True,
+                "read_first_only": True,
+                "external_mutation_claimed": False,
+                "live_oauth_claimed": False,
+                "browser_default_claimed": False,
                 "customer_facing_summary_ready": True,
             },
         }
@@ -244,11 +337,22 @@ def _inbox_state(adapters: dict) -> str:
     return "preview"
 
 
+def _adapter_state(value: object) -> str:
+    adapter = value if isinstance(value, dict) else {}
+    state = str(adapter.get("state", "")).lower()
+    if state in {"ready", "available", "ok"}:
+        return "ready"
+    if state in {"blocked", "setup_needed", "missing_credentials"}:
+        return "setup_needed"
+    return "blocked_until_observed_proof"
+
+
 def _render_page(app: DockerPreviewApp) -> str:
     status = scrub_payload(app.status())
     adapters = status.get("runtime", {}).get("adapters", {})
     activity = status.get("activity", {}).get("events", [])
     product_layer = status.get("product_layer", {})
+    work_inbox = product_layer.get("work_inbox", {}) if isinstance(product_layer.get("work_inbox"), dict) else {}
     features = product_layer.get("features", []) if isinstance(product_layer.get("features"), list) else []
     blockers = product_layer.get("blockers", []) if isinstance(product_layer.get("blockers"), list) else []
     llm_state = adapters.get("llm", {}).get("state", "unknown")
@@ -286,6 +390,21 @@ def _render_page(app: DockerPreviewApp) -> str:
         "</li>"
         for blocker in blockers
     ) or "<li>No product-layer blockers in this Docker preview.</li>"
+    inbox_source_html = "\n".join(
+        "<section class='feature'>"
+        f"<div><h3>{html.escape(str(source.get('label', 'Inbox source')))}</h3>"
+        f"<p>{html.escape(str(source.get('customer_value', '')))}</p></div>"
+        f"<span class='state'>{html.escape(str(source.get('state', 'unknown')))}</span>"
+        "</section>"
+        for source in work_inbox.get("sources", [])
+        if isinstance(source, dict)
+    )
+    inbox_workflow_html = "\n".join(
+        f"<li><b>{html.escape(str(workflow.get('label', 'Workflow')))}</b> "
+        f"{html.escape(str(workflow.get('state', '')))} · mutation_allowed={html.escape(str(workflow.get('mutation_allowed', False)).lower())}</li>"
+        for workflow in work_inbox.get("workflows", [])
+        if isinstance(workflow, dict)
+    ) or "<li>No Work Inbox workflows are available yet.</li>"
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -337,6 +456,18 @@ def _render_page(app: DockerPreviewApp) -> str:
     <div class="panel">
       <h2>Recovery Center</h2>
       <ul class="blockers">{blocker_html}</ul>
+    </div>
+  </section>
+  <section class="product">
+    <div class="panel">
+      <h2>Work Inbox</h2>
+      <p class="lead">{html.escape(str(work_inbox.get('customer_message', 'Read-first inbox preview.')))}</p>
+      {inbox_source_html}
+    </div>
+    <div class="panel">
+      <h2>Inbox Workflows</h2>
+      <ul>{inbox_workflow_html}</ul>
+      <p><a href="/api/work-inbox">work inbox JSON</a></p>
     </div>
   </section>
   <section class="panel">
@@ -416,6 +547,8 @@ def make_handler(app: DockerPreviewApp) -> type[BaseHTTPRequestHandler]:
                 _json_response(self, app.status())
             elif path == "/api/product":
                 _json_response(self, app.product_layer())
+            elif path == "/api/work-inbox":
+                _json_response(self, app.work_inbox())
             elif path == "/api/activity":
                 _json_response(self, app.activity())
             else:

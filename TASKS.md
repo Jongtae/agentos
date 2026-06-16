@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-113] Add Docker product map reviewer routes`
+- `[P2-114] Close Docker Product Layer map epic`
 
 Runtime impact statement:
 
-- This task adds customer-facing reviewer routes to the Product Layer Map so runtime evaluators, proof reviewers, capability reviewers, and trust reviewers can inspect the Docker preview in proof-safe order without confusing Docker-local proof for VM/ISO, live provider, release, mutation, or attestation proof.
+- This task closes the Docker Product Layer map epic after the customer-facing map, reviewer routes, README/TASKS/roadmap/Docker acceptance references, golden smokes, cleanup policy, and proof non-claims all align on Docker-first runtime truthfulness.
 
 Current autonomous completion loop:
 
@@ -173,9 +173,10 @@ Recommended Phase 2 tasks:
 - P2-109 adds `/api/proof-promotion`, a browser Proof Promotion Center panel, and `scripts/smoke_docker_proof_promotion_center.sh` so customers can see which claims are ready to describe and which require sanitized observed evidence.
 - P2-110 adds a Proof Sharing Checklist to `/api/proof-promotion`, the browser Proof Promotion Center panel, and Docker-safe smokes so customers know which Docker-local Product Layer statements are share-ready and which stronger claims remain blocked.
 - P2-111 closes the Docker proof promotion center epic after README, TASKS, roadmap, Docker acceptance, proof promotion gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks all preserve the Docker-safe proof promotion path.
-- The Docker Product Layer map epic is active for this Phase 2 slice; it must give customers one navigation surface across Product Layer surfaces, proof sources, handoff, and blockers without adding new unobserved proof claims.
+- The Docker Product Layer map epic is closed for this Phase 2 slice; future Product Layer map work should require observed Docker daemon proof, live browser evidence, release proof, VM/ISO proof, or a new customer-facing navigation need before reopening.
 - P2-112 adds `/api/product-map`, a browser Product Layer Map panel, and `scripts/smoke_docker_product_layer_map.sh` so customers can see what to inspect first, where safe work appears, where proof is collected, and which blockers remain external.
 - P2-113 adds reviewer routes to `/api/product-map`, the browser Product Layer Map panel, and Docker-safe smokes so runtime evaluators, proof reviewers, capability reviewers, and trust reviewers can inspect the same Product Layer surface in proof-safe order.
+- P2-114 closes the Docker Product Layer map epic after README, TASKS, roadmap, Docker acceptance, Product Layer map gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve the Docker-safe customer navigation path.
 - The verified boot and attestation proof boundary epic is closed for this Phase 2 slice; future verified boot work should require observed VM or hardware evidence before claiming Secure Boot, TPM measured boot, PCR/event-log, IMA, or hardware attestation proof.
 - The first verified boot slice is `docs/architecture/verified-boot-attestation-proof-boundary.md`, smoke-tested by `scripts/smoke_verified_boot_attestation_boundary.sh`.
 - `phase2-run --message "status"` attaches the verified boot/attestation non-claim artifact so boot-chain trust proof remains visibly separate from local runtime proof.

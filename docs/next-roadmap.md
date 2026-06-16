@@ -80,18 +80,21 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
+- None.
+
+## Completed Completion Epics
+
 - `docker-product-layer-map-epic` — [EPIC: Stage 3 / Phase 2 Docker Product Layer map](https://github.com/Jongtae/agentos/issues/257)
   - Milestone: Docker Product Layer map
   - Completion goal: give customers one ordered Docker-safe navigation surface and reviewer-specific routes that explain where to start, where safe work appears, where evidence and handoff live, which reviewer should inspect which surfaces, and which proof/trust claims remain blocked until observed evidence exists.
-  - Validation plan: `scripts/smoke_docker_product_layer_map.sh`, `scripts/smoke_docker_product_layer_completion.sh`, `scripts/smoke_docker_runtime_preview_python.sh`, `docker compose config`, and the Phase 2 golden demo runner.
-  - Exit condition: complete when the Docker preview exposes `/api/product-map` with surface groups and reviewer routes, the browser Runtime Home shows a Product Layer Map panel, README/TASKS/roadmap/Docker acceptance reference the Product Layer Map, golden smokes include the map gate, and non-claims remain explicit for VM/ISO, live OAuth, browser, release, external mutation, and hardware attestation proof.
-  - Active task: P2-113.
+  - Exit condition: completed by P2-112 through P2-114 after `/api/product-map`, the browser Product Layer Map panel, reviewer routes, README, TASKS, roadmap, Docker acceptance, `scripts/smoke_docker_product_layer_map.sh`, `scripts/smoke_docker_product_layer_completion.sh`, `scripts/smoke_docker_runtime_preview_python.sh`, `docker compose config`, cleanup policy, and CI checks all preserve Docker-safe customer navigation without stronger proof claims.
+  - Closed issue: #257.
+  - Completed tasks: P2-112, P2-113, and P2-114.
   - First slice: P2-112 adds `agentos-product-layer-map.v1` through `/api/product-map`, a browser Product Layer Map panel, and `scripts/smoke_docker_product_layer_map.sh`.
-  - Current slice: P2-113 adds reviewer routes for runtime evaluators, proof reviewers, capability reviewers, and trust reviewers so the Product Layer Map can support customer review flows without adding unobserved proof claims.
+  - Product-layer follow-up: P2-113 adds reviewer routes for runtime evaluators, proof reviewers, capability reviewers, and trust reviewers so the Product Layer Map can support customer review flows without adding unobserved proof claims.
+  - Product-layer closeout: P2-114 records the Docker Product Layer map epic as complete so future loops return to the roadmap before adding more map work.
   - Residual blockers: Docker daemon observed proof, VM/ISO boot/rejoin proof, live OAuth, live browser evidence, release artifacts/signing, external mutation proof, and hardware attestation remain unclaimed until observed evidence exists.
   - Advances: Docker-first public usability, runtime proof truthfulness, recovery, OS-native runtime defaults.
-
-## Completed Completion Epics
 
 - `docker-proof-promotion-center-epic` — [EPIC: Stage 3 / Phase 2 Docker proof promotion center](https://github.com/Jongtae/agentos/issues/247)
   - Milestone: Docker proof promotion center

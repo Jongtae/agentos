@@ -202,7 +202,7 @@ flowchart LR
 | Distribution packaging boundary | Completed | Separates local packaging checks from real release/signing/VM proof claims. |
 | Inbox capability ownership | Completed | Moves Gmail, Calendar, Maildir, fixtures, and future inbox adapters toward a read-first OS-native substrate. |
 | Verified boot and attestation boundary | Completed | Keeps Secure Boot, TPM, PCR/event-log, IMA, and hardware attestation proof explicit and unclaimed until observed. |
-| Observed proof intake | Active | Defines how live credentials, VM/ISO, release, browser, and boot-chain evidence can be attached without claiming unobserved proof. |
+| Observed proof intake | Active | Defines and validates how live credentials, VM/ISO, release, browser, and boot-chain evidence can be attached without claiming unobserved proof. |
 | Live Gmail OAuth | Blocked on credentials and observed read-only proof | Fixture and missing-credential paths are automated; real mailbox proof requires explicit tester OAuth. |
 | VM/ISO boot, recovery, and rejoin | Blocked on observed VM proof | Must show boot, reboot/recovery, and managed runtime rejoin before signoff. |
 | Calendar live adapter | Future read-only track | Starts from fixture-backed contracts and must stay read-only until live OAuth proof exists. |

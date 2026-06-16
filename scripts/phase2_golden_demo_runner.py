@@ -32,6 +32,7 @@ PRACTICAL_SMOKES = [
     "scripts/smoke_inbox_capability_ownership_boundary.sh",
     "scripts/smoke_verified_boot_attestation_boundary.sh",
     "scripts/smoke_observed_proof_intake_boundary.sh",
+    "scripts/smoke_observed_proof_intake_validator.sh",
 ]
 
 EXPLICIT_BLOCKERS = [

@@ -29,6 +29,7 @@ large build outputs are not included.
 - `docs/architecture/user-owned-runtime-data-boundary.md` - local-first user data ownership boundary
 - `docs/architecture/verified-boot-attestation-proof-boundary.md` - Secure Boot, TPM measured boot, IMA, and hardware attestation proof boundary
 - `docs/architecture/observed-proof-intake-boundary.md` - observed proof intake, blocker handoff, redaction, and promotion boundary
+- `docs/architecture/observed-proof-intake-schema.json` - machine-checkable observed proof intake record contract
 - `docs/operations/public-preview-operations.md` - public preview proof, blocker, non-claim, and promotion checklist
 - `docs/operations/distribution-packaging-proof-boundary.md` - distribution packaging local checks, release artifact requirements, blockers, and non-claims
 - `docs/acceptance/docker-runtime-preview.md` - Docker-first runtime preview acceptance

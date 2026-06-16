@@ -50,11 +50,12 @@ for term in required_terms:
 
 assert "docs/architecture/observed-proof-intake-boundary.md" in index
 assert "observed-proof-intake-and-blocker-handoff-epic" in roadmap
-assert "[P2-62] Define observed proof intake boundary" in tasks
-assert "observed proof intake boundary" in tasks
+assert "[P2-63] Add observed proof intake record validator" in tasks
+assert "Completed tasks: P2-62" in roadmap
+assert "observed proof intake record schema" in tasks
 assert "Observed proof intake" in readme
 assert "scripts/smoke_observed_proof_intake_boundary.sh" in runner
-assert "live credentials, VM/ISO, release, browser, and boot-chain proof" in roadmap
+assert "live credential, VM/ISO, release, browser, and boot-chain proof" in roadmap
 PY
 
 echo "observed proof intake boundary smoke: PASS"

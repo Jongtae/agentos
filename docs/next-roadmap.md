@@ -80,16 +80,20 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
+- No active completion epic is selected. The next iteration should compare the
+  completed epic list, Later Tracks, README, TASKS, and GitHub issue state
+  before creating or continuing the next milestone-backed completion epic.
+
+## Completed Completion Epics
+
 - `vm-iso-observed-proof-status-epic` — [EPIC: VM/ISO observed proof status surface](https://github.com/Jongtae/agentos/issues/159)
   - Milestone: Phase 2: Local-first Codex runtime loop
   - Completion goal: surface VM/ISO observed-proof preflight readiness and blocker state in the user-testable runtime status path without claiming a VM boot, reboot/recovery, or managed runtime rejoin was observed.
-  - Validation plan: attach `agentos-vm-iso-proof-preflight.v1` to `phase2-run --message "status"`, keep VM/ISO preflight, CLI, and golden smokes passing without launching a VM or building an ISO, and preserve explicit non-claims for observed VM boot, reboot/recovery, managed runtime rejoin, destructive actions, and ISO freshness.
-  - Exit condition: complete when AgentOS status exposes VM/ISO proof path readiness, planned observation commands, required proof blockers, and false observed-proof flags while automated smokes avoid real VM/ISO execution.
-  - Active task: P2-72.
+  - Exit condition: completed by `agentos-vm-iso-proof-preflight.v1` attached to `phase2-run --message "status"`, VM/ISO preflight/CLI/golden smoke coverage, and README/TASKS/roadmap updates preserving observed VM boot, reboot/recovery, managed runtime rejoin, destructive action, and ISO freshness non-claims.
+  - Closed issue: #159.
+  - Completed tasks: P2-72 and P2-73.
   - Residual blockers: observed VM/ISO proof requires a real VM run and sanitized evidence attached to a lifecycle issue; ISO build freshness, boot, reboot/recovery, and managed runtime rejoin remain unclaimed until observed.
   - Advances: OS-native runtime defaults, recovery, runtime proof truthfulness.
-
-## Completed Completion Epics
 
 - `gmail-readonly-live-readiness-status-epic` — [EPIC: Gmail live read-only readiness status](https://github.com/Jongtae/agentos/issues/154)
   - Milestone: Phase 2: Local-first Codex runtime loop

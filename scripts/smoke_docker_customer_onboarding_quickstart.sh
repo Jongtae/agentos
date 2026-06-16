@@ -51,9 +51,11 @@ for term in required_operations_terms:
     assert term in operations, term
 
 assert "docker-first-customer-onboarding-proof-epic" in roadmap
-assert "P2-94" in roadmap
+assert "P2-95" in roadmap
 assert "Docker-first customer onboarding proof epic is active" in tasks
 assert "scripts/smoke_docker_customer_onboarding_quickstart.sh" in tasks
+assert "/api/onboarding" in acceptance
+assert "Docker Onboarding Status" in readme
 PY
 
 echo "docker customer onboarding quickstart smoke: PASS"

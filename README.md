@@ -195,6 +195,7 @@ flowchart LR
 | Track | Status | Runtime impact |
 | --- | --- | --- |
 | Docker runtime preview | Developer/demo proof path | Makes the managed runtime easy to try without claiming boot ownership. |
+| Docker Onboarding Status | Active Docker product surface | Shows quickstart steps, preview entrypoints, validation smokes, and proof non-claims from the running preview. |
 | Runtime Home | Active Docker product surface | Presents runtime readiness, Work Inbox, Activity Timeline, Recovery Center, and Evidence Dashboard states in customer language. |
 | Work Inbox | Active Docker product surface | Presents fixture, Maildir, Gmail, and Calendar as read-first inbox sources with explicit live-proof blockers and mutation non-claims. |
 | Activity Timeline | Active Docker product surface | Shows customer-readable runtime events and user-visible records without claiming external app execution or live-provider proof. |

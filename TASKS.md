@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-94] Add Docker onboarding quickstart smoke`
+- `[P2-95] Add Docker onboarding status endpoint`
 
 Runtime impact statement:
 
-- This task adds a Docker customer onboarding quickstart smoke so README, Docker acceptance, public preview operations, roadmap, and task state keep the same public try path and proof boundaries.
+- This task adds a Docker onboarding status endpoint so customers and smokes can inspect the public quickstart steps, preview entrypoints, and proof non-claims from the running preview itself.
 
 Current autonomous completion loop:
 
@@ -108,6 +108,7 @@ Recommended Phase 2 tasks:
 - Docker preview now exposes `agentos-product-layer-evidence-dashboard.v1` through `/api/evidence` and the browser Evidence Dashboard so customers can distinguish observed Docker/local proof from explicit non-claims.
 - Docker Product Layer completion is guarded by `scripts/smoke_docker_product_layer_completion.sh`, which verifies Runtime Home, Work Inbox, Activity Timeline, Capability Store, Approval Center, Observed Proof Uploader, Release Trust Panel, Attestation Status, Recovery Center, and Evidence Dashboard together.
 - Docker customer onboarding is guarded by `scripts/smoke_docker_customer_onboarding_quickstart.sh`, which keeps README quickstart, Docker acceptance, public preview operations, roadmap, and task state aligned around the Docker-first public try path.
+- Docker preview now exposes `agentos-product-layer-onboarding-status.v1` through `/api/onboarding` and the browser Docker Onboarding Status panel without claiming VM/ISO, live OAuth, browser, release, external mutation, or hardware attestation proof.
 - Gmail setup is exposed through `agentos-kernelctl gmail-setup --serve-http`; live Gmail remains read-only and requires explicit user OAuth credentials.
 - Phase 2 closeout is recorded in `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`.
 - Practical local/Docker-safe proof is aggregated by `scripts/smoke_phase2_golden_demo.sh`.
@@ -144,6 +145,7 @@ Recommended Phase 2 tasks:
 - The first broader app/inbox promotion slice is `docs/architecture/inbox-workflow-promotion-boundary.md`, smoke-tested by `scripts/smoke_inbox_workflow_promotion_boundary.sh`.
 - The Docker-first customer onboarding proof epic is active for this Phase 2 slice; it must keep the public README quickstart, Docker acceptance, preview operations, and roadmap state aligned before expanding customer-facing public try paths.
 - The first Docker-first customer onboarding slice is `scripts/smoke_docker_customer_onboarding_quickstart.sh`, included in the Phase 2 golden demo runner so onboarding drift is caught with the practical Docker/local proof set.
+- P2-95 promotes Docker Onboarding Status into the running preview through `/api/onboarding`, so customers can inspect quickstart steps, entrypoints, validation smokes, and non-claims from the product surface itself.
 - The verified boot and attestation proof boundary epic is closed for this Phase 2 slice; future verified boot work should require observed VM or hardware evidence before claiming Secure Boot, TPM measured boot, PCR/event-log, IMA, or hardware attestation proof.
 - The first verified boot slice is `docs/architecture/verified-boot-attestation-proof-boundary.md`, smoke-tested by `scripts/smoke_verified_boot_attestation_boundary.sh`.
 - `phase2-run --message "status"` attaches the verified boot/attestation non-claim artifact so boot-chain trust proof remains visibly separate from local runtime proof.

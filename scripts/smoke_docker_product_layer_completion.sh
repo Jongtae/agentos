@@ -36,6 +36,7 @@ done
 curl -fsS "http://127.0.0.1:$PORT/healthz" >/dev/null
 curl -fsS "http://127.0.0.1:$PORT/" > "$TMP_DIR/home.html"
 curl -fsS "http://127.0.0.1:$PORT/api/product" > "$TMP_DIR/product.json"
+curl -fsS "http://127.0.0.1:$PORT/api/onboarding" > "$TMP_DIR/onboarding.json"
 curl -fsS "http://127.0.0.1:$PORT/api/work-inbox" > "$TMP_DIR/work-inbox.json"
 curl -fsS "http://127.0.0.1:$PORT/api/timeline" > "$TMP_DIR/timeline.json"
 curl -fsS "http://127.0.0.1:$PORT/api/capabilities" > "$TMP_DIR/capabilities.json"
@@ -54,8 +55,10 @@ from pathlib import Path
 root = Path(sys.argv[1])
 home = (root / "home.html").read_text()
 product = json.loads((root / "product.json").read_text())
+onboarding = json.loads((root / "onboarding.json").read_text())
 
 surfaces = {
+    "onboarding_status": ("onboarding.json", "agentos-product-layer-onboarding-status.v1", "Docker Onboarding Status"),
     "work_inbox": ("work-inbox.json", "agentos-product-layer-work-inbox.v1", "Work Inbox"),
     "activity_timeline": ("timeline.json", "agentos-product-layer-activity-timeline.v1", "Activity Timeline"),
     "capability_store": ("capabilities.json", "agentos-product-layer-capability-store.v1", "Capability Store"),
@@ -87,6 +90,8 @@ for key, (filename, schema, label) in surfaces.items():
 
 non_claims = {
     "boot_or_iso_proof_claimed": product["proof"]["boot_or_iso_proof_claimed"],
+    "onboarding_boot_or_iso": product["onboarding_status"]["proof"]["boot_or_iso_proof_claimed"],
+    "onboarding_live_oauth": product["onboarding_status"]["proof"]["live_oauth_claimed"],
     "work_inbox_live_oauth": product["work_inbox"]["proof"]["live_oauth_claimed"],
     "work_inbox_external_mutation": product["work_inbox"]["proof"]["external_mutation_claimed"],
     "timeline_external_app": product["activity_timeline"]["proof"]["external_app_execution_claimed"],
@@ -104,6 +109,7 @@ assert all(value is False for value in non_claims.values()), non_claims
 
 ready_claims = {
     "runtime_home": product["proof"]["customer_facing_summary_ready"],
+    "onboarding_status": product["onboarding_status"]["proof"]["customer_onboarding_ready"],
     "work_inbox": product["work_inbox"]["proof"]["customer_facing_summary_ready"],
     "activity_timeline": product["activity_timeline"]["proof"]["customer_facing_timeline_ready"],
     "capability_store": product["capability_store"]["proof"]["customer_facing_capability_store_ready"],

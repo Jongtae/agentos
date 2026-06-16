@@ -20,6 +20,7 @@ from kernel.intent_dispatch import build_intent_dispatch_report, classify_intent
 from kernel.operator_activity import append_activity_event, build_activity_feed_payload
 from kernel_gmail_setup import build_gmail_read_report, build_gmail_status_report
 from kernel_phase2_calendar_fixture import build_calendar_fixture_report
+from kernel_phase2_browser_fallback_contract import build_contract as build_browser_fallback_contract
 from kernel_phase2_capability_result import build_result as build_capability_permission_result
 from kernel_phase2_gmail_fixture import build_gmail_fixture_report
 from kernel_phase2_lifecycle_recovery import build_lifecycle_recovery_report
@@ -228,6 +229,21 @@ def run_phase2(
             capability_result = dispatch
             capability = str(dispatch.get("capability_executed", capability))
             response = str(dispatch.get("response", "")).strip()
+            if intent == "web_search_summary":
+                browser_contract = build_browser_fallback_contract(
+                    workspace_path,
+                    url=_browser_contract_url(prompt),
+                    allow_domains=allow_domains or None,
+                    interactive=_browser_contract_interactive(prompt),
+                    repeated_pattern=_browser_contract_repeated_pattern(prompt),
+                )
+                capability_result["browser_fallback"] = browser_contract
+                artifacts["browser_fallback_contract"] = str(
+                    browser_contract.get("artifacts", {}).get("latest_browser_fallback_contract_json", "")
+                )
+                for blocker in browser_contract.get("blockers", []):
+                    if isinstance(blocker, dict):
+                        blockers.append(blocker)
             if not dispatch.get("proof", {}).get("ok", False):
                 status = "failed"
 
@@ -346,6 +362,10 @@ def run_phase2(
                 intent == "lifecycle_recovery" and isinstance(capability_result.get("updater_state"), dict)
             ),
             "live_updater_executed": False,
+            "browser_fallback_contract_attached": bool(
+                intent == "web_search_summary" and isinstance(capability_result.get("browser_fallback"), dict)
+            ),
+            "live_browser_executed": False,
             "permission_checked": bool((permission_result.get("proof") or {}).get("permission_checked", False)),
             "outcome_checked": bool((permission_result.get("proof") or {}).get("outcome_checked", False)),
             "secrets_redacted": bool((permission_result.get("proof") or {}).get("secrets_redacted", False)),
@@ -410,6 +430,24 @@ def _query_from_prompt(prompt: str, *, fallback: str) -> str:
         if token in normalized:
             return token
     return fallback
+
+
+def _browser_contract_url(prompt: str) -> str:
+    words = str(prompt or "").split()
+    for word in words:
+        if word.startswith("https://") or word.startswith("http://"):
+            return word.rstrip(".,)")
+    return "https://example.com"
+
+
+def _browser_contract_interactive(prompt: str) -> bool:
+    normalized = str(prompt or "").lower()
+    return any(token in normalized for token in ("interactive", "login", "browser", "javascript", "js-heavy", "click"))
+
+
+def _browser_contract_repeated_pattern(prompt: str) -> bool:
+    normalized = str(prompt or "").lower()
+    return any(token in normalized for token in ("every time", "always", "반복", "매번", "routine"))
 
 
 def _lifecycle_action(prompt: str) -> str:

@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-43] Define browser fallback routing contract`
+- `[P2-45] Attach browser fallback routing to phase2 run`
 
 Runtime impact statement:
 
-- This task defines a smoke-verifiable browser fallback routing contract so AgentOS can prefer internal capabilities, allow bounded browser fallback, block external state, and identify capability graduation candidates.
+- This task attaches the browser fallback routing contract to `phase2-run` web/search requests so runtime results expose internal capability preference, browser fallback proof boundaries, and live-browser non-claims.
 
 Current autonomous completion loop:
 
@@ -114,6 +114,7 @@ Recommended Phase 2 tasks:
 - `phase2-run` lifecycle recovery should surface updater state artifacts for update, rollback, restart, and recovery prompts while keeping live updater and VM/ISO proof blocked until observed.
 - The browser fallback capability boundary epic is active; it should define when browser automation is allowed as fallback, when requests stay blocked, and which repeated web/app patterns should graduate into internal AgentOS capabilities.
 - The first browser fallback slice is `agentos-phase2-browser-fallback-contract.v1`, which classifies internal capability, allowed fallback, blocked external state, and capability graduation paths without launching a browser.
+- `phase2-run` web/search requests should attach the browser fallback contract artifact and keep live browser proof unclaimed unless a separate observed browser acceptance run exists.
 
 ## Validation Standards
 

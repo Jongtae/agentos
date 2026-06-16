@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-48] Add public preview smoke to golden runner`
+- `[P2-49] Record public preview operations epic completion`
 
 Runtime impact statement:
 
-- This task adds the public preview operations smoke to the Phase 2 golden demo runner so preview proof, blocker, and non-claim checks are part of the repeatable acceptance path.
+- This task closes the public preview operations epic after its checklist and golden-runner smoke integration are recorded, so the completion loop can return to the roadmap before selecting the next milestone-backed track.
 
 Current autonomous completion loop:
 
@@ -115,7 +115,7 @@ Recommended Phase 2 tasks:
 - The browser fallback capability boundary epic is closed for this Phase 2 slice; future browser fallback work should return to the roadmap and open a new task only when it adds observed fallback proof or graduates a repeated pattern into an internal AgentOS capability.
 - The first browser fallback slice is `agentos-phase2-browser-fallback-contract.v1`, which classifies internal capability, allowed fallback, blocked external state, and capability graduation paths without launching a browser.
 - `phase2-run` web/search requests should attach the browser fallback contract artifact and keep live browser proof unclaimed unless a separate observed browser acceptance run exists.
-- The public preview operations epic is active; it should define the Docker/local preview promotion gate, manual proof blockers, and release non-claims before broader public preview or distribution work continues.
+- The public preview operations epic is closed for this Phase 2 slice; future preview work should return to the roadmap and open a new task only when it adds observed proof, release packaging, or a new promotion decision surface.
 - The first public preview operations slice is `docs/operations/public-preview-operations.md`, smoke-tested by `scripts/smoke_public_preview_operations.sh`.
 - The public preview operations smoke is included in the Phase 2 golden demo runner so preview promotion gates remain part of practical local/Docker-safe proof.
 

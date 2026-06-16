@@ -7,51 +7,27 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SCHEMA_VERSION = "agentos-phase2-capability-result.v1"
+ROOT_DIR = Path(__file__).resolve().parents[1]
+REGISTRY_PATH = ROOT_DIR / "docs" / "architecture" / "capability-permission-registry.json"
 
-PERMISSION_LEVELS = (
-    "safe_read",
-    "safe_write_user_owned",
-    "external_read",
-    "external_write_confirmed",
-    "lifecycle_confirmed",
-    "destructive_blocked",
-    "unsupported",
-)
 
-OUTCOMES = (
-    "completed",
-    "blocked_needs_setup",
-    "blocked_needs_confirmation",
-    "blocked_unsupported",
-    "failed_recoverable",
-)
+def load_permission_registry(path: str | Path = REGISTRY_PATH) -> dict:
+    return json.loads(Path(path).read_text(encoding="utf-8"))
 
+
+PERMISSION_REGISTRY = load_permission_registry()
+PERMISSION_LEVELS = tuple(PERMISSION_REGISTRY["permission_levels"])
+OUTCOMES = tuple(PERMISSION_REGISTRY["outcomes"])
 DEFAULT_PERMISSION_BY_CAPABILITY = {
-    "runtime_status": "safe_read",
-    "setup_help": "safe_read",
-    "local_workspace_search": "safe_read",
-    "record_lookup": "safe_read",
-    "user_owned_record_write": "safe_write_user_owned",
-    "web_search_summary": "external_read",
-    "gmail_read_or_draft": "external_read",
-    "gmail_fixture": "external_read",
-    "gmail_read": "external_read",
-    "gmail_search": "external_read",
-    "gmail_summarize": "external_read",
-    "gmail_draft_local": "safe_write_user_owned",
-    "gmail_send": "destructive_blocked",
-    "gmail_delete": "destructive_blocked",
-    "gmail_archive": "destructive_blocked",
-    "calendar_readonly": "external_read",
-    "lifecycle_recovery": "lifecycle_confirmed",
-    "restart_runtime": "lifecycle_confirmed",
-    "reboot_system": "lifecycle_confirmed",
-    "shutdown_system": "lifecycle_confirmed",
+    capability: str(declaration.get("permission_level", "unsupported"))
+    for capability, declaration in (PERMISSION_REGISTRY.get("capabilities") or {}).items()
+    if isinstance(declaration, dict)
 }
 
 
 def _default_permission(capability: str) -> str:
-    return DEFAULT_PERMISSION_BY_CAPABILITY.get(capability, "unsupported")
+    fallback = str((PERMISSION_REGISTRY.get("defaults") or {}).get("unknown_capability_permission_level", "unsupported"))
+    return DEFAULT_PERMISSION_BY_CAPABILITY.get(capability, fallback)
 
 
 def _default_outcome(status: str, permission_level: str, requires_setup: bool) -> str:
@@ -128,6 +104,7 @@ def build_result(
             "ok": status in {"ok", "blocked", "degraded", "failed"},
             "permission_checked": permission_level in PERMISSION_LEVELS,
             "outcome_checked": outcome in OUTCOMES,
+            "registry_checked": capability in DEFAULT_PERMISSION_BY_CAPABILITY or permission_level == "unsupported",
             "blocked": blocked,
             "secrets_redacted": True,
         },

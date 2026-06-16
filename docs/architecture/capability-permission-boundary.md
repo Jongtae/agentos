@@ -35,6 +35,9 @@ Every capability should declare:
 Adapters may expose richer internal state, but public activity, records, and
 acceptance output should use this shared declaration vocabulary.
 
+The seed registry is stored in
+`docs/architecture/capability-permission-registry.json`.
+
 ## Default Rules
 
 AgentOS may run without confirmation when a capability is:
@@ -109,6 +112,6 @@ The boundary is acceptable when smokes or fixtures can show:
   secrets
 
 `scripts/smoke_phase2_capability_result.sh` is the seed executable check for
-these outcomes. `scripts/smoke_phase2_run_cli.sh` verifies that the same
-permission and outcome fields are visible through the user-testable Phase 2 CLI
-surface and user-owned records.
+the registry and these outcomes. `scripts/smoke_phase2_run_cli.sh` verifies
+that the same permission and outcome fields are visible through the
+user-testable Phase 2 CLI surface and user-owned records.

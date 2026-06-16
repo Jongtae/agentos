@@ -1,0 +1,46 @@
+{
+  "schema_version": "agentos-capability-permission-registry.v1",
+  "permission_levels": [
+    "safe_read",
+    "safe_write_user_owned",
+    "external_read",
+    "external_write_confirmed",
+    "lifecycle_confirmed",
+    "destructive_blocked",
+    "unsupported"
+  ],
+  "outcomes": [
+    "completed",
+    "blocked_needs_setup",
+    "blocked_needs_confirmation",
+    "blocked_unsupported",
+    "failed_recoverable"
+  ],
+  "capabilities": {
+    "runtime_status": {"permission_level": "safe_read"},
+    "setup_help": {"permission_level": "safe_read"},
+    "local_workspace_search": {"permission_level": "safe_read"},
+    "record_lookup": {"permission_level": "safe_read"},
+    "user_owned_record_write": {"permission_level": "safe_write_user_owned"},
+    "web_search_summary": {"permission_level": "external_read"},
+    "gmail_read_or_draft": {"permission_level": "external_read"},
+    "gmail_fixture": {"permission_level": "external_read"},
+    "gmail_read": {"permission_level": "external_read"},
+    "gmail_search": {"permission_level": "external_read"},
+    "gmail_summarize": {"permission_level": "external_read"},
+    "gmail_draft_local": {"permission_level": "safe_write_user_owned"},
+    "gmail_send": {"permission_level": "destructive_blocked"},
+    "gmail_delete": {"permission_level": "destructive_blocked"},
+    "gmail_archive": {"permission_level": "destructive_blocked"},
+    "calendar_readonly": {"permission_level": "external_read"},
+    "lifecycle_recovery": {"permission_level": "lifecycle_confirmed"},
+    "restart_runtime": {"permission_level": "lifecycle_confirmed"},
+    "reboot_system": {"permission_level": "lifecycle_confirmed"},
+    "shutdown_system": {"permission_level": "lifecycle_confirmed"}
+  },
+  "defaults": {
+    "unknown_capability_permission_level": "unsupported",
+    "secret_material_redacted": true,
+    "destructive_action_executed_by_default": false
+  }
+}

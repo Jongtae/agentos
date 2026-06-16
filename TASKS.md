@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-35] Surface capability permission outcomes in phase2-run`
+- `[P2-36] Add capability permission registry contract`
 
 Runtime impact statement:
 
-- This task surfaces smoke-verified capability permission levels, outcomes, recovery, and secret-redaction proof through the user-testable `phase2-run` CLI and user-owned records.
+- This task moves Phase 2 capability permission declarations into a public registry contract so future adapters must declare permission level, blocking posture, and secret defaults before runtime expansion.
 
 Current autonomous completion loop:
 
@@ -107,6 +107,7 @@ Recommended Phase 2 tasks:
 - VM/ISO proof remains an explicit blocker until a VM run is observed and recorded.
 - Capability result smokes now enforce permission levels and blocked outcomes for safe local reads, missing external setup, and destructive unsupported requests.
 - `phase2-run` should expose permission level, outcome, recovery, and secret-redaction proof in JSON output and user-owned records.
+- Capability permission declarations should be backed by `docs/architecture/capability-permission-registry.json`.
 
 ## Validation Standards
 
@@ -135,6 +136,7 @@ python3 scripts/cleanup_build_artifacts.py --delete --json
 - `docs/architecture/docker-runtime-preview-boundary.md`
 - `docs/architecture/intent-classification-contract.md`
 - `docs/architecture/capability-permission-boundary.md`
+- `docs/architecture/capability-permission-registry.json`
 - `docs/architecture/user-owned-runtime-data-boundary.md`
 - `docs/acceptance/phase2-golden-runtime-loop.md`
 - `docs/acceptance/docker-runtime-preview.md`

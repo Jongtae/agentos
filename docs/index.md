@@ -21,6 +21,7 @@ large build outputs are not included.
 - `docs/architecture/docker-runtime-preview-boundary.md` - Docker developer/demo proof boundary
 - `docs/architecture/intent-classification-contract.md` - Phase 2 prompt intent contract
 - `docs/architecture/capability-permission-boundary.md` - capability approval, denial, record, and recovery boundary
+- `docs/architecture/capability-permission-registry.json` - seed permission declarations for Phase 2 capabilities
 - `docs/architecture/calendar-readonly-capability-contract.md` - read-only Calendar fixture capability boundary
 - `docs/architecture/user-owned-runtime-data-boundary.md` - local-first user data ownership boundary
 - `docs/acceptance/docker-runtime-preview.md` - Docker-first runtime preview acceptance

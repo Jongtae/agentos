@@ -1,6 +1,6 @@
 # AgentOS Next Roadmap
 
-Status: Docker-first Phase 2 preview in progress
+Status: Phase 2 closeout recorded
 
 ## Phase 1 Closed
 
@@ -46,9 +46,8 @@ The detailed Phase 2 roadmap is tracked in
    - Detailed acceptance is tracked in `docs/acceptance/phase2-golden-runtime-loop.md`.
 
 2. **Docker runtime preview**
-   - Docker is the primary public try path for the AgentOS runtime today.
-   - It should expose `docker compose up` and `http://localhost:8787`.
-   - It proves the runtime loop without claiming boot, installer, VM recovery, or ISO freshness proof.
+   - Docker should be a developer/demo runtime preview, not the product target.
+   - It should prove the runtime loop without claiming boot, installer, VM recovery, or ISO freshness proof.
 
 3. **User-owned runtime data**
    - Shared folders and bind mounts should expose user-owned records, outputs, logs, diagnostics, and acceptance artifacts.
@@ -69,15 +68,61 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Later Tracks
 
-- live Gmail OAuth read/search/draft proof with explicit user consent
-- VM/ISO proof for boot, recovery, and managed Codex session rejoin
-- calendar read-only capability candidate
+- live Gmail OAuth read/search/draft observed proof after manual acceptance pack
+- VM/ISO observed proof for boot, recovery, and managed Codex session rejoin after preflight
+- calendar read-only live adapter candidate after fixture-backed contract
 - verified boot and hardware attestation
 - updater hardening
 - broader app/inbox ecosystem
 - richer browser fallback
 - distribution packaging
 - public preview operations
+
+## Active Completion Epics
+
+- `capability-permission-boundary-epic` — [EPIC: Capability permission boundary](https://github.com/Jongtae/agentos/issues/66)
+  - Milestone: Phase 2: Local-first Codex runtime loop
+  - Completion goal: define how AgentOS declares, approves, denies, narrates, and records OS-native capability access before expanding live adapters.
+  - Exit condition: the epic has milestone alignment, validation plan, explicit blocker handling, and a first safe contract task identified.
+  - Advances: capability ownership, OS-native runtime defaults, runtime proof truthfulness.
+
+## Autonomous Completion Loop
+
+The recurring completion loop should protect the current runtime proof and also
+move AgentOS toward completion. It runs every 15 minutes and starts by comparing
+README, PRD, TASKS, this roadmap, and GitHub issue/milestone state before
+choosing work.
+
+- keep validating only when no safe forward-progress task exists
+- create or continue a milestone-backed epic when the roadmap has a real gap
+- open the next small issue for a safe completion track inside that epic
+- when no safe task candidate exists, promote an uncovered Later Track or
+  README completion track into a missing-epic candidate before falling back to
+  status-only validation
+- record an explicit blocker when the next proof needs credentials, a VM, or
+  external state
+- hand off when the loop is misaligned with the runtime-first product direction
+
+Every epic must define:
+
+- the milestone it advances
+- the completion goal
+- the validation plan
+- the exit condition
+- the rule for deciding whether to continue follow-up work or return to the
+  roadmap for the next epic
+
+If roadmap changes require product or architecture judgment, the loop should
+research primary or credible external sources, summarize the evidence, and
+translate that evidence into milestone, epic, and exit-condition changes before
+implementation begins.
+
+Heavy smoke checks should not become the product motion. ISO smoke is limited
+to at most once per calendar day unless ISO/build code changed or a maintainer
+explicitly requests it.
+
+The direction judge must not claim live Gmail OAuth or VM/ISO proof unless those
+runs are actually observed.
 
 ## Current Source Of Truth
 

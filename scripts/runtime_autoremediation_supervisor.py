@@ -33,6 +33,8 @@ def main() -> int:
         cmd.append("--apply")
     else:
         cmd.append("--dry-run")
+    if args.gate_project_direction:
+        cmd.append("--gate-project-direction")
 
     import subprocess
 
@@ -74,6 +76,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--workspace", default="./workspaces/default")
     parser.add_argument("--trace-file", default="")
     parser.add_argument("--now-epoch", type=int, default=None)
+    parser.add_argument(
+        "--gate-project-direction",
+        action="store_true",
+        help="Block apply and surface governance handoff/hold when project direction drifts.",
+    )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true")
     mode.add_argument("--apply", action="store_true")

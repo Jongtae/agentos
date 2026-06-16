@@ -70,6 +70,7 @@ FIRST_RUN_SUMMARY_CMD="${AGENTOS_KERNEL_FIRST_RUN_SUMMARY_CMD:-$ROOT_DIR/scripts
 VM_E2E_PROOF_CMD="${AGENTOS_KERNEL_VM_E2E_PROOF_CMD:-$ROOT_DIR/scripts/kernel_vm_e2e_proof.py}"
 VM_E2E_SCENARIO_CMD="${AGENTOS_KERNEL_VM_E2E_SCENARIO_CMD:-$ROOT_DIR/scripts/kernel_vm_e2e_scenario.py}"
 VM_UTM_OBSERVE_CMD="${AGENTOS_KERNEL_VM_UTM_OBSERVE_CMD:-$ROOT_DIR/scripts/vm_utmctl_observation.py}"
+VM_ISO_PREFLIGHT_CMD="${AGENTOS_KERNEL_VM_ISO_PREFLIGHT_CMD:-$ROOT_DIR/scripts/kernel_vm_iso_proof_preflight.py}"
 POLICY_CORRELATION_CMD="${AGENTOS_KERNEL_POLICY_CORRELATION_CMD:-$ROOT_DIR/scripts/kernel_policy_evidence_report.py}"
 BROKER_STATUS_CMD="${AGENTOS_KERNEL_BROKER_STATUS_CMD:-$ROOT_DIR/scripts/kernel_broker_status.py}"
 EVIDENCE_CMD="${AGENTOS_KERNEL_EVIDENCE_CMD:-$ROOT_DIR/scripts/kernel_operator_evidence.py}"
@@ -280,7 +281,7 @@ Usage:
   agentos-kernelctl research-workflow [--workspace <path>] [--message-text <text>] [--chat-id <id>] [--request-id <id>] [--message-id <id>] [--session-id <id>] [--allow-domain <domain>] [--send] [--output <path>] [--json]
   agentos-kernelctl activity-feed [--workspace <path>] [--limit <N>] [--output <path>] [--json]
   agentos-kernelctl intent-dispatch [--workspace <path>] [--source telegram|operator] --message <text> [--chat-id <id>] [--request-id <id>] [--message-id <id>] [--session-id <id>] [--allow-domain <domain>] [--send] [--output <path>] [--json]
-  agentos-kernelctl phase2-run [--workspace <path>] [--user-root <path>] --message <text> [--gmail-fixture <path>] [--gmail-live] [--gmail-credentials <path>] [--gmail-token <path>] [--gmail-mock-response <path>] [--allow-domain <domain>] [--output <path>] [--json]
+  agentos-kernelctl phase2-run [--workspace <path>] [--user-root <path>] --message <text> [--gmail-fixture <path>] [--calendar-fixture <path>] [--gmail-live] [--gmail-credentials <path>] [--gmail-token <path>] [--gmail-mock-response <path>] [--allow-domain <domain>] [--output <path>] [--json]
   agentos-kernelctl gmail-setup [--workspace <path>] [--credentials <path>] [--credentials-path <path>] [--token-path <path>] [--authorize] [--serve-http] [--background] [--host <host>] [--display-host <host>] [--port <port>] [--timeout-sec <sec>] [--url-file <path>] [--output <path>] [--json]
   agentos-kernelctl gmail-status [--workspace <path>] [--credentials-path <path>] [--token-path <path>] [--output <path>] [--json]
   agentos-kernelctl gmail-read [--workspace <path>] [--query <text>] [--credentials-path <path>] [--token-path <path>] [--mock-response <path>] [--output <path>] [--json]
@@ -305,6 +306,7 @@ Usage:
   agentos-kernelctl vm-e2e-scenario [--workspace <path>] [--session-id <id>] [--output <path>] [--json]
   agentos-kernelctl vm-e2e-proof [--workspace <path>] [--session-id <id>] [--output <path>] [--json]
   agentos-kernelctl vm-utm-observe --vm <identifier> [--workspace <path>] [--session-id <id>] [--output <path>] [--json]
+  agentos-kernelctl vm-iso-proof-preflight [--workspace <path>] [--vm <identifier>] [--iso-path <path>] [--output <path>] [--json]
   agentos-kernelctl events [--workspace <path>] [--source <event-source>] [--kind <event-kind>] [--unit <systemd-unit>] [--limit <N>] [--lineage] [--correlation-key <key>] [--correlation-value <value>] [--json]
   agentos-kernelctl sessions [--workspace <path>] [--session-id <id>] [--limit <N>] [--json]
   agentos-kernelctl policy-correlation [--workspace <path>] [--json]
@@ -391,6 +393,7 @@ llm_setup_openai_api_key=""
 ask_message=""
 phase2_user_root="${AGENTOS_USER_DATA_ROOT:-$ROOT_DIR/agentos-data/user}"
 phase2_gmail_fixture=""
+phase2_calendar_fixture=""
 phase2_gmail_live=0
 gmail_credentials=""
 gmail_credentials_path=""
@@ -400,6 +403,7 @@ gmail_mock_response=""
 gmail_authorize=0
 intent_source="operator"
 vm_identifier=""
+vm_iso_path=""
 policy_enable=0
 policy_disable=0
 policy_status=0
@@ -601,6 +605,10 @@ while [ "$#" -gt 0 ]; do
       shift
       phase2_gmail_fixture="${1:-}"
       ;;
+    --calendar-fixture)
+      shift
+      phase2_calendar_fixture="${1:-}"
+      ;;
     --gmail-live)
       phase2_gmail_live=1
       ;;
@@ -700,6 +708,10 @@ while [ "$#" -gt 0 ]; do
     --vm)
       shift
       vm_identifier="${1:-}"
+      ;;
+    --iso-path)
+      shift
+      vm_iso_path="${1:-}"
       ;;
     --lineage)
       event_lineage=1
@@ -3258,6 +3270,9 @@ PY
     if [ -n "$phase2_gmail_fixture" ]; then
       phase2_args+=(--gmail-fixture "$phase2_gmail_fixture")
     fi
+    if [ -n "$phase2_calendar_fixture" ]; then
+      phase2_args+=(--calendar-fixture "$phase2_calendar_fixture")
+    fi
     if [ "$phase2_gmail_live" -eq 1 ]; then
       phase2_args+=(--gmail-live)
     fi
@@ -4096,6 +4111,26 @@ PY
       observe_args+=(--json)
     fi
     exec "$VM_UTM_OBSERVE_CMD" "${observe_args[@]}"
+    ;;
+  vm-iso-proof-preflight)
+    if [ ! -x "$VM_ISO_PREFLIGHT_CMD" ] && ! command -v "$VM_ISO_PREFLIGHT_CMD" >/dev/null 2>&1; then
+      echo "vm iso proof preflight tool not found: $VM_ISO_PREFLIGHT_CMD"
+      exit 1
+    fi
+    preflight_args=(--workspace "$workspace")
+    if [ -n "$vm_identifier" ]; then
+      preflight_args+=(--vm-name "$vm_identifier")
+    fi
+    if [ -n "$vm_iso_path" ]; then
+      preflight_args+=(--iso-path "$vm_iso_path")
+    fi
+    if [ -n "$out_dir" ]; then
+      preflight_args+=(--output "$out_dir")
+    fi
+    if [ "$as_json" -eq 1 ]; then
+      preflight_args+=(--json)
+    fi
+    exec "$VM_ISO_PREFLIGHT_CMD" "${preflight_args[@]}"
     ;;
   events)
     if [ ! -x "$EVENTS_CMD" ] && ! command -v "$EVENTS_CMD" >/dev/null 2>&1; then

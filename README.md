@@ -163,6 +163,27 @@ Useful entry points:
 - `src/kernel/intent_dispatch.py` — intent routing
 - `src/kernel/operator_activity.py` — activity feed
 
+## Roadmap
+
+Phase 1 closed as a public prototype. Phase 2 closed as the first
+local-first runtime loop: a prompt can enter AgentOS, be classified, run a
+bounded capability, narrate activity, write user-owned records, and recover
+clearly when live credentials or VM proof are missing.
+
+Current roadmap work is governed by completion tracks rather than repeated
+smoke-only hardening:
+
+- observed VM/ISO proof for boot, recovery, and managed runtime rejoin
+- live Gmail read-only proof with explicit user OAuth credentials
+- calendar and broader inbox capabilities that remain read-only until proven
+- capability ownership, permission boundaries, and OS-native runtime defaults
+- public preview operations, updater hardening, and distribution packaging
+
+Docker remains a developer/demo runtime preview, not the product target or a
+replacement for observed boot/VM proof.
+
+See [Next Roadmap](docs/next-roadmap.md).
+
 ## Limitations
 
 AgentOS is not yet:
@@ -190,19 +211,6 @@ Never commit:
 
 Docker and local preview paths run in degraded mode without credentials.
 Telegram and hosted LLM paths require user-provided runtime secrets.
-
-## Roadmap
-
-Near term:
-
-- make Docker the fastest public demo path
-- improve LLM and Telegram setup
-- make activity narration clearer
-- stabilize Telegram receiver behavior
-- improve lifecycle/recovery UX
-- bring Docker-learned UX back into the ISO path
-
-See [docs/next-roadmap.md](docs/next-roadmap.md).
 
 ## Docs
 

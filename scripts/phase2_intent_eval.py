@@ -25,6 +25,7 @@ LEGACY_TO_PHASE2 = {
     "memory_note": "record_lookup",
     "setup_help": "setup_help",
     "gmail_read_or_draft": "gmail_read_or_draft",
+    "calendar_readonly": "calendar_readonly",
     "record_lookup": "record_lookup",
     "lifecycle_recovery": "lifecycle_recovery",
     "unknown_needs_clarification": "unknown_or_unsupported",

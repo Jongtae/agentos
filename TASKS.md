@@ -15,11 +15,24 @@ Current public milestone:
 
 Current task:
 
-- `EPIC: Docker-first AgentOS runtime preview` ([#48](https://github.com/Jongtae/agentos/issues/48))
+- `[P2-32] Register capability permission epic state`
 
 Runtime impact statement:
 
-- This work makes `docker compose up` the lowest-friction public way to try AgentOS runtime status, prompt routing, activity/proof output, and optional Telegram polling preview while preserving the ISO as the long-term OS form factor.
+- This task records the newly created capability permission boundary epic in the roadmap source of truth so the autonomous completion loop advances into that epic instead of repeatedly proposing the same missing epic.
+
+Current autonomous completion loop:
+
+- A Codex heartbeat automation runs every 15 minutes against this thread.
+- Each pass starts from the repo startup order, compares README, PRD, TASKS, roadmap, and GitHub milestone/issue state, runs the roadmap direction judge, and decides whether to continue an epic, create a missing milestone-backed epic, or defer because a blocker requires user/external input.
+- Every epic must declare a completion goal, roadmap milestone alignment, validation plan, and exit condition before implementation work proceeds.
+- When the direction judge finds no safe task candidate, it should inspect uncovered completion tracks and propose the next missing epic candidate before falling back to lightweight status checks.
+- Created epic candidates must be registered in the roadmap state before the loop chooses the next task, so repeated passes do not create duplicate epics.
+- Roadmap changes that require product or architecture judgment should be backed by primary or credible external research before they become milestone, epic, or exit-condition updates.
+- A direction verdict of `accept_with_risk` means the loop may finish lightweight validation, but should not repeat heavy smoke-only passes when no safe forward-progress candidate exists.
+- A direction verdict of `reject` means autonomous apply work should stop and hand off or open a repair issue before continuing.
+- ISO smoke is limited to at most once per calendar day unless ISO/build code changed or the user explicitly requests it.
+- Live Gmail OAuth and observed VM/ISO proof remain explicit blockers until a tester provides credentials or a VM run can be observed and recorded.
 
 ## Phase 1 Closeout Truth
 
@@ -86,6 +99,11 @@ Recommended Phase 2 tasks:
 - Gmail setup is exposed through `agentos-kernelctl gmail-setup --serve-http`; live Gmail remains read-only and requires explicit user OAuth credentials.
 - Phase 2 closeout is recorded in `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`.
 - Practical local/Docker-safe proof is aggregated by `scripts/smoke_phase2_golden_demo.sh`.
+- A 15-minute roadmap-governed completion loop is active as an operational loop that compares source-of-truth docs, GitHub work state, and roadmap milestones before deciding whether to create or continue an epic.
+- Roadmap direction judging is part of that loop so stable Phase 2 validation can promote the next safe completion task instead of becoming the whole product motion.
+- Calendar read-only now has a fixture-backed contract and smoke path; live Calendar OAuth remains future work until explicit credentials and adapter design exist.
+- VM/ISO proof now has a preflight smoke and blocker contract; observed boot, reboot/recovery, and managed runtime rejoin still require a real VM run before signoff.
+- Gmail live read-only proof now has a manual acceptance pack and blocker capture; automated smokes still avoid real user credentials.
 - VM/ISO proof remains an explicit blocker until a VM run is observed and recorded.
 
 ## Validation Standards
@@ -120,3 +138,7 @@ python3 scripts/cleanup_build_artifacts.py --delete --json
 - `docs/acceptance/phase2-intent-eval.json`
 - `docs/roadmap/phase2-local-first-runtime-loop.md`
 - `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`
+- `.agents/roadmap-direction-judge.md`
+- `docs/architecture/calendar-readonly-capability-contract.md`
+- `docs/acceptance/vm-iso-proof-preflight.md`
+- `docs/acceptance/gmail-live-readonly-acceptance.md`

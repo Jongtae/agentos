@@ -17,11 +17,13 @@ python3 - "$DRY_JSON" <<'PY'
 import json
 import sys
 obj = json.loads(sys.argv[1])
-for field in ["scheduler", "cadence", "orchestration", "escalation", "state_updates"]:
+for field in ["scheduler", "cadence", "project_direction", "orchestration", "escalation", "state_updates"]:
     if field not in obj:
         raise SystemExit(f"missing field: {field}")
 if obj.get("execution_mode") != "dry-run":
     raise SystemExit("dry-run execution_mode mismatch")
+if (obj.get("project_direction", {}) or {}).get("verdict") not in {"accept", "accept_with_risk"}:
+    raise SystemExit("project direction verdict mismatch")
 PY
 
 # 2) Apply blocked by cadence interval => rc=3
@@ -52,7 +54,32 @@ if (obj.get("cadence", {}) or {}).get("reason") != "min_interval_not_elapsed":
     raise SystemExit("blocked cycle cadence reason mismatch")
 PY
 
-# 3) Apply eligible path => rc=0 + state writes
+# 3) Direction gate blocks apply when the roadmap judge reports risk.
+WS_GATE="$TMP_DIR/workspace-direction-gate"
+mkdir -p "$WS_GATE/artifacts"
+printf "{}\n" > "$WS_GATE/artifacts/runtime_trace.jsonl"
+printf "old\n" > "$WS_GATE/artifacts/runtime_trace.jsonl.1"
+
+set +e
+GATED_JSON="$(AGENTOS_SLO_MAX_RETENTION_PENDING=0 AGENTOS_TRACE_KEEP_ARCHIVES=0 python3 scripts/runtime_autoremediation_cycle.py --workspace "$WS_GATE" --trace-file "$WS_GATE/artifacts/runtime_trace.jsonl" --apply --now-epoch 2000 --scheduler-cooldown-sec 10 --cadence-min-interval-sec 10 --gate-project-direction)"
+GATED_RC=$?
+set -e
+
+if [ "$GATED_RC" -ne 3 ]; then
+  echo "expected direction-gated cycle rc=3, got $GATED_RC"
+  exit 1
+fi
+python3 - "$GATED_JSON" <<'PY'
+import json
+import sys
+obj = json.loads(sys.argv[1])
+if obj.get("execution_mode") != "dry-run":
+    raise SystemExit("direction-gated cycle should remain dry-run")
+if (obj.get("project_direction", {}) or {}).get("verdict") not in {"accept_with_risk", "reject"}:
+    raise SystemExit("expected project direction to block apply in current repeated hardening state")
+PY
+
+# 4) Apply eligible path without direction gate => rc=0 + state writes
 WS3="$TMP_DIR/workspace-eligible"
 mkdir -p "$WS3/artifacts"
 printf "{}\n" > "$WS3/artifacts/runtime_trace.jsonl"

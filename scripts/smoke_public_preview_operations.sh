@@ -47,8 +47,11 @@ for term in required_terms:
 
 assert "docs/operations/public-preview-operations.md" in index
 assert "public-preview-operations-epic" in roadmap
-assert "[P2-47] Define public preview operations checklist" in tasks
+assert "[P2-48] Add public preview smoke to golden runner" in tasks
 assert "public preview operations epic is active" in tasks
+assert "scripts/smoke_public_preview_operations.sh" in (
+    Path("scripts/phase2_golden_demo_runner.py").read_text(encoding="utf-8")
+)
 PY
 
 echo "public preview operations smoke: PASS"

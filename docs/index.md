@@ -42,6 +42,7 @@ large build outputs are not included.
 - `docs/acceptance/vm-iso-proof-preflight.md` - VM/ISO proof preflight and blocker contract
 - `docs/acceptance/gmail-live-readonly-acceptance.md` - live Gmail read-only manual proof and blocker capture
 - `docs/acceptance/calendar-live-readonly-acceptance.md` - live Calendar read-only manual proof and blocker capture
+- `docs/acceptance/browser-fallback-observed-acceptance.md` - browser fallback observed proof manual pack and blocker capture
 - `docs/roadmap/phase2-local-first-runtime-loop.md` - Phase 2 local-first runtime loop roadmap
 - `docs/reference/phase1-agentos-prototype-closeout-v1.md` - Phase 1 closeout and Phase 2 handoff
 - `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md` - Phase 2 proof and blocker closeout

@@ -80,9 +80,13 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
-- No active completion epic is selected. The next iteration should compare the
-  completed epic list, Later Tracks, README, TASKS, and GitHub issue state
-  before creating or continuing the next milestone-backed completion epic.
+- `browser-fallback-observed-proof-acceptance-epic` — [EPIC: Browser fallback observed proof acceptance](https://github.com/Jongtae/agentos/issues/179)
+  - Milestone: Phase 2: Local-first Codex runtime loop
+  - Completion goal: define and smoke-test a browser fallback observed-proof acceptance pack so AgentOS can accept a future user-approved browser fallback run without making browser automation the default runtime path or claiming unobserved live browser proof.
+  - Exit condition: complete when `docs/acceptance/browser-fallback-observed-acceptance.md`, `scripts/kernel_browser_fallback_observed_acceptance.py`, `scripts/smoke_browser_fallback_observed_acceptance_pack.sh`, golden runner integration, and README/TASKS/roadmap updates preserve browser fallback non-default behavior, mutation non-claims, and blocked/no-observed proof capture.
+  - Active task: P2-80.
+  - Residual blockers: real live browser fallback proof requires an explicit user-approved browser session and sanitized observed evidence; authenticated sites, destructive actions, and broad browser replacement remain unclaimed.
+  - Advances: mediation cost reduction, capability ownership, OS-native runtime defaults, runtime proof truthfulness.
 
 ## Completed Completion Epics
 

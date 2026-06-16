@@ -52,12 +52,13 @@ for term in required_terms:
 
 assert "docs/architecture/verified-boot-attestation-proof-boundary.md" in index
 assert "verified-boot-attestation-proof-boundary-epic" in roadmap
-assert "verified boot and attestation proof boundary epic is active" in tasks
+assert "verified boot and attestation proof boundary epic is closed" in tasks
 assert "Secure Boot, TPM measured boot, PCR/event-log, IMA" in roadmap
-assert "hardware attestation claims blocked" in tasks
+assert "hardware attestation proof" in tasks
 assert "scripts/smoke_verified_boot_attestation_boundary.sh" in tasks
 assert "verified boot/attestation non-claim artifact" in tasks
-assert "Runtime proof" in roadmap
+assert "Closed issue: #125" in roadmap
+assert "Completed tasks: P2-58, P2-59, and P2-61" in roadmap
 PY
 
 echo "verified boot attestation boundary smoke: PASS"

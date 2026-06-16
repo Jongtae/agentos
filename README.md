@@ -208,12 +208,12 @@ flowchart LR
 | Attestation Status | Active Docker product surface | Shows Secure Boot, TPM/PCR, event-log, IMA, and hardware attestation blockers without claiming Docker proves device trust. |
 | Recovery Center | Active Docker product surface | Turns VM/ISO, live OAuth, browser, release, attestation, and setup blockers into customer-facing recovery actions without claiming unobserved proof. |
 | Evidence Dashboard | Active Docker product surface | Separates observed Docker/local proof from explicit VM/ISO, live OAuth, browser, release, and attestation non-claims. |
-| Customer Proof Packet | Active Docker product surface | Summarizes completed Docker-local claims, validation commands, proof sources, next blockers, and explicit non-claims in one customer-readable packet. |
+| Customer Proof Packet | Active Docker product surface | Summarizes completed Docker-local claims, validation commands, proof sources, readiness checks, next blockers, and explicit non-claims in one customer-readable packet. |
 | Docker Product Layer completion gate | Active Docker proof gate | Verifies every customer-facing Docker surface together while preserving live OAuth, VM/ISO, browser, release, mutation, and attestation non-claims. |
 | Docker customer onboarding quickstart | Completed Docker proof gate | Keeps README quickstart, Docker acceptance, preview operations, roadmap, and task state aligned around the public try path. |
 | Docker onboarding status contract | Completed Docker proof gate | Verifies `/api/onboarding` exposes quickstart readiness, preview entrypoints, no-key local preview status, validation smokes, and proof blockers. |
 | Docker guided demo journey | Completed Docker proof gate | Verifies `/api/demo-journey` exposes the customer demo path, expected success/blocker outcomes, completion summary, and keeps VM/ISO, live OAuth, browser, release, mutation, and attestation proof unclaimed. |
-| Docker customer proof packet | Active Docker proof gate | Verifies `/api/proof-packet` exposes completed Docker-local claims, validation commands, proof sources, next blockers, and explicit non-claims without automatic claim promotion. |
+| Docker customer proof packet | Active Docker proof gate | Verifies `/api/proof-packet` exposes completed Docker-local claims, validation commands, proof sources, readiness checks, next blockers, and explicit non-claims without automatic claim promotion. |
 | Phase 2 golden runtime loop | Closed baseline | Proves prompt intake, intent classification, bounded capability execution, activity narration, records, and recovery. |
 | Capability permission boundary | Completed | Defines how AgentOS declares, blocks, records, and narrates capability access. |
 | Updater hardening | Completed | Protects runtime continuity and rollback/recovery truthfulness. |

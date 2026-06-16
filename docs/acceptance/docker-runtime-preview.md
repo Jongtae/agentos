@@ -41,7 +41,7 @@ http://localhost:8787
 - `/api/attestation` exposes Secure Boot, TPM/PCR, event-log, IMA, and hardware attestation requirements without claiming Docker proves device trust.
 - `/api/recovery` exposes customer-facing recovery actions for VM/ISO, live OAuth, browser, release, attestation, and setup blockers without claiming observed proof.
 - `/api/evidence` exposes observed Docker/local proof and explicit non-claims for VM/ISO, live OAuth, browser, release trust, and hardware attestation.
-- `/api/proof-packet` exposes completed Docker-local claims, validation commands, proof sources, next blockers, and explicit non-claims without claiming automatic proof promotion.
+- `/api/proof-packet` exposes completed Docker-local claims, validation commands, proof sources, readiness checks, next blockers, and explicit non-claims without claiming automatic proof promotion.
 - LLM setup/readiness state is visible.
 - Telegram setup/readiness state is visible.
 - Activity feed is visible.
@@ -144,5 +144,5 @@ scripts/smoke_docker_customer_proof_packet.sh
 
 This gate starts the Python Docker runtime preview and verifies that
 `/api/proof-packet` exposes customer-readable completed Docker-local claims,
-validation commands, proof sources, next blockers, and explicit non-claims
-without automatic claim promotion.
+validation commands, proof sources, readiness checks, next blockers, and
+explicit non-claims without automatic claim promotion.

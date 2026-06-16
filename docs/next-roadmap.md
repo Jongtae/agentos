@@ -84,9 +84,10 @@ The detailed Phase 2 roadmap is tracked in
   - Milestone: Docker customer proof packet
   - Completion goal: package Docker-local Product Layer proof into a customer-readable packet that summarizes completed local claims, validation commands, proof sources, explicit non-claims, and next observed-proof blockers without promoting Docker into VM/ISO, live OAuth, browser, release, mutation, or hardware attestation proof.
   - Validation plan: `scripts/smoke_docker_customer_proof_packet.sh`, `scripts/smoke_docker_product_layer_completion.sh`, `scripts/smoke_docker_runtime_preview_python.sh`, `docker compose config`, and the Phase 2 golden demo runner.
-  - Exit condition: complete when the Docker preview exposes `/api/proof-packet`, the browser Runtime Home links a Customer Proof Packet panel, README/TASKS/roadmap/Docker acceptance reference the packet, golden smokes include the packet gate, and non-claims remain explicit for VM/ISO, live OAuth, browser, release, external mutation, automatic claim promotion, and hardware attestation proof.
-  - Active task: P2-102.
+  - Exit condition: complete when the Docker preview exposes `/api/proof-packet`, the browser Runtime Home links a Customer Proof Packet panel with readiness checks, README/TASKS/roadmap/Docker acceptance reference the packet, golden smokes include the packet gate, and non-claims remain explicit for VM/ISO, live OAuth, browser, release, external mutation, automatic claim promotion, and hardware attestation proof.
+  - Active task: P2-103.
   - First slice: P2-102 adds `agentos-product-layer-customer-proof-packet.v1` through `/api/proof-packet`, a browser Customer Proof Packet panel, and `scripts/smoke_docker_customer_proof_packet.sh`.
+  - Current slice: P2-103 adds a readiness checklist to `/api/proof-packet`, the browser Customer Proof Packet panel, and Docker-safe smokes so customers can distinguish ready packet ingredients from proof-promotion blockers.
   - Residual blockers: VM/ISO boot/rejoin proof, live OAuth, live browser evidence, release artifacts/signing, Docker daemon observed proof, external mutation proof, and hardware attestation remain unclaimed until observed evidence exists.
   - Advances: Docker-first public usability, runtime proof truthfulness, recovery, OS-native runtime defaults.
 

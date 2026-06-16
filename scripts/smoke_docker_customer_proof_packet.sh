@@ -68,6 +68,14 @@ assert set(packet["validation_commands"]) >= {
     "scripts/smoke_docker_guided_demo_journey.sh",
     "scripts/smoke_phase2_golden_demo.sh",
 }
+readiness = {item["id"]: item["state"] for item in packet["readiness_checklist"]}
+assert readiness == {
+    "completed_claims_present": "ready",
+    "validation_commands_present": "ready",
+    "proof_sources_linked": "ready",
+    "non_claims_explicit": "blocked_until_observed_evidence",
+    "automatic_claim_promotion_disabled": "ready_protected",
+}
 assert packet["proof_sources"] == {
     "onboarding_status": "agentos-product-layer-onboarding-status.v1",
     "guided_demo_journey": "agentos-product-layer-guided-demo-journey.v1",
@@ -101,6 +109,8 @@ assert packet["proof"]["claim_promotion_automatic"] is False
 
 assert "Customer Proof Packet" in home
 assert "Packet Validation" in home
+assert "Packet Readiness" in home
+assert "Automatic claim promotion is disabled" in home
 assert "proof packet JSON" in home
 PY
 

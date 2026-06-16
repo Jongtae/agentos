@@ -896,6 +896,38 @@ class DockerPreviewApp:
             "scripts/smoke_docker_guided_demo_journey.sh",
             "scripts/smoke_phase2_golden_demo.sh",
         ]
+        readiness_checklist = [
+            {
+                "id": "completed_claims_present",
+                "label": "Completed Docker-local claims are present",
+                "state": "ready",
+                "customer_value": "The packet lists Docker-local claims backed by smoke-verifiable evidence.",
+            },
+            {
+                "id": "validation_commands_present",
+                "label": "Validation commands are present",
+                "state": "ready",
+                "customer_value": "The packet lists commands a customer or maintainer can run to reproduce local proof.",
+            },
+            {
+                "id": "proof_sources_linked",
+                "label": "Proof sources are linked",
+                "state": "ready",
+                "customer_value": "The packet links onboarding, guided demo, Evidence Dashboard, and Recovery Center contracts.",
+            },
+            {
+                "id": "non_claims_explicit",
+                "label": "Non-claims are explicit",
+                "state": "blocked_until_observed_evidence",
+                "customer_value": "VM/ISO, live OAuth, browser, release, mutation, and attestation proof stay blocked until observed evidence exists.",
+            },
+            {
+                "id": "automatic_claim_promotion_disabled",
+                "label": "Automatic claim promotion is disabled",
+                "state": "ready_protected",
+                "customer_value": "Observed evidence can inform future proof promotion, but this packet does not auto-promote stronger claims.",
+            },
+        ]
         non_claims = evidence.get("non_claims", []) if isinstance(evidence.get("non_claims"), list) else []
         blockers = recovery.get("items", []) if isinstance(recovery.get("items"), list) else []
         return {
@@ -905,6 +937,7 @@ class DockerPreviewApp:
             "customer_message": "Customer Proof Packet summarizes what Docker/local proof supports today and which stronger claims still require observed evidence.",
             "completed_claims": completed_claims,
             "validation_commands": validation_commands,
+            "readiness_checklist": readiness_checklist,
             "proof_sources": {
                 "onboarding_status": onboarding.get("schema_version"),
                 "guided_demo_journey": journey.get("schema_version"),
@@ -1438,6 +1471,15 @@ def _render_page(app: DockerPreviewApp) -> str:
         f"<li><code>{html.escape(str(command))}</code></li>"
         for command in customer_proof_packet.get("validation_commands", [])
     ) or "<li>No proof packet validation commands are configured.</li>"
+    proof_packet_readiness_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Readiness check'))))}</b> "
+        f"{html.escape(str(item.get('customer_value', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))}</em>"
+        "</li>"
+        for item in customer_proof_packet.get("readiness_checklist", [])
+        if isinstance(item, dict)
+    ) or "<li>No proof packet readiness checks are configured.</li>"
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -1665,6 +1707,10 @@ def _render_page(app: DockerPreviewApp) -> str:
       <h2>Packet Validation</h2>
       <ul>{proof_packet_command_html}</ul>
       <p><a href="/api/proof-packet">proof packet JSON</a></p>
+    </div>
+    <div class="panel">
+      <h2>Packet Readiness</h2>
+      <ul>{proof_packet_readiness_html}</ul>
     </div>
   </section>
   <section class="panel">

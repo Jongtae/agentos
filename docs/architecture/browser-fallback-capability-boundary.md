@@ -31,6 +31,8 @@ scripts/smoke_phase2_browser_fallback_contract.sh
 
 The smoke validates internal capability, allowed fallback, blocked external state, and capability graduation paths without live credentials or external browser state.
 
+`scripts/smoke_phase2_run_cli.sh` also verifies that `phase2-run` web/search requests attach this contract to runtime output without launching a live browser.
+
 ## Exit Condition
 
 This slice is complete when the contract, documentation, and smoke make the browser fallback decision explicit and keep internal capability ownership preferred.

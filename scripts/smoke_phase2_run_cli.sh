@@ -28,6 +28,7 @@ run_phase2 workspace "list files in workspace"
 run_phase2 gmail "draft a reply to my Gmail roadmap email"
 run_phase2 calendar "summarize my upcoming calendar roadmap meeting"
 run_phase2 records "find my roadmap records"
+run_phase2 web "summarize https://example.com"
 run_phase2 lifecycle "restart runtime"
 run_phase2 update "update AgentOS"
 run_phase2 rollback "rollback AgentOS"
@@ -51,6 +52,7 @@ expected = {
     "gmail": ("gmail_read_or_draft", "gmail_read_or_draft", "completed"),
     "calendar": ("calendar_readonly", "calendar_readonly", "completed"),
     "records": ("record_lookup", "record_lookup", "completed"),
+    "web": ("web_search_summary", "research_brief_response", "completed"),
     "lifecycle": ("lifecycle_recovery", "lifecycle_recovery", "blocked"),
     "update": ("lifecycle_recovery", "lifecycle_recovery", "blocked"),
     "rollback": ("lifecycle_recovery", "lifecycle_recovery", "blocked"),
@@ -92,6 +94,16 @@ assert calendar["proof"]["calendar_fixture_mode"] is True
 assert calendar["capability_result"]["proof"]["read_only"] is True
 assert calendar["capability_result"]["proof"]["mutation_executed"] is False
 assert calendar["blockers"][0]["id"] == "calendar-live-oauth"
+
+web = json.loads((tmp_dir / "web.json").read_text())
+assert web["proof"]["browser_fallback_contract_attached"] is True
+assert web["proof"]["live_browser_executed"] is False
+assert Path(web["artifacts"]["browser_fallback_contract"]).exists()
+browser_fallback = web["capability_result"]["browser_fallback"]
+assert browser_fallback["schema_version"] == "agentos-phase2-browser-fallback-contract.v1"
+assert browser_fallback["routing"]["internal_capability_preferred"] is True
+assert browser_fallback["routing"]["browser_is_default"] is False
+assert browser_fallback["proof"]["live_browser_executed"] is False
 
 lifecycle = json.loads((tmp_dir / "lifecycle.json").read_text())
 assert lifecycle["permission"]["level"] == "lifecycle_confirmed"

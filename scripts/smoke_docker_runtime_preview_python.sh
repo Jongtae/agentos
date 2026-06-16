@@ -130,6 +130,10 @@ assert {item["id"] for item in demo_journey["expected_outcomes"]} == {
     "recovery_next_steps_visible",
 }
 assert {item["kind"] for item in demo_journey["expected_outcomes"]} >= {"success", "blocked_until_observed"}
+assert demo_journey["completion_summary"]["id"] == "docker_guided_demo_complete"
+assert demo_journey["completion_summary"]["state"] == "ready"
+assert len(demo_journey["completion_summary"]["completed_claims"]) >= 4
+assert len(demo_journey["completion_summary"]["next_blockers"]) >= 3
 assert onboarding["schema_version"] == "agentos-product-layer-onboarding-status.v1"
 assert onboarding["proof"]["docker_preview_ready"] is True
 assert onboarding["proof"]["customer_onboarding_ready"] is True

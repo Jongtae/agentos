@@ -315,6 +315,23 @@ class DockerPreviewApp:
                 "customer_interpretation": "AgentOS tells the customer what evidence is still needed before stronger claims can be made.",
             },
         ]
+        completion_summary = {
+            "id": "docker_guided_demo_complete",
+            "label": "Docker guided demo is complete",
+            "state": "ready",
+            "customer_result": "A customer can complete the Docker Product Layer journey through runtime readiness, read-first work, prompt execution, activity narration, evidence, and recovery.",
+            "completed_claims": [
+                "Docker/local runtime preview is reachable.",
+                "Product Layer surfaces are visible from the running preview.",
+                "Prompt handling can be demonstrated through a Docker-safe local path.",
+                "Evidence and recovery surfaces explain observed proof and blockers.",
+            ],
+            "next_blockers": [
+                "VM/ISO boot, reboot, recovery, and managed runtime rejoin require observed VM evidence.",
+                "Live Gmail or Calendar proof requires explicit tester OAuth credentials and sanitized observed records.",
+                "Live browser, release signing/publication, external mutation, and hardware attestation claims require separate observed proof.",
+            ],
+        }
         return {
             "schema_version": "agentos-product-layer-guided-demo-journey.v1",
             "surface": "Guided Demo Journey",
@@ -322,6 +339,7 @@ class DockerPreviewApp:
             "customer_message": "Follow this Docker-safe journey to understand AgentOS Product Layer readiness without confusing local preview proof for OS, live-provider, release, or hardware proof.",
             "stages": stages,
             "expected_outcomes": expected_outcomes,
+            "completion_summary": completion_summary,
             "validation": {
                 "guided_demo_journey_smoke": "scripts/smoke_docker_guided_demo_journey.sh",
                 "product_layer_completion_smoke": "scripts/smoke_docker_product_layer_completion.sh",
@@ -1215,6 +1233,17 @@ def _render_page(app: DockerPreviewApp) -> str:
         for item in guided_demo_journey.get("expected_outcomes", [])
         if isinstance(item, dict)
     ) or "<li>No guided demo expected outcomes are configured.</li>"
+    guided_demo_completion = guided_demo_journey.get("completion_summary", {})
+    if not isinstance(guided_demo_completion, dict):
+        guided_demo_completion = {}
+    guided_demo_completed_claim_html = "\n".join(
+        f"<li>{html.escape(str(item))}</li>"
+        for item in guided_demo_completion.get("completed_claims", [])
+    ) or "<li>No completed Docker demo claims are configured.</li>"
+    guided_demo_next_blocker_html = "\n".join(
+        f"<li>{html.escape(str(item))}</li>"
+        for item in guided_demo_completion.get("next_blockers", [])
+    ) or "<li>No guided demo next blockers are configured.</li>"
     recovery_item_html = "\n".join(
         "<li>"
         f"<b>{html.escape(str(item.get('label', item.get('id', 'Recovery item'))))}</b> "
@@ -1360,6 +1389,12 @@ def _render_page(app: DockerPreviewApp) -> str:
       <ul>{guided_demo_stage_html}</ul>
       <h3>Expected Outcomes</h3>
       <ul>{guided_demo_outcome_html}</ul>
+      <h3>Demo Completion Summary</h3>
+      <p class="lead">{html.escape(str(guided_demo_completion.get('customer_result', 'The Docker guided demo can be completed through the local Product Layer preview.')))}</p>
+      <h3>Completed Claims</h3>
+      <ul>{guided_demo_completed_claim_html}</ul>
+      <h3>Next Proof Blockers</h3>
+      <ul>{guided_demo_next_blocker_html}</ul>
     </div>
     <div class="panel">
       <h2>Journey Proof</h2>

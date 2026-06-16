@@ -98,6 +98,9 @@ assert {item["id"] for item in product["guided_demo_journey"]["expected_outcomes
     "proof_boundaries_visible",
     "recovery_next_steps_visible",
 }
+assert product["guided_demo_journey"]["completion_summary"]["id"] == "docker_guided_demo_complete"
+assert len(product["guided_demo_journey"]["completion_summary"]["completed_claims"]) >= 4
+assert len(product["guided_demo_journey"]["completion_summary"]["next_blockers"]) >= 3
 assert {item["id"] for item in product["onboarding_status"]["readiness_checklist"]} >= {
     "quickstart_documented",
     "preview_entrypoints_available",

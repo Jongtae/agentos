@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-41] Record updater hardening epic completion`
+- `[P2-42] Create browser fallback completion epic`
 
 Runtime impact statement:
 
-- This task closes the safe Phase 2 updater hardening epic scope so the autonomous loop stops repeating the same updater track and returns to roadmap selection for the next milestone-backed completion epic.
+- This task opens the browser fallback capability boundary epic so AgentOS can reduce app/browser mediation cost while keeping OS-native capability ownership as the default direction.
 
 Current autonomous completion loop:
 
@@ -112,6 +112,7 @@ Recommended Phase 2 tasks:
 - The updater hardening epic is closed for this Phase 2 slice; future updater work should require an observed VM/live-updater proof issue before claiming reboot, rollback, or ISO behavior.
 - The first updater hardening slice is `agentos-phase2-updater-state.v1`, which records ready, blocked, rollback-needed, and recovery-suggested states without running destructive updater actions.
 - `phase2-run` lifecycle recovery should surface updater state artifacts for update, rollback, restart, and recovery prompts while keeping live updater and VM/ISO proof blocked until observed.
+- The browser fallback capability boundary epic is active; it should define when browser automation is allowed as fallback, when requests stay blocked, and which repeated web/app patterns should graduate into internal AgentOS capabilities.
 
 ## Validation Standards
 

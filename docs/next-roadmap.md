@@ -80,7 +80,13 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
-- None. The loop should inspect Later Tracks and GitHub issues before creating the next milestone-backed epic.
+- `browser-fallback-capability-boundary-epic` — [EPIC: Browser fallback capability boundary](https://github.com/Jongtae/agentos/issues/89)
+  - Milestone: Phase 2: Local-first Codex runtime loop
+  - Completion goal: define when browser automation is allowed as a fallback and how AgentOS moves common web/app access patterns toward internal, OS-native capabilities.
+  - Exit condition: the epic has a documented and smoke-tested browser fallback contract that distinguishes internal capability, allowed fallback, blocked external state, and future capability graduation paths.
+  - Active task: [P2-42] Create browser fallback completion epic.
+  - First safe task candidate: define the browser fallback contract and routing smoke without requiring live credentials or third-party app state.
+  - Advances: mediation cost reduction, capability ownership, OS-native runtime defaults, runtime proof truthfulness.
 
 ## Completed Completion Epics
 

@@ -171,6 +171,9 @@ Then:
 - confirm the parent branch
 - define the targeted validation set before editing
 - record one explicit `runtime impact statement` before implementation begins
+- when roadmap, epic, task, or completion-track state changes, update the
+  README roadmap visual/status table together with `docs/next-roadmap.md` so
+  public readers and parallel automation see the same current progress
 - run or consult the roadmap direction judge before deciding that another
   smoke-only hardening pass is sufficient
 - when the roadmap direction judge returns `accept_with_risk`, prefer opening
@@ -218,6 +221,11 @@ Autonomous hardening loops are not complete when they only prove that existing
 Phase 2 smokes still pass. They must also ask whether the loop is advancing the
 project toward completion. A direction judge should identify stable-phase
 repetition, explicit blockers, and the next safe forward-progress candidate.
+
+README roadmap visibility is part of docs sync. If an autonomous pass opens,
+closes, promotes, blocks, or changes a completion epic or roadmap track, it
+must keep the README Mermaid roadmap and status table aligned with
+`docs/next-roadmap.md` in the same branch before closeout.
 
 The main agent remains responsible for:
 - lifecycle correctness

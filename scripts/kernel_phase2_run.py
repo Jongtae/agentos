@@ -23,6 +23,7 @@ from kernel_phase2_calendar_fixture import build_calendar_fixture_report
 from kernel_phase2_capability_result import build_result as build_capability_permission_result
 from kernel_phase2_gmail_fixture import build_gmail_fixture_report
 from kernel_phase2_lifecycle_recovery import build_lifecycle_recovery_report
+from kernel_phase2_updater_state import build_payload as build_updater_state_payload
 from kernel_phase2_records import append_record, find_records
 
 SCHEMA_VERSION = "agentos-phase2-run.v1"
@@ -195,9 +196,15 @@ def run_phase2(
         elif intent == "lifecycle_recovery":
             action = _lifecycle_action(prompt)
             capability_result = build_lifecycle_recovery_report(workspace_path, action=action, confirmed=False)
+            updater_state = build_updater_state_payload(_updater_state_for_lifecycle_action(action), workspace_path)
+            updater_manifest = workspace_path / "artifacts" / "phase2-updater-state" / "latest-updater-state.json"
+            updater_manifest.parent.mkdir(parents=True, exist_ok=True)
+            updater_manifest.write_text(json.dumps(updater_state, ensure_ascii=True) + "\n", encoding="utf-8")
+            capability_result["updater_state"] = updater_state
             status = "blocked" if capability_result.get("needs_confirmation") else "completed"
             response = _lifecycle_response(capability_result)
             artifacts["lifecycle_manifest"] = capability_result.get("manifest_path", "")
+            artifacts["updater_state_manifest"] = str(updater_manifest)
             if capability_result.get("needs_confirmation"):
                 blockers.append(
                     {
@@ -206,6 +213,9 @@ def run_phase2(
                         "recovery_action": "Review the recovery steps and rerun a future confirmed control surface if appropriate.",
                     }
                 )
+            for blocker in updater_state.get("blockers", []):
+                if isinstance(blocker, dict):
+                    blockers.append(blocker)
         else:
             dispatch = build_intent_dispatch_report(
                 workspace_path,
@@ -332,6 +342,10 @@ def run_phase2(
             ),
             "vm_iso_proof_completed": False,
             "destructive_action_executed": False,
+            "updater_state_contract_attached": bool(
+                intent == "lifecycle_recovery" and isinstance(capability_result.get("updater_state"), dict)
+            ),
+            "live_updater_executed": False,
             "permission_checked": bool((permission_result.get("proof") or {}).get("permission_checked", False)),
             "outcome_checked": bool((permission_result.get("proof") or {}).get("outcome_checked", False)),
             "secrets_redacted": bool((permission_result.get("proof") or {}).get("secrets_redacted", False)),
@@ -400,6 +414,10 @@ def _query_from_prompt(prompt: str, *, fallback: str) -> str:
 
 def _lifecycle_action(prompt: str) -> str:
     normalized = str(prompt or "").lower()
+    if "rollback" in normalized or "roll back" in normalized or "롤백" in normalized:
+        return "rollback"
+    if "update" in normalized or "upgrade" in normalized or "업데이트" in normalized:
+        return "stage-update"
     if "reboot" in normalized:
         return "reboot"
     if "shutdown" in normalized:
@@ -409,6 +427,16 @@ def _lifecycle_action(prompt: str) -> str:
     if "restart" in normalized or "재시작" in normalized:
         return "restart-runtime"
     return "suggest-recovery"
+
+
+def _updater_state_for_lifecycle_action(action: str) -> str:
+    if action == "rollback":
+        return "rollback-needed"
+    if action in {"stage-update", "reboot", "restart-runtime"}:
+        return "blocked"
+    if action == "rejoin-session":
+        return "recovery-suggested"
+    return "ready"
 
 
 def _gmail_response(result: dict) -> str:
@@ -471,7 +499,16 @@ def _records_response(result: dict, *, query: str) -> str:
 def _lifecycle_response(result: dict) -> str:
     steps = result.get("recovery_steps") if isinstance(result.get("recovery_steps"), list) else []
     header = "Lifecycle action needs confirmation." if result.get("needs_confirmation") else "Lifecycle recovery guidance ready."
-    return header + ("\n" + "\n".join(f"- {step}" for step in steps) if steps else "")
+    lines = [header]
+    lines.extend(f"- {step}" for step in steps)
+    updater_state = result.get("updater_state") if isinstance(result.get("updater_state"), dict) else {}
+    if updater_state:
+        state = updater_state.get("state") if isinstance(updater_state.get("state"), dict) else {}
+        runtime_rejoin = updater_state.get("runtime_rejoin") if isinstance(updater_state.get("runtime_rejoin"), dict) else {}
+        lines.append(f"- updater_state: {state.get('status', 'unknown')}")
+        lines.append(f"- runtime_return_target: {runtime_rejoin.get('target', 'codex_cli_managed_session')}")
+        lines.append("- proof: updater contract only; no live updater or VM/ISO proof claimed")
+    return "\n".join(lines)
 
 
 def _capability_status(status: str) -> str:

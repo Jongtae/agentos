@@ -129,6 +129,7 @@ class DockerPreviewApp:
         capability_store = self.capability_store()
         approval_center = self.approval_center(capability_store=capability_store)
         proof_uploader = self.observed_proof_uploader()
+        release_trust = self.release_trust_panel()
         recovery_center = self.recovery_center(setup=setup_payload)
         evidence_dashboard = self.evidence_dashboard(setup=setup_payload, activity=activity_payload)
         blockers = recovery_center.get("blockers", [])
@@ -174,6 +175,12 @@ class DockerPreviewApp:
                     "customer_value": "See which evidence types can be attached later before live, VM, release, browser, or attestation claims are promoted.",
                 },
                 {
+                    "id": "release_trust_panel",
+                    "label": "Release Trust Panel",
+                    "state": release_trust.get("state", "blocked"),
+                    "customer_value": "See which release artifact, manifest, checksum, signing, publication, and VM proof evidence is still required.",
+                },
+                {
                     "id": "recovery_center",
                     "label": "Recovery Center",
                     "state": "attention" if blockers else "ready",
@@ -192,6 +199,7 @@ class DockerPreviewApp:
             "capability_store": capability_store,
             "approval_center": approval_center,
             "observed_proof_uploader": proof_uploader,
+            "release_trust_panel": release_trust,
             "recovery_center": recovery_center,
             "evidence_dashboard": evidence_dashboard,
             "proof": {
@@ -200,6 +208,62 @@ class DockerPreviewApp:
                 "live_oauth_claimed": False,
                 "live_browser_proof_claimed": False,
                 "customer_facing_summary_ready": True,
+            },
+        }
+
+    def release_trust_panel(self) -> dict:
+        checks = [
+            {
+                "id": "artifact-manifest",
+                "label": "Release artifact manifest",
+                "state": "blocked_until_release_artifact",
+                "customer_value": "Requires an actual release artifact and identity manifest before release freshness is claimed.",
+            },
+            {
+                "id": "checksum-publication",
+                "label": "Checksum publication",
+                "state": "blocked_until_checksum",
+                "customer_value": "Requires published checksums that match each release artifact.",
+            },
+            {
+                "id": "signing-evidence",
+                "label": "Signing evidence",
+                "state": "blocked_until_signature_or_unsigned_statement",
+                "customer_value": "Requires signing proof or an explicit unsigned-preview statement before trust is promoted.",
+            },
+            {
+                "id": "secret-free-review",
+                "label": "Secret-free artifact review",
+                "state": "blocked_until_artifact_review",
+                "customer_value": "Requires artifact review that confirms no secrets or local-only proof are bundled.",
+            },
+            {
+                "id": "vm-iso-release-proof",
+                "label": "VM/ISO release proof",
+                "state": "blocked_until_observed_vm_run",
+                "customer_value": "Requires an observed VM/ISO run before boot, installer, recovery, or rejoin claims are promoted.",
+            },
+        ]
+        return {
+            "schema_version": "agentos-product-layer-release-trust-panel.v1",
+            "surface": "Release Trust Panel",
+            "state": "blocked",
+            "customer_message": "Release Trust Panel separates local packaging preflight from real release, signing, checksum, and VM/ISO proof.",
+            "checks": checks,
+            "preflight": {
+                "local_manifest_checksum_preflight_available": True,
+                "preflight_script": "scripts/release_manifest_checksum_preflight.py",
+                "boundary_doc": "docs/operations/distribution-packaging-proof-boundary.md",
+            },
+            "proof": {
+                "docker_preview_ready": True,
+                "release_artifact_observed": False,
+                "manifest_validated": False,
+                "checksum_published": False,
+                "signing_observed": False,
+                "release_uploaded": False,
+                "vm_iso_release_proof_completed": False,
+                "customer_facing_release_trust_ready": True,
             },
         }
 
@@ -774,6 +838,7 @@ def _render_page(app: DockerPreviewApp) -> str:
     capability_store = product_layer.get("capability_store", {}) if isinstance(product_layer.get("capability_store"), dict) else {}
     approval_center = product_layer.get("approval_center", {}) if isinstance(product_layer.get("approval_center"), dict) else {}
     proof_uploader = product_layer.get("observed_proof_uploader", {}) if isinstance(product_layer.get("observed_proof_uploader"), dict) else {}
+    release_trust = product_layer.get("release_trust_panel", {}) if isinstance(product_layer.get("release_trust_panel"), dict) else {}
     recovery_center = product_layer.get("recovery_center", {}) if isinstance(product_layer.get("recovery_center"), dict) else {}
     evidence_dashboard = product_layer.get("evidence_dashboard", {}) if isinstance(product_layer.get("evidence_dashboard"), dict) else {}
     features = product_layer.get("features", []) if isinstance(product_layer.get("features"), list) else []
@@ -874,6 +939,15 @@ def _render_page(app: DockerPreviewApp) -> str:
         for item in proof_uploader.get("proof_types", [])
         if isinstance(item, dict)
     ) or "<li>No observed proof types are configured.</li>"
+    release_trust_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Release check'))))}</b> "
+        f"{html.escape(str(item.get('customer_value', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))}</em>"
+        "</li>"
+        for item in release_trust.get("checks", [])
+        if isinstance(item, dict)
+    ) or "<li>No release trust checks are configured.</li>"
     evidence_html = "\n".join(
         "<li>"
         f"<b>{html.escape(str(item.get('label', item.get('id', 'Evidence'))))}</b> "
@@ -1024,6 +1098,22 @@ def _render_page(app: DockerPreviewApp) -> str:
   </section>
   <section class="product">
     <div class="panel">
+      <h2>Release Trust Panel</h2>
+      <p class="lead">{html.escape(str(release_trust.get('customer_message', 'Release trust requirements are available below.')))}</p>
+      <ul>{release_trust_html}</ul>
+    </div>
+    <div class="panel">
+      <h2>Release Non-Claims</h2>
+      <ul>
+        <li><b>Release uploaded</b> not claimed</li>
+        <li><b>Signing observed</b> not claimed</li>
+        <li><b>VM/ISO release proof</b> not claimed</li>
+      </ul>
+      <p><a href="/api/release-trust">release trust JSON</a></p>
+    </div>
+  </section>
+  <section class="product">
+    <div class="panel">
       <h2>Evidence Dashboard</h2>
       <p class="lead">{html.escape(str(evidence_dashboard.get('customer_message', 'Evidence state is available below.')))}</p>
       <ul>{evidence_html}</ul>
@@ -1121,6 +1211,8 @@ def make_handler(app: DockerPreviewApp) -> type[BaseHTTPRequestHandler]:
                 _json_response(self, app.approval_center())
             elif path == "/api/proofs":
                 _json_response(self, app.observed_proof_uploader())
+            elif path == "/api/release-trust":
+                _json_response(self, app.release_trust_panel())
             elif path == "/api/recovery":
                 _json_response(self, app.recovery_center())
             elif path == "/api/evidence":

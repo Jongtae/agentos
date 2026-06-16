@@ -80,7 +80,15 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
-No active completion epic is currently open in the roadmap. The next iteration should re-check Later Tracks and GitHub issue state before creating a new milestone-backed Product Layer epic.
+- `docker-product-layer-map-epic` — [EPIC: Stage 3 / Phase 2 Docker Product Layer map](https://github.com/Jongtae/agentos/issues/257)
+  - Milestone: Docker Product Layer map
+  - Completion goal: give customers one ordered Docker-safe navigation surface that explains where to start, where safe work appears, where evidence and handoff live, and which proof/trust claims remain blocked until observed evidence exists.
+  - Validation plan: `scripts/smoke_docker_product_layer_map.sh`, `scripts/smoke_docker_product_layer_completion.sh`, `scripts/smoke_docker_runtime_preview_python.sh`, `docker compose config`, and the Phase 2 golden demo runner.
+  - Exit condition: complete when the Docker preview exposes `/api/product-map`, the browser Runtime Home shows a Product Layer Map panel, README/TASKS/roadmap/Docker acceptance reference the Product Layer Map, golden smokes include the map gate, and non-claims remain explicit for VM/ISO, live OAuth, browser, release, external mutation, and hardware attestation proof.
+  - Active task: P2-112.
+  - First slice: P2-112 adds `agentos-product-layer-map.v1` through `/api/product-map`, a browser Product Layer Map panel, and `scripts/smoke_docker_product_layer_map.sh`.
+  - Residual blockers: Docker daemon observed proof, VM/ISO boot/rejoin proof, live OAuth, live browser evidence, release artifacts/signing, external mutation proof, and hardware attestation remain unclaimed until observed evidence exists.
+  - Advances: Docker-first public usability, runtime proof truthfulness, recovery, OS-native runtime defaults.
 
 ## Completed Completion Epics
 

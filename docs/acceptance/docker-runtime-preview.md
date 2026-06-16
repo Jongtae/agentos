@@ -85,3 +85,14 @@ check `localhost:8787`, verify `/api/product`, `/api/work-inbox`,
 `/api/timeline`, `/api/capabilities`, `/api/approvals`, `/api/proofs`, `/api/release-trust`, `/api/attestation`, `/api/recovery`, and `/api/evidence`, run a prompt through `/api/prompt`,
 verify activity, and check that common secret patterns are not present in the
 response.
+
+## Product Layer Completion Gate
+
+```bash
+scripts/smoke_docker_product_layer_completion.sh
+```
+
+This gate starts the Python Docker runtime preview, verifies every customer-facing
+Product Layer surface together, and asserts that Docker still does not claim
+live OAuth, VM/ISO boot, browser, release, external mutation, Secure Boot,
+TPM/PCR, IMA, or hardware attestation proof.

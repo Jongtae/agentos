@@ -60,7 +60,7 @@ assert "observed-proof-record-required" in browser["blockers"], browser
 PY
 
 grep -q "inbox-workflow-promotion-boundary.md" docs/index.md
-grep -q "broader app/inbox workflow promotion epic is active" TASKS.md
+grep -q "broader app/inbox workflow promotion epic is closed" TASKS.md
 grep -q "broader-app-inbox-workflow-promotion-epic" docs/next-roadmap.md
 grep -q "Inbox workflow promotion" README.md
 

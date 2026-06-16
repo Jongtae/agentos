@@ -180,14 +180,14 @@ make runtime proof more truthful.
 flowchart LR
   phase1["Phase 1\nOS-native runtime prototype\nclosed"]
   phase2["Phase 2\nlocal-first runtime loop\nclosed baseline"]
-  active["Active\nInbox workflow\npromotion"]
+  ready["Product Layer\ncompletion gate\nready"]
   completed["Completed completion epics\npermissions, updater, browser fallback,\nBrowser observed acceptance,\npublic preview ops, distribution,\ninbox, capability graduation,\ncalendar/Gmail readiness,\nVM/ISO proof status,\nCalendar live acceptance,\nCalendar live adapter,\nMaildir intake"]
   blocked["Observed-proof blockers\nVM/ISO, live OAuth,\nlive browser, release artifacts"]
   future["Later completion tracks\ncalendar live adapter, broader app ecosystem,\nhardware attestation, packaging hardening"]
 
-  phase1 --> phase2 --> active
+  phase1 --> phase2 --> ready
   phase2 --> completed
-  active --> blocked
+  ready --> blocked
   completed --> future
   blocked --> future
 ```
@@ -205,6 +205,7 @@ flowchart LR
 | Attestation Status | Active Docker product surface | Shows Secure Boot, TPM/PCR, event-log, IMA, and hardware attestation blockers without claiming Docker proves device trust. |
 | Recovery Center | Active Docker product surface | Turns VM/ISO, live OAuth, browser, release, attestation, and setup blockers into customer-facing recovery actions without claiming unobserved proof. |
 | Evidence Dashboard | Active Docker product surface | Separates observed Docker/local proof from explicit VM/ISO, live OAuth, browser, release, and attestation non-claims. |
+| Docker Product Layer completion gate | Active Docker proof gate | Verifies every customer-facing Docker surface together while preserving live OAuth, VM/ISO, browser, release, mutation, and attestation non-claims. |
 | Phase 2 golden runtime loop | Closed baseline | Proves prompt intake, intent classification, bounded capability execution, activity narration, records, and recovery. |
 | Capability permission boundary | Completed | Defines how AgentOS declares, blocks, records, and narrates capability access. |
 | Updater hardening | Completed | Protects runtime continuity and rollback/recovery truthfulness. |
@@ -213,7 +214,7 @@ flowchart LR
 | Public preview operations | Completed | Defines safe preview promotion, manual proof blockers, and release non-claims. |
 | Distribution packaging boundary | Completed | Separates local packaging checks from real release/signing/VM proof claims. |
 | Inbox capability ownership | Completed | Moves Gmail, Calendar, Maildir, fixtures, and future inbox adapters toward a read-first OS-native substrate. |
-| Inbox workflow promotion | Active boundary | Makes broader app/inbox work choose a registry candidate and proof gate before expanding browser or external app mediation. |
+| Inbox workflow promotion | Completed | Makes broader app/inbox work choose a registry candidate and proof gate before expanding browser or external app mediation. |
 | Verified boot and attestation boundary | Completed | Keeps Secure Boot, TPM, PCR/event-log, IMA, and hardware attestation proof explicit and unclaimed until observed. |
 | Observed proof intake | Completed | Defines, validates, and surfaces how live credentials, VM/ISO, release, browser, and boot-chain evidence can be attached without claiming unobserved proof. |
 | Capability graduation registry | Completed | Turns repeated browser/app/inbox patterns into OS-native capability candidates before expanding external mediation. |
@@ -227,7 +228,7 @@ flowchart LR
 | Live browser fallback proof | Blocked on user-approved browser acceptance evidence | Requires an explicit user-approved browser run and sanitized observed proof before claiming live fallback proof. |
 | Release artifacts and signing | Blocked on real release evidence | Requires actual artifacts, checksums/signatures, and release publication proof. |
 | Maildir inbox intake | Completed | Proves user-owned local inbox intake before broader app or browser mediation. |
-| Broader app/inbox ecosystem | Active promotion track | Expands only through bounded inbox workflow candidates with user-owned records, local/mock proof, and explicit live blockers. |
+| Broader app/inbox ecosystem | Completed promotion gate; future proof track | Expands only through bounded inbox workflow candidates with user-owned records, local/mock proof, and explicit live blockers. |
 | Hardware attestation | Future proof track | Secure Boot, TPM, PCR/event-log, and IMA claims stay explicit non-claims until observed. |
 
 Docker remains a developer/demo runtime preview, not the product target or a

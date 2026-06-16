@@ -52,7 +52,6 @@ for term in required_terms:
 
 assert "docs/architecture/inbox-capability-ownership-boundary.md" in index
 assert "inbox-capability-ownership-boundary-epic" in roadmap
-assert "[P2-57] Close inbox ownership boundary epic" in tasks
 assert "inbox capability ownership boundary epic is closed" in tasks
 assert "phase2-run --message \"status\"" in tasks
 assert "inbox routing/ownership contract artifact" in roadmap

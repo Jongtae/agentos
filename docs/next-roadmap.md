@@ -80,17 +80,20 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
+- No active completion epic is currently open. The next automation pass should
+  re-check this roadmap, the open GitHub issue state, and the Later Tracks
+  before creating a new milestone-backed epic.
+
+## Completed Completion Epics
+
 - `verified-boot-attestation-proof-boundary-epic` — [EPIC: Verified boot and attestation proof boundary](https://github.com/Jongtae/agentos/issues/125)
   - Milestone: Phase 2: Local-first Codex runtime loop
   - Completion goal: define the AgentOS verified boot and attestation proof boundary so Secure Boot, TPM measured boot, event logs, PCR evidence, and Linux runtime integrity signals become explicit future proof surfaces without falsely claiming hardware-backed trust today.
-  - Exit condition: the epic has a documented and smoke-tested boundary that separates local runtime proof from Secure Boot, TPM measured boot, PCR/event-log, IMA, and observed hardware/VM proof requirements.
-  - Active task: [P2-59] Attach verified boot non-claim proof to phase2 status.
-  - First boundary: `docs/architecture/verified-boot-attestation-proof-boundary.md` defines local runtime proof, Secure Boot proof requirements, TPM measured boot and attestation requirements, Linux IMA requirements, non-claims, and promotion gates.
-  - Runtime proof: `phase2-run --message "status"` attaches the verified boot/attestation non-claim artifact while keeping Secure Boot, TPM measured boot, PCR/event-log, IMA, and hardware attestation proof unclaimed.
-  - Research basis: UEFI Secure Boot, TCG TPM 2.0, TCG EFI measured boot/event log, and Linux IMA documentation.
+  - Exit condition: completed by `docs/architecture/verified-boot-attestation-proof-boundary.md`, `scripts/smoke_verified_boot_attestation_boundary.sh`, golden runner integration through `scripts/phase2_golden_demo_runner.py`, and `phase2-run --message "status"` attaching `agentos-verified-boot-attestation-nonclaim.v1` while keeping Secure Boot, TPM measured boot, PCR/event-log, IMA, and hardware attestation proof unclaimed.
+  - Closed issue: #125.
+  - Completed tasks: P2-58, P2-59, and P2-61.
+  - Residual blocker: real Secure Boot, TPM measured boot, PCR/event-log, Linux IMA, and hardware-backed attestation proof remain unclaimed until observed VM or hardware evidence exists.
   - Advances: runtime proof truthfulness, OS-native runtime defaults, recovery, capability ownership.
-
-## Completed Completion Epics
 
 - `inbox-capability-ownership-boundary-epic` — [EPIC: Inbox capability ownership boundary](https://github.com/Jongtae/agentos/issues/116)
   - Milestone: Phase 2: Local-first Codex runtime loop

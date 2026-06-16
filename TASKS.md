@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-56] Attach inbox ownership proof to phase2 status`
+- `[P2-57] Close inbox ownership boundary epic`
 
 Runtime impact statement:
 
-- This task surfaces inbox ownership proof in the user-testable `phase2-run` status path, so native fixture/Maildir intake readiness and external adapter non-claims are visible in normal runtime proof without requiring live Gmail or Calendar OAuth.
+- This task closes the inbox ownership epic after its documented, smoke-tested, and status-visible proof boundary is in place, preventing repeated work on a completed boundary and returning the autonomous loop to the roadmap for the next completion track.
 
 Current autonomous completion loop:
 
@@ -122,7 +122,7 @@ Recommended Phase 2 tasks:
 - The first distribution packaging slice is `docs/operations/distribution-packaging-proof-boundary.md`, smoke-tested by `scripts/smoke_distribution_packaging_boundary.sh`.
 - Release manifest/checksum preflight is covered by `scripts/release_manifest_checksum_preflight.py` and `scripts/smoke_release_manifest_checksum_preflight.sh` without publishing or signing artifacts.
 - The release manifest/checksum preflight smoke is included in the Phase 2 golden demo runner so packaging non-claims remain part of practical local/Docker-safe proof.
-- The inbox capability ownership boundary epic is active; it should make native fixture and Maildir inbox intake the local proof baseline, keep Gmail and Calendar live OAuth read-only and explicit, and block external mutations until a later confirmation model exists.
+- The inbox capability ownership boundary epic is closed for this Phase 2 slice; future inbox work should require live read-only OAuth proof, observed Maildir/user data proof, or a later confirmed external mutation model before claiming broader inbox ecosystem support.
 - The first inbox ownership slice is `docs/architecture/inbox-capability-ownership-boundary.md`, smoke-tested by `scripts/smoke_inbox_capability_ownership_boundary.sh`.
 - The inbox ownership boundary smoke is included in the Phase 2 golden demo runner so inbox capability ownership remains part of practical local/Docker-safe proof.
 - `phase2-run --message "status"` attaches the inbox routing/ownership contract artifact so inbox capability ownership is visible in the user-testable runtime status proof.

@@ -84,8 +84,9 @@ The detailed Phase 2 roadmap is tracked in
   - Milestone: Phase 2: Local-first Codex runtime loop
   - Completion goal: define the AgentOS verified boot and attestation proof boundary so Secure Boot, TPM measured boot, event logs, PCR evidence, and Linux runtime integrity signals become explicit future proof surfaces without falsely claiming hardware-backed trust today.
   - Exit condition: the epic has a documented and smoke-tested boundary that separates local runtime proof from Secure Boot, TPM measured boot, PCR/event-log, IMA, and observed hardware/VM proof requirements.
-  - Active task: [P2-58] Define verified boot attestation proof boundary.
+  - Active task: [P2-59] Attach verified boot non-claim proof to phase2 status.
   - First boundary: `docs/architecture/verified-boot-attestation-proof-boundary.md` defines local runtime proof, Secure Boot proof requirements, TPM measured boot and attestation requirements, Linux IMA requirements, non-claims, and promotion gates.
+  - Runtime proof: `phase2-run --message "status"` attaches the verified boot/attestation non-claim artifact while keeping Secure Boot, TPM measured boot, PCR/event-log, IMA, and hardware attestation proof unclaimed.
   - Research basis: UEFI Secure Boot, TCG TPM 2.0, TCG EFI measured boot/event log, and Linux IMA documentation.
   - Advances: runtime proof truthfulness, OS-native runtime defaults, recovery, capability ownership.
 

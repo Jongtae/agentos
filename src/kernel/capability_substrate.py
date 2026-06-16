@@ -42,6 +42,7 @@ INBOX_CAPABILITY_SCHEMA = "agentos-inbox-capability.v1"
 INBOX_ROUTING_CONTRACT_SCHEMA = "agentos-inbox-routing-contract.v1"
 INBOX_PROOF_BASELINE_SCHEMA = "agentos-inbox-proof-baseline.v1"
 INBOX_NORMALIZED_INTAKE_SCHEMA = "agentos-inbox-normalized-intake.v1"
+VERIFIED_BOOT_ATTESTATION_SCHEMA = "agentos-verified-boot-attestation-nonclaim.v1"
 CAPABILITY_PROOF_SCHEMA = "agentos-capability-proof-surface.v1"
 TELEGRAM_INGRESS_SCHEMA = "agentos-telegram-ingress-contract.v1"
 TELEGRAM_ROUTING_SCHEMA = "agentos-telegram-request-routing-contract.v1"
@@ -2663,6 +2664,114 @@ def build_inbox_routing_contract(
         payload["artifacts"]["latest_inbox_routing_contract_json"] = _write_manifest(
             workspace,
             "latest-inbox-routing-contract.json",
+            payload,
+        )
+    return payload
+
+
+def build_verified_boot_attestation_nonclaim(
+    workspace_dir: str | Path,
+    *,
+    session_id: str = "",
+    write_manifest: bool = True,
+) -> dict:
+    workspace = Path(workspace_dir).resolve()
+    payload = {
+        "schema_version": VERIFIED_BOOT_ATTESTATION_SCHEMA,
+        "generated_at_utc": _utc_now(),
+        "workspace": str(workspace),
+        "capability_family": "runtime_proof",
+        "capability": "verified_boot_attestation_nonclaim",
+        "boundary_doc": "docs/architecture/verified-boot-attestation-proof-boundary.md",
+        "local_runtime_proof_scope": [
+            "runtime_status",
+            "intent_dispatch",
+            "bounded_capability_execution",
+            "activity_and_record_output",
+            "cleanup_policy",
+        ],
+        "trust_surfaces": [
+            {
+                "id": "secure_boot",
+                "status": "not_observed",
+                "claim_allowed": False,
+                "requires": [
+                    "firmware_or_vm_secure_boot_state",
+                    "bootloader_or_shim_signature_path",
+                    "kernel_or_initramfs_signature_policy",
+                ],
+            },
+            {
+                "id": "tpm_measured_boot",
+                "status": "not_observed",
+                "claim_allowed": False,
+                "requires": [
+                    "tpm_or_vtpm_available",
+                    "boot_event_log",
+                    "pcr_values",
+                    "event_log_replay_against_pcrs",
+                ],
+            },
+            {
+                "id": "linux_ima",
+                "status": "not_observed",
+                "claim_allowed": False,
+                "requires": [
+                    "kernel_support_and_boot_parameters",
+                    "active_ima_policy",
+                    "measurement_appraisal_or_audit_logs",
+                    "measurement_vs_appraisal_mode_declared",
+                ],
+            },
+        ],
+        "non_claims": {
+            "secure_boot_enforced": False,
+            "tpm_attestation_completed": False,
+            "pcr_event_log_verified": False,
+            "ima_appraisal_enforced": False,
+            "hardware_backed_attestation_completed": False,
+            "docker_runtime_used_as_boot_chain_proof": False,
+        },
+        "blockers": [
+            {
+                "id": "secure-boot-observation-required",
+                "reason": "Secure Boot status requires observed VM or hardware firmware state evidence.",
+                "recovery_action": "Run a VM or hardware proof flow and attach firmware state plus signature-path evidence before claiming Secure Boot.",
+            },
+            {
+                "id": "tpm-pcr-event-log-required",
+                "reason": "TPM measured boot requires TPM or vTPM PCR values and a matching boot event log.",
+                "recovery_action": "Capture TPM-backed PCR/event-log evidence and verify event-log replay before claiming attestation.",
+            },
+            {
+                "id": "ima-policy-log-required",
+                "reason": "Linux IMA proof requires kernel/config, active policy, and measurement/appraisal/audit logs.",
+                "recovery_action": "Attach IMA policy and logs, and declare whether AgentOS is measuring only or enforcing appraisal.",
+            },
+        ],
+        "correlation": {
+            "session_id": str(session_id).strip(),
+            "request_id": "",
+            "approval_id": "",
+            "trace_id": "",
+            "run_id": "",
+            "boot_id": "",
+        },
+        "proof": {
+            "local_runtime_proof_separate_from_boot_chain": True,
+            "secure_boot_observed": False,
+            "tpm_measured_boot_observed": False,
+            "pcr_event_log_verified": False,
+            "ima_enforcement_observed": False,
+            "hardware_attestation_observed": False,
+            "docker_claims_boot_trust": False,
+        },
+        "artifacts": {},
+    }
+    if write_manifest:
+        payload["artifacts"]["latest_verified_boot_attestation_nonclaim_json"] = _write_manifest(
+            workspace,
+            "latest-verified-boot-attestation-nonclaim.json",
             payload,
         )
     return payload

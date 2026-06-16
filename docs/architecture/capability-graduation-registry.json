@@ -1,0 +1,77 @@
+{
+  "schema_version": "agentos-capability-graduation-registry.v1",
+  "policy": {
+    "browser_is_default": false,
+    "prefer_internal_capability": true,
+    "require_permission_level": true,
+    "require_user_owned_records": true,
+    "require_live_proof_before_claim": true
+  },
+  "candidates": [
+    {
+      "candidate_id": "calendar_readonly_live",
+      "source_pattern": "repeated calendar read/search/summarize requests",
+      "target_capability": "calendar_readonly_live_adapter",
+      "current_route": "calendar_fixture_contract",
+      "graduation_stage": "candidate",
+      "permission_level": "external_read",
+      "data_boundary": "explicit OAuth adapter with user-owned records",
+      "safe_mock_available": true,
+      "live_proof_required": true,
+      "blockers": ["calendar-live-oauth", "observed-readonly-run-required"],
+      "exit_condition": "live read-only Calendar proof is observed without mutation and recorded through the observed-proof intake boundary"
+    },
+    {
+      "candidate_id": "gmail_readonly_live",
+      "source_pattern": "repeated Gmail read/search/summarize/draft requests",
+      "target_capability": "gmail_readonly_live_adapter",
+      "current_route": "gmail_fixture_and_manual_acceptance",
+      "graduation_stage": "candidate",
+      "permission_level": "external_read",
+      "data_boundary": "explicit OAuth adapter with user-owned records",
+      "safe_mock_available": true,
+      "live_proof_required": true,
+      "blockers": ["gmail-oauth-live", "observed-readonly-run-required"],
+      "exit_condition": "live read-only Gmail proof is observed without send/delete/archive and recorded through the observed-proof intake boundary"
+    },
+    {
+      "candidate_id": "web_research_brief",
+      "source_pattern": "repeated web/search summary requests",
+      "target_capability": "research_brief_response",
+      "current_route": "internal_web_summary_with_browser_fallback_contract",
+      "graduation_stage": "internal_capability",
+      "permission_level": "safe_read",
+      "data_boundary": "allowlisted web fetch with user-owned records",
+      "safe_mock_available": true,
+      "live_proof_required": false,
+      "blockers": [],
+      "exit_condition": "research brief outputs remain recorded and browser fallback remains non-default"
+    },
+    {
+      "candidate_id": "browser_fallback_observed",
+      "source_pattern": "repeated interactive or authenticated browser fallback requests",
+      "target_capability": "bounded_browser_acceptance",
+      "current_route": "blocked_external_state_or_allowed_fallback_contract",
+      "graduation_stage": "blocked",
+      "permission_level": "external_interactive",
+      "data_boundary": "user-approved browser session with sanitized observed proof",
+      "safe_mock_available": true,
+      "live_proof_required": true,
+      "blockers": ["user-approved-browser-acceptance-required", "observed-proof-record-required"],
+      "exit_condition": "a user-approved browser acceptance run is observed, redacted, and recorded before any live-browser proof claim"
+    },
+    {
+      "candidate_id": "maildir_inbox_intake",
+      "source_pattern": "local inbox-like file or Maildir workflows",
+      "target_capability": "maildir_inbox_intake",
+      "current_route": "native_inbox_fixture_boundary",
+      "graduation_stage": "candidate",
+      "permission_level": "local_read",
+      "data_boundary": "user-owned local path with secrets excluded",
+      "safe_mock_available": true,
+      "live_proof_required": true,
+      "blockers": ["observed-maildir-user-data-proof-required"],
+      "exit_condition": "Maildir/user-owned path proof is observed without external mutation and recorded through the observed-proof intake boundary"
+    }
+  ]
+}

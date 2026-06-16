@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-65] Close observed proof intake epic`
+- `[P2-66] Define capability graduation registry`
 
 Runtime impact statement:
 
-- This task closes the observed proof intake and blocker handoff epic after boundary docs, record validation, golden/CLI smokes, and runtime status visibility are in place, preventing repeated intake-boundary work while keeping real live credential, VM/ISO, release, browser, and boot-chain proof as explicit blockers.
+- This task defines the capability graduation registry so repeated browser fallback, inbox/app, Calendar, Gmail, and web patterns can move toward OS-native AgentOS capabilities before broader app ecosystem work expands external app or browser mediation.
 
 Current autonomous completion loop:
 
@@ -134,6 +134,8 @@ Recommended Phase 2 tasks:
 - Observed proof intake must keep secrets out of repo/workspace records, require sanitized evidence before proof promotion, and preserve explicit blockers for live credentials, VM/ISO, release, browser, and boot-chain proof.
 - Observed proof records now use `docs/architecture/observed-proof-intake-schema.json` and can be checked with `scripts/observed_proof_intake_validate.py`; `scripts/smoke_observed_proof_intake_validator.sh` covers valid, blocked, and secret-term rejection behavior.
 - `phase2-run --message "status"` attaches `agentos-observed-proof-intake-status.v1` so observed proof intake readiness and missing observed-record blockers are visible in the user-testable runtime status output.
+- The capability graduation registry epic is active; its first slice is `docs/architecture/capability-graduation-registry.md` and `docs/architecture/capability-graduation-registry.json`, smoke-tested by `scripts/smoke_capability_graduation_registry.sh`.
+- Capability graduation must prefer internal AgentOS capabilities, keep browser/external app mediation non-default, preserve permission/data boundaries, and require observed proof before live claims.
 
 ## Validation Standards
 
@@ -163,6 +165,8 @@ python3 scripts/cleanup_build_artifacts.py --delete --json
 - `docs/architecture/intent-classification-contract.md`
 - `docs/architecture/capability-permission-boundary.md`
 - `docs/architecture/capability-permission-registry.json`
+- `docs/architecture/capability-graduation-registry.md`
+- `docs/architecture/capability-graduation-registry.json`
 - `docs/architecture/user-owned-runtime-data-boundary.md`
 - `docs/architecture/verified-boot-attestation-proof-boundary.md`
 - `docs/architecture/observed-proof-intake-boundary.md`

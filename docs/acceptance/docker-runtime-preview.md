@@ -96,3 +96,14 @@ This gate starts the Python Docker runtime preview, verifies every customer-faci
 Product Layer surface together, and asserts that Docker still does not claim
 live OAuth, VM/ISO boot, browser, release, external mutation, Secure Boot,
 TPM/PCR, IMA, or hardware attestation proof.
+
+## Customer Onboarding Quickstart Gate
+
+```bash
+scripts/smoke_docker_customer_onboarding_quickstart.sh
+```
+
+This gate verifies that README quickstart, Docker acceptance, public preview
+operations, roadmap, and task state all point to the same Docker-first public
+try path and keep Docker proof separate from VM/ISO, live OAuth, browser,
+release, external mutation, and attestation proof.

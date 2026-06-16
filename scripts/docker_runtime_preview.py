@@ -128,6 +128,7 @@ class DockerPreviewApp:
         activity_timeline = self.activity_timeline(activity=activity_payload)
         capability_store = self.capability_store()
         approval_center = self.approval_center(capability_store=capability_store)
+        proof_uploader = self.observed_proof_uploader()
         recovery_center = self.recovery_center(setup=setup_payload)
         evidence_dashboard = self.evidence_dashboard(setup=setup_payload, activity=activity_payload)
         blockers = recovery_center.get("blockers", [])
@@ -167,6 +168,12 @@ class DockerPreviewApp:
                     "customer_value": "See which actions need user approval, observed proof, or are blocked before AgentOS may perform them.",
                 },
                 {
+                    "id": "observed_proof_uploader",
+                    "label": "Observed Proof Uploader",
+                    "state": proof_uploader.get("state", "ready"),
+                    "customer_value": "See which evidence types can be attached later before live, VM, release, browser, or attestation claims are promoted.",
+                },
+                {
                     "id": "recovery_center",
                     "label": "Recovery Center",
                     "state": "attention" if blockers else "ready",
@@ -184,6 +191,7 @@ class DockerPreviewApp:
             "activity_timeline": activity_timeline,
             "capability_store": capability_store,
             "approval_center": approval_center,
+            "observed_proof_uploader": proof_uploader,
             "recovery_center": recovery_center,
             "evidence_dashboard": evidence_dashboard,
             "proof": {
@@ -192,6 +200,65 @@ class DockerPreviewApp:
                 "live_oauth_claimed": False,
                 "live_browser_proof_claimed": False,
                 "customer_facing_summary_ready": True,
+            },
+        }
+
+    def observed_proof_uploader(self) -> dict:
+        proof_types = [
+            {
+                "id": "live-oauth-readonly",
+                "label": "Live OAuth read-only proof",
+                "state": "awaiting_external_evidence",
+                "accepted_evidence": ["provider", "scope", "sanitized transcript", "redacted artifact path", "reviewer note"],
+                "customer_value": "Promotes Gmail or Calendar read-only claims only after explicit credentials and sanitized observed evidence exist.",
+            },
+            {
+                "id": "vm-iso-boot-rejoin",
+                "label": "VM/ISO boot and rejoin proof",
+                "state": "awaiting_external_evidence",
+                "accepted_evidence": ["vm runner", "boot log", "reboot/recovery observation", "managed runtime rejoin observation"],
+                "customer_value": "Promotes OS boot, recovery, and managed runtime rejoin claims only after a real VM run is observed.",
+            },
+            {
+                "id": "live-browser-observed",
+                "label": "Live browser observed proof",
+                "state": "awaiting_user_approved_run",
+                "accepted_evidence": ["target", "approval note", "sanitized screenshots or transcript", "fallback contract result"],
+                "customer_value": "Promotes browser fallback claims only after a user-approved live browser run is observed.",
+            },
+            {
+                "id": "release-trust",
+                "label": "Release trust proof",
+                "state": "awaiting_release_evidence",
+                "accepted_evidence": ["artifact manifest", "checksum", "signature", "release signoff"],
+                "customer_value": "Promotes release trust claims only after real release artifacts and signing/checksum evidence exist.",
+            },
+            {
+                "id": "hardware-attestation",
+                "label": "Hardware attestation proof",
+                "state": "awaiting_hardware_evidence",
+                "accepted_evidence": ["Secure Boot state", "TPM/PCR evidence", "event log", "IMA or equivalent attestation"],
+                "customer_value": "Promotes hardware trust claims only after device-backed attestation evidence exists.",
+            },
+        ]
+        return {
+            "schema_version": "agentos-product-layer-observed-proof-uploader.v1",
+            "surface": "Observed Proof Uploader",
+            "state": "ready",
+            "customer_message": "Observed Proof Uploader defines the evidence AgentOS needs before stronger live, VM, browser, release, or attestation claims can be promoted.",
+            "proof_types": proof_types,
+            "mock_submission_contract": {
+                "required_fields": ["proof_type", "observed_at", "sanitized_artifact_ref", "reviewer_note"],
+                "secret_material_allowed": False,
+                "claim_promotion_automatic": False,
+            },
+            "proof": {
+                "docker_preview_ready": True,
+                "mock_contract_ready": True,
+                "file_upload_execution_claimed": False,
+                "claim_promotion_claimed": False,
+                "secret_material_allowed": False,
+                "customer_facing_proof_uploader_ready": True,
             },
         }
 
@@ -706,6 +773,7 @@ def _render_page(app: DockerPreviewApp) -> str:
     activity_timeline = product_layer.get("activity_timeline", {}) if isinstance(product_layer.get("activity_timeline"), dict) else {}
     capability_store = product_layer.get("capability_store", {}) if isinstance(product_layer.get("capability_store"), dict) else {}
     approval_center = product_layer.get("approval_center", {}) if isinstance(product_layer.get("approval_center"), dict) else {}
+    proof_uploader = product_layer.get("observed_proof_uploader", {}) if isinstance(product_layer.get("observed_proof_uploader"), dict) else {}
     recovery_center = product_layer.get("recovery_center", {}) if isinstance(product_layer.get("recovery_center"), dict) else {}
     evidence_dashboard = product_layer.get("evidence_dashboard", {}) if isinstance(product_layer.get("evidence_dashboard"), dict) else {}
     features = product_layer.get("features", []) if isinstance(product_layer.get("features"), list) else []
@@ -797,6 +865,15 @@ def _render_page(app: DockerPreviewApp) -> str:
         for item in approval_center.get("items", [])[:10]
         if isinstance(item, dict)
     ) or "<li>No approval-gated actions are available.</li>"
+    proof_type_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Proof type'))))}</b> "
+        f"{html.escape(str(item.get('customer_value', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))}</em>"
+        "</li>"
+        for item in proof_uploader.get("proof_types", [])
+        if isinstance(item, dict)
+    ) or "<li>No observed proof types are configured.</li>"
     evidence_html = "\n".join(
         "<li>"
         f"<b>{html.escape(str(item.get('label', item.get('id', 'Evidence'))))}</b> "
@@ -931,6 +1008,22 @@ def _render_page(app: DockerPreviewApp) -> str:
   </section>
   <section class="product">
     <div class="panel">
+      <h2>Observed Proof Uploader</h2>
+      <p class="lead">{html.escape(str(proof_uploader.get('customer_message', 'Observed proof requirements are available below.')))}</p>
+      <ul>{proof_type_html}</ul>
+    </div>
+    <div class="panel">
+      <h2>Upload Boundary</h2>
+      <ul>
+        <li><b>Secret material</b> not allowed</li>
+        <li><b>Claim promotion</b> not automatic</li>
+        <li><b>File upload execution</b> not claimed</li>
+      </ul>
+      <p><a href="/api/proofs">proofs JSON</a></p>
+    </div>
+  </section>
+  <section class="product">
+    <div class="panel">
       <h2>Evidence Dashboard</h2>
       <p class="lead">{html.escape(str(evidence_dashboard.get('customer_message', 'Evidence state is available below.')))}</p>
       <ul>{evidence_html}</ul>
@@ -1026,6 +1119,8 @@ def make_handler(app: DockerPreviewApp) -> type[BaseHTTPRequestHandler]:
                 _json_response(self, app.capability_store())
             elif path == "/api/approvals":
                 _json_response(self, app.approval_center())
+            elif path == "/api/proofs":
+                _json_response(self, app.observed_proof_uploader())
             elif path == "/api/recovery":
                 _json_response(self, app.recovery_center())
             elif path == "/api/evidence":

@@ -29,6 +29,7 @@ http://localhost:8787
 - the Activity Timeline product surface can summarize runtime events and user-visible records without claiming external app execution
 - the Capability Store product surface can summarize permission-registry capabilities without executing destructive actions or claiming external writes
 - the Approval Center product surface can summarize setup, confirmation, observed-proof, and blocked requirements without claiming approval execution
+- the Observed Proof Uploader product surface can summarize evidence requirements and mock submission fields without accepting secrets, uploading files, or auto-promoting claims
 - the Recovery Center product surface can turn missing proof into customer-facing next actions without claiming observed VM/ISO, live OAuth, browser, release, or attestation evidence
 - the Evidence Dashboard product surface can separate observed Docker/local proof from explicit external-proof non-claims
 - prompt intake can reach the same intent classification path used by AgentOS
@@ -93,6 +94,7 @@ command that produces:
 - an Activity Timeline product-layer summary
 - a Capability Store product-layer summary
 - an Approval Center product-layer summary
+- an Observed Proof Uploader product-layer summary
 - a Recovery Center product-layer summary
 - an Evidence Dashboard product-layer summary
 - at least one classified prompt

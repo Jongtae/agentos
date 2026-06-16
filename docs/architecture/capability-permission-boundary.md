@@ -107,3 +107,6 @@ The boundary is acceptable when smokes or fixtures can show:
 - a destructive or external-send request is blocked or requires confirmation
 - activity and records include permission level and recovery without leaking
   secrets
+
+`scripts/smoke_phase2_capability_result.sh` is the seed executable check for
+these outcomes.

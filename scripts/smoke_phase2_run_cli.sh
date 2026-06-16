@@ -82,12 +82,26 @@ assert status_payload["outcome"] == "completed"
 assert status_payload["proof"]["inbox_ownership_contract_attached"] is True
 assert status_payload["proof"]["live_inbox_oauth_completed"] is False
 assert status_payload["proof"]["inbox_mutation_executed"] is False
+assert status_payload["proof"]["verified_boot_attestation_nonclaim_attached"] is True
+assert status_payload["proof"]["secure_boot_observed"] is False
+assert status_payload["proof"]["tpm_measured_boot_observed"] is False
+assert status_payload["proof"]["pcr_event_log_verified"] is False
+assert status_payload["proof"]["ima_enforcement_observed"] is False
+assert status_payload["proof"]["hardware_attestation_observed"] is False
 assert Path(status_payload["artifacts"]["inbox_ownership_contract"]).exists()
+assert Path(status_payload["artifacts"]["verified_boot_attestation_nonclaim"]).exists()
 inbox_ownership = status_payload["capability_result"]["inbox_ownership"]
 assert inbox_ownership["schema_version"] == "agentos-inbox-routing-contract.v1"
 assert inbox_ownership["default_selected_path"] == "native_inbox_path"
 assert inbox_ownership["paths"][0]["native_inbox_handled"] is True
 assert inbox_ownership["paths"][0]["inbox_adapter_required"] is False
+verified_boot = status_payload["capability_result"]["verified_boot_attestation"]
+assert verified_boot["schema_version"] == "agentos-verified-boot-attestation-nonclaim.v1"
+assert verified_boot["proof"]["local_runtime_proof_separate_from_boot_chain"] is True
+assert verified_boot["non_claims"]["secure_boot_enforced"] is False
+assert verified_boot["non_claims"]["tpm_attestation_completed"] is False
+assert verified_boot["non_claims"]["ima_appraisal_enforced"] is False
+assert all(surface["claim_allowed"] is False for surface in verified_boot["trust_surfaces"])
 
 gmail = json.loads((tmp_dir / "gmail.json").read_text())
 assert gmail["permission"]["level"] == "external_read"

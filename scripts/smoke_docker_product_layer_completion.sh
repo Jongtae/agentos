@@ -37,6 +37,7 @@ curl -fsS "http://127.0.0.1:$PORT/healthz" >/dev/null
 curl -fsS "http://127.0.0.1:$PORT/" > "$TMP_DIR/home.html"
 curl -fsS "http://127.0.0.1:$PORT/api/product" > "$TMP_DIR/product.json"
 curl -fsS "http://127.0.0.1:$PORT/api/onboarding" > "$TMP_DIR/onboarding.json"
+curl -fsS "http://127.0.0.1:$PORT/api/demo-journey" > "$TMP_DIR/demo-journey.json"
 curl -fsS "http://127.0.0.1:$PORT/api/work-inbox" > "$TMP_DIR/work-inbox.json"
 curl -fsS "http://127.0.0.1:$PORT/api/timeline" > "$TMP_DIR/timeline.json"
 curl -fsS "http://127.0.0.1:$PORT/api/capabilities" > "$TMP_DIR/capabilities.json"
@@ -59,6 +60,7 @@ onboarding = json.loads((root / "onboarding.json").read_text())
 
 surfaces = {
     "onboarding_status": ("onboarding.json", "agentos-product-layer-onboarding-status.v1", "Docker Onboarding Status"),
+    "guided_demo_journey": ("demo-journey.json", "agentos-product-layer-guided-demo-journey.v1", "Guided Demo Journey"),
     "work_inbox": ("work-inbox.json", "agentos-product-layer-work-inbox.v1", "Work Inbox"),
     "activity_timeline": ("timeline.json", "agentos-product-layer-activity-timeline.v1", "Activity Timeline"),
     "capability_store": ("capabilities.json", "agentos-product-layer-capability-store.v1", "Capability Store"),
@@ -99,6 +101,9 @@ assert {item["id"] for item in product["onboarding_status"]["readiness_checklist
 
 non_claims = {
     "boot_or_iso_proof_claimed": product["proof"]["boot_or_iso_proof_claimed"],
+    "guided_demo_boot_or_iso": product["guided_demo_journey"]["proof"]["boot_or_iso_proof_claimed"],
+    "guided_demo_live_oauth": product["guided_demo_journey"]["proof"]["live_oauth_claimed"],
+    "guided_demo_external_mutation": product["guided_demo_journey"]["proof"]["external_mutation_claimed"],
     "onboarding_boot_or_iso": product["onboarding_status"]["proof"]["boot_or_iso_proof_claimed"],
     "onboarding_live_oauth": product["onboarding_status"]["proof"]["live_oauth_claimed"],
     "work_inbox_live_oauth": product["work_inbox"]["proof"]["live_oauth_claimed"],
@@ -118,6 +123,7 @@ assert all(value is False for value in non_claims.values()), non_claims
 
 ready_claims = {
     "runtime_home": product["proof"]["customer_facing_summary_ready"],
+    "guided_demo_journey": product["guided_demo_journey"]["proof"]["customer_guided_journey_ready"],
     "onboarding_status": product["onboarding_status"]["proof"]["customer_onboarding_ready"],
     "work_inbox": product["work_inbox"]["proof"]["customer_facing_summary_ready"],
     "activity_timeline": product["activity_timeline"]["proof"]["customer_facing_timeline_ready"],

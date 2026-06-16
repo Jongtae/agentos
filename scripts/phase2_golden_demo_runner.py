@@ -42,6 +42,7 @@ PRACTICAL_SMOKES = [
     "scripts/smoke_docker_product_layer_completion.sh",
     "scripts/smoke_docker_customer_onboarding_quickstart.sh",
     "scripts/smoke_docker_onboarding_status_contract.sh",
+    "scripts/smoke_docker_guided_demo_journey.sh",
 ]
 
 EXPLICIT_BLOCKERS = [

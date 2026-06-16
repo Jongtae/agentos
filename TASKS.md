@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-73] Close VM ISO observed proof status epic`
+- `[P2-74] Add Calendar live read-only manual acceptance pack`
 
 Runtime impact statement:
 
-- This task closes the VM/ISO observed proof status epic after runtime status exposes preflight readiness, planned observation commands, required proof blockers, and false observed-proof flags, preventing repeated VM/ISO status work until a real VM run can be observed.
+- This task adds a Calendar live read-only manual acceptance pack and blocker smoke so future tester OAuth evidence can be promoted through a safe, redacted path while automated local proof still avoids real credentials and Calendar mutations.
 
 Current autonomous completion loop:
 
@@ -139,6 +139,7 @@ Recommended Phase 2 tasks:
 - The Calendar read-only live adapter readiness epic is closed for this Phase 2 slice; future Calendar work should require explicit live OAuth adapter design, tester credentials, or a confirmed mutation model before claiming more than fixture-backed readiness.
 - The Gmail read-only live readiness epic is closed for this Phase 2 slice; future Gmail work should require explicit tester OAuth credentials, observed read-only proof, or a later confirmed mutation model before claiming more than setup readiness.
 - The VM/ISO observed proof status epic is closed for this Phase 2 slice; future VM/ISO work should require a real observed VM run, sanitized evidence, or a new release/boot proof promotion task before claiming boot, reboot/recovery, managed runtime rejoin, ISO freshness, or VM signoff.
+- The Calendar live read-only acceptance epic is active; its first slice adds a manual acceptance pack, blocker capture, and golden smoke coverage while keeping live Calendar OAuth, observed account proof, and create/update/delete/invite/cancel mutations blocked until tester evidence exists.
 
 ## Validation Standards
 
@@ -186,3 +187,4 @@ python3 scripts/cleanup_build_artifacts.py --delete --json
 - `docs/architecture/updater-hardening-state-contract.md`
 - `docs/acceptance/vm-iso-proof-preflight.md`
 - `docs/acceptance/gmail-live-readonly-acceptance.md`
+- `docs/acceptance/calendar-live-readonly-acceptance.md`

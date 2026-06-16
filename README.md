@@ -77,6 +77,7 @@ kept because the runtime must be easy to try while the OS form factor matures.
 ## What Works Now
 
 - `docker compose up` starts a local AgentOS runtime preview.
+- The Docker preview is the default public Product Layer try path.
 - `http://localhost:8787` shows status, setup state, prompt execution, and activity.
 - Greeting, status, workspace, and search-style requests route through intent dispatch.
 - A terminal-first operator surface exists for the VM/ISO path.
@@ -194,6 +195,7 @@ flowchart LR
 | Track | Status | Runtime impact |
 | --- | --- | --- |
 | Docker runtime preview | Developer/demo proof path | Makes the managed runtime easy to try without claiming boot ownership. |
+| Runtime Home | Active Docker product surface | Presents runtime readiness, Work Inbox, Activity Timeline, Recovery Center, and Evidence Dashboard states in customer language. |
 | Phase 2 golden runtime loop | Closed baseline | Proves prompt intake, intent classification, bounded capability execution, activity narration, records, and recovery. |
 | Capability permission boundary | Completed | Defines how AgentOS declares, blocks, records, and narrates capability access. |
 | Updater hardening | Completed | Protects runtime continuity and rollback/recovery truthfulness. |

@@ -24,6 +24,7 @@ http://localhost:8787
 
 - the runtime can start in a local developer environment
 - setup/status can report local runtime and adapter readiness
+- the customer-facing Runtime Home can summarize product-layer readiness
 - prompt intake can reach the same intent classification path used by AgentOS
 - bounded capabilities can emit activity events
 - generated outputs can be written to user-owned mounted storage
@@ -81,6 +82,7 @@ Docker preview work is acceptable when a contributor can run a documented
 command that produces:
 
 - a setup/status report
+- a Runtime Home product-layer summary
 - at least one classified prompt
 - at least one activity feed event
 - a user-owned output path

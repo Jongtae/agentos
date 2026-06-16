@@ -34,8 +34,9 @@ for _ in $(seq 1 20); do
 done
 
 curl -fsS "http://127.0.0.1:$PORT/healthz" >/dev/null
-curl -fsS "http://127.0.0.1:$PORT/" >/dev/null
+curl -fsS "http://127.0.0.1:$PORT/" > "$TMP_DIR/home.html"
 curl -fsS "http://127.0.0.1:$PORT/api/status" > "$TMP_DIR/status.json"
+curl -fsS "http://127.0.0.1:$PORT/api/product" > "$TMP_DIR/product.json"
 curl -fsS \
   -H 'Content-Type: application/json' \
   -d '{"message":"hi"}' \
@@ -49,12 +50,29 @@ from pathlib import Path
 
 root = Path(sys.argv[1])
 status = json.loads((root / "status.json").read_text())
+product = json.loads((root / "product.json").read_text())
 prompt = json.loads((root / "prompt.json").read_text())
 activity = json.loads((root / "activity.json").read_text())
+home = (root / "home.html").read_text()
 
 assert status["proof"]["docker_preview_surface_ready"] is True
+assert status["proof"]["product_layer_runtime_home_ready"] is True
 assert status["proof"]["boot_or_iso_proof"] is False
 assert status["telegram"]["transport"] == "polling_preview"
+assert product["schema_version"] == "agentos-product-layer-runtime-home.v1"
+assert product["proof"]["docker_main_try_path"] is True
+assert product["proof"]["boot_or_iso_proof_claimed"] is False
+assert product["proof"]["customer_facing_summary_ready"] is True
+assert {feature["id"] for feature in product["features"]} >= {
+    "runtime_home",
+    "work_inbox",
+    "activity_timeline",
+    "recovery_center",
+    "evidence_dashboard",
+}
+assert "Runtime Home" in home
+assert "Recovery Center" in home
+assert "Work Inbox" in home
 assert prompt["ok"] is True
 assert prompt["intent"] == "greeting", prompt
 assert "DuckDuckGo" not in json.dumps(prompt)

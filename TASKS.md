@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-61] Close verified boot attestation proof boundary epic`
+- `[P2-62] Define observed proof intake boundary`
 
 Runtime impact statement:
 
-- This task closes the verified boot and attestation proof boundary epic after its documented, smoke-tested, and status-visible non-claim proof is in place, preventing repeated boundary work while keeping real Secure Boot, TPM, IMA, and hardware evidence as explicit blockers.
+- This task defines the observed proof intake boundary so live credential, VM/ISO, release, browser, and boot-chain evidence can be attached later without turning unobserved blockers into claimed runtime proof.
 
 Current autonomous completion loop:
 
@@ -129,6 +129,8 @@ Recommended Phase 2 tasks:
 - The verified boot and attestation proof boundary epic is closed for this Phase 2 slice; future verified boot work should require observed VM or hardware evidence before claiming Secure Boot, TPM measured boot, PCR/event-log, IMA, or hardware attestation proof.
 - The first verified boot slice is `docs/architecture/verified-boot-attestation-proof-boundary.md`, smoke-tested by `scripts/smoke_verified_boot_attestation_boundary.sh`.
 - `phase2-run --message "status"` attaches the verified boot/attestation non-claim artifact so boot-chain trust proof remains visibly separate from local runtime proof.
+- The observed proof intake and blocker handoff epic is active; its first slice is `docs/architecture/observed-proof-intake-boundary.md`, smoke-tested by `scripts/smoke_observed_proof_intake_boundary.sh`.
+- Observed proof intake must keep secrets out of repo/workspace records, require sanitized evidence before proof promotion, and preserve explicit blockers for live credentials, VM/ISO, release, browser, and boot-chain proof.
 
 ## Validation Standards
 
@@ -160,6 +162,7 @@ python3 scripts/cleanup_build_artifacts.py --delete --json
 - `docs/architecture/capability-permission-registry.json`
 - `docs/architecture/user-owned-runtime-data-boundary.md`
 - `docs/architecture/verified-boot-attestation-proof-boundary.md`
+- `docs/architecture/observed-proof-intake-boundary.md`
 - `docs/acceptance/phase2-golden-runtime-loop.md`
 - `docs/acceptance/docker-runtime-preview.md`
 - `docs/acceptance/phase2-intent-eval.json`

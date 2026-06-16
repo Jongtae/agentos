@@ -114,6 +114,7 @@ assert onboarding["proof"]["external_mutation_claimed"] is False
 assert onboarding["proof"]["hardware_attestation_claimed"] is False
 assert onboarding["entrypoints"]["browser_url"] == "http://localhost:8787"
 assert onboarding["entrypoints"]["onboarding_api"] == "/api/onboarding"
+assert onboarding["validation"]["onboarding_status_contract_smoke"] == "scripts/smoke_docker_onboarding_status_contract.sh"
 assert {step["id"] for step in onboarding["steps"]} >= {
     "clone_repository",
     "copy_env",
@@ -121,6 +122,14 @@ assert {step["id"] for step in onboarding["steps"]} >= {
     "open_runtime_home",
     "try_prompt",
 }
+assert {item["id"] for item in onboarding["readiness_checklist"]} >= {
+    "quickstart_documented",
+    "preview_entrypoints_available",
+    "basic_preview_no_api_key",
+    "docker_validation_available",
+    "observed_proof_boundaries_visible",
+}
+assert {item["id"]: item["state"] for item in onboarding["readiness_checklist"]}["observed_proof_boundaries_visible"] == "blocked_on_external_evidence"
 assert work_inbox["schema_version"] == "agentos-product-layer-work-inbox.v1"
 assert work_inbox["proof"]["docker_preview_ready"] is True
 assert work_inbox["proof"]["read_first_only"] is True

@@ -88,6 +88,15 @@ for key, (filename, schema, label) in surfaces.items():
     assert endpoint["schema_version"] == schema, key
     assert label in home, label
 
+assert product["onboarding_status"]["validation"]["onboarding_status_contract_smoke"] == "scripts/smoke_docker_onboarding_status_contract.sh"
+assert {item["id"] for item in product["onboarding_status"]["readiness_checklist"]} >= {
+    "quickstart_documented",
+    "preview_entrypoints_available",
+    "basic_preview_no_api_key",
+    "docker_validation_available",
+    "observed_proof_boundaries_visible",
+}
+
 non_claims = {
     "boot_or_iso_proof_claimed": product["proof"]["boot_or_iso_proof_claimed"],
     "onboarding_boot_or_iso": product["onboarding_status"]["proof"]["boot_or_iso_proof_claimed"],

@@ -159,6 +159,43 @@ class DockerPreviewApp:
             "state": "ready",
             "customer_message": "Docker onboarding is ready for the public preview path; stronger OS, live, release, and hardware proofs still require observed evidence.",
             "steps": steps,
+            "readiness_checklist": [
+                {
+                    "id": "quickstart_documented",
+                    "label": "Quickstart is documented",
+                    "state": "ready",
+                    "evidence": "README.md",
+                    "customer_value": "A customer has the exact clone, env, compose, and browser steps before starting.",
+                },
+                {
+                    "id": "preview_entrypoints_available",
+                    "label": "Preview entrypoints are visible",
+                    "state": "ready",
+                    "evidence": "http://localhost:8787, /api/status, /api/product, /api/onboarding",
+                    "customer_value": "A customer can inspect the runtime home and onboarding contract from the running preview.",
+                },
+                {
+                    "id": "basic_preview_no_api_key",
+                    "label": "Basic preview does not require an API key",
+                    "state": "ready",
+                    "evidence": "requires_api_key_for_basic_preview=false",
+                    "customer_value": "A customer can open the Docker Product Layer without first configuring live providers.",
+                },
+                {
+                    "id": "docker_validation_available",
+                    "label": "Docker-safe validation is available",
+                    "state": "ready",
+                    "evidence": "scripts/smoke_docker_onboarding_status_contract.sh",
+                    "customer_value": "The public try path has a focused smoke that catches onboarding contract drift.",
+                },
+                {
+                    "id": "observed_proof_boundaries_visible",
+                    "label": "Observed proof boundaries are visible",
+                    "state": "blocked_on_external_evidence",
+                    "evidence": "VM/ISO, live OAuth, live browser, release, mutation, and hardware proof are explicit non-claims.",
+                    "customer_value": "A customer can tell which claims are proven locally and which require future observed evidence.",
+                },
+            ],
             "entrypoints": {
                 "browser_url": "http://localhost:8787",
                 "status_api": "/api/status",
@@ -169,6 +206,7 @@ class DockerPreviewApp:
             },
             "validation": {
                 "quickstart_smoke": "scripts/smoke_docker_customer_onboarding_quickstart.sh",
+                "onboarding_status_contract_smoke": "scripts/smoke_docker_onboarding_status_contract.sh",
                 "product_layer_completion_smoke": "scripts/smoke_docker_product_layer_completion.sh",
                 "docker_runtime_preview_python_smoke": "scripts/smoke_docker_runtime_preview_python.sh",
             },
@@ -1025,6 +1063,15 @@ def _render_page(app: DockerPreviewApp) -> str:
         for item in onboarding_status.get("steps", [])
         if isinstance(item, dict)
     ) or "<li>No onboarding steps are configured.</li>"
+    onboarding_checklist_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Readiness check'))))}</b> "
+        f"{html.escape(str(item.get('customer_value', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))}</em>"
+        "</li>"
+        for item in onboarding_status.get("readiness_checklist", [])
+        if isinstance(item, dict)
+    ) or "<li>No onboarding readiness checks are configured.</li>"
     recovery_item_html = "\n".join(
         "<li>"
         f"<b>{html.escape(str(item.get('label', item.get('id', 'Recovery item'))))}</b> "
@@ -1168,6 +1215,8 @@ def _render_page(app: DockerPreviewApp) -> str:
       <h2>Docker Onboarding Status</h2>
       <p class="lead">{html.escape(str(onboarding_status.get('customer_message', 'Docker onboarding status is available below.')))}</p>
       <ul>{onboarding_step_html}</ul>
+      <h3>Readiness Checklist</h3>
+      <ul>{onboarding_checklist_html}</ul>
     </div>
     <div class="panel">
       <h2>Onboarding Proof</h2>

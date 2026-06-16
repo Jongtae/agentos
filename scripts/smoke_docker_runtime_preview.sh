@@ -121,6 +121,14 @@ assert onboarding["proof"]["requires_api_key_for_basic_preview"] is False
 assert onboarding["proof"]["boot_or_iso_proof_claimed"] is False
 assert onboarding["proof"]["live_oauth_claimed"] is False
 assert onboarding["proof"]["hardware_attestation_claimed"] is False
+assert onboarding["validation"]["onboarding_status_contract_smoke"] == "scripts/smoke_docker_onboarding_status_contract.sh"
+assert {item["id"] for item in onboarding["readiness_checklist"]} >= {
+    "quickstart_documented",
+    "preview_entrypoints_available",
+    "basic_preview_no_api_key",
+    "docker_validation_available",
+    "observed_proof_boundaries_visible",
+}
 assert work_inbox["schema_version"] == "agentos-product-layer-work-inbox.v1"
 assert work_inbox["proof"]["read_first_only"] is True
 assert work_inbox["proof"]["external_mutation_claimed"] is False

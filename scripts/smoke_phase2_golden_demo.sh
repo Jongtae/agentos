@@ -26,6 +26,7 @@ smoke_names = {result["name"] for result in payload["results"]}
 assert "scripts/smoke_release_manifest_checksum_preflight.sh" in smoke_names
 assert "scripts/smoke_inbox_capability_ownership_boundary.sh" in smoke_names
 assert "scripts/smoke_docker_customer_proof_packet.sh" in smoke_names
+assert "scripts/smoke_docker_customer_handoff_bundle.sh" in smoke_names
 blocker_ids = {blocker["id"] for blocker in payload["explicit_blockers"]}
 assert {"gmail-oauth-live", "vm-iso-proof"} <= blocker_ids
 PY

@@ -48,6 +48,7 @@ curl -fsS "http://127.0.0.1:$PORT/api/attestation" > "$TMP_DIR/attestation.json"
 curl -fsS "http://127.0.0.1:$PORT/api/recovery" > "$TMP_DIR/recovery.json"
 curl -fsS "http://127.0.0.1:$PORT/api/evidence" > "$TMP_DIR/evidence.json"
 curl -fsS "http://127.0.0.1:$PORT/api/proof-packet" > "$TMP_DIR/proof-packet.json"
+curl -fsS "http://127.0.0.1:$PORT/api/customer-handoff" > "$TMP_DIR/customer-handoff.json"
 
 python3 - "$TMP_DIR" <<'PY'
 import json
@@ -72,6 +73,7 @@ surfaces = {
     "recovery_center": ("recovery.json", "agentos-product-layer-recovery-center.v1", "Recovery Center"),
     "evidence_dashboard": ("evidence.json", "agentos-product-layer-evidence-dashboard.v1", "Evidence Dashboard"),
     "customer_proof_packet": ("proof-packet.json", "agentos-product-layer-customer-proof-packet.v1", "Customer Proof Packet"),
+    "customer_handoff_bundle": ("customer-handoff.json", "agentos-product-layer-customer-handoff-bundle.v1", "Customer Handoff Bundle"),
 }
 
 assert product["schema_version"] == "agentos-product-layer-runtime-home.v1"
@@ -105,6 +107,17 @@ assert len(product["guided_demo_journey"]["completion_summary"]["completed_claim
 assert len(product["guided_demo_journey"]["completion_summary"]["next_blockers"]) >= 3
 assert product["customer_proof_packet"]["proof"]["customer_packet_ready"] is True
 assert product["customer_proof_packet"]["proof"]["claim_promotion_automatic"] is False
+assert product["customer_handoff_bundle"]["proof"]["customer_handoff_ready"] is True
+assert product["customer_handoff_bundle"]["proof"]["boot_or_iso_proof_claimed"] is False
+assert product["customer_handoff_bundle"]["try_path"]["command"] == "docker compose up --build"
+assert {item["id"] for item in product["customer_handoff_bundle"]["inspect_surfaces"]} >= {
+    "runtime_home",
+    "onboarding_status",
+    "guided_demo_journey",
+    "customer_proof_packet",
+    "recovery_center",
+    "evidence_dashboard",
+}
 assert {item["id"] for item in product["customer_proof_packet"]["readiness_checklist"]} >= {
     "completed_claims_present",
     "validation_commands_present",
@@ -148,6 +161,9 @@ non_claims = {
     "proof_packet_vm_iso": product["customer_proof_packet"]["proof"]["boot_or_iso_proof_claimed"],
     "proof_packet_live_oauth": product["customer_proof_packet"]["proof"]["live_oauth_claimed"],
     "proof_packet_external_mutation": product["customer_proof_packet"]["proof"]["external_mutation_claimed"],
+    "handoff_vm_iso": product["customer_handoff_bundle"]["proof"]["boot_or_iso_proof_claimed"],
+    "handoff_live_oauth": product["customer_handoff_bundle"]["proof"]["live_oauth_claimed"],
+    "handoff_external_mutation": product["customer_handoff_bundle"]["proof"]["external_mutation_claimed"],
 }
 assert all(value is False for value in non_claims.values()), non_claims
 
@@ -165,6 +181,7 @@ ready_claims = {
     "recovery_center": product["recovery_center"]["proof"]["customer_facing_recovery_ready"],
     "evidence_dashboard": product["evidence_dashboard"]["proof"]["customer_facing_evidence_ready"],
     "customer_proof_packet": product["customer_proof_packet"]["proof"]["customer_packet_ready"],
+    "customer_handoff_bundle": product["customer_handoff_bundle"]["proof"]["customer_handoff_ready"],
 }
 assert all(value is True for value in ready_claims.values()), ready_claims
 PY

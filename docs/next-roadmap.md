@@ -80,17 +80,18 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
+- None currently active. The next completion iteration should compare Later Tracks and open a new milestone-backed epic only when it can define a safe first task with a validation plan and exit condition.
+
+## Completed Completion Epics
+
 - `distribution-packaging-proof-boundary-epic` — [EPIC: Distribution packaging proof boundary](https://github.com/Jongtae/agentos/issues/107)
   - Milestone: Phase 2: Local-first Codex runtime loop
   - Completion goal: define the distribution packaging proof boundary for safe local checks, release artifact requirements, signing/checksum expectations, VM/ISO blockers, and explicit non-claims.
-  - Exit condition: the epic has a documented and smoke-tested distribution packaging boundary that distinguishes local packaging preflight, release artifact proof, VM/ISO observed-proof blockers, and packaging non-claims.
-  - Active task: [P2-52] Add release preflight smoke to golden runner.
-  - First boundary: `docs/operations/distribution-packaging-proof-boundary.md` defines local packaging checks, release artifact requirements, VM/installer blockers, non-claims, and promotion gates.
-  - Preflight: `scripts/release_manifest_checksum_preflight.py` validates observed artifact metadata and checksum files while keeping upload, signing, and VM/ISO proof unclaimed.
-  - Golden runner: `scripts/smoke_release_manifest_checksum_preflight.sh` is part of `scripts/phase2_golden_demo_runner.py`, keeping distribution packaging non-claims in practical Phase 2 proof.
+  - Exit condition: completed by `docs/operations/distribution-packaging-proof-boundary.md`, `scripts/smoke_distribution_packaging_boundary.sh`, `scripts/release_manifest_checksum_preflight.py`, `scripts/smoke_release_manifest_checksum_preflight.sh`, and golden runner integration through `scripts/phase2_golden_demo_runner.py`.
+  - Closed issue: #107.
+  - Completed tasks: P2-50, P2-51, and P2-52.
+  - Residual blocker: real release artifacts, signing/checksum publication, installer readiness, and observed VM/ISO proof remain unclaimed until maintainers provide artifacts and a VM run is observed.
   - Advances: runtime proof truthfulness, distribution packaging, OS-native runtime defaults.
-
-## Completed Completion Epics
 
 - `public-preview-operations-epic` — [EPIC: Public preview operations](https://github.com/Jongtae/agentos/issues/100)
   - Milestone: Phase 2: Local-first Codex runtime loop

@@ -51,8 +51,9 @@ for term in required_terms:
 
 assert "docs/operations/distribution-packaging-proof-boundary.md" in index
 assert "distribution-packaging-proof-boundary-epic" in roadmap
-assert "[P2-52] Add release preflight smoke to golden runner" in tasks
-assert "distribution packaging proof boundary epic is active" in tasks
+assert "[P2-53] Record distribution packaging epic completion" in tasks
+assert "distribution packaging proof boundary epic is closed" in tasks
+assert "Completed tasks: P2-50, P2-51, and P2-52" in roadmap
 assert "release manifest/checksum preflight" in tasks
 PY
 

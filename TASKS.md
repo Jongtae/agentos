@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-52] Add release preflight smoke to golden runner`
+- `[P2-53] Record distribution packaging epic completion`
 
 Runtime impact statement:
 
-- This task makes distribution release preflight part of the practical Phase 2 proof chain, so public preview packaging checks cannot drift away from golden runtime validation while release upload, signing, and VM/ISO proof stay unclaimed.
+- This task closes the distribution packaging proof boundary epic for this Phase 2 slice so the autonomous loop stops repeating packaging setup work and keeps real release artifacts, signing, and observed VM/ISO proof as explicit future blockers.
 
 Current autonomous completion loop:
 
@@ -118,7 +118,7 @@ Recommended Phase 2 tasks:
 - The public preview operations epic is closed for this Phase 2 slice; future preview work should return to the roadmap and open a new task only when it adds observed proof, release packaging, or a new promotion decision surface.
 - The first public preview operations slice is `docs/operations/public-preview-operations.md`, smoke-tested by `scripts/smoke_public_preview_operations.sh`.
 - The public preview operations smoke is included in the Phase 2 golden demo runner so preview promotion gates remain part of practical local/Docker-safe proof.
-- The distribution packaging proof boundary epic is active; it should separate local packaging preflight from release artifact requirements, signing/checksum evidence, VM/ISO blockers, and packaging non-claims.
+- The distribution packaging proof boundary epic is closed for this Phase 2 slice; future distribution work should require real release artifacts, signing/checksum publication, or observed VM/ISO proof before claiming release readiness.
 - The first distribution packaging slice is `docs/operations/distribution-packaging-proof-boundary.md`, smoke-tested by `scripts/smoke_distribution_packaging_boundary.sh`.
 - Release manifest/checksum preflight is covered by `scripts/release_manifest_checksum_preflight.py` and `scripts/smoke_release_manifest_checksum_preflight.sh` without publishing or signing artifacts.
 - The release manifest/checksum preflight smoke is included in the Phase 2 golden demo runner so packaging non-claims remain part of practical local/Docker-safe proof.

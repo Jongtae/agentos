@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-100] Add Docker guided demo completion summary`
+- `[P2-101] Close Docker guided demo journey epic`
 
 Runtime impact statement:
 
-- This task adds a guided demo completion summary so customers can tell the Docker Product Layer journey is complete while stronger VM/ISO, live-provider, release, browser, mutation, and attestation proof remains blocked until observed evidence exists.
+- This task closes the Docker guided demo journey epic after the customer journey, expected outcomes, completion summary, validation gates, and proof non-claims are aligned, so future work returns to the roadmap before adding another Product Layer epic.
 
 Current autonomous completion loop:
 
@@ -150,10 +150,11 @@ Recommended Phase 2 tasks:
 - P2-95 promotes Docker Onboarding Status into the running preview through `/api/onboarding`, so customers can inspect quickstart steps, entrypoints, validation smokes, and non-claims from the product surface itself.
 - P2-96 adds a Docker onboarding readiness checklist and focused contract smoke so customers can distinguish ready local-preview steps from observed-proof blockers before trying AgentOS.
 - P2-97 closes the Docker-first customer onboarding proof epic after README, Docker acceptance, TASKS, roadmap, product surfaces, quickstart gate, onboarding contract gate, Product Layer completion gate, and golden runner all point to the same Docker-first public try path.
-- The Docker guided Product Layer demo journey epic is active for this Phase 2 slice; it must turn the completed Product Layer surfaces into a customer-readable demo path before expanding live-provider, VM/ISO, release, browser, or attestation claims.
+- The Docker guided Product Layer demo journey epic is closed for this Phase 2 slice; future guided demo work should require a new milestone-backed epic when it adds observed Docker daemon proof, live browser evidence, release proof, VM/ISO proof, or a new customer-facing journey surface.
 - P2-98 adds `/api/demo-journey`, a browser Guided Demo Journey panel, and `scripts/smoke_docker_guided_demo_journey.sh` so customers can follow a Docker-safe path through runtime readiness, read-first work, prompt execution, activity narration, evidence, and recovery.
 - P2-99 adds customer-facing expected outcomes to `/api/demo-journey`, the browser Guided Demo Journey panel, and Docker-safe smokes so successful local proof and blocked-until-observed proof claims are visible before customers try the path.
 - P2-100 adds a Docker guided demo completion summary with completed local claims and next observed-proof blockers so customers know what the demo proves and what still requires external evidence.
+- P2-101 closes the Docker guided demo journey epic after README, Docker acceptance, TASKS, roadmap, guided demo gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and the golden runner all preserve the same proof-safe customer path.
 - The verified boot and attestation proof boundary epic is closed for this Phase 2 slice; future verified boot work should require observed VM or hardware evidence before claiming Secure Boot, TPM measured boot, PCR/event-log, IMA, or hardware attestation proof.
 - The first verified boot slice is `docs/architecture/verified-boot-attestation-proof-boundary.md`, smoke-tested by `scripts/smoke_verified_boot_attestation_boundary.sh`.
 - `phase2-run --message "status"` attaches the verified boot/attestation non-claim artifact so boot-chain trust proof remains visibly separate from local runtime proof.

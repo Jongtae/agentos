@@ -181,7 +181,7 @@ flowchart LR
   phase1["Phase 1\nOS-native runtime prototype\nclosed"]
   phase2["Phase 2\nlocal-first runtime loop\nclosed baseline"]
   ready["Product Layer\ncompletion gate\nready"]
-  completed["Completed completion epics\npermissions, updater, browser fallback,\nBrowser observed acceptance,\npublic preview ops, distribution,\ninbox, capability graduation,\ncalendar/Gmail readiness,\nVM/ISO proof status,\nCalendar live acceptance,\nCalendar live adapter,\nMaildir intake"]
+  completed["Completed completion epics\npermissions, updater, browser fallback,\nBrowser observed acceptance,\npublic preview ops, distribution,\ninbox, capability graduation,\ncalendar/Gmail readiness,\nVM/ISO proof status,\nCalendar live acceptance,\nCalendar live adapter,\nMaildir intake,\nDocker onboarding,\nguided demo journey"]
   blocked["Observed-proof blockers\nVM/ISO, live OAuth,\nlive browser, release artifacts"]
   future["Later completion tracks\ncalendar live adapter, broader app ecosystem,\nhardware attestation, packaging hardening"]
 
@@ -197,7 +197,7 @@ flowchart LR
 | Docker runtime preview | Developer/demo proof path | Makes the managed runtime easy to try without claiming boot ownership. |
 | Docker Onboarding Status | Completed Docker product surface | Shows quickstart steps, preview entrypoints, validation smokes, and proof non-claims from the running preview. |
 | Docker onboarding readiness checklist | Completed Docker product surface | Shows which local-preview steps are ready and which stronger proof claims still require observed external evidence. |
-| Guided Demo Journey | Active Docker product surface | Walks customers through Runtime Home, Work Inbox, prompt execution, Activity Timeline, Evidence Dashboard, and Recovery Center in proof-safe order, with expected outcomes and a completion summary separating successful Docker proof from blocked-until-observed claims. |
+| Guided Demo Journey | Completed Docker product surface | Walks customers through Runtime Home, Work Inbox, prompt execution, Activity Timeline, Evidence Dashboard, and Recovery Center in proof-safe order, with expected outcomes and a completion summary separating successful Docker proof from blocked-until-observed claims. |
 | Runtime Home | Active Docker product surface | Presents runtime readiness, Work Inbox, Activity Timeline, Recovery Center, and Evidence Dashboard states in customer language. |
 | Work Inbox | Active Docker product surface | Presents fixture, Maildir, Gmail, and Calendar as read-first inbox sources with explicit live-proof blockers and mutation non-claims. |
 | Activity Timeline | Active Docker product surface | Shows customer-readable runtime events and user-visible records without claiming external app execution or live-provider proof. |
@@ -211,7 +211,7 @@ flowchart LR
 | Docker Product Layer completion gate | Active Docker proof gate | Verifies every customer-facing Docker surface together while preserving live OAuth, VM/ISO, browser, release, mutation, and attestation non-claims. |
 | Docker customer onboarding quickstart | Completed Docker proof gate | Keeps README quickstart, Docker acceptance, preview operations, roadmap, and task state aligned around the public try path. |
 | Docker onboarding status contract | Completed Docker proof gate | Verifies `/api/onboarding` exposes quickstart readiness, preview entrypoints, no-key local preview status, validation smokes, and proof blockers. |
-| Docker guided demo journey | Active Docker proof gate | Verifies `/api/demo-journey` exposes the customer demo path, expected success/blocker outcomes, completion summary, and keeps VM/ISO, live OAuth, browser, release, mutation, and attestation proof unclaimed. |
+| Docker guided demo journey | Completed Docker proof gate | Verifies `/api/demo-journey` exposes the customer demo path, expected success/blocker outcomes, completion summary, and keeps VM/ISO, live OAuth, browser, release, mutation, and attestation proof unclaimed. |
 | Phase 2 golden runtime loop | Closed baseline | Proves prompt intake, intent classification, bounded capability execution, activity narration, records, and recovery. |
 | Capability permission boundary | Completed | Defines how AgentOS declares, blocks, records, and narrates capability access. |
 | Updater hardening | Completed | Protects runtime continuity and rollback/recovery truthfulness. |

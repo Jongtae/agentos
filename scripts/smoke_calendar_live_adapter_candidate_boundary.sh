@@ -36,9 +36,9 @@ for term in required_doc_terms:
     assert term in doc, f"missing contract term: {term}"
 
 assert "calendar-live-adapter-candidate-epic" in roadmap
-assert "Active task: P2-76" in roadmap
+assert ("Active task: P2-76" in roadmap) or ("Completed tasks: P2-76 and P2-77" in roadmap)
 assert "live Calendar OAuth requires explicit tester credentials" in roadmap
-assert "Calendar live adapter | Active" in readme
+assert ("Calendar live adapter | Active" in readme) or ("Calendar live adapter | Completed" in readme)
 assert "without claiming live OAuth or mutations" in readme
 
 for forbidden in [

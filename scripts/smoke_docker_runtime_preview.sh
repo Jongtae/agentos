@@ -92,6 +92,7 @@ curl -fsS http://127.0.0.1:18787/api/recovery > /tmp/agentos-docker-recovery.jso
 curl -fsS http://127.0.0.1:18787/api/evidence > /tmp/agentos-docker-evidence.json
 curl -fsS http://127.0.0.1:18787/api/proof-packet > /tmp/agentos-docker-proof-packet.json
 curl -fsS http://127.0.0.1:18787/api/customer-handoff > /tmp/agentos-docker-customer-handoff.json
+curl -fsS http://127.0.0.1:18787/api/proof-promotion > /tmp/agentos-docker-proof-promotion.json
 
 python3 - <<'PY'
 import json
@@ -111,6 +112,7 @@ recovery = json.loads(Path("/tmp/agentos-docker-recovery.json").read_text())
 evidence = json.loads(Path("/tmp/agentos-docker-evidence.json").read_text())
 proof_packet = json.loads(Path("/tmp/agentos-docker-proof-packet.json").read_text())
 customer_handoff = json.loads(Path("/tmp/agentos-docker-customer-handoff.json").read_text())
+proof_promotion = json.loads(Path("/tmp/agentos-docker-proof-promotion.json").read_text())
 home = Path("/tmp/agentos-docker-home.html").read_text()
 assert payload["proof"]["docker_preview_surface_ready"] is True
 assert payload["proof"]["product_layer_runtime_home_ready"] is True
@@ -124,6 +126,7 @@ assert product["onboarding_status"]["schema_version"] == "agentos-product-layer-
 assert product["guided_demo_journey"]["schema_version"] == "agentos-product-layer-guided-demo-journey.v1"
 assert product["customer_proof_packet"]["schema_version"] == "agentos-product-layer-customer-proof-packet.v1"
 assert product["customer_handoff_bundle"]["schema_version"] == "agentos-product-layer-customer-handoff-bundle.v1"
+assert product["proof_promotion_center"]["schema_version"] == "agentos-product-layer-proof-promotion-center.v1"
 assert onboarding["schema_version"] == "agentos-product-layer-onboarding-status.v1"
 assert demo_journey["schema_version"] == "agentos-product-layer-guided-demo-journey.v1"
 assert demo_journey["proof"]["customer_guided_journey_ready"] is True
@@ -228,6 +231,14 @@ assert {item["id"] for item in customer_handoff["handoff_report"]["sections"]} >
 }
 assert customer_handoff["handoff_report"]["share_policy"]["secret_material_allowed"] is False
 assert customer_handoff["handoff_report"]["share_policy"]["automatic_claim_promotion"] is False
+assert proof_promotion["schema_version"] == "agentos-product-layer-proof-promotion-center.v1"
+assert proof_promotion["proof"]["docker_local_claims_ready"] is True
+assert proof_promotion["proof"]["docker_daemon_observed_claimed"] is False
+assert proof_promotion["proof"]["boot_or_iso_proof_claimed"] is False
+assert proof_promotion["proof"]["live_oauth_claimed"] is False
+assert proof_promotion["proof"]["hardware_attestation_claimed"] is False
+assert proof_promotion["share_policy"]["secret_material_allowed"] is False
+assert proof_promotion["share_policy"]["automatic_claim_promotion"] is False
 assert "Runtime Home" in home
 assert "Docker Onboarding Status" in home
 assert "onboarding JSON" in home
@@ -252,6 +263,8 @@ assert "Customer Handoff Bundle" in home
 assert "Handoff Checklist" in home
 assert "Handoff Report" in home
 assert "customer handoff JSON" in home
+assert "Proof Promotion Center" in home
+assert "proof promotion JSON" in home
 PY
 
 curl -fsS \

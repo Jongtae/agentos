@@ -50,6 +50,7 @@ curl -fsS "http://127.0.0.1:$PORT/api/recovery" > "$TMP_DIR/recovery.json"
 curl -fsS "http://127.0.0.1:$PORT/api/evidence" > "$TMP_DIR/evidence.json"
 curl -fsS "http://127.0.0.1:$PORT/api/proof-packet" > "$TMP_DIR/proof-packet.json"
 curl -fsS "http://127.0.0.1:$PORT/api/customer-handoff" > "$TMP_DIR/customer-handoff.json"
+curl -fsS "http://127.0.0.1:$PORT/api/proof-promotion" > "$TMP_DIR/proof-promotion.json"
 curl -fsS \
   -H 'Content-Type: application/json' \
   -d '{"message":"hi"}' \
@@ -77,6 +78,7 @@ recovery = json.loads((root / "recovery.json").read_text())
 evidence = json.loads((root / "evidence.json").read_text())
 proof_packet = json.loads((root / "proof-packet.json").read_text())
 customer_handoff = json.loads((root / "customer-handoff.json").read_text())
+proof_promotion = json.loads((root / "proof-promotion.json").read_text())
 prompt = json.loads((root / "prompt.json").read_text())
 activity = json.loads((root / "activity.json").read_text())
 home = (root / "home.html").read_text()
@@ -102,6 +104,7 @@ assert product["recovery_center"]["schema_version"] == "agentos-product-layer-re
 assert product["evidence_dashboard"]["schema_version"] == "agentos-product-layer-evidence-dashboard.v1"
 assert product["customer_proof_packet"]["schema_version"] == "agentos-product-layer-customer-proof-packet.v1"
 assert product["customer_handoff_bundle"]["schema_version"] == "agentos-product-layer-customer-handoff-bundle.v1"
+assert product["proof_promotion_center"]["schema_version"] == "agentos-product-layer-proof-promotion-center.v1"
 assert {feature["id"] for feature in product["features"]} >= {
     "runtime_home",
     "onboarding_status",
@@ -113,6 +116,7 @@ assert {feature["id"] for feature in product["features"]} >= {
     "evidence_dashboard",
     "customer_proof_packet",
     "customer_handoff_bundle",
+    "proof_promotion_center",
 }
 assert demo_journey["schema_version"] == "agentos-product-layer-guided-demo-journey.v1"
 assert demo_journey["proof"]["docker_preview_ready"] is True
@@ -341,6 +345,22 @@ assert {item["id"] for item in customer_handoff["inspect_surfaces"]} >= {
     "recovery_center",
     "evidence_dashboard",
 }
+assert proof_promotion["schema_version"] == "agentos-product-layer-proof-promotion-center.v1"
+assert proof_promotion["proof"]["docker_local_claims_ready"] is True
+assert proof_promotion["proof"]["docker_daemon_observed_claimed"] is False
+assert proof_promotion["proof"]["boot_or_iso_proof_claimed"] is False
+assert proof_promotion["proof"]["live_oauth_claimed"] is False
+assert proof_promotion["proof"]["release_trust_claimed"] is False
+assert proof_promotion["proof"]["hardware_attestation_claimed"] is False
+assert proof_promotion["share_policy"]["secret_material_allowed"] is False
+assert proof_promotion["share_policy"]["automatic_claim_promotion"] is False
+assert {item["id"] for item in proof_promotion["promotion_decisions"]} >= {
+    "docker-local-product-layer",
+    "docker-daemon-observed-run",
+    "vm-iso-runtime-ownership",
+    "live-provider-readonly",
+    "live-browser-release-attestation",
+}
 assert "Runtime Home" in home
 assert "Docker Onboarding Status" in home
 assert "onboarding JSON" in home
@@ -369,6 +389,8 @@ assert "Customer Handoff Bundle" in home
 assert "Handoff Checklist" in home
 assert "Handoff Report" in home
 assert "customer handoff JSON" in home
+assert "Proof Promotion Center" in home
+assert "proof promotion JSON" in home
 assert prompt["ok"] is True
 assert prompt["intent"] == "greeting", prompt
 assert "DuckDuckGo" not in json.dumps(prompt)

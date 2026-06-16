@@ -129,6 +129,8 @@ assert {item["id"] for item in demo_journey["expected_outcomes"]} >= {
     "proof_boundaries_visible",
     "recovery_next_steps_visible",
 }
+assert demo_journey["completion_summary"]["id"] == "docker_guided_demo_complete"
+assert len(demo_journey["completion_summary"]["next_blockers"]) >= 3
 assert onboarding["proof"]["docker_preview_ready"] is True
 assert onboarding["proof"]["requires_api_key_for_basic_preview"] is False
 assert onboarding["proof"]["boot_or_iso_proof_claimed"] is False

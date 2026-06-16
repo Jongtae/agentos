@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-99] Add Docker guided demo expected outcomes`
+- `[P2-100] Add Docker guided demo completion summary`
 
 Runtime impact statement:
 
-- This task adds guided demo expected outcomes so customers can distinguish successful Docker-local Product Layer proof from blocked-until-observed VM/ISO, live-provider, release, browser, mutation, and attestation claims.
+- This task adds a guided demo completion summary so customers can tell the Docker Product Layer journey is complete while stronger VM/ISO, live-provider, release, browser, mutation, and attestation proof remains blocked until observed evidence exists.
 
 Current autonomous completion loop:
 
@@ -153,6 +153,7 @@ Recommended Phase 2 tasks:
 - The Docker guided Product Layer demo journey epic is active for this Phase 2 slice; it must turn the completed Product Layer surfaces into a customer-readable demo path before expanding live-provider, VM/ISO, release, browser, or attestation claims.
 - P2-98 adds `/api/demo-journey`, a browser Guided Demo Journey panel, and `scripts/smoke_docker_guided_demo_journey.sh` so customers can follow a Docker-safe path through runtime readiness, read-first work, prompt execution, activity narration, evidence, and recovery.
 - P2-99 adds customer-facing expected outcomes to `/api/demo-journey`, the browser Guided Demo Journey panel, and Docker-safe smokes so successful local proof and blocked-until-observed proof claims are visible before customers try the path.
+- P2-100 adds a Docker guided demo completion summary with completed local claims and next observed-proof blockers so customers know what the demo proves and what still requires external evidence.
 - The verified boot and attestation proof boundary epic is closed for this Phase 2 slice; future verified boot work should require observed VM or hardware evidence before claiming Secure Boot, TPM measured boot, PCR/event-log, IMA, or hardware attestation proof.
 - The first verified boot slice is `docs/architecture/verified-boot-attestation-proof-boundary.md`, smoke-tested by `scripts/smoke_verified_boot_attestation_boundary.sh`.
 - `phase2-run --message "status"` attaches the verified boot/attestation non-claim artifact so boot-chain trust proof remains visibly separate from local runtime proof.

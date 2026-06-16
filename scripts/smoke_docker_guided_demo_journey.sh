@@ -75,6 +75,15 @@ assert outcome_ids == {
 }
 kinds = {item["kind"] for item in journey["expected_outcomes"]}
 assert {"success", "blocked_until_observed"} <= kinds
+summary = journey["completion_summary"]
+assert summary["id"] == "docker_guided_demo_complete"
+assert summary["state"] == "ready"
+assert "Docker Product Layer journey" in summary["customer_result"]
+assert len(summary["completed_claims"]) >= 4
+assert len(summary["next_blockers"]) >= 3
+assert any("VM/ISO" in item for item in summary["next_blockers"])
+assert any("OAuth" in item for item in summary["next_blockers"])
+assert any("hardware attestation" in item for item in summary["next_blockers"])
 
 assert journey["validation"]["guided_demo_journey_smoke"] == "scripts/smoke_docker_guided_demo_journey.sh"
 assert journey["proof"]["docker_preview_ready"] is True
@@ -89,6 +98,8 @@ assert journey["proof"]["hardware_attestation_claimed"] is False
 assert "Guided Demo Journey" in home
 assert "Expected Outcomes" in home
 assert "Proof boundaries are visible" in home
+assert "Demo Completion Summary" in home
+assert "Next Proof Blockers" in home
 assert "Journey Proof" in home
 assert "demo journey JSON" in home
 PY

@@ -87,7 +87,7 @@ assert payload["blockers"] == [], payload
 PY
 
 grep -q "browser fallback observed proof acceptance" docs/acceptance/browser-fallback-observed-acceptance.md
-grep -q "browser fallback observed proof acceptance epic is active" TASKS.md
+grep -q "browser fallback observed proof acceptance epic is closed" TASKS.md
 grep -q "browser-fallback-observed-proof-acceptance-epic" docs/next-roadmap.md
 grep -q "docs/acceptance/browser-fallback-observed-acceptance.md" docs/index.md
 

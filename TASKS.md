@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-72] Attach VM/ISO preflight status to phase2 status`
+- `[P2-73] Close VM ISO observed proof status epic`
 
 Runtime impact statement:
 
-- This task attaches VM/ISO preflight and observed-proof blocker state to `phase2-run --message "status"` so boot, reboot/recovery, managed runtime rejoin, planned observation commands, and false proof flags are visible without claiming a VM or ISO run happened.
+- This task closes the VM/ISO observed proof status epic after runtime status exposes preflight readiness, planned observation commands, required proof blockers, and false observed-proof flags, preventing repeated VM/ISO status work until a real VM run can be observed.
 
 Current autonomous completion loop:
 
@@ -138,7 +138,7 @@ Recommended Phase 2 tasks:
 - Capability graduation must prefer internal AgentOS capabilities, keep browser/external app mediation non-default, preserve permission/data boundaries, and require observed proof before live claims.
 - The Calendar read-only live adapter readiness epic is closed for this Phase 2 slice; future Calendar work should require explicit live OAuth adapter design, tester credentials, or a confirmed mutation model before claiming more than fixture-backed readiness.
 - The Gmail read-only live readiness epic is closed for this Phase 2 slice; future Gmail work should require explicit tester OAuth credentials, observed read-only proof, or a later confirmed mutation model before claiming more than setup readiness.
-- The VM/ISO observed proof status epic is active; its first slice attaches `agentos-vm-iso-proof-preflight.v1` to `phase2-run --message "status"` while keeping observed boot, reboot/recovery, managed runtime rejoin, destructive action, and ISO freshness claims blocked until a real VM run is recorded.
+- The VM/ISO observed proof status epic is closed for this Phase 2 slice; future VM/ISO work should require a real observed VM run, sanitized evidence, or a new release/boot proof promotion task before claiming boot, reboot/recovery, managed runtime rejoin, ISO freshness, or VM signoff.
 
 ## Validation Standards
 

@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-69] Close Calendar read-only readiness epic`
+- `[P2-70] Attach Gmail read-only status to phase2 status`
 
 Runtime impact statement:
 
-- This task closes the Calendar read-only readiness epic after `phase2-run --message "status"` exposes fixture availability, permission level, live OAuth blockers, and mutation non-claims through `agentos-calendar-readonly-status.v1`, preventing repeated Calendar readiness work until live credentials or adapter design are available.
+- This task attaches Gmail read-only setup/status readiness to `phase2-run --message "status"` so credential, token, dependency, read-only scope, setup recovery, secret-redaction, and live OAuth blocker state are visible without claiming real Gmail account proof.
 
 Current autonomous completion loop:
 
@@ -137,6 +137,7 @@ Recommended Phase 2 tasks:
 - The capability graduation registry epic is closed for this Phase 2 slice; future broader app/inbox work should choose a candidate from `docs/architecture/capability-graduation-registry.json` before expanding browser or external app mediation.
 - Capability graduation must prefer internal AgentOS capabilities, keep browser/external app mediation non-default, preserve permission/data boundaries, and require observed proof before live claims.
 - The Calendar read-only live adapter readiness epic is closed for this Phase 2 slice; future Calendar work should require explicit live OAuth adapter design, tester credentials, or a confirmed mutation model before claiming more than fixture-backed readiness.
+- The Gmail read-only live readiness epic is active; its first slice attaches `agentos-gmail-status.v1` to `phase2-run --message "status"` while keeping live OAuth account proof and send/delete/archive mutations blocked until observed.
 
 ## Validation Standards
 

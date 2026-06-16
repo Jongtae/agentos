@@ -240,10 +240,16 @@ def run_phase2(
                 verified_boot_nonclaim = build_verified_boot_attestation_nonclaim(workspace_path, session_id=request_id)
                 observed_proof_intake = build_observed_proof_intake_status(workspace_path, session_id=request_id)
                 calendar_readonly_status = build_calendar_readonly_status(workspace_path, session_id=request_id)
+                gmail_readonly_status = build_gmail_status_report(
+                    workspace_path,
+                    credentials_path=gmail_credentials or None,
+                    token_path=gmail_token or None,
+                )
                 capability_result["inbox_ownership"] = inbox_contract
                 capability_result["verified_boot_attestation"] = verified_boot_nonclaim
                 capability_result["observed_proof_intake"] = observed_proof_intake
                 capability_result["calendar_readonly_status"] = calendar_readonly_status
+                capability_result["gmail_readonly_status"] = gmail_readonly_status
                 artifacts["inbox_ownership_contract"] = str(
                     inbox_contract.get("artifacts", {}).get("latest_inbox_routing_contract_json", "")
                 )
@@ -255,6 +261,9 @@ def run_phase2(
                 )
                 artifacts["calendar_readonly_status"] = str(
                     calendar_readonly_status.get("artifacts", {}).get("latest_calendar_readonly_status_json", "")
+                )
+                artifacts["gmail_readonly_status"] = str(
+                    gmail_readonly_status.get("artifacts", {}).get("latest_gmail_status_json", "")
                 )
             if intent == "web_search_summary":
                 browser_contract = build_browser_fallback_contract(
@@ -410,6 +419,16 @@ def run_phase2(
             "calendar_readonly_ready": bool(
                 intent == "runtime_status"
                 and (capability_result.get("calendar_readonly_status") or {}).get("summary", {}).get("calendar_readonly_ready")
+            ),
+            "gmail_readonly_status_attached": bool(
+                intent == "runtime_status" and isinstance(capability_result.get("gmail_readonly_status"), dict)
+            ),
+            "gmail_live_read_ready": bool(
+                intent == "runtime_status" and (capability_result.get("gmail_readonly_status") or {}).get("live_read_ready")
+            ),
+            "gmail_setup_recovery_available": bool(
+                intent == "runtime_status"
+                and str((capability_result.get("gmail_readonly_status") or {}).get("operator_action_required", "")).strip()
             ),
             "live_calendar_oauth_completed": False,
             "calendar_mutation_executed": False,

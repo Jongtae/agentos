@@ -161,7 +161,9 @@ def build_gmail_status_report(
         }
     )
     if write_manifest:
-        write_json_file(_manifest_path(workspace, GMAIL_STATUS_MANIFEST), scrub_payload(payload))
+        manifest_path = _manifest_path(workspace, GMAIL_STATUS_MANIFEST)
+        payload["artifacts"] = {"latest_gmail_status_json": str(manifest_path)}
+        write_json_file(manifest_path, scrub_payload(payload))
     return scrub_payload(payload)
 
 

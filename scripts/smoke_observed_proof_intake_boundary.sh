@@ -50,10 +50,11 @@ for term in required_terms:
 
 assert "docs/architecture/observed-proof-intake-boundary.md" in index
 assert "observed-proof-intake-and-blocker-handoff-epic" in roadmap
-assert "[P2-64] Attach observed proof intake status to phase2 status" in tasks
-assert "Completed tasks: P2-62 and P2-63" in roadmap
+assert "[P2-65] Close observed proof intake epic" in tasks
+assert "Completed tasks: P2-62, P2-63, P2-64, and P2-65" in roadmap
 assert "Observed proof records now use" in tasks
 assert "Observed proof intake" in readme
+assert "| Observed proof intake | Completed |" in readme
 assert "scripts/smoke_observed_proof_intake_boundary.sh" in runner
 assert "live credential, VM/ISO, release, browser, and boot-chain proof" in roadmap
 assert "agentos-observed-proof-intake-status.v1" in tasks

@@ -87,7 +87,7 @@ scripts/smoke_docker_runtime_preview.sh
 
 The smoke should validate compose config, build the image, start the preview,
 check `localhost:8787`, verify `/api/product`, `/api/work-inbox`,
-`/api/onboarding`, `/api/demo-journey`, `/api/timeline`, `/api/capabilities`, `/api/approvals`, `/api/proofs`, `/api/release-trust`, `/api/attestation`, `/api/recovery`, `/api/evidence`, and `/api/proof-packet`, run a prompt through `/api/prompt`,
+`/api/onboarding`, `/api/demo-journey`, `/api/timeline`, `/api/capabilities`, `/api/approvals`, `/api/proofs`, `/api/release-trust`, `/api/attestation`, `/api/recovery`, `/api/evidence`, `/api/proof-packet`, and `/api/customer-handoff`, run a prompt through `/api/prompt`,
 verify activity, and check that common secret patterns are not present in the
 response.
 
@@ -146,3 +146,15 @@ This gate starts the Python Docker runtime preview and verifies that
 `/api/proof-packet` exposes customer-readable completed Docker-local claims,
 validation commands, proof sources, readiness checks, next blockers, and
 explicit non-claims without automatic claim promotion.
+
+## Customer Handoff Bundle Gate
+
+```bash
+scripts/smoke_docker_customer_handoff_bundle.sh
+```
+
+This gate starts the Python Docker runtime preview and verifies that
+`/api/customer-handoff` exposes the Docker try path, inspectable Product Layer
+surfaces, validation commands, proof sources, next observed-proof blockers, and
+explicit non-claims without promoting Docker proof into VM/ISO, live OAuth,
+browser, release, mutation, or attestation proof.

@@ -28,6 +28,8 @@ http://localhost:8787
 - Runtime status is visible.
 - Docker Onboarding Status is visible.
 - `/api/onboarding` exposes quickstart steps, a readiness checklist, preview entrypoints, validation smokes, and proof non-claims without requiring an API key.
+- Guided Demo Journey is visible.
+- `/api/demo-journey` exposes the customer path across Runtime Home, Work Inbox, prompt execution, Activity Timeline, Evidence Dashboard, and Recovery Center without claiming VM/ISO, live OAuth, browser, release, external mutation, or hardware attestation proof.
 - A customer-facing Runtime Home is visible.
 - Work Inbox, Activity Timeline, Recovery Center, and Evidence Dashboard states are summarized.
 - `/api/work-inbox` exposes read-first inbox sources, workflows, live blockers, and mutation non-claims.
@@ -84,7 +86,7 @@ scripts/smoke_docker_runtime_preview.sh
 
 The smoke should validate compose config, build the image, start the preview,
 check `localhost:8787`, verify `/api/product`, `/api/work-inbox`,
-`/api/onboarding`, `/api/timeline`, `/api/capabilities`, `/api/approvals`, `/api/proofs`, `/api/release-trust`, `/api/attestation`, `/api/recovery`, and `/api/evidence`, run a prompt through `/api/prompt`,
+`/api/onboarding`, `/api/demo-journey`, `/api/timeline`, `/api/capabilities`, `/api/approvals`, `/api/proofs`, `/api/release-trust`, `/api/attestation`, `/api/recovery`, and `/api/evidence`, run a prompt through `/api/prompt`,
 verify activity, and check that common secret patterns are not present in the
 response.
 
@@ -120,3 +122,15 @@ This gate starts the Python Docker runtime preview and verifies that
 `/api/onboarding` exposes customer-facing quickstart readiness, preview
 entrypoints, no-key local preview status, Docker-safe validation, and explicit
 observed-proof blockers.
+
+## Guided Demo Journey Gate
+
+```bash
+scripts/smoke_docker_guided_demo_journey.sh
+```
+
+This gate starts the Python Docker runtime preview and verifies that
+`/api/demo-journey` exposes the customer path through runtime readiness,
+read-first work, prompt execution, activity narration, evidence, and recovery
+while preserving VM/ISO, live OAuth, browser, release, mutation, and attestation
+non-claims.

@@ -223,11 +223,85 @@ class DockerPreviewApp:
             },
         }
 
+    def guided_demo_journey(self) -> dict:
+        stages = [
+            {
+                "id": "start_at_runtime_home",
+                "label": "Start at Runtime Home",
+                "surface": "Runtime Home",
+                "state": "ready",
+                "entrypoint": "http://localhost:8787",
+                "customer_goal": "Confirm the managed runtime is reachable before asking AgentOS to work.",
+                "proof_boundary": "Docker proves local preview reachability, not VM/ISO boot ownership.",
+            },
+            {
+                "id": "inspect_work_inbox",
+                "label": "Inspect Work Inbox",
+                "surface": "Work Inbox",
+                "state": "ready",
+                "entrypoint": "/api/work-inbox",
+                "customer_goal": "See fixture, Maildir, Gmail, and Calendar as read-first sources with live-proof blockers.",
+                "proof_boundary": "Live OAuth and external mutations remain unclaimed.",
+            },
+            {
+                "id": "run_first_prompt",
+                "label": "Run a first prompt",
+                "surface": "Prompt Runner",
+                "state": "ready",
+                "entrypoint": "/api/prompt",
+                "suggested_prompt": "status",
+                "customer_goal": "Watch a bounded request flow through intent dispatch and runtime narration.",
+                "proof_boundary": "Docker-safe local execution is observed; external provider proof is not claimed.",
+            },
+            {
+                "id": "review_activity_timeline",
+                "label": "Review Activity Timeline",
+                "surface": "Activity Timeline",
+                "state": "ready",
+                "entrypoint": "/api/timeline",
+                "customer_goal": "Understand what AgentOS received, classified, ran, recorded, and returned.",
+                "proof_boundary": "External app execution and live-provider proof remain unclaimed.",
+            },
+            {
+                "id": "check_evidence_and_recovery",
+                "label": "Check Evidence and Recovery",
+                "surface": "Evidence Dashboard and Recovery Center",
+                "state": "ready",
+                "entrypoint": "/api/evidence",
+                "secondary_entrypoint": "/api/recovery",
+                "customer_goal": "Separate observed Docker/local proof from blockers that need credentials, VM/ISO runs, release artifacts, browser evidence, or attestation evidence.",
+                "proof_boundary": "Unobserved VM/ISO, live OAuth, browser, release, mutation, and hardware attestation claims stay blocked.",
+            },
+        ]
+        return {
+            "schema_version": "agentos-product-layer-guided-demo-journey.v1",
+            "surface": "Guided Demo Journey",
+            "state": "ready",
+            "customer_message": "Follow this Docker-safe journey to understand AgentOS Product Layer readiness without confusing local preview proof for OS, live-provider, release, or hardware proof.",
+            "stages": stages,
+            "validation": {
+                "guided_demo_journey_smoke": "scripts/smoke_docker_guided_demo_journey.sh",
+                "product_layer_completion_smoke": "scripts/smoke_docker_product_layer_completion.sh",
+                "docker_runtime_preview_python_smoke": "scripts/smoke_docker_runtime_preview_python.sh",
+            },
+            "proof": {
+                "docker_preview_ready": True,
+                "customer_guided_journey_ready": True,
+                "boot_or_iso_proof_claimed": False,
+                "live_oauth_claimed": False,
+                "live_browser_proof_claimed": False,
+                "release_proof_claimed": False,
+                "external_mutation_claimed": False,
+                "hardware_attestation_claimed": False,
+            },
+        }
+
     def product_layer(self, *, setup: dict | None = None, activity: dict | None = None) -> dict:
         setup_payload = setup or build_status(str(self.workspace), str(self.user_root))
         activity_payload = activity or build_activity_feed_payload(self.workspace, limit=12)
         adapters = setup_payload.get("adapters", {}) if isinstance(setup_payload.get("adapters"), dict) else {}
         onboarding_status = self.onboarding_status()
+        guided_demo_journey = self.guided_demo_journey()
         work_inbox = self.work_inbox(setup=setup_payload)
         activity_timeline = self.activity_timeline(activity=activity_payload)
         capability_store = self.capability_store()
@@ -248,6 +322,12 @@ class DockerPreviewApp:
                     "label": "Docker Onboarding Status",
                     "state": onboarding_status.get("state", "ready"),
                     "customer_value": "Confirm the public quickstart, preview URL, first prompt, and proof boundaries before trying AgentOS.",
+                },
+                {
+                    "id": "guided_demo_journey",
+                    "label": "Guided Demo Journey",
+                    "state": guided_demo_journey.get("state", "ready"),
+                    "customer_value": "Follow the recommended customer path across Runtime Home, Work Inbox, prompt execution, Activity Timeline, Evidence Dashboard, and Recovery Center.",
                 },
                 {
                     "id": "runtime_home",
@@ -312,6 +392,7 @@ class DockerPreviewApp:
             ],
             "blockers": blockers,
             "onboarding_status": onboarding_status,
+            "guided_demo_journey": guided_demo_journey,
             "work_inbox": work_inbox,
             "activity_timeline": activity_timeline,
             "capability_store": capability_store,
@@ -1008,6 +1089,7 @@ def _render_page(app: DockerPreviewApp) -> str:
     activity = status.get("activity", {}).get("events", [])
     product_layer = status.get("product_layer", {})
     onboarding_status = product_layer.get("onboarding_status", {}) if isinstance(product_layer.get("onboarding_status"), dict) else {}
+    guided_demo_journey = product_layer.get("guided_demo_journey", {}) if isinstance(product_layer.get("guided_demo_journey"), dict) else {}
     work_inbox = product_layer.get("work_inbox", {}) if isinstance(product_layer.get("work_inbox"), dict) else {}
     activity_timeline = product_layer.get("activity_timeline", {}) if isinstance(product_layer.get("activity_timeline"), dict) else {}
     capability_store = product_layer.get("capability_store", {}) if isinstance(product_layer.get("capability_store"), dict) else {}
@@ -1072,6 +1154,15 @@ def _render_page(app: DockerPreviewApp) -> str:
         for item in onboarding_status.get("readiness_checklist", [])
         if isinstance(item, dict)
     ) or "<li>No onboarding readiness checks are configured.</li>"
+    guided_demo_stage_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Demo stage'))))}</b> "
+        f"{html.escape(str(item.get('customer_goal', '')))} "
+        f"<em>{html.escape(str(item.get('proof_boundary', '')))}</em>"
+        "</li>"
+        for item in guided_demo_journey.get("stages", [])
+        if isinstance(item, dict)
+    ) or "<li>No guided demo journey is configured.</li>"
     recovery_item_html = "\n".join(
         "<li>"
         f"<b>{html.escape(str(item.get('label', item.get('id', 'Recovery item'))))}</b> "
@@ -1210,6 +1301,22 @@ def _render_page(app: DockerPreviewApp) -> str:
     <p class="lead">Try the AgentOS runtime without booting an ISO. This preview routes prompts through the same local-first intent/capability path and writes proof logs under mounted user data.</p>
   </header>
   <div class="grid">{card_html}</div>
+  <section class="product">
+    <div class="panel">
+      <h2>Guided Demo Journey</h2>
+      <p class="lead">{html.escape(str(guided_demo_journey.get('customer_message', 'A guided demo journey is available below.')))}</p>
+      <ul>{guided_demo_stage_html}</ul>
+    </div>
+    <div class="panel">
+      <h2>Journey Proof</h2>
+      <ul>
+        <li><b>Docker preview</b> ready</li>
+        <li><b>VM/ISO boot proof</b> not claimed</li>
+        <li><b>Live provider proof</b> not claimed</li>
+      </ul>
+      <p><a href="/api/demo-journey">demo journey JSON</a></p>
+    </div>
+  </section>
   <section class="product">
     <div class="panel">
       <h2>Docker Onboarding Status</h2>
@@ -1440,6 +1547,8 @@ def make_handler(app: DockerPreviewApp) -> type[BaseHTTPRequestHandler]:
                 _json_response(self, app.product_layer())
             elif path == "/api/onboarding":
                 _json_response(self, app.onboarding_status())
+            elif path == "/api/demo-journey":
+                _json_response(self, app.guided_demo_journey())
             elif path == "/api/work-inbox":
                 _json_response(self, app.work_inbox())
             elif path == "/api/timeline":

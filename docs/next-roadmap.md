@@ -80,7 +80,15 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
-- None currently active. The completion loop should re-check Later Tracks and GitHub issues before opening the next milestone-backed Product Layer epic.
+- `docker-guided-product-layer-demo-journey-epic` — [EPIC: Stage 3 / Phase 2 Docker guided Product Layer demo journey](https://github.com/Jongtae/agentos/issues/218)
+  - Milestone: Docker guided Product Layer demo journey
+  - Completion goal: turn the completed Docker Product Layer surfaces into a customer-readable guided demo path that explains what to inspect first, what proof has been observed locally, and which VM/ISO, live OAuth, browser, release, mutation, and hardware attestation claims remain blocked.
+  - Validation plan: `scripts/smoke_docker_guided_demo_journey.sh`, `scripts/smoke_docker_product_layer_completion.sh`, `scripts/smoke_docker_runtime_preview_python.sh`, `docker compose config`, and the Phase 2 golden demo runner.
+  - Exit condition: complete when the Docker preview exposes a guided journey from Runtime Home through Work Inbox, prompt execution, Activity Timeline, Evidence Dashboard, and Recovery Center; README, TASKS, roadmap, Docker acceptance, and golden smokes all reference that journey; and non-claims remain explicit for VM/ISO, live OAuth, browser, release, external mutation, and hardware attestation proof.
+  - Active task: P2-98.
+  - First slice: P2-98 adds `agentos-product-layer-guided-demo-journey.v1` through `/api/demo-journey`, a browser Guided Demo Journey panel, and `scripts/smoke_docker_guided_demo_journey.sh`.
+  - Residual blockers: VM/ISO boot/rejoin proof, live OAuth, live browser evidence, release artifacts/signing, Docker daemon observed proof, and hardware attestation remain unclaimed until observed evidence exists.
+  - Advances: Docker-first public usability, runtime proof truthfulness, OS-native runtime defaults.
 
 ## Completed Completion Epics
 

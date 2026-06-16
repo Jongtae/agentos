@@ -80,6 +80,7 @@ curl -fsS http://127.0.0.1:18787/ > /tmp/agentos-docker-home.html
 curl -fsS http://127.0.0.1:18787/api/status > /tmp/agentos-docker-status.json
 curl -fsS http://127.0.0.1:18787/api/product > /tmp/agentos-docker-product.json
 curl -fsS http://127.0.0.1:18787/api/onboarding > /tmp/agentos-docker-onboarding.json
+curl -fsS http://127.0.0.1:18787/api/demo-journey > /tmp/agentos-docker-demo-journey.json
 curl -fsS http://127.0.0.1:18787/api/work-inbox > /tmp/agentos-docker-work-inbox.json
 curl -fsS http://127.0.0.1:18787/api/timeline > /tmp/agentos-docker-timeline.json
 curl -fsS http://127.0.0.1:18787/api/capabilities > /tmp/agentos-docker-capabilities.json
@@ -96,6 +97,7 @@ from pathlib import Path
 payload = json.loads(Path("/tmp/agentos-docker-status.json").read_text())
 product = json.loads(Path("/tmp/agentos-docker-product.json").read_text())
 onboarding = json.loads(Path("/tmp/agentos-docker-onboarding.json").read_text())
+demo_journey = json.loads(Path("/tmp/agentos-docker-demo-journey.json").read_text())
 work_inbox = json.loads(Path("/tmp/agentos-docker-work-inbox.json").read_text())
 timeline = json.loads(Path("/tmp/agentos-docker-timeline.json").read_text())
 capabilities = json.loads(Path("/tmp/agentos-docker-capabilities.json").read_text())
@@ -115,7 +117,13 @@ assert product["schema_version"] == "agentos-product-layer-runtime-home.v1"
 assert product["proof"]["docker_main_try_path"] is True
 assert product["proof"]["boot_or_iso_proof_claimed"] is False
 assert product["onboarding_status"]["schema_version"] == "agentos-product-layer-onboarding-status.v1"
+assert product["guided_demo_journey"]["schema_version"] == "agentos-product-layer-guided-demo-journey.v1"
 assert onboarding["schema_version"] == "agentos-product-layer-onboarding-status.v1"
+assert demo_journey["schema_version"] == "agentos-product-layer-guided-demo-journey.v1"
+assert demo_journey["proof"]["customer_guided_journey_ready"] is True
+assert demo_journey["proof"]["boot_or_iso_proof_claimed"] is False
+assert demo_journey["proof"]["live_oauth_claimed"] is False
+assert demo_journey["proof"]["external_mutation_claimed"] is False
 assert onboarding["proof"]["docker_preview_ready"] is True
 assert onboarding["proof"]["requires_api_key_for_basic_preview"] is False
 assert onboarding["proof"]["boot_or_iso_proof_claimed"] is False

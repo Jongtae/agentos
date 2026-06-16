@@ -11,15 +11,15 @@ Current parent branch:
 
 Current public milestone:
 
-- **Docker-first AgentOS runtime preview** — public try path for the local-first runtime loop
+- **Docker guided Product Layer demo journey** — customer-facing path through the Docker-first Product Layer
 
 Current task:
 
-- `[P2-97] Close Docker onboarding proof epic`
+- `[P2-98] Add Docker guided demo journey endpoint`
 
 Runtime impact statement:
 
-- This task closes the Docker-first onboarding proof epic so the public try path is recorded as a completed Product Layer milestone slice instead of remaining an open automation target.
+- This task adds a guided Docker demo journey so customers can understand the recommended path across Runtime Home, Work Inbox, prompt execution, Activity Timeline, Evidence Dashboard, and Recovery Center without confusing Docker proof for OS, live-provider, release, or hardware proof.
 
 Current autonomous completion loop:
 
@@ -110,6 +110,7 @@ Recommended Phase 2 tasks:
 - Docker customer onboarding is guarded by `scripts/smoke_docker_customer_onboarding_quickstart.sh`, which keeps README quickstart, Docker acceptance, public preview operations, roadmap, and task state aligned around the Docker-first public try path.
 - Docker preview now exposes `agentos-product-layer-onboarding-status.v1` through `/api/onboarding` and the browser Docker Onboarding Status panel without claiming VM/ISO, live OAuth, browser, release, external mutation, or hardware attestation proof.
 - Docker onboarding readiness is guarded by `scripts/smoke_docker_onboarding_status_contract.sh`, which verifies the running preview exposes customer-facing quickstart readiness, entrypoints, Docker-safe validation, and explicit observed-proof blockers.
+- Docker preview now exposes `agentos-product-layer-guided-demo-journey.v1` through `/api/demo-journey` and the browser Guided Demo Journey panel without claiming VM/ISO, live OAuth, browser, release, external mutation, or hardware attestation proof.
 - Gmail setup is exposed through `agentos-kernelctl gmail-setup --serve-http`; live Gmail remains read-only and requires explicit user OAuth credentials.
 - Phase 2 closeout is recorded in `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`.
 - Practical local/Docker-safe proof is aggregated by `scripts/smoke_phase2_golden_demo.sh`.
@@ -149,6 +150,8 @@ Recommended Phase 2 tasks:
 - P2-95 promotes Docker Onboarding Status into the running preview through `/api/onboarding`, so customers can inspect quickstart steps, entrypoints, validation smokes, and non-claims from the product surface itself.
 - P2-96 adds a Docker onboarding readiness checklist and focused contract smoke so customers can distinguish ready local-preview steps from observed-proof blockers before trying AgentOS.
 - P2-97 closes the Docker-first customer onboarding proof epic after README, Docker acceptance, TASKS, roadmap, product surfaces, quickstart gate, onboarding contract gate, Product Layer completion gate, and golden runner all point to the same Docker-first public try path.
+- The Docker guided Product Layer demo journey epic is active for this Phase 2 slice; it must turn the completed Product Layer surfaces into a customer-readable demo path before expanding live-provider, VM/ISO, release, browser, or attestation claims.
+- P2-98 adds `/api/demo-journey`, a browser Guided Demo Journey panel, and `scripts/smoke_docker_guided_demo_journey.sh` so customers can follow a Docker-safe path through runtime readiness, read-first work, prompt execution, activity narration, evidence, and recovery.
 - The verified boot and attestation proof boundary epic is closed for this Phase 2 slice; future verified boot work should require observed VM or hardware evidence before claiming Secure Boot, TPM measured boot, PCR/event-log, IMA, or hardware attestation proof.
 - The first verified boot slice is `docs/architecture/verified-boot-attestation-proof-boundary.md`, smoke-tested by `scripts/smoke_verified_boot_attestation_boundary.sh`.
 - `phase2-run --message "status"` attaches the verified boot/attestation non-claim artifact so boot-chain trust proof remains visibly separate from local runtime proof.

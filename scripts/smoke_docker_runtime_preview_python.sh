@@ -38,6 +38,7 @@ curl -fsS "http://127.0.0.1:$PORT/" > "$TMP_DIR/home.html"
 curl -fsS "http://127.0.0.1:$PORT/api/status" > "$TMP_DIR/status.json"
 curl -fsS "http://127.0.0.1:$PORT/api/product" > "$TMP_DIR/product.json"
 curl -fsS "http://127.0.0.1:$PORT/api/onboarding" > "$TMP_DIR/onboarding.json"
+curl -fsS "http://127.0.0.1:$PORT/api/demo-journey" > "$TMP_DIR/demo-journey.json"
 curl -fsS "http://127.0.0.1:$PORT/api/work-inbox" > "$TMP_DIR/work-inbox.json"
 curl -fsS "http://127.0.0.1:$PORT/api/timeline" > "$TMP_DIR/timeline.json"
 curl -fsS "http://127.0.0.1:$PORT/api/capabilities" > "$TMP_DIR/capabilities.json"
@@ -62,6 +63,7 @@ root = Path(sys.argv[1])
 status = json.loads((root / "status.json").read_text())
 product = json.loads((root / "product.json").read_text())
 onboarding = json.loads((root / "onboarding.json").read_text())
+demo_journey = json.loads((root / "demo-journey.json").read_text())
 work_inbox = json.loads((root / "work-inbox.json").read_text())
 timeline = json.loads((root / "timeline.json").read_text())
 capabilities = json.loads((root / "capabilities.json").read_text())
@@ -84,6 +86,7 @@ assert product["proof"]["docker_main_try_path"] is True
 assert product["proof"]["boot_or_iso_proof_claimed"] is False
 assert product["proof"]["customer_facing_summary_ready"] is True
 assert product["onboarding_status"]["schema_version"] == "agentos-product-layer-onboarding-status.v1"
+assert product["guided_demo_journey"]["schema_version"] == "agentos-product-layer-guided-demo-journey.v1"
 assert product["work_inbox"]["schema_version"] == "agentos-product-layer-work-inbox.v1"
 assert product["activity_timeline"]["schema_version"] == "agentos-product-layer-activity-timeline.v1"
 assert product["capability_store"]["schema_version"] == "agentos-product-layer-capability-store.v1"
@@ -96,11 +99,28 @@ assert product["evidence_dashboard"]["schema_version"] == "agentos-product-layer
 assert {feature["id"] for feature in product["features"]} >= {
     "runtime_home",
     "onboarding_status",
+    "guided_demo_journey",
     "work_inbox",
     "activity_timeline",
     "attestation_status",
     "recovery_center",
     "evidence_dashboard",
+}
+assert demo_journey["schema_version"] == "agentos-product-layer-guided-demo-journey.v1"
+assert demo_journey["proof"]["docker_preview_ready"] is True
+assert demo_journey["proof"]["customer_guided_journey_ready"] is True
+assert demo_journey["proof"]["boot_or_iso_proof_claimed"] is False
+assert demo_journey["proof"]["live_oauth_claimed"] is False
+assert demo_journey["proof"]["live_browser_proof_claimed"] is False
+assert demo_journey["proof"]["release_proof_claimed"] is False
+assert demo_journey["proof"]["external_mutation_claimed"] is False
+assert demo_journey["proof"]["hardware_attestation_claimed"] is False
+assert {stage["id"] for stage in demo_journey["stages"]} == {
+    "start_at_runtime_home",
+    "inspect_work_inbox",
+    "run_first_prompt",
+    "review_activity_timeline",
+    "check_evidence_and_recovery",
 }
 assert onboarding["schema_version"] == "agentos-product-layer-onboarding-status.v1"
 assert onboarding["proof"]["docker_preview_ready"] is True

@@ -82,8 +82,9 @@ assert "production app ecosystem replacement" in doc
 assert "docs/architecture/capability-graduation-registry.md" in index
 assert "docs/architecture/capability-graduation-registry.json" in index
 assert "capability-graduation-registry-epic" in roadmap
-assert "[P2-66] Define capability graduation registry" in tasks
-assert "| Capability graduation registry | Active |" in readme
+assert "The capability graduation registry epic is closed" in tasks
+assert "Completed tasks: P2-66 and P2-67" in roadmap
+assert "| Capability graduation registry | Completed |" in readme
 assert "scripts/smoke_capability_graduation_registry.sh" in runner
 PY
 

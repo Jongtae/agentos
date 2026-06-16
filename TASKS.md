@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-66] Define capability graduation registry`
+- `[P2-67] Close capability graduation registry epic`
 
 Runtime impact statement:
 
-- This task defines the capability graduation registry so repeated browser fallback, inbox/app, Calendar, Gmail, and web patterns can move toward OS-native AgentOS capabilities before broader app ecosystem work expands external app or browser mediation.
+- This task closes the capability graduation registry epic after its registry document, seed JSON, smoke coverage, golden runner integration, and README/TASKS/roadmap links are in place, so future broader app/inbox work can choose a registry candidate instead of expanding browser or external app mediation by default.
 
 Current autonomous completion loop:
 
@@ -134,7 +134,7 @@ Recommended Phase 2 tasks:
 - Observed proof intake must keep secrets out of repo/workspace records, require sanitized evidence before proof promotion, and preserve explicit blockers for live credentials, VM/ISO, release, browser, and boot-chain proof.
 - Observed proof records now use `docs/architecture/observed-proof-intake-schema.json` and can be checked with `scripts/observed_proof_intake_validate.py`; `scripts/smoke_observed_proof_intake_validator.sh` covers valid, blocked, and secret-term rejection behavior.
 - `phase2-run --message "status"` attaches `agentos-observed-proof-intake-status.v1` so observed proof intake readiness and missing observed-record blockers are visible in the user-testable runtime status output.
-- The capability graduation registry epic is active; its first slice is `docs/architecture/capability-graduation-registry.md` and `docs/architecture/capability-graduation-registry.json`, smoke-tested by `scripts/smoke_capability_graduation_registry.sh`.
+- The capability graduation registry epic is closed for this Phase 2 slice; future broader app/inbox work should choose a candidate from `docs/architecture/capability-graduation-registry.json` before expanding browser or external app mediation.
 - Capability graduation must prefer internal AgentOS capabilities, keep browser/external app mediation non-default, preserve permission/data boundaries, and require observed proof before live claims.
 
 ## Validation Standards

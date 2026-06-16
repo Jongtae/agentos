@@ -565,12 +565,64 @@ class DockerPreviewApp:
                 ],
             },
         ]
+        reviewer_routes = [
+            {
+                "id": "runtime_evaluator",
+                "label": "Runtime evaluator",
+                "customer_goal": "Confirm the Docker runtime is reachable and the guided path is visible.",
+                "route": [
+                    "runtime_home",
+                    "onboarding_status",
+                    "guided_demo_journey",
+                    "activity_timeline",
+                    "recovery_center",
+                ],
+                "claim_boundary": "Docker preview only; not VM/ISO boot or install proof.",
+            },
+            {
+                "id": "proof_reviewer",
+                "label": "Proof reviewer",
+                "customer_goal": "Check local proof sources, handoff material, and claim promotion boundaries.",
+                "route": [
+                    "evidence_dashboard",
+                    "customer_proof_packet",
+                    "customer_handoff_bundle",
+                    "proof_promotion_center",
+                ],
+                "claim_boundary": "Share Docker-local claims only; stronger claims require sanitized observed evidence.",
+            },
+            {
+                "id": "capability_reviewer",
+                "label": "Capability reviewer",
+                "customer_goal": "Inspect read-first work, permission boundaries, and approval requirements.",
+                "route": [
+                    "work_inbox",
+                    "capability_store",
+                    "approval_center",
+                    "activity_timeline",
+                ],
+                "claim_boundary": "Does not claim external writes, live provider execution, or destructive actions.",
+            },
+            {
+                "id": "trust_reviewer",
+                "label": "Trust reviewer",
+                "customer_goal": "Review blocked release, VM/ISO, browser, and attestation evidence requirements.",
+                "route": [
+                    "observed_proof_uploader",
+                    "release_trust_panel",
+                    "attestation_status",
+                    "recovery_center",
+                ],
+                "claim_boundary": "No release, browser, VM/ISO, or hardware trust proof is claimed.",
+            },
+        ]
         return {
             "schema_version": "agentos-product-layer-map.v1",
             "surface": "Product Layer Map",
             "state": "ready",
-            "customer_message": "Product Layer Map gives customers one ordered path through AgentOS Docker preview surfaces without turning Docker proof into VM/ISO, live provider, release, mutation, or attestation proof.",
+            "customer_message": "Product Layer Map gives customers one ordered path and reviewer-specific routes through AgentOS Docker preview surfaces without turning Docker proof into VM/ISO, live provider, release, mutation, or attestation proof.",
             "surface_groups": surface_groups,
+            "reviewer_routes": reviewer_routes,
             "recommended_path": [
                 "runtime_home",
                 "onboarding_status",
@@ -1702,6 +1754,15 @@ def _render_page(app: DockerPreviewApp) -> str:
         f"<li><code>{html.escape(str(surface_id))}</code></li>"
         for surface_id in product_map.get("recommended_path", [])
     ) or "<li>No recommended product path is configured.</li>"
+    product_map_reviewer_route_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(route.get('label', route.get('id', 'Reviewer route'))))}</b> "
+        f"{html.escape(str(route.get('customer_goal', '')))} "
+        f"<em>{html.escape(str(route.get('claim_boundary', '')))}</em>"
+        "</li>"
+        for route in product_map.get("reviewer_routes", [])
+        if isinstance(route, dict)
+    ) or "<li>No reviewer routes are configured.</li>"
     feature_html = "\n".join(
         "<section class='feature'>"
         f"<div><h3>{html.escape(str(feature.get('label', 'Feature')))}</h3>"
@@ -1993,6 +2054,8 @@ def _render_page(app: DockerPreviewApp) -> str:
     <div class="panel">
       <h2>Recommended Path</h2>
       <ul>{product_map_path_html}</ul>
+      <h2>Reviewer Routes</h2>
+      <ul>{product_map_reviewer_route_html}</ul>
       <p><a href="/api/product-map">product map JSON</a></p>
     </div>
   </section>

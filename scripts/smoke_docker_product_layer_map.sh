@@ -90,6 +90,42 @@ assert product_map["recommended_path"][:3] == [
     "guided_demo_journey",
 ]
 assert "proof_promotion_center" in product_map["recommended_path"]
+routes = {route["id"]: route for route in product_map["reviewer_routes"]}
+assert set(routes) == {
+    "runtime_evaluator",
+    "proof_reviewer",
+    "capability_reviewer",
+    "trust_reviewer",
+}
+assert routes["runtime_evaluator"]["route"] == [
+    "runtime_home",
+    "onboarding_status",
+    "guided_demo_journey",
+    "activity_timeline",
+    "recovery_center",
+]
+assert "VM/ISO" in routes["runtime_evaluator"]["claim_boundary"]
+assert routes["proof_reviewer"]["route"] == [
+    "evidence_dashboard",
+    "customer_proof_packet",
+    "customer_handoff_bundle",
+    "proof_promotion_center",
+]
+assert "sanitized observed evidence" in routes["proof_reviewer"]["claim_boundary"]
+assert routes["capability_reviewer"]["route"] == [
+    "work_inbox",
+    "capability_store",
+    "approval_center",
+    "activity_timeline",
+]
+assert "external writes" in routes["capability_reviewer"]["claim_boundary"]
+assert routes["trust_reviewer"]["route"] == [
+    "observed_proof_uploader",
+    "release_trust_panel",
+    "attestation_status",
+    "recovery_center",
+]
+assert "hardware trust proof" in routes["trust_reviewer"]["claim_boundary"]
 assert product_map["proof"] == {
     "customer_facing_product_map_ready": True,
     "docker_main_try_path": True,
@@ -103,6 +139,9 @@ assert product_map["proof"] == {
 
 assert "Product Layer Map" in home
 assert "Recommended Path" in home
+assert "Reviewer Routes" in home
+assert "Runtime evaluator" in home
+assert "Trust reviewer" in home
 assert "product map JSON" in home
 assert "Prove and hand off" in home
 assert "Blocked until observed" in home

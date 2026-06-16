@@ -44,7 +44,7 @@ http://localhost:8787
 - `/api/proof-packet` exposes completed Docker-local claims, validation commands, proof sources, readiness checks, next blockers, and explicit non-claims without claiming automatic proof promotion.
 - `/api/customer-handoff` exposes the Docker try path, handoff checklist, share-safe handoff report, inspectable Product Layer surfaces, validation commands, proof sources, next observed-proof blockers, and explicit non-claims without claiming stronger observed proof.
 - `/api/proof-promotion` exposes Docker-local claim promotion decisions, a proof sharing checklist, source surfaces, required observed evidence, and explicit non-claims without automatic claim promotion.
-- `/api/product-map` exposes start, safe-work, proof/handoff, and blocked-until-observed surface groups with a recommended customer path and explicit non-claims.
+- `/api/product-map` exposes start, safe-work, proof/handoff, and blocked-until-observed surface groups with a recommended customer path, reviewer routes, and explicit non-claims.
 - LLM setup/readiness state is visible.
 - Telegram setup/readiness state is visible.
 - Activity feed is visible.
@@ -184,5 +184,7 @@ scripts/smoke_docker_product_layer_map.sh
 
 This gate starts the Python Docker runtime preview and verifies that
 `/api/product-map` exposes a customer-facing path across start-here,
-safe-work, proof/handoff, and blocked-until-observed groups while preserving
-VM/ISO, live OAuth, browser, release, mutation, and attestation non-claims.
+safe-work, proof/handoff, and blocked-until-observed groups, plus reviewer
+routes for runtime evaluators, proof reviewers, capability reviewers, and trust
+reviewers, while preserving VM/ISO, live OAuth, browser, release, mutation, and
+attestation non-claims.

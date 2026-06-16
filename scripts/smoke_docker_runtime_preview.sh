@@ -262,8 +262,20 @@ assert {group["id"] for group in product_map["surface_groups"]} >= {
     "prove_and_handoff",
     "blocked_until_observed",
 }
+reviewer_routes = {item["id"]: item for item in product_map["reviewer_routes"]}
+assert set(reviewer_routes) == {
+    "runtime_evaluator",
+    "proof_reviewer",
+    "capability_reviewer",
+    "trust_reviewer",
+}
+assert "VM/ISO" in reviewer_routes["runtime_evaluator"]["claim_boundary"]
+assert "proof_promotion_center" in reviewer_routes["proof_reviewer"]["route"]
+assert "approval_center" in reviewer_routes["capability_reviewer"]["route"]
+assert "attestation_status" in reviewer_routes["trust_reviewer"]["route"]
 assert "Runtime Home" in home
 assert "Product Layer Map" in home
+assert "Reviewer Routes" in home
 assert "product map JSON" in home
 assert "Docker Onboarding Status" in home
 assert "onboarding JSON" in home

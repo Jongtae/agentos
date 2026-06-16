@@ -11,15 +11,15 @@ Current parent branch:
 
 Current public milestone:
 
-- **Docker customer handoff bundle** — customer-ready Docker try path for the Product Layer
+- **Docker proof promotion center** — customer-readable claim promotion decisions for the Product Layer
 
 Current task:
 
-- `[P2-108] Close Docker customer handoff bundle epic`
+- `[P2-109] Add Docker proof promotion center`
 
 Runtime impact statement:
 
-- This task records the Docker customer handoff bundle epic as complete after the endpoint, checklist, share-safe report, docs, Product Layer gates, Docker-safe smokes, cleanup policy, and CI checks all preserve the same customer-facing Docker try path without promoting Docker-local proof into VM/ISO, live-provider, release, mutation, browser, or attestation proof.
+- This task adds a customer-facing Proof Promotion Center so evaluators can distinguish Docker-local claims that are ready to describe from Docker daemon, VM/ISO, live OAuth, browser, release, mutation, and attestation claims that remain blocked until sanitized observed evidence exists.
 
 Current autonomous completion loop:
 
@@ -108,7 +108,8 @@ Recommended Phase 2 tasks:
 - Docker preview now exposes `agentos-product-layer-evidence-dashboard.v1` through `/api/evidence` and the browser Evidence Dashboard so customers can distinguish observed Docker/local proof from explicit non-claims.
 - Docker preview now exposes `agentos-product-layer-customer-proof-packet.v1` through `/api/proof-packet` and the browser Customer Proof Packet panel so customers can inspect completed Docker-local claims, validation commands, proof sources, readiness checks, next blockers, and non-claims in one place.
 - Docker preview now exposes `agentos-product-layer-customer-handoff-bundle.v1` through `/api/customer-handoff` and the browser Customer Handoff Bundle panel so customers can run, inspect, validate, follow the handoff checklist, generate a share-safe handoff report, and explain the Docker-safe Product Layer path from one bundle.
-- Docker Product Layer completion is guarded by `scripts/smoke_docker_product_layer_completion.sh`, which verifies Runtime Home, Work Inbox, Activity Timeline, Capability Store, Approval Center, Observed Proof Uploader, Release Trust Panel, Attestation Status, Recovery Center, Evidence Dashboard, Customer Proof Packet, and Customer Handoff Bundle together.
+- Docker preview now exposes `agentos-product-layer-proof-promotion-center.v1` through `/api/proof-promotion` and the browser Proof Promotion Center panel so customers can decide which Docker-local claims are ready and which stronger claims require observed evidence.
+- Docker Product Layer completion is guarded by `scripts/smoke_docker_product_layer_completion.sh`, which verifies Runtime Home, Work Inbox, Activity Timeline, Capability Store, Approval Center, Observed Proof Uploader, Release Trust Panel, Attestation Status, Recovery Center, Evidence Dashboard, Customer Proof Packet, Customer Handoff Bundle, and Proof Promotion Center together.
 - Docker customer onboarding is guarded by `scripts/smoke_docker_customer_onboarding_quickstart.sh`, which keeps README quickstart, Docker acceptance, public preview operations, roadmap, and task state aligned around the Docker-first public try path.
 - Docker preview now exposes `agentos-product-layer-onboarding-status.v1` through `/api/onboarding` and the browser Docker Onboarding Status panel without claiming VM/ISO, live OAuth, browser, release, external mutation, or hardware attestation proof.
 - Docker onboarding readiness is guarded by `scripts/smoke_docker_onboarding_status_contract.sh`, which verifies the running preview exposes customer-facing quickstart readiness, entrypoints, Docker-safe validation, and explicit observed-proof blockers.
@@ -166,6 +167,8 @@ Recommended Phase 2 tasks:
 - P2-106 adds a handoff checklist to `/api/customer-handoff`, the browser Customer Handoff Bundle panel, and Docker-safe smokes so customers can follow run, inspect, validate, and blocker-recording steps in proof-safe order.
 - P2-107 adds a share-safe handoff report to `/api/customer-handoff`, the browser Customer Handoff Bundle panel, and Docker-safe smokes so customers can summarize reproduced local proof and remaining observed-proof blockers without including secrets or auto-promoting claims.
 - P2-108 closes the Docker customer handoff bundle epic after README, TASKS, roadmap, Docker acceptance, handoff bundle gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks all preserve the Docker-safe customer handoff path.
+- The Docker proof promotion center epic is active for this Phase 2 slice; it must give customers one proof-promotion decision surface before any stronger Docker daemon, VM/ISO, live-provider, browser, release, mutation, or attestation claim is promoted.
+- P2-109 adds `/api/proof-promotion`, a browser Proof Promotion Center panel, and `scripts/smoke_docker_proof_promotion_center.sh` so customers can see which claims are ready to describe and which require sanitized observed evidence.
 - The verified boot and attestation proof boundary epic is closed for this Phase 2 slice; future verified boot work should require observed VM or hardware evidence before claiming Secure Boot, TPM measured boot, PCR/event-log, IMA, or hardware attestation proof.
 - The first verified boot slice is `docs/architecture/verified-boot-attestation-proof-boundary.md`, smoke-tested by `scripts/smoke_verified_boot_attestation_boundary.sh`.
 - `phase2-run --message "status"` attaches the verified boot/attestation non-claim artifact so boot-chain trust proof remains visibly separate from local runtime proof.

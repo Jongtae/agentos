@@ -49,6 +49,7 @@ curl -fsS "http://127.0.0.1:$PORT/api/recovery" > "$TMP_DIR/recovery.json"
 curl -fsS "http://127.0.0.1:$PORT/api/evidence" > "$TMP_DIR/evidence.json"
 curl -fsS "http://127.0.0.1:$PORT/api/proof-packet" > "$TMP_DIR/proof-packet.json"
 curl -fsS "http://127.0.0.1:$PORT/api/customer-handoff" > "$TMP_DIR/customer-handoff.json"
+curl -fsS "http://127.0.0.1:$PORT/api/proof-promotion" > "$TMP_DIR/proof-promotion.json"
 
 python3 - "$TMP_DIR" <<'PY'
 import json
@@ -74,6 +75,7 @@ surfaces = {
     "evidence_dashboard": ("evidence.json", "agentos-product-layer-evidence-dashboard.v1", "Evidence Dashboard"),
     "customer_proof_packet": ("proof-packet.json", "agentos-product-layer-customer-proof-packet.v1", "Customer Proof Packet"),
     "customer_handoff_bundle": ("customer-handoff.json", "agentos-product-layer-customer-handoff-bundle.v1", "Customer Handoff Bundle"),
+    "proof_promotion_center": ("proof-promotion.json", "agentos-product-layer-proof-promotion-center.v1", "Proof Promotion Center"),
 }
 
 assert product["schema_version"] == "agentos-product-layer-runtime-home.v1"
@@ -127,6 +129,18 @@ assert {item["id"] for item in product["customer_handoff_bundle"]["handoff_repor
 }
 assert product["customer_handoff_bundle"]["handoff_report"]["share_policy"]["secret_material_allowed"] is False
 assert product["customer_handoff_bundle"]["handoff_report"]["share_policy"]["automatic_claim_promotion"] is False
+assert product["proof_promotion_center"]["proof"]["customer_facing_proof_promotion_ready"] is True
+assert product["proof_promotion_center"]["proof"]["docker_local_claims_ready"] is True
+assert product["proof_promotion_center"]["proof"]["docker_daemon_observed_claimed"] is False
+assert product["proof_promotion_center"]["share_policy"]["secret_material_allowed"] is False
+assert product["proof_promotion_center"]["share_policy"]["automatic_claim_promotion"] is False
+assert {item["id"] for item in product["proof_promotion_center"]["promotion_decisions"]} >= {
+    "docker-local-product-layer",
+    "docker-daemon-observed-run",
+    "vm-iso-runtime-ownership",
+    "live-provider-readonly",
+    "live-browser-release-attestation",
+}
 assert {item["id"] for item in product["customer_handoff_bundle"]["inspect_surfaces"]} >= {
     "runtime_home",
     "onboarding_status",
@@ -181,6 +195,13 @@ non_claims = {
     "handoff_vm_iso": product["customer_handoff_bundle"]["proof"]["boot_or_iso_proof_claimed"],
     "handoff_live_oauth": product["customer_handoff_bundle"]["proof"]["live_oauth_claimed"],
     "handoff_external_mutation": product["customer_handoff_bundle"]["proof"]["external_mutation_claimed"],
+    "promotion_docker_daemon_observed": product["proof_promotion_center"]["proof"]["docker_daemon_observed_claimed"],
+    "promotion_vm_iso": product["proof_promotion_center"]["proof"]["boot_or_iso_proof_claimed"],
+    "promotion_live_oauth": product["proof_promotion_center"]["proof"]["live_oauth_claimed"],
+    "promotion_live_browser": product["proof_promotion_center"]["proof"]["live_browser_proof_claimed"],
+    "promotion_release": product["proof_promotion_center"]["proof"]["release_trust_claimed"],
+    "promotion_external_mutation": product["proof_promotion_center"]["proof"]["external_mutation_claimed"],
+    "promotion_attestation": product["proof_promotion_center"]["proof"]["hardware_attestation_claimed"],
 }
 assert all(value is False for value in non_claims.values()), non_claims
 
@@ -199,6 +220,7 @@ ready_claims = {
     "evidence_dashboard": product["evidence_dashboard"]["proof"]["customer_facing_evidence_ready"],
     "customer_proof_packet": product["customer_proof_packet"]["proof"]["customer_packet_ready"],
     "customer_handoff_bundle": product["customer_handoff_bundle"]["proof"]["customer_handoff_ready"],
+    "proof_promotion_center": product["proof_promotion_center"]["proof"]["customer_facing_proof_promotion_ready"],
 }
 assert all(value is True for value in ready_claims.values()), ready_claims
 PY

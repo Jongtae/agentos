@@ -65,6 +65,16 @@ assert stage_ids == {
 }
 entrypoints = {item["entrypoint"] for item in journey["stages"]}
 assert {"http://localhost:8787", "/api/work-inbox", "/api/prompt", "/api/timeline", "/api/evidence"} <= entrypoints
+outcome_ids = {item["id"] for item in journey["expected_outcomes"]}
+assert outcome_ids == {
+    "runtime_reachable",
+    "read_first_work_visible",
+    "activity_and_records_visible",
+    "proof_boundaries_visible",
+    "recovery_next_steps_visible",
+}
+kinds = {item["kind"] for item in journey["expected_outcomes"]}
+assert {"success", "blocked_until_observed"} <= kinds
 
 assert journey["validation"]["guided_demo_journey_smoke"] == "scripts/smoke_docker_guided_demo_journey.sh"
 assert journey["proof"]["docker_preview_ready"] is True
@@ -77,6 +87,8 @@ assert journey["proof"]["external_mutation_claimed"] is False
 assert journey["proof"]["hardware_attestation_claimed"] is False
 
 assert "Guided Demo Journey" in home
+assert "Expected Outcomes" in home
+assert "Proof boundaries are visible" in home
 assert "Journey Proof" in home
 assert "demo journey JSON" in home
 PY

@@ -122,6 +122,14 @@ assert {stage["id"] for stage in demo_journey["stages"]} == {
     "review_activity_timeline",
     "check_evidence_and_recovery",
 }
+assert {item["id"] for item in demo_journey["expected_outcomes"]} == {
+    "runtime_reachable",
+    "read_first_work_visible",
+    "activity_and_records_visible",
+    "proof_boundaries_visible",
+    "recovery_next_steps_visible",
+}
+assert {item["kind"] for item in demo_journey["expected_outcomes"]} >= {"success", "blocked_until_observed"}
 assert onboarding["schema_version"] == "agentos-product-layer-onboarding-status.v1"
 assert onboarding["proof"]["docker_preview_ready"] is True
 assert onboarding["proof"]["customer_onboarding_ready"] is True

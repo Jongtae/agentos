@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-77] Close Calendar live adapter candidate epic`
+- `[P2-78] Add Maildir inbox intake proof boundary`
 
 Runtime impact statement:
 
-- This task closes the Calendar live adapter candidate epic after the read-only adapter candidate contract, smoke, docs index linkage, golden runner coverage, and roadmap blockers are in place, preventing repeated candidate-boundary work until real tester OAuth evidence or a later live adapter implementation task exists.
+- This task adds a Maildir inbox intake proof boundary so AgentOS can move broader app/inbox ecosystem work through a user-owned local inbox path before expanding external app, browser, or OAuth mediation.
 
 Current autonomous completion loop:
 
@@ -141,6 +141,7 @@ Recommended Phase 2 tasks:
 - The VM/ISO observed proof status epic is closed for this Phase 2 slice; future VM/ISO work should require a real observed VM run, sanitized evidence, or a new release/boot proof promotion task before claiming boot, reboot/recovery, managed runtime rejoin, ISO freshness, or VM signoff.
 - The Calendar live read-only acceptance epic is closed for this Phase 2 slice; future Calendar live work should require real tester OAuth evidence, a live read-only adapter run, or a new proof promotion task before claiming live account proof or Calendar mutations.
 - The Calendar live adapter candidate epic is closed for this Phase 2 slice; future Calendar live adapter work should require real tester OAuth evidence, an implementation task with credential storage and redaction behavior, or a new observed-proof promotion task before claiming live account proof.
+- The Maildir inbox intake proof epic is active; its first slice documents and smoke-tests a user-owned local Maildir path while preserving external mailbox mutation, browser/app automation, production sync, and full app ecosystem non-claims.
 
 ## Validation Standards
 
@@ -185,6 +186,7 @@ python3 scripts/cleanup_build_artifacts.py --delete --json
 - `docs/architecture/calendar-readonly-capability-contract.md`
 - `docs/architecture/calendar-live-adapter-candidate-boundary.md`
 - `docs/architecture/inbox-capability-ownership-boundary.md`
+- `docs/architecture/maildir-inbox-intake-proof-boundary.md`
 - `docs/architecture/browser-fallback-capability-boundary.md`
 - `docs/architecture/updater-hardening-state-contract.md`
 - `docs/acceptance/vm-iso-proof-preflight.md`

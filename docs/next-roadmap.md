@@ -80,9 +80,14 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
-- No active completion epic is selected. The next iteration should compare the
-  completed epic list, Later Tracks, README, TASKS, and GitHub issue state
-  before creating or continuing the next milestone-backed completion epic.
+- `maildir-inbox-intake-proof-epic` — [EPIC: Maildir inbox intake proof boundary](https://github.com/Jongtae/agentos/issues/174)
+  - Milestone: Phase 2: Local-first Codex runtime loop
+  - Completion goal: define and smoke-test the Maildir inbox intake proof boundary so broader app/inbox ecosystem work can advance through a user-owned local inbox path before expanding external app or browser mediation.
+  - Validation plan: add a Maildir inbox intake proof boundary, add a smoke that creates a local Maildir fixture and verifies normalized intake, proof baseline, and workflow surfaces without external credentials or mutations, include that smoke in the golden demo runner, and update README/TASKS/docs index/roadmap state.
+  - Exit condition: complete when Maildir intake has a documented proof boundary, a passing smoke over a local Maildir fixture, golden runner coverage, source-of-truth docs linkage, and explicit non-claims for mailbox sync, external mutations, browser/app automation, and production app ecosystem replacement.
+  - Active task: P2-78.
+  - Residual blockers: observed user Maildir proof requires a real user-provided Maildir path and sanitized evidence; external mailbox mutations, production sync, retention/compliance behavior, and full app ecosystem replacement remain out of scope until future proof exists.
+  - Advances: capability ownership, mediation cost reduction, OS-native runtime defaults, runtime proof truthfulness.
 
 ## Completed Completion Epics
 

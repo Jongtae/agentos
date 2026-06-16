@@ -9,7 +9,8 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 WORKSPACE="$TMP_DIR/workspace"
 USER_ROOT="$TMP_DIR/user"
-mkdir -p "$WORKSPACE"
+SECRETS="$TMP_DIR/secrets/gmail"
+mkdir -p "$WORKSPACE" "$SECRETS"
 printf 'phase2 cli fixture\n' >"$WORKSPACE/notes.txt"
 
 run_phase2() {
@@ -18,6 +19,8 @@ run_phase2() {
   PYTHONPATH="$ROOT_DIR/src:$ROOT_DIR" scripts/agentos-kernelctl phase2-run \
     --workspace "$WORKSPACE" \
     --user-root "$USER_ROOT" \
+    --gmail-credentials "$SECRETS/credentials.json" \
+    --gmail-token "$SECRETS/token.json" \
     --message "$message" \
     --allow-domain example.com \
     --json >"$TMP_DIR/${name}.json"
@@ -86,6 +89,9 @@ assert status_payload["proof"]["verified_boot_attestation_nonclaim_attached"] is
 assert status_payload["proof"]["observed_proof_intake_status_attached"] is True
 assert status_payload["proof"]["calendar_readonly_status_attached"] is True
 assert status_payload["proof"]["calendar_readonly_ready"] is True
+assert status_payload["proof"]["gmail_readonly_status_attached"] is True
+assert status_payload["proof"]["gmail_live_read_ready"] is False
+assert status_payload["proof"]["gmail_setup_recovery_available"] is True
 assert status_payload["proof"]["live_calendar_oauth_completed"] is False
 assert status_payload["proof"]["calendar_mutation_executed"] is False
 assert status_payload["proof"]["observed_proof_records_attached"] is False
@@ -99,6 +105,7 @@ assert Path(status_payload["artifacts"]["inbox_ownership_contract"]).exists()
 assert Path(status_payload["artifacts"]["verified_boot_attestation_nonclaim"]).exists()
 assert Path(status_payload["artifacts"]["observed_proof_intake_status"]).exists()
 assert Path(status_payload["artifacts"]["calendar_readonly_status"]).exists()
+assert Path(status_payload["artifacts"]["gmail_readonly_status"]).exists()
 inbox_ownership = status_payload["capability_result"]["inbox_ownership"]
 assert inbox_ownership["schema_version"] == "agentos-inbox-routing-contract.v1"
 assert inbox_ownership["default_selected_path"] == "native_inbox_path"
@@ -130,6 +137,15 @@ assert calendar_status["proof"]["read_only"] is True
 assert calendar_status["proof"]["live_calendar_oauth_completed"] is False
 assert calendar_status["proof"]["mutation_executed"] is False
 assert calendar_status["blockers"][0]["id"] == "calendar-live-oauth"
+gmail_status = status_payload["capability_result"]["gmail_readonly_status"]
+assert gmail_status["schema_version"] == "agentos-gmail-status.v1"
+assert gmail_status["capability"] == "gmail_status"
+assert gmail_status["live_read_ready"] is False
+assert gmail_status["proof"]["ok"] is False
+assert gmail_status["proof"]["reason"] == "gmail_credentials_missing"
+assert gmail_status["secrets_redacted"] is True
+assert "gmail-setup --serve-http" in gmail_status["operator_action_required"]
+assert "refresh_token" not in json.dumps(gmail_status, ensure_ascii=True)
 
 gmail = json.loads((tmp_dir / "gmail.json").read_text())
 assert gmail["permission"]["level"] == "external_read"

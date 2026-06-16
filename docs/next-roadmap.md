@@ -80,9 +80,14 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
-- No active completion epic is currently open. The next automation pass should
-  re-check this roadmap, the open GitHub issue state, and the Later Tracks
-  before creating a new milestone-backed epic.
+- `gmail-readonly-live-readiness-status-epic` — [EPIC: Gmail live read-only readiness status](https://github.com/Jongtae/agentos/issues/154)
+  - Milestone: Phase 2: Local-first Codex runtime loop
+  - Completion goal: surface Gmail read-only live readiness in the user-testable runtime status path without claiming live OAuth proof or executing send/delete/archive mutations.
+  - Validation plan: attach Gmail read-only setup/status state to `phase2-run --message "status"`, keep fixture Gmail, live-missing, mock live-read, and golden smokes passing without user credentials, and preserve explicit non-claims for live OAuth, account proof, send/delete/archive, and token exposure.
+  - Exit condition: complete when AgentOS status exposes Gmail credential/token/dependency readiness, read-only scope, setup recovery action, secret redaction, and live-proof blocker state while automated smokes avoid real credentials.
+  - Active task: P2-70.
+  - Residual blockers: live Gmail OAuth requires explicit tester credentials and an observed read-only run; send/delete/archive and Gmail mutation support remain out of scope.
+  - Advances: capability ownership, mediation cost reduction, OS-native runtime defaults, runtime proof truthfulness.
 
 ## Completed Completion Epics
 

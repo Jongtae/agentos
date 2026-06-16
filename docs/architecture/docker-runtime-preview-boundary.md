@@ -26,6 +26,7 @@ http://localhost:8787
 - setup/status can report local runtime and adapter readiness
 - the customer-facing Runtime Home can summarize product-layer readiness
 - the Work Inbox product surface can summarize read-first inbox sources without live-provider claims
+- the Recovery Center product surface can turn missing proof into customer-facing next actions without claiming observed VM/ISO, live OAuth, browser, release, or attestation evidence
 - prompt intake can reach the same intent classification path used by AgentOS
 - bounded capabilities can emit activity events
 - generated outputs can be written to user-owned mounted storage
@@ -85,6 +86,7 @@ command that produces:
 - a setup/status report
 - a Runtime Home product-layer summary
 - a Work Inbox read-first product-layer summary
+- a Recovery Center product-layer summary
 - at least one classified prompt
 - at least one activity feed event
 - a user-owned output path

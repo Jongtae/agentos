@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-42] Create browser fallback completion epic`
+- `[P2-43] Define browser fallback routing contract`
 
 Runtime impact statement:
 
-- This task opens the browser fallback capability boundary epic so AgentOS can reduce app/browser mediation cost while keeping OS-native capability ownership as the default direction.
+- This task defines a smoke-verifiable browser fallback routing contract so AgentOS can prefer internal capabilities, allow bounded browser fallback, block external state, and identify capability graduation candidates.
 
 Current autonomous completion loop:
 
@@ -113,6 +113,7 @@ Recommended Phase 2 tasks:
 - The first updater hardening slice is `agentos-phase2-updater-state.v1`, which records ready, blocked, rollback-needed, and recovery-suggested states without running destructive updater actions.
 - `phase2-run` lifecycle recovery should surface updater state artifacts for update, rollback, restart, and recovery prompts while keeping live updater and VM/ISO proof blocked until observed.
 - The browser fallback capability boundary epic is active; it should define when browser automation is allowed as fallback, when requests stay blocked, and which repeated web/app patterns should graduate into internal AgentOS capabilities.
+- The first browser fallback slice is `agentos-phase2-browser-fallback-contract.v1`, which classifies internal capability, allowed fallback, blocked external state, and capability graduation paths without launching a browser.
 
 ## Validation Standards
 
@@ -150,6 +151,7 @@ python3 scripts/cleanup_build_artifacts.py --delete --json
 - `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`
 - `.agents/roadmap-direction-judge.md`
 - `docs/architecture/calendar-readonly-capability-contract.md`
+- `docs/architecture/browser-fallback-capability-boundary.md`
 - `docs/architecture/updater-hardening-state-contract.md`
 - `docs/acceptance/vm-iso-proof-preflight.md`
 - `docs/acceptance/gmail-live-readonly-acceptance.md`

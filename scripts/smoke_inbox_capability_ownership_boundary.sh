@@ -52,10 +52,12 @@ for term in required_terms:
 
 assert "docs/architecture/inbox-capability-ownership-boundary.md" in index
 assert "inbox-capability-ownership-boundary-epic" in roadmap
-assert "[P2-55] Add inbox boundary smoke to golden runner" in tasks
+assert "[P2-56] Attach inbox ownership proof to phase2 status" in tasks
 assert "inbox capability ownership boundary epic is active" in tasks
+assert "phase2-run --message \"status\"" in tasks
 assert "native/local inbox intake" in roadmap
 assert "live Gmail and Calendar OAuth" in roadmap
+assert "Runtime proof" in roadmap
 assert "scripts/smoke_inbox_capability_ownership_boundary.sh" in (
     Path("scripts/phase2_golden_demo_runner.py").read_text(encoding="utf-8")
 )

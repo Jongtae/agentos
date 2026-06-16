@@ -26,6 +26,7 @@ from kernel_phase2_gmail_fixture import build_gmail_fixture_report
 from kernel_phase2_lifecycle_recovery import build_lifecycle_recovery_report
 from kernel_phase2_updater_state import build_payload as build_updater_state_payload
 from kernel_phase2_records import append_record, find_records
+from kernel.capability_substrate import build_inbox_routing_contract
 
 SCHEMA_VERSION = "agentos-phase2-run.v1"
 
@@ -229,6 +230,12 @@ def run_phase2(
             capability_result = dispatch
             capability = str(dispatch.get("capability_executed", capability))
             response = str(dispatch.get("response", "")).strip()
+            if intent == "runtime_status":
+                inbox_contract = build_inbox_routing_contract(workspace_path, session_id=request_id)
+                capability_result["inbox_ownership"] = inbox_contract
+                artifacts["inbox_ownership_contract"] = str(
+                    inbox_contract.get("artifacts", {}).get("latest_inbox_routing_contract_json", "")
+                )
             if intent == "web_search_summary":
                 browser_contract = build_browser_fallback_contract(
                     workspace_path,
@@ -366,6 +373,11 @@ def run_phase2(
                 intent == "web_search_summary" and isinstance(capability_result.get("browser_fallback"), dict)
             ),
             "live_browser_executed": False,
+            "inbox_ownership_contract_attached": bool(
+                intent == "runtime_status" and isinstance(capability_result.get("inbox_ownership"), dict)
+            ),
+            "live_inbox_oauth_completed": False,
+            "inbox_mutation_executed": False,
             "permission_checked": bool((permission_result.get("proof") or {}).get("permission_checked", False)),
             "outcome_checked": bool((permission_result.get("proof") or {}).get("outcome_checked", False)),
             "secrets_redacted": bool((permission_result.get("proof") or {}).get("secrets_redacted", False)),

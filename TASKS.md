@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-55] Add inbox boundary smoke to golden runner`
+- `[P2-56] Attach inbox ownership proof to phase2 status`
 
 Runtime impact statement:
 
-- This task makes the inbox ownership boundary part of the practical Phase 2 proof chain, so native inbox intake, read-only adapter blockers, user-owned records, and external mutation non-claims stay under recurring golden validation.
+- This task surfaces inbox ownership proof in the user-testable `phase2-run` status path, so native fixture/Maildir intake readiness and external adapter non-claims are visible in normal runtime proof without requiring live Gmail or Calendar OAuth.
 
 Current autonomous completion loop:
 
@@ -125,6 +125,7 @@ Recommended Phase 2 tasks:
 - The inbox capability ownership boundary epic is active; it should make native fixture and Maildir inbox intake the local proof baseline, keep Gmail and Calendar live OAuth read-only and explicit, and block external mutations until a later confirmation model exists.
 - The first inbox ownership slice is `docs/architecture/inbox-capability-ownership-boundary.md`, smoke-tested by `scripts/smoke_inbox_capability_ownership_boundary.sh`.
 - The inbox ownership boundary smoke is included in the Phase 2 golden demo runner so inbox capability ownership remains part of practical local/Docker-safe proof.
+- `phase2-run --message "status"` attaches the inbox routing/ownership contract artifact so inbox capability ownership is visible in the user-testable runtime status proof.
 
 ## Validation Standards
 

@@ -179,8 +179,8 @@ make runtime proof more truthful.
 flowchart LR
   phase1["Phase 1\nOS-native runtime prototype\nclosed"]
   phase2["Phase 2\nlocal-first runtime loop\nclosed baseline"]
-  active["Active\nBrowser fallback\nobserved proof"]
-  completed["Completed completion epics\npermissions, updater, browser fallback,\npublic preview ops, distribution,\ninbox, capability graduation,\ncalendar/Gmail readiness,\nVM/ISO proof status,\nCalendar live acceptance,\nCalendar live adapter,\nMaildir intake"]
+  active["Active\nNext roadmap\ncompletion track"]
+  completed["Completed completion epics\npermissions, updater, browser fallback,\nBrowser observed acceptance,\npublic preview ops, distribution,\ninbox, capability graduation,\ncalendar/Gmail readiness,\nVM/ISO proof status,\nCalendar live acceptance,\nCalendar live adapter,\nMaildir intake"]
   blocked["Observed-proof blockers\nVM/ISO, live OAuth,\nlive browser, release artifacts"]
   future["Later completion tracks\ncalendar live adapter, broader app ecosystem,\nhardware attestation, packaging hardening"]
 
@@ -198,6 +198,7 @@ flowchart LR
 | Capability permission boundary | Completed | Defines how AgentOS declares, blocks, records, and narrates capability access. |
 | Updater hardening | Completed | Protects runtime continuity and rollback/recovery truthfulness. |
 | Browser fallback boundary | Completed | Keeps browser automation as fallback while common patterns graduate to internal capabilities. |
+| Browser fallback observed acceptance | Completed | Defines manual observed proof and blocker capture for future user-approved browser fallback while keeping browser automation non-default. |
 | Public preview operations | Completed | Defines safe preview promotion, manual proof blockers, and release non-claims. |
 | Distribution packaging boundary | Completed | Separates local packaging checks from real release/signing/VM proof claims. |
 | Inbox capability ownership | Completed | Moves Gmail, Calendar, Maildir, fixtures, and future inbox adapters toward a read-first OS-native substrate. |
@@ -211,7 +212,7 @@ flowchart LR
 | VM/ISO boot, recovery, and rejoin | Blocked on observed VM proof | Must show boot, reboot/recovery, and managed runtime rejoin before signoff. |
 | Calendar live read-only acceptance | Completed | Defines manual proof and blocker capture for future Calendar OAuth without claiming live account proof. |
 | Calendar live adapter | Completed | Defines the read-only live adapter candidate boundary without claiming live OAuth or mutations. |
-| Live browser fallback proof | Active acceptance pack | Defines manual observed proof and blocker capture for future user-approved browser fallback while keeping browser automation non-default. |
+| Live browser fallback proof | Blocked on user-approved browser acceptance evidence | Requires an explicit user-approved browser run and sanitized observed proof before claiming live fallback proof. |
 | Release artifacts and signing | Blocked on real release evidence | Requires actual artifacts, checksums/signatures, and release publication proof. |
 | Maildir inbox intake | Completed | Proves user-owned local inbox intake before broader app or browser mediation. |
 | Broader app/inbox ecosystem | Future capability ownership track | Expands only after common access patterns can use internal substrate capabilities. |

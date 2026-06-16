@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-80] Add browser fallback observed proof acceptance pack`
+- `[P2-81] Close browser fallback observed proof acceptance epic`
 
 Runtime impact statement:
 
-- This task adds a browser fallback observed proof acceptance pack so a future user-approved browser run can attach sanitized evidence without making browser automation the default AgentOS path or claiming unobserved live browser proof.
+- This task closes the browser fallback observed proof acceptance epic after the manual acceptance pack, blocked/no-observed validation, synthetic observed validation, docs index linkage, golden runner coverage, and live browser non-claims are in place.
 
 Current autonomous completion loop:
 
@@ -115,7 +115,7 @@ Recommended Phase 2 tasks:
 - The browser fallback capability boundary epic is closed for this Phase 2 slice; future browser fallback work should return to the roadmap and open a new task only when it adds observed fallback proof or graduates a repeated pattern into an internal AgentOS capability.
 - The first browser fallback slice is `agentos-phase2-browser-fallback-contract.v1`, which classifies internal capability, allowed fallback, blocked external state, and capability graduation paths without launching a browser.
 - `phase2-run` web/search requests should attach the browser fallback contract artifact and keep live browser proof unclaimed unless a separate observed browser acceptance run exists.
-- The browser fallback observed proof acceptance epic is active for this Phase 2 slice; it must not close until a manual acceptance pack, blocked/no-observed validation, synthetic observed validation, docs index linkage, golden runner coverage, and non-claims are in place.
+- The browser fallback observed proof acceptance epic is closed for this Phase 2 slice; future live browser work should require an explicit user-approved run and sanitized observed proof before claiming live browser fallback proof.
 - The first browser fallback observed proof slice is `agentos-browser-fallback-observed-acceptance.v1`, which accepts a sanitized observed proof record only after the fallback contract allows browser fallback and keeps `browser_is_default=false`.
 - The public preview operations epic is closed for this Phase 2 slice; future preview work should return to the roadmap and open a new task only when it adds observed proof, release packaging, or a new promotion decision surface.
 - The first public preview operations slice is `docs/operations/public-preview-operations.md`, smoke-tested by `scripts/smoke_public_preview_operations.sh`.

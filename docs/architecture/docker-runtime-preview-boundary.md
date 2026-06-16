@@ -31,6 +31,7 @@ http://localhost:8787
 - the Approval Center product surface can summarize setup, confirmation, observed-proof, and blocked requirements without claiming approval execution
 - the Observed Proof Uploader product surface can summarize evidence requirements and mock submission fields without accepting secrets, uploading files, or auto-promoting claims
 - the Release Trust Panel product surface can summarize release artifact, manifest, checksum, signing, publication, and VM/ISO proof requirements without claiming release readiness
+- the Attestation Status product surface can summarize Secure Boot, TPM/PCR, event-log, IMA, and hardware attestation blockers without claiming Docker proves device trust
 - the Recovery Center product surface can turn missing proof into customer-facing next actions without claiming observed VM/ISO, live OAuth, browser, release, or attestation evidence
 - the Evidence Dashboard product surface can separate observed Docker/local proof from explicit external-proof non-claims
 - prompt intake can reach the same intent classification path used by AgentOS
@@ -97,6 +98,7 @@ command that produces:
 - an Approval Center product-layer summary
 - an Observed Proof Uploader product-layer summary
 - a Release Trust Panel product-layer summary
+- an Attestation Status product-layer summary
 - a Recovery Center product-layer summary
 - an Evidence Dashboard product-layer summary
 - at least one classified prompt

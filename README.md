@@ -202,6 +202,7 @@ flowchart LR
 | Approval Center | Active Docker product surface | Shows setup, confirmation, observed-proof, and blocked requirements without claiming approval execution, external writes, or destructive actions. |
 | Observed Proof Uploader | Active Docker product surface | Defines required evidence and mock submission fields for live, VM/ISO, browser, release, and attestation proof without accepting secrets or auto-promoting claims. |
 | Release Trust Panel | Active Docker product surface | Separates local release preflight from real artifacts, checksums, signatures, publication, and VM/ISO release proof. |
+| Attestation Status | Active Docker product surface | Shows Secure Boot, TPM/PCR, event-log, IMA, and hardware attestation blockers without claiming Docker proves device trust. |
 | Recovery Center | Active Docker product surface | Turns VM/ISO, live OAuth, browser, release, attestation, and setup blockers into customer-facing recovery actions without claiming unobserved proof. |
 | Evidence Dashboard | Active Docker product surface | Separates observed Docker/local proof from explicit VM/ISO, live OAuth, browser, release, and attestation non-claims. |
 | Phase 2 golden runtime loop | Closed baseline | Proves prompt intake, intent classification, bounded capability execution, activity narration, records, and recovery. |

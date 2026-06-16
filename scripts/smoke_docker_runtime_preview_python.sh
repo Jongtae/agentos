@@ -43,6 +43,7 @@ curl -fsS "http://127.0.0.1:$PORT/api/capabilities" > "$TMP_DIR/capabilities.jso
 curl -fsS "http://127.0.0.1:$PORT/api/approvals" > "$TMP_DIR/approvals.json"
 curl -fsS "http://127.0.0.1:$PORT/api/proofs" > "$TMP_DIR/proofs.json"
 curl -fsS "http://127.0.0.1:$PORT/api/release-trust" > "$TMP_DIR/release-trust.json"
+curl -fsS "http://127.0.0.1:$PORT/api/attestation" > "$TMP_DIR/attestation.json"
 curl -fsS "http://127.0.0.1:$PORT/api/recovery" > "$TMP_DIR/recovery.json"
 curl -fsS "http://127.0.0.1:$PORT/api/evidence" > "$TMP_DIR/evidence.json"
 curl -fsS \
@@ -65,6 +66,7 @@ capabilities = json.loads((root / "capabilities.json").read_text())
 approvals = json.loads((root / "approvals.json").read_text())
 proofs = json.loads((root / "proofs.json").read_text())
 release_trust = json.loads((root / "release-trust.json").read_text())
+attestation = json.loads((root / "attestation.json").read_text())
 recovery = json.loads((root / "recovery.json").read_text())
 evidence = json.loads((root / "evidence.json").read_text())
 prompt = json.loads((root / "prompt.json").read_text())
@@ -85,12 +87,14 @@ assert product["capability_store"]["schema_version"] == "agentos-product-layer-c
 assert product["approval_center"]["schema_version"] == "agentos-product-layer-approval-center.v1"
 assert product["observed_proof_uploader"]["schema_version"] == "agentos-product-layer-observed-proof-uploader.v1"
 assert product["release_trust_panel"]["schema_version"] == "agentos-product-layer-release-trust-panel.v1"
+assert product["attestation_status"]["schema_version"] == "agentos-product-layer-attestation-status.v1"
 assert product["recovery_center"]["schema_version"] == "agentos-product-layer-recovery-center.v1"
 assert product["evidence_dashboard"]["schema_version"] == "agentos-product-layer-evidence-dashboard.v1"
 assert {feature["id"] for feature in product["features"]} >= {
     "runtime_home",
     "work_inbox",
     "activity_timeline",
+    "attestation_status",
     "recovery_center",
     "evidence_dashboard",
 }
@@ -168,6 +172,22 @@ assert {item["id"] for item in release_trust["checks"]} >= {
     "secret-free-review",
     "vm-iso-release-proof",
 }
+assert attestation["schema_version"] == "agentos-product-layer-attestation-status.v1"
+assert attestation["proof"]["docker_preview_ready"] is True
+assert attestation["proof"]["secure_boot_observed"] is False
+assert attestation["proof"]["tpm_pcr_observed"] is False
+assert attestation["proof"]["event_log_observed"] is False
+assert attestation["proof"]["ima_runtime_integrity_observed"] is False
+assert attestation["proof"]["hardware_attestation_observed"] is False
+assert attestation["proof"]["customer_facing_attestation_status_ready"] is True
+assert attestation["boundary"]["docker_is_attestation_proof"] is False
+assert {item["id"] for item in attestation["checks"]} >= {
+    "secure-boot-state",
+    "tpm-pcr-evidence",
+    "event-log-review",
+    "ima-runtime-integrity",
+    "hardware-backed-attestation",
+}
 assert recovery["schema_version"] == "agentos-product-layer-recovery-center.v1"
 assert recovery["proof"]["docker_preview_ready"] is True
 assert recovery["proof"]["customer_facing_recovery_ready"] is True
@@ -219,6 +239,8 @@ assert "Observed Proof Uploader" in home
 assert "proofs JSON" in home
 assert "Release Trust Panel" in home
 assert "release trust JSON" in home
+assert "Attestation Status" in home
+assert "attestation JSON" in home
 assert "Evidence Dashboard" in home
 assert "evidence JSON" in home
 assert prompt["ok"] is True

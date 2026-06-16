@@ -85,6 +85,7 @@ curl -fsS http://127.0.0.1:18787/api/capabilities > /tmp/agentos-docker-capabili
 curl -fsS http://127.0.0.1:18787/api/approvals > /tmp/agentos-docker-approvals.json
 curl -fsS http://127.0.0.1:18787/api/proofs > /tmp/agentos-docker-proofs.json
 curl -fsS http://127.0.0.1:18787/api/release-trust > /tmp/agentos-docker-release-trust.json
+curl -fsS http://127.0.0.1:18787/api/attestation > /tmp/agentos-docker-attestation.json
 curl -fsS http://127.0.0.1:18787/api/recovery > /tmp/agentos-docker-recovery.json
 curl -fsS http://127.0.0.1:18787/api/evidence > /tmp/agentos-docker-evidence.json
 
@@ -99,6 +100,7 @@ capabilities = json.loads(Path("/tmp/agentos-docker-capabilities.json").read_tex
 approvals = json.loads(Path("/tmp/agentos-docker-approvals.json").read_text())
 proofs = json.loads(Path("/tmp/agentos-docker-proofs.json").read_text())
 release_trust = json.loads(Path("/tmp/agentos-docker-release-trust.json").read_text())
+attestation = json.loads(Path("/tmp/agentos-docker-attestation.json").read_text())
 recovery = json.loads(Path("/tmp/agentos-docker-recovery.json").read_text())
 evidence = json.loads(Path("/tmp/agentos-docker-evidence.json").read_text())
 home = Path("/tmp/agentos-docker-home.html").read_text()
@@ -140,6 +142,13 @@ assert release_trust["proof"]["release_artifact_observed"] is False
 assert release_trust["proof"]["signing_observed"] is False
 assert release_trust["proof"]["release_uploaded"] is False
 assert release_trust["proof"]["vm_iso_release_proof_completed"] is False
+assert attestation["schema_version"] == "agentos-product-layer-attestation-status.v1"
+assert attestation["proof"]["docker_preview_ready"] is True
+assert attestation["proof"]["secure_boot_observed"] is False
+assert attestation["proof"]["tpm_pcr_observed"] is False
+assert attestation["proof"]["event_log_observed"] is False
+assert attestation["proof"]["hardware_attestation_observed"] is False
+assert attestation["boundary"]["docker_is_attestation_proof"] is False
 assert recovery["schema_version"] == "agentos-product-layer-recovery-center.v1"
 assert recovery["proof"]["docker_preview_ready"] is True
 assert recovery["proof"]["boot_or_iso_proof_claimed"] is False
@@ -165,6 +174,8 @@ assert "Observed Proof Uploader" in home
 assert "proofs JSON" in home
 assert "Release Trust Panel" in home
 assert "release trust JSON" in home
+assert "Attestation Status" in home
+assert "attestation JSON" in home
 assert "Evidence Dashboard" in home
 assert "evidence JSON" in home
 PY

@@ -170,14 +170,45 @@ local-first runtime loop: a prompt can enter AgentOS, be classified, run a
 bounded capability, narrate activity, write user-owned records, and recover
 clearly when live credentials or VM proof are missing.
 
-Current roadmap work is governed by completion tracks rather than repeated
-smoke-only hardening:
+The current roadmap is governed by completion tracks rather than repeated
+smoke-only hardening. Each track must either move AgentOS toward capability
+ownership, reduce mediation cost, strengthen OS-native runtime defaults, or
+make runtime proof more truthful.
 
-- observed VM/ISO proof for boot, recovery, and managed runtime rejoin
-- live Gmail read-only proof with explicit user OAuth credentials
-- calendar and broader inbox capabilities that remain read-only until proven
-- capability ownership, permission boundaries, and OS-native runtime defaults
-- public preview operations, updater hardening, and distribution packaging
+```mermaid
+flowchart LR
+  phase1["Phase 1\nOS-native runtime prototype\nclosed"]
+  phase2["Phase 2\nlocal-first runtime loop\nclosed baseline"]
+  active["Active\nverified boot and attestation\nproof boundary"]
+  completed["Completed completion epics\npermissions, updater, browser fallback,\npublic preview ops, distribution,\ninbox ownership"]
+  blocked["Observed-proof blockers\nVM/ISO, live OAuth,\nlive browser, release artifacts"]
+  future["Later completion tracks\ncalendar live adapter, broader app ecosystem,\nhardware attestation, packaging hardening"]
+
+  phase1 --> phase2 --> active
+  phase2 --> completed
+  active --> blocked
+  completed --> future
+  blocked --> future
+```
+
+| Track | Status | Runtime impact |
+| --- | --- | --- |
+| Docker runtime preview | Developer/demo proof path | Makes the managed runtime easy to try without claiming boot ownership. |
+| Phase 2 golden runtime loop | Closed baseline | Proves prompt intake, intent classification, bounded capability execution, activity narration, records, and recovery. |
+| Capability permission boundary | Completed | Defines how AgentOS declares, blocks, records, and narrates capability access. |
+| Updater hardening | Completed | Protects runtime continuity and rollback/recovery truthfulness. |
+| Browser fallback boundary | Completed | Keeps browser automation as fallback while common patterns graduate to internal capabilities. |
+| Public preview operations | Completed | Defines safe preview promotion, manual proof blockers, and release non-claims. |
+| Distribution packaging boundary | Completed | Separates local packaging checks from real release/signing/VM proof claims. |
+| Inbox capability ownership | Completed | Moves Gmail, Calendar, Maildir, fixtures, and future inbox adapters toward a read-first OS-native substrate. |
+| Verified boot and attestation boundary | Active | Keeps Secure Boot, TPM, PCR/event-log, IMA, and hardware attestation proof explicit and unclaimed until observed. |
+| Live Gmail OAuth | Blocked on credentials and observed read-only proof | Fixture and missing-credential paths are automated; real mailbox proof requires explicit tester OAuth. |
+| VM/ISO boot, recovery, and rejoin | Blocked on observed VM proof | Must show boot, reboot/recovery, and managed runtime rejoin before signoff. |
+| Calendar live adapter | Future read-only track | Starts from fixture-backed contracts and must stay read-only until live OAuth proof exists. |
+| Live browser fallback proof | Blocked on user-approved browser acceptance | Browser automation remains fallback; repeated patterns should become internal capabilities. |
+| Release artifacts and signing | Blocked on real release evidence | Requires actual artifacts, checksums/signatures, and release publication proof. |
+| Broader app/inbox ecosystem | Future capability ownership track | Expands only after common access patterns can use internal substrate capabilities. |
+| Hardware attestation | Future proof track | Secure Boot, TPM, PCR/event-log, and IMA claims stay explicit non-claims until observed. |
 
 Docker remains a developer/demo runtime preview, not the product target or a
 replacement for observed boot/VM proof.

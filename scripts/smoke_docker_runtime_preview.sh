@@ -198,6 +198,13 @@ assert evidence["proof"]["customer_facing_evidence_ready"] is True
 assert proof_packet["schema_version"] == "agentos-product-layer-customer-proof-packet.v1"
 assert proof_packet["proof"]["customer_packet_ready"] is True
 assert proof_packet["proof"]["claim_promotion_automatic"] is False
+assert {item["id"] for item in proof_packet["readiness_checklist"]} >= {
+    "completed_claims_present",
+    "validation_commands_present",
+    "proof_sources_linked",
+    "non_claims_explicit",
+    "automatic_claim_promotion_disabled",
+}
 assert "Runtime Home" in home
 assert "Docker Onboarding Status" in home
 assert "onboarding JSON" in home

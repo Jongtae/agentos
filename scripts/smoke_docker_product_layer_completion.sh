@@ -105,6 +105,13 @@ assert len(product["guided_demo_journey"]["completion_summary"]["completed_claim
 assert len(product["guided_demo_journey"]["completion_summary"]["next_blockers"]) >= 3
 assert product["customer_proof_packet"]["proof"]["customer_packet_ready"] is True
 assert product["customer_proof_packet"]["proof"]["claim_promotion_automatic"] is False
+assert {item["id"] for item in product["customer_proof_packet"]["readiness_checklist"]} >= {
+    "completed_claims_present",
+    "validation_commands_present",
+    "proof_sources_linked",
+    "non_claims_explicit",
+    "automatic_claim_promotion_disabled",
+}
 assert {item["id"] for item in product["customer_proof_packet"]["completed_claims"]} >= {
     "docker-runtime-preview-ready",
     "product-layer-surfaces-ready",

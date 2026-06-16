@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-102] Add Docker customer proof packet endpoint`
+- `[P2-103] Add Docker customer proof packet readiness checklist`
 
 Runtime impact statement:
 
-- This task turns scattered Docker-local proof, Product Layer surfaces, validation commands, and explicit non-claims into one customer-readable proof packet without promoting Docker into VM/ISO, live-provider, release, browser, mutation, or attestation proof.
+- This task makes the Docker customer proof packet's readiness and blocker posture scannable by customers so local proof can be trusted without implying VM/ISO, live-provider, browser, release, mutation, or attestation proof.
 
 Current autonomous completion loop:
 
@@ -106,7 +106,7 @@ Recommended Phase 2 tasks:
 - Docker preview now exposes `agentos-product-layer-attestation-status.v1` through `/api/attestation` and the browser Attestation Status panel without claiming Secure Boot, TPM/PCR, event-log, IMA, or hardware attestation proof.
 - Docker preview now exposes `agentos-product-layer-recovery-center.v1` through `/api/recovery` and the browser Recovery Center without claiming VM/ISO, live OAuth, browser, release-trust, or hardware-attestation proof.
 - Docker preview now exposes `agentos-product-layer-evidence-dashboard.v1` through `/api/evidence` and the browser Evidence Dashboard so customers can distinguish observed Docker/local proof from explicit non-claims.
-- Docker preview now exposes `agentos-product-layer-customer-proof-packet.v1` through `/api/proof-packet` and the browser Customer Proof Packet panel so customers can inspect completed Docker-local claims, validation commands, proof sources, next blockers, and non-claims in one place.
+- Docker preview now exposes `agentos-product-layer-customer-proof-packet.v1` through `/api/proof-packet` and the browser Customer Proof Packet panel so customers can inspect completed Docker-local claims, validation commands, proof sources, readiness checks, next blockers, and non-claims in one place.
 - Docker Product Layer completion is guarded by `scripts/smoke_docker_product_layer_completion.sh`, which verifies Runtime Home, Work Inbox, Activity Timeline, Capability Store, Approval Center, Observed Proof Uploader, Release Trust Panel, Attestation Status, Recovery Center, and Evidence Dashboard together.
 - Docker customer onboarding is guarded by `scripts/smoke_docker_customer_onboarding_quickstart.sh`, which keeps README quickstart, Docker acceptance, public preview operations, roadmap, and task state aligned around the Docker-first public try path.
 - Docker preview now exposes `agentos-product-layer-onboarding-status.v1` through `/api/onboarding` and the browser Docker Onboarding Status panel without claiming VM/ISO, live OAuth, browser, release, external mutation, or hardware attestation proof.
@@ -158,6 +158,7 @@ Recommended Phase 2 tasks:
 - P2-101 closes the Docker guided demo journey epic after README, Docker acceptance, TASKS, roadmap, guided demo gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and the golden runner all preserve the same proof-safe customer path.
 - The Docker customer proof packet epic is active for this Phase 2 slice; it must package Docker-local Product Layer proof into a customer-readable summary before any stronger live, VM/ISO, browser, release, mutation, or attestation claim is promoted.
 - P2-102 adds `/api/proof-packet`, a browser Customer Proof Packet panel, and `scripts/smoke_docker_customer_proof_packet.sh` so customers can see completed Docker-local claims, validation commands, proof sources, next blockers, and explicit non-claims together.
+- P2-103 adds a Customer Proof Packet readiness checklist so completed claims, validation commands, proof-source links, explicit non-claims, and disabled automatic claim promotion are visible before customers rely on the packet.
 - The verified boot and attestation proof boundary epic is closed for this Phase 2 slice; future verified boot work should require observed VM or hardware evidence before claiming Secure Boot, TPM measured boot, PCR/event-log, IMA, or hardware attestation proof.
 - The first verified boot slice is `docs/architecture/verified-boot-attestation-proof-boundary.md`, smoke-tested by `scripts/smoke_verified_boot_attestation_boundary.sh`.
 - `phase2-run --message "status"` attaches the verified boot/attestation non-claim artifact so boot-chain trust proof remains visibly separate from local runtime proof.

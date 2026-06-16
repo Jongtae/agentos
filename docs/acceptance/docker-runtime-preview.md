@@ -154,7 +154,7 @@ scripts/smoke_docker_customer_handoff_bundle.sh
 ```
 
 This gate starts the Python Docker runtime preview and verifies that
-`/api/customer-handoff` exposes the Docker try path, inspectable Product Layer
-surfaces, validation commands, proof sources, next observed-proof blockers, and
-explicit non-claims without promoting Docker proof into VM/ISO, live OAuth,
-browser, release, mutation, or attestation proof.
+`/api/customer-handoff` exposes the Docker try path, handoff checklist,
+inspectable Product Layer surfaces, validation commands, proof sources, next
+observed-proof blockers, and explicit non-claims without promoting Docker proof
+into VM/ISO, live OAuth, browser, release, mutation, or attestation proof.

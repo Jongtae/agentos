@@ -47,6 +47,7 @@ curl -fsS "http://127.0.0.1:$PORT/api/release-trust" > "$TMP_DIR/release-trust.j
 curl -fsS "http://127.0.0.1:$PORT/api/attestation" > "$TMP_DIR/attestation.json"
 curl -fsS "http://127.0.0.1:$PORT/api/recovery" > "$TMP_DIR/recovery.json"
 curl -fsS "http://127.0.0.1:$PORT/api/evidence" > "$TMP_DIR/evidence.json"
+curl -fsS "http://127.0.0.1:$PORT/api/proof-packet" > "$TMP_DIR/proof-packet.json"
 
 python3 - "$TMP_DIR" <<'PY'
 import json
@@ -70,6 +71,7 @@ surfaces = {
     "attestation_status": ("attestation.json", "agentos-product-layer-attestation-status.v1", "Attestation Status"),
     "recovery_center": ("recovery.json", "agentos-product-layer-recovery-center.v1", "Recovery Center"),
     "evidence_dashboard": ("evidence.json", "agentos-product-layer-evidence-dashboard.v1", "Evidence Dashboard"),
+    "customer_proof_packet": ("proof-packet.json", "agentos-product-layer-customer-proof-packet.v1", "Customer Proof Packet"),
 }
 
 assert product["schema_version"] == "agentos-product-layer-runtime-home.v1"
@@ -101,6 +103,14 @@ assert {item["id"] for item in product["guided_demo_journey"]["expected_outcomes
 assert product["guided_demo_journey"]["completion_summary"]["id"] == "docker_guided_demo_complete"
 assert len(product["guided_demo_journey"]["completion_summary"]["completed_claims"]) >= 4
 assert len(product["guided_demo_journey"]["completion_summary"]["next_blockers"]) >= 3
+assert product["customer_proof_packet"]["proof"]["customer_packet_ready"] is True
+assert product["customer_proof_packet"]["proof"]["claim_promotion_automatic"] is False
+assert {item["id"] for item in product["customer_proof_packet"]["completed_claims"]} >= {
+    "docker-runtime-preview-ready",
+    "product-layer-surfaces-ready",
+    "guided-demo-path-ready",
+    "golden-runtime-loop-ready",
+}
 assert {item["id"] for item in product["onboarding_status"]["readiness_checklist"]} >= {
     "quickstart_documented",
     "preview_entrypoints_available",
@@ -128,6 +138,9 @@ non_claims = {
     "hardware_attestation": product["attestation_status"]["proof"]["hardware_attestation_observed"],
     "recovery_vm_iso": product["recovery_center"]["proof"]["boot_or_iso_proof_claimed"],
     "evidence_hardware": product["evidence_dashboard"]["proof"]["hardware_attestation_claimed"],
+    "proof_packet_vm_iso": product["customer_proof_packet"]["proof"]["boot_or_iso_proof_claimed"],
+    "proof_packet_live_oauth": product["customer_proof_packet"]["proof"]["live_oauth_claimed"],
+    "proof_packet_external_mutation": product["customer_proof_packet"]["proof"]["external_mutation_claimed"],
 }
 assert all(value is False for value in non_claims.values()), non_claims
 
@@ -144,6 +157,7 @@ ready_claims = {
     "attestation_status": product["attestation_status"]["proof"]["customer_facing_attestation_status_ready"],
     "recovery_center": product["recovery_center"]["proof"]["customer_facing_recovery_ready"],
     "evidence_dashboard": product["evidence_dashboard"]["proof"]["customer_facing_evidence_ready"],
+    "customer_proof_packet": product["customer_proof_packet"]["proof"]["customer_packet_ready"],
 }
 assert all(value is True for value in ready_claims.values()), ready_claims
 PY

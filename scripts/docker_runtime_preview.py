@@ -372,6 +372,12 @@ class DockerPreviewApp:
         attestation_status = self.attestation_status()
         recovery_center = self.recovery_center(setup=setup_payload)
         evidence_dashboard = self.evidence_dashboard(setup=setup_payload, activity=activity_payload)
+        proof_packet = self.customer_proof_packet(
+            onboarding_status=onboarding_status,
+            guided_demo_journey=guided_demo_journey,
+            evidence_dashboard=evidence_dashboard,
+            recovery_center=recovery_center,
+        )
         blockers = recovery_center.get("blockers", [])
         return {
             "schema_version": "agentos-product-layer-runtime-home.v1",
@@ -450,6 +456,12 @@ class DockerPreviewApp:
                     "state": "partial",
                     "customer_value": "Separate completed Docker/local proof from live OAuth, VM/ISO, browser, release, and attestation evidence.",
                 },
+                {
+                    "id": "customer_proof_packet",
+                    "label": "Customer Proof Packet",
+                    "state": proof_packet.get("state", "ready"),
+                    "customer_value": "Export the Docker-local proof summary, validation commands, and explicit non-claims in one customer-readable packet.",
+                },
             ],
             "blockers": blockers,
             "onboarding_status": onboarding_status,
@@ -463,6 +475,7 @@ class DockerPreviewApp:
             "attestation_status": attestation_status,
             "recovery_center": recovery_center,
             "evidence_dashboard": evidence_dashboard,
+            "customer_proof_packet": proof_packet,
             "proof": {
                 "docker_main_try_path": True,
                 "boot_or_iso_proof_claimed": False,
@@ -842,6 +855,78 @@ class DockerPreviewApp:
             },
         }
 
+    def customer_proof_packet(
+        self,
+        *,
+        onboarding_status: dict | None = None,
+        guided_demo_journey: dict | None = None,
+        evidence_dashboard: dict | None = None,
+        recovery_center: dict | None = None,
+    ) -> dict:
+        onboarding = onboarding_status or self.onboarding_status()
+        journey = guided_demo_journey or self.guided_demo_journey()
+        evidence = evidence_dashboard or self.evidence_dashboard()
+        recovery = recovery_center or self.recovery_center()
+        completed_claims = [
+            {
+                "id": "docker-runtime-preview-ready",
+                "label": "Docker runtime preview is ready",
+                "evidence_source": "docker compose config and scripts/smoke_docker_runtime_preview_python.sh",
+            },
+            {
+                "id": "product-layer-surfaces-ready",
+                "label": "Product Layer surfaces are customer-visible",
+                "evidence_source": "scripts/smoke_docker_product_layer_completion.sh",
+            },
+            {
+                "id": "guided-demo-path-ready",
+                "label": "Guided demo path, outcomes, and completion summary are available",
+                "evidence_source": "scripts/smoke_docker_guided_demo_journey.sh",
+            },
+            {
+                "id": "golden-runtime-loop-ready",
+                "label": "Golden runtime loop remains Docker/local smoke-verifiable",
+                "evidence_source": "scripts/smoke_phase2_golden_demo.sh",
+            },
+        ]
+        validation_commands = [
+            "docker compose config",
+            "scripts/smoke_docker_runtime_preview_python.sh",
+            "scripts/smoke_docker_product_layer_completion.sh",
+            "scripts/smoke_docker_guided_demo_journey.sh",
+            "scripts/smoke_phase2_golden_demo.sh",
+        ]
+        non_claims = evidence.get("non_claims", []) if isinstance(evidence.get("non_claims"), list) else []
+        blockers = recovery.get("items", []) if isinstance(recovery.get("items"), list) else []
+        return {
+            "schema_version": "agentos-product-layer-customer-proof-packet.v1",
+            "surface": "Customer Proof Packet",
+            "state": "ready",
+            "customer_message": "Customer Proof Packet summarizes what Docker/local proof supports today and which stronger claims still require observed evidence.",
+            "completed_claims": completed_claims,
+            "validation_commands": validation_commands,
+            "proof_sources": {
+                "onboarding_status": onboarding.get("schema_version"),
+                "guided_demo_journey": journey.get("schema_version"),
+                "evidence_dashboard": evidence.get("schema_version"),
+                "recovery_center": recovery.get("schema_version"),
+            },
+            "non_claims": non_claims,
+            "next_blockers": blockers,
+            "proof": {
+                "docker_preview_ready": True,
+                "customer_packet_ready": True,
+                "shareable_summary_ready": True,
+                "boot_or_iso_proof_claimed": False,
+                "live_oauth_claimed": False,
+                "live_browser_proof_claimed": False,
+                "release_trust_claimed": False,
+                "external_mutation_claimed": False,
+                "hardware_attestation_claimed": False,
+                "claim_promotion_automatic": False,
+            },
+        }
+
     def recovery_center(self, *, setup: dict | None = None) -> dict:
         setup_payload = setup or build_status(str(self.workspace), str(self.user_root))
         blockers = _product_blockers(setup_payload)
@@ -1160,6 +1245,7 @@ def _render_page(app: DockerPreviewApp) -> str:
     attestation_status = product_layer.get("attestation_status", {}) if isinstance(product_layer.get("attestation_status"), dict) else {}
     recovery_center = product_layer.get("recovery_center", {}) if isinstance(product_layer.get("recovery_center"), dict) else {}
     evidence_dashboard = product_layer.get("evidence_dashboard", {}) if isinstance(product_layer.get("evidence_dashboard"), dict) else {}
+    customer_proof_packet = product_layer.get("customer_proof_packet", {}) if isinstance(product_layer.get("customer_proof_packet"), dict) else {}
     features = product_layer.get("features", []) if isinstance(product_layer.get("features"), list) else []
     blockers = product_layer.get("blockers", []) if isinstance(product_layer.get("blockers"), list) else []
     llm_state = adapters.get("llm", {}).get("state", "unknown")
@@ -1340,6 +1426,18 @@ def _render_page(app: DockerPreviewApp) -> str:
         for item in evidence_dashboard.get("non_claims", [])
         if isinstance(item, dict)
     ) or "<li>No explicit non-claims are available yet.</li>"
+    proof_packet_claim_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Completed claim'))))}</b> "
+        f"<em>{html.escape(str(item.get('evidence_source', '')))}</em>"
+        "</li>"
+        for item in customer_proof_packet.get("completed_claims", [])
+        if isinstance(item, dict)
+    ) or "<li>No completed proof packet claims are configured.</li>"
+    proof_packet_command_html = "\n".join(
+        f"<li><code>{html.escape(str(command))}</code></li>"
+        for command in customer_proof_packet.get("validation_commands", [])
+    ) or "<li>No proof packet validation commands are configured.</li>"
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -1557,6 +1655,18 @@ def _render_page(app: DockerPreviewApp) -> str:
       <p><a href="/api/evidence">evidence JSON</a></p>
     </div>
   </section>
+  <section class="product">
+    <div class="panel">
+      <h2>Customer Proof Packet</h2>
+      <p class="lead">{html.escape(str(customer_proof_packet.get('customer_message', 'Customer proof packet is available below.')))}</p>
+      <ul>{proof_packet_claim_html}</ul>
+    </div>
+    <div class="panel">
+      <h2>Packet Validation</h2>
+      <ul>{proof_packet_command_html}</ul>
+      <p><a href="/api/proof-packet">proof packet JSON</a></p>
+    </div>
+  </section>
   <section class="panel">
     <h2>Run a prompt</h2>
     <textarea id="prompt">status</textarea>
@@ -1656,6 +1766,8 @@ def make_handler(app: DockerPreviewApp) -> type[BaseHTTPRequestHandler]:
                 _json_response(self, app.recovery_center())
             elif path == "/api/evidence":
                 _json_response(self, app.evidence_dashboard())
+            elif path == "/api/proof-packet":
+                _json_response(self, app.customer_proof_packet())
             elif path == "/api/activity":
                 _json_response(self, app.activity())
             else:

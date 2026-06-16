@@ -48,6 +48,7 @@ curl -fsS "http://127.0.0.1:$PORT/api/release-trust" > "$TMP_DIR/release-trust.j
 curl -fsS "http://127.0.0.1:$PORT/api/attestation" > "$TMP_DIR/attestation.json"
 curl -fsS "http://127.0.0.1:$PORT/api/recovery" > "$TMP_DIR/recovery.json"
 curl -fsS "http://127.0.0.1:$PORT/api/evidence" > "$TMP_DIR/evidence.json"
+curl -fsS "http://127.0.0.1:$PORT/api/proof-packet" > "$TMP_DIR/proof-packet.json"
 curl -fsS \
   -H 'Content-Type: application/json' \
   -d '{"message":"hi"}' \
@@ -73,6 +74,7 @@ release_trust = json.loads((root / "release-trust.json").read_text())
 attestation = json.loads((root / "attestation.json").read_text())
 recovery = json.loads((root / "recovery.json").read_text())
 evidence = json.loads((root / "evidence.json").read_text())
+proof_packet = json.loads((root / "proof-packet.json").read_text())
 prompt = json.loads((root / "prompt.json").read_text())
 activity = json.loads((root / "activity.json").read_text())
 home = (root / "home.html").read_text()
@@ -96,6 +98,7 @@ assert product["release_trust_panel"]["schema_version"] == "agentos-product-laye
 assert product["attestation_status"]["schema_version"] == "agentos-product-layer-attestation-status.v1"
 assert product["recovery_center"]["schema_version"] == "agentos-product-layer-recovery-center.v1"
 assert product["evidence_dashboard"]["schema_version"] == "agentos-product-layer-evidence-dashboard.v1"
+assert product["customer_proof_packet"]["schema_version"] == "agentos-product-layer-customer-proof-packet.v1"
 assert {feature["id"] for feature in product["features"]} >= {
     "runtime_home",
     "onboarding_status",
@@ -105,6 +108,7 @@ assert {feature["id"] for feature in product["features"]} >= {
     "attestation_status",
     "recovery_center",
     "evidence_dashboard",
+    "customer_proof_packet",
 }
 assert demo_journey["schema_version"] == "agentos-product-layer-guided-demo-journey.v1"
 assert demo_journey["proof"]["docker_preview_ready"] is True
@@ -288,6 +292,15 @@ assert {item["id"] for item in evidence["non_claims"]} >= {
     "release-trust-proof",
     "hardware-attestation-proof",
 }
+assert proof_packet["schema_version"] == "agentos-product-layer-customer-proof-packet.v1"
+assert proof_packet["proof"]["customer_packet_ready"] is True
+assert proof_packet["proof"]["claim_promotion_automatic"] is False
+assert {item["id"] for item in proof_packet["completed_claims"]} >= {
+    "docker-runtime-preview-ready",
+    "product-layer-surfaces-ready",
+    "guided-demo-path-ready",
+    "golden-runtime-loop-ready",
+}
 assert "Runtime Home" in home
 assert "Docker Onboarding Status" in home
 assert "onboarding JSON" in home
@@ -309,6 +322,8 @@ assert "Attestation Status" in home
 assert "attestation JSON" in home
 assert "Evidence Dashboard" in home
 assert "evidence JSON" in home
+assert "Customer Proof Packet" in home
+assert "proof packet JSON" in home
 assert prompt["ok"] is True
 assert prompt["intent"] == "greeting", prompt
 assert "DuckDuckGo" not in json.dumps(prompt)

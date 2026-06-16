@@ -126,6 +126,7 @@ class DockerPreviewApp:
         adapters = setup_payload.get("adapters", {}) if isinstance(setup_payload.get("adapters"), dict) else {}
         work_inbox = self.work_inbox(setup=setup_payload)
         activity_timeline = self.activity_timeline(activity=activity_payload)
+        capability_store = self.capability_store()
         recovery_center = self.recovery_center(setup=setup_payload)
         evidence_dashboard = self.evidence_dashboard(setup=setup_payload, activity=activity_payload)
         blockers = recovery_center.get("blockers", [])
@@ -153,6 +154,12 @@ class DockerPreviewApp:
                     "customer_value": "Understand what AgentOS did, which capability ran, and what happened next.",
                 },
                 {
+                    "id": "capability_store",
+                    "label": "Capability Store",
+                    "state": capability_store.get("state", "ready"),
+                    "customer_value": "See which capabilities are safe local actions, user-owned writes, external reads, confirmed lifecycle actions, or blocked destructive requests.",
+                },
+                {
                     "id": "recovery_center",
                     "label": "Recovery Center",
                     "state": "attention" if blockers else "ready",
@@ -168,6 +175,7 @@ class DockerPreviewApp:
             "blockers": blockers,
             "work_inbox": work_inbox,
             "activity_timeline": activity_timeline,
+            "capability_store": capability_store,
             "recovery_center": recovery_center,
             "evidence_dashboard": evidence_dashboard,
             "proof": {
@@ -176,6 +184,41 @@ class DockerPreviewApp:
                 "live_oauth_claimed": False,
                 "live_browser_proof_claimed": False,
                 "customer_facing_summary_ready": True,
+            },
+        }
+
+    def capability_store(self) -> dict:
+        registry = _read_capability_registry()
+        raw_capabilities = registry.get("capabilities", {}) if isinstance(registry.get("capabilities"), dict) else {}
+        capabilities = []
+        for capability_id, entry in sorted(raw_capabilities.items()):
+            details = entry if isinstance(entry, dict) else {}
+            permission = str(details.get("permission_level", "unsupported"))
+            capabilities.append(
+                {
+                    "id": str(capability_id),
+                    "label": str(capability_id).replace("_", " ").title(),
+                    "permission_level": permission,
+                    "state": _capability_store_state(permission),
+                    "customer_value": _capability_customer_value(str(capability_id), permission),
+                }
+            )
+        permission_levels = registry.get("permission_levels", []) if isinstance(registry.get("permission_levels"), list) else []
+        return {
+            "schema_version": "agentos-product-layer-capability-store.v1",
+            "surface": "Capability Store",
+            "state": "ready" if capabilities else "degraded",
+            "customer_message": "Capability Store shows what AgentOS can do locally, what needs confirmation, and what remains blocked.",
+            "permission_levels": permission_levels,
+            "capabilities": capabilities,
+            "defaults": registry.get("defaults", {}) if isinstance(registry.get("defaults"), dict) else {},
+            "proof": {
+                "docker_preview_ready": True,
+                "registry_loaded": bool(capabilities),
+                "destructive_action_executed_by_default": False,
+                "external_write_claimed": False,
+                "live_provider_proof_claimed": False,
+                "customer_facing_capability_store_ready": bool(capabilities),
             },
         }
 
@@ -550,6 +593,41 @@ def _adapter_state(value: object) -> str:
     return "blocked_until_observed_proof"
 
 
+def _read_capability_registry() -> dict:
+    path = ROOT_DIR / "docs" / "architecture" / "capability-permission-registry.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _capability_store_state(permission: str) -> str:
+    if permission in {"safe_read", "safe_write_user_owned"}:
+        return "docker_preview_ready"
+    if permission in {"external_read", "external_write_confirmed", "lifecycle_confirmed"}:
+        return "requires_setup_or_confirmation"
+    if permission in {"destructive_blocked", "unsupported"}:
+        return "blocked"
+    return "unknown"
+
+
+def _capability_customer_value(capability_id: str, permission: str) -> str:
+    if permission == "safe_read":
+        return "Available as a local read-only runtime capability."
+    if permission == "safe_write_user_owned":
+        return "Can write only to user-owned AgentOS records or workspace paths."
+    if permission == "external_read":
+        return "Requires setup or observed provider proof before claiming live external access."
+    if permission == "external_write_confirmed":
+        return "Requires explicit confirmation and future observed proof before external writes are claimed."
+    if permission == "lifecycle_confirmed":
+        return "Requires confirmation and observed runtime/OS proof before lifecycle behavior is claimed."
+    if permission == "destructive_blocked":
+        return "Blocked by default; Docker preview must not execute this destructive action."
+    return f"{capability_id} is not supported by default in this preview."
+
+
 def _render_page(app: DockerPreviewApp) -> str:
     status = scrub_payload(app.status())
     adapters = status.get("runtime", {}).get("adapters", {})
@@ -557,6 +635,7 @@ def _render_page(app: DockerPreviewApp) -> str:
     product_layer = status.get("product_layer", {})
     work_inbox = product_layer.get("work_inbox", {}) if isinstance(product_layer.get("work_inbox"), dict) else {}
     activity_timeline = product_layer.get("activity_timeline", {}) if isinstance(product_layer.get("activity_timeline"), dict) else {}
+    capability_store = product_layer.get("capability_store", {}) if isinstance(product_layer.get("capability_store"), dict) else {}
     recovery_center = product_layer.get("recovery_center", {}) if isinstance(product_layer.get("recovery_center"), dict) else {}
     evidence_dashboard = product_layer.get("evidence_dashboard", {}) if isinstance(product_layer.get("evidence_dashboard"), dict) else {}
     features = product_layer.get("features", []) if isinstance(product_layer.get("features"), list) else []
@@ -630,6 +709,15 @@ def _render_page(app: DockerPreviewApp) -> str:
         for event in activity_timeline.get("events", [])
         if isinstance(event, dict)
     ) or "<li>No activity yet. Run a prompt below.</li>"
+    capability_html = "\n".join(
+        "<section class='feature'>"
+        f"<div><h3>{html.escape(str(item.get('label', item.get('id', 'Capability'))))}</h3>"
+        f"<p>{html.escape(str(item.get('customer_value', '')))}</p></div>"
+        f"<span class='state'>{html.escape(str(item.get('state', 'unknown')))}</span>"
+        "</section>"
+        for item in capability_store.get("capabilities", [])[:10]
+        if isinstance(item, dict)
+    ) or "<p class='lead'>Capability registry is unavailable.</p>"
     evidence_html = "\n".join(
         "<li>"
         f"<b>{html.escape(str(item.get('label', item.get('id', 'Evidence'))))}</b> "
@@ -732,6 +820,22 @@ def _render_page(app: DockerPreviewApp) -> str:
   </section>
   <section class="product">
     <div class="panel">
+      <h2>Capability Store</h2>
+      <p class="lead">{html.escape(str(capability_store.get('customer_message', 'Capability registry is available below.')))}</p>
+      {capability_html}
+    </div>
+    <div class="panel">
+      <h2>Capability Proof</h2>
+      <ul>
+        <li><b>Destructive actions</b> blocked by default</li>
+        <li><b>External writes</b> not claimed</li>
+        <li><b>Live provider proof</b> not claimed</li>
+      </ul>
+      <p><a href="/api/capabilities">capabilities JSON</a></p>
+    </div>
+  </section>
+  <section class="product">
+    <div class="panel">
       <h2>Evidence Dashboard</h2>
       <p class="lead">{html.escape(str(evidence_dashboard.get('customer_message', 'Evidence state is available below.')))}</p>
       <ul>{evidence_html}</ul>
@@ -823,6 +927,8 @@ def make_handler(app: DockerPreviewApp) -> type[BaseHTTPRequestHandler]:
                 _json_response(self, app.work_inbox())
             elif path == "/api/timeline":
                 _json_response(self, app.activity_timeline())
+            elif path == "/api/capabilities":
+                _json_response(self, app.capability_store())
             elif path == "/api/recovery":
                 _json_response(self, app.recovery_center())
             elif path == "/api/evidence":

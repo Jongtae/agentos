@@ -20,6 +20,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application source
 COPY src/ ./src/
 COPY scripts/ ./scripts/
+COPY docs/architecture/capability-permission-registry.json ./docs/architecture/capability-permission-registry.json
 COPY spec.yaml ./spec.yaml
 
 # Create a seed workspace. docker-compose may later mount ./workspaces over this

@@ -31,6 +31,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
+dump_container_diagnostics() {
+  if [ -z "$TMP_CID" ]; then
+    return
+  fi
+  echo "docker runtime preview smoke: container status"
+  docker ps -a --filter "id=$TMP_CID" --no-trunc || true
+  echo "docker runtime preview smoke: container logs"
+  docker logs "$TMP_CID" || true
+}
+
 docker compose config >/dev/null
 docker compose build agent-os >/dev/null
 
@@ -43,12 +53,27 @@ TMP_CID="$(
     agent-os:latest
 )"
 
+READY=false
 for _ in $(seq 1 30); do
   if curl -fsS http://127.0.0.1:18787/healthz >/dev/null 2>&1; then
+    READY=true
     break
+  fi
+  if [ "$(docker inspect -f '{{.State.Running}}' "$TMP_CID" 2>/dev/null || true)" != "true" ]; then
+    echo "docker runtime preview smoke: FAIL"
+    echo "reason: container exited before /healthz became ready"
+    dump_container_diagnostics
+    exit 1
   fi
   sleep 1
 done
+
+if [ "$READY" != "true" ]; then
+  echo "docker runtime preview smoke: FAIL"
+  echo "reason: /healthz did not become ready before timeout"
+  dump_container_diagnostics
+  exit 1
+fi
 
 curl -fsS http://127.0.0.1:18787/healthz >/dev/null
 curl -fsS http://127.0.0.1:18787/ >/dev/null

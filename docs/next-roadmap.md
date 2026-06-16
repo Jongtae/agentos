@@ -84,7 +84,7 @@ The detailed Phase 2 roadmap is tracked in
   - Milestone: Phase 2: Local-first Codex runtime loop
   - Completion goal: define when browser automation is allowed as a fallback and how AgentOS moves common web/app access patterns toward internal, OS-native capabilities.
   - Exit condition: the epic has a documented and smoke-tested browser fallback contract that distinguishes internal capability, allowed fallback, blocked external state, and future capability graduation paths.
-  - Active task: [P2-44] Attach browser fallback routing to phase2 run.
+  - Active task: [P2-45] Attach browser fallback routing to phase2 run.
   - First contract: `agentos-phase2-browser-fallback-contract.v1` classifies internal capability, allowed browser fallback, blocked external state, and capability graduation paths without live browser proof.
   - Runtime integration: `phase2-run` web/search requests attach browser fallback routing artifacts and keep live browser proof unclaimed.
   - Advances: mediation cost reduction, capability ownership, OS-native runtime defaults, runtime proof truthfulness.

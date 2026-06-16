@@ -26,7 +26,11 @@ from kernel_phase2_gmail_fixture import build_gmail_fixture_report
 from kernel_phase2_lifecycle_recovery import build_lifecycle_recovery_report
 from kernel_phase2_updater_state import build_payload as build_updater_state_payload
 from kernel_phase2_records import append_record, find_records
-from kernel.capability_substrate import build_inbox_routing_contract, build_verified_boot_attestation_nonclaim
+from kernel.capability_substrate import (
+    build_inbox_routing_contract,
+    build_observed_proof_intake_status,
+    build_verified_boot_attestation_nonclaim,
+)
 
 SCHEMA_VERSION = "agentos-phase2-run.v1"
 
@@ -233,13 +237,18 @@ def run_phase2(
             if intent == "runtime_status":
                 inbox_contract = build_inbox_routing_contract(workspace_path, session_id=request_id)
                 verified_boot_nonclaim = build_verified_boot_attestation_nonclaim(workspace_path, session_id=request_id)
+                observed_proof_intake = build_observed_proof_intake_status(workspace_path, session_id=request_id)
                 capability_result["inbox_ownership"] = inbox_contract
                 capability_result["verified_boot_attestation"] = verified_boot_nonclaim
+                capability_result["observed_proof_intake"] = observed_proof_intake
                 artifacts["inbox_ownership_contract"] = str(
                     inbox_contract.get("artifacts", {}).get("latest_inbox_routing_contract_json", "")
                 )
                 artifacts["verified_boot_attestation_nonclaim"] = str(
                     verified_boot_nonclaim.get("artifacts", {}).get("latest_verified_boot_attestation_nonclaim_json", "")
+                )
+                artifacts["observed_proof_intake_status"] = str(
+                    observed_proof_intake.get("artifacts", {}).get("latest_observed_proof_intake_status_json", "")
                 )
             if intent == "web_search_summary":
                 browser_contract = build_browser_fallback_contract(
@@ -386,6 +395,11 @@ def run_phase2(
             "verified_boot_attestation_nonclaim_attached": bool(
                 intent == "runtime_status" and isinstance(capability_result.get("verified_boot_attestation"), dict)
             ),
+            "observed_proof_intake_status_attached": bool(
+                intent == "runtime_status" and isinstance(capability_result.get("observed_proof_intake"), dict)
+            ),
+            "observed_proof_records_attached": False,
+            "observed_claim_promotion_allowed": False,
             "secure_boot_observed": False,
             "tpm_measured_boot_observed": False,
             "pcr_event_log_verified": False,

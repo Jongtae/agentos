@@ -83,6 +83,9 @@ assert status_payload["proof"]["inbox_ownership_contract_attached"] is True
 assert status_payload["proof"]["live_inbox_oauth_completed"] is False
 assert status_payload["proof"]["inbox_mutation_executed"] is False
 assert status_payload["proof"]["verified_boot_attestation_nonclaim_attached"] is True
+assert status_payload["proof"]["observed_proof_intake_status_attached"] is True
+assert status_payload["proof"]["observed_proof_records_attached"] is False
+assert status_payload["proof"]["observed_claim_promotion_allowed"] is False
 assert status_payload["proof"]["secure_boot_observed"] is False
 assert status_payload["proof"]["tpm_measured_boot_observed"] is False
 assert status_payload["proof"]["pcr_event_log_verified"] is False
@@ -90,6 +93,7 @@ assert status_payload["proof"]["ima_enforcement_observed"] is False
 assert status_payload["proof"]["hardware_attestation_observed"] is False
 assert Path(status_payload["artifacts"]["inbox_ownership_contract"]).exists()
 assert Path(status_payload["artifacts"]["verified_boot_attestation_nonclaim"]).exists()
+assert Path(status_payload["artifacts"]["observed_proof_intake_status"]).exists()
 inbox_ownership = status_payload["capability_result"]["inbox_ownership"]
 assert inbox_ownership["schema_version"] == "agentos-inbox-routing-contract.v1"
 assert inbox_ownership["default_selected_path"] == "native_inbox_path"
@@ -102,6 +106,14 @@ assert verified_boot["non_claims"]["secure_boot_enforced"] is False
 assert verified_boot["non_claims"]["tpm_attestation_completed"] is False
 assert verified_boot["non_claims"]["ima_appraisal_enforced"] is False
 assert all(surface["claim_allowed"] is False for surface in verified_boot["trust_surfaces"])
+observed_intake = status_payload["capability_result"]["observed_proof_intake"]
+assert observed_intake["schema_version"] == "agentos-observed-proof-intake-status.v1"
+assert observed_intake["summary"]["observed_proof_intake_ready"] is True
+assert observed_intake["summary"]["observed_records_attached"] == 0
+assert observed_intake["summary"]["claim_promotion_allowed"] is False
+assert observed_intake["proof"]["live_proof_claimed"] is False
+assert observed_intake["blockers"][0]["id"] == "observed-record-required"
+assert all(surface["claim_allowed"] is False for surface in observed_intake["proof_surfaces"])
 
 gmail = json.loads((tmp_dir / "gmail.json").read_text())
 assert gmail["permission"]["level"] == "external_read"

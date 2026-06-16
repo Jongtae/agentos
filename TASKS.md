@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-63] Add observed proof intake record validator`
+- `[P2-64] Attach observed proof intake status to phase2 status`
 
 Runtime impact statement:
 
-- This task adds a machine-checkable observed proof intake record schema and validator so later live credential, VM/ISO, release, browser, and boot-chain evidence can be accepted only when the claimed proof, redaction, blocker, and recovery fields are explicit.
+- This task attaches observed proof intake status to `phase2-run --message "status"` so local testers can see that sanitized proof intake is ready while live credential, VM/ISO, release, browser, and boot-chain proof remain unclaimed.
 
 Current autonomous completion loop:
 
@@ -132,6 +132,7 @@ Recommended Phase 2 tasks:
 - The observed proof intake and blocker handoff epic is active; its first slice is `docs/architecture/observed-proof-intake-boundary.md`, smoke-tested by `scripts/smoke_observed_proof_intake_boundary.sh`.
 - Observed proof intake must keep secrets out of repo/workspace records, require sanitized evidence before proof promotion, and preserve explicit blockers for live credentials, VM/ISO, release, browser, and boot-chain proof.
 - Observed proof records now use `docs/architecture/observed-proof-intake-schema.json` and can be checked with `scripts/observed_proof_intake_validate.py`; `scripts/smoke_observed_proof_intake_validator.sh` covers valid, blocked, and secret-term rejection behavior.
+- `phase2-run --message "status"` attaches `agentos-observed-proof-intake-status.v1` so observed proof intake readiness and missing observed-record blockers are visible in the user-testable runtime status output.
 
 ## Validation Standards
 

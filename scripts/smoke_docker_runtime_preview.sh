@@ -211,6 +211,13 @@ assert {item["id"] for item in proof_packet["readiness_checklist"]} >= {
 assert customer_handoff["schema_version"] == "agentos-product-layer-customer-handoff-bundle.v1"
 assert customer_handoff["proof"]["customer_handoff_ready"] is True
 assert customer_handoff["proof"]["boot_or_iso_proof_claimed"] is False
+assert {item["id"] for item in customer_handoff["handoff_checklist"]} >= {
+    "run_preview",
+    "open_runtime_home",
+    "inspect_guided_path",
+    "run_validation_commands",
+    "record_remaining_blockers",
+}
 assert "Runtime Home" in home
 assert "Docker Onboarding Status" in home
 assert "onboarding JSON" in home
@@ -232,6 +239,7 @@ assert "attestation JSON" in home
 assert "Evidence Dashboard" in home
 assert "evidence JSON" in home
 assert "Customer Handoff Bundle" in home
+assert "Handoff Checklist" in home
 assert "customer handoff JSON" in home
 PY
 

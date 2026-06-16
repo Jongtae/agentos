@@ -84,7 +84,7 @@ The detailed Phase 2 roadmap is tracked in
   - Milestone: Phase 2: Local-first Codex runtime loop
   - Completion goal: define how AgentOS declares, approves, denies, narrates, and records OS-native capability access before expanding live adapters.
   - Exit condition: the epic has milestone alignment, validation plan, explicit blocker handling, and a first safe contract task identified.
-  - Active task: [P2-35] Surface capability permission outcomes in phase2-run.
+  - Active task: [P2-36] Add capability permission registry contract.
   - Advances: capability ownership, OS-native runtime defaults, runtime proof truthfulness.
 
 ## Autonomous Completion Loop

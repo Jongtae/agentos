@@ -33,7 +33,19 @@ assert payload["record"]["secrets_included"] is False
 assert payload["recovery"]["required"] is False
 assert payload["proof"]["permission_checked"] is True
 assert payload["proof"]["outcome_checked"] is True
+assert payload["proof"]["registry_checked"] is True
 assert payload["proof"]["secrets_redacted"] is True
+PY
+
+python3 - <<'PY'
+import json
+from pathlib import Path
+registry = json.loads(Path("docs/architecture/capability-permission-registry.json").read_text())
+assert registry["schema_version"] == "agentos-capability-permission-registry.v1"
+for capability in ("runtime_status", "gmail_read", "gmail_send", "calendar_readonly", "lifecycle_recovery"):
+    assert capability in registry["capabilities"], capability
+assert registry["capabilities"]["gmail_send"]["permission_level"] == "destructive_blocked"
+assert registry["defaults"]["destructive_action_executed_by_default"] is False
 PY
 
 BLOCKED_SETUP="$TMP_DIR/blocked-setup.json"

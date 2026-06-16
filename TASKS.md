@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-47] Define public preview operations checklist`
+- `[P2-48] Add public preview smoke to golden runner`
 
 Runtime impact statement:
 
-- This task defines the public preview operations checklist so Docker/local preview updates have smoke-verifiable proof, explicit manual blockers, and release non-claims before the loop promotes future preview work.
+- This task adds the public preview operations smoke to the Phase 2 golden demo runner so preview proof, blocker, and non-claim checks are part of the repeatable acceptance path.
 
 Current autonomous completion loop:
 
@@ -117,6 +117,7 @@ Recommended Phase 2 tasks:
 - `phase2-run` web/search requests should attach the browser fallback contract artifact and keep live browser proof unclaimed unless a separate observed browser acceptance run exists.
 - The public preview operations epic is active; it should define the Docker/local preview promotion gate, manual proof blockers, and release non-claims before broader public preview or distribution work continues.
 - The first public preview operations slice is `docs/operations/public-preview-operations.md`, smoke-tested by `scripts/smoke_public_preview_operations.sh`.
+- The public preview operations smoke is included in the Phase 2 golden demo runner so preview promotion gates remain part of practical local/Docker-safe proof.
 
 ## Validation Standards
 

@@ -90,6 +90,7 @@ curl -fsS http://127.0.0.1:18787/api/release-trust > /tmp/agentos-docker-release
 curl -fsS http://127.0.0.1:18787/api/attestation > /tmp/agentos-docker-attestation.json
 curl -fsS http://127.0.0.1:18787/api/recovery > /tmp/agentos-docker-recovery.json
 curl -fsS http://127.0.0.1:18787/api/evidence > /tmp/agentos-docker-evidence.json
+curl -fsS http://127.0.0.1:18787/api/proof-packet > /tmp/agentos-docker-proof-packet.json
 
 python3 - <<'PY'
 import json
@@ -107,6 +108,7 @@ release_trust = json.loads(Path("/tmp/agentos-docker-release-trust.json").read_t
 attestation = json.loads(Path("/tmp/agentos-docker-attestation.json").read_text())
 recovery = json.loads(Path("/tmp/agentos-docker-recovery.json").read_text())
 evidence = json.loads(Path("/tmp/agentos-docker-evidence.json").read_text())
+proof_packet = json.loads(Path("/tmp/agentos-docker-proof-packet.json").read_text())
 home = Path("/tmp/agentos-docker-home.html").read_text()
 assert payload["proof"]["docker_preview_surface_ready"] is True
 assert payload["proof"]["product_layer_runtime_home_ready"] is True
@@ -118,6 +120,7 @@ assert product["proof"]["docker_main_try_path"] is True
 assert product["proof"]["boot_or_iso_proof_claimed"] is False
 assert product["onboarding_status"]["schema_version"] == "agentos-product-layer-onboarding-status.v1"
 assert product["guided_demo_journey"]["schema_version"] == "agentos-product-layer-guided-demo-journey.v1"
+assert product["customer_proof_packet"]["schema_version"] == "agentos-product-layer-customer-proof-packet.v1"
 assert onboarding["schema_version"] == "agentos-product-layer-onboarding-status.v1"
 assert demo_journey["schema_version"] == "agentos-product-layer-guided-demo-journey.v1"
 assert demo_journey["proof"]["customer_guided_journey_ready"] is True
@@ -192,6 +195,9 @@ assert evidence["proof"]["docker_preview_ready"] is True
 assert evidence["proof"]["boot_or_iso_proof_claimed"] is False
 assert evidence["proof"]["live_oauth_claimed"] is False
 assert evidence["proof"]["customer_facing_evidence_ready"] is True
+assert proof_packet["schema_version"] == "agentos-product-layer-customer-proof-packet.v1"
+assert proof_packet["proof"]["customer_packet_ready"] is True
+assert proof_packet["proof"]["claim_promotion_automatic"] is False
 assert "Runtime Home" in home
 assert "Docker Onboarding Status" in home
 assert "onboarding JSON" in home

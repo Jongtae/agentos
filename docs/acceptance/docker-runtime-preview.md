@@ -41,6 +41,7 @@ http://localhost:8787
 - `/api/attestation` exposes Secure Boot, TPM/PCR, event-log, IMA, and hardware attestation requirements without claiming Docker proves device trust.
 - `/api/recovery` exposes customer-facing recovery actions for VM/ISO, live OAuth, browser, release, attestation, and setup blockers without claiming observed proof.
 - `/api/evidence` exposes observed Docker/local proof and explicit non-claims for VM/ISO, live OAuth, browser, release trust, and hardware attestation.
+- `/api/proof-packet` exposes completed Docker-local claims, validation commands, proof sources, next blockers, and explicit non-claims without claiming automatic proof promotion.
 - LLM setup/readiness state is visible.
 - Telegram setup/readiness state is visible.
 - Activity feed is visible.
@@ -86,7 +87,7 @@ scripts/smoke_docker_runtime_preview.sh
 
 The smoke should validate compose config, build the image, start the preview,
 check `localhost:8787`, verify `/api/product`, `/api/work-inbox`,
-`/api/onboarding`, `/api/demo-journey`, `/api/timeline`, `/api/capabilities`, `/api/approvals`, `/api/proofs`, `/api/release-trust`, `/api/attestation`, `/api/recovery`, and `/api/evidence`, run a prompt through `/api/prompt`,
+`/api/onboarding`, `/api/demo-journey`, `/api/timeline`, `/api/capabilities`, `/api/approvals`, `/api/proofs`, `/api/release-trust`, `/api/attestation`, `/api/recovery`, `/api/evidence`, and `/api/proof-packet`, run a prompt through `/api/prompt`,
 verify activity, and check that common secret patterns are not present in the
 response.
 
@@ -134,3 +135,14 @@ This gate starts the Python Docker runtime preview and verifies that
 summary through runtime readiness, read-first work, prompt execution, activity
 narration, evidence, and recovery while preserving VM/ISO, live OAuth, browser,
 release, mutation, and attestation non-claims.
+
+## Customer Proof Packet Gate
+
+```bash
+scripts/smoke_docker_customer_proof_packet.sh
+```
+
+This gate starts the Python Docker runtime preview and verifies that
+`/api/proof-packet` exposes customer-readable completed Docker-local claims,
+validation commands, proof sources, next blockers, and explicit non-claims
+without automatic claim promotion.

@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-38] Create updater hardening completion epic`
+- `[P2-39] Define updater hardening state contract`
 
 Runtime impact statement:
 
-- This task opens and records the updater hardening epic so update, rollback, restart, and recovery work can converge back to the managed AgentOS runtime with truthful proof boundaries.
+- This task defines a smoke-verifiable updater state contract so update, rollback, restart, and recovery paths can report managed runtime rejoin requirements without claiming live updater or VM/ISO proof before observation.
 
 Current autonomous completion loop:
 
@@ -110,6 +110,7 @@ Recommended Phase 2 tasks:
 - Capability permission declarations should be backed by `docs/architecture/capability-permission-registry.json`.
 - The capability permission boundary epic is closed for this Phase 2 slice; future loops should return to the roadmap before selecting the next epic.
 - The updater hardening epic is active and should begin with a safe contract or smoke task before any live updater, reboot, VM, or ISO proof is claimed.
+- The first updater hardening slice is `agentos-phase2-updater-state.v1`, which records ready, blocked, rollback-needed, and recovery-suggested states without running destructive updater actions.
 
 ## Validation Standards
 
@@ -147,5 +148,6 @@ python3 scripts/cleanup_build_artifacts.py --delete --json
 - `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`
 - `.agents/roadmap-direction-judge.md`
 - `docs/architecture/calendar-readonly-capability-contract.md`
+- `docs/architecture/updater-hardening-state-contract.md`
 - `docs/acceptance/vm-iso-proof-preflight.md`
 - `docs/acceptance/gmail-live-readonly-acceptance.md`

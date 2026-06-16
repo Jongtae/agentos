@@ -211,6 +211,7 @@ flowchart LR
 | Customer Proof Packet | Completed Docker product surface | Summarizes completed Docker-local claims, validation commands, proof sources, readiness checks, next blockers, and explicit non-claims in one customer-readable packet. |
 | Customer Handoff Bundle | Completed Docker product surface | Gives customers one Docker-safe bundle with the run command, checklist, first screens, validation commands, proof packet, share-safe handoff report, and next observed-proof blockers. |
 | Proof Promotion Center | Completed Docker product surface | Shows which Docker-local claims are ready to describe, which validation commands and source surfaces should be shared, and which Docker daemon, VM/ISO, live OAuth, browser, release, mutation, and attestation claims still require observed evidence. |
+| Product Layer Map | Active Docker product surface | Shows the recommended customer path across Runtime Home, onboarding, guided demo, safe work, evidence, handoff, proof promotion, and observed-proof blockers. |
 | Docker Product Layer completion gate | Active Docker proof gate | Verifies every customer-facing Docker surface together while preserving live OAuth, VM/ISO, browser, release, mutation, and attestation non-claims. |
 | Docker customer onboarding quickstart | Completed Docker proof gate | Keeps README quickstart, Docker acceptance, preview operations, roadmap, and task state aligned around the public try path. |
 | Docker onboarding status contract | Completed Docker proof gate | Verifies `/api/onboarding` exposes quickstart readiness, preview entrypoints, no-key local preview status, validation smokes, and proof blockers. |
@@ -218,6 +219,7 @@ flowchart LR
 | Docker customer proof packet | Completed Docker proof gate | Verifies `/api/proof-packet` exposes completed Docker-local claims, validation commands, proof sources, readiness checks, next blockers, and explicit non-claims without automatic claim promotion. |
 | Docker customer handoff bundle | Completed Docker proof gate | Verifies `/api/customer-handoff` exposes the Docker try path, handoff checklist, share-safe handoff report, inspectable Product Layer surfaces, validation commands, proof sources, and next observed-proof blockers without claiming stronger proof. |
 | Docker proof promotion center | Completed Docker proof gate | Verifies `/api/proof-promotion` exposes claim promotion decisions, proof sharing checklist items, required evidence, source surfaces, and non-claims without automatic promotion. |
+| Docker Product Layer map | Active Docker proof gate | Verifies `/api/product-map` exposes start, safe-work, proof/handoff, and blocked-until-observed surface groups without adding stronger proof claims. |
 | Phase 2 golden runtime loop | Closed baseline | Proves prompt intake, intent classification, bounded capability execution, activity narration, records, and recovery. |
 | Capability permission boundary | Completed | Defines how AgentOS declares, blocks, records, and narrates capability access. |
 | Updater hardening | Completed | Protects runtime continuity and rollback/recovery truthfulness. |

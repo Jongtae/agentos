@@ -11,15 +11,15 @@ Current parent branch:
 
 Current public milestone:
 
-- **Docker proof promotion center** — customer-readable claim promotion decisions for the Product Layer
+- **Docker Product Layer map** — customer-readable navigation across Product Layer surfaces
 
 Current task:
 
-- `[P2-111] Close Docker proof promotion center epic`
+- `[P2-112] Add Docker product map endpoint`
 
 Runtime impact statement:
 
-- This task closes the Docker proof promotion center epic after `/api/proof-promotion`, the browser Proof Promotion Center, the proof sharing checklist, README, roadmap, Docker acceptance, Docker-safe smokes, cleanup policy, and CI all preserve Docker-local claim promotion without auto-promoting Docker daemon, VM/ISO, live OAuth, browser, release, mutation, or attestation claims.
+- This task adds a customer-facing Product Layer Map so evaluators can follow the Docker preview from Runtime Home through onboarding, guided demo, safe work, evidence, handoff, proof promotion, and blocker recovery without confusing Docker-local proof for VM/ISO, live provider, release, mutation, or attestation proof.
 
 Current autonomous completion loop:
 
@@ -110,7 +110,8 @@ Recommended Phase 2 tasks:
 - Docker preview now exposes `agentos-product-layer-customer-handoff-bundle.v1` through `/api/customer-handoff` and the browser Customer Handoff Bundle panel so customers can run, inspect, validate, follow the handoff checklist, generate a share-safe handoff report, and explain the Docker-safe Product Layer path from one bundle.
 - Docker preview now exposes `agentos-product-layer-proof-promotion-center.v1` through `/api/proof-promotion` and the browser Proof Promotion Center panel so customers can decide which Docker-local claims are ready and which stronger claims require observed evidence.
 - Docker preview now exposes a Proof Sharing Checklist inside `/api/proof-promotion` and the browser Proof Promotion Center panel so customers can distinguish share-ready Docker-local language from blocked stronger claims before handing evidence to reviewers.
-- Docker Product Layer completion is guarded by `scripts/smoke_docker_product_layer_completion.sh`, which verifies Runtime Home, Work Inbox, Activity Timeline, Capability Store, Approval Center, Observed Proof Uploader, Release Trust Panel, Attestation Status, Recovery Center, Evidence Dashboard, Customer Proof Packet, Customer Handoff Bundle, and Proof Promotion Center together.
+- Docker preview now exposes `agentos-product-layer-map.v1` through `/api/product-map` and the browser Product Layer Map panel so customers can follow the recommended path across Product Layer surfaces and proof blockers.
+- Docker Product Layer completion is guarded by `scripts/smoke_docker_product_layer_completion.sh`, which verifies Runtime Home, Work Inbox, Activity Timeline, Capability Store, Approval Center, Observed Proof Uploader, Release Trust Panel, Attestation Status, Recovery Center, Evidence Dashboard, Customer Proof Packet, Customer Handoff Bundle, Proof Promotion Center, and Product Layer Map together.
 - Docker customer onboarding is guarded by `scripts/smoke_docker_customer_onboarding_quickstart.sh`, which keeps README quickstart, Docker acceptance, public preview operations, roadmap, and task state aligned around the Docker-first public try path.
 - Docker preview now exposes `agentos-product-layer-onboarding-status.v1` through `/api/onboarding` and the browser Docker Onboarding Status panel without claiming VM/ISO, live OAuth, browser, release, external mutation, or hardware attestation proof.
 - Docker onboarding readiness is guarded by `scripts/smoke_docker_onboarding_status_contract.sh`, which verifies the running preview exposes customer-facing quickstart readiness, entrypoints, Docker-safe validation, and explicit observed-proof blockers.
@@ -172,6 +173,8 @@ Recommended Phase 2 tasks:
 - P2-109 adds `/api/proof-promotion`, a browser Proof Promotion Center panel, and `scripts/smoke_docker_proof_promotion_center.sh` so customers can see which claims are ready to describe and which require sanitized observed evidence.
 - P2-110 adds a Proof Sharing Checklist to `/api/proof-promotion`, the browser Proof Promotion Center panel, and Docker-safe smokes so customers know which Docker-local Product Layer statements are share-ready and which stronger claims remain blocked.
 - P2-111 closes the Docker proof promotion center epic after README, TASKS, roadmap, Docker acceptance, proof promotion gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks all preserve the Docker-safe proof promotion path.
+- The Docker Product Layer map epic is active for this Phase 2 slice; it must give customers one navigation surface across Product Layer surfaces, proof sources, handoff, and blockers without adding new unobserved proof claims.
+- P2-112 adds `/api/product-map`, a browser Product Layer Map panel, and `scripts/smoke_docker_product_layer_map.sh` so customers can see what to inspect first, where safe work appears, where proof is collected, and which blockers remain external.
 - The verified boot and attestation proof boundary epic is closed for this Phase 2 slice; future verified boot work should require observed VM or hardware evidence before claiming Secure Boot, TPM measured boot, PCR/event-log, IMA, or hardware attestation proof.
 - The first verified boot slice is `docs/architecture/verified-boot-attestation-proof-boundary.md`, smoke-tested by `scripts/smoke_verified_boot_attestation_boundary.sh`.
 - `phase2-run --message "status"` attaches the verified boot/attestation non-claim artifact so boot-chain trust proof remains visibly separate from local runtime proof.

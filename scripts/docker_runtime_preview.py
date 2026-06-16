@@ -390,6 +390,7 @@ class DockerPreviewApp:
             proof_packet=proof_packet,
             customer_handoff=customer_handoff,
         )
+        product_map = self.product_map()
         blockers = recovery_center.get("blockers", [])
         return {
             "schema_version": "agentos-product-layer-runtime-home.v1",
@@ -486,6 +487,12 @@ class DockerPreviewApp:
                     "state": proof_promotion.get("state", "ready"),
                     "customer_value": "Decide which Docker-local claims are ready and which stronger claims require sanitized observed evidence before promotion.",
                 },
+                {
+                    "id": "product_map",
+                    "label": "Product Layer Map",
+                    "state": product_map.get("state", "ready"),
+                    "customer_value": "See the recommended customer path across Product Layer surfaces, proof packets, blockers, and trust panels.",
+                },
             ],
             "blockers": blockers,
             "onboarding_status": onboarding_status,
@@ -502,12 +509,89 @@ class DockerPreviewApp:
             "customer_proof_packet": proof_packet,
             "customer_handoff_bundle": customer_handoff,
             "proof_promotion_center": proof_promotion,
+            "product_map": product_map,
             "proof": {
                 "docker_main_try_path": True,
                 "boot_or_iso_proof_claimed": False,
                 "live_oauth_claimed": False,
                 "live_browser_proof_claimed": False,
                 "customer_facing_summary_ready": True,
+            },
+        }
+
+    def product_map(self) -> dict:
+        surface_groups = [
+            {
+                "id": "start_here",
+                "label": "Start here",
+                "customer_goal": "Open the preview, understand readiness, and follow the first guided demo path.",
+                "surfaces": [
+                    {"id": "runtime_home", "label": "Runtime Home", "endpoint": "/api/product", "state": "ready"},
+                    {"id": "onboarding_status", "label": "Docker Onboarding Status", "endpoint": "/api/onboarding", "state": "ready"},
+                    {"id": "guided_demo_journey", "label": "Guided Demo Journey", "endpoint": "/api/demo-journey", "state": "ready"},
+                ],
+            },
+            {
+                "id": "do_work",
+                "label": "Do safe work",
+                "customer_goal": "Inspect read-first work, runtime events, capability boundaries, and approval needs.",
+                "surfaces": [
+                    {"id": "work_inbox", "label": "Work Inbox", "endpoint": "/api/work-inbox", "state": "ready"},
+                    {"id": "activity_timeline", "label": "Activity Timeline", "endpoint": "/api/timeline", "state": "ready"},
+                    {"id": "capability_store", "label": "Capability Store", "endpoint": "/api/capabilities", "state": "ready"},
+                    {"id": "approval_center", "label": "Approval Center", "endpoint": "/api/approvals", "state": "ready"},
+                ],
+            },
+            {
+                "id": "prove_and_handoff",
+                "label": "Prove and hand off",
+                "customer_goal": "Collect Docker-local evidence, share safe proof, and keep stronger claims blocked.",
+                "surfaces": [
+                    {"id": "evidence_dashboard", "label": "Evidence Dashboard", "endpoint": "/api/evidence", "state": "ready"},
+                    {"id": "customer_proof_packet", "label": "Customer Proof Packet", "endpoint": "/api/proof-packet", "state": "ready"},
+                    {"id": "customer_handoff_bundle", "label": "Customer Handoff Bundle", "endpoint": "/api/customer-handoff", "state": "ready"},
+                    {"id": "proof_promotion_center", "label": "Proof Promotion Center", "endpoint": "/api/proof-promotion", "state": "ready"},
+                ],
+            },
+            {
+                "id": "blocked_until_observed",
+                "label": "Blocked until observed",
+                "customer_goal": "Understand recovery, release, and device-trust claims that require external observed evidence.",
+                "surfaces": [
+                    {"id": "recovery_center", "label": "Recovery Center", "endpoint": "/api/recovery", "state": "attention"},
+                    {"id": "observed_proof_uploader", "label": "Observed Proof Uploader", "endpoint": "/api/proofs", "state": "ready"},
+                    {"id": "release_trust_panel", "label": "Release Trust Panel", "endpoint": "/api/release-trust", "state": "blocked"},
+                    {"id": "attestation_status", "label": "Attestation Status", "endpoint": "/api/attestation", "state": "blocked"},
+                ],
+            },
+        ]
+        return {
+            "schema_version": "agentos-product-layer-map.v1",
+            "surface": "Product Layer Map",
+            "state": "ready",
+            "customer_message": "Product Layer Map gives customers one ordered path through AgentOS Docker preview surfaces without turning Docker proof into VM/ISO, live provider, release, mutation, or attestation proof.",
+            "surface_groups": surface_groups,
+            "recommended_path": [
+                "runtime_home",
+                "onboarding_status",
+                "guided_demo_journey",
+                "work_inbox",
+                "activity_timeline",
+                "evidence_dashboard",
+                "customer_proof_packet",
+                "customer_handoff_bundle",
+                "proof_promotion_center",
+                "recovery_center",
+            ],
+            "proof": {
+                "customer_facing_product_map_ready": True,
+                "docker_main_try_path": True,
+                "boot_or_iso_proof_claimed": False,
+                "live_oauth_claimed": False,
+                "live_browser_proof_claimed": False,
+                "release_trust_claimed": False,
+                "external_mutation_claimed": False,
+                "hardware_attestation_claimed": False,
             },
         }
 
@@ -1583,6 +1667,7 @@ def _render_page(app: DockerPreviewApp) -> str:
     customer_proof_packet = product_layer.get("customer_proof_packet", {}) if isinstance(product_layer.get("customer_proof_packet"), dict) else {}
     customer_handoff = product_layer.get("customer_handoff_bundle", {}) if isinstance(product_layer.get("customer_handoff_bundle"), dict) else {}
     proof_promotion = product_layer.get("proof_promotion_center", {}) if isinstance(product_layer.get("proof_promotion_center"), dict) else {}
+    product_map = product_layer.get("product_map", {}) if isinstance(product_layer.get("product_map"), dict) else {}
     features = product_layer.get("features", []) if isinstance(product_layer.get("features"), list) else []
     blockers = product_layer.get("blockers", []) if isinstance(product_layer.get("blockers"), list) else []
     llm_state = adapters.get("llm", {}).get("state", "unknown")
@@ -1604,6 +1689,19 @@ def _render_page(app: DockerPreviewApp) -> str:
         f"<section class='card'><h3>{html.escape(title)}</h3><p>{html.escape(str(value))}</p></section>"
         for title, value in cards
     )
+    product_map_group_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(group.get('label', group.get('id', 'Map group'))))}</b> "
+        f"{html.escape(str(group.get('customer_goal', '')))} "
+        f"<em>{html.escape(', '.join(str(surface.get('label', surface.get('id', 'surface'))) for surface in group.get('surfaces', []) if isinstance(surface, dict)))}</em>"
+        "</li>"
+        for group in product_map.get("surface_groups", [])
+        if isinstance(group, dict)
+    ) or "<li>No product map groups are configured.</li>"
+    product_map_path_html = "\n".join(
+        f"<li><code>{html.escape(str(surface_id))}</code></li>"
+        for surface_id in product_map.get("recommended_path", [])
+    ) or "<li>No recommended product path is configured.</li>"
     feature_html = "\n".join(
         "<section class='feature'>"
         f"<div><h3>{html.escape(str(feature.get('label', 'Feature')))}</h3>"
@@ -1886,6 +1984,18 @@ def _render_page(app: DockerPreviewApp) -> str:
     <p class="lead">Try the AgentOS runtime without booting an ISO. This preview routes prompts through the same local-first intent/capability path and writes proof logs under mounted user data.</p>
   </header>
   <div class="grid">{card_html}</div>
+  <section class="product">
+    <div class="panel">
+      <h2>Product Layer Map</h2>
+      <p class="lead">{html.escape(str(product_map.get('customer_message', 'A product layer map is available below.')))}</p>
+      <ul>{product_map_group_html}</ul>
+    </div>
+    <div class="panel">
+      <h2>Recommended Path</h2>
+      <ul>{product_map_path_html}</ul>
+      <p><a href="/api/product-map">product map JSON</a></p>
+    </div>
+  </section>
   <section class="product">
     <div class="panel">
       <h2>Guided Demo Journey</h2>
@@ -2236,6 +2346,8 @@ def make_handler(app: DockerPreviewApp) -> type[BaseHTTPRequestHandler]:
                 _json_response(self, app.customer_handoff_bundle())
             elif path == "/api/proof-promotion":
                 _json_response(self, app.proof_promotion_center())
+            elif path == "/api/product-map":
+                _json_response(self, app.product_map())
             elif path == "/api/activity":
                 _json_response(self, app.activity())
             else:

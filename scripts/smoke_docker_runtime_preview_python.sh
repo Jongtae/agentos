@@ -51,6 +51,7 @@ curl -fsS "http://127.0.0.1:$PORT/api/evidence" > "$TMP_DIR/evidence.json"
 curl -fsS "http://127.0.0.1:$PORT/api/proof-packet" > "$TMP_DIR/proof-packet.json"
 curl -fsS "http://127.0.0.1:$PORT/api/customer-handoff" > "$TMP_DIR/customer-handoff.json"
 curl -fsS "http://127.0.0.1:$PORT/api/proof-promotion" > "$TMP_DIR/proof-promotion.json"
+curl -fsS "http://127.0.0.1:$PORT/api/product-map" > "$TMP_DIR/product-map.json"
 curl -fsS \
   -H 'Content-Type: application/json' \
   -d '{"message":"hi"}' \
@@ -79,6 +80,7 @@ evidence = json.loads((root / "evidence.json").read_text())
 proof_packet = json.loads((root / "proof-packet.json").read_text())
 customer_handoff = json.loads((root / "customer-handoff.json").read_text())
 proof_promotion = json.loads((root / "proof-promotion.json").read_text())
+product_map = json.loads((root / "product-map.json").read_text())
 prompt = json.loads((root / "prompt.json").read_text())
 activity = json.loads((root / "activity.json").read_text())
 home = (root / "home.html").read_text()
@@ -105,6 +107,7 @@ assert product["evidence_dashboard"]["schema_version"] == "agentos-product-layer
 assert product["customer_proof_packet"]["schema_version"] == "agentos-product-layer-customer-proof-packet.v1"
 assert product["customer_handoff_bundle"]["schema_version"] == "agentos-product-layer-customer-handoff-bundle.v1"
 assert product["proof_promotion_center"]["schema_version"] == "agentos-product-layer-proof-promotion-center.v1"
+assert product["product_map"]["schema_version"] == "agentos-product-layer-map.v1"
 assert {feature["id"] for feature in product["features"]} >= {
     "runtime_home",
     "onboarding_status",
@@ -117,6 +120,7 @@ assert {feature["id"] for feature in product["features"]} >= {
     "customer_proof_packet",
     "customer_handoff_bundle",
     "proof_promotion_center",
+    "product_map",
 }
 assert demo_journey["schema_version"] == "agentos-product-layer-guided-demo-journey.v1"
 assert demo_journey["proof"]["docker_preview_ready"] is True
@@ -370,7 +374,22 @@ assert {
     "attach_source_surfaces": "share_ready",
     "withhold_stronger_claims": "blocked_until_observed_evidence",
 }
+assert product_map["schema_version"] == "agentos-product-layer-map.v1"
+assert product_map["proof"]["customer_facing_product_map_ready"] is True
+assert product_map["proof"]["boot_or_iso_proof_claimed"] is False
+assert product_map["proof"]["live_oauth_claimed"] is False
+assert product_map["proof"]["release_trust_claimed"] is False
+assert product_map["proof"]["hardware_attestation_claimed"] is False
+assert {group["id"] for group in product_map["surface_groups"]} >= {
+    "start_here",
+    "do_work",
+    "prove_and_handoff",
+    "blocked_until_observed",
+}
+assert "proof_promotion_center" in product_map["recommended_path"]
 assert "Runtime Home" in home
+assert "Product Layer Map" in home
+assert "product map JSON" in home
 assert "Docker Onboarding Status" in home
 assert "onboarding JSON" in home
 assert "Recovery Center" in home

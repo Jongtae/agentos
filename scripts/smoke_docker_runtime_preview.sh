@@ -81,6 +81,7 @@ curl -fsS http://127.0.0.1:18787/api/status > /tmp/agentos-docker-status.json
 curl -fsS http://127.0.0.1:18787/api/product > /tmp/agentos-docker-product.json
 curl -fsS http://127.0.0.1:18787/api/work-inbox > /tmp/agentos-docker-work-inbox.json
 curl -fsS http://127.0.0.1:18787/api/timeline > /tmp/agentos-docker-timeline.json
+curl -fsS http://127.0.0.1:18787/api/capabilities > /tmp/agentos-docker-capabilities.json
 curl -fsS http://127.0.0.1:18787/api/recovery > /tmp/agentos-docker-recovery.json
 curl -fsS http://127.0.0.1:18787/api/evidence > /tmp/agentos-docker-evidence.json
 
@@ -91,6 +92,7 @@ payload = json.loads(Path("/tmp/agentos-docker-status.json").read_text())
 product = json.loads(Path("/tmp/agentos-docker-product.json").read_text())
 work_inbox = json.loads(Path("/tmp/agentos-docker-work-inbox.json").read_text())
 timeline = json.loads(Path("/tmp/agentos-docker-timeline.json").read_text())
+capabilities = json.loads(Path("/tmp/agentos-docker-capabilities.json").read_text())
 recovery = json.loads(Path("/tmp/agentos-docker-recovery.json").read_text())
 evidence = json.loads(Path("/tmp/agentos-docker-evidence.json").read_text())
 home = Path("/tmp/agentos-docker-home.html").read_text()
@@ -110,6 +112,11 @@ assert timeline["proof"]["docker_preview_ready"] is True
 assert timeline["proof"]["external_app_execution_claimed"] is False
 assert timeline["proof"]["live_provider_proof_claimed"] is False
 assert timeline["proof"]["customer_facing_timeline_ready"] is True
+assert capabilities["schema_version"] == "agentos-product-layer-capability-store.v1"
+assert capabilities["proof"]["docker_preview_ready"] is True
+assert capabilities["proof"]["destructive_action_executed_by_default"] is False
+assert capabilities["proof"]["external_write_claimed"] is False
+assert capabilities["proof"]["customer_facing_capability_store_ready"] is True
 assert recovery["schema_version"] == "agentos-product-layer-recovery-center.v1"
 assert recovery["proof"]["docker_preview_ready"] is True
 assert recovery["proof"]["boot_or_iso_proof_claimed"] is False
@@ -127,6 +134,8 @@ assert "recovery JSON" in home
 assert "Work Inbox" in home
 assert "Activity Timeline" in home
 assert "timeline JSON" in home
+assert "Capability Store" in home
+assert "capabilities JSON" in home
 assert "Evidence Dashboard" in home
 assert "evidence JSON" in home
 PY

@@ -39,6 +39,7 @@ curl -fsS "http://127.0.0.1:$PORT/api/status" > "$TMP_DIR/status.json"
 curl -fsS "http://127.0.0.1:$PORT/api/product" > "$TMP_DIR/product.json"
 curl -fsS "http://127.0.0.1:$PORT/api/work-inbox" > "$TMP_DIR/work-inbox.json"
 curl -fsS "http://127.0.0.1:$PORT/api/timeline" > "$TMP_DIR/timeline.json"
+curl -fsS "http://127.0.0.1:$PORT/api/capabilities" > "$TMP_DIR/capabilities.json"
 curl -fsS "http://127.0.0.1:$PORT/api/recovery" > "$TMP_DIR/recovery.json"
 curl -fsS "http://127.0.0.1:$PORT/api/evidence" > "$TMP_DIR/evidence.json"
 curl -fsS \
@@ -57,6 +58,7 @@ status = json.loads((root / "status.json").read_text())
 product = json.loads((root / "product.json").read_text())
 work_inbox = json.loads((root / "work-inbox.json").read_text())
 timeline = json.loads((root / "timeline.json").read_text())
+capabilities = json.loads((root / "capabilities.json").read_text())
 recovery = json.loads((root / "recovery.json").read_text())
 evidence = json.loads((root / "evidence.json").read_text())
 prompt = json.loads((root / "prompt.json").read_text())
@@ -73,6 +75,7 @@ assert product["proof"]["boot_or_iso_proof_claimed"] is False
 assert product["proof"]["customer_facing_summary_ready"] is True
 assert product["work_inbox"]["schema_version"] == "agentos-product-layer-work-inbox.v1"
 assert product["activity_timeline"]["schema_version"] == "agentos-product-layer-activity-timeline.v1"
+assert product["capability_store"]["schema_version"] == "agentos-product-layer-capability-store.v1"
 assert product["recovery_center"]["schema_version"] == "agentos-product-layer-recovery-center.v1"
 assert product["evidence_dashboard"]["schema_version"] == "agentos-product-layer-evidence-dashboard.v1"
 assert {feature["id"] for feature in product["features"]} >= {
@@ -96,6 +99,20 @@ assert timeline["proof"]["external_app_execution_claimed"] is False
 assert timeline["proof"]["live_provider_proof_claimed"] is False
 assert timeline["proof"]["customer_facing_timeline_ready"] is True
 assert "os_events_jsonl" in timeline["records"]
+assert capabilities["schema_version"] == "agentos-product-layer-capability-store.v1"
+assert capabilities["proof"]["docker_preview_ready"] is True
+assert capabilities["proof"]["registry_loaded"] is True
+assert capabilities["proof"]["destructive_action_executed_by_default"] is False
+assert capabilities["proof"]["external_write_claimed"] is False
+assert capabilities["proof"]["live_provider_proof_claimed"] is False
+assert capabilities["proof"]["customer_facing_capability_store_ready"] is True
+assert {"safe_read", "external_read", "destructive_blocked"} <= set(capabilities["permission_levels"])
+capability_ids = {item["id"] for item in capabilities["capabilities"]}
+assert {"runtime_status", "gmail_read", "gmail_send"} <= capability_ids
+states_by_id = {item["id"]: item["state"] for item in capabilities["capabilities"]}
+assert states_by_id["runtime_status"] == "docker_preview_ready"
+assert states_by_id["gmail_read"] == "requires_setup_or_confirmation"
+assert states_by_id["gmail_send"] == "blocked"
 assert recovery["schema_version"] == "agentos-product-layer-recovery-center.v1"
 assert recovery["proof"]["docker_preview_ready"] is True
 assert recovery["proof"]["customer_facing_recovery_ready"] is True
@@ -139,6 +156,8 @@ assert "Work Inbox" in home
 assert "Inbox Workflows" in home
 assert "Activity Timeline" in home
 assert "timeline JSON" in home
+assert "Capability Store" in home
+assert "capabilities JSON" in home
 assert "Evidence Dashboard" in home
 assert "evidence JSON" in home
 assert prompt["ok"] is True

@@ -80,16 +80,20 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
+- No active completion epic is selected. The next iteration should compare the
+  completed epic list, Later Tracks, README, TASKS, and GitHub issue state
+  before creating or continuing the next milestone-backed completion epic.
+
+## Completed Completion Epics
+
 - `calendar-live-adapter-candidate-epic` — [EPIC: Calendar live read-only adapter candidate](https://github.com/Jongtae/agentos/issues/169)
   - Milestone: Phase 2: Local-first Codex runtime loop
   - Completion goal: define the Calendar live read-only adapter candidate boundary so AgentOS can move from fixture-backed Calendar proof toward a future OAuth-backed read-only adapter without claiming live account proof or allowing mutations before tester evidence exists.
-  - Validation plan: add a Calendar live adapter candidate contract, add a smoke that verifies read-only scope, fixture/live separation, secret handling, observed-proof promotion gates, and mutation non-claims, include that smoke in the golden demo runner, and update README/TASKS/docs index/roadmap state.
-  - Exit condition: complete when the adapter candidate contract is documented, smoke-tested, linked from docs/index.md, included in the golden demo runner, and live Calendar OAuth, observed account proof, and create/update/delete/invite/cancel mutations remain explicit blockers until a real tester run exists.
-  - Active task: P2-76.
+  - Exit condition: completed by `docs/architecture/calendar-live-adapter-candidate-boundary.md`, `scripts/smoke_calendar_live_adapter_candidate_boundary.sh`, docs index linkage, golden runner integration, and README/TASKS/roadmap updates preserving live Calendar OAuth, observed account proof, and create/update/delete/invite/cancel mutation non-claims.
+  - Closed issue: #169.
+  - Completed tasks: P2-76 and P2-77.
   - Residual blockers: live Calendar OAuth requires explicit tester credentials, a live read-only adapter run, and sanitized observed proof; Calendar mutations remain out of scope until a future confirmation and mutation model exists.
   - Advances: capability ownership, mediation cost reduction, OS-native runtime defaults, runtime proof truthfulness.
-
-## Completed Completion Epics
 
 - `calendar-live-readonly-acceptance-pack-epic` — [EPIC: Calendar live read-only acceptance pack](https://github.com/Jongtae/agentos/issues/164)
   - Milestone: Phase 2: Local-first Codex runtime loop

@@ -179,8 +179,8 @@ make runtime proof more truthful.
 flowchart LR
   phase1["Phase 1\nOS-native runtime prototype\nclosed"]
   phase2["Phase 2\nlocal-first runtime loop\nclosed baseline"]
-  active["Active\nCalendar live\nadapter candidate"]
-  completed["Completed completion epics\npermissions, updater, browser fallback,\npublic preview ops, distribution,\ninbox, capability graduation,\ncalendar/Gmail readiness,\nVM/ISO proof status,\nCalendar live acceptance"]
+  active["Active\nNext roadmap\ncompletion track"]
+  completed["Completed completion epics\npermissions, updater, browser fallback,\npublic preview ops, distribution,\ninbox, capability graduation,\ncalendar/Gmail readiness,\nVM/ISO proof status,\nCalendar live acceptance,\nCalendar live adapter"]
   blocked["Observed-proof blockers\nVM/ISO, live OAuth,\nlive browser, release artifacts"]
   future["Later completion tracks\ncalendar live adapter, broader app ecosystem,\nhardware attestation, packaging hardening"]
 
@@ -210,7 +210,7 @@ flowchart LR
 | VM/ISO observed proof status | Completed | Surfaces preflight readiness, planned observation commands, and unobserved boot/rejoin blockers in runtime status. |
 | VM/ISO boot, recovery, and rejoin | Blocked on observed VM proof | Must show boot, reboot/recovery, and managed runtime rejoin before signoff. |
 | Calendar live read-only acceptance | Completed | Defines manual proof and blocker capture for future Calendar OAuth without claiming live account proof. |
-| Calendar live adapter | Active | Defines the read-only live adapter candidate boundary without claiming live OAuth or mutations. |
+| Calendar live adapter | Completed | Defines the read-only live adapter candidate boundary without claiming live OAuth or mutations. |
 | Live browser fallback proof | Blocked on user-approved browser acceptance | Browser automation remains fallback; repeated patterns should become internal capabilities. |
 | Release artifacts and signing | Blocked on real release evidence | Requires actual artifacts, checksums/signatures, and release publication proof. |
 | Broader app/inbox ecosystem | Future capability ownership track | Expands only after common access patterns can use internal substrate capabilities. |

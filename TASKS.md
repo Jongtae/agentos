@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-76] Define Calendar live adapter candidate boundary`
+- `[P2-77] Close Calendar live adapter candidate epic`
 
 Runtime impact statement:
 
-- This task defines the Calendar live read-only adapter candidate boundary so AgentOS can graduate repeated Calendar read/search/summarize requests toward an OS-native read-only adapter while preserving fixture/live separation, secret isolation, observed-proof requirements, and mutation blockers.
+- This task closes the Calendar live adapter candidate epic after the read-only adapter candidate contract, smoke, docs index linkage, golden runner coverage, and roadmap blockers are in place, preventing repeated candidate-boundary work until real tester OAuth evidence or a later live adapter implementation task exists.
 
 Current autonomous completion loop:
 
@@ -140,7 +140,7 @@ Recommended Phase 2 tasks:
 - The Gmail read-only live readiness epic is closed for this Phase 2 slice; future Gmail work should require explicit tester OAuth credentials, observed read-only proof, or a later confirmed mutation model before claiming more than setup readiness.
 - The VM/ISO observed proof status epic is closed for this Phase 2 slice; future VM/ISO work should require a real observed VM run, sanitized evidence, or a new release/boot proof promotion task before claiming boot, reboot/recovery, managed runtime rejoin, ISO freshness, or VM signoff.
 - The Calendar live read-only acceptance epic is closed for this Phase 2 slice; future Calendar live work should require real tester OAuth evidence, a live read-only adapter run, or a new proof promotion task before claiming live account proof or Calendar mutations.
-- The Calendar live adapter candidate epic is active; its first slice defines and smoke-tests the read-only live adapter boundary while preserving live OAuth, observed account proof, and create/update/delete/invite/cancel mutation blockers.
+- The Calendar live adapter candidate epic is closed for this Phase 2 slice; future Calendar live adapter work should require real tester OAuth evidence, an implementation task with credential storage and redaction behavior, or a new observed-proof promotion task before claiming live account proof.
 
 ## Validation Standards
 

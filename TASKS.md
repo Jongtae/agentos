@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-81] Close browser fallback observed proof acceptance epic`
+- `[P2-82] Define inbox workflow promotion boundary`
 
 Runtime impact statement:
 
-- This task closes the browser fallback observed proof acceptance epic after the manual acceptance pack, blocked/no-observed validation, synthetic observed validation, docs index linkage, golden runner coverage, and live browser non-claims are in place.
+- This task defines the broader app/inbox workflow promotion gate so AgentOS grows OS-native inbox capabilities through registry-selected, user-owned, read-first workflows before expanding browser or external app mediation.
 
 Current autonomous completion loop:
 
@@ -128,6 +128,8 @@ Recommended Phase 2 tasks:
 - The first inbox ownership slice is `docs/architecture/inbox-capability-ownership-boundary.md`, smoke-tested by `scripts/smoke_inbox_capability_ownership_boundary.sh`.
 - The inbox ownership boundary smoke is included in the Phase 2 golden demo runner so inbox capability ownership remains part of practical local/Docker-safe proof.
 - `phase2-run --message "status"` attaches the inbox routing/ownership contract artifact so inbox capability ownership is visible in the user-testable runtime status proof.
+- The broader app/inbox workflow promotion epic is active for this Phase 2 slice; it must choose candidates from the capability graduation registry before expanding browser or external app mediation.
+- The first broader app/inbox promotion slice is `docs/architecture/inbox-workflow-promotion-boundary.md`, smoke-tested by `scripts/smoke_inbox_workflow_promotion_boundary.sh`.
 - The verified boot and attestation proof boundary epic is closed for this Phase 2 slice; future verified boot work should require observed VM or hardware evidence before claiming Secure Boot, TPM measured boot, PCR/event-log, IMA, or hardware attestation proof.
 - The first verified boot slice is `docs/architecture/verified-boot-attestation-proof-boundary.md`, smoke-tested by `scripts/smoke_verified_boot_attestation_boundary.sh`.
 - `phase2-run --message "status"` attaches the verified boot/attestation non-claim artifact so boot-chain trust proof remains visibly separate from local runtime proof.
@@ -189,6 +191,7 @@ python3 scripts/cleanup_build_artifacts.py --delete --json
 - `docs/architecture/calendar-live-adapter-candidate-boundary.md`
 - `docs/architecture/inbox-capability-ownership-boundary.md`
 - `docs/architecture/maildir-inbox-intake-proof-boundary.md`
+- `docs/architecture/inbox-workflow-promotion-boundary.md`
 - `docs/architecture/browser-fallback-capability-boundary.md`
 - `docs/acceptance/browser-fallback-observed-acceptance.md`
 - `docs/architecture/updater-hardening-state-contract.md`

@@ -29,6 +29,7 @@ large build outputs are not included.
 - `docs/architecture/capability-graduation-registry.json` - seed machine-readable capability graduation registry
 - `docs/architecture/inbox-capability-ownership-boundary.md` - OS-native inbox intake, read-only adapter, records, and mutation boundary
 - `docs/architecture/maildir-inbox-intake-proof-boundary.md` - local user-owned Maildir inbox intake proof boundary
+- `docs/architecture/inbox-workflow-promotion-boundary.md` - broader app/inbox workflow promotion gate
 - `docs/architecture/updater-hardening-state-contract.md` - updater, rollback, recovery, and runtime rejoin state proof boundary
 - `docs/architecture/user-owned-runtime-data-boundary.md` - local-first user data ownership boundary
 - `docs/architecture/verified-boot-attestation-proof-boundary.md` - Secure Boot, TPM measured boot, IMA, and hardware attestation proof boundary

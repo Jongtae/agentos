@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-110] Add Docker proof sharing checklist`
+- `[P2-111] Close Docker proof promotion center epic`
 
 Runtime impact statement:
 
-- This task adds a customer-facing proof sharing checklist so evaluators can share Docker-local Product Layer claims with validation commands and source surfaces while withholding Docker daemon, VM/ISO, live OAuth, browser, release, mutation, and attestation claims until sanitized observed evidence exists.
+- This task closes the Docker proof promotion center epic after `/api/proof-promotion`, the browser Proof Promotion Center, the proof sharing checklist, README, roadmap, Docker acceptance, Docker-safe smokes, cleanup policy, and CI all preserve Docker-local claim promotion without auto-promoting Docker daemon, VM/ISO, live OAuth, browser, release, mutation, or attestation claims.
 
 Current autonomous completion loop:
 
@@ -168,9 +168,10 @@ Recommended Phase 2 tasks:
 - P2-106 adds a handoff checklist to `/api/customer-handoff`, the browser Customer Handoff Bundle panel, and Docker-safe smokes so customers can follow run, inspect, validate, and blocker-recording steps in proof-safe order.
 - P2-107 adds a share-safe handoff report to `/api/customer-handoff`, the browser Customer Handoff Bundle panel, and Docker-safe smokes so customers can summarize reproduced local proof and remaining observed-proof blockers without including secrets or auto-promoting claims.
 - P2-108 closes the Docker customer handoff bundle epic after README, TASKS, roadmap, Docker acceptance, handoff bundle gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks all preserve the Docker-safe customer handoff path.
-- The Docker proof promotion center epic is active for this Phase 2 slice; it must give customers one proof-promotion decision surface before any stronger Docker daemon, VM/ISO, live-provider, browser, release, mutation, or attestation claim is promoted.
+- The Docker proof promotion center epic is closed for this Phase 2 slice; future proof promotion work should require observed Docker daemon proof, VM/ISO evidence, live OAuth evidence, release proof, browser evidence, external mutation proof, hardware attestation evidence, or a new customer-facing promotion surface before reopening.
 - P2-109 adds `/api/proof-promotion`, a browser Proof Promotion Center panel, and `scripts/smoke_docker_proof_promotion_center.sh` so customers can see which claims are ready to describe and which require sanitized observed evidence.
 - P2-110 adds a Proof Sharing Checklist to `/api/proof-promotion`, the browser Proof Promotion Center panel, and Docker-safe smokes so customers know which Docker-local Product Layer statements are share-ready and which stronger claims remain blocked.
+- P2-111 closes the Docker proof promotion center epic after README, TASKS, roadmap, Docker acceptance, proof promotion gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks all preserve the Docker-safe proof promotion path.
 - The verified boot and attestation proof boundary epic is closed for this Phase 2 slice; future verified boot work should require observed VM or hardware evidence before claiming Secure Boot, TPM measured boot, PCR/event-log, IMA, or hardware attestation proof.
 - The first verified boot slice is `docs/architecture/verified-boot-attestation-proof-boundary.md`, smoke-tested by `scripts/smoke_verified_boot_attestation_boundary.sh`.
 - `phase2-run --message "status"` attaches the verified boot/attestation non-claim artifact so boot-chain trust proof remains visibly separate from local runtime proof.

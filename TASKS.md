@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-96] Add Docker onboarding readiness checklist`
+- `[P2-97] Close Docker onboarding proof epic`
 
 Runtime impact statement:
 
-- This task adds a Docker onboarding readiness checklist so customers and smokes can inspect which public try-path steps are ready and which stronger proof claims still require external observed evidence.
+- This task closes the Docker-first onboarding proof epic so the public try path is recorded as a completed Product Layer milestone slice instead of remaining an open automation target.
 
 Current autonomous completion loop:
 
@@ -144,10 +144,11 @@ Recommended Phase 2 tasks:
 - `phase2-run --message "status"` attaches the inbox routing/ownership contract artifact so inbox capability ownership is visible in the user-testable runtime status proof.
 - The broader app/inbox workflow promotion epic is closed for this Phase 2 slice; future broader app/inbox work should require a new milestone-backed epic when it adds a real workflow candidate, observed proof, or live adapter promotion beyond the completed Docker Product Layer completion gate.
 - The first broader app/inbox promotion slice is `docs/architecture/inbox-workflow-promotion-boundary.md`, smoke-tested by `scripts/smoke_inbox_workflow_promotion_boundary.sh`.
-- The Docker-first customer onboarding proof epic is active for this Phase 2 slice; it must keep the public README quickstart, Docker acceptance, preview operations, and roadmap state aligned before expanding customer-facing public try paths.
+- The Docker-first customer onboarding proof epic is closed for this Phase 2 slice; future Docker onboarding work should require a new milestone-backed epic when it adds observed Docker daemon proof, release packaging, live browser evidence, or a new customer-facing public try-path surface.
 - The first Docker-first customer onboarding slice is `scripts/smoke_docker_customer_onboarding_quickstart.sh`, included in the Phase 2 golden demo runner so onboarding drift is caught with the practical Docker/local proof set.
 - P2-95 promotes Docker Onboarding Status into the running preview through `/api/onboarding`, so customers can inspect quickstart steps, entrypoints, validation smokes, and non-claims from the product surface itself.
 - P2-96 adds a Docker onboarding readiness checklist and focused contract smoke so customers can distinguish ready local-preview steps from observed-proof blockers before trying AgentOS.
+- P2-97 closes the Docker-first customer onboarding proof epic after README, Docker acceptance, TASKS, roadmap, product surfaces, quickstart gate, onboarding contract gate, Product Layer completion gate, and golden runner all point to the same Docker-first public try path.
 - The verified boot and attestation proof boundary epic is closed for this Phase 2 slice; future verified boot work should require observed VM or hardware evidence before claiming Secure Boot, TPM measured boot, PCR/event-log, IMA, or hardware attestation proof.
 - The first verified boot slice is `docs/architecture/verified-boot-attestation-proof-boundary.md`, smoke-tested by `scripts/smoke_verified_boot_attestation_boundary.sh`.
 - `phase2-run --message "status"` attaches the verified boot/attestation non-claim artifact so boot-chain trust proof remains visibly separate from local runtime proof.

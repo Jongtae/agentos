@@ -80,19 +80,22 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
+- None currently active. The completion loop should re-check Later Tracks and GitHub issues before opening the next milestone-backed Product Layer epic.
+
+## Completed Completion Epics
+
 - `docker-first-customer-onboarding-proof-epic` — [EPIC: Stage 3 / Phase 2 Docker-first customer onboarding proof](https://github.com/Jongtae/agentos/issues/209)
   - Milestone: Docker-first AgentOS runtime preview
   - Completion goal: keep the public README quickstart, Docker acceptance path, preview operations contract, roadmap state, and task state aligned so a customer can try the Product Layer through Docker without confusing Docker proof for VM/ISO, live OAuth, browser, release, mutation, or attestation proof.
-  - Validation plan: `scripts/smoke_docker_customer_onboarding_quickstart.sh`, `scripts/smoke_docker_product_layer_completion.sh`, `scripts/smoke_docker_runtime_preview_python.sh`, `docker compose config`, and the Phase 2 golden demo runner.
-  - Exit condition: complete when README, Docker acceptance, public preview operations, TASKS, roadmap, and golden runner all point to the same Docker-first public try path and preserve explicit non-claims for live OAuth, VM/ISO, browser, release, external mutation, and hardware attestation proof.
-  - Active task: P2-96.
+  - Exit condition: completed by P2-94 through P2-97 after README, Docker acceptance, public preview operations, TASKS, roadmap, Product Layer surfaces, `scripts/smoke_docker_customer_onboarding_quickstart.sh`, `scripts/smoke_docker_onboarding_status_contract.sh`, `scripts/smoke_docker_product_layer_completion.sh`, `scripts/smoke_docker_runtime_preview_python.sh`, `docker compose config`, and the Phase 2 golden demo runner all point to the same Docker-first public try path while preserving live OAuth, VM/ISO, browser, release, external mutation, and hardware attestation non-claims.
+  - Closed issue: #209.
+  - Completed tasks: P2-94, P2-95, P2-96, and P2-97.
   - First slice: P2-94 adds `scripts/smoke_docker_customer_onboarding_quickstart.sh` to catch drift across README quickstart, Docker acceptance, public preview operations, roadmap, and task state.
   - Product-layer follow-up: P2-95 exposes `agentos-product-layer-onboarding-status.v1` through `/api/onboarding` and the browser Docker Onboarding Status panel so quickstart steps, entrypoints, validation smokes, and non-claims are inspectable from the running preview.
   - Product-layer follow-up: P2-96 adds a readiness checklist to `/api/onboarding` and `scripts/smoke_docker_onboarding_status_contract.sh` so the running preview can prove quickstart readiness, visible entrypoints, no-key local preview, Docker-safe validation, and observed-proof blockers.
-  - Residual blockers: VM/ISO boot/rejoin proof, live OAuth, live browser evidence, release artifacts/signing, and hardware attestation remain unclaimed until observed evidence exists.
+  - Product-layer closeout: P2-97 records the Docker-first onboarding proof epic as complete so future loops return to the roadmap before adding more onboarding work.
+  - Residual blockers: VM/ISO boot/rejoin proof, live OAuth, live browser evidence, release artifacts/signing, Docker daemon observed proof, and hardware attestation remain unclaimed until observed evidence exists.
   - Advances: Docker-first public usability, runtime proof truthfulness, OS-native runtime defaults.
-
-## Completed Completion Epics
 
 - `broader-app-inbox-workflow-promotion-epic` — [EPIC: Broader app inbox workflow promotion](https://github.com/Jongtae/agentos/issues/184)
   - Milestone: Phase 2: Local-first Codex runtime loop

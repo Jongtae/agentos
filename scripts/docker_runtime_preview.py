@@ -378,6 +378,12 @@ class DockerPreviewApp:
             evidence_dashboard=evidence_dashboard,
             recovery_center=recovery_center,
         )
+        customer_handoff = self.customer_handoff_bundle(
+            onboarding_status=onboarding_status,
+            guided_demo_journey=guided_demo_journey,
+            proof_packet=proof_packet,
+            recovery_center=recovery_center,
+        )
         blockers = recovery_center.get("blockers", [])
         return {
             "schema_version": "agentos-product-layer-runtime-home.v1",
@@ -462,6 +468,12 @@ class DockerPreviewApp:
                     "state": proof_packet.get("state", "ready"),
                     "customer_value": "Export the Docker-local proof summary, validation commands, and explicit non-claims in one customer-readable packet.",
                 },
+                {
+                    "id": "customer_handoff_bundle",
+                    "label": "Customer Handoff Bundle",
+                    "state": customer_handoff.get("state", "ready"),
+                    "customer_value": "Share one Docker-safe bundle with the run command, first screens, validation commands, proof packet, and next observed-proof blockers.",
+                },
             ],
             "blockers": blockers,
             "onboarding_status": onboarding_status,
@@ -476,12 +488,71 @@ class DockerPreviewApp:
             "recovery_center": recovery_center,
             "evidence_dashboard": evidence_dashboard,
             "customer_proof_packet": proof_packet,
+            "customer_handoff_bundle": customer_handoff,
             "proof": {
                 "docker_main_try_path": True,
                 "boot_or_iso_proof_claimed": False,
                 "live_oauth_claimed": False,
                 "live_browser_proof_claimed": False,
                 "customer_facing_summary_ready": True,
+            },
+        }
+
+    def customer_handoff_bundle(
+        self,
+        *,
+        onboarding_status: dict | None = None,
+        guided_demo_journey: dict | None = None,
+        proof_packet: dict | None = None,
+        recovery_center: dict | None = None,
+    ) -> dict:
+        onboarding = onboarding_status or self.onboarding_status()
+        journey = guided_demo_journey or self.guided_demo_journey()
+        packet = proof_packet or self.customer_proof_packet()
+        recovery = recovery_center or self.recovery_center()
+        next_blockers = recovery.get("items", []) if isinstance(recovery.get("items"), list) else []
+        return {
+            "schema_version": "agentos-product-layer-customer-handoff-bundle.v1",
+            "surface": "Customer Handoff Bundle",
+            "state": "ready",
+            "customer_message": "Customer Handoff Bundle gives a Docker-safe path to run, inspect, validate, and explain AgentOS without claiming stronger observed proof.",
+            "try_path": {
+                "command": "docker compose up --build",
+                "url": "http://localhost:8787",
+                "first_prompt": "status",
+                "docker_is_default_public_try_path": True,
+            },
+            "inspect_surfaces": [
+                {"id": "runtime_home", "label": "Runtime Home", "url": "/api/product"},
+                {"id": "onboarding_status", "label": "Docker Onboarding Status", "url": "/api/onboarding"},
+                {"id": "guided_demo_journey", "label": "Guided Demo Journey", "url": "/api/demo-journey"},
+                {"id": "customer_proof_packet", "label": "Customer Proof Packet", "url": "/api/proof-packet"},
+                {"id": "recovery_center", "label": "Recovery Center", "url": "/api/recovery"},
+                {"id": "evidence_dashboard", "label": "Evidence Dashboard", "url": "/api/evidence"},
+            ],
+            "validation_commands": [
+                "docker compose config",
+                "scripts/smoke_docker_customer_handoff_bundle.sh",
+                "scripts/smoke_docker_runtime_preview_python.sh",
+                "scripts/smoke_docker_product_layer_completion.sh",
+                "scripts/smoke_phase2_golden_demo.sh",
+            ],
+            "handoff_sources": {
+                "onboarding_status": onboarding.get("schema_version"),
+                "guided_demo_journey": journey.get("schema_version"),
+                "customer_proof_packet": packet.get("schema_version"),
+                "recovery_center": recovery.get("schema_version"),
+            },
+            "next_blockers": next_blockers,
+            "proof": {
+                "docker_main_try_path": True,
+                "customer_handoff_ready": True,
+                "boot_or_iso_proof_claimed": False,
+                "live_oauth_claimed": False,
+                "live_browser_proof_claimed": False,
+                "release_trust_claimed": False,
+                "external_mutation_claimed": False,
+                "hardware_attestation_claimed": False,
             },
         }
 
@@ -1279,6 +1350,7 @@ def _render_page(app: DockerPreviewApp) -> str:
     recovery_center = product_layer.get("recovery_center", {}) if isinstance(product_layer.get("recovery_center"), dict) else {}
     evidence_dashboard = product_layer.get("evidence_dashboard", {}) if isinstance(product_layer.get("evidence_dashboard"), dict) else {}
     customer_proof_packet = product_layer.get("customer_proof_packet", {}) if isinstance(product_layer.get("customer_proof_packet"), dict) else {}
+    customer_handoff = product_layer.get("customer_handoff_bundle", {}) if isinstance(product_layer.get("customer_handoff_bundle"), dict) else {}
     features = product_layer.get("features", []) if isinstance(product_layer.get("features"), list) else []
     blockers = product_layer.get("blockers", []) if isinstance(product_layer.get("blockers"), list) else []
     llm_state = adapters.get("llm", {}).get("state", "unknown")
@@ -1480,6 +1552,21 @@ def _render_page(app: DockerPreviewApp) -> str:
         for item in customer_proof_packet.get("readiness_checklist", [])
         if isinstance(item, dict)
     ) or "<li>No proof packet readiness checks are configured.</li>"
+    handoff_try_path = customer_handoff.get("try_path", {})
+    if not isinstance(handoff_try_path, dict):
+        handoff_try_path = {}
+    handoff_surface_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Surface'))))}</b> "
+        f"<code>{html.escape(str(item.get('url', '')))}</code>"
+        "</li>"
+        for item in customer_handoff.get("inspect_surfaces", [])
+        if isinstance(item, dict)
+    ) or "<li>No handoff surfaces are configured.</li>"
+    handoff_validation_html = "\n".join(
+        f"<li><code>{html.escape(str(command))}</code></li>"
+        for command in customer_handoff.get("validation_commands", [])
+    ) or "<li>No handoff validation commands are configured.</li>"
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -1699,6 +1786,26 @@ def _render_page(app: DockerPreviewApp) -> str:
   </section>
   <section class="product">
     <div class="panel">
+      <h2>Customer Handoff Bundle</h2>
+      <p class="lead">{html.escape(str(customer_handoff.get('customer_message', 'Customer handoff bundle is available below.')))}</p>
+      <ul>
+        <li><b>Run</b> <code>{html.escape(str(handoff_try_path.get('command', 'docker compose up --build')))}</code></li>
+        <li><b>Open</b> <code>{html.escape(str(handoff_try_path.get('url', 'http://localhost:8787')))}</code></li>
+        <li><b>First prompt</b> <code>{html.escape(str(handoff_try_path.get('first_prompt', 'status')))}</code></li>
+      </ul>
+      <p><a href="/api/customer-handoff">customer handoff JSON</a></p>
+    </div>
+    <div class="panel">
+      <h2>Handoff Surfaces</h2>
+      <ul>{handoff_surface_html}</ul>
+    </div>
+    <div class="panel">
+      <h2>Handoff Validation</h2>
+      <ul>{handoff_validation_html}</ul>
+    </div>
+  </section>
+  <section class="product">
+    <div class="panel">
       <h2>Customer Proof Packet</h2>
       <p class="lead">{html.escape(str(customer_proof_packet.get('customer_message', 'Customer proof packet is available below.')))}</p>
       <ul>{proof_packet_claim_html}</ul>
@@ -1814,6 +1921,8 @@ def make_handler(app: DockerPreviewApp) -> type[BaseHTTPRequestHandler]:
                 _json_response(self, app.evidence_dashboard())
             elif path == "/api/proof-packet":
                 _json_response(self, app.customer_proof_packet())
+            elif path == "/api/customer-handoff":
+                _json_response(self, app.customer_handoff_bundle())
             elif path == "/api/activity":
                 _json_response(self, app.activity())
             else:

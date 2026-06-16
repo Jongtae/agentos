@@ -84,6 +84,7 @@ curl -fsS http://127.0.0.1:18787/api/timeline > /tmp/agentos-docker-timeline.jso
 curl -fsS http://127.0.0.1:18787/api/capabilities > /tmp/agentos-docker-capabilities.json
 curl -fsS http://127.0.0.1:18787/api/approvals > /tmp/agentos-docker-approvals.json
 curl -fsS http://127.0.0.1:18787/api/proofs > /tmp/agentos-docker-proofs.json
+curl -fsS http://127.0.0.1:18787/api/release-trust > /tmp/agentos-docker-release-trust.json
 curl -fsS http://127.0.0.1:18787/api/recovery > /tmp/agentos-docker-recovery.json
 curl -fsS http://127.0.0.1:18787/api/evidence > /tmp/agentos-docker-evidence.json
 
@@ -97,6 +98,7 @@ timeline = json.loads(Path("/tmp/agentos-docker-timeline.json").read_text())
 capabilities = json.loads(Path("/tmp/agentos-docker-capabilities.json").read_text())
 approvals = json.loads(Path("/tmp/agentos-docker-approvals.json").read_text())
 proofs = json.loads(Path("/tmp/agentos-docker-proofs.json").read_text())
+release_trust = json.loads(Path("/tmp/agentos-docker-release-trust.json").read_text())
 recovery = json.loads(Path("/tmp/agentos-docker-recovery.json").read_text())
 evidence = json.loads(Path("/tmp/agentos-docker-evidence.json").read_text())
 home = Path("/tmp/agentos-docker-home.html").read_text()
@@ -132,6 +134,12 @@ assert proofs["proof"]["docker_preview_ready"] is True
 assert proofs["proof"]["file_upload_execution_claimed"] is False
 assert proofs["proof"]["claim_promotion_claimed"] is False
 assert proofs["proof"]["secret_material_allowed"] is False
+assert release_trust["schema_version"] == "agentos-product-layer-release-trust-panel.v1"
+assert release_trust["proof"]["docker_preview_ready"] is True
+assert release_trust["proof"]["release_artifact_observed"] is False
+assert release_trust["proof"]["signing_observed"] is False
+assert release_trust["proof"]["release_uploaded"] is False
+assert release_trust["proof"]["vm_iso_release_proof_completed"] is False
 assert recovery["schema_version"] == "agentos-product-layer-recovery-center.v1"
 assert recovery["proof"]["docker_preview_ready"] is True
 assert recovery["proof"]["boot_or_iso_proof_claimed"] is False
@@ -155,6 +163,8 @@ assert "Approval Center" in home
 assert "approvals JSON" in home
 assert "Observed Proof Uploader" in home
 assert "proofs JSON" in home
+assert "Release Trust Panel" in home
+assert "release trust JSON" in home
 assert "Evidence Dashboard" in home
 assert "evidence JSON" in home
 PY

@@ -80,19 +80,22 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
+- No active completion epic is open after the Docker guided demo closeout. The next iteration should re-check the roadmap and GitHub issue state before creating a new milestone-backed Product Layer epic.
+
+## Completed Completion Epics
+
 - `docker-guided-product-layer-demo-journey-epic` — [EPIC: Stage 3 / Phase 2 Docker guided Product Layer demo journey](https://github.com/Jongtae/agentos/issues/218)
   - Milestone: Docker guided Product Layer demo journey
   - Completion goal: turn the completed Docker Product Layer surfaces into a customer-readable guided demo path that explains what to inspect first, what proof has been observed locally, and which VM/ISO, live OAuth, browser, release, mutation, and hardware attestation claims remain blocked.
-  - Validation plan: `scripts/smoke_docker_guided_demo_journey.sh`, `scripts/smoke_docker_product_layer_completion.sh`, `scripts/smoke_docker_runtime_preview_python.sh`, `docker compose config`, and the Phase 2 golden demo runner.
-  - Exit condition: complete when the Docker preview exposes a guided journey from Runtime Home through Work Inbox, prompt execution, Activity Timeline, Evidence Dashboard, and Recovery Center; README, TASKS, roadmap, Docker acceptance, and golden smokes all reference that journey; and non-claims remain explicit for VM/ISO, live OAuth, browser, release, external mutation, and hardware attestation proof.
-  - Active task: P2-100.
+  - Exit condition: completed by P2-98 through P2-101 after `/api/demo-journey`, the browser Guided Demo Journey panel, README, TASKS, roadmap, Docker acceptance, `scripts/smoke_docker_guided_demo_journey.sh`, `scripts/smoke_docker_product_layer_completion.sh`, `scripts/smoke_docker_runtime_preview_python.sh`, `docker compose config`, cleanup policy, and the Phase 2 golden demo runner all preserve the same customer path, expected outcomes, completion summary, and proof non-claims.
+  - Closed issue: #218.
+  - Completed tasks: P2-98, P2-99, P2-100, and P2-101.
   - First slice: P2-98 adds `agentos-product-layer-guided-demo-journey.v1` through `/api/demo-journey`, a browser Guided Demo Journey panel, and `scripts/smoke_docker_guided_demo_journey.sh`.
-  - Follow-up slice: P2-99 adds expected success and blocked-until-observed outcomes to the guided journey contract, browser panel, and Docker-safe smoke gates.
-  - Current slice: P2-100 adds a guided demo completion summary with completed local claims and next observed-proof blockers.
+  - Product-layer follow-up: P2-99 adds expected success and blocked-until-observed outcomes to the guided journey contract, browser panel, and Docker-safe smoke gates.
+  - Product-layer follow-up: P2-100 adds a guided demo completion summary with completed local claims and next observed-proof blockers.
+  - Product-layer closeout: P2-101 records the Docker guided demo journey epic as complete so future loops return to the roadmap before adding more guided demo work.
   - Residual blockers: VM/ISO boot/rejoin proof, live OAuth, live browser evidence, release artifacts/signing, Docker daemon observed proof, and hardware attestation remain unclaimed until observed evidence exists.
   - Advances: Docker-first public usability, runtime proof truthfulness, OS-native runtime defaults.
-
-## Completed Completion Epics
 
 - `docker-first-customer-onboarding-proof-epic` — [EPIC: Stage 3 / Phase 2 Docker-first customer onboarding proof](https://github.com/Jongtae/agentos/issues/209)
   - Milestone: Docker-first AgentOS runtime preview

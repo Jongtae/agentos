@@ -15,19 +15,22 @@ Current public milestone:
 
 Current task:
 
-- `[P2-29] Add Gmail live read-only manual acceptance pack`
+- `[P2-30] Align roadmap-governed completion source of truth`
 
 Runtime impact statement:
 
-- This task advances the next safe completion candidate from the roadmap direction judge by adding a Gmail live read-only manual acceptance pack that separates mock/blocker proof from real user-observed OAuth proof without exposing secrets.
+- This task keeps the autonomous completion loop aligned with the AgentOS mission by correcting stale README, roadmap, and task-state language so future work creates milestone-backed epics with explicit exit conditions instead of repeating smoke-only Phase 2 checks.
 
-Current autonomous hardening loop:
+Current autonomous completion loop:
 
-- A Codex heartbeat automation runs every five minutes against this thread.
-- Each pass starts from the repo startup order, checks the active issue/branch state, runs the roadmap direction judge, runs high-signal Phase 2 and setup smokes, cleans temp/build artifacts, and opens the next small lifecycle issue when it finds either an actionable regression/state drift or a safe forward-progress candidate after stable repetition.
-- A direction verdict of `accept_with_risk` means the loop may finish the current validation pass, but the next autonomous issue should move a project-completion track forward when that can be done without live credentials or unobserved VM proof.
+- A Codex heartbeat automation runs every 15 minutes against this thread.
+- Each pass starts from the repo startup order, compares README, PRD, TASKS, roadmap, and GitHub milestone/issue state, runs the roadmap direction judge, and decides whether to continue an epic, create a missing milestone-backed epic, or defer because a blocker requires user/external input.
+- Every epic must declare a completion goal, roadmap milestone alignment, validation plan, and exit condition before implementation work proceeds.
+- Roadmap changes that require product or architecture judgment should be backed by primary or credible external research before they become milestone, epic, or exit-condition updates.
+- A direction verdict of `accept_with_risk` means the loop may finish lightweight validation, but should not repeat heavy smoke-only passes when no safe forward-progress candidate exists.
 - A direction verdict of `reject` means autonomous apply work should stop and hand off or open a repair issue before continuing.
-- Recent manual passes confirmed Telegram setup/live receiver, terminal QR rendering, Gmail setup page, Phase 2 CLI, Gmail live-blocked recovery, golden demo, workflow status, ISO build smoke coverage, and cleanup policy before refreshing this task status.
+- ISO smoke is limited to at most once per calendar day unless ISO/build code changed or the user explicitly requests it.
+- Live Gmail OAuth and observed VM/ISO proof remain explicit blockers until a tester provides credentials or a VM run can be observed and recorded.
 
 ## Phase 1 Closeout Truth
 
@@ -93,7 +96,7 @@ Recommended Phase 2 tasks:
 - Gmail setup is exposed through `agentos-kernelctl gmail-setup --serve-http`; live Gmail remains read-only and requires explicit user OAuth credentials.
 - Phase 2 closeout is recorded in `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`.
 - Practical local/Docker-safe proof is aggregated by `scripts/smoke_phase2_golden_demo.sh`.
-- Five-minute hardening is active as an operational loop that repeatedly validates Telegram setup/live receive, Gmail setup/live-blocked recovery, Phase 2 runtime CLI, golden demo, workflow status, ISO build smoke, and cleanup policy.
+- A 15-minute roadmap-governed completion loop is active as an operational loop that compares source-of-truth docs, GitHub work state, and roadmap milestones before deciding whether to create or continue an epic.
 - Roadmap direction judging is part of that loop so stable Phase 2 validation can promote the next safe completion task instead of becoming the whole product motion.
 - Calendar read-only now has a fixture-backed contract and smoke path; live Calendar OAuth remains future work until explicit credentials and adapter design exist.
 - VM/ISO proof now has a preflight smoke and blocker contract; observed boot, reboot/recovery, and managed runtime rejoin still require a real VM run before signoff.

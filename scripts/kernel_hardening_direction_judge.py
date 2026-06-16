@@ -68,6 +68,26 @@ def recent_task_ids(lines: list[str], limit: int = 6) -> list[str]:
     return list(reversed(ids))
 
 
+def completed_task_ids(lines: list[str]) -> set[str]:
+    issue_to_task: dict[int, str] = {}
+    completed: set[str] = set()
+    for line in lines:
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if payload.get("action") == "start":
+            issue_number = payload.get("issue_number")
+            task_id = payload.get("task_id")
+            if isinstance(issue_number, int) and task_id:
+                issue_to_task[issue_number] = str(task_id)
+        elif payload.get("action") == "close":
+            issue_number = payload.get("issue_number")
+            if isinstance(issue_number, int) and issue_number in issue_to_task:
+                completed.add(issue_to_task[issue_number])
+    return completed
+
+
 def contains_all(text: str, needles: list[str]) -> bool:
     lower = text.lower()
     return all(needle.lower() in lower for needle in needles)
@@ -80,7 +100,11 @@ def judge(root: Path) -> dict:
     combined = "\n".join([snapshot.prd, snapshot.tasks, snapshot.roadmap])
 
     phase2_closed = "Phase 2 closeout recorded" in snapshot.roadmap
-    hardening_active = "Five-minute hardening is active" in snapshot.tasks
+    old_hardening_loop = "Five-minute hardening is active" in snapshot.tasks
+    hardening_active = (
+        old_hardening_loop
+        or "15-minute roadmap-governed completion loop is active" in snapshot.tasks
+    )
     vm_blocker_explicit = "VM/ISO proof remains an explicit blocker" in snapshot.tasks
     runtime_first = contains_all(
         combined,
@@ -94,7 +118,7 @@ def judge(root: Path) -> dict:
     hardening_recent = [task_id for task_id in recent_ids if task_id in {"P2-24", "P2-25", "P2-26"}]
 
     risks: list[dict] = []
-    if phase2_closed and hardening_active and len(hardening_recent) >= 2:
+    if phase2_closed and old_hardening_loop and len(hardening_recent) >= 2:
         risks.append(
             {
                 "id": "stable-phase-repeat",
@@ -202,7 +226,8 @@ def _later_tracks(roadmap: str) -> list[dict]:
 
 def _next_forward_candidates(snapshot: SourceSnapshot, later_tracks: list[dict]) -> list[dict]:
     candidates = []
-    if "roadmap direction judge" not in snapshot.tasks.lower():
+    completed = completed_task_ids(snapshot.ledger_lines)
+    if "roadmap direction judge" not in snapshot.tasks.lower() and "P2-26" not in completed:
         candidates.append(
             {
                 "id": "direction-judge-loop-gate",
@@ -212,7 +237,11 @@ def _next_forward_candidates(snapshot: SourceSnapshot, later_tracks: list[dict])
             }
         )
     track_names = " ".join(track["name"] for track in later_tracks).lower()
-    if "calendar read-only" in track_names and "fixture-backed contract" not in snapshot.tasks.lower():
+    if (
+        "calendar read-only" in track_names
+        and "fixture-backed contract" not in snapshot.tasks.lower()
+        and "P2-27" not in completed
+    ):
         candidates.append(
             {
                 "id": "calendar-readonly-contract",
@@ -221,7 +250,11 @@ def _next_forward_candidates(snapshot: SourceSnapshot, later_tracks: list[dict])
                 "advances": ["capability ownership", "mediation cost reduction"],
             }
         )
-    if "vm/iso proof preflight" not in snapshot.tasks.lower() and "vm/iso proof" in track_names:
+    if (
+        "vm/iso proof preflight" not in snapshot.tasks.lower()
+        and "vm/iso proof" in track_names
+        and "P2-28" not in completed
+    ):
         candidates.append(
             {
                 "id": "vm-proof-runbook-smoke",
@@ -230,7 +263,11 @@ def _next_forward_candidates(snapshot: SourceSnapshot, later_tracks: list[dict])
                 "advances": ["runtime proof truthfulness", "OS-native runtime defaults"],
             }
         )
-    if "gmail live read-only manual acceptance pack" not in snapshot.tasks.lower() and "live gmail oauth" in track_names:
+    if (
+        "gmail live read-only manual acceptance pack" not in snapshot.tasks.lower()
+        and "live gmail oauth" in track_names
+        and "P2-29" not in completed
+    ):
         candidates.append(
             {
                 "id": "gmail-live-manual-acceptance",

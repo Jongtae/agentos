@@ -80,6 +80,7 @@ curl -fsS http://127.0.0.1:18787/ > /tmp/agentos-docker-home.html
 curl -fsS http://127.0.0.1:18787/api/status > /tmp/agentos-docker-status.json
 curl -fsS http://127.0.0.1:18787/api/product > /tmp/agentos-docker-product.json
 curl -fsS http://127.0.0.1:18787/api/work-inbox > /tmp/agentos-docker-work-inbox.json
+curl -fsS http://127.0.0.1:18787/api/recovery > /tmp/agentos-docker-recovery.json
 
 python3 - <<'PY'
 import json
@@ -87,6 +88,7 @@ from pathlib import Path
 payload = json.loads(Path("/tmp/agentos-docker-status.json").read_text())
 product = json.loads(Path("/tmp/agentos-docker-product.json").read_text())
 work_inbox = json.loads(Path("/tmp/agentos-docker-work-inbox.json").read_text())
+recovery = json.loads(Path("/tmp/agentos-docker-recovery.json").read_text())
 home = Path("/tmp/agentos-docker-home.html").read_text()
 assert payload["proof"]["docker_preview_surface_ready"] is True
 assert payload["proof"]["product_layer_runtime_home_ready"] is True
@@ -99,8 +101,15 @@ assert product["proof"]["boot_or_iso_proof_claimed"] is False
 assert work_inbox["schema_version"] == "agentos-product-layer-work-inbox.v1"
 assert work_inbox["proof"]["read_first_only"] is True
 assert work_inbox["proof"]["external_mutation_claimed"] is False
+assert recovery["schema_version"] == "agentos-product-layer-recovery-center.v1"
+assert recovery["proof"]["docker_preview_ready"] is True
+assert recovery["proof"]["boot_or_iso_proof_claimed"] is False
+assert recovery["proof"]["live_oauth_claimed"] is False
+assert recovery["proof"]["live_browser_proof_claimed"] is False
+assert recovery["proof"]["customer_facing_recovery_ready"] is True
 assert "Runtime Home" in home
 assert "Recovery Center" in home
+assert "recovery JSON" in home
 assert "Work Inbox" in home
 PY
 

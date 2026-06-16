@@ -125,7 +125,8 @@ class DockerPreviewApp:
         activity_payload = activity or build_activity_feed_payload(self.workspace, limit=12)
         adapters = setup_payload.get("adapters", {}) if isinstance(setup_payload.get("adapters"), dict) else {}
         work_inbox = self.work_inbox(setup=setup_payload)
-        blockers = _product_blockers(setup_payload)
+        recovery_center = self.recovery_center(setup=setup_payload)
+        blockers = recovery_center.get("blockers", [])
         return {
             "schema_version": "agentos-product-layer-runtime-home.v1",
             "surface": "Docker Runtime Home",
@@ -164,12 +165,82 @@ class DockerPreviewApp:
             ],
             "blockers": blockers,
             "work_inbox": work_inbox,
+            "recovery_center": recovery_center,
             "proof": {
                 "docker_main_try_path": True,
                 "boot_or_iso_proof_claimed": False,
                 "live_oauth_claimed": False,
                 "live_browser_proof_claimed": False,
                 "customer_facing_summary_ready": True,
+            },
+        }
+
+    def recovery_center(self, *, setup: dict | None = None) -> dict:
+        setup_payload = setup or build_status(str(self.workspace), str(self.user_root))
+        blockers = _product_blockers(setup_payload)
+        recovery_items = [
+            {
+                "id": "vm-iso-observed-proof",
+                "label": "Boot and rejoin proof",
+                "state": "blocked_until_observed_proof",
+                "customer_problem": "Docker preview can show AgentOS runtime behavior, but it cannot prove ISO boot, install, reboot, recovery, or managed runtime rejoin.",
+                "recovery_action": "Attach sanitized VM/ISO evidence from an observed run before claiming OS boot proof.",
+            },
+            {
+                "id": "live-oauth-proof",
+                "label": "Live inbox proof",
+                "state": "blocked_until_user_credentials",
+                "customer_problem": "Gmail and Calendar live proof require explicit user OAuth credentials and read-only observed runs.",
+                "recovery_action": "Keep fixture and local-path proof active until credentials and sanitized observed evidence are provided.",
+            },
+            {
+                "id": "live-browser-proof",
+                "label": "Browser proof",
+                "state": "blocked_until_user_approved_run",
+                "customer_problem": "Browser automation is not claimed as a default customer capability until an approved live run is observed.",
+                "recovery_action": "Run a future live browser proof with user approval and attach sanitized artifacts before promoting the claim.",
+            },
+            {
+                "id": "release-trust-proof",
+                "label": "Release trust proof",
+                "state": "blocked_until_release_evidence",
+                "customer_problem": "Docker preview does not prove signed release media, checksums, or distribution integrity.",
+                "recovery_action": "Attach release manifests, checksums, and signing evidence before presenting release trust as complete.",
+            },
+            {
+                "id": "attestation-proof",
+                "label": "Attestation proof",
+                "state": "blocked_until_hardware_evidence",
+                "customer_problem": "Secure Boot, TPM/PCR, and hardware attestation are outside Docker preview proof.",
+                "recovery_action": "Attach hardware-backed attestation evidence before claiming device-level trust.",
+            },
+        ]
+        blocker_ids = {str(blocker.get("id", "")) for blocker in blockers}
+        if "llm-setup" in blocker_ids:
+            recovery_items.append(
+                {
+                    "id": "llm-setup",
+                    "label": "Local model setup",
+                    "state": "needs_setup_attention",
+                    "customer_problem": "The local model path is not fully ready in this preview state.",
+                    "recovery_action": "Use deterministic fixture-backed capabilities or follow setup guidance before claiming local model readiness.",
+                }
+            )
+        return {
+            "schema_version": "agentos-product-layer-recovery-center.v1",
+            "surface": "Recovery Center",
+            "state": "attention" if blockers else "ready",
+            "customer_message": "Recovery Center turns missing proof into clear next actions without overstating what Docker has proven.",
+            "items": recovery_items,
+            "blockers": blockers,
+            "proof": {
+                "docker_preview_ready": True,
+                "boot_or_iso_proof_claimed": False,
+                "live_oauth_claimed": False,
+                "live_browser_proof_claimed": False,
+                "release_trust_claimed": False,
+                "hardware_attestation_claimed": False,
+                "customer_facing_recovery_ready": True,
             },
         }
 
@@ -353,6 +424,7 @@ def _render_page(app: DockerPreviewApp) -> str:
     activity = status.get("activity", {}).get("events", [])
     product_layer = status.get("product_layer", {})
     work_inbox = product_layer.get("work_inbox", {}) if isinstance(product_layer.get("work_inbox"), dict) else {}
+    recovery_center = product_layer.get("recovery_center", {}) if isinstance(product_layer.get("recovery_center"), dict) else {}
     features = product_layer.get("features", []) if isinstance(product_layer.get("features"), list) else []
     blockers = product_layer.get("blockers", []) if isinstance(product_layer.get("blockers"), list) else []
     llm_state = adapters.get("llm", {}).get("state", "unknown")
@@ -390,6 +462,15 @@ def _render_page(app: DockerPreviewApp) -> str:
         "</li>"
         for blocker in blockers
     ) or "<li>No product-layer blockers in this Docker preview.</li>"
+    recovery_item_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Recovery item'))))}</b> "
+        f"{html.escape(str(item.get('customer_problem', '')))} "
+        f"<em>{html.escape(str(item.get('recovery_action', '')))}</em>"
+        "</li>"
+        for item in recovery_center.get("items", [])
+        if isinstance(item, dict)
+    ) or blocker_html
     inbox_source_html = "\n".join(
         "<section class='feature'>"
         f"<div><h3>{html.escape(str(source.get('label', 'Inbox source')))}</h3>"
@@ -455,7 +536,9 @@ def _render_page(app: DockerPreviewApp) -> str:
     </div>
     <div class="panel">
       <h2>Recovery Center</h2>
-      <ul class="blockers">{blocker_html}</ul>
+      <p class="lead">{html.escape(str(recovery_center.get('customer_message', 'Missing proof is listed below.')))}</p>
+      <ul class="blockers">{recovery_item_html}</ul>
+      <p><a href="/api/recovery">recovery JSON</a></p>
     </div>
   </section>
   <section class="product">
@@ -549,6 +632,8 @@ def make_handler(app: DockerPreviewApp) -> type[BaseHTTPRequestHandler]:
                 _json_response(self, app.product_layer())
             elif path == "/api/work-inbox":
                 _json_response(self, app.work_inbox())
+            elif path == "/api/recovery":
+                _json_response(self, app.recovery_center())
             elif path == "/api/activity":
                 _json_response(self, app.activity())
             else:

@@ -38,6 +38,7 @@ curl -fsS "http://127.0.0.1:$PORT/" > "$TMP_DIR/home.html"
 curl -fsS "http://127.0.0.1:$PORT/api/status" > "$TMP_DIR/status.json"
 curl -fsS "http://127.0.0.1:$PORT/api/product" > "$TMP_DIR/product.json"
 curl -fsS "http://127.0.0.1:$PORT/api/work-inbox" > "$TMP_DIR/work-inbox.json"
+curl -fsS "http://127.0.0.1:$PORT/api/recovery" > "$TMP_DIR/recovery.json"
 curl -fsS \
   -H 'Content-Type: application/json' \
   -d '{"message":"hi"}' \
@@ -53,6 +54,7 @@ root = Path(sys.argv[1])
 status = json.loads((root / "status.json").read_text())
 product = json.loads((root / "product.json").read_text())
 work_inbox = json.loads((root / "work-inbox.json").read_text())
+recovery = json.loads((root / "recovery.json").read_text())
 prompt = json.loads((root / "prompt.json").read_text())
 activity = json.loads((root / "activity.json").read_text())
 home = (root / "home.html").read_text()
@@ -66,6 +68,7 @@ assert product["proof"]["docker_main_try_path"] is True
 assert product["proof"]["boot_or_iso_proof_claimed"] is False
 assert product["proof"]["customer_facing_summary_ready"] is True
 assert product["work_inbox"]["schema_version"] == "agentos-product-layer-work-inbox.v1"
+assert product["recovery_center"]["schema_version"] == "agentos-product-layer-recovery-center.v1"
 assert {feature["id"] for feature in product["features"]} >= {
     "runtime_home",
     "work_inbox",
@@ -80,8 +83,24 @@ assert work_inbox["proof"]["external_mutation_claimed"] is False
 assert work_inbox["proof"]["live_oauth_claimed"] is False
 assert {source["id"] for source in work_inbox["sources"]} >= {"native_fixture", "maildir", "gmail", "calendar"}
 assert {workflow["id"] for workflow in work_inbox["workflows"]} >= {"inbox_summary", "draft_preparation", "search_and_triage"}
+assert recovery["schema_version"] == "agentos-product-layer-recovery-center.v1"
+assert recovery["proof"]["docker_preview_ready"] is True
+assert recovery["proof"]["customer_facing_recovery_ready"] is True
+assert recovery["proof"]["boot_or_iso_proof_claimed"] is False
+assert recovery["proof"]["live_oauth_claimed"] is False
+assert recovery["proof"]["live_browser_proof_claimed"] is False
+assert recovery["proof"]["release_trust_claimed"] is False
+assert recovery["proof"]["hardware_attestation_claimed"] is False
+assert {item["id"] for item in recovery["items"]} >= {
+    "vm-iso-observed-proof",
+    "live-oauth-proof",
+    "live-browser-proof",
+    "release-trust-proof",
+    "attestation-proof",
+}
 assert "Runtime Home" in home
 assert "Recovery Center" in home
+assert "recovery JSON" in home
 assert "Work Inbox" in home
 assert "Inbox Workflows" in home
 assert prompt["ok"] is True

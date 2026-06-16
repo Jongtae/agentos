@@ -125,6 +125,7 @@ class DockerPreviewApp:
         activity_payload = activity or build_activity_feed_payload(self.workspace, limit=12)
         adapters = setup_payload.get("adapters", {}) if isinstance(setup_payload.get("adapters"), dict) else {}
         work_inbox = self.work_inbox(setup=setup_payload)
+        activity_timeline = self.activity_timeline(activity=activity_payload)
         recovery_center = self.recovery_center(setup=setup_payload)
         evidence_dashboard = self.evidence_dashboard(setup=setup_payload, activity=activity_payload)
         blockers = recovery_center.get("blockers", [])
@@ -166,6 +167,7 @@ class DockerPreviewApp:
             ],
             "blockers": blockers,
             "work_inbox": work_inbox,
+            "activity_timeline": activity_timeline,
             "recovery_center": recovery_center,
             "evidence_dashboard": evidence_dashboard,
             "proof": {
@@ -174,6 +176,50 @@ class DockerPreviewApp:
                 "live_oauth_claimed": False,
                 "live_browser_proof_claimed": False,
                 "customer_facing_summary_ready": True,
+            },
+        }
+
+    def activity_timeline(self, *, activity: dict | None = None) -> dict:
+        activity_payload = activity or build_activity_feed_payload(self.workspace, limit=40)
+        raw_events = activity_payload.get("events", []) if isinstance(activity_payload.get("events"), list) else []
+        timeline_events = []
+        for event in raw_events[-12:]:
+            if not isinstance(event, dict):
+                continue
+            timeline_events.append(
+                {
+                    "id": str(event.get("request_id") or event.get("timestamp_utc") or event.get("kind") or "event"),
+                    "time": str(event.get("time", "")),
+                    "kind": str(event.get("kind", "")),
+                    "label": str(event.get("label", "AgentOS")),
+                    "message": str(event.get("human_message", "")),
+                    "intent": str(event.get("intent", "")),
+                    "capability": str(event.get("capability", "")),
+                    "request_id": str(event.get("request_id", "")),
+                }
+            )
+        return {
+            "schema_version": "agentos-product-layer-activity-timeline.v1",
+            "surface": "Activity Timeline",
+            "state": "ready" if activity_payload.get("activity_feed_ready") else "degraded",
+            "customer_message": "Activity Timeline shows what AgentOS received, classified, ran, completed, blocked, or recovered in this runtime.",
+            "events": timeline_events,
+            "summary": {
+                "activity_feed_ready": bool(activity_payload.get("activity_feed_ready")),
+                "event_count": int(activity_payload.get("event_count", len(raw_events)) or 0),
+                "latest_human_message": str(
+                    activity_payload.get("summary", {}).get("latest_human_message", "")
+                    if isinstance(activity_payload.get("summary"), dict)
+                    else ""
+                ),
+            },
+            "records": activity_payload.get("artifacts", {}) if isinstance(activity_payload.get("artifacts"), dict) else {},
+            "proof": {
+                "docker_preview_ready": True,
+                "user_visible_records_ready": True,
+                "external_app_execution_claimed": False,
+                "live_provider_proof_claimed": False,
+                "customer_facing_timeline_ready": True,
             },
         }
 
@@ -510,6 +556,7 @@ def _render_page(app: DockerPreviewApp) -> str:
     activity = status.get("activity", {}).get("events", [])
     product_layer = status.get("product_layer", {})
     work_inbox = product_layer.get("work_inbox", {}) if isinstance(product_layer.get("work_inbox"), dict) else {}
+    activity_timeline = product_layer.get("activity_timeline", {}) if isinstance(product_layer.get("activity_timeline"), dict) else {}
     recovery_center = product_layer.get("recovery_center", {}) if isinstance(product_layer.get("recovery_center"), dict) else {}
     evidence_dashboard = product_layer.get("evidence_dashboard", {}) if isinstance(product_layer.get("evidence_dashboard"), dict) else {}
     features = product_layer.get("features", []) if isinstance(product_layer.get("features"), list) else []
@@ -573,6 +620,16 @@ def _render_page(app: DockerPreviewApp) -> str:
         for workflow in work_inbox.get("workflows", [])
         if isinstance(workflow, dict)
     ) or "<li>No Work Inbox workflows are available yet.</li>"
+    timeline_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(event.get('label', 'AgentOS')))}</b> "
+        f"<span>{html.escape(str(event.get('time', '')))}</span> "
+        f"{html.escape(str(event.get('message', '')))} "
+        f"<em>{html.escape(str(event.get('intent', '') or event.get('capability', '')))}</em>"
+        "</li>"
+        for event in activity_timeline.get("events", [])
+        if isinstance(event, dict)
+    ) or "<li>No activity yet. Run a prompt below.</li>"
     evidence_html = "\n".join(
         "<li>"
         f"<b>{html.escape(str(item.get('label', item.get('id', 'Evidence'))))}</b> "
@@ -655,6 +712,22 @@ def _render_page(app: DockerPreviewApp) -> str:
       <h2>Inbox Workflows</h2>
       <ul>{inbox_workflow_html}</ul>
       <p><a href="/api/work-inbox">work inbox JSON</a></p>
+    </div>
+  </section>
+  <section class="product">
+    <div class="panel">
+      <h2>Activity Timeline</h2>
+      <p class="lead">{html.escape(str(activity_timeline.get('customer_message', 'Recent runtime activity is available below.')))}</p>
+      <ul>{timeline_html}</ul>
+    </div>
+    <div class="panel">
+      <h2>Timeline Proof</h2>
+      <ul>
+        <li><b>Records</b> {html.escape(str(activity_timeline.get('records', {}).get('os_events_jsonl', '') if isinstance(activity_timeline.get('records'), dict) else ''))}</li>
+        <li><b>External app execution</b> not claimed</li>
+        <li><b>Live provider proof</b> not claimed</li>
+      </ul>
+      <p><a href="/api/timeline">timeline JSON</a></p>
     </div>
   </section>
   <section class="product">
@@ -748,6 +821,8 @@ def make_handler(app: DockerPreviewApp) -> type[BaseHTTPRequestHandler]:
                 _json_response(self, app.product_layer())
             elif path == "/api/work-inbox":
                 _json_response(self, app.work_inbox())
+            elif path == "/api/timeline":
+                _json_response(self, app.activity_timeline())
             elif path == "/api/recovery":
                 _json_response(self, app.recovery_center())
             elif path == "/api/evidence":

@@ -26,6 +26,7 @@ http://localhost:8787
 - setup/status can report local runtime and adapter readiness
 - the customer-facing Runtime Home can summarize product-layer readiness
 - the Work Inbox product surface can summarize read-first inbox sources without live-provider claims
+- the Activity Timeline product surface can summarize runtime events and user-visible records without claiming external app execution
 - the Recovery Center product surface can turn missing proof into customer-facing next actions without claiming observed VM/ISO, live OAuth, browser, release, or attestation evidence
 - the Evidence Dashboard product surface can separate observed Docker/local proof from explicit external-proof non-claims
 - prompt intake can reach the same intent classification path used by AgentOS
@@ -87,6 +88,7 @@ command that produces:
 - a setup/status report
 - a Runtime Home product-layer summary
 - a Work Inbox read-first product-layer summary
+- an Activity Timeline product-layer summary
 - a Recovery Center product-layer summary
 - an Evidence Dashboard product-layer summary
 - at least one classified prompt

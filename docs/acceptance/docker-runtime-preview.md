@@ -29,7 +29,7 @@ http://localhost:8787
 - Docker Onboarding Status is visible.
 - `/api/onboarding` exposes quickstart steps, a readiness checklist, preview entrypoints, validation smokes, and proof non-claims without requiring an API key.
 - Guided Demo Journey is visible.
-- `/api/demo-journey` exposes the customer path across Runtime Home, Work Inbox, prompt execution, Activity Timeline, Evidence Dashboard, and Recovery Center without claiming VM/ISO, live OAuth, browser, release, external mutation, or hardware attestation proof.
+- `/api/demo-journey` exposes the customer path across Runtime Home, Work Inbox, prompt execution, Activity Timeline, Evidence Dashboard, and Recovery Center with expected success and blocked-until-observed outcomes, without claiming VM/ISO, live OAuth, browser, release, external mutation, or hardware attestation proof.
 - A customer-facing Runtime Home is visible.
 - Work Inbox, Activity Timeline, Recovery Center, and Evidence Dashboard states are summarized.
 - `/api/work-inbox` exposes read-first inbox sources, workflows, live blockers, and mutation non-claims.
@@ -130,7 +130,7 @@ scripts/smoke_docker_guided_demo_journey.sh
 ```
 
 This gate starts the Python Docker runtime preview and verifies that
-`/api/demo-journey` exposes the customer path through runtime readiness,
-read-first work, prompt execution, activity narration, evidence, and recovery
-while preserving VM/ISO, live OAuth, browser, release, mutation, and attestation
-non-claims.
+`/api/demo-journey` exposes the customer path and expected outcomes through
+runtime readiness, read-first work, prompt execution, activity narration,
+evidence, and recovery while preserving VM/ISO, live OAuth, browser, release,
+mutation, and attestation non-claims.

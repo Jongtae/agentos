@@ -85,8 +85,9 @@ The detailed Phase 2 roadmap is tracked in
   - Completion goal: turn the completed Docker Product Layer surfaces into a customer-readable guided demo path that explains what to inspect first, what proof has been observed locally, and which VM/ISO, live OAuth, browser, release, mutation, and hardware attestation claims remain blocked.
   - Validation plan: `scripts/smoke_docker_guided_demo_journey.sh`, `scripts/smoke_docker_product_layer_completion.sh`, `scripts/smoke_docker_runtime_preview_python.sh`, `docker compose config`, and the Phase 2 golden demo runner.
   - Exit condition: complete when the Docker preview exposes a guided journey from Runtime Home through Work Inbox, prompt execution, Activity Timeline, Evidence Dashboard, and Recovery Center; README, TASKS, roadmap, Docker acceptance, and golden smokes all reference that journey; and non-claims remain explicit for VM/ISO, live OAuth, browser, release, external mutation, and hardware attestation proof.
-  - Active task: P2-98.
+  - Active task: P2-99.
   - First slice: P2-98 adds `agentos-product-layer-guided-demo-journey.v1` through `/api/demo-journey`, a browser Guided Demo Journey panel, and `scripts/smoke_docker_guided_demo_journey.sh`.
+  - Current slice: P2-99 adds expected success and blocked-until-observed outcomes to the guided journey contract, browser panel, and Docker-safe smoke gates.
   - Residual blockers: VM/ISO boot/rejoin proof, live OAuth, live browser evidence, release artifacts/signing, Docker daemon observed proof, and hardware attestation remain unclaimed until observed evidence exists.
   - Advances: Docker-first public usability, runtime proof truthfulness, OS-native runtime defaults.
 

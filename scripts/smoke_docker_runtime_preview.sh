@@ -124,6 +124,11 @@ assert demo_journey["proof"]["customer_guided_journey_ready"] is True
 assert demo_journey["proof"]["boot_or_iso_proof_claimed"] is False
 assert demo_journey["proof"]["live_oauth_claimed"] is False
 assert demo_journey["proof"]["external_mutation_claimed"] is False
+assert {item["id"] for item in demo_journey["expected_outcomes"]} >= {
+    "runtime_reachable",
+    "proof_boundaries_visible",
+    "recovery_next_steps_visible",
+}
 assert onboarding["proof"]["docker_preview_ready"] is True
 assert onboarding["proof"]["requires_api_key_for_basic_preview"] is False
 assert onboarding["proof"]["boot_or_iso_proof_claimed"] is False

@@ -91,6 +91,13 @@ for key, (filename, schema, label) in surfaces.items():
     assert label in home, label
 
 assert product["onboarding_status"]["validation"]["onboarding_status_contract_smoke"] == "scripts/smoke_docker_onboarding_status_contract.sh"
+assert {item["id"] for item in product["guided_demo_journey"]["expected_outcomes"]} >= {
+    "runtime_reachable",
+    "read_first_work_visible",
+    "activity_and_records_visible",
+    "proof_boundaries_visible",
+    "recovery_next_steps_visible",
+}
 assert {item["id"] for item in product["onboarding_status"]["readiness_checklist"]} >= {
     "quickstart_documented",
     "preview_entrypoints_available",

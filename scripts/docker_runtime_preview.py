@@ -273,12 +273,55 @@ class DockerPreviewApp:
                 "proof_boundary": "Unobserved VM/ISO, live OAuth, browser, release, mutation, and hardware attestation claims stay blocked.",
             },
         ]
+        expected_outcomes = [
+            {
+                "id": "runtime_reachable",
+                "label": "Runtime is reachable",
+                "kind": "success",
+                "surface": "Runtime Home",
+                "expected_result": "The preview opens and reports Docker/local runtime readiness.",
+                "customer_interpretation": "AgentOS can be tried through the local Product Layer preview.",
+            },
+            {
+                "id": "read_first_work_visible",
+                "label": "Read-first work is visible",
+                "kind": "success",
+                "surface": "Work Inbox",
+                "expected_result": "Fixture, Maildir, Gmail, and Calendar sources are listed with safe read-first boundaries.",
+                "customer_interpretation": "AgentOS shows how work intake will be owned before live credentials are connected.",
+            },
+            {
+                "id": "activity_and_records_visible",
+                "label": "Activity and records are visible",
+                "kind": "success",
+                "surface": "Activity Timeline",
+                "expected_result": "Prompt handling produces customer-readable activity and user-owned record paths.",
+                "customer_interpretation": "AgentOS narrates execution instead of hiding work behind raw logs.",
+            },
+            {
+                "id": "proof_boundaries_visible",
+                "label": "Proof boundaries are visible",
+                "kind": "blocked_until_observed",
+                "surface": "Evidence Dashboard",
+                "expected_result": "VM/ISO, live OAuth, browser, release, mutation, and hardware attestation claims remain explicit non-claims.",
+                "customer_interpretation": "Docker proof is useful but is not being oversold as OS, live-provider, release, or device trust proof.",
+            },
+            {
+                "id": "recovery_next_steps_visible",
+                "label": "Recovery next steps are visible",
+                "kind": "blocked_until_observed",
+                "surface": "Recovery Center",
+                "expected_result": "Missing credentials, VM/ISO evidence, release evidence, browser evidence, and attestation evidence are translated into next actions.",
+                "customer_interpretation": "AgentOS tells the customer what evidence is still needed before stronger claims can be made.",
+            },
+        ]
         return {
             "schema_version": "agentos-product-layer-guided-demo-journey.v1",
             "surface": "Guided Demo Journey",
             "state": "ready",
             "customer_message": "Follow this Docker-safe journey to understand AgentOS Product Layer readiness without confusing local preview proof for OS, live-provider, release, or hardware proof.",
             "stages": stages,
+            "expected_outcomes": expected_outcomes,
             "validation": {
                 "guided_demo_journey_smoke": "scripts/smoke_docker_guided_demo_journey.sh",
                 "product_layer_completion_smoke": "scripts/smoke_docker_product_layer_completion.sh",
@@ -1163,6 +1206,15 @@ def _render_page(app: DockerPreviewApp) -> str:
         for item in guided_demo_journey.get("stages", [])
         if isinstance(item, dict)
     ) or "<li>No guided demo journey is configured.</li>"
+    guided_demo_outcome_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Expected outcome'))))}</b> "
+        f"{html.escape(str(item.get('expected_result', '')))} "
+        f"<em>{html.escape(str(item.get('kind', 'unknown')))}</em>"
+        "</li>"
+        for item in guided_demo_journey.get("expected_outcomes", [])
+        if isinstance(item, dict)
+    ) or "<li>No guided demo expected outcomes are configured.</li>"
     recovery_item_html = "\n".join(
         "<li>"
         f"<b>{html.escape(str(item.get('label', item.get('id', 'Recovery item'))))}</b> "
@@ -1306,6 +1358,8 @@ def _render_page(app: DockerPreviewApp) -> str:
       <h2>Guided Demo Journey</h2>
       <p class="lead">{html.escape(str(guided_demo_journey.get('customer_message', 'A guided demo journey is available below.')))}</p>
       <ul>{guided_demo_stage_html}</ul>
+      <h3>Expected Outcomes</h3>
+      <ul>{guided_demo_outcome_html}</ul>
     </div>
     <div class="panel">
       <h2>Journey Proof</h2>

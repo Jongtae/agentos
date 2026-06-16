@@ -1,6 +1,6 @@
 # Calendar Read-only Capability Contract
 
-Status: Planned fixture-backed contract
+Status: Fixture-backed contract with runtime status surface
 
 Calendar is an everyday-work capability candidate, but Phase 2 must start with
 read-only behavior. The public contract is intentionally narrower than a live
@@ -44,3 +44,7 @@ creating, cancelling, or inviting, the result must be blocked or clarified.
 `scripts/smoke_phase2_run_cli.sh` verifies that the Phase 2 CLI can route a
 calendar prompt through the same user-owned record and activity surfaces as the
 other everyday-work capabilities.
+
+`phase2-run --message "status"` attaches `agentos-calendar-readonly-status.v1`
+so operators can see fixture readiness, permission level, live OAuth blockers,
+and mutation non-claims before any real Calendar adapter is promoted.

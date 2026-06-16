@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-33] Define capability permission boundary contract`
+- `[P2-34] Enforce capability permission outcomes in Phase 2 smokes`
 
 Runtime impact statement:
 
-- This task defines the Phase 2 capability permission boundary so live adapters and OS-native actions declare approval, denial, recovery, and record behavior before capability expansion.
+- This task makes Phase 2 capability results carry smoke-verified permission levels, blocked outcomes, recovery hints, and secret-redaction proof before live adapter expansion.
 
 Current autonomous completion loop:
 
@@ -105,6 +105,7 @@ Recommended Phase 2 tasks:
 - VM/ISO proof now has a preflight smoke and blocker contract; observed boot, reboot/recovery, and managed runtime rejoin still require a real VM run before signoff.
 - Gmail live read-only proof now has a manual acceptance pack and blocker capture; automated smokes still avoid real user credentials.
 - VM/ISO proof remains an explicit blocker until a VM run is observed and recorded.
+- Capability result smokes now enforce permission levels and blocked outcomes for safe local reads, missing external setup, and destructive unsupported requests.
 
 ## Validation Standards
 

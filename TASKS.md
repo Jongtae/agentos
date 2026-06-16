@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-85] Add Docker Recovery Center product surface`
+- `[P2-86] Add Docker Evidence Dashboard product surface`
 
 Runtime impact statement:
 
-- This task promotes Recovery Center from a Runtime Home card into a Docker product surface that turns missing VM/ISO, live OAuth, browser, release, attestation, and setup proof into customer-facing recovery actions without overstating Docker proof.
+- This task promotes Evidence Dashboard from a Runtime Home card into a Docker product surface that separates observed Docker/local proof from VM/ISO, live OAuth, browser, release-trust, and hardware-attestation non-claims.
 
 Current autonomous completion loop:
 
@@ -99,6 +99,7 @@ Recommended Phase 2 tasks:
 - Docker preview now exposes `agentos-product-layer-runtime-home.v1` through `/api/product` and the browser Runtime Home without claiming VM/ISO boot proof.
 - Docker preview now exposes `agentos-product-layer-work-inbox.v1` through `/api/work-inbox` and the browser Work Inbox without claiming live OAuth, browser-default behavior, or external mutations.
 - Docker preview now exposes `agentos-product-layer-recovery-center.v1` through `/api/recovery` and the browser Recovery Center without claiming VM/ISO, live OAuth, browser, release-trust, or hardware-attestation proof.
+- Docker preview now exposes `agentos-product-layer-evidence-dashboard.v1` through `/api/evidence` and the browser Evidence Dashboard so customers can distinguish observed Docker/local proof from explicit non-claims.
 - Gmail setup is exposed through `agentos-kernelctl gmail-setup --serve-http`; live Gmail remains read-only and requires explicit user OAuth credentials.
 - Phase 2 closeout is recorded in `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`.
 - Practical local/Docker-safe proof is aggregated by `scripts/smoke_phase2_golden_demo.sh`.

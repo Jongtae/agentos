@@ -82,11 +82,12 @@ The detailed Phase 2 roadmap is tracked in
 
 - `docker-proof-promotion-center-epic` — [EPIC: Stage 3 / Phase 2 Docker proof promotion center](https://github.com/Jongtae/agentos/issues/247)
   - Milestone: Docker proof promotion center
-  - Completion goal: give customers one Docker-safe claim-promotion decision surface that explains which Docker-local Product Layer claims can be described now, which Docker daemon, VM/ISO, live OAuth, browser, release, mutation, and attestation claims require sanitized observed evidence, and which source surfaces support each decision.
+  - Completion goal: give customers one Docker-safe claim-promotion decision surface that explains which Docker-local Product Layer claims can be described now, which validation commands and source surfaces should be shared, which Docker daemon, VM/ISO, live OAuth, browser, release, mutation, and attestation claims require sanitized observed evidence, and which source surfaces support each decision.
   - Validation plan: `scripts/smoke_docker_proof_promotion_center.sh`, `scripts/smoke_docker_product_layer_completion.sh`, `scripts/smoke_docker_runtime_preview_python.sh`, `docker compose config`, and the Phase 2 golden demo runner.
   - Exit condition: complete when the Docker preview exposes `/api/proof-promotion`, the browser Runtime Home links a Proof Promotion Center panel, README/TASKS/roadmap/Docker acceptance reference the proof promotion center, golden smokes include the proof promotion gate, and non-claims remain explicit for Docker daemon observed proof, VM/ISO, live OAuth, browser, release, external mutation, and hardware attestation proof.
-  - Active task: P2-109.
+  - Active task: P2-110.
   - First slice: P2-109 adds `agentos-product-layer-proof-promotion-center.v1` through `/api/proof-promotion`, a browser Proof Promotion Center panel, and `scripts/smoke_docker_proof_promotion_center.sh`.
+  - Product-layer follow-up: P2-110 adds a Proof Sharing Checklist to `/api/proof-promotion`, the browser Proof Promotion Center panel, and Docker-safe smokes so customers know which Docker-local statements are share-ready and which stronger claims remain blocked.
   - Residual blockers: Docker daemon observed proof, VM/ISO boot/rejoin proof, live OAuth, live browser evidence, release artifacts/signing, external mutation proof, and hardware attestation remain unclaimed until observed evidence exists.
   - Advances: Docker-first public usability, runtime proof truthfulness, recovery, OS-native runtime defaults.
 

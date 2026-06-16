@@ -141,6 +141,18 @@ assert {item["id"] for item in product["proof_promotion_center"]["promotion_deci
     "live-provider-readonly",
     "live-browser-release-attestation",
 }
+proof_sharing_states = {
+    item["id"]: item["state"]
+    for item in product["proof_promotion_center"]["sharing_checklist"]
+}
+assert proof_sharing_states == {
+    "describe_docker_local_product_layer": "share_ready",
+    "include_validation_commands": "share_ready",
+    "attach_source_surfaces": "share_ready",
+    "withhold_stronger_claims": "blocked_until_observed_evidence",
+}
+assert "Proof Sharing Checklist" in home
+assert "Withhold stronger claims" in home
 assert {item["id"] for item in product["customer_handoff_bundle"]["inspect_surfaces"]} >= {
     "runtime_home",
     "onboarding_status",

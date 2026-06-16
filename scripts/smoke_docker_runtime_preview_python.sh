@@ -361,6 +361,15 @@ assert {item["id"] for item in proof_promotion["promotion_decisions"]} >= {
     "live-provider-readonly",
     "live-browser-release-attestation",
 }
+assert {
+    item["id"]: item["state"]
+    for item in proof_promotion["sharing_checklist"]
+} == {
+    "describe_docker_local_product_layer": "share_ready",
+    "include_validation_commands": "share_ready",
+    "attach_source_surfaces": "share_ready",
+    "withhold_stronger_claims": "blocked_until_observed_evidence",
+}
 assert "Runtime Home" in home
 assert "Docker Onboarding Status" in home
 assert "onboarding JSON" in home
@@ -390,6 +399,8 @@ assert "Handoff Checklist" in home
 assert "Handoff Report" in home
 assert "customer handoff JSON" in home
 assert "Proof Promotion Center" in home
+assert "Proof Sharing Checklist" in home
+assert "Withhold stronger claims" in home
 assert "proof promotion JSON" in home
 assert prompt["ok"] is True
 assert prompt["intent"] == "greeting", prompt

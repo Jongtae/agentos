@@ -80,8 +80,13 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
-No completion epic is currently active. The next loop should inspect Later
-Tracks and GitHub milestones before opening a new milestone-backed epic.
+- `public-preview-operations-epic` — [EPIC: Public preview operations](https://github.com/Jongtae/agentos/issues/100)
+  - Milestone: Phase 2: Local-first Codex runtime loop
+  - Completion goal: define the public preview operating contract for Docker/local runtime testing, manual proof blockers, release non-claims, and safe preview promotion.
+  - Exit condition: the epic has a documented and smoke-tested public preview operations checklist that distinguishes automated local/Docker proof, manual credential/VM blockers, release non-claims, and next safe preview promotion criteria.
+  - Active task: [P2-47] Define public preview operations checklist.
+  - First checklist: `docs/operations/public-preview-operations.md` defines automated local proof, manual proof blockers, non-claims, and promotion gates.
+  - Advances: runtime proof truthfulness, public preview operations, mediation cost reduction, OS-native runtime defaults.
 
 ## Completed Completion Epics
 

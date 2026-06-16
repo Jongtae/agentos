@@ -80,11 +80,16 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
+- No active completion epic. The next loop should return to the Later Tracks list and create a new milestone-backed epic only when it can define a customer-facing completion goal, validation plan, and exit condition.
+
+## Completed Completion Epics
+
 - `broader-app-inbox-workflow-promotion-epic` — [EPIC: Broader app inbox workflow promotion](https://github.com/Jongtae/agentos/issues/184)
   - Milestone: Phase 2: Local-first Codex runtime loop
   - Completion goal: define and smoke-test the broader app/inbox workflow promotion gate so AgentOS can choose the next inbox/app capability from the graduation registry without expanding browser automation or external app mediation as the default path.
-  - Exit condition: complete when `docs/architecture/inbox-workflow-promotion-boundary.md`, `scripts/smoke_inbox_workflow_promotion_boundary.sh`, golden runner integration, README/TASKS/roadmap updates, and registry linkage preserve local/mock proof, user-owned records, live-proof blockers, mutation non-claims, and browser non-default behavior.
-  - Active task: P2-92.
+  - Exit condition: completed by `docs/architecture/inbox-workflow-promotion-boundary.md`, `scripts/smoke_inbox_workflow_promotion_boundary.sh`, golden runner integration, registry linkage, Docker Product Layer surfaces from P2-83 through P2-92, `scripts/smoke_docker_product_layer_completion.sh`, and README/TASKS/roadmap updates preserving local/mock proof, user-owned records, live-proof blockers, mutation non-claims, and browser non-default behavior.
+  - Closed issue: #184.
+  - Completed tasks: P2-83, P2-84, and P2-87 through P2-93.
   - Product-layer follow-up: P2-83 makes Docker preview the default customer-facing Runtime Home for this epic.
   - Product-layer follow-up: P2-84 promotes Work Inbox into a Docker product surface with read-first sources, workflows, live blockers, and mutation non-claims.
   - Product-layer follow-up: P2-87 promotes Activity Timeline into a Docker product surface with customer-readable runtime events, user-visible records, and external-app/live-provider non-claims.
@@ -93,12 +98,11 @@ The detailed Phase 2 roadmap is tracked in
   - Product-layer follow-up: P2-90 promotes Observed Proof Uploader into a Docker product surface that defines future evidence requirements and mock submission fields without accepting secrets or auto-promoting claims.
   - Product-layer follow-up: P2-91 promotes Release Trust Panel into a Docker product surface that separates local release preflight from real artifact, checksum, signing, publication, and VM/ISO release proof.
   - Product-layer follow-up: P2-92 promotes Attestation Status into a Docker product surface that shows Secure Boot, TPM/PCR, event-log, IMA, and hardware attestation blockers without claiming Docker proves device trust.
+  - Product-layer closeout: P2-93 adds the Docker Product Layer completion gate that verifies Runtime Home, Work Inbox, Activity Timeline, Capability Store, Approval Center, Observed Proof Uploader, Release Trust Panel, Attestation Status, Recovery Center, and Evidence Dashboard together.
   - Product-layer follow-up: P2-85 promotes Recovery Center into a Docker product surface with customer-facing recovery actions for VM/ISO, live OAuth, browser, release, attestation, and setup blockers.
   - Product-layer follow-up: P2-86 promotes Evidence Dashboard into a Docker product surface that separates observed Docker/local proof from explicit VM/ISO, live OAuth, browser, release, and attestation non-claims.
   - Residual blockers: live Gmail/Calendar OAuth, real user Maildir proof, browser acceptance evidence, production sync, retention/compliance behavior, and external mutations remain unclaimed until observed proof and later permission models exist.
   - Advances: capability ownership, mediation cost reduction, OS-native runtime defaults, runtime proof truthfulness.
-
-## Completed Completion Epics
 
 - `browser-fallback-observed-proof-acceptance-epic` — [EPIC: Browser fallback observed proof acceptance](https://github.com/Jongtae/agentos/issues/179)
   - Milestone: Phase 2: Local-first Codex runtime loop

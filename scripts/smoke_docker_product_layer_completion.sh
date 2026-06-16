@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT_DIR"
+
+TMP_DIR="$(mktemp -d)"
+PORT="${AGENTOS_DOCKER_PRODUCT_LAYER_SMOKE_PORT:-18788}"
+PID=""
+cleanup() {
+  if [ -n "$PID" ]; then
+    kill "$PID" >/dev/null 2>&1 || true
+    wait "$PID" >/dev/null 2>&1 || true
+  fi
+  rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT
+
+AGENTOS_DOCKER_TELEGRAM_POLLING=false \
+PYTHONPATH="$ROOT_DIR/src:$ROOT_DIR/scripts:$ROOT_DIR" \
+python3 scripts/docker_runtime_preview.py \
+  --host 127.0.0.1 \
+  --port "$PORT" \
+  --workspace "$TMP_DIR/workspace" \
+  --user-root "$TMP_DIR/user" \
+  > "$TMP_DIR/server.log" 2>&1 &
+PID="$!"
+
+for _ in $(seq 1 20); do
+  if curl -fsS "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.5
+done
+
+curl -fsS "http://127.0.0.1:$PORT/healthz" >/dev/null
+curl -fsS "http://127.0.0.1:$PORT/" > "$TMP_DIR/home.html"
+curl -fsS "http://127.0.0.1:$PORT/api/product" > "$TMP_DIR/product.json"
+curl -fsS "http://127.0.0.1:$PORT/api/work-inbox" > "$TMP_DIR/work-inbox.json"
+curl -fsS "http://127.0.0.1:$PORT/api/timeline" > "$TMP_DIR/timeline.json"
+curl -fsS "http://127.0.0.1:$PORT/api/capabilities" > "$TMP_DIR/capabilities.json"
+curl -fsS "http://127.0.0.1:$PORT/api/approvals" > "$TMP_DIR/approvals.json"
+curl -fsS "http://127.0.0.1:$PORT/api/proofs" > "$TMP_DIR/proofs.json"
+curl -fsS "http://127.0.0.1:$PORT/api/release-trust" > "$TMP_DIR/release-trust.json"
+curl -fsS "http://127.0.0.1:$PORT/api/attestation" > "$TMP_DIR/attestation.json"
+curl -fsS "http://127.0.0.1:$PORT/api/recovery" > "$TMP_DIR/recovery.json"
+curl -fsS "http://127.0.0.1:$PORT/api/evidence" > "$TMP_DIR/evidence.json"
+
+python3 - "$TMP_DIR" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+home = (root / "home.html").read_text()
+product = json.loads((root / "product.json").read_text())
+
+surfaces = {
+    "work_inbox": ("work-inbox.json", "agentos-product-layer-work-inbox.v1", "Work Inbox"),
+    "activity_timeline": ("timeline.json", "agentos-product-layer-activity-timeline.v1", "Activity Timeline"),
+    "capability_store": ("capabilities.json", "agentos-product-layer-capability-store.v1", "Capability Store"),
+    "approval_center": ("approvals.json", "agentos-product-layer-approval-center.v1", "Approval Center"),
+    "observed_proof_uploader": ("proofs.json", "agentos-product-layer-observed-proof-uploader.v1", "Observed Proof Uploader"),
+    "release_trust_panel": ("release-trust.json", "agentos-product-layer-release-trust-panel.v1", "Release Trust Panel"),
+    "attestation_status": ("attestation.json", "agentos-product-layer-attestation-status.v1", "Attestation Status"),
+    "recovery_center": ("recovery.json", "agentos-product-layer-recovery-center.v1", "Recovery Center"),
+    "evidence_dashboard": ("evidence.json", "agentos-product-layer-evidence-dashboard.v1", "Evidence Dashboard"),
+}
+
+assert product["schema_version"] == "agentos-product-layer-runtime-home.v1"
+assert product["proof"]["docker_main_try_path"] is True
+assert product["proof"]["boot_or_iso_proof_claimed"] is False
+assert product["proof"]["live_oauth_claimed"] is False
+assert product["proof"]["live_browser_proof_claimed"] is False
+
+feature_ids = {feature["id"] for feature in product["features"]}
+expected_feature_ids = {"runtime_home", *surfaces.keys()}
+assert expected_feature_ids <= feature_ids, sorted(expected_feature_ids - feature_ids)
+assert "Runtime Home" in home
+
+for key, (filename, schema, label) in surfaces.items():
+    embedded = product[key]
+    endpoint = json.loads((root / filename).read_text())
+    assert embedded["schema_version"] == schema, key
+    assert endpoint["schema_version"] == schema, key
+    assert label in home, label
+
+non_claims = {
+    "boot_or_iso_proof_claimed": product["proof"]["boot_or_iso_proof_claimed"],
+    "work_inbox_live_oauth": product["work_inbox"]["proof"]["live_oauth_claimed"],
+    "work_inbox_external_mutation": product["work_inbox"]["proof"]["external_mutation_claimed"],
+    "timeline_external_app": product["activity_timeline"]["proof"]["external_app_execution_claimed"],
+    "capability_external_write": product["capability_store"]["proof"]["external_write_claimed"],
+    "approval_execution": product["approval_center"]["proof"]["approval_execution_claimed"],
+    "proof_upload_execution": product["observed_proof_uploader"]["proof"]["file_upload_execution_claimed"],
+    "release_uploaded": product["release_trust_panel"]["proof"]["release_uploaded"],
+    "release_vm_iso": product["release_trust_panel"]["proof"]["vm_iso_release_proof_completed"],
+    "secure_boot": product["attestation_status"]["proof"]["secure_boot_observed"],
+    "hardware_attestation": product["attestation_status"]["proof"]["hardware_attestation_observed"],
+    "recovery_vm_iso": product["recovery_center"]["proof"]["boot_or_iso_proof_claimed"],
+    "evidence_hardware": product["evidence_dashboard"]["proof"]["hardware_attestation_claimed"],
+}
+assert all(value is False for value in non_claims.values()), non_claims
+
+ready_claims = {
+    "runtime_home": product["proof"]["customer_facing_summary_ready"],
+    "work_inbox": product["work_inbox"]["proof"]["customer_facing_summary_ready"],
+    "activity_timeline": product["activity_timeline"]["proof"]["customer_facing_timeline_ready"],
+    "capability_store": product["capability_store"]["proof"]["customer_facing_capability_store_ready"],
+    "approval_center": product["approval_center"]["proof"]["customer_facing_approval_center_ready"],
+    "proof_uploader": product["observed_proof_uploader"]["proof"]["customer_facing_proof_uploader_ready"],
+    "release_trust": product["release_trust_panel"]["proof"]["customer_facing_release_trust_ready"],
+    "attestation_status": product["attestation_status"]["proof"]["customer_facing_attestation_status_ready"],
+    "recovery_center": product["recovery_center"]["proof"]["customer_facing_recovery_ready"],
+    "evidence_dashboard": product["evidence_dashboard"]["proof"]["customer_facing_evidence_ready"],
+}
+assert all(value is True for value in ready_claims.values()), ready_claims
+PY
+
+echo "docker product layer completion smoke: PASS"

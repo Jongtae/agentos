@@ -101,10 +101,13 @@ command that produces:
 - an Attestation Status product-layer summary
 - a Recovery Center product-layer summary
 - an Evidence Dashboard product-layer summary
+- a Docker Product Layer completion gate covering every customer-facing surface
 - at least one classified prompt
 - at least one activity feed event
 - a user-owned output path
 - a friendly degraded response for missing external credentials
 - a browser-visible preview page on `localhost:8787`
 
-Any Stage E closeout must still distinguish Docker proof from VM/ISO proof.
+Any Stage E closeout must still distinguish Docker proof from VM/ISO proof,
+release proof, live OAuth proof, live browser proof, external mutation proof,
+and hardware attestation proof.

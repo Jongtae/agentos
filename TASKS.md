@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-92] Add Docker Attestation Status product surface`
+- `[P2-93] Add Docker Product Layer completion gate`
 
 Runtime impact statement:
 
-- This task promotes boot-chain and hardware trust requirements into a Docker product surface that shows Secure Boot, TPM/PCR, event-log, IMA, and hardware attestation blockers without claiming Docker can prove device trust.
+- This task adds a Docker Product Layer completion gate so the public try path verifies every customer-facing runtime surface while preserving live OAuth, VM/ISO, browser, release, mutation, and attestation non-claims.
 
 Current autonomous completion loop:
 
@@ -106,6 +106,7 @@ Recommended Phase 2 tasks:
 - Docker preview now exposes `agentos-product-layer-attestation-status.v1` through `/api/attestation` and the browser Attestation Status panel without claiming Secure Boot, TPM/PCR, event-log, IMA, or hardware attestation proof.
 - Docker preview now exposes `agentos-product-layer-recovery-center.v1` through `/api/recovery` and the browser Recovery Center without claiming VM/ISO, live OAuth, browser, release-trust, or hardware-attestation proof.
 - Docker preview now exposes `agentos-product-layer-evidence-dashboard.v1` through `/api/evidence` and the browser Evidence Dashboard so customers can distinguish observed Docker/local proof from explicit non-claims.
+- Docker Product Layer completion is guarded by `scripts/smoke_docker_product_layer_completion.sh`, which verifies Runtime Home, Work Inbox, Activity Timeline, Capability Store, Approval Center, Observed Proof Uploader, Release Trust Panel, Attestation Status, Recovery Center, and Evidence Dashboard together.
 - Gmail setup is exposed through `agentos-kernelctl gmail-setup --serve-http`; live Gmail remains read-only and requires explicit user OAuth credentials.
 - Phase 2 closeout is recorded in `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`.
 - Practical local/Docker-safe proof is aggregated by `scripts/smoke_phase2_golden_demo.sh`.
@@ -138,7 +139,7 @@ Recommended Phase 2 tasks:
 - The first inbox ownership slice is `docs/architecture/inbox-capability-ownership-boundary.md`, smoke-tested by `scripts/smoke_inbox_capability_ownership_boundary.sh`.
 - The inbox ownership boundary smoke is included in the Phase 2 golden demo runner so inbox capability ownership remains part of practical local/Docker-safe proof.
 - `phase2-run --message "status"` attaches the inbox routing/ownership contract artifact so inbox capability ownership is visible in the user-testable runtime status proof.
-- The broader app/inbox workflow promotion epic is active for this Phase 2 slice; it must choose candidates from the capability graduation registry before expanding browser or external app mediation.
+- The broader app/inbox workflow promotion epic is closed for this Phase 2 slice; future broader app/inbox work should require a new milestone-backed epic when it adds a real workflow candidate, observed proof, or live adapter promotion beyond the completed Docker Product Layer completion gate.
 - The first broader app/inbox promotion slice is `docs/architecture/inbox-workflow-promotion-boundary.md`, smoke-tested by `scripts/smoke_inbox_workflow_promotion_boundary.sh`.
 - The verified boot and attestation proof boundary epic is closed for this Phase 2 slice; future verified boot work should require observed VM or hardware evidence before claiming Secure Boot, TPM measured boot, PCR/event-log, IMA, or hardware attestation proof.
 - The first verified boot slice is `docs/architecture/verified-boot-attestation-proof-boundary.md`, smoke-tested by `scripts/smoke_verified_boot_attestation_boundary.sh`.

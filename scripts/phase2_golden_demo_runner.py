@@ -40,6 +40,7 @@ PRACTICAL_SMOKES = [
     "scripts/smoke_observed_proof_intake_validator.sh",
     "scripts/smoke_capability_graduation_registry.sh",
     "scripts/smoke_docker_product_layer_completion.sh",
+    "scripts/smoke_docker_customer_onboarding_quickstart.sh",
 ]
 
 EXPLICIT_BLOCKERS = [

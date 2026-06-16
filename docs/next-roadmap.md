@@ -80,7 +80,15 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
-- No active completion epic. The next loop should return to the Later Tracks list and create a new milestone-backed epic only when it can define a customer-facing completion goal, validation plan, and exit condition.
+- `docker-first-customer-onboarding-proof-epic` — [EPIC: Stage 3 / Phase 2 Docker-first customer onboarding proof](https://github.com/Jongtae/agentos/issues/209)
+  - Milestone: Docker-first AgentOS runtime preview
+  - Completion goal: keep the public README quickstart, Docker acceptance path, preview operations contract, roadmap state, and task state aligned so a customer can try the Product Layer through Docker without confusing Docker proof for VM/ISO, live OAuth, browser, release, mutation, or attestation proof.
+  - Validation plan: `scripts/smoke_docker_customer_onboarding_quickstart.sh`, `scripts/smoke_docker_product_layer_completion.sh`, `scripts/smoke_docker_runtime_preview_python.sh`, `docker compose config`, and the Phase 2 golden demo runner.
+  - Exit condition: complete when README, Docker acceptance, public preview operations, TASKS, roadmap, and golden runner all point to the same Docker-first public try path and preserve explicit non-claims for live OAuth, VM/ISO, browser, release, external mutation, and hardware attestation proof.
+  - Active task: P2-94.
+  - First slice: P2-94 adds `scripts/smoke_docker_customer_onboarding_quickstart.sh` to catch drift across README quickstart, Docker acceptance, public preview operations, roadmap, and task state.
+  - Residual blockers: VM/ISO boot/rejoin proof, live OAuth, live browser evidence, release artifacts/signing, and hardware attestation remain unclaimed until observed evidence exists.
+  - Advances: Docker-first public usability, runtime proof truthfulness, OS-native runtime defaults.
 
 ## Completed Completion Epics
 

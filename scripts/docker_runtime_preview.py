@@ -384,6 +384,12 @@ class DockerPreviewApp:
             proof_packet=proof_packet,
             recovery_center=recovery_center,
         )
+        proof_promotion = self.proof_promotion_center(
+            evidence_dashboard=evidence_dashboard,
+            recovery_center=recovery_center,
+            proof_packet=proof_packet,
+            customer_handoff=customer_handoff,
+        )
         blockers = recovery_center.get("blockers", [])
         return {
             "schema_version": "agentos-product-layer-runtime-home.v1",
@@ -474,6 +480,12 @@ class DockerPreviewApp:
                     "state": customer_handoff.get("state", "ready"),
                     "customer_value": "Share one Docker-safe bundle with the run command, first screens, validation commands, proof packet, and next observed-proof blockers.",
                 },
+                {
+                    "id": "proof_promotion_center",
+                    "label": "Proof Promotion Center",
+                    "state": proof_promotion.get("state", "ready"),
+                    "customer_value": "Decide which Docker-local claims are ready and which stronger claims require sanitized observed evidence before promotion.",
+                },
             ],
             "blockers": blockers,
             "onboarding_status": onboarding_status,
@@ -489,6 +501,7 @@ class DockerPreviewApp:
             "evidence_dashboard": evidence_dashboard,
             "customer_proof_packet": proof_packet,
             "customer_handoff_bundle": customer_handoff,
+            "proof_promotion_center": proof_promotion,
             "proof": {
                 "docker_main_try_path": True,
                 "boot_or_iso_proof_claimed": False,
@@ -641,6 +654,101 @@ class DockerPreviewApp:
                 "release_trust_claimed": False,
                 "external_mutation_claimed": False,
                 "hardware_attestation_claimed": False,
+            },
+        }
+
+    def proof_promotion_center(
+        self,
+        *,
+        evidence_dashboard: dict | None = None,
+        recovery_center: dict | None = None,
+        proof_packet: dict | None = None,
+        customer_handoff: dict | None = None,
+    ) -> dict:
+        evidence = evidence_dashboard or self.evidence_dashboard()
+        recovery = recovery_center or self.recovery_center()
+        packet = proof_packet or self.customer_proof_packet()
+        handoff = customer_handoff or self.customer_handoff_bundle()
+        promotion_decisions = [
+            {
+                "id": "docker-local-product-layer",
+                "label": "Docker-local Product Layer",
+                "state": "ready_to_describe",
+                "customer_decision": "Use Docker preview proof to evaluate Runtime Home, Work Inbox, Activity Timeline, Recovery Center, Evidence Dashboard, proof packet, and handoff bundle.",
+                "required_evidence": [
+                    "scripts/smoke_docker_runtime_preview_python.sh",
+                    "scripts/smoke_docker_product_layer_completion.sh",
+                    "scripts/smoke_docker_customer_handoff_bundle.sh",
+                ],
+                "promotion_boundary": "May be described as Docker-local Product Layer proof only.",
+            },
+            {
+                "id": "docker-daemon-observed-run",
+                "label": "Docker daemon observed run",
+                "state": "blocked_until_observed_docker_daemon",
+                "customer_decision": "Promote Docker preview from Python-local smoke to observed Docker daemon run only after a real daemon-backed smoke is captured.",
+                "required_evidence": ["scripts/smoke_docker_runtime_preview.sh"],
+                "promotion_boundary": "Still does not prove VM/ISO boot, live providers, release signing, mutation, or attestation.",
+            },
+            {
+                "id": "vm-iso-runtime-ownership",
+                "label": "VM/ISO runtime ownership",
+                "state": "blocked_until_observed_vm_iso",
+                "customer_decision": "Promote OS boot/rejoin claims only after observed VM/ISO boot, recovery, and managed runtime rejoin evidence exists.",
+                "required_evidence": ["docs/acceptance/vm-iso-proof-preflight.md", "sanitized observed VM run record"],
+                "promotion_boundary": "Docker proof must not be reused as boot ownership proof.",
+            },
+            {
+                "id": "live-provider-readonly",
+                "label": "Live provider read-only proof",
+                "state": "blocked_until_live_credentials",
+                "customer_decision": "Promote Gmail or Calendar live proof only after explicit tester OAuth credentials and sanitized read-only observed records exist.",
+                "required_evidence": [
+                    "docs/acceptance/gmail-live-readonly-acceptance.md",
+                    "docs/acceptance/calendar-live-readonly-acceptance.md",
+                ],
+                "promotion_boundary": "Does not permit send/delete/archive/calendar mutations.",
+            },
+            {
+                "id": "live-browser-release-attestation",
+                "label": "Browser, release, and attestation proof",
+                "state": "blocked_until_specialized_observed_evidence",
+                "customer_decision": "Promote live browser, release trust, or hardware trust claims only with their own sanitized observed evidence.",
+                "required_evidence": [
+                    "browser observed acceptance record",
+                    "release artifact, checksum, signing, and publication record",
+                    "Secure Boot, TPM/PCR, event-log, IMA, or hardware attestation record",
+                ],
+                "promotion_boundary": "No automatic promotion from Docker-local proof.",
+            },
+        ]
+        return {
+            "schema_version": "agentos-product-layer-proof-promotion-center.v1",
+            "surface": "Proof Promotion Center",
+            "state": "ready",
+            "customer_message": "Proof Promotion Center turns Docker-local proof into clear customer decisions about what can be described now and what still needs observed evidence.",
+            "promotion_decisions": promotion_decisions,
+            "source_surfaces": {
+                "evidence_dashboard": evidence.get("schema_version"),
+                "recovery_center": recovery.get("schema_version"),
+                "customer_proof_packet": packet.get("schema_version"),
+                "customer_handoff_bundle": handoff.get("schema_version"),
+            },
+            "share_policy": {
+                "secret_material_allowed": False,
+                "automatic_claim_promotion": False,
+                "requires_sanitized_observed_evidence_for_stronger_claims": True,
+            },
+            "proof": {
+                "docker_local_claims_ready": True,
+                "docker_daemon_observed_claimed": False,
+                "boot_or_iso_proof_claimed": False,
+                "live_oauth_claimed": False,
+                "live_browser_proof_claimed": False,
+                "release_trust_claimed": False,
+                "external_mutation_claimed": False,
+                "hardware_attestation_claimed": False,
+                "customer_facing_proof_promotion_ready": True,
             },
         }
 
@@ -1439,6 +1547,7 @@ def _render_page(app: DockerPreviewApp) -> str:
     evidence_dashboard = product_layer.get("evidence_dashboard", {}) if isinstance(product_layer.get("evidence_dashboard"), dict) else {}
     customer_proof_packet = product_layer.get("customer_proof_packet", {}) if isinstance(product_layer.get("customer_proof_packet"), dict) else {}
     customer_handoff = product_layer.get("customer_handoff_bundle", {}) if isinstance(product_layer.get("customer_handoff_bundle"), dict) else {}
+    proof_promotion = product_layer.get("proof_promotion_center", {}) if isinstance(product_layer.get("proof_promotion_center"), dict) else {}
     features = product_layer.get("features", []) if isinstance(product_layer.get("features"), list) else []
     blockers = product_layer.get("blockers", []) if isinstance(product_layer.get("blockers"), list) else []
     llm_state = adapters.get("llm", {}).get("state", "unknown")
@@ -1679,6 +1788,18 @@ def _render_page(app: DockerPreviewApp) -> str:
     handoff_share_policy = handoff_report.get("share_policy", {})
     if not isinstance(handoff_share_policy, dict):
         handoff_share_policy = {}
+    proof_promotion_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Promotion decision'))))}</b> "
+        f"{html.escape(str(item.get('customer_decision', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))} · {html.escape(str(item.get('promotion_boundary', '')))}</em>"
+        "</li>"
+        for item in proof_promotion.get("promotion_decisions", [])
+        if isinstance(item, dict)
+    ) or "<li>No proof promotion decisions are configured.</li>"
+    proof_promotion_share_policy = proof_promotion.get("share_policy", {})
+    if not isinstance(proof_promotion_share_policy, dict):
+        proof_promotion_share_policy = {}
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -1946,6 +2067,22 @@ def _render_page(app: DockerPreviewApp) -> str:
       <ul>{proof_packet_readiness_html}</ul>
     </div>
   </section>
+  <section class="product">
+    <div class="panel">
+      <h2>Proof Promotion Center</h2>
+      <p class="lead">{html.escape(str(proof_promotion.get('customer_message', 'Proof promotion decisions are available below.')))}</p>
+      <ul>{proof_promotion_html}</ul>
+    </div>
+    <div class="panel">
+      <h2>Promotion Policy</h2>
+      <ul>
+        <li><b>Secrets allowed</b> {html.escape(str(proof_promotion_share_policy.get('secret_material_allowed', False)))}</li>
+        <li><b>Automatic claim promotion</b> {html.escape(str(proof_promotion_share_policy.get('automatic_claim_promotion', False)))}</li>
+        <li><b>Stronger claims require observed evidence</b> {html.escape(str(proof_promotion_share_policy.get('requires_sanitized_observed_evidence_for_stronger_claims', True)))}</li>
+      </ul>
+      <p><a href="/api/proof-promotion">proof promotion JSON</a></p>
+    </div>
+  </section>
   <section class="panel">
     <h2>Run a prompt</h2>
     <textarea id="prompt">status</textarea>
@@ -2049,6 +2186,8 @@ def make_handler(app: DockerPreviewApp) -> type[BaseHTTPRequestHandler]:
                 _json_response(self, app.customer_proof_packet())
             elif path == "/api/customer-handoff":
                 _json_response(self, app.customer_handoff_bundle())
+            elif path == "/api/proof-promotion":
+                _json_response(self, app.proof_promotion_center())
             elif path == "/api/activity":
                 _json_response(self, app.activity())
             else:

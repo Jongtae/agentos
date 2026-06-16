@@ -43,6 +43,7 @@ http://localhost:8787
 - `/api/evidence` exposes observed Docker/local proof and explicit non-claims for VM/ISO, live OAuth, browser, release trust, and hardware attestation.
 - `/api/proof-packet` exposes completed Docker-local claims, validation commands, proof sources, readiness checks, next blockers, and explicit non-claims without claiming automatic proof promotion.
 - `/api/customer-handoff` exposes the Docker try path, handoff checklist, share-safe handoff report, inspectable Product Layer surfaces, validation commands, proof sources, next observed-proof blockers, and explicit non-claims without claiming stronger observed proof.
+- `/api/proof-promotion` exposes Docker-local claim promotion decisions, source surfaces, required observed evidence, and explicit non-claims without automatic claim promotion.
 - LLM setup/readiness state is visible.
 - Telegram setup/readiness state is visible.
 - Activity feed is visible.
@@ -88,7 +89,7 @@ scripts/smoke_docker_runtime_preview.sh
 
 The smoke should validate compose config, build the image, start the preview,
 check `localhost:8787`, verify `/api/product`, `/api/work-inbox`,
-`/api/onboarding`, `/api/demo-journey`, `/api/timeline`, `/api/capabilities`, `/api/approvals`, `/api/proofs`, `/api/release-trust`, `/api/attestation`, `/api/recovery`, `/api/evidence`, `/api/proof-packet`, and `/api/customer-handoff`, run a prompt through `/api/prompt`,
+`/api/onboarding`, `/api/demo-journey`, `/api/timeline`, `/api/capabilities`, `/api/approvals`, `/api/proofs`, `/api/release-trust`, `/api/attestation`, `/api/recovery`, `/api/evidence`, `/api/proof-packet`, `/api/customer-handoff`, and `/api/proof-promotion`, run a prompt through `/api/prompt`,
 verify activity, and check that common secret patterns are not present in the
 response.
 
@@ -160,3 +161,15 @@ share-safe handoff report, inspectable Product Layer surfaces, validation
 commands, proof sources, next observed-proof blockers, and explicit non-claims
 without promoting Docker proof into VM/ISO, live OAuth, browser, release,
 mutation, or attestation proof.
+
+## Proof Promotion Center Gate
+
+```bash
+scripts/smoke_docker_proof_promotion_center.sh
+```
+
+This gate starts the Python Docker runtime preview and verifies that
+`/api/proof-promotion` exposes customer-facing claim promotion decisions,
+required evidence, source surfaces, share policy, and explicit non-claims
+without automatically promoting Docker-local proof into Docker daemon observed,
+VM/ISO, live OAuth, browser, release, mutation, or attestation proof.

@@ -108,8 +108,8 @@ for term in [
     assert term in doc, f"missing doc term: {term}"
 
 assert "maildir-inbox-intake-proof-epic" in roadmap
-assert "Active task: P2-78" in roadmap
-assert "Maildir inbox intake | Active" in readme
+assert ("Active task: P2-78" in roadmap) or ("Completed tasks: P2-78 and P2-79" in roadmap)
+assert ("Maildir inbox intake | Active" in readme) or ("Maildir inbox intake | Completed" in readme)
 
 for forbidden in [
     "production mailbox sync is complete",

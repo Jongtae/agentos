@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-78] Add Maildir inbox intake proof boundary`
+- `[P2-79] Close Maildir inbox intake proof epic`
 
 Runtime impact statement:
 
-- This task adds a Maildir inbox intake proof boundary so AgentOS can move broader app/inbox ecosystem work through a user-owned local inbox path before expanding external app, browser, or OAuth mediation.
+- This task closes the Maildir inbox intake proof epic after the local user-owned proof boundary, Maildir fixture smoke, docs index linkage, golden runner coverage, and non-claims are in place, preventing repeated Maildir boundary work until real user Maildir evidence or a broader inbox workflow promotion task exists.
 
 Current autonomous completion loop:
 
@@ -141,7 +141,7 @@ Recommended Phase 2 tasks:
 - The VM/ISO observed proof status epic is closed for this Phase 2 slice; future VM/ISO work should require a real observed VM run, sanitized evidence, or a new release/boot proof promotion task before claiming boot, reboot/recovery, managed runtime rejoin, ISO freshness, or VM signoff.
 - The Calendar live read-only acceptance epic is closed for this Phase 2 slice; future Calendar live work should require real tester OAuth evidence, a live read-only adapter run, or a new proof promotion task before claiming live account proof or Calendar mutations.
 - The Calendar live adapter candidate epic is closed for this Phase 2 slice; future Calendar live adapter work should require real tester OAuth evidence, an implementation task with credential storage and redaction behavior, or a new observed-proof promotion task before claiming live account proof.
-- The Maildir inbox intake proof epic is active; its first slice documents and smoke-tests a user-owned local Maildir path while preserving external mailbox mutation, browser/app automation, production sync, and full app ecosystem non-claims.
+- The Maildir inbox intake proof epic is closed for this Phase 2 slice; future broader app/inbox work should require real user Maildir evidence, a broader inbox workflow promotion task, or a new observed-proof promotion task before claiming production sync, external mutation, retention/compliance behavior, or full app ecosystem replacement.
 
 ## Validation Standards
 

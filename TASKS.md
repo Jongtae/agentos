@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-115] Add Docker release trust checklist`
+- `[P2-116] Close Docker release trust checklist epic`
 
 Runtime impact statement:
 
-- This task turns the Release Trust Panel into a customer decision checklist so release, signing, checksum, publication, and VM/ISO trust claims stay visibly blocked until observed evidence exists while Docker remains the default public try path.
+- This task closes the Docker release trust customer checklist epic after README, TASKS, roadmap, Docker acceptance, release trust gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and proof non-claims all align on Docker-first release-trust truthfulness.
 
 Current autonomous completion loop:
 
@@ -144,8 +144,9 @@ Recommended Phase 2 tasks:
 - The first distribution packaging slice is `docs/operations/distribution-packaging-proof-boundary.md`, smoke-tested by `scripts/smoke_distribution_packaging_boundary.sh`.
 - Release manifest/checksum preflight is covered by `scripts/release_manifest_checksum_preflight.py` and `scripts/smoke_release_manifest_checksum_preflight.sh` without publishing or signing artifacts.
 - The release manifest/checksum preflight smoke is included in the Phase 2 golden demo runner so packaging non-claims remain part of practical local/Docker-safe proof.
-- The Docker release trust customer checklist epic is active for this Phase 2 slice; it must make release readiness decisions customer-readable without claiming release artifacts, signing, checksum publication, upload, VM/ISO release proof, external mutation, or hardware attestation.
+- The Docker release trust customer checklist epic is closed for this Phase 2 slice; future release-trust work should require real release artifacts, checksum publication, signing or unsigned-preview evidence, observed VM/ISO release proof, live browser evidence, or a new customer-facing release promotion need before reopening.
 - P2-115 adds a Release Trust readiness checklist, customer decisions, a browser panel section, and `scripts/smoke_docker_release_trust_panel.sh` so customers can see which release trust language is share-ready and which claims remain blocked.
+- P2-116 closes the Docker release trust customer checklist epic after README, TASKS, roadmap, Docker acceptance, release trust gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve the Docker-safe release trust decision path.
 - The inbox capability ownership boundary epic is closed for this Phase 2 slice; future inbox work should require live read-only OAuth proof, observed Maildir/user data proof, or a later confirmed external mutation model before claiming broader inbox ecosystem support.
 - The first inbox ownership slice is `docs/architecture/inbox-capability-ownership-boundary.md`, smoke-tested by `scripts/smoke_inbox_capability_ownership_boundary.sh`.
 - The inbox ownership boundary smoke is included in the Phase 2 golden demo runner so inbox capability ownership remains part of practical local/Docker-safe proof.

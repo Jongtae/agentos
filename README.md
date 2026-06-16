@@ -220,6 +220,7 @@ flowchart LR
 | Docker customer handoff bundle | Completed Docker proof gate | Verifies `/api/customer-handoff` exposes the Docker try path, handoff checklist, share-safe handoff report, inspectable Product Layer surfaces, validation commands, proof sources, and next observed-proof blockers without claiming stronger proof. |
 | Docker proof promotion center | Completed Docker proof gate | Verifies `/api/proof-promotion` exposes claim promotion decisions, proof sharing checklist items, required evidence, source surfaces, and non-claims without automatic promotion. |
 | Docker Product Layer map | Completed Docker proof gate | Verifies `/api/product-map` exposes start, safe-work, proof/handoff, blocked-until-observed surface groups, and reviewer routes without adding stronger proof claims. |
+| Docker release trust checklist | Completed Docker proof gate | Verifies `/api/release-trust` exposes release readiness checklist items and customer decisions while preserving release artifact, checksum, signing, upload, VM/ISO, browser, mutation, and attestation non-claims. |
 | Phase 2 golden runtime loop | Closed baseline | Proves prompt intake, intent classification, bounded capability execution, activity narration, records, and recovery. |
 | Capability permission boundary | Completed | Defines how AgentOS declares, blocks, records, and narrates capability access. |
 | Updater hardening | Completed | Protects runtime continuity and rollback/recovery truthfulness. |

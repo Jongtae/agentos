@@ -80,7 +80,13 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
-- None currently active. The next completion iteration should compare Later Tracks and open a new milestone-backed epic only when it can define a safe first task with a validation plan and exit condition.
+- `inbox-capability-ownership-boundary-epic` — [EPIC: Inbox capability ownership boundary](https://github.com/Jongtae/agentos/issues/116)
+  - Milestone: Phase 2: Local-first Codex runtime loop
+  - Completion goal: define the inbox capability ownership boundary so Gmail, Calendar, Maildir, fixture, and future inbox-like adapters converge through an OS-native, read-first, user-owned intake substrate.
+  - Exit condition: the epic has a documented and smoke-tested boundary that distinguishes native/local inbox intake, explicit read-only external adapters, user-owned records, activity proof, and external mutation blockers.
+  - Active task: [P2-54] Define inbox capability ownership boundary.
+  - First boundary: `docs/architecture/inbox-capability-ownership-boundary.md` defines native fixture, Maildir, live Gmail and Calendar OAuth blockers, user-owned records, activity/recovery expectations, and mutation non-claims.
+  - Advances: capability ownership, mediation cost reduction, OS-native runtime defaults, runtime proof truthfulness.
 
 ## Completed Completion Epics
 

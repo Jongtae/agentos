@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-53] Record distribution packaging epic completion`
+- `[P2-54] Define inbox capability ownership boundary`
 
 Runtime impact statement:
 
-- This task closes the distribution packaging proof boundary epic for this Phase 2 slice so the autonomous loop stops repeating packaging setup work and keeps real release artifacts, signing, and observed VM/ISO proof as explicit future blockers.
+- This task moves inbox-like work toward an AgentOS-owned intake and records substrate, reducing dependence on Gmail, Calendar, browser, and app-specific adapters while keeping live OAuth and external mutations blocked until observed and approved.
 
 Current autonomous completion loop:
 
@@ -122,6 +122,8 @@ Recommended Phase 2 tasks:
 - The first distribution packaging slice is `docs/operations/distribution-packaging-proof-boundary.md`, smoke-tested by `scripts/smoke_distribution_packaging_boundary.sh`.
 - Release manifest/checksum preflight is covered by `scripts/release_manifest_checksum_preflight.py` and `scripts/smoke_release_manifest_checksum_preflight.sh` without publishing or signing artifacts.
 - The release manifest/checksum preflight smoke is included in the Phase 2 golden demo runner so packaging non-claims remain part of practical local/Docker-safe proof.
+- The inbox capability ownership boundary epic is active; it should make native fixture and Maildir inbox intake the local proof baseline, keep Gmail and Calendar live OAuth read-only and explicit, and block external mutations until a later confirmation model exists.
+- The first inbox ownership slice is `docs/architecture/inbox-capability-ownership-boundary.md`, smoke-tested by `scripts/smoke_inbox_capability_ownership_boundary.sh`.
 
 ## Validation Standards
 
@@ -159,6 +161,7 @@ python3 scripts/cleanup_build_artifacts.py --delete --json
 - `docs/reference/phase2-local-first-runtime-loop-closeout-v1.md`
 - `.agents/roadmap-direction-judge.md`
 - `docs/architecture/calendar-readonly-capability-contract.md`
+- `docs/architecture/inbox-capability-ownership-boundary.md`
 - `docs/architecture/browser-fallback-capability-boundary.md`
 - `docs/architecture/updater-hardening-state-contract.md`
 - `docs/acceptance/vm-iso-proof-preflight.md`

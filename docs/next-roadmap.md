@@ -80,16 +80,20 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
+- No active completion epic is currently open. The next automation pass should
+  re-check this roadmap, the open GitHub issue state, and the Later Tracks
+  before creating a new milestone-backed epic.
+
+## Completed Completion Epics
+
 - `capability-graduation-registry-epic` — [EPIC: Capability graduation registry](https://github.com/Jongtae/agentos/issues/144)
   - Milestone: Phase 2: Local-first Codex runtime loop
   - Completion goal: define how repeated browser fallback, inbox/app, calendar, web, and external-adapter patterns graduate into OS-native AgentOS capabilities instead of expanding browser/app mediation as the default product motion.
-  - Validation plan: document the capability graduation registry, add seed machine-readable candidates, smoke-test candidate shape and README/TASKS/docs index/roadmap links, and include the smoke in the Phase 2 golden demo runner.
-  - Exit condition: complete when AgentOS has a documented and smoke-tested registry for internal capability candidates, promotion criteria, blockers, and explicit non-claims, and future broader app ecosystem work can choose a capability candidate before depending on browser/app automation.
-  - Active task: P2-66.
+  - Exit condition: completed by `docs/architecture/capability-graduation-registry.md`, `docs/architecture/capability-graduation-registry.json`, `scripts/smoke_capability_graduation_registry.sh`, golden runner integration through `scripts/phase2_golden_demo_runner.py`, and README/TASKS/roadmap/docs index linkage.
+  - Closed issue: #144.
+  - Completed tasks: P2-66 and P2-67.
   - Residual blockers: live app/browser/credential proof still requires explicit observed evidence; AgentOS does not claim production app ecosystem replacement.
   - Advances: capability ownership, mediation cost reduction, OS-native runtime defaults, runtime proof truthfulness.
-
-## Completed Completion Epics
 
 - `observed-proof-intake-and-blocker-handoff-epic` — [EPIC: Observed proof intake and blocker handoff](https://github.com/Jongtae/agentos/issues/135)
   - Milestone: Phase 2: Local-first Codex runtime loop

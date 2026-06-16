@@ -179,8 +179,8 @@ make runtime proof more truthful.
 flowchart LR
   phase1["Phase 1\nOS-native runtime prototype\nclosed"]
   phase2["Phase 2\nlocal-first runtime loop\nclosed baseline"]
-  active["Active\ncapability graduation\nregistry"]
-  completed["Completed completion epics\npermissions, updater, browser fallback,\npublic preview ops, distribution,\ninbox ownership"]
+  active["Active\nnext completion track\nselected by roadmap"]
+  completed["Completed completion epics\npermissions, updater, browser fallback,\npublic preview ops, distribution,\ninbox, capability graduation"]
   blocked["Observed-proof blockers\nVM/ISO, live OAuth,\nlive browser, release artifacts"]
   future["Later completion tracks\ncalendar live adapter, broader app ecosystem,\nhardware attestation, packaging hardening"]
 
@@ -203,7 +203,7 @@ flowchart LR
 | Inbox capability ownership | Completed | Moves Gmail, Calendar, Maildir, fixtures, and future inbox adapters toward a read-first OS-native substrate. |
 | Verified boot and attestation boundary | Completed | Keeps Secure Boot, TPM, PCR/event-log, IMA, and hardware attestation proof explicit and unclaimed until observed. |
 | Observed proof intake | Completed | Defines, validates, and surfaces how live credentials, VM/ISO, release, browser, and boot-chain evidence can be attached without claiming unobserved proof. |
-| Capability graduation registry | Active | Turns repeated browser/app/inbox patterns into OS-native capability candidates before expanding external mediation. |
+| Capability graduation registry | Completed | Turns repeated browser/app/inbox patterns into OS-native capability candidates before expanding external mediation. |
 | Live Gmail OAuth | Blocked on credentials and observed read-only proof | Fixture and missing-credential paths are automated; real mailbox proof requires explicit tester OAuth. |
 | VM/ISO boot, recovery, and rejoin | Blocked on observed VM proof | Must show boot, reboot/recovery, and managed runtime rejoin before signoff. |
 | Calendar live adapter | Future read-only track | Starts from fixture-backed contracts and must stay read-only until live OAuth proof exists. |

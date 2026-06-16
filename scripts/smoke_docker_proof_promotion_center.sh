@@ -68,6 +68,22 @@ assert decisions["vm-iso-runtime-ownership"]["state"] == "blocked_until_observed
 assert decisions["live-provider-readonly"]["state"] == "blocked_until_live_credentials"
 assert decisions["live-browser-release-attestation"]["state"] == "blocked_until_specialized_observed_evidence"
 
+checklist = {item["id"]: item for item in promotion["sharing_checklist"]}
+assert set(checklist) == {
+    "describe_docker_local_product_layer",
+    "include_validation_commands",
+    "attach_source_surfaces",
+    "withhold_stronger_claims",
+}
+assert checklist["describe_docker_local_product_layer"]["state"] == "share_ready"
+assert checklist["include_validation_commands"]["state"] == "share_ready"
+assert checklist["attach_source_surfaces"]["state"] == "share_ready"
+assert checklist["withhold_stronger_claims"]["state"] == "blocked_until_observed_evidence"
+assert "VM/ISO boot ownership" in checklist["describe_docker_local_product_layer"]["blocked_claim"]
+assert "full Docker daemon proof" in checklist["include_validation_commands"]["blocked_claim"]
+assert "private credentials" in checklist["attach_source_surfaces"]["blocked_claim"]
+assert "auto-promote Docker-local proof" in checklist["withhold_stronger_claims"]["blocked_claim"]
+
 assert promotion["source_surfaces"] == {
     "evidence_dashboard": "agentos-product-layer-evidence-dashboard.v1",
     "recovery_center": "agentos-product-layer-recovery-center.v1",
@@ -94,6 +110,9 @@ assert "Promotion Policy" in home
 assert "proof promotion JSON" in home
 assert "Automatic claim promotion" in home
 assert "Stronger claims require observed evidence" in home
+assert "Proof Sharing Checklist" in home
+assert "Describe Docker-local Product Layer" in home
+assert "Withhold stronger claims" in home
 PY
 
 echo "docker proof promotion center smoke: PASS"

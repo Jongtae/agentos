@@ -722,12 +722,47 @@ class DockerPreviewApp:
                 "promotion_boundary": "No automatic promotion from Docker-local proof.",
             },
         ]
+        sharing_checklist = [
+            {
+                "id": "describe_docker_local_product_layer",
+                "label": "Describe Docker-local Product Layer",
+                "state": "share_ready",
+                "customer_guidance": "Safe to say the Docker preview exposes the customer Product Layer surfaces and local smoke-verified proof boundaries.",
+                "allowed_claim": "Docker-local Product Layer preview is ready for customer inspection.",
+                "blocked_claim": "Do not describe this as VM/ISO boot ownership, installer proof, or production release proof.",
+            },
+            {
+                "id": "include_validation_commands",
+                "label": "Include validation commands",
+                "state": "share_ready",
+                "customer_guidance": "Share the Docker-safe validation commands that reproduced the local preview proof.",
+                "allowed_claim": "Local proof is backed by the listed Docker-safe smokes and compose config.",
+                "blocked_claim": "Do not imply full Docker daemon proof if the daemon smoke was skipped or unavailable.",
+            },
+            {
+                "id": "attach_source_surfaces",
+                "label": "Attach source surfaces",
+                "state": "share_ready",
+                "customer_guidance": "Point reviewers to Evidence Dashboard, Recovery Center, Customer Proof Packet, Customer Handoff Bundle, and this Promotion Center.",
+                "allowed_claim": "The claim is traceable to customer-visible Product Layer surfaces.",
+                "blocked_claim": "Do not rely on hidden logs or private credentials as customer-facing proof.",
+            },
+            {
+                "id": "withhold_stronger_claims",
+                "label": "Withhold stronger claims",
+                "state": "blocked_until_observed_evidence",
+                "customer_guidance": "Hold Docker daemon, VM/ISO, live OAuth, browser, release, mutation, and attestation claims until sanitized observed evidence exists.",
+                "allowed_claim": "Stronger claims are explicitly blocked pending observed evidence.",
+                "blocked_claim": "Do not auto-promote Docker-local proof into stronger runtime, release, or hardware trust claims.",
+            },
+        ]
         return {
             "schema_version": "agentos-product-layer-proof-promotion-center.v1",
             "surface": "Proof Promotion Center",
             "state": "ready",
             "customer_message": "Proof Promotion Center turns Docker-local proof into clear customer decisions about what can be described now and what still needs observed evidence.",
             "promotion_decisions": promotion_decisions,
+            "sharing_checklist": sharing_checklist,
             "source_surfaces": {
                 "evidence_dashboard": evidence.get("schema_version"),
                 "recovery_center": recovery.get("schema_version"),
@@ -1800,6 +1835,15 @@ def _render_page(app: DockerPreviewApp) -> str:
     proof_promotion_share_policy = proof_promotion.get("share_policy", {})
     if not isinstance(proof_promotion_share_policy, dict):
         proof_promotion_share_policy = {}
+    proof_promotion_checklist_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Sharing checklist item'))))}</b> "
+        f"{html.escape(str(item.get('customer_guidance', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))} · allowed: {html.escape(str(item.get('allowed_claim', '')))} · blocked: {html.escape(str(item.get('blocked_claim', '')))}</em>"
+        "</li>"
+        for item in proof_promotion.get("sharing_checklist", [])
+        if isinstance(item, dict)
+    ) or "<li>No proof sharing checklist is configured.</li>"
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -2081,6 +2125,10 @@ def _render_page(app: DockerPreviewApp) -> str:
         <li><b>Stronger claims require observed evidence</b> {html.escape(str(proof_promotion_share_policy.get('requires_sanitized_observed_evidence_for_stronger_claims', True)))}</li>
       </ul>
       <p><a href="/api/proof-promotion">proof promotion JSON</a></p>
+    </div>
+    <div class="panel">
+      <h2>Proof Sharing Checklist</h2>
+      <ul>{proof_promotion_checklist_html}</ul>
     </div>
   </section>
   <section class="panel">

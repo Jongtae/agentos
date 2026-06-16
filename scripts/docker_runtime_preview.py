@@ -120,10 +120,76 @@ class DockerPreviewApp:
             },
         }
 
+    def onboarding_status(self) -> dict:
+        steps = [
+            {
+                "id": "clone_repository",
+                "label": "Clone the repository",
+                "state": "documented",
+                "command": "git clone git@github.com:Jongtae/agentos.git",
+            },
+            {
+                "id": "copy_env",
+                "label": "Create local environment file",
+                "state": "documented",
+                "command": "cp .env.example .env",
+            },
+            {
+                "id": "start_docker_preview",
+                "label": "Start Docker runtime preview",
+                "state": "ready",
+                "command": "docker compose up",
+            },
+            {
+                "id": "open_runtime_home",
+                "label": "Open Runtime Home",
+                "state": "ready",
+                "url": "http://localhost:8787",
+            },
+            {
+                "id": "try_prompt",
+                "label": "Try a first prompt",
+                "state": "ready",
+                "suggested_prompt": "status",
+            },
+        ]
+        return {
+            "schema_version": "agentos-product-layer-onboarding-status.v1",
+            "surface": "Docker Onboarding Status",
+            "state": "ready",
+            "customer_message": "Docker onboarding is ready for the public preview path; stronger OS, live, release, and hardware proofs still require observed evidence.",
+            "steps": steps,
+            "entrypoints": {
+                "browser_url": "http://localhost:8787",
+                "status_api": "/api/status",
+                "product_api": "/api/product",
+                "onboarding_api": "/api/onboarding",
+                "quickstart_doc": "README.md",
+                "acceptance_doc": "docs/acceptance/docker-runtime-preview.md",
+            },
+            "validation": {
+                "quickstart_smoke": "scripts/smoke_docker_customer_onboarding_quickstart.sh",
+                "product_layer_completion_smoke": "scripts/smoke_docker_product_layer_completion.sh",
+                "docker_runtime_preview_python_smoke": "scripts/smoke_docker_runtime_preview_python.sh",
+            },
+            "proof": {
+                "docker_preview_ready": True,
+                "customer_onboarding_ready": True,
+                "requires_api_key_for_basic_preview": False,
+                "boot_or_iso_proof_claimed": False,
+                "live_oauth_claimed": False,
+                "live_browser_proof_claimed": False,
+                "release_proof_claimed": False,
+                "external_mutation_claimed": False,
+                "hardware_attestation_claimed": False,
+            },
+        }
+
     def product_layer(self, *, setup: dict | None = None, activity: dict | None = None) -> dict:
         setup_payload = setup or build_status(str(self.workspace), str(self.user_root))
         activity_payload = activity or build_activity_feed_payload(self.workspace, limit=12)
         adapters = setup_payload.get("adapters", {}) if isinstance(setup_payload.get("adapters"), dict) else {}
+        onboarding_status = self.onboarding_status()
         work_inbox = self.work_inbox(setup=setup_payload)
         activity_timeline = self.activity_timeline(activity=activity_payload)
         capability_store = self.capability_store()
@@ -139,6 +205,12 @@ class DockerPreviewApp:
             "surface": "Docker Runtime Home",
             "customer_message": "AgentOS is ready for local-first runtime preview. Some live proofs still need user-provided evidence.",
             "features": [
+                {
+                    "id": "onboarding_status",
+                    "label": "Docker Onboarding Status",
+                    "state": onboarding_status.get("state", "ready"),
+                    "customer_value": "Confirm the public quickstart, preview URL, first prompt, and proof boundaries before trying AgentOS.",
+                },
                 {
                     "id": "runtime_home",
                     "label": "Runtime Home",
@@ -201,6 +273,7 @@ class DockerPreviewApp:
                 },
             ],
             "blockers": blockers,
+            "onboarding_status": onboarding_status,
             "work_inbox": work_inbox,
             "activity_timeline": activity_timeline,
             "capability_store": capability_store,
@@ -896,6 +969,7 @@ def _render_page(app: DockerPreviewApp) -> str:
     adapters = status.get("runtime", {}).get("adapters", {})
     activity = status.get("activity", {}).get("events", [])
     product_layer = status.get("product_layer", {})
+    onboarding_status = product_layer.get("onboarding_status", {}) if isinstance(product_layer.get("onboarding_status"), dict) else {}
     work_inbox = product_layer.get("work_inbox", {}) if isinstance(product_layer.get("work_inbox"), dict) else {}
     activity_timeline = product_layer.get("activity_timeline", {}) if isinstance(product_layer.get("activity_timeline"), dict) else {}
     capability_store = product_layer.get("capability_store", {}) if isinstance(product_layer.get("capability_store"), dict) else {}
@@ -942,6 +1016,15 @@ def _render_page(app: DockerPreviewApp) -> str:
         "</li>"
         for blocker in blockers
     ) or "<li>No product-layer blockers in this Docker preview.</li>"
+    onboarding_step_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Onboarding step'))))}</b> "
+        f"{html.escape(str(item.get('command', item.get('url', item.get('suggested_prompt', '')))))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))}</em>"
+        "</li>"
+        for item in onboarding_status.get("steps", [])
+        if isinstance(item, dict)
+    ) or "<li>No onboarding steps are configured.</li>"
     recovery_item_html = "\n".join(
         "<li>"
         f"<b>{html.escape(str(item.get('label', item.get('id', 'Recovery item'))))}</b> "
@@ -1080,6 +1163,22 @@ def _render_page(app: DockerPreviewApp) -> str:
     <p class="lead">Try the AgentOS runtime without booting an ISO. This preview routes prompts through the same local-first intent/capability path and writes proof logs under mounted user data.</p>
   </header>
   <div class="grid">{card_html}</div>
+  <section class="product">
+    <div class="panel">
+      <h2>Docker Onboarding Status</h2>
+      <p class="lead">{html.escape(str(onboarding_status.get('customer_message', 'Docker onboarding status is available below.')))}</p>
+      <ul>{onboarding_step_html}</ul>
+    </div>
+    <div class="panel">
+      <h2>Onboarding Proof</h2>
+      <ul>
+        <li><b>Basic preview API key</b> not required</li>
+        <li><b>VM/ISO boot proof</b> not claimed</li>
+        <li><b>Live OAuth proof</b> not claimed</li>
+      </ul>
+      <p><a href="/api/onboarding">onboarding JSON</a></p>
+    </div>
+  </section>
   <section class="product">
     <div class="panel">
       <h2>Runtime Home</h2>
@@ -1290,6 +1389,8 @@ def make_handler(app: DockerPreviewApp) -> type[BaseHTTPRequestHandler]:
                 _json_response(self, app.status())
             elif path == "/api/product":
                 _json_response(self, app.product_layer())
+            elif path == "/api/onboarding":
+                _json_response(self, app.onboarding_status())
             elif path == "/api/work-inbox":
                 _json_response(self, app.work_inbox())
             elif path == "/api/timeline":

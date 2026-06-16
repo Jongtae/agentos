@@ -26,6 +26,8 @@ http://localhost:8787
 - `docker compose up` starts a local AgentOS preview.
 - `http://localhost:8787` opens.
 - Runtime status is visible.
+- Docker Onboarding Status is visible.
+- `/api/onboarding` exposes quickstart steps, preview entrypoints, validation smokes, and proof non-claims without requiring an API key.
 - A customer-facing Runtime Home is visible.
 - Work Inbox, Activity Timeline, Recovery Center, and Evidence Dashboard states are summarized.
 - `/api/work-inbox` exposes read-first inbox sources, workflows, live blockers, and mutation non-claims.
@@ -82,7 +84,7 @@ scripts/smoke_docker_runtime_preview.sh
 
 The smoke should validate compose config, build the image, start the preview,
 check `localhost:8787`, verify `/api/product`, `/api/work-inbox`,
-`/api/timeline`, `/api/capabilities`, `/api/approvals`, `/api/proofs`, `/api/release-trust`, `/api/attestation`, `/api/recovery`, and `/api/evidence`, run a prompt through `/api/prompt`,
+`/api/onboarding`, `/api/timeline`, `/api/capabilities`, `/api/approvals`, `/api/proofs`, `/api/release-trust`, `/api/attestation`, `/api/recovery`, and `/api/evidence`, run a prompt through `/api/prompt`,
 verify activity, and check that common secret patterns are not present in the
 response.
 

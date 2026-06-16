@@ -79,6 +79,7 @@ curl -fsS http://127.0.0.1:18787/healthz >/dev/null
 curl -fsS http://127.0.0.1:18787/ > /tmp/agentos-docker-home.html
 curl -fsS http://127.0.0.1:18787/api/status > /tmp/agentos-docker-status.json
 curl -fsS http://127.0.0.1:18787/api/product > /tmp/agentos-docker-product.json
+curl -fsS http://127.0.0.1:18787/api/onboarding > /tmp/agentos-docker-onboarding.json
 curl -fsS http://127.0.0.1:18787/api/work-inbox > /tmp/agentos-docker-work-inbox.json
 curl -fsS http://127.0.0.1:18787/api/timeline > /tmp/agentos-docker-timeline.json
 curl -fsS http://127.0.0.1:18787/api/capabilities > /tmp/agentos-docker-capabilities.json
@@ -94,6 +95,7 @@ import json
 from pathlib import Path
 payload = json.loads(Path("/tmp/agentos-docker-status.json").read_text())
 product = json.loads(Path("/tmp/agentos-docker-product.json").read_text())
+onboarding = json.loads(Path("/tmp/agentos-docker-onboarding.json").read_text())
 work_inbox = json.loads(Path("/tmp/agentos-docker-work-inbox.json").read_text())
 timeline = json.loads(Path("/tmp/agentos-docker-timeline.json").read_text())
 capabilities = json.loads(Path("/tmp/agentos-docker-capabilities.json").read_text())
@@ -112,6 +114,13 @@ assert payload["telegram"]["transport"] == "polling_preview"
 assert product["schema_version"] == "agentos-product-layer-runtime-home.v1"
 assert product["proof"]["docker_main_try_path"] is True
 assert product["proof"]["boot_or_iso_proof_claimed"] is False
+assert product["onboarding_status"]["schema_version"] == "agentos-product-layer-onboarding-status.v1"
+assert onboarding["schema_version"] == "agentos-product-layer-onboarding-status.v1"
+assert onboarding["proof"]["docker_preview_ready"] is True
+assert onboarding["proof"]["requires_api_key_for_basic_preview"] is False
+assert onboarding["proof"]["boot_or_iso_proof_claimed"] is False
+assert onboarding["proof"]["live_oauth_claimed"] is False
+assert onboarding["proof"]["hardware_attestation_claimed"] is False
 assert work_inbox["schema_version"] == "agentos-product-layer-work-inbox.v1"
 assert work_inbox["proof"]["read_first_only"] is True
 assert work_inbox["proof"]["external_mutation_claimed"] is False
@@ -161,6 +170,8 @@ assert evidence["proof"]["boot_or_iso_proof_claimed"] is False
 assert evidence["proof"]["live_oauth_claimed"] is False
 assert evidence["proof"]["customer_facing_evidence_ready"] is True
 assert "Runtime Home" in home
+assert "Docker Onboarding Status" in home
+assert "onboarding JSON" in home
 assert "Recovery Center" in home
 assert "recovery JSON" in home
 assert "Work Inbox" in home

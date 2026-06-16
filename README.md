@@ -179,8 +179,8 @@ make runtime proof more truthful.
 flowchart LR
   phase1["Phase 1\nOS-native runtime prototype\nclosed"]
   phase2["Phase 2\nlocal-first runtime loop\nclosed baseline"]
-  active["Active\nCalendar live\nread-only acceptance"]
-  completed["Completed completion epics\npermissions, updater, browser fallback,\npublic preview ops, distribution,\ninbox, capability graduation,\ncalendar/Gmail readiness,\nVM/ISO proof status"]
+  active["Active\nNext roadmap\ncompletion track"]
+  completed["Completed completion epics\npermissions, updater, browser fallback,\npublic preview ops, distribution,\ninbox, capability graduation,\ncalendar/Gmail readiness,\nVM/ISO proof status,\nCalendar live acceptance"]
   blocked["Observed-proof blockers\nVM/ISO, live OAuth,\nlive browser, release artifacts"]
   future["Later completion tracks\ncalendar live adapter, broader app ecosystem,\nhardware attestation, packaging hardening"]
 
@@ -209,7 +209,7 @@ flowchart LR
 | Live Gmail OAuth | Blocked on credentials and observed read-only proof | Fixture and missing-credential paths are automated; real mailbox proof requires explicit tester OAuth. |
 | VM/ISO observed proof status | Completed | Surfaces preflight readiness, planned observation commands, and unobserved boot/rejoin blockers in runtime status. |
 | VM/ISO boot, recovery, and rejoin | Blocked on observed VM proof | Must show boot, reboot/recovery, and managed runtime rejoin before signoff. |
-| Calendar live read-only acceptance | Active | Defines manual proof and blocker capture for future Calendar OAuth without claiming live account proof. |
+| Calendar live read-only acceptance | Completed | Defines manual proof and blocker capture for future Calendar OAuth without claiming live account proof. |
 | Calendar live adapter | Future read-only track | Starts from fixture-backed contracts and must stay read-only until live OAuth proof exists. |
 | Live browser fallback proof | Blocked on user-approved browser acceptance | Browser automation remains fallback; repeated patterns should become internal capabilities. |
 | Release artifacts and signing | Blocked on real release evidence | Requires actual artifacts, checksums/signatures, and release publication proof. |

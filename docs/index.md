@@ -27,6 +27,7 @@ large build outputs are not included.
 - `docs/architecture/updater-hardening-state-contract.md` - updater, rollback, recovery, and runtime rejoin state proof boundary
 - `docs/architecture/user-owned-runtime-data-boundary.md` - local-first user data ownership boundary
 - `docs/operations/public-preview-operations.md` - public preview proof, blocker, non-claim, and promotion checklist
+- `docs/operations/distribution-packaging-proof-boundary.md` - distribution packaging local checks, release artifact requirements, blockers, and non-claims
 - `docs/acceptance/docker-runtime-preview.md` - Docker-first runtime preview acceptance
 - `docs/acceptance/phase2-golden-runtime-loop.md` - Phase 2 golden runtime loop acceptance
 - `docs/acceptance/phase2-intent-eval.json` - seed prompt intent eval set

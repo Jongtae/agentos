@@ -15,11 +15,11 @@ Current public milestone:
 
 Current task:
 
-- `[P2-49] Record public preview operations epic completion`
+- `[P2-50] Define distribution packaging proof boundary`
 
 Runtime impact statement:
 
-- This task closes the public preview operations epic after its checklist and golden-runner smoke integration are recorded, so the completion loop can return to the roadmap before selecting the next milestone-backed track.
+- This task defines the distribution packaging proof boundary so local packaging checks, release artifact requirements, VM/ISO blockers, and packaging non-claims are smoke-verifiable before future release work.
 
 Current autonomous completion loop:
 
@@ -118,6 +118,8 @@ Recommended Phase 2 tasks:
 - The public preview operations epic is closed for this Phase 2 slice; future preview work should return to the roadmap and open a new task only when it adds observed proof, release packaging, or a new promotion decision surface.
 - The first public preview operations slice is `docs/operations/public-preview-operations.md`, smoke-tested by `scripts/smoke_public_preview_operations.sh`.
 - The public preview operations smoke is included in the Phase 2 golden demo runner so preview promotion gates remain part of practical local/Docker-safe proof.
+- The distribution packaging proof boundary epic is active; it should separate local packaging preflight from release artifact requirements, signing/checksum evidence, VM/ISO blockers, and packaging non-claims.
+- The first distribution packaging slice is `docs/operations/distribution-packaging-proof-boundary.md`, smoke-tested by `scripts/smoke_distribution_packaging_boundary.sh`.
 
 ## Validation Standards
 

@@ -80,9 +80,14 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
-- No active completion epic is selected. The next iteration should compare the
-  completed epic list, Later Tracks, README, TASKS, and GitHub issue state
-  before creating or continuing the next milestone-backed completion epic.
+- `calendar-live-readonly-acceptance-pack-epic` — [EPIC: Calendar live read-only acceptance pack](https://github.com/Jongtae/agentos/issues/164)
+  - Milestone: Phase 2: Local-first Codex runtime loop
+  - Completion goal: define a manual Calendar live read-only acceptance pack and automated blocker capture path so future tester OAuth runs can promote Calendar proof without claiming live OAuth or mutations today.
+  - Validation plan: add a Calendar live read-only acceptance pack builder/validator, add a smoke that verifies blocker capture without live credentials and validates a synthetic live-success payload without contacting Calendar, include that smoke in the golden demo runner, and preserve explicit non-claims for live OAuth, observed account proof, and Calendar create/update/delete/invite/cancel mutations.
+  - Exit condition: complete when docs, script, smoke, and golden runner coverage allow a tester to attach sanitized Calendar read-only status/read evidence later while automated local proof still avoids real credentials.
+  - Active task: P2-74.
+  - Residual blockers: live Calendar OAuth requires explicit tester credentials, a live adapter run, and sanitized observed proof; Calendar mutations remain out of scope until a later confirmed mutation model exists.
+  - Advances: capability ownership, mediation cost reduction, OS-native runtime defaults, runtime proof truthfulness.
 
 ## Completed Completion Epics
 

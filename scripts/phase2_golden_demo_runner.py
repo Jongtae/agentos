@@ -26,6 +26,7 @@ PRACTICAL_SMOKES = [
     "scripts/smoke_gmail_live_missing_credentials.sh",
     "scripts/smoke_phase2_gmail_live_blocked.sh",
     "scripts/smoke_gmail_live_acceptance_pack.sh",
+    "scripts/smoke_calendar_live_acceptance_pack.sh",
     "scripts/smoke_vm_iso_proof_preflight.sh",
     "scripts/smoke_public_preview_operations.sh",
     "scripts/smoke_release_manifest_checksum_preflight.sh",

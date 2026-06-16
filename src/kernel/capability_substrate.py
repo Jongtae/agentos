@@ -43,6 +43,7 @@ INBOX_ROUTING_CONTRACT_SCHEMA = "agentos-inbox-routing-contract.v1"
 INBOX_PROOF_BASELINE_SCHEMA = "agentos-inbox-proof-baseline.v1"
 INBOX_NORMALIZED_INTAKE_SCHEMA = "agentos-inbox-normalized-intake.v1"
 VERIFIED_BOOT_ATTESTATION_SCHEMA = "agentos-verified-boot-attestation-nonclaim.v1"
+OBSERVED_PROOF_INTAKE_STATUS_SCHEMA = "agentos-observed-proof-intake-status.v1"
 CAPABILITY_PROOF_SCHEMA = "agentos-capability-proof-surface.v1"
 TELEGRAM_INGRESS_SCHEMA = "agentos-telegram-ingress-contract.v1"
 TELEGRAM_ROUTING_SCHEMA = "agentos-telegram-request-routing-contract.v1"
@@ -2772,6 +2773,105 @@ def build_verified_boot_attestation_nonclaim(
         payload["artifacts"]["latest_verified_boot_attestation_nonclaim_json"] = _write_manifest(
             workspace,
             "latest-verified-boot-attestation-nonclaim.json",
+            payload,
+        )
+    return payload
+
+
+def build_observed_proof_intake_status(
+    workspace_dir: str | Path,
+    *,
+    session_id: str = "",
+    write_manifest: bool = True,
+) -> dict:
+    workspace = Path(workspace_dir).resolve()
+    proof_surfaces = [
+        {
+            "id": "gmail_readonly_live",
+            "status": "blocked",
+            "claim_allowed": False,
+            "requires": ["explicit_tester_oauth", "read_only_query", "sanitized_summary_or_log"],
+        },
+        {
+            "id": "calendar_readonly_live",
+            "status": "blocked",
+            "claim_allowed": False,
+            "requires": ["explicit_tester_oauth", "read_only_query", "sanitized_summary_or_log"],
+        },
+        {
+            "id": "vm_iso_runtime_rejoin",
+            "status": "blocked",
+            "claim_allowed": False,
+            "requires": ["observed_vm_boot", "reboot_or_recovery_run", "managed_runtime_rejoin_log"],
+        },
+        {
+            "id": "release_artifact_signing",
+            "status": "blocked",
+            "claim_allowed": False,
+            "requires": ["published_artifact", "checksum", "signature_or_signing_nonclaim"],
+        },
+        {
+            "id": "browser_fallback_live",
+            "status": "blocked",
+            "claim_allowed": False,
+            "requires": ["user_approved_browser_acceptance", "target_url", "sanitized_result"],
+        },
+        {
+            "id": "boot_chain_trust",
+            "status": "blocked",
+            "claim_allowed": False,
+            "requires": ["secure_boot_or_tpm_or_ima_evidence", "sanitized_observed_record"],
+        },
+    ]
+    payload = {
+        "schema_version": OBSERVED_PROOF_INTAKE_STATUS_SCHEMA,
+        "generated_at_utc": _utc_now(),
+        "workspace": str(workspace),
+        "capability_family": "runtime_proof",
+        "capability": "observed_proof_intake_status",
+        "boundary_doc": "docs/architecture/observed-proof-intake-boundary.md",
+        "record_schema": "docs/architecture/observed-proof-intake-schema.json",
+        "validator": "scripts/observed_proof_intake_validate.py",
+        "status": "ready_for_sanitized_records",
+        "proof_surfaces": proof_surfaces,
+        "summary": {
+            "observed_proof_intake_ready": True,
+            "observed_records_attached": 0,
+            "claim_promotion_allowed": False,
+            "live_credential_proof_claimed": False,
+            "vm_iso_proof_claimed": False,
+            "release_proof_claimed": False,
+            "browser_live_proof_claimed": False,
+            "boot_chain_trust_claimed": False,
+        },
+        "blockers": [
+            {
+                "id": "observed-record-required",
+                "reason": "No sanitized observed proof record has been attached for any live or hardware proof surface.",
+                "recovery_action": "Run the relevant manual acceptance flow, redact secrets, then validate the record with scripts/observed_proof_intake_validate.py.",
+            }
+        ],
+        "correlation": {
+            "session_id": str(session_id).strip(),
+            "request_id": "",
+            "approval_id": "",
+            "trace_id": "",
+            "run_id": "",
+            "boot_id": "",
+        },
+        "proof": {
+            "observed_proof_intake_ready": True,
+            "observed_records_attached": False,
+            "claim_promotion_allowed": False,
+            "secrets_required_in_records": False,
+            "live_proof_claimed": False,
+        },
+        "artifacts": {},
+    }
+    if write_manifest:
+        payload["artifacts"]["latest_observed_proof_intake_status_json"] = _write_manifest(
+            workspace,
+            "latest-observed-proof-intake-status.json",
             payload,
         )
     return payload

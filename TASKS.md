@@ -11,15 +11,15 @@ Current parent branch:
 
 Current public milestone:
 
-- **Docker observed proof request board** — customer-readable evidence requests for blocked stronger proof
+- **Docker observed proof request board closeout** — completed evidence-request surface with explicit residual proof blockers
 
 Current task:
 
-- `[P2-121] Add Docker observed proof request board`
+- `[P2-122] Close Docker observed proof request board epic`
 
 Runtime impact statement:
 
-- This task turns Docker, VM/ISO, live OAuth, browser, release, mutation, and attestation proof blockers into customer-readable evidence requests while preserving runtime-first truthfulness and preventing automatic proof promotion.
+- This task records the Docker observed proof request board as completed Product Layer work while preserving runtime-first truthfulness and leaving Docker daemon, VM/ISO, live OAuth, browser, release, mutation, and attestation proof blockers explicit until observed evidence exists.
 
 Current autonomous completion loop:
 
@@ -155,8 +155,9 @@ Recommended Phase 2 tasks:
 - The Docker next work board epic is closed for this Phase 2 slice; future next-work-board changes should require observed Docker daemon proof, live proof evidence, VM/ISO proof, release proof, hardware attestation evidence, or a new customer-facing next-work promotion need before reopening.
 - P2-119 adds `/api/next-work`, a browser Next Work Board panel, and `scripts/smoke_docker_next_work_board.sh` so customers can see completed Docker-local Product Layer proof, safe next implementation candidates, and blocked stronger proof tracks from the Product Layer.
 - P2-120 closes the Docker next work board epic after README, TASKS, roadmap, Docker acceptance, next-work gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve the Docker-safe completed-proof and next-work path.
-- The Docker observed proof request board epic is active for this Phase 2 slice; completion requires `/api/proof-requests`, the browser Observed Proof Request Board panel, README, TASKS, roadmap, Docker acceptance, focused proof-request gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks to preserve customer evidence-request truthfulness.
+- The Docker observed proof request board epic is closed for this Phase 2 slice; future proof-request-board changes should require observed Docker daemon proof, live proof evidence, VM/ISO proof, release proof, hardware attestation evidence, or a new customer-facing evidence-request promotion need before reopening.
 - P2-121 adds `/api/proof-requests`, a browser Observed Proof Request Board panel, and `scripts/smoke_docker_observed_proof_request_board.sh` so customers can see the exact evidence, redaction, validation, and promotion boundaries required before stronger proof claims can be promoted.
+- P2-122 closes the Docker observed proof request board epic after README, TASKS, roadmap, Docker acceptance, proof-request gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve evidence-request truthfulness without stronger proof claims.
 - The inbox capability ownership boundary epic is closed for this Phase 2 slice; future inbox work should require live read-only OAuth proof, observed Maildir/user data proof, or a later confirmed external mutation model before claiming broader inbox ecosystem support.
 - The first inbox ownership slice is `docs/architecture/inbox-capability-ownership-boundary.md`, smoke-tested by `scripts/smoke_inbox_capability_ownership_boundary.sh`.
 - The inbox ownership boundary smoke is included in the Phase 2 golden demo runner so inbox capability ownership remains part of practical local/Docker-safe proof.

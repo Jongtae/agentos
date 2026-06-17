@@ -145,6 +145,25 @@ for key, (filename, schema, label) in surfaces.items():
     assert label in home, label
 
 assert product["onboarding_status"]["validation"]["onboarding_status_contract_smoke"] == "scripts/smoke_docker_onboarding_status_contract.sh"
+assert product["work_inbox"]["proof"]["work_inbox_completion_snapshot_ready"] is True
+work_inbox_snapshot = product["work_inbox"]["completion_snapshot"]
+assert work_inbox_snapshot["schema_version"] == "agentos-product-layer-work-inbox-completion-snapshot.v1"
+assert work_inbox_snapshot["state"] == "ready"
+assert {item["id"] for item in work_inbox_snapshot["completed_local_proof"]} == {
+    "fixture_inbox_ready",
+    "read_first_workflows_ready",
+    "live_boundaries_visible",
+}
+assert {item["id"] for item in work_inbox_snapshot["mutation_boundaries"]} == {
+    "external_send_blocked",
+    "production_sync_blocked",
+}
+assert any(item["command"] == "scripts/smoke_docker_work_inbox_snapshot.sh" for item in work_inbox_snapshot["validation_gates"])
+assert work_inbox_snapshot["proof"]["customer_facing_work_inbox_snapshot_ready"] is True
+assert work_inbox_snapshot["proof"]["external_mutation_claimed"] is False
+assert work_inbox_snapshot["proof"]["automatic_claim_promotion"] is False
+assert "Work Inbox Completion Snapshot" in home
+assert "scripts/smoke_docker_work_inbox_snapshot.sh" in home
 assert {item["id"] for item in product["guided_demo_journey"]["expected_outcomes"]} >= {
     "runtime_reachable",
     "read_first_work_visible",
@@ -411,6 +430,12 @@ non_claims = {
     "onboarding_live_oauth": product["onboarding_status"]["proof"]["live_oauth_claimed"],
     "work_inbox_live_oauth": product["work_inbox"]["proof"]["live_oauth_claimed"],
     "work_inbox_external_mutation": product["work_inbox"]["proof"]["external_mutation_claimed"],
+    "work_inbox_snapshot_live_oauth": product["work_inbox"]["completion_snapshot"]["proof"]["live_oauth_claimed"],
+    "work_inbox_snapshot_browser_default": product["work_inbox"]["completion_snapshot"]["proof"]["browser_default_claimed"],
+    "work_inbox_snapshot_external_mutation": product["work_inbox"]["completion_snapshot"]["proof"]["external_mutation_claimed"],
+    "work_inbox_snapshot_production_sync": product["work_inbox"]["completion_snapshot"]["proof"]["production_sync_claimed"],
+    "work_inbox_snapshot_maildir_observed": product["work_inbox"]["completion_snapshot"]["proof"]["user_maildir_observed_claimed"],
+    "work_inbox_snapshot_auto_promotion": product["work_inbox"]["completion_snapshot"]["proof"]["automatic_claim_promotion"],
     "timeline_external_app": product["activity_timeline"]["proof"]["external_app_execution_claimed"],
     "capability_external_write": product["capability_store"]["proof"]["external_write_claimed"],
     "approval_execution": product["approval_center"]["proof"]["approval_execution_claimed"],
@@ -472,6 +497,7 @@ ready_claims = {
     "preview_readiness_board": product["preview_readiness_board"]["proof"]["customer_facing_preview_readiness_ready"],
     "onboarding_status": product["onboarding_status"]["proof"]["customer_onboarding_ready"],
     "work_inbox": product["work_inbox"]["proof"]["customer_facing_summary_ready"],
+    "work_inbox_completion_snapshot": product["work_inbox"]["completion_snapshot"]["proof"]["customer_facing_work_inbox_snapshot_ready"],
     "activity_timeline": product["activity_timeline"]["proof"]["customer_facing_timeline_ready"],
     "capability_store": product["capability_store"]["proof"]["customer_facing_capability_store_ready"],
     "approval_center": product["approval_center"]["proof"]["customer_facing_approval_center_ready"],

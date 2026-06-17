@@ -2372,6 +2372,81 @@ class DockerPreviewApp:
                 "mutation_allowed": False,
             },
         ]
+        completion_snapshot = {
+            "schema_version": "agentos-product-layer-work-inbox-completion-snapshot.v1",
+            "surface": "Work Inbox Completion Snapshot",
+            "state": "ready",
+            "customer_message": "Work Inbox is complete as a Docker-safe read-first surface; live provider and mutation claims remain blocked until observed evidence exists.",
+            "completed_local_proof": [
+                {
+                    "id": "fixture_inbox_ready",
+                    "label": "Fixture inbox is ready",
+                    "state": "completed_local_proof",
+                    "customer_value": "Customers can inspect inbox summaries and draft preparation without external credentials.",
+                    "evidence": ["/api/work-inbox", "scripts/smoke_docker_work_inbox_snapshot.sh"],
+                },
+                {
+                    "id": "read_first_workflows_ready",
+                    "label": "Read-first workflows are ready",
+                    "state": "completed_local_proof",
+                    "customer_value": "Inbox summary, draft preparation, and search/triage are visible as non-mutating workflows.",
+                    "evidence": ["inbox_summary", "draft_preparation", "search_and_triage"],
+                },
+                {
+                    "id": "live_boundaries_visible",
+                    "label": "Live boundaries are visible",
+                    "state": "completed_local_proof",
+                    "customer_value": "Gmail, Calendar, and user Maildir promotion requirements are visible before customers trust live claims.",
+                    "evidence": ["live-gmail-oauth", "live-calendar-oauth", "observed-maildir-user-data-proof"],
+                },
+            ],
+            "validation_gates": [
+                {
+                    "id": "work_inbox_snapshot_gate",
+                    "label": "Work Inbox snapshot gate",
+                    "state": "ready",
+                    "command": "scripts/smoke_docker_work_inbox_snapshot.sh",
+                },
+                {
+                    "id": "product_layer_completion_gate",
+                    "label": "Product Layer completion gate",
+                    "state": "ready",
+                    "command": "scripts/smoke_docker_product_layer_completion.sh",
+                },
+                {
+                    "id": "runtime_preview_python_gate",
+                    "label": "Runtime preview Python gate",
+                    "state": "ready",
+                    "command": "scripts/smoke_docker_runtime_preview_python.sh",
+                },
+            ],
+            "mutation_boundaries": [
+                {
+                    "id": "external_send_blocked",
+                    "label": "External sends are blocked",
+                    "state": "blocked",
+                    "customer_value": "Work Inbox can prepare drafts but does not send or mutate external inboxes in Docker proof.",
+                },
+                {
+                    "id": "production_sync_blocked",
+                    "label": "Production sync is blocked",
+                    "state": "blocked_until_observed_evidence",
+                    "customer_value": "Production mailbox sync, retention, and compliance behavior require future observed proof.",
+                },
+            ],
+            "blocked_stronger_proof": blockers,
+            "proof": {
+                "customer_facing_work_inbox_snapshot_ready": True,
+                "docker_preview_ready": True,
+                "read_first_only": True,
+                "live_oauth_claimed": False,
+                "browser_default_claimed": False,
+                "external_mutation_claimed": False,
+                "production_sync_claimed": False,
+                "user_maildir_observed_claimed": False,
+                "automatic_claim_promotion": False,
+            },
+        }
         return {
             "schema_version": "agentos-product-layer-work-inbox.v1",
             "surface": "Work Inbox",
@@ -2380,6 +2455,7 @@ class DockerPreviewApp:
             "sources": sources,
             "workflows": workflows,
             "blockers": blockers,
+            "completion_snapshot": completion_snapshot,
             "proof": {
                 "docker_preview_ready": True,
                 "read_first_only": True,
@@ -2387,6 +2463,7 @@ class DockerPreviewApp:
                 "live_oauth_claimed": False,
                 "browser_default_claimed": False,
                 "customer_facing_summary_ready": True,
+                "work_inbox_completion_snapshot_ready": True,
             },
         }
 
@@ -2803,6 +2880,33 @@ def _render_page(app: DockerPreviewApp) -> str:
         for workflow in work_inbox.get("workflows", [])
         if isinstance(workflow, dict)
     ) or "<li>No Work Inbox workflows are available yet.</li>"
+    work_inbox_snapshot = work_inbox.get("completion_snapshot", {}) if isinstance(work_inbox.get("completion_snapshot"), dict) else {}
+    inbox_snapshot_completed_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Completed proof'))))}</b> "
+        f"{html.escape(str(item.get('customer_value', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))}</em>"
+        "</li>"
+        for item in work_inbox_snapshot.get("completed_local_proof", [])
+        if isinstance(item, dict)
+    ) or "<li>No Work Inbox completed proof is configured.</li>"
+    inbox_snapshot_gate_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Validation gate'))))}</b> "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))} · {html.escape(str(item.get('command', '')))}</em>"
+        "</li>"
+        for item in work_inbox_snapshot.get("validation_gates", [])
+        if isinstance(item, dict)
+    ) or "<li>No Work Inbox validation gates are configured.</li>"
+    inbox_mutation_boundary_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Mutation boundary'))))}</b> "
+        f"{html.escape(str(item.get('customer_value', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))}</em>"
+        "</li>"
+        for item in work_inbox_snapshot.get("mutation_boundaries", [])
+        if isinstance(item, dict)
+    ) or "<li>No Work Inbox mutation boundaries are configured.</li>"
     timeline_html = "\n".join(
         "<li>"
         f"<b>{html.escape(str(event.get('label', 'AgentOS')))}</b> "
@@ -3178,6 +3282,16 @@ def _render_page(app: DockerPreviewApp) -> str:
       <h2>Inbox Workflows</h2>
       <ul>{inbox_workflow_html}</ul>
       <p><a href="/api/work-inbox">work inbox JSON</a></p>
+    </div>
+    <div class="panel">
+      <h2>Work Inbox Completion Snapshot</h2>
+      <p class="lead">{html.escape(str(work_inbox_snapshot.get('customer_message', 'Work Inbox completion snapshot is available below.')))}</p>
+      <h3>Completed Local Proof</h3>
+      <ul>{inbox_snapshot_completed_html}</ul>
+      <h3>Validation Gates</h3>
+      <ul>{inbox_snapshot_gate_html}</ul>
+      <h3>Mutation Boundaries</h3>
+      <ul>{inbox_mutation_boundary_html}</ul>
     </div>
   </section>
   <section class="product">

@@ -79,11 +79,13 @@ assert {surface["id"] for surface in groups["prove_and_handoff"]["surfaces"]} >=
     "customer_proof_packet",
     "customer_handoff_bundle",
     "proof_promotion_center",
+    "observed_proof_request_board",
     "next_work_board",
 }
 assert {surface["id"] for surface in groups["blocked_until_observed"]["surfaces"]} >= {
     "recovery_center",
     "observed_proof_uploader",
+    "observed_proof_request_board",
     "release_trust_panel",
     "attestation_status",
 }
@@ -94,6 +96,7 @@ assert product_map["recommended_path"][:3] == [
 ]
 assert product_map["recommended_path"][3] == "preview_readiness_board"
 assert "proof_promotion_center" in product_map["recommended_path"]
+assert "observed_proof_request_board" in product_map["recommended_path"]
 assert "next_work_board" in product_map["recommended_path"]
 routes = {route["id"]: route for route in product_map["reviewer_routes"]}
 assert set(routes) == {
@@ -117,6 +120,7 @@ assert routes["proof_reviewer"]["route"] == [
     "customer_proof_packet",
     "customer_handoff_bundle",
     "proof_promotion_center",
+    "observed_proof_request_board",
     "next_work_board",
 ]
 assert "sanitized observed evidence" in routes["proof_reviewer"]["claim_boundary"]
@@ -129,6 +133,7 @@ assert routes["capability_reviewer"]["route"] == [
 assert "external writes" in routes["capability_reviewer"]["claim_boundary"]
 assert routes["trust_reviewer"]["route"] == [
     "observed_proof_uploader",
+    "observed_proof_request_board",
     "release_trust_panel",
     "attestation_status",
     "recovery_center",

@@ -181,13 +181,15 @@ flowchart LR
   phase1["Phase 1\nOS-native runtime prototype\nclosed"]
   phase2["Phase 2\nlocal-first runtime loop\nclosed baseline"]
   ready["Product Layer\ncompletion gate\nready"]
-  completed["Completed completion epics\npermissions, updater, browser fallback,\nBrowser observed acceptance,\npublic preview ops, distribution,\ninbox, capability graduation,\ncalendar/Gmail readiness,\nVM/ISO proof status,\nCalendar live acceptance,\nCalendar live adapter,\nMaildir intake,\nDocker onboarding,\nguided demo journey,\ncustomer handoff bundle,\npreview readiness board"]
+  active["Active completion epic\nNone"]
+  completed["Completed completion epics\npermissions, updater, browser fallback,\nBrowser observed acceptance,\npublic preview ops, distribution,\ninbox, capability graduation,\ncalendar/Gmail readiness,\nVM/ISO proof status,\nCalendar live acceptance,\nCalendar live adapter,\nMaildir intake,\nDocker onboarding,\nguided demo journey,\ncustomer handoff bundle,\npreview readiness board,\nobserved proof request board"]
   blocked["Observed-proof blockers\nVM/ISO, live OAuth,\nlive browser, release artifacts"]
   future["Later completion tracks\ncalendar live adapter, broader app ecosystem,\nhardware attestation, packaging hardening"]
 
-  phase1 --> phase2 --> ready
+  phase1 --> phase2 --> ready --> active
   phase2 --> completed
   ready --> blocked
+  active --> blocked
   completed --> future
   blocked --> future
 ```
@@ -206,6 +208,7 @@ flowchart LR
 | Capability Store | Active Docker product surface | Presents safe reads, user-owned writes, external-read setup needs, lifecycle confirmation, and blocked destructive actions from the capability registry. |
 | Approval Center | Active Docker product surface | Shows setup, confirmation, observed-proof, and blocked requirements without claiming approval execution, external writes, or destructive actions. |
 | Observed Proof Uploader | Active Docker product surface | Defines required evidence and mock submission fields for live, VM/ISO, browser, release, and attestation proof without accepting secrets or auto-promoting claims. |
+| Observed Proof Request Board | Completed Docker product surface | Turns proof blockers into concrete customer evidence requests with actions, accepted evidence, redaction rules, validation commands, and promotion boundaries. |
 | Release Trust Panel | Active Docker product surface | Separates local release preflight, customer readiness decisions, and blocked real artifacts, checksums, signatures, publication, and VM/ISO release proof. |
 | Attestation Status | Active Docker product surface | Shows Secure Boot, TPM/PCR, event-log, IMA, and hardware attestation blockers without claiming Docker proves device trust. |
 | Recovery Center | Active Docker product surface | Turns VM/ISO, live OAuth, browser, release, attestation, and setup blockers into customer-facing recovery actions without claiming unobserved proof. |
@@ -214,12 +217,13 @@ flowchart LR
 | Customer Handoff Bundle | Completed Docker product surface | Gives customers one Docker-safe bundle with the run command, checklist, first screens, validation commands, proof packet, share-safe handoff report, and next observed-proof blockers. |
 | Proof Promotion Center | Completed Docker product surface | Shows which Docker-local claims are ready to describe, which validation commands and source surfaces should be shared, and which Docker daemon, VM/ISO, live OAuth, browser, release, mutation, and attestation claims still require observed evidence. |
 | Product Layer Map | Completed Docker product surface | Shows the recommended customer path and reviewer routes across Runtime Home, onboarding, guided demo, safe work, evidence, handoff, proof promotion, and observed-proof blockers. |
-| Docker Product Layer completion gate | Active Docker proof gate | Verifies every customer-facing Docker surface, including the Next Work Board, together while preserving live OAuth, VM/ISO, browser, release, mutation, and attestation non-claims. |
+| Docker Product Layer completion gate | Active Docker proof gate | Verifies every customer-facing Docker surface, including the Next Work Board and Observed Proof Request Board, together while preserving live OAuth, VM/ISO, browser, release, mutation, and attestation non-claims. |
 | Docker customer onboarding quickstart | Completed Docker proof gate | Keeps README quickstart, Docker acceptance, preview operations, roadmap, and task state aligned around the public try path. |
 | Docker onboarding status contract | Completed Docker proof gate | Verifies `/api/onboarding` exposes quickstart readiness, preview entrypoints, no-key local preview status, validation smokes, and proof blockers. |
 | Docker guided demo journey | Completed Docker proof gate | Verifies `/api/demo-journey` exposes the customer demo path, expected success/blocker outcomes, completion summary, and keeps VM/ISO, live OAuth, browser, release, mutation, and attestation proof unclaimed. |
 | Docker preview readiness board | Completed Docker proof gate | Verifies `/api/preview-readiness` exposes public preview readiness checks, promotion decisions, validation commands, and stronger-proof non-claims without automatic claim promotion. |
 | Docker next work board | Completed Docker proof gate | Verifies `/api/next-work` exposes completed local proof, safe next candidates, blocked observed-proof tracks, validation commands, and stronger-proof non-claims without automatic claim promotion. |
+| Docker observed proof request board | Completed Docker proof gate | Verifies `/api/proof-requests` exposes customer evidence requests, redaction rules, validation commands, and promotion boundaries without accepting secrets or promoting claims. |
 | Docker customer proof packet | Completed Docker proof gate | Verifies `/api/proof-packet` exposes completed Docker-local claims, validation commands, proof sources, readiness checks, next blockers, and explicit non-claims without automatic claim promotion. |
 | Docker customer handoff bundle | Completed Docker proof gate | Verifies `/api/customer-handoff` exposes the Docker try path, handoff checklist, share-safe handoff report, inspectable Product Layer surfaces, validation commands, proof sources, and next observed-proof blockers without claiming stronger proof. |
 | Docker proof promotion center | Completed Docker proof gate | Verifies `/api/proof-promotion` exposes claim promotion decisions, proof sharing checklist items, required evidence, source surfaces, and non-claims without automatic promotion. |

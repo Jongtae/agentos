@@ -391,6 +391,7 @@ class DockerPreviewApp:
             proof_packet=proof_packet,
             customer_handoff=customer_handoff,
         )
+        proof_request_board = self.observed_proof_request_board()
         product_map = self.product_map()
         next_work_board = self.next_work_board()
         blockers = recovery_center.get("blockers", [])
@@ -496,6 +497,12 @@ class DockerPreviewApp:
                     "customer_value": "Decide which Docker-local claims are ready and which stronger claims require sanitized observed evidence before promotion.",
                 },
                 {
+                    "id": "observed_proof_request_board",
+                    "label": "Observed Proof Request Board",
+                    "state": proof_request_board.get("state", "ready"),
+                    "customer_value": "See the concrete evidence requests needed before Docker daemon, VM/ISO, live OAuth, browser, release, mutation, or attestation claims can be promoted.",
+                },
+                {
                     "id": "product_map",
                     "label": "Product Layer Map",
                     "state": product_map.get("state", "ready"),
@@ -524,6 +531,7 @@ class DockerPreviewApp:
             "customer_proof_packet": proof_packet,
             "customer_handoff_bundle": customer_handoff,
             "proof_promotion_center": proof_promotion,
+            "observed_proof_request_board": proof_request_board,
             "product_map": product_map,
             "next_work_board": next_work_board,
             "proof": {
@@ -674,6 +682,7 @@ class DockerPreviewApp:
                     {"id": "customer_proof_packet", "label": "Customer Proof Packet", "endpoint": "/api/proof-packet", "state": "ready"},
                     {"id": "customer_handoff_bundle", "label": "Customer Handoff Bundle", "endpoint": "/api/customer-handoff", "state": "ready"},
                     {"id": "proof_promotion_center", "label": "Proof Promotion Center", "endpoint": "/api/proof-promotion", "state": "ready"},
+                    {"id": "observed_proof_request_board", "label": "Observed Proof Request Board", "endpoint": "/api/proof-requests", "state": "ready"},
                     {"id": "next_work_board", "label": "Next Work Board", "endpoint": "/api/next-work", "state": "ready"},
                 ],
             },
@@ -684,6 +693,7 @@ class DockerPreviewApp:
                 "surfaces": [
                     {"id": "recovery_center", "label": "Recovery Center", "endpoint": "/api/recovery", "state": "attention"},
                     {"id": "observed_proof_uploader", "label": "Observed Proof Uploader", "endpoint": "/api/proofs", "state": "ready"},
+                    {"id": "observed_proof_request_board", "label": "Observed Proof Request Board", "endpoint": "/api/proof-requests", "state": "ready"},
                     {"id": "release_trust_panel", "label": "Release Trust Panel", "endpoint": "/api/release-trust", "state": "blocked"},
                     {"id": "attestation_status", "label": "Attestation Status", "endpoint": "/api/attestation", "state": "blocked"},
                 ],
@@ -714,6 +724,7 @@ class DockerPreviewApp:
                     "customer_proof_packet",
                     "customer_handoff_bundle",
                     "proof_promotion_center",
+                    "observed_proof_request_board",
                     "next_work_board",
                 ],
                 "claim_boundary": "Share Docker-local claims only; stronger claims require sanitized observed evidence.",
@@ -736,6 +747,7 @@ class DockerPreviewApp:
                 "customer_goal": "Review blocked release, VM/ISO, browser, and attestation evidence requirements.",
                 "route": [
                     "observed_proof_uploader",
+                    "observed_proof_request_board",
                     "release_trust_panel",
                     "attestation_status",
                     "recovery_center",
@@ -761,6 +773,7 @@ class DockerPreviewApp:
                 "customer_proof_packet",
                 "customer_handoff_bundle",
                 "proof_promotion_center",
+                "observed_proof_request_board",
                 "next_work_board",
                 "recovery_center",
             ],
@@ -911,6 +924,102 @@ class DockerPreviewApp:
                 "external_mutation_claimed": False,
                 "hardware_attestation_claimed": False,
                 "automatic_claim_promotion": False,
+            },
+        }
+
+    def observed_proof_request_board(self) -> dict:
+        requests = [
+            {
+                "id": "docker_daemon_observed",
+                "label": "Docker daemon observed proof",
+                "state": "requested_when_daemon_available",
+                "customer_action": "Run the daemon-backed Docker runtime preview smoke on a machine with Docker Desktop or another reachable Docker daemon.",
+                "accepted_evidence": "Sanitized output showing scripts/smoke_docker_runtime_preview.sh passed, plus the preview URL and timestamp.",
+                "redaction_rule": "Do not include environment files, tokens, local usernames beyond the proof host label, or private workspace contents.",
+                "validation_command": "scripts/smoke_docker_runtime_preview.sh",
+                "promotion_boundary": "May promote only Docker daemon observed preview proof; still not VM/ISO, live OAuth, release, browser, mutation, or attestation proof.",
+            },
+            {
+                "id": "vm_iso_runtime_rejoin",
+                "label": "VM/ISO boot, recovery, and rejoin proof",
+                "state": "blocked_until_observed_vm_run",
+                "customer_action": "Boot the AgentOS ISO in a VM, observe runtime reachability, trigger documented recovery/reboot behavior, and verify managed runtime rejoin.",
+                "accepted_evidence": "Sanitized VM run notes, screenshots or logs, ISO identity, boot/recovery/rejoin timestamps, and the observed managed runtime rejoin prompt state.",
+                "redaction_rule": "Remove host paths, secrets, personal account identifiers, and unrelated VM logs before attaching evidence.",
+                "validation_command": "docs/acceptance/vm-iso-proof-preflight.md",
+                "promotion_boundary": "May promote only the observed VM/ISO claims explicitly shown by the attached evidence.",
+            },
+            {
+                "id": "live_readonly_oauth",
+                "label": "Live Gmail or Calendar read-only proof",
+                "state": "blocked_until_tester_credentials",
+                "customer_action": "Provide explicit tester OAuth credentials and run the documented read-only Gmail or Calendar acceptance path.",
+                "accepted_evidence": "Sanitized read/search/list result metadata proving read-only access without token exposure or mutations.",
+                "redaction_rule": "Do not attach OAuth tokens, message bodies, personal email addresses, calendar invitees, or mutable account actions.",
+                "validation_command": "docs/acceptance/gmail-live-readonly-acceptance.md and docs/acceptance/calendar-live-readonly-acceptance.md",
+                "promotion_boundary": "May promote read-only live-provider proof only; send/delete/archive/create/update/cancel mutations remain unclaimed.",
+            },
+            {
+                "id": "live_browser_fallback",
+                "label": "Live browser fallback proof",
+                "state": "blocked_until_user_approved_browser_run",
+                "customer_action": "Approve and observe a browser fallback run that is allowed by the browser fallback boundary.",
+                "accepted_evidence": "Sanitized observed browser fallback record showing user approval, allowed fallback classification, action boundaries, and result.",
+                "redaction_rule": "Do not attach authenticated page secrets, cookies, session tokens, personal data, or destructive action evidence.",
+                "validation_command": "docs/acceptance/browser-fallback-observed-acceptance.md",
+                "promotion_boundary": "May promote only this specific fallback proof; browser automation remains non-default.",
+            },
+            {
+                "id": "release_trust",
+                "label": "Release artifact and trust proof",
+                "state": "blocked_until_release_artifacts",
+                "customer_action": "Attach real release artifacts, manifest, checksum publication, signing evidence or unsigned-preview statement, and release VM/ISO proof.",
+                "accepted_evidence": "Artifact manifest, checksums, signature or unsigned statement, publication location, and sanitized VM/ISO release proof.",
+                "redaction_rule": "Do not attach private signing keys, local-only draft artifacts, secrets, or obsolete build-output paths.",
+                "validation_command": "scripts/smoke_distribution_packaging_boundary.sh and scripts/smoke_release_manifest_checksum_preflight.sh",
+                "promotion_boundary": "May promote only release evidence that maps to real artifacts and verified checksums/signing or explicit unsigned-preview language.",
+            },
+            {
+                "id": "hardware_attestation",
+                "label": "Hardware attestation proof",
+                "state": "blocked_until_device_evidence",
+                "customer_action": "Attach Secure Boot, TPM/PCR, event-log, IMA, or hardware-backed attestation evidence from an observed VM or device run.",
+                "accepted_evidence": "Sanitized boot-chain and runtime integrity evidence with timestamp, device/VM context, and measured components.",
+                "redaction_rule": "Do not attach private keys, sensitive device identifiers, unrelated event logs, or personal account material.",
+                "validation_command": "scripts/smoke_verified_boot_attestation_boundary.sh",
+                "promotion_boundary": "May promote only the specific boot-chain or hardware trust claims backed by observed evidence.",
+            },
+        ]
+        return {
+            "schema_version": "agentos-product-layer-observed-proof-request-board.v1",
+            "surface": "Observed Proof Request Board",
+            "state": "ready",
+            "customer_message": "Observed Proof Request Board turns AgentOS proof blockers into concrete customer evidence requests without accepting secrets or promoting unobserved claims.",
+            "requests": requests,
+            "request_policy": {
+                "secret_material_allowed": False,
+                "automatic_claim_promotion": False,
+                "requires_sanitized_observed_evidence": True,
+                "docker_local_proof_is_not_vm_iso_proof": True,
+            },
+            "validation_commands": [
+                "scripts/smoke_docker_observed_proof_request_board.sh",
+                "scripts/smoke_docker_product_layer_completion.sh",
+                "scripts/smoke_docker_runtime_preview_python.sh",
+                "docker compose config",
+                "scripts/smoke_phase2_golden_demo.sh",
+            ],
+            "proof": {
+                "customer_facing_observed_proof_requests_ready": True,
+                "secret_material_allowed": False,
+                "automatic_claim_promotion": False,
+                "docker_daemon_observed_claimed": False,
+                "boot_or_iso_proof_claimed": False,
+                "live_oauth_claimed": False,
+                "live_browser_proof_claimed": False,
+                "release_trust_claimed": False,
+                "external_mutation_claimed": False,
+                "hardware_attestation_claimed": False,
             },
         }
 
@@ -2052,6 +2161,7 @@ def _render_page(app: DockerPreviewApp) -> str:
     customer_proof_packet = product_layer.get("customer_proof_packet", {}) if isinstance(product_layer.get("customer_proof_packet"), dict) else {}
     customer_handoff = product_layer.get("customer_handoff_bundle", {}) if isinstance(product_layer.get("customer_handoff_bundle"), dict) else {}
     proof_promotion = product_layer.get("proof_promotion_center", {}) if isinstance(product_layer.get("proof_promotion_center"), dict) else {}
+    proof_request_board = product_layer.get("observed_proof_request_board", {}) if isinstance(product_layer.get("observed_proof_request_board"), dict) else {}
     product_map = product_layer.get("product_map", {}) if isinstance(product_layer.get("product_map"), dict) else {}
     next_work_board = product_layer.get("next_work_board", {}) if isinstance(product_layer.get("next_work_board"), dict) else {}
     features = product_layer.get("features", []) if isinstance(product_layer.get("features"), list) else []
@@ -2274,6 +2384,22 @@ def _render_page(app: DockerPreviewApp) -> str:
         for item in proof_uploader.get("proof_types", [])
         if isinstance(item, dict)
     ) or "<li>No observed proof types are configured.</li>"
+    proof_request_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Proof request'))))}</b> "
+        f"{html.escape(str(item.get('customer_action', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))} · {html.escape(str(item.get('promotion_boundary', '')))}</em>"
+        "</li>"
+        for item in proof_request_board.get("requests", [])
+        if isinstance(item, dict)
+    ) or "<li>No observed proof requests are configured.</li>"
+    proof_request_validation_html = "\n".join(
+        f"<li><code>{html.escape(str(command))}</code></li>"
+        for command in proof_request_board.get("validation_commands", [])
+    ) or "<li>No proof request validation commands are configured.</li>"
+    proof_request_policy = proof_request_board.get("request_policy", {})
+    if not isinstance(proof_request_policy, dict):
+        proof_request_policy = {}
     release_trust_html = "\n".join(
         "<li>"
         f"<b>{html.escape(str(item.get('label', item.get('id', 'Release check'))))}</b> "
@@ -2636,6 +2762,25 @@ def _render_page(app: DockerPreviewApp) -> str:
   </section>
   <section class="product">
     <div class="panel">
+      <h2>Observed Proof Request Board</h2>
+      <p class="lead">{html.escape(str(proof_request_board.get('customer_message', 'Observed proof requests are available below.')))}</p>
+      <ul>{proof_request_html}</ul>
+    </div>
+    <div class="panel">
+      <h2>Request Policy</h2>
+      <ul>
+        <li><b>Secrets allowed</b> {html.escape(str(proof_request_policy.get('secret_material_allowed', False)))}</li>
+        <li><b>Automatic claim promotion</b> {html.escape(str(proof_request_policy.get('automatic_claim_promotion', False)))}</li>
+        <li><b>Sanitized observed evidence required</b> {html.escape(str(proof_request_policy.get('requires_sanitized_observed_evidence', True)))}</li>
+        <li><b>Docker local proof is VM/ISO proof</b> {html.escape(str(not proof_request_policy.get('docker_local_proof_is_not_vm_iso_proof', True)))}</li>
+      </ul>
+      <h2>Request Validation</h2>
+      <ul>{proof_request_validation_html}</ul>
+      <p><a href="/api/proof-requests">proof requests JSON</a></p>
+    </div>
+  </section>
+  <section class="product">
+    <div class="panel">
       <h2>Release Trust Panel</h2>
       <p class="lead">{html.escape(str(release_trust.get('customer_message', 'Release trust requirements are available below.')))}</p>
       <ul>{release_trust_html}</ul>
@@ -2859,6 +3004,8 @@ def make_handler(app: DockerPreviewApp) -> type[BaseHTTPRequestHandler]:
                 _json_response(self, app.customer_handoff_bundle())
             elif path == "/api/proof-promotion":
                 _json_response(self, app.proof_promotion_center())
+            elif path == "/api/proof-requests":
+                _json_response(self, app.observed_proof_request_board())
             elif path == "/api/product-map":
                 _json_response(self, app.product_map())
             elif path == "/api/next-work":

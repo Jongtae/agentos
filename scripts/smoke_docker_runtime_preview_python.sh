@@ -39,6 +39,7 @@ curl -fsS "http://127.0.0.1:$PORT/api/status" > "$TMP_DIR/status.json"
 curl -fsS "http://127.0.0.1:$PORT/api/product" > "$TMP_DIR/product.json"
 curl -fsS "http://127.0.0.1:$PORT/api/onboarding" > "$TMP_DIR/onboarding.json"
 curl -fsS "http://127.0.0.1:$PORT/api/demo-journey" > "$TMP_DIR/demo-journey.json"
+curl -fsS "http://127.0.0.1:$PORT/api/preview-readiness" > "$TMP_DIR/preview-readiness.json"
 curl -fsS "http://127.0.0.1:$PORT/api/work-inbox" > "$TMP_DIR/work-inbox.json"
 curl -fsS "http://127.0.0.1:$PORT/api/timeline" > "$TMP_DIR/timeline.json"
 curl -fsS "http://127.0.0.1:$PORT/api/capabilities" > "$TMP_DIR/capabilities.json"
@@ -68,6 +69,7 @@ status = json.loads((root / "status.json").read_text())
 product = json.loads((root / "product.json").read_text())
 onboarding = json.loads((root / "onboarding.json").read_text())
 demo_journey = json.loads((root / "demo-journey.json").read_text())
+preview_readiness = json.loads((root / "preview-readiness.json").read_text())
 work_inbox = json.loads((root / "work-inbox.json").read_text())
 timeline = json.loads((root / "timeline.json").read_text())
 capabilities = json.loads((root / "capabilities.json").read_text())
@@ -95,6 +97,7 @@ assert product["proof"]["boot_or_iso_proof_claimed"] is False
 assert product["proof"]["customer_facing_summary_ready"] is True
 assert product["onboarding_status"]["schema_version"] == "agentos-product-layer-onboarding-status.v1"
 assert product["guided_demo_journey"]["schema_version"] == "agentos-product-layer-guided-demo-journey.v1"
+assert product["preview_readiness_board"]["schema_version"] == "agentos-product-layer-preview-readiness-board.v1"
 assert product["work_inbox"]["schema_version"] == "agentos-product-layer-work-inbox.v1"
 assert product["activity_timeline"]["schema_version"] == "agentos-product-layer-activity-timeline.v1"
 assert product["capability_store"]["schema_version"] == "agentos-product-layer-capability-store.v1"
@@ -112,6 +115,7 @@ assert {feature["id"] for feature in product["features"]} >= {
     "runtime_home",
     "onboarding_status",
     "guided_demo_journey",
+    "preview_readiness_board",
     "work_inbox",
     "activity_timeline",
     "attestation_status",
@@ -150,6 +154,23 @@ assert demo_journey["completion_summary"]["id"] == "docker_guided_demo_complete"
 assert demo_journey["completion_summary"]["state"] == "ready"
 assert len(demo_journey["completion_summary"]["completed_claims"]) >= 4
 assert len(demo_journey["completion_summary"]["next_blockers"]) >= 3
+assert preview_readiness["schema_version"] == "agentos-product-layer-preview-readiness-board.v1"
+assert preview_readiness["proof"]["customer_facing_preview_readiness_ready"] is True
+assert preview_readiness["proof"]["docker_daemon_observed_claimed"] is False
+assert preview_readiness["proof"]["boot_or_iso_proof_claimed"] is False
+assert preview_readiness["proof"]["live_oauth_claimed"] is False
+assert preview_readiness["proof"]["live_browser_proof_claimed"] is False
+assert preview_readiness["proof"]["release_trust_claimed"] is False
+assert preview_readiness["proof"]["external_mutation_claimed"] is False
+assert preview_readiness["proof"]["hardware_attestation_claimed"] is False
+assert preview_readiness["proof"]["automatic_claim_promotion"] is False
+assert {item["id"] for item in preview_readiness["readiness_checks"]} >= {
+    "docker_try_path_documented",
+    "product_layer_surfaces_visible",
+    "docker_safe_validation_available",
+    "public_preview_operations_contract_linked",
+    "observed_proof_blockers_visible",
+}
 assert onboarding["schema_version"] == "agentos-product-layer-onboarding-status.v1"
 assert onboarding["proof"]["docker_preview_ready"] is True
 assert onboarding["proof"]["customer_onboarding_ready"] is True

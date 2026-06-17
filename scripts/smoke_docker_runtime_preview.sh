@@ -90,6 +90,7 @@ curl -fsS http://127.0.0.1:18787/api/proofs > /tmp/agentos-docker-proofs.json
 curl -fsS http://127.0.0.1:18787/api/release-trust > /tmp/agentos-docker-release-trust.json
 curl -fsS http://127.0.0.1:18787/api/attestation > /tmp/agentos-docker-attestation.json
 curl -fsS http://127.0.0.1:18787/api/recovery > /tmp/agentos-docker-recovery.json
+curl -fsS http://127.0.0.1:18787/api/recovery-drills > /tmp/agentos-docker-recovery-drills.json
 curl -fsS http://127.0.0.1:18787/api/evidence > /tmp/agentos-docker-evidence.json
 curl -fsS http://127.0.0.1:18787/api/proof-packet > /tmp/agentos-docker-proof-packet.json
 curl -fsS http://127.0.0.1:18787/api/customer-handoff > /tmp/agentos-docker-customer-handoff.json
@@ -114,6 +115,7 @@ proofs = json.loads(Path("/tmp/agentos-docker-proofs.json").read_text())
 release_trust = json.loads(Path("/tmp/agentos-docker-release-trust.json").read_text())
 attestation = json.loads(Path("/tmp/agentos-docker-attestation.json").read_text())
 recovery = json.loads(Path("/tmp/agentos-docker-recovery.json").read_text())
+recovery_drills = json.loads(Path("/tmp/agentos-docker-recovery-drills.json").read_text())
 evidence = json.loads(Path("/tmp/agentos-docker-evidence.json").read_text())
 proof_packet = json.loads(Path("/tmp/agentos-docker-proof-packet.json").read_text())
 customer_handoff = json.loads(Path("/tmp/agentos-docker-customer-handoff.json").read_text())
@@ -137,6 +139,7 @@ assert product["customer_proof_packet"]["schema_version"] == "agentos-product-la
 assert product["customer_handoff_bundle"]["schema_version"] == "agentos-product-layer-customer-handoff-bundle.v1"
 assert product["proof_promotion_center"]["schema_version"] == "agentos-product-layer-proof-promotion-center.v1"
 assert product["observed_proof_request_board"]["schema_version"] == "agentos-product-layer-observed-proof-request-board.v1"
+assert product["recovery_drill_board"]["schema_version"] == "agentos-product-layer-recovery-drill-board.v1"
 assert product["product_map"]["schema_version"] == "agentos-product-layer-map.v1"
 assert product["next_work_board"]["schema_version"] == "agentos-product-layer-next-work-board.v1"
 assert onboarding["schema_version"] == "agentos-product-layer-onboarding-status.v1"
@@ -311,6 +314,17 @@ assert {item["id"] for item in next_work["safe_next_candidates"]} == {
     "release_and_attestation_evidence",
 }
 assert "scripts/smoke_docker_next_work_board.sh" in next_work["validation_commands"]
+assert recovery_drills["schema_version"] == "agentos-product-layer-recovery-drill-board.v1"
+assert recovery_drills["proof"]["customer_facing_recovery_drills_ready"] is True
+assert recovery_drills["proof"]["boot_or_iso_proof_claimed"] is False
+assert recovery_drills["proof"]["live_oauth_claimed"] is False
+assert {item["id"] for item in recovery_drills["drills"]} >= {
+    "preview_health_check",
+    "runtime_preview_python_smoke",
+    "product_layer_completion_recheck",
+    "cleanup_policy_recheck",
+}
+assert "scripts/smoke_docker_recovery_drill_board.sh" in recovery_drills["validation_commands"]
 assert {group["id"] for group in product_map["surface_groups"]} >= {
     "start_here",
     "do_work",
@@ -325,15 +339,19 @@ assert set(reviewer_routes) == {
     "trust_reviewer",
 }
 assert "VM/ISO" in reviewer_routes["runtime_evaluator"]["claim_boundary"]
+assert "recovery_drill_board" in reviewer_routes["runtime_evaluator"]["route"]
 assert "proof_promotion_center" in reviewer_routes["proof_reviewer"]["route"]
 assert "observed_proof_request_board" in reviewer_routes["proof_reviewer"]["route"]
 assert "next_work_board" in reviewer_routes["proof_reviewer"]["route"]
 assert "approval_center" in reviewer_routes["capability_reviewer"]["route"]
+assert "recovery_drill_board" in reviewer_routes["trust_reviewer"]["route"]
 assert "attestation_status" in reviewer_routes["trust_reviewer"]["route"]
 assert "Runtime Home" in home
 assert "Product Layer Map" in home
 assert "Reviewer Routes" in home
 assert "product map JSON" in home
+assert "Recovery Drill Board" in home
+assert "recovery drills JSON" in home
 assert "Next Work Board" in home
 assert "next work JSON" in home
 assert "Docker Onboarding Status" in home

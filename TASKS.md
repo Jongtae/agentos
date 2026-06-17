@@ -11,15 +11,15 @@ Current parent branch:
 
 Current public milestone:
 
-- **Docker Activity Timeline completion snapshot closeout** — completed narration summary with runtime stages, record surfaces, and external/live proof blockers
+- **Docker Capability Store completion snapshot** — active capability ownership summary with safe paths, confirmation paths, destructive blocks, validation gates, and external/live proof blockers
 
 Current task:
 
-- `[P2-132] Close Activity Timeline completion snapshot epic`
+- `[P2-133] Add Capability Store completion snapshot`
 
 Runtime impact statement:
 
-- This closeout makes Activity Timeline a completed Docker Product Layer narration/proof customer surface while keeping external app execution, live provider, browser, VM/ISO, release, mutation, and attestation proof blockers explicit.
+- This task turns capability ownership from a technical registry into a customer-readable Docker Product Layer completion snapshot while preserving mediation-cost reduction and refusing unobserved external-write, destructive-action, live-provider, VM/ISO, release, and attestation claims.
 
 Current autonomous completion loop:
 
@@ -102,6 +102,7 @@ Recommended Phase 2 tasks:
 - Docker preview now exposes `agentos-product-layer-activity-timeline.v1` through `/api/timeline` and the browser Activity Timeline without claiming external app execution or live-provider proof.
 - Docker Activity Timeline now exposes `agentos-product-layer-activity-timeline-completion-snapshot.v1` inside `/api/timeline` and the browser Activity Timeline panel so customers can see narrated runtime stages, record surfaces, validation gates, and external/live proof blockers.
 - Docker preview now exposes `agentos-product-layer-capability-store.v1` through `/api/capabilities` and the browser Capability Store without claiming destructive, external-write, or live-provider proof.
+- Docker Capability Store now exposes `agentos-product-layer-capability-store-completion-snapshot.v1` inside `/api/capabilities` and the browser Capability Store panel so customers can see safe local paths, confirmation paths, blocked destructive actions, validation gates, and external/live proof blockers.
 - Docker preview now exposes `agentos-product-layer-approval-center.v1` through `/api/approvals` and the browser Approval Center without claiming approval execution, external writes, or destructive actions.
 - Docker preview now exposes `agentos-product-layer-observed-proof-uploader.v1` through `/api/proofs` and the browser Observed Proof Uploader without claiming file upload execution, secret-material acceptance, or automatic claim promotion.
 - Docker preview now exposes `agentos-product-layer-release-trust-panel.v1` through `/api/release-trust` and the browser Release Trust Panel with a customer readiness checklist and decision guidance without claiming release upload, signing, checksum publication, or VM/ISO release proof.
@@ -178,6 +179,8 @@ Recommended Phase 2 tasks:
 - The Docker Activity Timeline completion snapshot epic is closed for this Phase 2 slice; future Activity Timeline changes should require observed external app activity, live provider proof, browser evidence, VM/ISO proof, or a new customer-facing activity narration promotion need before reopening.
 - P2-131 adds the Activity Timeline completion snapshot to `/api/timeline`, the browser Activity Timeline panel, `scripts/smoke_docker_activity_timeline_snapshot.sh`, Product Layer completion coverage, and the Phase 2 golden runner while preserving external/live proof boundaries.
 - P2-132 closes the Docker Activity Timeline completion snapshot epic after README, TASKS, roadmap, Docker acceptance, Activity Timeline snapshot gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve Docker-safe activity narration truthfulness without stronger proof claims.
+- The Docker Capability Store completion snapshot epic is active for this Phase 2 slice; future Capability Store changes should require external-write proof, destructive-action proof, live provider proof, VM/ISO proof, or a new customer-facing capability ownership promotion need before expanding claims.
+- P2-133 adds the Capability Store completion snapshot to `/api/capabilities`, the browser Capability Store panel, `scripts/smoke_docker_capability_store_snapshot.sh`, Product Layer completion coverage, and the Phase 2 golden runner while preserving external-write, destructive-action, live-provider, and VM/ISO proof boundaries.
 - The inbox capability ownership boundary epic is closed for this Phase 2 slice; future inbox work should require live read-only OAuth proof, observed Maildir/user data proof, or a later confirmed external mutation model before claiming broader inbox ecosystem support.
 - The first inbox ownership slice is `docs/architecture/inbox-capability-ownership-boundary.md`, smoke-tested by `scripts/smoke_inbox_capability_ownership_boundary.sh`.
 - The inbox ownership boundary smoke is included in the Phase 2 golden demo runner so inbox capability ownership remains part of practical local/Docker-safe proof.

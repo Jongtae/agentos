@@ -41,6 +41,7 @@ http://localhost:8787
 - `/api/timeline` exposes customer-readable runtime events, user-visible record paths, and external-app/live-provider non-claims.
 - `/api/timeline` exposes an Activity Timeline completion snapshot with narrated runtime stages, record surfaces, validation gates, and external/live proof blockers without automatic claim promotion.
 - `/api/capabilities` exposes safe local capabilities, confirmation-needed capabilities, and blocked destructive capabilities from the permission registry.
+- `/api/capabilities` exposes a Capability Store completion snapshot with safe local paths, confirmation paths, blocked destructive actions, validation gates, and external/live proof blockers without automatic claim promotion.
 - `/api/approvals` exposes setup-needed, confirmation-needed, observed-proof-needed, and blocked approval requirements without executing them.
 - `/api/proofs` exposes future observed-proof evidence requirements and mock submission fields without accepting secrets or auto-promoting claims.
 - `/api/proof-requests` exposes customer evidence requests, redaction rules, validation commands, and proof-promotion boundaries without accepting secrets or auto-promoting claims.
@@ -85,6 +86,7 @@ Expected behavior:
 - Activity Timeline shows recent runtime events and record paths without claiming external app execution
 - Activity Timeline Completion Snapshot shows narrated stages, record surfaces, validation gates, and blocked external/live proof without claiming browser, VM/ISO, release, mutation, or attestation proof
 - Capability Store shows safe local actions, external-read setup needs, lifecycle confirmation, and destructive blocked actions
+- Capability Store Completion Snapshot shows safe local paths, confirmation paths, blocked destructive actions, validation gates, and external/live proof blockers without claiming external writes, destructive execution, live provider proof, or VM/ISO proof
 - Approval Center shows approval-gated actions without claiming approval execution, external writes, or destructive actions
 - Observed Proof Uploader shows evidence requirements without claiming file upload execution or claim promotion
 - Observed Proof Request Board shows the concrete customer action, accepted evidence, redaction rule, validation command, and promotion boundary for each blocked stronger proof category
@@ -156,6 +158,19 @@ This gate starts the Python Docker runtime preview and verifies that
 snapshot, narrated runtime stages, record surfaces, validation gates, and
 explicit non-claims for external app execution, live provider activity, browser
 activity, and VM/ISO runtime activity.
+
+## Capability Store Snapshot Gate
+
+```bash
+scripts/smoke_docker_capability_store_snapshot.sh
+```
+
+This gate starts the Python Docker runtime preview and verifies that
+`/api/capabilities` and the browser Capability Store expose the completion
+snapshot, safe local capability paths, confirmation paths, blocked destructive
+actions, validation gates, and explicit non-claims for external write
+execution, destructive action execution, live provider proof, and VM/ISO
+capability ownership.
 
 ## Customer Onboarding Quickstart Gate
 

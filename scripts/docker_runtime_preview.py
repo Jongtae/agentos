@@ -1791,6 +1791,126 @@ class DockerPreviewApp:
                 }
             )
         permission_levels = registry.get("permission_levels", []) if isinstance(registry.get("permission_levels"), list) else []
+        completion_snapshot = {
+            "schema_version": "agentos-product-layer-capability-store-completion-snapshot.v1",
+            "surface": "Capability Store Completion Snapshot",
+            "state": "ready" if capabilities else "degraded",
+            "customer_message": "Capability Store is complete as a Docker-safe capability ownership surface; destructive, external-write, and live-provider claims remain blocked until observed evidence exists.",
+            "completed_local_proof": [
+                {
+                    "id": "permission_registry_loaded",
+                    "label": "Permission registry loaded",
+                    "state": "ready" if capabilities else "degraded",
+                    "customer_value": "Customers can inspect the permission level behind each visible capability.",
+                },
+                {
+                    "id": "safe_local_capabilities_visible",
+                    "label": "Safe local capabilities visible",
+                    "state": "ready",
+                    "customer_value": "Status, setup help, workspace search, record lookup, and user-owned writes are separated from external or destructive work.",
+                },
+                {
+                    "id": "blocked_actions_visible",
+                    "label": "Blocked actions visible",
+                    "state": "ready",
+                    "customer_value": "Send/delete/archive and unknown capabilities remain blocked or unsupported unless a future proof task changes the boundary.",
+                },
+            ],
+            "capability_paths": [
+                {
+                    "id": "safe_read",
+                    "label": "Safe read",
+                    "state": "ready",
+                    "permission_level": "safe_read",
+                    "customer_value": "AgentOS may answer local status, setup, workspace, and record questions without external mutation.",
+                },
+                {
+                    "id": "safe_write_user_owned",
+                    "label": "User-owned write",
+                    "state": "ready",
+                    "permission_level": "safe_write_user_owned",
+                    "customer_value": "AgentOS may write local user-owned records such as drafts or proof artifacts.",
+                },
+                {
+                    "id": "external_read",
+                    "label": "External read setup",
+                    "state": "blocked_until_setup",
+                    "permission_level": "external_read",
+                    "customer_value": "Live providers need explicit setup and observed read-only proof before customer claims can expand.",
+                },
+                {
+                    "id": "lifecycle_confirmed",
+                    "label": "Lifecycle confirmation",
+                    "state": "confirmation_required",
+                    "permission_level": "lifecycle_confirmed",
+                    "customer_value": "Restart, reboot, shutdown, and recovery paths require user confirmation or observed proof.",
+                },
+                {
+                    "id": "destructive_blocked",
+                    "label": "Destructive blocked",
+                    "state": "blocked",
+                    "permission_level": "destructive_blocked",
+                    "customer_value": "Destructive inbox actions remain blocked in the Docker Product Layer.",
+                },
+            ],
+            "validation_gates": [
+                {
+                    "id": "capability_store_snapshot_gate",
+                    "label": "Capability Store snapshot gate",
+                    "state": "ready",
+                    "command": "scripts/smoke_docker_capability_store_snapshot.sh",
+                },
+                {
+                    "id": "product_layer_completion_gate",
+                    "label": "Product Layer completion gate",
+                    "state": "ready",
+                    "command": "scripts/smoke_docker_product_layer_completion.sh",
+                },
+                {
+                    "id": "runtime_preview_python_gate",
+                    "label": "Runtime preview Python gate",
+                    "state": "ready",
+                    "command": "scripts/smoke_docker_runtime_preview_python.sh",
+                },
+            ],
+            "blocked_stronger_proof": [
+                {
+                    "id": "external_write_execution",
+                    "label": "External write execution",
+                    "state": "blocked_until_observed",
+                    "customer_value": "Docker preview does not prove external write execution.",
+                },
+                {
+                    "id": "destructive_action_execution",
+                    "label": "Destructive action execution",
+                    "state": "blocked_by_policy",
+                    "customer_value": "Docker preview keeps destructive actions blocked by default.",
+                },
+                {
+                    "id": "live_provider_execution",
+                    "label": "Live provider execution",
+                    "state": "blocked_until_credentials",
+                    "customer_value": "Live OAuth/provider proof requires explicit credentials and sanitized observed evidence.",
+                },
+                {
+                    "id": "vm_iso_capability_ownership",
+                    "label": "VM/ISO capability ownership",
+                    "state": "blocked_until_observed_vm",
+                    "customer_value": "Docker capability proof is not VM/ISO boot or rejoin proof.",
+                },
+            ],
+            "proof": {
+                "customer_facing_capability_store_snapshot_ready": bool(capabilities),
+                "docker_preview_ready": True,
+                "permission_registry_loaded": bool(capabilities),
+                "safe_local_capabilities_ready": True,
+                "external_write_claimed": False,
+                "destructive_action_executed_by_default": False,
+                "live_provider_proof_claimed": False,
+                "boot_or_iso_proof_claimed": False,
+                "automatic_claim_promotion": False,
+            },
+        }
         return {
             "schema_version": "agentos-product-layer-capability-store.v1",
             "surface": "Capability Store",
@@ -1799,6 +1919,7 @@ class DockerPreviewApp:
             "permission_levels": permission_levels,
             "capabilities": capabilities,
             "defaults": registry.get("defaults", {}) if isinstance(registry.get("defaults"), dict) else {},
+            "completion_snapshot": completion_snapshot,
             "proof": {
                 "docker_preview_ready": True,
                 "registry_loaded": bool(capabilities),
@@ -1806,6 +1927,7 @@ class DockerPreviewApp:
                 "external_write_claimed": False,
                 "live_provider_proof_claimed": False,
                 "customer_facing_capability_store_ready": bool(capabilities),
+                "capability_store_completion_snapshot_ready": bool(capabilities),
             },
         }
 
@@ -2997,6 +3119,42 @@ def _render_page(app: DockerPreviewApp) -> str:
         for item in capability_store.get("capabilities", [])[:10]
         if isinstance(item, dict)
     ) or "<p class='lead'>Capability registry is unavailable.</p>"
+    capability_snapshot = capability_store.get("completion_snapshot", {}) if isinstance(capability_store.get("completion_snapshot"), dict) else {}
+    capability_snapshot_proof_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Completed proof'))))}</b> "
+        f"{html.escape(str(item.get('customer_value', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))}</em>"
+        "</li>"
+        for item in capability_snapshot.get("completed_local_proof", [])
+        if isinstance(item, dict)
+    ) or "<li>No Capability Store completed proof is configured.</li>"
+    capability_path_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Capability path'))))}</b> "
+        f"{html.escape(str(item.get('customer_value', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))} · {html.escape(str(item.get('permission_level', '')))}</em>"
+        "</li>"
+        for item in capability_snapshot.get("capability_paths", [])
+        if isinstance(item, dict)
+    ) or "<li>No Capability Store paths are configured.</li>"
+    capability_gate_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Validation gate'))))}</b> "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))} · {html.escape(str(item.get('command', '')))}</em>"
+        "</li>"
+        for item in capability_snapshot.get("validation_gates", [])
+        if isinstance(item, dict)
+    ) or "<li>No Capability Store validation gates are configured.</li>"
+    capability_blocker_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Blocked proof'))))}</b> "
+        f"{html.escape(str(item.get('customer_value', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))}</em>"
+        "</li>"
+        for item in capability_snapshot.get("blocked_stronger_proof", [])
+        if isinstance(item, dict)
+    ) or "<li>No Capability Store proof blockers are configured.</li>"
     approval_html = "\n".join(
         "<li>"
         f"<b>{html.escape(str(item.get('label', item.get('id', 'Approval'))))}</b> "
@@ -3405,6 +3563,18 @@ def _render_page(app: DockerPreviewApp) -> str:
         <li><b>Live provider proof</b> not claimed</li>
       </ul>
       <p><a href="/api/capabilities">capabilities JSON</a></p>
+    </div>
+    <div class="panel">
+      <h2>Capability Store Completion Snapshot</h2>
+      <p class="lead">{html.escape(str(capability_snapshot.get('customer_message', 'Capability Store completion snapshot is available below.')))}</p>
+      <h3>Completed Local Proof</h3>
+      <ul>{capability_snapshot_proof_html}</ul>
+      <h3>Capability Paths</h3>
+      <ul>{capability_path_html}</ul>
+      <h3>Validation Gates</h3>
+      <ul>{capability_gate_html}</ul>
+      <h3>Blocked Stronger Proof</h3>
+      <ul>{capability_blocker_html}</ul>
     </div>
   </section>
   <section class="product">

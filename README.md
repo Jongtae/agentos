@@ -181,8 +181,8 @@ flowchart LR
   phase1["Phase 1\nOS-native runtime prototype\nclosed"]
   phase2["Phase 2\nlocal-first runtime loop\nclosed baseline"]
   ready["Product Layer\ncompletion gate\nready"]
-  active["Active completion epic\nDocker Activity Timeline\ncompletion snapshot"]
-  completed["Completed completion epics\npermissions, updater, browser fallback,\nBrowser observed acceptance,\npublic preview ops, distribution,\ninbox, capability graduation,\ncalendar/Gmail readiness,\nVM/ISO proof status,\nCalendar live acceptance,\nCalendar live adapter,\nMaildir intake,\nDocker onboarding,\nguided demo journey,\ncustomer handoff bundle,\npreview readiness board,\nobserved proof request board,\nrecovery drill board,\nsession report,\nruntime home snapshot,\nWork Inbox snapshot"]
+  active["Active completion epic\nNone"]
+  completed["Completed completion epics\npermissions, updater, browser fallback,\nBrowser observed acceptance,\npublic preview ops, distribution,\ninbox, capability graduation,\ncalendar/Gmail readiness,\nVM/ISO proof status,\nCalendar live acceptance,\nCalendar live adapter,\nMaildir intake,\nDocker onboarding,\nguided demo journey,\ncustomer handoff bundle,\npreview readiness board,\nobserved proof request board,\nrecovery drill board,\nsession report,\nruntime home snapshot,\nWork Inbox snapshot,\nActivity Timeline snapshot"]
   blocked["Observed-proof blockers\nVM/ISO, live OAuth,\nlive browser, release artifacts"]
   future["Later completion tracks\ncalendar live adapter, broader app ecosystem,\nhardware attestation, packaging hardening"]
 
@@ -199,7 +199,7 @@ flowchart LR
 | Docker runtime preview | Developer/demo proof path | Makes the managed runtime easy to try without claiming boot ownership. |
 | Runtime Home completion snapshot | Completed Docker product surface | Turns the default Docker Runtime Home into a customer-readable completion snapshot with completed local proof, validation gates, review surfaces, and blocked stronger-proof claims. |
 | Work Inbox completion snapshot | Completed Docker product surface | Turns Work Inbox into a customer-readable read-first snapshot with safe workflows, mutation boundaries, validation gates, and live-provider blockers. |
-| Activity Timeline completion snapshot | Active Docker product surface | Turns Activity Timeline into a customer-readable narration snapshot with runtime stages, record surfaces, validation gates, and external/live proof blockers. |
+| Activity Timeline completion snapshot | Completed Docker product surface | Turns Activity Timeline into a customer-readable narration snapshot with runtime stages, record surfaces, validation gates, and external/live proof blockers. |
 | Docker Onboarding Status | Completed Docker product surface | Shows quickstart steps, preview entrypoints, validation smokes, and proof non-claims from the running preview. |
 | Docker onboarding readiness checklist | Completed Docker product surface | Shows which local-preview steps are ready and which stronger proof claims still require observed external evidence. |
 | Guided Demo Journey | Completed Docker product surface | Walks customers through Runtime Home, Work Inbox, prompt execution, Activity Timeline, Evidence Dashboard, and Recovery Center in proof-safe order, with expected outcomes and a completion summary separating successful Docker proof from blocked-until-observed claims. |
@@ -209,7 +209,7 @@ flowchart LR
 | Session Report | Completed Docker product surface | Summarizes runtime state, recent activity, proof sources, recovery drills, and stronger-proof blockers in one Docker-safe customer report. |
 | Runtime Home | Completed Docker product surface | Presents runtime readiness, Work Inbox, Activity Timeline, Recovery Center, Evidence Dashboard states, and the completion snapshot in customer language. |
 | Work Inbox | Completed Docker product surface | Presents fixture, Maildir, Gmail, and Calendar as read-first inbox sources with explicit live-proof blockers, mutation non-claims, and the completion snapshot. |
-| Activity Timeline | Active Docker product surface | Shows customer-readable runtime events, user-visible records, and the active completion snapshot without claiming external app execution or live-provider proof. |
+| Activity Timeline | Completed Docker product surface | Shows customer-readable runtime events, user-visible records, and the completion snapshot without claiming external app execution or live-provider proof. |
 | Capability Store | Active Docker product surface | Presents safe reads, user-owned writes, external-read setup needs, lifecycle confirmation, and blocked destructive actions from the capability registry. |
 | Approval Center | Active Docker product surface | Shows setup, confirmation, observed-proof, and blocked requirements without claiming approval execution, external writes, or destructive actions. |
 | Observed Proof Uploader | Active Docker product surface | Defines required evidence and mock submission fields for live, VM/ISO, browser, release, and attestation proof without accepting secrets or auto-promoting claims. |

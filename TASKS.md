@@ -11,15 +11,15 @@ Current parent branch:
 
 Current public milestone:
 
-- **Docker Activity Timeline completion snapshot** — customer-facing narration summary with runtime stages, record surfaces, and external/live proof blockers
+- **Docker Activity Timeline completion snapshot closeout** — completed narration summary with runtime stages, record surfaces, and external/live proof blockers
 
 Current task:
 
-- `[P2-131] Add Activity Timeline completion snapshot`
+- `[P2-132] Close Activity Timeline completion snapshot epic`
 
 Runtime impact statement:
 
-- This task makes Activity Timeline a clearer customer-facing narration/proof surface while keeping external app execution, live provider, browser, VM/ISO, release, mutation, and attestation proof blocked until observed evidence exists.
+- This closeout makes Activity Timeline a completed Docker Product Layer narration/proof customer surface while keeping external app execution, live provider, browser, VM/ISO, release, mutation, and attestation proof blockers explicit.
 
 Current autonomous completion loop:
 
@@ -175,8 +175,9 @@ Recommended Phase 2 tasks:
 - The Docker Work Inbox completion snapshot epic is closed for this Phase 2 slice; future Work Inbox changes should require live read-only OAuth proof, observed user Maildir proof, production sync design, mutation permission model, or a new customer-facing Work Inbox promotion need before reopening.
 - P2-129 adds the Work Inbox completion snapshot to `/api/work-inbox`, the browser Work Inbox panel, `scripts/smoke_docker_work_inbox_snapshot.sh`, Product Layer completion coverage, and the Phase 2 golden runner while preserving read-first capability ownership boundaries.
 - P2-130 closes the Docker Work Inbox completion snapshot epic after README, TASKS, roadmap, Docker acceptance, Work Inbox snapshot gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve Docker-safe read-first Work Inbox truthfulness without stronger proof claims.
-- The Docker Activity Timeline completion snapshot epic is active for this Phase 2 slice; it should close only after Activity Timeline exposes a focused customer narration snapshot, record surfaces, validation gates, README/TASKS/roadmap/Docker acceptance alignment, and Docker-safe smoke coverage without promoting external app, live provider, browser, VM/ISO, release, mutation, or attestation proof claims.
+- The Docker Activity Timeline completion snapshot epic is closed for this Phase 2 slice; future Activity Timeline changes should require observed external app activity, live provider proof, browser evidence, VM/ISO proof, or a new customer-facing activity narration promotion need before reopening.
 - P2-131 adds the Activity Timeline completion snapshot to `/api/timeline`, the browser Activity Timeline panel, `scripts/smoke_docker_activity_timeline_snapshot.sh`, Product Layer completion coverage, and the Phase 2 golden runner while preserving external/live proof boundaries.
+- P2-132 closes the Docker Activity Timeline completion snapshot epic after README, TASKS, roadmap, Docker acceptance, Activity Timeline snapshot gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve Docker-safe activity narration truthfulness without stronger proof claims.
 - The inbox capability ownership boundary epic is closed for this Phase 2 slice; future inbox work should require live read-only OAuth proof, observed Maildir/user data proof, or a later confirmed external mutation model before claiming broader inbox ecosystem support.
 - The first inbox ownership slice is `docs/architecture/inbox-capability-ownership-boundary.md`, smoke-tested by `scripts/smoke_inbox_capability_ownership_boundary.sh`.
 - The inbox ownership boundary smoke is included in the Phase 2 golden demo runner so inbox capability ownership remains part of practical local/Docker-safe proof.

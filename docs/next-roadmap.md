@@ -80,7 +80,16 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
-- None.
+- `docker-next-work-board-epic` — [EPIC: Stage 3 / Phase 2 Docker next work board](https://github.com/Jongtae/agentos/issues/281)
+  - Milestone: Docker next work board
+  - Completion goal: expose a customer-readable Docker Next Work Board that separates completed Docker-local Product Layer proof, safe next implementation candidates, and stronger observed-proof blockers without promoting Docker proof into VM/ISO, live OAuth, browser, release, mutation, or hardware-attestation claims.
+  - Validation plan: `scripts/smoke_docker_next_work_board.sh`, `scripts/smoke_docker_product_layer_completion.sh`, `scripts/smoke_docker_runtime_preview_python.sh`, `docker compose config`, the Phase 2 golden demo runner, roadmap direction judge, cleanup policy, and PR CI.
+  - Exit condition: complete after `/api/next-work`, the browser Next Work Board panel, README, TASKS, Docker acceptance, roadmap state, focused next-work gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks all preserve completed-proof, safe-next-candidate, and observed-blocker truthfulness without stronger proof claims.
+  - Open issue: #281.
+  - Active task: P2-119 ([#282](https://github.com/Jongtae/agentos/issues/282)).
+  - First slice: P2-119 adds the Next Work Board API, browser panel, focused smoke gate, and Product Layer/golden runner coverage.
+  - Residual blockers: Docker daemon observed proof, VM/ISO boot/rejoin proof, live OAuth, live browser evidence, release artifacts/signing, external mutation proof, and hardware attestation remain unclaimed until observed evidence exists.
+  - Advances: Docker-first public usability, runtime proof truthfulness, recovery, capability ownership, OS-native runtime defaults.
 
 ## Completed Completion Epics
 
@@ -196,7 +205,7 @@ The detailed Phase 2 roadmap is tracked in
   - Product-layer follow-up: P2-90 promotes Observed Proof Uploader into a Docker product surface that defines future evidence requirements and mock submission fields without accepting secrets or auto-promoting claims.
   - Product-layer follow-up: P2-91 promotes Release Trust Panel into a Docker product surface that separates local release preflight from real artifact, checksum, signing, publication, and VM/ISO release proof.
   - Product-layer follow-up: P2-92 promotes Attestation Status into a Docker product surface that shows Secure Boot, TPM/PCR, event-log, IMA, and hardware attestation blockers without claiming Docker proves device trust.
-  - Product-layer closeout: P2-93 adds the Docker Product Layer completion gate that verifies Runtime Home, Work Inbox, Activity Timeline, Capability Store, Approval Center, Observed Proof Uploader, Release Trust Panel, Attestation Status, Recovery Center, and Evidence Dashboard together.
+  - Product-layer closeout: P2-93 adds the Docker Product Layer completion gate, now extended by later Docker Product Layer epics to verify Runtime Home, Work Inbox, Activity Timeline, Capability Store, Approval Center, Observed Proof Uploader, Release Trust Panel, Attestation Status, Recovery Center, Evidence Dashboard, Customer Proof Packet, Customer Handoff Bundle, Proof Promotion Center, Product Layer Map, Preview Readiness Board, and Next Work Board together.
   - Product-layer follow-up: P2-85 promotes Recovery Center into a Docker product surface with customer-facing recovery actions for VM/ISO, live OAuth, browser, release, attestation, and setup blockers.
   - Product-layer follow-up: P2-86 promotes Evidence Dashboard into a Docker product surface that separates observed Docker/local proof from explicit VM/ISO, live OAuth, browser, release, and attestation non-claims.
   - Residual blockers: live Gmail/Calendar OAuth, real user Maildir proof, browser acceptance evidence, production sync, retention/compliance behavior, and external mutations remain unclaimed until observed proof and later permission models exist.

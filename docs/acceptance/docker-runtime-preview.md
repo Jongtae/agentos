@@ -32,6 +32,8 @@ http://localhost:8787
 - `/api/demo-journey` exposes the customer path across Runtime Home, Work Inbox, prompt execution, Activity Timeline, Evidence Dashboard, and Recovery Center with expected success outcomes, blocked-until-observed outcomes, and a completion summary, without claiming VM/ISO, live OAuth, browser, release, external mutation, or hardware attestation proof.
 - Preview Readiness Board is visible.
 - `/api/preview-readiness` exposes public preview readiness checks, promotion decisions, validation commands, and stronger-proof non-claims without automatic claim promotion.
+- Next Work Board is visible.
+- `/api/next-work` exposes completed Docker-local Product Layer proof, safe next implementation candidates, blocked observed-proof tracks, validation commands, and stronger-proof non-claims without automatic claim promotion.
 - A customer-facing Runtime Home is visible.
 - Work Inbox, Activity Timeline, Recovery Center, and Evidence Dashboard states are summarized.
 - `/api/work-inbox` exposes read-first inbox sources, workflows, live blockers, and mutation non-claims.
@@ -72,6 +74,7 @@ Expected behavior:
 - status returns runtime state
 - Runtime Home explains product-layer readiness and proof blockers
 - Preview Readiness Board shows share-ready Docker-local preview claims, local gates to rerun before a demo, and stronger claims blocked until observed evidence exists
+- Next Work Board shows completed Docker-local Product Layer proof, safe next implementation candidates, and blocked observed-proof tracks without automatic claim promotion
 - Work Inbox shows fixture, Maildir, Gmail, and Calendar sources without claiming live OAuth or mutations
 - Activity Timeline shows recent runtime events and record paths without claiming external app execution
 - Capability Store shows safe local actions, external-read setup needs, lifecycle confirmation, and destructive blocked actions
@@ -93,7 +96,7 @@ scripts/smoke_docker_runtime_preview.sh
 
 The smoke should validate compose config, build the image, start the preview,
 check `localhost:8787`, verify `/api/product`, `/api/work-inbox`,
-`/api/onboarding`, `/api/demo-journey`, `/api/preview-readiness`, `/api/timeline`, `/api/capabilities`, `/api/approvals`, `/api/proofs`, `/api/release-trust`, `/api/attestation`, `/api/recovery`, `/api/evidence`, `/api/proof-packet`, `/api/customer-handoff`, `/api/proof-promotion`, and `/api/product-map`, run a prompt through `/api/prompt`,
+`/api/onboarding`, `/api/demo-journey`, `/api/preview-readiness`, `/api/next-work`, `/api/timeline`, `/api/capabilities`, `/api/approvals`, `/api/proofs`, `/api/release-trust`, `/api/attestation`, `/api/recovery`, `/api/evidence`, `/api/proof-packet`, `/api/customer-handoff`, `/api/proof-promotion`, and `/api/product-map`, run a prompt through `/api/prompt`,
 verify activity, and check that common secret patterns are not present in the
 response.
 
@@ -153,6 +156,18 @@ This gate starts the Python Docker runtime preview and verifies that
 checks, promotion decisions, validation commands, the public preview operations
 contract, and explicit non-claims for Docker daemon observed proof, VM/ISO, live
 OAuth, browser, release, mutation, and hardware attestation.
+
+## Next Work Board Gate
+
+```bash
+scripts/smoke_docker_next_work_board.sh
+```
+
+This gate starts the Python Docker runtime preview and verifies that
+`/api/next-work` exposes completed Docker-local Product Layer proof, safe next
+implementation candidates, blocked observed-proof tracks, validation commands,
+and explicit non-claims for Docker daemon observed proof, VM/ISO, live OAuth,
+browser, release, mutation, and hardware attestation.
 
 ## Customer Proof Packet Gate
 

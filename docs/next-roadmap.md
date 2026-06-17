@@ -80,18 +80,21 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
+- None.
+
+## Completed Completion Epics
+
 - `docker-next-work-board-epic` — [EPIC: Stage 3 / Phase 2 Docker next work board](https://github.com/Jongtae/agentos/issues/281)
   - Milestone: Docker next work board
   - Completion goal: expose a customer-readable Docker Next Work Board that separates completed Docker-local Product Layer proof, safe next implementation candidates, and stronger observed-proof blockers without promoting Docker proof into VM/ISO, live OAuth, browser, release, mutation, or hardware-attestation claims.
   - Validation plan: `scripts/smoke_docker_next_work_board.sh`, `scripts/smoke_docker_product_layer_completion.sh`, `scripts/smoke_docker_runtime_preview_python.sh`, `docker compose config`, the Phase 2 golden demo runner, roadmap direction judge, cleanup policy, and PR CI.
-  - Exit condition: complete after `/api/next-work`, the browser Next Work Board panel, README, TASKS, Docker acceptance, roadmap state, focused next-work gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks all preserve completed-proof, safe-next-candidate, and observed-blocker truthfulness without stronger proof claims.
-  - Open issue: #281.
-  - Active task: P2-119 ([#282](https://github.com/Jongtae/agentos/issues/282)).
+  - Exit condition: completed by P2-119 through P2-120 after `/api/next-work`, the browser Next Work Board panel, README, TASKS, Docker acceptance, roadmap state, focused next-work gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks all preserve completed-proof, safe-next-candidate, and observed-blocker truthfulness without stronger proof claims.
+  - Closed issue: #281.
+  - Completed tasks: P2-119 and P2-120.
   - First slice: P2-119 adds the Next Work Board API, browser panel, focused smoke gate, and Product Layer/golden runner coverage.
+  - Product-layer closeout: P2-120 records the Docker next work board epic as complete so future loops return to the roadmap before adding more next-work-board changes.
   - Residual blockers: Docker daemon observed proof, VM/ISO boot/rejoin proof, live OAuth, live browser evidence, release artifacts/signing, external mutation proof, and hardware attestation remain unclaimed until observed evidence exists.
   - Advances: Docker-first public usability, runtime proof truthfulness, recovery, capability ownership, OS-native runtime defaults.
-
-## Completed Completion Epics
 
 - `docker-public-preview-readiness-board-epic` — [EPIC: Stage 3 / Phase 2 Docker public preview readiness board](https://github.com/Jongtae/agentos/issues/274)
   - Milestone: Docker public preview readiness board

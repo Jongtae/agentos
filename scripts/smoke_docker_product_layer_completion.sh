@@ -48,6 +48,7 @@ curl -fsS "http://127.0.0.1:$PORT/api/release-trust" > "$TMP_DIR/release-trust.j
 curl -fsS "http://127.0.0.1:$PORT/api/attestation" > "$TMP_DIR/attestation.json"
 curl -fsS "http://127.0.0.1:$PORT/api/recovery" > "$TMP_DIR/recovery.json"
 curl -fsS "http://127.0.0.1:$PORT/api/recovery-drills" > "$TMP_DIR/recovery-drills.json"
+curl -fsS "http://127.0.0.1:$PORT/api/session-report" > "$TMP_DIR/session-report.json"
 curl -fsS "http://127.0.0.1:$PORT/api/evidence" > "$TMP_DIR/evidence.json"
 curl -fsS "http://127.0.0.1:$PORT/api/proof-packet" > "$TMP_DIR/proof-packet.json"
 curl -fsS "http://127.0.0.1:$PORT/api/customer-handoff" > "$TMP_DIR/customer-handoff.json"
@@ -79,6 +80,7 @@ surfaces = {
     "attestation_status": ("attestation.json", "agentos-product-layer-attestation-status.v1", "Attestation Status"),
     "recovery_center": ("recovery.json", "agentos-product-layer-recovery-center.v1", "Recovery Center"),
     "recovery_drill_board": ("recovery-drills.json", "agentos-product-layer-recovery-drill-board.v1", "Recovery Drill Board"),
+    "session_report": ("session-report.json", "agentos-product-layer-session-report.v1", "Session Report"),
     "evidence_dashboard": ("evidence.json", "agentos-product-layer-evidence-dashboard.v1", "Evidence Dashboard"),
     "customer_proof_packet": ("proof-packet.json", "agentos-product-layer-customer-proof-packet.v1", "Customer Proof Packet"),
     "customer_handoff_bundle": ("customer-handoff.json", "agentos-product-layer-customer-handoff-bundle.v1", "Customer Handoff Bundle"),
@@ -248,6 +250,18 @@ assert "proof_promotion_center" in product["product_map"]["recommended_path"]
 assert "observed_proof_request_board" in product["product_map"]["recommended_path"]
 assert "next_work_board" in product["product_map"]["recommended_path"]
 assert "recovery_drill_board" in product["product_map"]["recommended_path"]
+assert "session_report" in product["product_map"]["recommended_path"]
+assert product["session_report"]["proof"]["customer_facing_session_report_ready"] is True
+assert product["session_report"]["proof"]["evidence_dashboard_linked"] is True
+assert product["session_report"]["proof"]["recovery_drills_linked"] is True
+assert {item["id"] for item in product["session_report"]["report_sections"]} == {
+    "runtime_state",
+    "recent_activity",
+    "proof_sources",
+    "recovery_drills",
+    "stronger_proof_blockers",
+}
+assert "scripts/smoke_docker_session_report.sh" in product["session_report"]["validation_commands"]
 assert product["recovery_drill_board"]["proof"]["customer_facing_recovery_drills_ready"] is True
 assert product["recovery_drill_board"]["proof"]["boot_or_iso_proof_claimed"] is False
 assert product["recovery_drill_board"]["proof"]["live_oauth_claimed"] is False
@@ -282,6 +296,7 @@ assert reviewer_routes["proof_reviewer"]["route"] == [
     "evidence_dashboard",
     "customer_proof_packet",
     "customer_handoff_bundle",
+    "session_report",
     "proof_promotion_center",
     "observed_proof_request_board",
     "next_work_board",
@@ -310,6 +325,8 @@ assert "Observed Proof Request Board" in home
 assert "proof requests JSON" in home
 assert "Recovery Drill Board" in home
 assert "recovery drills JSON" in home
+assert "Session Report" in home
+assert "session report JSON" in home
 assert "Next Work Board" in home
 assert "next work JSON" in home
 assert {item["id"] for item in product["customer_handoff_bundle"]["inspect_surfaces"]} >= {
@@ -374,6 +391,13 @@ non_claims = {
     "recovery_drill_release": product["recovery_drill_board"]["proof"]["release_trust_claimed"],
     "recovery_drill_external_mutation": product["recovery_drill_board"]["proof"]["external_mutation_claimed"],
     "recovery_drill_attestation": product["recovery_drill_board"]["proof"]["hardware_attestation_claimed"],
+    "session_report_docker_daemon": product["session_report"]["proof"]["docker_daemon_observed_claimed"],
+    "session_report_vm_iso": product["session_report"]["proof"]["boot_or_iso_proof_claimed"],
+    "session_report_live_oauth": product["session_report"]["proof"]["live_oauth_claimed"],
+    "session_report_live_browser": product["session_report"]["proof"]["live_browser_proof_claimed"],
+    "session_report_release": product["session_report"]["proof"]["release_trust_claimed"],
+    "session_report_external_mutation": product["session_report"]["proof"]["external_mutation_claimed"],
+    "session_report_attestation": product["session_report"]["proof"]["hardware_attestation_claimed"],
     "evidence_hardware": product["evidence_dashboard"]["proof"]["hardware_attestation_claimed"],
     "proof_packet_vm_iso": product["customer_proof_packet"]["proof"]["boot_or_iso_proof_claimed"],
     "proof_packet_live_oauth": product["customer_proof_packet"]["proof"]["live_oauth_claimed"],
@@ -411,6 +435,7 @@ ready_claims = {
     "attestation_status": product["attestation_status"]["proof"]["customer_facing_attestation_status_ready"],
     "recovery_center": product["recovery_center"]["proof"]["customer_facing_recovery_ready"],
     "recovery_drill_board": product["recovery_drill_board"]["proof"]["customer_facing_recovery_drills_ready"],
+    "session_report": product["session_report"]["proof"]["customer_facing_session_report_ready"],
     "evidence_dashboard": product["evidence_dashboard"]["proof"]["customer_facing_evidence_ready"],
     "customer_proof_packet": product["customer_proof_packet"]["proof"]["customer_packet_ready"],
     "customer_handoff_bundle": product["customer_handoff_bundle"]["proof"]["customer_handoff_ready"],

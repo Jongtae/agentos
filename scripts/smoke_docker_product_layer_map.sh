@@ -78,6 +78,7 @@ assert {surface["id"] for surface in groups["prove_and_handoff"]["surfaces"]} >=
     "evidence_dashboard",
     "customer_proof_packet",
     "customer_handoff_bundle",
+    "session_report",
     "proof_promotion_center",
     "observed_proof_request_board",
     "next_work_board",
@@ -100,6 +101,7 @@ assert "proof_promotion_center" in product_map["recommended_path"]
 assert "observed_proof_request_board" in product_map["recommended_path"]
 assert "next_work_board" in product_map["recommended_path"]
 assert "recovery_drill_board" in product_map["recommended_path"]
+assert "session_report" in product_map["recommended_path"]
 routes = {route["id"]: route for route in product_map["reviewer_routes"]}
 assert set(routes) == {
     "runtime_evaluator",
@@ -122,6 +124,7 @@ assert routes["proof_reviewer"]["route"] == [
     "evidence_dashboard",
     "customer_proof_packet",
     "customer_handoff_bundle",
+    "session_report",
     "proof_promotion_center",
     "observed_proof_request_board",
     "next_work_board",

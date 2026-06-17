@@ -84,6 +84,18 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Completed Completion Epics
 
+- `docker-session-report-epic` — [EPIC: Stage 3 / Phase 2 Docker session report](https://github.com/Jongtae/agentos/issues/299)
+  - Milestone: Docker session report
+  - Completion goal: expose a customer-facing Docker Session Report that summarizes the current runtime state, recent activity, Product Layer proof sources, recovery drills, and blocked stronger-proof claims in one Docker-safe report without claiming boot, VM/ISO, live OAuth, live browser, release, mutation, or hardware attestation proof.
+  - Validation plan: `scripts/smoke_docker_session_report.sh`, `scripts/smoke_docker_product_layer_completion.sh`, `scripts/smoke_docker_runtime_preview_python.sh`, `docker compose config`, the Phase 2 golden demo runner, roadmap direction judge, cleanup policy, and PR CI.
+  - Exit condition: completed by P2-125 through P2-126 after `/api/session-report`, the browser Session Report panel, README, TASKS, Docker acceptance, roadmap state, focused session-report gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks all preserve Docker-safe customer reporting without stronger proof claims.
+  - Closed issue: #299.
+  - Completed tasks: P2-125 and P2-126.
+  - First slice: P2-125 adds the session report API, browser panel, focused smoke gate, and Product Layer/golden runner coverage.
+  - Product-layer closeout: P2-126 records the Docker session report epic as complete so future loops return to the roadmap before adding more session-report work.
+  - Residual blockers: Docker daemon observed proof, VM/ISO boot/rejoin proof, live OAuth, live browser evidence, release artifacts/signing, external mutation proof, and hardware attestation remain unclaimed until observed evidence exists.
+  - Advances: Docker-first public usability, runtime proof truthfulness, recovery, and OS-native runtime defaults.
+
 - `docker-recovery-drill-board-epic` — [EPIC: Stage 3 / Phase 2 Docker recovery drill board](https://github.com/Jongtae/agentos/issues/293)
   - Milestone: Docker recovery drill board
   - Completion goal: expose a customer-facing Docker Recovery Drill Board that turns runtime restart, health, recovery, evidence refresh, and blocked VM/ISO rejoin paths into repeatable Docker-safe drills without claiming boot, VM/ISO, live OAuth, live browser, release, mutation, or hardware attestation proof.

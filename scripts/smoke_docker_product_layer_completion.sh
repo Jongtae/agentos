@@ -183,6 +183,35 @@ assert activity_snapshot["proof"]["external_app_execution_claimed"] is False
 assert activity_snapshot["proof"]["automatic_claim_promotion"] is False
 assert "Activity Timeline Completion Snapshot" in home
 assert "scripts/smoke_docker_activity_timeline_snapshot.sh" in home
+assert product["capability_store"]["proof"]["capability_store_completion_snapshot_ready"] is True
+capability_snapshot = product["capability_store"]["completion_snapshot"]
+assert capability_snapshot["schema_version"] == "agentos-product-layer-capability-store-completion-snapshot.v1"
+assert capability_snapshot["state"] == "ready"
+assert {item["id"] for item in capability_snapshot["completed_local_proof"]} == {
+    "permission_registry_loaded",
+    "safe_local_capabilities_visible",
+    "blocked_actions_visible",
+}
+assert {item["id"] for item in capability_snapshot["capability_paths"]} == {
+    "safe_read",
+    "safe_write_user_owned",
+    "external_read",
+    "lifecycle_confirmed",
+    "destructive_blocked",
+}
+assert any(item["command"] == "scripts/smoke_docker_capability_store_snapshot.sh" for item in capability_snapshot["validation_gates"])
+assert {item["id"] for item in capability_snapshot["blocked_stronger_proof"]} == {
+    "external_write_execution",
+    "destructive_action_execution",
+    "live_provider_execution",
+    "vm_iso_capability_ownership",
+}
+assert capability_snapshot["proof"]["customer_facing_capability_store_snapshot_ready"] is True
+assert capability_snapshot["proof"]["external_write_claimed"] is False
+assert capability_snapshot["proof"]["destructive_action_executed_by_default"] is False
+assert capability_snapshot["proof"]["automatic_claim_promotion"] is False
+assert "Capability Store Completion Snapshot" in home
+assert "scripts/smoke_docker_capability_store_snapshot.sh" in home
 assert {item["id"] for item in product["guided_demo_journey"]["expected_outcomes"]} >= {
     "runtime_reachable",
     "read_first_work_visible",
@@ -462,6 +491,11 @@ non_claims = {
     "timeline_snapshot_boot": product["activity_timeline"]["completion_snapshot"]["proof"]["boot_or_iso_proof_claimed"],
     "timeline_snapshot_auto_promotion": product["activity_timeline"]["completion_snapshot"]["proof"]["automatic_claim_promotion"],
     "capability_external_write": product["capability_store"]["proof"]["external_write_claimed"],
+    "capability_snapshot_external_write": product["capability_store"]["completion_snapshot"]["proof"]["external_write_claimed"],
+    "capability_snapshot_destructive": product["capability_store"]["completion_snapshot"]["proof"]["destructive_action_executed_by_default"],
+    "capability_snapshot_live_provider": product["capability_store"]["completion_snapshot"]["proof"]["live_provider_proof_claimed"],
+    "capability_snapshot_boot": product["capability_store"]["completion_snapshot"]["proof"]["boot_or_iso_proof_claimed"],
+    "capability_snapshot_auto_promotion": product["capability_store"]["completion_snapshot"]["proof"]["automatic_claim_promotion"],
     "approval_execution": product["approval_center"]["proof"]["approval_execution_claimed"],
     "proof_upload_execution": product["observed_proof_uploader"]["proof"]["file_upload_execution_claimed"],
     "release_uploaded": product["release_trust_panel"]["proof"]["release_uploaded"],
@@ -525,6 +559,7 @@ ready_claims = {
     "activity_timeline": product["activity_timeline"]["proof"]["customer_facing_timeline_ready"],
     "activity_timeline_completion_snapshot": product["activity_timeline"]["completion_snapshot"]["proof"]["customer_facing_activity_timeline_snapshot_ready"],
     "capability_store": product["capability_store"]["proof"]["customer_facing_capability_store_ready"],
+    "capability_store_completion_snapshot": product["capability_store"]["completion_snapshot"]["proof"]["customer_facing_capability_store_snapshot_ready"],
     "approval_center": product["approval_center"]["proof"]["customer_facing_approval_center_ready"],
     "proof_uploader": product["observed_proof_uploader"]["proof"]["customer_facing_proof_uploader_ready"],
     "release_trust": product["release_trust_panel"]["proof"]["customer_facing_release_trust_ready"],

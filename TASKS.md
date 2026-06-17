@@ -11,15 +11,15 @@ Current parent branch:
 
 Current public milestone:
 
-- **Docker next work board** — customer-readable completed proof, safe next candidates, and observed-proof blockers
+- **Docker next work board closeout** — completed-proof, next-candidate, and blocker truthfulness recorded
 
 Current task:
 
-- `[P2-119] Add Docker next work board`
+- `[P2-120] Close Docker next work board epic`
 
 Runtime impact statement:
 
-- This task gives customers a Docker Product Layer Next Work Board that separates completed local proof, safe next implementation candidates, and observed-proof blockers without promoting Docker proof into VM/ISO, live OAuth, browser, release, mutation, or hardware-attestation claims.
+- This task closes the Docker next work board epic after README, TASKS, roadmap, Docker acceptance, focused next-work gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve completed-proof, next-candidate, and blocker truthfulness.
 
 Current autonomous completion loop:
 
@@ -151,8 +151,9 @@ Recommended Phase 2 tasks:
 - The Docker public preview readiness board epic is closed for this Phase 2 slice; future preview readiness work should require observed Docker daemon proof, live browser evidence, release proof, VM/ISO proof, or a new customer-facing public preview promotion need before reopening.
 - P2-117 adds `/api/preview-readiness`, a browser Preview Readiness Board panel, and `scripts/smoke_docker_preview_readiness_board.sh` so customers can see share-ready Docker-local preview claims, recommended local gates, and blocked stronger claims from the Product Layer.
 - P2-118 closes the Docker public preview readiness board epic after README, TASKS, roadmap, Docker acceptance, preview readiness gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve the Docker-safe public preview go/no-go path.
-- The Docker next work board epic is active for this Phase 2 slice; completion requires `/api/next-work`, the browser Next Work Board panel, README, TASKS, roadmap, Docker acceptance, focused next-work gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks to preserve completed-proof, next-candidate, and blocker truthfulness.
+- The Docker next work board epic is closed for this Phase 2 slice; future next-work-board changes should require observed Docker daemon proof, live proof evidence, VM/ISO proof, release proof, hardware attestation evidence, or a new customer-facing next-work promotion need before reopening.
 - P2-119 adds `/api/next-work`, a browser Next Work Board panel, and `scripts/smoke_docker_next_work_board.sh` so customers can see completed Docker-local Product Layer proof, safe next implementation candidates, and blocked stronger proof tracks from the Product Layer.
+- P2-120 closes the Docker next work board epic after README, TASKS, roadmap, Docker acceptance, next-work gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve the Docker-safe completed-proof and next-work path.
 - The inbox capability ownership boundary epic is closed for this Phase 2 slice; future inbox work should require live read-only OAuth proof, observed Maildir/user data proof, or a later confirmed external mutation model before claiming broader inbox ecosystem support.
 - The first inbox ownership slice is `docs/architecture/inbox-capability-ownership-boundary.md`, smoke-tested by `scripts/smoke_inbox_capability_ownership_boundary.sh`.
 - The inbox ownership boundary smoke is included in the Phase 2 golden demo runner so inbox capability ownership remains part of practical local/Docker-safe proof.

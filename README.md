@@ -181,15 +181,13 @@ flowchart LR
   phase1["Phase 1\nOS-native runtime prototype\nclosed"]
   phase2["Phase 2\nlocal-first runtime loop\nclosed baseline"]
   ready["Product Layer\ncompletion gate\nready"]
-  active["Active completion epic\nDocker next work board"]
   completed["Completed completion epics\npermissions, updater, browser fallback,\nBrowser observed acceptance,\npublic preview ops, distribution,\ninbox, capability graduation,\ncalendar/Gmail readiness,\nVM/ISO proof status,\nCalendar live acceptance,\nCalendar live adapter,\nMaildir intake,\nDocker onboarding,\nguided demo journey,\ncustomer handoff bundle,\npreview readiness board"]
   blocked["Observed-proof blockers\nVM/ISO, live OAuth,\nlive browser, release artifacts"]
   future["Later completion tracks\ncalendar live adapter, broader app ecosystem,\nhardware attestation, packaging hardening"]
 
-  phase1 --> phase2 --> ready --> active
+  phase1 --> phase2 --> ready
   phase2 --> completed
   ready --> blocked
-  active --> blocked
   completed --> future
   blocked --> future
 ```
@@ -201,7 +199,7 @@ flowchart LR
 | Docker onboarding readiness checklist | Completed Docker product surface | Shows which local-preview steps are ready and which stronger proof claims still require observed external evidence. |
 | Guided Demo Journey | Completed Docker product surface | Walks customers through Runtime Home, Work Inbox, prompt execution, Activity Timeline, Evidence Dashboard, and Recovery Center in proof-safe order, with expected outcomes and a completion summary separating successful Docker proof from blocked-until-observed claims. |
 | Preview Readiness Board | Completed Docker product surface | Shows which Docker-local preview claims are share-ready, which local gates should be rerun before a demo, and which stronger claims remain blocked until observed evidence exists. |
-| Next Work Board | Active Docker product surface | Shows completed Docker-local Product Layer proof, safe next implementation candidates, and observed-proof blockers without promoting stronger claims. |
+| Next Work Board | Completed Docker product surface | Shows completed Docker-local Product Layer proof, safe next implementation candidates, and observed-proof blockers without promoting stronger claims. |
 | Runtime Home | Active Docker product surface | Presents runtime readiness, Work Inbox, Activity Timeline, Recovery Center, and Evidence Dashboard states in customer language. |
 | Work Inbox | Active Docker product surface | Presents fixture, Maildir, Gmail, and Calendar as read-first inbox sources with explicit live-proof blockers and mutation non-claims. |
 | Activity Timeline | Active Docker product surface | Shows customer-readable runtime events and user-visible records without claiming external app execution or live-provider proof. |
@@ -221,7 +219,7 @@ flowchart LR
 | Docker onboarding status contract | Completed Docker proof gate | Verifies `/api/onboarding` exposes quickstart readiness, preview entrypoints, no-key local preview status, validation smokes, and proof blockers. |
 | Docker guided demo journey | Completed Docker proof gate | Verifies `/api/demo-journey` exposes the customer demo path, expected success/blocker outcomes, completion summary, and keeps VM/ISO, live OAuth, browser, release, mutation, and attestation proof unclaimed. |
 | Docker preview readiness board | Completed Docker proof gate | Verifies `/api/preview-readiness` exposes public preview readiness checks, promotion decisions, validation commands, and stronger-proof non-claims without automatic claim promotion. |
-| Docker next work board | Active Docker proof gate | Verifies `/api/next-work` exposes completed local proof, safe next candidates, blocked observed-proof tracks, validation commands, and stronger-proof non-claims without automatic claim promotion. |
+| Docker next work board | Completed Docker proof gate | Verifies `/api/next-work` exposes completed local proof, safe next candidates, blocked observed-proof tracks, validation commands, and stronger-proof non-claims without automatic claim promotion. |
 | Docker customer proof packet | Completed Docker proof gate | Verifies `/api/proof-packet` exposes completed Docker-local claims, validation commands, proof sources, readiness checks, next blockers, and explicit non-claims without automatic claim promotion. |
 | Docker customer handoff bundle | Completed Docker proof gate | Verifies `/api/customer-handoff` exposes the Docker try path, handoff checklist, share-safe handoff report, inspectable Product Layer surfaces, validation commands, proof sources, and next observed-proof blockers without claiming stronger proof. |
 | Docker proof promotion center | Completed Docker proof gate | Verifies `/api/proof-promotion` exposes claim promotion decisions, proof sharing checklist items, required evidence, source surfaces, and non-claims without automatic promotion. |

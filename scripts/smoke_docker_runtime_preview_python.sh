@@ -220,6 +220,12 @@ assert capabilities["proof"]["destructive_action_executed_by_default"] is False
 assert capabilities["proof"]["external_write_claimed"] is False
 assert capabilities["proof"]["live_provider_proof_claimed"] is False
 assert capabilities["proof"]["customer_facing_capability_store_ready"] is True
+assert capabilities["proof"]["capability_store_completion_snapshot_ready"] is True
+assert capabilities["completion_snapshot"]["schema_version"] == "agentos-product-layer-capability-store-completion-snapshot.v1"
+assert capabilities["completion_snapshot"]["proof"]["customer_facing_capability_store_snapshot_ready"] is True
+assert capabilities["completion_snapshot"]["proof"]["external_write_claimed"] is False
+assert capabilities["completion_snapshot"]["proof"]["destructive_action_executed_by_default"] is False
+assert capabilities["completion_snapshot"]["proof"]["automatic_claim_promotion"] is False
 assert {"safe_read", "external_read", "destructive_blocked"} <= set(capabilities["permission_levels"])
 capability_ids = {item["id"] for item in capabilities["capabilities"]}
 assert {"runtime_status", "gmail_read", "gmail_send"} <= capability_ids

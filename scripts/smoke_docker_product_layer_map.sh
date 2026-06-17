@@ -84,6 +84,7 @@ assert {surface["id"] for surface in groups["prove_and_handoff"]["surfaces"]} >=
 }
 assert {surface["id"] for surface in groups["blocked_until_observed"]["surfaces"]} >= {
     "recovery_center",
+    "recovery_drill_board",
     "observed_proof_uploader",
     "observed_proof_request_board",
     "release_trust_panel",
@@ -98,6 +99,7 @@ assert product_map["recommended_path"][3] == "preview_readiness_board"
 assert "proof_promotion_center" in product_map["recommended_path"]
 assert "observed_proof_request_board" in product_map["recommended_path"]
 assert "next_work_board" in product_map["recommended_path"]
+assert "recovery_drill_board" in product_map["recommended_path"]
 routes = {route["id"]: route for route in product_map["reviewer_routes"]}
 assert set(routes) == {
     "runtime_evaluator",
@@ -112,6 +114,7 @@ assert routes["runtime_evaluator"]["route"] == [
     "preview_readiness_board",
     "next_work_board",
     "activity_timeline",
+    "recovery_drill_board",
     "recovery_center",
 ]
 assert "VM/ISO" in routes["runtime_evaluator"]["claim_boundary"]
@@ -134,6 +137,7 @@ assert "external writes" in routes["capability_reviewer"]["claim_boundary"]
 assert routes["trust_reviewer"]["route"] == [
     "observed_proof_uploader",
     "observed_proof_request_board",
+    "recovery_drill_board",
     "release_trust_panel",
     "attestation_status",
     "recovery_center",

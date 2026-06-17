@@ -80,7 +80,16 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
-- None.
+- `docker-recovery-drill-board-epic` — [EPIC: Stage 3 / Phase 2 Docker recovery drill board](https://github.com/Jongtae/agentos/issues/293)
+  - Milestone: Docker recovery drill board
+  - Completion goal: expose a customer-facing Docker Recovery Drill Board that turns runtime restart, health, recovery, evidence refresh, and blocked VM/ISO rejoin paths into repeatable Docker-safe drills without claiming boot, VM/ISO, live OAuth, live browser, release, mutation, or hardware attestation proof.
+  - Validation plan: `scripts/smoke_docker_recovery_drill_board.sh`, `scripts/smoke_docker_product_layer_completion.sh`, `scripts/smoke_docker_runtime_preview_python.sh`, `docker compose config`, the Phase 2 golden demo runner, roadmap direction judge, cleanup policy, and PR CI.
+  - Exit condition: complete after `/api/recovery-drills`, the browser Recovery Drill Board panel, README, TASKS, Docker acceptance, roadmap state, focused recovery-drill gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks all preserve Docker-safe recovery guidance without stronger proof claims.
+  - Open issue: #293.
+  - Active task: P2-123 ([#294](https://github.com/Jongtae/agentos/issues/294)).
+  - First slice: P2-123 adds the recovery drills API, browser panel, focused smoke gate, and Product Layer/golden runner coverage.
+  - Residual blockers: Docker daemon observed proof, VM/ISO boot/rejoin proof, live OAuth, live browser evidence, release artifacts/signing, external mutation proof, and hardware attestation remain unclaimed until observed evidence exists.
+  - Advances: Docker-first public usability, runtime recovery, proof truthfulness, and OS-native runtime defaults.
 
 ## Completed Completion Epics
 

@@ -401,6 +401,15 @@ class DockerPreviewApp:
         proof_request_board = self.observed_proof_request_board()
         product_map = self.product_map()
         next_work_board = self.next_work_board()
+        completion_snapshot = self.runtime_home_completion_snapshot(
+            onboarding_status=onboarding_status,
+            guided_demo_journey=guided_demo_journey,
+            preview_readiness=preview_readiness,
+            product_map=product_map,
+            next_work_board=next_work_board,
+            recovery_drill_board=recovery_drill_board,
+            session_report=session_report,
+        )
         blockers = recovery_center.get("blockers", [])
         return {
             "schema_version": "agentos-product-layer-runtime-home.v1",
@@ -555,12 +564,178 @@ class DockerPreviewApp:
             "observed_proof_request_board": proof_request_board,
             "product_map": product_map,
             "next_work_board": next_work_board,
+            "completion_snapshot": completion_snapshot,
             "proof": {
                 "docker_main_try_path": True,
                 "boot_or_iso_proof_claimed": False,
                 "live_oauth_claimed": False,
                 "live_browser_proof_claimed": False,
                 "customer_facing_summary_ready": True,
+                "runtime_home_completion_snapshot_ready": True,
+            },
+        }
+
+    def runtime_home_completion_snapshot(
+        self,
+        *,
+        onboarding_status: dict,
+        guided_demo_journey: dict,
+        preview_readiness: dict,
+        product_map: dict,
+        next_work_board: dict,
+        recovery_drill_board: dict,
+        session_report: dict,
+    ) -> dict:
+        completed_local_proof = [
+            {
+                "id": "docker_runtime_home_visible",
+                "label": "Docker Runtime Home is visible",
+                "state": "completed_local_proof",
+                "customer_value": "Customers can open the browser Runtime Home and inspect runtime readiness without live credentials.",
+                "evidence": ["/", "/api/product"],
+            },
+            {
+                "id": "customer_path_available",
+                "label": "Customer path is available",
+                "state": "completed_local_proof",
+                "customer_value": "Onboarding, guided demo, Product Layer Map, Next Work Board, recovery drills, and session report are linked from the default surface.",
+                "evidence": ["/api/onboarding", "/api/demo-journey", "/api/product-map", "/api/next-work", "/api/recovery-drills", "/api/session-report"],
+            },
+            {
+                "id": "proof_boundaries_visible",
+                "label": "Proof boundaries are visible",
+                "state": "completed_local_proof",
+                "customer_value": "The Runtime Home keeps Docker-local proof separate from VM/ISO, live OAuth, browser, release, mutation, and attestation proof.",
+                "evidence": ["/api/evidence", "/api/proof-promotion", "/api/proof-requests"],
+            },
+        ]
+        validation_gates = [
+            {
+                "id": "runtime_home_snapshot_gate",
+                "label": "Runtime Home snapshot gate",
+                "state": "ready",
+                "command": "scripts/smoke_docker_runtime_home_snapshot.sh",
+                "customer_value": "Verifies the Runtime Home completion snapshot, browser text, and stronger-proof non-claims.",
+            },
+            {
+                "id": "product_layer_completion_gate",
+                "label": "Product Layer completion gate",
+                "state": "ready",
+                "command": "scripts/smoke_docker_product_layer_completion.sh",
+                "customer_value": "Verifies all Docker Product Layer surfaces together.",
+            },
+            {
+                "id": "runtime_preview_python_gate",
+                "label": "Runtime preview Python gate",
+                "state": "ready",
+                "command": "scripts/smoke_docker_runtime_preview_python.sh",
+                "customer_value": "Verifies the Python runtime preview without requiring a Docker daemon.",
+            },
+            {
+                "id": "compose_config_gate",
+                "label": "Compose config gate",
+                "state": "ready",
+                "command": "docker compose config",
+                "customer_value": "Verifies the public Docker compose entrypoint is syntactically valid.",
+            },
+        ]
+        review_surfaces = [
+            {
+                "id": "start_here",
+                "label": "Start here",
+                "state": onboarding_status.get("state", "ready"),
+                "surface": "Runtime Home",
+                "source": "/api/product",
+            },
+            {
+                "id": "guided_path",
+                "label": "Guided path",
+                "state": guided_demo_journey.get("state", "ready"),
+                "surface": "Guided Demo Journey",
+                "source": "/api/demo-journey",
+            },
+            {
+                "id": "preview_readiness",
+                "label": "Preview readiness",
+                "state": preview_readiness.get("state", "ready"),
+                "surface": "Preview Readiness Board",
+                "source": "/api/preview-readiness",
+            },
+            {
+                "id": "product_map",
+                "label": "Product map",
+                "state": product_map.get("state", "ready"),
+                "surface": "Product Layer Map",
+                "source": "/api/product-map",
+            },
+            {
+                "id": "next_work",
+                "label": "Next work",
+                "state": next_work_board.get("state", "ready"),
+                "surface": "Next Work Board",
+                "source": "/api/next-work",
+            },
+            {
+                "id": "recovery_drills",
+                "label": "Recovery drills",
+                "state": recovery_drill_board.get("state", "ready"),
+                "surface": "Recovery Drill Board",
+                "source": "/api/recovery-drills",
+            },
+            {
+                "id": "session_report",
+                "label": "Session report",
+                "state": session_report.get("state", "ready"),
+                "surface": "Session Report",
+                "source": "/api/session-report",
+            },
+        ]
+        blocked_stronger_proof = [
+            {
+                "id": "docker_daemon_observed",
+                "label": "Docker daemon observed run",
+                "state": "blocked_until_daemon_available",
+                "required_evidence": "A successful docker compose run observed against a running Docker daemon.",
+            },
+            {
+                "id": "vm_iso_runtime_rejoin",
+                "label": "VM/ISO runtime rejoin",
+                "state": "blocked_until_observed_vm_run",
+                "required_evidence": "Observed VM boot, reboot/recovery, and managed runtime rejoin evidence.",
+            },
+            {
+                "id": "live_readonly_oauth",
+                "label": "Live read-only OAuth",
+                "state": "blocked_until_tester_credentials",
+                "required_evidence": "Explicit tester credentials and sanitized live read-only proof.",
+            },
+            {
+                "id": "release_browser_attestation",
+                "label": "Release, browser, and attestation proof",
+                "state": "blocked_until_observed_evidence",
+                "required_evidence": "Real release artifacts, live browser evidence, or hardware attestation evidence.",
+            },
+        ]
+        return {
+            "schema_version": "agentos-product-layer-runtime-home-completion-snapshot.v1",
+            "surface": "Runtime Home Completion Snapshot",
+            "state": "ready",
+            "customer_message": "Runtime Home is ready as the default Docker Product Layer entrypoint; stronger proof claims remain blocked until observed evidence exists.",
+            "completed_local_proof": completed_local_proof,
+            "validation_gates": validation_gates,
+            "review_surfaces": review_surfaces,
+            "blocked_stronger_proof": blocked_stronger_proof,
+            "proof": {
+                "customer_facing_runtime_home_snapshot_ready": True,
+                "docker_main_try_path": True,
+                "docker_daemon_observed_claimed": False,
+                "boot_or_iso_proof_claimed": False,
+                "live_oauth_claimed": False,
+                "live_browser_proof_claimed": False,
+                "release_trust_claimed": False,
+                "external_mutation_claimed": False,
+                "hardware_attestation_claimed": False,
+                "automatic_claim_promotion": False,
             },
         }
 
@@ -2382,6 +2557,7 @@ def _render_page(app: DockerPreviewApp) -> str:
     proof_request_board = product_layer.get("observed_proof_request_board", {}) if isinstance(product_layer.get("observed_proof_request_board"), dict) else {}
     product_map = product_layer.get("product_map", {}) if isinstance(product_layer.get("product_map"), dict) else {}
     next_work_board = product_layer.get("next_work_board", {}) if isinstance(product_layer.get("next_work_board"), dict) else {}
+    completion_snapshot = product_layer.get("completion_snapshot", {}) if isinstance(product_layer.get("completion_snapshot"), dict) else {}
     features = product_layer.get("features", []) if isinstance(product_layer.get("features"), list) else []
     blockers = product_layer.get("blockers", []) if isinstance(product_layer.get("blockers"), list) else []
     llm_state = adapters.get("llm", {}).get("state", "unknown")
@@ -2482,6 +2658,42 @@ def _render_page(app: DockerPreviewApp) -> str:
         f"<li><code>{html.escape(str(command))}</code></li>"
         for command in session_report.get("validation_commands", [])
     ) or "<li>No session report validation commands are configured.</li>"
+    runtime_home_completed_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Completed local proof'))))}</b> "
+        f"{html.escape(str(item.get('customer_value', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))}</em>"
+        "</li>"
+        for item in completion_snapshot.get("completed_local_proof", [])
+        if isinstance(item, dict)
+    ) or "<li>No Runtime Home completed proof is configured.</li>"
+    runtime_home_gate_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Validation gate'))))}</b> "
+        f"{html.escape(str(item.get('customer_value', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))} · {html.escape(str(item.get('command', '')))}</em>"
+        "</li>"
+        for item in completion_snapshot.get("validation_gates", [])
+        if isinstance(item, dict)
+    ) or "<li>No Runtime Home validation gates are configured.</li>"
+    runtime_home_review_surface_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Review surface'))))}</b> "
+        f"{html.escape(str(item.get('surface', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))} · {html.escape(str(item.get('source', '')))}</em>"
+        "</li>"
+        for item in completion_snapshot.get("review_surfaces", [])
+        if isinstance(item, dict)
+    ) or "<li>No Runtime Home review surfaces are configured.</li>"
+    runtime_home_blocked_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Blocked proof'))))}</b> "
+        f"{html.escape(str(item.get('required_evidence', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))}</em>"
+        "</li>"
+        for item in completion_snapshot.get("blocked_stronger_proof", [])
+        if isinstance(item, dict)
+    ) or "<li>No Runtime Home stronger-proof blockers are configured.</li>"
     feature_html = "\n".join(
         "<section class='feature'>"
         f"<div><h3>{html.escape(str(feature.get('label', 'Feature')))}</h3>"
@@ -2920,6 +3132,18 @@ def _render_page(app: DockerPreviewApp) -> str:
       <h2>Runtime Home</h2>
       <p class="lead">{html.escape(str(product_layer.get('customer_message', 'AgentOS runtime preview is ready.')))}</p>
       {feature_html}
+    </div>
+    <div class="panel">
+      <h2>Runtime Home Completion Snapshot</h2>
+      <p class="lead">{html.escape(str(completion_snapshot.get('customer_message', 'Runtime Home completion snapshot is available below.')))}</p>
+      <h3>Completed Local Proof</h3>
+      <ul>{runtime_home_completed_html}</ul>
+      <h3>Validation Gates</h3>
+      <ul>{runtime_home_gate_html}</ul>
+      <h3>Review Surfaces</h3>
+      <ul>{runtime_home_review_surface_html}</ul>
+      <h3>Blocked Stronger Proof</h3>
+      <ul>{runtime_home_blocked_html}</ul>
     </div>
     <div class="panel">
       <h2>Recovery Center</h2>

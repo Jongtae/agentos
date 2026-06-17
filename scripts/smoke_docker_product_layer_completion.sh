@@ -95,11 +95,47 @@ assert product["proof"]["docker_main_try_path"] is True
 assert product["proof"]["boot_or_iso_proof_claimed"] is False
 assert product["proof"]["live_oauth_claimed"] is False
 assert product["proof"]["live_browser_proof_claimed"] is False
+assert product["proof"]["runtime_home_completion_snapshot_ready"] is True
+
+snapshot = product["completion_snapshot"]
+assert snapshot["schema_version"] == "agentos-product-layer-runtime-home-completion-snapshot.v1"
+assert snapshot["state"] == "ready"
+assert {item["id"] for item in snapshot["completed_local_proof"]} == {
+    "docker_runtime_home_visible",
+    "customer_path_available",
+    "proof_boundaries_visible",
+}
+assert {item["id"] for item in snapshot["validation_gates"]} >= {
+    "runtime_home_snapshot_gate",
+    "product_layer_completion_gate",
+    "runtime_preview_python_gate",
+    "compose_config_gate",
+}
+assert any(item["command"] == "scripts/smoke_docker_runtime_home_snapshot.sh" for item in snapshot["validation_gates"])
+assert {item["id"] for item in snapshot["review_surfaces"]} >= {
+    "start_here",
+    "guided_path",
+    "preview_readiness",
+    "product_map",
+    "next_work",
+    "recovery_drills",
+    "session_report",
+}
+assert {item["id"] for item in snapshot["blocked_stronger_proof"]} == {
+    "docker_daemon_observed",
+    "vm_iso_runtime_rejoin",
+    "live_readonly_oauth",
+    "release_browser_attestation",
+}
+assert snapshot["proof"]["customer_facing_runtime_home_snapshot_ready"] is True
+assert snapshot["proof"]["automatic_claim_promotion"] is False
 
 feature_ids = {feature["id"] for feature in product["features"]}
 expected_feature_ids = {"runtime_home", *surfaces.keys()}
 assert expected_feature_ids <= feature_ids, sorted(expected_feature_ids - feature_ids)
 assert "Runtime Home" in home
+assert "Runtime Home Completion Snapshot" in home
+assert "scripts/smoke_docker_runtime_home_snapshot.sh" in home
 
 for key, (filename, schema, label) in surfaces.items():
     embedded = product[key]
@@ -418,11 +454,20 @@ non_claims = {
     "product_map_release": product["product_map"]["proof"]["release_trust_claimed"],
     "product_map_mutation": product["product_map"]["proof"]["external_mutation_claimed"],
     "product_map_attestation": product["product_map"]["proof"]["hardware_attestation_claimed"],
+    "runtime_home_snapshot_docker_daemon": product["completion_snapshot"]["proof"]["docker_daemon_observed_claimed"],
+    "runtime_home_snapshot_boot": product["completion_snapshot"]["proof"]["boot_or_iso_proof_claimed"],
+    "runtime_home_snapshot_live_oauth": product["completion_snapshot"]["proof"]["live_oauth_claimed"],
+    "runtime_home_snapshot_live_browser": product["completion_snapshot"]["proof"]["live_browser_proof_claimed"],
+    "runtime_home_snapshot_release": product["completion_snapshot"]["proof"]["release_trust_claimed"],
+    "runtime_home_snapshot_mutation": product["completion_snapshot"]["proof"]["external_mutation_claimed"],
+    "runtime_home_snapshot_attestation": product["completion_snapshot"]["proof"]["hardware_attestation_claimed"],
+    "runtime_home_snapshot_auto_promotion": product["completion_snapshot"]["proof"]["automatic_claim_promotion"],
 }
 assert all(value is False for value in non_claims.values()), non_claims
 
 ready_claims = {
     "runtime_home": product["proof"]["customer_facing_summary_ready"],
+    "runtime_home_completion_snapshot": product["completion_snapshot"]["proof"]["customer_facing_runtime_home_snapshot_ready"],
     "guided_demo_journey": product["guided_demo_journey"]["proof"]["customer_guided_journey_ready"],
     "preview_readiness_board": product["preview_readiness_board"]["proof"]["customer_facing_preview_readiness_ready"],
     "onboarding_status": product["onboarding_status"]["proof"]["customer_onboarding_ready"],

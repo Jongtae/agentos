@@ -11,15 +11,15 @@ Current parent branch:
 
 Current public milestone:
 
-- **Docker session report** — customer-readable Docker-safe runtime report with explicit stronger-proof blockers
+- **Docker session report closeout** — completed Docker-safe runtime report with explicit stronger-proof blockers
 
 Current task:
 
-- `[P2-125] Add Docker session report`
+- `[P2-126] Close Docker session report epic`
 
 Runtime impact statement:
 
-- This task gives customers one Docker-safe runtime session report while preserving runtime-first truthfulness and leaving Docker daemon, VM/ISO, live OAuth, browser, release, mutation, and attestation proof blockers explicit until observed evidence exists.
+- This task records Docker-safe session reporting as completed Product Layer work while preserving runtime-first truthfulness and leaving Docker daemon, VM/ISO, live OAuth, browser, release, mutation, and attestation proof blockers explicit until observed evidence exists.
 
 Current autonomous completion loop:
 
@@ -163,8 +163,9 @@ Recommended Phase 2 tasks:
 - The Docker recovery drill board epic is closed for this Phase 2 slice; future recovery-drill changes should require observed Docker daemon proof, VM/ISO recovery evidence, live adapter proof, release proof, or a new customer-facing recovery promotion need before reopening.
 - P2-123 adds `/api/recovery-drills`, a browser Recovery Drill Board panel, and `scripts/smoke_docker_recovery_drill_board.sh` so customers can run or review concrete recovery drills while VM/ISO, live OAuth, browser, release, mutation, and attestation proof remain unclaimed.
 - P2-124 closes the Docker recovery drill board epic after README, TASKS, roadmap, Docker acceptance, recovery-drill gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve Docker-safe recovery truthfulness without stronger proof claims.
-- The Docker session report epic is active for this Phase 2 slice; completion requires `/api/session-report`, the browser Session Report panel, README, TASKS, roadmap, Docker acceptance, focused session-report gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks to preserve Docker-safe reporting truthfulness.
+- The Docker session report epic is closed for this Phase 2 slice; future session-report changes should require observed Docker daemon proof, VM/ISO proof, live adapter proof, release proof, or a new customer-facing reporting promotion need before reopening.
 - P2-125 adds `/api/session-report`, a browser Session Report panel, and `scripts/smoke_docker_session_report.sh` so customers can inspect one report covering runtime state, recent activity, proof sources, recovery drills, validation commands, and stronger-proof non-claims.
+- P2-126 closes the Docker session report epic after README, TASKS, roadmap, Docker acceptance, session-report gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve Docker-safe reporting truthfulness without stronger proof claims.
 - The inbox capability ownership boundary epic is closed for this Phase 2 slice; future inbox work should require live read-only OAuth proof, observed Maildir/user data proof, or a later confirmed external mutation model before claiming broader inbox ecosystem support.
 - The first inbox ownership slice is `docs/architecture/inbox-capability-ownership-boundary.md`, smoke-tested by `scripts/smoke_inbox_capability_ownership_boundary.sh`.
 - The inbox ownership boundary smoke is included in the Phase 2 golden demo runner so inbox capability ownership remains part of practical local/Docker-safe proof.

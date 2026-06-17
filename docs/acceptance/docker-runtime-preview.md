@@ -39,6 +39,7 @@ http://localhost:8787
 - `/api/work-inbox` exposes read-first inbox sources, workflows, live blockers, and mutation non-claims.
 - `/api/work-inbox` exposes a Work Inbox completion snapshot with completed local proof, validation gates, mutation boundaries, and live-provider blockers without automatic claim promotion.
 - `/api/timeline` exposes customer-readable runtime events, user-visible record paths, and external-app/live-provider non-claims.
+- `/api/timeline` exposes an Activity Timeline completion snapshot with narrated runtime stages, record surfaces, validation gates, and external/live proof blockers without automatic claim promotion.
 - `/api/capabilities` exposes safe local capabilities, confirmation-needed capabilities, and blocked destructive capabilities from the permission registry.
 - `/api/approvals` exposes setup-needed, confirmation-needed, observed-proof-needed, and blocked approval requirements without executing them.
 - `/api/proofs` exposes future observed-proof evidence requirements and mock submission fields without accepting secrets or auto-promoting claims.
@@ -82,6 +83,7 @@ Expected behavior:
 - Work Inbox shows fixture, Maildir, Gmail, and Calendar sources without claiming live OAuth or mutations
 - Work Inbox Completion Snapshot shows read-first local proof, safe workflows, mutation boundaries, and live-provider blockers without claiming production sync, user Maildir proof, browser-default behavior, or external mutations
 - Activity Timeline shows recent runtime events and record paths without claiming external app execution
+- Activity Timeline Completion Snapshot shows narrated stages, record surfaces, validation gates, and blocked external/live proof without claiming browser, VM/ISO, release, mutation, or attestation proof
 - Capability Store shows safe local actions, external-read setup needs, lifecycle confirmation, and destructive blocked actions
 - Approval Center shows approval-gated actions without claiming approval execution, external writes, or destructive actions
 - Observed Proof Uploader shows evidence requirements without claiming file upload execution or claim promotion
@@ -142,6 +144,18 @@ This gate starts the Python Docker runtime preview and verifies that
 read-first local proof, safe non-mutating workflows, mutation boundaries, and
 explicit non-claims for live OAuth, browser-default behavior, production sync,
 real user Maildir proof, and external mutations.
+
+## Activity Timeline Snapshot Gate
+
+```bash
+scripts/smoke_docker_activity_timeline_snapshot.sh
+```
+
+This gate starts the Python Docker runtime preview and verifies that
+`/api/timeline` and the browser Activity Timeline expose the completion
+snapshot, narrated runtime stages, record surfaces, validation gates, and
+explicit non-claims for external app execution, live provider activity, browser
+activity, and VM/ISO runtime activity.
 
 ## Customer Onboarding Quickstart Gate
 

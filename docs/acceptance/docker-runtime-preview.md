@@ -50,6 +50,7 @@ http://localhost:8787
 - `/api/customer-handoff` exposes the Docker try path, handoff checklist, share-safe handoff report, inspectable Product Layer surfaces, validation commands, proof sources, next observed-proof blockers, and explicit non-claims without claiming stronger observed proof.
 - `/api/proof-promotion` exposes Docker-local claim promotion decisions, a proof sharing checklist, source surfaces, required observed evidence, and explicit non-claims without automatic claim promotion.
 - `/api/product-map` exposes start, safe-work, proof/handoff, and blocked-until-observed surface groups with a recommended customer path, reviewer routes, and explicit non-claims.
+- `/api/product` exposes a Runtime Home completion snapshot with completed Docker-local proof, validation gates, review surfaces, and blocked stronger-proof claims without automatic claim promotion.
 - LLM setup/readiness state is visible.
 - Telegram setup/readiness state is visible.
 - Activity feed is visible.
@@ -74,6 +75,7 @@ Expected behavior:
 - greeting does not trigger web search
 - status returns runtime state
 - Runtime Home explains product-layer readiness and proof blockers
+- Runtime Home Completion Snapshot shows completed local proof, validation gates, review surfaces, and stronger-proof blockers without promoting Docker into VM/ISO, live OAuth, browser, release, mutation, Docker daemon observed, or attestation proof
 - Preview Readiness Board shows share-ready Docker-local preview claims, local gates to rerun before a demo, and stronger claims blocked until observed evidence exists
 - Next Work Board shows completed Docker-local Product Layer proof, safe next implementation candidates, and blocked observed-proof tracks without automatic claim promotion
 - Work Inbox shows fixture, Maildir, Gmail, and Calendar sources without claiming live OAuth or mutations
@@ -114,6 +116,18 @@ This gate starts the Python Docker runtime preview, verifies every customer-faci
 Product Layer surface together, and asserts that Docker still does not claim
 live OAuth, VM/ISO boot, browser, release, external mutation, Secure Boot,
 TPM/PCR, IMA, or hardware attestation proof.
+
+## Runtime Home Snapshot Gate
+
+```bash
+scripts/smoke_docker_runtime_home_snapshot.sh
+```
+
+This gate starts the Python Docker runtime preview and verifies that
+`/api/product` and the browser Runtime Home expose the completion snapshot,
+completed Docker-local proof, validation gates, review surfaces, and explicit
+non-claims for Docker daemon observed proof, VM/ISO, live OAuth, browser,
+release, mutation, and hardware attestation.
 
 ## Customer Onboarding Quickstart Gate
 

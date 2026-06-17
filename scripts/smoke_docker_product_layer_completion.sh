@@ -38,6 +38,7 @@ curl -fsS "http://127.0.0.1:$PORT/" > "$TMP_DIR/home.html"
 curl -fsS "http://127.0.0.1:$PORT/api/product" > "$TMP_DIR/product.json"
 curl -fsS "http://127.0.0.1:$PORT/api/onboarding" > "$TMP_DIR/onboarding.json"
 curl -fsS "http://127.0.0.1:$PORT/api/demo-journey" > "$TMP_DIR/demo-journey.json"
+curl -fsS "http://127.0.0.1:$PORT/api/preview-readiness" > "$TMP_DIR/preview-readiness.json"
 curl -fsS "http://127.0.0.1:$PORT/api/work-inbox" > "$TMP_DIR/work-inbox.json"
 curl -fsS "http://127.0.0.1:$PORT/api/timeline" > "$TMP_DIR/timeline.json"
 curl -fsS "http://127.0.0.1:$PORT/api/capabilities" > "$TMP_DIR/capabilities.json"
@@ -65,6 +66,7 @@ onboarding = json.loads((root / "onboarding.json").read_text())
 surfaces = {
     "onboarding_status": ("onboarding.json", "agentos-product-layer-onboarding-status.v1", "Docker Onboarding Status"),
     "guided_demo_journey": ("demo-journey.json", "agentos-product-layer-guided-demo-journey.v1", "Guided Demo Journey"),
+    "preview_readiness_board": ("preview-readiness.json", "agentos-product-layer-preview-readiness-board.v1", "Preview Readiness Board"),
     "work_inbox": ("work-inbox.json", "agentos-product-layer-work-inbox.v1", "Work Inbox"),
     "activity_timeline": ("timeline.json", "agentos-product-layer-activity-timeline.v1", "Activity Timeline"),
     "capability_store": ("capabilities.json", "agentos-product-layer-capability-store.v1", "Capability Store"),
@@ -109,6 +111,23 @@ assert {item["id"] for item in product["guided_demo_journey"]["expected_outcomes
 assert product["guided_demo_journey"]["completion_summary"]["id"] == "docker_guided_demo_complete"
 assert len(product["guided_demo_journey"]["completion_summary"]["completed_claims"]) >= 4
 assert len(product["guided_demo_journey"]["completion_summary"]["next_blockers"]) >= 3
+assert {item["id"] for item in product["preview_readiness_board"]["readiness_checks"]} >= {
+    "docker_try_path_documented",
+    "product_layer_surfaces_visible",
+    "docker_safe_validation_available",
+    "public_preview_operations_contract_linked",
+    "observed_proof_blockers_visible",
+}
+assert {item["id"] for item in product["preview_readiness_board"]["promotion_decisions"]} >= {
+    "share_docker_local_preview",
+    "rerun_local_gates_before_demo",
+    "withhold_stronger_preview_claims",
+}
+assert product["preview_readiness_board"]["operations_contract"]["doc"] == "docs/operations/public-preview-operations.md"
+assert "scripts/smoke_docker_preview_readiness_board.sh" in product["preview_readiness_board"]["validation_commands"]
+assert "Preview Readiness Board" in home
+assert "Preview Promotion Decisions" in home
+assert "preview readiness JSON" in home
 assert product["customer_proof_packet"]["proof"]["customer_packet_ready"] is True
 assert product["customer_proof_packet"]["proof"]["claim_promotion_automatic"] is False
 assert product["customer_handoff_bundle"]["proof"]["customer_handoff_ready"] is True
@@ -197,6 +216,7 @@ assert reviewer_routes["runtime_evaluator"]["route"] == [
     "runtime_home",
     "onboarding_status",
     "guided_demo_journey",
+    "preview_readiness_board",
     "activity_timeline",
     "recovery_center",
 ]
@@ -259,6 +279,14 @@ non_claims = {
     "guided_demo_boot_or_iso": product["guided_demo_journey"]["proof"]["boot_or_iso_proof_claimed"],
     "guided_demo_live_oauth": product["guided_demo_journey"]["proof"]["live_oauth_claimed"],
     "guided_demo_external_mutation": product["guided_demo_journey"]["proof"]["external_mutation_claimed"],
+    "preview_readiness_docker_daemon": product["preview_readiness_board"]["proof"]["docker_daemon_observed_claimed"],
+    "preview_readiness_vm_iso": product["preview_readiness_board"]["proof"]["boot_or_iso_proof_claimed"],
+    "preview_readiness_live_oauth": product["preview_readiness_board"]["proof"]["live_oauth_claimed"],
+    "preview_readiness_live_browser": product["preview_readiness_board"]["proof"]["live_browser_proof_claimed"],
+    "preview_readiness_release": product["preview_readiness_board"]["proof"]["release_trust_claimed"],
+    "preview_readiness_external_mutation": product["preview_readiness_board"]["proof"]["external_mutation_claimed"],
+    "preview_readiness_attestation": product["preview_readiness_board"]["proof"]["hardware_attestation_claimed"],
+    "preview_readiness_automatic_promotion": product["preview_readiness_board"]["proof"]["automatic_claim_promotion"],
     "onboarding_boot_or_iso": product["onboarding_status"]["proof"]["boot_or_iso_proof_claimed"],
     "onboarding_live_oauth": product["onboarding_status"]["proof"]["live_oauth_claimed"],
     "work_inbox_live_oauth": product["work_inbox"]["proof"]["live_oauth_claimed"],
@@ -298,6 +326,7 @@ assert all(value is False for value in non_claims.values()), non_claims
 ready_claims = {
     "runtime_home": product["proof"]["customer_facing_summary_ready"],
     "guided_demo_journey": product["guided_demo_journey"]["proof"]["customer_guided_journey_ready"],
+    "preview_readiness_board": product["preview_readiness_board"]["proof"]["customer_facing_preview_readiness_ready"],
     "onboarding_status": product["onboarding_status"]["proof"]["customer_onboarding_ready"],
     "work_inbox": product["work_inbox"]["proof"]["customer_facing_summary_ready"],
     "activity_timeline": product["activity_timeline"]["proof"]["customer_facing_timeline_ready"],

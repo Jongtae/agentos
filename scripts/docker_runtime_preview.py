@@ -363,6 +363,7 @@ class DockerPreviewApp:
         adapters = setup_payload.get("adapters", {}) if isinstance(setup_payload.get("adapters"), dict) else {}
         onboarding_status = self.onboarding_status()
         guided_demo_journey = self.guided_demo_journey()
+        preview_readiness = self.preview_readiness_board()
         work_inbox = self.work_inbox(setup=setup_payload)
         activity_timeline = self.activity_timeline(activity=activity_payload)
         capability_store = self.capability_store()
@@ -408,6 +409,12 @@ class DockerPreviewApp:
                     "label": "Guided Demo Journey",
                     "state": guided_demo_journey.get("state", "ready"),
                     "customer_value": "Follow the recommended customer path across Runtime Home, Work Inbox, prompt execution, Activity Timeline, Evidence Dashboard, and Recovery Center.",
+                },
+                {
+                    "id": "preview_readiness_board",
+                    "label": "Preview Readiness Board",
+                    "state": preview_readiness.get("state", "ready"),
+                    "customer_value": "See whether the Docker public preview is share-ready, which local gates must pass, and which stronger claims are still blocked.",
                 },
                 {
                     "id": "runtime_home",
@@ -497,6 +504,7 @@ class DockerPreviewApp:
             "blockers": blockers,
             "onboarding_status": onboarding_status,
             "guided_demo_journey": guided_demo_journey,
+            "preview_readiness_board": preview_readiness,
             "work_inbox": work_inbox,
             "activity_timeline": activity_timeline,
             "capability_store": capability_store,
@@ -519,6 +527,111 @@ class DockerPreviewApp:
             },
         }
 
+    def preview_readiness_board(self) -> dict:
+        readiness_checks = [
+            {
+                "id": "docker_try_path_documented",
+                "label": "Docker try path is documented",
+                "state": "ready",
+                "customer_value": "Customers can start with README quickstart and docker compose up without first configuring live providers.",
+                "evidence": ["README.md", "docs/acceptance/docker-runtime-preview.md"],
+            },
+            {
+                "id": "product_layer_surfaces_visible",
+                "label": "Product Layer surfaces are visible",
+                "state": "ready",
+                "customer_value": "Runtime Home, onboarding, guided demo, safe work, evidence, handoff, proof promotion, release trust, and recovery are inspectable from Docker.",
+                "evidence": ["/api/product", "/api/product-map", "/api/customer-handoff", "/api/proof-promotion"],
+            },
+            {
+                "id": "docker_safe_validation_available",
+                "label": "Docker-safe validation is available",
+                "state": "ready",
+                "customer_value": "A customer or reviewer can rerun local validation without credentials or VM access.",
+                "evidence": [
+                    "docker compose config",
+                    "scripts/smoke_docker_runtime_preview_python.sh",
+                    "scripts/smoke_docker_product_layer_completion.sh",
+                    "scripts/smoke_docker_preview_readiness_board.sh",
+                    "scripts/smoke_phase2_golden_demo.sh",
+                ],
+            },
+            {
+                "id": "public_preview_operations_contract_linked",
+                "label": "Public preview operations contract is linked",
+                "state": "ready",
+                "customer_value": "The board follows the public preview contract for automated proof, manual blockers, non-claims, and promotion gates.",
+                "evidence": ["docs/operations/public-preview-operations.md", "scripts/smoke_public_preview_operations.sh"],
+            },
+            {
+                "id": "observed_proof_blockers_visible",
+                "label": "Observed-proof blockers are visible",
+                "state": "blocked_until_observed_evidence",
+                "customer_value": "VM/ISO, live OAuth, live browser, release artifacts/signing, external mutation, and hardware attestation remain blocked until sanitized observed evidence exists.",
+                "evidence": ["/api/evidence", "/api/recovery", "/api/proofs"],
+            },
+        ]
+        promotion_decisions = [
+            {
+                "id": "share_docker_local_preview",
+                "label": "Share Docker-local preview",
+                "state": "share_ready",
+                "customer_decision": "Safe to share that the Docker preview exposes customer-facing Product Layer surfaces and local proof boundaries.",
+                "allowed_claim": "Docker-local Product Layer preview is ready for customer inspection.",
+                "blocked_claim": "Do not claim OS boot ownership, production release readiness, live provider proof, or device trust.",
+            },
+            {
+                "id": "rerun_local_gates_before_demo",
+                "label": "Rerun local gates before demo",
+                "state": "recommended",
+                "customer_decision": "Run the listed Docker-safe gates before presenting a fresh preview to a customer or reviewer.",
+                "allowed_claim": "The local preview was smoke-verified by the listed commands.",
+                "blocked_claim": "Do not claim full Docker daemon proof if the daemon-backed smoke was unavailable.",
+            },
+            {
+                "id": "withhold_stronger_preview_claims",
+                "label": "Withhold stronger preview claims",
+                "state": "blocked_until_observed_evidence",
+                "customer_decision": "Hold VM/ISO, live OAuth, browser, release, mutation, and hardware attestation language until observed proof is attached.",
+                "allowed_claim": "Stronger claims have explicit blockers and recovery actions.",
+                "blocked_claim": "Do not auto-promote Docker-local proof into stronger proof categories.",
+            },
+        ]
+        validation_commands = [
+            "docker compose config",
+            "scripts/smoke_public_preview_operations.sh",
+            "scripts/smoke_docker_preview_readiness_board.sh",
+            "scripts/smoke_docker_runtime_preview_python.sh",
+            "scripts/smoke_docker_product_layer_completion.sh",
+            "scripts/smoke_phase2_golden_demo.sh",
+        ]
+        return {
+            "schema_version": "agentos-product-layer-preview-readiness-board.v1",
+            "surface": "Preview Readiness Board",
+            "state": "ready",
+            "customer_message": "Preview Readiness Board turns public preview operations into a customer-facing Docker go/no-go view without claiming unobserved OS, live, release, mutation, or hardware proof.",
+            "readiness_checks": readiness_checks,
+            "promotion_decisions": promotion_decisions,
+            "validation_commands": validation_commands,
+            "operations_contract": {
+                "doc": "docs/operations/public-preview-operations.md",
+                "smoke": "scripts/smoke_public_preview_operations.sh",
+                "manual_blockers_required_for_stronger_claims": True,
+            },
+            "proof": {
+                "docker_main_try_path": True,
+                "customer_facing_preview_readiness_ready": True,
+                "docker_daemon_observed_claimed": False,
+                "boot_or_iso_proof_claimed": False,
+                "live_oauth_claimed": False,
+                "live_browser_proof_claimed": False,
+                "release_trust_claimed": False,
+                "external_mutation_claimed": False,
+                "hardware_attestation_claimed": False,
+                "automatic_claim_promotion": False,
+            },
+        }
+
     def product_map(self) -> dict:
         surface_groups = [
             {
@@ -529,6 +642,7 @@ class DockerPreviewApp:
                     {"id": "runtime_home", "label": "Runtime Home", "endpoint": "/api/product", "state": "ready"},
                     {"id": "onboarding_status", "label": "Docker Onboarding Status", "endpoint": "/api/onboarding", "state": "ready"},
                     {"id": "guided_demo_journey", "label": "Guided Demo Journey", "endpoint": "/api/demo-journey", "state": "ready"},
+                    {"id": "preview_readiness_board", "label": "Preview Readiness Board", "endpoint": "/api/preview-readiness", "state": "ready"},
                 ],
             },
             {
@@ -574,6 +688,7 @@ class DockerPreviewApp:
                     "runtime_home",
                     "onboarding_status",
                     "guided_demo_journey",
+                    "preview_readiness_board",
                     "activity_timeline",
                     "recovery_center",
                 ],
@@ -627,6 +742,7 @@ class DockerPreviewApp:
                 "runtime_home",
                 "onboarding_status",
                 "guided_demo_journey",
+                "preview_readiness_board",
                 "work_inbox",
                 "activity_timeline",
                 "evidence_dashboard",
@@ -1772,6 +1888,7 @@ def _render_page(app: DockerPreviewApp) -> str:
     product_layer = status.get("product_layer", {})
     onboarding_status = product_layer.get("onboarding_status", {}) if isinstance(product_layer.get("onboarding_status"), dict) else {}
     guided_demo_journey = product_layer.get("guided_demo_journey", {}) if isinstance(product_layer.get("guided_demo_journey"), dict) else {}
+    preview_readiness = product_layer.get("preview_readiness_board", {}) if isinstance(product_layer.get("preview_readiness_board"), dict) else {}
     work_inbox = product_layer.get("work_inbox", {}) if isinstance(product_layer.get("work_inbox"), dict) else {}
     activity_timeline = product_layer.get("activity_timeline", {}) if isinstance(product_layer.get("activity_timeline"), dict) else {}
     capability_store = product_layer.get("capability_store", {}) if isinstance(product_layer.get("capability_store"), dict) else {}
@@ -1891,6 +2008,28 @@ def _render_page(app: DockerPreviewApp) -> str:
         f"<li>{html.escape(str(item))}</li>"
         for item in guided_demo_completion.get("next_blockers", [])
     ) or "<li>No guided demo next blockers are configured.</li>"
+    preview_readiness_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Preview check'))))}</b> "
+        f"{html.escape(str(item.get('customer_value', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))}</em>"
+        "</li>"
+        for item in preview_readiness.get("readiness_checks", [])
+        if isinstance(item, dict)
+    ) or "<li>No preview readiness checks are configured.</li>"
+    preview_decision_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Preview decision'))))}</b> "
+        f"{html.escape(str(item.get('customer_decision', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))} · allowed: {html.escape(str(item.get('allowed_claim', '')))} · blocked: {html.escape(str(item.get('blocked_claim', '')))}</em>"
+        "</li>"
+        for item in preview_readiness.get("promotion_decisions", [])
+        if isinstance(item, dict)
+    ) or "<li>No preview promotion decisions are configured.</li>"
+    preview_validation_html = "\n".join(
+        f"<li><code>{html.escape(str(command))}</code></li>"
+        for command in preview_readiness.get("validation_commands", [])
+    ) or "<li>No preview validation commands are configured.</li>"
     recovery_item_html = "\n".join(
         "<li>"
         f"<b>{html.escape(str(item.get('label', item.get('id', 'Recovery item'))))}</b> "
@@ -2186,6 +2325,26 @@ def _render_page(app: DockerPreviewApp) -> str:
   </section>
   <section class="product">
     <div class="panel">
+      <h2>Preview Readiness Board</h2>
+      <p class="lead">{html.escape(str(preview_readiness.get('customer_message', 'Preview readiness is available below.')))}</p>
+      <ul>{preview_readiness_html}</ul>
+      <h3>Preview Promotion Decisions</h3>
+      <ul>{preview_decision_html}</ul>
+    </div>
+    <div class="panel">
+      <h2>Preview Validation</h2>
+      <ul>{preview_validation_html}</ul>
+      <h2>Preview Non-Claims</h2>
+      <ul>
+        <li><b>Docker daemon observed proof</b> not claimed</li>
+        <li><b>VM/ISO boot proof</b> not claimed</li>
+        <li><b>Live OAuth/browser/release/attestation proof</b> not claimed</li>
+      </ul>
+      <p><a href="/api/preview-readiness">preview readiness JSON</a></p>
+    </div>
+  </section>
+  <section class="product">
+    <div class="panel">
       <h2>Runtime Home</h2>
       <p class="lead">{html.escape(str(product_layer.get('customer_message', 'AgentOS runtime preview is ready.')))}</p>
       {feature_html}
@@ -2472,6 +2631,8 @@ def make_handler(app: DockerPreviewApp) -> type[BaseHTTPRequestHandler]:
                 _json_response(self, app.onboarding_status())
             elif path == "/api/demo-journey":
                 _json_response(self, app.guided_demo_journey())
+            elif path == "/api/preview-readiness":
+                _json_response(self, app.preview_readiness_board())
             elif path == "/api/work-inbox":
                 _json_response(self, app.work_inbox())
             elif path == "/api/timeline":

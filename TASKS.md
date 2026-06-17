@@ -11,15 +11,15 @@ Current parent branch:
 
 Current public milestone:
 
-- **Docker recovery drill board** — customer-runnable Docker-safe recovery drills with explicit stronger-proof blockers
+- **Docker recovery drill board closeout** — completed Docker-safe recovery drills with explicit stronger-proof blockers
 
 Current task:
 
-- `[P2-123] Add Docker recovery drill board`
+- `[P2-124] Close Docker recovery drill board epic`
 
 Runtime impact statement:
 
-- This task makes runtime recovery customer-runnable through Docker-safe drills while preserving runtime-first truthfulness and leaving Docker daemon, VM/ISO, live OAuth, browser, release, mutation, and attestation proof blockers explicit until observed evidence exists.
+- This task records Docker-safe recovery drills as completed Product Layer work while preserving runtime-first truthfulness and leaving Docker daemon, VM/ISO, live OAuth, browser, release, mutation, and attestation proof blockers explicit until observed evidence exists.
 
 Current autonomous completion loop:
 
@@ -159,8 +159,9 @@ Recommended Phase 2 tasks:
 - The Docker observed proof request board epic is closed for this Phase 2 slice; future proof-request-board changes should require observed Docker daemon proof, live proof evidence, VM/ISO proof, release proof, hardware attestation evidence, or a new customer-facing evidence-request promotion need before reopening.
 - P2-121 adds `/api/proof-requests`, a browser Observed Proof Request Board panel, and `scripts/smoke_docker_observed_proof_request_board.sh` so customers can see the exact evidence, redaction, validation, and promotion boundaries required before stronger proof claims can be promoted.
 - P2-122 closes the Docker observed proof request board epic after README, TASKS, roadmap, Docker acceptance, proof-request gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve evidence-request truthfulness without stronger proof claims.
-- The Docker recovery drill board epic is active for this Phase 2 slice; completion requires `/api/recovery-drills`, the browser Recovery Drill Board panel, README, TASKS, roadmap, Docker acceptance, focused recovery-drill gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks to preserve Docker-safe recovery truthfulness.
+- The Docker recovery drill board epic is closed for this Phase 2 slice; future recovery-drill changes should require observed Docker daemon proof, VM/ISO recovery evidence, live adapter proof, release proof, or a new customer-facing recovery promotion need before reopening.
 - P2-123 adds `/api/recovery-drills`, a browser Recovery Drill Board panel, and `scripts/smoke_docker_recovery_drill_board.sh` so customers can run or review concrete recovery drills while VM/ISO, live OAuth, browser, release, mutation, and attestation proof remain unclaimed.
+- P2-124 closes the Docker recovery drill board epic after README, TASKS, roadmap, Docker acceptance, recovery-drill gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve Docker-safe recovery truthfulness without stronger proof claims.
 - The inbox capability ownership boundary epic is closed for this Phase 2 slice; future inbox work should require live read-only OAuth proof, observed Maildir/user data proof, or a later confirmed external mutation model before claiming broader inbox ecosystem support.
 - The first inbox ownership slice is `docs/architecture/inbox-capability-ownership-boundary.md`, smoke-tested by `scripts/smoke_inbox_capability_ownership_boundary.sh`.
 - The inbox ownership boundary smoke is included in the Phase 2 golden demo runner so inbox capability ownership remains part of practical local/Docker-safe proof.

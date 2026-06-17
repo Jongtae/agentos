@@ -392,6 +392,7 @@ class DockerPreviewApp:
             customer_handoff=customer_handoff,
         )
         product_map = self.product_map()
+        next_work_board = self.next_work_board()
         blockers = recovery_center.get("blockers", [])
         return {
             "schema_version": "agentos-product-layer-runtime-home.v1",
@@ -500,6 +501,12 @@ class DockerPreviewApp:
                     "state": product_map.get("state", "ready"),
                     "customer_value": "See the recommended customer path across Product Layer surfaces, proof packets, blockers, and trust panels.",
                 },
+                {
+                    "id": "next_work_board",
+                    "label": "Next Work Board",
+                    "state": next_work_board.get("state", "ready"),
+                    "customer_value": "See what is completed, what can safely move next, and which stronger claims are blocked until observed evidence exists.",
+                },
             ],
             "blockers": blockers,
             "onboarding_status": onboarding_status,
@@ -518,6 +525,7 @@ class DockerPreviewApp:
             "customer_handoff_bundle": customer_handoff,
             "proof_promotion_center": proof_promotion,
             "product_map": product_map,
+            "next_work_board": next_work_board,
             "proof": {
                 "docker_main_try_path": True,
                 "boot_or_iso_proof_claimed": False,
@@ -643,6 +651,7 @@ class DockerPreviewApp:
                     {"id": "onboarding_status", "label": "Docker Onboarding Status", "endpoint": "/api/onboarding", "state": "ready"},
                     {"id": "guided_demo_journey", "label": "Guided Demo Journey", "endpoint": "/api/demo-journey", "state": "ready"},
                     {"id": "preview_readiness_board", "label": "Preview Readiness Board", "endpoint": "/api/preview-readiness", "state": "ready"},
+                    {"id": "next_work_board", "label": "Next Work Board", "endpoint": "/api/next-work", "state": "ready"},
                 ],
             },
             {
@@ -665,6 +674,7 @@ class DockerPreviewApp:
                     {"id": "customer_proof_packet", "label": "Customer Proof Packet", "endpoint": "/api/proof-packet", "state": "ready"},
                     {"id": "customer_handoff_bundle", "label": "Customer Handoff Bundle", "endpoint": "/api/customer-handoff", "state": "ready"},
                     {"id": "proof_promotion_center", "label": "Proof Promotion Center", "endpoint": "/api/proof-promotion", "state": "ready"},
+                    {"id": "next_work_board", "label": "Next Work Board", "endpoint": "/api/next-work", "state": "ready"},
                 ],
             },
             {
@@ -689,6 +699,7 @@ class DockerPreviewApp:
                     "onboarding_status",
                     "guided_demo_journey",
                     "preview_readiness_board",
+                    "next_work_board",
                     "activity_timeline",
                     "recovery_center",
                 ],
@@ -703,6 +714,7 @@ class DockerPreviewApp:
                     "customer_proof_packet",
                     "customer_handoff_bundle",
                     "proof_promotion_center",
+                    "next_work_board",
                 ],
                 "claim_boundary": "Share Docker-local claims only; stronger claims require sanitized observed evidence.",
             },
@@ -749,6 +761,7 @@ class DockerPreviewApp:
                 "customer_proof_packet",
                 "customer_handoff_bundle",
                 "proof_promotion_center",
+                "next_work_board",
                 "recovery_center",
             ],
             "proof": {
@@ -760,6 +773,144 @@ class DockerPreviewApp:
                 "release_trust_claimed": False,
                 "external_mutation_claimed": False,
                 "hardware_attestation_claimed": False,
+            },
+        }
+
+    def next_work_board(self) -> dict:
+        completed_product_proof = [
+            {
+                "id": "docker_product_layer_surfaces",
+                "label": "Docker Product Layer surfaces",
+                "state": "completed_local_proof",
+                "customer_value": "Runtime Home, Work Inbox, Activity Timeline, Recovery Center, Evidence Dashboard, proof packet, handoff, promotion, map, release trust, attestation, onboarding, guided demo, and preview readiness are visible through Docker-safe local proof.",
+                "evidence": [
+                    "/api/product",
+                    "/api/product-map",
+                    "/api/preview-readiness",
+                    "scripts/smoke_docker_product_layer_completion.sh",
+                ],
+            },
+            {
+                "id": "docker_customer_handoff",
+                "label": "Docker customer handoff",
+                "state": "completed_local_proof",
+                "customer_value": "Customers can run, inspect, validate, and share a proof-safe handoff without including secrets or promoting stronger claims.",
+                "evidence": ["/api/customer-handoff", "/api/proof-packet", "/api/proof-promotion"],
+            },
+            {
+                "id": "runtime_truthfulness_gates",
+                "label": "Runtime truthfulness gates",
+                "state": "completed_local_proof",
+                "customer_value": "Docker-safe gates keep local proof separate from VM/ISO, live OAuth, browser, release, mutation, and attestation proof.",
+                "evidence": [
+                    "scripts/smoke_docker_runtime_preview_python.sh",
+                    "scripts/smoke_public_preview_operations.sh",
+                    "scripts/smoke_phase2_golden_demo.sh",
+                ],
+            },
+        ]
+        safe_next_candidates = [
+            {
+                "id": "docker_daemon_observed_run",
+                "label": "Capture Docker daemon observed run",
+                "state": "ready_when_daemon_available",
+                "customer_value": "Promote local Python preview proof into an observed Docker daemon run only when a real daemon-backed smoke can be captured.",
+                "termination_condition": "scripts/smoke_docker_runtime_preview.sh passes with Docker daemon available and a sanitized observed record is attached.",
+                "validation": ["scripts/smoke_docker_runtime_preview.sh"],
+                "blocked_by": ["docker_daemon_unavailable_locally"],
+            },
+            {
+                "id": "live_readonly_provider_proof",
+                "label": "Run live read-only provider proof",
+                "state": "blocked_until_tester_credentials",
+                "customer_value": "Gmail or Calendar can move from setup/readiness into observed read-only proof after explicit tester OAuth credentials are provided.",
+                "termination_condition": "A sanitized read-only Gmail or Calendar observed proof record is attached without exposing tokens or enabling mutations.",
+                "validation": [
+                    "docs/acceptance/gmail-live-readonly-acceptance.md",
+                    "docs/acceptance/calendar-live-readonly-acceptance.md",
+                ],
+                "blocked_by": ["live_oauth_credentials_missing"],
+            },
+            {
+                "id": "vm_iso_runtime_rejoin_proof",
+                "label": "Observe VM/ISO boot and rejoin",
+                "state": "blocked_until_observed_vm_run",
+                "customer_value": "OS-shaped claims require observed boot, reboot/recovery, and managed runtime rejoin evidence from a VM run.",
+                "termination_condition": "A sanitized VM/ISO proof record shows boot, recovery/reboot, and managed runtime rejoin.",
+                "validation": ["docs/acceptance/vm-iso-proof-preflight.md"],
+                "blocked_by": ["vm_iso_observed_run_missing"],
+            },
+            {
+                "id": "release_and_attestation_evidence",
+                "label": "Attach release and attestation evidence",
+                "state": "blocked_until_specialized_evidence",
+                "customer_value": "Release trust and hardware trust remain future tracks until real artifacts, checksums, signing or unsigned-preview statements, VM/ISO release proof, and boot-chain evidence exist.",
+                "termination_condition": "Release artifacts/checksums/signing or unsigned-preview statement and sanitized boot-chain evidence are attached.",
+                "validation": [
+                    "scripts/smoke_distribution_packaging_boundary.sh",
+                    "scripts/smoke_verified_boot_attestation_boundary.sh",
+                ],
+                "blocked_by": ["release_artifacts_missing", "hardware_attestation_evidence_missing"],
+            },
+        ]
+        blocked_tracks = [
+            {
+                "id": "vm_iso",
+                "label": "VM/ISO proof",
+                "state": "blocked_until_observed_vm_run",
+                "required_evidence": "Observed boot, recovery/reboot, and managed runtime rejoin record.",
+            },
+            {
+                "id": "live_oauth",
+                "label": "Live OAuth proof",
+                "state": "blocked_until_tester_credentials",
+                "required_evidence": "Explicit tester OAuth credentials and sanitized read-only Gmail or Calendar record.",
+            },
+            {
+                "id": "live_browser",
+                "label": "Live browser fallback proof",
+                "state": "blocked_until_user_approved_browser_run",
+                "required_evidence": "User-approved browser fallback run and sanitized observed proof.",
+            },
+            {
+                "id": "release",
+                "label": "Release proof",
+                "state": "blocked_until_release_artifacts",
+                "required_evidence": "Release artifacts, manifest, checksum publication, signing or unsigned-preview statement, and VM/ISO release proof.",
+            },
+            {
+                "id": "hardware_attestation",
+                "label": "Hardware attestation proof",
+                "state": "blocked_until_device_evidence",
+                "required_evidence": "Secure Boot, TPM/PCR, event-log, IMA, or hardware-backed attestation evidence.",
+            },
+        ]
+        return {
+            "schema_version": "agentos-product-layer-next-work-board.v1",
+            "surface": "Next Work Board",
+            "state": "ready",
+            "customer_message": "Next Work Board shows what AgentOS has completed in Docker-local Product Layer proof, what can safely move next, and which stronger claims still need observed evidence.",
+            "completed_product_proof": completed_product_proof,
+            "safe_next_candidates": safe_next_candidates,
+            "blocked_tracks": blocked_tracks,
+            "validation_commands": [
+                "scripts/smoke_docker_next_work_board.sh",
+                "scripts/smoke_docker_product_layer_completion.sh",
+                "scripts/smoke_docker_runtime_preview_python.sh",
+                "docker compose config",
+                "scripts/smoke_phase2_golden_demo.sh",
+            ],
+            "proof": {
+                "customer_facing_next_work_ready": True,
+                "docker_main_try_path": True,
+                "docker_daemon_observed_claimed": False,
+                "boot_or_iso_proof_claimed": False,
+                "live_oauth_claimed": False,
+                "live_browser_proof_claimed": False,
+                "release_trust_claimed": False,
+                "external_mutation_claimed": False,
+                "hardware_attestation_claimed": False,
+                "automatic_claim_promotion": False,
             },
         }
 
@@ -1902,6 +2053,7 @@ def _render_page(app: DockerPreviewApp) -> str:
     customer_handoff = product_layer.get("customer_handoff_bundle", {}) if isinstance(product_layer.get("customer_handoff_bundle"), dict) else {}
     proof_promotion = product_layer.get("proof_promotion_center", {}) if isinstance(product_layer.get("proof_promotion_center"), dict) else {}
     product_map = product_layer.get("product_map", {}) if isinstance(product_layer.get("product_map"), dict) else {}
+    next_work_board = product_layer.get("next_work_board", {}) if isinstance(product_layer.get("next_work_board"), dict) else {}
     features = product_layer.get("features", []) if isinstance(product_layer.get("features"), list) else []
     blockers = product_layer.get("blockers", []) if isinstance(product_layer.get("blockers"), list) else []
     llm_state = adapters.get("llm", {}).get("state", "unknown")
@@ -1945,6 +2097,37 @@ def _render_page(app: DockerPreviewApp) -> str:
         for route in product_map.get("reviewer_routes", [])
         if isinstance(route, dict)
     ) or "<li>No reviewer routes are configured.</li>"
+    next_work_completed_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Completed proof'))))}</b> "
+        f"{html.escape(str(item.get('customer_value', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))}</em>"
+        "</li>"
+        for item in next_work_board.get("completed_product_proof", [])
+        if isinstance(item, dict)
+    ) or "<li>No completed Product Layer proof is configured.</li>"
+    next_work_candidate_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Next candidate'))))}</b> "
+        f"{html.escape(str(item.get('customer_value', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))} · {html.escape(str(item.get('termination_condition', '')))}</em>"
+        "</li>"
+        for item in next_work_board.get("safe_next_candidates", [])
+        if isinstance(item, dict)
+    ) or "<li>No safe next candidates are configured.</li>"
+    next_work_blocked_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Blocked track'))))}</b> "
+        f"{html.escape(str(item.get('required_evidence', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))}</em>"
+        "</li>"
+        for item in next_work_board.get("blocked_tracks", [])
+        if isinstance(item, dict)
+    ) or "<li>No blocked tracks are configured.</li>"
+    next_work_validation_html = "\n".join(
+        f"<li><code>{html.escape(str(command))}</code></li>"
+        for command in next_work_board.get("validation_commands", [])
+    ) or "<li>No next-work validation commands are configured.</li>"
     feature_html = "\n".join(
         "<section class='feature'>"
         f"<div><h3>{html.escape(str(feature.get('label', 'Feature')))}</h3>"
@@ -2279,6 +2462,25 @@ def _render_page(app: DockerPreviewApp) -> str:
       <h2>Reviewer Routes</h2>
       <ul>{product_map_reviewer_route_html}</ul>
       <p><a href="/api/product-map">product map JSON</a></p>
+    </div>
+  </section>
+  <section class="product">
+    <div class="panel">
+      <h2>Next Work Board</h2>
+      <p class="lead">{html.escape(str(next_work_board.get('customer_message', 'Next work is available below.')))}</p>
+      <h3>Completed Product Proof</h3>
+      <ul>{next_work_completed_html}</ul>
+    </div>
+    <div class="panel">
+      <h2>Safe Next Candidates</h2>
+      <ul>{next_work_candidate_html}</ul>
+      <h2>Blocked Tracks</h2>
+      <ul>{next_work_blocked_html}</ul>
+      <p><a href="/api/next-work">next work JSON</a></p>
+    </div>
+    <div class="panel">
+      <h2>Next Work Validation</h2>
+      <ul>{next_work_validation_html}</ul>
     </div>
   </section>
   <section class="product">
@@ -2659,6 +2861,8 @@ def make_handler(app: DockerPreviewApp) -> type[BaseHTTPRequestHandler]:
                 _json_response(self, app.proof_promotion_center())
             elif path == "/api/product-map":
                 _json_response(self, app.product_map())
+            elif path == "/api/next-work":
+                _json_response(self, app.next_work_board())
             elif path == "/api/activity":
                 _json_response(self, app.activity())
             else:

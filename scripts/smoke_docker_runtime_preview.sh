@@ -94,6 +94,7 @@ curl -fsS http://127.0.0.1:18787/api/evidence > /tmp/agentos-docker-evidence.jso
 curl -fsS http://127.0.0.1:18787/api/proof-packet > /tmp/agentos-docker-proof-packet.json
 curl -fsS http://127.0.0.1:18787/api/customer-handoff > /tmp/agentos-docker-customer-handoff.json
 curl -fsS http://127.0.0.1:18787/api/proof-promotion > /tmp/agentos-docker-proof-promotion.json
+curl -fsS http://127.0.0.1:18787/api/proof-requests > /tmp/agentos-docker-proof-requests.json
 curl -fsS http://127.0.0.1:18787/api/product-map > /tmp/agentos-docker-product-map.json
 curl -fsS http://127.0.0.1:18787/api/next-work > /tmp/agentos-docker-next-work.json
 
@@ -117,6 +118,7 @@ evidence = json.loads(Path("/tmp/agentos-docker-evidence.json").read_text())
 proof_packet = json.loads(Path("/tmp/agentos-docker-proof-packet.json").read_text())
 customer_handoff = json.loads(Path("/tmp/agentos-docker-customer-handoff.json").read_text())
 proof_promotion = json.loads(Path("/tmp/agentos-docker-proof-promotion.json").read_text())
+proof_requests = json.loads(Path("/tmp/agentos-docker-proof-requests.json").read_text())
 product_map = json.loads(Path("/tmp/agentos-docker-product-map.json").read_text())
 next_work = json.loads(Path("/tmp/agentos-docker-next-work.json").read_text())
 home = Path("/tmp/agentos-docker-home.html").read_text()
@@ -134,6 +136,7 @@ assert product["preview_readiness_board"]["schema_version"] == "agentos-product-
 assert product["customer_proof_packet"]["schema_version"] == "agentos-product-layer-customer-proof-packet.v1"
 assert product["customer_handoff_bundle"]["schema_version"] == "agentos-product-layer-customer-handoff-bundle.v1"
 assert product["proof_promotion_center"]["schema_version"] == "agentos-product-layer-proof-promotion-center.v1"
+assert product["observed_proof_request_board"]["schema_version"] == "agentos-product-layer-observed-proof-request-board.v1"
 assert product["product_map"]["schema_version"] == "agentos-product-layer-map.v1"
 assert product["next_work_board"]["schema_version"] == "agentos-product-layer-next-work-board.v1"
 assert onboarding["schema_version"] == "agentos-product-layer-onboarding-status.v1"
@@ -265,6 +268,18 @@ assert proof_promotion["proof"]["live_oauth_claimed"] is False
 assert proof_promotion["proof"]["hardware_attestation_claimed"] is False
 assert proof_promotion["share_policy"]["secret_material_allowed"] is False
 assert proof_promotion["share_policy"]["automatic_claim_promotion"] is False
+assert proof_requests["schema_version"] == "agentos-product-layer-observed-proof-request-board.v1"
+assert proof_requests["proof"]["customer_facing_observed_proof_requests_ready"] is True
+assert proof_requests["proof"]["secret_material_allowed"] is False
+assert proof_requests["proof"]["automatic_claim_promotion"] is False
+assert {item["id"] for item in proof_requests["requests"]} == {
+    "docker_daemon_observed",
+    "vm_iso_runtime_rejoin",
+    "live_readonly_oauth",
+    "live_browser_fallback",
+    "release_trust",
+    "hardware_attestation",
+}
 assert {
     item["id"]: item["state"]
     for item in proof_promotion["sharing_checklist"]
@@ -311,6 +326,7 @@ assert set(reviewer_routes) == {
 }
 assert "VM/ISO" in reviewer_routes["runtime_evaluator"]["claim_boundary"]
 assert "proof_promotion_center" in reviewer_routes["proof_reviewer"]["route"]
+assert "observed_proof_request_board" in reviewer_routes["proof_reviewer"]["route"]
 assert "next_work_board" in reviewer_routes["proof_reviewer"]["route"]
 assert "approval_center" in reviewer_routes["capability_reviewer"]["route"]
 assert "attestation_status" in reviewer_routes["trust_reviewer"]["route"]
@@ -347,6 +363,8 @@ assert "Proof Promotion Center" in home
 assert "Proof Sharing Checklist" in home
 assert "Withhold stronger claims" in home
 assert "proof promotion JSON" in home
+assert "Observed Proof Request Board" in home
+assert "proof requests JSON" in home
 PY
 
 curl -fsS \

@@ -41,6 +41,7 @@ http://localhost:8787
 - `/api/capabilities` exposes safe local capabilities, confirmation-needed capabilities, and blocked destructive capabilities from the permission registry.
 - `/api/approvals` exposes setup-needed, confirmation-needed, observed-proof-needed, and blocked approval requirements without executing them.
 - `/api/proofs` exposes future observed-proof evidence requirements and mock submission fields without accepting secrets or auto-promoting claims.
+- `/api/proof-requests` exposes customer evidence requests, redaction rules, validation commands, and proof-promotion boundaries without accepting secrets or auto-promoting claims.
 - `/api/release-trust` exposes release artifact, manifest, checksum, signing, publication, customer readiness decisions, and VM/ISO proof requirements without claiming release readiness.
 - `/api/attestation` exposes Secure Boot, TPM/PCR, event-log, IMA, and hardware attestation requirements without claiming Docker proves device trust.
 - `/api/recovery` exposes customer-facing recovery actions for VM/ISO, live OAuth, browser, release, attestation, and setup blockers without claiming observed proof.
@@ -80,6 +81,7 @@ Expected behavior:
 - Capability Store shows safe local actions, external-read setup needs, lifecycle confirmation, and destructive blocked actions
 - Approval Center shows approval-gated actions without claiming approval execution, external writes, or destructive actions
 - Observed Proof Uploader shows evidence requirements without claiming file upload execution or claim promotion
+- Observed Proof Request Board shows the concrete customer action, accepted evidence, redaction rule, validation command, and promotion boundary for each blocked stronger proof category
 - Release Trust Panel shows release evidence requirements, readiness checklist items, and customer decisions without claiming upload, signing, checksum publication, or VM/ISO release proof
 - Attestation Status shows boot-chain and hardware trust evidence requirements without claiming Secure Boot, TPM/PCR, event-log, IMA, or hardware attestation proof
 - Recovery Center shows proof blockers as next recovery actions without claiming Docker is boot, release, browser, or hardware proof
@@ -96,7 +98,7 @@ scripts/smoke_docker_runtime_preview.sh
 
 The smoke should validate compose config, build the image, start the preview,
 check `localhost:8787`, verify `/api/product`, `/api/work-inbox`,
-`/api/onboarding`, `/api/demo-journey`, `/api/preview-readiness`, `/api/next-work`, `/api/timeline`, `/api/capabilities`, `/api/approvals`, `/api/proofs`, `/api/release-trust`, `/api/attestation`, `/api/recovery`, `/api/evidence`, `/api/proof-packet`, `/api/customer-handoff`, `/api/proof-promotion`, and `/api/product-map`, run a prompt through `/api/prompt`,
+`/api/onboarding`, `/api/demo-journey`, `/api/preview-readiness`, `/api/next-work`, `/api/timeline`, `/api/capabilities`, `/api/approvals`, `/api/proofs`, `/api/proof-requests`, `/api/release-trust`, `/api/attestation`, `/api/recovery`, `/api/evidence`, `/api/proof-packet`, `/api/customer-handoff`, `/api/proof-promotion`, and `/api/product-map`, run a prompt through `/api/prompt`,
 verify activity, and check that common secret patterns are not present in the
 response.
 
@@ -168,6 +170,18 @@ This gate starts the Python Docker runtime preview and verifies that
 implementation candidates, blocked observed-proof tracks, validation commands,
 and explicit non-claims for Docker daemon observed proof, VM/ISO, live OAuth,
 browser, release, mutation, and hardware attestation.
+
+## Observed Proof Request Board Gate
+
+```bash
+scripts/smoke_docker_observed_proof_request_board.sh
+```
+
+This gate starts the Python Docker runtime preview and verifies that
+`/api/proof-requests` exposes customer-facing proof requests for Docker daemon,
+VM/ISO, live OAuth, live browser, release, and hardware attestation proof,
+including customer actions, accepted evidence, redaction rules, validation
+commands, promotion boundaries, and explicit non-claims.
 
 ## Customer Proof Packet Gate
 

@@ -51,6 +51,7 @@ curl -fsS "http://127.0.0.1:$PORT/api/evidence" > "$TMP_DIR/evidence.json"
 curl -fsS "http://127.0.0.1:$PORT/api/proof-packet" > "$TMP_DIR/proof-packet.json"
 curl -fsS "http://127.0.0.1:$PORT/api/customer-handoff" > "$TMP_DIR/customer-handoff.json"
 curl -fsS "http://127.0.0.1:$PORT/api/proof-promotion" > "$TMP_DIR/proof-promotion.json"
+curl -fsS "http://127.0.0.1:$PORT/api/proof-requests" > "$TMP_DIR/proof-requests.json"
 curl -fsS "http://127.0.0.1:$PORT/api/product-map" > "$TMP_DIR/product-map.json"
 curl -fsS "http://127.0.0.1:$PORT/api/next-work" > "$TMP_DIR/next-work.json"
 
@@ -80,6 +81,7 @@ surfaces = {
     "customer_proof_packet": ("proof-packet.json", "agentos-product-layer-customer-proof-packet.v1", "Customer Proof Packet"),
     "customer_handoff_bundle": ("customer-handoff.json", "agentos-product-layer-customer-handoff-bundle.v1", "Customer Handoff Bundle"),
     "proof_promotion_center": ("proof-promotion.json", "agentos-product-layer-proof-promotion-center.v1", "Proof Promotion Center"),
+    "observed_proof_request_board": ("proof-requests.json", "agentos-product-layer-observed-proof-request-board.v1", "Observed Proof Request Board"),
     "product_map": ("product-map.json", "agentos-product-layer-map.v1", "Product Layer Map"),
     "next_work_board": ("next-work.json", "agentos-product-layer-next-work-board.v1", "Next Work Board"),
 }
@@ -198,6 +200,18 @@ assert proof_sharing_states == {
 }
 assert "Proof Sharing Checklist" in home
 assert "Withhold stronger claims" in home
+assert product["observed_proof_request_board"]["proof"]["customer_facing_observed_proof_requests_ready"] is True
+assert product["observed_proof_request_board"]["proof"]["secret_material_allowed"] is False
+assert product["observed_proof_request_board"]["proof"]["automatic_claim_promotion"] is False
+assert {item["id"] for item in product["observed_proof_request_board"]["requests"]} == {
+    "docker_daemon_observed",
+    "vm_iso_runtime_rejoin",
+    "live_readonly_oauth",
+    "live_browser_fallback",
+    "release_trust",
+    "hardware_attestation",
+}
+assert "scripts/smoke_docker_observed_proof_request_board.sh" in product["observed_proof_request_board"]["validation_commands"]
 assert product["product_map"]["proof"]["customer_facing_product_map_ready"] is True
 assert product["product_map"]["proof"]["boot_or_iso_proof_claimed"] is False
 assert product["next_work_board"]["proof"]["customer_facing_next_work_ready"] is True
@@ -229,6 +243,7 @@ assert {group["id"] for group in product["product_map"]["surface_groups"]} >= {
     "blocked_until_observed",
 }
 assert "proof_promotion_center" in product["product_map"]["recommended_path"]
+assert "observed_proof_request_board" in product["product_map"]["recommended_path"]
 assert "next_work_board" in product["product_map"]["recommended_path"]
 reviewer_routes = {item["id"]: item for item in product["product_map"]["reviewer_routes"]}
 assert set(reviewer_routes) == {
@@ -252,6 +267,7 @@ assert reviewer_routes["proof_reviewer"]["route"] == [
     "customer_proof_packet",
     "customer_handoff_bundle",
     "proof_promotion_center",
+    "observed_proof_request_board",
     "next_work_board",
 ]
 assert "sanitized observed evidence" in reviewer_routes["proof_reviewer"]["claim_boundary"]
@@ -264,6 +280,7 @@ assert reviewer_routes["capability_reviewer"]["route"] == [
 assert "external writes" in reviewer_routes["capability_reviewer"]["claim_boundary"]
 assert reviewer_routes["trust_reviewer"]["route"] == [
     "observed_proof_uploader",
+    "observed_proof_request_board",
     "release_trust_panel",
     "attestation_status",
     "recovery_center",
@@ -272,6 +289,8 @@ assert "hardware trust proof" in reviewer_routes["trust_reviewer"]["claim_bounda
 assert "Product Layer Map" in home
 assert "Reviewer Routes" in home
 assert "product map JSON" in home
+assert "Observed Proof Request Board" in home
+assert "proof requests JSON" in home
 assert "Next Work Board" in home
 assert "next work JSON" in home
 assert {item["id"] for item in product["customer_handoff_bundle"]["inspect_surfaces"]} >= {

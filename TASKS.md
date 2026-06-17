@@ -11,15 +11,15 @@ Current parent branch:
 
 Current public milestone:
 
-- **Docker Capability Store completion snapshot** — active capability ownership summary with safe paths, confirmation paths, destructive blocks, validation gates, and external/live proof blockers
+- **Docker Capability Store completion snapshot closeout** — completed capability ownership summary with safe paths, confirmation paths, destructive blocks, validation gates, and external/live proof blockers
 
 Current task:
 
-- `[P2-133] Add Capability Store completion snapshot`
+- `[P2-134] Close Capability Store completion snapshot epic`
 
 Runtime impact statement:
 
-- This task turns capability ownership from a technical registry into a customer-readable Docker Product Layer completion snapshot while preserving mediation-cost reduction and refusing unobserved external-write, destructive-action, live-provider, VM/ISO, release, and attestation claims.
+- This closeout makes Capability Store a completed Docker Product Layer capability ownership customer surface while keeping external-write, destructive-action, live-provider, VM/ISO, release, mutation, and attestation proof blockers explicit.
 
 Current autonomous completion loop:
 
@@ -179,8 +179,9 @@ Recommended Phase 2 tasks:
 - The Docker Activity Timeline completion snapshot epic is closed for this Phase 2 slice; future Activity Timeline changes should require observed external app activity, live provider proof, browser evidence, VM/ISO proof, or a new customer-facing activity narration promotion need before reopening.
 - P2-131 adds the Activity Timeline completion snapshot to `/api/timeline`, the browser Activity Timeline panel, `scripts/smoke_docker_activity_timeline_snapshot.sh`, Product Layer completion coverage, and the Phase 2 golden runner while preserving external/live proof boundaries.
 - P2-132 closes the Docker Activity Timeline completion snapshot epic after README, TASKS, roadmap, Docker acceptance, Activity Timeline snapshot gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve Docker-safe activity narration truthfulness without stronger proof claims.
-- The Docker Capability Store completion snapshot epic is active for this Phase 2 slice; future Capability Store changes should require external-write proof, destructive-action proof, live provider proof, VM/ISO proof, or a new customer-facing capability ownership promotion need before expanding claims.
+- The Docker Capability Store completion snapshot epic is closed for this Phase 2 slice; future Capability Store changes should require external-write proof, destructive-action proof, live provider proof, VM/ISO proof, or a new customer-facing capability ownership promotion need before expanding claims.
 - P2-133 adds the Capability Store completion snapshot to `/api/capabilities`, the browser Capability Store panel, `scripts/smoke_docker_capability_store_snapshot.sh`, Product Layer completion coverage, and the Phase 2 golden runner while preserving external-write, destructive-action, live-provider, and VM/ISO proof boundaries.
+- P2-134 closes the Docker Capability Store completion snapshot epic after README, TASKS, roadmap, Docker acceptance, Capability Store snapshot gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve Docker-safe capability ownership truthfulness without stronger proof claims.
 - The inbox capability ownership boundary epic is closed for this Phase 2 slice; future inbox work should require live read-only OAuth proof, observed Maildir/user data proof, or a later confirmed external mutation model before claiming broader inbox ecosystem support.
 - The first inbox ownership slice is `docs/architecture/inbox-capability-ownership-boundary.md`, smoke-tested by `scripts/smoke_inbox_capability_ownership_boundary.sh`.
 - The inbox ownership boundary smoke is included in the Phase 2 golden demo runner so inbox capability ownership remains part of practical local/Docker-safe proof.

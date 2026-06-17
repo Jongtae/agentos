@@ -80,17 +80,21 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
+- None.
+
+## Completed Completion Epics
+
 - `docker-capability-store-completion-snapshot-epic` — [EPIC: Stage 3 / Phase 2 Docker Capability Store completion snapshot](https://github.com/Jongtae/agentos/issues/323)
   - Milestone: Docker Capability Store completion snapshot
   - Completion goal: expose a customer-facing Docker Capability Store completion snapshot that summarizes safe local capabilities, confirmation-needed paths, blocked destructive actions, validation gates, and external/live non-claims without claiming destructive execution, external writes, live provider proof, VM/ISO proof, release proof, mutation proof, or hardware attestation.
   - Validation plan: `scripts/smoke_docker_capability_store_snapshot.sh`, `scripts/smoke_docker_product_layer_completion.sh`, `scripts/smoke_docker_runtime_preview_python.sh`, `docker compose config`, the Phase 2 golden demo runner, roadmap direction judge, cleanup policy, and PR CI.
-  - Exit condition: complete after `/api/capabilities`, the browser Capability Store panel, README, TASKS, Docker acceptance, roadmap state, focused Capability Store snapshot gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks all preserve Docker-safe capability ownership without stronger proof claims.
-  - Open issue: #323.
-  - First task: [P2-133 Add Capability Store completion snapshot](https://github.com/Jongtae/agentos/issues/324) adds the completion snapshot contract, browser panel, focused smoke gate, and Product Layer/golden runner coverage.
+  - Exit condition: completed by P2-133 through P2-134 after `/api/capabilities`, the browser Capability Store panel, README, TASKS, Docker acceptance, roadmap state, focused Capability Store snapshot gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks all preserve Docker-safe capability ownership without stronger proof claims.
+  - Closed issue: #323.
+  - Completed tasks: P2-133 and P2-134.
+  - First task: P2-133 adds the completion snapshot contract, browser panel, focused smoke gate, and Product Layer/golden runner coverage.
+  - Product-layer closeout: P2-134 records the Docker Capability Store completion snapshot epic as complete so future loops return to the roadmap before adding more Capability Store work.
   - Residual blockers: external write execution, destructive action execution, live provider execution, VM/ISO capability ownership, release proof, mutation proof, and hardware attestation remain unclaimed until observed evidence exists.
   - Advances: capability ownership, mediation cost reduction, Docker-first public usability, runtime proof truthfulness, and OS-native runtime defaults.
-
-## Completed Completion Epics
 
 - `docker-activity-timeline-completion-snapshot-epic` — [EPIC: Stage 3 / Phase 2 Docker Activity Timeline completion snapshot](https://github.com/Jongtae/agentos/issues/317)
   - Milestone: Docker Activity Timeline completion snapshot

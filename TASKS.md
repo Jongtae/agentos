@@ -11,15 +11,15 @@ Current parent branch:
 
 Current public milestone:
 
-- **Docker runtime home completion snapshot closeout** — completed customer-facing Runtime Home summary with explicit stronger-proof blockers
+- **Docker Work Inbox completion snapshot** — customer-facing read-first Work Inbox summary with safe workflows, mutation boundaries, and live-proof blockers
 
 Current task:
 
-- `[P2-128] Close Runtime Home completion snapshot epic`
+- `[P2-129] Add Work Inbox completion snapshot`
 
 Runtime impact statement:
 
-- This closeout makes Runtime Home a completed Docker Product Layer customer entrypoint while keeping stronger proof blockers explicit and returning future Runtime Home work to roadmap review.
+- This task makes Work Inbox a clearer customer-facing read-first capability ownership surface while keeping live OAuth, browser default behavior, external mutation, production sync, and real user Maildir proof blocked until observed evidence exists.
 
 Current autonomous completion loop:
 
@@ -98,6 +98,7 @@ Recommended Phase 2 tasks:
 - Docker preview is promoted as the primary public try path at `http://localhost:8787`.
 - Docker preview now exposes `agentos-product-layer-runtime-home.v1` through `/api/product` and the browser Runtime Home without claiming VM/ISO boot proof.
 - Docker preview now exposes `agentos-product-layer-work-inbox.v1` through `/api/work-inbox` and the browser Work Inbox without claiming live OAuth, browser-default behavior, or external mutations.
+- Docker Work Inbox now exposes `agentos-product-layer-work-inbox-completion-snapshot.v1` inside `/api/work-inbox` and the browser Work Inbox panel so customers can see completed local proof, safe workflows, mutation boundaries, validation gates, and live-provider blockers from the product surface.
 - Docker preview now exposes `agentos-product-layer-activity-timeline.v1` through `/api/timeline` and the browser Activity Timeline without claiming external app execution or live-provider proof.
 - Docker preview now exposes `agentos-product-layer-capability-store.v1` through `/api/capabilities` and the browser Capability Store without claiming destructive, external-write, or live-provider proof.
 - Docker preview now exposes `agentos-product-layer-approval-center.v1` through `/api/approvals` and the browser Approval Center without claiming approval execution, external writes, or destructive actions.
@@ -170,6 +171,8 @@ Recommended Phase 2 tasks:
 - The Docker runtime home completion snapshot epic is closed for this Phase 2 slice; future Runtime Home changes should require observed Docker daemon proof, VM/ISO proof, live adapter proof, release proof, or a new customer-facing Runtime Home promotion need before reopening.
 - P2-127 adds the Runtime Home completion snapshot to `/api/product`, the browser Runtime Home panel, `scripts/smoke_docker_runtime_home_snapshot.sh`, Product Layer completion coverage, and the Phase 2 golden runner while preserving Docker-safe proof boundaries.
 - P2-128 closes the Docker runtime home completion snapshot epic after README, TASKS, roadmap, Docker acceptance, Runtime Home snapshot gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve Docker-safe Runtime Home truthfulness without stronger proof claims.
+- The Docker Work Inbox completion snapshot epic is active for this Phase 2 slice; it should close only after Work Inbox exposes a focused read-first customer completion snapshot, mutation boundaries, validation gates, README/TASKS/roadmap/Docker acceptance alignment, and Docker-safe smoke coverage without promoting live provider, browser-default, mutation, production sync, or user Maildir proof claims.
+- P2-129 adds the Work Inbox completion snapshot to `/api/work-inbox`, the browser Work Inbox panel, `scripts/smoke_docker_work_inbox_snapshot.sh`, Product Layer completion coverage, and the Phase 2 golden runner while preserving read-first capability ownership boundaries.
 - The inbox capability ownership boundary epic is closed for this Phase 2 slice; future inbox work should require live read-only OAuth proof, observed Maildir/user data proof, or a later confirmed external mutation model before claiming broader inbox ecosystem support.
 - The first inbox ownership slice is `docs/architecture/inbox-capability-ownership-boundary.md`, smoke-tested by `scripts/smoke_inbox_capability_ownership_boundary.sh`.
 - The inbox ownership boundary smoke is included in the Phase 2 golden demo runner so inbox capability ownership remains part of practical local/Docker-safe proof.

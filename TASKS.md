@@ -11,15 +11,15 @@ Current parent branch:
 
 Current public milestone:
 
-- **Docker runtime home completion snapshot** — customer-facing Runtime Home summary of completed Docker-local proof, validation gates, review surfaces, and blocked stronger-proof claims
+- **Docker runtime home completion snapshot closeout** — completed customer-facing Runtime Home summary with explicit stronger-proof blockers
 
 Current task:
 
-- `[P2-127] Add Runtime Home completion snapshot`
+- `[P2-128] Close Runtime Home completion snapshot epic`
 
 Runtime impact statement:
 
-- This task makes the default Docker Runtime Home explain runtime readiness and proof status in customer language while keeping VM/ISO, live OAuth, live browser, release, mutation, Docker daemon observed, and hardware attestation claims blocked until observed evidence exists.
+- This closeout makes Runtime Home a completed Docker Product Layer customer entrypoint while keeping stronger proof blockers explicit and returning future Runtime Home work to roadmap review.
 
 Current autonomous completion loop:
 
@@ -167,8 +167,9 @@ Recommended Phase 2 tasks:
 - The Docker session report epic is closed for this Phase 2 slice; future session-report changes should require observed Docker daemon proof, VM/ISO proof, live adapter proof, release proof, or a new customer-facing reporting promotion need before reopening.
 - P2-125 adds `/api/session-report`, a browser Session Report panel, and `scripts/smoke_docker_session_report.sh` so customers can inspect one report covering runtime state, recent activity, proof sources, recovery drills, validation commands, and stronger-proof non-claims.
 - P2-126 closes the Docker session report epic after README, TASKS, roadmap, Docker acceptance, session-report gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve Docker-safe reporting truthfulness without stronger proof claims.
-- The Docker runtime home completion snapshot epic is active for this Phase 2 slice; it should close only after Runtime Home exposes a focused customer completion snapshot, validation gates, review surfaces, blocked stronger-proof claims, README/TASKS/roadmap/Docker acceptance alignment, and Docker-safe smoke coverage without promoting stronger proof claims.
+- The Docker runtime home completion snapshot epic is closed for this Phase 2 slice; future Runtime Home changes should require observed Docker daemon proof, VM/ISO proof, live adapter proof, release proof, or a new customer-facing Runtime Home promotion need before reopening.
 - P2-127 adds the Runtime Home completion snapshot to `/api/product`, the browser Runtime Home panel, `scripts/smoke_docker_runtime_home_snapshot.sh`, Product Layer completion coverage, and the Phase 2 golden runner while preserving Docker-safe proof boundaries.
+- P2-128 closes the Docker runtime home completion snapshot epic after README, TASKS, roadmap, Docker acceptance, Runtime Home snapshot gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve Docker-safe Runtime Home truthfulness without stronger proof claims.
 - The inbox capability ownership boundary epic is closed for this Phase 2 slice; future inbox work should require live read-only OAuth proof, observed Maildir/user data proof, or a later confirmed external mutation model before claiming broader inbox ecosystem support.
 - The first inbox ownership slice is `docs/architecture/inbox-capability-ownership-boundary.md`, smoke-tested by `scripts/smoke_inbox_capability_ownership_boundary.sh`.
 - The inbox ownership boundary smoke is included in the Phase 2 golden demo runner so inbox capability ownership remains part of practical local/Docker-safe proof.

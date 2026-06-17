@@ -181,8 +181,8 @@ flowchart LR
   phase1["Phase 1\nOS-native runtime prototype\nclosed"]
   phase2["Phase 2\nlocal-first runtime loop\nclosed baseline"]
   ready["Product Layer\ncompletion gate\nready"]
-  active["Active completion epic\nDocker runtime home\ncompletion snapshot"]
-  completed["Completed completion epics\npermissions, updater, browser fallback,\nBrowser observed acceptance,\npublic preview ops, distribution,\ninbox, capability graduation,\ncalendar/Gmail readiness,\nVM/ISO proof status,\nCalendar live acceptance,\nCalendar live adapter,\nMaildir intake,\nDocker onboarding,\nguided demo journey,\ncustomer handoff bundle,\npreview readiness board,\nobserved proof request board,\nrecovery drill board,\nsession report"]
+  active["Active completion epic\nNone"]
+  completed["Completed completion epics\npermissions, updater, browser fallback,\nBrowser observed acceptance,\npublic preview ops, distribution,\ninbox, capability graduation,\ncalendar/Gmail readiness,\nVM/ISO proof status,\nCalendar live acceptance,\nCalendar live adapter,\nMaildir intake,\nDocker onboarding,\nguided demo journey,\ncustomer handoff bundle,\npreview readiness board,\nobserved proof request board,\nrecovery drill board,\nsession report,\nruntime home snapshot"]
   blocked["Observed-proof blockers\nVM/ISO, live OAuth,\nlive browser, release artifacts"]
   future["Later completion tracks\ncalendar live adapter, broader app ecosystem,\nhardware attestation, packaging hardening"]
 
@@ -197,7 +197,7 @@ flowchart LR
 | Track | Status | Runtime impact |
 | --- | --- | --- |
 | Docker runtime preview | Developer/demo proof path | Makes the managed runtime easy to try without claiming boot ownership. |
-| Runtime Home completion snapshot | Active Docker product surface | Turns the default Docker Runtime Home into a customer-readable completion snapshot with completed local proof, validation gates, review surfaces, and blocked stronger-proof claims. |
+| Runtime Home completion snapshot | Completed Docker product surface | Turns the default Docker Runtime Home into a customer-readable completion snapshot with completed local proof, validation gates, review surfaces, and blocked stronger-proof claims. |
 | Docker Onboarding Status | Completed Docker product surface | Shows quickstart steps, preview entrypoints, validation smokes, and proof non-claims from the running preview. |
 | Docker onboarding readiness checklist | Completed Docker product surface | Shows which local-preview steps are ready and which stronger proof claims still require observed external evidence. |
 | Guided Demo Journey | Completed Docker product surface | Walks customers through Runtime Home, Work Inbox, prompt execution, Activity Timeline, Evidence Dashboard, and Recovery Center in proof-safe order, with expected outcomes and a completion summary separating successful Docker proof from blocked-until-observed claims. |
@@ -205,7 +205,7 @@ flowchart LR
 | Next Work Board | Completed Docker product surface | Shows completed Docker-local Product Layer proof, safe next implementation candidates, and observed-proof blockers without promoting stronger claims. |
 | Recovery Drill Board | Completed Docker product surface | Turns Docker-safe recovery checks into repeatable customer drills for health, runtime preview, Product Layer recheck, cleanup, and blocked stronger-proof review. |
 | Session Report | Completed Docker product surface | Summarizes runtime state, recent activity, proof sources, recovery drills, and stronger-proof blockers in one Docker-safe customer report. |
-| Runtime Home | Active Docker product surface | Presents runtime readiness, Work Inbox, Activity Timeline, Recovery Center, Evidence Dashboard states, and the active completion snapshot in customer language. |
+| Runtime Home | Completed Docker product surface | Presents runtime readiness, Work Inbox, Activity Timeline, Recovery Center, Evidence Dashboard states, and the completion snapshot in customer language. |
 | Work Inbox | Active Docker product surface | Presents fixture, Maildir, Gmail, and Calendar as read-first inbox sources with explicit live-proof blockers and mutation non-claims. |
 | Activity Timeline | Active Docker product surface | Shows customer-readable runtime events and user-visible records without claiming external app execution or live-provider proof. |
 | Capability Store | Active Docker product surface | Presents safe reads, user-owned writes, external-read setup needs, lifecycle confirmation, and blocked destructive actions from the capability registry. |

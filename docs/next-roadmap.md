@@ -80,17 +80,21 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
+- None.
+
+## Completed Completion Epics
+
 - `docker-runtime-home-completion-snapshot-epic` — [EPIC: Stage 3 / Phase 2 Docker runtime home completion snapshot](https://github.com/Jongtae/agentos/issues/305)
   - Milestone: Docker runtime home completion snapshot
   - Completion goal: expose a customer-facing Runtime Home completion snapshot that summarizes what the Docker Product Layer proves, which validation gates support it, which review surfaces are ready, and which stronger proof claims remain blocked without claiming VM/ISO, live OAuth, live browser, release, external mutation, Docker daemon observed, or hardware attestation proof.
   - Validation plan: `scripts/smoke_docker_runtime_home_snapshot.sh`, `scripts/smoke_docker_product_layer_completion.sh`, `scripts/smoke_docker_runtime_preview_python.sh`, `docker compose config`, the Phase 2 golden demo runner, roadmap direction judge, cleanup policy, and PR CI.
-  - Exit condition: complete after `/api/product`, the browser Runtime Home panel, README, TASKS, Docker acceptance, roadmap state, focused Runtime Home snapshot gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks all preserve Docker-safe Runtime Home customer completion without stronger proof claims.
-  - Open issue: #305.
+  - Exit condition: completed by P2-127 through P2-128 after `/api/product`, the browser Runtime Home panel, README, TASKS, Docker acceptance, roadmap state, focused Runtime Home snapshot gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks all preserve Docker-safe Runtime Home customer completion without stronger proof claims.
+  - Closed issue: #305.
+  - Completed tasks: P2-127 and P2-128.
   - First task: P2-127 adds the completion snapshot contract, browser panel, focused smoke gate, and Product Layer/golden runner coverage.
+  - Product-layer closeout: P2-128 records the Docker runtime home completion snapshot epic as complete so future loops return to the roadmap before adding more Runtime Home work.
   - Residual blockers: Docker daemon observed proof, VM/ISO boot/rejoin proof, live OAuth, live browser evidence, release artifacts/signing, external mutation proof, and hardware attestation remain unclaimed until observed evidence exists.
   - Advances: Docker-first public usability, runtime proof truthfulness, recovery, and OS-native runtime defaults.
-
-## Completed Completion Epics
 
 - `docker-session-report-epic` — [EPIC: Stage 3 / Phase 2 Docker session report](https://github.com/Jongtae/agentos/issues/299)
   - Milestone: Docker session report

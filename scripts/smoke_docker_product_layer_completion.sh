@@ -164,6 +164,25 @@ assert work_inbox_snapshot["proof"]["external_mutation_claimed"] is False
 assert work_inbox_snapshot["proof"]["automatic_claim_promotion"] is False
 assert "Work Inbox Completion Snapshot" in home
 assert "scripts/smoke_docker_work_inbox_snapshot.sh" in home
+assert product["activity_timeline"]["proof"]["activity_timeline_completion_snapshot_ready"] is True
+activity_snapshot = product["activity_timeline"]["completion_snapshot"]
+assert activity_snapshot["schema_version"] == "agentos-product-layer-activity-timeline-completion-snapshot.v1"
+assert {item["id"] for item in activity_snapshot["narrated_stages"]} == {
+    "received",
+    "classified",
+    "running",
+    "completed_or_recovered",
+}
+assert {item["id"] for item in activity_snapshot["record_surfaces"]} == {
+    "activity_feed",
+    "user_visible_records",
+}
+assert any(item["command"] == "scripts/smoke_docker_activity_timeline_snapshot.sh" for item in activity_snapshot["validation_gates"])
+assert activity_snapshot["proof"]["customer_facing_activity_timeline_snapshot_ready"] is True
+assert activity_snapshot["proof"]["external_app_execution_claimed"] is False
+assert activity_snapshot["proof"]["automatic_claim_promotion"] is False
+assert "Activity Timeline Completion Snapshot" in home
+assert "scripts/smoke_docker_activity_timeline_snapshot.sh" in home
 assert {item["id"] for item in product["guided_demo_journey"]["expected_outcomes"]} >= {
     "runtime_reachable",
     "read_first_work_visible",
@@ -437,6 +456,11 @@ non_claims = {
     "work_inbox_snapshot_maildir_observed": product["work_inbox"]["completion_snapshot"]["proof"]["user_maildir_observed_claimed"],
     "work_inbox_snapshot_auto_promotion": product["work_inbox"]["completion_snapshot"]["proof"]["automatic_claim_promotion"],
     "timeline_external_app": product["activity_timeline"]["proof"]["external_app_execution_claimed"],
+    "timeline_snapshot_external_app": product["activity_timeline"]["completion_snapshot"]["proof"]["external_app_execution_claimed"],
+    "timeline_snapshot_live_provider": product["activity_timeline"]["completion_snapshot"]["proof"]["live_provider_proof_claimed"],
+    "timeline_snapshot_browser": product["activity_timeline"]["completion_snapshot"]["proof"]["browser_activity_claimed"],
+    "timeline_snapshot_boot": product["activity_timeline"]["completion_snapshot"]["proof"]["boot_or_iso_proof_claimed"],
+    "timeline_snapshot_auto_promotion": product["activity_timeline"]["completion_snapshot"]["proof"]["automatic_claim_promotion"],
     "capability_external_write": product["capability_store"]["proof"]["external_write_claimed"],
     "approval_execution": product["approval_center"]["proof"]["approval_execution_claimed"],
     "proof_upload_execution": product["observed_proof_uploader"]["proof"]["file_upload_execution_claimed"],
@@ -499,6 +523,7 @@ ready_claims = {
     "work_inbox": product["work_inbox"]["proof"]["customer_facing_summary_ready"],
     "work_inbox_completion_snapshot": product["work_inbox"]["completion_snapshot"]["proof"]["customer_facing_work_inbox_snapshot_ready"],
     "activity_timeline": product["activity_timeline"]["proof"]["customer_facing_timeline_ready"],
+    "activity_timeline_completion_snapshot": product["activity_timeline"]["completion_snapshot"]["proof"]["customer_facing_activity_timeline_snapshot_ready"],
     "capability_store": product["capability_store"]["proof"]["customer_facing_capability_store_ready"],
     "approval_center": product["approval_center"]["proof"]["customer_facing_approval_center_ready"],
     "proof_uploader": product["observed_proof_uploader"]["proof"]["customer_facing_proof_uploader_ready"],

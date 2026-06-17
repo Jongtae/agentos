@@ -83,6 +83,7 @@ Expected behavior:
 - Observed Proof Uploader shows evidence requirements without claiming file upload execution or claim promotion
 - Observed Proof Request Board shows the concrete customer action, accepted evidence, redaction rule, validation command, and promotion boundary for each blocked stronger proof category
 - Recovery Drill Board shows repeatable Docker-safe recovery drills for health, runtime preview, Product Layer recheck, cleanup policy, VM/ISO blocker review, and live adapter recovery review without claiming stronger proof
+- Session Report shows runtime state, recent activity, proof sources, recovery drills, validation commands, and stronger-proof blockers in one Docker-safe customer report
 - Release Trust Panel shows release evidence requirements, readiness checklist items, and customer decisions without claiming upload, signing, checksum publication, or VM/ISO release proof
 - Attestation Status shows boot-chain and hardware trust evidence requirements without claiming Secure Boot, TPM/PCR, event-log, IMA, or hardware attestation proof
 - Recovery Center shows proof blockers as next recovery actions without claiming Docker is boot, release, browser, or hardware proof
@@ -99,7 +100,7 @@ scripts/smoke_docker_runtime_preview.sh
 
 The smoke should validate compose config, build the image, start the preview,
 check `localhost:8787`, verify `/api/product`, `/api/work-inbox`,
-`/api/onboarding`, `/api/demo-journey`, `/api/preview-readiness`, `/api/next-work`, `/api/timeline`, `/api/capabilities`, `/api/approvals`, `/api/proofs`, `/api/proof-requests`, `/api/recovery-drills`, `/api/release-trust`, `/api/attestation`, `/api/recovery`, `/api/evidence`, `/api/proof-packet`, `/api/customer-handoff`, `/api/proof-promotion`, and `/api/product-map`, run a prompt through `/api/prompt`,
+`/api/onboarding`, `/api/demo-journey`, `/api/preview-readiness`, `/api/next-work`, `/api/timeline`, `/api/capabilities`, `/api/approvals`, `/api/proofs`, `/api/proof-requests`, `/api/recovery-drills`, `/api/session-report`, `/api/release-trust`, `/api/attestation`, `/api/recovery`, `/api/evidence`, `/api/proof-packet`, `/api/customer-handoff`, `/api/proof-promotion`, and `/api/product-map`, run a prompt through `/api/prompt`,
 verify activity, and check that common secret patterns are not present in the
 response.
 
@@ -195,6 +196,18 @@ This gate starts the Python Docker runtime preview and verifies that
 health, runtime preview, Product Layer recheck, cleanup policy, VM/ISO blocker
 review, and live adapter recovery review while preserving Docker daemon,
 VM/ISO, live OAuth, browser, release, mutation, and attestation non-claims.
+
+## Session Report Gate
+
+```bash
+scripts/smoke_docker_session_report.sh
+```
+
+This gate starts the Python Docker runtime preview and verifies that
+`/api/session-report` exposes runtime state, recent activity, proof sources,
+recovery drills, validation commands, and stronger-proof blockers in one
+Docker-safe customer report while preserving Docker daemon, VM/ISO, live OAuth,
+browser, release, mutation, and attestation non-claims.
 
 ## Customer Proof Packet Gate
 

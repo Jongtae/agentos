@@ -11,15 +11,15 @@ Current parent branch:
 
 Current public milestone:
 
-- **Docker recovery drill board closeout** — completed Docker-safe recovery drills with explicit stronger-proof blockers
+- **Docker session report** — customer-readable Docker-safe runtime report with explicit stronger-proof blockers
 
 Current task:
 
-- `[P2-124] Close Docker recovery drill board epic`
+- `[P2-125] Add Docker session report`
 
 Runtime impact statement:
 
-- This task records Docker-safe recovery drills as completed Product Layer work while preserving runtime-first truthfulness and leaving Docker daemon, VM/ISO, live OAuth, browser, release, mutation, and attestation proof blockers explicit until observed evidence exists.
+- This task gives customers one Docker-safe runtime session report while preserving runtime-first truthfulness and leaving Docker daemon, VM/ISO, live OAuth, browser, release, mutation, and attestation proof blockers explicit until observed evidence exists.
 
 Current autonomous completion loop:
 
@@ -112,6 +112,7 @@ Recommended Phase 2 tasks:
 - Docker preview now exposes a Proof Sharing Checklist inside `/api/proof-promotion` and the browser Proof Promotion Center panel so customers can distinguish share-ready Docker-local language from blocked stronger claims before handing evidence to reviewers.
 - Docker preview now exposes `agentos-product-layer-observed-proof-request-board.v1` through `/api/proof-requests` and the browser Observed Proof Request Board panel so customers can see evidence requests, redaction rules, validation commands, and promotion boundaries for each blocked proof category without accepting secrets or auto-promoting claims.
 - Docker preview now exposes `agentos-product-layer-recovery-drill-board.v1` through `/api/recovery-drills` and the browser Recovery Drill Board panel so customers can run Docker-safe health, runtime preview, Product Layer, cleanup, VM/ISO blocker, and live adapter recovery drills without promoting stronger proof claims.
+- Docker preview now exposes `agentos-product-layer-session-report.v1` through `/api/session-report` and the browser Session Report panel so customers can review runtime state, recent activity, proof sources, recovery drills, and stronger-proof blockers in one Docker-safe report.
 - Docker preview now exposes `agentos-product-layer-map.v1` through `/api/product-map` and the browser Product Layer Map panel so customers can follow the recommended path and reviewer-specific routes across Product Layer surfaces and proof blockers.
 - Docker preview now exposes `agentos-product-layer-next-work-board.v1` through `/api/next-work` and the browser Next Work Board panel so customers can see completed Docker-local proof, safe next implementation candidates, blocked observed-proof tracks, and validation commands without automatic claim promotion.
 - Docker Product Layer completion is guarded by `scripts/smoke_docker_product_layer_completion.sh`, which verifies Runtime Home, Work Inbox, Activity Timeline, Capability Store, Approval Center, Observed Proof Uploader, Release Trust Panel, Attestation Status, Recovery Center, Evidence Dashboard, Customer Proof Packet, Customer Handoff Bundle, Proof Promotion Center, Observed Proof Request Board, Product Layer Map, and Next Work Board together.
@@ -162,6 +163,8 @@ Recommended Phase 2 tasks:
 - The Docker recovery drill board epic is closed for this Phase 2 slice; future recovery-drill changes should require observed Docker daemon proof, VM/ISO recovery evidence, live adapter proof, release proof, or a new customer-facing recovery promotion need before reopening.
 - P2-123 adds `/api/recovery-drills`, a browser Recovery Drill Board panel, and `scripts/smoke_docker_recovery_drill_board.sh` so customers can run or review concrete recovery drills while VM/ISO, live OAuth, browser, release, mutation, and attestation proof remain unclaimed.
 - P2-124 closes the Docker recovery drill board epic after README, TASKS, roadmap, Docker acceptance, recovery-drill gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve Docker-safe recovery truthfulness without stronger proof claims.
+- The Docker session report epic is active for this Phase 2 slice; completion requires `/api/session-report`, the browser Session Report panel, README, TASKS, roadmap, Docker acceptance, focused session-report gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks to preserve Docker-safe reporting truthfulness.
+- P2-125 adds `/api/session-report`, a browser Session Report panel, and `scripts/smoke_docker_session_report.sh` so customers can inspect one report covering runtime state, recent activity, proof sources, recovery drills, validation commands, and stronger-proof non-claims.
 - The inbox capability ownership boundary epic is closed for this Phase 2 slice; future inbox work should require live read-only OAuth proof, observed Maildir/user data proof, or a later confirmed external mutation model before claiming broader inbox ecosystem support.
 - The first inbox ownership slice is `docs/architecture/inbox-capability-ownership-boundary.md`, smoke-tested by `scripts/smoke_inbox_capability_ownership_boundary.sh`.
 - The inbox ownership boundary smoke is included in the Phase 2 golden demo runner so inbox capability ownership remains part of practical local/Docker-safe proof.

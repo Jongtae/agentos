@@ -374,6 +374,12 @@ class DockerPreviewApp:
         recovery_center = self.recovery_center(setup=setup_payload)
         recovery_drill_board = self.recovery_drill_board(setup=setup_payload)
         evidence_dashboard = self.evidence_dashboard(setup=setup_payload, activity=activity_payload)
+        session_report = self.session_report(
+            setup=setup_payload,
+            activity=activity_payload,
+            recovery_drill_board=recovery_drill_board,
+            evidence_dashboard=evidence_dashboard,
+        )
         proof_packet = self.customer_proof_packet(
             onboarding_status=onboarding_status,
             guided_demo_journey=guided_demo_journey,
@@ -480,6 +486,12 @@ class DockerPreviewApp:
                     "customer_value": "Run Docker-safe recovery drills for health, restart, evidence refresh, cleanup, and blocked stronger-proof paths without claiming VM/ISO proof.",
                 },
                 {
+                    "id": "session_report",
+                    "label": "Session Report",
+                    "state": session_report.get("state", "ready"),
+                    "customer_value": "Review one Docker-safe report with runtime state, recent activity, proof sources, recovery drills, and stronger-proof non-claims.",
+                },
+                {
                     "id": "evidence_dashboard",
                     "label": "Evidence Dashboard",
                     "state": "partial",
@@ -535,6 +547,7 @@ class DockerPreviewApp:
             "attestation_status": attestation_status,
             "recovery_center": recovery_center,
             "recovery_drill_board": recovery_drill_board,
+            "session_report": session_report,
             "evidence_dashboard": evidence_dashboard,
             "customer_proof_packet": proof_packet,
             "customer_handoff_bundle": customer_handoff,
@@ -689,6 +702,7 @@ class DockerPreviewApp:
                     {"id": "evidence_dashboard", "label": "Evidence Dashboard", "endpoint": "/api/evidence", "state": "ready"},
                     {"id": "customer_proof_packet", "label": "Customer Proof Packet", "endpoint": "/api/proof-packet", "state": "ready"},
                     {"id": "customer_handoff_bundle", "label": "Customer Handoff Bundle", "endpoint": "/api/customer-handoff", "state": "ready"},
+                    {"id": "session_report", "label": "Session Report", "endpoint": "/api/session-report", "state": "ready"},
                     {"id": "proof_promotion_center", "label": "Proof Promotion Center", "endpoint": "/api/proof-promotion", "state": "ready"},
                     {"id": "observed_proof_request_board", "label": "Observed Proof Request Board", "endpoint": "/api/proof-requests", "state": "ready"},
                     {"id": "next_work_board", "label": "Next Work Board", "endpoint": "/api/next-work", "state": "ready"},
@@ -733,6 +747,7 @@ class DockerPreviewApp:
                     "evidence_dashboard",
                     "customer_proof_packet",
                     "customer_handoff_bundle",
+                    "session_report",
                     "proof_promotion_center",
                     "observed_proof_request_board",
                     "next_work_board",
@@ -783,6 +798,7 @@ class DockerPreviewApp:
                 "evidence_dashboard",
                 "customer_proof_packet",
                 "customer_handoff_bundle",
+                "session_report",
                 "proof_promotion_center",
                 "observed_proof_request_board",
                 "next_work_board",
@@ -2012,6 +2028,102 @@ class DockerPreviewApp:
             },
         }
 
+    def session_report(
+        self,
+        *,
+        setup: dict | None = None,
+        activity: dict | None = None,
+        recovery_drill_board: dict | None = None,
+        evidence_dashboard: dict | None = None,
+    ) -> dict:
+        setup_payload = setup or build_status(str(self.workspace), str(self.user_root))
+        activity_payload = activity or build_activity_feed_payload(self.workspace, limit=12)
+        drills = recovery_drill_board or self.recovery_drill_board(setup=setup_payload)
+        evidence = evidence_dashboard or self.evidence_dashboard(setup=setup_payload, activity=activity_payload)
+        events = activity_payload.get("events", []) if isinstance(activity_payload.get("events"), list) else []
+        report_sections = [
+            {
+                "id": "runtime_state",
+                "label": "Runtime state",
+                "state": str(setup_payload.get("overall_state", "unknown")),
+                "customer_value": "Shows whether the local Docker preview runtime is ready, degraded, or blocked.",
+                "evidence_source": "/api/status",
+            },
+            {
+                "id": "recent_activity",
+                "label": "Recent activity",
+                "state": "ready" if activity_payload.get("activity_feed_ready") else "degraded",
+                "customer_value": f"Summarizes {len(events[-5:])} recent runtime events without exposing raw parser traces.",
+                "evidence_source": "/api/activity",
+            },
+            {
+                "id": "proof_sources",
+                "label": "Proof sources",
+                "state": "ready",
+                "customer_value": "Links Docker-local proof packet, Evidence Dashboard, Product Layer map, and recovery drills.",
+                "evidence_source": "/api/proof-packet, /api/evidence, /api/product-map, /api/recovery-drills",
+            },
+            {
+                "id": "recovery_drills",
+                "label": "Recovery drills",
+                "state": drills.get("state", "ready"),
+                "customer_value": "Includes repeatable Docker-safe recovery drills before any stronger proof promotion.",
+                "evidence_source": "/api/recovery-drills",
+            },
+            {
+                "id": "stronger_proof_blockers",
+                "label": "Stronger proof blockers",
+                "state": "blocked_until_observed_evidence",
+                "customer_value": "Keeps VM/ISO, live OAuth, browser, release, mutation, and hardware attestation claims blocked.",
+                "evidence_source": "/api/proof-requests",
+            },
+        ]
+        return {
+            "schema_version": "agentos-product-layer-session-report.v1",
+            "surface": "Session Report",
+            "state": "ready",
+            "customer_message": "Session Report gives customers one Docker-safe summary of runtime state, recent activity, proof sources, recovery drills, and stronger-proof blockers.",
+            "report_sections": report_sections,
+            "recent_activity": [
+                {
+                    "label": str(event.get("label", "AgentOS")),
+                    "time": str(event.get("time", "")),
+                    "human_message": str(event.get("human_message", "")),
+                }
+                for event in events[-5:]
+                if isinstance(event, dict)
+            ],
+            "proof_sources": [
+                "/api/status",
+                "/api/product",
+                "/api/activity",
+                "/api/evidence",
+                "/api/proof-packet",
+                "/api/recovery-drills",
+                "/api/proof-requests",
+            ],
+            "validation_commands": [
+                "scripts/smoke_docker_session_report.sh",
+                "scripts/smoke_docker_product_layer_completion.sh",
+                "scripts/smoke_docker_runtime_preview_python.sh",
+                "docker compose config",
+                "scripts/smoke_phase2_golden_demo.sh",
+            ],
+            "proof": {
+                "customer_facing_session_report_ready": True,
+                "docker_main_try_path": True,
+                "evidence_dashboard_linked": evidence.get("schema_version") == "agentos-product-layer-evidence-dashboard.v1",
+                "recovery_drills_linked": drills.get("schema_version") == "agentos-product-layer-recovery-drill-board.v1",
+                "docker_daemon_observed_claimed": False,
+                "boot_or_iso_proof_claimed": False,
+                "live_oauth_claimed": False,
+                "live_browser_proof_claimed": False,
+                "release_trust_claimed": False,
+                "external_mutation_claimed": False,
+                "hardware_attestation_claimed": False,
+            },
+        }
+
     def work_inbox(self, *, setup: dict | None = None) -> dict:
         setup_payload = setup or build_status(str(self.workspace), str(self.user_root))
         adapters = setup_payload.get("adapters", {}) if isinstance(setup_payload.get("adapters"), dict) else {}
@@ -2262,6 +2374,7 @@ def _render_page(app: DockerPreviewApp) -> str:
     attestation_status = product_layer.get("attestation_status", {}) if isinstance(product_layer.get("attestation_status"), dict) else {}
     recovery_center = product_layer.get("recovery_center", {}) if isinstance(product_layer.get("recovery_center"), dict) else {}
     recovery_drill_board = product_layer.get("recovery_drill_board", {}) if isinstance(product_layer.get("recovery_drill_board"), dict) else {}
+    session_report = product_layer.get("session_report", {}) if isinstance(product_layer.get("session_report"), dict) else {}
     evidence_dashboard = product_layer.get("evidence_dashboard", {}) if isinstance(product_layer.get("evidence_dashboard"), dict) else {}
     customer_proof_packet = product_layer.get("customer_proof_packet", {}) if isinstance(product_layer.get("customer_proof_packet"), dict) else {}
     customer_handoff = product_layer.get("customer_handoff_bundle", {}) if isinstance(product_layer.get("customer_handoff_bundle"), dict) else {}
@@ -2356,6 +2469,19 @@ def _render_page(app: DockerPreviewApp) -> str:
         f"<li><code>{html.escape(str(command))}</code></li>"
         for command in recovery_drill_board.get("validation_commands", [])
     ) or "<li>No recovery drill validation commands are configured.</li>"
+    session_report_section_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Report section'))))}</b> "
+        f"{html.escape(str(item.get('customer_value', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))} · {html.escape(str(item.get('evidence_source', '')))}</em>"
+        "</li>"
+        for item in session_report.get("report_sections", [])
+        if isinstance(item, dict)
+    ) or "<li>No session report sections are configured.</li>"
+    session_report_validation_html = "\n".join(
+        f"<li><code>{html.escape(str(command))}</code></li>"
+        for command in session_report.get("validation_commands", [])
+    ) or "<li>No session report validation commands are configured.</li>"
     feature_html = "\n".join(
         "<section class='feature'>"
         f"<div><h3>{html.escape(str(feature.get('label', 'Feature')))}</h3>"
@@ -2809,6 +2935,14 @@ def _render_page(app: DockerPreviewApp) -> str:
       <ul>{recovery_drill_validation_html}</ul>
       <p><a href="/api/recovery-drills">recovery drills JSON</a></p>
     </div>
+    <div class="panel">
+      <h2>Session Report</h2>
+      <p class="lead">{html.escape(str(session_report.get('customer_message', 'A Docker-safe session report is available below.')))}</p>
+      <ul>{session_report_section_html}</ul>
+      <h3>Report Validation</h3>
+      <ul>{session_report_validation_html}</ul>
+      <p><a href="/api/session-report">session report JSON</a></p>
+    </div>
   </section>
   <section class="product">
     <div class="panel">
@@ -3124,6 +3258,8 @@ def make_handler(app: DockerPreviewApp) -> type[BaseHTTPRequestHandler]:
                 _json_response(self, app.recovery_center())
             elif path == "/api/recovery-drills":
                 _json_response(self, app.recovery_drill_board())
+            elif path == "/api/session-report":
+                _json_response(self, app.session_report())
             elif path == "/api/evidence":
                 _json_response(self, app.evidence_dashboard())
             elif path == "/api/proof-packet":

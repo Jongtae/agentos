@@ -81,6 +81,7 @@ curl -fsS http://127.0.0.1:18787/api/status > /tmp/agentos-docker-status.json
 curl -fsS http://127.0.0.1:18787/api/product > /tmp/agentos-docker-product.json
 curl -fsS http://127.0.0.1:18787/api/onboarding > /tmp/agentos-docker-onboarding.json
 curl -fsS http://127.0.0.1:18787/api/demo-journey > /tmp/agentos-docker-demo-journey.json
+curl -fsS http://127.0.0.1:18787/api/preview-readiness > /tmp/agentos-docker-preview-readiness.json
 curl -fsS http://127.0.0.1:18787/api/work-inbox > /tmp/agentos-docker-work-inbox.json
 curl -fsS http://127.0.0.1:18787/api/timeline > /tmp/agentos-docker-timeline.json
 curl -fsS http://127.0.0.1:18787/api/capabilities > /tmp/agentos-docker-capabilities.json
@@ -102,6 +103,7 @@ payload = json.loads(Path("/tmp/agentos-docker-status.json").read_text())
 product = json.loads(Path("/tmp/agentos-docker-product.json").read_text())
 onboarding = json.loads(Path("/tmp/agentos-docker-onboarding.json").read_text())
 demo_journey = json.loads(Path("/tmp/agentos-docker-demo-journey.json").read_text())
+preview_readiness = json.loads(Path("/tmp/agentos-docker-preview-readiness.json").read_text())
 work_inbox = json.loads(Path("/tmp/agentos-docker-work-inbox.json").read_text())
 timeline = json.loads(Path("/tmp/agentos-docker-timeline.json").read_text())
 capabilities = json.loads(Path("/tmp/agentos-docker-capabilities.json").read_text())
@@ -126,6 +128,7 @@ assert product["proof"]["docker_main_try_path"] is True
 assert product["proof"]["boot_or_iso_proof_claimed"] is False
 assert product["onboarding_status"]["schema_version"] == "agentos-product-layer-onboarding-status.v1"
 assert product["guided_demo_journey"]["schema_version"] == "agentos-product-layer-guided-demo-journey.v1"
+assert product["preview_readiness_board"]["schema_version"] == "agentos-product-layer-preview-readiness-board.v1"
 assert product["customer_proof_packet"]["schema_version"] == "agentos-product-layer-customer-proof-packet.v1"
 assert product["customer_handoff_bundle"]["schema_version"] == "agentos-product-layer-customer-handoff-bundle.v1"
 assert product["proof_promotion_center"]["schema_version"] == "agentos-product-layer-proof-promotion-center.v1"
@@ -143,6 +146,23 @@ assert {item["id"] for item in demo_journey["expected_outcomes"]} >= {
 }
 assert demo_journey["completion_summary"]["id"] == "docker_guided_demo_complete"
 assert len(demo_journey["completion_summary"]["next_blockers"]) >= 3
+assert preview_readiness["schema_version"] == "agentos-product-layer-preview-readiness-board.v1"
+assert preview_readiness["proof"]["customer_facing_preview_readiness_ready"] is True
+assert preview_readiness["proof"]["docker_daemon_observed_claimed"] is False
+assert preview_readiness["proof"]["boot_or_iso_proof_claimed"] is False
+assert preview_readiness["proof"]["live_oauth_claimed"] is False
+assert preview_readiness["proof"]["live_browser_proof_claimed"] is False
+assert preview_readiness["proof"]["release_trust_claimed"] is False
+assert preview_readiness["proof"]["external_mutation_claimed"] is False
+assert preview_readiness["proof"]["hardware_attestation_claimed"] is False
+assert preview_readiness["proof"]["automatic_claim_promotion"] is False
+assert {item["id"] for item in preview_readiness["readiness_checks"]} >= {
+    "docker_try_path_documented",
+    "product_layer_surfaces_visible",
+    "docker_safe_validation_available",
+    "public_preview_operations_contract_linked",
+    "observed_proof_blockers_visible",
+}
 assert onboarding["proof"]["docker_preview_ready"] is True
 assert onboarding["proof"]["requires_api_key_for_basic_preview"] is False
 assert onboarding["proof"]["boot_or_iso_proof_claimed"] is False

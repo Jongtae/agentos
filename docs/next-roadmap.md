@@ -80,7 +80,14 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
-- None.
+- `docker-public-preview-readiness-board-epic` — [EPIC: Stage 3 / Phase 2 Docker public preview readiness board](https://github.com/Jongtae/agentos/issues/274)
+  - Milestone: Docker public preview readiness board
+  - Completion goal: make public preview operations customer-readable in Docker by showing which Docker-local preview claims are share-ready, which local gates should be rerun before a demo, which public preview contract governs promotion, and which VM/ISO, live OAuth, browser, release, mutation, and hardware attestation claims remain blocked until observed evidence exists.
+  - Validation plan: `scripts/smoke_docker_preview_readiness_board.sh`, `scripts/smoke_docker_product_layer_completion.sh`, `scripts/smoke_docker_runtime_preview_python.sh`, `docker compose config`, cleanup policy, and the Phase 2 golden demo runner.
+  - Exit condition: `/api/preview-readiness`, the browser Preview Readiness Board panel, README, TASKS, Docker acceptance, roadmap, focused preview readiness gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks all preserve Docker-safe public preview go/no-go guidance without stronger proof claims.
+  - First task: P2-117 adds the preview readiness API, browser panel, focused smoke gate, and Product Layer/golden runner coverage.
+  - Residual blockers: Docker daemon observed proof, VM/ISO boot/rejoin proof, live OAuth, live browser evidence, release artifacts/signing, external mutation proof, and hardware attestation remain unclaimed until observed evidence exists.
+  - Advances: Docker-first public usability, runtime proof truthfulness, recovery, OS-native runtime defaults.
 
 ## Completed Completion Epics
 

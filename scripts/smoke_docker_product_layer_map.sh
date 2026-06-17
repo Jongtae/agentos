@@ -65,6 +65,7 @@ assert [surface["id"] for surface in groups["start_here"]["surfaces"]] == [
     "runtime_home",
     "onboarding_status",
     "guided_demo_journey",
+    "preview_readiness_board",
 ]
 assert {surface["id"] for surface in groups["do_work"]["surfaces"]} >= {
     "work_inbox",
@@ -89,6 +90,7 @@ assert product_map["recommended_path"][:3] == [
     "onboarding_status",
     "guided_demo_journey",
 ]
+assert product_map["recommended_path"][3] == "preview_readiness_board"
 assert "proof_promotion_center" in product_map["recommended_path"]
 routes = {route["id"]: route for route in product_map["reviewer_routes"]}
 assert set(routes) == {
@@ -101,6 +103,7 @@ assert routes["runtime_evaluator"]["route"] == [
     "runtime_home",
     "onboarding_status",
     "guided_demo_journey",
+    "preview_readiness_board",
     "activity_timeline",
     "recovery_center",
 ]

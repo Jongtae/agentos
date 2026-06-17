@@ -11,15 +11,15 @@ Current parent branch:
 
 Current public milestone:
 
-- **Docker release trust customer checklist** — customer-readable release trust decisions
+- **Docker public preview readiness board** — customer-readable public preview go/no-go state
 
 Current task:
 
-- `[P2-116] Close Docker release trust checklist epic`
+- `[P2-117] Add Docker preview readiness board`
 
 Runtime impact statement:
 
-- This task closes the Docker release trust customer checklist epic after README, TASKS, roadmap, Docker acceptance, release trust gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and proof non-claims all align on Docker-first release-trust truthfulness.
+- This task promotes public preview operations into the Docker Product Layer so customers can see which preview claims are share-ready, which local gates should be rerun, and which VM/ISO, live OAuth, browser, release, mutation, and hardware proof claims remain blocked until observed evidence exists.
 
 Current autonomous completion loop:
 
@@ -147,6 +147,8 @@ Recommended Phase 2 tasks:
 - The Docker release trust customer checklist epic is closed for this Phase 2 slice; future release-trust work should require real release artifacts, checksum publication, signing or unsigned-preview evidence, observed VM/ISO release proof, live browser evidence, or a new customer-facing release promotion need before reopening.
 - P2-115 adds a Release Trust readiness checklist, customer decisions, a browser panel section, and `scripts/smoke_docker_release_trust_panel.sh` so customers can see which release trust language is share-ready and which claims remain blocked.
 - P2-116 closes the Docker release trust customer checklist epic after README, TASKS, roadmap, Docker acceptance, release trust gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve the Docker-safe release trust decision path.
+- The Docker public preview readiness board epic is active for this Phase 2 slice; it turns the public preview operations contract into a customer-facing Docker surface while preserving proof non-claims.
+- P2-117 adds `/api/preview-readiness`, a browser Preview Readiness Board panel, and `scripts/smoke_docker_preview_readiness_board.sh` so customers can see share-ready Docker-local preview claims, recommended local gates, and blocked stronger claims from the Product Layer.
 - The inbox capability ownership boundary epic is closed for this Phase 2 slice; future inbox work should require live read-only OAuth proof, observed Maildir/user data proof, or a later confirmed external mutation model before claiming broader inbox ecosystem support.
 - The first inbox ownership slice is `docs/architecture/inbox-capability-ownership-boundary.md`, smoke-tested by `scripts/smoke_inbox_capability_ownership_boundary.sh`.
 - The inbox ownership boundary smoke is included in the Phase 2 golden demo runner so inbox capability ownership remains part of practical local/Docker-safe proof.

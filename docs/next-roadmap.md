@@ -84,6 +84,18 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Completed Completion Epics
 
+- `docker-work-inbox-completion-snapshot-epic` — [EPIC: Stage 3 / Phase 2 Docker Work Inbox completion snapshot](https://github.com/Jongtae/agentos/issues/311)
+  - Milestone: Docker Work Inbox completion snapshot
+  - Completion goal: expose a customer-facing Docker Work Inbox completion snapshot that summarizes read-first sources, safe workflows, validation gates, mutation boundaries, and live-proof blockers without claiming live OAuth, browser-default behavior, external mutations, production sync, or user Maildir proof.
+  - Validation plan: `scripts/smoke_docker_work_inbox_snapshot.sh`, `scripts/smoke_docker_product_layer_completion.sh`, `scripts/smoke_docker_runtime_preview_python.sh`, `docker compose config`, the Phase 2 golden demo runner, roadmap direction judge, cleanup policy, and PR CI.
+  - Exit condition: completed by P2-129 through P2-130 after `/api/work-inbox`, the browser Work Inbox panel, README, TASKS, Docker acceptance, roadmap state, focused Work Inbox snapshot gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks all preserve Docker-safe read-first Work Inbox completion without stronger proof claims.
+  - Closed issue: #311.
+  - Completed tasks: P2-129 and P2-130.
+  - First task: P2-129 adds the completion snapshot contract, browser panel, focused smoke gate, and Product Layer/golden runner coverage.
+  - Product-layer closeout: P2-130 records the Docker Work Inbox completion snapshot epic as complete so future loops return to the roadmap before adding more Work Inbox work.
+  - Residual blockers: live Gmail OAuth, live Calendar OAuth, observed user Maildir proof, external mutations, production sync, browser-default behavior, and VM/ISO proof remain unclaimed until observed evidence exists.
+  - Advances: capability ownership, mediation cost reduction, Docker-first public usability, runtime proof truthfulness, and OS-native runtime defaults.
+
 - `docker-runtime-home-completion-snapshot-epic` — [EPIC: Stage 3 / Phase 2 Docker runtime home completion snapshot](https://github.com/Jongtae/agentos/issues/305)
   - Milestone: Docker runtime home completion snapshot
   - Completion goal: expose a customer-facing Runtime Home completion snapshot that summarizes what the Docker Product Layer proves, which validation gates support it, which review surfaces are ready, and which stronger proof claims remain blocked without claiming VM/ISO, live OAuth, live browser, release, external mutation, Docker daemon observed, or hardware attestation proof.

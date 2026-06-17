@@ -11,15 +11,15 @@ Current parent branch:
 
 Current public milestone:
 
-- **Docker Work Inbox completion snapshot closeout** — completed read-first Work Inbox summary with explicit live-proof and mutation blockers
+- **Docker Activity Timeline completion snapshot** — customer-facing narration summary with runtime stages, record surfaces, and external/live proof blockers
 
 Current task:
 
-- `[P2-130] Close Work Inbox completion snapshot epic`
+- `[P2-131] Add Activity Timeline completion snapshot`
 
 Runtime impact statement:
 
-- This closeout makes Work Inbox a completed Docker Product Layer read-first customer surface while keeping live provider, browser-default, mutation, production sync, and user Maildir proof blockers explicit.
+- This task makes Activity Timeline a clearer customer-facing narration/proof surface while keeping external app execution, live provider, browser, VM/ISO, release, mutation, and attestation proof blocked until observed evidence exists.
 
 Current autonomous completion loop:
 
@@ -100,6 +100,7 @@ Recommended Phase 2 tasks:
 - Docker preview now exposes `agentos-product-layer-work-inbox.v1` through `/api/work-inbox` and the browser Work Inbox without claiming live OAuth, browser-default behavior, or external mutations.
 - Docker Work Inbox now exposes `agentos-product-layer-work-inbox-completion-snapshot.v1` inside `/api/work-inbox` and the browser Work Inbox panel so customers can see completed local proof, safe workflows, mutation boundaries, validation gates, and live-provider blockers from the product surface.
 - Docker preview now exposes `agentos-product-layer-activity-timeline.v1` through `/api/timeline` and the browser Activity Timeline without claiming external app execution or live-provider proof.
+- Docker Activity Timeline now exposes `agentos-product-layer-activity-timeline-completion-snapshot.v1` inside `/api/timeline` and the browser Activity Timeline panel so customers can see narrated runtime stages, record surfaces, validation gates, and external/live proof blockers.
 - Docker preview now exposes `agentos-product-layer-capability-store.v1` through `/api/capabilities` and the browser Capability Store without claiming destructive, external-write, or live-provider proof.
 - Docker preview now exposes `agentos-product-layer-approval-center.v1` through `/api/approvals` and the browser Approval Center without claiming approval execution, external writes, or destructive actions.
 - Docker preview now exposes `agentos-product-layer-observed-proof-uploader.v1` through `/api/proofs` and the browser Observed Proof Uploader without claiming file upload execution, secret-material acceptance, or automatic claim promotion.
@@ -174,6 +175,8 @@ Recommended Phase 2 tasks:
 - The Docker Work Inbox completion snapshot epic is closed for this Phase 2 slice; future Work Inbox changes should require live read-only OAuth proof, observed user Maildir proof, production sync design, mutation permission model, or a new customer-facing Work Inbox promotion need before reopening.
 - P2-129 adds the Work Inbox completion snapshot to `/api/work-inbox`, the browser Work Inbox panel, `scripts/smoke_docker_work_inbox_snapshot.sh`, Product Layer completion coverage, and the Phase 2 golden runner while preserving read-first capability ownership boundaries.
 - P2-130 closes the Docker Work Inbox completion snapshot epic after README, TASKS, roadmap, Docker acceptance, Work Inbox snapshot gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve Docker-safe read-first Work Inbox truthfulness without stronger proof claims.
+- The Docker Activity Timeline completion snapshot epic is active for this Phase 2 slice; it should close only after Activity Timeline exposes a focused customer narration snapshot, record surfaces, validation gates, README/TASKS/roadmap/Docker acceptance alignment, and Docker-safe smoke coverage without promoting external app, live provider, browser, VM/ISO, release, mutation, or attestation proof claims.
+- P2-131 adds the Activity Timeline completion snapshot to `/api/timeline`, the browser Activity Timeline panel, `scripts/smoke_docker_activity_timeline_snapshot.sh`, Product Layer completion coverage, and the Phase 2 golden runner while preserving external/live proof boundaries.
 - The inbox capability ownership boundary epic is closed for this Phase 2 slice; future inbox work should require live read-only OAuth proof, observed Maildir/user data proof, or a later confirmed external mutation model before claiming broader inbox ecosystem support.
 - The first inbox ownership slice is `docs/architecture/inbox-capability-ownership-boundary.md`, smoke-tested by `scripts/smoke_inbox_capability_ownership_boundary.sh`.
 - The inbox ownership boundary smoke is included in the Phase 2 golden demo runner so inbox capability ownership remains part of practical local/Docker-safe proof.

@@ -80,7 +80,15 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
-- None.
+- `docker-activity-timeline-completion-snapshot-epic` — [EPIC: Stage 3 / Phase 2 Docker Activity Timeline completion snapshot](https://github.com/Jongtae/agentos/issues/317)
+  - Milestone: Docker Activity Timeline completion snapshot
+  - Completion goal: expose a customer-facing Docker Activity Timeline completion snapshot that summarizes narrated runtime stages, user-visible records, validation gates, and external/live non-claims without claiming external app execution, live provider proof, browser execution, or VM/ISO proof.
+  - Validation plan: `scripts/smoke_docker_activity_timeline_snapshot.sh`, `scripts/smoke_docker_product_layer_completion.sh`, `scripts/smoke_docker_runtime_preview_python.sh`, `docker compose config`, the Phase 2 golden demo runner, roadmap direction judge, cleanup policy, and PR CI.
+  - Exit condition: complete after `/api/timeline`, the browser Activity Timeline panel, README, TASKS, Docker acceptance, roadmap state, focused Activity Timeline snapshot gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks all preserve Docker-safe Activity Timeline narration without stronger proof claims.
+  - Open issue: #317.
+  - First task: P2-131 adds the completion snapshot contract, browser panel, focused smoke gate, and Product Layer/golden runner coverage.
+  - Residual blockers: external app execution, live provider activity, browser activity proof, VM/ISO runtime activity, release proof, mutation proof, and hardware attestation remain unclaimed until observed evidence exists.
+  - Advances: runtime proof truthfulness, OS-native runtime defaults, recovery, and customer-understandable activity narration.
 
 ## Completed Completion Epics
 

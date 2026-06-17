@@ -1828,6 +1828,53 @@ class DockerPreviewApp:
                     "request_id": str(event.get("request_id", "")),
                 }
             )
+        completion_snapshot = {
+            "schema_version": "agentos-product-layer-activity-timeline-completion-snapshot.v1",
+            "surface": "Activity Timeline Completion Snapshot",
+            "state": "ready",
+            "customer_message": "Activity Timeline is complete as a Docker-safe narration surface; external and live-provider proof remains blocked until observed evidence exists.",
+            "narrated_stages": [
+                {"id": "received", "label": "Request received", "state": "ready"},
+                {"id": "classified", "label": "Intent classified", "state": "ready"},
+                {"id": "running", "label": "Capability running", "state": "ready"},
+                {"id": "completed_or_recovered", "label": "Completed or recovered", "state": "ready"},
+            ],
+            "record_surfaces": [
+                {
+                    "id": "activity_feed",
+                    "label": "Activity feed",
+                    "state": "ready" if activity_payload.get("activity_feed_ready") else "degraded",
+                    "source": "/api/timeline",
+                },
+                {
+                    "id": "user_visible_records",
+                    "label": "User-visible records",
+                    "state": "ready",
+                    "source": "activity artifacts",
+                },
+            ],
+            "validation_gates": [
+                {"id": "activity_timeline_snapshot_gate", "label": "Activity Timeline snapshot gate", "state": "ready", "command": "scripts/smoke_docker_activity_timeline_snapshot.sh"},
+                {"id": "product_layer_completion_gate", "label": "Product Layer completion gate", "state": "ready", "command": "scripts/smoke_docker_product_layer_completion.sh"},
+                {"id": "runtime_preview_python_gate", "label": "Runtime preview Python gate", "state": "ready", "command": "scripts/smoke_docker_runtime_preview_python.sh"},
+            ],
+            "blocked_stronger_proof": [
+                {"id": "external_app_execution", "label": "External app execution", "state": "blocked_until_observed_evidence"},
+                {"id": "live_provider_activity", "label": "Live provider activity", "state": "blocked_until_live_credentials"},
+                {"id": "browser_activity", "label": "Browser activity proof", "state": "blocked_until_observed_browser_run"},
+                {"id": "vm_iso_activity", "label": "VM/ISO runtime activity", "state": "blocked_until_observed_vm_run"},
+            ],
+            "proof": {
+                "customer_facing_activity_timeline_snapshot_ready": True,
+                "docker_preview_ready": True,
+                "user_visible_records_ready": True,
+                "external_app_execution_claimed": False,
+                "live_provider_proof_claimed": False,
+                "browser_activity_claimed": False,
+                "boot_or_iso_proof_claimed": False,
+                "automatic_claim_promotion": False,
+            },
+        }
         return {
             "schema_version": "agentos-product-layer-activity-timeline.v1",
             "surface": "Activity Timeline",
@@ -1844,12 +1891,14 @@ class DockerPreviewApp:
                 ),
             },
             "records": activity_payload.get("artifacts", {}) if isinstance(activity_payload.get("artifacts"), dict) else {},
+            "completion_snapshot": completion_snapshot,
             "proof": {
                 "docker_preview_ready": True,
                 "user_visible_records_ready": True,
                 "external_app_execution_claimed": False,
                 "live_provider_proof_claimed": False,
                 "customer_facing_timeline_ready": True,
+                "activity_timeline_completion_snapshot_ready": True,
             },
         }
 
@@ -2917,6 +2966,28 @@ def _render_page(app: DockerPreviewApp) -> str:
         for event in activity_timeline.get("events", [])
         if isinstance(event, dict)
     ) or "<li>No activity yet. Run a prompt below.</li>"
+    activity_snapshot = activity_timeline.get("completion_snapshot", {}) if isinstance(activity_timeline.get("completion_snapshot"), dict) else {}
+    activity_stage_html = "\n".join(
+        f"<li><b>{html.escape(str(item.get('label', item.get('id', 'Stage'))))}</b> <em>{html.escape(str(item.get('state', 'unknown')))}</em></li>"
+        for item in activity_snapshot.get("narrated_stages", [])
+        if isinstance(item, dict)
+    ) or "<li>No Activity Timeline stages are configured.</li>"
+    activity_record_surface_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Record surface'))))}</b> "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))} · {html.escape(str(item.get('source', '')))}</em>"
+        "</li>"
+        for item in activity_snapshot.get("record_surfaces", [])
+        if isinstance(item, dict)
+    ) or "<li>No Activity Timeline record surfaces are configured.</li>"
+    activity_gate_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Validation gate'))))}</b> "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))} · {html.escape(str(item.get('command', '')))}</em>"
+        "</li>"
+        for item in activity_snapshot.get("validation_gates", [])
+        if isinstance(item, dict)
+    ) or "<li>No Activity Timeline validation gates are configured.</li>"
     capability_html = "\n".join(
         "<section class='feature'>"
         f"<div><h3>{html.escape(str(item.get('label', item.get('id', 'Capability'))))}</h3>"
@@ -3308,6 +3379,16 @@ def _render_page(app: DockerPreviewApp) -> str:
         <li><b>Live provider proof</b> not claimed</li>
       </ul>
       <p><a href="/api/timeline">timeline JSON</a></p>
+    </div>
+    <div class="panel">
+      <h2>Activity Timeline Completion Snapshot</h2>
+      <p class="lead">{html.escape(str(activity_snapshot.get('customer_message', 'Activity Timeline completion snapshot is available below.')))}</p>
+      <h3>Narrated Stages</h3>
+      <ul>{activity_stage_html}</ul>
+      <h3>Record Surfaces</h3>
+      <ul>{activity_record_surface_html}</ul>
+      <h3>Validation Gates</h3>
+      <ul>{activity_gate_html}</ul>
     </div>
   </section>
   <section class="product">

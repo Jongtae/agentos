@@ -66,6 +66,7 @@ assert [surface["id"] for surface in groups["start_here"]["surfaces"]] == [
     "onboarding_status",
     "guided_demo_journey",
     "preview_readiness_board",
+    "next_work_board",
 ]
 assert {surface["id"] for surface in groups["do_work"]["surfaces"]} >= {
     "work_inbox",
@@ -78,6 +79,7 @@ assert {surface["id"] for surface in groups["prove_and_handoff"]["surfaces"]} >=
     "customer_proof_packet",
     "customer_handoff_bundle",
     "proof_promotion_center",
+    "next_work_board",
 }
 assert {surface["id"] for surface in groups["blocked_until_observed"]["surfaces"]} >= {
     "recovery_center",
@@ -92,6 +94,7 @@ assert product_map["recommended_path"][:3] == [
 ]
 assert product_map["recommended_path"][3] == "preview_readiness_board"
 assert "proof_promotion_center" in product_map["recommended_path"]
+assert "next_work_board" in product_map["recommended_path"]
 routes = {route["id"]: route for route in product_map["reviewer_routes"]}
 assert set(routes) == {
     "runtime_evaluator",
@@ -104,6 +107,7 @@ assert routes["runtime_evaluator"]["route"] == [
     "onboarding_status",
     "guided_demo_journey",
     "preview_readiness_board",
+    "next_work_board",
     "activity_timeline",
     "recovery_center",
 ]
@@ -113,6 +117,7 @@ assert routes["proof_reviewer"]["route"] == [
     "customer_proof_packet",
     "customer_handoff_bundle",
     "proof_promotion_center",
+    "next_work_board",
 ]
 assert "sanitized observed evidence" in routes["proof_reviewer"]["claim_boundary"]
 assert routes["capability_reviewer"]["route"] == [

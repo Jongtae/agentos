@@ -11,15 +11,15 @@ Current parent branch:
 
 Current public milestone:
 
-- **Docker public preview readiness board** — customer-readable public preview go/no-go state
+- **Docker next work board** — customer-readable completed proof, safe next candidates, and observed-proof blockers
 
 Current task:
 
-- `[P2-118] Close Docker preview readiness board epic`
+- `[P2-119] Add Docker next work board`
 
 Runtime impact statement:
 
-- This task closes the Docker public preview readiness board epic after README, TASKS, roadmap, Docker acceptance, focused readiness gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks all preserve customer-facing public preview go/no-go truthfulness.
+- This task gives customers a Docker Product Layer Next Work Board that separates completed local proof, safe next implementation candidates, and observed-proof blockers without promoting Docker proof into VM/ISO, live OAuth, browser, release, mutation, or hardware-attestation claims.
 
 Current autonomous completion loop:
 
@@ -111,7 +111,8 @@ Recommended Phase 2 tasks:
 - Docker preview now exposes `agentos-product-layer-proof-promotion-center.v1` through `/api/proof-promotion` and the browser Proof Promotion Center panel so customers can decide which Docker-local claims are ready and which stronger claims require observed evidence.
 - Docker preview now exposes a Proof Sharing Checklist inside `/api/proof-promotion` and the browser Proof Promotion Center panel so customers can distinguish share-ready Docker-local language from blocked stronger claims before handing evidence to reviewers.
 - Docker preview now exposes `agentos-product-layer-map.v1` through `/api/product-map` and the browser Product Layer Map panel so customers can follow the recommended path and reviewer-specific routes across Product Layer surfaces and proof blockers.
-- Docker Product Layer completion is guarded by `scripts/smoke_docker_product_layer_completion.sh`, which verifies Runtime Home, Work Inbox, Activity Timeline, Capability Store, Approval Center, Observed Proof Uploader, Release Trust Panel, Attestation Status, Recovery Center, Evidence Dashboard, Customer Proof Packet, Customer Handoff Bundle, Proof Promotion Center, and Product Layer Map together.
+- Docker preview now exposes `agentos-product-layer-next-work-board.v1` through `/api/next-work` and the browser Next Work Board panel so customers can see completed Docker-local proof, safe next implementation candidates, blocked observed-proof tracks, and validation commands without automatic claim promotion.
+- Docker Product Layer completion is guarded by `scripts/smoke_docker_product_layer_completion.sh`, which verifies Runtime Home, Work Inbox, Activity Timeline, Capability Store, Approval Center, Observed Proof Uploader, Release Trust Panel, Attestation Status, Recovery Center, Evidence Dashboard, Customer Proof Packet, Customer Handoff Bundle, Proof Promotion Center, Product Layer Map, and Next Work Board together.
 - Docker customer onboarding is guarded by `scripts/smoke_docker_customer_onboarding_quickstart.sh`, which keeps README quickstart, Docker acceptance, public preview operations, roadmap, and task state aligned around the Docker-first public try path.
 - Docker preview now exposes `agentos-product-layer-onboarding-status.v1` through `/api/onboarding` and the browser Docker Onboarding Status panel without claiming VM/ISO, live OAuth, browser, release, external mutation, or hardware attestation proof.
 - Docker onboarding readiness is guarded by `scripts/smoke_docker_onboarding_status_contract.sh`, which verifies the running preview exposes customer-facing quickstart readiness, entrypoints, Docker-safe validation, and explicit observed-proof blockers.
@@ -150,6 +151,8 @@ Recommended Phase 2 tasks:
 - The Docker public preview readiness board epic is closed for this Phase 2 slice; future preview readiness work should require observed Docker daemon proof, live browser evidence, release proof, VM/ISO proof, or a new customer-facing public preview promotion need before reopening.
 - P2-117 adds `/api/preview-readiness`, a browser Preview Readiness Board panel, and `scripts/smoke_docker_preview_readiness_board.sh` so customers can see share-ready Docker-local preview claims, recommended local gates, and blocked stronger claims from the Product Layer.
 - P2-118 closes the Docker public preview readiness board epic after README, TASKS, roadmap, Docker acceptance, preview readiness gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve the Docker-safe public preview go/no-go path.
+- The Docker next work board epic is active for this Phase 2 slice; completion requires `/api/next-work`, the browser Next Work Board panel, README, TASKS, roadmap, Docker acceptance, focused next-work gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks to preserve completed-proof, next-candidate, and blocker truthfulness.
+- P2-119 adds `/api/next-work`, a browser Next Work Board panel, and `scripts/smoke_docker_next_work_board.sh` so customers can see completed Docker-local Product Layer proof, safe next implementation candidates, and blocked stronger proof tracks from the Product Layer.
 - The inbox capability ownership boundary epic is closed for this Phase 2 slice; future inbox work should require live read-only OAuth proof, observed Maildir/user data proof, or a later confirmed external mutation model before claiming broader inbox ecosystem support.
 - The first inbox ownership slice is `docs/architecture/inbox-capability-ownership-boundary.md`, smoke-tested by `scripts/smoke_inbox_capability_ownership_boundary.sh`.
 - The inbox ownership boundary smoke is included in the Phase 2 golden demo runner so inbox capability ownership remains part of practical local/Docker-safe proof.

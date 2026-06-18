@@ -80,7 +80,14 @@ The detailed Phase 2 roadmap is tracked in
 
 ## Active Completion Epics
 
-- None.
+- `docker-approval-center-completion-snapshot-epic` — [EPIC: Stage 3 / Phase 2 Docker Approval Center completion snapshot](https://github.com/Jongtae/agentos/issues/329)
+  - Milestone: Docker Approval Center completion snapshot
+  - Completion goal: expose a customer-facing Docker Approval Center completion snapshot that summarizes setup, confirmation, observed-proof, and blocked approval requirements, validation gates, and external/live non-claims without claiming approval execution, external writes, destructive execution, live provider proof, VM/ISO proof, release proof, mutation proof, or hardware attestation.
+  - Validation plan: `scripts/smoke_docker_approval_center_snapshot.sh`, `scripts/smoke_docker_product_layer_completion.sh`, `scripts/smoke_docker_runtime_preview_python.sh`, `docker compose config`, the Phase 2 golden demo runner, roadmap direction judge, cleanup policy, and PR CI.
+  - Exit condition: complete after `/api/approvals`, the browser Approval Center panel, README, TASKS, Docker acceptance, roadmap state, focused Approval Center snapshot gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks all preserve Docker-safe approval visibility without stronger proof claims.
+  - Active task: P2-135 adds the completion snapshot contract, browser panel, focused smoke gate, and Product Layer/golden runner coverage.
+  - Residual blockers: approval execution, external write execution, destructive action execution, live provider execution, VM/ISO approval ownership, release proof, mutation proof, and hardware attestation remain unclaimed until observed evidence exists.
+  - Advances: capability ownership, mediation cost reduction, Docker-first public usability, runtime proof truthfulness, and OS-native runtime defaults.
 
 ## Completed Completion Epics
 

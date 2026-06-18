@@ -43,6 +43,7 @@ http://localhost:8787
 - `/api/capabilities` exposes safe local capabilities, confirmation-needed capabilities, and blocked destructive capabilities from the permission registry.
 - `/api/capabilities` exposes a Capability Store completion snapshot with safe local paths, confirmation paths, blocked destructive actions, validation gates, and external/live proof blockers without automatic claim promotion.
 - `/api/approvals` exposes setup-needed, confirmation-needed, observed-proof-needed, and blocked approval requirements without executing them.
+- `/api/approvals` exposes an Approval Center completion snapshot with completed local proof, approval paths, validation gates, and external/live proof blockers without automatic claim promotion.
 - `/api/proofs` exposes future observed-proof evidence requirements and mock submission fields without accepting secrets or auto-promoting claims.
 - `/api/proof-requests` exposes customer evidence requests, redaction rules, validation commands, and proof-promotion boundaries without accepting secrets or auto-promoting claims.
 - `/api/release-trust` exposes release artifact, manifest, checksum, signing, publication, customer readiness decisions, and VM/ISO proof requirements without claiming release readiness.
@@ -171,6 +172,19 @@ snapshot, safe local capability paths, confirmation paths, blocked destructive
 actions, validation gates, and explicit non-claims for external write
 execution, destructive action execution, live provider proof, and VM/ISO
 capability ownership.
+
+## Approval Center Snapshot Gate
+
+```bash
+scripts/smoke_docker_approval_center_snapshot.sh
+```
+
+This gate starts the Python Docker runtime preview and verifies that
+`/api/approvals` and the browser Approval Center expose the completion snapshot,
+completed Docker-local approval visibility proof, approval paths, validation
+gates, and explicit non-claims for approval execution, external write
+execution, destructive action execution, live provider proof, and VM/ISO
+approval ownership.
 
 ## Customer Onboarding Quickstart Gate
 

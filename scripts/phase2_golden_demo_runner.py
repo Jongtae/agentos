@@ -44,6 +44,7 @@ PRACTICAL_SMOKES = [
     "scripts/smoke_docker_work_inbox_snapshot.sh",
     "scripts/smoke_docker_activity_timeline_snapshot.sh",
     "scripts/smoke_docker_capability_store_snapshot.sh",
+    "scripts/smoke_docker_approval_center_snapshot.sh",
     "scripts/smoke_docker_customer_onboarding_quickstart.sh",
     "scripts/smoke_docker_onboarding_status_contract.sh",
     "scripts/smoke_docker_guided_demo_journey.sh",

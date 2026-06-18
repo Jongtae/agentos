@@ -212,6 +212,36 @@ assert capability_snapshot["proof"]["destructive_action_executed_by_default"] is
 assert capability_snapshot["proof"]["automatic_claim_promotion"] is False
 assert "Capability Store Completion Snapshot" in home
 assert "scripts/smoke_docker_capability_store_snapshot.sh" in home
+assert product["approval_center"]["proof"]["approval_center_completion_snapshot_ready"] is True
+approval_snapshot = product["approval_center"]["completion_snapshot"]
+assert approval_snapshot["schema_version"] == "agentos-product-layer-approval-center-completion-snapshot.v1"
+assert approval_snapshot["state"] == "ready"
+assert {item["id"] for item in approval_snapshot["completed_local_proof"]} == {
+    "approval_requirements_visible",
+    "capability_permissions_mapped",
+    "blocked_actions_preserved",
+}
+assert {item["id"] for item in approval_snapshot["approval_paths"]} == {
+    "setup_needed",
+    "confirmation_needed",
+    "observed_proof_needed",
+    "blocked_by_policy",
+}
+assert any(item["command"] == "scripts/smoke_docker_approval_center_snapshot.sh" for item in approval_snapshot["validation_gates"])
+assert {item["id"] for item in approval_snapshot["blocked_stronger_proof"]} == {
+    "approval_execution",
+    "external_write_execution",
+    "destructive_action_execution",
+    "live_provider_execution",
+    "vm_iso_approval_ownership",
+}
+assert approval_snapshot["proof"]["customer_facing_approval_center_snapshot_ready"] is True
+assert approval_snapshot["proof"]["approval_execution_claimed"] is False
+assert approval_snapshot["proof"]["external_write_claimed"] is False
+assert approval_snapshot["proof"]["destructive_action_executed_by_default"] is False
+assert approval_snapshot["proof"]["automatic_claim_promotion"] is False
+assert "Approval Center Completion Snapshot" in home
+assert "scripts/smoke_docker_approval_center_snapshot.sh" in home
 assert {item["id"] for item in product["guided_demo_journey"]["expected_outcomes"]} >= {
     "runtime_reachable",
     "read_first_work_visible",
@@ -545,6 +575,12 @@ non_claims = {
     "runtime_home_snapshot_mutation": product["completion_snapshot"]["proof"]["external_mutation_claimed"],
     "runtime_home_snapshot_attestation": product["completion_snapshot"]["proof"]["hardware_attestation_claimed"],
     "runtime_home_snapshot_auto_promotion": product["completion_snapshot"]["proof"]["automatic_claim_promotion"],
+    "approval_snapshot_approval_execution": product["approval_center"]["completion_snapshot"]["proof"]["approval_execution_claimed"],
+    "approval_snapshot_external_write": product["approval_center"]["completion_snapshot"]["proof"]["external_write_claimed"],
+    "approval_snapshot_destructive": product["approval_center"]["completion_snapshot"]["proof"]["destructive_action_executed_by_default"],
+    "approval_snapshot_live_provider": product["approval_center"]["completion_snapshot"]["proof"]["live_provider_proof_claimed"],
+    "approval_snapshot_boot": product["approval_center"]["completion_snapshot"]["proof"]["boot_or_iso_proof_claimed"],
+    "approval_snapshot_auto_promotion": product["approval_center"]["completion_snapshot"]["proof"]["automatic_claim_promotion"],
 }
 assert all(value is False for value in non_claims.values()), non_claims
 
@@ -561,6 +597,7 @@ ready_claims = {
     "capability_store": product["capability_store"]["proof"]["customer_facing_capability_store_ready"],
     "capability_store_completion_snapshot": product["capability_store"]["completion_snapshot"]["proof"]["customer_facing_capability_store_snapshot_ready"],
     "approval_center": product["approval_center"]["proof"]["customer_facing_approval_center_ready"],
+    "approval_center_completion_snapshot": product["approval_center"]["completion_snapshot"]["proof"]["customer_facing_approval_center_snapshot_ready"],
     "proof_uploader": product["observed_proof_uploader"]["proof"]["customer_facing_proof_uploader_ready"],
     "release_trust": product["release_trust_panel"]["proof"]["customer_facing_release_trust_ready"],
     "attestation_status": product["attestation_status"]["proof"]["customer_facing_attestation_status_ready"],

@@ -1757,12 +1757,128 @@ class DockerPreviewApp:
                     "customer_value": str(item.get("customer_value", "")),
                 }
             )
+        completion_snapshot = {
+            "schema_version": "agentos-product-layer-approval-center-completion-snapshot.v1",
+            "surface": "Approval Center Completion Snapshot",
+            "state": "ready" if approval_items else "degraded",
+            "customer_message": "Approval Center is complete as a Docker-safe approval visibility surface; approval execution, external writes, destructive actions, and live-provider proof remain blocked until observed evidence exists.",
+            "completed_local_proof": [
+                {
+                    "id": "approval_requirements_visible",
+                    "label": "Approval requirements visible",
+                    "state": "ready" if approval_items else "degraded",
+                    "customer_value": "Customers can see which capability requests need setup, confirmation, observed proof, or must stay blocked.",
+                },
+                {
+                    "id": "capability_permissions_mapped",
+                    "label": "Capability permissions mapped",
+                    "state": "ready",
+                    "customer_value": "Approval items are derived from the same permission registry that backs the Capability Store.",
+                },
+                {
+                    "id": "blocked_actions_preserved",
+                    "label": "Blocked actions preserved",
+                    "state": "ready",
+                    "customer_value": "Destructive and unsupported actions remain visible as blocked requirements, not executable Docker actions.",
+                },
+            ],
+            "approval_paths": [
+                {
+                    "id": "setup_needed",
+                    "label": "Setup needed",
+                    "state": "blocked_until_setup",
+                    "customer_value": "External read paths need explicit provider setup and observed read-only proof.",
+                },
+                {
+                    "id": "confirmation_needed",
+                    "label": "Confirmation needed",
+                    "state": "confirmation_required",
+                    "customer_value": "External write and lifecycle-changing paths require a later confirmation model before execution.",
+                },
+                {
+                    "id": "observed_proof_needed",
+                    "label": "Observed proof needed",
+                    "state": "blocked_until_observed",
+                    "customer_value": "Live provider, browser, VM/ISO, release, and attestation claims require sanitized observed evidence.",
+                },
+                {
+                    "id": "blocked_by_policy",
+                    "label": "Blocked by policy",
+                    "state": "blocked",
+                    "customer_value": "Destructive inbox actions remain blocked in the Docker Product Layer.",
+                },
+            ],
+            "validation_gates": [
+                {
+                    "id": "approval_center_snapshot_gate",
+                    "label": "Approval Center snapshot gate",
+                    "state": "ready",
+                    "command": "scripts/smoke_docker_approval_center_snapshot.sh",
+                },
+                {
+                    "id": "product_layer_completion_gate",
+                    "label": "Product Layer completion gate",
+                    "state": "ready",
+                    "command": "scripts/smoke_docker_product_layer_completion.sh",
+                },
+                {
+                    "id": "runtime_preview_python_gate",
+                    "label": "Runtime preview Python gate",
+                    "state": "ready",
+                    "command": "scripts/smoke_docker_runtime_preview_python.sh",
+                },
+            ],
+            "blocked_stronger_proof": [
+                {
+                    "id": "approval_execution",
+                    "label": "Approval execution",
+                    "state": "blocked_until_confirmation_model",
+                    "customer_value": "Docker preview shows approval requirements but does not execute approval-gated actions.",
+                },
+                {
+                    "id": "external_write_execution",
+                    "label": "External write execution",
+                    "state": "blocked_until_observed",
+                    "customer_value": "External writes require explicit confirmation and observed proof before customer claims can expand.",
+                },
+                {
+                    "id": "destructive_action_execution",
+                    "label": "Destructive action execution",
+                    "state": "blocked_by_policy",
+                    "customer_value": "Destructive requests remain blocked by default.",
+                },
+                {
+                    "id": "live_provider_execution",
+                    "label": "Live provider execution",
+                    "state": "blocked_until_credentials",
+                    "customer_value": "Live OAuth/provider proof requires explicit credentials and sanitized observed evidence.",
+                },
+                {
+                    "id": "vm_iso_approval_ownership",
+                    "label": "VM/ISO approval ownership",
+                    "state": "blocked_until_observed_vm",
+                    "customer_value": "Docker approval proof is not boot, reboot, or managed runtime rejoin proof.",
+                },
+            ],
+            "proof": {
+                "customer_facing_approval_center_snapshot_ready": bool(approval_items),
+                "docker_preview_ready": True,
+                "approval_records_ready": True,
+                "approval_execution_claimed": False,
+                "external_write_claimed": False,
+                "destructive_action_executed_by_default": False,
+                "live_provider_proof_claimed": False,
+                "boot_or_iso_proof_claimed": False,
+                "automatic_claim_promotion": False,
+            },
+        }
         return {
             "schema_version": "agentos-product-layer-approval-center.v1",
             "surface": "Approval Center",
             "state": "attention" if approval_items else "ready",
             "customer_message": "Approval Center shows actions that need user confirmation, observed proof, or must remain blocked before AgentOS may perform them.",
             "items": approval_items,
+            "completion_snapshot": completion_snapshot,
             "proof": {
                 "docker_preview_ready": True,
                 "approval_records_ready": True,
@@ -1771,6 +1887,7 @@ class DockerPreviewApp:
                 "external_write_claimed": False,
                 "live_provider_proof_claimed": False,
                 "customer_facing_approval_center_ready": True,
+                "approval_center_completion_snapshot_ready": bool(approval_items),
             },
         }
 
@@ -3164,6 +3281,42 @@ def _render_page(app: DockerPreviewApp) -> str:
         for item in approval_center.get("items", [])[:10]
         if isinstance(item, dict)
     ) or "<li>No approval-gated actions are available.</li>"
+    approval_snapshot = approval_center.get("completion_snapshot", {}) if isinstance(approval_center.get("completion_snapshot"), dict) else {}
+    approval_snapshot_proof_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Completed proof'))))}</b> "
+        f"{html.escape(str(item.get('customer_value', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))}</em>"
+        "</li>"
+        for item in approval_snapshot.get("completed_local_proof", [])
+        if isinstance(item, dict)
+    ) or "<li>No Approval Center completed proof is configured.</li>"
+    approval_path_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Approval path'))))}</b> "
+        f"{html.escape(str(item.get('customer_value', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))}</em>"
+        "</li>"
+        for item in approval_snapshot.get("approval_paths", [])
+        if isinstance(item, dict)
+    ) or "<li>No Approval Center paths are configured.</li>"
+    approval_gate_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Validation gate'))))}</b> "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))} · {html.escape(str(item.get('command', '')))}</em>"
+        "</li>"
+        for item in approval_snapshot.get("validation_gates", [])
+        if isinstance(item, dict)
+    ) or "<li>No Approval Center validation gates are configured.</li>"
+    approval_blocker_html = "\n".join(
+        "<li>"
+        f"<b>{html.escape(str(item.get('label', item.get('id', 'Blocked proof'))))}</b> "
+        f"{html.escape(str(item.get('customer_value', '')))} "
+        f"<em>{html.escape(str(item.get('state', 'unknown')))}</em>"
+        "</li>"
+        for item in approval_snapshot.get("blocked_stronger_proof", [])
+        if isinstance(item, dict)
+    ) or "<li>No Approval Center proof blockers are configured.</li>"
     proof_type_html = "\n".join(
         "<li>"
         f"<b>{html.escape(str(item.get('label', item.get('id', 'Proof type'))))}</b> "
@@ -3591,6 +3744,18 @@ def _render_page(app: DockerPreviewApp) -> str:
         <li><b>Destructive actions</b> blocked by default</li>
       </ul>
       <p><a href="/api/approvals">approvals JSON</a></p>
+    </div>
+    <div class="panel">
+      <h2>Approval Center Completion Snapshot</h2>
+      <p class="lead">{html.escape(str(approval_snapshot.get('customer_message', 'Approval Center completion snapshot is available below.')))}</p>
+      <h3>Completed Local Proof</h3>
+      <ul>{approval_snapshot_proof_html}</ul>
+      <h3>Approval Paths</h3>
+      <ul>{approval_path_html}</ul>
+      <h3>Validation Gates</h3>
+      <ul>{approval_gate_html}</ul>
+      <h3>Blocked Stronger Proof</h3>
+      <ul>{approval_blocker_html}</ul>
     </div>
   </section>
   <section class="product">

@@ -11,15 +11,15 @@ Current parent branch:
 
 Current public milestone:
 
-- **Docker Capability Store completion snapshot closeout** — completed capability ownership summary with safe paths, confirmation paths, destructive blocks, validation gates, and external/live proof blockers
+- **Docker Approval Center completion snapshot closeout** — completed approval visibility summary with setup, confirmation, observed-proof, blocked requirements, validation gates, and external/live proof blockers
 
 Current task:
 
-- `[P2-134] Close Capability Store completion snapshot epic`
+- `[P2-136] Close Approval Center completion snapshot epic`
 
 Runtime impact statement:
 
-- This closeout makes Capability Store a completed Docker Product Layer capability ownership customer surface while keeping external-write, destructive-action, live-provider, VM/ISO, release, mutation, and attestation proof blockers explicit.
+- This closeout makes Approval Center a completed Docker Product Layer approval visibility customer surface while keeping approval execution, external writes, destructive actions, live-provider proof, VM/ISO proof, release, mutation, and attestation blockers explicit.
 
 Current autonomous completion loop:
 
@@ -104,6 +104,7 @@ Recommended Phase 2 tasks:
 - Docker preview now exposes `agentos-product-layer-capability-store.v1` through `/api/capabilities` and the browser Capability Store without claiming destructive, external-write, or live-provider proof.
 - Docker Capability Store now exposes `agentos-product-layer-capability-store-completion-snapshot.v1` inside `/api/capabilities` and the browser Capability Store panel so customers can see safe local paths, confirmation paths, blocked destructive actions, validation gates, and external/live proof blockers.
 - Docker preview now exposes `agentos-product-layer-approval-center.v1` through `/api/approvals` and the browser Approval Center without claiming approval execution, external writes, or destructive actions.
+- Docker Approval Center now exposes `agentos-product-layer-approval-center-completion-snapshot.v1` inside `/api/approvals` and the browser Approval Center panel so customers can see completed local approval visibility proof, approval paths, validation gates, and approval execution blockers from the product surface.
 - Docker preview now exposes `agentos-product-layer-observed-proof-uploader.v1` through `/api/proofs` and the browser Observed Proof Uploader without claiming file upload execution, secret-material acceptance, or automatic claim promotion.
 - Docker preview now exposes `agentos-product-layer-release-trust-panel.v1` through `/api/release-trust` and the browser Release Trust Panel with a customer readiness checklist and decision guidance without claiming release upload, signing, checksum publication, or VM/ISO release proof.
 - Docker preview now exposes `agentos-product-layer-attestation-status.v1` through `/api/attestation` and the browser Attestation Status panel without claiming Secure Boot, TPM/PCR, event-log, IMA, or hardware attestation proof.
@@ -182,6 +183,9 @@ Recommended Phase 2 tasks:
 - The Docker Capability Store completion snapshot epic is closed for this Phase 2 slice; future Capability Store changes should require external-write proof, destructive-action proof, live provider proof, VM/ISO proof, or a new customer-facing capability ownership promotion need before expanding claims.
 - P2-133 adds the Capability Store completion snapshot to `/api/capabilities`, the browser Capability Store panel, `scripts/smoke_docker_capability_store_snapshot.sh`, Product Layer completion coverage, and the Phase 2 golden runner while preserving external-write, destructive-action, live-provider, and VM/ISO proof boundaries.
 - P2-134 closes the Docker Capability Store completion snapshot epic after README, TASKS, roadmap, Docker acceptance, Capability Store snapshot gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve Docker-safe capability ownership truthfulness without stronger proof claims.
+- The Docker Approval Center completion snapshot epic is closed for this Phase 2 slice; future Approval Center changes should require approval execution proof, external-write proof, destructive-action proof, live provider proof, VM/ISO proof, or a new customer-facing approval promotion need before expanding claims.
+- P2-135 adds the Approval Center completion snapshot to `/api/approvals`, the browser Approval Center panel, `scripts/smoke_docker_approval_center_snapshot.sh`, Product Layer completion coverage, and the Phase 2 golden runner while preserving approval execution, external-write, destructive-action, live-provider, and VM/ISO proof boundaries.
+- P2-136 closes the Docker Approval Center completion snapshot epic after README, TASKS, roadmap, Docker acceptance, Approval Center snapshot gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve Docker-safe approval visibility truthfulness without stronger proof claims.
 - The inbox capability ownership boundary epic is closed for this Phase 2 slice; future inbox work should require live read-only OAuth proof, observed Maildir/user data proof, or a later confirmed external mutation model before claiming broader inbox ecosystem support.
 - The first inbox ownership slice is `docs/architecture/inbox-capability-ownership-boundary.md`, smoke-tested by `scripts/smoke_inbox_capability_ownership_boundary.sh`.
 - The inbox ownership boundary smoke is included in the Phase 2 golden demo runner so inbox capability ownership remains part of practical local/Docker-safe proof.

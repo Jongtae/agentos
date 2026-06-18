@@ -11,15 +11,15 @@ Current parent branch:
 
 Current public milestone:
 
-- **Docker Approval Center completion snapshot** — customer-readable approval visibility summary with setup, confirmation, observed-proof, blocked requirements, validation gates, and external/live proof blockers
+- **Docker Approval Center completion snapshot closeout** — completed approval visibility summary with setup, confirmation, observed-proof, blocked requirements, validation gates, and external/live proof blockers
 
 Current task:
 
-- `[P2-135] Add Approval Center completion snapshot`
+- `[P2-136] Close Approval Center completion snapshot epic`
 
 Runtime impact statement:
 
-- This task makes Approval Center a Docker Product Layer approval visibility surface with completed local proof, approval paths, validation gates, and blocked stronger-proof claims while keeping approval execution, external writes, destructive actions, live-provider proof, VM/ISO proof, release, mutation, and attestation unclaimed.
+- This closeout makes Approval Center a completed Docker Product Layer approval visibility customer surface while keeping approval execution, external writes, destructive actions, live-provider proof, VM/ISO proof, release, mutation, and attestation blockers explicit.
 
 Current autonomous completion loop:
 
@@ -183,8 +183,9 @@ Recommended Phase 2 tasks:
 - The Docker Capability Store completion snapshot epic is closed for this Phase 2 slice; future Capability Store changes should require external-write proof, destructive-action proof, live provider proof, VM/ISO proof, or a new customer-facing capability ownership promotion need before expanding claims.
 - P2-133 adds the Capability Store completion snapshot to `/api/capabilities`, the browser Capability Store panel, `scripts/smoke_docker_capability_store_snapshot.sh`, Product Layer completion coverage, and the Phase 2 golden runner while preserving external-write, destructive-action, live-provider, and VM/ISO proof boundaries.
 - P2-134 closes the Docker Capability Store completion snapshot epic after README, TASKS, roadmap, Docker acceptance, Capability Store snapshot gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve Docker-safe capability ownership truthfulness without stronger proof claims.
-- The Docker Approval Center completion snapshot epic is active for this Phase 2 slice; future Approval Center changes should require approval execution proof, external-write proof, destructive-action proof, live provider proof, VM/ISO proof, or a new customer-facing approval promotion need before expanding claims.
+- The Docker Approval Center completion snapshot epic is closed for this Phase 2 slice; future Approval Center changes should require approval execution proof, external-write proof, destructive-action proof, live provider proof, VM/ISO proof, or a new customer-facing approval promotion need before expanding claims.
 - P2-135 adds the Approval Center completion snapshot to `/api/approvals`, the browser Approval Center panel, `scripts/smoke_docker_approval_center_snapshot.sh`, Product Layer completion coverage, and the Phase 2 golden runner while preserving approval execution, external-write, destructive-action, live-provider, and VM/ISO proof boundaries.
+- P2-136 closes the Docker Approval Center completion snapshot epic after README, TASKS, roadmap, Docker acceptance, Approval Center snapshot gate, Product Layer completion gate, runtime preview Python smoke, compose config, cleanup policy, and CI checks preserve Docker-safe approval visibility truthfulness without stronger proof claims.
 - The inbox capability ownership boundary epic is closed for this Phase 2 slice; future inbox work should require live read-only OAuth proof, observed Maildir/user data proof, or a later confirmed external mutation model before claiming broader inbox ecosystem support.
 - The first inbox ownership slice is `docs/architecture/inbox-capability-ownership-boundary.md`, smoke-tested by `scripts/smoke_inbox_capability_ownership_boundary.sh`.
 - The inbox ownership boundary smoke is included in the Phase 2 golden demo runner so inbox capability ownership remains part of practical local/Docker-safe proof.

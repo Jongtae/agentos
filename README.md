@@ -181,8 +181,8 @@ flowchart LR
   phase1["Phase 1\nOS-native runtime prototype\nclosed"]
   phase2["Phase 2\nlocal-first runtime loop\nclosed baseline"]
   ready["Product Layer\ncompletion gate\nready"]
-  active["Active completion epic\nApproval Center snapshot"]
-  completed["Completed completion epics\npermissions, updater, browser fallback,\nBrowser observed acceptance,\npublic preview ops, distribution,\ninbox, capability graduation,\ncalendar/Gmail readiness,\nVM/ISO proof status,\nCalendar live acceptance,\nCalendar live adapter,\nMaildir intake,\nDocker onboarding,\nguided demo journey,\ncustomer handoff bundle,\npreview readiness board,\nobserved proof request board,\nrecovery drill board,\nsession report,\nruntime home snapshot,\nWork Inbox snapshot,\nActivity Timeline snapshot,\nCapability Store snapshot"]
+  active["Active completion epic\nNone"]
+  completed["Completed completion epics\npermissions, updater, browser fallback,\nBrowser observed acceptance,\npublic preview ops, distribution,\ninbox, capability graduation,\ncalendar/Gmail readiness,\nVM/ISO proof status,\nCalendar live acceptance,\nCalendar live adapter,\nMaildir intake,\nDocker onboarding,\nguided demo journey,\ncustomer handoff bundle,\npreview readiness board,\nobserved proof request board,\nrecovery drill board,\nsession report,\nruntime home snapshot,\nWork Inbox snapshot,\nActivity Timeline snapshot,\nCapability Store snapshot,\nApproval Center snapshot"]
   blocked["Observed-proof blockers\nVM/ISO, live OAuth,\nlive browser, release artifacts"]
   future["Later completion tracks\ncalendar live adapter, broader app ecosystem,\nhardware attestation, packaging hardening"]
 
@@ -212,8 +212,8 @@ flowchart LR
 | Activity Timeline | Completed Docker product surface | Shows customer-readable runtime events, user-visible records, and the completion snapshot without claiming external app execution or live-provider proof. |
 | Capability Store completion snapshot | Completed Docker product surface | Turns Capability Store into a customer-readable capability ownership snapshot with safe local paths, confirmation paths, destructive blocks, validation gates, and external/live proof blockers. |
 | Capability Store | Completed Docker product surface | Presents safe reads, user-owned writes, external-read setup needs, lifecycle confirmation, blocked destructive actions, and the completion snapshot from the capability registry. |
-| Approval Center completion snapshot | Active Docker product surface | Turns Approval Center into a customer-readable approval visibility snapshot with completed local proof, approval paths, validation gates, and approval execution blockers. |
-| Approval Center | Active Docker product surface | Shows setup, confirmation, observed-proof, and blocked requirements with the completion snapshot, without claiming approval execution, external writes, or destructive actions. |
+| Approval Center completion snapshot | Completed Docker product surface | Turns Approval Center into a customer-readable approval visibility snapshot with completed local proof, approval paths, validation gates, and approval execution blockers. |
+| Approval Center | Completed Docker product surface | Shows setup, confirmation, observed-proof, and blocked requirements with the completion snapshot, without claiming approval execution, external writes, or destructive actions. |
 | Observed Proof Uploader | Active Docker product surface | Defines required evidence and mock submission fields for live, VM/ISO, browser, release, and attestation proof without accepting secrets or auto-promoting claims. |
 | Observed Proof Request Board | Completed Docker product surface | Turns proof blockers into concrete customer evidence requests with actions, accepted evidence, redaction rules, validation commands, and promotion boundaries. |
 | Release Trust Panel | Active Docker product surface | Separates local release preflight, customer readiness decisions, and blocked real artifacts, checksums, signatures, publication, and VM/ISO release proof. |

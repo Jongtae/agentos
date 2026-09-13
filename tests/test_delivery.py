@@ -58,12 +58,18 @@ class DeliveryTests(unittest.TestCase):
         plan['next_goal']={'id':'TOP','status':'active'}
         (self.root/'delivery-plan.yaml').write_text(json.dumps(plan))
 
-    def test_owner_deferred_site_does_not_select_successor_or_claim_completion(self):
+    def test_owner_deferred_site_is_preserved_with_goal_mode_target(self):
         controller=self.controller()
-        self.assertEqual(controller.plan.next_goal()['status'], 'requires-explicit-owner-approval')
-        self.assertIsNone(controller.plan.next_goal()['id'])
+        self.assertEqual(controller.plan.next_goal()['status'], 'owner-activated-goal-ready')
+        self.assertEqual(controller.plan.next_goal()['id'], 'D-AP-01')
+        # Goal-mode readiness is an explicit owner selection, but the existing
+        # delivery heartbeat still requires next_goal.status == 'active'. This
+        # keeps preparation from auto-running before the owner starts Goal mode.
         self.assertIsNone(controller.plan.select({}))
         self.assertIsNone(controller.plan.select({'active':'SITE-01'}))
+        self.assertEqual(controller.plan.items['D-AP-01']['activation_status'], 'owner-activated-goal-ready')
+        self.assertEqual(controller.plan.items['D-AP-01']['issue'], 334)
+        self.assertEqual(controller.plan.items['D-AP-01']['depends_on'], ['FILE-WS-C-01'])
         self.assertEqual(controller.plan.items['SITE-01']['activation_status'], 'owner-deferred')
         self.assertNotIn('SITE-01', controller.plan.documented_completed())
         self.assertIsNone(controller.plan.data['programs']['FILE-WORKSPACE-01']['active_substep'])

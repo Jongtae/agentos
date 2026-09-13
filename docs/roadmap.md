@@ -1,8 +1,52 @@
-# AgentOS Hub v2 roadmap
+# Personal AgentOS roadmap
 
-Use the [Goal Execution Contract](goal-execution-contract.en.md) with this tracker: the active delivery plan and a goal-ready issue select work; vision, historical entries, and reserved proposals do not activate themselves.
+Use the [Goal Execution Contract](goal-execution-contract.en.md) with this tracker: the active delivery plan and a goal-ready issue select work; vision, roadmap order, historical entries, and planned/reserved issues do not activate themselves.
 
-AgentOS Hub v2 is a local-first personal-agent runtime, not a generic model gateway. The Mac hosts the owner-controlled runtime; AgentOS owns personal state, assistants, permissions, tools, task lifecycle, and evidence; Codex or Claude Code performs bounded engine turns.
+Personal AgentOS is a local-first, owner-installed personal AI operating environment. The long-term architecture is **Personal AI Kernel + Agent Distribution Platform**: AgentOS owns durable owner state and authority; packages, tools, models and delegated runtimes remain replaceable workers/capabilities. See the canonical [architecture](personal-agentos-architecture.en.md), [development constitution](development-constitution.en.md), and [Agent Distribution Platform foundation](agent-distribution-platform-foundation.en.md).
+
+## Proposed — Agent Distribution Platform / EPIC-ADP-01
+
+[#333](https://github.com/Jongtae/personal-agentos/issues/333) is the planned successor epic that turns the owner-authoritative kernel into an ecosystem-ready platform. **Creating these issues does not activate execution.** Each issue requires explicit owner activation, a goal-ready contract and the normal issue → branch → PR → validation/review lifecycle.
+
+The platform keeps the kernel agent-independent while allowing the product/marketplace to present agents as installable applications. Core authority remains with Owner, Context, Memory, Artifact, Capability, Runtime registration, Grant, Work, Event and Evidence. Distribution adds AgentPackage, Package Manager, Registry, Marketplace/Discovery and Trust/Verification without giving those layers owner-state authority.
+
+### Phase A — foundation contracts
+
+| Work | Issue | Planned outcome |
+| --- | --- | --- |
+| D-AP-01 | [#334](https://github.com/Jongtae/personal-agentos/issues/334) | Core primitives + AgentPackage v0.1 schemas/contracts |
+| D-AP-02 | [#335](https://github.com/Jongtae/personal-agentos/issues/335) | package trust, permission and install/update/rollback/uninstall lifecycle |
+| D-MEM-01 | [#336](https://github.com/Jongtae/personal-agentos/issues/336) | third-party Context/Memory and MemoryCandidate semantics |
+| D-SBX-01 | [#337](https://github.com/Jongtae/personal-agentos/issues/337) | sandbox, capability broker, supply-chain and quarantine/revocation model |
+| D-RT-01 | [#338](https://github.com/Jongtae/personal-agentos/issues/338) | common Runtime Adapter / Work / Grant / Evidence contract |
+| D-REG-01 | [#339](https://github.com/Jongtae/personal-agentos/issues/339) | Registry identity/integrity plane separated from Marketplace/discovery |
+
+### Phase B — local package platform
+
+| Work | Issue | Planned outcome |
+| --- | --- | --- |
+| I-AP-01 | [#340](https://github.com/Jongtae/personal-agentos/issues/340) | local AgentPackage validator + Package Manager |
+| I-EVT-01 | [#341](https://github.com/Jongtae/personal-agentos/issues/341) | installed-package Work/Event integration and restart/recovery |
+| I-SDK-01 | [#342](https://github.com/Jongtae/personal-agentos/issues/342) | SDK/CLI + General/Files/Research/Coding reference packages |
+
+### Phase C — ecosystem bootstrap
+
+| Work | Issue | Planned outcome |
+| --- | --- | --- |
+| I-ECO-01 | [#343](https://github.com/Jongtae/personal-agentos/issues/343) | wrap/import compatible MCP and selected OpenAI/Codex/Claude ecosystems |
+| I-RT-RUFLO-01 | [#344](https://github.com/Jongtae/personal-agentos/issues/344) | prove Ruflo as a bounded delegated Runtime Adapter, not kernel authority |
+
+### Phase D — Registry ready
+
+| Work | Issue | Planned outcome |
+| --- | --- | --- |
+| I-REG-01 | [#345](https://github.com/Jongtae/personal-agentos/issues/345) | local/open Registry with immutable releases, trust metadata and advisories |
+
+### Phase E — future capability acquisition
+
+[D-AUTO-01 / #346](https://github.com/Jongtae/personal-agentos/issues/346) defines L1–L5 acquisition policy from manual install through future bounded agent-requested capability acquisition. L4/L5 auto-install is **not** part of the first platform MVP. Package acquisition authority remains separate from action authority at every level.
+
+Current product evidence does not include AgentPackage installation, a Registry/Marketplace, Ruflo integration or autonomous acquisition. The above is planned work only.
 
 ## Deferred — Product information and policy site
 
@@ -88,7 +132,7 @@ The [UX v1.1 epic](https://github.com/Jongtae/personal-agentos/issues/149) recor
 
 **Delivered.** [#162](https://github.com/Jongtae/personal-agentos/issues/162) records the owner-visible bubble contract in [UX-06 Telegram conversation](ux-06-telegram-conversation.ko.md). The implementation preserves one status card and one terminal answer bubble, keeps approval/recovery controls separate, and expands the readable long-result preview. The root suite passed and the deployed Telegram desktop flow was directly observed to edit a status card to completion followed by one terminal answer without a generic completion duplicate.
 
-## Active — Master Plan 1 Personal Assistant Core
+## Historical/development-complete — Master Plan 1 Personal Assistant Core
 
 The owner closed UX-05 after deciding its remaining manual Telegram observations were disproportionate. This does not claim the waived checks passed. [Master Plan 1](master-plan-01-personal-assistant-core.en.md) is development complete on mock-contract evidence: R-01 through R-05 prove policy-owned ReAct orchestration, A2A, Calendar, Drive, and the new owner-local release journey. External credentials and real connections remain deferred to the owner-controlled operating-mode deployment. The repository-wide [contract-first development governance](development-governance.en.md) defines these gates.
 
@@ -96,15 +140,15 @@ MP2 is proposed for [conversation-first settings](master-plan-02-proposal.en.md)
 
 The owner-local delivery state is reconciled and must not rerun merged UX, MP1, D-MP2-01, or I-MP2-01 work. Autonomous execution continues only an explicitly owner-activated, goal-ready iteration; it never selects the next MP2 friction, successor, or feature by itself.
 
-D-MP2-02 selects reviewed capability discovery and recommendation as that bounded friction. It defines only an owner-local reviewed catalogue and read-only recommendation boundary; marketplace discovery, downloading, installation, activation, permission/scope grant, credentials, OAuth, external endpoints/actions, and operating deployment remain out of scope. I-MP2-02 requires a separate goal-ready issue.
+D-MP2-02 selects reviewed capability discovery and recommendation as that bounded friction. It defines only an owner-local reviewed catalogue and read-only recommendation boundary; marketplace discovery, downloading, installation, activation, permission/scope grant, credentials, OAuth, external endpoints/actions, and operating deployment remain out of scope. It remains historical authority for that original scope. The Agent Distribution Platform epic #333 and successor contracts #334–#346 extend future package/distribution work without retroactively widening D-MP2-02.
 
-I-MP2-02 delivers the fixture-backed owner-local catalogue and read-only recommendation model with deterministic ranking and HTTP/Telegram parity. It remains development-only mock-contract evidence and does not claim any live recommendation source, connector, or installation.
+I-MP2-02 delivers the fixture-backed owner-local catalogue and read-only recommendation model with deterministic ranking and HTTP/Telegram parity. It remains development-only mock-contract evidence and does not claim any live recommendation source, connector, installation, Registry or Marketplace.
 
 D-MP2-03 defines transparent owner-local Personal Space retrieval with source evidence and a separate explicit sharing boundary. It excludes external indexing, cloud sync, provider/OAuth/credentials, automatic long-term memory, document ingestion, external action, and operating deployment. I-MP2-03 is complete in [#251](https://github.com/Jongtae/personal-agentos/pull/251) on fixture-backed automated evidence: the policy-owned owner-local read model provides deterministic source evidence/redaction, safe audit/export/recovery, and HTTP/paired-Telegram/local-companion parity. It does not claim an external index, provider, connection, credential, sharing, action, or operating deployment.
 
-Design completion is not capability completion. The active plan now mechanically maps every Master Plan design entry to its named implementation, bilingual contract, and automated-evidence declaration. A `development_complete` Master Plan claim is rejected unless every declared implementation has documented completion. I-MP2-03 is documented complete on fixture-backed evidence; it is not an external operating claim.
+Design completion is not capability completion. Historical plans mechanically mapped every Master Plan design entry to its named implementation, bilingual contract, and automated-evidence declaration. A `development_complete` Master Plan claim remains limited to its recorded evidence and is not an external operating claim.
 
-The owner-directed subscription-engine Telegram stabilization cycle is complete in [#255](https://github.com/Jongtae/personal-agentos/pull/255). It fixes the `/summarize` command-only engine input defect, verifies the bounded AgentOS MCP bridge/tool round trip and failure/restart/duplicate recovery with fixtures, and introduces the required `validate` CI check for `main`. The single heartbeat now resumes only the owner-approved TOP goal; it cannot select a new feature or operating deployment. This is mock/fixture and CI evidence only; it does not claim a live engine, Telegram deployment, or provider connection.
+The owner-directed subscription-engine Telegram stabilization cycle is complete in [#255](https://github.com/Jongtae/personal-agentos/pull/255). It fixes the `/summarize` command-only engine input defect, verifies the bounded AgentOS MCP bridge/tool round trip and failure/restart/duplicate recovery with fixtures, and introduces the required `validate` CI check for `main`. The single heartbeat resumes only an owner-approved active goal; it cannot select a new feature or operating deployment. This is mock/fixture and CI evidence only; it does not claim a live engine, Telegram deployment, or provider connection.
 
 The original owner-approved operating deployment preparation cycle [#258](https://github.com/Jongtae/personal-agentos/pull/258) is historical only: its `v1.0.4` candidate claim was incorrect. [OP-02 / #261](https://github.com/Jongtae/personal-agentos/pull/261) corrected isolation/recovery design. TOP-01 [#272](https://github.com/Jongtae/personal-agentos/pull/272) proved the credential-free Compose lifecycle, and TOP-02/TOP-03 [#277](https://github.com/Jongtae/personal-agentos/pull/277) repaired the configured isolated-Codex path and completion gate. The reproducible candidate is `53912eeb1357ced37031234b1e5376f024dd0a96`, with successful main `validate` run `34204797899`. It proves development/fixture and local Compose evidence only: provider allowlist, official login, provider reachability, Telegram activation, and an operating deployment remain explicit owner-mode steps.
 

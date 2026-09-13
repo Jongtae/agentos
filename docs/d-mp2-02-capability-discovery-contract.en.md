@@ -1,6 +1,6 @@
 # D-MP2-02 — Reviewed Capability Discovery and Recommendation Contract
 
-> **Historical contract.** This document remains authoritative for its original owner-local, read-only recommendation scope. It did **not** authorize marketplace discovery, download, installation, activation, credential setup, permission grants, or execution. The planned [Agent Distribution Platform / #333](https://github.com/Jongtae/personal-agentos/issues/333), including [D-REG-01 / #339](https://github.com/Jongtae/personal-agentos/issues/339), is a successor program and must not be used to retroactively widen what D-MP2-02 implemented or proved.
+> **Historical contract.** This document remains authoritative for its original owner-local, read-only recommendation scope. It did **not** authorize marketplace discovery, download, installation, activation, credential setup, permission grants, or execution. The planned Agent Distribution Platform (#333), including D-REG-01 (#339), is a successor program and must not be used to retroactively widen what D-MP2-02 implemented or proved.
 
 ## Objective and scope
 

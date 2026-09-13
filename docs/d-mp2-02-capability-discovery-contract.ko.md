@@ -1,6 +1,6 @@
 # D-MP2-02 — 검토된 Capability 발견 및 추천 계약
 
-> **과거 참고용 한국어 번역본.** 내부 개발 기준은 [영어 원본](d-mp2-02-capability-discovery-contract.en.md)을 따른다. 이 계약의 원래 권한은 owner-local read-only 추천까지였으며 marketplace 발견, download, installation, activation, credential 설정, permission Grant 또는 실행을 승인하지 않았다. 계획된 [Agent Distribution Platform / #333](https://github.com/Jongtae/personal-agentos/issues/333)과 [D-REG-01 / #339](https://github.com/Jongtae/personal-agentos/issues/339)는 후속 계약이며 D-MP2-02가 과거에 구현·증명한 범위를 소급해 넓히지 않는다.
+> **과거 참고용 한국어 번역본.** 내부 개발 기준은 [영어 원본](d-mp2-02-capability-discovery-contract.en.md)을 따른다. 이 계약의 원래 권한은 owner-local read-only 추천까지였으며 marketplace 발견, download, installation, activation, credential 설정, permission Grant 또는 실행을 승인하지 않았다. 계획된 Agent Distribution Platform(#333)과 D-REG-01(#339)는 후속 계약이며 D-MP2-02가 과거에 구현·증명한 범위를 소급해 넓히지 않는다.
 
 ## 목표와 범위
 

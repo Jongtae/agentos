@@ -2,7 +2,11 @@
 
 ## Product priority
 
-AgentOS is a local-first personal agent whose material foundation is owner files and folders and whose experience is conversation and work. AgentOS owns the personal state, assistant policy, tool boundary, work queue, approvals, evidence, recovery, and managed workspace; a connected Codex or Claude Code process is a bounded execution engine, not the owner of that state.
+Personal AgentOS is a local-first, owner-installed personal AI operating environment for one person. The product owns the durable personal state and policy boundary across conversations and engine changes: personal context, owner material/workspace, permissions, approvals, work state, evidence, recovery, and capability/runtime boundaries. A connected Codex or Claude Code process is a bounded execution engine, not the owner of that state. See the canonical [Personal AgentOS Architecture](docs/personal-agentos-architecture.en.md).
+
+The repository's issue/branch/PR workflow, Goal Execution Contract, CI, delivery heartbeat, and state-driven implementer/reviewer handoff are **development infrastructure used to build Personal AgentOS**. Do not treat those repository mechanics as an end-user AgentOS feature, an OS runtime dependency, or evidence of live autonomous product operation. A coding harness may be a service or development aid; it is not the product identity.
+
+The current first usable product slice has owner files and folders as its material foundation and conversation/work as its experience. AgentOS owns the assistant policy, tool boundary, work queue, approvals, evidence, recovery, and managed workspace while keeping owner state independent of replaceable workers.
 
 Every active Hub v2 task must advance one or more outcomes:
 

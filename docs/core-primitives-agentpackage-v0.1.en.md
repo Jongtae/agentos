@@ -127,6 +127,9 @@ closed. Full conversation history is not implied by a snapshot.
 `MemoryCandidate`, whose `canonicalMemoryAuthority` value is always `false`, whose `state` begins as `proposed`, and
 whose exact Work/package/runtime provenance is required. Only AgentOS policy may
 accept a candidate and create or revise a separate canonical `Memory` record.
+The canonical Memory and accepted MemoryCandidate MUST reference the same
+sealed, candidate-bound decision Evidence; an unrelated approved decision
+cannot authorize that Memory.
 Acceptance never mutates the candidate into an owner-authoritative record.
 Package/runtime-local state remains local and non-canonical even if durable.
 
@@ -166,6 +169,13 @@ scope wider than the Grant fails closed. A package manifest contains requests,
 not Grants. Installation, enablement, connection, conversation intent, and an
 Event cannot create or widen a Grant.
 
+Delegation is a strict subset chain. An effective delegated Grant requires its
+exact revision and the exact referenced revision of every ancestor to remain
+the current, active, unexpired revision. A later ancestor revocation or expiry
+invalidates every descendant immediately. Grant lifecycle lineage is checked
+independently of optional example transition lists: `active -> revoked` and
+`active -> expired` are terminal, and omitted edges cannot reactivate authority.
+
 Schema constants such as `authority: "agentos"` and `issuer: "agentos"`
 prove only structural conformance of a fixture. They do not authenticate an
 issuer. A future implementation MUST establish origin and integrity inside the
@@ -203,7 +213,9 @@ Event is an immutable, ordered fact or request bound to Owner and normally Work.
 It identifies emitter, sequence, type, classification, payload digest, and
 Evidence when applicable. Package subscriptions are declarations reviewed by
 AgentOS. An Event is neither a Grant nor proof that an action occurred.
-Background delivery requires declared policy, a current Grant, and budget.
+Delivery to a subscribed package requires the exact current, active Work and a
+single current Work-scoped Grant that covers its package/runtime, actions,
+scope, and budget. Background delivery without that binding fails closed.
 
 ### Evidence
 

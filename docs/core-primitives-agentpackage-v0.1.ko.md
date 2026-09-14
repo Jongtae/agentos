@@ -22,10 +22,15 @@ Claude 가져오기를 구현하거나 실제로 작동한다고 주장하지 �
 - 설치 후 기본 상태는 `installed-disabled`이며 설치는 Grant를 만들지 않습니다.
 - ContextSnapshot은 한 Work에 제한된 입력이며 영구 Memory가 아닙니다.
 - 외부 패키지의 영구 기억 출력은 기본적으로 MemoryCandidate입니다. AgentOS가
-  별도 정책으로 검토·수락해야 새로운 정식 MemoryRecord가 생깁니다.
+  별도 정책으로 검토·수락해야 새로운 정식 MemoryRecord가 생기며, 양쪽은
+  동일한 봉인된 결정 Evidence를 참조해야 합니다.
 - 파일, 네트워크 목적지, 비밀 참조, 백그라운드 Event, 비용·시간 예산,
   결과 행동과 승인이 manifest에 명시되어야 합니다. 생략되거나 모호하면
   허용하는 대신 거부합니다.
+- 위임된 Grant는 모든 상위 Grant의 최신 revision이 활성·유효해야 하며,
+  상위 Grant가 취소되거나 만료되면 하위 권한도 즉시 무효가 됩니다.
+- 구독 Event를 패키지에 전달하려면 현재 Work와 그 행동·범위·예산 전체를
+  포함하는 유효 Grant가 있어야 합니다.
 - 비밀 값, 루트/홈 전체 경로, 와일드카드 네트워크, 직접 정식 Memory 쓰기,
   자체 Grant 발급, 버전이 고정되지 않은 의존성은 유효한 v0.1 manifest로
   표현할 수 없습니다.

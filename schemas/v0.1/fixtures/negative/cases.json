@@ -337,5 +337,34 @@
       {"file": "$catalog", "changes": [{"op": "set", "path": "/transitions", "value": []}]},
       {"file": "positive/work-ready.json", "changes": [{"op": "set", "path": "/requestedActions", "value": ["resource.read", "memory.propose"]}]}
     ]
+  },
+  {
+    "id": "TRANSITION-003-grant-lineage-cannot-omit-invalid-edge",
+    "layer": "semantic",
+    "rule": "TRANSITION-003",
+    "mutations": [
+      {"file": "$catalog", "changes": [{"op": "set", "path": "/transitions", "value": []}]},
+      {"file": "positive/grant-child.json", "changes": [{"op": "set", "path": "/id", "value": "urn:agentos:grant:example"}, {"op": "set", "path": "/revision", "value": 2}, {"op": "set", "path": "/parentGrantRef", "value": null}]}
+    ]
+  },
+  {
+    "id": "EVENT-002-subscription-needs-current-work-authority",
+    "layer": "semantic",
+    "rule": "EVENT-002",
+    "mutations": [
+      {"file": "positive/agent-package.json", "changes": [{"op": "set", "path": "/requestedScope/events/subscriptions", "value": ["schedule"]}, {"op": "set", "path": "/requestedScope/events/background", "value": "requiresCurrentGrant"}]},
+      {"file": "positive/event.json", "changes": [{"op": "set", "path": "/eventType", "value": "schedule"}, {"op": "set", "path": "/subscribedPackageRef", "value": {"kind": "AgentPackage", "id": "urn:agentos:agent-package:example", "schemaVersion": "0.1", "revision": 1, "releaseVersion": "1.0.0", "digest": {"algorithm": "sha256", "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "scope": "packageArchive"}}}, {"op": "set", "path": "/requestedWorkRef", "value": null}]}
+    ]
+  },
+  {
+    "id": "MEMORY-003-memory-and-candidate-decisions-must-match",
+    "layer": "semantic",
+    "rule": "MEMORY-003",
+    "mutations": [
+      {"file": "positive/memory-candidate.json", "changes": [{"op": "set", "path": "/state", "value": "accepted"}, {"op": "set", "path": "/decisionRef", "value": {"kind": "Evidence", "id": "urn:agentos:evidence:memory", "schemaVersion": "0.1", "revision": 1}}, {"op": "set", "path": "/resultingMemoryRef", "value": {"kind": "Memory", "id": "urn:agentos:memory:example", "schemaVersion": "0.1", "revision": 1}}]},
+      {"file": "positive/memory.json", "changes": [{"op": "set", "path": "/acceptedCandidateRef", "value": {"kind": "MemoryCandidate", "id": "urn:agentos:memory-candidate:example", "schemaVersion": "0.1", "revision": 1}}, {"op": "set", "path": "/decisionRef", "value": {"kind": "Evidence", "id": "urn:agentos:evidence:approval", "schemaVersion": "0.1", "revision": 1}}]},
+      {"file": "positive/evidence-memory.json", "changes": [{"op": "set", "path": "/relatedRefs", "value": [{"kind": "MemoryCandidate", "id": "urn:agentos:memory-candidate:example", "schemaVersion": "0.1", "revision": 1}, {"kind": "Memory", "id": "urn:agentos:memory:example", "schemaVersion": "0.1", "revision": 1}]}]},
+      {"file": "positive/evidence-approval.json", "changes": [{"op": "set", "path": "/recordType", "value": "memoryDecision"}, {"op": "set", "path": "/relatedRefs", "value": [{"kind": "Memory", "id": "urn:agentos:memory:example", "schemaVersion": "0.1", "revision": 1}]}]}
+    ]
   }
 ]

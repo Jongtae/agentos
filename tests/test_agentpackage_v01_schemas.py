@@ -82,6 +82,98 @@ class AgentPackageV01Tests(unittest.TestCase):
                 errors = verifier.semantic_errors([*documents.values(), revoked], catalog)
                 self.assertTrue(any(error.startswith("CONTEXT-002 ") for error in errors), errors)
 
+    def test_delegated_grant_fails_when_latest_ancestor_is_revoked(self):
+        catalog, documents = verifier.load_fixture_bundle()
+        changed = deepcopy(documents)
+        child = changed["positive/grant-child.json"]
+        revoked_parent = deepcopy(changed["positive/grant.json"])
+        revoked_parent.update(revision=2, createdAt="2026-09-14T00:01:00Z", state="revoked")
+        work = changed["positive/work.json"]
+        snapshot = changed["positive/context-snapshot.json"]
+        child_ref = {"kind": "Grant", "id": child["id"], "schemaVersion": "0.1", "revision": child["revision"]}
+        work["effectiveGrantRefs"] = [child_ref]
+        snapshot["effectiveGrantRefs"] = [child_ref]
+        errors = verifier.semantic_errors([*changed.values(), revoked_parent], catalog)
+        self.assertTrue(any(error.startswith("GRANT-003 ") for error in errors), errors)
+
+    def test_grant_lineage_rejects_reactivation_without_catalog_edges(self):
+        catalog, documents = verifier.load_fixture_bundle()
+        catalog = deepcopy(catalog)
+        catalog["transitions"] = []
+        grant = deepcopy(documents["positive/grant.json"])
+        revoked = deepcopy(grant)
+        revoked.update(revision=2, createdAt="2026-09-14T00:01:00Z", state="revoked")
+        reactivated = deepcopy(grant)
+        reactivated.update(revision=3, createdAt="2026-09-14T00:02:00Z", state="active")
+        errors = verifier.semantic_errors([*documents.values(), revoked, reactivated], catalog)
+        self.assertTrue(any(error.startswith("TRANSITION-003 ") for error in errors), errors)
+
+    def test_subscribed_event_requires_current_authorized_work(self):
+        catalog, documents = verifier.load_fixture_bundle()
+        changed = deepcopy(documents)
+        package = changed["positive/agent-package.json"]
+        package["requestedScope"]["events"]["subscriptions"] = ["schedule"]
+        package["requestedScope"]["events"]["background"] = "requiresCurrentGrant"
+        event = changed["positive/event.json"]
+        event.update(eventType="schedule", subscribedPackageRef={
+            "kind": "AgentPackage", "id": package["id"], "schemaVersion": "0.1",
+            "revision": package["revision"], "releaseVersion": package["releaseVersion"],
+            "digest": package["releaseDigest"],
+        }, requestedWorkRef=None)
+        errors = verifier.semantic_errors(list(changed.values()), catalog)
+        self.assertTrue(any(error.startswith("EVENT-002 ") for error in errors), errors)
+
+    def test_subscribed_event_requires_event_scope_in_work_and_grant(self):
+        catalog, documents = verifier.load_fixture_bundle()
+        catalog = deepcopy(catalog)
+        catalog["transitions"] = catalog["transitions"][:2]
+        changed = deepcopy(documents)
+        del changed["positive/work-proposed.json"]
+        del changed["positive/work-completed.json"]
+        package = changed["positive/agent-package.json"]
+        package["requestedScope"]["events"].update(
+            subscriptions=["schedule"], background="requiresCurrentGrant"
+        )
+        event = changed["positive/event.json"]
+        event.update(eventType="schedule", subscribedPackageRef={
+            "kind": "AgentPackage", "id": package["id"], "schemaVersion": "0.1",
+            "revision": package["revision"], "releaseVersion": package["releaseVersion"],
+            "digest": package["releaseDigest"],
+        }, requestedWorkRef={
+            "kind": "Work", "id": "urn:agentos:work:example", "schemaVersion": "0.1", "revision": 3,
+        })
+        denied = verifier.semantic_errors(list(changed.values()), catalog)
+        self.assertTrue(any(error.startswith("EVENT-002 ") for error in denied), denied)
+
+        for file_name in (
+            "positive/work-planned.json", "positive/work-ready.json",
+            "positive/work.json", "positive/grant.json",
+        ):
+            changed[file_name]["scope"]["events"].update(
+                subscriptions=["schedule"], background="requiresCurrentGrant"
+            )
+        allowed = verifier.semantic_errors(list(changed.values()), catalog)
+        self.assertEqual(allowed, [])
+
+    def test_memory_decision_must_match_accepted_candidate_decision(self):
+        catalog, documents = verifier.load_fixture_bundle()
+        changed = deepcopy(documents)
+        candidate = changed["positive/memory-candidate.json"]
+        memory = changed["positive/memory.json"]
+        decision = changed["positive/evidence-memory.json"]
+        other_decision = deepcopy(decision)
+        other_decision.update(id="urn:agentos:evidence:memory-other")
+        candidate_ref = {"kind": "MemoryCandidate", "id": candidate["id"], "schemaVersion": "0.1", "revision": 1}
+        memory_ref = {"kind": "Memory", "id": memory["id"], "schemaVersion": "0.1", "revision": 1}
+        decision_ref = {"kind": "Evidence", "id": decision["id"], "schemaVersion": "0.1", "revision": 1}
+        other_ref = {"kind": "Evidence", "id": other_decision["id"], "schemaVersion": "0.1", "revision": 1}
+        candidate.update(state="accepted", decisionRef=decision_ref, resultingMemoryRef=memory_ref)
+        memory.update(acceptedCandidateRef=candidate_ref, decisionRef=other_ref)
+        decision["relatedRefs"] = [candidate_ref, memory_ref]
+        other_decision["relatedRefs"] = [memory_ref]
+        errors = verifier.semantic_errors([*changed.values(), other_decision], catalog)
+        self.assertTrue(any(error.startswith("MEMORY-003 ") for error in errors), errors)
+
 
 if __name__ == "__main__":
     unittest.main()

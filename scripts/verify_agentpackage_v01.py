@@ -196,6 +196,27 @@ def semantic_errors(records: list[dict[str, Any]], catalog: dict[str, Any]) -> l
     def same_work(left: dict[str, Any], right: dict[str, Any]) -> bool:
         return left["workRef"]["id"] == right["workRef"]["id"]
 
+    def grant_is_currently_effective(grant: dict[str, Any]) -> bool:
+        """Require the exact Grant and every delegated ancestor to remain current."""
+        cursor, seen = grant, set()
+        while cursor is not None:
+            identity = cursor["id"]
+            if identity in seen:
+                return False
+            seen.add(identity)
+            current = latest("Grant", identity)
+            if (current is None or current["revision"] != cursor["revision"] or
+                    current["state"] != "active" or
+                    not (_stamp(current["validFrom"]) <= as_of < _stamp(current["expiresAt"]))):
+                return False
+            parent_ref = current["parentGrantRef"]
+            if parent_ref is None:
+                return True
+            cursor = resolve(parent_ref)
+            if cursor is None:
+                return False
+        return True
+
     for record in records:
         for reference in _refs(record):
             target = resolve(reference)
@@ -275,6 +296,8 @@ def semantic_errors(records: list[dict[str, Any]], catalog: dict[str, Any]) -> l
                     fail("GRANT-002", record, "delegated Grant is not a subset of its parent")
                 if record["state"] == "active" and parent["state"] != "active":
                     fail("GRANT-003", record, "active child of inactive Grant")
+                if latest("Grant", record["id"]) is record and record["state"] == "active" and not grant_is_currently_effective(record):
+                    fail("GRANT-003", record, "current delegated Grant has a stale, revoked, or expired ancestor")
             decision = resolve(record["decisionRef"])
             if decision and (decision["recordType"] != "approval" or decision["outcome"] != "approved" or decision["status"] != "sealed" or not same_work(record, decision)):
                 fail("GRANT-004", record, "Grant decision is not sealed approval for this Work")
@@ -287,9 +310,8 @@ def semantic_errors(records: list[dict[str, Any]], catalog: dict[str, Any]) -> l
             effective = [resolve(ref) for ref in record["effectiveGrantRefs"]]
             for grant in (item for item in effective if item is not None):
                 work_id = record["id"] if kind == "Work" else record["workRef"]["id"]
-                newer = [item for item in records if item["kind"] == "Grant" and item["id"] == grant["id"] and item["revision"] > grant["revision"]]
-                if grant["state"] != "active" or newer or not (_stamp(grant["validFrom"]) <= _stamp(catalog["asOf"]) < _stamp(grant["expiresAt"])):
-                    fail("GRANT-003", record, "effective Grant is revoked, stale, expired, or not yet valid")
+                if not grant_is_currently_effective(grant):
+                    fail("GRANT-003", record, "effective Grant or delegated ancestor is revoked, stale, expired, or not yet valid")
                 if grant["workRef"]["id"] != work_id:
                     fail("WORK-001", record, "effective Grant is bound to different Work")
             if kind == "Work":
@@ -358,6 +380,9 @@ def semantic_errors(records: list[dict[str, Any]], catalog: dict[str, Any]) -> l
             candidate = resolve(record["acceptedCandidateRef"])
             if candidate and (candidate["state"] != "accepted" or candidate["resultingMemoryRef"] is None or _key(candidate["resultingMemoryRef"]) != _key(record)):
                 fail("MEMORY-001", record, "Memory candidate disposition is not reciprocal")
+            if candidate and (candidate["decisionRef"] is None or
+                              _key(candidate["decisionRef"]) != _key(record["decisionRef"])):
+                fail("MEMORY-003", record, "canonical Memory decision does not match its accepted candidate decision")
         if kind == "MemoryCandidate" and record["state"] in {"accepted", "rejected"}:
             decision = resolve(record["decisionRef"])
             expected_outcome = "approved" if record["state"] == "accepted" else "rejected"
@@ -380,6 +405,28 @@ def semantic_errors(records: list[dict[str, Any]], catalog: dict[str, Any]) -> l
             package = resolve(record["subscribedPackageRef"])
             if package and record["eventType"] not in package["requestedScope"]["events"]["subscriptions"]:
                 fail("EVENT-001", record, "package did not declare this Event subscription")
+            work = resolve(record["requestedWorkRef"])
+            current_work = latest("Work", record["requestedWorkRef"]["id"]) if record["requestedWorkRef"] else None
+            authorized = bool(
+                work and current_work and _key(work) == _key(current_work) and
+                work["state"] in {"running", "waitingApproval", "completionProposed"} and
+                work["packageRef"] == record["subscribedPackageRef"] and
+                record["eventType"] in work["scope"]["events"]["subscriptions"] and
+                work["scope"]["events"]["background"] == "requiresCurrentGrant" and
+                any(
+                    grant and grant_is_currently_effective(grant) and
+                    grant["packageRef"] == work["packageRef"] and
+                    grant["runtimeRef"] == work["runtimeRef"] and
+                    record["eventType"] in grant["scope"]["events"]["subscriptions"] and
+                    grant["scope"]["events"]["background"] == "requiresCurrentGrant" and
+                    set(work["requestedActions"]) <= set(grant["actions"]) and
+                    _scope_subset(work["scope"], grant["scope"]) and
+                    _budget_subset(work["budget"], grant["budget"])
+                    for grant in (resolve(ref) for ref in work["effectiveGrantRefs"])
+                )
+            )
+            if not authorized:
+                fail("EVENT-002", record, "subscribed delivery lacks current Work-scoped Grant and budget authority")
 
     transitions = {
         "Work": {"planned": {"ready", "cancelled"}, "ready": {"running", "waitingApproval", "cancelled"}, "running": {"waitingApproval", "completionProposed", "failed", "cancelled"}, "waitingApproval": {"ready", "running", "cancelled"}, "completionProposed": {"completed", "failed"}, "failed": {"ready"}, "completed": set(), "cancelled": set()},
@@ -409,6 +456,16 @@ def semantic_errors(records: list[dict[str, Any]], catalog: dict[str, Any]) -> l
                 fail("WORK-007", after, "Work lifecycle revision changes its authority-bearing request")
             if before["state"] != "planned" and before["contextSnapshotRef"] != after["contextSnapshotRef"]:
                 fail("WORK-007", after, "ready Work changes its ContextSnapshot binding")
+    grant_ids = {record["id"] for record in records if record["kind"] == "Grant"}
+    for grant_id in grant_ids:
+        lineage = sorted(
+            (record for record in records if record["kind"] == "Grant" and record["id"] == grant_id),
+            key=lambda record: record["revision"],
+        )
+        for before, after in zip(lineage, lineage[1:]):
+            if (after["revision"] != before["revision"] + 1 or
+                    after["state"] not in transitions["Grant"][before["state"]]):
+                fail("TRANSITION-003", after, "Grant record lineage has a missing or invalid state edge")
     for transition in catalog["transitions"]:
         before, after = resolve(transition["from"]), resolve(transition["to"])
         if before is None or after is None:

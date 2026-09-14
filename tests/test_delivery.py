@@ -58,14 +58,17 @@ class DeliveryTests(unittest.TestCase):
         plan['next_goal']={'id':'TOP','status':'active'}
         (self.root/'delivery-plan.yaml').write_text(json.dumps(plan))
 
-    def test_completed_foundation_preserves_deferred_site_and_selects_no_successor(self):
+    def test_dogfood_is_sole_goal_ready_target_but_heartbeat_cannot_run_it(self):
         controller=self.controller()
-        self.assertEqual(controller.plan.next_goal()['status'], 'no-owner-activated-successor')
-        self.assertIsNone(controller.plan.next_goal()['id'])
-        # D-AP-01 closeout must fail closed: the heartbeat cannot select a
-        # planned successor or revive the owner-deferred site.
+        self.assertEqual(controller.plan.next_goal()['status'], 'owner-activated-goal-ready')
+        self.assertEqual(controller.plan.next_goal()['id'], 'DOGFOOD-01')
+        # Goal readiness records owner intent, but only a later explicit active
+        # transition can make the repository heartbeat select DOGFOOD Work.
         self.assertIsNone(controller.plan.select({}))
         self.assertIsNone(controller.plan.select({'active':'SITE-01'}))
+        self.assertEqual(controller.plan.items['DOGFOOD-01']['activation_status'], 'owner-activated-goal-ready')
+        self.assertEqual(controller.plan.items['DOGFOOD-01']['issue'], 351)
+        self.assertEqual(controller.plan.items['DOGFOOD-01']['depends_on'], ['D-AP-01'])
         self.assertEqual(controller.plan.items['D-AP-01']['activation_status'], 'complete-on-merge')
         self.assertEqual(controller.plan.items['D-AP-01']['issue'], 334)
         self.assertEqual(controller.plan.items['D-AP-01']['depends_on'], ['FILE-WS-C-01'])
@@ -82,6 +85,16 @@ class DeliveryTests(unittest.TestCase):
         self.assertIn('DRIVE-TG-01', controller.plan.documented_completed())
         self.assertIn('FILE-WS-C-01', controller.plan.documented_completed())
         self.assertIn('D-AP-01', controller.plan.documented_completed())
+        goal_ready_targets = [
+            target['id'] for target in [controller.plan.next_goal()]
+            if target.get('status') == 'owner-activated-goal-ready'
+        ]
+        self.assertEqual(goal_ready_targets, ['DOGFOOD-01'])
+        self.assertFalse(any(
+            item.get('issue') in range(335, 347)
+            and item.get('activation_status') in {'owner-activated-goal-ready', 'active'}
+            for item in controller.plan.items.values()
+        ))
         self.assertNotIn('DRIVE-LOCAL-OP-01', controller.plan.documented_completed())
         self.assertNotIn('SCN-I-01', controller.plan.documented_completed())
 

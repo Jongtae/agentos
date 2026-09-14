@@ -10,11 +10,13 @@ Personal AgentOS is a local-first, owner-installed personal AI operating environ
 
 The platform keeps the kernel agent-independent while allowing the product/marketplace to present agents as installable applications. Core authority remains with Owner, Context, Memory, Artifact, Capability, Runtime registration, Grant, Work, Event and Evidence. Distribution adds AgentPackage, Package Manager, Registry, Marketplace/Discovery and Trust/Verification without giving those layers owner-state authority.
 
+D-AP-01 / [#334](https://github.com/Jongtae/personal-agentos/issues/334) is complete on merge of [PR #350](https://github.com/Jongtae/personal-agentos/pull/350). It defines the canonical v0.1 contracts, schemas, deterministic fixtures, compatibility rules, and independent review evidence. This is specification and machine-verification evidence only; it does not implement or prove package execution, installation, a Registry/Marketplace, credentials, connectors, Ruflo, or live external operation. No successor is active, and #335–#346 remain planned until separate explicit owner activation.
+
 ### Phase A — foundation contracts
 
 | Work | Issue | Planned outcome |
 | --- | --- | --- |
-| D-AP-01 | [#334](https://github.com/Jongtae/personal-agentos/issues/334) | Core primitives + AgentPackage v0.1 schemas/contracts |
+| D-AP-01 | [#334](https://github.com/Jongtae/personal-agentos/issues/334) | Complete on merge of PR #350: Core primitives + AgentPackage v0.1 schemas/contracts |
 | D-AP-02 | [#335](https://github.com/Jongtae/personal-agentos/issues/335) | package trust, permission and install/update/rollback/uninstall lifecycle |
 | D-MEM-01 | [#336](https://github.com/Jongtae/personal-agentos/issues/336) | third-party Context/Memory and MemoryCandidate semantics |
 | D-SBX-01 | [#337](https://github.com/Jongtae/personal-agentos/issues/337) | sandbox, capability broker, supply-chain and quarantine/revocation model |

@@ -122,7 +122,7 @@ closed. Full conversation history is not implied by a snapshot.
 ### Memory and MemoryCandidate
 
 `Memory` is canonical only when its `authority` is `agentos` and
-`writeAuthority` is `agentosOnly`. A package/runtime output uses
+`writeAuthority` is `agentosPolicyOrOwner`. A package/runtime output uses
 `MemoryCandidate`, whose `canonicalMemoryAuthority` value is always `false`, whose `state` begins as `proposed`, and
 whose exact Work/package/runtime provenance is required. Only AgentOS policy may
 accept a candidate and create or revise a separate canonical `Memory` record.

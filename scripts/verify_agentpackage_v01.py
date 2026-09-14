@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 import re
 from typing import Any
+from urllib.parse import urlsplit
 
 from jsonschema import Draft202012Validator, FormatChecker
 from referencing import Registry, Resource
@@ -26,6 +27,26 @@ SCHEMA_NAMESPACE = "https://personal-agentos.dev/schemas/v0.1/"
 DIALECT = "https://json-schema.org/draft/2020-12/schema"
 CORE_KINDS = {"Owner", "Context", "Memory", "Artifact", "Capability", "Runtime", "Grant", "Work", "Event", "Evidence"}
 KINDS = CORE_KINDS | {"ContextSnapshot", "MemoryCandidate", "AgentPackage"}
+FORMAT_CHECKER = FormatChecker()
+
+
+@FORMAT_CHECKER.checks("date-time")
+def _valid_datetime(value: object) -> bool:
+    if not isinstance(value, str):
+        return True
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return value.endswith("Z") and parsed.tzinfo is not None
+
+
+@FORMAT_CHECKER.checks("uri")
+def _valid_uri(value: object) -> bool:
+    if not isinstance(value, str):
+        return True
+    parsed = urlsplit(value)
+    return bool(parsed.scheme and parsed.netloc and not any(character.isspace() for character in value))
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -79,12 +100,12 @@ def load_validators(schema_root: Path = SCHEMA_ROOT) -> dict[str, Draft202012Val
             if "$ref" in node and not node["$ref"].startswith(SCHEMA_NAMESPACE):
                 raise ValueError(f"non-local schema reference: {name}")
         registry = registry.with_resource(schema["$id"], Resource.from_contents(schema))
-    return {name: Draft202012Validator(schema, registry=registry, format_checker=FormatChecker())
+    return {name: Draft202012Validator(schema, registry=registry, format_checker=FORMAT_CHECKER)
             for name, schema in schemas.items()}
 
 
 def schema_errors(document: dict[str, Any], validator: Draft202012Validator) -> list[str]:
-    return [f"{error.json_path}: {error.message}" for error in sorted(
+    return [f"{error.validator} {error.json_path}: {error.message}" for error in sorted(
         validator.iter_errors(document), key=lambda error: (str(error.json_path), error.message))]
 
 
@@ -119,6 +140,16 @@ def _scope_subset(child: dict[str, Any], parent: dict[str, Any]) -> bool:
             return False
     if any(item not in parent["secrets"] for item in child["secrets"]):
         return False
+    for item in child["data"]:
+        if not any(item["category"] == other["category"] and
+                   all(ref in other["resourceRefs"] for ref in item["resourceRefs"]) and
+                   set(item["access"]) <= set(other["access"]) for other in parent["data"]):
+            return False
+    for item in child["filesystem"]:
+        if not any(item["root"] == other["root"] and item["rootKind"] == other["rootKind"] and
+                   item["resourceRef"] == other["resourceRef"] and
+                   set(item["access"]) <= set(other["access"]) for other in parent["filesystem"]):
+            return False
     for name in ("read", "write", "localState"):
         if child["memory"][name] != "none" and child["memory"][name] != parent["memory"][name]:
             return False
@@ -290,6 +321,10 @@ def semantic_errors(records: list[dict[str, Any]], catalog: dict[str, Any]) -> l
                 fail("MEMORY-001", record, "accepted candidate lacks reciprocal canonical Memory decision")
         if kind == "Evidence" and record["evidenceClass"] != provenance["evidenceClass"]:
             fail("EVIDENCE-002", record, "record/provenance evidence class mismatch")
+        if kind == "Evidence" and catalog["evidenceClass"] == "deterministicFixture" and record["evidenceClass"] in {
+            "repositoryReview", "repositoryCi", "localOperation", "authenticatedConnection", "liveExternalOperation"
+        }:
+            fail("EVIDENCE-003", record, "fixture evidence overclaims a stronger observation class")
 
     transitions = {
         "Work": {"planned": {"ready", "cancelled"}, "ready": {"running", "waitingApproval", "cancelled"}, "running": {"waitingApproval", "completionProposed", "failed", "cancelled"}, "waitingApproval": {"ready", "running", "cancelled"}, "completionProposed": {"completed", "failed"}, "failed": {"ready", "cancelled"}, "completed": set(), "cancelled": set()},
@@ -349,6 +384,9 @@ def verify(schema_root: Path = SCHEMA_ROOT) -> tuple[list[str], dict[str, int]]:
     failures.extend(semantic_errors(list(documents.values()), catalog))
     negative_path = schema_root / "fixtures" / "negative" / "cases.json"
     cases = read_json(negative_path) if negative_path.exists() else []
+    case_ids = [case["id"] for case in cases]
+    if len(case_ids) != len(set(case_ids)):
+        failures.append("negative fixture IDs must be unique")
     for case in cases:
         changed = deepcopy(documents)
         changed_catalog = deepcopy(catalog)
@@ -363,6 +401,8 @@ def verify(schema_root: Path = SCHEMA_ROOT) -> tuple[list[str], dict[str, int]]:
         if case["layer"] == "schema":
             if not structural:
                 failures.append(f"negative {case['id']}: unexpectedly passes JSON Schema")
+            elif not any(error.startswith(case["rule"] + " ") for error in structural):
+                failures.append(f"negative {case['id']}: expected schema rule {case['rule']}, got {structural}")
         elif structural:
             failures.append(f"negative {case['id']}: semantic fixture is structurally invalid: {structural[0]}")
         else:

@@ -72,9 +72,10 @@ identifiers, not filesystem paths, URLs, secrets, or mutable display names.
 Timestamps use RFC 3339 date-time values.
 
 Security- or behavior-relevant cross-record links use an `ImmutableReference`:
-`kind`, typed `id`, and at least one immutable selector (`revision` or
-`digest`). Package-release and runtime-execution provenance MUST include both an
-exact revision/version and a `sha256:` digest. Mutable tags such as `latest`,
+`kind`, typed `id`, `schemaVersion`, and an exact record `revision`.
+Package-release and runtime-execution provenance MUST additionally include both an
+exact revision/version and a digest object with `algorithm: "sha256"`, a
+64-character lowercase hexadecimal value, and a declared digest scope. Mutable tags such as `latest`,
 ranges in exact-release positions, and a name without immutable selection are
 invalid.
 
@@ -173,12 +174,14 @@ owner-controlled trust boundary before treating a record as effective.
 Work is the AgentOS-owned durable execution state. It binds Owner, Capability,
 ContextSnapshot, exact package/runtime, effective Grant references, budgets,
 deadline, idempotency key, attempts, lease/checkpoint metadata, and recovery.
-AgentOS alone validates transitions:
+AgentOS alone validates the v0.1 transition examples:
 
 ```text
-queued -> authorized -> running -> {succeeded | failed | cancelled | timed-out}
-running -> paused -> running
-failed/timed-out -> queued (only under bounded retry and idempotency policy)
+planned -> ready -> running -> completionProposed -> completed
+ready/running -> waitingApproval -> {ready | running}
+planned/ready/running/waitingApproval -> cancelled
+running/completionProposed -> failed
+failed -> ready (only under bounded retry and idempotency policy)
 ```
 
 No other transition is valid. A worker report is an observation; `succeeded`
@@ -196,9 +199,9 @@ Background delivery requires declared policy, a current Grant, and budget.
 ### Evidence
 
 Evidence is an AgentOS-sealed record of a claim and attributable observations.
-It names its evidence class: `normative-design`, `schema-static`,
-`deterministic-fixture`, `repository-ci`, `local-operation`,
-`authenticated-connection`, or `live-external-operation`. Stronger classes may
+It names its evidence class: `designSpecification`, `schemaValidation`,
+`deterministicFixture`, `repositoryReview`, `repositoryCi`, `localOperation`,
+`authenticatedConnection`, or `liveExternalOperation`. Stronger classes may
 not be inferred from weaker ones. Exact Work/package/runtime provenance is
 required when relevant. Packages may submit observations but cannot seal,
 rewrite, downgrade, or delete retained Evidence.
@@ -269,8 +272,8 @@ v0.1 uses JSON Schema Draft 2020-12 and stable `$id` values under
   changing enum semantics, or accepting a formerly invalid authority request is
   incompatible and requires a new minor/major schema family plus migration.
 - Exact package dependencies use an exact semantic version and digest. AgentOS
-  API compatibility uses bounded minimum/maximum versions; an unsupported or
-  contradictory range is rejected.
+  API compatibility is an explicit finite list of supported versions in v0.1;
+  floating or unsupported ranges are rejected.
 - Migration is copy/validate/commit: retain the source record, produce a new
   revision with migration Provenance, validate every reference and invariant,
   and atomically select it only after success. Failure leaves the prior record

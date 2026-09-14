@@ -17,6 +17,7 @@ class AgentPackageV01Tests(unittest.TestCase):
         self.assertEqual(failures, [])
         self.assertEqual(counts["schemas"], 14)
         self.assertGreaterEqual(counts["positive"], 13)
+        self.assertGreaterEqual(counts["negative"], 35)
 
     def test_json_parser_rejects_duplicate_keys_and_non_json_numbers(self):
         for value in ('{"issuer":"package","issuer":"agentos"}', '{"value":NaN}', '{"value":Infinity}', '{"value":-Infinity}'):

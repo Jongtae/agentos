@@ -1,0 +1,242 @@
+[
+  {
+    "id": "SCHEMA-001-missing-authority-declaration",
+    "layer": "schema",
+    "rule": "required",
+    "mutations": [{"file": "positive/agent-package.json", "changes": [{"op": "remove", "path": "/requestedScope"}]}]
+  },
+  {
+    "id": "SCHEMA-002-unknown-nested-authority-field",
+    "layer": "schema",
+    "rule": "additionalProperties",
+    "mutations": [{"file": "positive/agent-package.json", "changes": [{"op": "set", "path": "/requestedScope/rootAccess", "value": true}]}]
+  },
+  {
+    "id": "SCHEMA-003-install-cannot-create-grant",
+    "layer": "schema",
+    "rule": "const",
+    "mutations": [{"file": "positive/agent-package.json", "changes": [{"op": "set", "path": "/lifecycle/installationCreatesGrant", "value": true}]}]
+  },
+  {
+    "id": "SCHEMA-004-package-cannot-write-canonical-memory",
+    "layer": "schema",
+    "rule": "const",
+    "mutations": [{"file": "positive/agent-package.json", "changes": [{"op": "set", "path": "/requestedScope/memory/canonicalWrite", "value": true}]}]
+  },
+  {
+    "id": "SCHEMA-005-package-cannot-request-home-access",
+    "layer": "schema",
+    "rule": "const",
+    "mutations": [{"file": "positive/agent-package.json", "changes": [{"op": "set", "path": "/requestedScope/hostHomeAccess", "value": true}]}]
+  },
+  {
+    "id": "SCHEMA-006-wildcard-network-is-invalid",
+    "layer": "schema",
+    "rule": "pattern",
+    "mutations": [{"file": "positive/agent-package.json", "changes": [{"op": "set", "path": "/requestedScope/network", "value": [{"origin": "https://*.example.com", "paths": ["/v1"], "methods": ["POST"], "dataCategories": ["ownerContext"], "credentials": "brokerOnly", "redirects": "deny"}]}]}]
+  },
+  {
+    "id": "SCHEMA-007-symbolic-digest-is-invalid",
+    "layer": "schema",
+    "rule": "pattern",
+    "mutations": [{"file": "positive/agent-package.json", "changes": [{"op": "set", "path": "/releaseDigest/value", "value": "drive-search-v1"}]}]
+  },
+  {
+    "id": "SCHEMA-008-secret-values-are-not-manifest-fields",
+    "layer": "schema",
+    "rule": "additionalProperties",
+    "mutations": [{"file": "positive/agent-package.json", "changes": [{"op": "set", "path": "/requestedScope/secrets", "value": [{"slot": "search", "handle": "agentos-secret:search", "mediation": "agentosBrokerOnly", "exposeToRuntime": false, "value": "not-allowed"}]}]}]
+  },
+  {
+    "id": "SCHEMA-009-unsupported-schema-version",
+    "layer": "schema",
+    "rule": "const",
+    "mutations": [{"file": "positive/owner.json", "changes": [{"op": "set", "path": "/schemaVersion", "value": "0.2"}]}]
+  },
+  {
+    "id": "SCHEMA-010-context-is-not-memory",
+    "layer": "schema",
+    "rule": "const",
+    "mutations": [{"file": "positive/context.json", "changes": [{"op": "set", "path": "/canonicalMemory", "value": true}]}]
+  },
+  {
+    "id": "SCHEMA-011-context-snapshot-is-read-only",
+    "layer": "schema",
+    "rule": "const",
+    "mutations": [{"file": "positive/context-snapshot.json", "changes": [{"op": "set", "path": "/readOnly", "value": false}]}]
+  },
+  {
+    "id": "SCHEMA-012-package-cannot-be-memory-authority",
+    "layer": "schema",
+    "rule": "const",
+    "mutations": [{"file": "positive/memory.json", "changes": [{"op": "set", "path": "/writeAuthority", "value": "package"}]}]
+  },
+  {
+    "id": "SCHEMA-013-candidate-cannot-be-canonical",
+    "layer": "schema",
+    "rule": "const",
+    "mutations": [{"file": "positive/memory-candidate.json", "changes": [{"op": "set", "path": "/canonicalMemoryAuthority", "value": true}]}]
+  },
+  {
+    "id": "SCHEMA-014-runtime-cannot-mint-grants",
+    "layer": "schema",
+    "rule": "const",
+    "mutations": [{"file": "positive/runtime.json", "changes": [{"op": "set", "path": "/grantAuthority", "value": "runtime"}]}]
+  },
+  {
+    "id": "SCHEMA-015-event-cannot-create-authority",
+    "layer": "schema",
+    "rule": "const",
+    "mutations": [{"file": "positive/event.json", "changes": [{"op": "set", "path": "/createsAuthority", "value": true}]}]
+  },
+  {
+    "id": "SCHEMA-016-package-cannot-rewrite-sealed-evidence",
+    "layer": "schema",
+    "rule": "const",
+    "mutations": [{"file": "positive/evidence-completion.json", "changes": [{"op": "set", "path": "/sealedMutation", "value": "allowed"}]}]
+  },
+  {
+    "id": "SCHEMA-017-package-cannot-issue-grant",
+    "layer": "schema",
+    "rule": "const",
+    "mutations": [{"file": "positive/grant.json", "changes": [{"op": "set", "path": "/issuer", "value": "package"}]}]
+  },
+  {
+    "id": "SCHEMA-018-runtime-cannot-own-work-transition",
+    "layer": "schema",
+    "rule": "const",
+    "mutations": [{"file": "positive/work.json", "changes": [{"op": "set", "path": "/transitionAuthority", "value": "runtime"}]}]
+  },
+  {
+    "id": "SCHEMA-019-floating-dependency-is-invalid",
+    "layer": "schema",
+    "rule": "pattern",
+    "mutations": [{"file": "positive/agent-package.json", "changes": [{"op": "set", "path": "/dependencies", "value": [{"kind": "AgentPackage", "id": "urn:agentos:agent-package:dependency", "schemaVersion": "0.1", "revision": 1, "releaseVersion": "latest", "digest": {"algorithm": "sha256", "value": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "scope": "packageArchive"}}]}]}]
+  },
+  {
+    "id": "SCHEMA-020-raw-filesystem-root-is-invalid",
+    "layer": "schema",
+    "rule": "pattern",
+    "mutations": [{"file": "positive/agent-package.json", "changes": [{"op": "set", "path": "/requestedScope/filesystem/0/root", "value": "/"}]}]
+  },
+  {
+    "id": "SCHEMA-021-unknown-top-level-field",
+    "layer": "schema",
+    "rule": "additionalProperties",
+    "mutations": [{"file": "positive/agent-package.json", "changes": [{"op": "set", "path": "/effectiveGrant", "value": {}}]}]
+  },
+  {
+    "id": "SCHEMA-022-invalid-date-time",
+    "layer": "schema",
+    "rule": "format",
+    "mutations": [{"file": "positive/work.json", "changes": [{"op": "set", "path": "/createdAt", "value": "2026-99-99T00:00:00Z"}]}]
+  },
+  {
+    "id": "SCHEMA-023-request-only-authority",
+    "layer": "schema",
+    "rule": "const",
+    "mutations": [{"file": "positive/agent-package.json", "changes": [{"op": "set", "path": "/authority", "value": "selfGranted"}]}]
+  },
+  {
+    "id": "SCHEMA-024-failed-health-cannot-activate",
+    "layer": "schema",
+    "rule": "const",
+    "mutations": [{"file": "positive/agent-package.json", "changes": [{"op": "set", "path": "/healthCheck/failure", "value": "activate"}]}]
+  },
+  {
+    "id": "REF-001-unresolved-exact-reference",
+    "layer": "semantic",
+    "rule": "REF-001",
+    "mutations": [{"file": "positive/capability.json", "changes": [{"op": "set", "path": "/packageRef/id", "value": "urn:agentos:agent-package:missing"}]}]
+  },
+  {
+    "id": "REF-002-release-digest-substitution",
+    "layer": "semantic",
+    "rule": "REF-002",
+    "mutations": [{"file": "positive/work.json", "changes": [{"op": "set", "path": "/packageRef/digest/value", "value": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}]}]
+  },
+  {
+    "id": "LINK-001-capability-action-not-declared",
+    "layer": "semantic",
+    "rule": "LINK-001",
+    "mutations": [{"file": "positive/capability.json", "changes": [{"op": "set", "path": "/actions", "value": ["resource.read", "artifact.create", "memory.propose", "message.send"]}]}]
+  },
+  {
+    "id": "GRANT-001-grant-exceeds-package-request",
+    "layer": "semantic",
+    "rule": "GRANT-001",
+    "mutations": [{"file": "positive/grant.json", "changes": [{"op": "set", "path": "/actions", "value": ["resource.read", "artifact.create", "memory.propose", "network.read"]}]}]
+  },
+  {
+    "id": "GRANT-002-child-budget-exceeds-parent",
+    "layer": "semantic",
+    "rule": "GRANT-002",
+    "mutations": [{"file": "positive/grant-child.json", "changes": [{"op": "set", "path": "/budget/maxDurationSeconds", "value": 301}]}]
+  },
+  {
+    "id": "GRANT-003-revoked-grant-is-not-effective",
+    "layer": "semantic",
+    "rule": "GRANT-003",
+    "mutations": [{"file": "positive/grant.json", "changes": [{"op": "set", "path": "/state", "value": "revoked"}]}]
+  },
+  {
+    "id": "GRANT-004-rejected-decision-cannot-authorize",
+    "layer": "semantic",
+    "rule": "GRANT-004",
+    "mutations": [{"file": "positive/evidence-approval.json", "changes": [{"op": "set", "path": "/outcome", "value": "rejected"}]}]
+  },
+  {
+    "id": "WORK-002-scope-must-fit-one-grant",
+    "layer": "semantic",
+    "rule": "WORK-002",
+    "mutations": [{"file": "positive/work.json", "changes": [{"op": "set", "path": "/scope/data/0/access", "value": ["read", "createDerived"]}]}]
+  },
+  {
+    "id": "WORK-003-runtime-must-be-healthy",
+    "layer": "semantic",
+    "rule": "WORK-003",
+    "mutations": [{"file": "positive/runtime.json", "changes": [{"op": "set", "path": "/state", "value": "disabled"}, {"op": "set", "path": "/health", "value": "failed"}]}]
+  },
+  {
+    "id": "WORK-004-attempt-exceeds-recovery-limit",
+    "layer": "semantic",
+    "rule": "WORK-004",
+    "mutations": [{"file": "positive/work.json", "changes": [{"op": "set", "path": "/attempt", "value": 3}]}]
+  },
+  {
+    "id": "CONTEXT-001-snapshot-cannot-outlive-context",
+    "layer": "semantic",
+    "rule": "CONTEXT-001",
+    "mutations": [{"file": "positive/context-snapshot.json", "changes": [{"op": "set", "path": "/expiresAt", "value": "2026-09-14T02:30:00Z"}]}]
+  },
+  {
+    "id": "MEMORY-001-rejected-decision-is-not-canonical-acceptance",
+    "layer": "semantic",
+    "rule": "MEMORY-001",
+    "mutations": [{"file": "positive/evidence-memory.json", "changes": [{"op": "set", "path": "/outcome", "value": "rejected"}]}]
+  },
+  {
+    "id": "EVIDENCE-001-worker-report-is-not-completion-validation",
+    "layer": "semantic",
+    "rule": "EVIDENCE-001",
+    "mutations": [{"file": "positive/work-completed.json", "changes": [{"op": "set", "path": "/validationEvidenceRefs/0/id", "value": "urn:agentos:evidence:approval"}]}]
+  },
+  {
+    "id": "EVIDENCE-002-provenance-class-must-match",
+    "layer": "semantic",
+    "rule": "EVIDENCE-002",
+    "mutations": [{"file": "positive/evidence-completion.json", "changes": [{"op": "set", "path": "/provenance/evidenceClass", "value": "schemaValidation"}]}]
+  },
+  {
+    "id": "EVIDENCE-003-fixture-cannot-claim-live-operation",
+    "layer": "semantic",
+    "rule": "EVIDENCE-003",
+    "mutations": [{"file": "positive/evidence-completion.json", "changes": [{"op": "set", "path": "/evidenceClass", "value": "liveExternalOperation"}, {"op": "set", "path": "/provenance/evidenceClass", "value": "liveExternalOperation"}]}]
+  },
+  {
+    "id": "TRANSITION-001-runtime-cannot-transition-work",
+    "layer": "semantic",
+    "rule": "TRANSITION-001",
+    "mutations": [{"file": "$catalog", "changes": [{"op": "set", "path": "/transitions/1/actor", "value": "runtime"}]}]
+  }
+]

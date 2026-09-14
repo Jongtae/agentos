@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "0.1",
+  "kind": "Event",
+  "id": "urn:agentos:event:example",
+  "revision": 1,
+  "createdAt": "2026-09-14T00:00:00Z",
+  "authority": "agentos",
+  "ownerRef": {
+    "kind": "Owner",
+    "id": "urn:agentos:owner:example",
+    "schemaVersion": "0.1",
+    "revision": 1
+  },
+  "provenance": {
+    "producer": "agentos",
+    "evidenceClass": "deterministicFixture",
+    "sourceRefs": []
+  },
+  "eventType": "ownerAction",
+  "state": "evaluated",
+  "payloadRef": {
+    "kind": "Resource",
+    "id": "urn:agentos:resource:source",
+    "schemaVersion": "0.1",
+    "revision": 1,
+    "digest": {
+      "algorithm": "sha256",
+      "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "scope": "contentBlob"
+    }
+  },
+  "requestedWorkRef": {
+    "kind": "Work",
+    "id": "urn:agentos:work:example",
+    "schemaVersion": "0.1",
+    "revision": 1
+  },
+  "subscribedPackageRef": null,
+  "createsAuthority": false,
+  "policyEvaluationRequired": true,
+  "subscriptionAuthorizesAction": false,
+  "expiresAt": "2026-09-14T02:00:00Z",
+  "deduplicationKey": "fixture_event_0001",
+  "sequence": 1
+}

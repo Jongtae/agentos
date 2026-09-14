@@ -1,0 +1,51 @@
+{
+  "schemaVersion": "0.1",
+  "kind": "Artifact",
+  "id": "urn:agentos:artifact:native",
+  "revision": 1,
+  "createdAt": "2026-09-14T00:00:00Z",
+  "authority": "agentos",
+  "ownerRef": {
+    "kind": "Owner",
+    "id": "urn:agentos:owner:example",
+    "schemaVersion": "0.1",
+    "revision": 1
+  },
+  "provenance": {
+    "producer": "owner",
+    "evidenceClass": "deterministicFixture",
+    "sourceRefs": []
+  },
+  "workRef": {
+    "kind": "Work",
+    "id": "urn:agentos:work:example",
+    "schemaVersion": "0.1",
+    "revision": 1
+  },
+  "packageRef": null,
+  "runtimeRef": null,
+  "contentRef": {
+    "kind": "Resource",
+    "id": "urn:agentos:resource:source",
+    "schemaVersion": "0.1",
+    "revision": 1,
+    "digest": {
+      "algorithm": "sha256",
+      "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "scope": "contentBlob"
+    }
+  },
+  "mediaType": "text/plain",
+  "role": "derived",
+  "sourceRefs": [],
+  "state": "available",
+  "ownership": "owner",
+  "preserveOnPackageRemoval": true,
+  "originalMutation": "forbidden",
+  "retention": {
+    "policy": "ownerManaged",
+    "expiresAt": null,
+    "deletionAuthority": "agentos",
+    "supersedes": null
+  }
+}

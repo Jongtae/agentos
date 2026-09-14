@@ -1,0 +1,157 @@
+{
+  "schemaVersion": "0.1",
+  "kind": "Grant",
+  "id": "urn:agentos:grant:example",
+  "revision": 1,
+  "createdAt": "2026-09-14T00:00:00Z",
+  "authority": "agentos",
+  "ownerRef": {
+    "kind": "Owner",
+    "id": "urn:agentos:owner:example",
+    "schemaVersion": "0.1",
+    "revision": 1
+  },
+  "provenance": {
+    "producer": "agentos",
+    "evidenceClass": "deterministicFixture",
+    "sourceRefs": []
+  },
+  "issuer": "agentos",
+  "decisionActor": "owner",
+  "decisionRef": {
+    "kind": "Evidence",
+    "id": "urn:agentos:evidence:approval",
+    "schemaVersion": "0.1",
+    "revision": 1
+  },
+  "workRef": {
+    "kind": "Work",
+    "id": "urn:agentos:work:example",
+    "schemaVersion": "0.1",
+    "revision": 1
+  },
+  "packageRef": {
+    "kind": "AgentPackage",
+    "id": "urn:agentos:agent-package:example",
+    "schemaVersion": "0.1",
+    "revision": 1,
+    "releaseVersion": "1.0.0",
+    "digest": {
+      "algorithm": "sha256",
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scope": "packageArchive"
+    }
+  },
+  "runtimeRef": {
+    "kind": "Runtime",
+    "id": "urn:agentos:runtime:example",
+    "schemaVersion": "0.1",
+    "revision": 1,
+    "releaseVersion": "1.0.0",
+    "digest": {
+      "algorithm": "sha256",
+      "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "scope": "runtimeDistribution"
+    }
+  },
+  "actions": [
+    "resource.read",
+    "artifact.create",
+    "memory.propose"
+  ],
+  "scope": {
+    "resources": [
+      {
+        "resourceRef": {
+          "kind": "Resource",
+          "id": "urn:agentos:resource:source",
+          "schemaVersion": "0.1",
+          "revision": 1,
+          "digest": {
+            "algorithm": "sha256",
+            "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "scope": "contentBlob"
+          }
+        },
+        "access": [
+          "read"
+        ],
+        "preserveOriginal": true
+      }
+    ],
+    "network": [],
+    "secrets": [],
+    "memory": {
+      "read": "contextSnapshotOnly",
+      "write": "candidateOnly",
+      "canonicalWrite": false,
+      "localState": "none",
+      "removal": "removePackageStatePreserveOwnerMemory"
+    },
+    "events": {
+      "subscriptions": [],
+      "background": "disabled",
+      "triggerAuthority": "none"
+    },
+    "hostHomeAccess": false,
+    "arbitraryShell": false,
+    "dockerSocket": false,
+    "data": [
+      {
+        "category": "ownerArtifacts",
+        "resourceRefs": [
+          {
+            "kind": "Resource",
+            "id": "urn:agentos:resource:source",
+            "schemaVersion": "0.1",
+            "revision": 1,
+            "digest": {
+              "algorithm": "sha256",
+              "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "scope": "contentBlob"
+            }
+          }
+        ],
+        "access": [
+          "read"
+        ]
+      }
+    ],
+    "filesystem": [
+      {
+        "root": "owner-root:reference",
+        "resourceRef": {
+          "kind": "Resource",
+          "id": "urn:agentos:resource:source",
+          "schemaVersion": "0.1",
+          "revision": 1,
+          "digest": {
+            "algorithm": "sha256",
+            "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "scope": "contentBlob"
+          }
+        },
+        "rootKind": "referenceFolder",
+        "access": [
+          "read"
+        ]
+      }
+    ]
+  },
+  "budget": {
+    "maxDurationSeconds": 300,
+    "maxCostMinor": 0,
+    "currency": "USD",
+    "maxTokens": 4096,
+    "maxMemoryMiB": 128,
+    "maxOutputBytes": 1048576,
+    "maxChildren": 0
+  },
+  "validFrom": "2026-09-14T00:00:00Z",
+  "expiresAt": "2026-09-14T02:00:00Z",
+  "state": "active",
+  "parentGrantRef": null,
+  "delegation": "subsetOnly",
+  "installationDerived": false,
+  "approvalRef": null
+}

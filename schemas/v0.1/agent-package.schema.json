@@ -1,0 +1,558 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://personal-agentos.dev/schemas/v0.1/agent-package.schema.json",
+  "title": "Personal AgentOS v0.1 AgentPackage",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "0.1"
+    },
+    "kind": {
+      "const": "AgentPackage"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^urn:agentos:agent-package:[a-z0-9][a-z0-9._-]{0,95}$",
+      "maxLength": 150
+    },
+    "revision": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/revision"
+    },
+    "createdAt": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/timestamp"
+    },
+    "provenance": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/provenance"
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,63}$"
+    },
+    "publisher": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9.-]{0,95}$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "identityEvidence": {
+          "enum": [
+            "unverified",
+            "signatureMetadata"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "displayName",
+        "identityEvidence"
+      ]
+    },
+    "releaseVersion": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/releaseVersion"
+    },
+    "releaseDigest": {
+      "allOf": [
+        {
+          "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/digest"
+        },
+        {
+          "properties": {
+            "scope": {
+              "const": "packageArchive"
+            }
+          }
+        }
+      ]
+    },
+    "license": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "agentosApiVersions": {
+          "type": "array",
+          "items": {
+            "const": "0.1"
+          },
+          "uniqueItems": true,
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "manifestSchemaVersions": {
+          "type": "array",
+          "items": {
+            "const": "0.1"
+          },
+          "uniqueItems": true,
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "unknownVersion": {
+          "const": "reject"
+        },
+        "unknownFields": {
+          "const": "reject"
+        },
+        "migration": {
+          "const": "explicitValidatedCopy"
+        }
+      },
+      "required": [
+        "agentosApiVersions",
+        "manifestSchemaVersions",
+        "unknownVersion",
+        "unknownFields",
+        "migration"
+      ]
+    },
+    "capabilityRefs": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          {
+            "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+          },
+          {
+            "properties": {
+              "kind": {
+                "const": "Capability"
+              },
+              "id": {
+                "pattern": "^urn:agentos:capability:"
+              }
+            }
+          }
+        ]
+      },
+      "uniqueItems": true,
+      "minItems": 1,
+      "maxItems": 64
+    },
+    "runtimeRefs": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          {
+            "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+          },
+          {
+            "properties": {
+              "kind": {
+                "const": "Runtime"
+              },
+              "id": {
+                "pattern": "^urn:agentos:runtime:"
+              }
+            }
+          }
+        ]
+      },
+      "uniqueItems": true,
+      "minItems": 1,
+      "maxItems": 64
+    },
+    "requestedActions": {
+      "type": "array",
+      "items": {
+        "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/action"
+      },
+      "uniqueItems": true,
+      "minItems": 1,
+      "maxItems": 64
+    },
+    "requestedScope": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/scope"
+    },
+    "budget": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/budget"
+    },
+    "approvalPolicy": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/approvalPolicy"
+    },
+    "sandbox": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/sandbox"
+    },
+    "lifecycle": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/lifecycle"
+    },
+    "authority": {
+      "const": "requestOnly"
+    },
+    "artifactPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "inputTypes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9.+-]*/[a-z0-9][a-z0-9.+-]*$"
+          },
+          "uniqueItems": true,
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "outputTypes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9.+-]*/[a-z0-9][a-z0-9.+-]*$"
+          },
+          "uniqueItems": true,
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "ownership": {
+          "const": "owner"
+        },
+        "preserveOnRemoval": {
+          "const": true
+        }
+      },
+      "required": [
+        "inputTypes",
+        "outputTypes",
+        "ownership",
+        "preserveOnRemoval"
+      ]
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          {
+            "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+          },
+          {
+            "properties": {
+              "kind": {
+                "const": "AgentPackage"
+              },
+              "id": {
+                "pattern": "^urn:agentos:agent-package:"
+              }
+            }
+          }
+        ]
+      },
+      "uniqueItems": true,
+      "minItems": 0,
+      "maxItems": 64
+    },
+    "healthCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "capabilityRef": {
+          "allOf": [
+            {
+              "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "Capability"
+                },
+                "id": {
+                  "pattern": "^urn:agentos:capability:"
+                }
+              }
+            }
+          ]
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300
+        },
+        "failure": {
+          "const": "doNotActivate"
+        }
+      },
+      "required": [
+        "capabilityRef",
+        "timeoutSeconds",
+        "failure"
+      ]
+    },
+    "supplyChain": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sourceRevision": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$"
+        },
+        "buildProvenanceRef": {
+          "allOf": [
+            {
+              "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "Resource"
+                },
+                "id": {
+                  "pattern": "^urn:agentos:resource:"
+                }
+              }
+            }
+          ]
+        },
+        "sbom": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "format": {
+              "enum": [
+                "spdx",
+                "cyclonedx"
+              ]
+            },
+            "contentRef": {
+              "allOf": [
+                {
+                  "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+                },
+                {
+                  "properties": {
+                    "kind": {
+                      "const": "Resource"
+                    },
+                    "id": {
+                      "pattern": "^urn:agentos:resource:"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "required": [
+            "format",
+            "contentRef"
+          ]
+        },
+        "signature": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "status": {
+              "enum": [
+                "unsigned",
+                "metadataOnly"
+              ]
+            },
+            "algorithm": {
+              "enum": [
+                "none",
+                "ed25519"
+              ]
+            },
+            "keyId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^agentos-key:[a-z][a-z0-9.-]{0,95}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "signatureRef": {
+              "anyOf": [
+                {
+                  "allOf": [
+                    {
+                      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+                    },
+                    {
+                      "properties": {
+                        "kind": {
+                          "const": "Resource"
+                        },
+                        "id": {
+                          "pattern": "^urn:agentos:resource:"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "securityClaim": {
+              "const": "identityAndIntegrityOnly"
+            }
+          },
+          "required": [
+            "status",
+            "algorithm",
+            "keyId",
+            "signatureRef",
+            "securityClaim"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "unsigned"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "algorithm": {
+                    "const": "none"
+                  },
+                  "keyId": {
+                    "type": "null"
+                  },
+                  "signatureRef": {
+                    "type": "null"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "metadataOnly"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "algorithm": {
+                    "const": "ed25519"
+                  },
+                  "keyId": {
+                    "type": "string",
+                    "pattern": "^agentos-key:[a-z][a-z0-9.-]{0,95}$"
+                  },
+                  "signatureRef": {
+                    "allOf": [
+                      {
+                        "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+                      },
+                      {
+                        "properties": {
+                          "kind": {
+                            "const": "Resource"
+                          },
+                          "id": {
+                            "pattern": "^urn:agentos:resource:"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "required": [
+        "sourceRevision",
+        "buildProvenanceRef",
+        "sbom",
+        "signature"
+      ]
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "kind",
+    "id",
+    "revision",
+    "createdAt",
+    "provenance",
+    "name",
+    "publisher",
+    "releaseVersion",
+    "releaseDigest",
+    "license",
+    "compatibility",
+    "capabilityRefs",
+    "runtimeRefs",
+    "requestedActions",
+    "requestedScope",
+    "budget",
+    "approvalPolicy",
+    "sandbox",
+    "lifecycle",
+    "authority",
+    "artifactPolicy",
+    "dependencies",
+    "healthCheck",
+    "supplyChain"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "requestedScope": {
+            "properties": {
+              "network": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "sandbox": {
+            "properties": {
+              "network": {
+                "const": "deny"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "requestedScope": {
+            "properties": {
+              "network": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "sandbox": {
+            "properties": {
+              "network": {
+                "const": "declaredDestinationsOnly"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

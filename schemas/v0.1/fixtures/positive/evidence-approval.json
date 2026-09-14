@@ -1,0 +1,73 @@
+{
+  "schemaVersion": "0.1",
+  "kind": "Evidence",
+  "id": "urn:agentos:evidence:approval",
+  "revision": 1,
+  "createdAt": "2026-09-14T00:00:00Z",
+  "authority": "agentos",
+  "ownerRef": {
+    "kind": "Owner",
+    "id": "urn:agentos:owner:example",
+    "schemaVersion": "0.1",
+    "revision": 1
+  },
+  "provenance": {
+    "producer": "agentos",
+    "evidenceClass": "deterministicFixture",
+    "sourceRefs": []
+  },
+  "workRef": {
+    "kind": "Work",
+    "id": "urn:agentos:work:example",
+    "schemaVersion": "0.1",
+    "revision": 1
+  },
+  "packageRef": {
+    "kind": "AgentPackage",
+    "id": "urn:agentos:agent-package:example",
+    "schemaVersion": "0.1",
+    "revision": 1,
+    "releaseVersion": "1.0.0",
+    "digest": {
+      "algorithm": "sha256",
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scope": "packageArchive"
+    }
+  },
+  "runtimeRef": {
+    "kind": "Runtime",
+    "id": "urn:agentos:runtime:example",
+    "schemaVersion": "0.1",
+    "revision": 1,
+    "releaseVersion": "1.0.0",
+    "digest": {
+      "algorithm": "sha256",
+      "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "scope": "runtimeDistribution"
+    }
+  },
+  "evidenceClass": "deterministicFixture",
+  "recordType": "approval",
+  "status": "sealed",
+  "payloadRef": {
+    "kind": "Resource",
+    "id": "urn:agentos:resource:source",
+    "schemaVersion": "0.1",
+    "revision": 1,
+    "digest": {
+      "algorithm": "sha256",
+      "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "scope": "contentBlob"
+    }
+  },
+  "relatedRefs": [],
+  "outcome": "approved",
+  "recordedBy": "owner",
+  "redacted": true,
+  "secretPersistence": false,
+  "sealedMutation": "forbidden",
+  "retention": {
+    "policy": "ownerEvidencePolicy",
+    "preserveOnPackageRemoval": true
+  }
+}

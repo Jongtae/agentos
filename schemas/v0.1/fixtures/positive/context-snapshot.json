@@ -1,0 +1,75 @@
+{
+  "schemaVersion": "0.1",
+  "kind": "ContextSnapshot",
+  "id": "urn:agentos:context-snapshot:example",
+  "revision": 1,
+  "createdAt": "2026-09-14T00:00:00Z",
+  "authority": "agentos",
+  "ownerRef": {
+    "kind": "Owner",
+    "id": "urn:agentos:owner:example",
+    "schemaVersion": "0.1",
+    "revision": 1
+  },
+  "provenance": {
+    "producer": "agentos",
+    "evidenceClass": "deterministicFixture",
+    "sourceRefs": []
+  },
+  "workRef": {
+    "kind": "Work",
+    "id": "urn:agentos:work:example",
+    "schemaVersion": "0.1",
+    "revision": 1
+  },
+  "contextRef": {
+    "kind": "Context",
+    "id": "urn:agentos:context:example",
+    "schemaVersion": "0.1",
+    "revision": 1
+  },
+  "sourceRefs": [
+    {
+      "kind": "Artifact",
+      "id": "urn:agentos:artifact:example",
+      "schemaVersion": "0.1",
+      "revision": 1
+    }
+  ],
+  "contentRef": {
+    "kind": "Resource",
+    "id": "urn:agentos:resource:source",
+    "schemaVersion": "0.1",
+    "revision": 1,
+    "digest": {
+      "algorithm": "sha256",
+      "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "scope": "contentBlob"
+    }
+  },
+  "effectiveGrantRefs": [
+    {
+      "kind": "Grant",
+      "id": "urn:agentos:grant:example",
+      "schemaVersion": "0.1",
+      "revision": 1
+    }
+  ],
+  "expiresAt": "2026-09-14T02:00:00Z",
+  "redactionApplied": true,
+  "sharing": "workOnly",
+  "canonicalMemoryAuthority": false,
+  "readOnly": true,
+  "recipientRuntimeRef": {
+    "kind": "Runtime",
+    "id": "urn:agentos:runtime:example",
+    "schemaVersion": "0.1",
+    "revision": 1,
+    "releaseVersion": "1.0.0",
+    "digest": {
+      "algorithm": "sha256",
+      "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "scope": "runtimeDistribution"
+    }
+  }
+}

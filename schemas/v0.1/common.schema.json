@@ -1,0 +1,1374 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://personal-agentos.dev/schemas/v0.1/common.schema.json",
+  "title": "Personal AgentOS v0.1 shared closed contracts",
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^urn:agentos:[a-z][a-z0-9-]*:[a-z0-9][a-z0-9._-]{0,95}$",
+      "maxLength": 150
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "releaseVersion": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "maxLength": 48
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$",
+      "maxLength": 32
+    },
+    "digest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": {
+          "const": "sha256"
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "scope": {
+          "enum": [
+            "packageArchive",
+            "runtimeDistribution",
+            "contentBlob"
+          ]
+        }
+      },
+      "required": [
+        "algorithm",
+        "value",
+        "scope"
+      ]
+    },
+    "immutableRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "Owner",
+            "Context",
+            "ContextSnapshot",
+            "Memory",
+            "MemoryCandidate",
+            "Artifact",
+            "Capability",
+            "Runtime",
+            "Grant",
+            "Work",
+            "Event",
+            "Evidence",
+            "AgentPackage",
+            "Resource"
+          ]
+        },
+        "id": {
+          "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/identifier"
+        },
+        "schemaVersion": {
+          "const": "0.1"
+        },
+        "revision": {
+          "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/revision"
+        },
+        "releaseVersion": {
+          "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/releaseVersion"
+        },
+        "digest": {
+          "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/digest"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "schemaVersion",
+        "revision"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "Owner"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "pattern": "^urn:agentos:owner:"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "Context"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "pattern": "^urn:agentos:context:"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "ContextSnapshot"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "pattern": "^urn:agentos:context-snapshot:"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "Memory"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "pattern": "^urn:agentos:memory:"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "MemoryCandidate"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "pattern": "^urn:agentos:memory-candidate:"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "Artifact"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "pattern": "^urn:agentos:artifact:"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "Capability"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "pattern": "^urn:agentos:capability:"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "Runtime"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "pattern": "^urn:agentos:runtime:"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "Grant"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "pattern": "^urn:agentos:grant:"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "Work"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "pattern": "^urn:agentos:work:"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "Event"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "pattern": "^urn:agentos:event:"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "Evidence"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "pattern": "^urn:agentos:evidence:"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "AgentPackage"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "pattern": "^urn:agentos:agent-package:"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "Resource"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "pattern": "^urn:agentos:resource:"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "AgentPackage"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "releaseVersion",
+              "digest"
+            ],
+            "properties": {
+              "digest": {
+                "properties": {
+                  "scope": {
+                    "const": "packageArchive"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "Runtime"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "releaseVersion",
+              "digest"
+            ],
+            "properties": {
+              "digest": {
+                "properties": {
+                  "scope": {
+                    "const": "runtimeDistribution"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "Resource"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "digest"
+            ],
+            "properties": {
+              "digest": {
+                "properties": {
+                  "scope": {
+                    "const": "contentBlob"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "not": {
+                  "enum": [
+                    "AgentPackage",
+                    "Runtime",
+                    "Resource"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "releaseVersion"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "Resource"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "releaseVersion"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "evidenceClass": {
+      "enum": [
+        "designSpecification",
+        "schemaValidation",
+        "deterministicFixture",
+        "repositoryReview",
+        "repositoryCi",
+        "localOperation",
+        "authenticatedConnection",
+        "liveExternalOperation"
+      ]
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "producer": {
+          "enum": [
+            "owner",
+            "agentos",
+            "package",
+            "runtime"
+          ]
+        },
+        "evidenceClass": {
+          "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/evidenceClass"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+          },
+          "uniqueItems": true,
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "workRef": {
+          "allOf": [
+            {
+              "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "Work"
+                },
+                "id": {
+                  "pattern": "^urn:agentos:work:"
+                }
+              }
+            }
+          ]
+        },
+        "packageRef": {
+          "anyOf": [
+            {
+              "allOf": [
+                {
+                  "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+                },
+                {
+                  "properties": {
+                    "kind": {
+                      "const": "AgentPackage"
+                    },
+                    "id": {
+                      "pattern": "^urn:agentos:agent-package:"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "runtimeRef": {
+          "allOf": [
+            {
+              "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "Runtime"
+                },
+                "id": {
+                  "pattern": "^urn:agentos:runtime:"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "required": [
+        "producer",
+        "evidenceClass",
+        "sourceRefs"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "producer": {
+                "enum": [
+                  "package",
+                  "runtime"
+                ]
+              }
+            },
+            "required": [
+              "producer"
+            ]
+          },
+          "then": {
+            "required": [
+              "workRef",
+              "packageRef",
+              "runtimeRef"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "producer": {
+                "const": "package"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "packageRef": {
+                "not": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "policy": {
+          "enum": [
+            "untilExpiry",
+            "ownerManaged"
+          ]
+        },
+        "expiresAt": {
+          "anyOf": [
+            {
+              "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "deletionAuthority": {
+          "const": "agentos"
+        },
+        "supersedes": {
+          "anyOf": [
+            {
+              "allOf": [
+                {
+                  "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+                },
+                {
+                  "properties": {
+                    "kind": {
+                      "const": "Memory"
+                    },
+                    "id": {
+                      "pattern": "^urn:agentos:memory:"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "policy",
+        "expiresAt",
+        "deletionAuthority",
+        "supersedes"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "policy": {
+                "const": "untilExpiry"
+              }
+            },
+            "required": [
+              "policy"
+            ]
+          },
+          "then": {
+            "properties": {
+              "expiresAt": {
+                "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/timestamp"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "policy": {
+                "const": "ownerManaged"
+              }
+            },
+            "required": [
+              "policy"
+            ]
+          },
+          "then": {
+            "properties": {
+              "expiresAt": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "sensitivity": {
+      "enum": [
+        "public",
+        "personal",
+        "sensitive"
+      ]
+    },
+    "action": {
+      "enum": [
+        "resource.read",
+        "artifact.create",
+        "memory.propose",
+        "network.read",
+        "network.write",
+        "message.send",
+        "resource.delete"
+      ]
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxDurationSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "maxCostMinor": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "currency": {
+          "const": "USD"
+        },
+        "maxTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "maxMemoryMiB": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16384
+        },
+        "maxOutputBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1073741824
+        },
+        "maxChildren": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8
+        }
+      },
+      "required": [
+        "maxDurationSeconds",
+        "maxCostMinor",
+        "currency",
+        "maxTokens",
+        "maxMemoryMiB",
+        "maxOutputBytes",
+        "maxChildren"
+      ]
+    },
+    "secretRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "slot": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "handle": {
+          "type": "string",
+          "pattern": "^agentos-secret:[a-z][a-z0-9-]{0,63}$"
+        },
+        "mediation": {
+          "const": "agentosBrokerOnly"
+        },
+        "exposeToRuntime": {
+          "const": false
+        }
+      },
+      "required": [
+        "slot",
+        "handle",
+        "mediation",
+        "exposeToRuntime"
+      ]
+    },
+    "networkDestination": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "origin": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?(?::443)?$",
+          "maxLength": 260
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^/(?:[A-Za-z0-9_~-]+(?:\\.[A-Za-z0-9_~-]+)*/?)*$",
+            "maxLength": 256
+          },
+          "uniqueItems": true,
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "methods": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "GET",
+              "HEAD",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE"
+            ]
+          },
+          "uniqueItems": true,
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "dataCategories": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "public",
+              "metadata",
+              "ownerContext",
+              "ownerArtifact"
+            ]
+          },
+          "uniqueItems": true,
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "credentials": {
+          "const": "brokerOnly"
+        },
+        "redirects": {
+          "const": "deny"
+        }
+      },
+      "required": [
+        "origin",
+        "paths",
+        "methods",
+        "dataCategories",
+        "credentials",
+        "redirects"
+      ]
+    },
+    "resourceScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "resourceRef": {
+          "allOf": [
+            {
+              "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "Resource"
+                },
+                "id": {
+                  "pattern": "^urn:agentos:resource:"
+                }
+              }
+            }
+          ]
+        },
+        "access": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "read",
+              "createDerived"
+            ]
+          },
+          "uniqueItems": true,
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "preserveOriginal": {
+          "const": true
+        }
+      },
+      "required": [
+        "resourceRef",
+        "access",
+        "preserveOriginal"
+      ]
+    },
+    "memoryPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "read": {
+          "enum": [
+            "none",
+            "contextSnapshotOnly"
+          ]
+        },
+        "write": {
+          "enum": [
+            "none",
+            "candidateOnly"
+          ]
+        },
+        "canonicalWrite": {
+          "const": false
+        },
+        "localState": {
+          "enum": [
+            "none",
+            "declaredEphemeral",
+            "declaredExportable"
+          ]
+        },
+        "removal": {
+          "const": "removePackageStatePreserveOwnerMemory"
+        }
+      },
+      "required": [
+        "read",
+        "write",
+        "canonicalWrite",
+        "localState",
+        "removal"
+      ]
+    },
+    "eventPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subscriptions": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "ownerAction",
+              "schedule",
+              "resourceChanged",
+              "connectorNotification",
+              "system"
+            ]
+          },
+          "uniqueItems": true,
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "background": {
+          "enum": [
+            "disabled",
+            "requiresCurrentGrant"
+          ]
+        },
+        "triggerAuthority": {
+          "const": "none"
+        }
+      },
+      "required": [
+        "subscriptions",
+        "background",
+        "triggerAuthority"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "subscriptions": {
+                "maxItems": 0
+              }
+            },
+            "required": [
+              "subscriptions"
+            ]
+          },
+          "then": {
+            "properties": {
+              "background": {
+                "const": "disabled"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "subscriptions": {
+                "minItems": 1
+              }
+            },
+            "required": [
+              "subscriptions"
+            ]
+          },
+          "then": {
+            "properties": {
+              "background": {
+                "const": "requiresCurrentGrant"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "resources": {
+          "type": "array",
+          "items": {
+            "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/resourceScope"
+          },
+          "uniqueItems": true,
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "network": {
+          "type": "array",
+          "items": {
+            "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/networkDestination"
+          },
+          "uniqueItems": true,
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "secrets": {
+          "type": "array",
+          "items": {
+            "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/secretRef"
+          },
+          "uniqueItems": true,
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "memory": {
+          "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/memoryPolicy"
+        },
+        "events": {
+          "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/eventPolicy"
+        },
+        "hostHomeAccess": {
+          "const": false
+        },
+        "arbitraryShell": {
+          "const": false
+        },
+        "dockerSocket": {
+          "const": false
+        },
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/dataScope"
+          },
+          "uniqueItems": true,
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "filesystem": {
+          "type": "array",
+          "items": {
+            "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/filesystemScope"
+          },
+          "uniqueItems": true,
+          "minItems": 0,
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "resources",
+        "network",
+        "secrets",
+        "memory",
+        "events",
+        "hostHomeAccess",
+        "arbitraryShell",
+        "dockerSocket",
+        "data",
+        "filesystem"
+      ]
+    },
+    "approvalPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "consequentialActions": {
+          "const": "ownerPerAction"
+        },
+        "otherActions": {
+          "const": "currentGrant"
+        },
+        "installationCreatesGrant": {
+          "const": false
+        }
+      },
+      "required": [
+        "consequentialActions",
+        "otherActions",
+        "installationCreatesGrant"
+      ]
+    },
+    "sandbox": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "profile": {
+          "const": "agentosScoped"
+        },
+        "hostHomeAccess": {
+          "const": false
+        },
+        "arbitraryShell": {
+          "const": false
+        },
+        "hostMounts": {
+          "const": false
+        },
+        "dockerSocket": {
+          "const": false
+        },
+        "network": {
+          "enum": [
+            "deny",
+            "declaredDestinationsOnly"
+          ]
+        },
+        "nestedAuthority": {
+          "const": "subsetOfParentWork"
+        }
+      },
+      "required": [
+        "profile",
+        "hostHomeAccess",
+        "arbitraryShell",
+        "hostMounts",
+        "dockerSocket",
+        "network",
+        "nestedAuthority"
+      ]
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "installationState": {
+          "const": "installedDisabled"
+        },
+        "installationCreatesGrant": {
+          "const": false
+        },
+        "enablingCreatesGrant": {
+          "const": false
+        },
+        "connectionCreatesGrant": {
+          "const": false
+        },
+        "activationRequiresHealthyRevision": {
+          "const": true
+        },
+        "updateAuthority": {
+          "const": "reevaluateAllAuthorityDeltas"
+        },
+        "updateFailure": {
+          "const": "restoreKnownGoodOrQuarantine"
+        },
+        "rollback": {
+          "enum": [
+            "supported",
+            "quarantineOnly"
+          ]
+        },
+        "disable": {
+          "const": "revokePackageGrants"
+        },
+        "quarantine": {
+          "const": "revokePackageGrants"
+        },
+        "uninstall": {
+          "const": "revokePackageGrantsPreserveOwnerArtifactsAndEvidence"
+        },
+        "dataMigration": {
+          "const": "explicitOwnerApprovedCopy"
+        }
+      },
+      "required": [
+        "installationState",
+        "installationCreatesGrant",
+        "enablingCreatesGrant",
+        "connectionCreatesGrant",
+        "activationRequiresHealthyRevision",
+        "updateAuthority",
+        "updateFailure",
+        "rollback",
+        "disable",
+        "quarantine",
+        "uninstall",
+        "dataMigration"
+      ]
+    },
+    "dataScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "enum": [
+            "public",
+            "ownerMetadata",
+            "ownerContext",
+            "ownerMemory",
+            "ownerArtifacts"
+          ]
+        },
+        "resourceRefs": {
+          "type": "array",
+          "items": {
+            "allOf": [
+              {
+                "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "Resource"
+                  },
+                  "id": {
+                    "pattern": "^urn:agentos:resource:"
+                  }
+                }
+              }
+            ]
+          },
+          "uniqueItems": true,
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "access": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "read",
+              "createDerived"
+            ]
+          },
+          "uniqueItems": true,
+          "minItems": 1,
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "category",
+        "resourceRefs",
+        "access"
+      ]
+    },
+    "filesystemScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "root": {
+          "type": "string",
+          "pattern": "^owner-root:[a-z][a-z0-9-]{0,63}$"
+        },
+        "resourceRef": {
+          "allOf": [
+            {
+              "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "Resource"
+                },
+                "id": {
+                  "pattern": "^urn:agentos:resource:"
+                }
+              }
+            }
+          ]
+        },
+        "rootKind": {
+          "enum": [
+            "referenceFolder",
+            "managedWorkspace"
+          ]
+        },
+        "access": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "read",
+              "createDerived"
+            ]
+          },
+          "uniqueItems": true,
+          "minItems": 1,
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "root",
+        "resourceRef",
+        "rootKind",
+        "access"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "rootKind": {
+                "const": "referenceFolder"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "access": {
+                "items": {
+                  "const": "read"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

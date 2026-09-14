@@ -1,0 +1,282 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://personal-agentos.dev/schemas/v0.1/grant.schema.json",
+  "title": "Personal AgentOS v0.1 Grant",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "0.1"
+    },
+    "kind": {
+      "const": "Grant"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^urn:agentos:grant:[a-z0-9][a-z0-9._-]{0,95}$",
+      "maxLength": 150
+    },
+    "revision": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/revision"
+    },
+    "createdAt": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/timestamp"
+    },
+    "authority": {
+      "const": "agentos"
+    },
+    "ownerRef": {
+      "allOf": [
+        {
+          "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "Owner"
+            },
+            "id": {
+              "pattern": "^urn:agentos:owner:"
+            }
+          }
+        }
+      ]
+    },
+    "provenance": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/provenance"
+    },
+    "issuer": {
+      "const": "agentos"
+    },
+    "decisionActor": {
+      "enum": [
+        "owner",
+        "agentosPolicy"
+      ]
+    },
+    "decisionRef": {
+      "allOf": [
+        {
+          "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "Evidence"
+            },
+            "id": {
+              "pattern": "^urn:agentos:evidence:"
+            }
+          }
+        }
+      ]
+    },
+    "workRef": {
+      "allOf": [
+        {
+          "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "Work"
+            },
+            "id": {
+              "pattern": "^urn:agentos:work:"
+            }
+          }
+        }
+      ]
+    },
+    "packageRef": {
+      "anyOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "AgentPackage"
+                },
+                "id": {
+                  "pattern": "^urn:agentos:agent-package:"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "runtimeRef": {
+      "allOf": [
+        {
+          "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "Runtime"
+            },
+            "id": {
+              "pattern": "^urn:agentos:runtime:"
+            }
+          }
+        }
+      ]
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/action"
+      },
+      "uniqueItems": true,
+      "minItems": 1,
+      "maxItems": 64
+    },
+    "scope": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/scope"
+    },
+    "budget": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/budget"
+    },
+    "validFrom": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/timestamp"
+    },
+    "expiresAt": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/timestamp"
+    },
+    "state": {
+      "enum": [
+        "active",
+        "revoked",
+        "expired"
+      ]
+    },
+    "parentGrantRef": {
+      "anyOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "Grant"
+                },
+                "id": {
+                  "pattern": "^urn:agentos:grant:"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "delegation": {
+      "const": "subsetOnly"
+    },
+    "installationDerived": {
+      "const": false
+    },
+    "approvalRef": {
+      "anyOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "Evidence"
+                },
+                "id": {
+                  "pattern": "^urn:agentos:evidence:"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "kind",
+    "id",
+    "revision",
+    "createdAt",
+    "authority",
+    "ownerRef",
+    "provenance",
+    "issuer",
+    "decisionActor",
+    "decisionRef",
+    "workRef",
+    "packageRef",
+    "runtimeRef",
+    "actions",
+    "scope",
+    "budget",
+    "validFrom",
+    "expiresAt",
+    "state",
+    "parentGrantRef",
+    "delegation",
+    "installationDerived",
+    "approvalRef"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "actions": {
+            "contains": {
+              "enum": [
+                "network.write",
+                "message.send",
+                "resource.delete"
+              ]
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "decisionActor": {
+            "const": "owner"
+          },
+          "approvalRef": {
+            "allOf": [
+              {
+                "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "Evidence"
+                  },
+                  "id": {
+                    "pattern": "^urn:agentos:evidence:"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

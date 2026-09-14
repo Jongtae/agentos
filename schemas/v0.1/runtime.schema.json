@@ -1,0 +1,247 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://personal-agentos.dev/schemas/v0.1/runtime.schema.json",
+  "title": "Personal AgentOS v0.1 Runtime",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "0.1"
+    },
+    "kind": {
+      "const": "Runtime"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^urn:agentos:runtime:[a-z0-9][a-z0-9._-]{0,95}$",
+      "maxLength": 150
+    },
+    "revision": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/revision"
+    },
+    "createdAt": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/timestamp"
+    },
+    "authority": {
+      "const": "agentos"
+    },
+    "ownerRef": {
+      "allOf": [
+        {
+          "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "Owner"
+            },
+            "id": {
+              "pattern": "^urn:agentos:owner:"
+            }
+          }
+        }
+      ]
+    },
+    "provenance": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/provenance"
+    },
+    "releaseVersion": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/releaseVersion"
+    },
+    "releaseDigest": {
+      "allOf": [
+        {
+          "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/digest"
+        },
+        {
+          "properties": {
+            "scope": {
+              "const": "runtimeDistribution"
+            }
+          }
+        }
+      ]
+    },
+    "packageRef": {
+      "anyOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "AgentPackage"
+                },
+                "id": {
+                  "pattern": "^urn:agentos:agent-package:"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "capabilityRefs": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          {
+            "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+          },
+          {
+            "properties": {
+              "kind": {
+                "const": "Capability"
+              },
+              "id": {
+                "pattern": "^urn:agentos:capability:"
+              }
+            }
+          }
+        ]
+      },
+      "uniqueItems": true,
+      "minItems": 1,
+      "maxItems": 64
+    },
+    "adapterType": {
+      "enum": [
+        "modelProvider",
+        "localModel",
+        "api",
+        "mcp",
+        "delegated",
+        "humanMediated"
+      ]
+    },
+    "agentosApi": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "supportedVersions": {
+          "type": "array",
+          "items": {
+            "const": "0.1"
+          },
+          "uniqueItems": true,
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "unknownVersion": {
+          "const": "reject"
+        }
+      },
+      "required": [
+        "supportedVersions",
+        "unknownVersion"
+      ]
+    },
+    "state": {
+      "enum": [
+        "staged",
+        "installedDisabled",
+        "enabled",
+        "connected",
+        "disabled",
+        "quarantined",
+        "uninstalled"
+      ]
+    },
+    "health": {
+      "enum": [
+        "notChecked",
+        "passed",
+        "failed"
+      ]
+    },
+    "sandbox": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/sandbox"
+    },
+    "executionAuthority": {
+      "const": "workScopedGrantsOnly"
+    },
+    "grantAuthority": {
+      "const": "none"
+    },
+    "canonicalMemoryWrite": {
+      "const": false
+    },
+    "sealedEvidenceMutation": {
+      "const": false
+    },
+    "finalCompletionAuthority": {
+      "const": "agentos"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "kind",
+    "id",
+    "revision",
+    "createdAt",
+    "authority",
+    "ownerRef",
+    "provenance",
+    "releaseVersion",
+    "releaseDigest",
+    "packageRef",
+    "capabilityRefs",
+    "adapterType",
+    "agentosApi",
+    "state",
+    "health",
+    "sandbox",
+    "executionAuthority",
+    "grantAuthority",
+    "canonicalMemoryWrite",
+    "sealedEvidenceMutation",
+    "finalCompletionAuthority"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "enum": [
+              "enabled",
+              "connected"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "health": {
+            "const": "passed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "health": {
+            "const": "failed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "state": {
+            "enum": [
+              "staged",
+              "disabled",
+              "quarantined",
+              "uninstalled"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

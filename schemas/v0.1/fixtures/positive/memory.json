@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "0.1",
+  "kind": "Memory",
+  "id": "urn:agentos:memory:example",
+  "revision": 1,
+  "createdAt": "2026-09-14T00:00:00Z",
+  "authority": "agentos",
+  "ownerRef": {
+    "kind": "Owner",
+    "id": "urn:agentos:owner:example",
+    "schemaVersion": "0.1",
+    "revision": 1
+  },
+  "provenance": {
+    "producer": "agentos",
+    "evidenceClass": "deterministicFixture",
+    "sourceRefs": []
+  },
+  "contentRef": {
+    "kind": "Resource",
+    "id": "urn:agentos:resource:source",
+    "schemaVersion": "0.1",
+    "revision": 1,
+    "digest": {
+      "algorithm": "sha256",
+      "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "scope": "contentBlob"
+    }
+  },
+  "sourceRefs": [
+    {
+      "kind": "Artifact",
+      "id": "urn:agentos:artifact:example",
+      "schemaVersion": "0.1",
+      "revision": 1
+    }
+  ],
+  "confidence": 0.8,
+  "sensitivity": "personal",
+  "retention": {
+    "policy": "ownerManaged",
+    "expiresAt": null,
+    "deletionAuthority": "agentos",
+    "supersedes": null
+  },
+  "state": "active",
+  "decisionRef": {
+    "kind": "Evidence",
+    "id": "urn:agentos:evidence:memory",
+    "schemaVersion": "0.1",
+    "revision": 1
+  },
+  "writeAuthority": "agentosPolicyOrOwner",
+  "acceptedCandidateRef": null
+}

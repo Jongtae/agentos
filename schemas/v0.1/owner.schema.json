@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://personal-agentos.dev/schemas/v0.1/owner.schema.json",
+  "title": "Personal AgentOS v0.1 Owner",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "0.1"
+    },
+    "kind": {
+      "const": "Owner"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^urn:agentos:owner:[a-z0-9][a-z0-9._-]{0,95}$",
+      "maxLength": 150
+    },
+    "revision": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/revision"
+    },
+    "createdAt": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/timestamp"
+    },
+    "authority": {
+      "const": "agentos"
+    },
+    "provenance": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/provenance"
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "revision": {
+          "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/revision"
+        },
+        "defaultDeny": {
+          "const": true
+        },
+        "contextCapture": {
+          "const": "optInFiltered"
+        },
+        "canonicalMemoryAuthority": {
+          "const": "agentos"
+        },
+        "packageAuthority": {
+          "const": "requestOnly"
+        },
+        "controlPlaneContentRetention": {
+          "const": "none"
+        }
+      },
+      "required": [
+        "revision",
+        "defaultDeny",
+        "contextCapture",
+        "canonicalMemoryAuthority",
+        "packageAuthority",
+        "controlPlaneContentRetention"
+      ]
+    },
+    "state": {
+      "enum": [
+        "active",
+        "locked",
+        "retired"
+      ]
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "kind",
+    "id",
+    "revision",
+    "createdAt",
+    "authority",
+    "provenance",
+    "displayName",
+    "policy",
+    "state"
+  ]
+}

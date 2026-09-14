@@ -1,0 +1,236 @@
+{
+  "schemaVersion": "0.1",
+  "kind": "AgentPackage",
+  "id": "urn:agentos:agent-package:example",
+  "revision": 1,
+  "createdAt": "2026-09-14T00:00:00Z",
+  "provenance": {
+    "producer": "agentos",
+    "evidenceClass": "deterministicFixture",
+    "sourceRefs": []
+  },
+  "name": "fixture-reader",
+  "publisher": {
+    "id": "example.publisher",
+    "displayName": "Fixture publisher",
+    "identityEvidence": "unverified"
+  },
+  "releaseVersion": "1.0.0",
+  "releaseDigest": {
+    "algorithm": "sha256",
+    "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "scope": "packageArchive"
+  },
+  "license": "MIT",
+  "compatibility": {
+    "agentosApiVersions": [
+      "0.1"
+    ],
+    "manifestSchemaVersions": [
+      "0.1"
+    ],
+    "unknownVersion": "reject",
+    "unknownFields": "reject",
+    "migration": "explicitValidatedCopy"
+  },
+  "capabilityRefs": [
+    {
+      "kind": "Capability",
+      "id": "urn:agentos:capability:example",
+      "schemaVersion": "0.1",
+      "revision": 1
+    }
+  ],
+  "runtimeRefs": [
+    {
+      "kind": "Runtime",
+      "id": "urn:agentos:runtime:example",
+      "schemaVersion": "0.1",
+      "revision": 1,
+      "releaseVersion": "1.0.0",
+      "digest": {
+        "algorithm": "sha256",
+        "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "scope": "runtimeDistribution"
+      }
+    }
+  ],
+  "requestedActions": [
+    "resource.read",
+    "artifact.create",
+    "memory.propose"
+  ],
+  "requestedScope": {
+    "resources": [
+      {
+        "resourceRef": {
+          "kind": "Resource",
+          "id": "urn:agentos:resource:source",
+          "schemaVersion": "0.1",
+          "revision": 1,
+          "digest": {
+            "algorithm": "sha256",
+            "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "scope": "contentBlob"
+          }
+        },
+        "access": [
+          "read"
+        ],
+        "preserveOriginal": true
+      }
+    ],
+    "network": [],
+    "secrets": [],
+    "memory": {
+      "read": "contextSnapshotOnly",
+      "write": "candidateOnly",
+      "canonicalWrite": false,
+      "localState": "none",
+      "removal": "removePackageStatePreserveOwnerMemory"
+    },
+    "events": {
+      "subscriptions": [],
+      "background": "disabled",
+      "triggerAuthority": "none"
+    },
+    "hostHomeAccess": false,
+    "arbitraryShell": false,
+    "dockerSocket": false,
+    "data": [
+      {
+        "category": "ownerArtifacts",
+        "resourceRefs": [
+          {
+            "kind": "Resource",
+            "id": "urn:agentos:resource:source",
+            "schemaVersion": "0.1",
+            "revision": 1,
+            "digest": {
+              "algorithm": "sha256",
+              "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "scope": "contentBlob"
+            }
+          }
+        ],
+        "access": [
+          "read"
+        ]
+      }
+    ],
+    "filesystem": [
+      {
+        "root": "owner-root:reference",
+        "resourceRef": {
+          "kind": "Resource",
+          "id": "urn:agentos:resource:source",
+          "schemaVersion": "0.1",
+          "revision": 1,
+          "digest": {
+            "algorithm": "sha256",
+            "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "scope": "contentBlob"
+          }
+        },
+        "rootKind": "referenceFolder",
+        "access": [
+          "read"
+        ]
+      }
+    ]
+  },
+  "budget": {
+    "maxDurationSeconds": 300,
+    "maxCostMinor": 0,
+    "currency": "USD",
+    "maxTokens": 4096,
+    "maxMemoryMiB": 128,
+    "maxOutputBytes": 1048576,
+    "maxChildren": 0
+  },
+  "approvalPolicy": {
+    "consequentialActions": "ownerPerAction",
+    "otherActions": "currentGrant",
+    "installationCreatesGrant": false
+  },
+  "sandbox": {
+    "profile": "agentosScoped",
+    "hostHomeAccess": false,
+    "arbitraryShell": false,
+    "hostMounts": false,
+    "dockerSocket": false,
+    "network": "deny",
+    "nestedAuthority": "subsetOfParentWork"
+  },
+  "lifecycle": {
+    "installationState": "installedDisabled",
+    "installationCreatesGrant": false,
+    "enablingCreatesGrant": false,
+    "connectionCreatesGrant": false,
+    "activationRequiresHealthyRevision": true,
+    "updateAuthority": "reevaluateAllAuthorityDeltas",
+    "updateFailure": "restoreKnownGoodOrQuarantine",
+    "rollback": "supported",
+    "disable": "revokePackageGrants",
+    "quarantine": "revokePackageGrants",
+    "uninstall": "revokePackageGrantsPreserveOwnerArtifactsAndEvidence",
+    "dataMigration": "explicitOwnerApprovedCopy"
+  },
+  "authority": "requestOnly",
+  "artifactPolicy": {
+    "inputTypes": [
+      "text/plain"
+    ],
+    "outputTypes": [
+      "text/plain"
+    ],
+    "ownership": "owner",
+    "preserveOnRemoval": true
+  },
+  "dependencies": [],
+  "healthCheck": {
+    "capabilityRef": {
+      "kind": "Capability",
+      "id": "urn:agentos:capability:example",
+      "schemaVersion": "0.1",
+      "revision": 1
+    },
+    "timeoutSeconds": 30,
+    "failure": "doNotActivate"
+  },
+  "supplyChain": {
+    "sourceRevision": "dddddddddddddddddddddddddddddddddddddddd",
+    "buildProvenanceRef": {
+      "kind": "Resource",
+      "id": "urn:agentos:resource:source",
+      "schemaVersion": "0.1",
+      "revision": 1,
+      "digest": {
+        "algorithm": "sha256",
+        "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "scope": "contentBlob"
+      }
+    },
+    "sbom": {
+      "format": "spdx",
+      "contentRef": {
+        "kind": "Resource",
+        "id": "urn:agentos:resource:source",
+        "schemaVersion": "0.1",
+        "revision": 1,
+        "digest": {
+          "algorithm": "sha256",
+          "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "scope": "contentBlob"
+        }
+      }
+    },
+    "signature": {
+      "status": "unsigned",
+      "algorithm": "none",
+      "keyId": null,
+      "signatureRef": null,
+      "securityClaim": "identityAndIntegrityOnly"
+    }
+  }
+}

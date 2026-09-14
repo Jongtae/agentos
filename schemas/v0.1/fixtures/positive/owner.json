@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "0.1",
+  "kind": "Owner",
+  "id": "urn:agentos:owner:example",
+  "revision": 1,
+  "createdAt": "2026-09-14T00:00:00Z",
+  "authority": "agentos",
+  "provenance": {
+    "producer": "agentos",
+    "evidenceClass": "deterministicFixture",
+    "sourceRefs": []
+  },
+  "displayName": "Fixture owner",
+  "policy": {
+    "revision": 1,
+    "defaultDeny": true,
+    "contextCapture": "optInFiltered",
+    "canonicalMemoryAuthority": "agentos",
+    "packageAuthority": "requestOnly",
+    "controlPlaneContentRetention": "none"
+  },
+  "state": "active"
+}

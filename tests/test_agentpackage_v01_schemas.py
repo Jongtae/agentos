@@ -75,10 +75,12 @@ class AgentPackageV01Tests(unittest.TestCase):
 
     def test_latest_context_revision_revokes_a_historical_snapshot(self):
         catalog, documents = verifier.load_fixture_bundle()
-        revoked = deepcopy(documents["positive/context.json"])
-        revoked.update(revision=2, createdAt="2026-09-14T00:01:00Z", state="deleted")
-        errors = verifier.semantic_errors([*documents.values(), revoked], catalog)
-        self.assertTrue(any(error.startswith("CONTEXT-002 ") for error in errors), errors)
+        for state, expires_at in (("deleted", "2026-09-14T02:00:00Z"), ("available", "2026-09-14T00:04:00Z")):
+            with self.subTest(state=state, expires_at=expires_at):
+                revoked = deepcopy(documents["positive/context.json"])
+                revoked.update(revision=2, createdAt="2026-09-14T00:01:00Z", state=state, expiresAt=expires_at)
+                errors = verifier.semantic_errors([*documents.values(), revoked], catalog)
+                self.assertTrue(any(error.startswith("CONTEXT-002 ") for error in errors), errors)
 
 
 if __name__ == "__main__":

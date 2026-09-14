@@ -339,8 +339,11 @@ def semantic_errors(records: list[dict[str, Any]], catalog: dict[str, Any]) -> l
                 work = resolve(record["workRef"])
                 if _stamp(record["expiresAt"]) <= as_of:
                     fail("CONTEXT-002", record, "ContextSnapshot is expired")
-                if current_context and current_context["state"] != "available":
+                if current_context and (current_context["state"] != "available" or
+                                        _stamp(current_context["expiresAt"]) <= as_of):
                     fail("CONTEXT-002", record, "source Context is not available")
+                if current_context and _stamp(record["expiresAt"]) > _stamp(current_context["expiresAt"]):
+                    fail("CONTEXT-001", record, "snapshot outlives the current Context revision")
                 if work and (record["recipientRuntimeRef"] != work["runtimeRef"] or
                              (context and record["recipientRuntimeRef"] != context["recipientRuntimeRef"])):
                     fail("CONTEXT-003", record, "snapshot recipient does not match Context and Work runtime")

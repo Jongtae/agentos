@@ -8,6 +8,10 @@ Active work is executed only from a goal-ready issue and active delivery-plan en
 | --- | --- | --- |
 | D-AP-01: Core Primitives + AgentPackage v0.1 | [#334](https://github.com/Jongtae/personal-agentos/issues/334) | Complete on merge of PR #350 after current schema/fixture validation, required CI, and independent schema, authority, and convergence review. This is a contract and machine-verification slice only: no package execution, installation, Registry/Marketplace, credential, connector, Ruflo, or live external operation is implemented or claimed. |
 
+## Owner dogfood vertical slice
+
+| DOGFOOD-01: owner-usable local browser, provider, file workspace, and restart path | [#351](https://github.com/Jongtae/personal-agentos/issues/351) | Implementation on `dogfood/owner-usable-vertical-slice`; the deterministic local HTTP/worker journey is covered, while real-provider operating evidence remains owner-controlled and is not claimed by repository tests. |
+
 No successor is active. Issues #335–#346 remain planned and require separate explicit owner activation.
 
 ## Deferred — Product information and policy site

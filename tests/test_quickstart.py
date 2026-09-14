@@ -445,6 +445,74 @@ finally:
         result=json.loads(restarted.stdout)
         self.assertEqual(result['status'],'succeeded');self.assertIn('Compatible response',result['response']);self.assertIn('meeting.txt',result['response'])
 
+    def test_owner_dogfood_vertical_slice_runs_over_http_and_restarts(self):
+        """Exercise the credential-free owner journey through the real local worker."""
+        reference=Path(self.temp.name)/'reference';workspace=Path(self.temp.name)/'workspace'
+        reference.mkdir();workspace.mkdir()
+        original=reference/'launch.md';original.write_text('Launch review: ship October 12.',encoding='utf-8')
+        before=original.read_bytes()
+        password='owner-dogfood-password'
+
+        def start_server(service):
+            server=ThreadingHTTPServer(('127.0.0.1',0),make_handler(service))
+            thread=threading.Thread(target=server.serve_forever);thread.start()
+            service.start()
+            client=build_opener(HTTPCookieProcessor(CookieJar()))
+            base='http://127.0.0.1:'+str(server.server_port)
+            return server,thread,client,base
+
+        def request(client,base,path,body=None):
+            req=Request(base+path,data=json.dumps(body).encode() if body is not None else None,
+                        headers={'Content-Type':'application/json'} if body is not None else {})
+            with client.open(req,timeout=3) as response:return json.load(response)
+
+        def wait_for(client,base,job_id):
+            for _ in range(100):
+                state=request(client,base,'/api/state')
+                job=next(item for item in state['jobs'] if item['id']==job_id)
+                if job['status'] not in ('queued','running'):return job
+                time.sleep(.03)
+            self.fail('local worker did not finish the owner request')
+
+        server,thread,client,base=start_server(self.service)
+        try:
+            request(client,base,'/api/claim',{'code':self.store.bootstrap.read_text(),'password':password})
+            request(client,base,'/api/model',{'provider':'compatible','endpoint':'https://example.test/v1','model':'test-model'})
+            self.assertTrue(request(client,base,'/api/model/test',{})['ok'])
+            request(client,base,'/api/file-workspace',{'references':[str(reference)],'workspace':str(workspace)})
+            request(client,base,'/api/documents/approval',{'approved':True})
+            queued=request(client,base,'/api/chat',{
+                'message':'“Launch review” 자료를 요약해 “Launch notes”로 저장해줘',
+                'request_key':'owner-dogfood-summary'})
+            first=wait_for(client,base,queued['id'])
+            self.assertEqual(first['status'],'succeeded',first)
+            self.assertEqual(len(list(workspace.glob('*.md'))),1)
+            saved=next(workspace.glob('*.md'))
+            self.assertIn('launch.md',saved.read_text(encoding='utf-8'))
+            self.assertEqual(original.read_bytes(),before)
+            self.assertTrue(self.store.config('file_workspace_document_jobs'))
+        finally:
+            self.service.stop.set()
+            for worker in self.service.threads:worker.join(timeout=2)
+            server.shutdown();thread.join();server.server_close()
+
+        restarted=AgentService(QuickStore(self.temp.name),ModelAdapter(self.transport),self.transport)
+        server,thread,client,base=start_server(restarted)
+        try:
+            request(client,base,'/api/login',{'password':password})
+            queued=request(client,base,'/api/chat',{
+                'message':'저장된 작업공간에서 “Launch notes” 찾아줘',
+                'request_key':'owner-dogfood-reuse'})
+            reused=wait_for(client,base,queued['id'])
+            self.assertEqual(reused['status'],'succeeded')
+            self.assertIn('Launch notes',reused['response'])
+            self.assertIn('launch.md',reused['response'])
+            self.assertEqual(request(client,base,'/api/home')['state'],'ready')
+        finally:
+            restarted.stop.set()
+            for worker in restarted.threads:worker.join(timeout=2)
+            server.shutdown();thread.join();server.server_close()
+
     def test_file_workspace_rejects_escape_and_cleans_up_failed_save(self):
         reference=Path(self.temp.name)/'reference';workspace=Path(self.temp.name)/'workspace';outside=Path(self.temp.name)/'outside.md'
         reference.mkdir();workspace.mkdir();outside.write_text('outside',encoding='utf-8')

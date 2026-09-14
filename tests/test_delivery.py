@@ -60,21 +60,25 @@ class DeliveryTests(unittest.TestCase):
 
     def test_dogfood_is_sole_goal_ready_target_but_heartbeat_cannot_run_it(self):
         controller=self.controller()
-        self.assertEqual(controller.plan.next_goal()['status'], 'active')
-        self.assertEqual(controller.plan.next_goal()['id'], 'DOGFOOD-01')
-        # The explicit owner invocation has transitioned the next-goal state;
-        # the iteration itself remains the goal-ready record.
-        self.assertEqual(controller.plan.select({})['id'], 'DOGFOOD-01')
-        # A non-active next-goal status is also never executable by heartbeat,
-        # even when the iteration remains the sole goal-ready target.
+        self.assertEqual(controller.plan.next_goal()['status'], 'complete')
+        self.assertIsNone(controller.plan.next_goal()['id'])
+        self.assertIsNone(controller.plan.select({}))
+        # Preserve the activation-preparation contract as a regression fixture:
+        # DOGFOOD-01 is the sole goal-ready target, but a non-active next-goal
+        # status cannot cause the heartbeat to execute it.
         altered=json.loads((self.root/'delivery-plan.yaml').read_text())
-        altered['next_goal']['status']='owner-activated-goal-ready'
+        altered['iterations']=[dict(item) for item in altered['iterations']]
+        dogfood=next(item for item in altered['iterations'] if item['id']=='DOGFOOD-01')
+        dogfood['activation_status']='owner-activated-goal-ready'
+        altered['next_goal']={'id':'DOGFOOD-01','status':'owner-activated-goal-ready'}
         (self.root/'delivery-plan.yaml').write_text(json.dumps(altered))
         paused=DeliveryPlan(self.root/'delivery-plan.yaml')
-        self.assertEqual(paused.next_goal()['id'], 'DOGFOOD-01')
+        self.assertEqual(paused.next_goal()['id'],'DOGFOOD-01')
         self.assertIsNone(paused.select({}))
+        # A non-active next-goal status is also never executable by heartbeat,
+        # even when the iteration remains the sole goal-ready target.
         self.assertIsNone(paused.select({'active':'SITE-01'}))
-        self.assertEqual(controller.plan.items['DOGFOOD-01']['activation_status'], 'owner-activated-goal-ready')
+        self.assertEqual(controller.plan.items['DOGFOOD-01']['activation_status'], 'complete-on-merge')
         self.assertEqual(controller.plan.items['DOGFOOD-01']['issue'], 351)
         self.assertEqual(controller.plan.items['DOGFOOD-01']['depends_on'], ['D-AP-01'])
         self.assertEqual(controller.plan.items['D-AP-01']['activation_status'], 'complete-on-merge')

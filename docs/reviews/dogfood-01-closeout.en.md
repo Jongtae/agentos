@@ -4,6 +4,12 @@ This audit records the evidence for the owner-selected local vertical slice. It
 does not claim that a live provider or browser session was operated in this
 repository run.
 
+Lifecycle status: PR #354 is merged to `main` as `6bdcb05`; the required PR
+validation passed on the merged head; the implementation branch is closed out;
+the delivery plan records DOGFOOD-01 complete and selects no successor. Issue
+#351 is the final remaining GitHub closeout action at the time this audit was
+written.
+
 | Requirement | Current evidence | Evidence class |
 | --- | --- | --- |
 | Start locally and open the owner flow | `agentos start`, loopback URL, setup-link recovery, and restart guidance in `QUICKSTART.md`; existing CLI/server tests | deterministic + local operating instructions |

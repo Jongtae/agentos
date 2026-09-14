@@ -10,7 +10,7 @@ Active work is executed only from a goal-ready issue and active delivery-plan en
 
 ## Owner dogfood vertical slice
 
-| DOGFOOD-01: owner-usable local browser, provider, file workspace, and restart path | [#351](https://github.com/Jongtae/personal-agentos/issues/351) | Implementation on `dogfood/owner-usable-vertical-slice`; the deterministic local HTTP/worker journey is covered, while real-provider operating evidence remains owner-controlled and is not claimed by repository tests. |
+| DOGFOOD-01: owner-usable local browser, provider, file workspace, and restart path | [#351](https://github.com/Jongtae/personal-agentos/issues/351) | Complete on merge of PR #354 with deterministic local HTTP/worker evidence and independent authority/convergence review; live-provider/browser operation remains owner-controlled and is not claimed by repository tests. |
 
 No successor is active. Issues #335–#346 remain planned and require separate explicit owner activation.
 

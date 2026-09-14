@@ -328,5 +328,14 @@
       {"file": "positive/memory-candidate.json", "changes": [{"op": "set", "path": "/state", "value": "accepted"}, {"op": "set", "path": "/decisionRef", "value": {"kind": "Evidence", "id": "urn:agentos:evidence:memory", "schemaVersion": "0.1", "revision": 1}}, {"op": "set", "path": "/resultingMemoryRef", "value": {"kind": "Memory", "id": "urn:agentos:memory:example", "schemaVersion": "0.1", "revision": 1}}]},
       {"file": "positive/memory.json", "changes": [{"op": "set", "path": "/acceptedCandidateRef", "value": {"kind": "MemoryCandidate", "id": "urn:agentos:memory-candidate:example", "schemaVersion": "0.1", "revision": 1}}]}
     ]
+  },
+  {
+    "id": "WORK-007-invariants-do-not-depend-on-listed-transition",
+    "layer": "semantic",
+    "rule": "WORK-007",
+    "mutations": [
+      {"file": "$catalog", "changes": [{"op": "set", "path": "/transitions", "value": []}]},
+      {"file": "positive/work-ready.json", "changes": [{"op": "set", "path": "/requestedActions", "value": ["resource.read", "memory.propose"]}]}
+    ]
   }
 ]

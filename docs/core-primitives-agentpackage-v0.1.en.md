@@ -115,7 +115,8 @@ The record contains no password, token, provider session, or raw secret. A
 Context is represented at the worker boundary as a `ContextSnapshot` bound to
 one Owner and one Work, with issue and expiry timestamps, classified items,
 source/digest attribution, and explicit allowed uses. `canonicalMemory` is
-always `false`. Possession of Context does not grant an action, filesystem,
+always `false` on Context, and `canonicalMemoryAuthority` is always `false` on
+ContextSnapshot. Possession of Context does not grant an action, filesystem,
 network, secret, or Memory write. Expired or differently bound snapshots fail
 closed. Full conversation history is not implied by a snapshot.
 

@@ -333,12 +333,13 @@ def semantic_errors(records: list[dict[str, Any]], catalog: dict[str, Any]) -> l
                             fail("EVIDENCE-001", record, "completion requires sealed AgentOS validation for this Work")
             else:
                 context = resolve(record["contextRef"])
+                current_context = latest("Context", record["contextRef"]["id"])
                 if context and (not same_work(record, context) or any(ref not in context["sourceRefs"] for ref in record["sourceRefs"]) or _stamp(record["expiresAt"]) > _stamp(context["expiresAt"])):
                     fail("CONTEXT-001", record, "snapshot expands its Context or Work boundary")
                 work = resolve(record["workRef"])
                 if _stamp(record["expiresAt"]) <= as_of:
                     fail("CONTEXT-002", record, "ContextSnapshot is expired")
-                if context and context["state"] != "available":
+                if current_context and current_context["state"] != "available":
                     fail("CONTEXT-002", record, "source Context is not available")
                 if work and (record["recipientRuntimeRef"] != work["runtimeRef"] or
                              (context and record["recipientRuntimeRef"] != context["recipientRuntimeRef"])):
@@ -388,6 +389,23 @@ def semantic_errors(records: list[dict[str, Any]], catalog: dict[str, Any]) -> l
         "Event": {"received": {"evaluated", "ignored"}, "evaluated": {"consumed", "ignored"}, "consumed": set(), "ignored": set()},
         "Evidence": {"appended": {"sealed"}, "sealed": set()},
     }
+    work_request_fields = (
+        "ownerRef", "goal", "packageRef", "runtimeRef", "capabilityRef",
+        "requestedActions", "scope", "budget", "deadline", "idempotencyKey", "recovery",
+    )
+    work_ids = {record["id"] for record in records if record["kind"] == "Work"}
+    for work_id in work_ids:
+        lineage = sorted(
+            (record for record in records if record["kind"] == "Work" and record["id"] == work_id),
+            key=lambda record: record["revision"],
+        )
+        for before, after in zip(lineage, lineage[1:]):
+            if after["revision"] != before["revision"] + 1 or after["state"] not in transitions["Work"][before["state"]]:
+                fail("TRANSITION-002", after, "Work record lineage has a missing or invalid state edge")
+            if any(before[field] != after[field] for field in work_request_fields):
+                fail("WORK-007", after, "Work lifecycle revision changes its authority-bearing request")
+            if before["state"] != "planned" and before["contextSnapshotRef"] != after["contextSnapshotRef"]:
+                fail("WORK-007", after, "ready Work changes its ContextSnapshot binding")
     for transition in catalog["transitions"]:
         before, after = resolve(transition["from"]), resolve(transition["to"])
         if before is None or after is None:
@@ -397,15 +415,6 @@ def semantic_errors(records: list[dict[str, Any]], catalog: dict[str, Any]) -> l
         allowed = transitions.get(before["kind"], {}).get(before.get(state_field), set())
         if transition["actor"] != "agentos" or before["kind"] != after["kind"] or before["id"] != after["id"] or after["revision"] != before["revision"] + 1 or after.get(state_field) not in allowed:
             fail("TRANSITION-001", after, "invalid state edge, revision, identity, or transition authority")
-        if before["kind"] == after["kind"] == "Work":
-            immutable_request_fields = (
-                "ownerRef", "goal", "packageRef", "runtimeRef", "capabilityRef",
-                "requestedActions", "scope", "budget", "deadline", "idempotencyKey", "recovery",
-            )
-            if any(before[field] != after[field] for field in immutable_request_fields):
-                fail("WORK-007", after, "Work lifecycle revision changes its authority-bearing request")
-            if before["state"] != "planned" and before["contextSnapshotRef"] != after["contextSnapshotRef"]:
-                fail("WORK-007", after, "ready Work changes its ContextSnapshot binding")
     return sorted(set(errors))
 
 

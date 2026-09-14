@@ -73,6 +73,13 @@ class AgentPackageV01Tests(unittest.TestCase):
         self.assertEqual(verifier.schema_errors(memory, validators["memory.schema.json"]), [])
         self.assertEqual(verifier.semantic_errors(list(changed.values()), catalog), [])
 
+    def test_latest_context_revision_revokes_a_historical_snapshot(self):
+        catalog, documents = verifier.load_fixture_bundle()
+        revoked = deepcopy(documents["positive/context.json"])
+        revoked.update(revision=2, createdAt="2026-09-14T00:01:00Z", state="deleted")
+        errors = verifier.semantic_errors([*documents.values(), revoked], catalog)
+        self.assertTrue(any(error.startswith("CONTEXT-002 ") for error in errors), errors)
+
 
 if __name__ == "__main__":
     unittest.main()

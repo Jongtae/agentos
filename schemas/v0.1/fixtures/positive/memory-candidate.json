@@ -1,0 +1,117 @@
+{
+  "schemaVersion": "0.1",
+  "kind": "MemoryCandidate",
+  "id": "urn:agentos:memory-candidate:example",
+  "revision": 1,
+  "createdAt": "2026-09-14T00:00:00Z",
+  "authority": "agentos",
+  "ownerRef": {
+    "kind": "Owner",
+    "id": "urn:agentos:owner:example",
+    "schemaVersion": "0.1",
+    "revision": 1
+  },
+  "provenance": {
+    "producer": "runtime",
+    "evidenceClass": "deterministicFixture",
+    "sourceRefs": [],
+    "workRef": {
+      "kind": "Work",
+      "id": "urn:agentos:work:example",
+      "schemaVersion": "0.1",
+      "revision": 1
+    },
+    "packageRef": {
+      "kind": "AgentPackage",
+      "id": "urn:agentos:agent-package:example",
+      "schemaVersion": "0.1",
+      "revision": 1,
+      "releaseVersion": "1.0.0",
+      "digest": {
+        "algorithm": "sha256",
+        "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "scope": "packageArchive"
+      }
+    },
+    "runtimeRef": {
+      "kind": "Runtime",
+      "id": "urn:agentos:runtime:example",
+      "schemaVersion": "0.1",
+      "revision": 1,
+      "releaseVersion": "1.0.0",
+      "digest": {
+        "algorithm": "sha256",
+        "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "scope": "runtimeDistribution"
+      }
+    }
+  },
+  "workRef": {
+    "kind": "Work",
+    "id": "urn:agentos:work:example",
+    "schemaVersion": "0.1",
+    "revision": 1
+  },
+  "packageRef": {
+    "kind": "AgentPackage",
+    "id": "urn:agentos:agent-package:example",
+    "schemaVersion": "0.1",
+    "revision": 1,
+    "releaseVersion": "1.0.0",
+    "digest": {
+      "algorithm": "sha256",
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scope": "packageArchive"
+    }
+  },
+  "runtimeRef": {
+    "kind": "Runtime",
+    "id": "urn:agentos:runtime:example",
+    "schemaVersion": "0.1",
+    "revision": 1,
+    "releaseVersion": "1.0.0",
+    "digest": {
+      "algorithm": "sha256",
+      "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "scope": "runtimeDistribution"
+    }
+  },
+  "contentRef": {
+    "kind": "Resource",
+    "id": "urn:agentos:resource:source",
+    "schemaVersion": "0.1",
+    "revision": 1,
+    "digest": {
+      "algorithm": "sha256",
+      "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "scope": "contentBlob"
+    }
+  },
+  "sourceRefs": [
+    {
+      "kind": "Artifact",
+      "id": "urn:agentos:artifact:example",
+      "schemaVersion": "0.1",
+      "revision": 1
+    },
+    {
+      "kind": "ContextSnapshot",
+      "id": "urn:agentos:context-snapshot:example",
+      "schemaVersion": "0.1",
+      "revision": 1
+    }
+  ],
+  "confidence": 0.7,
+  "sensitivity": "personal",
+  "retention": {
+    "policy": "ownerManaged",
+    "expiresAt": null,
+    "deletionAuthority": "agentos",
+    "supersedes": null
+  },
+  "state": "proposed",
+  "canonicalMemoryAuthority": false,
+  "dispositionAuthority": "agentosPolicyOrOwner",
+  "decisionRef": null,
+  "resultingMemoryRef": null
+}

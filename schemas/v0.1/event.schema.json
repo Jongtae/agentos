@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://personal-agentos.dev/schemas/v0.1/event.schema.json",
+  "title": "Personal AgentOS v0.1 Event",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "0.1"
+    },
+    "kind": {
+      "const": "Event"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^urn:agentos:event:[a-z0-9][a-z0-9._-]{0,95}$",
+      "maxLength": 150
+    },
+    "revision": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/revision"
+    },
+    "createdAt": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/timestamp"
+    },
+    "authority": {
+      "const": "agentos"
+    },
+    "ownerRef": {
+      "allOf": [
+        {
+          "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "Owner"
+            },
+            "id": {
+              "pattern": "^urn:agentos:owner:"
+            }
+          }
+        }
+      ]
+    },
+    "provenance": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/provenance"
+    },
+    "eventType": {
+      "enum": [
+        "ownerAction",
+        "schedule",
+        "resourceChanged",
+        "connectorNotification",
+        "system"
+      ]
+    },
+    "state": {
+      "enum": [
+        "received",
+        "evaluated",
+        "consumed",
+        "ignored"
+      ]
+    },
+    "payloadRef": {
+      "allOf": [
+        {
+          "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "Resource"
+            },
+            "id": {
+              "pattern": "^urn:agentos:resource:"
+            }
+          }
+        }
+      ]
+    },
+    "requestedWorkRef": {
+      "anyOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "Work"
+                },
+                "id": {
+                  "pattern": "^urn:agentos:work:"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "subscribedPackageRef": {
+      "anyOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "AgentPackage"
+                },
+                "id": {
+                  "pattern": "^urn:agentos:agent-package:"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "createsAuthority": {
+      "const": false
+    },
+    "policyEvaluationRequired": {
+      "const": true
+    },
+    "subscriptionAuthorizesAction": {
+      "const": false
+    },
+    "expiresAt": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/timestamp"
+    },
+    "deduplicationKey": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_-]{16,96}$"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 2147483647
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "kind",
+    "id",
+    "revision",
+    "createdAt",
+    "authority",
+    "ownerRef",
+    "provenance",
+    "eventType",
+    "state",
+    "payloadRef",
+    "requestedWorkRef",
+    "subscribedPackageRef",
+    "createsAuthority",
+    "policyEvaluationRequired",
+    "subscriptionAuthorizesAction",
+    "expiresAt",
+    "deduplicationKey",
+    "sequence"
+  ]
+}

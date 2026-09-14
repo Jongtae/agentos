@@ -1,0 +1,65 @@
+{
+  "schemaVersion": "0.1",
+  "kind": "Capability",
+  "id": "urn:agentos:capability:example",
+  "revision": 1,
+  "createdAt": "2026-09-14T00:00:00Z",
+  "authority": "agentos",
+  "ownerRef": {
+    "kind": "Owner",
+    "id": "urn:agentos:owner:example",
+    "schemaVersion": "0.1",
+    "revision": 1
+  },
+  "provenance": {
+    "producer": "agentos",
+    "evidenceClass": "deterministicFixture",
+    "sourceRefs": []
+  },
+  "name": "resource.reader",
+  "description": "Deterministic design fixture for bounded local reading.",
+  "actions": [
+    "resource.read",
+    "artifact.create",
+    "memory.propose"
+  ],
+  "packageRef": {
+    "kind": "AgentPackage",
+    "id": "urn:agentos:agent-package:example",
+    "schemaVersion": "0.1",
+    "revision": 1,
+    "releaseVersion": "1.0.0",
+    "digest": {
+      "algorithm": "sha256",
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scope": "packageArchive"
+    }
+  },
+  "runtimeRefs": [
+    {
+      "kind": "Runtime",
+      "id": "urn:agentos:runtime:example",
+      "schemaVersion": "0.1",
+      "revision": 1,
+      "releaseVersion": "1.0.0",
+      "digest": {
+        "algorithm": "sha256",
+        "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "scope": "runtimeDistribution"
+      }
+    }
+  ],
+  "inputArtifactTypes": [
+    "text/plain"
+  ],
+  "outputArtifactTypes": [
+    "text/plain"
+  ],
+  "authorization": "currentWorkGrant",
+  "approvalPolicy": {
+    "consequentialActions": "ownerPerAction",
+    "otherActions": "currentGrant",
+    "installationCreatesGrant": false
+  },
+  "state": "registered"
+}

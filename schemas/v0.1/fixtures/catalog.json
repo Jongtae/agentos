@@ -1,0 +1,190 @@
+{
+  "schemaVersion": "0.1",
+  "evidenceClass": "deterministicFixture",
+  "asOf": "2026-09-14T00:05:00Z",
+  "positive": [
+    {
+      "file": "positive/owner.json",
+      "schema": "owner.schema.json"
+    },
+    {
+      "file": "positive/owner-current.json",
+      "schema": "owner.schema.json"
+    },
+    {
+      "file": "positive/agent-package.json",
+      "schema": "agent-package.schema.json"
+    },
+    {
+      "file": "positive/capability.json",
+      "schema": "capability.schema.json"
+    },
+    {
+      "file": "positive/capability-current.json",
+      "schema": "capability.schema.json"
+    },
+    {
+      "file": "positive/runtime.json",
+      "schema": "runtime.schema.json"
+    },
+    {
+      "file": "positive/runtime-current.json",
+      "schema": "runtime.schema.json"
+    },
+    {
+      "file": "positive/evidence-approval.json",
+      "schema": "evidence.schema.json"
+    },
+    {
+      "file": "positive/evidence-memory.json",
+      "schema": "evidence.schema.json"
+    },
+    {
+      "file": "positive/evidence-completion.json",
+      "schema": "evidence.schema.json"
+    },
+    {
+      "file": "positive/grant.json",
+      "schema": "grant.schema.json"
+    },
+    {
+      "file": "positive/grant-child.json",
+      "schema": "grant.schema.json"
+    },
+    {
+      "file": "positive/context.json",
+      "schema": "context.schema.json"
+    },
+    {
+      "file": "positive/context-snapshot.json",
+      "schema": "context-snapshot.schema.json"
+    },
+    {
+      "file": "positive/artifact.json",
+      "schema": "artifact.schema.json"
+    },
+    {
+      "file": "positive/memory.json",
+      "schema": "memory.schema.json"
+    },
+    {
+      "file": "positive/memory-candidate.json",
+      "schema": "memory-candidate.schema.json"
+    },
+    {
+      "file": "positive/event.json",
+      "schema": "event.schema.json"
+    },
+    {
+      "file": "positive/work-planned.json",
+      "schema": "work.schema.json"
+    },
+    {
+      "file": "positive/work-ready.json",
+      "schema": "work.schema.json"
+    },
+    {
+      "file": "positive/work.json",
+      "schema": "work.schema.json"
+    },
+    {
+      "file": "positive/work-proposed.json",
+      "schema": "work.schema.json"
+    },
+    {
+      "file": "positive/work-completed.json",
+      "schema": "work.schema.json"
+    },
+    {
+      "file": "positive/artifact-native.json",
+      "schema": "artifact.schema.json"
+    },
+    {
+      "file": "positive/evidence-native.json",
+      "schema": "evidence.schema.json"
+    }
+  ],
+  "resources": [
+    {
+      "ref": {
+        "kind": "Resource",
+        "id": "urn:agentos:resource:source",
+        "schemaVersion": "0.1",
+        "revision": 1,
+        "digest": {
+          "algorithm": "sha256",
+          "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "scope": "contentBlob"
+        }
+      },
+      "ownerRef": {
+        "kind": "Owner",
+        "id": "urn:agentos:owner:example",
+        "schemaVersion": "0.1",
+        "revision": 1
+      }
+    }
+  ],
+  "transitions": [
+    {
+      "from": {
+        "kind": "Work",
+        "id": "urn:agentos:work:example",
+        "schemaVersion": "0.1",
+        "revision": 1
+      },
+      "to": {
+        "kind": "Work",
+        "id": "urn:agentos:work:example",
+        "schemaVersion": "0.1",
+        "revision": 2
+      },
+      "actor": "agentos"
+    },
+    {
+      "from": {
+        "kind": "Work",
+        "id": "urn:agentos:work:example",
+        "schemaVersion": "0.1",
+        "revision": 2
+      },
+      "to": {
+        "kind": "Work",
+        "id": "urn:agentos:work:example",
+        "schemaVersion": "0.1",
+        "revision": 3
+      },
+      "actor": "agentos"
+    },
+    {
+      "from": {
+        "kind": "Work",
+        "id": "urn:agentos:work:example",
+        "schemaVersion": "0.1",
+        "revision": 3
+      },
+      "to": {
+        "kind": "Work",
+        "id": "urn:agentos:work:example",
+        "schemaVersion": "0.1",
+        "revision": 4
+      },
+      "actor": "agentos"
+    },
+    {
+      "from": {
+        "kind": "Work",
+        "id": "urn:agentos:work:example",
+        "schemaVersion": "0.1",
+        "revision": 4
+      },
+      "to": {
+        "kind": "Work",
+        "id": "urn:agentos:work:example",
+        "schemaVersion": "0.1",
+        "revision": 5
+      },
+      "actor": "agentos"
+    }
+  ]
+}

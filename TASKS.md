@@ -2,6 +2,14 @@
 
 Active work is executed only from a goal-ready issue and active delivery-plan entry under the [Goal Execution Contract](docs/goal-execution-contract.en.md). Status tables are trackers, not authority to activate reserved work.
 
+## Complete on merge — Agent Distribution Platform foundation
+
+| Work unit | Issue | Status |
+| --- | --- | --- |
+| D-AP-01: Core Primitives + AgentPackage v0.1 | [#334](https://github.com/Jongtae/personal-agentos/issues/334) | Complete on merge of PR #350 after current schema/fixture validation, required CI, and independent schema, authority, and convergence review. This is a contract and machine-verification slice only: no package execution, installation, Registry/Marketplace, credential, connector, Ruflo, or live external operation is implemented or claimed. |
+
+No successor is active. Issues #335–#346 remain planned and require separate explicit owner activation.
+
 ## Deferred — Product information and policy site
 
 | Work unit | Issue | Status |

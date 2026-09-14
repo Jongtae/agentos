@@ -1,0 +1,342 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://personal-agentos.dev/schemas/v0.1/evidence.schema.json",
+  "title": "Personal AgentOS v0.1 Evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "0.1"
+    },
+    "kind": {
+      "const": "Evidence"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^urn:agentos:evidence:[a-z0-9][a-z0-9._-]{0,95}$",
+      "maxLength": 150
+    },
+    "revision": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/revision"
+    },
+    "createdAt": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/timestamp"
+    },
+    "authority": {
+      "const": "agentos"
+    },
+    "ownerRef": {
+      "allOf": [
+        {
+          "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "Owner"
+            },
+            "id": {
+              "pattern": "^urn:agentos:owner:"
+            }
+          }
+        }
+      ]
+    },
+    "provenance": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/provenance"
+    },
+    "workRef": {
+      "allOf": [
+        {
+          "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "Work"
+            },
+            "id": {
+              "pattern": "^urn:agentos:work:"
+            }
+          }
+        }
+      ]
+    },
+    "packageRef": {
+      "anyOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "AgentPackage"
+                },
+                "id": {
+                  "pattern": "^urn:agentos:agent-package:"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "runtimeRef": {
+      "anyOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "Runtime"
+                },
+                "id": {
+                  "pattern": "^urn:agentos:runtime:"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "evidenceClass": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/evidenceClass"
+    },
+    "recordType": {
+      "enum": [
+        "approval",
+        "observation",
+        "completionValidation",
+        "memoryDecision"
+      ]
+    },
+    "status": {
+      "enum": [
+        "appended",
+        "sealed"
+      ]
+    },
+    "payloadRef": {
+      "allOf": [
+        {
+          "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "Resource"
+            },
+            "id": {
+              "pattern": "^urn:agentos:resource:"
+            }
+          }
+        }
+      ]
+    },
+    "relatedRefs": {
+      "type": "array",
+      "items": {
+        "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+      },
+      "uniqueItems": true,
+      "minItems": 0,
+      "maxItems": 64
+    },
+    "outcome": {
+      "enum": [
+        "approved",
+        "rejected",
+        "passed",
+        "failed",
+        "observed"
+      ]
+    },
+    "recordedBy": {
+      "enum": [
+        "owner",
+        "agentos"
+      ]
+    },
+    "redacted": {
+      "const": true
+    },
+    "secretPersistence": {
+      "const": false
+    },
+    "sealedMutation": {
+      "const": "forbidden"
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "policy": {
+          "const": "ownerEvidencePolicy"
+        },
+        "preserveOnPackageRemoval": {
+          "const": true
+        }
+      },
+      "required": [
+        "policy",
+        "preserveOnPackageRemoval"
+      ]
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "kind",
+    "id",
+    "revision",
+    "createdAt",
+    "authority",
+    "ownerRef",
+    "provenance",
+    "workRef",
+    "packageRef",
+    "runtimeRef",
+    "evidenceClass",
+    "recordType",
+    "status",
+    "payloadRef",
+    "relatedRefs",
+    "outcome",
+    "recordedBy",
+    "redacted",
+    "secretPersistence",
+    "sealedMutation",
+    "retention"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "recordType": {
+            "const": "approval"
+          },
+          "outcome": {
+            "const": "approved"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "recordedBy": {
+            "enum": [
+              "owner",
+              "agentos"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "recordType": {
+            "const": "completionValidation"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "recordedBy": {
+            "const": "agentos"
+          },
+          "status": {
+            "const": "sealed"
+          },
+          "outcome": {
+            "enum": [
+              "passed",
+              "failed"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "packageRef": {"type": "null"},
+          "runtimeRef": {"type": "null"}
+        },
+        "required": ["packageRef", "runtimeRef"]
+      },
+      "then": {
+        "properties": {
+          "runtimeRef": {
+            "type": "null"
+          },
+          "provenance": {
+            "properties": {
+              "producer": {
+                "enum": [
+                  "owner",
+                  "agentos"
+                ]
+              }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "packageRef"
+                  ]
+                },
+                {
+                  "required": [
+                    "runtimeRef"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "packageRef": {
+            "not": {
+              "type": "null"
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "runtimeRef": {
+            "allOf": [
+              {
+                "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "Runtime"
+                  },
+                  "id": {
+                    "pattern": "^urn:agentos:runtime:"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

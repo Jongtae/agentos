@@ -1,0 +1,320 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://personal-agentos.dev/schemas/v0.1/artifact.schema.json",
+  "title": "Personal AgentOS v0.1 Artifact",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "0.1"
+    },
+    "kind": {
+      "const": "Artifact"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^urn:agentos:artifact:[a-z0-9][a-z0-9._-]{0,95}$",
+      "maxLength": 150
+    },
+    "revision": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/revision"
+    },
+    "createdAt": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/timestamp"
+    },
+    "authority": {
+      "const": "agentos"
+    },
+    "ownerRef": {
+      "allOf": [
+        {
+          "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "Owner"
+            },
+            "id": {
+              "pattern": "^urn:agentos:owner:"
+            }
+          }
+        }
+      ]
+    },
+    "provenance": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/provenance"
+    },
+    "workRef": {
+      "allOf": [
+        {
+          "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "Work"
+            },
+            "id": {
+              "pattern": "^urn:agentos:work:"
+            }
+          }
+        }
+      ]
+    },
+    "packageRef": {
+      "anyOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "AgentPackage"
+                },
+                "id": {
+                  "pattern": "^urn:agentos:agent-package:"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "runtimeRef": {
+      "anyOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "Runtime"
+                },
+                "id": {
+                  "pattern": "^urn:agentos:runtime:"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "contentRef": {
+      "allOf": [
+        {
+          "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "Resource"
+            },
+            "id": {
+              "pattern": "^urn:agentos:resource:"
+            }
+          }
+        }
+      ]
+    },
+    "mediaType": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9.+-]*/[a-z0-9][a-z0-9.+-]*$",
+      "maxLength": 100
+    },
+    "role": {
+      "enum": [
+        "original",
+        "derived",
+        "draft",
+        "final"
+      ]
+    },
+    "sourceRefs": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "allOf": [
+              {
+                "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "Artifact"
+                  },
+                  "id": {
+                    "pattern": "^urn:agentos:artifact:"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "ContextSnapshot"
+                  },
+                  "id": {
+                    "pattern": "^urn:agentos:context-snapshot:"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "Memory"
+                  },
+                  "id": {
+                    "pattern": "^urn:agentos:memory:"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "uniqueItems": true,
+      "minItems": 0,
+      "maxItems": 64
+    },
+    "state": {
+      "enum": [
+        "available",
+        "superseded",
+        "deleted"
+      ]
+    },
+    "ownership": {
+      "const": "owner"
+    },
+    "preserveOnPackageRemoval": {
+      "const": true
+    },
+    "originalMutation": {
+      "const": "forbidden"
+    },
+    "retention": {
+      "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/retention"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "kind",
+    "id",
+    "revision",
+    "createdAt",
+    "authority",
+    "ownerRef",
+    "provenance",
+    "workRef",
+    "packageRef",
+    "runtimeRef",
+    "contentRef",
+    "mediaType",
+    "role",
+    "sourceRefs",
+    "state",
+    "ownership",
+    "preserveOnPackageRemoval",
+    "originalMutation",
+    "retention"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "packageRef": {"type": "null"},
+          "runtimeRef": {"type": "null"}
+        },
+        "required": ["packageRef", "runtimeRef"]
+      },
+      "then": {
+        "properties": {
+          "runtimeRef": {
+            "type": "null"
+          },
+          "provenance": {
+            "properties": {
+              "producer": {
+                "enum": [
+                  "owner",
+                  "agentos"
+                ]
+              }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "packageRef"
+                  ]
+                },
+                {
+                  "required": [
+                    "runtimeRef"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "packageRef": {
+            "not": {
+              "type": "null"
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "runtimeRef": {
+            "allOf": [
+              {
+                "$ref": "https://personal-agentos.dev/schemas/v0.1/common.schema.json#/$defs/immutableRef"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "const": "Runtime"
+                  },
+                  "id": {
+                    "pattern": "^urn:agentos:runtime:"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

@@ -269,10 +269,10 @@
     {
       "if": {
         "properties": {
-          "packageRef": {
-            "type": "null"
-          }
-        }
+          "packageRef": {"type": "null"},
+          "runtimeRef": {"type": "null"}
+        },
+        "required": ["packageRef", "runtimeRef"]
       },
       "then": {
         "properties": {

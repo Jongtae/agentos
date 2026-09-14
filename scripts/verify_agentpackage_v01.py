@@ -165,6 +165,7 @@ def semantic_errors(records: list[dict[str, Any]], catalog: dict[str, Any]) -> l
     of exact revisions and release/content digests; they do not hash whole records.
     """
     errors: list[str] = []
+    as_of = _stamp(catalog["asOf"])
 
     def fail(rule: str, record: dict[str, Any], message: str) -> None:
         errors.append(f"{rule} {record.get('id', 'fixture')}: {message}")
@@ -183,10 +184,14 @@ def semantic_errors(records: list[dict[str, Any]], catalog: dict[str, Any]) -> l
     def resolve(ref: dict[str, Any] | None) -> dict[str, Any] | None:
         return index.get(_key(ref)) if ref is not None else None
 
-    def owner_key(record: dict[str, Any]) -> tuple[str, str, int] | None:
+    def owner_key(record: dict[str, Any]) -> tuple[str, str] | None:
         if record["kind"] == "Owner":
-            return _key(record)
-        return _key(record["ownerRef"]) if "ownerRef" in record else None
+            return record["kind"], record["id"]
+        return (record["ownerRef"]["kind"], record["ownerRef"]["id"]) if "ownerRef" in record else None
+
+    def latest(kind: str, identifier: str) -> dict[str, Any] | None:
+        matches = [item for item in records if item["kind"] == kind and item["id"] == identifier]
+        return max(matches, key=lambda item: item["revision"]) if matches else None
 
     def same_work(left: dict[str, Any], right: dict[str, Any]) -> bool:
         return left["workRef"]["id"] == right["workRef"]["id"]
@@ -223,6 +228,13 @@ def semantic_errors(records: list[dict[str, Any]], catalog: dict[str, Any]) -> l
         for field in ("workRef", "packageRef", "runtimeRef"):
             if field in provenance and field in record and provenance[field] != record[field]:
                 fail("LINK-001", record, f"provenance {field} disagrees with record")
+        if kind in {"Artifact", "Evidence", "MemoryCandidate"} and (
+            record.get("packageRef") is not None or record.get("runtimeRef") is not None
+        ):
+            producing_work = resolve(record.get("workRef"))
+            if producing_work and (record.get("packageRef") != producing_work.get("packageRef") or
+                                   record.get("runtimeRef") != producing_work.get("runtimeRef")):
+                fail("LINK-002", record, "producer package/runtime does not match referenced Work")
 
         if kind == "AgentPackage":
             for field, backlink in (("capabilityRefs", "packageRef"), ("runtimeRefs", "packageRef")):
@@ -282,6 +294,12 @@ def semantic_errors(records: list[dict[str, Any]], catalog: dict[str, Any]) -> l
                     fail("WORK-001", record, "effective Grant is bound to different Work")
             if kind == "Work":
                 capability = resolve(record["capabilityRef"])
+                current_capability = latest("Capability", record["capabilityRef"]["id"])
+                owner = latest("Owner", record["ownerRef"]["id"])
+                if record["state"] not in {"completed", "failed", "cancelled"} and owner and owner["state"] != "active":
+                    fail("OWNER-002", record, "non-terminal Work owner is not active")
+                if record["state"] not in {"completed", "failed", "cancelled"} and current_capability and current_capability["state"] != "registered":
+                    fail("CAPABILITY-001", record, "non-terminal Work capability is not registered")
                 if capability and (capability["packageRef"] != record["packageRef"] or record["runtimeRef"] not in capability["runtimeRefs"] or not set(record["requestedActions"]) <= set(capability["actions"])):
                     fail("WORK-001", record, "Work capability/runtime/action binding mismatch")
                 if record["state"] in {"running", "completionProposed", "completed"}:
@@ -289,13 +307,23 @@ def semantic_errors(records: list[dict[str, Any]], catalog: dict[str, Any]) -> l
                                _scope_subset(record["scope"], grant["scope"]) and _budget_subset(record["budget"], grant["budget"]) and
                                record["packageRef"] == grant["packageRef"] and record["runtimeRef"] == grant["runtimeRef"] for grant in effective):
                         fail("WORK-002", record, "no single effective Grant covers the complete Work request")
+                    current_runtime = latest("Runtime", record["runtimeRef"]["id"])
                     if runtime and (runtime["state"] not in {"enabled", "connected"} or runtime["health"] != "passed"):
                         fail("WORK-003", record, "runtime is not enabled and healthy")
+                    if current_runtime and (current_runtime["state"] not in {"enabled", "connected"} or
+                                            current_runtime["health"] != "passed" or
+                                            current_runtime["releaseVersion"] != record["runtimeRef"]["releaseVersion"] or
+                                            current_runtime["releaseDigest"] != record["runtimeRef"]["digest"]):
+                        fail("WORK-006", record, "current runtime registration does not authorize the pinned release")
                 snapshot = resolve(record["contextSnapshotRef"])
                 if snapshot and snapshot["workRef"]["id"] != record["id"]:
                     fail("CONTEXT-001", record, "ContextSnapshot is bound to different Work")
                 if record["leaseExpiresAt"] and _stamp(record["leaseExpiresAt"]) > _stamp(record["deadline"]):
                     fail("TIME-001", record, "Work lease exceeds deadline")
+                if record["state"] in {"running", "waitingApproval", "completionProposed"} and (
+                    record["leaseExpiresAt"] is None or _stamp(record["leaseExpiresAt"]) <= as_of
+                ):
+                    fail("WORK-005", record, "active Work lease is missing or expired")
                 if record["attempt"] > record["recovery"]["maxAttempts"]:
                     fail("WORK-004", record, "attempt exceeds recovery limit")
                 if record["state"] == "completed":
@@ -307,6 +335,17 @@ def semantic_errors(records: list[dict[str, Any]], catalog: dict[str, Any]) -> l
                 context = resolve(record["contextRef"])
                 if context and (not same_work(record, context) or any(ref not in context["sourceRefs"] for ref in record["sourceRefs"]) or _stamp(record["expiresAt"]) > _stamp(context["expiresAt"])):
                     fail("CONTEXT-001", record, "snapshot expands its Context or Work boundary")
+                work = resolve(record["workRef"])
+                if _stamp(record["expiresAt"]) <= as_of:
+                    fail("CONTEXT-002", record, "ContextSnapshot is expired")
+                if context and context["state"] != "available":
+                    fail("CONTEXT-002", record, "source Context is not available")
+                if work and (record["recipientRuntimeRef"] != work["runtimeRef"] or
+                             (context and record["recipientRuntimeRef"] != context["recipientRuntimeRef"])):
+                    fail("CONTEXT-003", record, "snapshot recipient does not match Context and Work runtime")
+                if work and (not record["effectiveGrantRefs"] or
+                             any(ref not in work["effectiveGrantRefs"] for ref in record["effectiveGrantRefs"])):
+                    fail("CONTEXT-004", record, "snapshot lacks a Work-effective Context Grant")
 
         if kind == "Memory":
             decision = resolve(record["decisionRef"])
@@ -315,19 +354,31 @@ def semantic_errors(records: list[dict[str, Any]], catalog: dict[str, Any]) -> l
             candidate = resolve(record["acceptedCandidateRef"])
             if candidate and (candidate["state"] != "accepted" or candidate["resultingMemoryRef"] is None or _key(candidate["resultingMemoryRef"]) != _key(record)):
                 fail("MEMORY-001", record, "Memory candidate disposition is not reciprocal")
-        if kind == "MemoryCandidate" and record["state"] == "accepted":
-            memory_record = resolve(record["resultingMemoryRef"])
-            if memory_record and (memory_record["acceptedCandidateRef"] is None or _key(memory_record["acceptedCandidateRef"]) != _key(record)):
-                fail("MEMORY-001", record, "accepted candidate lacks reciprocal canonical Memory decision")
+        if kind == "MemoryCandidate" and record["state"] in {"accepted", "rejected"}:
+            decision = resolve(record["decisionRef"])
+            expected_outcome = "approved" if record["state"] == "accepted" else "rejected"
+            if decision and (decision["recordType"] != "memoryDecision" or
+                             decision["outcome"] != expected_outcome or decision["status"] != "sealed" or
+                             not same_work(record, decision) or
+                             not any(_key(ref) == _key(record) for ref in decision["relatedRefs"] if ref["kind"] == "MemoryCandidate")):
+                fail("MEMORY-002", record, "candidate acceptance lacks sealed Memory decision for this Work")
+            if record["state"] == "accepted":
+                memory_record = resolve(record["resultingMemoryRef"])
+                if memory_record and (memory_record["acceptedCandidateRef"] is None or _key(memory_record["acceptedCandidateRef"]) != _key(record)):
+                    fail("MEMORY-001", record, "accepted candidate lacks reciprocal canonical Memory decision")
         if kind == "Evidence" and record["evidenceClass"] != provenance["evidenceClass"]:
             fail("EVIDENCE-002", record, "record/provenance evidence class mismatch")
         if kind == "Evidence" and catalog["evidenceClass"] == "deterministicFixture" and record["evidenceClass"] in {
             "repositoryReview", "repositoryCi", "localOperation", "authenticatedConnection", "liveExternalOperation"
         }:
             fail("EVIDENCE-003", record, "fixture evidence overclaims a stronger observation class")
+        if kind == "Event" and record["subscribedPackageRef"] is not None:
+            package = resolve(record["subscribedPackageRef"])
+            if package and record["eventType"] not in package["requestedScope"]["events"]["subscriptions"]:
+                fail("EVENT-001", record, "package did not declare this Event subscription")
 
     transitions = {
-        "Work": {"planned": {"ready", "cancelled"}, "ready": {"running", "waitingApproval", "cancelled"}, "running": {"waitingApproval", "completionProposed", "failed", "cancelled"}, "waitingApproval": {"ready", "running", "cancelled"}, "completionProposed": {"completed", "failed"}, "failed": {"ready", "cancelled"}, "completed": set(), "cancelled": set()},
+        "Work": {"planned": {"ready", "cancelled"}, "ready": {"running", "waitingApproval", "cancelled"}, "running": {"waitingApproval", "completionProposed", "failed", "cancelled"}, "waitingApproval": {"ready", "running", "cancelled"}, "completionProposed": {"completed", "failed"}, "failed": {"ready"}, "completed": set(), "cancelled": set()},
         "Runtime": {"staged": {"installedDisabled", "quarantined"}, "installedDisabled": {"enabled", "connected", "uninstalled"}, "enabled": {"connected", "disabled", "quarantined"}, "connected": {"disabled", "quarantined"}, "disabled": {"enabled", "connected", "uninstalled"}, "quarantined": {"installedDisabled", "uninstalled"}, "uninstalled": set()},
         "Grant": {"active": {"revoked", "expired"}, "revoked": set(), "expired": set()},
         "MemoryCandidate": {"proposed": {"accepted", "rejected", "expired"}, "accepted": set(), "rejected": set(), "expired": set()},
@@ -346,6 +397,15 @@ def semantic_errors(records: list[dict[str, Any]], catalog: dict[str, Any]) -> l
         allowed = transitions.get(before["kind"], {}).get(before.get(state_field), set())
         if transition["actor"] != "agentos" or before["kind"] != after["kind"] or before["id"] != after["id"] or after["revision"] != before["revision"] + 1 or after.get(state_field) not in allowed:
             fail("TRANSITION-001", after, "invalid state edge, revision, identity, or transition authority")
+        if before["kind"] == after["kind"] == "Work":
+            immutable_request_fields = (
+                "ownerRef", "goal", "packageRef", "runtimeRef", "capabilityRef",
+                "requestedActions", "scope", "budget", "deadline", "idempotencyKey", "recovery",
+            )
+            if any(before[field] != after[field] for field in immutable_request_fields):
+                fail("WORK-007", after, "Work lifecycle revision changes its authority-bearing request")
+            if before["state"] != "planned" and before["contextSnapshotRef"] != after["contextSnapshotRef"]:
+                fail("WORK-007", after, "ready Work changes its ContextSnapshot binding")
     return sorted(set(errors))
 
 

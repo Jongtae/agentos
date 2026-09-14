@@ -20,7 +20,7 @@
     "kind": "Work",
     "id": "urn:agentos:work:example",
     "schemaVersion": "0.1",
-    "revision": 1
+    "revision": 3
   },
   "contextRef": {
     "kind": "Context",

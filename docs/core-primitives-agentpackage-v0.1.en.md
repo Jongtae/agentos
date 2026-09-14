@@ -69,7 +69,8 @@ reviewed implementation goal.
 Every v0.1 instance carries `schemaVersion: "0.1"`, a typed opaque `id`, and a
 positive integer `revision` where it represents an AgentOS-owned record. IDs are
 identifiers, not filesystem paths, URLs, secrets, or mutable display names.
-Timestamps use RFC 3339 date-time values.
+Timestamps use the asserted v0.1 RFC 3339 UTC profile
+`YYYY-MM-DDTHH:MM:SS[.fraction]Z`; basic ISO forms and non-UTC offsets are rejected.
 
 Security- or behavior-relevant cross-record links use an `ImmutableReference`:
 `kind`, typed `id`, `schemaVersion`, and an exact record `revision`.
@@ -107,7 +108,7 @@ verification profile rather than annotation-only hints.
 Owner is the local human principal and policy root. AgentOS creates and revises
 the record. `authority` is always `agentos`; packages receive only a reference.
 The record contains no password, token, provider session, or raw secret. A
-suspended owner cannot acquire new effective authority.
+`locked` or `retired` owner cannot acquire new effective authority.
 
 ### Context and ContextSnapshot
 
@@ -120,11 +121,11 @@ closed. Full conversation history is not implied by a snapshot.
 
 ### Memory and MemoryCandidate
 
-`MemoryRecord` is canonical only when its `authority` is `agentos` and
-`canonical` is `true`. A package/runtime output uses `MemoryCandidate`, whose
-`canonical` value is always `false`, whose status begins as `proposed`, and
+`Memory` is canonical only when its `authority` is `agentos` and
+`writeAuthority` is `agentosOnly`. A package/runtime output uses
+`MemoryCandidate`, whose `canonicalMemoryAuthority` value is always `false`, whose `state` begins as `proposed`, and
 whose exact Work/package/runtime provenance is required. Only AgentOS policy may
-accept a candidate and create or revise a separate canonical MemoryRecord.
+accept a candidate and create or revise a separate canonical `Memory` record.
 Acceptance never mutates the candidate into an owner-authoritative record.
 Package/runtime-local state remains local and non-canonical even if durable.
 
@@ -140,7 +141,7 @@ retained Evidence, or overwrite an original merely by declaring an output.
 
 Capability is an AgentOS registration of a callable action contract. It binds a
 stable capability ID to the exact package release that supplies it, the accepted
-input/output schema references, consequential-action classification, requested
+input/output Artifact media types, consequential-action classification, requested
 scope categories, and compatible runtime kinds. Registration is not enablement
 or a Grant. Undeclared actions cannot be invoked.
 
@@ -164,7 +165,7 @@ scope wider than the Grant fails closed. A package manifest contains requests,
 not Grants. Installation, enablement, connection, conversation intent, and an
 Event cannot create or widen a Grant.
 
-Schema constants such as `authority: "agentos"` and `issuedBy: "agentos"`
+Schema constants such as `authority: "agentos"` and `issuer: "agentos"`
 prove only structural conformance of a fixture. They do not authenticate an
 issuer. A future implementation MUST establish origin and integrity inside the
 owner-controlled trust boundary before treating a record as effective.
@@ -184,9 +185,16 @@ running/completionProposed -> failed
 failed -> ready (only under bounded retry and idempotency policy)
 ```
 
-No other transition is valid. A worker report is an observation; `succeeded`
+No other transition is valid. A worker report is an observation; `completed`
 requires AgentOS validation and Evidence. Cancellation/revocation stops further
 authority. Retry MUST NOT duplicate a consequential effect.
+
+Owner, goal, package/runtime/capability binding, requested actions, scope,
+budget, deadline, idempotency, and recovery fields are invariant across a Work
+lifecycle. `contextSnapshotRef` may be filled only by `planned -> ready` and is
+then invariant. Approval and completion Evidence bind an exact Work revision;
+later lifecycle revisions may rely on it only because the verifier proves these
+authority-bearing request fields did not change.
 
 ### Event
 
@@ -247,8 +255,9 @@ installed-disabled/disabled/quarantined -> uninstalled
 ```
 
 `downloaded != installed != enabled != connected != authorized-for-action`.
-Install defaults to `installed-disabled` and `installCreatesGrant` is always
-false. Enablement does not imply connection; connection does not imply action
+The manifest fields are `installationState: "installedDisabled"` and
+`installationCreatesGrant: false`; the prose lifecycle name is
+“installed-disabled.” Enablement does not imply connection; connection does not imply action
 authority. Update is a new exact release evaluated against a permission,
 data/egress, Memory/Event, dependency, budget, sandbox, approval, and
 consequential-action diff. Any expansion needs a new decision. Failed health

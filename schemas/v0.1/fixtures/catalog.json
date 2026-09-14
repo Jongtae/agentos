@@ -8,6 +8,10 @@
       "schema": "owner.schema.json"
     },
     {
+      "file": "positive/owner-current.json",
+      "schema": "owner.schema.json"
+    },
+    {
       "file": "positive/agent-package.json",
       "schema": "agent-package.schema.json"
     },
@@ -16,7 +20,15 @@
       "schema": "capability.schema.json"
     },
     {
+      "file": "positive/capability-current.json",
+      "schema": "capability.schema.json"
+    },
+    {
       "file": "positive/runtime.json",
+      "schema": "runtime.schema.json"
+    },
+    {
+      "file": "positive/runtime-current.json",
       "schema": "runtime.schema.json"
     },
     {

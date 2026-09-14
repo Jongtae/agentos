@@ -1,6 +1,7 @@
 """Offline v0.1 schema/fixture conformance, never live runtime authorization."""
 
 import importlib.util
+from copy import deepcopy
 from pathlib import Path
 import unittest
 
@@ -37,6 +38,40 @@ class AgentPackageV01Tests(unittest.TestCase):
         from referencing.exceptions import NoSuchResource
         with self.assertRaises(NoSuchResource):
             verifier._deny_remote("https://invalid.example/remote.schema.json")
+
+    def test_standalone_runtime_provenance_is_representable_without_inventing_a_package(self):
+        validators = verifier.load_validators()
+        _, documents = verifier.load_fixture_bundle()
+        artifact = deepcopy(documents["positive/artifact-native.json"])
+        runtime_ref = documents["positive/runtime.json"]
+        runtime_ref = {
+            "kind": "Runtime", "id": runtime_ref["id"], "schemaVersion": "0.1",
+            "revision": runtime_ref["revision"], "releaseVersion": runtime_ref["releaseVersion"],
+            "digest": runtime_ref["releaseDigest"],
+        }
+        artifact["runtimeRef"] = runtime_ref
+        artifact["provenance"] = {
+            "producer": "runtime", "evidenceClass": "deterministicFixture", "sourceRefs": [],
+            "workRef": artifact["workRef"], "packageRef": None, "runtimeRef": runtime_ref,
+        }
+        self.assertEqual(verifier.schema_errors(artifact, validators["artifact.schema.json"]), [])
+
+    def test_valid_memory_candidate_acceptance_is_sealed_bound_and_reciprocal(self):
+        validators = verifier.load_validators()
+        catalog, documents = verifier.load_fixture_bundle()
+        changed = deepcopy(documents)
+        candidate = changed["positive/memory-candidate.json"]
+        memory = changed["positive/memory.json"]
+        decision = changed["positive/evidence-memory.json"]
+        candidate_ref = {"kind": "MemoryCandidate", "id": candidate["id"], "schemaVersion": "0.1", "revision": candidate["revision"]}
+        memory_ref = {"kind": "Memory", "id": memory["id"], "schemaVersion": "0.1", "revision": memory["revision"]}
+        decision_ref = {"kind": "Evidence", "id": decision["id"], "schemaVersion": "0.1", "revision": decision["revision"]}
+        candidate.update(state="accepted", decisionRef=decision_ref, resultingMemoryRef=memory_ref)
+        memory["acceptedCandidateRef"] = candidate_ref
+        decision["relatedRefs"] = [candidate_ref, memory_ref]
+        self.assertEqual(verifier.schema_errors(candidate, validators["memory-candidate.schema.json"]), [])
+        self.assertEqual(verifier.schema_errors(memory, validators["memory.schema.json"]), [])
+        self.assertEqual(verifier.semantic_errors(list(changed.values()), catalog), [])
 
 
 if __name__ == "__main__":

@@ -238,5 +238,95 @@
     "layer": "semantic",
     "rule": "TRANSITION-001",
     "mutations": [{"file": "$catalog", "changes": [{"op": "set", "path": "/transitions/1/actor", "value": "runtime"}]}]
+  },
+  {
+    "id": "SCHEMA-025-rfc3339-basic-form-is-rejected",
+    "layer": "schema",
+    "rule": "pattern",
+    "mutations": [{"file": "positive/work.json", "changes": [{"op": "set", "path": "/createdAt", "value": "20260914T000000Z"}]}]
+  },
+  {
+    "id": "OWNER-002-latest-owner-policy-is-locked",
+    "layer": "semantic",
+    "rule": "OWNER-002",
+    "mutations": [{"file": "positive/owner-current.json", "changes": [{"op": "set", "path": "/state", "value": "locked"}]}]
+  },
+  {
+    "id": "CAPABILITY-001-latest-capability-is-removed",
+    "layer": "semantic",
+    "rule": "CAPABILITY-001",
+    "mutations": [{"file": "positive/capability-current.json", "changes": [{"op": "set", "path": "/state", "value": "removed"}]}]
+  },
+  {
+    "id": "WORK-005-active-work-lease-is-expired",
+    "layer": "semantic",
+    "rule": "WORK-005",
+    "mutations": [{"file": "positive/work.json", "changes": [{"op": "set", "path": "/leaseExpiresAt", "value": "2026-09-14T00:04:00Z"}]}]
+  },
+  {
+    "id": "WORK-006-latest-runtime-is-quarantined",
+    "layer": "semantic",
+    "rule": "WORK-006",
+    "mutations": [{"file": "positive/runtime-current.json", "changes": [{"op": "set", "path": "/state", "value": "quarantined"}, {"op": "set", "path": "/health", "value": "failed"}]}]
+  },
+  {
+    "id": "CONTEXT-002-expired-snapshot-is-denied",
+    "layer": "semantic",
+    "rule": "CONTEXT-002",
+    "mutations": [{"file": "positive/context-snapshot.json", "changes": [{"op": "set", "path": "/expiresAt", "value": "2026-09-14T00:04:00Z"}]}]
+  },
+  {
+    "id": "CONTEXT-002-deleted-context-is-denied",
+    "layer": "semantic",
+    "rule": "CONTEXT-002",
+    "mutations": [{"file": "positive/context.json", "changes": [{"op": "set", "path": "/state", "value": "deleted"}]}]
+  },
+  {
+    "id": "CONTEXT-003-recipient-must-match-work-runtime",
+    "layer": "semantic",
+    "rule": "CONTEXT-003",
+    "mutations": [{"file": "positive/context-snapshot.json", "changes": [{"op": "set", "path": "/recipientRuntimeRef/revision", "value": 2}]}]
+  },
+  {
+    "id": "CONTEXT-004-snapshot-needs-work-effective-grant",
+    "layer": "semantic",
+    "rule": "CONTEXT-004",
+    "mutations": [{"file": "positive/context-snapshot.json", "changes": [{"op": "set", "path": "/effectiveGrantRefs", "value": []}]}]
+  },
+  {
+    "id": "MEMORY-002-candidate-cannot-use-generic-approval",
+    "layer": "semantic",
+    "rule": "MEMORY-002",
+    "mutations": [
+      {"file": "positive/memory-candidate.json", "changes": [{"op": "set", "path": "/state", "value": "accepted"}, {"op": "set", "path": "/decisionRef", "value": {"kind": "Evidence", "id": "urn:agentos:evidence:approval", "schemaVersion": "0.1", "revision": 1}}, {"op": "set", "path": "/resultingMemoryRef", "value": {"kind": "Memory", "id": "urn:agentos:memory:example", "schemaVersion": "0.1", "revision": 1}}]},
+      {"file": "positive/memory.json", "changes": [{"op": "set", "path": "/acceptedCandidateRef", "value": {"kind": "MemoryCandidate", "id": "urn:agentos:memory-candidate:example", "schemaVersion": "0.1", "revision": 1}}]}
+    ]
+  },
+  {
+    "id": "EVENT-001-subscription-must-be-declared",
+    "layer": "semantic",
+    "rule": "EVENT-001",
+    "mutations": [{"file": "positive/event.json", "changes": [{"op": "set", "path": "/eventType", "value": "schedule"}, {"op": "set", "path": "/subscribedPackageRef", "value": {"kind": "AgentPackage", "id": "urn:agentos:agent-package:example", "schemaVersion": "0.1", "revision": 1, "releaseVersion": "1.0.0", "digest": {"algorithm": "sha256", "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "scope": "packageArchive"}}}]}]
+  },
+  {
+    "id": "LINK-002-output-runtime-must-match-work",
+    "layer": "semantic",
+    "rule": "LINK-002",
+    "mutations": [{"file": "positive/artifact.json", "changes": [{"op": "set", "path": "/runtimeRef/revision", "value": 2}, {"op": "set", "path": "/provenance/runtimeRef/revision", "value": 2}]}]
+  },
+  {
+    "id": "WORK-007-lifecycle-cannot-change-authority-request",
+    "layer": "semantic",
+    "rule": "WORK-007",
+    "mutations": [{"file": "positive/work-ready.json", "changes": [{"op": "set", "path": "/requestedActions", "value": ["resource.read", "message.send"]}]}]
+  },
+  {
+    "id": "MEMORY-002-decision-must-name-candidate",
+    "layer": "semantic",
+    "rule": "MEMORY-002",
+    "mutations": [
+      {"file": "positive/memory-candidate.json", "changes": [{"op": "set", "path": "/state", "value": "accepted"}, {"op": "set", "path": "/decisionRef", "value": {"kind": "Evidence", "id": "urn:agentos:evidence:memory", "schemaVersion": "0.1", "revision": 1}}, {"op": "set", "path": "/resultingMemoryRef", "value": {"kind": "Memory", "id": "urn:agentos:memory:example", "schemaVersion": "0.1", "revision": 1}}]},
+      {"file": "positive/memory.json", "changes": [{"op": "set", "path": "/acceptedCandidateRef", "value": {"kind": "MemoryCandidate", "id": "urn:agentos:memory-candidate:example", "schemaVersion": "0.1", "revision": 1}}]}
+    ]
   }
 ]

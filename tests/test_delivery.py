@@ -105,6 +105,9 @@ class DeliveryTests(unittest.TestCase):
         self.assertNotIn('SCN-I-01', controller.plan.documented_completed())
 
     def test_deferred_site_waits_without_external_commands(self):
+        plan=json.loads((self.root/'delivery-plan.yaml').read_text())
+        plan['next_goal']={'id':'SITE-01','status':'owner-deferred'}
+        (self.root/'delivery-plan.yaml').write_text(json.dumps(plan))
         runner=Runner()
         result=self.controller(runner).run_once(dry_run=True)
         self.assertEqual(result['status'], 'awaiting-owner-activated-goal')
@@ -115,6 +118,9 @@ class DeliveryTests(unittest.TestCase):
         self.assertIsNone(DeliveryPlan(self.root/'delivery-plan.yaml').select({}))
 
     def test_deferred_site_active_state_is_retired_without_completion(self):
+        plan=json.loads((self.root/'delivery-plan.yaml').read_text())
+        plan['next_goal']={'id':'SITE-01','status':'owner-deferred'}
+        (self.root/'delivery-plan.yaml').write_text(json.dumps(plan))
         StateStore(self.state).write({
             'active':'SITE-01', 'status':'running', 'milestone':'Product Information and Policy Site',
             'issue':313, 'issues':{'SITE-01':313}, 'last_error':'stale site work',
@@ -131,6 +137,9 @@ class DeliveryTests(unittest.TestCase):
         self.assertNotIn('last_error', persisted)
 
     def test_deferred_site_blocked_state_is_retired_without_completion(self):
+        plan=json.loads((self.root/'delivery-plan.yaml').read_text())
+        plan['next_goal']={'id':'SITE-01','status':'owner-deferred'}
+        (self.root/'delivery-plan.yaml').write_text(json.dumps(plan))
         StateStore(self.state).write({
             'active':'SITE-01', 'blocked':'SITE-01', 'status':'blocked-validation-failed',
             'milestone':'Product Information and Policy Site', 'issue':313,

@@ -60,12 +60,20 @@ class DeliveryTests(unittest.TestCase):
 
     def test_dogfood_is_sole_goal_ready_target_but_heartbeat_cannot_run_it(self):
         controller=self.controller()
-        self.assertEqual(controller.plan.next_goal()['status'], 'owner-activated-goal-ready')
+        self.assertEqual(controller.plan.next_goal()['status'], 'active')
         self.assertEqual(controller.plan.next_goal()['id'], 'DOGFOOD-01')
-        # Goal readiness records owner intent, but only a later explicit active
-        # transition can make the repository heartbeat select DOGFOOD Work.
-        self.assertIsNone(controller.plan.select({}))
-        self.assertIsNone(controller.plan.select({'active':'SITE-01'}))
+        # The explicit owner invocation has transitioned the next-goal state;
+        # the iteration itself remains the goal-ready record.
+        self.assertEqual(controller.plan.select({})['id'], 'DOGFOOD-01')
+        # A non-active next-goal status is also never executable by heartbeat,
+        # even when the iteration remains the sole goal-ready target.
+        altered=json.loads((self.root/'delivery-plan.yaml').read_text())
+        altered['next_goal']['status']='owner-activated-goal-ready'
+        (self.root/'delivery-plan.yaml').write_text(json.dumps(altered))
+        paused=DeliveryPlan(self.root/'delivery-plan.yaml')
+        self.assertEqual(paused.next_goal()['id'], 'DOGFOOD-01')
+        self.assertIsNone(paused.select({}))
+        self.assertIsNone(paused.select({'active':'SITE-01'}))
         self.assertEqual(controller.plan.items['DOGFOOD-01']['activation_status'], 'owner-activated-goal-ready')
         self.assertEqual(controller.plan.items['DOGFOOD-01']['issue'], 351)
         self.assertEqual(controller.plan.items['DOGFOOD-01']['depends_on'], ['D-AP-01'])
@@ -85,10 +93,8 @@ class DeliveryTests(unittest.TestCase):
         self.assertIn('DRIVE-TG-01', controller.plan.documented_completed())
         self.assertIn('FILE-WS-C-01', controller.plan.documented_completed())
         self.assertIn('D-AP-01', controller.plan.documented_completed())
-        goal_ready_targets = [
-            target['id'] for target in [controller.plan.next_goal()]
-            if target.get('status') == 'owner-activated-goal-ready'
-        ]
+        goal_ready_targets = [target['id'] for target in [paused.next_goal()]
+                              if target.get('status') == 'owner-activated-goal-ready']
         self.assertEqual(goal_ready_targets, ['DOGFOOD-01'])
         self.assertFalse(any(
             item.get('issue') in range(335, 347)
@@ -99,6 +105,9 @@ class DeliveryTests(unittest.TestCase):
         self.assertNotIn('SCN-I-01', controller.plan.documented_completed())
 
     def test_deferred_site_waits_without_external_commands(self):
+        plan=json.loads((self.root/'delivery-plan.yaml').read_text())
+        plan['next_goal']={'id':'SITE-01','status':'owner-deferred'}
+        (self.root/'delivery-plan.yaml').write_text(json.dumps(plan))
         runner=Runner()
         result=self.controller(runner).run_once(dry_run=True)
         self.assertEqual(result['status'], 'awaiting-owner-activated-goal')
@@ -109,6 +118,9 @@ class DeliveryTests(unittest.TestCase):
         self.assertIsNone(DeliveryPlan(self.root/'delivery-plan.yaml').select({}))
 
     def test_deferred_site_active_state_is_retired_without_completion(self):
+        plan=json.loads((self.root/'delivery-plan.yaml').read_text())
+        plan['next_goal']={'id':'SITE-01','status':'owner-deferred'}
+        (self.root/'delivery-plan.yaml').write_text(json.dumps(plan))
         StateStore(self.state).write({
             'active':'SITE-01', 'status':'running', 'milestone':'Product Information and Policy Site',
             'issue':313, 'issues':{'SITE-01':313}, 'last_error':'stale site work',
@@ -125,6 +137,9 @@ class DeliveryTests(unittest.TestCase):
         self.assertNotIn('last_error', persisted)
 
     def test_deferred_site_blocked_state_is_retired_without_completion(self):
+        plan=json.loads((self.root/'delivery-plan.yaml').read_text())
+        plan['next_goal']={'id':'SITE-01','status':'owner-deferred'}
+        (self.root/'delivery-plan.yaml').write_text(json.dumps(plan))
         StateStore(self.state).write({
             'active':'SITE-01', 'blocked':'SITE-01', 'status':'blocked-validation-failed',
             'milestone':'Product Information and Policy Site', 'issue':313,

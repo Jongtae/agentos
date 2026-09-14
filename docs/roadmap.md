@@ -12,6 +12,8 @@ The platform keeps the kernel agent-independent while allowing the product/marke
 
 D-AP-01 / [#334](https://github.com/Jongtae/personal-agentos/issues/334) is complete on merge of [PR #350](https://github.com/Jongtae/personal-agentos/pull/350). It defines the canonical v0.1 contracts, schemas, deterministic fixtures, compatibility rules, and independent review evidence. This is specification and machine-verification evidence only; it does not implement or prove package execution, installation, a Registry/Marketplace, credentials, connectors, Ruflo, or live external operation. No successor is active, and #335–#346 remain planned until separate explicit owner activation.
 
+Owner-authorized DOGFOOD-01 / [#351](https://github.com/Jongtae/personal-agentos/issues/351) is the current implementation goal on `dogfood/owner-usable-vertical-slice`. It closes only the smallest local browser → supported provider → explicit reference folder → managed result → restart/reuse path. Automated evidence uses a simulated provider and temporary folders; live provider operation remains a separate owner observation and is not claimed here. #335–#346 remain inactive.
+
 ### Phase A — foundation contracts
 
 | Work | Issue | Planned outcome |

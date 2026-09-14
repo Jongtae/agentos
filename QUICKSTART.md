@@ -22,6 +22,25 @@ Supported connections: Ollama (an already running local model server), OpenAI-co
 
 In web chat, enter `/note Review the launch on Friday`, then `/notes`. These work without a model. After connecting a model, try `/summarize` or a normal conversation.
 
+## Recommended owner dogfood task
+
+Create two dedicated local folders (for example, `/Users/your-name/AgentOS-dogfood/reference`
+and `/Users/your-name/AgentOS-dogfood/workspace`) and place one small Markdown or text note in the
+reference folder. Put the words `Launch review` in that note. In **내 에이전트
+관리 → 내 자료**, enter the reference folder and workspace folder, then choose a
+direct model-provider connection (OpenAI-compatible, OpenAI, Anthropic, or
+Ollama) and complete its connection test; subscription engines do not run this
+file-workspace path. If the selected provider is external, approve document
+sharing before submitting the task. Ask the chat:
+`“Launch review” 자료를 요약해 “Launch notes”로 저장해줘`. Confirm that a
+Markdown result appears only in the managed workspace and that the original note
+is unchanged. Stop AgentOS with Ctrl-C, run `agentos start` again, and ask
+`저장된 작업공간에서 “Launch notes” 찾아줘` to reuse the saved result.
+
+This local test uses a real folder and a real provider only when you supply the
+provider credentials. Repository tests use a simulated provider and do not prove
+live external-provider operation.
+
 ## Telegram
 
 Create your own bot using Telegram's BotFather, paste its token into Settings, and open the generated pairing link in your own Telegram account. Only the paired private account can submit work. The web interface and Telegram share conversation history and notes. AgentOS uses outbound polling, so no public inbound port is needed for Telegram. Use a dedicated bot without an existing webhook.

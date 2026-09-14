@@ -24,8 +24,8 @@ In web chat, enter `/note Review the launch on Friday`, then `/notes`. These wor
 
 ## Recommended owner dogfood task
 
-Create two dedicated local folders (for example, `~/AgentOS-dogfood/reference` and
-`~/AgentOS-dogfood/workspace`) and place one small Markdown or text note in the
+Create two dedicated local folders (for example, `/Users/your-name/AgentOS-dogfood/reference`
+and `/Users/your-name/AgentOS-dogfood/workspace`) and place one small Markdown or text note in the
 reference folder. Put the words `Launch review` in that note. In **내 에이전트
 관리 → 내 자료**, enter the reference folder and workspace folder, then choose a
 direct model-provider connection (OpenAI-compatible, OpenAI, Anthropic, or

@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 
-HOST_ACTIONS={'web_search','weather','list_roots','find_files','read_file','list_notes','save_note','list_agents','delegate_agent'}
+HOST_ACTIONS={'web_search','public_page_read','weather','list_roots','find_files','read_file','list_notes','save_note','list_agents','delegate_agent'}
 WRITE_ACTIONS={'save_note','delegate_agent'}
 ROLE_PERMISSIONS={'read_only','bounded_write'}
 

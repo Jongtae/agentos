@@ -1,6 +1,6 @@
 """Scoped local file workspace: references stay read-only; results are new files."""
 from pathlib import Path
-import hashlib, json, os, time, uuid
+import hashlib, json, os, re, time, uuid
 
 
 class FileWorkspace:
@@ -51,8 +51,15 @@ class FileWorkspace:
                 'path':str(Path(relative)),'version':hashlib.sha256(content.encode()).hexdigest(),'content':content}
 
     def find_reference(self, query):
+        matches=self.find_references(query, limit=2)
+        if not matches: raise ValueError('연결한 참고 폴더에서 일치하는 TXT/MD 자료를 찾지 못했습니다.')
+        if len(matches)>1: raise ValueError('일치하는 자료가 여러 개입니다. 더 구체적인 자료 검색어로 다시 요청하세요.')
+        return matches[0]
+
+    def find_references(self, query, limit=20):
         if not isinstance(query,str) or not 2<=len(query.strip())<=160: raise ValueError('두 글자 이상의 자료 검색어를 입력하세요.')
-        needle=query.casefold().strip(); matches=[]
+        terms=[query.casefold().strip()]+[term for term in re.findall(r'[\w가-힣-]{2,}',query.casefold()) if len(term)>2]
+        matches=[]
         for root in self.status()['references']:
             base=Path(root['path'])
             for parent,dirs,names in os.walk(base,followlinks=False):
@@ -62,13 +69,11 @@ class FileWorkspace:
                     relative=str((Path(parent)/name).relative_to(base))
                     try: source=self.read(root['id'],relative)
                     except (OSError,UnicodeError,ValueError): continue
-                    if needle in (relative+'\n'+source['content']).casefold(): matches.append(source)
-                    if len(matches)>1: break
-                if len(matches)>1: break
-            if len(matches)>1: break
-        if not matches: raise ValueError('연결한 참고 폴더에서 일치하는 TXT/MD 자료를 찾지 못했습니다.')
-        if len(matches)>1: raise ValueError('일치하는 자료가 여러 개입니다. 더 구체적인 검색어로 다시 요청하세요.')
-        return matches[0]
+                    haystack=(relative+'\n'+source['content']).casefold()
+                    if any(term in haystack for term in terms):
+                        matches.append(source)
+                        if len(matches)>=limit: return matches
+        return matches
 
     @staticmethod
     def _ensure_results_table(db):

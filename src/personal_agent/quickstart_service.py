@@ -67,6 +67,9 @@ def workspace_search_request(prompt):
     lowered=prompt.casefold(); quotes=_WORKSPACE_QUOTED.findall(prompt)
     if quotes and any(word in lowered for word in ('search','find','찾아','검색')) and any(word in lowered for word in ('저장','workspace','작업공간','result','결과')):
         return quotes[0]
+    if (any(word in lowered for word in ('find','찾아','검색','reuse','재사용','다시'))
+            and any(word in lowered for word in ('saved','저장','workspace','작업공간','result','결과','아까'))):
+        return next((word for word in ('meeting','회의','project','프로젝트','summary','요약','brief','브리프') if word in lowered), None)
     return None
 
 # Subscription CLIs do not receive AgentOS credentials, local paths, or an

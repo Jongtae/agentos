@@ -1,9 +1,11 @@
 """Bounded read-only tools executed by the user's AgentOS process."""
 import json
 import gzip
+import http.client
 import ipaddress
 import re
 import socket
+import ssl
 import time
 import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
@@ -39,7 +41,7 @@ class _PageText(HTMLParser):
 class PublicPageReader:
     """Small, anonymous, read-only page reader with an explicit egress boundary."""
     def __init__(self, opener=None, resolver=None, clock=None):
-        self.opener = opener or build_opener(NoRedirect())
+        self.opener = opener
         self.resolver = resolver or socket.getaddrinfo
         self.clock = clock or time.monotonic
 
@@ -62,14 +64,38 @@ class PublicPageReader:
             except ValueError: raise ValueError('페이지 주소가 올바르지 않습니다.') from None
             if any(address in network for network in PRIVATE_NETWORKS) or address.is_private or address.is_loopback or address.is_link_local or address.is_reserved:
                 raise ValueError('개인 네트워크나 메타데이터 주소에는 접근할 수 없습니다.')
+        return addresses
+
+    def _open_pinned(self, url, addresses):
+        parsed=urlsplit(url); port=parsed.port or (443 if parsed.scheme=='https' else 80)
+        host_header=parsed.hostname if port in (80,443) else f'{parsed.hostname}:{port}'
+        path=urlunsplit(('', '', parsed.path or '/', parsed.query, ''))
+        last=None
+        for address in addresses:
+            conn=None
+            try:
+                if parsed.scheme=='https':
+                    conn=http.client.HTTPSConnection(parsed.hostname,port,timeout=MAX_PAGE_SECONDS,context=ssl.create_default_context())
+                    raw=socket.create_connection((address,port),MAX_PAGE_SECONDS)
+                    conn.sock=conn._context.wrap_socket(raw,server_hostname=parsed.hostname)
+                else:
+                    conn=http.client.HTTPConnection(parsed.hostname,port,timeout=MAX_PAGE_SECONDS)
+                    conn.sock=socket.create_connection((address,port),MAX_PAGE_SECONDS)
+                conn.request('GET',path,headers={'Host':host_header,'User-Agent':'AgentOS public-page-reader/1.0','Accept':'text/html,text/plain,application/xhtml+xml;q=0.9','Connection':'close'})
+                response=conn.getresponse(); response._agentos_connection=conn
+                return response
+            except (OSError, ssl.SSLError) as exc:
+                last=exc
+                if conn: conn.close()
+        raise OSError('all validated public addresses failed') from last
 
     def read(self, url):
         current=self._safe_url(url); started=self.clock()
         for redirect in range(MAX_PAGE_REDIRECTS+1):
             if self.clock()-started > MAX_PAGE_SECONDS: raise ProviderError('공개 페이지 읽기 시간이 제한을 초과했습니다.')
-            self._validate_host(current)
+            addresses=self._validate_host(current)
             request=Request(current, headers={'User-Agent':'AgentOS public-page-reader/1.0','Accept':'text/html,text/plain,application/xhtml+xml;q=0.9'})
-            try: response=self.opener.open(request, timeout=MAX_PAGE_SECONDS)
+            try: response=self.opener.open(request, timeout=MAX_PAGE_SECONDS) if self.opener else self._open_pinned(current,addresses)
             except OSError as exc: raise ProviderError('공개 페이지를 가져오지 못했습니다.') from exc
             status=getattr(response,'status',200); location=response.headers.get('Location') if hasattr(response,'headers') else None
             if status in (301,302,303,307,308) or location:

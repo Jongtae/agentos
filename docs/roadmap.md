@@ -9,7 +9,7 @@ Use the [Goal Execution Contract](goal-execution-contract.en.md): the canonical 
 | Work | Status and evidence boundary |
 | --- | --- |
 | GOV-USE-01 / [#357](https://github.com/Jongtae/personal-agentos/issues/357) | Complete only upon PR #361 merge after required CI and independent review. Product/docs/governance/static evaluation specification; no runtime feature, model-quality result or live operation. |
-| USE-01 / [#358](https://github.com/Jongtae/personal-agentos/issues/358) | Sole owner-selected next goal, conditional on #361 merge. `owner-activated-goal-ready`, not `active`; later explicit owner Goal invocation starts implementation. [Execution readiness](use-01-goal-readiness.en.md). |
+| USE-01 / [#358](https://github.com/Jongtae/personal-agentos/issues/358) | Complete on merge of [PR #362](https://github.com/Jongtae/personal-agentos/pull/362) after required CI and independent review. Deterministic development evidence is 72/72; live provider quality remains `not_run/pending_owner_operation`. No successor is selected. |
 | OBS-01 / [#359](https://github.com/Jongtae/personal-agentos/issues/359) | Planned/inactive: actual progress, redacted tool/action receipts and owner controls on current Work paths. Coordinate with USE-01 without a circular prerequisite. |
 | AGENT-UX-01 / [#360](https://github.com/Jongtae/personal-agentos/issues/360) | Planned/inactive: useful install → grant → run → inspect → revoke → denied retry → remove → restart → separately authorized replacement/reuse. Reuses #335/#337/#338/#340/#341/#342 rather than inventing a second installer. |
 

@@ -79,6 +79,29 @@ class PreflightTests(unittest.TestCase):
         commands = [call.args[0][:2] for call in run.call_args_list]
         self.assertEqual(commands, [["pr", "view"], ["pr", "checks"], ["api", "repos/owner/repo"], ["pr", "view"]])
 
+    def test_failed_or_missing_head_reread_is_unknown(self):
+        for after, code in [(None, -1), ({}, 0), ({"headRefOid": None}, 0)]:
+            with self.subTest(after=after, code=code):
+                s = sample()
+                with patch.object(preflight, "gh_json", side_effect=[
+                    (s["pr"], 0), (s["required_checks"], 0), ({"allow_auto_merge": False}, 0),
+                    (after, code)]):
+                    collected = preflight.collect("owner/repo", 1)
+                self.assertIsNone(collected["head_stable"])
+                self.assertEqual(preflight.classify(collected)["outcome"], "head_unknown")
+        s = sample(); s.pop("head_stable")
+        self.assertEqual(preflight.classify(s)["outcome"], "head_unknown")
+
+    def test_merged_head_mismatch_requires_delivered_revision_review(self):
+        for state in ("MERGED", "CLOSED"):
+            with self.subTest(state=state):
+                s = sample(); s["pr"].update(state=state, mergedAt="2030-01-01T00:00:00Z")
+                result = preflight.classify(s, "b" * 40)
+                self.assertEqual(result["outcome"], "merged_head_mismatch")
+                self.assertIn("delivered revision", result["next_action"])
+                self.assertEqual(preflight.classify(s, "a" * 40)["outcome"], "merged")
+                self.assertEqual(preflight.classify(s)["outcome"], "merged")
+
     def test_failed_collection_does_not_expose_error_payload(self):
         with patch.object(preflight, "gh_json", return_value=(None, -1)):
             with self.assertRaises(ValueError): preflight.collect("owner/repo", 1)

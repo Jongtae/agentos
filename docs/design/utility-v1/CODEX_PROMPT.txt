@@ -1,0 +1,19 @@
+Implement the owner-approved utility UI direction for Jongtae/personal-agentos using DESIGN-UTIL-01 #379 and docs/design/utility-v1/{README.md,prototype.html,utility.css,utility.js} from branch design/379-utility-first-proposal. This prompt, only when the owner runs it after approving the proposal, authorizes implementation. Reconcile the current main first; preserve recent UX fixes and unrelated local work. Do not reset the app to the design baseline.
+
+PRODUCT
+This is an installed personal utility, NOT a SaaS website. No mascot, hero, marketing, model recommendation cards, KPI dashboard, tips column or mandatory setup wizard. Use a compact sidebar, aligned setting rows, short contextual guidance and a separate request list/detail monitor. Do not copy mock titlebar controls into a browser tab.
+
+Implement one stable navigation: conversation, tasks, records, projects; an environment-settings group with AI connection, files/output, integrations and privacy/diagnostics. A click replaces the pane, never appends settings below chat. Preserve input, selected task, expanded detail, focus and scroll across real polling and navigation.
+
+AI: show the actual selected execution connection, including subscription CLI vs direct provider. Do not call a selected CLI disconnected because the direct-provider config is empty. Observed model can be unknown. Draft edit -> exact-draft test -> apply on success; preserve the working connection on failure and invalidate verification after any relevant change. Reuse existing implementation; do not fabricate successful test results or send a stored key to another destination.
+
+TASKS: reuse real jobs/events/artifacts, correlated by request ID. Separate observed actions from plans; show last observed activity without invented ETA. Tool details are expandable and redacted. Controls appear only when supported. A stop request is not confirmed cancellation or rollback. No repository delivery/CI status in user-task progress.
+
+RECORDS/FILES: a searchable typed list, clear inspection before removal, and distinct labels for reference folder, output folder and project. Preserve backend types and user data. Contextual help is one or two lines at the relevant decision; diagnostics are secondary.
+
+SHIP
+Use the existing vanilla stack. Work on a current issue-linked implementation branch under existing governance; no separate preparation program or full platform redesign. Implement small slices: navigation/drafts, connection state, task/records, responsive copy. Do not copy synthetic data, mock success toggles or placeholder actions into production. Necessary missing behaviors get a small real fix or truthful unavailable state, not pretend controls.
+
+Verify actual application/browser paths at desktop and 390 px, including failures, >4 seconds of real refresh, back/forward, long text, keyboard/dialog focus and 200% zoom. Run required repository tests and scoped independent UX review. Ordinary merge when gates pass; a real external gate gets the existing integration_pending handoff, not admin bypass or repeated replanning.
+
+No real credentials, paid calls, deployment, new permissions, arbitrary shell/browser automation, Marketplace, Ruflo or successor activation. Stop after the approved UI increment. Korean final report: actual screens, before/after, browser evidence, PR/CI, limitations and local test instructions.

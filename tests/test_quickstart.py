@@ -477,7 +477,7 @@ finally:
         server,thread,client,base=start_server(self.service)
         try:
             request(client,base,'/api/claim',{'code':self.store.bootstrap.read_text(),'password':password})
-            request(client,base,'/api/model',{'provider':'compatible','endpoint':'https://example.test/v1','model':'test-model'})
+            request(client,base,'/api/model',{'provider':'compatible','endpoint':'https://example.test/v1','model':'test-model','api_key':'fixture-key'})
             self.assertTrue(request(client,base,'/api/model/test',{})['ok'])
             request(client,base,'/api/file-workspace',{'references':[str(reference)],'workspace':str(workspace)})
             request(client,base,'/api/documents/approval',{'approved':True})

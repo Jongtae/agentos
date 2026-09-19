@@ -46,7 +46,7 @@ class Capabilities:
   definitions=[]
   for tool_id in sorted(self.allowed_tools):
    tool=self.tools.get(tool_id)
-   if not tool or (self.readonly and tool['host_action'] in ('save_note','delegate_agent')):continue
+   if not tool or (self.readonly and tool['host_action'] in ('save_note','save_memory','delegate_agent')):continue
    source=next(d for d in DEFINITIONS if d['function']['name']==tool['host_action'])
    definitions.append({**source,'function':{**source['function'],'name':tool_id}})
   return definitions
@@ -138,6 +138,8 @@ def evidence_summary(name,result):
  if name=='read_file':
   return {'root_id':result.get('root_id'),'path':result.get('path'),'kind':result.get('kind'),'locations':result.get('locations',[])[:12],'characters':len(result.get('content','')),'truncated':bool(result.get('truncated'))}
  if name=='save_note':return {'saved':bool(result.get('saved')),'id':result.get('id')}
+ if name=='save_memory':return {'saved':bool(result.get('id')),'id':result.get('id'),'memory_key':result.get('memory_key'),'supersedes':result.get('supersedes')}
+ if name=='list_memory':return {'memory_count':len(result.get('memories',[]))}
  if name=='list_notes':return {'note_count':len(result.get('notes',[]))}
  if name=='delegate_agent':return {'agent_id':result.get('agent_id'),'model':result.get('model'),'report_characters':len(result.get('report',''))}
  if name=='list_agents':return {'agent_count':len(result.get('agents',[]))}

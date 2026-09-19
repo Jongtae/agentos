@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 HOST_ACTIONS={'web_search','public_page_read','weather','list_roots','find_files','read_file','list_notes','save_note','save_memory','list_memory','list_agents','delegate_agent'}
-WRITE_ACTIONS={'save_note','delegate_agent'}
+WRITE_ACTIONS={'save_note','save_memory','delegate_agent'}
 ROLE_PERMISSIONS={'read_only','bounded_write'}
 
 BUILTIN_MANIFEST={'version':1,'id':'builtin','tools':[{'id':name,'host_action':name,'mode':'bounded_write' if name in WRITE_ACTIONS else 'read_only'} for name in sorted(HOST_ACTIONS)],'roles':[

@@ -15,7 +15,7 @@ The deterministic command exercises the bounded public reader and managed file w
 
 The evaluator executes 24 cases × 3 trials = 72 rows and retains every result. The current deterministic run is 72 passed / 0 failed. This includes restart/reuse, corrected artifact constraints, revoked reads, interrupted-work recovery, provider-bound approval invalidation, latest-intent no-tool behavior, redacted receipts and owner-authorized superseding memory. The held-out paraphrase inventory is 3. This proves only the implemented fixture boundary. It does not prove a live provider, browser behavior, inventory, payable total, production safety or natural-language model quality.
 
-The mandatory repository validation observed 339 pytest tests with 232 subtests, 304 unittest tests, canonical-document/source-layout/AgentPackage checks, root/package delivery-plan equality, ledger JSON parsing and `git diff --check` successfully. Live provider quality, real browser observation and owner acceptance remain pending and are reported separately.
+The mandatory repository validation observed 342 pytest tests with 232 subtests, 307 unittest tests, canonical-document/source-layout/AgentPackage checks, root/package delivery-plan equality, ledger JSON parsing and `git diff --check` successfully. Live provider quality, real browser observation and owner acceptance remain pending and are reported separately.
 
 ## Owner live procedure
 

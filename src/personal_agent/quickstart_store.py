@@ -32,6 +32,9 @@ class QuickStore:
             CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY, request_key TEXT UNIQUE, message TEXT, channel TEXT, chat_id INTEGER, status TEXT, response TEXT, error TEXT, delivery TEXT, provider TEXT, model TEXT, created REAL);
             CREATE TABLE IF NOT EXISTS tool_events(id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT, tool TEXT, status TEXT, detail TEXT, created REAL);
             CREATE TABLE IF NOT EXISTS notes(id TEXT PRIMARY KEY, content TEXT, created REAL);
+            CREATE TABLE IF NOT EXISTS memories(id TEXT PRIMARY KEY, memory_key TEXT NOT NULL, content TEXT NOT NULL, created REAL NOT NULL, supersedes TEXT, state TEXT NOT NULL DEFAULT 'current');
+            CREATE INDEX IF NOT EXISTS memories_key_state ON memories(memory_key, state, created DESC);
+            CREATE TABLE IF NOT EXISTS memory_candidates(id TEXT PRIMARY KEY, job_id TEXT, memory_key TEXT NOT NULL, content TEXT NOT NULL, created REAL NOT NULL, state TEXT NOT NULL DEFAULT 'pending');
             CREATE TABLE IF NOT EXISTS telegram_task_cards(job_id TEXT PRIMARY KEY, chat_id INTEGER NOT NULL, message_id INTEGER NOT NULL, state TEXT NOT NULL, created REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS telegram_notifications(id TEXT PRIMARY KEY, job_id TEXT NOT NULL, chat_id INTEGER NOT NULL, generation TEXT NOT NULL, kind TEXT NOT NULL, fingerprint TEXT, state TEXT NOT NULL, message_id INTEGER, created REAL NOT NULL, UNIQUE(job_id, kind));
             CREATE TABLE IF NOT EXISTS context_events(id TEXT PRIMARY KEY, captured_at REAL NOT NULL, source_kind TEXT NOT NULL, content TEXT NOT NULL, content_hash TEXT NOT NULL, expires_at REAL NOT NULL, sharing_state TEXT NOT NULL, source_app TEXT NOT NULL, source_domain TEXT NOT NULL);
@@ -177,22 +180,78 @@ class QuickStore:
         with self.db() as db:
             return [dict(r) for r in db.execute('SELECT * FROM notes ORDER BY created DESC LIMIT 50')]
 
+    def save_memory(self, memory_key, content):
+        if not isinstance(memory_key,str) or not 2<=len(memory_key.strip())<=160: raise ValueError('기억 항목의 이름을 확인하세요.')
+        if not isinstance(content,str) or not content.strip() or len(content)>4000: raise ValueError('기억할 내용을 확인하세요.')
+        memory_id=str(uuid.uuid4())
+        with self.db() as db:
+            previous=db.execute("SELECT id FROM memories WHERE memory_key=? AND state='current' ORDER BY created DESC LIMIT 1",(memory_key.strip(),)).fetchone()
+            if previous: db.execute("UPDATE memories SET state='superseded' WHERE id=?",(previous['id'],))
+            db.execute('INSERT INTO memories(id,memory_key,content,created,supersedes,state) VALUES (?,?,?,?,?,?)',(memory_id,memory_key.strip(),content.strip(),time.time(),previous['id'] if previous else None,'current'))
+        return {'id':memory_id,'memory_key':memory_key.strip(),'content':content.strip(),'supersedes':previous['id'] if previous else None,'state':'current'}
+
+    def save_memory_candidate(self, job_id, memory_key, content):
+        if not isinstance(memory_key,str) or not 2<=len(memory_key.strip())<=160: raise ValueError('기억 항목의 이름을 확인하세요.')
+        if not isinstance(content,str) or not content.strip() or len(content)>4000: raise ValueError('기억할 내용을 확인하세요.')
+        candidate_id=str(uuid.uuid4())
+        with self.db() as db:
+            db.execute('INSERT INTO memory_candidates(id,job_id,memory_key,content,created,state) VALUES (?,?,?,?,?,?)',(candidate_id,job_id,memory_key.strip(),content.strip(),time.time(),'pending'))
+        return {'id':candidate_id,'memory_key':memory_key.strip(),'content':content.strip(),'state':'pending','saved':False}
+
+    def issue_memory_approval(self, job_id, owner_message, ttl=600):
+        """Issue a short-lived token bound to the authenticated owner job."""
+        job=self.job(job_id)
+        if not job or job.get('message')!=owner_message: raise ValueError('소유자 요청을 확인할 수 없습니다.')
+        expires_at=int(time.time()+ttl)
+        message_hash=hashlib.sha256(owner_message.encode()).hexdigest()
+        secret=self.secret('memory_approval_secret')
+        if not secret:
+            secret=secrets.token_hex(32); self.secret('memory_approval_secret',secret)
+        payload=f'{job_id}|{message_hash}|{expires_at}'
+        token=hmac.new(secret.encode(),payload.encode(),hashlib.sha256).hexdigest()
+        return {'job_id':job_id,'message_hash':message_hash,'expires_at':expires_at,'token':token}
+
+    def verify_memory_approval(self, approval, job_id):
+        if not isinstance(approval,dict) or approval.get('job_id')!=job_id or approval.get('expires_at',0)<time.time(): return False
+        job=self.job(job_id)
+        if not job: return False
+        message_hash=hashlib.sha256(str(job.get('message','')).encode()).hexdigest()
+        if not hmac.compare_digest(str(approval.get('message_hash','')),message_hash): return False
+        secret=self.secret('memory_approval_secret')
+        payload=f'{job_id}|{message_hash}|{approval.get("expires_at")}'
+        expected=hmac.new(secret.encode(),payload.encode(),hashlib.sha256).hexdigest()
+        return hmac.compare_digest(str(approval.get('token','')),expected)
+
+    def memory_candidates(self):
+        with self.db() as db:
+            return [dict(r) for r in db.execute("SELECT id,job_id,memory_key,content,created,state FROM memory_candidates WHERE state='pending' ORDER BY created DESC LIMIT 50")]
+
+    def memories(self):
+        with self.db() as db:
+            return [dict(r) for r in db.execute("SELECT id,memory_key,content,created,supersedes,state FROM memories WHERE state='current' ORDER BY created DESC LIMIT 50")]
+
     def personal_space(self):
         now=time.time()
         with self.db() as db:
             db.execute('DELETE FROM context_events WHERE expires_at<=?',(now,))
             memories=[dict(r) for r in db.execute('SELECT id,content,created FROM notes ORDER BY created DESC LIMIT 50')]
+            memories.extend(dict(r) for r in db.execute("SELECT id,content,created FROM memories WHERE state='current' ORDER BY created DESC LIMIT 50"))
+            memories=sorted(memories,key=lambda row:row.get('created',0),reverse=True)[:50]
             results=[dict(r) for r in db.execute('SELECT id,workspace_id,job_id,content,created FROM workspace_results ORDER BY created DESC LIMIT 50')]
             context=[dict(r) for r in db.execute('SELECT id,captured_at,source_kind,expires_at,sharing_state,source_app,source_domain FROM context_events ORDER BY captured_at DESC LIMIT 100')]
             evidence=[dict(r) for r in db.execute("SELECT tool,status,COUNT(*) AS count FROM tool_events WHERE tool!='model' GROUP BY tool,status ORDER BY tool,status")]
-        return {'memories':memories,'memory_count':len(memories),'results':results,'result_count':len(results),'context':context,'context_count':len(context),'evidence':evidence}
+            candidates=[dict(r) for r in db.execute("SELECT id,job_id,memory_key,content,created,state FROM memory_candidates WHERE state='pending' ORDER BY created DESC LIMIT 50")]
+        return {'memories':memories,'memory_count':len(memories),'memory_candidates':candidates,'memory_candidate_count':len(candidates),'results':results,'result_count':len(results),'context':context,'context_count':len(context),'evidence':evidence}
 
     def delete_personal_space_item(self, kind, item_id):
-        if kind not in ('memories','results') or not isinstance(item_id,str) or not item_id:
+        if kind not in ('memories','memory_candidates','results') or not isinstance(item_id,str) or not item_id:
             raise ValueError('삭제할 Personal Space 항목을 확인하세요.')
-        table={'memories':'notes','results':'workspace_results'}[kind]
         with self.db() as db:
-            deleted=db.execute(f'DELETE FROM {table} WHERE id=?',(item_id,)).rowcount
+            if kind=='results': deleted=db.execute('DELETE FROM workspace_results WHERE id=?',(item_id,)).rowcount
+            elif kind=='memory_candidates': deleted=db.execute("DELETE FROM memory_candidates WHERE id=? AND state='pending'",(item_id,)).rowcount
+            else:
+                deleted=db.execute('DELETE FROM memories WHERE id=?',(item_id,)).rowcount
+                if not deleted: deleted=db.execute('DELETE FROM notes WHERE id=?',(item_id,)).rowcount
         return {'deleted':bool(deleted),'id':item_id,'kind':kind}
 
     def workspaces(self, include_archived=False):

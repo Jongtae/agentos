@@ -1,6 +1,7 @@
 """Scoped local file workspace: references stay read-only; results are new files."""
 from pathlib import Path
-import hashlib, json, os, time, uuid
+import hashlib, json, os, re, time, uuid
+from .document_reader import read as read_document, supported as supported_document
 
 
 class FileWorkspace:
@@ -41,34 +42,49 @@ class FileWorkspace:
         base=Path(root['path']); path=self._safe_relative(relative); candidate=base/path
         if any(part.is_symlink() for part in (base, *candidate.parents) if part.exists()): raise ValueError('심볼릭 링크를 통한 참고 자료 접근은 허용하지 않습니다.')
         resolved=candidate.resolve()
-        if (not resolved.is_relative_to(base) or resolved.suffix.lower() not in ('.txt','.md') or not resolved.is_file() or candidate.is_symlink()): raise ValueError('참고 폴더 밖 또는 지원하지 않는 파일입니다.')
+        if (not resolved.is_relative_to(base) or resolved.suffix.lower() not in ('.txt','.md','.pdf','.docx','.xlsx') or not resolved.is_file() or candidate.is_symlink()): raise ValueError('참고 폴더 밖 또는 지원하지 않는 파일입니다.')
         return resolved
 
     def read(self, ref_id, relative):
-        path=self._reference(ref_id,relative); content=path.read_text(encoding='utf-8')
+        path=self._reference(ref_id,relative)
+        if path.suffix.lower() in ('.txt','.md'): content=path.read_text(encoding='utf-8')
+        else:
+            document=read_document(path); content='\n'.join(f'[{segment["location"]}] {segment["text"]}' for segment in document.segments)
         stat=path.stat()
         return {'reference_id':ref_id,'source_id':hashlib.sha256(f'{stat.st_dev}:{stat.st_ino}'.encode()).hexdigest()[:24],
                 'path':str(Path(relative)),'version':hashlib.sha256(content.encode()).hexdigest(),'content':content}
 
     def find_reference(self, query):
+        matches=self.find_references(query, limit=2)
+        if not matches: raise ValueError('연결한 참고 폴더에서 일치하는 TXT/MD 자료를 찾지 못했습니다.')
+        if len(matches)>1: raise ValueError('일치하는 자료가 여러 개입니다. 더 구체적인 자료 검색어로 다시 요청하세요.')
+        return matches[0]
+
+    def find_references(self, query, limit=20):
         if not isinstance(query,str) or not 2<=len(query.strip())<=160: raise ValueError('두 글자 이상의 자료 검색어를 입력하세요.')
-        needle=query.casefold().strip(); matches=[]
+        phrase=query.casefold().strip(); alternatives=[item.strip() for item in phrase.split('||') if item.strip()]
+        matches=[]
         for root in self.status()['references']:
             base=Path(root['path'])
             for parent,dirs,names in os.walk(base,followlinks=False):
                 dirs[:]=[name for name in dirs if not name.startswith('.') and not (Path(parent)/name).is_symlink()]
                 for name in names:
-                    if name.startswith('.') or Path(name).suffix.lower() not in ('.txt','.md'): continue
+                    if name.startswith('.') or Path(name).suffix.lower() not in ('.txt','.md','.pdf','.docx','.xlsx') or not supported_document(Path(parent)/name): continue
                     relative=str((Path(parent)/name).relative_to(base))
                     try: source=self.read(root['id'],relative)
                     except (OSError,UnicodeError,ValueError): continue
-                    if needle in (relative+'\n'+source['content']).casefold(): matches.append(source)
-                    if len(matches)>1: break
-                if len(matches)>1: break
-            if len(matches)>1: break
-        if not matches: raise ValueError('연결한 참고 폴더에서 일치하는 TXT/MD 자료를 찾지 못했습니다.')
-        if len(matches)>1: raise ValueError('일치하는 자료가 여러 개입니다. 더 구체적인 검색어로 다시 요청하세요.')
-        return matches[0]
+                    haystack=(relative+'\n'+source['content']).casefold()
+                    matches_query=False
+                    for alternative in alternatives:
+                        terms=[term for term in re.findall(r'[\w가-힣-]{2,}',alternative) if len(term)>2]
+                        candidate=alternative in haystack if alternative else False
+                        if not candidate and terms:
+                            candidate=(any(term in haystack for term in terms) if len(terms)==1 else all(term in haystack for term in terms))
+                        matches_query=matches_query or candidate
+                    if matches_query:
+                        matches.append(source)
+                        if len(matches)>=limit: return matches
+        return matches
 
     @staticmethod
     def _ensure_results_table(db):
@@ -157,7 +173,8 @@ class FileWorkspace:
         except (KeyError,ValueError,OSError,UnicodeError): return False
 
     def search(self, query):
-        if not isinstance(query,str) or not 2<=len(query.strip())<=160: raise ValueError('두 글자 이상의 결과 검색어를 입력하세요.')
+        latest=isinstance(query,str) and query.strip() in ('*','__latest__')
+        if not latest and (not isinstance(query,str) or not 2<=len(query.strip())<=160): raise ValueError('두 글자 이상의 결과 검색어를 입력하세요.')
         self.recover()
         needle=query.casefold().strip()
         with self.store.db() as db:
@@ -172,5 +189,6 @@ class FileWorkspace:
             if not fresh: continue
             try: content=self._result_path(record['path']).read_text(encoding='utf-8')
             except (OSError,UnicodeError,ValueError): continue
-            if needle in (record['path']+'\n'+content).casefold(): results.append({'id':record['id'],'path':record['path'],'content':content,'sources':json.loads(record['sources'])})
+            if latest or needle in (record['path']+'\n'+content).casefold(): results.append({'id':record['id'],'path':record['path'],'content':content,'sources':json.loads(record['sources'])})
+            if latest and results: break
         return results

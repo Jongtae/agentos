@@ -18,6 +18,17 @@ class GeneralRuntimeTests(unittest.TestCase):
    with self.assertRaises(ValueError):self.caps.read_file(hits[0]['root_id'],path)
   (self.root/'escape.txt').symlink_to(Path(self.tmp.name)/'data/private/quickstart.db')
   with self.assertRaises(ValueError):self.caps.read_file(hits[0]['root_id'],'escape.txt')
+
+ def test_public_page_read_requires_owner_scope_and_passes_scope_to_reader(self):
+  class Public:
+   def __init__(self): self.calls=[]
+   def execute(self,plan): self.calls.append(plan); return {'tool':'public_page_read','url':plan['url'],'content':'ok','sources':[plan['url']]}
+  network=Public(); caps=Capabilities(self.store,None,CFG,'','job',lambda *a:None,network=network)
+  with self.assertRaisesRegex(ValueError,'승인한 공개 페이지 범위'):
+   caps.execute('public_page_read',{'url':'https://example.com/event'})
+  caps=Capabilities(self.store,None,CFG,'','job',lambda *a:None,network=network,public_page_scope=['https://example.com/event?a=1&b=2'])
+  caps.execute('public_page_read',{'url':'https://example.com/event?b=2&a=1'})
+  self.assertEqual(network.calls[-1]['approved_urls'],['https://example.com/event?a=1&b=2'])
  def test_notes_idempotent(self):
   self.caps.execute('save_note',{'content':'hello'});self.caps.execute('save_note',{'content':'hello'})
   self.assertEqual(len(self.store.notes()),1)

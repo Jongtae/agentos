@@ -485,7 +485,7 @@ class AgentService:
         rows=rows if isinstance(rows,list) else []
         self.store.put('file_workspace_document_jobs',[*{*rows,job_id}][-100:])
 
-    def save_model(self, body):
+    def save_model(self, body, strict=False):
         config=validate_model(body)
         key=body.get('api_key','')
         if not isinstance(key,str) or len(key)>4096: raise ValueError('올바른 API 키를 입력하세요.')
@@ -493,6 +493,8 @@ class AgentService:
             previous=self.store.config('model',{})
             changed=any(config.get(k)!=previous.get(k) for k in ('provider','endpoint'))
             # Never silently send an existing key to a newly selected host/provider.
+            if changed and not key and (strict or body.get('require_key')):
+                raise ValueError('연결 대상이 바뀌었습니다. 새 API 키를 입력한 뒤 적용하세요.')
             if key or changed or body.get('clear_key'):
                 self.store.secret('model_key',key)
             self.store.put('model',config)
@@ -535,10 +537,15 @@ class AgentService:
         if not isinstance(data,dict) or not isinstance(data.get('models'),list):raise ProviderError('모델 목록을 읽을 수 없습니다.')
         return {'models':[{'name':m['name'],'size':m.get('size',0)} for m in data['models'] if isinstance(m,dict) and isinstance(m.get('name'),str)]}
 
-    def test_model(self):
+    def test_model(self, draft=None, strict=False):
         with self.lock:
-            config=self.store.config('model',{})
-            key=self.store.secret('model_key')
+            config=validate_model(draft) if draft is not None else self.store.config('model',{})
+            key=(draft or {}).get('api_key','') if draft is not None else ''
+            current=self.store.config('model',{})
+            if not key and config.get('provider')==current.get('provider') and config.get('endpoint')==current.get('endpoint'):
+                key=self.store.secret('model_key')
+            if draft is not None and (strict or draft.get('require_key')) and any(config.get(k)!=current.get(k) for k in ('provider','endpoint')) and not key:
+                raise ValueError('연결 대상이 바뀌었습니다. 새 API 키를 입력한 뒤 테스트하세요.')
         if not config:
             raise ValueError('먼저 모델을 선택하세요.')
         now=time.time()

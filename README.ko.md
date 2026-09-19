@@ -2,118 +2,98 @@
 
 [English](README.md) | [한국어](README.ko.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-**Personal AgentOS는 한 사람이 자신의 환경에 설치해 소유하는 로컬 우선 개인 AI 운영 환경입니다.**
+**내가 설치하고, 내가 통제하며, 실제로 유용한 일을 맡기는 개인 AI 환경.**
 
-장기 제품 방향은 다음 한 문장으로 요약합니다.
+Personal AgentOS는 한 사람이 자신의 환경에 설치해 소유하는 로컬 우선 개인 AI 운영 환경입니다. 원하는 결과를 말하고, 선택한 모델과 허용한 자료로 일을 끝내고, 유용한 결과를 보관합니다. 장기적으로 에이전트를 앱처럼 설치·교체해도 내 기억, 권한, 작업과 결과는 나에게 남아야 합니다.
 
-> **Personal AgentOS = 개인 AI 커널 + Agent 유통 플랫폼**
+> **Personal AgentOS = 개인 AI 커널 + 열린 Agent 유통 플랫폼**
 
-개인 PC와 개인 OS가 한 사람에게 지속되는 컴퓨팅 환경을 제공하듯, Personal AgentOS는 대화 하나나 특정 모델 하나를 넘어 계속 유지되는 개인 AI 환경을 지향합니다. 사용자가 제어하는 호스트/런타임 위에서 동작하며 정책, 개인 컨텍스트와 기억, 작업공간, 권한, 승인, 작업 상태, 결과물, 근거와 복구 상태를 AgentOS가 소유하는 경계 안에 둡니다.
+통제만 잘하고 쓸모가 없는 관리 도구도, 일을 하지만 무엇을 했는지 확인할 수 없는 비서도 목표가 아닙니다. **초기 번들 수는 적어도 되지만 기본 기능의 품질이 낮아도 된다는 뜻은 아닙니다.**
 
-커널은 의도적으로 **Agent 독립적**입니다. Codex, Claude Code, GPT 계열 모델, 로컬 모델, MCP 서버, 도구, 전문 Agent, Ruflo 같은 multi-agent runtime은 필요할 때 교체할 수 있는 실행자/기능입니다. 이들이 canonical Memory, Grant, Work 상태나 Evidence의 주인이 되어서는 안 됩니다.
+## 지금 있는 것과 아직 계획인 것
 
-반면 사용자 경험과 생태계는 **Agent 중심**일 수 있습니다. 잘 만들어진 외부 Agent를 앱처럼 발견하고, 검토하고, 설치하고, 권한을 부여하고, 실행하고, 업데이트·롤백·비활성화·제거할 수 있어야 합니다. 중요한 것은 Agent를 바꾸어도 나의 개인 AI 환경이 유지되는 것입니다.
-
-**Personal AgentOS는 코딩 하네스나 Agent swarm 프레임워크가 아닙니다.** 코딩 자동화나 multi-agent orchestration은 AgentOS 위에서 실행되는 서비스/런타임이 될 수 있습니다. 이 저장소의 GitHub/Codex 자동화는 제품을 만드는 개발 인프라이지 일반 사용자가 사용하는 OS 기능 자체가 아닙니다. 또한 macOS/Linux를 대체하는 커널이나 하이퍼바이저가 아니라, 사용자가 소유한 호스트 위에서 지속되는 개인 AI 계층입니다.
-
-## 제품 구조
-
-| 계층 | 책임 |
+| 상태 | 범위와 근거 |
 | --- | --- |
-| **Owner plane** | 사용자 정체성/정책, 개인 Context/Memory, 자료/작업공간, Grant, 승인, Work/Event, Artifact, Evidence, 복구 |
-| **Capability plane** | 도구, connector, capability registry, runtime/engine boundary |
-| **Distribution plane** | AgentPackage, Package Manager, Registry, trust metadata, Marketplace/discovery 경계 |
-| **Worker plane** | 제한된 Codex, Claude Code, 외부/로컬 모델, Ruflo 또는 기타 runtime 실행 |
-| **Experience plane** | 로컬 UI, Telegram/companion, 향후 Agent 탐색·설치·권한 UX |
+| 기존 제품 코드 | 로컬 브라우저 설정·대화, 모델 연결, 제한된 도구와 메모, 허용된 폴더·파일 결과. 실제 지원 경로는 [QUICKSTART](QUICKSTART.md)를 따릅니다. |
+| 파일 작업공간 개발 완료 | #314 / PR #320·#324: 원본 보존, 제한된 파일 사용, 결과 저장, 재시작 후 재사용. 자동·임시 로컬 파일 검증 범위입니다. |
+| v0.1 계약 완료 | #334 / PR #350: 핵심 객체와 AgentPackage 스키마·규칙·fixture. 패키지 실행이나 설치 구현을 의미하지 않습니다. |
+| DOGFOOD-01 개발 완료 | #351 / PR #354–#356: 모의 모델을 사용한 HTTP·파일·재시작 통합 검증과 사용 안내. 실제 모델·브라우저 사용 관찰은 별도입니다. |
+| 다음 기능 후보 | [#358](https://github.com/Jongtae/personal-agentos/issues/358): 조사·비교, 파일 결과 생성, 후속 대화·재사용의 실제 품질 개선과 측정. |
+| 계획된 통제·앱 경험 | [#359](https://github.com/Jongtae/personal-agentos/issues/359) 실행 기록·통제 화면, [#360](https://github.com/Jongtae/personal-agentos/issues/360) 설치·사용·회수·제거 통합 경험과 #333의 미완료 하위 작업. |
 
-영문 단일 원본 아키텍처는 [Personal AgentOS Architecture](docs/personal-agentos-architecture.en.md)입니다. 플랫폼 단계와 issue 구조는 [Agent Distribution Platform Foundation](docs/agent-distribution-platform-foundation.en.md)과 [#333](https://github.com/Jongtae/personal-agentos/issues/333)에 정리합니다.
+현재 임의의 제3자 AgentPackage 실행, 공개 Registry/Marketplace, 모든 에이전트와의 호환, 자동 구매를 지원한다고 주장하지 않습니다. 기존 선언형 플러그인과 앞으로의 실행형 AgentPackage는 다릅니다. 과거 실제 모델 검증 기록도 당시 질문·버전·제공자 조건에 한정됩니다.
 
-### 커널 primitive
+## 먼저 잘해야 하는 세 가지 일
+
+**조사해서 결정에 도움을 줍니다.** 공개 자료로 선택지를 비교하고, 출처·조회 시점·가격 조건·불확실한 점을 분리해 실제로 결정할 수 있는 요약을 제공합니다. 링크를 나열하는 것만으로 끝내지 않습니다. 현재 웹 검색은 검색 결과 발췌 수준이므로 전체 페이지·재고·결제 총액을 확인했다고 표현해서는 안 됩니다.
+
+**내 자료로 쓸 만한 결과를 만듭니다.** 허용한 문서를 읽고 핵심 쟁점·결정·다음 행동을 정리해 일반 파일로 저장합니다. 파일이 생기는 것뿐 아니라 내용이 정확하고 유용해야 하며 원본은 보존합니다.
+
+**다시 설명하지 않아도 일을 이어갑니다.** 조건 변경과 정정을 반영하고, 재시작 후에도 이전 결과를 찾아 재사용합니다. 모든 대화를 몰래 장기 기억으로 저장하는 방식은 쓰지 않습니다.
+
+[기본 기능 품질 계획](docs/default-agent-usefulness.en.md)은 이를 24개 합성 평가 사례로 정의합니다. 사례와 정적 검증을 추가한 것은 실제 모델 평가에 통과했다는 뜻이 아닙니다. 성공률·응답 시간·비용·사용자 개입을 실제 지원 경로에서 측정해야 합니다.
+
+## 내가 행사할 수 있어야 하는 통제권
+
+[Owner Control Contract](docs/owner-control-contract.en.md)는 앞으로 구현·검증할 여섯 권리를 정의합니다.
+
+1. 설치할 에이전트의 출처·제작자·버전·실행 위치·요청 권한을 봅니다.
+2. 에이전트가 사용할 자료·기억·계정을 선택합니다.
+3. 어떤 정보가 어느 모델·서비스로 나가는지 확인합니다.
+4. 설치·연결과 읽기·쓰기·전송·결제 같은 행동 권한을 구분합니다.
+5. 작업을 멈추고 권한을 회수하며, 이미 진행 중인 외부 행동의 불확실성도 확인합니다.
+6. 에이전트를 제거·교체해도 내 결과·기억·필요한 기록을 유지합니다.
+
+이것은 모델에게 “규칙을 지켜라”라고 지시하는 것만으로 충족되지 않습니다. 실제 실행 경계에서 접근을 거부할 수 있어야 합니다. 진행 상황은 실제 Work·도구 이벤트에서 만들고, 필요하면 도구명·가려진 입력값·목적지·승인·결과를 확인할 수 있어야 합니다. 숨은 추론, 시스템 프롬프트, 비밀키 공개가 목적은 아닙니다.
+
+로컬 설치와 로컬 처리는 다릅니다. 외부 모델을 사용하는 로컬 에이전트는 승인한 내용을 그 제공자에게 보냅니다. 외부 에이전트의 연결 패키지를 설치했다고 그 서버까지 내 통제 아래가 되는 것도 아닙니다. 연결 해제·권한 회수·에이전트 제거·저장 정보 삭제를 구분하고, 이미 전달된 정보나 완료된 외부 행동을 중지 버튼으로 되돌렸다고 약속하지 않습니다.
+
+## 구조와 에이전트 생태계
+
+커널은 **Agent 독립적**, 제품 경험은 **Agent 중심**일 수 있습니다.
 
 `Owner · Context · Memory · Artifact · Capability · Runtime · Grant · Work · Event · Evidence`
 
-Agent 유통 플랫폼은 여기에 다음을 추가합니다.
+이 개인 상태 계층 위에 `AgentPackage · Package Manager · Registry · Marketplace/Discovery · Trust/Verification`을 둡니다. 모델, Codex, Claude Code, 로컬 실행자, MCP, 선택적 Ruflo 런타임은 교체 가능한 작업자이지 사용자 상태의 주인이 아닙니다.
 
-`AgentPackage · Package Manager · Registry · Marketplace/Discovery · Trust/Verification`
+`다운로드 ≠ 설치 ≠ 활성화 ≠ 연결 ≠ 특정 행동 허가`
 
-## AgentPackage와 권한
+설치는 비활성이 기본이며 권한을 자동 발급하지 않습니다. 업데이트가 자료·행동·외부 목적지·기억·백그라운드 범위를 넓히면 다시 허가받아야 합니다. 외부 에이전트의 장기 기억 변경은 기본적으로 MemoryCandidate 제안이고 AgentOS 정책·사용자가 반영 여부를 결정합니다.
 
-AgentPackage는 사용자가 설치하는 Agent/app 단위입니다. package manifest는 장기적으로 package/publisher/version, AgentOS API 호환성, capability/action, runtime 요구사항, 파일·데이터 범위, 네트워크 목적지, secret reference, Memory 정책, Event/background 동작, 비용/시간 예산, 승인 필요 행동, Artifact, dependency, sandbox, health check, 업데이트·롤백·제거, provenance/signature/SBOM 등을 선언해야 합니다.
+Registry는 정확한 패키지 식별·버전·무결성·호환성·폐기 정보를, Marketplace는 검색·추천·리뷰·향후 유통을 담당합니다. 별점과 다운로드 수는 권한이 아니며 서명도 행동의 안전성을 보장하지 않습니다. 개인 자료를 마켓 검색 데이터로 보내지 않습니다.
 
-설치와 권한은 분리합니다.
+[영문 아키텍처](docs/personal-agentos-architecture.en.md), [PRD](PRD.md), [유통 플랫폼 기반](docs/agent-distribution-platform-foundation.en.md), [로드맵](docs/roadmap.md)을 함께 참고하세요.
 
-`발견 → 검토 → 검증 → 설치(비활성) → 연결/Grant/활성 → 실행 → 업데이트/롤백 → 비활성 → 제거`
+## 초기 번들과 개발자 경험
 
-**다운로드됨, 설치됨, 활성화됨, 계정/credential이 연결됨, 특정 행동이 허가됨은 서로 다른 상태입니다.** 패키지를 설치했다고 Grant가 생기지 않으며, 업데이트가 권한·데이터 범위·외부 목적지·Memory/background 동작을 넓히면 다시 검토해야 합니다.
+처음에는 유용한 Files 참조 패키지 하나와 공개 작성 경로부터 입증합니다. 번들과 제3자 에이전트는 같은 계약을 사용하고 숨은 특권을 갖지 않습니다. MCP·기존 skill/plugin 호환은 형식·라이선스·권한을 실제로 대응시킬 수 있을 때만 추가합니다. Ruflo와 공개 마켓은 첫 사용 경험의 필수 조건이 아닙니다.
 
-외부 Agent는 기본적으로 canonical 사용자 Memory를 직접 수정하지 않고 출처가 있는 MemoryCandidate를 제안합니다. AgentOS 정책/사용자가 실제 Memory 반영 여부를 결정합니다.
+입증할 흐름은 `검토 → 비활성 설치 → 권한 부여 → 유용한 작업 → 기록 확인 → 권한 회수 → 재접근 차단 → 제거 → 재시작 → 별도 승인한 다른 에이전트로 결과 재사용`입니다. 아직 구현된 전체 흐름으로 표시하지 않습니다.
 
-## Registry와 Marketplace
-
-**Registry**는 package/publisher identity, exact version/digest, 호환성, signature/provenance, trust metadata, advisory/revocation/quarantine 같은 기술적 배포 메타데이터를 담당합니다.
-
-**Marketplace/Discovery**는 검색, 추천, 랭킹, 리뷰, 큐레이션, 향후 상업 유통을 담당할 수 있습니다. 다운로드 수·별점·추천 순위는 권한이 아니며 quarantine/signature/AgentOS 정책을 덮어쓸 수 없습니다.
-
-사용자의 private Context/Memory/Work 내용은 Registry/Marketplace의 상태가 되어서는 안 됩니다. Agent 탐색은 가능한 한 구조화된 capability metadata를 사용하고, raw 개인 prompt를 store 검색에 그대로 보내는 것을 기본으로 하지 않습니다.
-
-## 초기 생태계 전략
-
-초기 Personal AgentOS에 최고의 Agent가 모두 번들될 필요는 없습니다. 초기 MS-DOS/Linux/Ubuntu의 기본 앱처럼 General Assistant, Files, Research, Coding 정도의 작은 reference Agent 집합으로 시작할 수 있습니다.
-
-이 번들 Agent의 목적은 최고의 앱을 직접 만드는 것이 아니라 **AgentOS 공개 계약을 검증하고 OS가 usable한 최소 baseline을 제공하는 것**입니다. 번들 Agent도 third-party Agent와 같은 Package/Runtime/Grant 계약을 사용하며 숨겨진 first-party 권한을 갖지 않습니다.
-
-Marketplace가 비어 있는 chicken-and-egg 문제를 줄이기 위해, official format과 라이선스가 허용하는 범위에서 기존 MCP 및 OpenAI/Codex·Claude skill/plugin 생태계를 AgentPackage로 wrapping/import하는 방향을 계획합니다. Ruflo는 AgentOS의 kernel이 아니라 향후 bounded delegated Runtime Adapter 후보입니다.
-
-## 현재 구현 기준선
-
-첫 번째 사용 가능한 제품 단면은 **파일·폴더 기반 개인 작업공간**입니다. [#314 프로그램](https://github.com/Jongtae/personal-agentos/issues/314)은 완료되었고, 통합 파일 작업공간 구현은 [PR #320](https://github.com/Jongtae/personal-agentos/pull/320), 검증과 프로그램 종료는 [PR #324](https://github.com/Jongtae/personal-agentos/pull/324)에 병합되었습니다.
-
-현재 흐름은 사용자 원본을 보존하고, 연결한 참고 폴더를 기본 읽기 전용으로 사용하며, 새 결과는 소유자가 허용한 관리 작업공간에만 기록합니다. 원본·파생물·초안·확정 기록의 출처 관계를 구별하고, 재생성 가능한 검색 인덱스와 지속되는 작업·승인·근거·복구·인증 상태를 분리하며, 앱 재시작 뒤에도 저장한 결과를 찾아 다시 사용할 수 있습니다.
-
-증거의 범위도 구분합니다. 완료된 파일 작업공간 프로그램은 자동화된 deterministic model과 임시 로컬 파일 기반 검증에 근거합니다. 이것만으로 실제 외부 모델, Telegram, Google Drive/OAuth, 반복 스케줄러, 개인 폴더, AgentPackage 설치, Registry 또는 Marketplace 운영이 검증되었다고 주장하지 않습니다.
-
-[#333 Agent Distribution Platform](https://github.com/Jongtae/personal-agentos/issues/333)과 #334–#346은 **계획된 후속 작업**입니다. 이슈가 만들어졌다는 사실만으로 자동 실행되는 작업 큐가 되지 않습니다. 활성 작업은 여전히 owner가 명시적으로 선택하고 Goal Execution Contract를 만족해야 합니다.
-
-## 사용자 통제와 신뢰 경계
-
-- 연결할 폴더, 서비스, 도구, AgentPackage, runtime은 사용자가 선택합니다.
-- 연결한 참고 폴더는 기본 읽기 전용이며, 관리 작업공간 쓰기는 명시한 사용자 범위 안에서만 이뤄집니다.
-- 외부 AgentPackage/runtime은 canonical Memory를 기본적으로 직접 수정하지 않습니다.
-- 외부 AI, 메신저, 다른 Agent, package/runtime, 수신자에게 보내는 것은 로컬 저장과 별개의 정책 경계입니다.
-- 외부 전송, 결제, 파괴적 파일/계정 변경, 권한 확대 같은 행동에는 명시적인 권한이 필요합니다.
-- package signature/provenance는 identity/integrity 근거이지 '안전한 Agent'라는 보장이 아닙니다.
-- 지원되는 범위에서 Work/Evidence를 남겨 취소, 재시도, 복구, 업데이트·롤백, 내보내기와 복원을 가능하게 합니다.
-
-로컬 우선은 '어떤 정보도 기기 밖으로 나가지 않는다'는 뜻이 아닙니다. 사용자가 외부 AI, connector, AgentPackage/runtime, 메신저 또는 수신자를 선택하면 승인된 작업 Context가 해당 기능의 정책에 따라 전송될 수 있습니다. AgentOS는 이를 '로컬'이라는 말 뒤에 숨기지 않고 경계를 명확히 보여야 합니다.
-
-## 상태 이동
-
-사용자 상태는 다음 도구로 로컬 런타임 사이에서 이동할 수 있습니다.
-
-```sh
-scripts/agentos-backup.py DATA ARCHIVE
-scripts/agentos-restore.py ARCHIVE EMPTY_DATA
-```
-
-아카이브는 무결성을 확인하고 Memory record, Work Evidence, 검토된 assistant/package declaration 같은 지속 상태를 담을 수 있습니다. provider credential, session, 로컬 폴더 Grant, 엔진/모델 선택 또는 Telegram pairing은 포함하지 않으며, 대상 런타임은 다시 명시적으로 claim하고 연결해야 합니다.
-
-## 개발 설치
+## 현재 버전 사용
 
 ```sh
 brew install jongtae/agentos/agentos
 agentos start
 ```
 
-일반 사용자 설치 경험을 다듬는 동안 Homebrew 경로는 개발자와 자체 호스팅 사용자용으로 유지합니다.
+Homebrew는 개발자·자체 호스팅 경로이며 최신 main과 다를 수 있습니다. [QUICKSTART](QUICKSTART.md)의 전용 테스트 폴더 시나리오를 따르세요. 문서화된 파일 작업공간 테스트에는 구독형 실행 엔진이 아니라 지원되는 직접 모델 연결을 사용합니다. 계획된 패키지 기능을 이미 사용할 수 있는 명령처럼 안내하지 않습니다.
 
-## 개발 거버넌스
+## 상태 이동과 한계
 
-저장소 개발은 [Development Constitution](docs/development-constitution.en.md), 이슈에 연결된 브랜치, PR, 필수 검증, [Goal 실행 계약](docs/goal-execution-contract.en.md)을 따릅니다.
+```sh
+scripts/agentos-backup.py DATA ARCHIVE
+scripts/agentos-restore.py ARCHIVE EMPTY_DATA
+```
 
-개발 순서는 다음 원칙을 사용합니다.
+지원되는 사용자 상태와 검토된 선언을 무결성 검증과 함께 이동합니다. 이 이동용 아카이브에는 제공자 자격 증명, 세션, 로컬 폴더 권한, 모델·엔진 선택, Telegram 연결이 포함되지 않으므로 대상 환경에서 다시 승인·연결해야 합니다. 비밀정보가 포함될 수 있는 전체 데이터 폴더 백업과 구분하세요.
 
-`Constitution → Spec → Authority/Threat Model → Plan → Tasks → Implement → Verify → Converge`
+로컬 우선이라고 자동으로 안전하거나 아무 정보도 외부로 나가지 않는 것은 아닙니다. 호스트 보안, 격리 구현, 외부로 이미 전달된 정보와 원격 서비스의 보관 정책에는 한계가 있습니다.
 
-Spec Kit·BuilderMethods Agent OS·Open AgentOS 계열에서 유용한 개발 패턴을 참고하지만 이들을 Personal AgentOS runtime dependency로 넣지 않습니다. 상태 기반 구현자/검토자 handoff도 저장소 개발 인프라이지 일반 사용자의 AgentOS runtime이나 실제 무인 운영을 증명하는 기능이 아닙니다.
+## 개발 원칙
 
-구현 전 [AGENTS.md](AGENTS.md), [PRD.md](PRD.md), [TASKS.md](TASKS.md), [로드맵](docs/roadmap.md)을 확인하세요.
+Personal AgentOS는 코딩 하네스, swarm 프레임워크, macOS/Linux 대체 커널이 아닙니다. GitHub/Codex 거버넌스는 제품을 만드는 개발 인프라입니다.
+
+[AGENTS.md](AGENTS.md), [Development Constitution](docs/development-constitution.en.md), [Goal Execution Contract](docs/goal-execution-contract.en.md)에 따라 제한된 이슈·브랜치·PR·검증·독립 리뷰·종료를 수행합니다. 계획된 이슈는 자동 실행 큐가 아닙니다. 이번 #357은 문서·평가 명세·backlog 정렬이고 #358–#360과 미완료 플랫폼 작업은 별도 활성화 전까지 비활성입니다.
+
+제품 완료는 스키마·파일 개수·CI만으로 판단하지 않습니다. **쓸 만한 결과를 실제로 만들었는지, 허용하지 않은 행동은 실제로 막혔는지 함께 확인합니다.**

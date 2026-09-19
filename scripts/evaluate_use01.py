@@ -135,6 +135,8 @@ class LiveEvaluationRunner:
         self.config=config; self.api_key=api_key; self.started=time.monotonic(); self.calls=0
         self.max_requests=72
     def transport(self,url,body,headers):
+        if normalize_public_url(url) not in self.config.destinations:
+            raise ProviderError('live evaluation destination is outside the owner-approved scope')
         elapsed=time.monotonic()-self.started
         if elapsed>self.config.timeout: raise ProviderError('live evaluation timeout limit reached')
         if self.calls>=self.max_requests: raise ProviderError('live evaluation request limit reached')
@@ -146,7 +148,17 @@ def main():
     parser=argparse.ArgumentParser();parser.add_argument('--mode',choices=('deterministic','live'),default='deterministic');parser.add_argument('--label',default='candidate');parser.add_argument('--json',action='store_true');parser.add_argument('--provider',default='');parser.add_argument('--endpoint',default='');parser.add_argument('--model',default='');parser.add_argument('--destination',action='append',default=[]);parser.add_argument('--data-class',default='');parser.add_argument('--budget',type=float,default=0);parser.add_argument('--timeout',type=int,default=0);parser.add_argument('--api-key-env',default='');parser.add_argument('--execute-live',action='store_true');args=parser.parse_args()
     seed=json.loads((ROOT/'evals/owner-usefulness-v0.1.json').read_text());fixtures=json.loads((ROOT/'evals/use01-fixtures.json').read_text());rubric=json.loads((ROOT/'evals/owner-usefulness-rubric-v0.1.json').read_text())
     if args.mode=='live':
-        try: config=LiveEvaluationConfig(args);report={'label':args.label,'mode':'live','live_quality':'implemented_but_unrun/owner_authorization_required' if not config.authorized else 'authorized_runner_ready','authorization':config.report(),'limits':{'max_requests':72,'deadline_seconds':config.timeout,'destination_scope_enforced':True},'cases':[]}
+        try:
+            config=LiveEvaluationConfig(args)
+            api_key=None
+            if config.authorized:
+                if not args.api_key_env: raise ValueError('--execute-live requires --api-key-env; credentials are referenced, never supplied inline')
+                api_key=__import__('os').environ.get(args.api_key_env)
+                if not api_key: raise ValueError('the named API-key environment variable is not set')
+            LiveEvaluationRunner(config,api_key)
+            status='implemented_but_unrun/owner_authorization_required' if not config.authorized else 'implemented_but_unrun/owner_authorized_not_started'
+            report={'label':args.label,'mode':'live','live_quality':status,'authorization':config.report(),'limits':{'max_requests':72,'deadline_seconds':config.timeout,'destination_scope_enforced':True,'api_key_env_required':True},'cases':[]}
+        except ValueError as exc: report={'label':args.label,'mode':'live','live_quality':'implemented_not_run/owner_authorization_required','reason':str(exc),'cases':[]}
         except ValueError as exc: report={'label':args.label,'mode':'live','live_quality':'implemented_not_run/owner_authorization_required','reason':str(exc),'cases':[]}
     else:
         rows=[]

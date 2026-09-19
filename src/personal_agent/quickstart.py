@@ -319,6 +319,9 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                                        'state':handoff.status()['state'] if handoff else 'not-configured'})
             if not self.auth():return
             if path=='/api/home':return self.reply(200,service.home())
+            if path=='/api/tasks':return self.reply(200,service.task_progress())
+            if path.startswith('/api/tasks/'):
+                return self.reply(200,service.task_progress(path.rsplit('/',1)[-1]))
             if path=='/api/capabilities':return self.reply(200,{'capabilities':CapabilityRegistry(store).list()})
             if path=='/api/settings':return self.reply(200,service.conversation_settings_request({'operation':'read'}))
             if path=='/api/capability-recommendations':return self.reply(200,service.capability_recommendation_request({'outcome':parse_qs(parts.query).get('outcome',[''])[0]}))

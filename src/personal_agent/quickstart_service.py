@@ -55,6 +55,7 @@ def workspace_summary_request(prompt):
     if len(quotes)>=2 and any(word in lowered for word in ('summarize','summary','요약','회의록')) and any(word in lowered for word in ('save','저장')):
         return quotes[0],quotes[1]
     if (any(word in lowered for word in ('summarize','summary','요약','정리','brief'))
+            and not any(word in lowered for word in ('find','찾아','검색','reuse','재사용','다시'))
             and any(word in lowered for word in ('save','저장','workspace','작업공간','workspace file','파일로'))):
         topic=next((word for word in ('meeting','회의','project','프로젝트','note','문서','자료') if word in lowered), None)
         if topic:

@@ -74,6 +74,12 @@ def deterministic_case(case, fixtures):
                 out=Path(tmp)/'out'; out.mkdir(); store=QuickStore(Path(tmp)/'state'); workspace=FileWorkspace(store); state=workspace.configure([str(ref)],str(out)); ref_id=state['references'][0]['id']; store.put('file_workspace',{'references':[],'workspace':state['workspace'],'workspace_id':state['workspace_id']})
                 try: workspace.read(ref_id,'memo.md')
                 except ValueError: checks=[True]
+        elif cid=='U3-04':
+            with tempfile.TemporaryDirectory() as tmp:
+                store=QuickStore(Path(tmp)/'state'); job=store.enqueue('Research options','cancel-case')
+                with store.db() as db: db.execute("UPDATE jobs SET status='running' WHERE id=?",(job,))
+                store.recover(); recovered=store.job(job)
+                checks=[recovered['status']=='interrupted', '자동으로 재호출하지 않습니다' in recovered['error'], not store.jobs()[0]['status'] in ('queued','running')]
         elif cid=='U3-05':
             with tempfile.TemporaryDirectory() as tmp:
                 store=QuickStore(Path(tmp)/'state'); service=AgentService(store); service.save_model({'provider':'compatible','endpoint':'https://provider-a.example/v1','model':'a'}); service.set_document_approval({'approved':True}); approved=service.document_boundary()['approved']; service.save_model({'provider':'compatible','endpoint':'https://provider-b.example/v1','model':'b'}); checks=[approved, service.document_boundary()['requires_approval'], not service.document_boundary()['approved']]

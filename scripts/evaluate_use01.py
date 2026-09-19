@@ -11,6 +11,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 from personal_agent.file_workspace import FileWorkspace
 from personal_agent.local_tools import PublicPageReader
 from personal_agent.quickstart_store import QuickStore
+from personal_agent.quickstart_service import AgentService
+from personal_agent.agent_runtime import Capabilities, run_agent
+from personal_agent.providers import ModelAdapter
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -59,6 +62,30 @@ def deterministic_case(case, fixtures):
                 saved=workspace.save(cid,'meeting brief','Decision: review on 2030-04-20. Next: Mina confirms venue.',[source])
                 restarted=FileWorkspace(QuickStore(state)); reused=restarted.search('__latest__')
                 checks=[Path(out/saved['path']).is_file(), bool(reused), reused[0]['id']==saved['id'], '2030-04-20' in reused[0]['content']]
+        elif cid=='U3-02':
+            with tempfile.TemporaryDirectory() as tmp:
+                ref=Path(tmp)/'references'; out=Path(tmp)/'workspace'; ref.mkdir();out.mkdir(); (ref/'prices.md').write_text('Per adult: 120 USD. Quantity is corrected to one adult.')
+                store=QuickStore(Path(tmp)/'state'); workspace=FileWorkspace(store); configured=workspace.configure([str(ref)],str(out)); source=workspace.read(configured['references'][0]['id'],'prices.md')
+                saved=workspace.save(cid,'current comparison','Quantity: 1 adult. Total: 120 USD. Do not purchase.',[source]); current=workspace.search('__latest__')
+                checks=[bool(current), '1 adult' in current[0]['content'], '120 USD' in current[0]['content'], '2 adults' not in current[0]['content']]
+        elif cid=='U3-03':
+            with tempfile.TemporaryDirectory() as tmp:
+                ref=Path(tmp)/'references'; ref.mkdir(); (ref/'memo.md').write_text('owner material')
+                out=Path(tmp)/'out'; out.mkdir(); store=QuickStore(Path(tmp)/'state'); workspace=FileWorkspace(store); state=workspace.configure([str(ref)],str(out)); ref_id=state['references'][0]['id']; store.put('file_workspace',{'references':[],'workspace':state['workspace'],'workspace_id':state['workspace_id']})
+                try: workspace.read(ref_id,'memo.md')
+                except ValueError: checks=[True]
+        elif cid=='U3-05':
+            with tempfile.TemporaryDirectory() as tmp:
+                store=QuickStore(Path(tmp)/'state'); service=AgentService(store); service.save_model({'provider':'compatible','endpoint':'https://provider-a.example/v1','model':'a'}); service.set_document_approval({'approved':True}); approved=service.document_boundary()['approved']; service.save_model({'provider':'compatible','endpoint':'https://provider-b.example/v1','model':'b'}); checks=[approved, service.document_boundary()['requires_approval'], not service.document_boundary()['approved']]
+        elif cid=='U3-06':
+            events=[]
+            def transport(url,body,headers): return {'choices':[{'message':{'content':'안녕하세요'}}]}
+            with tempfile.TemporaryDirectory() as tmp:
+                store=QuickStore(Path(tmp)/'state'); caps=Capabilities(store,ModelAdapter(transport),{'provider':'compatible','endpoint':'https://provider.example','model':'test'},'','job',lambda *event:events.append(event))
+                result=run_agent(caps.adapter,caps.config,'',[{'role':'user','content':'old search'},{'role':'assistant','content':'old result'},{'role':'user','content':'Just say hello; no tools.'}],'',caps,lambda *event:events.append(event)); checks=[result.content=='안녕하세요', not any(event[0] in ('web_search','public_page_read') for event in events)]
+        elif cid=='U3-07':
+            from personal_agent.agent_runtime import evidence_summary
+            summary=evidence_summary('read_file',{'root_id':'r','path':'memo.md','content':'PRIVATE','locations':['줄 1']}); checks=[summary['path']=='memo.md', summary['characters']==7, 'PRIVATE' not in json.dumps(summary)]
         else:
             checks=[False, 'grader-not-implemented-for-live-continuity-control']
     return bool(checks) and all(check is True for check in checks), checks

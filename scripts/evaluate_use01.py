@@ -65,7 +65,7 @@ def main():
         for case in seed['cases']:
             for trial in range(1, rubric['trial_policy']['trials_per_case']+1):
                 passed,checks=deterministic_case(case,fixtures); rows.append({'case':case['id'],'family':case['family'],'trial':trial,'passed':passed,'checks':checks,'evidence_class':'deterministic-fixture-boundary'})
-        report={'label':args.label,'mode':'deterministic','rubric':rubric['version'],'live_quality':'not_run/pending_owner_operation','case_count':len(seed['cases']),'trial_count':len(rows),'passed':sum(r['passed'] for r in rows),'failed':sum(not r['passed'] for r in rows),'cases':rows}
+        report={'label':args.label,'mode':'deterministic','rubric':rubric['version'],'live_quality':'not_run/pending_owner_operation','case_count':len(seed['cases']),'trial_count':len(rows),'passed':sum(r['passed'] for r in rows),'failed':sum(not r['passed'] for r in rows),'held_out_cases':len(rubric['held_out_paraphrases']),'cases':rows}
     print(json.dumps(report,ensure_ascii=False,indent=2) if args.json else json.dumps({'mode':report['mode'],'label':report['label'],'passed':report.get('passed'),'failed':report.get('failed'),'live_quality':report['live_quality']},ensure_ascii=False))
     return 0
 if __name__=='__main__': raise SystemExit(main())

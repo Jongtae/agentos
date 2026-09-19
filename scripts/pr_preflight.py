@@ -37,7 +37,9 @@ def collect(repo: str, number: int) -> dict[str, Any]:
     metadata, meta_code = gh_json(["api", f"repos/{repo}"])
     # Re-read the head: do not combine checks collected for a moving commit.
     after, after_code = gh_json(["pr", "view", str(number), "--repo", repo, "--json", "headRefOid"])
-    stable = after_code == 0 and isinstance(after, dict) and after.get("headRefOid") == pr.get("headRefOid")
+    stable = (after.get("headRefOid") == pr.get("headRefOid")
+              if after_code == 0 and isinstance(after, dict) and after.get("headRefOid")
+              else None)
     return {
         "pr": pr,
         "required_checks": checks if isinstance(checks, list) else [],
@@ -67,7 +69,9 @@ def classify(snapshot: dict[str, Any], expected_head: str | None = None) -> dict
         "read_only": True, "automatic_retry": False,
         "scope": "Repository-gate observation only; not code approval, a security sign-off or full goal completion.",
     }
-    if state == "MERGED" or pr.get("mergedAt"):
+    if (state == "MERGED" or pr.get("mergedAt")) and expected_head and expected_head != pr["headRefOid"]:
+        outcome, action = "merged_head_mismatch", "Already merged with a different head; verify the delivered revision and review evidence before closeout."
+    elif state == "MERGED" or pr.get("mergedAt"):
         outcome, action = "merged", "Verify main CI and record the exact delivered scope; do not merge again."
     elif state == "CLOSED":
         outcome, action = "closed_unmerged", "Inspect why the PR was closed; do not claim delivery."
@@ -75,8 +79,10 @@ def classify(snapshot: dict[str, Any], expected_head: str | None = None) -> dict
         outcome, action = "metadata_unknown", "Refresh authoritative PR state."
     elif expected_head and expected_head != pr["headRefOid"]:
         outcome, action = "head_changed", "Review and validate the new head before any merge attempt."
-    elif snapshot.get("head_stable") is not True:
+    elif snapshot.get("head_stable") is False:
         outcome, action = "head_changed", "Refresh after the head stabilizes; this mixed snapshot cannot authorize a merge."
+    elif snapshot.get("head_stable") is not True:
+        outcome, action = "head_unknown", "The head reread failed or was unavailable; refresh metadata without claiming the head moved."
     elif pr.get("isDraft") is True:
         outcome, action = "draft", "Finish the scoped change and mark ready only with verified evidence."
     elif pr.get("mergeable") == "CONFLICTING" or merge_state == "DIRTY":

@@ -69,7 +69,7 @@ def classify(snapshot: dict[str, Any], expected_head: str | None = None) -> dict
         "read_only": True, "automatic_retry": False,
         "scope": "Repository-gate observation only; not code approval, a security sign-off or full goal completion.",
     }
-    if (state == "MERGED" or pr.get("mergedAt")) and expected_head and expected_head != pr["headRefOid"]:
+    if (state == "MERGED" or pr.get("mergedAt")) and expected_head and expected_head.lower() != str(pr["headRefOid"]).lower():
         outcome, action = "merged_head_mismatch", "Already merged with a different head; verify the delivered revision and review evidence before closeout."
     elif state == "MERGED" or pr.get("mergedAt"):
         outcome, action = "merged", "Verify main CI and record the exact delivered scope; do not merge again."
@@ -77,7 +77,7 @@ def classify(snapshot: dict[str, Any], expected_head: str | None = None) -> dict
         outcome, action = "closed_unmerged", "Inspect why the PR was closed; do not claim delivery."
     elif state != "OPEN":
         outcome, action = "metadata_unknown", "Refresh authoritative PR state."
-    elif expected_head and expected_head != pr["headRefOid"]:
+    elif expected_head and expected_head.lower() != str(pr["headRefOid"]).lower():
         outcome, action = "head_changed", "Review and validate the new head before any merge attempt."
     elif snapshot.get("head_stable") is False:
         outcome, action = "head_changed", "Refresh after the head stabilizes; this mixed snapshot cannot authorize a merge."

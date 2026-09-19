@@ -6,6 +6,14 @@ This contract makes an active AgentOS work item executable as an agent goal. A g
 
 Use this contract for every new active design, implementation, release, remediation, operating-mode deployment, or documentation iteration. Historical records remain historical; vision documents and reserved proposals are inputs, not executable goals.
 
+## Incremental delivery and session handoff
+
+Follow [Incremental Delivery and Merge Handoff](incremental-delivery.en.md) for owner-authorized small increments. Record implementation, integration and operating evidence separately. `implementation_verified`, `review_pending`, `integration_pending`, `merged` and `owner_validation_pending` are handoff descriptions, not new product Work states or permission to activate the heartbeat.
+
+A pending review/check, repository merge permission, or disabled native auto-merge is not by itself failed implementation. Refresh actual gates, attempt the ordinary SHA-pinned merge only when appropriate, and use the read-only `scripts/pr_preflight.py` helper for diagnosis. Never bypass protection or invent approval. Disabled auto-merge does not prevent ordinary merge.
+
+When only an external integration step remains, finish safe in-scope work, record the exact gate, reviewed head, tests, unresolved findings, next actor and resume command, and end the session with `integration_pending`. Do not wait for three identical Goal turns, start another preparation cycle, poll indefinitely, or claim full completion. This narrow integration-wait rule takes precedence over the generic blocked rule below. Required review, actual findings, merged evidence and truthful full-goal closeout remain mandatory. An owner-approved experimental checkpoint must preserve and explicitly transfer deferred criteria; it is not a production or private-data approval.
+
 ## Goal-ready record
 
 Before activating a goal, its issue and source plan must identify all of the following.
@@ -22,7 +30,7 @@ Before activating a goal, its issue and source plan must identify all of the fol
 | Delegation record | For each delegated work unit: exclusive file ownership, requested model/reasoning, tool-accepted setting when available, observed result, and the reason the delegation is independent. |
 | Independent review | A required review artifact for relevant security, recovery, external-boundary, and final-completion work. It is not a routine owner manual-test gate. |
 | Completion rule | A current requirement-to-evidence audit proving every promised artifact, state transition, and check, including merged artifacts, required CI, and tracker/roadmap/ledger closeout. |
-| Blocked rule | The concrete external condition that prevents progress, recovery attempts already made, and the next authority or state change required. |
+| Blocked rule | The concrete external condition that prevents progress, recovery attempts already made, and the next authority or state change required. Integration-only waits use the bounded handoff above. |
 
 ## Execution lifecycle
 
@@ -31,8 +39,8 @@ Before activating a goal, its issue and source plan must identify all of the fol
 3. Create the required issue and `codex/` branch before changing implementation or documentation. Keep commits intentional and scoped.
 4. Complete the ordered work units. After each material change, test the relevant contract before moving on. Use delegation only with the recorded model, ownership, and review boundaries.
 5. Run the declared complete validation set, including plan/doc parity, local-link, ledger, and full-suite checks when the source plan requires them.
-6. Create a PR that distinguishes automated evidence from operating evidence, merge it, close the issue, and update `TASKS.md`, `docs/roadmap.md`, and the ledger together.
-7. Perform the completion audit. Only then report the goal complete.
+6. Create a PR that distinguishes automated evidence from operating evidence, merge it, close the issue, and update `TASKS.md`, `docs/roadmap.md`, and the ledger together. If only external integration is pending, preserve a resumable handoff instead; do not falsely close the issue.
+7. Perform the completion audit. Only then report the full goal complete.
 
 ## Autonomous delivery-cycle delegation
 
@@ -52,7 +60,7 @@ The single existing delivery automation reads this contract and may resume only 
 
 - A goal is **complete** only when a current requirement-to-evidence audit proves every completion item, merged artifact, required CI result, and tracker/roadmap/ledger closeout. A top-level goal additionally proves every enumerated substep and requirement is complete, owner-setting-only, or separately decision-required. Intent, a partial fixture, a closed issue, an unmerged branch, or a narrow test cannot prove a broader claim.
 - A goal remains **active** while a safe next action exists, even if work is difficult or incomplete.
-- A goal is **blocked** only after the same concrete external blocker has recurred across three goal turns and no meaningful safe progress remains. The report must name the blocker, evidence, and the smallest required next input.
+- A goal is **blocked** only after the same concrete external blocker has recurred across three goal turns and no meaningful safe progress remains. The report must name the blocker, evidence, and the smallest required next input. Integration-only waits instead end the current session with the exact `integration_pending` receipt; they do not require repeated identical turns.
 - A goal never treats a routine owner manual test, real credential, or live provider as a development blocker. Those belong to the separately documented operating-mode deployment unless the active goal explicitly authorizes it.
 
 ## Design–implementation traceability
@@ -71,7 +79,7 @@ The delivery-plan verifier rejects a design without this mapping. It also reject
 | Design contract | Becomes a design goal only when its predecessor is complete; it must define the dependent implementation's contracts and fixtures. |
 | Issue | Carries the goal-ready record and PR closeout evidence. |
 | Reserved/proposed proposal | Records a candidate and missing promotion evidence; it cannot create implementation work until promoted explicitly. |
-| Operating-mode runbook | Is executable only after development completion and only with its explicit owner-controlled configuration authority. |
+| Operating-mode runbook | Is executable only after development completion and only with its explicit owner-controlled configuration authority; an experimental owner-smoke exception requires its own explicit scope and is not production deployment. |
 
 ## Goal prompt template
 
@@ -82,9 +90,9 @@ Execute <iteration ID and user outcome> from <authoritative issue and delivery-p
 
 Preserve the stated predecessors, non-goals, data/permission boundaries, and operating-mode separation. Work only within the documented authority. Implement the ordered work units, then run every declared validation and perform a requirement-by-requirement completion audit against current repository and PR state.
 
-Do not mark the goal complete until the issue, branch, PR merge, required CI, requirement-to-evidence audit, tracker/roadmap/ledger closeout, and all stated evidence are current. Continue only this active goal; do not select a successor. Treat live credentials, real providers, and manual owner validation as out of scope unless this specific goal explicitly authorizes operating-mode work. If a single external blocker persists for three consecutive goal turns after safe recovery attempts, mark it blocked with evidence; otherwise continue.
+Do not mark the full goal complete until the issue, branch, PR merge, required CI, requirement-to-evidence audit, tracker/roadmap/ledger closeout, and all stated evidence are current. Continue only this active goal; do not select a successor. Treat live credentials, real providers, and manual owner validation as out of scope unless this specific goal explicitly authorizes operating-mode work. For integration-only waits, follow incremental-delivery.en.md: diagnose once, finish safe work, and preserve an integration_pending receipt and one resume action without bypass or repeated unchanged polling. Other external implementation blockers use the three-turn blocked rule.
 ```
 
 ## Required final report
 
-The final report names the outcome, merged PR/issue, exact validation evidence, data/security effect, known limits, and any remaining operating-mode configuration. It must not claim an external capability is live when only mock-contract evidence exists.
+The final report names the supported increment, implementation state, integration state, operating evidence, PR/issue, exact validation evidence, data/security effect, known limits, and any remaining owner action. It must not claim an external capability is live when only mock-contract evidence exists, or describe a pending integration as merged/full-goal completion.

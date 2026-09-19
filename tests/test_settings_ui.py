@@ -35,3 +35,22 @@ def test_refresh_does_not_replace_active_editing_surfaces():
 def test_mobile_checkbox_is_not_full_width_input():
     assert ".check-row input[type=checkbox]{width:auto" in CSS
     assert "@media(max-width:520px)" in CSS
+
+
+def test_owner_flow_has_five_destinations_and_three_step_first_use_path():
+    assert "renderOwnerFlow" in APP
+    for label in ("대화", "작업 현황", "내 기록", "프로젝트", "설정"):
+        assert label in APP
+    for label in ("AI 연결", "파일 위치 설정", "첫 요청 실행"):
+        assert label in APP
+    assert "home.model_connected" in APP
+    assert "state.settings.file_workspace" in APP
+    assert "home.conversation?.length" in APP
+
+
+def test_guidance_preserves_observed_progress_and_ai_state_boundaries():
+    assert "관찰된 과정" in APP
+    assert "예상 시간은 추정하지 않고" in APP
+    assert "저장된 설정" in APP
+    assert "테스트한 설정" in APP
+    assert "최근 응답 모델" in APP

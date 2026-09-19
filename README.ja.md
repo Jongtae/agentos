@@ -2,99 +2,80 @@
 
 [English](README.md) | [한국어](README.ko.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-**Personal AgentOS は、一人の所有者が自分の環境にインストールして管理する、ローカルファーストのパーソナル AI オペレーティング環境です。**
+**自分でインストールし、所有し、管理する、実際に役立つ仕事のためのパーソナル AI 環境。**
 
-長期的な製品方針は次のとおりです。
+Personal AgentOS は、一人の所有者が管理するホスト上で動作するローカルファーストの AI オペレーティング環境です。目標を伝え、選んだモデルと許可した資料で仕事を進め、有用な結果を残します。将来は Agent をアプリのようにインストール・交換しても、個人の Memory、権限、Work、Artifact と Evidence が所有者のもとに残ることを目指します。
 
-> **Personal AgentOS = Personal AI Kernel + Agent Distribution Platform**
+> **Personal AgentOS = Personal AI Kernel + Open Agent Distribution Platform**
 
-個人用 PC と個人用 OS が一人の所有者に持続的なコンピューティング環境を提供するように、Personal AgentOS は会話、タスク、ツール、Agent、モデルの変更をまたいで続く個人 AI 環境を目指します。所有者が管理するホスト／ランタイム上で動作し、ポリシー、個人 Context/Memory、ワークスペース、Grant、承認、Work/Event、Artifact、Evidence、復旧を AgentOS 側の境界で保持します。
+制御できるだけで役に立たない製品も、実行の根拠を確認できない製品も目標ではありません。初期の同梱 Agent は少数で構いませんが、基本機能の品質を意図的に低くしてよいという意味ではありません。
 
-Kernel は意図的に **Agent-independent** です。Codex、Claude Code、外部／ローカルモデル、MCP server、専門 Agent、Ruflo のような multi-agent runtime は交換可能な worker/capability です。これらは canonical Memory、Grant、Work state、Evidence の所有者にはなりません。
+## 現在と計画を区別する
 
-一方、ユーザー体験は **Agent-centric** にできます。良い第三者 Agent をアプリのように発見、確認、インストール、権限付与、実行、更新、ロールバック、無効化、削除できることを目指します。Agent を交換しても、所有者の Personal AI environment は維持されるべきです。
+| 状態 | 範囲 |
+| --- | --- |
+| 既存コード | ローカルブラウザ設定・会話、モデル接続、制限されたツール、メモ、承認済みフォルダ、管理ワークスペースの結果。対応経路は [QUICKSTART](QUICKSTART.md) を参照。 |
+| ファイル作業の開発完了 | #314、PR #320/#324。原本保持、限定アクセス、結果保存と再起動後の再利用を自動・一時ファイルで検証。 |
+| v0.1 契約完了 | #334、PR #350。Core Primitive/AgentPackage のスキーマと静的・意味的検証。パッケージ実行の実装ではありません。 |
+| DOGFOOD-01 開発完了 | #351、PR #354–#356。模擬モデルによる HTTP/ファイル/再起動テストと操作案内。実モデル・実ブラウザの利用観察は別記録。 |
+| 計画中 | #358 基本機能の品質、#359 実行記録・制御 UI、#360 インストールから削除・再利用までの体験、および #333 の未完了項目。 |
 
-**Personal AgentOS はコーディングハーネスや Agent swarm フレームワークではありません。** コーディング自動化や multi-agent orchestration は AgentOS 上の service/runtime になり得ます。このリポジトリの GitHub/Codex 開発自動化は製品を作るための開発インフラです。また macOS/Linux を置き換えるカーネルやハイパーバイザーではなく、所有者が管理するホスト上の持続的な個人 AI 層です。
+任意の第三者コード実行、公開 Registry/Marketplace、万能な互換性、自動購入は提供済みとは主張しません。既存の宣言型プラグインは将来の実行型 AgentPackage と別です。過去の実測結果は当時のタスク、モデル、バージョンの範囲に限定します。
 
-## 製品モデル
+## 最初に役立つ三つの仕事
 
-- **Owner plane** — identity/policy、Context/Memory、owner data/workspace、Grant/approval、Work/Event、Artifact、Evidence、recovery。
-- **Capability plane** — tools/connectors、capability registry、runtime/engine boundary。
-- **Distribution plane** — AgentPackage、Package Manager、Registry、trust metadata、Marketplace/discovery boundary。
-- **Worker plane** — bounded Codex、Claude Code、model provider、local runtime、Ruflo など。
-- **Experience plane** — local UI、Telegram/companion、将来の Agent inspect/install/permission UI。
+**調査から判断へ。** 公開資料で選択肢を比較し、出典・時刻・価格条件・不明点を分けた判断材料を作ります。現在の検索結果は抜粋であり、ページ全文、在庫、決済総額の確認とは異なります。
 
-英語の正本アーキテクチャは [Personal AgentOS Architecture](docs/personal-agentos-architecture.en.md) です。Distribution Platform の段階計画は [Agent Distribution Platform Foundation](docs/agent-distribution-platform-foundation.en.md) と [#333](https://github.com/Jongtae/personal-agentos/issues/333) を参照してください。
+**自分の資料から成果物へ。** 許可した文書を読み、重要事項と次の行動をまとめ、通常のファイルとして保存します。ファイルの存在だけでなく内容の品質も評価し、原本は変更しません。
 
-### Kernel primitives
+**続きの依頼と再起動後の再利用。** 条件の訂正を反映し、前の成果物を再利用します。すべての会話を黙って永続 Memory にすることはしません。
+
+[品質計画](docs/default-agent-usefulness.en.md) の24件の合成評価ケースは評価仕様であって、実行済みモデル評価ではありません。実際の経路で成功率、根拠、待ち時間、費用、所有者の手間を測定します。
+
+## 所有者が行使する六つの権利
+
+[Owner Control Contract](docs/owner-control-contract.en.md) は、実装・検証すべき権利を定義します。
+
+1. パッケージの出典、作成者、バージョン、実行場所、要求権限を確認する。
+2. Agent が使える資料、Memory、アカウントを選ぶ。
+3. どの情報をどのサービスへ送るか知る。
+4. インストール・接続と個々の行動の権限を分ける。
+5. 作業を止め、権限を取り消し、進行中の外部処理の不確実性も確認する。
+6. Agent を削除・交換しても自分の成果物と承認済み Memory を保持する。
+
+モデルへの指示だけでなく、実行境界がアクセスを拒否できる必要があります。進捗は実際の Work/ツールイベントから作成し、詳細には必要なマスク済み入力、送信先、承認と結果を表示します。隠れた推論、システムプロンプト、秘密情報の公開は必要ありません。
+
+ローカルインストールとローカル処理は別です。外部モデルには許可済み Context が送られます。リモート Agent のコネクタを入れても、そのサーバーを所有することにはなりません。切断、権限取消、Agent 削除、保存情報の消去を区別し、すでに送信された情報や完了した外部操作を停止ボタンで取り消せるとは約束しません。
+
+## アーキテクチャと Agent アプリ
+
+Kernel は Agent-independent、体験は Agent-centric です。
 
 `Owner · Context · Memory · Artifact · Capability · Runtime · Grant · Work · Event · Evidence`
 
-Distribution plane はその上に次を追加します。
+その上に `AgentPackage · Package Manager · Registry · Marketplace/Discovery · Trust/Verification` を置きます。Codex、Claude Code、モデル、MCP、任意の Ruflo などは交換可能な worker であり、所有者の状態の権威にはなりません。
 
-`AgentPackage · Package Manager · Registry · Marketplace/Discovery · Trust/Verification`
+`downloaded != installed != enabled != connected != authorized-for-action`
 
-## AgentPackage と権限
+インストールは無効状態が既定で Grant を作りません。権限・送信先・Memory・背景動作の拡張には再承認が必要です。第三者の永続 Memory 変更は基本的に MemoryCandidate として提出します。削除は Agent の権限を取り消しますが、所有者の結果は保持します。
 
-AgentPackage はインストール可能な Agent/application unit です。Package manifest は package/publisher/version、AgentOS API compatibility、capability/action、runtime requirements、filesystem/data scope、network destinations、secret references、Memory policy、Event/background behavior、budgets、approval requirements、Artifact、dependencies、sandbox、health check、update/rollback/remove、provenance/signature/SBOM などを宣言する方向です。
+Registry は正確な identity/version/digest/互換性/失効を、Marketplace は検索・ランキング・レビューと将来の流通を扱います。人気や署名は行動の安全性を保証しません。個人 Context は Marketplace の検索データではありません。
 
-インストールと権限は別です。
+最初は有用な Files 参照パッケージと公開 SDK 経路を実証します。同梱 Agent と第三者 Agent は同じ契約を使い、隠れた特権を持ちません。MCP/skill/plugin の互換性は形式・ライセンス・権限を実際に対応付けられる場合のみ追加します。公開ストアや Ruflo は最初の体験の必須条件ではありません。
 
-`discover → inspect → verify → installed-disabled → grant/connect/enable → run → update/rollback → disable → uninstall`
-
-**downloaded、installed、enabled、connected、authorized-for-action は別の状態です。** Package install は Grant を自動作成しません。更新によって permissions、data scope、external destinations、Memory/background behavior が拡大する場合、新しい owner/policy review が必要です。
-
-第三者 Package は canonical owner Memory を直接変更せず、デフォルトでは出典付きの MemoryCandidate を提案します。
-
-## Registry と Marketplace
-
-**Registry** は package/publisher identity、exact version/digest、compatibility、signature/provenance、trust metadata、advisory/revocation/quarantine を扱います。
-
-**Marketplace/Discovery** は search、recommendation、ranking、review、curation、将来の commerce を扱えます。ただし人気や rating は execution authority ではなく、quarantine/signature/AgentOS policy を上書きできません。
-
-Private owner Context/Memory/Work は Registry/Marketplace の状態にしません。Capability discovery は可能な限り structured/minimised metadata を使い、raw private prompt を store search にそのまま送ることを基本にしません。
-
-## 初期エコシステム
-
-初期 Personal AgentOS に最高品質の Agent がすべて同梱される必要はありません。General Assistant、Files、Research、Coding など少数の reference Agent で開始できます。目的は最高のアプリを自前で揃えることではなく、OS と公開 Package/Runtime/Grant contract を bootstrap することです。
-
-Reference Agent も third-party Package と同じ public contract を使用し、隠れた first-party privilege を持ちません。
-
-空の Marketplace 問題を減らすため、official format と license が許す範囲で MCP や選択された OpenAI/Codex・Claude skill/plugin ecosystem を AgentPackage として wrap/import する方針です。Ruflo は kernel ではなく将来の bounded delegated Runtime Adapter 候補です。
-
-## 現在の実装ベースライン
-
-最初の利用可能な製品スライスは **ファイル／フォルダ型パーソナルワークスペース**です。[#314 プログラム](https://github.com/Jongtae/personal-agentos/issues/314) は完了しており、統合実装は [PR #320](https://github.com/Jongtae/personal-agentos/pull/320)、検証と終了記録は [PR #324](https://github.com/Jongtae/personal-agentos/pull/324) にマージされています。
-
-参照フォルダは既定で読み取り専用、書き込みは所有者が許可した管理ワークスペース内に限定されます。原本、派生資料、下書き、最終記録を区別し、再構築可能な検索インデックスを永続的な作業・承認・証跡・復旧・認証状態から分離し、再起動後も保存した結果を再利用できます。
-
-現在の完了証拠は deterministic model と一時ローカルフォルダによる自動検証です。これだけで外部モデル、Telegram、Google Drive/OAuth、定期 scheduler、個人フォルダ、AgentPackage、Registry、Marketplace の実運用が確認されたとは主張しません。
-
-[#333](https://github.com/Jongtae/personal-agentos/issues/333) と #334–#346 は **planned successor work** です。Issue が存在するだけでは実行は有効になりません。
-
-## 所有者の管理境界
-
-- 接続するフォルダ、サービス、ツール、AgentPackage、runtime は所有者が選択します。
-- 第三者 package/runtime は canonical Memory をデフォルトで直接変更しません。
-- 外部 AI、messenger、Agent、package/runtime、recipient への transmission は local storage とは別の policy boundary です。
-- send、payment、destructive file/account change、privilege expansion などには explicit authority が必要です。
-- package signature/provenance は identity/integrity evidence であり、behavioral safety の保証ではありません。
-
-ローカルファーストは「情報が一切端末外に出ない」という意味ではありません。外部機能を選択した場合、承認済み Context はその capability policy に従って送信されることがあります。
-
-## 開発用インストール
+## 現在のプレビューを試す
 
 ```sh
 brew install jongtae/agentos/agentos
 agentos start
 ```
 
-Homebrew 経路は、一般ユーザー向けインストール体験を改善している間、開発者とセルフホスト利用者向けに維持されます。
+Homebrew は開発者・セルフホスト用で最新 main と異なる場合があります。[QUICKSTART](QUICKSTART.md) の専用テストフォルダ手順を使用してください。記載されたファイルワークスペースのテストには直接のモデル接続を使います。計画中の機能を実装済みのコマンドとして扱わないでください。
 
-## 開発ガバナンス
+対応する永続状態は `scripts/agentos-backup.py DATA ARCHIVE` と `scripts/agentos-restore.py ARCHIVE EMPTY_DATA` で移動できます。接続秘密、セッション、フォルダ Grant、モデル選択、Telegram pairing は移行用アーカイブに含めず、新しい環境で再承認します。全データディレクトリのバックアップとは異なります。
 
-このリポジトリは [Development Constitution](docs/development-constitution.en.md) と Goal Execution Contract を使用し、`Constitution → Spec → Authority/Threat Model → Plan → Tasks → Implement → Verify → Converge` の流れを採用します。
+## 開発
 
-Spec Kit、BuilderMethods Agent OS、Open AgentOS 系の有用な development patterns は参照しますが、Personal AgentOS runtime dependency にはしません。Repository automation は end-user runtime や live autonomy の証拠ではありません。
+[アーキテクチャ](docs/personal-agentos-architecture.en.md)、[PRD](PRD.md)、[AGENTS.md](AGENTS.md)、[Development Constitution](docs/development-constitution.en.md)、[Goal Execution Contract](docs/goal-execution-contract.en.md)、[ロードマップ](docs/roadmap.md) に従います。
 
-実装前に [AGENTS.md](AGENTS.md)、[PRD.md](PRD.md)、[TASKS.md](TASKS.md)、[roadmap](docs/roadmap.md) を確認してください。
+これはコーディングハーネスや macOS/Linux の代替ではありません。GitHub/Codex 自動化は開発インフラです。#357 は文書・評価仕様・計画の整合であり、#358–#360 や未完了のプラットフォーム項目は別途明示的に有効化されるまで実行しません。完了には、有用な結果と適切な拒否・復旧の両方の根拠が必要です。

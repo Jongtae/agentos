@@ -4,6 +4,12 @@
 
 AgentOS uses contract-first delivery with automated quality gates. It is designed to keep development fast, repeatable, and independent of a person manually exercising every feature or third-party service on every change.
 
+## Incremental delivery
+
+Follow [Incremental Delivery and Merge Handoff](incremental-delivery.en.md). Ship small useful increments; fix concrete defects in enabled behavior without turning each PR into an unbounded hardening program. Explicitly transfer deferred criteria to linked follow-ups; never relabel a known defect fixed or a partial checkpoint as the whole goal.
+
+Implementation verification, GitHub integration and actual owner operation have separate states. External review/check/permission waits produce a bounded `integration_pending` receipt when safe work is exhausted, not an invented implementation failure, repeated preparation cycle, or false completion. Required checks and relevant independent review still apply. Native auto-merge is optional and disabled auto-merge does not rule out normal merge. Neither this document nor the helper changes native repository settings.
+
 ## Method
 
 The governance combines four complementary practices:
@@ -17,7 +23,7 @@ The governance combines four complementary practices:
 
 The [Goal Execution Contract](goal-execution-contract.en.md) defines how an active plan/issue becomes an executable goal, how it remains active or becomes blocked, and the audit required before completion.
 
-An iteration is complete when all of the following are recorded in its issue and pull request:
+A development increment is implementation-verified when its issue and pull request record:
 
 - a documented contract and threat/data-boundary decision;
 - versioned success, denial, timeout, malformed-response, and recovery fixtures where applicable;
@@ -25,7 +31,7 @@ An iteration is complete when all of the following are recorded in its issue and
 - required repository checks passing in CI; and
 - known limitations and the exact distinction between mock evidence and operating evidence.
 
-No person is required to perform a routine manual acceptance test, log in to a third-party provider, or create a provider token to complete a development iteration. Human review remains a product and security design activity, not a recurring test gate.
+Full iteration completion additionally requires relevant independent review, normal merge, current main validation and the active contract's tracker/ledger closeout. An integration-pending session handoff is not full iteration completion. No person is required to perform a routine manual acceptance test, log in to a third-party provider, or create a provider token to complete a development iteration. Human review remains a product and security design activity, not a recurring test gate.
 
 ## External integrations and agents
 
@@ -35,7 +41,7 @@ Development uses local mock peers and fixtures only. It never requires live cred
 
 ## Operating-mode deployment
 
-Only after an entire Master Plan is complete does the owner deploy AgentOS in operating mode and configure real credentials, OAuth client registrations, endpoints, and enabled connections. This is configuration and activation, not retroactive manual acceptance testing of every development PR.
+Production operating-mode deployment remains separately owner-authorized under its active deployment contract. The owner may also explicitly select a narrow experimental local smoke test before the entire long-term roadmap is complete. Such a test declares the exact revision, fresh data scope, provider/destination and budget approval; it is not production deployment, blanket private-data permission or retroactive acceptance of all capabilities. See [the early-access runbook](early-access-smoke.en.md).
 
 The deployed runtime must use automated startup and health checks, fail closed on missing or invalid configuration, redact secrets from evidence, and retain a machine-readable deployment report. An operating connection may be described as configured only when its automated health check succeeds. Mock evidence remains labelled as development evidence and never as proof that the external service is live.
 
@@ -46,7 +52,7 @@ The deployed runtime must use automated startup and health checks, fail closed o
 - A contract change requires its fixture and mock suite to change in the same PR.
 - New scopes, external writes, credentials, data classes, or recovery semantics require a contract and threat-model update before implementation.
 - Tests must be deterministic, hermetic where possible, and safe to run without personal data or external credentials.
-- A capability is described as *development-complete* after its declared automated gates pass. It is described as *operating-configured* only after the later automated deployment health check succeeds.
+- A capability is described as *development-complete* only after its full declared development contract, merge and closeout. It is described as *operating-configured* only after the relevant automated health check succeeds. Use narrower implementation-verified or experimental-checkpoint labels where appropriate.
 
 ## Non-goals
 

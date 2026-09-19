@@ -1,4 +1,5 @@
 import gzip
+import http.client
 import io
 import unittest
 from unittest.mock import patch
@@ -60,6 +61,12 @@ class PublicPageReaderTests(unittest.TestCase):
         body=gzip.compress(b'x'*2_000_001)
         with self.assertRaisesRegex(ValueError, '압축 해제'):
             PublicPageReader(opener=Opener(Response(body, headers={'Content-Type':'text/plain','Content-Encoding':'gzip'})), resolver=public_dns).read('https://example.com/')
+
+    def test_malformed_http_is_a_recoverable_provider_failure(self):
+        class Broken:
+            def open(self, request, timeout=None): raise http.client.BadStatusLine('broken')
+        with self.assertRaisesRegex(Exception, '공개 페이지를 가져오지 못했습니다'):
+            PublicPageReader(opener=Broken(), resolver=public_dns).read('https://example.com/')
 
 
 if __name__ == '__main__': unittest.main()

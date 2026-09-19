@@ -36,7 +36,7 @@ def deterministic_case(case, fixtures):
                 return [(None,None,None,None,('169.254.169.254',port))] if '169.254' in host else _dns(host,port,type)
             try:
                 PublicPageReader(_Opener(_Response('',location='http://169.254.169.254/latest')), private_dns).read('https://official.example/events')
-            except ValueError: checks.append('unsafe redirect denied')
+            except ValueError: checks.append(True)
         else:
             page=fixtures['public_pages']['safe']; result=PublicPageReader(_Opener(_Response(page['body'])),_dns).read(page['url'])
             checks += ['official.example' in result['url'], '120 USD' in result['content'], '2030-04-02' in result['content']]
@@ -52,8 +52,16 @@ def deterministic_case(case, fixtures):
             checks += [Path(out/result['path']).is_file(), '2030-04-20' in (out/result['path']).read_text(), '7300 USD' in (out/result['path']).read_text()]
             checks.append(before=={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in ref.iterdir()})
     else:
-        checks=['continuity state is represented by durable file workspace primitives', 'correction/revocation remain explicit application concerns']
-    return all(checks) if checks and all(isinstance(x,bool) for x in checks) else bool(checks), checks
+        if cid=='U3-01':
+            with tempfile.TemporaryDirectory() as tmp:
+                ref=Path(tmp)/'references'; out=Path(tmp)/'workspace'; ref.mkdir();out.mkdir(); (ref/'meeting.md').write_text('Decision: review on 2030-04-20. Next: Mina confirms venue.')
+                state=Path(tmp)/'state'; first=QuickStore(state); workspace=FileWorkspace(first); configured=workspace.configure([str(ref)],str(out)); source=workspace.read(configured['references'][0]['id'],'meeting.md')
+                saved=workspace.save(cid,'meeting brief','Decision: review on 2030-04-20. Next: Mina confirms venue.',[source])
+                restarted=FileWorkspace(QuickStore(state)); reused=restarted.search('__latest__')
+                checks=[Path(out/saved['path']).is_file(), bool(reused), reused[0]['id']==saved['id'], '2030-04-20' in reused[0]['content']]
+        else:
+            checks=[False, 'grader-not-implemented-for-live-continuity-control']
+    return bool(checks) and all(check is True for check in checks), checks
 
 def main():
     parser=argparse.ArgumentParser(); parser.add_argument('--mode',choices=('deterministic','live'),default='deterministic'); parser.add_argument('--label',default='candidate'); parser.add_argument('--json',action='store_true'); args=parser.parse_args()

@@ -1,12 +1,12 @@
 """Bounded read-only tools executed by the user's AgentOS process."""
 import json
-import gzip
 import http.client
 import ipaddress
 import re
 import socket
 import ssl
 import time
+import zlib
 import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
 from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
@@ -96,7 +96,7 @@ class PublicPageReader:
             addresses=self._validate_host(current)
             request=Request(current, headers={'User-Agent':'AgentOS public-page-reader/1.0','Accept':'text/html,text/plain,application/xhtml+xml;q=0.9'})
             try: response=self.opener.open(request, timeout=MAX_PAGE_SECONDS) if self.opener else self._open_pinned(current,addresses)
-            except OSError as exc: raise ProviderError('공개 페이지를 가져오지 못했습니다.') from exc
+            except (OSError, http.client.HTTPException) as exc: raise ProviderError('공개 페이지를 가져오지 못했습니다.') from exc
             status=getattr(response,'status',200); location=response.headers.get('Location') if hasattr(response,'headers') else None
             if status in (301,302,303,307,308) or location:
                 if not location: raise ProviderError('공개 페이지 이동을 확인하지 못했습니다.')
@@ -115,9 +115,16 @@ class PublicPageReader:
                 raw.extend(chunk)
                 if len(raw)>MAX_PAGE_BYTES: raise ValueError('공개 페이지 응답 크기 제한을 초과했습니다.')
             if encoding == 'gzip':
-                try: data=gzip.decompress(bytes(raw))
-                except OSError: raise ValueError('압축된 공개 페이지를 해석하지 못했습니다.') from None
-                if len(data)>MAX_PAGE_DECOMPRESSED_BYTES: raise ValueError('압축 해제 후 공개 페이지 크기 제한을 초과했습니다.')
+                try:
+                    decompressor=zlib.decompressobj(16 + zlib.MAX_WBITS); expanded=bytearray()
+                    for offset in range(0,len(raw),64*1024):
+                        expanded.extend(decompressor.decompress(bytes(raw[offset:offset+64*1024]), MAX_PAGE_DECOMPRESSED_BYTES-len(expanded)+1))
+                        if len(expanded)>MAX_PAGE_DECOMPRESSED_BYTES: raise ValueError('압축 해제 후 공개 페이지 크기 제한을 초과했습니다.')
+                    expanded.extend(decompressor.flush(MAX_PAGE_DECOMPRESSED_BYTES-len(expanded)+1))
+                    if len(expanded)>MAX_PAGE_DECOMPRESSED_BYTES: raise ValueError('압축 해제 후 공개 페이지 크기 제한을 초과했습니다.')
+                    data=bytes(expanded)
+                except ValueError: raise
+                except (OSError, zlib.error): raise ValueError('압축된 공개 페이지를 해석하지 못했습니다.') from None
             else: data=bytes(raw)
             text=data.decode('utf-8','replace')
             parser=_PageText(); parser.feed(text)

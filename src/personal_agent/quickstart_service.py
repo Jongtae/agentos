@@ -58,7 +58,8 @@ def workspace_summary_request(prompt):
             and any(word in lowered for word in ('save','저장','workspace','작업공간','workspace file','파일로'))):
         topic=next((word for word in ('meeting','회의','project','프로젝트','note','문서','자료') if word in lowered), None)
         if topic:
-            return topic, ('회의 결과 브리프' if topic in ('meeting','회의') else 'project brief')
+            query={'회의':'회의 meeting','meeting':'meeting 회의','프로젝트':'프로젝트 project','project':'project 프로젝트'}.get(topic,topic)
+            return query, ('회의 결과 브리프' if topic in ('meeting','회의') else 'project brief')
     return None
 
 
@@ -69,7 +70,8 @@ def workspace_search_request(prompt):
         return quotes[0]
     if (any(word in lowered for word in ('find','찾아','검색','reuse','재사용','다시'))
             and any(word in lowered for word in ('saved','저장','workspace','작업공간','result','결과','아까'))):
-        return next((word for word in ('meeting','회의','project','프로젝트','summary','요약','brief','브리프') if word in lowered), None)
+        topic=next((word for word in ('meeting','회의','project','프로젝트','summary','요약','brief','브리프') if word in lowered), '__latest__')
+        return {'회의':'회의 meeting','meeting':'meeting 회의','프로젝트':'프로젝트 project','project':'project 프로젝트'}.get(topic,topic)
     return None
 
 # Subscription CLIs do not receive AgentOS credentials, local paths, or an

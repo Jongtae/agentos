@@ -13,7 +13,7 @@ The deterministic command exercises the bounded public reader and managed file w
 
 ## Current observed run
 
-The candidate fixture run on the USE-01 branch executed 24 cases × 3 trials = 72 trials. All 72 deterministic rows passed; held-out paraphrase count is 3. This proves only the implemented fixture boundary. It does not prove a live provider, browser behavior, inventory, payable total, production safety or natural-language model quality.
+The evaluator executes 24 cases × 3 trials = 72 rows and retains every result. Rows whose continuity/control grader is not implemented are reported as failures rather than being passed by placeholder text. The held-out paraphrase inventory is 3. This proves only the implemented fixture boundary. It does not prove a live provider, browser behavior, inventory, payable total, production safety or natural-language model quality.
 
 The mandatory repository validation observed 339 pytest tests with 232 subtests, 304 unittest tests, canonical-document/source-layout/AgentPackage checks, root/package delivery-plan equality, ledger JSON parsing and `git diff --check` successfully. Live provider quality, real browser observation and owner acceptance remain pending and are reported separately.
 

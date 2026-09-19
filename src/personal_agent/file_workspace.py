@@ -58,7 +58,7 @@ class FileWorkspace:
 
     def find_references(self, query, limit=20):
         if not isinstance(query,str) or not 2<=len(query.strip())<=160: raise ValueError('두 글자 이상의 자료 검색어를 입력하세요.')
-        terms=[query.casefold().strip()]+[term for term in re.findall(r'[\w가-힣-]{2,}',query.casefold()) if len(term)>2]
+        phrase=query.casefold().strip(); terms=[term for term in re.findall(r'[\w가-힣-]{2,}',phrase) if len(term)>2]
         matches=[]
         for root in self.status()['references']:
             base=Path(root['path'])
@@ -70,7 +70,10 @@ class FileWorkspace:
                     try: source=self.read(root['id'],relative)
                     except (OSError,UnicodeError,ValueError): continue
                     haystack=(relative+'\n'+source['content']).casefold()
-                    if any(term in haystack for term in terms):
+                    matches_query=phrase in haystack if phrase else False
+                    if not matches_query and terms:
+                        matches_query=(any(term in haystack for term in terms) if len(terms)==1 else all(term in haystack for term in terms))
+                    if matches_query:
                         matches.append(source)
                         if len(matches)>=limit: return matches
         return matches
@@ -162,7 +165,8 @@ class FileWorkspace:
         except (KeyError,ValueError,OSError,UnicodeError): return False
 
     def search(self, query):
-        if not isinstance(query,str) or not 2<=len(query.strip())<=160: raise ValueError('두 글자 이상의 결과 검색어를 입력하세요.')
+        latest=isinstance(query,str) and query.strip() in ('*','__latest__')
+        if not latest and (not isinstance(query,str) or not 2<=len(query.strip())<=160): raise ValueError('두 글자 이상의 결과 검색어를 입력하세요.')
         self.recover()
         needle=query.casefold().strip()
         with self.store.db() as db:
@@ -177,5 +181,6 @@ class FileWorkspace:
             if not fresh: continue
             try: content=self._result_path(record['path']).read_text(encoding='utf-8')
             except (OSError,UnicodeError,ValueError): continue
-            if needle in (record['path']+'\n'+content).casefold(): results.append({'id':record['id'],'path':record['path'],'content':content,'sources':json.loads(record['sources'])})
+            if latest or needle in (record['path']+'\n'+content).casefold(): results.append({'id':record['id'],'path':record['path'],'content':content,'sources':json.loads(record['sources'])})
+            if latest and results: break
         return results

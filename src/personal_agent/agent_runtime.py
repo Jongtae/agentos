@@ -114,8 +114,10 @@ class Capabilities:
    note_id=hashlib.sha256((self.job_id+content).encode()).hexdigest()
    with self.store.db() as db:db.execute('INSERT OR IGNORE INTO notes VALUES (?,?,?)',(note_id,content,time.time()))
    return {'saved':True,'id':note_id,'content':content}
-  if name=='save_memory': return self.store.save_memory(args['memory_key'],args['content'])
-  if name=='list_memory': return {'memories':self.store.memories()}
+  if name=='save_memory':
+   result=self.store.save_memory(args['memory_key'],args['content']); self.evidence.append({'tool':name,'result':result}); return result
+  if name=='list_memory':
+   result={'memories':self.store.memories()}; self.evidence.append({'tool':name,'result':result}); return result
   if name=='list_agents':return {'agents':[{'id':role_id,'name':role['name'],'permissions':role['permissions'],'package_id':role['package_id']} for role_id,role in self.roles.items()]}
   if name=='delegate_agent':
    agent=self.roles.get(args['agent_id'])
@@ -224,7 +226,7 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
     if cache_key not in capabilities.memo:capabilities.memo[cache_key]=capabilities.execute(name,args)
     result=capabilities.memo[cache_key]
     executions.append((name,result))
-    if name in ('find_files','read_file','list_notes'):capabilities.evidence.append({'tool':name,'result':result})
+    if name in ('find_files','read_file','list_notes','list_memory','save_memory'):capabilities.evidence.append({'tool':name,'result':result})
     if result.get('outcome') in ('failed','partial'):failed=True
     invalid_calls.discard(name)
     successful+=1

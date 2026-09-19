@@ -40,6 +40,7 @@ class DeliveryTests(unittest.TestCase):
 
     def test_packaged_delivery_plan_matches_repository_plan(self):
         root=Path(__file__).parents[1]
+        self.assertEqual((root/'delivery-plan.yaml').read_bytes(), (root/'src/personal_agent/delivery-plan.yaml').read_bytes())
         self.assertEqual(json.loads((root/'delivery-plan.yaml').read_text()), json.loads((root/'src/personal_agent/delivery-plan.yaml').read_text()))
 
     def test_only_explicit_owner_activated_goal_can_be_selected(self):
@@ -58,7 +59,12 @@ class DeliveryTests(unittest.TestCase):
         plan['next_goal']={'id':'TOP','status':'active'}
         (self.root/'delivery-plan.yaml').write_text(json.dumps(plan))
 
-    def test_dogfood_is_sole_goal_ready_target_but_heartbeat_cannot_run_it(self):
+    def test_historical_dogfood_closeout_and_goal_ready_heartbeat_boundary(self):
+        # Explicit historical fixture: DOGFOOD closeout selected no successor.
+        # The current plan may prepare a later goal without rewriting history.
+        historical=json.loads((self.root/'delivery-plan.yaml').read_text())
+        historical['next_goal']={'id':None,'status':'complete'}
+        (self.root/'delivery-plan.yaml').write_text(json.dumps(historical))
         controller=self.controller()
         self.assertEqual(controller.plan.next_goal()['status'], 'complete')
         self.assertIsNone(controller.plan.next_goal()['id'])
@@ -107,6 +113,44 @@ class DeliveryTests(unittest.TestCase):
         ))
         self.assertNotIn('DRIVE-LOCAL-OP-01', controller.plan.documented_completed())
         self.assertNotIn('SCN-I-01', controller.plan.documented_completed())
+
+    def test_use01_goal_ready_never_starts_heartbeat_or_external_commands(self):
+        runner=Runner()
+        controller=self.controller(runner)
+        plan=controller.plan
+        self.assertEqual(plan.next_goal()['id'], 'USE-01')
+        self.assertEqual(plan.next_goal()['status'], 'owner-activated-goal-ready')
+        self.assertEqual(plan.items['USE-01']['issue'], 358)
+        self.assertEqual(plan.items['USE-01']['depends_on'], ['GOV-USE-01'])
+        self.assertEqual(plan.items['USE-01']['activation_status'], 'owner-activated-goal-ready')
+        self.assertEqual(plan.items['USE-01']['contract'], 'use-01-goal-readiness.en.md')
+        self.assertIn('GOV-USE-01', plan.documented_completed())
+        self.assertIn('DOGFOOD-01', plan.documented_completed())
+        self.assertNotIn('USE-01', plan.documented_completed())
+        self.assertIsNone(plan.select({}))
+        self.assertIsNone(plan.select({'active':'USE-01','status':'running'}))
+        self.assertEqual(controller.run_once(dry_run=False)['status'], 'awaiting-owner-activated-goal')
+        self.assertEqual(runner.calls, [])
+        self.assertFalse(any(
+            (item.get('issue') in range(335,347) or item.get('issue') in {359,360})
+            and item.get('activation_status') in {'owner-activated-goal-ready','active'}
+            for item in plan.items.values()
+        ))
+        self.assertEqual(plan.items['SITE-01']['activation_status'], 'owner-deferred')
+
+    def test_use01_requires_explicit_active_transition_and_stops_after_completion(self):
+        altered=json.loads((self.root/'delivery-plan.yaml').read_text())
+        altered['next_goal']['status']='active'  # Test fixture only, never repository activation.
+        (self.root/'delivery-plan.yaml').write_text(json.dumps(altered))
+        plan=DeliveryPlan(self.root/'delivery-plan.yaml')
+        self.assertEqual(plan.select({})['id'], 'USE-01')
+        altered['history']['documented_completed_iterations'].append('USE-01')
+        altered['next_goal']={'id':None,'status':'complete'}
+        (self.root/'delivery-plan.yaml').write_text(json.dumps(altered))
+        self.assertIsNone(DeliveryPlan(self.root/'delivery-plan.yaml').select({}))
+        runner=Runner()
+        self.assertEqual(self.controller(runner).run_once()['status'], 'awaiting-owner-activated-goal')
+        self.assertEqual(runner.calls, [])
 
     def test_deferred_site_waits_without_external_commands(self):
         plan=json.loads((self.root/'delivery-plan.yaml').read_text())
@@ -167,7 +211,6 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(migrated['issues'], {'GOV-01':168})
         self.assertEqual(migrated['issue'], 168)
         self.assertEqual(migrated['last_error'], 'governance detail')
-
     def test_file_workspace_contract_uses_the_canonical_plan_substep_ids(self):
         root=Path(__file__).parents[1]
         contract=(root/'docs'/'file-workspace-first-experience-contract.en.md').read_text()

@@ -2,6 +2,19 @@
 
 Active work is executed only from a goal-ready issue and active delivery-plan entry under the [Goal Execution Contract](docs/goal-execution-contract.en.md). Status tables are trackers, not authority to activate reserved work.
 
+## Current — useful default agents and observable owner control
+
+| Work unit | Issue | Current boundary |
+| --- | --- | --- |
+| GOV-USE-01: product, control, usefulness and backlog alignment | [#357](https://github.com/Jongtae/personal-agentos/issues/357) | Complete only on merge of PR #361 after required CI and independent review. Documentation/governance/static evaluation specification, not product runtime or measured model quality. |
+| USE-01: useful research, file artifacts and continuity | [#358](https://github.com/Jongtae/personal-agentos/issues/358) | Sole owner-selected next goal, conditional on #361 merge. `owner-activated-goal-ready`, NOT heartbeat-active; the later explicit owner Goal invocation starts implementation. No implementation branch or live run is created by preparation. |
+| OBS-01: observed progress, redacted receipts and owner controls | [#359](https://github.com/Jongtae/personal-agentos/issues/359) | Planned/inactive; uses current Work evidence and does not become a prerequisite cycle for USE-01. |
+| AGENT-UX-01: useful install/run/revoke/remove/replacement | [#360](https://github.com/Jongtae/personal-agentos/issues/360) | Planned/inactive; consumes existing package/security/runtime/SDK implementation, not a second installer. |
+
+Read [Owner Control](docs/owner-control-contract.en.md), [Default Agent Usefulness](docs/default-agent-usefulness.en.md) and [USE-01 readiness](docs/use-01-goal-readiness.en.md). Build the minimum evaluator before baseline, freeze the rubric before tuning, and grade actual useful outputs plus denied unauthorized effects. The 24-case seed/static checks are not an executed model benchmark. Development completion and live-quality promotion are separate; unrun live evaluation stays pending.
+
+#335–#346 remain inactive. Their original unfinished update/rollback/event/SDK scope is preserved; #340/#341/#342 are foundations for #360, not dependent on that downstream integration. No new heartbeat, package execution, credentials or external actions are authorized by this tracker. Historical status below retains its original scope and dates.
+
 ## Complete on merge — Agent Distribution Platform foundation
 
 | Work unit | Issue | Status |
@@ -10,9 +23,11 @@ Active work is executed only from a goal-ready issue and active delivery-plan en
 
 ## Owner dogfood vertical slice
 
+| Work unit | Issue | Status |
+| --- | --- | --- |
 | DOGFOOD-01: owner-usable local browser, provider, file workspace, and restart path | [#351](https://github.com/Jongtae/personal-agentos/issues/351) | Complete on merge of PR #354 with deterministic local HTTP/worker evidence and independent authority/convergence review; live-provider/browser operation remains owner-controlled and is not claimed by repository tests. |
 
-No successor is active. Issues #335–#346 remain planned and require separate explicit owner activation.
+DOGFOOD-01 selected no successor at its historical closeout. The current preparation above selects USE-01 as goal-ready only; no product successor is executing. Issues #335–#346 remain planned and require separate explicit owner activation.
 
 ## Deferred — Product information and policy site
 

@@ -2,118 +2,110 @@
 
 [English](README.md) | [한국어](README.ko.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-**Personal AgentOS is a local-first, owner-installed personal AI operating environment for one person.**
+**A personal AI environment you install, own, and control — built to do useful work.**
 
-Its long-term product thesis is:
+Personal AgentOS is a local-first, owner-installed personal AI operating environment for one person. Its intended experience is simple: ask for an outcome, use your chosen models and approved material, keep useful results, and install or replace agents without surrendering your memory, permissions or work history.
 
-> **Personal AgentOS = Personal AI Kernel + Agent Distribution Platform**
+> **Personal AgentOS = Personal AI Kernel + Open Agent Distribution Platform**
 
-Just as a personal computer gives one owner a durable computing environment, Personal AgentOS is intended to give one owner a durable AI environment that survives individual conversations, tasks, tools, agents, and model changes. It runs on an owner-controlled host/runtime and keeps the owner's policy, personal context, workspace, permissions, approvals, work state, evidence, and recovery under an AgentOS-owned boundary.
+The platform must earn trust by doing useful work within observable, enforceable boundaries. Control without usefulness is not the product. A small initial bundle is acceptable; deliberately weak basic functions are not.
 
-The kernel is intentionally **agent-independent**. Codex, Claude Code, GPT-class models, local models, tools, MCP servers, specialist agents, and multi-agent runtimes such as Ruflo may be used as replaceable workers or capabilities. They are not the owner of personal state and cannot become the authority for canonical memory, grants, work transitions, or evidence history.
+## What exists today — and what is planned
 
-The product experience can still be **agent-centric**. A useful third-party agent should be discoverable, inspectable, installable, permissioned, runnable, updatable, rollbackable, disableable, and removable like an application—without taking ownership of the user's AI environment.
+| Status | Scope and evidence |
+| --- | --- |
+| Existing product code | Local browser setup/chat, model-provider adapters, bounded tools, notes, approved folders and managed file results. Exact supported operating paths are in [QUICKSTART](QUICKSTART.md). |
+| File-workspace development complete | #314, PR #320 and PR #324: scoped file use, original preservation, saved results and restart/reuse, supported by deterministic/temporary-local-file evidence. |
+| v0.1 contract complete | #334 / PR #350: Core Primitive and AgentPackage schemas, semantic validation and fixtures. This is not package execution or installation. |
+| DOGFOOD-01 development complete | #351 / PRs #354–#356: simulated-provider HTTP/file/restart acceptance and operating instructions. Real-provider/browser use remains separately observed owner acceptance. |
+| Planned useful default-agent work | [USE-01 #358](https://github.com/Jongtae/personal-agentos/issues/358): better research, file artifacts and continuity with measured outcome quality. |
+| Planned control/app experience | [OBS-01 #359](https://github.com/Jongtae/personal-agentos/issues/359), [AGENT-UX-01 #360](https://github.com/Jongtae/personal-agentos/issues/360) and the uncompleted children of #333: receipts, install/use/revoke/remove and ecosystem expansion. |
 
-**This is not a coding harness or an agent-swarm framework.** Coding automation can be one service inside Personal AgentOS, and this repository uses GitHub/Codex delivery automation to build the product, but that development harness is not the end-user product. Personal AgentOS is also not a replacement for macOS/Linux, a kernel, or a hypervisor; it is the persistent personal-AI layer above an owner-controlled host/runtime.
+There is no claim of current arbitrary third-party AgentPackage execution, public Registry/Marketplace, universal agent compatibility or autonomous purchasing. Legacy declaration-only plugins are not the planned executable AgentPackage system. Historical live acceptance remains limited to its recorded prompts, versions and provider conditions.
 
-## Product model
+## Useful from the beginning
 
-The architecture separates durable owner state, distribution, and replaceable workers:
+The next product targets are three complete journeys, not a collection of disconnected demos:
+
+- **Research → decision:** compare public options using appropriate source evidence, distinguish known facts from missing inventory/fees, and produce a useful decision brief without buying anything.
+- **My files → artifact:** understand approved documents, reconcile facts and save a useful result as an ordinary file without changing the originals.
+- **Follow-up → continuity:** accept corrections, find previous work and reuse results after restart without rebuilding the owner's context every time.
+
+Current public search returns snippets; it is not full-page or checkout verification. The [usefulness plan](docs/default-agent-usefulness.en.md) identifies this concrete gap and defines a 24-case synthetic evaluation seed. Static test success is not a model-performance result. Model quality, result substance, latency, cost and owner effort must be measured on the actual supported path.
+
+Start with a capable default assistant and reliable shared tools; add specialists when they improve measured outcomes. Strong cloud models and local models are both compatible with the direction, subject to explicit data-destination choices. More agents, a larger framework or a marketplace do not substitute for good basic functionality.
+
+## Control the environment, not just the conversation
+
+The [owner-control contract](docs/owner-control-contract.en.md) defines six rights to implement and verify:
+
+1. Inspect package source, publisher, version, execution mode and requested authority.
+2. Choose the documents, memories and accounts each agent can use.
+3. See where task information will be sent.
+4. Limit actions separately from connecting or installing.
+5. Stop work and revoke authority, with honest in-flight uncertainty.
+6. Remove/replace agents while retaining owner artifacts, accepted Memory and appropriate evidence.
+
+Controls must be enforced by the capability/runtime boundary, not just by telling a model to behave. Progress must reflect observed Work/tool events. Relevant redacted parameters, destinations, approval decisions and results should be inspectable; hidden reasoning, secrets and raw system prompts are not required.
+
+Local installation is not the same as local processing. A local package using an external model sends approved context to that provider. A remote-agent connector does not make the remote service locally controlled. Disconnecting, revoking access, removing an agent and deleting retained information are different operations. Already transmitted data or completed external effects cannot be promised away by a local stop button.
+
+## Architecture and application model
 
 | Layer | Responsibility |
 | --- | --- |
-| **Owner plane** | Identity/policy, personal context and memory boundaries, owner data/workspace, permissions, approvals, work state, evidence, recovery |
-| **Capability plane** | Tools, connectors, assistants, specialist capabilities, runtime/engine registry |
-| **Distribution plane** | AgentPackage, Package Manager, Registry, trust metadata, discovery/Marketplace boundaries |
-| **Worker plane** | Bounded Codex, Claude Code, model-provider, local-runtime, Ruflo, or other execution |
-| **Experience plane** | Conversation and work through supported local, Telegram, companion, and future package-discovery interfaces |
+| Owner plane | Owner identity/policy, Context/Memory authority, data/workspace, Grants, approvals, Work/Event, Artifacts, Evidence and recovery |
+| Capability plane | Typed tools/connectors and bounded runtime interfaces |
+| Distribution plane | AgentPackage, Package Manager, Registry, trust metadata and Marketplace/discovery |
+| Worker plane | Replaceable models, Codex/Claude Code, local/API workers and optional delegated runtimes such as Ruflo |
+| Experience plane | Conversation, useful results, inspectable progress, approval/control and future agent discovery |
 
-The canonical architecture is [Personal AgentOS Architecture](docs/personal-agentos-architecture.en.md). The platform foundation and planned delivery sequence are in [Agent Distribution Platform Foundation](docs/agent-distribution-platform-foundation.en.md) and [#333](https://github.com/Jongtae/personal-agentos/issues/333).
-
-### Kernel primitives
-
-Personal AgentOS treats these as owner-level primitives rather than agent-specific implementation details:
+The kernel is **agent-independent**; the product and ecosystem can be **agent-centric**. Core primitives remain:
 
 `Owner · Context · Memory · Artifact · Capability · Runtime · Grant · Work · Event · Evidence`
 
-The Agent Distribution Platform adds package/distribution concepts around those primitives:
+Agents request authority; AgentOS policy and the owner decide it. Models, agents, registries and marketplaces must not become the source of truth for canonical owner state.
 
-`AgentPackage · Package Manager · Registry · Marketplace/Discovery · Trust/Verification`
+The AgentPackage lifecycle distinguishes:
 
-The important rule is that distribution metadata and worker runtimes remain subordinate to kernel authority.
+`downloaded != installed != enabled != connected != authorized-for-action`
 
-## Agent application model
+Installation defaults to disabled and never creates a Grant. Updates that expand data, actions, destinations, memory or background behavior require fresh authority. Third-party durable-memory output is a MemoryCandidate by default. Removal revokes package authority while preserving owner-owned outputs and retained evidence according to policy.
 
-An AgentPackage is the installable product unit. Its manifest is expected to declare identity/version, compatible AgentOS API, capabilities/actions, runtime requirements, permissions and data scope, network destinations, secret references, memory policy, events/background behavior, budgets, approval requirements, artifacts, dependencies, sandbox profile, health checks, provenance/signing and removal/update behavior.
+A Registry resolves exact identity/version/digest/compatibility/advisories. A Marketplace supports discovery, ranking, reviews and possible commerce; popularity never overrides security policy. Package identity/signatures are not guarantees of behavior. Private owner Context is not marketplace search data.
 
-Installation is deliberately separated from authority:
+See the canonical [architecture](docs/personal-agentos-architecture.en.md), [PRD](PRD.md), [platform foundation](docs/agent-distribution-platform-foundation.en.md) and [roadmap](docs/roadmap.md).
 
-`discovered → inspected → verified → installed-disabled → granted/enabled → running → updated/rolled back → disabled → uninstalled`
+## Bootstrap the ecosystem
 
-**Downloaded, installed, enabled, connected, and authorized-for-action are different states.** Installing a package never implicitly creates or widens a Grant. A package update that expands permissions, external destinations, memory behavior, or background authority requires a new policy/owner decision.
+First prove one useful Files reference package and a public authoring path, then expand. Bundled and outside agents must use the same public contracts with no hidden first-party privilege. Compatibility adapters for MCP and selected skill/plugin formats are planned only where formats, licenses and authority can be mapped. Ruflo is an optional future worker adapter, not the kernel or a required dependency.
 
-Registry and Marketplace are also different responsibilities. A Registry resolves publisher/package identity, immutable versions/digests, compatibility, trust metadata, advisories and revocation. A Marketplace/discovery layer may search, rank, review or commercialize packages, but popularity and ratings do not grant execution authority and do not override security policy.
+The first app experience to prove is: inspect → install disabled → grant → useful work → inspect receipt → revoke → denied retry → remove → restart → authorized replacement/reuse. A public store and payments are not prerequisites.
 
-## Bootstrap strategy
-
-The first Personal AgentOS distribution does not need the world's best bundled agents. Like early operating systems, it can ship a small set of bootstrap/reference packages—such as General, Files, Research, and Coding—to prove the application model and provide a usable baseline.
-
-Those reference agents must use the same public package/runtime/permission contracts as third-party agents. They do not receive hidden first-party privileges. The long-term product value should come from the owner-controlled kernel plus a healthy ecosystem of independently developed capabilities.
-
-To avoid an empty-marketplace problem, Personal AgentOS plans compatibility adapters for existing ecosystems such as MCP and selected OpenAI/Codex and Claude skills/plugins. Ruflo is planned as an optional delegated Runtime Adapter, not as the AgentOS kernel or personal-memory authority.
-
-## Current implemented baseline
-
-The first usable slice is the **file-and-folder personal workspace**. The finite [#314 program](https://github.com/Jongtae/personal-agentos/issues/314) is complete: its integrated file-workspace implementation merged in [PR #320](https://github.com/Jongtae/personal-agentos/pull/320), and validation/closeout merged in [PR #324](https://github.com/Jongtae/personal-agentos/pull/324).
-
-That flow preserves owner originals, uses approved reference folders as read-only by default, writes new results only inside an owner-granted managed workspace, keeps original/derived/draft/final provenance distinct, separates rebuildable search indexes from durable work/approval/evidence/recovery/authentication state, and can find/reuse saved results after restart.
-
-The evidence boundary matters: the completed file-workspace program is backed by automated deterministic-model and temporary local-file evidence. It does **not** by itself claim live operation of an external model, Telegram, Google Drive/OAuth, a recurring scheduler, personal folders, AgentPackage installation, Registry operation, or Marketplace operation.
-
-The Agent Distribution Platform work in [#333](https://github.com/Jongtae/personal-agentos/issues/333) and its child issues is **planned**, not activated merely because the issues exist. The [roadmap](docs/roadmap.md) remains the status source for shipped, historical, deferred, proposed, and active work.
-
-## Owner control and trust boundary
-
-- The owner chooses which folders, services, tools, agents, packages, and runtimes are connected.
-- Connected reference folders are read-only by default; managed-workspace writes stay inside explicit owner scope.
-- Originals remain distinct from extracted text, summaries, drafts, and final records.
-- Search indexes are rebuildable and separate from durable task, approval, evidence, recovery, and authentication state.
-- Third-party packages do not directly mutate canonical owner Memory by default; they propose bounded memory candidates under AgentOS policy.
-- External AI, messenger, agent, package, runtime, and recipient transmission is a separate policy boundary from local storage.
-- Consequential actions such as external sending, payments, privilege expansion, or destructive/account changes require explicit authority.
-- Work state and evidence are retained where supported for cancellation, retry, recovery, export, restore, and later audit.
-- Package signatures/provenance establish identity and integrity; they are not a guarantee of behavioral safety.
-
-Local-first does not mean "nothing ever leaves the device." When the owner selects an external AI engine, connector, package, runtime, messenger, or recipient, approved task context may be transmitted under that capability's policy. AgentOS must make that boundary explicit rather than hiding it behind the word local.
-
-## Portability
-
-Owner state can move between local runtimes with:
-
-```sh
-scripts/agentos-backup.py DATA ARCHIVE
-scripts/agentos-restore.py ARCHIVE EMPTY_DATA
-```
-
-The archive is integrity-checked and carries durable owner state such as memory records, work evidence, and reviewed assistant/package declarations where supported. It does not carry provider credentials, sessions, local-folder grants, engine/model selections, or Telegram pairing; the destination runtime must be explicitly claimed and reconnected.
-
-## Development installation
+## Try the current baseline
 
 ```sh
 brew install jongtae/agentos/agentos
 agentos start
 ```
 
-The Homebrew path remains for developers and self-hosters while consumer installation is refined.
+Homebrew is a developer/self-host path and may differ from current main. Follow [QUICKSTART](QUICKSTART.md) for the supported setup and a dedicated test-folder task; do not treat planned package features as commands that already exist. For the documented file-workspace test use a supported direct model-provider path, not a subscription engine.
+
+## Portability and limits
+
+```sh
+scripts/agentos-backup.py DATA ARCHIVE
+scripts/agentos-restore.py ARCHIVE EMPTY_DATA
+```
+
+Supported owner state and reviewed declarations can be exported/restored with integrity checks. Provider credentials, sessions, local-folder grants, engine/model selections and Telegram pairing are excluded from this portable archive; explicitly claim and reconnect the destination. This is distinct from backing up an entire private data directory, which may contain secrets.
+
+Local-first does not mean local-only or automatically safe. Host security, package isolation, data already transmitted and remote-provider retention have limits. Supported cancellation/recovery must distinguish confirmed and unknown outcomes.
 
 ## Development governance
 
-Repository delivery follows the [Development Constitution](docs/development-constitution.en.md), issue-linked branches, pull requests, required validation, and the [Goal Execution Contract](docs/goal-execution-contract.en.md). The development process adapts useful ideas from Spec-Driven Development and explicit state/authority governance, while keeping those frameworks out of the Personal AgentOS runtime dependency boundary.
+This is **not a coding harness, swarm framework, host kernel or replacement for macOS/Linux**. GitHub/Codex delivery automation builds Personal AgentOS; it is not the end-user product.
 
-The intended sequence is:
+Follow [AGENTS.md](AGENTS.md), the [Development Constitution](docs/development-constitution.en.md) and [Goal Execution Contract](docs/goal-execution-contract.en.md): issue → bounded branch → implementation → validation → independent review → merge/closeout. Spec-driven patterns are development aids, not runtime dependencies.
 
-`Constitution → Spec → Authority/Threat Model → Plan → Tasks → Implement → Verify → Converge`
-
-Repository automation, implementer/reviewer handoff, and CI are **development infrastructure for building Personal AgentOS**, not an end-user AgentOS service or proof of live autonomous operation.
-
-Read [AGENTS.md](AGENTS.md), [PRD.md](PRD.md), [TASKS.md](TASKS.md), and the [roadmap](docs/roadmap.md) before implementation.
+Planned issues are not an automatic execution queue. GOV-USE-01 aligns requirements/backlog only; #358–#360 and uncompleted #333 children remain inactive until separately selected. A product completion claim must include useful outcome evidence and relevant denial/recovery evidence, not only schemas, file counts or green CI.

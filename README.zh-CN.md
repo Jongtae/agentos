@@ -2,101 +2,82 @@
 
 [English](README.md) | [한국어](README.ko.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-**Personal AgentOS 是面向单一所有者、由用户安装并掌控的本地优先个人 AI 运行环境。**
+**由你安装、拥有和掌控，并能真正完成有用工作的个人 AI 环境。**
 
-长期产品方向可以概括为：
+Personal AgentOS 是面向单一所有者的本地优先个人 AI 运行环境。你提出目标，选择模型和获准资料，完成工作并保留有用结果。长期目标是像安装应用一样安装和替换 Agent，同时让个人 Memory、权限、Work、Artifact 和 Evidence 始终属于你。
 
-> **Personal AgentOS = Personal AI Kernel + Agent Distribution Platform**
+> **Personal AgentOS = Personal AI Kernel + Open Agent Distribution Platform**
 
-就像个人电脑和个人操作系统为一个人提供持续的计算环境一样，Personal AgentOS 旨在提供跨对话、任务、工具、Agent 和模型变化持续存在的个人 AI 环境。它运行在所有者掌控的主机／运行时上，并在 AgentOS 自身的边界内保留策略、个人 Context/Memory、工作空间、Grant、审批、Work/Event、Artifact、Evidence 与恢复状态。
+只有控制而没有用途的管理工具不是目标；只有流畅回答而无法核实执行结果也不是目标。初期可以只有少量内置 Agent，但不能把基本功能质量低当成合理的产品策略。
 
-Kernel 有意保持 **Agent-independent**。Codex、Claude Code、外部/本地模型、MCP server、专业 Agent、Ruflo 等 multi-agent runtime 都只是可替换的 worker/capability。它们不能成为 canonical Memory、Grant、Work state 或 Evidence 的权威来源。
+## 当前实现与后续计划
 
-但产品体验可以是 **Agent-centric** 的：优秀的第三方 Agent 应该能够像应用一样被发现、检查、安装、授权、运行、更新、回滚、禁用和卸载，而不会接管所有者的个人 AI 状态。
+| 状态 | 范围与证据 |
+| --- | --- |
+| 现有代码 | 本地浏览器设置和聊天、模型适配器、受限工具、笔记、获准文件夹和工作空间结果。具体支持路径见 [QUICKSTART](QUICKSTART.md)。 |
+| 文件工作空间开发完成 | #314、PR #320/#324：原件保留、受限读取、保存结果、重启后复用；证据来自自动测试与临时本地文件。 |
+| v0.1 契约完成 | #334、PR #350：核心对象和 AgentPackage 的 schema、静态/语义验证及 fixtures；不是包执行或安装实现。 |
+| DOGFOOD-01 开发完成 | #351、PR #354–#356：模拟提供者的 HTTP/文件/重启验收与操作说明；真实模型和浏览器使用观察单独记录。 |
+| 计划中的产品工作 | #358 基本任务质量，#359 真实执行记录与控制界面，#360 安装、使用、撤销、卸载及复用体验，以及 #333 未完成子任务。 |
 
-**Personal AgentOS 不是编码 harness，也不是 Agent swarm 框架。** 编码自动化和 multi-agent orchestration 可以成为 AgentOS 上的 service/runtime；本仓库的 GitHub/Codex 自动化只是构建产品的开发基础设施。它也不是 macOS/Linux 的替代内核或 hypervisor，而是运行在所有者控制主机之上的持久个人 AI 层。
+没有声称已经支持任意第三方代码、公开 Registry/Marketplace、通用兼容或自动购买。现有声明型插件不等于计划中的可执行 AgentPackage。历史真实测试仅证明其记录的任务、版本与提供者条件。
 
-## 产品模型
+## 首先做好三类工作
 
-- **Owner plane** — 身份/策略、Context/Memory、owner data/workspace、Grant/approval、Work/Event、Artifact、Evidence、recovery。
-- **Capability plane** — tools/connectors、capability registry、runtime/engine boundary。
-- **Distribution plane** — AgentPackage、Package Manager、Registry、trust metadata、Marketplace/discovery boundary。
-- **Worker plane** — 受限的 Codex、Claude Code、model provider、local runtime、Ruflo 等。
-- **Experience plane** — local UI、Telegram/companion，以及未来的 Agent inspect/install/permission UI。
+**研究到决策。** 根据公开来源比较选项，区分来源时间、价格条件、已确认事实和未知内容，形成有用的决策摘要。当前网页搜索只是搜索结果片段，不等于读取完整页面、确认库存或核对结账总额。
 
-英文规范架构见 [Personal AgentOS Architecture](docs/personal-agentos-architecture.en.md)。Distribution Platform 的分阶段计划见 [Agent Distribution Platform Foundation](docs/agent-distribution-platform-foundation.en.md) 和 [#333](https://github.com/Jongtae/personal-agentos/issues/333)。
+**个人文件到成果。** 读取明确允许的文档，整理关键事实、分歧和下一步行动，保存为普通文件。不仅检查文件存在，也检查内容质量；不得修改原件。
 
-### Kernel primitives
+**跟进、纠正和重启复用。** 接受条件变更并继续相关工作，重启后找回结果，而不是反复要求用户重建上下文。不会默默把全部聊天都变成永久 Memory。
+
+[基本功能质量计划](docs/default-agent-usefulness.en.md) 包含24个合成测试案例。这只是评估规格，不是已运行的模型评测成绩。必须在真实支持路径上测量成功率、依据、延迟、费用和用户干预。
+
+## 所有者应能行使的六项控制权
+
+[Owner Control Contract](docs/owner-control-contract.en.md) 定义待实现并验证的权利：
+
+1. 查看包来源、发布者、精确版本、执行位置和请求权限。
+2. 选择各 Agent 可用的资料、记忆和账户。
+3. 知道哪些信息会发送到哪些服务。
+4. 将安装和连接与具体行为授权分开。
+5. 停止工作、撤销权限，并了解进行中外部操作的不确定性。
+6. 卸载或替换 Agent 后仍保留自己的成果和已接受记忆。
+
+控制必须由执行边界落实，而不仅是要求模型遵守规则。进度来自真实 Work/工具事件；详细记录应显示必要的脱敏输入、目的地、授权与结果。隐藏推理、系统提示词和秘密值不是这些记录的必要内容。
+
+本地安装不等于本地处理。本地包可能调用外部模型并发送获准 Context。安装远程 Agent 的连接器，并不意味着控制该远程服务器。断开连接、撤销权限、卸载 Agent 与删除保留数据是不同操作。停止按钮不能保证收回已经发送的信息或撤销已完成的外部行为。
+
+## 架构和应用模型
+
+Kernel 保持 Agent-independent，产品体验可以 Agent-centric。
 
 `Owner · Context · Memory · Artifact · Capability · Runtime · Grant · Work · Event · Evidence`
 
-Distribution plane 在此之上增加：
+其上是 `AgentPackage · Package Manager · Registry · Marketplace/Discovery · Trust/Verification`。模型、Codex、Claude Code、MCP 和可选 Ruflo 只是可替换 worker，不是个人状态的权威。
 
-`AgentPackage · Package Manager · Registry · Marketplace/Discovery · Trust/Verification`
+`downloaded != installed != enabled != connected != authorized-for-action`
 
-## AgentPackage 与权限
+默认以禁用状态安装；安装不创建 Grant。扩大权限、数据范围、目的地、Memory 或后台行为的更新需要重新授权。第三方持久记忆更改默认是 MemoryCandidate，由所有者策略决定是否接受。卸载撤销包权限，但保留所有者成果和适当证据。
 
-AgentPackage 是可安装的 Agent/application unit。长期 manifest 将声明 package/publisher/version、AgentOS API compatibility、capability/action、runtime requirements、filesystem/data scope、network destinations、secret references、Memory policy、Event/background behavior、budgets、approval requirements、Artifact、dependencies、sandbox、health check、update/rollback/remove、provenance/signature/SBOM 等信息。
+Registry 管理精确身份、版本、摘要、兼容性和撤销信息；Marketplace 管理搜索、排序、评论和未来商业分发。流行度不授予权限，签名也不保证行为安全。个人 Context 不是商店搜索数据。
 
-安装和权限必须分离：
+先验证一个真正有用的 Files 参考包与公开 SDK 路径。同捆与第三方 Agent 使用同一公开契约，没有隐藏特权。只有格式、许可和权限可以明确对应时才引入 MCP/skill/plugin 兼容。大型商店、付款和 Ruflo 不是第一阶段用途的前提。
 
-`discover → inspect → verify → installed-disabled → grant/connect/enable → run → update/rollback → disable → uninstall`
-
-**downloaded、installed、enabled、connected、authorized-for-action 是不同状态。** 安装 package 不会自动创建 Grant。若更新扩大 permissions、data scope、external destinations、Memory/background behavior，则必须重新经过 owner/policy review。
-
-第三方 Package 默认不能直接修改 canonical owner Memory，而应提交带来源的 MemoryCandidate。
-
-## Registry 与 Marketplace
-
-**Registry** 负责 package/publisher identity、exact version/digest、compatibility、signature/provenance、trust metadata、advisory/revocation/quarantine。
-
-**Marketplace/Discovery** 可负责 search、recommendation、ranking、review、curation 以及未来的 commerce。但 popularity、rating、install count 都不是 execution authority，也不能覆盖 quarantine/signature/AgentOS policy。
-
-Private owner Context/Memory/Work 不应成为 Registry/Marketplace 的状态。Capability discovery 应优先使用 structured/minimised metadata，而不是把 raw private prompt 直接发送给 store search。
-
-## 初期生态策略
-
-初期 Personal AgentOS 不需要自带所有最优秀的 Agent。可以从 General Assistant、Files、Research、Coding 等少量 reference Agent 开始。它们的目标不是由平台方包办最佳应用，而是让 OS 可用并验证公开的 Package/Runtime/Grant contract。
-
-Reference Agent 与第三方 Package 应使用相同公开 contract，不应获得隐藏的 first-party privilege。
-
-为了降低空 Marketplace 的 chicken-and-egg 问题，计划在官方格式与许可证允许的范围内，将 MCP 以及部分 OpenAI/Codex、Claude skill/plugin ecosystem wrap/import 成 AgentPackage。Ruflo 的定位是未来的 bounded delegated Runtime Adapter，而不是 AgentOS kernel。
-
-## 当前实现基线
-
-第一个可用的产品切片是 **基于文件与文件夹的个人工作空间**。[#314 项目](https://github.com/Jongtae/personal-agentos/issues/314) 已完成；集成实现合并于 [PR #320](https://github.com/Jongtae/personal-agentos/pull/320)，验证与结束记录合并于 [PR #324](https://github.com/Jongtae/personal-agentos/pull/324)。
-
-连接的参考文件夹默认只读；新结果只能写入所有者明确授权的受管工作空间。原件、派生资料、草稿和最终记录保持可区分，可重建的搜索索引与持久的工作、审批、证据、恢复和认证状态分离，并可在应用重启后重新找到和使用已保存结果。
-
-当前完成证据来自 deterministic model 与临时本地文件的自动验证。这并不意味着已经验证外部模型、Telegram、Google Drive/OAuth、周期 scheduler、个人文件夹、AgentPackage、Registry 或 Marketplace 的真实运行。
-
-[#333](https://github.com/Jongtae/personal-agentos/issues/333) 与 #334–#346 是 **planned successor work**；issue 的存在本身不会激活执行。
-
-## 所有者控制与信任边界
-
-- 所有者选择连接哪些文件夹、服务、工具、AgentPackage 与 runtime。
-- 第三方 package/runtime 默认不能直接修改 canonical Memory。
-- 向外部 AI、messenger、Agent、package/runtime 或 recipient 传输内容，是独立于本地存储的 policy boundary。
-- send、payment、destructive file/account change、privilege expansion 等需要 explicit authority。
-- package signature/provenance 是 identity/integrity evidence，不是 behavioral safety 保证。
-
-本地优先不等于“任何信息都绝不会离开设备”。当所有者选择外部能力时，获准的 Context 可能依据该 capability 的策略被发送出去。
-
-## 开发安装
+## 使用当前预览版
 
 ```sh
 brew install jongtae/agentos/agentos
 agentos start
 ```
 
-在面向普通用户的安装体验继续完善期间，Homebrew 路径仍面向开发者和自托管用户。
+Homebrew 面向开发者和自托管用户，可能不同于最新 main。请遵循 [QUICKSTART](QUICKSTART.md) 的专用测试文件夹流程。该文件工作空间测试使用受支持的直接模型连接，不使用订阅引擎。计划中的包功能不能写成已经可用的命令。
+
+支持的持久状态可通过 `scripts/agentos-backup.py DATA ARCHIVE` 与 `scripts/agentos-restore.py ARCHIVE EMPTY_DATA` 导出恢复。迁移归档不包含提供者凭据、会话、本地文件夹权限、模型选择或 Telegram pairing；新环境必须重新声明并连接。这不同于可能含秘密的整个数据目录备份。
 
 ## 开发治理
 
-本仓库遵循 [Development Constitution](docs/development-constitution.en.md) 与 Goal Execution Contract，并采用：
+参阅[架构](docs/personal-agentos-architecture.en.md)、[PRD](PRD.md)、[AGENTS.md](AGENTS.md)、[Development Constitution](docs/development-constitution.en.md)、[Goal Execution Contract](docs/goal-execution-contract.en.md)和[路线图](docs/roadmap.md)。
 
-`Constitution → Spec → Authority/Threat Model → Plan → Tasks → Implement → Verify → Converge`
+本项目不是 coding harness、swarm 框架或 macOS/Linux 替代内核。GitHub/Codex 自动化是开发基础设施。#357 只对齐文档、评估规格与计划；#358–#360 及未完成的平台任务在单独明确激活前保持未执行。
 
-我们会借鉴 Spec Kit、BuilderMethods Agent OS、Open AgentOS 类项目中有用的 development patterns，但不会把它们作为 Personal AgentOS runtime dependency。Repository automation 也不是 end-user runtime 或 live autonomy 的证明。
-
-实现前请阅读 [AGENTS.md](AGENTS.md)、[PRD.md](PRD.md)、[TASKS.md](TASKS.md) 和[路线图](docs/roadmap.md)。
+完成标准不只是 schema、文件数和 CI：**必须同时证明成果有用，以及不允许的行为确实被阻止。**

@@ -8,7 +8,7 @@ A connected Codex, Claude Code, model provider, local model, MCP server, AgentPa
 
 The repository's issue/branch/PR workflow, Goal Execution Contract, CI, delivery heartbeat, and state-driven implementer/reviewer handoff are **development infrastructure used to build Personal AgentOS**. Do not treat those repository mechanics as an end-user AgentOS feature, an OS runtime dependency, or evidence of live autonomous product operation. A coding harness may be a service or development aid; it is not the product identity.
 
-The current first usable product slice remains owner files and folders as the material foundation with conversation/work as the experience. The Agent Distribution Platform epic [#333](https://github.com/Jongtae/personal-agentos/issues/333) is planned successor work. Its child issues are not activated merely because they exist.
+The current first usable product slice remains owner files and folders as the material foundation with conversation/work as the experience. D-AP-01 #334 is contract/schema-complete and DOGFOOD-01 #351 is development-complete in their named evidence classes. Uncompleted Agent Distribution Platform #333 children and useful-default-agent issues #358–#360 are planned; their existence does not activate them.
 
 Every active task must advance one or more durable outcomes:
 
@@ -19,9 +19,24 @@ Every active task must advance one or more durable outcomes:
 - keep personal state independent of replaceable models/agents/runtimes;
 - allow reviewed third-party capabilities to be installed/updated/removed without implicit authority expansion;
 - make external data destinations and consequential actions explicit;
-- preserve truthful evidence boundaries between design, fixture, local operation and live external operation.
+- preserve truthful evidence boundaries between design, fixture, local operation and live external operation;
+- complete useful research/file/continuity tasks with accurate, substantive outputs and less unnecessary owner work.
 
 Do not expand Kubernetes, appliance, cosmetic task-card/UI work, marketplace commerce, or infrastructure complexity unless an explicitly activated goal shows how it advances these outcomes.
+
+## Useful outcomes and observable owner control
+
+Follow [Owner Control Contract](docs/owner-control-contract.en.md) and [Default Agent Usefulness](docs/default-agent-usefulness.en.md) for relevant successor work. These requirements do not themselves activate product implementation.
+
+- Few bundles is acceptable; intentionally weak basic functionality is not. Start with a capable default assistant and reliable tools, then justify extra agents/frameworks by task evidence.
+- Measure actual task outcomes: source-supported comparisons, substantive artifacts, unchanged originals, successful restart/reuse, and relevant denied unauthorized attempts. Schema counts, test counts, reassuring prose and a file's mere existence are not usefulness scores.
+- The 24-case evaluation seed and its static tests are specification evidence only. A runnable evaluator, repeated trials and calibrated outcome graders are separately required before reporting agent performance.
+- Progress and action receipts must derive from observed Work/broker/tool events. Separate requested, observed, failed and unknown states. Never invent an ETA, tool execution, model identity or successful external effect.
+- Owner-inspectable redacted parameters/destinations/approval/effects do not require hidden reasoning, raw system prompts, secrets or unrestricted payload logging. Apply redaction and retention before persistence and export.
+- A public read, cart/hold mutation, identity entry, reservation, send and payment are different effects. Default research does not authorize checkout/cart actions. Parameter or authority changes invalidate non-covering approval.
+- Preserve existing private-document transmission/search guards. Review precise data/egress semantics before combining public research and private context; utility is not authority to remove a safety boundary.
+- Local install is not local-only processing. Remote connectors do not place remote services under local control. Disconnect, revoke, remove and forget/delete have different scopes.
+- For product-facing changes, independent review includes task-result usefulness and affected UI behavior as well as security. Existing historical areas need re-audit only when a concrete dependency or contradiction requires it.
 
 ## Development constitution
 
@@ -116,7 +131,7 @@ An owner may explicitly activate one goal-ready iteration or one goal-ready top-
 
 There is one existing delivery heartbeat. It may resume only the explicitly active goal after inspecting current repository and GitHub state; it must not create another automation or concurrent execution. It stays paused when no top-level goal is active or after top-level closeout, not after an in-scope substep closeout. A changed external condition is required before retrying a recorded authentication, permission, environment or usage failure.
 
-Planned Agent Distribution Platform issues #333–#346 are not an autonomous queue. Do not select #334 or any successor merely because #332 documentation alignment merges. Each execution unit still requires explicit owner activation and a goal-ready delivery-plan state.
+Uncompleted Agent Distribution Platform issues and #358–#360 are not an autonomous queue. D-AP-01 #334 and DOGFOOD-01 #351 completion does not activate a successor. Each execution unit still requires explicit owner activation and a goal-ready delivery-plan state. GOV-USE-01 #357 authorizes only its bounded documentation/governance alignment, not product execution.
 
 Use role-appropriate delegation only for independent bounded work. Record the requested model/reasoning setting when material, the tool-accepted setting when observable, the observed execution result, and exclusive file ownership. Do not claim a model/runtime change that was not accepted or observed.
 

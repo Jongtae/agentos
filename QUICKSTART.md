@@ -2,6 +2,14 @@
 
 AgentOS is a self-hosted personal agent preview. One local process serves a Korean web setup and chat interface. Docker and Kubernetes are not required. Homebrew installs Python automatically; model runtimes and model weights are separate.
 
+## Current use versus planned work
+
+The current owner test remains the small file-workspace journey below: configure a supported direct provider, explicitly grant a reference folder and output workspace, save a result, restart and find it again. DOGFOOD-01's repository evidence uses simulated providers and temporary files; actual owner browser/provider operation is a separate test. Check the installed revision when comparing a released Homebrew build with current source; a merged documentation PR is not a new application release.
+
+[USE-01 / #358](https://github.com/Jongtae/personal-agentos/issues/358) is prepared to improve ordinary research, substantive file results and follow-up continuity. It does not run merely because its issue exists. Public full-page reading, measured 24-case model quality, the expanded receipt/control UX and v0.1 agent installation are **not delivered by the preparation**. Current public search returns snippets, not full-page/inventory/checkout proof. The [usefulness specification](docs/default-agent-usefulness.en.md) separates deterministic development tests from live-quality promotion; an unrun live gate is pending, not passed.
+
+[Owner control requirements](docs/owner-control-contract.en.md) describe implemented versus planned boundaries. A local install can use an external model; approve only the data/destinations you intend. No ticket/cart/booking/payment, account creation or new external action is part of the recommended test. Do not publish private documents, credentials or full tool payloads as repository evidence.
+
 ## Install on macOS
 
 Install Homebrew from [brew.sh](https://brew.sh) if needed, then:
@@ -14,7 +22,6 @@ agentos start
 The browser opens at `http://127.0.0.1:8787`. Click **바로 시작하기** (Start now). There is no setup code to enter. A login password is optional for local use; expand **비밀번호 설정 · 선택** to set one (12+ characters). Without a password, anyone using this computer can access the agent through its local address.
 
 For a ChatGPT/Codex subscription, install and log in to the official Codex CLI first (`codex login`), then select **Codex 로그인 완료 · 연결** in AgentOS. AgentOS records only your confirmation; it does not request, read, or store the Codex login. A connected subscription engine receives only the bounded AgentOS tools, not your local files, credentials, or arbitrary shell access. Alternatively, choose a model provider, endpoint and model name, then use Save and Test connection. API keys stay in a private local file. Cloud requests send conversation content to your selected provider.
-
 
 Supported connections: Ollama (an already running local model server), OpenAI-compatible Chat Completions endpoints, and Anthropic Messages. Bring your own model access; no paid model subscription is included.
 
@@ -39,7 +46,9 @@ is unchanged. Stop AgentOS with Ctrl-C, run `agentos start` again, and ask
 
 This local test uses a real folder and a real provider only when you supply the
 provider credentials. Repository tests use a simulated provider and do not prove
-live external-provider operation.
+live external-provider operation. After this bounded smoke test, record useful-result quality,
+missing facts, awkward clarifications and failures; the exact sample phrase is not a claim that
+all natural-language requests work. Share redacted observations, not private documents.
 
 ## Telegram
 
@@ -75,15 +84,16 @@ On a remote host, keep the default loopback binding and connect through SSH forw
 
 ## Preview scope
 
-Implemented: single owner, password login, model adapters, persistent chat and notes, queued requests, private Telegram pairing and deduplication, connected TXT/Markdown/PDF/DOCX/XLSX folders with source evidence, explicit external-model document sharing approval, Docker Compose, and backup/restore scripts. Interrupted model work and uncertain Telegram delivery are shown without automatic replay.
+Implemented paths include single owner, password login, model adapters, persistent chat/notes, queued requests, private Telegram pairing/deduplication, connected TXT/Markdown/PDF/DOCX/XLSX folders with sources, explicit external-model document approval, Docker Compose and backup/restore scripts. Each path's actual operating evidence remains scoped to its recorded revision/configuration. Interrupted model work and uncertain Telegram delivery are shown without automatic replay.
 
-Not yet implemented: arbitrary shell execution, calendar/email integrations, native desktop/mobile applications, managed unattended installation, or multi-user hosting. This is the first installation-to-task slice, not the complete AgentOS ecosystem.
+Arbitrary shell, native desktop/mobile apps, managed unattended installation, multi-user hosting and the complete AgentPackage ecosystem are not this preview. Calendar/Drive-related design or mock-validated code elsewhere in the repository is not proof of a currently configured live integration. See the [roadmap](docs/roadmap.md) for exact historical and planned states.
 
 ## Advanced: local manifest plugins
 
 Declaration-only plugins can add only the bounded host actions AgentOS already
-supports; they never execute third-party code. Install a reviewed manifest and
-manage it from the same local data directory:
+supports; they never execute third-party code. They are the legacy declaration path,
+not proof of the planned v0.1 AgentPackage installer or arbitrary binary support.
+Install a reviewed manifest and manage it from the same local data directory:
 
 ```sh
 agentos plugins install /path/to/manifest.json
@@ -92,11 +102,14 @@ agentos plugins disable example-plugin
 agentos plugins remove example-plugin
 ```
 
-Tests use simulated provider and Telegram responses, plus a real local HTTP server for setup/chat/authentication. Live provider and Telegram testing requires your credentials.
+Tests use simulated provider and Telegram responses, plus a real local HTTP server for setup/chat/authentication. Live provider and Telegram testing requires your credentials and explicit operating scope.
 
 Source and Homebrew formula: [Jongtae/homebrew-agentos](https://github.com/Jongtae/homebrew-agentos).
 
-## General tool runtime (0.2.0)
+## Historical general tool runtime (0.2.0)
+
+The following describes that release's recorded behavior and limits, not a new live
+acceptance or a promise that its limits match every later source revision.
 
 Normal messages use a shared native tool-call loop. The model selects from web search,
 weather, connected-folder search/read, personal notes, and built-in researcher/reviewer
@@ -125,3 +138,5 @@ shell commands are unavailable. **최근 도구 실행 기록** shows actual too
 `scripts/verify_general_agent.py` runs live multi-topic acceptance with the configured
 provider in a temporary store; `--installed` verifies the Homebrew installation.
 It creates a synthetic local document and never changes personal chat or notes.
+Run a live verifier only after explicitly choosing provider/data scope and budget;
+its historical result is not the new USE-01 24-case quality gate.

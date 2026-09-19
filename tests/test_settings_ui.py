@@ -54,3 +54,10 @@ def test_guidance_preserves_observed_progress_and_ai_state_boundaries():
     assert "저장된 설정" in APP
     assert "테스트한 설정" in APP
     assert "최근 응답 모델" in APP
+
+
+def test_records_surface_each_owner_record_type():
+    for label in ("메모", "기억", "임시 자료", "저장된 결과", "활동 기록"):
+        assert label in APP
+    assert "showRecordCategories" in APP
+    assert "space.result_count" in APP

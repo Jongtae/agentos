@@ -159,7 +159,6 @@ def main():
             status='implemented_but_unrun/owner_authorization_required' if not config.authorized else 'implemented_but_unrun/owner_authorized_not_started'
             report={'label':args.label,'mode':'live','live_quality':status,'authorization':config.report(),'limits':{'max_requests':72,'deadline_seconds':config.timeout,'destination_scope_enforced':True,'api_key_env_required':True},'cases':[]}
         except ValueError as exc: report={'label':args.label,'mode':'live','live_quality':'implemented_not_run/owner_authorization_required','reason':str(exc),'cases':[]}
-        except ValueError as exc: report={'label':args.label,'mode':'live','live_quality':'implemented_not_run/owner_authorization_required','reason':str(exc),'cases':[]}
     else:
         rows=[]
         for case in seed['cases']:

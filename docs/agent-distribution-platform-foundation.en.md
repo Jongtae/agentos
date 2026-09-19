@@ -2,200 +2,165 @@
 
 ## Status
 
-This is the canonical **foundation and migration plan** for the planned Agent Distribution Platform program. It translates the current Personal AgentOS architecture into a staged body of future design and implementation work.
-
-It is not a shipped-capability claim and does not activate any child issue. The executable work selector remains the Goal Execution Contract plus an explicitly owner-activated, goal-ready delivery-plan entry.
+This is the canonical **foundation and migration plan** for the Agent Distribution Platform program. It translates the architecture into staged design and implementation work. It is not a shipped-capability claim and does not activate child issues. The selector remains the Goal Execution Contract and an explicitly delegated goal-ready delivery-plan entry.
 
 Parent epic: [EPIC-ADP-01 / #333](https://github.com/Jongtae/personal-agentos/issues/333).
+
+D-AP-01 / #334 is development-complete through PR #350: v0.1 contracts, schemas and deterministic fixtures, not package execution. DOGFOOD-01 / #351 is development-complete through PRs #354–#356: simulated-provider/local-file/HTTP/restart evidence; real owner browser/provider acceptance remains separate. Other distribution children remain planned.
+
+GOV-USE-01 / #357 and PR #361 add the [Owner Control Contract](owner-control-contract.en.md) and [Default Agent Usefulness](default-agent-usefulness.en.md). [USE-01 readiness](use-01-goal-readiness.en.md) prepares #358 as the sole next goal after #361 merges. Preparation is not execution: the heartbeat stays non-active and a later explicit owner Goal invocation starts product work.
 
 ## Thesis
 
 > **Personal AgentOS = Personal AI Kernel + Agent Distribution Platform**
 
-The kernel owns the durable personal state and authority model. The distribution platform makes third-party AgentPackages discoverable/installable while remaining subordinate to that kernel.
-
-The platform should enable a future in which the quality of the Personal AgentOS experience is not limited by bundled agents. Bundled agents are bootstrap/reference applications. The durable value is the owner's environment plus an open ecosystem of capabilities that can be changed without rebuilding the owner's AI life.
+The kernel owns durable personal state and authority. Distribution makes useful third-party packages discoverable/installable without taking that authority. Owner choice and replaceability remain the strategy, but the product must be useful before a marketplace is large. **Few bundles is acceptable; deliberately weak basic functionality is not.** Reference agents use the same public contract as third parties, not hidden privilege.
 
 ## Authority boundary
 
-The kernel remains authoritative for:
+AgentOS remains authoritative for Owner identity/policy, Context/Memory semantics, Artifact ownership/provenance, Capability/Runtime registration, Grants/approvals, Work/Event lifecycle and retained Evidence/recovery/audit. A package, runtime, Registry or Marketplace may request, describe or recommend authority; it cannot grant itself authority.
 
-- Owner identity and policy;
-- canonical Context/Memory semantics;
-- Artifact ownership/provenance;
-- Capability and Runtime registration;
-- effective Grants and approvals;
-- Work/Event lifecycle;
-- retained Evidence, recovery and audit.
-
-A package, runtime, Registry or Marketplace may request, describe or recommend authority. It cannot grant itself authority.
+OC-01–OC-06 map this architecture to inspectable packages, chosen data, disclosed destinations, bounded effects, stop/revoke and retained portable owner state. Each promised control needs an enforcement point and useful-positive/denial tests. Local installation is not proof of local processing: distinguish local code/local model, local code/cloud model and remote-agent connection; disclose remote control/deletion limits.
 
 ## Distribution components
 
 ### AgentPackage
 
-Installable unit. Describes package identity, capabilities, runtimes, permissions/data scope, egress, secrets/connector references, memory policy, events/background behavior, budgets, approvals, artifacts, dependencies, sandbox, health, lifecycle, provenance and integrity metadata.
+Installable unit declaring identity, capabilities, runtimes, permissions/data scope, egress, secret/connector references, memory policy, events/background behavior, budgets, approvals, artifacts, dependencies, sandbox, health, lifecycle, provenance and integrity metadata.
 
 ### Package Manager
 
-Owner-local lifecycle mechanism. Validates and verifies exact revisions, stages them, performs health checks, records package state, coordinates enable/disable, applies update permission diffs, rolls back failures, quarantines unsafe revisions and uninstalls package-owned state while preserving owner artifacts/evidence.
+Owner-local lifecycle mechanism: validate/verify exact revisions, stage, health-check, record package state, coordinate enable/disable, review update diffs, recover/roll back, quarantine and uninstall package-local state while preserving owner artifacts/evidence under policy. No second permission database or installer in integration work.
 
 ### Registry
 
-Package identity and release metadata authority. Resolves publisher/package/version/digest, compatibility, trust metadata, advisories/revocation/quarantine and optional package locations. It must not contain owner Context/Memory/Work content.
+Publisher/package/version/digest, compatibility, trust metadata, advisories/revocation/quarantine and optional package-location authority. It must not hold owner Context/Memory/Work content.
 
 ### Marketplace / Discovery
 
-Search, recommendation, ranking, curation, reviews and future commerce. Marketplace signals help the owner find packages but do not grant execution authority and do not override kernel security policy.
+Search, recommendation, ranking, curation, reviews and future commerce. Signals help discovery, not authority; popularity cannot override kernel policy.
 
 ### Trust / Verification
 
-Trust is a set of evidence classes rather than a single badge: publisher identity, signature/integrity, build provenance/SBOM, static manifest checks, behavioral conformance/evals, permission risk, update history, incidents/revocation, user/expert reviews and curator status.
+Keep publisher identity, signature/integrity, build provenance/SBOM, static checks, behavioral conformance/evals, permission risk, update/incident history, revocation, reviews and curation distinct. Signing is not behavioral safety or useful task quality.
 
 ## Lifecycle
 
 ```text
-discover
-  -> inspect
-  -> resolve exact version/digest
-  -> verify integrity/trust metadata
-  -> stage in isolated package area
-  -> preflight + health check
-  -> installed-disabled
-  -> optional connection/credential setup
-  -> owner/policy Grant + enable
-  -> Work-scoped execution
-  -> update with permission/data/egress diff
-  -> rollback on failure
-  -> disable/quarantine
-  -> uninstall
+discover → inspect → exact version/digest → verify → isolated staging
+→ preflight/health → installed-disabled → separately permitted connection
+→ owner/policy Grant and enable → Work-scoped execution
+→ update with authority diff → supported rollback → disable/quarantine → uninstall
 ```
 
-The following are explicitly distinct:
+`downloaded != installed != enabled != connected != authorized-for-action`.
 
-`downloaded != installed != enabled != connected != authorized-for-action`
+A grant-free health check cannot access owner data or call a paid model. A valid manifest is not permission to execute arbitrary code. Disconnect, revoke, remove and forget/delete are different operations; retained artifacts, caches, backups and remote copies need explicit semantics. Removing an agent preserves owner results according to policy, while a replacement still requires its own authority.
 
 ## Security invariants
 
-1. Package install cannot create a Grant.
-2. Runtime/package cannot mint or widen authority.
-3. Package update cannot inherit old approval when authority requirements changed.
-4. Exact package/runtime revision is attributable in Evidence.
-5. External destinations are explicit policy data, not hidden implementation detail.
-6. Secret references are mediated; raw secrets are not package metadata/evidence.
-7. Third-party durable Memory writes are candidate-only by default.
-8. Nested agents/tools inherit a subset of the parent Work authority.
-9. Registry/Marketplace content is untrusted input, not executable policy.
-10. Signature/provenance proves identity/integrity, not behavioral safety.
-11. Quarantine/revocation overrides popularity/recommendation.
-12. Owner Artifacts and retained Evidence survive package removal as policy requires.
+1. Install cannot create a Grant; runtime/package cannot mint or widen authority.
+2. Updated authority cannot inherit an old non-covering approval; approvals bind exact current parameters, resource, revision and expiry.
+3. Exact package/runtime revisions are attributable in Evidence.
+4. External destinations are explicit policy, not hidden implementation details.
+5. Secrets are mediated references, not package metadata/evidence.
+6. Third-party durable Memory writes are candidate-only by default.
+7. Nested agents/tools stay within current parent Work authority.
+8. Registry/Marketplace inputs are untrusted data, not executable policy.
+9. Signature/provenance is identity/integrity evidence, not behavioral safety.
+10. Quarantine/revocation overrides popularity; rollback cannot revive revoked authority.
+11. Owner Artifacts and retained Evidence survive removal as policy requires.
+12. Stop prevents supported new work, but cannot promise undo or remote erasure of already completed effects. In-flight unknowns require reconciliation.
 
 ## Development-framework adoption
 
 ### GitHub Spec Kit — adapt, do not depend
 
-Adopt the discipline:
+Use Constitution/Specify/Plan/Tasks/Implement/Converge discipline, extended as:
 
-`Constitution -> Specify -> Plan -> Tasks -> Implement -> Converge`
+`Constitution → Spec → Authority/Threat Model → Plan → Tasks → Implement → Verify → Converge`.
 
-Personal AgentOS extends it with explicit authority/threat modeling and evidence:
-
-`Constitution -> Spec -> Authority/Threat Model -> Plan -> Tasks -> Implement -> Verify -> Converge`
-
-Do not make Spec Kit a product runtime dependency.
+No product runtime dependency is required.
 
 ### BuilderMethods Agent OS — adapt context/standards discipline
 
-Use relevant-context/standards injection ideas for development so a worker receives only applicable product/security contracts. Do not make that framework the authority for personal Memory or package state.
+Inject applicable development/security context; never make the framework personal Memory or package-state authority.
 
-### Open AgentOS-style governance — adapt explicit state and authority
+### Open AgentOS-style governance — adapt explicit state/authority
 
-Use explicit workflow states, role separation, live authority checks and receipts for repository development. GitHub workflow state is not the end-user Personal AgentOS Work state.
+Use explicit workflow state, role separation, live authority checks and receipts for repository development. GitHub workflow state is not end-user Work state.
 
 ### Ruflo — optional Runtime Adapter
 
-Treat Ruflo as one delegated execution implementation behind the common Runtime contract. Ruflo swarm state/memory is package-local/runtime-local and subordinate to AgentOS owner state.
+A delegated implementation behind the common Runtime contract. Its internal swarm/memory is subordinate package/runtime-local state, not the kernel and not a prerequisite for useful defaults.
 
 ### MCP / A2A / foreign skills — compatibility protocols
 
-Treat these as ways to describe/connect/import capabilities, not as sources of owner authority. Unsupported/ambiguous foreign authority fails closed.
+Describe/connect/import capabilities without supplying owner authority. Ambiguous or unmappable authority fails closed. No universal compatibility claim.
 
 ## Bootstrap strategy
 
-A platform cannot wait for a large native ecosystem before being useful. The initial distribution may ship a small number of public-contract reference packages:
+Begin with a capable default assistant and reusable research/file/result/continuity tools. Add bounded specialists where measured results justify them, not a swarm for every task. Then package one useful Files reference first, using public contracts and real artifact-quality plus revoked-access tests. General, Research, Coding and MCP references remain #342 work; one Files example does not close its remaining scope.
 
-- General Assistant — basic conversation/work delegation;
-- Files — local file/workspace operations under explicit Grants;
-- Research — web/document research and attributable report artifacts;
-- Coding — bounded project coding, testing and PR preparation.
+Reference packages are not privileged kernel modules or guaranteed best-in-class, but they must perform their supported tasks well enough to use. Evaluate actual results, not installer status or file existence alone.
 
-They are reference/bootstrapping applications, not privileged kernel modules and not a claim of best-in-class agent quality.
+Existing-ecosystem wrappers may reduce cold start where official formats/licences and authority mapping permit. MCP and selected OpenAI/Codex/Claude formats use the same manager, Grant, isolation, Memory and Evidence rules. Catalogue size is not compatibility or quality evidence.
 
-Cold-start mitigation should prioritize deterministic wrappers/importers for existing ecosystems where official metadata and licensing permit it. MCP is a strong early compatibility target; selected OpenAI/Codex and Claude skills/plugins are subsequent targets. Imported packages receive the same Package Manager, Grant, sandbox, Memory and Evidence rules as native packages.
+## Outcome-first priority overlay
 
-## Phased roadmap
+1. [USE-01 / #358](https://github.com/Jongtae/personal-agentos/issues/358): evaluator first, baseline next, then bounded public-page research, useful file artifacts and follow-up/restart. It need not wait for the platform epic.
+2. [OBS-01 / #359](https://github.com/Jongtae/personal-agentos/issues/359): actual progress/parameters/effects, minimal redacted receipts and supported cancellation on existing Work. Coordinate without circular dependencies.
+3. #335/#337/#338 define compatible minimum lifecycle/security/runtime boundaries; #336 governs Memory where used.
+4. #340/#341/#342 implement lifecycle, manual package Work first, then event/SDK coverage and one useful Files package. Downstream consumers are not reverse prerequisites of foundation tasks. Preserve all unfinished update/rollback/event/reference scope.
+5. [AGENT-UX-01 / #360](https://github.com/Jongtae/personal-agentos/issues/360): install → grant → useful result → inspect → revoke → denied retry → remove → restart → separately authorized replacement/reuse.
+6. Broader Registry/import/commerce/autonomy follows demonstrated utility and lifecycle control, not the reverse.
+
+This overlay does not erase the phases or activate a top-level automatic program. Each issue's actual dependencies, current evidence and separate activation govern execution.
+
+## Phased roadmap — preserved scope
 
 ### Phase A — Foundation contracts
 
-- [#334](https://github.com/Jongtae/personal-agentos/issues/334) D-AP-01 — Core Primitives + AgentPackage v0.1.
-- [#335](https://github.com/Jongtae/personal-agentos/issues/335) D-AP-02 — package trust/permission/lifecycle.
-- [#336](https://github.com/Jongtae/personal-agentos/issues/336) D-MEM-01 — third-party Context/Memory semantics.
-- [#337](https://github.com/Jongtae/personal-agentos/issues/337) D-SBX-01 — sandbox/supply-chain/capability broker.
-- [#338](https://github.com/Jongtae/personal-agentos/issues/338) D-RT-01 — common Runtime Adapter.
-- [#339](https://github.com/Jongtae/personal-agentos/issues/339) D-REG-01 — Registry/Marketplace separation.
+- [#334](https://github.com/Jongtae/personal-agentos/issues/334) D-AP-01: complete contracts/schemas/fixtures, not execution.
+- [#335](https://github.com/Jongtae/personal-agentos/issues/335) D-AP-02: trust/permission/lifecycle.
+- [#336](https://github.com/Jongtae/personal-agentos/issues/336) D-MEM-01: third-party Context/Memory.
+- [#337](https://github.com/Jongtae/personal-agentos/issues/337) D-SBX-01: isolation/supply-chain/broker.
+- [#338](https://github.com/Jongtae/personal-agentos/issues/338) D-RT-01: common Runtime Adapter.
+- [#339](https://github.com/Jongtae/personal-agentos/issues/339) D-REG-01: Registry/Marketplace separation.
 
-**Exit condition:** schemas/contracts can be reviewed independently of one runtime/framework and negative cases are specified. No package execution is required for design completion.
+Exit: independently reviewable contracts and negative cases. Design completion requires no package execution and proves no implemented isolation.
 
 ### Phase B — Local package platform
 
-- [#340](https://github.com/Jongtae/personal-agentos/issues/340) I-AP-01 — local validator + Package Manager.
-- [#341](https://github.com/Jongtae/personal-agentos/issues/341) I-EVT-01 — Work/Event integration.
-- [#342](https://github.com/Jongtae/personal-agentos/issues/342) I-SDK-01 — SDK/CLI/reference packages.
+- [#340](https://github.com/Jongtae/personal-agentos/issues/340) I-AP-01: validator/Package Manager.
+- [#341](https://github.com/Jongtae/personal-agentos/issues/341) I-EVT-01: Work/Event integration.
+- [#342](https://github.com/Jongtae/personal-agentos/issues/342) I-SDK-01: SDK/CLI/reference packages.
 
-**Exit condition:** a deterministic locally signed fixture package can be validated, staged, installed-disabled, explicitly granted/enabled, executed under bounded Work, updated/rolled back and uninstalled with restart/recovery and evidence tests.
+Exit: a signed fixture package validates/stages/installs-disabled, is explicitly granted, performs useful bounded Work, updates/rolls back/removes and survives restart correctly. #360 adds owner-visible integration and replacement evidence. Arbitrary executable support requires actual independent isolation/egress enforcement evidence.
 
 ### Phase C — Ecosystem ready
 
-- [#343](https://github.com/Jongtae/personal-agentos/issues/343) I-ECO-01 — MCP/OpenAI-Codex/Claude compatibility import.
-- [#344](https://github.com/Jongtae/personal-agentos/issues/344) I-RT-RUFLO-01 — bounded Ruflo Runtime Adapter.
+- [#343](https://github.com/Jongtae/personal-agentos/issues/343) I-ECO-01: compatible foreign formats.
+- [#344](https://github.com/Jongtae/personal-agentos/issues/344) I-RT-RUFLO-01: optional bounded runtime.
 
-**Exit condition:** at least one foreign ecosystem representation and one sophisticated delegated runtime operate through the same AgentOS authority/evidence contracts in deterministic/local validation.
+The full phase's existing scope includes a foreign representation and a sophisticated delegated runtime through common authority/evidence contracts in deterministic/local validation. Useful defaults and the first app do not depend on finishing this optional expansion.
 
 ### Phase D — Registry ready
 
-- [#345](https://github.com/Jongtae/personal-agentos/issues/345) I-REG-01 — local/open Registry + trust metadata.
+[#345](https://github.com/Jongtae/personal-agentos/issues/345) I-REG-01 resolves exact releases/trust/advisories without private owner data or implicit installation/enablement.
 
-**Exit condition:** exact package release resolution/trust/advisory metadata is demonstrable without sending private owner data to the Registry and without allowing Registry lookup to install/enable a package by itself.
+### Phase E — Acquisition autonomy design
 
-### Phase E — Autonomous acquisition design
-
-- [#346](https://github.com/Jongtae/personal-agentos/issues/346) D-AUTO-01 — acquisition levels L1-L5.
-
-The first platform MVP does **not** require L4/L5 automatic installation. Owner-visible install plans and safe package lifecycle precede autonomy.
+[#346](https://github.com/Jongtae/personal-agentos/issues/346) defines L1–L5. L4/L5 is not first-MVP scope. Safe visible installation precedes autonomy.
 
 ## Historical migration rule
 
-Existing closed/deferred work is evidence, not raw material to rewrite.
-
-The historical D-MP2-02 capability-discovery contract defined reviewed, read-only local recommendation and explicitly excluded marketplace/download/install/activation. It remains historical authority for that work. Agent Distribution Platform contracts are successors; they do not retroactively expand what D-MP2-02 implemented or proved.
-
-Likewise, completed file-workspace evidence, deferred Drive work, repository handoff automation and deferred SITE-01 remain in their existing evidence classes/status.
+Closed/deferred work remains evidence of its original scope. Historical D-MP2-02 was owner-local read-only recommendation, explicitly not Marketplace/download/install/activation. These are successors, not retroactive claims. Preserve file-workspace, D-AP-01 and DOGFOOD evidence classes, optional deferred Drive, repository handoff and SITE-01 deferral.
 
 ## Do not implement yet
 
-Until the corresponding child contract is goal-ready and activated, do not:
-
-- launch a public Registry/Marketplace;
-- add payments, revenue share or developer commerce;
-- download/execute arbitrary third-party packages;
-- give packages broad host shell/network/home-folder access;
-- allow packages to write canonical Memory directly;
-- automatically accept credentials/OAuth/legal/vendor terms;
-- implement L4/L5 capability acquisition;
-- adopt Ruflo or another framework as kernel authority;
-- turn package popularity/rating into a permission decision;
-- create a second conflicting workflow authority or scheduler.
+Without the corresponding explicitly activated goal and current predecessor evidence, do not launch a store/Registry, add commerce, execute arbitrary packages, grant broad shell/network/home access, allow direct canonical Memory writes, accept OAuth/credentials/vendor terms, implement L4/L5, make any framework kernel authority, turn popularity into permission, or create another workflow authority/heartbeat.
 
 ## Evidence rule
 
-A design, manifest, issue, package listing, signature, unit test or fixture proves only its own evidence class. Live external capability/package/registry/marketplace operation is claimed only when that exact operating path is configured and observed under current acceptance criteria.
+A specification, manifest, listing, signature, fixture or static seed test proves only its own class. Progress/receipts derive from real Work events. Useful positive outcomes and correct denied effects both matter. The [usefulness specification](default-agent-usefulness.en.md) separates deterministic development completion from live-quality promotion: an unrun live evaluation is pending, never passed. Exact live package/provider/Registry operation requires current configured and observed evidence.

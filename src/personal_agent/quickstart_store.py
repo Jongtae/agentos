@@ -32,6 +32,8 @@ class QuickStore:
             CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY, request_key TEXT UNIQUE, message TEXT, channel TEXT, chat_id INTEGER, status TEXT, response TEXT, error TEXT, delivery TEXT, provider TEXT, model TEXT, created REAL);
             CREATE TABLE IF NOT EXISTS tool_events(id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT, tool TEXT, status TEXT, detail TEXT, created REAL);
             CREATE TABLE IF NOT EXISTS notes(id TEXT PRIMARY KEY, content TEXT, created REAL);
+            CREATE TABLE IF NOT EXISTS memories(id TEXT PRIMARY KEY, memory_key TEXT NOT NULL, content TEXT NOT NULL, created REAL NOT NULL, supersedes TEXT, state TEXT NOT NULL DEFAULT 'current');
+            CREATE INDEX IF NOT EXISTS memories_key_state ON memories(memory_key, state, created DESC);
             CREATE TABLE IF NOT EXISTS telegram_task_cards(job_id TEXT PRIMARY KEY, chat_id INTEGER NOT NULL, message_id INTEGER NOT NULL, state TEXT NOT NULL, created REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS telegram_notifications(id TEXT PRIMARY KEY, job_id TEXT NOT NULL, chat_id INTEGER NOT NULL, generation TEXT NOT NULL, kind TEXT NOT NULL, fingerprint TEXT, state TEXT NOT NULL, message_id INTEGER, created REAL NOT NULL, UNIQUE(job_id, kind));
             CREATE TABLE IF NOT EXISTS context_events(id TEXT PRIMARY KEY, captured_at REAL NOT NULL, source_kind TEXT NOT NULL, content TEXT NOT NULL, content_hash TEXT NOT NULL, expires_at REAL NOT NULL, sharing_state TEXT NOT NULL, source_app TEXT NOT NULL, source_domain TEXT NOT NULL);
@@ -176,6 +178,20 @@ class QuickStore:
     def notes(self):
         with self.db() as db:
             return [dict(r) for r in db.execute('SELECT * FROM notes ORDER BY created DESC LIMIT 50')]
+
+    def save_memory(self, memory_key, content):
+        if not isinstance(memory_key,str) or not 2<=len(memory_key.strip())<=160: raise ValueError('기억 항목의 이름을 확인하세요.')
+        if not isinstance(content,str) or not content.strip() or len(content)>4000: raise ValueError('기억할 내용을 확인하세요.')
+        memory_id=str(uuid.uuid4())
+        with self.db() as db:
+            previous=db.execute("SELECT id FROM memories WHERE memory_key=? AND state='current' ORDER BY created DESC LIMIT 1",(memory_key.strip(),)).fetchone()
+            if previous: db.execute("UPDATE memories SET state='superseded' WHERE id=?",(previous['id'],))
+            db.execute('INSERT INTO memories(id,memory_key,content,created,supersedes,state) VALUES (?,?,?,?,?,?)',(memory_id,memory_key.strip(),content.strip(),time.time(),previous['id'] if previous else None,'current'))
+        return {'id':memory_id,'memory_key':memory_key.strip(),'content':content.strip(),'supersedes':previous['id'] if previous else None,'state':'current'}
+
+    def memories(self):
+        with self.db() as db:
+            return [dict(r) for r in db.execute("SELECT id,memory_key,content,created,supersedes,state FROM memories WHERE state='current' ORDER BY created DESC LIMIT 50")]
 
     def personal_space(self):
         now=time.time()

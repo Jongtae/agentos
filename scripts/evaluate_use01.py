@@ -92,6 +92,10 @@ def deterministic_case(case, fixtures):
         elif cid=='U3-07':
             from personal_agent.agent_runtime import evidence_summary
             summary=evidence_summary('read_file',{'root_id':'r','path':'memo.md','content':'PRIVATE','locations':['줄 1']}); checks=[summary['path']=='memo.md', summary['characters']==7, 'PRIVATE' not in json.dumps(summary)]
+        elif cid=='U3-08':
+            with tempfile.TemporaryDirectory() as tmp:
+                store=QuickStore(Path(tmp)/'state'); first=store.save_memory('meeting-time','morning'); second=store.save_memory('meeting-time','afternoons'); current=store.memories()
+                checks=[len(current)==1, current[0]['content']=='afternoons', current[0]['supersedes']==first['id'], second['state']=='current']
         else:
             checks=[False, 'grader-not-implemented-for-live-continuity-control']
     return bool(checks) and all(check is True for check in checks), checks

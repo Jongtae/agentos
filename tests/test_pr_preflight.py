@@ -102,6 +102,14 @@ class PreflightTests(unittest.TestCase):
                 self.assertEqual(preflight.classify(s, "a" * 40)["outcome"], "merged")
                 self.assertEqual(preflight.classify(s)["outcome"], "merged")
 
+    def test_head_pin_is_case_insensitive(self):
+        for state in ("OPEN", "MERGED"):
+            for observed, expected in [("a" * 40, "A" * 40), ("A" * 40, "a" * 40)]:
+                with self.subTest(state=state, observed=observed):
+                    s = sample(); s["pr"].update(state=state, headRefOid=observed)
+                    outcome = "merged" if state == "MERGED" else "normal_merge_candidate"
+                    self.assertEqual(preflight.classify(s, expected)["outcome"], outcome)
+
     def test_failed_collection_does_not_expose_error_payload(self):
         with patch.object(preflight, "gh_json", return_value=(None, -1)):
             with self.assertRaises(ValueError): preflight.collect("owner/repo", 1)

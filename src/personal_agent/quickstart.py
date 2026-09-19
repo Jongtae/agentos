@@ -421,6 +421,7 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 if path=='/api/personal-knowledge':return self.reply(200,service.personal_knowledge_request(body, channel='local-companion'))
                 if path=='/api/context-inbox/telegram-policy':return self.reply(200,service.set_context_telegram_policy(body))
                 if path=='/api/documents/approval':return self.reply(200,service.set_document_approval(body))
+                if path=='/api/public-pages/approval':return self.reply(200,service.set_public_page_approval(body))
                 if path=='/api/model':return self.reply(200,service.save_model(body))
                 if path=='/api/model/test':return self.reply(200,service.test_model())
                 if path=='/api/telegram':return self.reply(200,service.connect_telegram(body))

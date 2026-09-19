@@ -30,12 +30,14 @@ DEFINITIONS=[
 ]
 
 class Capabilities:
- def __init__(self,store,adapter,config,key,job_id,record,readonly=False,network=None,document_access=True,packages=None,allowed_tools=None,document_context=False):
+ def __init__(self,store,adapter,config,key,job_id,record,readonly=False,network=None,document_access=True,packages=None,allowed_tools=None,document_context=False,public_page_scope=None,memory_approval=None):
   self.store,self.adapter,self.config,self.key=store,adapter,config,key
   self.job_id,self.record,self.readonly=job_id,record,readonly
   self.network=network or LocalTools()
   self.document_access=document_access
   self.document_context=document_context
+  self.public_page_scope=None if public_page_scope is None else frozenset(public_page_scope)
+  self.memory_approval=memory_approval
   self.packages=runtime_packages([]) if packages is None else packages
   self.tools={tool['id']:tool for package in self.packages for tool in package['tools']}
   self.roles={role['id']:{**role,'package_id':package['id']} for package in self.packages for role in package['roles']}
@@ -101,7 +103,8 @@ class Capabilities:
    return self.network.execute({'tool':name,**args})
   if name=='public_page_read':
    if self.evidence or self.document_context:raise ValueError('연결 문서 내용과 함께 공개 페이지를 조회할 수 없습니다. 문서와 무관한 요청으로 다시 보내 주세요.')
-   return self.network.execute({'tool':name,**args})
+   if not self.public_page_scope:raise ValueError('소유자가 승인한 공개 페이지 범위가 없습니다. 먼저 정확한 주소와 조회 매개변수를 승인하세요.')
+   return self.network.execute({'tool':name,'url':args['url'],'approved_urls':list(self.public_page_scope)})
   if name=='weather':return self.network.execute({'tool':name,**args})
   if name=='list_roots':return {'roots':[{'id':r['id'],'name':Path(r['path']).name} for r in self.roots()]}
   if name=='find_files':return self.find_files(**args)
@@ -115,6 +118,9 @@ class Capabilities:
    with self.store.db() as db:db.execute('INSERT OR IGNORE INTO notes VALUES (?,?,?)',(note_id,content,time.time()))
    return {'saved':True,'id':note_id,'content':content}
   if name=='save_memory':
+   if not self.store.verify_memory_approval(self.memory_approval,self.job_id):
+    result=self.store.save_memory_candidate(self.job_id,args['memory_key'],args['content'])
+    self.evidence.append({'tool':name,'result':result}); return result
    result=self.store.save_memory(args['memory_key'],args['content']); self.evidence.append({'tool':name,'result':result}); return result
   if name=='list_memory':
    result={'memories':self.store.memories()}; self.evidence.append({'tool':name,'result':result}); return result
@@ -164,6 +170,9 @@ def fallback_response(executions, sources):
  if name=='public_page_read' and isinstance(result,dict):
   return (result.get('content','')[:12000] + '\n\n출처: ' + result.get('url',''))
  if name=='save_note' and isinstance(result,dict) and result.get('saved'):return '메모를 저장했습니다.'
+ if name=='save_memory' and isinstance(result,dict):
+  if result.get('state')=='pending':return '소유자 확인이 필요해 기억 후보로 보관했습니다. 승인 후 저장할 수 있습니다.'
+  if result.get('id'):return '기억을 저장했습니다.'
  if name=='find_files' and isinstance(result,dict):
   files=result.get('files',[])
   return '찾은 파일:\n'+('\n'.join('- '+str(f.get('path')) for f in files[:12] if isinstance(f,dict)) or '일치하는 파일이 없습니다.')

@@ -9,7 +9,7 @@ import time
 import zlib
 import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
-from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 from urllib.request import Request, build_opener
 from .providers import NoRedirect, ProviderError, request_json
 
@@ -25,6 +25,20 @@ PRIVATE_NETWORKS = tuple(ipaddress.ip_network(value) for value in (
     '::/128', '::1/128', 'fc00::/7', 'fe80::/10', 'ff00::/8',
     '2001:db8::/32',
 ))
+
+
+def normalize_public_url(value):
+    """Return the exact, approval-comparable public URL form."""
+    if not isinstance(value, str) or len(value) > 2048:
+        raise ValueError('공개 페이지 URL이 올바르지 않습니다.')
+    parsed=urlsplit(value)
+    if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError('로그인 정보가 없는 HTTP(S) 공개 페이지만 읽을 수 있습니다.')
+    host=parsed.hostname.casefold()
+    port=parsed.port
+    if port is not None and port not in (80,443): host=f'{host}:{port}'
+    query=urlencode(sorted(parse_qsl(parsed.query,keep_blank_values=True)))
+    return urlunsplit((parsed.scheme.casefold(),host,parsed.path or '/',query,''))
 
 
 class _PageText(HTMLParser):
@@ -47,12 +61,7 @@ class PublicPageReader:
 
     @staticmethod
     def _safe_url(value):
-        if not isinstance(value, str) or len(value) > 2048: raise ValueError('공개 페이지 URL이 올바르지 않습니다.')
-        parsed=urlsplit(value)
-        if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password:
-            raise ValueError('로그인 정보가 없는 HTTP(S) 공개 페이지만 읽을 수 있습니다.')
-        if parsed.fragment: parsed=parsed._replace(fragment='')
-        return urlunsplit(parsed)
+        return normalize_public_url(value)
 
     def _validate_host(self, url):
         parsed=urlsplit(url); host=parsed.hostname
@@ -89,10 +98,13 @@ class PublicPageReader:
                 if conn: conn.close()
         raise OSError('all validated public addresses failed') from last
 
-    def read(self, url):
+    def read(self, url, approved_urls=None):
         current=self._safe_url(url); started=self.clock()
+        approved={normalize_public_url(item) for item in approved_urls} if approved_urls is not None else None
         for redirect in range(MAX_PAGE_REDIRECTS+1):
             if self.clock()-started > MAX_PAGE_SECONDS: raise ProviderError('공개 페이지 읽기 시간이 제한을 초과했습니다.')
+            if approved is not None and current not in approved:
+                raise ValueError('소유자가 승인한 공개 페이지 범위를 벗어난 주소입니다.')
             addresses=self._validate_host(current)
             request=Request(current, headers={'User-Agent':'AgentOS public-page-reader/1.0','Accept':'text/html,text/plain,application/xhtml+xml;q=0.9'})
             try: response=self.opener.open(request, timeout=MAX_PAGE_SECONDS) if self.opener else self._open_pinned(current,addresses)
@@ -191,7 +203,7 @@ class LocalTools:
 
     def execute(self, plan):
         if plan.get('tool')=='web_search':return self.search(plan.get('query'))
-        if plan.get('tool')=='public_page_read':return self.page_reader.read(plan.get('url'))
+        if plan.get('tool')=='public_page_read':return self.page_reader.read(plan.get('url'),plan.get('approved_urls'))
         if plan.get('tool')=='weather':return self.weather(plan.get('city'),plan.get('country',''))
         raise ValueError('지원하지 않는 조회 도구입니다.')
 

@@ -4,7 +4,7 @@ import io
 import unittest
 from unittest.mock import patch
 
-from personal_agent.local_tools import PublicPageReader
+from personal_agent.local_tools import PublicPageReader, normalize_public_url
 
 
 class Headers(dict):
@@ -50,6 +50,19 @@ class PublicPageReaderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '개인 네트워크'):
             PublicPageReader(opener=opener, resolver=redirect_dns).read('https://example.com/')
         self.assertEqual(len(opener.requests), 1)
+
+    def test_owner_scope_binds_initial_url_and_redirects(self):
+        opener=Opener(Response())
+        reader=PublicPageReader(opener=opener, resolver=public_dns)
+        with self.assertRaisesRegex(ValueError, '승인한 공개 페이지 범위'):
+            reader.read('https://example.com/event', approved_urls=['https://example.com/other'])
+        self.assertEqual(normalize_public_url('HTTPS://Example.com/event?b=2&a=1#frag'), 'https://example.com/event?a=1&b=2')
+
+    def test_owner_scope_rejects_public_redirect_collector(self):
+        opener=Opener(Response(status=302, headers={'Location':'https://collector.example/collect?x=1'}))
+        reader=PublicPageReader(opener=opener, resolver=public_dns)
+        with self.assertRaisesRegex(ValueError, '승인한 공개 페이지 범위'):
+            reader.read('https://example.com/event', approved_urls=['https://example.com/event'])
 
     def test_rejects_oversize_and_non_text(self):
         with self.assertRaisesRegex(ValueError, '응답 크기'):

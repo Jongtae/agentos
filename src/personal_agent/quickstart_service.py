@@ -7,7 +7,7 @@ import threading
 import time
 import hashlib
 from urllib.parse import urlsplit
-from .local_tools import LocalTools
+from .local_tools import LocalTools, normalize_public_url
 from .agent_runtime import Capabilities, run_agent, AGENTS, evidence_summary
 from .plugins import PluginRegistry
 from .providers import ModelAdapter, ProviderError, request_json, validate_model
@@ -57,10 +57,10 @@ def workspace_summary_request(prompt):
     if (any(word in lowered for word in ('summarize','summary','요약','정리','brief'))
             and not any(word in lowered for word in ('find','찾아','검색','reuse','재사용','다시'))
             and any(word in lowered for word in ('save','저장','workspace','작업공간','workspace file','파일로'))):
-        topic=next((word for word in ('meeting','회의','project','프로젝트','note','문서','자료') if word in lowered), None)
-        if topic:
-            query={'회의':'회의 meeting','meeting':'meeting 회의','프로젝트':'프로젝트 project','project':'project 프로젝트'}.get(topic,topic)
-            return query, ('회의 결과 브리프' if topic in ('meeting','회의') else 'project brief')
+            topic=next((word for word in ('meeting','회의','project','프로젝트','cost','비용','note','문서','자료') if word in lowered), None)
+            if topic:
+                query={'회의':'회의||meeting','meeting':'meeting||회의','프로젝트':'프로젝트||project','project':'project||프로젝트','cost':'cost','비용':'비용'}.get(topic,topic)
+                return query, ('회의 결과 브리프' if topic in ('meeting','회의') else 'project brief' if topic in ('project','프로젝트') else '자료 요약')
     return None
 
 
@@ -71,8 +71,10 @@ def workspace_search_request(prompt):
         return quotes[0]
     if (any(word in lowered for word in ('find','찾아','검색','reuse','재사용','다시'))
             and any(word in lowered for word in ('saved','저장','workspace','작업공간','result','결과','아까'))):
+        if '아까' in lowered or '앞서' in lowered or '다시' in lowered or 'again' in lowered or 'reuse' in lowered or '재사용' in lowered:
+            return '__latest__'
         topic=next((word for word in ('meeting','회의','project','프로젝트','summary','요약','brief','브리프') if word in lowered), '__latest__')
-        return {'회의':'회의 meeting','meeting':'meeting 회의','프로젝트':'프로젝트 project','project':'project 프로젝트'}.get(topic,topic)
+        return {'회의':'회의||meeting','meeting':'meeting||회의','프로젝트':'프로젝트||project','project':'project||프로젝트'}.get(topic,topic)
     return None
 
 # Subscription CLIs do not receive AgentOS credentials, local paths, or an
@@ -418,6 +420,34 @@ class AgentService:
         self.store.put('document_sharing',{'approved':True,'fingerprint':self.document_fingerprint(model),'approved_at':time.time()})
         return self.document_boundary(model)
 
+    def public_page_boundary(self, model=None):
+        model=self.store.config('model',{}) if model is None else model
+        saved=self.store.config('public_page_sharing',{})
+        urls=saved.get('urls',[]) if isinstance(saved,dict) else []
+        approved=bool(urls) and saved.get('approved') is True and saved.get('fingerprint')==self.model_fingerprint(model)
+        return {'approved':approved,'requires_approval':True,'urls':urls if approved else [],'scope':'소유자가 승인한 정규화된 공개 페이지 주소와 매개변수'}
+
+    def set_public_page_approval(self, body):
+        if not isinstance(body,dict) or body.get('approved') is not True:
+            raise ValueError('공개 페이지 주소 승인은 명시적으로 설정해야 합니다.')
+        urls=body.get('urls')
+        if not isinstance(urls,list) or not 1<=len(urls)<=20:
+            raise ValueError('승인할 공개 페이지 주소를 1~20개 입력하세요.')
+        normalized=[]
+        for url in urls:
+            value=normalize_public_url(url)
+            if value not in normalized: normalized.append(value)
+        model=self.store.config('model',{})
+        if not model: raise ValueError('먼저 모델을 연결하세요.')
+        self.store.put('public_page_sharing',{'approved':True,'fingerprint':self.model_fingerprint(model),'urls':normalized,'approved_at':time.time()})
+        return self.public_page_boundary(model)
+
+    @staticmethod
+    def explicit_memory_request(prompt):
+        if not isinstance(prompt,str): return False
+        if re.search(r'\b(?:do not|don\'t|never)\s+(?:save|remember)|기억하지\s*마|저장하지\s*마',prompt,re.I): return False
+        return bool(re.search(r'\b(?:remember|save\s+(?:this|that|it)|memory|preference)\b|기억해|기억하|저장해|선호',prompt,re.I))
+
     @staticmethod
     def model_fingerprint(config):
         public='|'.join(str(config.get(key,'')) for key in ('provider','endpoint','model'))
@@ -468,6 +498,7 @@ class AgentService:
             self.store.put('model',config)
             self.store.put('model_test',None)
             self.store.put('document_sharing',{})
+            self.store.put('public_page_sharing',{})
         return self.settings()
 
     def connect_openrouter(self, body):
@@ -1048,6 +1079,7 @@ class AgentService:
             context_approval_needed=[False]
             try:
                 prompt=job['message'].strip()
+                owner_memory_approval=self.store.issue_memory_approval(job['id'],prompt) if self.explicit_memory_request(prompt) else None
                 if prompt in ('/start','/help'):
                     response='개인 AgentOS에 연결되었습니다. 하고 싶은 일을 자연스럽게 적어 주세요. 웹과 Telegram은 같은 대화 기록을 사용합니다.'
                 elif prompt.startswith('/recommend '):
@@ -1212,7 +1244,7 @@ class AgentService:
                         checked=self.store.config('model_test',{})
                         if checked.get('runtime_model'):
                             runtime_config['model']=checked['runtime_model']
-                        capabilities=Capabilities(self.store,self.adapter,runtime_config,key,job['id'],record,network=self.local_tools,document_access=not boundary['requires_approval'],packages=self.runtime_packages(),document_context=document_history and not boundary['requires_approval'])
+                        capabilities=Capabilities(self.store,self.adapter,runtime_config,key,job['id'],record,network=self.local_tools,document_access=not boundary['requires_approval'],packages=self.runtime_packages(),document_context=document_history and not boundary['requires_approval'],public_page_scope=self.public_page_boundary(config)['urls'],memory_approval=owner_memory_approval)
                         result=run_agent(self.adapter,runtime_config,key,history,'',capabilities,record)
                         outcome=getattr(result,'outcome','succeeded')
                         response,provider,model=result.content,result.provider,result.model

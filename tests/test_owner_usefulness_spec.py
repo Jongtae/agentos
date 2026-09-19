@@ -1,8 +1,10 @@
-"""Static checks for the evaluation specification, not an agent evaluation run."""
+"""Static evaluation/readiness checks, not an agent benchmark or live run."""
 import json
 import unittest
 from collections import Counter
 from pathlib import Path
+
+from personal_agent.delivery import DeliveryPlan
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -54,18 +56,42 @@ class OwnerUsefulnessSpecificationTests(unittest.TestCase):
         self.assertIs(gates["report_all_trials"], True)
         self.assertNotIn("actual_success_ratio", gates)
 
-    def test_successor_plan_and_new_documents_do_not_enable_execution(self):
-        plan = json.loads((ROOT / "delivery-plan.yaml").read_text())
-        self.assertIsNone(plan.get("next_goal", {}).get("id"))
-        self.assertNotEqual(plan.get("next_goal", {}).get("status"), "active")
+    def test_selected_goal_readiness_does_not_enable_execution(self):
+        # The owner explicitly selected USE-01 preparation after the original
+        # all-planned draft. Preserve the safety invariant by testing actual
+        # non-execution, rather than asserting the now-obsolete null target.
+        plan = json.loads((ROOT / "delivery-plan.yaml").read_text(encoding="utf-8"))
+        self.assertEqual(plan["next_goal"]["id"], "USE-01")
+        self.assertEqual(plan["next_goal"]["status"], "owner-activated-goal-ready")
+        selected = next(item for item in plan["iterations"] if item["id"] == "USE-01")
+        self.assertEqual(selected["issue"], 358)
+        self.assertEqual(selected["depends_on"], ["GOV-USE-01"])
+        self.assertEqual(selected["activation_status"], "owner-activated-goal-ready")
+        self.assertNotIn("USE-01", plan["history"]["documented_completed_iterations"])
+        controller_plan = DeliveryPlan(ROOT / "delivery-plan.yaml")
+        self.assertIsNone(controller_plan.select({}))
+        self.assertIsNone(controller_plan.select({"active": "USE-01", "status": "running"}))
         for item in plan["iterations"]:
-            if item.get("issue") in {358, 359, 360}:
-                self.assertNotEqual(item.get("activation_status"), "owner-activated-goal-ready")
+            if item.get("issue") in set(range(335, 347)) | {359, 360}:
+                self.assertNotIn(item.get("activation_status"), {"active", "owner-activated-goal-ready"})
         for relative in (
             "docs/owner-control-contract.en.md",
             "docs/default-agent-usefulness.en.md",
+            "docs/use-01-goal-readiness.en.md",
         ):
             self.assertTrue((ROOT / relative).is_file())
+
+    def test_live_quality_is_separate_from_simulated_development(self):
+        for name in ("default-agent-usefulness.en.md", "use-01-goal-readiness.en.md"):
+            text = (ROOT / "docs" / name).read_text(encoding="utf-8")
+            self.assertIn("pending_owner_operation", text)
+            self.assertIn("20 of 24", text)
+            self.assertIn("before", text)
+        # This historical declaration must not gain extra claimed evidence as
+        # a side effect of adding the new plan entries.
+        plan = json.loads((ROOT / "delivery-plan.yaml").read_text(encoding="utf-8"))
+        historical = next(item for item in plan["iterations"] if item["id"] == "MP1-I-03")
+        self.assertEqual(historical["automated_evidence"], ["python3 -m pytest -q tests"])
 
 
 if __name__ == "__main__":

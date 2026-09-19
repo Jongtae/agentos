@@ -35,13 +35,24 @@ class BoundedExecutionTests(unittest.TestCase):
             seen['argv'],seen['kwargs']=argv,kwargs
             return Done()
         with tempfile.TemporaryDirectory() as folder:
-            adapter=BoundedExecutionAdapter(finder=lambda name:'/runtime/'+name, runner=runner, runtime_root=folder)
+            adapter=BoundedExecutionAdapter(finder=lambda name:'/runtime/'+name, runner=runner, runtime_root=folder,
+                                            claude_config_dir=Path(folder)/'claude-profile')
+            (Path(folder)/'claude-profile').mkdir()
             result=adapter.execute('claude-code','hello',AgentOSMcpTools(_Capabilities()))
         self.assertEqual(result.content,'bounded result')
         self.assertEqual(seen['argv'][:2], ['/runtime/claude','-p'])
         self.assertTrue(seen['kwargs']['shell'] is False)
-        self.assertEqual(set(seen['kwargs']['env']), {'HOME','PATH','LANG','PYTHONPATH'})
-        self.assertNotIn('private', str(seen))
+        self.assertEqual(set(seen['kwargs']['env']), {'HOME','PATH','LANG','PYTHONPATH','CLAUDE_CONFIG_DIR'})
+        self.assertEqual(seen['kwargs']['env']['CLAUDE_CONFIG_DIR'], str(Path(folder)/'claude-profile'))
+        self.assertNotIn('API_KEY', str(seen))
+        self.assertNotIn('TOKEN', str(seen))
+
+    def test_claude_requires_an_existing_owner_profile_without_copying_credentials(self):
+        with tempfile.TemporaryDirectory() as folder:
+            adapter=BoundedExecutionAdapter(finder=lambda _: '/runtime/claude', runtime_root=folder,
+                                            claude_config_dir=Path(folder)/'missing-profile')
+            with self.assertRaisesRegex(ExecutionError, '공식 로그인 프로필'):
+                adapter.environment('claude-code','/runtime/claude',Path(folder)/'turn')
 
     def test_codex_uses_only_its_existing_profile_and_cli_directory(self):
         seen={}

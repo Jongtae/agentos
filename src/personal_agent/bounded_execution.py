@@ -87,18 +87,25 @@ class BoundedExecutionAdapter:
     configuration parameters.  Expanding those is a security design change,
     not an engine prompt option.
     """
-    def __init__(self, finder=None, runner=subprocess.run, runtime_root=None, codex_home=None):
+    def __init__(self, finder=None, runner=subprocess.run, runtime_root=None, codex_home=None,
+                 claude_config_dir=None):
         from shutil import which
         self.finder = finder or which
         self.runner = runner
         configured_root = runtime_root or os.environ.get('AGENTOS_ENGINE_RUNS')
         self.runtime_root = Path(configured_root).expanduser() if configured_root else Path.home()/'.local/share/agentos/engine-runs'
         self.codex_home = Path(codex_home).expanduser() if codex_home else None
+        self.claude_config_dir = Path(claude_config_dir).expanduser() if claude_config_dir else None
 
     def environment(self, engine_id, binary, run_dir):
         env = {'HOME': str(run_dir), 'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}
         env['PYTHONPATH'] = str(Path(__file__).resolve().parents[1])
         if engine_id != 'codex':
+            if engine_id == 'claude-code':
+                profile = self.claude_config_dir or Path(os.environ.get('CLAUDE_CONFIG_DIR', Path.home()/'.claude')).expanduser()
+                if not profile.is_dir():
+                    raise ExecutionError('Claude Code의 공식 로그인 프로필을 찾지 못했습니다. Claude Code에서 다시 로그인하세요.')
+                env['CLAUDE_CONFIG_DIR'] = str(profile)
             return env
         # Codex owns its official session under CODEX_HOME. AgentOS never
         # reads, copies, logs, exports, or persists that profile; the CLI reads

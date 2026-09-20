@@ -15,13 +15,17 @@ class WebManagementReadinessTests(unittest.TestCase):
         self.assertEqual(len(entries), 1)
         entry = entries[0]
         self.assertEqual(entry['issue'], 382)
-        self.assertEqual(entry['activation_status'], 'owner-activated-goal-ready')
+        self.assertEqual(entry['activation_status'], 'parent-controlled')
         self.assertEqual(entry['contract'], 'web-management-contract.en.md')
-        self.assertEqual(set(entry['depends_on']), {'GOV-USE-01', 'DOGFOOD-01'})
+        self.assertEqual(set(entry['depends_on']), {'GOV-USE-01', 'DOGFOOD-01', 'PA1-FDN-01'})
+        self.assertEqual(entry['program'], 'EPIC-PA1')
+        self.assertEqual(entry['parallel_group'], 'pa1-wave-1')
         completed = plan['history']['documented_completed_iterations']
-        self.assertTrue(set(entry['depends_on']).issubset(completed))
+        self.assertTrue({'GOV-USE-01', 'DOGFOOD-01'}.issubset(completed))
+        self.assertNotIn('PA1-FDN-01', completed)
         self.assertNotIn('WEB-ADMIN-01', completed)
         self.assertNotEqual(plan['next_goal']['status'], 'active')
+        self.assertEqual(plan['next_goal']['id'], 'EPIC-PA1')
         self.assertNotEqual(plan['next_goal']['id'], 'WEB-ADMIN-01')
         self.assertTrue((ROOT / 'docs' / entry['contract']).is_file())
 

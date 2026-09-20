@@ -28,9 +28,13 @@ class GovUsePreservationTests(unittest.TestCase):
             with self.subTest(iteration=identifier):
                 self.assertEqual(new_items[identifier], original_item)
         self.assertTrue({"GOV-USE-01", "USE-01"}.issubset(new_items))
-        for field in ("repository", "retry", "completion_claims", "programs"):
+        for field in ("repository", "retry", "completion_claims"):
             with self.subTest(field=field):
                 self.assertEqual(current[field], baseline[field])
+        for name, value in baseline["programs"].items():
+            with self.subTest(program=name):
+                self.assertEqual(current["programs"][name], value)
+        self.assertIn("EPIC-PA1", current["programs"])
         for field, value in baseline["history"].items():
             with self.subTest(history=field):
                 if field == "documented_completed_iterations":

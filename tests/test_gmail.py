@@ -295,6 +295,17 @@ class GmailConnectorTests(unittest.TestCase):
             self.gmail.search("owner-a", "receipt")
         self.assertEqual(rejected.exception.reason, "invalid_provider_response")
 
+    def test_search_rejects_duplicate_singleton_metadata_headers(self):
+        self.connect()
+        for name in ("Subject", "From", "Date"):
+            with self.subTest(name=name):
+                duplicate=self.metadata()
+                duplicate["payload"]["headers"].append({"name":name.swapcase(),"value":"ambiguous"})
+                self.responses.extend([{"messages":[{"id":"m_1"}]},duplicate])
+                with self.assertRaises(GmailError) as rejected:
+                    self.gmail.search("owner-a","receipt")
+                self.assertEqual(rejected.exception.reason,"invalid_provider_response")
+
     def test_search_limits_and_provider_over_return_are_bounded(self):
         self.connect()
         for invalid in (0, 21, True):

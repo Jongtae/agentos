@@ -710,7 +710,9 @@ class GmailConnector:
         for item in raw_headers:
             if isinstance(item, dict) and isinstance(item.get("name"), str):
                 name = item["name"].lower()
-                if name in {"subject", "from", "date"} and name not in headers:
+                if name in {"subject", "from", "date"}:
+                    if name in headers:
+                        raise GmailError("invalid_provider_response")
                     headers[name] = _decoded_header(item.get("value"), {"subject": 512, "from": 320, "date": 128}[name])
         return GmailSearchResult(
             requested_id,

@@ -401,6 +401,29 @@ class ServiceControlTests(unittest.TestCase):
         self.assertEqual(status["status"], "running_unhealthy")
         self.assertFalse(status["background_available"])
 
+    def test_readiness_retry_refreshes_relaunched_process_identity(self):
+        self.controller.install()
+        initial_pid = self.runner.pid
+
+        def ownership(pid):
+            if pid == initial_pid:
+                self.runner.pid = 9876
+                return False
+            return pid == 9876
+
+        controller = ServiceController(
+            home=self.home,
+            cli_path=self.cli,
+            runner=self.runner,
+            uid=501,
+            health_probe=lambda _timeout: True,
+            listener_owner=ownership,
+        )
+        controller._production_health_probe = True
+        result = controller._confirm_running("inspect")
+        self.assertEqual(result["process_id"], 9876)
+        self.assertTrue(result["background_available"])
+
     def test_health_retry_uses_one_shared_four_second_deadline(self):
         self.controller.install()
         clock = [0.0]

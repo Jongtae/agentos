@@ -310,22 +310,26 @@ class ServiceController:
             kicked = self._launchctl("kickstart", "-k", self.service_target)
             self._require(kicked, "The loaded AgentOS service could not be started", next_action)
             observed = self._observed_status()
-        if not observed["background_available"]:
-            raise ServiceControlError("A running AgentOS background process was not observed.", next_action)
         healthy = False
+        saw_running = False
         deadline = self.monotonic() + 4.0
         for attempt in range(20):
             remaining = deadline - self.monotonic()
             if remaining <= 0:
                 break
-            healthy = self._application_healthy(observed, min(1.0, remaining))
+            if attempt:
+                observed = self._observed_status()
+            if observed.get("background_available"):
+                saw_running = True
+                healthy = self._application_healthy(observed, min(1.0, remaining))
             if healthy:
                 break
             if attempt < 19:
                 self.health_wait(min(0.2, max(0.0, deadline - self.monotonic())))
         if not healthy:
             raise ServiceControlError(
-                "The AgentOS process was running but its application health check did not pass.",
+                ("The AgentOS process was running but its application health check did not pass."
+                 if saw_running else "A running AgentOS background process was not observed."),
                 next_action,
             )
         return observed

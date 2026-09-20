@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import threading
 import tempfile
 import unittest
@@ -84,6 +85,68 @@ class MemoryServiceTests(unittest.TestCase):
         self.assertEqual(self.service.inspect_candidate("owner-a", "work-a", expiring["id"])["state"], "pending")
         with self.store.db() as db:
             self.assertEqual(db.execute("SELECT state FROM memory_approvals WHERE expires=?", (expiring_approval["expires_at"],)).fetchone()["state"], "expired")
+
+    def test_candidate_approval_is_revoked_if_canonical_memory_changes_after_issue(self):
+        candidate = self.service.propose("owner-a", "work-a", "meeting-time", "candidate value")
+        approval = self.service.request_candidate_approval(
+            "owner-a", "work-a", candidate["id"], candidate["content_digest"]
+        )
+        owner_value = self.service.remember("owner-a", "work-owner", "meeting-time", "owner value")
+
+        with self.assertRaisesRegex(ValueError, "변경"):
+            self.service.approve_candidate(
+                "owner-a", "work-a", candidate["id"], candidate["content_digest"], approval["approval_token"]
+            )
+
+        self.assertEqual(self.service.inspect_memory("owner-a", owner_value["id"])["state"], "current")
+        self.assertEqual(self.service.inspect_candidate("owner-a", "work-a", candidate["id"])["state"], "pending")
+        with self.store.db() as db:
+            row = db.execute(
+                "SELECT state,memory_key FROM memory_approvals WHERE token_hash=?",
+                (self.store._exact_memory_token_hash(approval["approval_token"]),),
+            ).fetchone()
+        self.assertEqual((row["state"], row["memory_key"]), ("revoked", ""))
+
+    def test_candidate_approval_is_bound_to_existing_memory_but_not_unrelated_keys(self):
+        original = self.service.remember("owner-a", "work-owner", "meeting-time", "morning")
+        stale_candidate = self.service.propose("owner-a", "work-a", "meeting-time", "afternoon")
+        stale_approval = self.service.request_candidate_approval(
+            "owner-a", "work-a", stale_candidate["id"], stale_candidate["content_digest"]
+        )
+        self.service.remember("owner-a", "work-owner", "meeting-time", "evening")
+        with self.assertRaisesRegex(ValueError, "변경"):
+            self.service.approve_candidate(
+                "owner-a", "work-a", stale_candidate["id"], stale_candidate["content_digest"],
+                stale_approval["approval_token"],
+            )
+        self.assertEqual(self.store.memory(original["id"], "owner-a", current_only=False)["state"], "superseded")
+
+        valid_candidate = self.service.propose("owner-a", "work-a", "timezone", "Asia/Seoul")
+        valid_approval = self.service.request_candidate_approval(
+            "owner-a", "work-a", valid_candidate["id"], valid_candidate["content_digest"]
+        )
+        self.service.remember("owner-a", "work-owner", "language", "Korean")
+        accepted = self.service.approve_candidate(
+            "owner-a", "work-a", valid_candidate["id"], valid_candidate["content_digest"],
+            valid_approval["approval_token"],
+        )
+        self.assertEqual(accepted["content"], "Asia/Seoul")
+
+    def test_existing_approval_table_is_migrated_for_canonical_state_binding(self):
+        legacy_root = Path(self.temp.name) / "legacy-state"
+        legacy_private = legacy_root / "private"
+        legacy_private.mkdir(parents=True)
+        with sqlite3.connect(legacy_private / "quickstart.db") as db:
+            db.execute("""CREATE TABLE memory_approvals(
+                token_hash TEXT PRIMARY KEY, owner_key TEXT NOT NULL, work_key TEXT NOT NULL,
+                action TEXT NOT NULL, subject_id TEXT NOT NULL, memory_key TEXT NOT NULL,
+                source_digest TEXT NOT NULL, content_digest TEXT NOT NULL, created REAL NOT NULL,
+                expires REAL NOT NULL, state TEXT NOT NULL DEFAULT 'issued', result_id TEXT)""")
+
+        migrated = QuickStore(legacy_root)
+        with migrated.db() as db:
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(memory_approvals)")}
+        self.assertTrue({"expected_memory_id", "expected_memory_digest"} <= columns)
 
     def test_owner_wide_candidate_page_returns_actionable_opaque_work_reference(self):
         candidate = self.service.propose("owner-a", "private-work-name", "timezone", "Asia/Seoul")

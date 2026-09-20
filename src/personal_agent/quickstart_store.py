@@ -40,7 +40,7 @@ class QuickStore:
             CREATE TABLE IF NOT EXISTS memories(id TEXT PRIMARY KEY, memory_key TEXT NOT NULL, content TEXT NOT NULL, created REAL NOT NULL, supersedes TEXT, state TEXT NOT NULL DEFAULT 'current');
             CREATE INDEX IF NOT EXISTS memories_key_state ON memories(memory_key, state, created DESC);
             CREATE TABLE IF NOT EXISTS memory_candidates(id TEXT PRIMARY KEY, job_id TEXT, memory_key TEXT NOT NULL, content TEXT NOT NULL, created REAL NOT NULL, state TEXT NOT NULL DEFAULT 'pending');
-            CREATE TABLE IF NOT EXISTS memory_approvals(token_hash TEXT PRIMARY KEY, owner_key TEXT NOT NULL, work_key TEXT NOT NULL, action TEXT NOT NULL, subject_id TEXT NOT NULL, memory_key TEXT NOT NULL, source_digest TEXT NOT NULL, content_digest TEXT NOT NULL, created REAL NOT NULL, expires REAL NOT NULL, state TEXT NOT NULL DEFAULT 'issued', result_id TEXT);
+            CREATE TABLE IF NOT EXISTS memory_approvals(token_hash TEXT PRIMARY KEY, owner_key TEXT NOT NULL, work_key TEXT NOT NULL, action TEXT NOT NULL, subject_id TEXT NOT NULL, memory_key TEXT NOT NULL, source_digest TEXT NOT NULL, content_digest TEXT NOT NULL, created REAL NOT NULL, expires REAL NOT NULL, state TEXT NOT NULL DEFAULT 'issued', result_id TEXT, expected_memory_id TEXT, expected_memory_digest TEXT);
             CREATE TABLE IF NOT EXISTS telegram_task_cards(job_id TEXT PRIMARY KEY, chat_id INTEGER NOT NULL, message_id INTEGER NOT NULL, state TEXT NOT NULL, created REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS telegram_notifications(id TEXT PRIMARY KEY, job_id TEXT NOT NULL, chat_id INTEGER NOT NULL, generation TEXT NOT NULL, kind TEXT NOT NULL, fingerprint TEXT, state TEXT NOT NULL, message_id INTEGER, created REAL NOT NULL, UNIQUE(job_id, kind));
             CREATE TABLE IF NOT EXISTS context_events(id TEXT PRIMARY KEY, captured_at REAL NOT NULL, source_kind TEXT NOT NULL, content TEXT NOT NULL, content_hash TEXT NOT NULL, expires_at REAL NOT NULL, sharing_state TEXT NOT NULL, source_app TEXT NOT NULL, source_domain TEXT NOT NULL);
@@ -63,6 +63,9 @@ class QuickStore:
             candidate_columns={row['name'] for row in db.execute('PRAGMA table_info(memory_candidates)')}
             for name,kind in (('owner_key','TEXT'),('work_key','TEXT'),('content_digest','TEXT'),('decided','REAL'),('resulting_memory_id','TEXT')):
                 if name not in candidate_columns: db.execute(f'ALTER TABLE memory_candidates ADD COLUMN {name} {kind}')
+            approval_columns={row['name'] for row in db.execute('PRAGMA table_info(memory_approvals)')}
+            for name in ('expected_memory_id','expected_memory_digest'):
+                if name not in approval_columns: db.execute(f'ALTER TABLE memory_approvals ADD COLUMN {name} TEXT')
             default_owner=self._memory_binding('local-owner')
             for row in db.execute('SELECT id,memory_key,content,owner_key,content_digest FROM memories'):
                 db.execute('UPDATE memories SET owner_key=?,content_digest=? WHERE id=?',
@@ -362,7 +365,11 @@ class QuickStore:
         created=time.time() if now is None else float(now);token=secrets.token_urlsafe(32)
         value=(self._exact_memory_token_hash(token),self._memory_binding(owner_id),self._work_binding(work_id),action,
                subject_id,memory_key,source_digest,content_digest,created,created+ttl,'issued',None)
-        with self.db() as db:db.execute('INSERT INTO memory_approvals VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',value)
+        with self.db() as db:
+            db.execute('''INSERT INTO memory_approvals
+                          (token_hash,owner_key,work_key,action,subject_id,memory_key,source_digest,
+                           content_digest,created,expires,state,result_id)
+                          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',value)
         return {'approval_token':token,'action':action,'subject_id':subject_id,'memory_key':memory_key,
                 'source_digest':source_digest,'content_digest':content_digest,'expires_at':created+ttl,'state':'issued'}
 
@@ -383,9 +390,17 @@ class QuickStore:
             ).fetchone()
             if not candidate or candidate['state']!='pending' or not hmac.compare_digest(str(candidate['content_digest']),content_digest):
                 raise ValueError('기억 후보를 다시 확인하세요.')
+            current=db.execute(
+                "SELECT id,content_digest FROM memories WHERE owner_key=? AND memory_key=? AND state='current' ORDER BY created DESC LIMIT 1",
+                (owner_key,candidate['memory_key']),
+            ).fetchone()
             value=(token_hash,owner_key,work_key,'accept-candidate',candidate_id,candidate['memory_key'],
-                   content_digest,content_digest,created,created+ttl,'issued',None)
-            db.execute('INSERT INTO memory_approvals VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',value)
+                   content_digest,content_digest,created,created+ttl,'issued',None,
+                   current['id'] if current else None,current['content_digest'] if current else None)
+            db.execute('''INSERT INTO memory_approvals
+                          (token_hash,owner_key,work_key,action,subject_id,memory_key,source_digest,
+                           content_digest,created,expires,state,result_id,expected_memory_id,expected_memory_digest)
+                          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',value)
         return {'approval_token':token,'action':'accept-candidate','subject_id':candidate_id,
                 'memory_key':candidate['memory_key'],'source_digest':content_digest,
                 'content_digest':content_digest,'expires_at':created+ttl,'state':'issued'}
@@ -410,7 +425,10 @@ class QuickStore:
                 raise ValueError('수정할 기억을 다시 확인하세요.')
             value=(token_hash,owner_key,work_key,'correct-memory',memory_id,memory_key,
                    current_digest,replacement_digest,created,created+ttl,'issued',None)
-            db.execute('INSERT INTO memory_approvals VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',value)
+            db.execute('''INSERT INTO memory_approvals
+                          (token_hash,owner_key,work_key,action,subject_id,memory_key,source_digest,
+                           content_digest,created,expires,state,result_id)
+                          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',value)
         return {'approval_token':token,'action':'correct-memory','subject_id':memory_id,
                 'memory_key':memory_key,'source_digest':current_digest,
                 'content_digest':replacement_digest,'expires_at':created+ttl,'state':'issued'}
@@ -449,6 +467,17 @@ class QuickStore:
                 if result:return result
                 raise ValueError('승인 결과를 확인할 수 없습니다.')
             if candidate['state']!='pending':raise ValueError('이미 결정된 기억 후보입니다.')
+            current=db.execute(
+                "SELECT id,content_digest FROM memories WHERE owner_key=? AND memory_key=? AND state='current' ORDER BY created DESC LIMIT 1",
+                (owner_key,candidate['memory_key']),
+            ).fetchone()
+            expected_state=(approval['expected_memory_id'],approval['expected_memory_digest'])
+            current_state=(current['id'],current['content_digest']) if current else (None,None)
+            if expected_state!=current_state:
+                db.execute("UPDATE memory_approvals SET state='revoked',memory_key='' WHERE token_hash=? AND state='issued'",
+                           (approval['token_hash'],))
+                db.commit()
+                raise ValueError('승인 이후 현재 기억이 변경되었습니다.')
             result=self._save_memory(db,candidate['memory_key'],candidate['content'],owner_key,work_key,candidate_id)
             db.execute("UPDATE memory_candidates SET state='accepted',decided=?,resulting_memory_id=? WHERE id=? AND state='pending'",(observed,result['id'],candidate_id))
             db.execute("UPDATE memory_approvals SET state='consumed',result_id=? WHERE token_hash=? AND state='issued'",(result['id'],approval['token_hash']))

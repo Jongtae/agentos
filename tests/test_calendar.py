@@ -111,6 +111,9 @@ class CalendarTests(unittest.TestCase):
         self.assertFalse(self.provider.calls)
         with self.assertRaises(CalendarError):
             self.calendar.create(draft["id"], "not-approved", "owner")
+        with self.assertRaises(CalendarError) as non_ascii:
+            self.calendar.create(draft["id"], "승인", "owner")
+        self.assertEqual(non_ascii.exception.reason, "exact-approval-required")
         self.assertFalse(self.provider.calls)
 
         approval = self.approve(draft)
@@ -279,6 +282,41 @@ class CalendarTests(unittest.TestCase):
             "migrated-event",
         )
         self.assertEqual(calls, ["create"])
+
+        self.store.put(
+            "calendar_create",
+            {
+                "legacy-unicode": {
+                    "id": "legacy-unicode",
+                    "payload": dict(EVENT),
+                    "hash": "legacy-content-hash",
+                    "owner": "소유자",
+                    "state": "awaiting-approval",
+                }
+            },
+        )
+        unicode_legacy = CalendarCreate(self.store, lambda *_: {"id": "unused"})
+        preview = unicode_legacy.preview("legacy-unicode", "소유자")
+        self.assertEqual(preview["action"], "create")
+        self.assertNotEqual(unicode_legacy._rows()["legacy-unicode"]["owner"], "소유자")
+
+    def test_portable_terminal_calendar_evidence_remains_readable(self):
+        self.store.put(
+            "calendar_create",
+            {
+                "portable": {
+                    "id": "portable",
+                    "state": "created",
+                    "hash": "redacted-hash",
+                    "result": {"id": "event-1"},
+                }
+            },
+        )
+        restored = CalendarCreate(self.store, lambda *_: self.fail("portable evidence dispatched"))
+        status = restored.status("portable", "restored-owner")
+        self.assertEqual(status["state"], "created")
+        self.assertEqual(status["result"], {"id": "event-1"})
+        self.assertNotIn("restored-owner", str(restored._rows()))
 
     def test_write_authority_check_and_executing_commit_share_registry_guard(self):
         draft = self.calendar.draft_create(EVENT, "owner")

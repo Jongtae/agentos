@@ -94,6 +94,12 @@ def _canonical(value: dict) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
+def _constant_text_equal(left: object, right: object) -> bool:
+    if not isinstance(left, str) or not isinstance(right, str):
+        return False
+    return hmac.compare_digest(left.encode("utf-8"), right.encode("utf-8"))
+
+
 def _validate_event(payload: object, *, partial: bool = False) -> dict:
     if not isinstance(payload, dict) or not payload or not set(payload).issubset(_CONTENT_FIELDS):
         raise CalendarError("invalid-event")
@@ -252,13 +258,32 @@ class CalendarConnector:
         owner_key = _owner_key(owner)
         stored_owner = row.get("owner")
         if "action" not in row:
+            if "payload" not in row:
+                portable_fields = {"id", "state", "hash", "error_class", "result"}
+                if (
+                    not set(row).issubset(portable_fields)
+                    or row.get("state") not in {"created", "completed", "failed", "expired", "outcome-unknown"}
+                ):
+                    raise CalendarError("invalid-stored-state")
+                # Portable restore intentionally retains only terminal,
+                # content-free recovery evidence. Rebind that evidence to the
+                # restored owner without manufacturing executable authority.
+                row.update(
+                    action="create",
+                    payload={},
+                    event_id="",
+                    event_version="",
+                    owner=owner_key,
+                    effect="observed" if isinstance(row.get("result"), dict) else "none",
+                    portable_evidence=True,
+                )
+                rows[ident] = row
+                self._put(rows)
+                return row
             # The pre-PA1 CalendarCreate schema stored a raw owner (or None)
             # and did not include action/effect fields. Normalize one legacy
             # row atomically when its historical owner next accesses it.
-            if stored_owner is not None and not (
-                isinstance(stored_owner, str)
-                and hmac.compare_digest(stored_owner, owner)
-            ):
+            if stored_owner is not None and stored_owner != owner:
                 raise CalendarError("draft-not-found")
             payload = row.get("payload")
             if not isinstance(payload, dict):
@@ -277,7 +302,7 @@ class CalendarConnector:
                 row["approval_hash"] = digest
             rows[ident] = row
             self._put(rows)
-        elif not hmac.compare_digest(str(stored_owner or ""), owner_key):
+        elif not _constant_text_equal(stored_owner, owner_key):
             raise CalendarError("draft-not-found")
         return row
 
@@ -358,11 +383,11 @@ class CalendarConnector:
         with _LOCK:
             rows = self._rows()
             row = self._owned(rows, ident, owner)
-            if row.get("state") == "completed" and hmac.compare_digest(str(row.get("approval", "")), str(approval)):
+            if row.get("state") == "completed" and _constant_text_equal(row.get("approval"), approval):
                 return dict(row["result"])
             if row.get("state") in {"executing", "outcome-unknown"}:
                 raise CalendarError("unknown-external-outcome", effect="unknown", recovery="inspect-calendar-before-retry")
-            if row.get("state") != "approved" or not isinstance(approval, str) or not hmac.compare_digest(str(row.get("approval", "")), approval):
+            if row.get("state") != "approved" or not _constant_text_equal(row.get("approval"), approval):
                 raise CalendarError("exact-approval-required")
             if self._now() > row.get("expires", 0):
                 row.update(state="expired", error_class="approval-expired", effect="none")
@@ -492,7 +517,7 @@ class CalendarCreate(CalendarConnector):
 
     def create(self, ident: str, approval: str, owner: str) -> dict:
         row = self._owned(self._rows(), ident, owner)
-        if row.get("state") == "created" and hmac.compare_digest(str(row.get("approval", "")), str(approval)):
+        if row.get("state") == "created" and _constant_text_equal(row.get("approval"), approval):
             return dict(row["result"])
         result = super().create(ident, approval, owner)
         with _LOCK:

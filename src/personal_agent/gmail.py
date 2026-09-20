@@ -816,14 +816,19 @@ class GmailConnector:
             if normalized_mime == "multipart/related":
                 if not related_children:
                     return []
-                start = None
+                start_values = []
                 if content_type:
                     message = Message()
                     message["content-type"] = content_type
-                    start = message.get_param("start", header="content-type")
-                if not start:
+                    parameters = message.get_params(header="content-type") or []
+                    start_values = [value for name, value in parameters[1:] if str(name).lower() == "start"]
+                if not start_values:
                     return related_children[0][1]
-                wanted = str(start).strip().strip("<>")
+                if len(start_values) != 1 or not isinstance(start_values[0], str):
+                    raise GmailError("invalid_provider_response")
+                wanted = start_values[0].strip().strip("<>")
+                if not wanted:
+                    raise GmailError("invalid_provider_response")
                 for child, rendered in related_children:
                     child_headers = child.get("headers", []) if isinstance(child, dict) else []
                     if not isinstance(child_headers, list):

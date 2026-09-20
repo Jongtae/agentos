@@ -790,6 +790,22 @@ class GmailConnectorTests(unittest.TestCase):
                 self.assertEqual(message.body,expected)
                 self.assertEqual(message.mime_type,mime_type)
 
+    def test_related_body_rejects_explicit_empty_root_selector(self):
+        self.connect()
+        encoded=base64.urlsafe_b64encode(b"inline-first").decode()
+        for content_type in ('multipart/related; start=""','multipart/related; start=<>'):
+            with self.subTest(content_type=content_type):
+                self.responses.append({
+                    "id":"m_1","threadId":"t_1","payload":{
+                        "mimeType":"multipart/related",
+                        "headers":[{"name":"Content-Type","value":content_type}],
+                        "parts":[{"mimeType":"text/plain","body":{"data":encoded}}],
+                    },
+                })
+                with self.assertRaises(GmailError) as malformed:
+                    self.read()
+                self.assertEqual(malformed.exception.reason,"invalid_provider_response")
+
     def test_body_attachment_id_is_fetched_with_same_bounded_authority(self):
         self.connect()
         encoded = base64.urlsafe_b64encode(b"separate body").decode()

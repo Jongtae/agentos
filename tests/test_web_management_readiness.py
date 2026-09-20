@@ -80,6 +80,11 @@ assert.equal(merged.tasks[0].status,'succeeded');
 assert.equal(merged.tasks[0].response,'fresh text');
 assert.deepEqual(merged.tasks[0].events,[{id:1}]);
 assert.equal(merged.tasks[1].id,'two');
+const incoherent=ui.mergeTaskProgress({tasks:[{id:'race',status:'running',status_kind:'active'}]},null,[{id:'race',status:'succeeded',response:'too early'}]).tasks[0];
+assert.equal(incoherent.response,undefined);
+assert.deepEqual([ui.statusText(incoherent),ui.taskOutcome(incoherent).title],['진행 중','진행 중']);
+const coherent=ui.mergeTaskProgress({tasks:[{id:'done',status:'succeeded',status_kind:'finished'}]},null,[{id:'done',status:'succeeded',response:'terminal result',channel:'telegram:fixture'}]).tasks[0];
+assert.deepEqual([ui.statusText(coherent),ui.taskOutcome(coherent).title,ui.requestSource(coherent)],['완료','결과','Telegram']);
 assert(ui.isDiagnosticTask({title:'/start abc'}));
 assert(!ui.isDiagnosticTask({title:'compare flights'}));
 const proofA=ui.modelDraftFingerprint({provider:'openai',endpoint:'https://api.example/v1/',model:'m',credential_revision:1});
@@ -107,13 +112,13 @@ const verified=await guard.test(current,async()=>{testRequests++;return {ok:true
 assert.equal(verified.accepted,true);assert.equal(guard.canApply(current),true);
 assert.equal(await guard.apply(current,async payload=>{saveRequests++;assert.equal('credential_revision' in payload,false);}),true);
 assert.equal(testRequests,2);assert.equal(saveRequests,1);
-console.log(JSON.stringify({checks:12}));
+console.log(JSON.stringify({checks:15}));
 })().catch(error=>{console.error(error);process.exit(1);});
 """
         result = subprocess.run(
             [node, '-e', script, str(ROOT / 'src/personal_agent/web/app.js')],
             check=True, capture_output=True, text=True, timeout=20)
-        self.assertEqual(json.loads(result.stdout)['checks'], 12)
+        self.assertEqual(json.loads(result.stdout)['checks'], 15)
 
     def test_model_apply_has_one_explicit_test_and_credential_revision(self):
         app = (ROOT / 'src/personal_agent/web/app.js').read_text()
@@ -140,8 +145,13 @@ console.log(JSON.stringify({checks:12}));
             check=True, capture_output=True, text=True, timeout=20)
         self.assertIn('python3 tests/web_management_browser_fixture.py --port 18782', transcript)
         self.assertIn('bash "$PWCLI" resize 390 844', transcript)
-        self.assertIn('{"test_requests": 2, "apply_requests": 1', transcript)
-        self.assertIn('no live model', transcript)
+        self.assertIn('"task_polls": 4', transcript)
+        self.assertIn('"focused":true,"value":"durable-key","start":8', transcript)
+        self.assertIn('snapshot still showed 삭제 확인', transcript)
+        self.assertIn('go-back', transcript)
+        self.assertIn('no POST, PUT', transcript)
+        self.assertIn('test_requests=2', transcript)
+        self.assertIn('does not run AgentService', transcript)
 
     def test_synthetic_telegram_request_reaches_web_read_models_without_web_chat(self):
         calls = []

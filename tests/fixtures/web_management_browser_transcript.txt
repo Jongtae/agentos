@@ -1,51 +1,168 @@
-WEB-ADMIN-01 #382 deterministic browser transcript
-Evidence class: local synthetic HTTP fixture + real Chromium browser; no live model,
-Telegram, connector, or external effect was invoked.
+WEB-ADMIN-01 #382 deterministic browser transcript (2026-09-21 KST)
 
-Runner (terminal 1, repository root):
+Evidence boundaries
+-------------------
+This is a real headed Chromium run against tests/web_management_browser_fixture.py,
+an independent synthetic HTTP fixture. It does not run AgentService, a real Telegram
+ingest/delivery path, a model/provider, a connector, or any external effect. The
+separate executable Python test
+test_synthetic_telegram_request_reaches_web_read_models_without_web_chat covers
+the injected Telegram service/read-model path. The browser fixture marks its own
+channel as telegram:fixture-owner only so the renderer's provenance projection can
+be inspected; it is not evidence of live or service-backed Telegram operation.
+
+Prerequisite and server (terminal 1, repository root)
+-----------------------------------------------------
+  command -v npx
   python3 tests/web_management_browser_fixture.py --port 18782
-  # output: fixture-only http://127.0.0.1:18782
 
-Runner (terminal 2, repository root):
+Observed server output:
+  fixture-only http://127.0.0.1:18782
+
+Browser setup (terminal 2, repository root)
+-------------------------------------------
   PWCLI=/Users/jongtaelee/.codex/skills/playwright/scripts/playwright_cli.sh
   bash "$PWCLI" open http://127.0.0.1:18782/#tasks --headed
   bash "$PWCLI" resize 1280 900
   bash "$PWCLI" snapshot
-  curl -s -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:18782/control/append-event
+
+Observed coherent task projection:
+  list status: 진행 중
+  outcome heading/text: 진행 중 / 새 이벤트를 기다리고 있습니다.
+  no terminal result was rendered beside the active status.
+
+Polling refresh, expanded event, and synthetic provenance (A3/A7/A8)
+--------------------------------------------------------------------
+Refs below are from each immediately preceding clean-run snapshot.
+
+  bash "$PWCLI" click e33
+  bash "$PWCLI" click e35
+  curl -s -X POST -H 'Content-Type: application/json' -d '{}' \
+    http://127.0.0.1:18782/control/reset-observation
+  curl -s -X POST -H 'Content-Type: application/json' -d '{}' \
+    http://127.0.0.1:18782/control/append-event
+  sleep 7
+  curl -s http://127.0.0.1:18782/control/counts
+  bash "$PWCLI" snapshot
+  bash "$PWCLI" click e59
+  bash "$PWCLI" snapshot
+
+Observed outputs:
+  {"events": 2}
+  {"test_requests": 0, "apply_requests": 0, "events": 2, "task_polls": 3}
+  - the selected timeline updated from one to two events without reselection;
+  - the first event remained expanded and still showed 첫 이벤트 after the
+    event-driven rerender and three subsequent polling intervals;
+  - status/outcome remained coherently 진행 중; the succeeded event was an
+    event state, not a fabricated terminal task result;
+  - execution detail rendered 요청 경로 Telegram. This is the explicitly
+    synthetic fixture channel described in the evidence boundary above.
+
+Full local record search, focus/caret, and pending-delete preservation (A4/A7)
+-----------------------------------------------------------------------------
+  bash "$PWCLI" click e10
+  bash "$PWCLI" snapshot
+  bash "$PWCLI" fill e72 durable-key
+  bash "$PWCLI" snapshot
+  bash "$PWCLI" click e112
+  bash "$PWCLI" snapshot
+  bash "$PWCLI" click e72
+  bash "$PWCLI" press End
+  bash "$PWCLI" press ArrowLeft
+  bash "$PWCLI" press ArrowLeft
+  bash "$PWCLI" press ArrowLeft
+  curl -s -X POST -H 'Content-Type: application/json' -d '{}' \
+    http://127.0.0.1:18782/control/reset-observation
+  sleep 7
+  curl -s http://127.0.0.1:18782/control/counts
+  bash "$PWCLI" eval \
+    'el => JSON.stringify({focused:document.activeElement===el,value:el.value,start:el.selectionStart,end:el.selectionEnd})' e72
+  bash "$PWCLI" snapshot
+
+Observed outputs after four polls:
+  {"test_requests": 0, "apply_requests": 0, "events": 2, "task_polls": 4}
+  {"focused":true,"value":"durable-key","start":8,"end":8}
+  snapshot still showed 삭제 확인; no DELETE request occurred.
+
+The full-content search regression also ran in the same browser:
+  bash "$PWCLI" fill e72 needle-after-truncation
+  bash "$PWCLI" click e76
+  bash "$PWCLI" snapshot
+
+Observed: 로컬 원문 기록 1개를 찾았습니다., and the matching row whose
+needle begins after character 300 remained visible. The executable Node regression
+also checks both this case and exact durable-memory-key search.
+
+Unsaved Telegram field plus browser back/forward (A7/A8)
+--------------------------------------------------------
+Starting from records after the steps above:
+
+  bash "$PWCLI" click e11
+  bash "$PWCLI" snapshot
+  bash "$PWCLI" click e135
+  bash "$PWCLI" snapshot
+  bash "$PWCLI" click e154
+  bash "$PWCLI" snapshot
+  bash "$PWCLI" fill e162 fixture-unsaved-token
+  bash "$PWCLI" press ArrowLeft
+  bash "$PWCLI" press ArrowLeft
+  curl -s -X POST -H 'Content-Type: application/json' -d '{}' \
+    http://127.0.0.1:18782/control/reset-observation
+  sleep 7
+  curl -s http://127.0.0.1:18782/control/counts
+  bash "$PWCLI" eval \
+    'el => JSON.stringify({focused:document.activeElement===el,value:el.value,start:el.selectionStart,end:el.selectionEnd})' e162
+
+Observed after three polls:
+  {"test_requests": 0, "apply_requests": 0, "events": 2, "task_polls": 3}
+  {"focused":true,"value":"fixture-unsaved-token","start":19,"end":19}
+
+Then reset the request observer, traverse actual browser history, and inspect the
+same unsaved field and every application request made during pane/history entry:
+
+  curl -s -X POST -H 'Content-Type: application/json' -d '{}' \
+    http://127.0.0.1:18782/control/reset-observation
+  bash "$PWCLI" go-back
+  bash "$PWCLI" go-back
+  bash "$PWCLI" go-forward
+  bash "$PWCLI" go-forward
   sleep 3
-  bash "$PWCLI" snapshot
+  bash "$PWCLI" eval \
+    'el => JSON.stringify({value:el.value,visible:!el.closest("form").hidden,url:location.hash})' e162
+  curl -s http://127.0.0.1:18782/control/requests
+
+Observed:
+  {"value":"fixture-unsaved-token","visible":true,"url":"#settings/external"}
+  The request log contained only GET /favicon.ico, /api/tasks, /api/home,
+  /api/state, and /api/personal-space entries. It contained no POST, PUT,
+  PATCH, or DELETE application request. The reset control request is deliberately
+  excluded from the application log. Thus pane entry and history navigation were
+  observed read-only, not inferred from source strings.
+
+Mobile list/detail (390x844)
+---------------------------
   bash "$PWCLI" resize 390 844
+  bash "$PWCLI" click e9
+  bash "$PWCLI" snapshot
+  bash "$PWCLI" click e43
   bash "$PWCLI" snapshot
 
-Observed 2026-09-21 KST:
-  - desktop 1280x900 rendered only 작업 현황 / 내 기록 / 설정;
-  - after append-event returned {"events": 2}, the already-selected task changed
-    from one timeline item at observed_at=1 to two items at observed_at=2 without
-    reselection;
-  - at 390x844, selecting the task opened its detail with a 목록으로 control.
+Observed: the list-only state became a detail overlay with a visible 목록으로
+control; status/outcome remained the coherent active pair.
 
-Record-search steps in the same browser:
-  - open 내 기록, fill "durable-key", click 찾기;
-  - output: 로컬 원문 기록 1개를 찾았습니다.; exact durable-memory row visible;
-  - fill "needle-after-truncation", click 찾기;
-  - output: 로컬 원문 기록 1개를 찾았습니다.; the match beyond character
-    300 remained visible.
+R5/R6 deterministic behavior and browser request counts
+---------------------------------------------------------
+The executable Node check in test_source_derived_task_record_and_model_regressions
+starts an unresolved old-key test, changes only the credential revision, resolves
+the old success, and asserts it is rejected. It then tests the new draft and applies
+once, asserting test_requests == 2 and save_requests == 1. This is executable async
+behavior, not a string assertion.
 
-R5/R6 steps in a fresh fixture process:
-  - open 설정 > AI 연결 > 직접 API 설정 변경;
-  - fill API key old-key, test, then change only the key to new-key;
-  - observed apply disabled and "입력한 설정이 바뀌었습니다. 다시 테스트하세요.";
-  - test new-key, apply once, then:
-      curl -s http://127.0.0.1:18782/control/counts
-      {"test_requests": 2, "apply_requests": 1, "events": 2}
-    Applying performed no hidden third test.
-  - the deterministic deferred stale-success race is also executed by
-    test_source_derived_task_record_and_model_regressions (Node, not a string
-    assertion): an old success resolves after key-only invalidation and is rejected.
+In a fresh browser-fixture process, direct interaction also observed:
+  - changing only the key disabled apply and displayed 다시 테스트하세요;
+  - testing the new key enabled apply;
+  - applying once produced /control/counts values test_requests=2 and
+    apply_requests=1, proving there was no hidden third test.
 
-Project preservation steps:
-  - open 내 기록 > 프로젝트 > 회귀 프로젝트;
-  - observed purpose, no saved results, and 완료 결과 저장 action;
-  - click 완료 결과 저장;
-  - observed "완료 결과를 프로젝트에 저장했습니다." and fixture result in
-    저장된 결과.
+No credential in this transcript is real; fixture-unsaved-token is inert text and
+was never submitted.

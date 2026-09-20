@@ -142,9 +142,9 @@ class GoogleCalendar:
             {"Content-Type": "application/json", "Idempotency-Key": idempotency_key},
             mutation=True,
         )
-        if not isinstance(response, dict) or not isinstance(response.get("id"), str) or not response["id"]:
+        if not isinstance(response, dict) or response.get("id") != event_id:
             raise GoogleCalendarError("malformed-response", "unknown")
-        return {"id": response["id"], "etag": response.get("etag", "")}
+        return {"id": event_id, "etag": response.get("etag", "")}
 
     def update(self, event_id: str, etag: str, payload: dict) -> dict:
         response = self._call(

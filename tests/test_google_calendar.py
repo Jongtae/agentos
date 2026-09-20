@@ -76,6 +76,18 @@ class GoogleCalendarTests(unittest.TestCase):
         self.assertNotIn("recurrence", body)
         self.assertEqual(headers["Idempotency-Key"], "approved-key")
 
+    def test_create_rejects_response_for_different_event_identity(self):
+        calendar = GoogleCalendar(lambda _method, _url, _body, _headers: {"id": "different-event"})
+        payload = {
+            "summary": "review",
+            "start": "2026-01-01T10:00:00Z",
+            "end": "2026-01-01T11:00:00Z",
+            "timezone": "UTC",
+        }
+        with self.assertRaises(GoogleCalendarError) as mismatch:
+            calendar.create(payload, "approved-key")
+        self.assertEqual((mismatch.exception.reason, mismatch.exception.effect), ("malformed-response", "unknown"))
+
     def test_policy_makes_no_exact_post_before_owner_approval(self):
         with tempfile.TemporaryDirectory() as folder:
             connector = CalendarConnector(

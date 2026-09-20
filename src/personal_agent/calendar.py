@@ -19,7 +19,7 @@ import time
 import uuid
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .connector_contract import ConnectorContractError, ConnectorRegistry, ConnectorSpec
+from .connector_contract import ConnectorContractError, ConnectorRegistry, ConnectorSpec, ConnectorState
 from .google_calendar import (
     CALENDAR_READ_SCOPE,
     CALENDAR_WRITE_SCOPE,
@@ -170,16 +170,29 @@ class CalendarConnector:
     def _put(self, rows: dict) -> None:
         self.store.put(CALENDAR_STATE_KEY, rows)
 
-    def _authorize(self, owner: str, scope: str) -> None:
+    def _authorize(self, owner: str, scope: str) -> str | None:
         _owner_key(owner)
         try:
             if self.registry is not None:
-                self.registry.require_connected(owner, CALENDAR_CONNECTOR_ID, (scope,))
+                status = self.registry.require_connected(owner, CALENDAR_CONNECTOR_ID, (scope,))
+                return status.connection_revision
             elif not self.authority(owner, scope):
                 raise CalendarError("scope-denied", recovery="reconnect")
         except ConnectorContractError as error:
             reason = "scope-expired" if error.reason in {"reauth_required", "scope_mismatch"} else "scope-denied"
             raise CalendarError(reason, recovery="reconnect") from None
+        return None
+
+    def _mark_scope_expired(self, owner: str, expected_revision: str | None) -> None:
+        if self.registry is None or expected_revision is None:
+            return
+        with self.registry._authority_guard():
+            current = self.registry.status(owner, CALENDAR_CONNECTOR_ID)
+            if (
+                current.state is ConnectorState.CONNECTED
+                and current.connection_revision == expected_revision
+            ):
+                self.registry.transition(owner, CALENDAR_CONNECTOR_ID, ConnectorState.REAUTH_REQUIRED)
 
     @staticmethod
     def _provider_error(error: GoogleCalendarError) -> CalendarError:
@@ -201,11 +214,15 @@ class CalendarConnector:
         timezone = _timezone(timezone)
         if isinstance(max_results, bool) or not isinstance(max_results, int) or not 1 <= max_results <= 100:
             raise CalendarError("invalid-limit")
-        self._authorize(owner, CALENDAR_READ_SCOPE)
-        try:
-            events = self.provider.query(start, end, timezone, max_results)
-        except GoogleCalendarError as error:
-            raise self._provider_error(error) from None
+        authority_guard = self.registry._authority_guard() if self.registry is not None else nullcontext()
+        with authority_guard:
+            connection_revision = self._authorize(owner, CALENDAR_READ_SCOPE)
+            try:
+                events = self.provider.query(start, end, timezone, max_results)
+            except GoogleCalendarError as error:
+                if error.reason == "scope-expired":
+                    self._mark_scope_expired(owner, connection_revision)
+                raise self._provider_error(error) from None
         return {
             "events": events,
             "window": {"start": start, "end": end, "timezone": timezone},
@@ -408,7 +425,7 @@ class CalendarConnector:
             authority_guard = self.registry._authority_guard() if self.registry is not None else nullcontext()
             with authority_guard:
                 try:
-                    self._authorize(owner, CALENDAR_WRITE_SCOPE)
+                    connection_revision = self._authorize(owner, CALENDAR_WRITE_SCOPE)
                 except CalendarError as error:
                     row.update(state="failed", error_class=error.reason, effect="none", recovery=error.recovery)
                     rows[ident] = row
@@ -434,6 +451,8 @@ class CalendarConnector:
                 result = self.provider.cancel(row["event_id"], row["event_version"])
                 safe_result = {"id": result["id"], "cancelled": True}
         except GoogleCalendarError as provider_error:
+            if provider_error.reason == "scope-expired":
+                self._mark_scope_expired(owner, connection_revision)
             error = self._provider_error(provider_error)
             with _LOCK:
                 rows = self._rows()

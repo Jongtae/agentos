@@ -104,6 +104,23 @@ class CalendarTests(unittest.TestCase):
         self.assertEqual(denied.exception.reason, "scope-denied")
         self.assertFalse(disconnected.provider.calls)
 
+    def test_query_authority_guard_covers_provider_dispatch(self):
+        observed = []
+        original_query = self.provider.query
+
+        def guarded_query(*args):
+            observed.append(self.registry._lock._is_owned())
+            return original_query(*args)
+
+        self.provider.query = guarded_query
+        self.calendar.query(
+            "owner",
+            "2026-09-21T00:00:00+09:00",
+            "2026-09-28T00:00:00+09:00",
+            "Asia/Seoul",
+        )
+        self.assertEqual(observed, [True])
+
     def test_create_exact_preview_one_time_approval_and_idempotency(self):
         draft = self.calendar.draft_create(EVENT, "owner")
         self.assertEqual(draft["action"], "create")
@@ -194,7 +211,35 @@ class CalendarTests(unittest.TestCase):
             self.calendar.cancel(stale_scope["id"], self.approve(stale_scope), "owner")
         self.assertEqual((scope.exception.reason, scope.exception.effect), ("scope-expired", "none"))
         self.assertEqual(self.calendar.status(stale_scope["id"], "owner")["state"], "failed")
+        self.assertEqual(
+            self.registry.status("owner", CALENDAR_CONNECTOR_ID).state,
+            ConnectorState.REAUTH_REQUIRED,
+        )
 
+        self.registry.transition(
+            "owner",
+            CALENDAR_CONNECTOR_ID,
+            ConnectorState.CONNECTED,
+            granted_scopes=(CALENDAR_READ_SCOPE, CALENDAR_WRITE_SCOPE),
+        )
+        with self.assertRaises(CalendarError):
+            self.calendar.query(
+                "owner",
+                "2026-09-21T00:00:00+09:00",
+                "2026-09-28T00:00:00+09:00",
+                "Asia/Seoul",
+            )
+        self.assertEqual(
+            self.registry.status("owner", CALENDAR_CONNECTOR_ID).state,
+            ConnectorState.REAUTH_REQUIRED,
+        )
+
+        self.registry.transition(
+            "owner",
+            CALENDAR_CONNECTOR_ID,
+            ConnectorState.CONNECTED,
+            granted_scopes=(CALENDAR_READ_SCOPE, CALENDAR_WRITE_SCOPE),
+        )
         self.provider.error = GoogleCalendarError("provider-timeout", "unknown")
         uncertain = self.calendar.draft_create(EVENT, "owner")
         uncertain_approval = self.approve(uncertain)

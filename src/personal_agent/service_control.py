@@ -43,7 +43,7 @@ class ServiceControlError(RuntimeError):
 
 Runner = Callable[[Sequence[str]], CommandResult]
 Which = Callable[[str], str | None]
-HealthProbe = Callable[[], bool]
+HealthProbe = Callable[..., bool]
 
 
 def _run(command: Sequence[str]) -> CommandResult:
@@ -55,9 +55,9 @@ def _clean_error(result: CommandResult) -> str:
     return " ".join((result.stderr or result.stdout).strip().split())[:300]
 
 
-def _probe_healthz() -> bool:
+def _probe_healthz(timeout: float = 2) -> bool:
     try:
-        with urlopen("http://127.0.0.1:8787/healthz", timeout=2) as response:
+        with urlopen("http://127.0.0.1:8787/healthz", timeout=timeout) as response:
             return response.status == 200
     except Exception:
         return False
@@ -158,7 +158,9 @@ class ServiceController:
         # negative health behavior when needed. The real launchctl path always
         # confirms the loopback application endpoint before claiming success.
         self.health_probe = health_probe or (_probe_healthz if runner is _run else lambda: True)
+        self._production_health_probe = health_probe is None and runner is _run
         self.health_wait = time.sleep if health_probe is None and runner is _run else lambda _seconds: None
+        self.monotonic = time.monotonic
         self.uid = os.getuid() if uid is None else uid
         self.domain = f"gui/{self.uid}"
         self.service_target = f"{self.domain}/{LABEL}"
@@ -193,7 +195,25 @@ class ServiceController:
                 )})}
 
     def status(self) -> dict[str, object]:
-        return self._observed_status()
+        observed = self._observed_status()
+        if observed.get("background_available"):
+            try:
+                healthy = (
+                    self.health_probe(2.0)
+                    if self._production_health_probe
+                    else self.health_probe()
+                ) is True
+            except Exception:
+                healthy = False
+            if not healthy:
+                return {
+                    **observed,
+                    "status": "running_unhealthy",
+                    "process_running": True,
+                    "background_available": False,
+                    "next_action": "Run service restart; use foreground `agentos start` to inspect application health.",
+                }
+        return observed
 
     def _require(self, result: CommandResult, message: str, next_action: str) -> None:
         if result.returncode:
@@ -233,15 +253,23 @@ class ServiceController:
         if not observed["background_available"]:
             raise ServiceControlError("A running AgentOS background process was not observed.", next_action)
         healthy = False
+        deadline = self.monotonic() + 4.0
         for attempt in range(20):
+            remaining = deadline - self.monotonic()
+            if remaining <= 0:
+                break
             try:
-                healthy = self.health_probe() is True
+                healthy = (
+                    self.health_probe(min(1.0, remaining))
+                    if self._production_health_probe
+                    else self.health_probe()
+                ) is True
             except Exception:
                 healthy = False
             if healthy:
                 break
             if attempt < 19:
-                self.health_wait(0.2)
+                self.health_wait(min(0.2, max(0.0, deadline - self.monotonic())))
         if not healthy:
             raise ServiceControlError(
                 "The AgentOS process was running but its application health check did not pass.",
@@ -348,9 +376,14 @@ class ServiceController:
         if not self.plist_path.exists():
             raise ServiceControlError("The AgentOS background service is not installed.",
                                       "Run the service install action, or use foreground `agentos start`.")
-        current = self._observed_status()
+        current = self.status()
         if current["status"] == "running":
             return {**current, "operation": "start", "changed": False}
+        if current["status"] == "running_unhealthy":
+            raise ServiceControlError(
+                "The AgentOS process is running but its application health check did not pass.",
+                "Run service restart; use foreground `agentos start` to inspect application health.",
+            )
         if current["status"] == "loaded_not_running":
             started = self._launchctl("kickstart", "-k", self.service_target)
         else:

@@ -326,6 +326,44 @@ class ServiceControlTests(unittest.TestCase):
         self.assertEqual(started["status"], "running")
         self.assertEqual(self.runner.commands[-2][1], "kickstart")
 
+    def test_status_and_already_running_start_do_not_claim_unhealthy_app_available(self):
+        self.controller.install()
+        unhealthy = ServiceController(
+            home=self.home,
+            cli_path=self.cli,
+            runner=self.runner,
+            uid=501,
+            health_probe=lambda: False,
+        )
+        status = unhealthy.status()
+        self.assertEqual(status["status"], "running_unhealthy")
+        self.assertTrue(status["process_running"])
+        self.assertFalse(status["background_available"])
+        with self.assertRaisesRegex(ServiceControlError, "health check did not pass"):
+            unhealthy.start()
+        self.assertTrue(self.runner.running)
+
+    def test_health_retry_uses_one_shared_four_second_deadline(self):
+        self.controller.install()
+        clock = [0.0]
+        timeouts = []
+
+        def stalled_probe(timeout):
+            timeouts.append(timeout)
+            clock[0] += timeout
+            return False
+
+        controller = ServiceController(home=self.home, cli_path=self.cli, runner=self.runner, uid=501)
+        controller._production_health_probe = True
+        controller.health_probe = stalled_probe
+        controller.monotonic = lambda: clock[0]
+        controller.health_wait = lambda delay: clock.__setitem__(0, clock[0] + delay)
+        with self.assertRaisesRegex(ServiceControlError, "health check did not pass"):
+            controller._confirm_running("inspect")
+        self.assertLessEqual(clock[0], 4.0)
+        self.assertTrue(timeouts)
+        self.assertLessEqual(max(timeouts), 1.0)
+
     def test_status_reports_unreadable_launchd_state_as_unknown(self):
         self.controller.plist_path.parent.mkdir(parents=True)
         self.controller.plist_path.write_bytes(render_plist(self.cli, self.controller.data_dir))

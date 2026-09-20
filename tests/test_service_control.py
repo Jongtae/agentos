@@ -29,6 +29,7 @@ class FakeLaunchctl:
         self.loaded = False
         self.running = False
         self.pid = 4321
+        self.disabled = False
         self.fail = {}
 
     def __call__(self, command):
@@ -48,6 +49,10 @@ class FakeLaunchctl:
             self.loaded = self.running = False
         elif command[:2] == ["launchctl", "kickstart"]:
             self.loaded = self.running = True
+        elif command[:2] == ["launchctl", "disable"]:
+            self.disabled = True
+        elif command[:2] == ["launchctl", "enable"]:
+            self.disabled = False
         return CommandResult(0)
 
 
@@ -171,13 +176,48 @@ class ServiceControlTests(unittest.TestCase):
         self.assertEqual(removed["data_dir"], str(data.resolve()))
         self.assertEqual(marker.read_text(), "keep")
 
+    def test_observational_actions_report_installed_path_over_unrelated_environment(self):
+        installed_data = self.root / "installed-owner-state"
+        installed = ServiceController(
+            home=self.home, data_dir=installed_data, cli_path=self.cli, runner=self.runner, uid=501
+        )
+        installed.install()
+        unrelated = self.root / "foreground-only-state"
+        observer = ServiceController(
+            home=self.home,
+            cli_path=self.cli,
+            runner=self.runner,
+            uid=501,
+            environ={"AGENTOS_DATA": str(unrelated)},
+        )
+        self.assertEqual(observer.status()["data_dir"], str(installed_data.resolve()))
+        self.assertEqual(observer.stop()["data_dir"], str(installed_data.resolve()))
+        self.assertEqual(observer.uninstall()["data_dir"], str(installed_data.resolve()))
+
+    def test_stop_persists_disable_and_start_explicitly_reenables(self):
+        self.controller.install()
+        stopped = self.controller.stop()
+        self.assertEqual(stopped["status"], "stopped")
+        self.assertTrue(self.runner.disabled)
+        self.assertIn(["launchctl", "disable", self.controller.service_target], self.runner.commands)
+
+        command_start = len(self.runner.commands)
+        started = self.controller.start()
+        self.assertEqual(started["status"], "running")
+        self.assertFalse(self.runner.disabled)
+        new_commands = self.runner.commands[command_start:]
+        self.assertLess(
+            new_commands.index(["launchctl", "enable", self.controller.service_target]),
+            next(index for index, command in enumerate(new_commands) if command[:2] == ["launchctl", "bootstrap"]),
+        )
+
     def test_explicit_unchanged_upgrade_restarts_running_process(self):
         self.controller.install()
         before = len(self.runner.commands)
         upgraded = self.controller.upgrade()
         self.assertEqual(upgraded["operation"], "upgrade")
         verbs = [command[1] for command in self.runner.commands[before:]]
-        self.assertEqual(verbs, ["print", "print", "bootout", "bootstrap", "print"])
+        self.assertEqual(verbs, ["print", "print", "bootout", "enable", "bootstrap", "print"])
 
     def test_upgrade_preserves_explicitly_stopped_state_for_same_or_changed_plist(self):
         self.controller.install()

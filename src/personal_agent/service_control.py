@@ -151,6 +151,7 @@ class ServiceController:
             except (OSError, plistlib.InvalidFileException, ValueError, TypeError):
                 recovered_data = None
         self.data_dir = Path(configured_data or recovered_data or self.home / DEFAULT_DATA_RELATIVE).expanduser().resolve()
+        self._recovered_data_dir = Path(recovered_data).expanduser().resolve() if recovered_data else None
         # Resolution is intentionally lazy: status/stop/uninstall must remain
         # usable after a package manager has already removed the executable.
         self._cli_path = cli_path
@@ -170,6 +171,25 @@ class ServiceController:
         self.domain = f"gui/{self.uid}"
         self.service_target = f"{self.domain}/{LABEL}"
 
+    def _reported_data_dir(self) -> Path:
+        """Return the path owned by the installed definition for read/remove actions."""
+        if self.plist_path.is_file():
+            try:
+                installed = plistlib.loads(self.plist_path.read_bytes())
+                arguments = installed.get("ProgramArguments") if isinstance(installed, dict) else None
+                positions = [index for index, value in enumerate(arguments or ()) if value == "--data"]
+                if (
+                    isinstance(arguments, list)
+                    and len(positions) == 1
+                    and positions[0] + 1 < len(arguments)
+                    and isinstance(arguments[positions[0] + 1], str)
+                    and arguments[positions[0] + 1]
+                ):
+                    return Path(arguments[positions[0] + 1]).expanduser().resolve()
+            except (OSError, plistlib.InvalidFileException, ValueError, TypeError):
+                pass
+        return self._recovered_data_dir or self.data_dir
+
     def _launchctl(self, *arguments: str) -> CommandResult:
         try:
             return self.runner(["launchctl", *arguments])
@@ -178,14 +198,15 @@ class ServiceController:
 
     def _observed_status(self) -> dict[str, object]:
         definition_exists = self.plist_path.exists()
+        reported_data = self._reported_data_dir()
         result = self._launchctl("print", self.service_target)
         if result.returncode != 0:
             not_loaded = result.returncode == 113 or "could not find service" in _clean_error(result).lower()
             if not_loaded and not definition_exists:
                 return {"ok": True, "status": "not_installed", "installed": False, "background_available": False,
-                        "data_dir": str(self.data_dir), "data_preserved": self.data_dir.exists()}
+                        "data_dir": str(reported_data), "data_preserved": reported_data.exists()}
             return {"ok": not_loaded, "status": "stopped" if not_loaded else "unknown", "installed": definition_exists,
-                    "background_available": False, "data_dir": str(self.data_dir),
+                    "background_available": False, "data_dir": str(reported_data),
                     "next_action": ("Run the service start action; if it fails, reinstall the service definition."
                                     if not_loaded else "launchd status could not be read; retry before assuming the service is available.")}
         match = re.search(r"^\s*state\s*=\s*([^\s]+)", result.stdout, re.MULTILINE)
@@ -193,7 +214,7 @@ class ServiceController:
         state = match.group(1).lower() if match else "loaded"
         running = state == "running"
         return {"ok": True, "status": "running" if running else "loaded_not_running", "launchd_state": state,
-                "installed": definition_exists, "background_available": running, "data_dir": str(self.data_dir),
+                "installed": definition_exists, "background_available": running, "data_dir": str(reported_data),
                 **({"process_id": int(pid_match.group(1))} if pid_match else {}),
                 **({} if running and definition_exists else {"next_action": (
                     "Run service uninstall to disable the orphaned registered job, then reinstall."
@@ -350,6 +371,12 @@ class ServiceController:
             if previous is not None and not was_loaded:
                 observed = self._observed_status()
                 return {**observed, "operation": "upgrade", "changed": True, "data_preserved": True}
+            enabled = self._launchctl("enable", self.service_target)
+            self._require(
+                enabled,
+                "The service definition could not be enabled",
+                "Run service status, then retry install; owner data was retained.",
+            )
             started = self._launchctl("bootstrap", self.domain, str(self.plist_path))
             self._require(
                 started,
@@ -379,6 +406,12 @@ class ServiceController:
                     if replacement_committed:
                         self._write_plist(previous)
                     if was_loaded:
+                        restored_enabled = self._launchctl("enable", self.service_target)
+                        self._require(
+                            restored_enabled,
+                            "The previous service definition could not be re-enabled",
+                            "Reinstall the service definition, inspect service status, and use foreground `agentos start`; owner data was retained.",
+                        )
                         restored = self._launchctl("bootstrap", self.domain, str(self.plist_path))
                         self._require(
                             restored,
@@ -416,6 +449,12 @@ class ServiceController:
                 "The AgentOS process is running but its application health check did not pass.",
                 "Run service restart; use foreground `agentos start` to inspect application health.",
             )
+        enabled = self._launchctl("enable", self.service_target)
+        self._require(
+            enabled,
+            "The AgentOS background service could not be enabled",
+            "Run service status, then retry start; no owner data was deleted.",
+        )
         if current["status"] == "loaded_not_running":
             started = self._launchctl("kickstart", "-k", self.service_target)
         else:
@@ -441,8 +480,16 @@ class ServiceController:
 
     def stop(self) -> dict[str, object]:
         current = self._observed_status()
-        if current["status"] in {"stopped", "not_installed"}:
+        if current["status"] == "not_installed":
             return {**current, "operation": "stop", "changed": False}
+        disabled = self._launchctl("disable", self.service_target)
+        self._require(
+            disabled,
+            "The AgentOS background service could not be persistently disabled",
+            "Run service status and retry stop; no owner data was deleted.",
+        )
+        if current["status"] == "stopped":
+            return {**current, "operation": "stop", "changed": True, "persistently_disabled": True}
         stopped = (
             self._launchctl("bootout", self.domain, str(self.plist_path))
             if self.plist_path.exists()
@@ -453,7 +500,8 @@ class ServiceController:
         installed = self.plist_path.exists()
         return {"ok": True, "operation": "stop", "changed": True,
                 "status": "stopped" if installed else "not_installed", "installed": installed,
-                "background_available": False, "data_dir": str(self.data_dir), "data_preserved": True,
+                "background_available": False, "data_dir": str(self._reported_data_dir()), "data_preserved": True,
+                "persistently_disabled": True,
                 **({} if installed else {"next_action": "Run service install before starting the background service."})}
 
     def restart(self) -> dict[str, object]:
@@ -465,6 +513,12 @@ class ServiceController:
             stopped = self._launchctl("bootout", self.domain, str(self.plist_path))
             self._require(stopped, "The existing AgentOS service could not be stopped for restart",
                           "Run service status; no owner data was deleted.")
+        enabled = self._launchctl("enable", self.service_target)
+        self._require(
+            enabled,
+            "The AgentOS background service could not be enabled for restart",
+            "Run service status, then retry restart; no owner data was deleted.",
+        )
         started = self._launchctl("bootstrap", self.domain, str(self.plist_path))
         self._require(started, "The AgentOS background service could not restart",
                       "Use foreground `agentos start` to inspect the startup failure, then retry service restart.")
@@ -486,9 +540,13 @@ class ServiceController:
     def uninstall(self) -> dict[str, object]:
         """Remove only service registration; durable owner data is always retained."""
         current = self._observed_status()
+        reported_data = self._reported_data_dir()
         job_registered = current["status"] not in {"stopped", "not_installed"}
         definition_exists = self.plist_path.exists()
         if job_registered:
+            disabled = self._launchctl("disable", self.service_target)
+            self._require(disabled, "The service could not be persistently disabled",
+                          "Run service stop and retry uninstall; no owner data was deleted.")
             stopped = (
                 self._launchctl("bootout", self.domain, str(self.plist_path))
                 if definition_exists
@@ -500,7 +558,7 @@ class ServiceController:
             self.plist_path.unlink()
         changed = job_registered or definition_exists
         return {"ok": True, "operation": "uninstall", "changed": changed, "status": "not_installed",
-                "installed": False, "background_available": False, "data_dir": str(self.data_dir),
+                "installed": False, "background_available": False, "data_dir": str(reported_data),
                 "data_preserved": True,
                 "next_action": "Owner data was retained. Remove the reported data directory separately only if you intend to erase it."}
 

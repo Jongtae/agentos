@@ -78,8 +78,8 @@ class GoogleCalendar:
                 raise GoogleCalendarError("provider-rejected") from None
             if error.status == 412:
                 raise GoogleCalendarError("stale-event") from None
-            if error.status >= 500 and mutation:
-                raise GoogleCalendarError("provider-error", "unknown") from None
+            if error.status >= 500:
+                raise GoogleCalendarError("provider-error", "unknown" if mutation else "none") from None
             raise GoogleCalendarError("provider-rejected") from None
         except (TimeoutError, OSError):
             raise GoogleCalendarError("provider-timeout", "unknown" if mutation else "none") from None

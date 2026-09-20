@@ -133,6 +133,8 @@ class GoogleCalendarTests(unittest.TestCase):
             (lambda *_: (_ for _ in ()).throw(TimeoutError()), "provider-timeout"),
             (lambda *_: {}, "malformed-response"),
             (lambda *_: (_ for _ in ()).throw(GoogleCalendarHTTPError(401)), "scope-expired"),
+            (lambda *_: (_ for _ in ()).throw(GoogleCalendarHTTPError(500)), "provider-error"),
+            (lambda *_: (_ for _ in ()).throw(GoogleCalendarHTTPError(503)), "provider-error"),
         )
         for transport, reason in cases:
             with self.subTest(reason=reason):

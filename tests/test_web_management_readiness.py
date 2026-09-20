@@ -143,17 +143,19 @@ const pending=guard.test(current,()=>{testRequests++;return new Promise(resolve=
 current={...current,api_key:'new'};guard.invalidate();resolveOld({ok:true});
 assert.deepEqual(await pending,{accepted:false,stale:true,result:{ok:true}});
 assert.equal(guard.canApply(current),false);
-const verified=await guard.test(current,async()=>{testRequests++;return {ok:true};},()=>current);
+const verified=await guard.test(current,async()=>{testRequests++;return {ok:true,test_proof:'p'.repeat(43)};},()=>current);
 assert.equal(verified.accepted,true);assert.equal(guard.canApply(current),true);
-assert.equal(await guard.apply(current,async payload=>{saveRequests++;assert.equal('credential_revision' in payload,false);}),true);
+assert.equal(await guard.apply(current,async payload=>{saveRequests++;assert.equal('credential_revision' in payload,false);assert.equal(payload.test_proof,'p'.repeat(43));}),true);
+const missingProof=await guard.test(current,async()=>({ok:true}),()=>current);
+assert.equal(missingProof.accepted,false);assert.equal(guard.canApply(current),false);
 assert.equal(testRequests,2);assert.equal(saveRequests,1);
-console.log(JSON.stringify({checks:38}));
+console.log(JSON.stringify({checks:40}));
 })().catch(error=>{console.error(error);process.exit(1);});
 """
         result = subprocess.run(
             [node, '-e', script, str(ROOT / 'src/personal_agent/web/app.js')],
             check=True, capture_output=True, text=True, timeout=20)
-        self.assertEqual(json.loads(result.stdout)['checks'], 38)
+        self.assertEqual(json.loads(result.stdout)['checks'], 40)
 
     def test_model_apply_has_one_explicit_test_and_credential_revision(self):
         app = (ROOT / 'src/personal_agent/web/app.js').read_text()
@@ -167,7 +169,11 @@ console.log(JSON.stringify({checks:38}));
         deletion = app[app.index("if(item.deleteKind)"):app.index("$('record-search').onsubmit")]
         self.assertIn('recordLoadSequence++', deletion)
         self.assertNotIn("api('/api/personal-space')", deletion)
+        self.assertLess(deletion.index('lastRecords.items=lastRecords.items.filter'),
+                        deletion.index('await loadRecords({refreshLoaded:true,throwOnError:true})'))
         self.assertIn('recordPageMatches(lastRecords', app)
+        self.assertIn("if(activeView==='records')void refreshLoadedRecords()", app)
+        self.assertIn('if(taskDetailInflight.has(id))return taskDetailInflight.get(id)', app)
         self.assertEqual(app.count("invalidateModelDraft('연결 결과가 바뀌었습니다. 적용 전에 다시 테스트하세요.')"), 2)
 
     def test_project_detail_and_result_save_actions_remain_available(self):

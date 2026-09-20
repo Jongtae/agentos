@@ -418,3 +418,28 @@ The mutation invalidated the older records request before issuing DELETE and did
 not depend on the legacy `/api/personal-space` GET before refreshing authoritative
 records. These were synthetic fixture records only; no owner data, live provider,
 or external mutation was used.
+
+Polling convergence, slow task detail, and failed post-delete reload
+---------------------------------------------------------------------
+On 2026-09-21 a fresh headed Chromium run held `/api/tasks/task-382` for three
+seconds while the two-second management poll continued. After 4.5 seconds the
+selected task still converged to its one observed event instead of repeatedly
+invalidating every slow detail response:
+
+  {"events":1,"detailLoaded":true}
+
+While `내 기록` remained open, the fixture added 105 notes outside the records
+view. The next coalesced polling refresh updated the authoritative totals without
+changing the query or reloading the page:
+
+  {"notes":106,"memories":1,"temporary":0,"artifacts":30}
+
+Finally, Chromium confirmed deletion of `memory-exact` while the fixture forced
+the immediately following `/api/personal-records` reload to return HTTP 500.
+The UI displayed the refresh failure but removed the successfully deleted row
+and its old detail immediately:
+
+  {"durableKeyVisible":0,"error":"fixture records refresh failed","staleDeletedDetail":false}
+
+All controls and records in this run were fixture-only; no owner data, live
+provider, or external mutation was used.

@@ -38,6 +38,7 @@ class Fixture:
     workspace_detail_inflight = False
     delay_records = False
     records_inflight = False
+    fail_records_once = False
     file_roots = []
     file_workspace = {"references": [], "workspace": ""}
     workspace_updated = {"workspace-382": 1, "workspace-other": 2}
@@ -113,6 +114,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"settings": {"model": model, "model_ready": False, "subscription_engines": {"engines": []}, "file_roots": [{"path": path} for path in file_roots], "file_workspace": file_workspace, "context_inbox": {"sources": {}, "items": []}, "telegram": {"enabled": True, "paired": True, "username": "fixture_bot"}, "conversation_settings": {"state": "read", "capabilities": [{"id": "google-drive-read", "kind": "connector", "state": Fixture.capability_state, "recovery": "Owner can resume after review."}]}, "document_boundary": {}}, "jobs": [{"id": "task-382", "status": "running", "response": None, "message": "fixture Telegram request", "channel": "telegram:fixture-owner"}, {"id": "project-job", "status": "succeeded", "response": "fixture project result", "message": "fixture project request", "channel": "telegram:fixture-owner"}], "tool_events": [], "healthy": True})
         elif path == "/api/personal-space": self.send_json({"memories": Fixture.memories, "context": [], "results": (Fixture.results + Fixture.other_results)[-50:]})
         elif path == "/api/personal-records":
+            if Fixture.fail_records_once:
+                Fixture.fail_records_once = False
+                self.send_json({"error": "fixture records refresh failed"}, 500)
+                return
             query = parse_qs(parsed.query).get("query", [""])[0].casefold()
             record_filter = parse_qs(parsed.query).get("filter", ["all"])[0]
             limit = int(parse_qs(parsed.query).get("limit", ["100"])[0])
@@ -184,6 +189,9 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/control/delay-records":
             Fixture.delay_records = True
             self.send_json({"delay_records": True})
+        elif path == "/control/fail-next-records":
+            Fixture.fail_records_once = True
+            self.send_json({"fail_records_once": True})
         elif path == "/control/set-openrouter":
             Fixture.model = {"provider": "compatible", "endpoint": "https://openrouter.ai/api/v1", "model": "fixture/connected"}
             self.send_json({"model": Fixture.model})
@@ -199,7 +207,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/model/test":
             Fixture.test_requests += 1
             time.sleep(0.8)
-            self.send_json({"ok": True})
+            self.send_json({"ok": True, "test_proof": "p" * 43})
         elif path == "/api/model":
             Fixture.apply_requests += 1
             self.send_json({"ok": True})

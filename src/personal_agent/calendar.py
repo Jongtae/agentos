@@ -59,6 +59,15 @@ class CalendarError(ValueError):
         self.recovery = recovery
 
 
+class _ScopeExpiryAfterDispatch(Exception):
+    """Carry a shared-credential expiry until the connector lease is released."""
+
+    def __init__(self, snapshot, error: CalendarError):
+        super().__init__(error.reason)
+        self.snapshot = snapshot
+        self.error = error
+
+
 def _owner_key(owner: object) -> str:
     if not isinstance(owner, str) or not owner or len(owner) > 256:
         raise CalendarError("invalid-owner")
@@ -508,23 +517,36 @@ class CalendarConnector:
             }
 
     def approve(self, ident: str, owner: str) -> dict:
-        with _LOCK:
-            rows = self._rows()
-            row = self._owned(rows, ident, owner)
-            if row.get("state") != "awaiting-approval":
-                raise CalendarError("not-awaiting-approval")
-            now = self._now()
-            approval = self.approval_factory()
-            if not isinstance(approval, str) or len(approval) < 16:
-                raise CalendarError("invalid-approval")
-            row.update(
-                state="approved",
-                approval=approval,
-                approval_hash=row["hash"],
-                expires=now + self.approval_ttl,
-            )
-            rows[ident] = row
-            self._put(rows)
+        dispatch_guard = (
+            self.registry._dispatch_guard(owner, (CALENDAR_WRITE_CONNECTOR_ID,))
+            if self.registry is not None else nullcontext()
+        )
+        with dispatch_guard:
+            with _LOCK:
+                rows = self._rows()
+                row = self._owned(rows, ident, owner)
+                if row.get("state") != "awaiting-approval":
+                    raise CalendarError("not-awaiting-approval")
+                authority_guard = self.registry._authority_guard() if self.registry is not None else nullcontext()
+                with authority_guard:
+                    authority_snapshot = self._authorize(owner, CALENDAR_WRITE_SCOPE)
+                    approval_revision = dict(authority_snapshot or ()).get(CALENDAR_WRITE_CONNECTOR_ID)
+                now = self._now()
+                approval = self.approval_factory()
+                if not isinstance(approval, str) or len(approval) < 16:
+                    raise CalendarError("invalid-approval")
+                row.update(
+                    state="approved",
+                    approval=approval,
+                    approval_hash=row["hash"],
+                    expires=now + self.approval_ttl,
+                )
+                if self.registry is not None:
+                    if not isinstance(approval_revision, str):
+                        raise CalendarError("invalid-stored-state")
+                    row["approval_revision"] = approval_revision
+                rows[ident] = row
+                self._put(rows)
         return {"approval_id": approval, "payload_hash": row["hash"], "action": row["action"]}
 
     def status(self, ident: str, owner: str) -> dict:
@@ -572,6 +594,18 @@ class CalendarConnector:
         return value
 
     def execute(self, ident: str, approval: str, owner: str) -> dict:
+        dispatch_guard = (
+            self.registry._dispatch_guard(owner, (CALENDAR_WRITE_CONNECTOR_ID,))
+            if self.registry is not None else nullcontext()
+        )
+        try:
+            with dispatch_guard:
+                return self._execute_leased(ident, approval, owner)
+        except _ScopeExpiryAfterDispatch as delayed:
+            self._mark_scope_expired(owner, delayed.snapshot)
+            raise delayed.error from None
+
+    def _execute_leased(self, ident: str, approval: str, owner: str) -> dict:
         with _LOCK:
             rows = self._rows()
             row = self._owned(rows, ident, owner)
@@ -621,6 +655,22 @@ class CalendarConnector:
                     rows[ident] = row
                     self._put(rows)
                     raise CalendarError(error.reason, effect=error.effect, recovery=recovery) from None
+                if self.registry is not None:
+                    current_revision = dict(authority_snapshot or ()).get(CALENDAR_WRITE_CONNECTOR_ID)
+                    if (not isinstance(current_revision, str) or
+                            row.get("approval_revision") != current_revision):
+                        row.update(
+                            state="failed",
+                            error_class="approval-connection-changed",
+                            effect="none",
+                            recovery="request-new-draft",
+                        )
+                        rows[ident] = row
+                        self._put(rows)
+                        raise CalendarError(
+                            "approval-connection-changed",
+                            recovery="request-new-draft",
+                        )
                 observed_at = self._now()
                 if observed_at >= row.get("expires", 0):
                     row.update(state="expired", error_class="approval-expired", effect="none",
@@ -648,8 +698,6 @@ class CalendarConnector:
                 result = self.provider.cancel(row["event_id"], row["event_version"])
                 safe_result = {"id": result["id"], "cancelled": True}
         except GoogleCalendarError as provider_error:
-            if provider_error.reason == "scope-expired":
-                self._mark_scope_expired(owner, authority_snapshot)
             error = self._provider_error(provider_error)
             if error.recovery == "reconnect":
                 error = CalendarError(
@@ -674,6 +722,10 @@ class CalendarConnector:
                 )
                 rows[ident] = current
                 self._put(rows)
+            if provider_error.reason == "scope-expired" and self.registry is not None:
+                raise _ScopeExpiryAfterDispatch(authority_snapshot, error) from None
+            if provider_error.reason == "scope-expired":
+                self._mark_scope_expired(owner, authority_snapshot)
             raise error from None
 
         with _LOCK:

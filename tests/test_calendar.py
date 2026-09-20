@@ -138,19 +138,13 @@ class CalendarTests(unittest.TestCase):
         )
         self.assertEqual(result["evidence"]["result_count"], 1)
         draft = calendar.draft_create(EVENT, "reader")
-        approval = calendar.approve(draft["id"], "reader")["approval_id"]
         with self.assertRaises(CalendarError) as denied:
-            calendar.create(draft["id"], approval, "reader")
+            calendar.approve(draft["id"], "reader")
         self.assertEqual(
             (denied.exception.reason, denied.exception.effect, denied.exception.recovery),
-            ("scope-denied", "none", "reconnect-and-request-new-draft"),
+            ("scope-denied", "none", "reconnect"),
         )
-        self.assertEqual(
-            calendar.status(draft["id"], "reader")["recovery"],
-            "reconnect-and-request-new-draft",
-        )
-        with self.assertRaises(CalendarError):
-            calendar.approve(draft["id"], "reader")
+        self.assertEqual(calendar.status(draft["id"], "reader")["state"], "awaiting-approval")
         self.assertEqual(
             registry.status("reader", CALENDAR_WRITE_CONNECTOR_ID).state,
             ConnectorState.DISCONNECTED,
@@ -169,6 +163,72 @@ class CalendarTests(unittest.TestCase):
             registry.status("reader", CALENDAR_WRITE_CONNECTOR_ID).state,
             ConnectorState.CONNECTED,
         )
+
+    def test_approval_is_bound_to_write_connection_revision(self):
+        draft = self.calendar.draft_create(EVENT, "owner")
+        approval = self.approve(draft)
+        self.registry.transition("owner", CALENDAR_WRITE_CONNECTOR_ID, ConnectorState.DISCONNECTED)
+        self.registry.transition(
+            "owner",
+            CALENDAR_WRITE_CONNECTOR_ID,
+            ConnectorState.CONNECTED,
+            granted_scopes=(CALENDAR_WRITE_SCOPE,),
+        )
+
+        with self.assertRaises(CalendarError) as stale:
+            self.calendar.create(draft["id"], approval, "owner")
+        self.assertEqual(
+            (stale.exception.reason, stale.exception.effect, stale.exception.recovery),
+            ("approval-connection-changed", "none", "request-new-draft"),
+        )
+        self.assertEqual(self.calendar.status(draft["id"], "owner")["state"], "failed")
+        self.assertFalse(self.provider.calls)
+
+    def test_mutation_dispatch_is_ordered_before_write_disconnect(self):
+        provider_started = threading.Event()
+        allow_provider = threading.Event()
+        disconnect_finished = threading.Event()
+        errors = []
+        original_create = self.provider.create
+
+        def paused_create(*args):
+            provider_started.set()
+            if not allow_provider.wait(1):
+                raise AssertionError("provider wait timed out")
+            return original_create(*args)
+
+        self.provider.create = paused_create
+        draft = self.calendar.draft_create(EVENT, "owner")
+        approval = self.approve(draft)
+
+        def create():
+            try:
+                self.calendar.create(draft["id"], approval, "owner")
+            except Exception as error:
+                errors.append(error)
+
+        def disconnect():
+            try:
+                self.registry.transition("owner", CALENDAR_WRITE_CONNECTOR_ID, ConnectorState.DISCONNECTED)
+            except Exception as error:
+                errors.append(error)
+            finally:
+                disconnect_finished.set()
+
+        mutation = threading.Thread(target=create)
+        mutation.start()
+        self.assertTrue(provider_started.wait(1))
+        transition = threading.Thread(target=disconnect)
+        transition.start()
+        self.assertFalse(disconnect_finished.wait(.05))
+        allow_provider.set()
+        mutation.join(1)
+        transition.join(1)
+        self.assertFalse(mutation.is_alive())
+        self.assertFalse(transition.is_alive())
+        self.assertFalse(errors)
+        self.assertTrue(disconnect_finished.is_set())
+        self.assertEqual([call[0] for call in self.provider.calls], ["create"])
 
     def test_query_releases_global_authority_lock_during_provider_dispatch(self):
         observed = []
@@ -528,9 +588,8 @@ class CalendarTests(unittest.TestCase):
                 "Asia/Seoul",
             )
         draft = self.calendar.draft_cancel("event", '"v1"', "owner")
-        approval = self.approve(draft)
         with self.assertRaises(CalendarError) as denied:
-            self.calendar.cancel(draft["id"], approval, "owner")
+            self.calendar.approve(draft["id"], "owner")
         self.assertEqual(denied.exception.reason, "scope-expired")
         self.assertEqual([call[0] for call in self.provider.calls], ["query"])
 

@@ -178,6 +178,11 @@ def _owner_key(owner_id: str) -> str:
     return hashlib.sha256(owner_id.encode()).hexdigest()
 
 
+def _owner_secret_key(prefix: str, owner_id: str) -> str:
+    """Return a non-identifying per-owner secret slot."""
+    return f"{prefix}:{_owner_key(owner_id)}"
+
+
 def _finite_now(now: Callable[[], float]) -> float:
     value = now()
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
@@ -300,7 +305,7 @@ class GmailConnector:
                     "connector_state": current.state.value,
                     "connection_revision": current.connection_revision,
                 }
-                self.store.secret(PENDING_SECRET_KEY, pending)
+                self.store.secret(f"{PENDING_SECRET_KEY}:{owner}", pending)
         query = {
             "client_id": self.client_id,
             "redirect_uri": self.redirect_uri,
@@ -326,7 +331,7 @@ class GmailConnector:
             pending = self._pending(owner_id, callback.get("state"))
             # Consume before inspecting the code or contacting the provider so
             # every callback, including failure, is single use across handlers.
-            self.store.secret(PENDING_SECRET_KEY, {"status": "used"})
+            self.store.secret(_owner_secret_key(PENDING_SECRET_KEY, owner_id), {"status": "used"})
             if callback.get("error"):
                 raise GmailError("authorization_denied")
             code = callback.get("code")
@@ -358,7 +363,8 @@ class GmailConnector:
                     or current.connection_revision != pending.get("connection_revision")
                 ):
                     raise GmailError("connector_authority_changed")
-                self.store.secret(TOKEN_SECRET_KEY, tokens)
+                token_key = _owner_secret_key(TOKEN_SECRET_KEY, owner_id)
+                self.store.secret(token_key, tokens)
                 try:
                     self.registry.transition(
                         owner_id,
@@ -369,7 +375,7 @@ class GmailConnector:
                 except Exception:
                     # Never leave usable credentials behind if durable lifecycle
                     # metadata cannot be committed.
-                    self.store.secret(TOKEN_SECRET_KEY, {})
+                    self.store.secret(token_key, {})
                     raise GmailError("connection_commit_failed") from None
             return self.status(owner_id)
 
@@ -474,13 +480,14 @@ class GmailConnector:
             current = self.registry.status(owner_id, GMAIL_CONNECTOR_ID)
             if expected_revision is not None and current.connection_revision != expected_revision:
                 return current.as_dict()
-            self.store.secret(TOKEN_SECRET_KEY, {})
+            self.store.secret(_owner_secret_key(TOKEN_SECRET_KEY, owner_id), {})
             if current.state is ConnectorState.CONNECTED:
                 self.registry.transition(owner_id, GMAIL_CONNECTOR_ID, ConnectorState.REAUTH_REQUIRED)
         return self.status(owner_id)
 
     def _pending(self, owner_id: str, state: object) -> dict:
-        pending = self.store.secret(PENDING_SECRET_KEY)
+        pending_key = _owner_secret_key(PENDING_SECRET_KEY, owner_id)
+        pending = self.store.secret(pending_key)
         if not isinstance(pending, dict) or pending.get("status") != "pending":
             raise GmailError("missing_or_replayed_state")
         owner = _owner_key(owner_id)
@@ -518,7 +525,7 @@ class GmailConnector:
         ):
             raise GmailError("invalid_state")
         if _finite_now(self.now) >= expires_at:
-            self.store.secret(PENDING_SECRET_KEY, {"status": "used"})
+            self.store.secret(pending_key, {"status": "used"})
             raise GmailError("state_expired")
         verifier = pending.get("verifier")
         if (
@@ -568,8 +575,9 @@ class GmailConnector:
                 if exc.reason == ConnectorState.REAUTH_REQUIRED.value:
                     raise GmailReauthenticationRequired("reauth_required") from None
                 raise GmailError("connection_required") from None
+            token_key = _owner_secret_key(TOKEN_SECRET_KEY, owner_id)
             try:
-                tokens = self.store.secret(TOKEN_SECRET_KEY)
+                tokens = self.store.secret(token_key)
             except GmailError:
                 # The encryption key or ciphertext is no longer usable. Revoke
                 # connector authority before offering recovery; never report the
@@ -621,7 +629,8 @@ class GmailConnector:
             if status == 401:
                 with self.registry._authority_guard():
                     current = self.registry.status(owner_id, GMAIL_CONNECTOR_ID)
-                    current_tokens = self.store.secret(TOKEN_SECRET_KEY)
+                    token_key = _owner_secret_key(TOKEN_SECRET_KEY, owner_id)
+                    current_tokens = self.store.secret(token_key)
                     if (
                         current.state is not ConnectorState.CONNECTED
                         or current.connection_revision != connection_revision
@@ -629,7 +638,7 @@ class GmailConnector:
                         or current_tokens.get("access_token") != access_token
                     ):
                         raise GmailError("superseded_connection")
-                    self.store.secret(TOKEN_SECRET_KEY, {})
+                    self.store.secret(token_key, {})
                     self.registry.transition(owner_id, GMAIL_CONNECTOR_ID, ConnectorState.REAUTH_REQUIRED)
                 raise GmailReauthenticationRequired("reauth_required")
             if isinstance(status, int) and status >= 400:
@@ -645,14 +654,15 @@ class GmailConnector:
     ) -> None:
         with self.registry._authority_guard():
             current = self.registry.status(owner_id, GMAIL_CONNECTOR_ID)
+            token_key = _owner_secret_key(TOKEN_SECRET_KEY, owner_id)
             try:
-                current_tokens = self.store.secret(TOKEN_SECRET_KEY)
+                current_tokens = self.store.secret(token_key)
             except GmailError:
                 if (
                     current.state is ConnectorState.CONNECTED
                     and current.connection_revision == connection_revision
                 ):
-                    self.store.secret(TOKEN_SECRET_KEY, {})
+                    self.store.secret(token_key, {})
                     self.registry.transition(owner_id, GMAIL_CONNECTOR_ID, ConnectorState.REAUTH_REQUIRED)
                     raise GmailReauthenticationRequired("reauth_required") from None
                 raise GmailError("superseded_connection") from None
@@ -671,7 +681,7 @@ class GmailConnector:
                 or not math.isfinite(expires_at)
                 or _finite_now(self.now) >= expires_at
             ):
-                self.store.secret(TOKEN_SECRET_KEY, {})
+                self.store.secret(token_key, {})
                 self.registry.transition(owner_id, GMAIL_CONNECTOR_ID, ConnectorState.REAUTH_REQUIRED)
                 raise GmailReauthenticationRequired("reauth_required")
 

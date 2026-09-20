@@ -172,10 +172,13 @@ console.log(JSON.stringify({checks:32}));
         self.assertIn('if(refreshQueued){refreshQueued=false;void refresh();}', app)
         self.assertGreaterEqual(app.count('invalidateModelLoad()'), 4)
         hydration = app[app.index('if(!modelLoaded){if(requestedModelRevision'):app.index("$('task-refresh-state').textContent='방금 확인'")]
-        self.assertNotIn("$('root-paths').value", hydration.split('if(!rootsLoaded)')[0])
-        self.assertIn("$('root-paths').value", hydration.split('if(!rootsLoaded)')[1])
+        self.assertNotIn("$('root-paths').value", hydration.split('if(!rootsLoaded&&')[0])
+        self.assertIn("$('root-paths').value", hydration.split('if(!rootsLoaded&&')[1])
         self.assertIn('rootsLoaded=false', app)
         self.assertIn('fileWorkspaceLoaded=false', app)
+        self.assertIn('requestedRootsRevision===rootsLoadRevision', app)
+        self.assertIn('requestedFileWorkspaceRevision===fileWorkspaceLoadRevision', app)
+        self.assertIn('workspaceDetailSequence++;try{const deleted=', app)
 
     def test_workspace_result_projection_is_complete_and_duplicate_save_is_not_success(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -238,6 +241,8 @@ console.log(JSON.stringify({checks:32}));
         self.assertIn('"root":"/tmp/saved-root","reference":"/tmp/unsaved-reference"', transcript)
         self.assertIn('"taskId":"","selectedRows":0', transcript)
         self.assertIn('"detail":"다른 프로젝트","saveButtons":0', transcript)
+        self.assertIn('"root":"/tmp/race-saved-root","reference":"/tmp/race-saved-reference"', transcript)
+        self.assertIn('"deletedVisible":false,"visibleResults":29', transcript)
         self.assertIn('does not run AgentService', transcript)
 
     def test_browser_fixture_observer_captures_every_mutating_http_verb(self):

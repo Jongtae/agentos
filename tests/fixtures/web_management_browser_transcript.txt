@@ -350,3 +350,29 @@ authoritative saved-job membership prevented the older saved job outside the 30-
 display page from reappearing as a save candidate. The executable store regression
 also inserts 31 results, verifies the 30-body/31-count projection, rejects a duplicate
 save without advancing the project revision, and advances that revision on deletion.
+
+Pre-save polling cannot hydrate either file form from a stale snapshot
+---------------------------------------------------------------------
+In a fresh headed run, the fixture captured an empty file-settings response and
+delayed it while each form was saved. The POST completed during the in-flight poll;
+the browser then waited for both that stale response and the queued fresh refresh.
+After the roots race and then the file-workspace race, Chromium observed:
+
+  {"roots":{"root":"/tmp/race-saved-root","reference":"","output":""},"workspace":{"root":"/tmp/race-saved-root","reference":"/tmp/race-saved-reference","output":"/tmp/race-saved-output"}}
+
+Each pre-save response had older empty data. Neither could hydrate or mark its form
+loaded because its captured generation no longer matched; the queued response loaded
+the saved values. These are fixture paths only, not owner folders.
+
+Pre-delete project detail cannot repopulate the cache
+----------------------------------------------------
+The fixture captured the 31-result project detail, delayed it, and reported the
+request in flight. While it was pending, Chromium deleted `other result 29`. After
+the deletion refresh, fresh selected detail, and delayed pre-delete response all
+completed, the browser observed:
+
+  {"row":"다른 프로젝트 · 30개 완료 결과","detail":"다른 프로젝트","deletedVisible":false,"visibleResults":29}
+
+The deletion invalidated the earlier detail sequence before mutation. Consequently
+the captured 31-result response could neither render nor cache itself under the new
+workspace revision.

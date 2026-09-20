@@ -2,6 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 import shutil
+import hashlib
+import json
 
 from personal_agent.calendar import (
     CALENDAR_CONNECTOR_ID,
@@ -538,17 +540,18 @@ class CalendarTests(unittest.TestCase):
                 self.assertEqual(legacy.status(ident, "owner")["result"], {"id": "legacy-event"})
 
         calls = []
+        legacy_event_hash = hashlib.sha256(json.dumps(EVENT, sort_keys=True).encode()).hexdigest()
         self.store.put(
             "calendar_create",
             {
                 "legacy-approved": {
                     "id": "legacy-approved",
                     "payload": dict(EVENT),
-                    "hash": "legacy-content-hash",
+                    "hash": legacy_event_hash,
                     "owner": "owner",
                     "state": "approved",
                     "approval": "legacy-approval",
-                    "approval_hash": "legacy-content-hash",
+                    "approval_hash": legacy_event_hash,
                     "expires": 9999999999,
                 }
             },
@@ -616,6 +619,69 @@ class CalendarTests(unittest.TestCase):
                 self.assertNotIn("approval", migrated)
                 self.assertNotIn("approval_hash", migrated)
                 self.assertEqual(calls, [])
+
+    def test_changed_legacy_approved_payload_or_hash_is_quarantined_before_dispatch(self):
+        original_hash = hashlib.sha256(json.dumps(EVENT, sort_keys=True).encode()).hexdigest()
+        changed = {**EVENT, "summary": "changed after approval"}
+        changed_hash = hashlib.sha256(json.dumps(changed, sort_keys=True).encode()).hexdigest()
+        cases = (
+            (changed, original_hash, original_hash),
+            (dict(EVENT), original_hash, changed_hash),
+        )
+        for payload, stored_hash, approval_hash in cases:
+            with self.subTest(payload=payload["summary"], approval_hash=approval_hash):
+                self.store.put(
+                    "calendar_create",
+                    {
+                        "legacy-changed": {
+                            "id": "legacy-changed",
+                            "payload": payload,
+                            "hash": stored_hash,
+                            "owner": "owner",
+                            "state": "approved",
+                            "approval": "legacy-approval",
+                            "approval_hash": approval_hash,
+                            "expires": 9999999999,
+                        }
+                    },
+                )
+                calls = []
+                legacy = CalendarCreate(
+                    self.store,
+                    lambda *_: calls.append("create") or {"id": "must-not-dispatch"},
+                )
+                with self.assertRaises(CalendarError) as rejected:
+                    legacy.create("legacy-changed", "legacy-approval", "owner")
+                self.assertEqual(rejected.exception.reason, "exact-approval-required")
+                migrated = legacy._rows()["legacy-changed"]
+                self.assertEqual(
+                    (migrated["state"], migrated["error_class"], migrated["recovery"]),
+                    ("expired", "legacy-approval-mismatch", "request-new-draft"),
+                )
+                self.assertNotIn("approval", migrated)
+                self.assertNotIn("approval_hash", migrated)
+                self.assertEqual(calls, [])
+
+    def test_legacy_scope_failure_without_recovery_reconstructs_actionable_path(self):
+        self.store.put(
+            "calendar_create",
+            {
+                "legacy-scope-denied": {
+                    "id": "legacy-scope-denied",
+                    "payload": dict(EVENT),
+                    "hash": "legacy-content-hash",
+                    "owner": "owner",
+                    "state": "failed",
+                    "error_class": "scope-denied",
+                }
+            },
+        )
+        legacy = CalendarCreate(self.store, lambda *_: self.fail("failed work must not dispatch"))
+        status = legacy.status("legacy-scope-denied", "owner")
+        self.assertEqual(
+            (status["state"], status["effect"], status["recovery"]),
+            ("failed", "none", "reconnect-and-request-new-draft"),
+        )
 
     def test_legacy_post_dispatch_failures_migrate_to_unknown_effect(self):
         for error_class in ("transport-error", "malformed-response", "provider-timeout"):

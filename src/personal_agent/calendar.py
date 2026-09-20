@@ -374,7 +374,7 @@ class CalendarConnector:
             elif (
                 portable_state == "failed"
                 and row.get("error_class") in {"scope-denied", "scope-expired"}
-                and row.get("recovery") == "reconnect"
+                and row.get("recovery") in {None, "", "reconnect"}
             ):
                 row["recovery"] = "reconnect-and-request-new-draft"
             elif portable_state == "failed" and row.get("recovery") == "review-request":
@@ -400,8 +400,22 @@ class CalendarConnector:
                 row.get("state") == "failed"
                 and row.get("error_class") in {"transport-error", "malformed-response", "provider-timeout"}
             )
+            legacy_state = row.get("state")
+            legacy_hash = (
+                hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+                if legacy_payload_valid
+                else ""
+            )
+            legacy_approval_matches = (
+                legacy_state != "approved"
+                or (
+                    legacy_payload_valid
+                    and _constant_text_equal(row.get("hash"), legacy_hash)
+                    and _constant_text_equal(row.get("approval_hash"), legacy_hash)
+                )
+            )
             bound = {"action": "create", "payload": payload, "event_id": "", "event_version": ""}
-            digest = _canonical(bound)
+            digest = _canonical(bound) if legacy_payload_valid else ""
             row.update(
                 action="create",
                 event_id="",
@@ -414,10 +428,19 @@ class CalendarConnector:
             )
             if legacy_unknown_effect:
                 row["recovery"] = "inspect-calendar-before-retry"
-            if not legacy_payload_valid and row.get("state") in {"awaiting-approval", "approved"}:
+            if not legacy_payload_valid and legacy_state in {"awaiting-approval", "approved"}:
                 row.update(
                     state="expired",
                     error_class="legacy-payload-invalid",
+                    recovery="request-new-draft",
+                    effect="none",
+                )
+                row.pop("approval", None)
+                row.pop("approval_hash", None)
+            elif not legacy_approval_matches:
+                row.update(
+                    state="expired",
+                    error_class="legacy-approval-mismatch",
                     recovery="request-new-draft",
                     effect="none",
                 )
@@ -436,7 +459,7 @@ class CalendarConnector:
         elif (
             row.get("state") == "failed"
             and row.get("error_class") in {"scope-denied", "scope-expired"}
-            and row.get("recovery") == "reconnect"
+            and row.get("recovery") in {None, "", "reconnect"}
         ):
             row["recovery"] = "reconnect-and-request-new-draft"
             rows[ident] = row

@@ -254,15 +254,26 @@ class CalendarConnector:
         timezone = _timezone(timezone)
         if isinstance(max_results, bool) or not isinstance(max_results, int) or not 1 <= max_results <= 100:
             raise CalendarError("invalid-limit")
-        authority_guard = self.registry._authority_guard() if self.registry is not None else nullcontext()
-        with authority_guard:
+        if self.registry is not None:
+            with self.registry._authority_guard():
+                authority_snapshot = self._authorize(owner, CALENDAR_READ_SCOPE)
+        else:
             authority_snapshot = self._authorize(owner, CALENDAR_READ_SCOPE)
-            try:
-                events = self.provider.query(start, end, timezone, max_results)
-            except GoogleCalendarError as error:
-                if error.reason == "scope-expired":
-                    self._mark_scope_expired(owner, authority_snapshot)
-                raise self._provider_error(error) from None
+        try:
+            events = self.provider.query(start, end, timezone, max_results)
+        except GoogleCalendarError as error:
+            if error.reason == "scope-expired":
+                self._mark_scope_expired(owner, authority_snapshot)
+            raise self._provider_error(error) from None
+        if self.registry is not None:
+            with self.registry._authority_guard():
+                for connector_id, expected_revision in authority_snapshot or ():
+                    current = self.registry.status(owner, connector_id)
+                    if (current.state is not ConnectorState.CONNECTED or
+                            current.connection_revision != expected_revision):
+                        raise CalendarError("scope-denied", recovery="reconnect")
+        else:
+            self._authorize(owner, CALENDAR_READ_SCOPE)
         return {
             "events": events,
             "window": {"start": start, "end": end, "timezone": timezone},

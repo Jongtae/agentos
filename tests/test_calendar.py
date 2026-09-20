@@ -169,7 +169,7 @@ class CalendarTests(unittest.TestCase):
             ConnectorState.CONNECTED,
         )
 
-    def test_query_authority_guard_covers_provider_dispatch(self):
+    def test_query_releases_global_authority_lock_during_provider_dispatch(self):
         observed = []
         original_query = self.provider.query
 
@@ -184,7 +184,25 @@ class CalendarTests(unittest.TestCase):
             "2026-09-28T00:00:00+09:00",
             "Asia/Seoul",
         )
-        self.assertEqual(observed, [True])
+        self.assertEqual(observed, [False])
+
+    def test_query_discards_result_if_authority_changes_during_provider_call(self):
+        original_query = self.provider.query
+
+        def revoke_then_return(*args):
+            self.registry.transition("owner", CALENDAR_CONNECTOR_ID, ConnectorState.DISCONNECTED)
+            return original_query(*args)
+
+        self.provider.query = revoke_then_return
+        with self.assertRaises(CalendarError) as changed:
+            self.calendar.query(
+                "owner",
+                "2026-09-21T00:00:00+09:00",
+                "2026-09-28T00:00:00+09:00",
+                "Asia/Seoul",
+            )
+        self.assertEqual(changed.exception.reason,"scope-denied")
+        self.assertEqual(changed.exception.recovery,"reconnect")
 
     def test_create_exact_preview_one_time_approval_and_idempotency(self):
         draft = self.calendar.draft_create(EVENT, "owner")

@@ -944,6 +944,24 @@ class GmailConnectorTests(unittest.TestCase):
         self.assertEqual(message.body, "")
         self.assertNotIn("must not be body", repr(message.as_dict()))
 
+    def test_empty_content_disposition_is_not_treated_as_an_absent_header(self):
+        self.connect()
+        encoded = base64.urlsafe_b64encode(b"must not be body").decode()
+        for disposition in ("", "   "):
+            with self.subTest(disposition=repr(disposition)):
+                self.responses.append({
+                    "id": "m_1",
+                    "threadId": "t_1",
+                    "payload": {
+                        "mimeType": "text/plain",
+                        "headers": [{"name": "Content-Disposition", "value": disposition}],
+                        "body": {"data": encoded},
+                    },
+                })
+                message = self.read()
+                self.assertEqual(message.body, "")
+                self.assertNotIn("must not be body", repr(message.as_dict()))
+
     def test_owner_namespaced_oauth_state_and_tokens_do_not_overwrite_or_cross_revoke(self):
         _offer_a,state_a=self.begin("owner-a")
         _offer_b,state_b=self.begin("owner-b")

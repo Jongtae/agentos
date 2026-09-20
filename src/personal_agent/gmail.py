@@ -746,6 +746,7 @@ class GmailConnector:
             filename = part.get("filename")
             headers = part.get("headers", [])
             disposition = ""
+            disposition_present = False
             content_type = ""
             security_headers: set[str] = set()
             if isinstance(headers, list):
@@ -768,6 +769,7 @@ class GmailConnector:
                             exhausted = True
                             return []
                         disposition = value
+                        disposition_present = True
                     elif normalized_name == "content-type":
                         if len(value) > 1024:
                             exhausted = True
@@ -777,7 +779,7 @@ class GmailConnector:
             is_attachment = (
                 isinstance(filename, str)
                 and bool(filename.strip())
-            ) or disposition_kind not in {"", "inline"}
+            ) or (disposition_present and disposition_kind != "inline")
             if is_attachment:
                 return []
             normalized_mime = mime_type.lower() if isinstance(mime_type, str) else ""

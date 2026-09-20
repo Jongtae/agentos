@@ -1,6 +1,7 @@
 """Reviewed capability lifecycle; never installs or executes arbitrary code."""
 
 import math
+import threading
 import time
 
 
@@ -23,12 +24,17 @@ STATES = {
 _ACTIVE_GRANT_STATES = {"enabled", "paused"}
 _MISSING_CAPABILITY_STATE = object()
 _INVALID_CAPABILITY_STATE = "저장된 capability 상태를 확인하세요."
+_CAPABILITY_STATE_LOCK = threading.RLock()
 
 
 class CapabilityRegistry:
     def __init__(self, store):
         self.store = store
         self._catalogue = {item["id"]: item for item in CATALOGUE}
+        # QuickStore has no compare-and-swap config primitive.  All registry
+        # instances therefore share this in-process lock so a one-time legacy
+        # migration cannot overwrite a concurrent lifecycle transition.
+        self._lock = _CAPABILITY_STATE_LOCK
 
     @staticmethod
     def _reject():
@@ -67,7 +73,7 @@ class CapabilityRegistry:
             cls._reject()
 
     @classmethod
-    def _validate_row(cls, item, row):
+    def _validated_row_parts(cls, item, row):
         if not isinstance(row, dict) or set(row) != {"state", "changed_at", "grant", "audit"}:
             cls._reject()
         state = row["state"]
@@ -75,6 +81,18 @@ class CapabilityRegistry:
             cls._reject()
         changed_at = cls._timestamp(row["changed_at"])
         grant = cls._scopes(row["grant"])
+        audit = row["audit"]
+        if not isinstance(audit, list) or not 1 <= len(audit) <= 50:
+            cls._reject()
+        for event in audit:
+            cls._validate_event(item, event)
+        if audit[-1]["state"] != state or cls._timestamp(audit[-1]["changed_at"]) != changed_at:
+            cls._reject()
+        return state, grant, audit
+
+    @classmethod
+    def _validate_row(cls, item, row):
+        state, grant, _ = cls._validated_row_parts(item, row)
         declared_grant = sorted(item["scopes"])
         if state == "enabled":
             allowed_grants = [declared_grant]
@@ -84,69 +102,96 @@ class CapabilityRegistry:
             allowed_grants = [[]]
         if grant not in allowed_grants:
             cls._reject()
-        audit = row["audit"]
-        if not isinstance(audit, list) or not 1 <= len(audit) <= 50:
-            cls._reject()
-        for event in audit:
-            cls._validate_event(item, event)
-        if audit[-1]["state"] != state or cls._timestamp(audit[-1]["changed_at"]) != changed_at:
-            cls._reject()
         return row
 
+    @classmethod
+    def _migrate_legacy_inactive_grant(cls, item, row):
+        """Normalize only inactive grants proved to come from the old lifecycle.
+
+        Before this contract, leaving ``enabled`` retained its exact grant.  A
+        structurally valid enabled audit event is the evidence that distinguishes
+        that historical row from fabricated inactive authority.
+        """
+        state, grant, audit = cls._validated_row_parts(item, row)
+        declared_grant = sorted(item["scopes"])
+        if (
+            state in _ACTIVE_GRANT_STATES
+            or grant != declared_grant
+            or not any(event["state"] == "enabled" for event in audit)
+        ):
+            return None
+        migrated = {**row, "grant": []}
+        cls._validate_row(item, migrated)
+        return migrated
+
     def _saved(self):
-        saved = self.store.config("capability_registry", _MISSING_CAPABILITY_STATE)
-        if saved is _MISSING_CAPABILITY_STATE:
-            return {}
-        if not isinstance(saved, dict) or any(key not in self._catalogue for key in saved):
-            self._reject()
-        for capability_id, row in saved.items():
-            self._validate_row(self._catalogue[capability_id], row)
-        return saved
+        with self._lock:
+            saved = self.store.config("capability_registry", _MISSING_CAPABILITY_STATE)
+            if saved is _MISSING_CAPABILITY_STATE:
+                return {}
+            if not isinstance(saved, dict) or any(key not in self._catalogue for key in saved):
+                self._reject()
+            migrated = dict(saved)
+            changed = False
+            for capability_id, row in saved.items():
+                item = self._catalogue[capability_id]
+                legacy = self._migrate_legacy_inactive_grant(item, row)
+                if legacy is not None:
+                    migrated[capability_id] = legacy
+                    changed = True
+                else:
+                    self._validate_row(item, row)
+            if changed:
+                self.store.put("capability_registry", migrated)
+            return migrated
 
     def list(self):
-        saved = self._saved()
-        return [
-            {
-                **item,
-                "tools": list(item["tools"]),
-                "scopes": list(item["scopes"]),
-                "state": saved.get(item["id"], {}).get("state", "available"),
-                "grant": list(saved.get(item["id"], {}).get("grant", [])),
-            }
-            for item in CATALOGUE
-        ]
+        with self._lock:
+            saved = self._saved()
+            return [
+                {
+                    **item,
+                    "tools": list(item["tools"]),
+                    "scopes": list(item["scopes"]),
+                    "state": saved.get(item["id"], {}).get("state", "available"),
+                    "grant": list(saved.get(item["id"], {}).get("grant", [])),
+                }
+                for item in CATALOGUE
+            ]
 
     def transition(self, capability_id, target, approved_scopes=()):
-        item = self._catalogue.get(capability_id)
-        if not item or target not in STATES:
-            raise ValueError("검토된 capability와 상태를 확인하세요.")
-        if target == "enabled" and set(item["scopes"]) != set(approved_scopes):
-            raise ValueError("선언된 scope의 명시 승인이 필요합니다.")
-        saved = self._saved()
-        prior = saved.get(capability_id, {})
-        changed_at = time.time()
-        event = {"state": target, "changed_at": changed_at}
-        if target == "enabled":
-            event["approved_scopes"] = sorted(approved_scopes)
-        grant = sorted(item["scopes"]) if target == "enabled" else list(prior.get("grant", []))
-        if target not in _ACTIVE_GRANT_STATES:
-            grant = []
-        candidate = {
-            "state": target,
-            "changed_at": changed_at,
-            "grant": grant,
-            "audit": [*prior.get("audit", []), event][-50:],
-        }
-        self._validate_row(item, candidate)
-        saved[capability_id] = candidate
-        self.store.put("capability_registry", saved)
-        return next(entry for entry in self.list() if entry["id"] == capability_id)
+        with self._lock:
+            item = self._catalogue.get(capability_id)
+            if not item or target not in STATES:
+                raise ValueError("검토된 capability와 상태를 확인하세요.")
+            if target == "enabled" and set(item["scopes"]) != set(approved_scopes):
+                raise ValueError("선언된 scope의 명시 승인이 필요합니다.")
+            saved = self._saved()
+            prior = saved.get(capability_id, {})
+            changed_at = time.time()
+            event = {"state": target, "changed_at": changed_at}
+            if target == "enabled":
+                event["approved_scopes"] = sorted(approved_scopes)
+            grant = sorted(item["scopes"]) if target == "enabled" else list(prior.get("grant", []))
+            if target not in _ACTIVE_GRANT_STATES:
+                grant = []
+            candidate = {
+                "state": target,
+                "changed_at": changed_at,
+                "grant": grant,
+                "audit": [*prior.get("audit", []), event][-50:],
+            }
+            self._validate_row(item, candidate)
+            saved[capability_id] = candidate
+            self.store.put("capability_registry", saved)
+            return next(entry for entry in self.list() if entry["id"] == capability_id)
 
     def require_enabled(self, capability_id, scope):
         """The sole lifecycle gate used before a reviewed capability is invoked."""
-        item = next((entry for entry in self.list() if entry["id"] == capability_id), None)
-        if not item or scope not in item["scopes"]:
-            raise ValueError("검토된 capability와 scope를 확인하세요.")
-        if item["state"] != "enabled" or scope not in item.get("grant", []):
-            raise ValueError("이 capability는 현재 사용할 수 없습니다. 연결 상태와 승인을 확인하세요.")
-        return item
+        with self._lock:
+            item = next((entry for entry in self.list() if entry["id"] == capability_id), None)
+            if not item or scope not in item["scopes"]:
+                raise ValueError("검토된 capability와 scope를 확인하세요.")
+            if item["state"] != "enabled" or scope not in item.get("grant", []):
+                raise ValueError("이 capability는 현재 사용할 수 없습니다. 연결 상태와 승인을 확인하세요.")
+            return item

@@ -1351,6 +1351,223 @@ class ConnectorContractTests(unittest.TestCase):
         )
         self.assertEqual(registry.transition("google-drive-read", "disconnected")["grant"], [])
 
+    def test_legacy_inactive_capability_grants_migrate_only_with_enable_evidence(self):
+        registry = CapabilityRegistry(self.store)
+        for state in (
+            "available",
+            "connected-disabled",
+            "auth-required",
+            "error",
+            "disconnected",
+        ):
+            with self.subTest(state=state):
+                audit = [
+                    {
+                        "state": "enabled",
+                        "changed_at": 1.0,
+                        "approved_scopes": ["read"],
+                    },
+                    {"state": state, "changed_at": 2.0},
+                ]
+                self.store.put(
+                    "capability_registry",
+                    {
+                        "google-drive-read": {
+                            "state": state,
+                            "changed_at": 2.0,
+                            "grant": ["read"],
+                            "audit": audit,
+                        }
+                    },
+                )
+
+                listed = next(
+                    item for item in registry.list() if item["id"] == "google-drive-read"
+                )
+                self.assertEqual(listed["state"], state)
+                self.assertEqual(listed["grant"], [])
+                migrated = self.store.config("capability_registry")["google-drive-read"]
+                self.assertEqual(migrated["state"], state)
+                self.assertEqual(migrated["changed_at"], 2.0)
+                self.assertEqual(migrated["grant"], [])
+                self.assertEqual(migrated["audit"], audit)
+                with self.assertRaises(ValueError):
+                    registry.require_enabled("google-drive-read", "read")
+
+                recovered = registry.transition(
+                    "google-drive-read", "enabled", ("read",)
+                )
+                self.assertEqual(recovered["state"], "enabled")
+                self.assertEqual(recovered["grant"], ["read"])
+
+    def test_legacy_paused_capability_grant_remains_valid_and_unchanged(self):
+        registry = CapabilityRegistry(self.store)
+        row = {
+            "state": "paused",
+            "changed_at": 2.0,
+            "grant": ["read"],
+            "audit": [
+                {
+                    "state": "enabled",
+                    "changed_at": 1.0,
+                    "approved_scopes": ["read"],
+                },
+                {"state": "paused", "changed_at": 2.0},
+            ],
+        }
+        self.store.put("capability_registry", {"google-drive-read": row})
+        before = copy.deepcopy(self.store.config("capability_registry"))
+
+        listed = next(
+            item for item in registry.list() if item["id"] == "google-drive-read"
+        )
+
+        self.assertEqual(listed["state"], "paused")
+        self.assertEqual(listed["grant"], ["read"])
+        self.assertEqual(self.store.config("capability_registry"), before)
+        with self.assertRaises(ValueError):
+            registry.require_enabled("google-drive-read", "read")
+
+    def test_legacy_capability_migration_rejects_unproved_or_inexact_grants(self):
+        registry = CapabilityRegistry(self.store)
+        exact_enabled = {
+            "state": "enabled",
+            "changed_at": 1.0,
+            "approved_scopes": ["read"],
+        }
+        cases = {
+            "no_prior_enable": {
+                "state": "disconnected",
+                "changed_at": 2.0,
+                "grant": ["read"],
+                "audit": [{"state": "disconnected", "changed_at": 2.0}],
+            },
+            "extra_grant": {
+                "state": "disconnected",
+                "changed_at": 2.0,
+                "grant": ["read", "write"],
+                "audit": [exact_enabled, {"state": "disconnected", "changed_at": 2.0}],
+            },
+            "wrong_enable_evidence": {
+                "state": "disconnected",
+                "changed_at": 2.0,
+                "grant": ["read"],
+                "audit": [
+                    {
+                        "state": "enabled",
+                        "changed_at": 1.0,
+                        "approved_scopes": ["write"],
+                    },
+                    {"state": "disconnected", "changed_at": 2.0},
+                ],
+            },
+        }
+        for name, row in cases.items():
+            with self.subTest(name=name):
+                value = {"google-drive-read": copy.deepcopy(row)}
+                self.store.put("capability_registry", value)
+                before = copy.deepcopy(self.store.config("capability_registry"))
+                with self.assertRaises(ValueError):
+                    registry.list()
+                self.assertEqual(self.store.config("capability_registry"), before)
+
+        multi_scope_item = copy.deepcopy(registry._catalogue["google-drive-read"])
+        multi_scope_item["scopes"] = ["metadata", "read"]
+        registry._catalogue["google-drive-read"] = multi_scope_item
+        partial = {
+            "google-drive-read": {
+                "state": "disconnected",
+                "changed_at": 2.0,
+                "grant": ["read"],
+                "audit": [
+                    {
+                        "state": "enabled",
+                        "changed_at": 1.0,
+                        "approved_scopes": ["metadata", "read"],
+                    },
+                    {"state": "disconnected", "changed_at": 2.0},
+                ],
+            }
+        }
+        self.store.put("capability_registry", partial)
+        before = copy.deepcopy(self.store.config("capability_registry"))
+        with self.assertRaises(ValueError):
+            registry.list()
+        self.assertEqual(self.store.config("capability_registry"), before)
+
+    def test_legacy_capability_migration_and_transitions_share_one_lock(self):
+        legacy = {
+            "google-drive-read": {
+                "state": "disconnected",
+                "changed_at": 2.0,
+                "grant": ["read"],
+                "audit": [
+                    {
+                        "state": "enabled",
+                        "changed_at": 1.0,
+                        "approved_scopes": ["read"],
+                    },
+                    {"state": "disconnected", "changed_at": 2.0},
+                ],
+            }
+        }
+
+        class BarrierStore:
+            def __init__(self):
+                self.values = {"capability_registry": copy.deepcopy(legacy)}
+                self.migration_commit = threading.Event()
+                self.release_migration = threading.Event()
+                self.block_first_put = True
+
+            def config(self, key, default=None):
+                return copy.deepcopy(self.values[key]) if key in self.values else default
+
+            def put(self, key, value):
+                if key == "capability_registry" and self.block_first_put:
+                    self.block_first_put = False
+                    self.migration_commit.set()
+                    if not self.release_migration.wait(timeout=5):
+                        raise RuntimeError("capability migration barrier timed out")
+                self.values[key] = copy.deepcopy(value)
+
+        class AttemptRegistry(CapabilityRegistry):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.attempted = threading.Event()
+
+            def transition(self, *args, **kwargs):
+                self.attempted.set()
+                return super().transition(*args, **kwargs)
+
+        store = BarrierStore()
+        first = CapabilityRegistry(store)
+        second = AttemptRegistry(store)
+        pool = ThreadPoolExecutor(max_workers=2)
+        try:
+            migration = pool.submit(first.list)
+            self.assertTrue(store.migration_commit.wait(timeout=5))
+            transition = pool.submit(
+                second.transition,
+                "google-calendar-create",
+                "enabled",
+                ("calendar.events",),
+            )
+            self.assertTrue(second.attempted.wait(timeout=5))
+            self.assertFalse(transition.done())
+            store.release_migration.set()
+            migration.result(timeout=5)
+            transition.result(timeout=5)
+        finally:
+            store.release_migration.set()
+            pool.shutdown(wait=True)
+
+        rows = store.config("capability_registry")
+        self.assertEqual(rows["google-drive-read"]["grant"], [])
+        self.assertEqual(
+            rows["google-drive-read"]["audit"], legacy["google-drive-read"]["audit"]
+        )
+        self.assertEqual(rows["google-calendar-create"]["grant"], ["calendar.events"])
+
     def test_capability_registry_top_level_corruption_fails_closed_without_overwrite(self):
         registry = CapabilityRegistry(self.store)
         self.assertTrue(registry.list())
@@ -1414,10 +1631,9 @@ class ConnectorContractTests(unittest.TestCase):
         inactive_row = inactive_grant["google-drive-read"]
         inactive_row["state"] = "disconnected"
         inactive_row["grant"] = ["read"]
-        inactive_row["audit"][-1] = {
-            "state": "disconnected",
-            "changed_at": inactive_row["changed_at"],
-        }
+        inactive_row["audit"] = [
+            {"state": "disconnected", "changed_at": inactive_row["changed_at"]}
+        ]
         corruptions["inactive_grant"] = inactive_grant
         for name, audit in (
             ("scalar_audit", "event"),

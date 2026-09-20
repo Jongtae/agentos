@@ -408,10 +408,22 @@ class GmailConnector:
             results.append(self._search_result(message_id, metadata, connection_revision))
         return tuple(results)
 
-    def read_message(self, owner_id: str, message_id: str) -> GmailMessage:
+    def read_message(
+        self,
+        owner_id: str,
+        message_id: str,
+        *,
+        expected_connection_revision: str,
+    ) -> GmailMessage:
         """Explicitly fetch one attributed body without retaining it locally."""
         message_id = self._message_id(message_id)
         headers, connection_revision, access_token = self._authorization_context(owner_id)
+        if (
+            not isinstance(expected_connection_revision, str)
+            or not expected_connection_revision
+            or expected_connection_revision != connection_revision
+        ):
+            raise GmailError("superseded_connection")
         response = self._get(
             owner_id,
             MESSAGES_ENDPOINT + "/" + quote(message_id, safe=""),

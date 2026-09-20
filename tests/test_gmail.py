@@ -69,6 +69,13 @@ class GmailConnectorTests(unittest.TestCase):
         result = self.gmail.complete_oauth(owner, {"state": state, "code": "oauth-code"}, exchange)
         return result, seen[0]
 
+    def read(self, message_id="m_1", owner="owner-a"):
+        return self.gmail.read_message(
+            owner,
+            message_id,
+            expected_connection_revision=self.gmail.status(owner)["connection_revision"],
+        )
+
     @staticmethod
     def metadata(message_id="m_1", thread_id="t_1"):
         return {
@@ -311,7 +318,7 @@ class GmailConnectorTests(unittest.TestCase):
 
         self.gmail.transport = revoke_during_read
         with self.assertRaises(GmailError) as revoked:
-            self.gmail.read_message("owner-a", "m_1")
+            self.read()
         self.assertEqual(revoked.exception.reason, "superseded_connection")
         self.assertEqual(self.gmail.status("owner-a")["state"], "blocked")
 
@@ -346,7 +353,7 @@ class GmailConnectorTests(unittest.TestCase):
                 },
             }
         )
-        message = self.gmail.read_message("owner-a", "m_1")
+        message = self.read()
         self.assertEqual(message.body, "private mail body")
         self.assertEqual(message.mime_type, "text/plain")
         self.assertEqual(message.source["message_id"], "m_1")
@@ -376,6 +383,23 @@ class GmailConnectorTests(unittest.TestCase):
         self.assertEqual(first.source["connection_revision"], first_revision)
         self.assertEqual(second.source["connection_revision"], second_revision)
 
+    def test_explicit_read_rejects_stale_search_source_before_transport(self):
+        self.connect(access_token="first-access", refresh_token="first-refresh")
+        stale_revision = self.gmail.status("owner-a")["connection_revision"]
+        self.registry.transition("owner-a", GMAIL_CONNECTOR_ID, ConnectorState.DISCONNECTED)
+        self.connect(access_token="second-access", refresh_token="second-refresh")
+        calls_before = len(self.calls)
+
+        with self.assertRaises(GmailError) as stale:
+            self.gmail.read_message(
+                "owner-a",
+                "m_1",
+                expected_connection_revision=stale_revision,
+            )
+
+        self.assertEqual(stale.exception.reason, "superseded_connection")
+        self.assertEqual(len(self.calls), calls_before)
+
     def test_body_traversal_is_bounded_by_all_visited_nodes(self):
         self.connect()
         shared = {"mimeType": "multipart/mixed", "parts": []}
@@ -388,7 +412,7 @@ class GmailConnectorTests(unittest.TestCase):
             }
         )
 
-        message = self.gmail.read_message("owner-a", "m_1")
+        message = self.read()
         self.assertEqual(message.body, "")
         self.assertEqual(message.mime_type, "multipart/mixed")
 
@@ -422,7 +446,7 @@ class GmailConnectorTests(unittest.TestCase):
                 },
             }
         )
-        message = self.gmail.read_message("owner-a", "m_1")
+        message = self.read()
         self.assertEqual(message.body, "<p>café</p>")
         self.assertEqual(message.mime_type, "text/html")
 
@@ -456,7 +480,7 @@ class GmailConnectorTests(unittest.TestCase):
                 },
             }
         )
-        message = self.gmail.read_message("owner-a", "m_1")
+        message = self.read()
         self.assertEqual(message.body, "<p>main body</p>")
         self.assertEqual(message.mime_type, "text/html")
 
@@ -480,7 +504,7 @@ class GmailConnectorTests(unittest.TestCase):
                 },
             }
         )
-        message = self.gmail.read_message("owner-a", "m_1")
+        message = self.read()
         self.assertEqual(message.body, "main body")
         self.assertNotIn("attached", message.body)
 
@@ -500,7 +524,7 @@ class GmailConnectorTests(unittest.TestCase):
             }
         )
         with self.assertRaises(GmailError) as malformed:
-            self.gmail.read_message("owner-a", "m_1")
+            self.read()
         self.assertEqual(malformed.exception.reason, "invalid_provider_response")
 
     def test_charset_lookup_and_decode_failures_are_bounded_provider_errors(self):
@@ -522,7 +546,7 @@ class GmailConnectorTests(unittest.TestCase):
                     }
                 )
                 with self.assertRaises(GmailError) as malformed:
-                    self.gmail.read_message("owner-a", "m_1")
+                    self.read()
                 self.assertEqual(malformed.exception.reason, "invalid_provider_response")
 
     def test_mixed_body_combines_serial_parts_but_alternative_chooses_plain(self):
@@ -548,7 +572,7 @@ class GmailConnectorTests(unittest.TestCase):
                 },
             }
         )
-        message = self.gmail.read_message("owner-a", "m_1")
+        message = self.read()
         self.assertEqual(message.body, "intro\n\nmain\n\nfooter")
         self.assertEqual(message.mime_type, "text/plain")
 
@@ -568,7 +592,7 @@ class GmailConnectorTests(unittest.TestCase):
                 {"data": encoded, "size": len(b"separate body")},
             ]
         )
-        message = self.gmail.read_message("owner-a", "m_1")
+        message = self.read()
         self.assertEqual(message.body, "separate body")
         self.assertEqual(
             self.calls[-1][1],

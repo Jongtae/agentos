@@ -175,13 +175,15 @@ class CalendarTests(unittest.TestCase):
             granted_scopes=(CALENDAR_WRITE_SCOPE,),
         )
 
+        status = self.calendar.status(draft["id"], "owner")
+        self.assertEqual(
+            (status["state"], status["error_class"], status["effect"], status["recovery"]),
+            ("failed", "approval-connection-changed", "none", "request-new-draft"),
+        )
+        self.assertEqual(self.calendar.preview(draft["id"], "owner")["state"], "failed")
         with self.assertRaises(CalendarError) as stale:
             self.calendar.create(draft["id"], approval, "owner")
-        self.assertEqual(
-            (stale.exception.reason, stale.exception.effect, stale.exception.recovery),
-            ("approval-connection-changed", "none", "request-new-draft"),
-        )
-        self.assertEqual(self.calendar.status(draft["id"], "owner")["state"], "failed")
+        self.assertEqual(stale.exception.reason, "exact-approval-required")
         self.assertFalse(self.provider.calls)
 
     def test_mutation_dispatch_is_ordered_before_write_disconnect(self):

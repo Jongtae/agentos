@@ -503,18 +503,47 @@ class CalendarConnector:
         return row
 
     def preview(self, ident: str, owner: str) -> dict:
-        with _LOCK:
-            row = self._owned(self._rows(), ident, owner)
-            return {
-                "id": ident,
-                "action": row["action"],
-                "calendar": "primary",
-                "event_id": row.get("event_id", ""),
-                "event_version": row.get("event_version", ""),
-                "payload": dict(row.get("payload", {})),
-                "payload_hash": row["hash"],
-                "state": row["state"],
-            }
+        dispatch_guard = (
+            self.registry._dispatch_guard(owner, (CALENDAR_WRITE_CONNECTOR_ID,))
+            if self.registry is not None else nullcontext()
+        )
+        with dispatch_guard:
+            with _LOCK:
+                rows = self._rows()
+                row = self._owned(rows, ident, owner)
+                self._invalidate_stale_approval(rows, row, ident, owner)
+                return {
+                    "id": ident,
+                    "action": row["action"],
+                    "calendar": "primary",
+                    "event_id": row.get("event_id", ""),
+                    "event_version": row.get("event_version", ""),
+                    "payload": dict(row.get("payload", {})),
+                    "payload_hash": row["hash"],
+                    "state": row["state"],
+                }
+
+    def _invalidate_stale_approval(self, rows: dict, row: dict, ident: str, owner: str) -> None:
+        if self.registry is None or row.get("state") != "approved":
+            return
+        recovery = "request-new-draft"
+        try:
+            with self.registry._authority_guard():
+                snapshot = self._authorize(owner, CALENDAR_WRITE_SCOPE)
+                current_revision = dict(snapshot or ()).get(CALENDAR_WRITE_CONNECTOR_ID)
+        except CalendarError:
+            current_revision = None
+            recovery = "reconnect-and-request-new-draft"
+        if (not isinstance(current_revision, str) or
+                row.get("approval_revision") != current_revision):
+            row.update(
+                state="failed",
+                error_class="approval-connection-changed",
+                effect="none",
+                recovery=recovery,
+            )
+            rows[ident] = row
+            self._put(rows)
 
     def approve(self, ident: str, owner: str) -> dict:
         dispatch_guard = (
@@ -550,39 +579,45 @@ class CalendarConnector:
         return {"approval_id": approval, "payload_hash": row["hash"], "action": row["action"]}
 
     def status(self, ident: str, owner: str) -> dict:
-        with _LOCK:
-            rows = self._rows()
-            row = self._owned(rows, ident, owner)
-            if row.get("state") == "approved" and self._now() >= row.get("expires", 0):
-                row.update(
-                    state="expired",
-                    error_class="approval-expired",
-                    effect="none",
-                    recovery="request-new-draft",
-                )
-                rows[ident] = row
-                self._put(rows)
-            state = "outcome-unknown" if row.get("state") == "executing" else row.get("state")
-            effect = "unknown" if row.get("state") == "executing" else row.get("effect", "none")
-            result = row.get("result", {})
-            safe_result = {}
-            if isinstance(result, dict):
-                if isinstance(result.get("id"), str):
-                    safe_result["id"] = result["id"]
-                for field in ("updated", "cancelled"):
-                    if result.get(field) is True:
-                        safe_result[field] = True
-            return {
-                "id": ident,
-                "action": row.get("action", "create"),
-                "state": state,
-                "payload_hash": row.get("hash", ""),
-                "event_ref_hash": hashlib.sha256(str(row.get("event_id", "")).encode()).hexdigest() if row.get("event_id") else "",
-                "result": safe_result,
-                "error_class": row.get("error_class", ""),
-                "effect": effect,
-                "recovery": row.get("recovery", ""),
-            }
+        dispatch_guard = (
+            self.registry._dispatch_guard(owner, (CALENDAR_WRITE_CONNECTOR_ID,))
+            if self.registry is not None else nullcontext()
+        )
+        with dispatch_guard:
+            with _LOCK:
+                rows = self._rows()
+                row = self._owned(rows, ident, owner)
+                if row.get("state") == "approved" and self._now() >= row.get("expires", 0):
+                    row.update(
+                        state="expired",
+                        error_class="approval-expired",
+                        effect="none",
+                        recovery="request-new-draft",
+                    )
+                    rows[ident] = row
+                    self._put(rows)
+                self._invalidate_stale_approval(rows, row, ident, owner)
+                state = "outcome-unknown" if row.get("state") == "executing" else row.get("state")
+                effect = "unknown" if row.get("state") == "executing" else row.get("effect", "none")
+                result = row.get("result", {})
+                safe_result = {}
+                if isinstance(result, dict):
+                    if isinstance(result.get("id"), str):
+                        safe_result["id"] = result["id"]
+                    for field in ("updated", "cancelled"):
+                        if result.get(field) is True:
+                            safe_result[field] = True
+                return {
+                    "id": ident,
+                    "action": row.get("action", "create"),
+                    "state": state,
+                    "payload_hash": row.get("hash", ""),
+                    "event_ref_hash": hashlib.sha256(str(row.get("event_id", "")).encode()).hexdigest() if row.get("event_id") else "",
+                    "result": safe_result,
+                    "error_class": row.get("error_class", ""),
+                    "effect": effect,
+                    "recovery": row.get("recovery", ""),
+                }
 
     def _now(self) -> float:
         try:

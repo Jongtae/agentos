@@ -86,6 +86,13 @@ class MemoryServiceTests(unittest.TestCase):
 
     def test_candidate_rejection_is_exact_and_never_creates_memory(self):
         candidate = self.service.propose("owner-a", "work-a", "food", "vegetarian")
+        self.service.request_candidate_approval(
+            "owner-a", "work-a", candidate["id"], candidate["content_digest"]
+        )
+        self.store.issue_exact_memory_approval(
+            "owner-b", "work-b", "accept-candidate", candidate["id"], "other-owner-key",
+            candidate["content_digest"], candidate["content_digest"], now=self.now[0]
+        )
         with self.assertRaises(ValueError):
             self.service.reject_candidate("owner-a", "wrong-work", candidate["id"], candidate["content_digest"])
         with self.assertRaises(ValueError):
@@ -102,7 +109,23 @@ class MemoryServiceTests(unittest.TestCase):
         self.assertEqual(rejected["memory_key"], "")
         with self.store.db() as db:
             stored = db.execute("SELECT memory_key,content FROM memory_candidates WHERE id=?", (candidate["id"],)).fetchone()
+            approvals = db.execute("SELECT owner_key,memory_key FROM memory_approvals WHERE subject_id=?", (candidate["id"],)).fetchall()
         self.assertEqual((stored["memory_key"], stored["content"]), ("", ""))
+        self.assertEqual([(row["owner_key"], row["memory_key"]) for row in approvals], [
+            (self.store._memory_binding("owner-b"), "other-owner-key")
+        ])
+        archive = export_owner_state(self.root, self.root / "rejected-owner.tar.gz")
+        restored = QuickStore(restore_owner_state(archive, self.root.parent / "restored-rejected"))
+        with restored.db() as db:
+            restored_candidate = db.execute("SELECT memory_key,content FROM memory_candidates WHERE id=?", (candidate["id"],)).fetchone()
+            restored_approvals = db.execute("SELECT owner_key,memory_key FROM memory_approvals WHERE subject_id=?", (candidate["id"],)).fetchall()
+        self.assertEqual((restored_candidate["memory_key"], restored_candidate["content"]), ("", ""))
+        self.assertEqual([(row["owner_key"], row["memory_key"]) for row in restored_approvals], [
+            (self.store._memory_binding("owner-b"), "other-owner-key")
+        ])
+        portable_bytes = (Path(restored.root) / "private" / "quickstart.db").read_bytes()
+        self.assertNotIn(b"vegetarian", portable_bytes)
+        self.assertNotIn(b"food", portable_bytes)
         self.assertEqual(self.store.memories("owner-a"), [])
 
     def test_personal_space_candidate_delete_atomically_revokes_issued_approval(self):

@@ -382,14 +382,17 @@ class QuickStore:
             return result
 
     def reject_memory_candidate(self, owner_id, work_id, candidate_id, content_digest, now=None):
+        owner_key=self._memory_binding(owner_id);work_key=self._memory_binding(work_id)
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
             row=db.execute('SELECT * FROM memory_candidates WHERE id=? AND owner_key=? AND work_key=?',
-                           (candidate_id,self._memory_binding(owner_id),self._memory_binding(work_id))).fetchone()
+                           (candidate_id,owner_key,work_key)).fetchone()
             if not row or not hmac.compare_digest(str(row['content_digest']),str(content_digest)):raise ValueError('기억 후보를 다시 확인하세요.')
             if row['state']=='rejected':
                 return {key:row[key] for key in ('id','memory_key','content','created','state','content_digest','decided','resulting_memory_id')}
             if row['state']!='pending':raise ValueError('이미 결정된 기억 후보입니다.')
+            db.execute('DELETE FROM memory_approvals WHERE owner_key=? AND work_key=? AND subject_id=?',
+                       (owner_key,work_key,candidate_id))
             db.execute("UPDATE memory_candidates SET state='rejected',decided=?,memory_key='',content='' WHERE id=? AND state='pending'",(time.time() if now is None else float(now),candidate_id))
             result=db.execute('SELECT * FROM memory_candidates WHERE id=?',(candidate_id,)).fetchone()
             return {key:result[key] for key in ('id','memory_key','content','created','state','content_digest','decided','resulting_memory_id')}

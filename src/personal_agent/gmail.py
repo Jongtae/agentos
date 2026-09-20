@@ -648,7 +648,14 @@ class GmailConnector:
             try:
                 current_tokens = self.store.secret(TOKEN_SECRET_KEY)
             except GmailError:
-                raise GmailReauthenticationRequired("reauth_required") from None
+                if (
+                    current.state is ConnectorState.CONNECTED
+                    and current.connection_revision == connection_revision
+                ):
+                    self.store.secret(TOKEN_SECRET_KEY, {})
+                    self.registry.transition(owner_id, GMAIL_CONNECTOR_ID, ConnectorState.REAUTH_REQUIRED)
+                    raise GmailReauthenticationRequired("reauth_required") from None
+                raise GmailError("superseded_connection") from None
             if (
                 current.state is not ConnectorState.CONNECTED
                 or current.connection_revision != connection_revision
@@ -707,10 +714,14 @@ class GmailConnector:
             raise GmailError("invalid_provider_response")
         candidate_count = 0
         visited_count = 0
+        exhausted = False
 
         def visit(part: object, depth: int = 0) -> list[tuple[str, str | None, str | None, str | None]]:
-            nonlocal candidate_count, visited_count
-            if not isinstance(part, dict) or depth > 20 or visited_count >= 100:
+            nonlocal candidate_count, visited_count, exhausted
+            if not isinstance(part, dict):
+                return []
+            if depth > 20 or visited_count >= 100:
+                exhausted = True
                 return []
             visited_count += 1
             mime_type = part.get("mimeType")
@@ -766,8 +777,11 @@ class GmailConnector:
             children: list[list[tuple[str, str | None, str | None, str | None]]] = []
             parts = part.get("parts", [])
             if isinstance(parts, list):
+                if len(parts) > 100:
+                    exhausted = True
                 for child in parts[:100]:
                     if visited_count >= 100:
+                        exhausted = True
                         break
                     rendered = visit(child, depth + 1)
                     if rendered:
@@ -780,6 +794,8 @@ class GmailConnector:
             return [candidate for group in children for candidate in group]
 
         candidates = visit(payload)
+        if exhausted:
+            raise GmailError("message_too_complex")
         if not candidates:
             return "", _bounded_text(payload.get("mimeType"), 160)
         decoded_parts: list[str] = []

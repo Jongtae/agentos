@@ -459,9 +459,30 @@ class GmailConnectorTests(unittest.TestCase):
             }
         )
 
-        message = self.read()
-        self.assertEqual(message.body, "")
-        self.assertEqual(message.mime_type, "multipart/mixed")
+        with self.assertRaises(GmailError) as bounded:
+            self.read()
+        self.assertEqual(bounded.exception.reason, "message_too_complex")
+
+    def test_oversized_mime_tree_never_returns_a_partial_body(self):
+        self.connect()
+        self.responses.append(
+            {
+                "id": "m_1",
+                "threadId": "t_1",
+                "payload": {
+                    "mimeType": "multipart/mixed",
+                    "parts": [
+                        {
+                            "mimeType": "text/plain",
+                            "body": {"data": base64.urlsafe_b64encode(b"partial").decode()},
+                        }
+                    ] + [{"mimeType": "application/octet-stream", "body": {}} for _ in range(100)],
+                },
+            }
+        )
+        with self.assertRaises(GmailError) as bounded:
+            self.read()
+        self.assertEqual(bounded.exception.reason, "message_too_complex")
 
     def test_body_ignores_text_attachments_and_honors_declared_charset(self):
         self.connect()
@@ -762,6 +783,19 @@ class GmailConnectorTests(unittest.TestCase):
         self.assertIsInstance(error.exception, GmailReauthenticationRequired)
         self.assertEqual(error.exception.reason, "reauth_required")
         self.assertEqual(str(error.exception), "Gmail request rejected")
+        self.assertEqual(self.gmail.status("owner-a")["state"], "reauth_required")
+        self.assertEqual(self.store.secret("gmail_oauth_tokens"), {})
+
+    def test_inflight_token_corruption_revokes_matching_connected_revision(self):
+        self.connect()
+
+        def corrupt_after_dispatch(_method, _endpoint, _params, _headers):
+            self.raw_store.secret("encrypted:gmail:gmail_oauth_tokens", "not-a-valid-token")
+            return {"messages": []}
+
+        self.gmail.transport = corrupt_after_dispatch
+        with self.assertRaises(GmailReauthenticationRequired):
+            self.gmail.search("owner-a", "receipt")
         self.assertEqual(self.gmail.status("owner-a")["state"], "reauth_required")
         self.assertEqual(self.store.secret("gmail_oauth_tokens"), {})
 

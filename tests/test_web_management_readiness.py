@@ -3,7 +3,12 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import tempfile
 import unittest
+from urllib.parse import parse_qs, urlsplit
+
+from personal_agent.quickstart_service import AgentService
+from personal_agent.quickstart_store import QuickStore
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -97,6 +102,46 @@ console.log(JSON.stringify({checks:6}));
         self.assertIn('proof!==modelDraftFingerprint(modelDraft())', app)
         self.assertIn("method||(body===undefined?'GET':'POST')", app)
         self.assertIn("'/api/personal-space/'+item.deleteKind", app)
+
+    def test_synthetic_telegram_request_reaches_web_read_models_without_web_chat(self):
+        calls = []
+
+        def telegram_fixture(url, body, headers=None, timeout=60):
+            calls.append((url, body))
+            if url.endswith('/getMe'):
+                return {'ok': True, 'result': {'username': 'fixture_bot'}}
+            if url.endswith('/getWebhookInfo'):
+                return {'ok': True, 'result': {'url': ''}}
+            if url.endswith('/sendMessage'):
+                return {'ok': True, 'result': {'message_id': len(calls)}}
+            raise AssertionError(url)
+
+        with tempfile.TemporaryDirectory() as folder:
+            store = QuickStore(folder)
+            service = AgentService(store, telegram_transport=telegram_fixture)
+            link = service.connect_telegram({'token': '123456:FIXTURE_TOKEN'})['url']
+            code = parse_qs(urlsplit(link).query)['start'][0]
+            generation = store.config('telegram')['generation']
+            service.ingest_update({'update_id': 1, 'message': {
+                'from': {'id': 42}, 'chat': {'id': 42, 'type': 'private'},
+                'text': '/start ' + code}}, generation)
+            service.ingest_update({'update_id': 2, 'message': {
+                'from': {'id': 42}, 'chat': {'id': 42, 'type': 'private'},
+                'text': '/note browser-visible'}}, generation)
+            self.assertTrue(service.run_one())
+            service.deliver_one()
+            self.assertTrue(service.run_one())
+            service.deliver_one()
+            job = store.jobs()[0]
+            self.assertTrue(job['channel'].startswith('telegram:'))
+            self.assertIn('메모를 저장했습니다', job['response'])
+            self.assertEqual(job['delivery'], 'sent')
+            self.assertEqual(store.notes()[0]['content'], 'browser-visible')
+            selected = service.task_progress(job['id'])['selected']
+            self.assertEqual(selected['id'], job['id'])
+            self.assertTrue(selected['result_available'])
+            html = (ROOT / 'src/personal_agent/web/index.html').read_text()
+            self.assertNotIn('id="chat-form"', html)
 
 
 if __name__ == '__main__':

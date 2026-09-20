@@ -1,0 +1,571 @@
+"""Owner-bound, read-only Gmail connector for the PA1 first completion.
+
+OAuth state and credentials stay in the encrypted owner-local secret boundary.
+Only redacted lifecycle metadata is delegated to :mod:`connector_contract`.
+The provider surface is deliberately limited to bounded search/metadata reads
+and an explicit selected-message body read; this module has no Gmail mutation
+request primitive.
+"""
+
+from __future__ import annotations
+
+import base64
+from dataclasses import dataclass
+import hashlib
+import hmac
+import json
+import math
+import re
+import secrets
+import threading
+import time
+from typing import Callable
+from urllib.parse import quote, urlencode, urlsplit
+
+from cryptography.fernet import Fernet, InvalidToken
+
+from .connector_contract import (
+    ConnectorContractError,
+    ConnectorRegistry,
+    ConnectorSpec,
+    ConnectorState,
+)
+
+
+GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+GMAIL_CONNECTOR_ID = "google-gmail-read"
+GMAIL_CONNECTOR = ConnectorSpec(GMAIL_CONNECTOR_ID, (GMAIL_READONLY_SCOPE,))
+AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
+MESSAGES_ENDPOINT = "https://gmail.googleapis.com/gmail/v1/users/me/messages"
+PENDING_SECRET_KEY = "gmail_oauth_pending"
+TOKEN_SECRET_KEY = "gmail_oauth_tokens"
+_MAX_RESULTS = 20
+_MAX_QUERY_LENGTH = 512
+_MAX_BODY_BYTES = 1_048_576
+_MESSAGE_ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
+_OAUTH_LOCK = threading.RLock()
+
+
+class GmailError(ValueError):
+    """A fail-closed Gmail error whose text does not disclose private data."""
+
+    def __init__(self, reason: str = "rejected"):
+        super().__init__("Gmail request rejected")
+        self.reason = reason
+
+
+class GmailReauthenticationRequired(GmailError):
+    pass
+
+
+class EncryptedGmailSecretStore:
+    """Encrypt Gmail-only OAuth secrets using a caller-owned local key.
+
+    The key is never persisted here. Copying the ordinary owner database or
+    its connection file alone therefore does not reveal OAuth state or tokens.
+    """
+
+    encrypted_secrets = True
+
+    def __init__(self, store, key: str | bytes):
+        if not isinstance(key, (str, bytes)):
+            raise ValueError("A local encryption key is required for Gmail OAuth.")
+        try:
+            self._cipher = Fernet(key.encode() if isinstance(key, str) else key)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("A valid local encryption key is required for Gmail OAuth.") from exc
+        self._store = store
+
+    def secret(self, key: str, value=None):
+        namespaced = "encrypted:gmail:" + key
+        if value is not None:
+            payload = json.dumps(value, separators=(",", ":")).encode()
+            self._store.secret(namespaced, self._cipher.encrypt(payload).decode())
+        raw = self._store.secret(namespaced)
+        if not raw:
+            return ""
+        try:
+            return json.loads(self._cipher.decrypt(str(raw).encode()).decode())
+        except (InvalidToken, TypeError, ValueError, json.JSONDecodeError):
+            raise GmailError("unreadable_secret") from None
+
+    def config(self, key: str, default=None):
+        return self._store.config(key, default)
+
+    def put(self, key: str, value) -> None:
+        self._store.put(key, value)
+
+
+@dataclass(frozen=True, repr=False)
+class GmailSearchResult:
+    message_id: str
+    thread_id: str
+    subject: str
+    sender: str
+    date: str
+
+    @property
+    def source(self) -> dict:
+        return {
+            "provider": "gmail",
+            "resource": "message",
+            "message_id": self.message_id,
+            "thread_id": self.thread_id,
+        }
+
+    def as_dict(self) -> dict:
+        return {
+            "message_id": self.message_id,
+            "thread_id": self.thread_id,
+            "subject": self.subject,
+            "sender": self.sender,
+            "date": self.date,
+            "source": self.source,
+        }
+
+    def __repr__(self) -> str:
+        return f"GmailSearchResult(message_id={self.message_id!r}, metadata=<redacted>)"
+
+
+@dataclass(frozen=True, repr=False)
+class GmailMessage:
+    """An ephemeral explicit body read; callers must not persist ``body``."""
+
+    message_id: str
+    thread_id: str
+    mime_type: str
+    body: str
+
+    @property
+    def source(self) -> dict:
+        return {
+            "provider": "gmail",
+            "resource": "message",
+            "message_id": self.message_id,
+            "thread_id": self.thread_id,
+        }
+
+    def as_dict(self) -> dict:
+        """Return the private task result for the immediate authorized caller."""
+        return {
+            "message_id": self.message_id,
+            "thread_id": self.thread_id,
+            "mime_type": self.mime_type,
+            "body": self.body,
+            "source": self.source,
+        }
+
+    def as_evidence(self) -> dict:
+        """Return portable source evidence without private message content."""
+        return {"source": self.source, "body_included": False}
+
+    def __repr__(self) -> str:
+        return f"GmailMessage(message_id={self.message_id!r}, body=<redacted>)"
+
+
+def _owner_key(owner_id: str) -> str:
+    if not isinstance(owner_id, str) or not owner_id.strip() or len(owner_id) > 200:
+        raise GmailError("invalid_owner")
+    return hashlib.sha256(owner_id.encode()).hexdigest()
+
+
+def _finite_now(now: Callable[[], float]) -> float:
+    value = now()
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise GmailError("invalid_clock")
+    return float(value)
+
+
+def _pkce_pair() -> tuple[str, str]:
+    verifier = secrets.token_urlsafe(64)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+    return verifier, challenge
+
+
+def _bounded_text(value: object, maximum: int) -> str:
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.split())[:maximum]
+
+
+class GmailConnector:
+    """Minimum-authority Gmail OAuth, bounded search, and explicit body read."""
+
+    def __init__(
+        self,
+        store,
+        client_id: str,
+        redirect_uri: str,
+        *,
+        registry: ConnectorRegistry | None = None,
+        transport: Callable | None = None,
+        now: Callable[[], float] = time.time,
+        oauth_ttl_seconds: float = 600,
+        allow_localhost: bool = False,
+    ):
+        if not getattr(store, "encrypted_secrets", False):
+            raise ValueError("Gmail OAuth requires an encrypted owner-local secret store.")
+        if not isinstance(client_id, str) or not client_id.strip() or len(client_id) > 512:
+            raise ValueError("A Gmail OAuth client id is required.")
+        parsed = urlsplit(redirect_uri) if isinstance(redirect_uri, str) else None
+        is_loopback = bool(
+            parsed
+            and parsed.scheme == "http"
+            and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+        )
+        if (
+            not parsed
+            or not parsed.hostname
+            or len(redirect_uri) > 2048
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.fragment
+            or (parsed.scheme != "https" and not (allow_localhost and is_loopback))
+        ):
+            raise ValueError("The Gmail OAuth callback must use HTTPS or an explicitly allowed loopback URL.")
+        if (
+            isinstance(oauth_ttl_seconds, bool)
+            or not isinstance(oauth_ttl_seconds, (int, float))
+            or not 1 <= oauth_ttl_seconds <= 1800
+        ):
+            raise ValueError("Gmail OAuth state lifetime must be between one and 1,800 seconds.")
+        self.store = store
+        self.client_id = client_id
+        self.redirect_uri = redirect_uri
+        self.transport = transport
+        self.now = now
+        self.oauth_ttl_seconds = float(oauth_ttl_seconds)
+        self.registry = registry or ConnectorRegistry(store, (GMAIL_CONNECTOR,), clock=now)
+        self.registry.register(GMAIL_CONNECTOR)
+
+    def status(self, owner_id: str) -> dict:
+        """Return restart-safe lifecycle metadata with no OAuth or mail data."""
+        return self.registry.status(owner_id, GMAIL_CONNECTOR_ID).as_dict()
+
+    def portable_status(self, owner_id: str) -> dict:
+        return self.status(owner_id)
+
+    def connection_required(self, owner_id: str) -> dict:
+        return self.registry.required_result(owner_id, GMAIL_CONNECTOR_ID).as_dict()
+
+    def begin_oauth(self, owner_id: str) -> dict:
+        current = self.registry.status(owner_id, GMAIL_CONNECTOR_ID)
+        if current.state is ConnectorState.CONNECTED:
+            raise GmailError("already_connected")
+        if current.state is ConnectorState.BLOCKED:
+            raise GmailError("blocked")
+        owner = _owner_key(owner_id)
+        created_at = _finite_now(self.now)
+        verifier, challenge = _pkce_pair()
+        nonce = secrets.token_urlsafe(32)
+        signing_key = secrets.token_bytes(32)
+        signature = hmac.new(signing_key, f"{owner}:{nonce}".encode(), hashlib.sha256).hexdigest()
+        state = nonce + "." + signature
+        pending = {
+            "status": "pending",
+            "owner": owner,
+            "state": state,
+            "signing_key": base64.urlsafe_b64encode(signing_key).decode(),
+            "verifier": verifier,
+            "created_at": created_at,
+            "expires_at": created_at + self.oauth_ttl_seconds,
+        }
+        with _OAUTH_LOCK:
+            self.store.secret(PENDING_SECRET_KEY, pending)
+        query = {
+            "client_id": self.client_id,
+            "redirect_uri": self.redirect_uri,
+            "response_type": "code",
+            "scope": GMAIL_READONLY_SCOPE,
+            "access_type": "offline",
+            "include_granted_scopes": "false",
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+            "state": state,
+        }
+        required = self.registry.required_result(owner_id, GMAIL_CONNECTOR_ID).as_dict()
+        return {
+            **required,
+            "authorization_url": AUTHORIZATION_ENDPOINT + "?" + urlencode(query),
+            "expires_at": pending["expires_at"],
+        }
+
+    def complete_oauth(self, owner_id: str, callback: dict, exchange: Callable[[dict], dict]) -> dict:
+        if not isinstance(callback, dict) or not callable(exchange):
+            raise GmailError("invalid_callback")
+        with _OAUTH_LOCK:
+            pending = self._pending(owner_id, callback.get("state"))
+            # Consume before inspecting the code or contacting the provider so
+            # every callback, including failure, is single use across handlers.
+            self.store.secret(PENDING_SECRET_KEY, {"status": "used"})
+            if callback.get("error"):
+                raise GmailError("authorization_denied")
+            code = callback.get("code")
+            if not isinstance(code, str) or not code or len(code) > 4096:
+                raise GmailError("invalid_callback")
+            request = {
+                "code": code,
+                "code_verifier": pending["verifier"],
+                "redirect_uri": self.redirect_uri,
+                "client_id": self.client_id,
+                "grant_type": "authorization_code",
+            }
+            try:
+                response = exchange(request)
+            except Exception:
+                raise GmailError("token_exchange_failed") from None
+            tokens = self._validated_tokens(response, pending["owner"])
+            self.store.secret(TOKEN_SECRET_KEY, tokens)
+            try:
+                self.registry.transition(
+                    owner_id,
+                    GMAIL_CONNECTOR_ID,
+                    ConnectorState.CONNECTED,
+                    granted_scopes=(GMAIL_READONLY_SCOPE,),
+                )
+            except Exception:
+                # Never leave usable credentials behind if durable lifecycle
+                # metadata cannot be committed.
+                self.store.secret(TOKEN_SECRET_KEY, {})
+                raise GmailError("connection_commit_failed") from None
+            return self.status(owner_id)
+
+    def search(self, owner_id: str, query: str, *, max_results: int = 10) -> tuple[GmailSearchResult, ...]:
+        if not isinstance(query, str) or not query.strip() or len(query) > _MAX_QUERY_LENGTH:
+            raise GmailError("invalid_query")
+        if isinstance(max_results, bool) or not isinstance(max_results, int) or not 1 <= max_results <= _MAX_RESULTS:
+            raise GmailError("invalid_limit")
+        headers = self._authorization_headers(owner_id)
+        response = self._get(
+            owner_id,
+            MESSAGES_ENDPOINT,
+            {"q": query.strip(), "maxResults": max_results, "includeSpamTrash": False},
+            headers,
+        )
+        messages = response.get("messages", [])
+        if not isinstance(messages, list):
+            raise GmailError("invalid_provider_response")
+        results = []
+        for reference in messages[:max_results]:
+            if not isinstance(reference, dict):
+                raise GmailError("invalid_provider_response")
+            message_id = self._message_id(reference.get("id"))
+            metadata = self._get(
+                owner_id,
+                MESSAGES_ENDPOINT + "/" + quote(message_id, safe=""),
+                {
+                    "format": "metadata",
+                    "metadataHeaders": ["Subject", "From", "Date"],
+                },
+                headers,
+            )
+            results.append(self._search_result(message_id, metadata))
+        return tuple(results)
+
+    def read_message(self, owner_id: str, message_id: str) -> GmailMessage:
+        """Explicitly fetch one attributed body without retaining it locally."""
+        message_id = self._message_id(message_id)
+        headers = self._authorization_headers(owner_id)
+        response = self._get(
+            owner_id,
+            MESSAGES_ENDPOINT + "/" + quote(message_id, safe=""),
+            {"format": "full"},
+            headers,
+        )
+        returned_id = self._message_id(response.get("id"))
+        if returned_id != message_id:
+            raise GmailError("invalid_provider_response")
+        thread_id = self._message_id(response.get("threadId"))
+        body, mime_type = self._body(response.get("payload"))
+        return GmailMessage(message_id, thread_id, mime_type, body)
+
+    def mark_reauthentication_required(self, owner_id: str) -> dict:
+        """Clear Gmail credentials and fail closed after expiry or revocation."""
+        self.store.secret(TOKEN_SECRET_KEY, {})
+        self.registry.transition(owner_id, GMAIL_CONNECTOR_ID, ConnectorState.REAUTH_REQUIRED)
+        return self.status(owner_id)
+
+    def _pending(self, owner_id: str, state: object) -> dict:
+        pending = self.store.secret(PENDING_SECRET_KEY)
+        if not isinstance(pending, dict) or pending.get("status") != "pending":
+            raise GmailError("missing_or_replayed_state")
+        owner = _owner_key(owner_id)
+        if owner != pending.get("owner"):
+            raise GmailError("wrong_owner")
+        if not isinstance(state, str) or not secrets.compare_digest(state, str(pending.get("state", ""))):
+            raise GmailError("state_mismatch")
+        try:
+            nonce, signature = state.rsplit(".", 1)
+            encoded_key = pending["signing_key"]
+            if not isinstance(encoded_key, str):
+                raise ValueError("signing key")
+            signing_key = base64.b64decode(
+                encoded_key + "=" * (-len(encoded_key) % 4),
+                altchars=b"-_",
+                validate=True,
+            )
+            if len(signing_key) != 32:
+                raise ValueError("signing key")
+            expected = hmac.new(signing_key, f"{owner}:{nonce}".encode(), hashlib.sha256).hexdigest()
+        except (AttributeError, KeyError, TypeError, ValueError):
+            raise GmailError("invalid_state") from None
+        if not hmac.compare_digest(signature, expected):
+            raise GmailError("state_mismatch")
+        expires_at = pending.get("expires_at")
+        if (
+            isinstance(expires_at, bool)
+            or not isinstance(expires_at, (int, float))
+            or not math.isfinite(expires_at)
+        ):
+            raise GmailError("invalid_state")
+        if _finite_now(self.now) >= expires_at:
+            self.store.secret(PENDING_SECRET_KEY, {"status": "used"})
+            raise GmailError("state_expired")
+        verifier = pending.get("verifier")
+        if (
+            not isinstance(verifier, str)
+            or not 43 <= len(verifier) <= 128
+            or re.fullmatch(r"[A-Za-z0-9._~-]+", verifier) is None
+        ):
+            raise GmailError("invalid_state")
+        return pending
+
+    def _validated_tokens(self, response: object, owner: str) -> dict:
+        if not isinstance(response, dict):
+            raise GmailError("token_exchange_failed")
+        access_token = response.get("access_token")
+        expires_in = response.get("expires_in")
+        granted = response.get("scope")
+        if (
+            not isinstance(access_token, str)
+            or not access_token
+            or len(access_token) > 16_384
+            or isinstance(expires_in, bool)
+            or not isinstance(expires_in, (int, float))
+            or not math.isfinite(expires_in)
+            or expires_in <= 0
+            or expires_in > 86_400
+            or set(str(granted).split()) != {GMAIL_READONLY_SCOPE}
+        ):
+            raise GmailError("token_exchange_failed")
+        tokens = {
+            "owner": owner,
+            "access_token": access_token,
+            "scope": GMAIL_READONLY_SCOPE,
+            "expires_at": _finite_now(self.now) + float(expires_in),
+        }
+        refresh_token = response.get("refresh_token")
+        if refresh_token is not None:
+            if not isinstance(refresh_token, str) or not refresh_token or len(refresh_token) > 16_384:
+                raise GmailError("token_exchange_failed")
+            tokens["refresh_token"] = refresh_token
+        return tokens
+
+    def _authorization_headers(self, owner_id: str) -> dict:
+        try:
+            self.registry.require_connected(owner_id, GMAIL_CONNECTOR_ID, (GMAIL_READONLY_SCOPE,))
+        except ConnectorContractError as exc:
+            if exc.reason == ConnectorState.REAUTH_REQUIRED.value:
+                raise GmailReauthenticationRequired("reauth_required") from None
+            raise GmailError("connection_required") from None
+        try:
+            tokens = self.store.secret(TOKEN_SECRET_KEY)
+        except GmailError:
+            # The encryption key or ciphertext is no longer usable. Revoke
+            # connector authority before offering recovery; never report the
+            # structurally connected metadata as usable.
+            self.mark_reauthentication_required(owner_id)
+            raise GmailReauthenticationRequired("reauth_required") from None
+        if not isinstance(tokens, dict) or tokens.get("owner") != _owner_key(owner_id):
+            self.mark_reauthentication_required(owner_id)
+            raise GmailReauthenticationRequired("reauth_required")
+        access_token = tokens.get("access_token")
+        expires_at = tokens.get("expires_at")
+        if (
+            not isinstance(access_token, str)
+            or not access_token
+            or isinstance(expires_at, bool)
+            or not isinstance(expires_at, (int, float))
+            or not math.isfinite(expires_at)
+            or _finite_now(self.now) >= expires_at
+            or tokens.get("scope") != GMAIL_READONLY_SCOPE
+        ):
+            self.mark_reauthentication_required(owner_id)
+            raise GmailReauthenticationRequired("reauth_required")
+        return {"Authorization": "Bearer " + access_token, "Accept": "application/json"}
+
+    def _get(self, owner_id: str, endpoint: str, params: dict, headers: dict) -> dict:
+        if not callable(self.transport):
+            raise GmailError("transport_unavailable")
+        try:
+            response = self.transport("GET", endpoint, params, headers)
+        except Exception:
+            raise GmailError("provider_unavailable") from None
+        if isinstance(response, dict):
+            status = response.get("status_code")
+            if status == 401:
+                self.mark_reauthentication_required(owner_id)
+                raise GmailReauthenticationRequired("reauth_required")
+            if isinstance(status, int) and status >= 400:
+                raise GmailError("provider_rejected")
+            return response
+        raise GmailError("invalid_provider_response")
+
+    @staticmethod
+    def _message_id(value: object) -> str:
+        if not isinstance(value, str) or not _MESSAGE_ID.fullmatch(value):
+            raise GmailError("invalid_message_id")
+        return value
+
+    def _search_result(self, requested_id: str, response: dict) -> GmailSearchResult:
+        if not isinstance(response, dict) or self._message_id(response.get("id")) != requested_id:
+            raise GmailError("invalid_provider_response")
+        thread_id = self._message_id(response.get("threadId"))
+        payload = response.get("payload")
+        raw_headers = payload.get("headers") if isinstance(payload, dict) else None
+        if not isinstance(raw_headers, list):
+            raise GmailError("invalid_provider_response")
+        headers: dict[str, str] = {}
+        for item in raw_headers[:100]:
+            if isinstance(item, dict) and isinstance(item.get("name"), str):
+                name = item["name"].lower()
+                if name in {"subject", "from", "date"} and name not in headers:
+                    headers[name] = _bounded_text(item.get("value"), {"subject": 512, "from": 320, "date": 128}[name])
+        return GmailSearchResult(
+            requested_id,
+            thread_id,
+            headers.get("subject", ""),
+            headers.get("from", ""),
+            headers.get("date", ""),
+        )
+
+    def _body(self, payload: object) -> tuple[str, str]:
+        if not isinstance(payload, dict):
+            raise GmailError("invalid_provider_response")
+        candidates: list[tuple[str, str]] = []
+
+        def visit(part: object, depth: int = 0) -> None:
+            if not isinstance(part, dict) or depth > 20 or len(candidates) >= 100:
+                return
+            mime_type = part.get("mimeType")
+            body = part.get("body")
+            if mime_type in {"text/plain", "text/html"} and isinstance(body, dict) and isinstance(body.get("data"), str):
+                candidates.append((mime_type, body["data"]))
+            parts = part.get("parts", [])
+            if isinstance(parts, list):
+                for child in parts[:100]:
+                    visit(child, depth + 1)
+
+        visit(payload)
+        if not candidates:
+            return "", _bounded_text(payload.get("mimeType"), 160)
+        mime_type, encoded = next((item for item in candidates if item[0] == "text/plain"), candidates[0])
+        if len(encoded) > (_MAX_BODY_BYTES * 4 // 3) + 8:
+            raise GmailError("body_too_large")
+        try:
+            decoded = base64.b64decode(encoded + "=" * (-len(encoded) % 4), altchars=b"-_", validate=True)
+        except (TypeError, ValueError):
+            raise GmailError("invalid_provider_response") from None
+        if len(decoded) > _MAX_BODY_BYTES:
+            raise GmailError("body_too_large")
+        return decoded.decode("utf-8", errors="replace"), mime_type

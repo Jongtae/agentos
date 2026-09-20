@@ -1,0 +1,332 @@
+import base64
+import tempfile
+import unittest
+from urllib.parse import parse_qs, urlparse
+
+from cryptography.fernet import Fernet
+
+from personal_agent.connector_contract import ConnectorRegistry, ConnectorState
+from personal_agent.gmail import (
+    GMAIL_CONNECTOR,
+    GMAIL_CONNECTOR_ID,
+    GMAIL_READONLY_SCOPE,
+    MESSAGES_ENDPOINT,
+    EncryptedGmailSecretStore,
+    GmailConnector,
+    GmailError,
+    GmailReauthenticationRequired,
+)
+from personal_agent.quickstart_store import QuickStore
+
+
+class GmailConnectorTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.key = Fernet.generate_key()
+        self.raw_store = QuickStore(self.temp.name)
+        self.store = EncryptedGmailSecretStore(self.raw_store, self.key)
+        self.clock = [1000.0]
+        self.calls = []
+        self.responses = []
+
+        def transport(method, endpoint, params, headers):
+            self.calls.append((method, endpoint, params, headers))
+            if not self.responses:
+                raise AssertionError("unexpected Gmail transport call")
+            return self.responses.pop(0)
+
+        self.registry = ConnectorRegistry(self.store, (GMAIL_CONNECTOR,), clock=lambda: self.clock[0])
+        self.gmail = GmailConnector(
+            self.store,
+            "gmail-client",
+            "https://connect.example.test/gmail/callback",
+            registry=self.registry,
+            transport=transport,
+            now=lambda: self.clock[0],
+        )
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def begin(self, owner="owner-a"):
+        offer = self.gmail.begin_oauth(owner)
+        state = parse_qs(urlparse(offer["authorization_url"]).query)["state"][0]
+        return offer, state
+
+    def connect(self, owner="owner-a", access_token="access-secret", refresh_token="refresh-secret"):
+        _offer, state = self.begin(owner)
+        seen = []
+
+        def exchange(request):
+            seen.append(request)
+            return {
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "expires_in": 60,
+                "scope": GMAIL_READONLY_SCOPE,
+            }
+
+        result = self.gmail.complete_oauth(owner, {"state": state, "code": "oauth-code"}, exchange)
+        return result, seen[0]
+
+    @staticmethod
+    def metadata(message_id="m_1", thread_id="t_1"):
+        return {
+            "id": message_id,
+            "threadId": thread_id,
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": "Booking receipt"},
+                    {"name": "From", "value": "Vendor <vendor@example.test>"},
+                    {"name": "Date", "value": "Mon, 1 Sep 2026 10:00:00 +0000"},
+                ]
+            },
+        }
+
+    def test_disconnected_offer_is_owner_bound_redacted_and_minimum_scope_pkce(self):
+        self.assertEqual(
+            self.gmail.connection_required("owner-a"),
+            {
+                "result": "connection_required",
+                "connector_id": GMAIL_CONNECTOR_ID,
+                "required_scopes": [GMAIL_READONLY_SCOPE],
+                "recovery": "connect",
+            },
+        )
+        offer, _state = self.begin()
+        query = parse_qs(urlparse(offer["authorization_url"]).query)
+        self.assertEqual(query["scope"], [GMAIL_READONLY_SCOPE])
+        self.assertEqual(query["code_challenge_method"], ["S256"])
+        self.assertEqual(query["include_granted_scopes"], ["false"])
+        self.assertNotIn("code_verifier", query)
+        self.assertNotIn("owner-a", str(offer))
+        self.assertNotIn("token", str(self.gmail.portable_status("owner-a")).lower())
+        self.assertEqual(self.gmail.status("owner-b")["state"], "disconnected")
+
+    def test_callback_uses_exact_pkce_exchange_and_separate_gmail_authority(self):
+        result, request = self.connect()
+        self.assertEqual(result["state"], "connected")
+        self.assertEqual(
+            set(request),
+            {"code", "code_verifier", "redirect_uri", "client_id", "grant_type"},
+        )
+        self.assertEqual(request["grant_type"], "authorization_code")
+        self.assertNotEqual(request["code_verifier"], "oauth-code")
+        self.assertEqual(result["granted_scopes"], [GMAIL_READONLY_SCOPE])
+        self.assertNotIn("drive", str(result).lower())
+        self.assertNotIn("calendar", str(result).lower())
+
+    def test_oauth_state_tamper_wrong_owner_expiry_and_replay_fail_closed(self):
+        _offer, state = self.begin()
+        with self.assertRaisesRegex(GmailError, "rejected") as wrong_owner:
+            self.gmail.complete_oauth("owner-b", {"state": state, "code": "code"}, lambda _: {})
+        self.assertEqual(wrong_owner.exception.reason, "wrong_owner")
+        with self.assertRaises(GmailError) as tampered:
+            self.gmail.complete_oauth("owner-a", {"state": state + "x", "code": "code"}, lambda _: {})
+        self.assertEqual(tampered.exception.reason, "state_mismatch")
+
+        self.clock[0] += 601
+        with self.assertRaises(GmailError) as expired:
+            self.gmail.complete_oauth("owner-a", {"state": state, "code": "code"}, lambda _: {})
+        self.assertEqual(expired.exception.reason, "state_expired")
+        with self.assertRaises(GmailError) as replay:
+            self.gmail.complete_oauth("owner-a", {"state": state, "code": "code"}, lambda _: {})
+        self.assertEqual(replay.exception.reason, "missing_or_replayed_state")
+        self.assertEqual(self.gmail.status("owner-a")["state"], "disconnected")
+
+    def test_successful_callback_is_single_use_and_rejects_wider_or_wrong_scope(self):
+        _result, request = self.connect()
+        pending = self.store.secret("gmail_oauth_pending")
+        self.assertEqual(pending, {"status": "used"})
+        with self.assertRaises(GmailError):
+            self.gmail.complete_oauth("owner-a", {"state": "replay", "code": "again"}, lambda _: {})
+        self.assertNotIn("access-secret", str(self.gmail.status("owner-a")))
+        self.assertNotIn("refresh-secret", str(self.gmail.portable_status("owner-a")))
+        self.assertNotIn(request["code_verifier"], str(self.gmail.status("owner-a")))
+
+        other_temp = tempfile.TemporaryDirectory()
+        self.addCleanup(other_temp.cleanup)
+        other_raw = QuickStore(other_temp.name)
+        other_store = EncryptedGmailSecretStore(other_raw, Fernet.generate_key())
+        other = GmailConnector(
+            other_store,
+            "client",
+            "https://connect.example.test/callback",
+            now=lambda: self.clock[0],
+        )
+        _offer, state = (
+            lambda value: (value, parse_qs(urlparse(value["authorization_url"]).query)["state"][0])
+        )(other.begin_oauth("owner-a"))
+        with self.assertRaises(GmailError):
+            other.complete_oauth(
+                "owner-a",
+                {"state": state, "code": "code"},
+                lambda _: {
+                    "access_token": "secret",
+                    "expires_in": 60,
+                    "scope": GMAIL_READONLY_SCOPE + " https://www.googleapis.com/auth/gmail.modify",
+                },
+            )
+        self.assertEqual(other.status("owner-a")["state"], "disconnected")
+
+    def test_plaintext_store_and_implicit_insecure_callback_are_rejected(self):
+        with self.assertRaises(ValueError):
+            GmailConnector(self.raw_store, "client", "https://connect.example.test/callback")
+        with self.assertRaises(ValueError):
+            GmailConnector(self.store, "client", "http://localhost:8787/callback")
+        local = GmailConnector(
+            self.store,
+            "client",
+            "http://127.0.0.1:8787/callback",
+            allow_localhost=True,
+        )
+        self.assertEqual(local.status("owner-a")["connector_id"], GMAIL_CONNECTOR_ID)
+
+    def test_search_is_bounded_metadata_only_with_exact_get_endpoints_and_parameters(self):
+        self.connect()
+        self.responses.extend(
+            [
+                {"messages": [{"id": "m_1", "threadId": "ignored"}]},
+                self.metadata(),
+            ]
+        )
+        results = self.gmail.search("owner-a", "newer_than:30d booking", max_results=3)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].subject, "Booking receipt")
+        self.assertEqual(results[0].source["message_id"], "m_1")
+        self.assertEqual(
+            [(call[0], call[1], call[2]) for call in self.calls],
+            [
+                (
+                    "GET",
+                    MESSAGES_ENDPOINT,
+                    {"q": "newer_than:30d booking", "maxResults": 3, "includeSpamTrash": False},
+                ),
+                (
+                    "GET",
+                    MESSAGES_ENDPOINT + "/m_1",
+                    {"format": "metadata", "metadataHeaders": ["Subject", "From", "Date"]},
+                ),
+            ],
+        )
+        self.assertTrue(all(call[0] == "GET" for call in self.calls))
+        self.assertTrue(all(set(call[2]).isdisjoint({"addLabelIds", "removeLabelIds", "raw"}) for call in self.calls))
+
+    def test_search_limits_and_provider_over_return_are_bounded(self):
+        self.connect()
+        for invalid in (0, 21, True):
+            with self.assertRaises(GmailError):
+                self.gmail.search("owner-a", "receipt", max_results=invalid)
+        with self.assertRaises(GmailError):
+            self.gmail.search("owner-a", "x" * 513)
+        self.responses.extend(
+            [
+                {"messages": [{"id": "m_1"}, {"id": "m_2"}]},
+                self.metadata("m_1", "t_1"),
+            ]
+        )
+        results = self.gmail.search("owner-a", "receipt", max_results=1)
+        self.assertEqual([item.message_id for item in results], ["m_1"])
+
+    def test_explicit_body_read_is_source_attributable_ephemeral_and_get_only(self):
+        self.connect()
+        encoded = base64.urlsafe_b64encode(b"private mail body").rstrip(b"=").decode()
+        self.responses.append(
+            {
+                "id": "m_1",
+                "threadId": "t_1",
+                "payload": {
+                    "mimeType": "multipart/alternative",
+                    "parts": [
+                        {"mimeType": "text/html", "body": {"data": base64.urlsafe_b64encode(b"<p>html</p>").decode()}},
+                        {"mimeType": "text/plain", "body": {"data": encoded}},
+                    ],
+                },
+            }
+        )
+        message = self.gmail.read_message("owner-a", "m_1")
+        self.assertEqual(message.body, "private mail body")
+        self.assertEqual(message.mime_type, "text/plain")
+        self.assertEqual(message.source["message_id"], "m_1")
+        self.assertEqual(message.as_evidence(), {"source": message.source, "body_included": False})
+        self.assertNotIn("private mail body", repr(message))
+        self.assertNotIn("private mail body", str(self.gmail.portable_status("owner-a")))
+        self.assertEqual(self.calls[-1][0:3], ("GET", MESSAGES_ENDPOINT + "/m_1", {"format": "full"}))
+        self.assertNotIn("private mail body", str(self.raw_store.config("connector_contract_state")))
+
+    def test_expiry_and_provider_revocation_clear_tokens_and_require_reauth(self):
+        self.connect()
+        self.clock[0] += 61
+        with self.assertRaises(GmailReauthenticationRequired):
+            self.gmail.search("owner-a", "receipt")
+        self.assertEqual(self.gmail.status("owner-a")["state"], "reauth_required")
+        self.assertEqual(self.store.secret("gmail_oauth_tokens"), {})
+        self.assertEqual(self.gmail.connection_required("owner-a")["recovery"], "reauthenticate")
+
+        _result, _request = self.connect()
+        self.responses.append({"status_code": 401, "error": "invalid credentials"})
+        with self.assertRaises(GmailReauthenticationRequired):
+            self.gmail.search("owner-a", "receipt")
+        self.assertEqual(self.gmail.status("owner-a")["state"], "reauth_required")
+        self.assertEqual(self.store.secret("gmail_oauth_tokens"), {})
+
+    def test_restart_restores_redacted_metadata_and_encrypted_credentials_only(self):
+        self.connect()
+        stored = self.raw_store.secret("encrypted:gmail:gmail_oauth_tokens")
+        self.assertIsInstance(stored, str)
+        self.assertNotIn("access-secret", stored)
+        restarted_raw = QuickStore(self.temp.name)
+        restarted_store = EncryptedGmailSecretStore(restarted_raw, self.key)
+        restarted_registry = ConnectorRegistry(restarted_store, (GMAIL_CONNECTOR,), clock=lambda: self.clock[0])
+        restarted_calls = []
+
+        def restarted_transport(method, endpoint, params, headers):
+            restarted_calls.append((method, endpoint, params, headers))
+            return {"messages": []}
+
+        restarted = GmailConnector(
+            restarted_store,
+            "gmail-client",
+            "https://connect.example.test/gmail/callback",
+            registry=restarted_registry,
+            transport=restarted_transport,
+            now=lambda: self.clock[0],
+        )
+        self.assertEqual(restarted.status("owner-a")["state"], "connected")
+        self.assertEqual(restarted.search("owner-a", "receipt"), ())
+        self.assertEqual(restarted_calls[0][0], "GET")
+        self.assertEqual(restarted_store.secret("gmail_oauth_tokens")["access_token"], "access-secret")
+        self.assertNotIn("access-secret", str(restarted.portable_status("owner-a")))
+
+    def test_wrong_owner_cannot_use_restarted_token_and_no_mutation_surface_exists(self):
+        self.connect()
+        with self.assertRaises(GmailError) as error:
+            self.gmail.search("owner-b", "receipt")
+        self.assertEqual(error.exception.reason, "connection_required")
+        self.assertEqual(self.calls, [])
+        for forbidden in (
+            "send",
+            "reply",
+            "forward",
+            "delete",
+            "archive",
+            "create_draft",
+            "modify_labels",
+            "watch",
+        ):
+            self.assertFalse(hasattr(self.gmail, forbidden), forbidden)
+
+    def test_corrupt_encrypted_secret_fails_closed_without_disclosure(self):
+        self.connect()
+        self.raw_store.secret("encrypted:gmail:gmail_oauth_tokens", "not-a-valid-token")
+        with self.assertRaises(GmailError) as error:
+            self.gmail.search("owner-a", "receipt")
+        self.assertIsInstance(error.exception, GmailReauthenticationRequired)
+        self.assertEqual(error.exception.reason, "reauth_required")
+        self.assertEqual(str(error.exception), "Gmail request rejected")
+        self.assertEqual(self.gmail.status("owner-a")["state"], "reauth_required")
+        self.assertEqual(self.store.secret("gmail_oauth_tokens"), {})
+
+
+if __name__ == "__main__":
+    unittest.main()

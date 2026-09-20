@@ -162,5 +162,40 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         self.assertIn("payment", text)
 
 
+    def test_dynamic_execution_profiles_are_machine_readable_and_inactive(self):
+        profiles = self.program["execution_profiles"]
+        self.assertEqual(set(profiles), {"economy", "standard", "critical"})
+        self.assertEqual((profiles["economy"]["preferred_model"], profiles["economy"]["preferred_reasoning"]), ("Luna", "Medium"))
+        self.assertEqual((profiles["standard"]["preferred_model"], profiles["standard"]["preferred_reasoning"]), ("Sol", "Medium"))
+        self.assertEqual((profiles["critical"]["preferred_model"], profiles["critical"]["preferred_reasoning"]), ("Sol", "High"))
+        self.assertEqual(self.program["routing_policy"]["default"], "standard")
+        self.assertEqual(self.program["active_substeps"], [])
+        self.assertEqual(self.plan["next_goal"]["status"], "owner-activated-goal-ready")
+
+    def test_child_initial_profiles_match_pa1_risk_routing(self):
+        expected = {
+            "PA1-FDN-01": "critical",
+            "PA1-INSTALL-01": "standard",
+            "PA1-GMAIL-01": "standard",
+            "PA1-CALENDAR-01": "standard",
+            "PA1-RESEARCH-01": "standard",
+            "PA1-MEMORY-01": "standard",
+            "WEB-ADMIN-01": "standard",
+            "PA1-CONV-01": "critical",
+            "PA1-INT-01": "critical",
+        }
+        self.assertEqual({key: self.items[key]["execution_profile"] for key in expected}, expected)
+
+    def test_dynamic_routing_contract_has_escalation_and_truthfulness_rules(self):
+        path = ROOT / self.program["contract"]
+        text = path.read_text(encoding="utf-8")
+        self.assertIn("## Dynamic worker capability routing", text)
+        self.assertIn("### Mandatory escalation", text)
+        self.assertIn("Escalation does not widen issue authority", text)
+        self.assertIn("`requested`, `tool_accepted`, and `observed_execution`", text)
+        self.assertIn("`observed_execution: unknown`", text)
+        self.assertIn("Tool acceptance is not proof of execution", self.program["routing_policy"]["truthfulness"])
+
+
 if __name__ == "__main__":
     unittest.main()

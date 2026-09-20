@@ -309,6 +309,40 @@ class GmailConnectorTests(unittest.TestCase):
         self.assertEqual(message.body, "<p>café</p>")
         self.assertEqual(message.mime_type, "text/html")
 
+    def test_body_does_not_traverse_nested_attachment_subtrees(self):
+        self.connect()
+        self.responses.append(
+            {
+                "id": "m_1",
+                "threadId": "t_1",
+                "payload": {
+                    "mimeType": "multipart/mixed",
+                    "parts": [
+                        {
+                            "mimeType": "text/html",
+                            "body": {"data": base64.urlsafe_b64encode(b"<p>main body</p>").decode()},
+                        },
+                        {
+                            "mimeType": "message/rfc822",
+                            "filename": "attached.eml",
+                            "headers": [
+                                {"name": "Content-Disposition", "value": "attachment; filename=attached.eml"}
+                            ],
+                            "parts": [
+                                {
+                                    "mimeType": "text/plain",
+                                    "body": {"data": base64.urlsafe_b64encode(b"nested attachment").decode()},
+                                }
+                            ],
+                        },
+                    ],
+                },
+            }
+        )
+        message = self.gmail.read_message("owner-a", "m_1")
+        self.assertEqual(message.body, "<p>main body</p>")
+        self.assertEqual(message.mime_type, "text/html")
+
     def test_expiry_and_provider_revocation_clear_tokens_and_require_reauth(self):
         self.connect()
         self.clock[0] += 61
@@ -324,6 +358,31 @@ class GmailConnectorTests(unittest.TestCase):
             self.gmail.search("owner-a", "receipt")
         self.assertEqual(self.gmail.status("owner-a")["state"], "reauth_required")
         self.assertEqual(self.store.secret("gmail_oauth_tokens"), {})
+
+    def test_late_401_from_superseded_connection_does_not_revoke_new_token(self):
+        self.connect(access_token="token-a", refresh_token="refresh-a")
+
+        def reconnect_then_reject(_method, _endpoint, _params, _headers):
+            self.registry.transition("owner-a", GMAIL_CONNECTOR_ID, ConnectorState.DISCONNECTED)
+            _offer, state = self.begin()
+            self.gmail.complete_oauth(
+                "owner-a",
+                {"state": state, "code": "new-code"},
+                lambda _: {
+                    "access_token": "token-b",
+                    "refresh_token": "refresh-b",
+                    "expires_in": 60,
+                    "scope": GMAIL_READONLY_SCOPE,
+                },
+            )
+            return {"status_code": 401}
+
+        self.gmail.transport = reconnect_then_reject
+        with self.assertRaises(GmailError) as stale:
+            self.gmail.search("owner-a", "receipt")
+        self.assertEqual(stale.exception.reason, "superseded_connection")
+        self.assertEqual(self.gmail.status("owner-a")["state"], "connected")
+        self.assertEqual(self.store.secret("gmail_oauth_tokens")["access_token"], "token-b")
 
     def test_restart_restores_redacted_metadata_and_encrypted_credentials_only(self):
         self.connect()

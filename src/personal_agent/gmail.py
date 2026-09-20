@@ -347,12 +347,14 @@ class GmailConnector:
             raise GmailError("invalid_query")
         if isinstance(max_results, bool) or not isinstance(max_results, int) or not 1 <= max_results <= _MAX_RESULTS:
             raise GmailError("invalid_limit")
-        headers = self._authorization_headers(owner_id)
+        headers, connection_revision, access_token = self._authorization_context(owner_id)
         response = self._get(
             owner_id,
             MESSAGES_ENDPOINT,
             {"q": query.strip(), "maxResults": max_results, "includeSpamTrash": False},
             headers,
+            connection_revision,
+            access_token,
         )
         messages = response.get("messages", [])
         if not isinstance(messages, list):
@@ -370,6 +372,8 @@ class GmailConnector:
                     "metadataHeaders": ["Subject", "From", "Date"],
                 },
                 headers,
+                connection_revision,
+                access_token,
             )
             results.append(self._search_result(message_id, metadata))
         return tuple(results)
@@ -377,12 +381,14 @@ class GmailConnector:
     def read_message(self, owner_id: str, message_id: str) -> GmailMessage:
         """Explicitly fetch one attributed body without retaining it locally."""
         message_id = self._message_id(message_id)
-        headers = self._authorization_headers(owner_id)
+        headers, connection_revision, access_token = self._authorization_context(owner_id)
         response = self._get(
             owner_id,
             MESSAGES_ENDPOINT + "/" + quote(message_id, safe=""),
             {"format": "full"},
             headers,
+            connection_revision,
+            access_token,
         )
         returned_id = self._message_id(response.get("id"))
         if returned_id != message_id:
@@ -393,8 +399,9 @@ class GmailConnector:
 
     def mark_reauthentication_required(self, owner_id: str) -> dict:
         """Clear Gmail credentials and fail closed after expiry or revocation."""
-        self.store.secret(TOKEN_SECRET_KEY, {})
-        self.registry.transition(owner_id, GMAIL_CONNECTOR_ID, ConnectorState.REAUTH_REQUIRED)
+        with self.registry._authority_guard():
+            self.store.secret(TOKEN_SECRET_KEY, {})
+            self.registry.transition(owner_id, GMAIL_CONNECTOR_ID, ConnectorState.REAUTH_REQUIRED)
         return self.status(owner_id)
 
     def _pending(self, owner_id: str, state: object) -> dict:
@@ -473,40 +480,54 @@ class GmailConnector:
             tokens["refresh_token"] = refresh_token
         return tokens
 
-    def _authorization_headers(self, owner_id: str) -> dict:
-        try:
-            self.registry.require_connected(owner_id, GMAIL_CONNECTOR_ID, (GMAIL_READONLY_SCOPE,))
-        except ConnectorContractError as exc:
-            if exc.reason == ConnectorState.REAUTH_REQUIRED.value:
+    def _authorization_context(self, owner_id: str) -> tuple[dict, str, str]:
+        with self.registry._authority_guard():
+            try:
+                status = self.registry.require_connected(owner_id, GMAIL_CONNECTOR_ID, (GMAIL_READONLY_SCOPE,))
+            except ConnectorContractError as exc:
+                if exc.reason == ConnectorState.REAUTH_REQUIRED.value:
+                    raise GmailReauthenticationRequired("reauth_required") from None
+                raise GmailError("connection_required") from None
+            try:
+                tokens = self.store.secret(TOKEN_SECRET_KEY)
+            except GmailError:
+                # The encryption key or ciphertext is no longer usable. Revoke
+                # connector authority before offering recovery; never report the
+                # structurally connected metadata as usable.
+                self.mark_reauthentication_required(owner_id)
                 raise GmailReauthenticationRequired("reauth_required") from None
-            raise GmailError("connection_required") from None
-        try:
-            tokens = self.store.secret(TOKEN_SECRET_KEY)
-        except GmailError:
-            # The encryption key or ciphertext is no longer usable. Revoke
-            # connector authority before offering recovery; never report the
-            # structurally connected metadata as usable.
-            self.mark_reauthentication_required(owner_id)
-            raise GmailReauthenticationRequired("reauth_required") from None
-        if not isinstance(tokens, dict) or tokens.get("owner") != _owner_key(owner_id):
-            self.mark_reauthentication_required(owner_id)
-            raise GmailReauthenticationRequired("reauth_required")
-        access_token = tokens.get("access_token")
-        expires_at = tokens.get("expires_at")
-        if (
-            not isinstance(access_token, str)
-            or not access_token
-            or isinstance(expires_at, bool)
-            or not isinstance(expires_at, (int, float))
-            or not math.isfinite(expires_at)
-            or _finite_now(self.now) >= expires_at
-            or tokens.get("scope") != GMAIL_READONLY_SCOPE
-        ):
-            self.mark_reauthentication_required(owner_id)
-            raise GmailReauthenticationRequired("reauth_required")
-        return {"Authorization": "Bearer " + access_token, "Accept": "application/json"}
+            if not isinstance(tokens, dict) or tokens.get("owner") != _owner_key(owner_id):
+                self.mark_reauthentication_required(owner_id)
+                raise GmailReauthenticationRequired("reauth_required")
+            access_token = tokens.get("access_token")
+            expires_at = tokens.get("expires_at")
+            if (
+                not isinstance(access_token, str)
+                or not access_token
+                or isinstance(expires_at, bool)
+                or not isinstance(expires_at, (int, float))
+                or not math.isfinite(expires_at)
+                or _finite_now(self.now) >= expires_at
+                or tokens.get("scope") != GMAIL_READONLY_SCOPE
+                or not isinstance(status.connection_revision, str)
+            ):
+                self.mark_reauthentication_required(owner_id)
+                raise GmailReauthenticationRequired("reauth_required")
+            return (
+                {"Authorization": "Bearer " + access_token, "Accept": "application/json"},
+                status.connection_revision,
+                access_token,
+            )
 
-    def _get(self, owner_id: str, endpoint: str, params: dict, headers: dict) -> dict:
+    def _get(
+        self,
+        owner_id: str,
+        endpoint: str,
+        params: dict,
+        headers: dict,
+        connection_revision: str,
+        access_token: str,
+    ) -> dict:
         if not callable(self.transport):
             raise GmailError("transport_unavailable")
         try:
@@ -516,7 +537,18 @@ class GmailConnector:
         if isinstance(response, dict):
             status = response.get("status_code")
             if status == 401:
-                self.mark_reauthentication_required(owner_id)
+                with self.registry._authority_guard():
+                    current = self.registry.status(owner_id, GMAIL_CONNECTOR_ID)
+                    current_tokens = self.store.secret(TOKEN_SECRET_KEY)
+                    if (
+                        current.state is not ConnectorState.CONNECTED
+                        or current.connection_revision != connection_revision
+                        or not isinstance(current_tokens, dict)
+                        or current_tokens.get("access_token") != access_token
+                    ):
+                        raise GmailError("superseded_connection")
+                    self.store.secret(TOKEN_SECRET_KEY, {})
+                    self.registry.transition(owner_id, GMAIL_CONNECTOR_ID, ConnectorState.REAUTH_REQUIRED)
                 raise GmailReauthenticationRequired("reauth_required")
             if isinstance(status, int) and status >= 400:
                 raise GmailError("provider_rejected")
@@ -581,6 +613,8 @@ class GmailConnector:
                 isinstance(filename, str)
                 and bool(filename.strip())
             ) or disposition.split(";", 1)[0].strip().lower() == "attachment"
+            if is_attachment:
+                return
             normalized_mime = mime_type.lower() if isinstance(mime_type, str) else ""
             if (
                 not is_attachment

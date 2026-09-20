@@ -31,6 +31,7 @@ TRANSLATION_REFERENCES = (
     ("drive-telegram-web-oauth-contract.ko.md", "drive-telegram-web-oauth-contract.en.md"),
     ("file-workspace-first-experience-contract.ko.md", "file-workspace-first-experience-contract.en.md"),
     ("core-primitives-agentpackage-v0.1.ko.md", "core-primitives-agentpackage-v0.1.en.md"),
+    ("web-management-contract.ko.md", "web-management-contract.en.md"),
 )
 KOREAN_REFERENCE_EXCLUSIONS = {
     "agentos-hub-v2.ko.md", "b3os-design-reference.ko.md", "context-capture-idea.ko.md",

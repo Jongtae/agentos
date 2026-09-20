@@ -139,6 +139,9 @@ class PublicResearchTests(unittest.TestCase):
             ('source -> private-notes.md','owner_public_request'),
             ('-----BEGIN ENCRYPTED PRIVATE KEY----- abcdef','owner_public_request'),
             ('-----BEGIN PGP PRIVATE KEY BLOCK----- abcdef','owner_public_request'),
+            ('AWS_SECRET_ACCESS_KEY=supersecret','owner_public_request'),
+            ('DATABASE_PASSWORD=supersecret','owner_public_request'),
+            ('Cookie: sessionid=supersecret','owner_public_request'),
         ]
         for query,source in cases:
             with self.subTest(query=query),self.assertRaises(ValueError):
@@ -152,7 +155,8 @@ class PublicResearchTests(unittest.TestCase):
                       'client secret rotation guide','secret management best practices',
                       'compare password requirements and api key permissions',
                       'authorization header format','compare https://example.com/public/path',
-                      'compare "https://example.com/public/path"','JWT format examples'):
+                      'compare "https://example.com/public/path"','JWT format examples',
+                      'basic authentication overview','bearer authentication examples'):
             with self.subTest(query=query):
                 self.assertEqual(validate_public_query(query,'owner_public_request'),query)
 
@@ -209,6 +213,24 @@ class PublicResearchTests(unittest.TestCase):
                 self.assertEqual(result['dynamic_facts']['fee']['status'],'observed')
                 self.assertNotIn('추가 수수료: 확인된 공개 근거가 없어 알 수 없음',result['brief'])
                 self.assertIn(content,result['dynamic_facts']['fee']['evidence'][0]['exact_text'])
+
+    def test_discount_amount_is_not_misreported_as_fee_value(self):
+        for content in ('Service fee reduced by USD 10.','Service fee includes a USD 10 discount.'):
+            with self.subTest(content=content):
+                reader=Reader({'https://alpha.example/item':{
+                    'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+                result=PublicResearch(search_result,reader,max_pages=1).run(
+                    'travel_plan','museum plan',query_source='owner_public_request')
+                self.assertEqual(result['dynamic_facts']['fee']['status'],'unknown')
+
+    def test_incomplete_adjacent_total_does_not_erase_exact_fee(self):
+        content='Service fee: USD 10. Grand total: USD 100 before taxes.'
+        reader=Reader({'https://alpha.example/item':{
+            'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+        result=PublicResearch(search_result,reader,max_pages=1).run(
+            'travel_plan','museum plan',query_source='owner_public_request')
+        self.assertEqual(result['dynamic_facts']['fee']['status'],'observed')
+        self.assertEqual(result['dynamic_facts']['payable_total']['status'],'unknown')
 
     def test_hedged_inventory_and_unrelated_prices_do_not_observe_dynamic_values(self):
         content=('Rooms may be available. Fees may apply; rooms start at USD 100. '

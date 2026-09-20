@@ -18,8 +18,8 @@ ALLOWED_QUERY_SOURCES = frozenset({'owner_public_request', 'public_task_input'})
 HIGH_CONFIDENCE_SECRET_PATTERNS = (
     re.compile(r'(?i)\bauthorization\s*:\s*\S+'),
     re.compile(r'(?i)\bauthorization\s*:?\s*(?:bearer|basic)\s+\S+'),
-    re.compile(r'(?i)\bbasic\s+\S{8,}'),
-    re.compile(r'(?i)\bbearer\s*:?\s+\S{8,}'),
+    re.compile(r'(?i:\bbasic)\s+(?=[A-Za-z0-9+/=]{8,}(?:\s|$))(?=[A-Za-z0-9+/=]*[A-Z0-9+/=])[A-Za-z0-9+/=]{8,}'),
+    re.compile(r'(?i:\bbearer)\s*:\s*\S{8,}'),
     re.compile(r'(?i)\b(?:client[_ -]?secret|secret)\b\s*(?::|=|\bis\b|\bequals\b|,)\s*\S+'),
     re.compile(r'(?i)\b(?:sk_live_|rk_live_)[a-z0-9]{12,}\b'),
     re.compile(r'\bAIzaSy[A-Za-z0-9_-]{20,}\b'),
@@ -28,6 +28,8 @@ HIGH_CONFIDENCE_SECRET_PATTERNS = (
     re.compile(r'(?i)\b(?:gh[pousr]_[a-z0-9]{16,}|github_pat_[a-z0-9_]{16,}|glpat-[a-z0-9_-]{16,}|xox[baprs]-[a-z0-9-]{10,}|npm_[a-z0-9]{16,}|pypi-[a-z0-9_-]{16,}|AKIA[A-Z0-9]{16})\b'),
     re.compile(r'(?i)-----BEGIN [A-Z0-9 -]*PRIVATE KEY(?: BLOCK)?-----'),
     re.compile(r'(?i)\b[a-z][a-z0-9+.-]*://[^\s/@]*@'),
+    re.compile(r'(?i)\b(?:cookie|set-cookie)\s*:\s*\S+'),
+    re.compile(r'(?i)\b[A-Z][A-Z0-9_]{1,80}(?:_PASSWORD|_PASSWD|_SECRET|_TOKEN|_API_KEY|_ACCESS_KEY)\s*=\s*\S+'),
     re.compile(r'(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*(?![A-Za-z0-9_-])'),
     re.compile(
         r'(?i)\b(?:path|file|source)\s*(?::|=|,|;|->|\bis\b|\bas\b)\s*'
@@ -88,6 +90,10 @@ FEE_MISSING_DISCLOSURE = re.compile(
 FEE_NEGATED_PROPERTY = re.compile(
     r'(?i)\bno\s+(?:\w+\s+){0,2}(?:fee|fees|tax|taxes|surcharge)\b[^.!?]{0,25}'
     r'\b(?:refundable|refunded|waived|included|charged|credited)\b'
+)
+FEE_NONVALUE_CONTEXT = re.compile(
+    r'(?i)\b(?:fee|fees|tax|taxes|surcharge|service charge)\b[^.!?]{0,35}'
+    r'\b(?:reduced?|reduction|discount|credit|saving|decreased?|lowered?|off)\b'
 )
 INVENTORY_METADATA = re.compile(
     r'(?i)\b(?:stock|inventory|room|rooms|ticket|tickets|seat|seats)\s+'
@@ -189,11 +195,13 @@ def _qualified_dynamic(name, evidence):
                         context_units.append(neighbor)
             context=' '.join(context_units)
             if (adjacent_condition or classified_text.rstrip().endswith('?') or NON_ASSERTIVE_DYNAMIC.search(classified_text) or
-                    DYNAMIC_DISQUALIFIER.search(context) or INCOMPLETE_TOTAL.search(context)): continue
+                    DYNAMIC_DISQUALIFIER.search(context) or
+                    (name == 'payable_total' and INCOMPLETE_TOTAL.search(context))): continue
             tied=(name == 'inventory')
             if name == 'inventory' and INVENTORY_METADATA.search(classified_text): continue
             if name == 'fee':
-                if FEE_MISSING_DISCLOSURE.search(classified_text) or FEE_NEGATED_PROPERTY.search(classified_text): continue
+                if (FEE_MISSING_DISCLOSURE.search(classified_text) or FEE_NEGATED_PROPERTY.search(classified_text) or
+                        FEE_NONVALUE_CONTEXT.search(classified_text)): continue
                 tied=bool(FEE_VALUE_PATTERNS[0].search(classified_text) or FEE_VALUE_PATTERNS[2].search(classified_text) or
                           (FEE_VALUE_PATTERNS[1].search(classified_text) and not FACT_PATTERNS['payable_total'].search(classified_text)))
             elif name == 'payable_total':

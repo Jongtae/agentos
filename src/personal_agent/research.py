@@ -192,7 +192,7 @@ NEGATED_TOTAL_EXISTENCE = re.compile(
 DYNAMIC_SUBJECT_PATTERNS = {
     'fee': FACT_PATTERNS['fee'],
     'inventory': re.compile(r'(?i)\b(?:availability|inventory|stock|room|rooms|ticket|tickets|seat|seats|product|products|item|items)\b|재고|매진|예약'),
-    'payable_total': FACT_PATTERNS['payable_total'],
+    'payable_total': re.compile(r'(?i)\b(?:total|total due|payable total|grand total|total price)\b|총\s*결제|결제\s*금액'),
 }
 
 
@@ -279,6 +279,12 @@ def _qualified_dynamic(name, evidence):
         units=_sentences(row['evidence_excerpt'])
         for text in row['observed_details'][name]:
             classified_text=_rendered_evidence_text(text)
+            clause_pattern=(
+                (lambda part: bool(FACT_PATTERNS['inventory'].search(part))) if name == 'inventory' else
+                (lambda part: any(pattern.search(part) for pattern in TOTAL_VALUE_PATTERNS)) if name == 'payable_total' else
+                (lambda part: bool(FEE_NOT_CHARGED.search(part) or
+                                   any(pattern.search(part) for pattern in FEE_VALUE_PATTERNS)))
+            )
             context_units=[classified_text]
             adjacent_condition=False
             positions=[index for index,unit in enumerate(units) if unit == text]
@@ -292,16 +298,17 @@ def _qualified_dynamic(name, evidence):
                     is_forward_anaphor=neighbor_position > position and (
                         ANAPHORIC_QUALIFIER.search(neighbor) or historical_anaphor
                     )
-                    if is_forward_anaphor: adjacent_condition=True
-                    if ADJACENT_QUALIFIER_ONLY.search(neighbor) or is_forward_anaphor:
+                    is_forward_subject_qualifier=(
+                        neighbor_position > position
+                        and DYNAMIC_SUBJECT_PATTERNS[name].search(neighbor)
+                        and DYNAMIC_DISQUALIFIER.search(neighbor)
+                        and not clause_pattern(neighbor)
+                    )
+                    if is_forward_anaphor or is_forward_subject_qualifier: adjacent_condition=True
+                    if (ADJACENT_QUALIFIER_ONLY.search(neighbor) or is_forward_anaphor or
+                            is_forward_subject_qualifier):
                         context_units.append(neighbor)
             context=' '.join(context_units)
-            clause_pattern=(
-                (lambda part: bool(FACT_PATTERNS['inventory'].search(part))) if name == 'inventory' else
-                (lambda part: any(pattern.search(part) for pattern in TOTAL_VALUE_PATTERNS)) if name == 'payable_total' else
-                (lambda part: bool(FEE_NOT_CHARGED.search(part) or
-                                   any(pattern.search(part) for pattern in FEE_VALUE_PATTERNS)))
-            )
             fact_clauses=[part for part in re.split(r'(?i)\s*(?:;|,(?=\s*[A-Za-z])|\band\b|\bbut\b)\s*',classified_text)
                           if clause_pattern(part)]
             fact_context=' '.join(fact_clauses or [classified_text])

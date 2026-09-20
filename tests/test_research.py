@@ -569,6 +569,20 @@ class PublicResearchTests(unittest.TestCase):
         self.assertEqual(result['dynamic_facts']['inventory']['evidence'],[
             {'source_id':'S1','exact_text':'Rooms are available today.'}])
 
+    def test_forward_same_subject_qualifier_applies_without_conflating_assertions(self):
+        cases=(
+            ('inventory','Rooms are available. Availability is subject to change.'),
+            ('payable_total','Grand total: USD 100. Total is subject to taxes.'),
+            ('fee','Service fee: USD 10. Fees may vary.'),
+        )
+        for dynamic,content in cases:
+            with self.subTest(dynamic=dynamic):
+                reader=Reader({'https://alpha.example/item':{
+                    'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+                result=PublicResearch(search_result,reader,max_pages=1).run(
+                    'travel_plan','museum plan',query_source='owner_public_request')
+                self.assertEqual(result['dynamic_facts'][dynamic]['status'],'unknown')
+
     def test_anaphoric_adjacent_uncertainty_keeps_dynamic_facts_unknown(self):
         cases=(
             ('payable_total','Grand total: USD 100. This is an estimate.'),

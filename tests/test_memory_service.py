@@ -107,6 +107,27 @@ class MemoryServiceTests(unittest.TestCase):
             ).fetchone()
         self.assertEqual((row["state"], row["memory_key"]), ("revoked", ""))
 
+    def test_candidate_approval_does_not_survive_an_absent_present_absent_sequence(self):
+        """Comparing only the final row state cannot see the owner's changes."""
+        candidate = self.service.propose("owner-a", "work-a", "meeting-time", "afternoon")
+        approval = self.service.request_candidate_approval(
+            "owner-a", "work-a", candidate["id"], candidate["content_digest"]
+        )
+        # The key was absent when the approval was issued. The owner then makes
+        # and withdraws an explicit choice, returning the key to absent.
+        written = self.service.remember("owner-a", "work-owner", "meeting-time", "evening")
+        self.store.delete_memory("owner-a", written["id"])
+        with self.assertRaisesRegex(ValueError, "변경"):
+            self.service.approve_candidate(
+                "owner-a", "work-a", candidate["id"], candidate["content_digest"],
+                approval["approval_token"],
+            )
+        self.assertEqual(
+            [row for row in self.service.list_memories("owner-a")["memories"]
+             if row["memory_key"] == "meeting-time"],
+            [],
+        )
+
     def test_candidate_approval_is_bound_to_existing_memory_but_not_unrelated_keys(self):
         original = self.service.remember("owner-a", "work-owner", "meeting-time", "morning")
         stale_candidate = self.service.propose("owner-a", "work-a", "meeting-time", "afternoon")

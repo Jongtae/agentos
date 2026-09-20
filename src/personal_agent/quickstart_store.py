@@ -10,6 +10,7 @@ import secrets
 import sqlite3
 import threading
 import time
+import unicodedata
 import uuid
 
 
@@ -82,6 +83,11 @@ class QuickStore:
     def db(self):
         conn = sqlite3.connect(self.path, timeout=10)
         conn.row_factory = sqlite3.Row
+        conn.create_function(
+            'unicode_search_key', 1,
+            lambda value: unicodedata.normalize('NFKC', str(value or '')).casefold(),
+            deterministic=True,
+        )
         try:
             with conn:
                 yield conn
@@ -258,6 +264,14 @@ class QuickStore:
                               WHERE owner_key=? AND action='correct-memory'
                                 AND subject_id=? AND token_hash<>? AND state='issued'""",
                            (owner_key,previous['id'],preserve_correction_token))
+        # Comparing the expected and current row cannot see an absent -> present
+        # -> absent sequence, so a stale token could still overwrite a later
+        # owner choice. Every canonical write invalidates the other approvals
+        # issued against this key.
+        db.execute("""UPDATE memory_approvals SET state='revoked',memory_key=''
+                      WHERE owner_key=? AND memory_key=? AND state='issued'
+                        AND (? IS NULL OR token_hash<>?)""",
+                   (owner_key,memory_key,preserve_correction_token,preserve_correction_token))
         db.execute('INSERT INTO memories(id,memory_key,content,created,supersedes,state,owner_key,work_key,content_digest,candidate_id) VALUES (?,?,?,?,?,?,?,?,?,?)',
                    (memory_id,memory_key,content,time.time(),previous['id'] if previous else None,'current',owner_key,work_key,digest,candidate_id))
         return self._memory_row(db.execute('SELECT * FROM memories WHERE id=?',(memory_id,)).fetchone())
@@ -442,6 +456,17 @@ class QuickStore:
         if not isinstance(approval_token,str) or not approval_token:raise ValueError('정확한 승인이 필요합니다.')
         row=db.execute('SELECT * FROM memory_approvals WHERE token_hash=?',(self._exact_memory_token_hash(approval_token),)).fetchone()
         if not row:raise ValueError('정확한 승인이 필요합니다.')
+        if row['state']=='revoked':
+            # A revoked row no longer carries its memory key, so the full
+            # binding check below cannot run. Still confirm the owner, work,
+            # action and subject before explaining why the token stopped
+            # working; anything else stays generic.
+            revoked_expected=(self._memory_binding(owner_id),self._work_binding(work_id),action,subject_id)
+            revoked_observed=tuple(row[key] for key in ('owner_key','work_key','action','subject_id'))
+            if all(hmac.compare_digest(str(left),str(right))
+                   for left,right in zip(revoked_expected,revoked_observed)):
+                raise ValueError('승인 이후 현재 기억이 변경되었습니다.')
+            raise ValueError('정확한 승인이 필요합니다.')
         expected=(self._memory_binding(owner_id),self._work_binding(work_id),action,subject_id,memory_key,source_digest,content_digest)
         observed=tuple(row[key] for key in ('owner_key','work_key','action','subject_id','memory_key','source_digest','content_digest'))
         if any(not hmac.compare_digest(str(left),str(right)) for left,right in zip(expected,observed)):
@@ -478,7 +503,8 @@ class QuickStore:
                            (approval['token_hash'],))
                 db.commit()
                 raise ValueError('승인 이후 현재 기억이 변경되었습니다.')
-            result=self._save_memory(db,candidate['memory_key'],candidate['content'],owner_key,work_key,candidate_id)
+            result=self._save_memory(db,candidate['memory_key'],candidate['content'],owner_key,work_key,candidate_id,
+                                     preserve_correction_token=approval['token_hash'])
             db.execute("UPDATE memory_candidates SET state='accepted',decided=?,resulting_memory_id=? WHERE id=? AND state='pending'",(observed,result['id'],candidate_id))
             db.execute("UPDATE memory_approvals SET state='consumed',result_id=? WHERE token_hash=? AND state='issued'",(result['id'],approval['token_hash']))
             db.execute("""UPDATE memory_approvals SET state='revoked',memory_key=''
@@ -525,7 +551,7 @@ class QuickStore:
     def _delete_memory_chain(self, owner_key, memory_id):
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
-            current=db.execute("SELECT id,supersedes FROM memories WHERE id=? AND owner_key=? AND state='current'",(memory_id,owner_key)).fetchone()
+            current=db.execute("SELECT id,supersedes,memory_key FROM memories WHERE id=? AND owner_key=? AND state='current'",(memory_id,owner_key)).fetchone()
             if not current:return {'deleted':False,'id':memory_id,'kind':'memory','deleted_memory_count':0,'deleted_candidate_count':0,'deleted_approval_count':0,'retained_private_copies':'unknown_outside_store','external_archives_affected':False}
             memory_ids=[];cursor=current
             while cursor:
@@ -543,6 +569,11 @@ class QuickStore:
                 approval_deleted=db.execute(
                     f'DELETE FROM memory_approvals WHERE owner_key=? AND (subject_id IN ({approval_marks}) OR result_id IN ({approval_marks}))',
                     (owner_key,*approval_subjects,*approval_subjects)).rowcount
+            # An approval issued against this key must not survive the delete
+            # and re-apply once the key is absent again.
+            approval_deleted+=db.execute(
+                "DELETE FROM memory_approvals WHERE owner_key=? AND memory_key=? AND state='issued'",
+                (owner_key,current['memory_key'])).rowcount
             candidate_deleted=0
             if candidates:
                 candidate_marks=','.join('?' for _ in candidates)
@@ -569,6 +600,54 @@ class QuickStore:
             candidates=[dict(r) for r in db.execute("SELECT id,job_id,memory_key,content,created,state FROM memory_candidates WHERE state='pending' ORDER BY created DESC LIMIT 50")]
         return {'memories':memories,'memory_count':len(memories),'memory_candidates':candidates,'memory_candidate_count':len(candidates),'results':results,'result_count':len(results),'context':context,'context_count':len(context),'evidence':evidence}
 
+    def personal_records(self, query='', record_filter='all', limit=100, offset=0):
+        if not isinstance(query,str) or len(query)>160:
+            raise ValueError('기록 검색어를 확인하세요.')
+        if record_filter not in ('all','saved','note','memory','temporary','artifact'):
+            raise ValueError('기록 유형을 확인하세요.')
+        if (isinstance(limit,bool) or not isinstance(limit,int) or not 1<=limit<=100 or
+                isinstance(offset,bool) or not isinstance(offset,int) or not 0<=offset<=2_147_483_647):
+            raise ValueError('기록 페이지 범위를 확인하세요.')
+        now=time.time()
+        union='''
+            SELECT id,'note' AS type,'메모' AS label,'' AS memory_key,content,created,
+                   NULL AS expires_at,'' AS sharing_state,'' AS source_kind,'' AS source_app,
+                   '' AS workspace_id,'' AS job_id,'memories' AS deleteKind FROM notes
+            UNION ALL
+            SELECT id,'memory','기억',memory_key,content,created,NULL,'','','','','','memories'
+              FROM memories WHERE state='current'
+            UNION ALL
+            SELECT id,'temporary','임시 자료','',source_kind||' · '||source_app||' · '||sharing_state,
+                   captured_at,expires_at,sharing_state,source_kind,source_app,'','',''
+              FROM context_events WHERE expires_at>?
+            UNION ALL
+            SELECT id,'artifact','저장된 결과','',content,created,NULL,'','','',workspace_id,job_id,'results'
+              FROM workspace_results
+        '''
+        escaped=unicodedata.normalize('NFKC',query).casefold().replace('\\','\\\\').replace('%','\\%').replace('_','\\_')
+        needle=f'%{escaped}%'
+        where='''
+            WHERE (?='all' OR (?='saved' AND type IN ('note','memory')) OR type=?)
+              AND (?='' OR unicode_search_key(coalesce(memory_key,'')||' '||content||' '||source_kind||' '||source_app)
+                   LIKE ? ESCAPE '\\')
+        '''
+        params=(now,record_filter,record_filter,record_filter,query,needle)
+        with self.db() as db:
+            db.execute('DELETE FROM context_events WHERE expires_at<=?',(now,))
+            rows=[dict(row) for row in db.execute(
+                f'SELECT * FROM ({union}) {where} ORDER BY created DESC,id DESC LIMIT ? OFFSET ?',
+                (*params,limit,offset),
+            )]
+            match_count=db.execute(f'SELECT COUNT(*) FROM ({union}) {where}',params).fetchone()[0]
+            counts={
+                'note':db.execute('SELECT COUNT(*) FROM notes').fetchone()[0],
+                'memory':db.execute("SELECT COUNT(*) FROM memories WHERE state='current'").fetchone()[0],
+                'temporary':db.execute('SELECT COUNT(*) FROM context_events WHERE expires_at>?',(now,)).fetchone()[0],
+                'artifact':db.execute('SELECT COUNT(*) FROM workspace_results').fetchone()[0],
+            }
+        return {'items':rows,'counts':counts,'match_count':match_count,'offset':offset,'limit':limit,
+                'has_more':offset+len(rows)<match_count}
+
     def delete_personal_space_item(self, kind, item_id):
         if kind not in ('memories','memory_candidates','results') or not isinstance(item_id,str) or not item_id:
             raise ValueError('삭제할 Personal Space 항목을 확인하세요.')
@@ -578,7 +657,12 @@ class QuickStore:
                 result=self._delete_memory_chain(memory['owner_key'],item_id)
                 return {**result,'kind':'memories'}
         with self.db() as db:
-            if kind=='results': deleted=db.execute('DELETE FROM workspace_results WHERE id=?',(item_id,)).rowcount
+            workspace_id=None
+            if kind=='results':
+                row=db.execute('SELECT workspace_id FROM workspace_results WHERE id=?',(item_id,)).fetchone()
+                workspace_id=row['workspace_id'] if row else None
+                deleted=db.execute('DELETE FROM workspace_results WHERE id=?',(item_id,)).rowcount
+                if deleted:db.execute('UPDATE workspaces SET updated=? WHERE id=?',(time.time(),workspace_id))
             elif kind=='memory_candidates':
                 db.execute('BEGIN IMMEDIATE')
                 candidate=db.execute("SELECT owner_key FROM memory_candidates WHERE id=? AND state IN ('pending','rejected')",(item_id,)).fetchone()
@@ -586,8 +670,12 @@ class QuickStore:
                                    if candidate else 0)
                 deleted=(db.execute("DELETE FROM memory_candidates WHERE id=? AND owner_key=? AND state IN ('pending','rejected')",(item_id,candidate['owner_key'])).rowcount
                          if candidate else 0)
-            else: deleted=db.execute('DELETE FROM notes WHERE id=?',(item_id,)).rowcount
-        result={'deleted':bool(deleted),'id':item_id,'kind':kind}
+            else:
+                # A current memory is already routed through the approval-aware
+                # chain above, so only a superseded row can reach this path.
+                deleted=db.execute('DELETE FROM memories WHERE id=?',(item_id,)).rowcount
+                if not deleted: deleted=db.execute('DELETE FROM notes WHERE id=?',(item_id,)).rowcount
+        result={'deleted':bool(deleted),'id':item_id,'kind':kind,'workspace_id':workspace_id}
         if kind=='memory_candidates':
             result.update(deleted_approval_count=deleted_approvals,
                           retained_private_copies='unknown_outside_store',external_archives_affected=False)
@@ -631,7 +719,8 @@ class QuickStore:
             if not job:raise ValueError('저장할 완료 결과를 찾을 수 없습니다.')
             detail=db.execute("SELECT detail FROM tool_events WHERE job_id=? AND tool!='model' AND status='succeeded' ORDER BY id DESC LIMIT 8",(job_id,)).fetchall()
             evidence=json.dumps([row['detail'][:500] for row in detail],ensure_ascii=False)
-            db.execute('INSERT INTO workspace_results VALUES (?,?,?,?,?,?) ON CONFLICT(workspace_id,job_id) DO NOTHING',(str(uuid.uuid4()),workspace_id,job_id,job['response'] or '',evidence,time.time()))
+            inserted=db.execute('INSERT INTO workspace_results VALUES (?,?,?,?,?,?) ON CONFLICT(workspace_id,job_id) DO NOTHING',(str(uuid.uuid4()),workspace_id,job_id,job['response'] or '',evidence,time.time())).rowcount
+            if not inserted:raise ValueError('이미 프로젝트에 저장된 완료 결과입니다.')
             db.execute('UPDATE workspaces SET updated=? WHERE id=?',(time.time(),workspace_id))
         return self.workspace_detail(workspace_id)
 
@@ -640,6 +729,8 @@ class QuickStore:
         if not workspace:return None
         with self.db() as db:
             workspace['results']=[dict(row) for row in db.execute('SELECT id,job_id,content,created FROM workspace_results WHERE workspace_id=? ORDER BY created DESC LIMIT 30',(workspace_id,))]
+            workspace['result_count']=db.execute('SELECT COUNT(*) FROM workspace_results WHERE workspace_id=?',(workspace_id,)).fetchone()[0]
+            workspace['saved_job_ids']=[row['job_id'] for row in db.execute('SELECT job_id FROM workspace_results WHERE workspace_id=? AND job_id IN (SELECT id FROM jobs ORDER BY created DESC LIMIT 40)',(workspace_id,))]
             workspace['messages']=[dict(row) for row in db.execute('SELECT id,role,content,channel,created,workspace_id,job_id FROM messages WHERE workspace_id=? ORDER BY id DESC LIMIT 100',(workspace_id,))][::-1]
         return workspace
 

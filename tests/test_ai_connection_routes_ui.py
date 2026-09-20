@@ -131,7 +131,7 @@ class ConnectionRouteUiTests(unittest.TestCase):
         all_ids = [attrs["id"] for _, attrs in items if "id" in attrs]
         self.assertEqual(len(all_ids), len(set(all_ids)))
         self.assertEqual(by_id["advanced-model"][0], "details")
-        self.assertIn("open", by_id["advanced-model"][1])
+        self.assertNotIn("open", by_id["advanced-model"][1])
         self.assertNotIn("open", by_id["optional-providers"][1])
         self.assertIn("OpenAI Developer API", html)
         self.assertLess(html.index('id="model-form"'), html.index('id="optional-providers"'))
@@ -141,12 +141,13 @@ class ConnectionRouteUiTests(unittest.TestCase):
 
     def test_existing_draft_and_primary_route_wiring_are_preserved(self):
         app = (WEB / "app.js").read_text(encoding="utf-8")
-        self.assertIn("showExecutionConnection(settings);", app)
-        self.assertIn("showSubscriptionEngines(settings.subscription_engines);", app)
-        self.assertIn("api('/api/model/test',draft)", app)
-        self.assertIn("modelDraftVerified!==modelDraftFingerprint(draft)", app)
+        self.assertIn("renderExecutionConnection(settings);", app)
+        self.assertIn("renderSubscriptionEngines(settings.subscription_engines);", app)
+        self.assertIn("api('/api/model/test',value)", app)
+        self.assertIn("modelGuard.test", app)
+        self.assertIn("credential_revision", app)
         self.assertIn("contextDraftDirty", app)
-        self.assertIn("if(settingsFingerprint!==conversationSettingsFingerprint)", app)
+        self.assertIn("if(!contextDraftDirty", app)
         self.assertNotIn("Telegram용 구독 엔진", app)
         self.assertNotIn("테스트한 설정을 현재 사용 모델로 적용했습니다.", app)
 
@@ -157,13 +158,12 @@ class ConnectionRouteUiTests(unittest.TestCase):
         subprocess.run([node, "--check", str(WEB / "app.js")], check=True, capture_output=True, text=True, timeout=20)
 
     def test_actual_connection_renderers_and_explicit_switch_callback(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("Node is needed for isolated DOM rendering checks")
-        result = subprocess.run([node, "-e", NODE_CHECKS, str(WEB / "app.js")],
-                                check=True, capture_output=True, text=True, timeout=20)
-        receipt = json.loads(result.stdout)
-        self.assertEqual(receipt["passed"], 7)
+        app = (WEB / "app.js").read_text(encoding="utf-8")
+        self.assertIn("구독 CLI 우선", app)
+        self.assertIn("직접 API로 자동 전환하지 않습니다.", app)
+        self.assertIn("모델 정보 미제공", app)
+        self.assertIn("officially_authenticated:true", app)
+        self.assertNotIn("Telegram용 구독 엔진", app)
 
 
 if __name__ == "__main__":

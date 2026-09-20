@@ -549,13 +549,33 @@ class AgentService:
         with self.lock:
             previous=self.store.config('model',{})
             changed=any(config.get(k)!=previous.get(k) for k in ('provider','endpoint'))
+            effective_key=key
+            if (not effective_key and config.get('provider')==previous.get('provider') and
+                    config.get('endpoint')==previous.get('endpoint')):
+                effective_key=self.store.secret('model_key')
             # Never silently send an existing key to a newly selected host/provider.
-            if changed and not key and (strict or body.get('require_key')):
+            if changed and config.get('provider') != 'ollama' and not key and (strict or body.get('require_key')):
                 raise ValueError('연결 대상이 바뀌었습니다. 새 API 키를 입력한 뒤 적용하세요.')
+            tested=None
+            if strict:
+                proof=body.get('test_proof','')
+                pending=self.store.config('model_draft_test',{})
+                valid=(isinstance(proof,str) and len(proof)>=32 and isinstance(pending,dict) and
+                       hmac.compare_digest(hashlib.sha256(proof.encode()).hexdigest(),str(pending.get('proof_hash',''))) and
+                       pending.get('fingerprint')==self.model_fingerprint(config) and
+                       hmac.compare_digest(
+                           hmac.new(proof.encode(),effective_key.encode(),hashlib.sha256).hexdigest(),
+                           str(pending.get('credential_digest','')),
+                       ) and isinstance(pending.get('record'),dict) and
+                       self.model_ready(config,pending.get('record')))
+                if not valid:
+                    raise ValueError('테스트한 정확한 설정만 적용할 수 있습니다. 다시 테스트하세요.')
+                tested=dict(pending['record'])
             if key or changed or body.get('clear_key'):
                 self.store.secret('model_key',key)
             self.store.put('model',config)
-            self.store.put('model_test',None)
+            self.store.put('model_test',tested)
+            self.store.put('model_draft_test',None)
             self.store.put('document_sharing',{})
             self.store.put('public_page_sharing',{})
         return self.settings()
@@ -601,7 +621,9 @@ class AgentService:
             current=self.store.config('model',{})
             if not key and config.get('provider')==current.get('provider') and config.get('endpoint')==current.get('endpoint'):
                 key=self.store.secret('model_key')
-            if draft is not None and (strict or draft.get('require_key')) and any(config.get(k)!=current.get(k) for k in ('provider','endpoint')) and not key:
+            if (draft is not None and config.get('provider') != 'ollama' and
+                    (strict or draft.get('require_key')) and
+                    any(config.get(k)!=current.get(k) for k in ('provider','endpoint')) and not key):
                 raise ValueError('연결 대상이 바뀌었습니다. 새 API 키를 입력한 뒤 테스트하세요.')
         if not config:
             raise ValueError('먼저 모델을 선택하세요.')
@@ -632,8 +654,21 @@ class AgentService:
         with self.lock:
             if self.store.config('model',{})==config:
                 self.store.put('model_test',record)
+            proof=''
+            if draft is not None:
+                if record['ok']:
+                    proof=secrets.token_urlsafe(32)
+                    self.store.put('model_draft_test',{
+                        'proof_hash':hashlib.sha256(proof.encode()).hexdigest(),
+                        'credential_digest':hmac.new(proof.encode(),key.encode(),hashlib.sha256).hexdigest(),
+                        'fingerprint':self.model_fingerprint(config),
+                        'record':record,
+                    })
+                else:
+                    self.store.put('model_draft_test',None)
         return {'ok':record['ok'],'text_ok':record['text_ok'],'tools_ok':record['tools_ok'],
-                'response':response,'error':record.get('error',''),'model':record['model']}
+                'response':response,'error':record.get('error',''),'model':record['model'],
+                'test_proof':proof}
 
     def telegram_call(self,token,method,body):
         result=self.telegram_transport(f'https://api.telegram.org/bot{token}/{method}',body,{},timeout=15)

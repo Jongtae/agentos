@@ -2,6 +2,12 @@
 
 Active work is executed only from a goal-ready issue and active delivery-plan entry under the [Goal Execution Contract](docs/goal-execution-contract.en.md). Status tables are trackers, not authority to activate reserved work.
 
+## Execution governance
+
+| Work unit | Issue | Current boundary |
+| --- | --- | --- |
+| GOV-EXEC-01: verification budget and stable-head review | [#408](https://github.com/Jongtae/personal-agentos/issues/408) | Complete on merge after exact-head CI/review. Keeps required CI/review gates while using focused tests during implementation, coherent checkpoint pushes, batched review remediation, a soft two-broad-cycle expectation, and no duplicate review/polling. |
+
 ## Prepared — PA1 first Telegram personal-assistant completion
 
 | Work unit | Issue | Current boundary |

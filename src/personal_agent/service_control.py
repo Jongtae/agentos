@@ -118,8 +118,25 @@ class ServiceController:
     ):
         env = os.environ if environ is None else environ
         self.home = Path(home if home is not None else Path.home()).expanduser().resolve()
+        self.plist_path = self.home / "Library/LaunchAgents" / f"{LABEL}.plist"
         configured_data = data_dir if data_dir is not None else env.get("AGENTOS_DATA")
-        self.data_dir = Path(configured_data or self.home / DEFAULT_DATA_RELATIVE).expanduser().resolve()
+        recovered_data = None
+        if configured_data is None and self.plist_path.is_file():
+            try:
+                installed = plistlib.loads(self.plist_path.read_bytes())
+                arguments = installed.get("ProgramArguments") if isinstance(installed, dict) else None
+                positions = [index for index, value in enumerate(arguments or ()) if value == "--data"]
+                if (
+                    isinstance(arguments, list)
+                    and len(positions) == 1
+                    and positions[0] + 1 < len(arguments)
+                    and isinstance(arguments[positions[0] + 1], str)
+                    and arguments[positions[0] + 1]
+                ):
+                    recovered_data = arguments[positions[0] + 1]
+            except (OSError, plistlib.InvalidFileException, ValueError, TypeError):
+                recovered_data = None
+        self.data_dir = Path(configured_data or recovered_data or self.home / DEFAULT_DATA_RELATIVE).expanduser().resolve()
         # Resolution is intentionally lazy: status/stop/uninstall must remain
         # usable after a package manager has already removed the executable.
         self._cli_path = cli_path
@@ -128,7 +145,6 @@ class ServiceController:
         self.uid = os.getuid() if uid is None else uid
         self.domain = f"gui/{self.uid}"
         self.service_target = f"{self.domain}/{LABEL}"
-        self.plist_path = self.home / "Library/LaunchAgents" / f"{LABEL}.plist"
 
     def _launchctl(self, *arguments: str) -> CommandResult:
         try:

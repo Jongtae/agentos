@@ -149,6 +149,27 @@ class ServiceControlTests(unittest.TestCase):
         self.assertEqual(marker.read_text(), "keep")
         self.assertFalse(upgraded.plist_path.exists())
 
+    def test_later_lifecycle_recovers_installed_custom_data_path_by_default(self):
+        data = self.root / "owner-state"
+        installed = ServiceController(home=self.home, data_dir=data, cli_path=self.cli, runner=self.runner, uid=501)
+        installed.install()
+        marker = data / "owner.txt"
+        marker.write_text("keep")
+
+        restarted_context = ServiceController(home=self.home, cli_path=self.cli, runner=self.runner, uid=501)
+        self.assertEqual(restarted_context.data_dir, data.resolve())
+        self.assertEqual(restarted_context.status()["data_dir"], str(data.resolve()))
+        upgraded = restarted_context.upgrade()
+        self.assertEqual(upgraded["data_dir"], str(data.resolve()))
+        plist = plistlib.loads(restarted_context.plist_path.read_bytes())
+        self.assertEqual(
+            plist["ProgramArguments"][plist["ProgramArguments"].index("--data") + 1],
+            str(data.resolve()),
+        )
+        removed = restarted_context.uninstall()
+        self.assertEqual(removed["data_dir"], str(data.resolve()))
+        self.assertEqual(marker.read_text(), "keep")
+
     def test_explicit_unchanged_upgrade_restarts_running_process(self):
         self.controller.install()
         before = len(self.runner.commands)

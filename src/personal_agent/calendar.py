@@ -342,6 +342,10 @@ class CalendarConnector:
                 _validate_event(payload)
             except CalendarError:
                 legacy_payload_valid = False
+            legacy_unknown_effect = (
+                row.get("state") == "failed"
+                and row.get("error_class") in {"transport-error", "malformed-response", "provider-timeout"}
+            )
             bound = {"action": "create", "payload": payload, "event_id": "", "event_version": ""}
             digest = _canonical(bound)
             row.update(
@@ -350,8 +354,12 @@ class CalendarConnector:
                 event_version="",
                 owner=owner_key,
                 hash=digest,
-                effect="observed" if row.get("state") == "created" else "none",
+                state="outcome-unknown" if legacy_unknown_effect else row.get("state"),
+                effect=("observed" if row.get("state") == "created" else
+                        "unknown" if legacy_unknown_effect else "none"),
             )
+            if legacy_unknown_effect:
+                row["recovery"] = "inspect-calendar-before-retry"
             if not legacy_payload_valid and row.get("state") in {"awaiting-approval", "approved"}:
                 row.update(
                     state="expired",

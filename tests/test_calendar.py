@@ -407,6 +407,28 @@ class CalendarTests(unittest.TestCase):
                 self.assertNotIn("approval_hash", migrated)
                 self.assertEqual(calls, [])
 
+    def test_legacy_post_dispatch_failures_migrate_to_unknown_effect(self):
+        for error_class in ("transport-error", "malformed-response", "provider-timeout"):
+            with self.subTest(error_class=error_class):
+                self.store.put(
+                    "calendar_create",
+                    {
+                        "legacy-failed": {
+                            "id": "legacy-failed",
+                            "payload": dict(EVENT),
+                            "hash": "legacy-content-hash",
+                            "owner": "owner",
+                            "state": "failed",
+                            "error_class": error_class,
+                        }
+                    },
+                )
+                legacy = CalendarCreate(self.store, lambda *_: self.fail("must not retry"))
+                status = legacy.status("legacy-failed", "owner")
+                self.assertEqual(status["state"], "outcome-unknown")
+                self.assertEqual(status["effect"], "unknown")
+                self.assertEqual(status["recovery"], "inspect-calendar-before-retry")
+
     def test_portable_terminal_calendar_evidence_remains_readable(self):
         self.store.put(
             "calendar_create",

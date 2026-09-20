@@ -211,18 +211,23 @@ def validate_public_query(query, query_source):
     decoded_scan=strip_controls(unquote(raw_scan))
     scan_query=' '.join((raw_scan,decoded_scan,strip_controls(unquote(decoded_scan))))
     sensitive=any(pattern.search(scan_query) for pattern in HIGH_CONFIDENCE_SECRET_PATTERNS)
-    bearer_value=re.search(r'(?i)\bbearer\s+([^\s,;:!?()\[\]{}]{8,})',scan_query)
-    if bearer_value:
+    # Every scheme occurrence must be examined. Stopping at the first match
+    # lets an allowlisted topic word shield a later credential, as in
+    # 'basic room rates Basic dTpw', and transmits it to the search provider.
+    for bearer_value in re.finditer(r'(?i)\bbearer\s+([^\s,;:!?()\[\]{}]{8,})',scan_query):
         bearer_token=bearer_value.group(1).strip('"\'.-_/@#$%^&*+=\\|<>`~').casefold()
-        if bearer_token not in PUBLIC_CREDENTIAL_TOPICS: sensitive=True
-    basic_value=re.search(r'(?i)\bbasic\s+([A-Za-z0-9+/=]{4,})(?![A-Za-z0-9+/=])',scan_query)
-    if basic_value:
+        if bearer_token not in PUBLIC_CREDENTIAL_TOPICS:
+            sensitive=True
+            break
+    for basic_value in re.finditer(r'(?i)\bbasic\s+([A-Za-z0-9+/=]{4,})(?![A-Za-z0-9+/=])',scan_query):
         basic_token=basic_value.group(1)
         try:
             decoded=base64.b64decode(basic_token+'='*((-len(basic_token))%4),validate=True)
         except (binascii.Error,ValueError):
             decoded=b''
-        if b':' in decoded: sensitive=True
+        if b':' in decoded:
+            sensitive=True
+            break
     sensitive=sensitive or bool(LABEL_ASSIGNMENT.search(scan_query))
     labels=list(LABEL_OCCURRENCE.finditer(scan_query))
     if labels:

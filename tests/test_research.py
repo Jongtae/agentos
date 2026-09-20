@@ -70,6 +70,11 @@ class PublicResearchTests(unittest.TestCase):
             ('private memo text','memory'),
             ('compare /Users/alice/private/receipt.pdf','owner_public_request'),
             ('api_key=super-secret-value','owner_public_request'),
+            # A credential must be found at any occurrence. An allowlisted
+            # topic word in an earlier Basic/Bearer position must not shield a
+            # later credential from inspection.
+            ('basic room rates Basic dTpw','owner_public_request'),
+            ('bearer authentication examples bearer abcdefghijklmnop','owner_public_request'),
             ('Bearer: secret-token','public_task_input'),
             ('Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.private.signature','owner_public_request'),
             ('Bearer eyJhbGciOiJIUzI1NiJ9.private.signature','owner_public_request'),

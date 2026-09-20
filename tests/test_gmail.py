@@ -810,6 +810,61 @@ class GmailConnectorTests(unittest.TestCase):
                     self.read()
                 self.assertEqual(malformed.exception.reason,"invalid_provider_response")
 
+    def test_body_rejects_duplicate_structure_security_headers(self):
+        self.connect()
+        encoded=base64.urlsafe_b64encode(b"must not be body").decode()
+        payloads=(
+            {
+                "mimeType":"text/plain",
+                "headers":[
+                    {"name":"Content-Disposition","value":"inline"},
+                    {"name":"Content-Disposition","value":"attachment"},
+                ],
+                "body":{"data":encoded},
+            },
+            {
+                "mimeType":"multipart/related",
+                "headers":[
+                    {"name":"Content-Type","value":"multipart/related"},
+                    {"name":"Content-Type","value":"multipart/related; start=\"<root>\""},
+                ],
+                "parts":[{"mimeType":"text/plain","body":{"data":encoded}}],
+            },
+        )
+        for payload in payloads:
+            with self.subTest(mime_type=payload["mimeType"]):
+                self.responses.append({"id":"m_1","threadId":"t_1","payload":payload})
+                with self.assertRaises(GmailError) as duplicate:
+                    self.read()
+                self.assertEqual(duplicate.exception.reason,"invalid_provider_response")
+
+    def test_related_body_rejects_ambiguous_content_ids(self):
+        self.connect()
+        encoded=base64.urlsafe_b64encode(b"ambiguous root").decode()
+        for parts in (
+            [
+                {"mimeType":"text/plain","headers":[
+                    {"name":"Content-ID","value":"<root>"},
+                    {"name":"Content-ID","value":"<other>"},
+                ],"body":{"data":encoded}},
+            ],
+            [
+                {"mimeType":"text/plain","headers":[{"name":"Content-ID","value":"<root>"}],"body":{"data":encoded}},
+                {"mimeType":"text/html","headers":[{"name":"Content-ID","value":"<root>"}],"body":{"data":encoded}},
+            ],
+        ):
+            with self.subTest(parts=len(parts)):
+                self.responses.append({
+                    "id":"m_1","threadId":"t_1","payload":{
+                        "mimeType":"multipart/related",
+                        "headers":[{"name":"Content-Type","value":'multipart/related; start="<root>"'}],
+                        "parts":parts,
+                    },
+                })
+                with self.assertRaises(GmailError) as ambiguous:
+                    self.read()
+                self.assertEqual(ambiguous.exception.reason,"invalid_provider_response")
+
     def test_body_attachment_id_is_fetched_with_same_bounded_authority(self):
         self.connect()
         encoded = base64.urlsafe_b64encode(b"separate body").decode()

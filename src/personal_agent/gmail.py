@@ -742,6 +742,7 @@ class GmailConnector:
             headers = part.get("headers", [])
             disposition = ""
             content_type = ""
+            security_headers: set[str] = set()
             if isinstance(headers, list):
                 if len(headers) > 100:
                     exhausted = True
@@ -752,12 +753,17 @@ class GmailConnector:
                     value = header.get("value")
                     if not isinstance(name, str) or not isinstance(value, str):
                         continue
-                    if name.lower() == "content-disposition" and not disposition:
+                    normalized_name = name.lower()
+                    if normalized_name in {"content-disposition", "content-type"}:
+                        if normalized_name in security_headers:
+                            raise GmailError("invalid_provider_response")
+                        security_headers.add(normalized_name)
+                    if normalized_name == "content-disposition":
                         if len(value) > 1024:
                             exhausted = True
                             return []
                         disposition = value
-                    elif name.lower() == "content-type" and not content_type:
+                    elif normalized_name == "content-type":
                         if len(value) > 1024:
                             exhausted = True
                             return []
@@ -830,10 +836,12 @@ class GmailConnector:
                 if start_match is None:
                     raise GmailError("invalid_provider_response")
                 wanted = start_match.group(1)
+                matching_roots: list[list[tuple[str, str | None, str | None, str | None]]] = []
                 for child, rendered in related_children:
                     child_headers = child.get("headers", []) if isinstance(child, dict) else []
                     if not isinstance(child_headers, list):
                         continue
+                    child_content_ids: list[str] = []
                     for header in child_headers[:100]:
                         if not isinstance(header, dict) or str(header.get("name", "")).lower() != "content-id":
                             continue
@@ -843,9 +851,14 @@ class GmailConnector:
                         content_id_match = re.fullmatch(r"<([^<>\s\x00-\x1f\x7f]{1,998})>", value.strip())
                         if content_id_match is None:
                             raise GmailError("invalid_provider_response")
-                        if content_id_match.group(1) == wanted:
-                            return rendered
-                raise GmailError("invalid_provider_response")
+                        child_content_ids.append(content_id_match.group(1))
+                    if len(child_content_ids) > 1:
+                        raise GmailError("invalid_provider_response")
+                    if child_content_ids == [wanted]:
+                        matching_roots.append(rendered)
+                if len(matching_roots) != 1:
+                    raise GmailError("invalid_provider_response")
+                return matching_roots[0]
             return [candidate for group in children for candidate in group]
 
         candidates = visit(payload)

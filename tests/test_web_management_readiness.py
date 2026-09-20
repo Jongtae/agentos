@@ -5,6 +5,8 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from urllib import error as urlerror
+from urllib import request as urlrequest
 from urllib.parse import parse_qs, urlsplit
 
 from personal_agent.quickstart_service import AgentService
@@ -150,8 +152,39 @@ console.log(JSON.stringify({checks:15}));
         self.assertIn('snapshot still showed 삭제 확인', transcript)
         self.assertIn('go-back', transcript)
         self.assertIn('no POST, PUT', transcript)
+        self.assertIn('"method":"DELETE","path":"/api/observer-probe"', transcript)
+        self.assertIn('positive control above proves', transcript)
         self.assertIn('test_requests=2', transcript)
         self.assertIn('does not run AgentService', transcript)
+
+    def test_browser_fixture_observer_captures_every_mutating_http_verb(self):
+        process = subprocess.Popen(
+            [shutil.which('python3') or 'python3', str(ROOT / 'tests/web_management_browser_fixture.py'), '--port', '0'],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            line = process.stdout.readline().strip()
+            base = line.removeprefix('fixture-only ')
+            self.assertTrue(base.startswith('http://127.0.0.1:'))
+            reset = urlrequest.Request(base + '/control/reset-observation', data=b'{}', method='POST', headers={'Content-Type': 'application/json'})
+            with urlrequest.urlopen(reset, timeout=5) as response:
+                self.assertEqual(response.status, 200)
+            for method in ('PUT', 'PATCH', 'DELETE'):
+                probe = urlrequest.Request(base + '/api/observer-probe', data=b'{}', method=method, headers={'Content-Type': 'application/json'})
+                with self.assertRaises(urlerror.HTTPError) as caught:
+                    urlrequest.urlopen(probe, timeout=5)
+                self.assertEqual(caught.exception.code, 405)
+            with urlrequest.urlopen(base + '/control/requests', timeout=5) as response:
+                observed = json.load(response)['requests']
+            self.assertEqual(observed, [
+                {'method': 'PUT', 'path': '/api/observer-probe'},
+                {'method': 'PATCH', 'path': '/api/observer-probe'},
+                {'method': 'DELETE', 'path': '/api/observer-probe'},
+            ])
+        finally:
+            process.terminate()
+            process.wait(timeout=5)
+            process.stdout.close()
+            process.stderr.close()
 
     def test_synthetic_telegram_request_reaches_web_read_models_without_web_chat(self):
         calls = []

@@ -117,7 +117,26 @@ Observed after three polls:
   {"test_requests": 0, "apply_requests": 0, "events": 2, "task_polls": 3}
   {"focused":true,"value":"fixture-unsaved-token","start":19,"end":19}
 
-Then reset the request observer, traverse actual browser history, and inspect the
+First positively verify that the fixture observer sees and identifies every relevant
+mutating verb (the fixture rejects these probes with 405 after recording them):
+
+  curl -s -o /dev/null -w '%{http_code}\n' -X PUT -d '{}' \
+    http://127.0.0.1:18782/api/observer-probe
+  curl -s -o /dev/null -w '%{http_code}\n' -X PATCH -d '{}' \
+    http://127.0.0.1:18782/api/observer-probe
+  curl -s -o /dev/null -w '%{http_code}\n' -X DELETE -d '{}' \
+    http://127.0.0.1:18782/api/observer-probe
+  curl -s http://127.0.0.1:18782/control/requests
+
+Observed positive-control output:
+  405
+  405
+  405
+  {"requests":[{"method":"PUT","path":"/api/observer-probe"},
+  {"method":"PATCH","path":"/api/observer-probe"},
+  {"method":"DELETE","path":"/api/observer-probe"}]}
+
+Then reset the proven observer, traverse actual browser history, and inspect the
 same unsaved field and every application request made during pane/history entry:
 
   curl -s -X POST -H 'Content-Type: application/json' -d '{}' \
@@ -135,9 +154,11 @@ Observed:
   {"value":"fixture-unsaved-token","visible":true,"url":"#settings/external"}
   The request log contained only GET /favicon.ico, /api/tasks, /api/home,
   /api/state, and /api/personal-space entries. It contained no POST, PUT,
-  PATCH, or DELETE application request. The reset control request is deliberately
-  excluded from the application log. Thus pane entry and history navigation were
-  observed read-only, not inferred from source strings.
+  PATCH, or DELETE application request. Because the positive control above proves
+  that all four mutating verbs are recorded, their absence is meaningful. The reset
+  control request is deliberately excluded from the application log. Thus pane
+  entry and history navigation were observed read-only, not inferred from source
+  strings.
 
 Mobile list/detail (390x844)
 ---------------------------

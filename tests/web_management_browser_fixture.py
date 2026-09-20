@@ -44,10 +44,22 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
+    @staticmethod
+    def observe(method, path):
+        if not path.startswith("/control/"):
+            Fixture.requests.append({"method": method, "path": path})
+
+    def reject_observed_method(self, method):
+        path = urlsplit(self.path).path
+        self.observe(method, path)
+        length = int(self.headers.get("Content-Length", "0"))
+        if length:
+            self.rfile.read(length)
+        self.send_json({"error": f"{method} is not supported by this fixture"}, 405)
+
     def do_GET(self):
         path = urlsplit(self.path).path
-        if not path.startswith("/control/"):
-            Fixture.requests.append({"method": "GET", "path": path})
+        self.observe("GET", path)
         if path == "/favicon.ico":
             self.send_response(204)
             self.end_headers()
@@ -76,8 +88,7 @@ class Handler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         length = int(self.headers.get("Content-Length", "0"))
         body = json.loads(self.rfile.read(length) or b"{}")
-        if not path.startswith("/control/"):
-            Fixture.requests.append({"method": "POST", "path": path})
+        self.observe("POST", path)
         if path == "/control/reset-observation":
             Fixture.task_polls = 0
             Fixture.requests.clear()
@@ -97,10 +108,20 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"id": "workspace-382", "title": "회귀 프로젝트", "purpose": "상세/결과 저장 회귀", "results": Fixture.results, "messages": []})
         else: self.send_json({"error": path}, 404)
 
+    def do_PUT(self):
+        self.reject_observed_method("PUT")
+
+    def do_PATCH(self):
+        self.reject_observed_method("PATCH")
+
+    def do_DELETE(self):
+        self.reject_observed_method("DELETE")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=18782)
     args = parser.parse_args()
-    print(f"fixture-only http://127.0.0.1:{args.port}", flush=True)
-    ThreadingHTTPServer(("127.0.0.1", args.port), Handler).serve_forever()
+    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    print(f"fixture-only http://127.0.0.1:{server.server_port}", flush=True)
+    server.serve_forever()

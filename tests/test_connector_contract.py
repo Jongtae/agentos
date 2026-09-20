@@ -1428,6 +1428,41 @@ class ConnectorContractTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             registry.require_enabled("google-drive-read", "read")
 
+    def test_zero_scope_capability_reads_never_trigger_legacy_migration_writes(self):
+        class CountingStore:
+            def __init__(self, delegate):
+                self.delegate = delegate
+                self.puts = 0
+
+            def config(self, key, default=None):
+                return self.delegate.config(key, default)
+
+            def put(self, key, value):
+                self.puts += 1
+                self.delegate.put(key, value)
+
+        store = CountingStore(self.store)
+        registry = CapabilityRegistry(store)
+        capability_id = "isolated-runtime-placeholder"
+
+        registry.transition(capability_id, "enabled", ())
+        self.assertEqual(store.puts, 1)
+        registry.transition(capability_id, "disconnected")
+        self.assertEqual(store.puts, 2)
+
+        for _ in range(5):
+            listed = next(item for item in registry.list() if item["id"] == capability_id)
+            self.assertEqual(listed["state"], "disconnected")
+            self.assertEqual(listed["grant"], [])
+            with self.assertRaises(ValueError):
+                registry.require_enabled(capability_id, "read")
+        self.assertEqual(store.puts, 2)
+
+        registry.transition(capability_id, "auth-required")
+        self.assertEqual(store.puts, 3)
+        registry.list()
+        self.assertEqual(store.puts, 3)
+
     def test_legacy_capability_migration_rejects_unproved_or_inexact_grants(self):
         registry = CapabilityRegistry(self.store)
         exact_enabled = {

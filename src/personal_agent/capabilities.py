@@ -116,6 +116,7 @@ class CapabilityRegistry:
         declared_grant = sorted(item["scopes"])
         if (
             state in _ACTIVE_GRANT_STATES
+            or not grant
             or grant != declared_grant
             or not any(event["state"] == "enabled" for event in audit)
         ):
@@ -136,7 +137,7 @@ class CapabilityRegistry:
             for capability_id, row in saved.items():
                 item = self._catalogue[capability_id]
                 legacy = self._migrate_legacy_inactive_grant(item, row)
-                if legacy is not None:
+                if legacy is not None and legacy != row:
                     migrated[capability_id] = legacy
                     changed = True
                 else:

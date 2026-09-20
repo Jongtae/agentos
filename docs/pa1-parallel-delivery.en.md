@@ -177,6 +177,21 @@ Use review findings as routing signals:
 After a critical architectural/root-cause decision is settled, repetitive follow-up may return to a cheaper profile.
 
 
+
+## Verification budget
+
+PA1 applies the repository-wide [Goal Execution Contract](goal-execution-contract.en.md) verification budget to every child PR.
+
+- Use targeted tests during implementation and remediation.
+- Push a coherent review-ready checkpoint rather than each micro-fix.
+- Run required full validation and request independent review on a stable head.
+- Batch compatible findings from one review pass before another full-suite/re-review cycle.
+- The normal soft budget is one review-ready broad cycle plus one consolidated remediation broad cycle when needed. A third or later broad cycle must record the new reason that makes it necessary.
+- Do not request re-review for an unchanged head, duplicate a running review, or poll CI/review repeatedly without a decision point.
+- Required exact-head CI/review and security/authority escalation remain mandatory; this budget reduces redundant cycles and never weakens evidence.
+
+For PA1 specifically, a `critical` worker should broaden testing early for auth/OAuth, privacy, shared-contract, external-effect, replay/idempotency/recovery, or cross-worktree risk, but must still batch findings and avoid repeated stable-head churn.
+
 ## Owner-only operating gates
 
 An owner-only action such as entering a credential, completing OAuth consent, pairing a live Telegram bot, or observing a real launchd/Homebrew effect is an **operating-validation gate**, not a reason to stop safe PA1 development early.

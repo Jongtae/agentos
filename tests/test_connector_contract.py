@@ -510,7 +510,7 @@ class ConnectorContractTests(unittest.TestCase):
             def config(self, key, default=None):
                 self._enter()
                 try:
-                    return copy.deepcopy(self.values.get(key, default))
+                    return copy.deepcopy(self.values[key]) if key in self.values else default
                 finally:
                     self._leave()
 
@@ -543,6 +543,31 @@ class ConnectorContractTests(unittest.TestCase):
         self.assertFalse(store.overlap)
         self.assertEqual(first.status("owner-a", GMAIL.connector_id).state, ConnectorState.CONNECTED)
         self.assertEqual(second.status("owner-a", CALENDAR.connector_id).state, ConnectorState.CONNECTED)
+
+    def test_malformed_top_level_connector_state_fails_closed_without_overwrite(self):
+        for malformed in (None, [], "corrupt", 42, True):
+            with self.subTest(malformed=malformed):
+                self.store.put(CONNECTOR_STATE_KEY, malformed)
+                operations = (
+                    lambda: self.registry.status("owner-a", GMAIL.connector_id),
+                    lambda: self.registry.transition(
+                        "owner-a",
+                        GMAIL.connector_id,
+                        ConnectorState.CONNECTED,
+                        granted_scopes=GMAIL.required_scopes,
+                    ),
+                    lambda: self.registry.record_health(
+                        "owner-a", GMAIL.connector_id, HealthState.HEALTHY
+                    ),
+                    lambda: self.registry.require_connected(
+                        "owner-a", GMAIL.connector_id, GMAIL.required_scopes
+                    ),
+                )
+                for operation in operations:
+                    with self.assertRaises(ConnectorContractError) as rejected:
+                        operation()
+                    self.assertEqual(rejected.exception.reason, "invalid_stored_state")
+                    self.assertEqual(self.store.config(CONNECTOR_STATE_KEY), malformed)
 
     def test_corrupt_pending_schema_work_reference_and_expiry_fail_closed(self):
         self.connect()

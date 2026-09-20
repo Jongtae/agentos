@@ -24,6 +24,7 @@ import uuid
 CONNECTOR_STATE_KEY = "connector_contract_state"
 PENDING_WORK_KEY = "connector_pending_work"
 _IDENTIFIER = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,95})\Z")
+_MISSING_CONNECTOR_STATE = object()
 _MISSING_PENDING_STATE = object()
 _CONNECTOR_STATE_LOCK = threading.RLock()
 _PENDING_WORK_LOCK = threading.RLock()
@@ -278,8 +279,12 @@ class ConnectorRegistry:
         return ConnectorHealth(HealthState.UNKNOWN, None, None)
 
     def _rows(self) -> dict:
-        value = self.store.config(CONNECTOR_STATE_KEY, {})
-        return value if isinstance(value, dict) else {}
+        value = self.store.config(CONNECTOR_STATE_KEY, _MISSING_CONNECTOR_STATE)
+        if value is _MISSING_CONNECTOR_STATE:
+            return {}
+        if not isinstance(value, dict):
+            raise ConnectorContractError("invalid_stored_state")
+        return value
 
     def status(self, owner_id: str, connector_id: str) -> ConnectorStatus:
         with self._lock:

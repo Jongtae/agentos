@@ -309,6 +309,13 @@ class GmailConnector:
             code = callback.get("code")
             if not isinstance(code, str) or not code or len(code) > 4096:
                 raise GmailError("invalid_callback")
+            with self.registry._authority_guard():
+                current = self.registry.status(owner_id, GMAIL_CONNECTOR_ID)
+                if (
+                    current.state.value != pending.get("connector_state")
+                    or current.connection_revision != pending.get("connection_revision")
+                ):
+                    raise GmailError("connector_authority_changed")
             request = {
                 "code": code,
                 "code_verifier": pending["verifier"],
@@ -418,11 +425,20 @@ class GmailConnector:
         body, mime_type = self._body(response.get("payload"), load_attachment)
         return GmailMessage(message_id, thread_id, mime_type, body)
 
-    def mark_reauthentication_required(self, owner_id: str) -> dict:
+    def mark_reauthentication_required(
+        self,
+        owner_id: str,
+        *,
+        expected_revision: str | None = None,
+    ) -> dict:
         """Clear Gmail credentials and fail closed after expiry or revocation."""
         with self.registry._authority_guard():
+            current = self.registry.status(owner_id, GMAIL_CONNECTOR_ID)
+            if expected_revision is not None and current.connection_revision != expected_revision:
+                return current.as_dict()
             self.store.secret(TOKEN_SECRET_KEY, {})
-            self.registry.transition(owner_id, GMAIL_CONNECTOR_ID, ConnectorState.REAUTH_REQUIRED)
+            if current.state is ConnectorState.CONNECTED:
+                self.registry.transition(owner_id, GMAIL_CONNECTOR_ID, ConnectorState.REAUTH_REQUIRED)
         return self.status(owner_id)
 
     def _pending(self, owner_id: str, state: object) -> dict:

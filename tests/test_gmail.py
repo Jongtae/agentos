@@ -175,11 +175,12 @@ class GmailConnectorTests(unittest.TestCase):
                 self.registry.transition("owner-a", GMAIL_CONNECTOR_ID, ConnectorState.DISCONNECTED)
                 _offer, state = self.begin()
                 self.registry.transition("owner-a", GMAIL_CONNECTOR_ID, changed_state)
+                exchanges = []
                 with self.assertRaises(GmailError) as rejected:
                     self.gmail.complete_oauth(
                         "owner-a",
                         {"state": state, "code": "oauth-code"},
-                        lambda _: {
+                        lambda request: exchanges.append(request) or {
                             "access_token": "must-not-survive",
                             "refresh_token": "must-not-survive",
                             "expires_in": 60,
@@ -187,8 +188,20 @@ class GmailConnectorTests(unittest.TestCase):
                         },
                     )
                 self.assertEqual(rejected.exception.reason, "connector_authority_changed")
+                self.assertEqual(exchanges, [])
                 self.assertEqual(self.gmail.status("owner-a")["state"], changed_state.value)
                 self.assertFalse(self.store.secret("gmail_oauth_tokens"))
+
+    def test_late_reauthentication_signal_preserves_owner_block(self):
+        self.connect()
+        prior = self.gmail.status("owner-a")["connection_revision"]
+        self.registry.transition("owner-a", GMAIL_CONNECTOR_ID, ConnectorState.BLOCKED)
+        result = self.gmail.mark_reauthentication_required(
+            "owner-a",
+            expected_revision=prior,
+        )
+        self.assertEqual(result["state"], "blocked")
+        self.assertEqual(self.gmail.status("owner-a")["state"], "blocked")
 
     def test_plaintext_store_and_implicit_insecure_callback_are_rejected(self):
         with self.assertRaises(ValueError):

@@ -319,6 +319,18 @@ class PublicPageReaderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'콘텐츠 유형'):
             PublicPageReader(opener=Opener(response),resolver=public_dns).read('https://example.com/')
 
+    def test_xml_markup_is_parsed_into_visible_text(self):
+        """A comment or script body is not something the page shows a reader."""
+        for media_type in ('application/xml', 'text/xml'):
+            with self.subTest(media_type=media_type):
+                body=(b'<feed><!-- Grand total: USD 1. -->'
+                      b'<item>No total published.</item></feed>')
+                opener=Opener(Response(body=body, headers={'Content-Type':media_type}))
+                result=PublicPageReader(opener=opener, resolver=public_dns).read('https://example.com/feed')
+                self.assertIn('No total published.', result['content'])
+                self.assertNotIn('Grand total', result['content'])
+                self.assertNotIn('<item>', result['content'])
+
     def test_malformed_http_is_a_recoverable_provider_failure(self):
         class Broken:
             def open(self, request, timeout=None): raise http.client.BadStatusLine('broken')

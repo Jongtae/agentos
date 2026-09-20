@@ -126,6 +126,14 @@ def normalize_public_url(value):
     return urlunsplit((parsed.scheme.casefold(),host,parsed.path or '/',query,''))
 
 
+MARKUP_PAGE_MEDIA_TYPES = (
+    'text/html',
+    'application/xhtml+xml',
+    'application/xml',
+    'text/xml',
+)
+
+
 class _PageText(HTMLParser):
     def __init__(self):
         super().__init__(); self.parts=[]; self.skip=0
@@ -370,7 +378,10 @@ class PublicPageReader:
             try: text=data.decode(charset,'strict')
             except UnicodeDecodeError:
                 raise ValueError('공개 페이지 문자 인코딩과 응답 내용이 일치하지 않습니다.') from None
-            if media_type in ('text/html','application/xhtml+xml'):
+            # Every accepted markup type must be parsed into visible text.
+            # Classifying raw source as evidence would let a comment or a
+            # script body become an observed fact the page never displays.
+            if media_type in MARKUP_PAGE_MEDIA_TYPES:
                 parser=_PageText(); parser.feed(text); page_text=' '.join(parser.parts)
             else:
                 page_text=text

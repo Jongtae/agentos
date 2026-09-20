@@ -405,7 +405,9 @@ class GmailConnector:
                 connection_revision,
                 access_token,
             )
-            results.append(self._search_result(message_id, metadata, connection_revision))
+            result = self._search_result(message_id, metadata, connection_revision)
+            self._assert_current_request(owner_id, connection_revision, access_token)
+            results.append(result)
         return tuple(results)
 
     def read_message(

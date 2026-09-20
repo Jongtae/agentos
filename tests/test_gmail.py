@@ -302,6 +302,22 @@ class GmailConnectorTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(self.gmail.status("owner-a")["state"], "disconnected")
 
+    def test_search_discards_metadata_when_authority_changes_during_parsing(self):
+        self.connect()
+        self.responses.extend([{"messages": [{"id": "m_1"}]}, self.metadata()])
+        original = self.gmail._search_result
+
+        def revoke_during_parse(message_id, metadata, connection_revision):
+            result = original(message_id, metadata, connection_revision)
+            self.registry.transition("owner-a", GMAIL_CONNECTOR_ID, ConnectorState.BLOCKED)
+            return result
+
+        self.gmail._search_result = revoke_during_parse
+        with self.assertRaises(GmailError) as revoked:
+            self.gmail.search("owner-a", "receipt")
+        self.assertEqual(revoked.exception.reason, "superseded_connection")
+        self.assertEqual(self.gmail.status("owner-a")["state"], "blocked")
+
     def test_inflight_success_is_discarded_after_authority_revocation(self):
         self.connect()
 

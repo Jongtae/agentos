@@ -8,6 +8,7 @@ this contract.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 import base64
@@ -273,6 +274,12 @@ class ConnectorRegistry:
         if connector is None:
             raise ConnectorContractError("unknown_connector")
         return connector
+
+    @contextmanager
+    def _authority_guard(self):
+        """Serialize an authority check with a dependent local state write."""
+        with self._lock:
+            yield
 
     @staticmethod
     def _unknown_health() -> ConnectorHealth:
@@ -653,7 +660,6 @@ class PendingWorkRegistry:
                     saved_owner == owner
                     and saved_work == work_id
                     and saved_connector == connector_id
-                    and saved_scopes == requested
                 ):
                     matches.append((state, row))
             if any(state is ResumeState.CLAIMED for state, _row in matches):
@@ -737,18 +743,23 @@ class PendingWorkRegistry:
                 self.store.put(PENDING_WORK_KEY, rows)
                 reason = "scope_mismatch" if actual != expected else "invalid_resume"
                 raise ConnectorContractError(reason)
-            try:
-                self.connector_registry.require_connected(owner_id, connector_id, actual)
-            except ConnectorContractError as exc:
-                row["state"] = ResumeState.SUPERSEDED.value
-                row["completed_at"] = None
-                row["terminal_at"] = now
+            # Lock order is pending-state then connector-authority. Connector
+            # lifecycle paths never acquire the pending lock. Hold authority
+            # from validation through CLAIMED persistence so revocation cannot
+            # commit in between those two operations.
+            with self.connector_registry._authority_guard():
+                try:
+                    self.connector_registry.require_connected(owner_id, connector_id, actual)
+                except ConnectorContractError as exc:
+                    row["state"] = ResumeState.SUPERSEDED.value
+                    row["completed_at"] = None
+                    row["terminal_at"] = now
+                    self.store.put(PENDING_WORK_KEY, rows)
+                    raise exc
+                row["state"] = ResumeState.CLAIMED.value
+                row["claim_digest"] = claim_digest
+                row["claimed_at"] = now
                 self.store.put(PENDING_WORK_KEY, rows)
-                raise exc
-            row["state"] = ResumeState.CLAIMED.value
-            row["claim_digest"] = claim_digest
-            row["claimed_at"] = now
-            self.store.put(PENDING_WORK_KEY, rows)
             return PendingWorkReference(work_id, connector_id, expected)
 
     def complete(

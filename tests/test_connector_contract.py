@@ -30,6 +30,7 @@ CALENDAR = ConnectorSpec(
     "google-calendar-owner",
     ("calendar.events.read", "calendar.events.write"),
 )
+MULTI_SCOPE = ConnectorSpec("mail-owner", ("mail.read", "mail.write"))
 WORK_1 = "11111111-1111-4111-8111-111111111111"
 WORK_2 = "22222222-2222-4222-8222-222222222222"
 WORK_3 = "33333333-3333-4333-8333-333333333333"
@@ -281,6 +282,153 @@ class ConnectorContractTests(unittest.TestCase):
                 handle.token, "owner-a", GMAIL.connector_id, loser
             )
         self.assertEqual(competing_complete.exception.reason, "invalid_resume")
+
+    def test_initial_claim_and_connector_revocation_commit_in_one_serial_order(self):
+        class ClaimWinsRegistry(ConnectorRegistry):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.checked = threading.Barrier(2)
+                self.release = threading.Event()
+                self.revoke_attempted = threading.Event()
+
+            def require_connected(self, *args, **kwargs):
+                result = super().require_connected(*args, **kwargs)
+                self.checked.wait(timeout=5)
+                if not self.release.wait(timeout=5):
+                    raise RuntimeError("claim test barrier timed out")
+                return result
+
+            def transition(self, owner_id, connector_id, state, **kwargs):
+                if state is ConnectorState.DISCONNECTED:
+                    self.revoke_attempted.set()
+                return super().transition(owner_id, connector_id, state, **kwargs)
+
+        with tempfile.TemporaryDirectory() as root:
+            store = QuickStore(root)
+            registry = ClaimWinsRegistry(store, (GMAIL,), clock=lambda: self.now[0])
+            pending = PendingWorkRegistry(store, registry, clock=lambda: self.now[0])
+            registry.transition(
+                "owner-a", GMAIL.connector_id, ConnectorState.CONNECTED,
+                granted_scopes=GMAIL.required_scopes,
+            )
+            handle = pending.issue("owner-a", WORK_1, GMAIL.connector_id, GMAIL.required_scopes)
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                claim_future = pool.submit(
+                    pending.claim,
+                    handle.token,
+                    "owner-a",
+                    GMAIL.connector_id,
+                    GMAIL.required_scopes,
+                    HANDOFF_1,
+                )
+                registry.checked.wait(timeout=5)
+                revoke_future = pool.submit(
+                    registry.transition,
+                    "owner-a",
+                    GMAIL.connector_id,
+                    ConnectorState.DISCONNECTED,
+                )
+                self.assertTrue(registry.revoke_attempted.wait(timeout=5))
+                self.assertFalse(revoke_future.done())
+                registry.release.set()
+                self.assertEqual(claim_future.result(timeout=5).work_id, WORK_1)
+                self.assertEqual(
+                    revoke_future.result(timeout=5).state, ConnectorState.DISCONNECTED
+                )
+
+        class RevokeWinsRegistry(ConnectorRegistry):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.revoke_locked = threading.Barrier(2)
+                self.release = threading.Event()
+
+            def transition(self, owner_id, connector_id, state, **kwargs):
+                if state is ConnectorState.DISCONNECTED:
+                    with self._authority_guard():
+                        self.revoke_locked.wait(timeout=5)
+                        if not self.release.wait(timeout=5):
+                            raise RuntimeError("revoke test barrier timed out")
+                        return super().transition(owner_id, connector_id, state, **kwargs)
+                return super().transition(owner_id, connector_id, state, **kwargs)
+
+        with tempfile.TemporaryDirectory() as root:
+            store = QuickStore(root)
+            registry = RevokeWinsRegistry(store, (GMAIL,), clock=lambda: self.now[0])
+            pending = PendingWorkRegistry(store, registry, clock=lambda: self.now[0])
+            registry.transition(
+                "owner-a", GMAIL.connector_id, ConnectorState.CONNECTED,
+                granted_scopes=GMAIL.required_scopes,
+            )
+            handle = pending.issue("owner-a", WORK_2, GMAIL.connector_id, GMAIL.required_scopes)
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                revoke_future = pool.submit(
+                    registry.transition,
+                    "owner-a",
+                    GMAIL.connector_id,
+                    ConnectorState.DISCONNECTED,
+                )
+                registry.revoke_locked.wait(timeout=5)
+                claim_future = pool.submit(
+                    pending.claim,
+                    handle.token,
+                    "owner-a",
+                    GMAIL.connector_id,
+                    GMAIL.required_scopes,
+                    HANDOFF_2,
+                )
+                registry.release.set()
+                self.assertEqual(
+                    revoke_future.result(timeout=5).state, ConnectorState.DISCONNECTED
+                )
+                with self.assertRaises(ConnectorContractError) as rejected:
+                    claim_future.result(timeout=5)
+                self.assertEqual(rejected.exception.reason, ConnectorState.DISCONNECTED.value)
+
+    def test_work_deduplication_does_not_partition_by_scope_subset(self):
+        registry = ConnectorRegistry(self.store, (MULTI_SCOPE,), clock=lambda: self.now[0])
+        pending = PendingWorkRegistry(self.store, registry, clock=lambda: self.now[0])
+        registry.transition(
+            "owner-a",
+            MULTI_SCOPE.connector_id,
+            ConnectorState.CONNECTED,
+            granted_scopes=MULTI_SCOPE.required_scopes,
+        )
+
+        read_offer = pending.issue(
+            "owner-a", WORK_1, MULTI_SCOPE.connector_id, ("mail.read",)
+        )
+        write_offer = pending.issue(
+            "owner-a", WORK_1, MULTI_SCOPE.connector_id, ("mail.write",)
+        )
+        with self.assertRaises(ConnectorContractError) as superseded:
+            pending.claim(
+                read_offer.token,
+                "owner-a",
+                MULTI_SCOPE.connector_id,
+                ("mail.read",),
+                HANDOFF_1,
+            )
+        self.assertEqual(superseded.exception.reason, "superseded_resume")
+        pending.claim(
+            write_offer.token,
+            "owner-a",
+            MULTI_SCOPE.connector_id,
+            ("mail.write",),
+            HANDOFF_2,
+        )
+        with self.assertRaises(ConnectorContractError) as claimed:
+            pending.issue(
+                "owner-a", WORK_1, MULTI_SCOPE.connector_id, ("mail.read",)
+            )
+        self.assertEqual(claimed.exception.reason, "work_already_claimed")
+        pending.complete(
+            write_offer.token, "owner-a", MULTI_SCOPE.connector_id, HANDOFF_2
+        )
+        with self.assertRaises(ConnectorContractError) as completed:
+            pending.issue(
+                "owner-a", WORK_1, MULTI_SCOPE.connector_id, ("mail.read",)
+            )
+        self.assertEqual(completed.exception.reason, "work_already_completed")
 
     def test_reissue_rejects_claimed_and_completed_work_but_claimant_recovers(self):
         self.connect()

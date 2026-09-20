@@ -542,7 +542,31 @@ class ServiceControlTests(unittest.TestCase):
                     getattr(controller, operation)()
                 self.assertFalse(self.runner.loaded)
                 self.assertFalse(self.runner.running)
-                self.assertEqual(self.runner.commands[-1][1], "bootout")
+                self.assertTrue(self.runner.disabled)
+                self.assertEqual(self.runner.commands[-2][1], "bootout")
+                self.assertEqual(self.runner.commands[-1], ["launchctl", "disable", controller.service_target])
+
+    def test_failed_start_cleanup_reports_unverified_when_disable_fails(self):
+        self.controller.plist_path.parent.mkdir(parents=True)
+        self.controller.plist_path.write_bytes(render_plist(self.cli, self.controller.data_dir))
+        controller = ServiceController(
+            home=self.home,
+            cli_path=self.cli,
+            runner=self.runner,
+            uid=501,
+            health_probe=lambda: False,
+        )
+        original = self.runner
+
+        def fail_cleanup_disable(command):
+            if list(command)[:2] == ["launchctl", "disable"] and not original.loaded:
+                original.commands.append(list(command))
+                return CommandResult(1, stderr="permission denied")
+            return original(command)
+
+        controller.runner = fail_cleanup_disable
+        with self.assertRaisesRegex(ServiceControlError, "cleanup could not be verified"):
+            controller.start()
 
     def test_static_template_has_no_fixed_homebrew_prefix(self):
         template = (Path(__file__).resolve().parents[1] / "deploy/com.personal-agentos.plist").read_text()

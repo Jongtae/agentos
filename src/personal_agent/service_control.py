@@ -459,6 +459,13 @@ class ServiceController:
             started = self._launchctl("kickstart", "-k", self.service_target)
         else:
             started = self._launchctl("bootstrap", self.domain, str(self.plist_path))
+        if started.returncode:
+            disabled = self._launchctl("disable", self.service_target)
+            if disabled.returncode:
+                raise ServiceControlError(
+                    "The service failed to start and its persistent disable state could not be verified.",
+                    "Run service stop before the next login, then inspect foreground startup.",
+                )
         self._require(started, "The AgentOS background service could not start",
                       "Run service status; use foreground `agentos start` to view a startup error.")
         try:
@@ -471,6 +478,12 @@ class ServiceController:
                 raise ServiceControlError(
                     f"The service did not become healthy and cleanup could not be verified: {failure}",
                     "Run service status and stop before retrying; use foreground `agentos start` to inspect startup.",
+                ) from failure
+            disabled = self._launchctl("disable", self.service_target)
+            if disabled.returncode:
+                raise ServiceControlError(
+                    f"The service did not become healthy and persistent cleanup could not be verified: {failure}",
+                    "Run service stop before the next login; use foreground `agentos start` to inspect startup.",
                 ) from failure
             raise ServiceControlError(
                 f"The service did not become healthy and was stopped: {failure}",
@@ -520,6 +533,13 @@ class ServiceController:
             "Run service status, then retry restart; no owner data was deleted.",
         )
         started = self._launchctl("bootstrap", self.domain, str(self.plist_path))
+        if started.returncode:
+            disabled = self._launchctl("disable", self.service_target)
+            if disabled.returncode:
+                raise ServiceControlError(
+                    "The service failed to restart and its persistent disable state could not be verified.",
+                    "Run service stop before the next login, then inspect foreground startup.",
+                )
         self._require(started, "The AgentOS background service could not restart",
                       "Use foreground `agentos start` to inspect the startup failure, then retry service restart.")
         try:
@@ -530,6 +550,12 @@ class ServiceController:
                 raise ServiceControlError(
                     f"The service did not become healthy and cleanup could not be verified: {failure}",
                     "Run service status and stop before retrying; use foreground `agentos start` to inspect startup.",
+                ) from failure
+            disabled = self._launchctl("disable", self.service_target)
+            if disabled.returncode:
+                raise ServiceControlError(
+                    f"The service did not become healthy and persistent cleanup could not be verified: {failure}",
+                    "Run service stop before the next login; use foreground `agentos start` to inspect startup.",
                 ) from failure
             raise ServiceControlError(
                 f"The service did not become healthy and was stopped: {failure}",

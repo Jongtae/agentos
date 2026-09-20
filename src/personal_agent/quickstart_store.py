@@ -216,6 +216,13 @@ class QuickStore:
         return hashlib.sha256(value.encode()).hexdigest()
 
     @staticmethod
+    def _work_binding(value):
+        if isinstance(value,str) and value.startswith('workref:') and len(value)==72:
+            digest=value[8:]
+            if all(character in '0123456789abcdef' for character in digest):return digest
+        return QuickStore._memory_binding(value)
+
+    @staticmethod
     def _memory_value(memory_key, content):
         if not isinstance(memory_key,str) or not 2<=len(memory_key.strip())<=160: raise ValueError('기억 항목의 이름을 확인하세요.')
         if not isinstance(content,str) or not content.strip() or len(content)>4000: raise ValueError('기억할 내용을 확인하세요.')
@@ -242,7 +249,7 @@ class QuickStore:
 
     def save_memory(self, memory_key, content, owner_id='local-owner', work_id=None):
         memory_key,content=self._memory_value(memory_key,content);owner_key=self._memory_binding(owner_id)
-        work_key=self._memory_binding(work_id) if work_id is not None else None
+        work_key=self._work_binding(work_id) if work_id is not None else None
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
             return self._save_memory(db,memory_key,content,owner_key,work_key)
@@ -250,7 +257,7 @@ class QuickStore:
     def save_memory_candidate(self, job_id, memory_key, content, owner_id='local-owner', work_id=None):
         memory_key,content=self._memory_value(memory_key,content)
         work_id=job_id if work_id is None else work_id
-        owner_key,work_key=self._memory_binding(owner_id),self._memory_binding(work_id)
+        owner_key,work_key=self._memory_binding(owner_id),self._work_binding(work_id)
         candidate_id=str(uuid.uuid4());digest=self.memory_digest(memory_key,content)
         with self.db() as db:
             db.execute('INSERT INTO memory_candidates(id,job_id,memory_key,content,created,state,owner_key,work_key,content_digest) VALUES (?,?,?,?,?,?,?,?,?)',
@@ -287,22 +294,27 @@ class QuickStore:
                 row=db.execute('SELECT * FROM memory_candidates WHERE id=? AND owner_key=?',(candidate_id,owner_key)).fetchone()
             else:
                 row=db.execute('SELECT * FROM memory_candidates WHERE id=? AND owner_key=? AND work_key=?',
-                               (candidate_id,owner_key,self._memory_binding(work_id))).fetchone()
+                               (candidate_id,owner_key,self._work_binding(work_id))).fetchone()
         if not row:return None
         value=dict(row)
-        return {key:value[key] for key in ('id','memory_key','content','created','state','content_digest','decided','resulting_memory_id')}
+        result={key:value[key] for key in ('id','memory_key','content','created','state','content_digest','decided','resulting_memory_id')}
+        result['work_ref']='workref:'+value['work_key']
+        return result
 
     def memory_candidates(self, owner_id=None, work_id=None, include_decided=False, limit=50, offset=0):
         if isinstance(limit,bool) or not isinstance(limit,int) or not 1<=limit<=101:raise ValueError('기억 후보 조회 범위를 확인하세요.')
         if isinstance(offset,bool) or not isinstance(offset,int) or offset<0:raise ValueError('기억 후보 조회 위치를 확인하세요.')
         clauses=[];parameters=[]
         if owner_id is not None:clauses.append('owner_key=?');parameters.append(self._memory_binding(owner_id))
-        if work_id is not None:clauses.append('work_key=?');parameters.append(self._memory_binding(work_id))
+        if work_id is not None:clauses.append('work_key=?');parameters.append(self._work_binding(work_id))
         if not include_decided:clauses.append("state='pending'")
         where=(' WHERE '+' AND '.join(clauses)) if clauses else ''
         with self.db() as db:
-            rows=db.execute('SELECT id,job_id,memory_key,content,created,state,content_digest,decided,resulting_memory_id FROM memory_candidates'+where+' ORDER BY created DESC,id DESC LIMIT ? OFFSET ?',(*parameters,limit,offset))
-            return [dict(r) for r in rows]
+            rows=db.execute('SELECT id,job_id,memory_key,content,created,state,content_digest,decided,resulting_memory_id,work_key FROM memory_candidates'+where+' ORDER BY created DESC,id DESC LIMIT ? OFFSET ?',(*parameters,limit,offset))
+            results=[]
+            for row in rows:
+                value=dict(row);value['work_ref']='workref:'+value.pop('work_key');results.append(value)
+            return results
 
     def memory(self, memory_id, owner_id='local-owner', current_only=True):
         if not isinstance(memory_id,str) or not memory_id:return None
@@ -336,11 +348,35 @@ class QuickStore:
         if not isinstance(source_digest,str) or len(source_digest)!=64 or not isinstance(content_digest,str) or len(content_digest)!=64:raise ValueError('승인 내용을 확인하세요.')
         if isinstance(ttl,bool) or not isinstance(ttl,(int,float)) or not 1<=ttl<=900:raise ValueError('승인 유효 시간을 확인하세요.')
         created=time.time() if now is None else float(now);token=secrets.token_urlsafe(32)
-        value=(self._exact_memory_token_hash(token),self._memory_binding(owner_id),self._memory_binding(work_id),action,
+        value=(self._exact_memory_token_hash(token),self._memory_binding(owner_id),self._work_binding(work_id),action,
                subject_id,memory_key,source_digest,content_digest,created,created+ttl,'issued',None)
         with self.db() as db:db.execute('INSERT INTO memory_approvals VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',value)
         return {'approval_token':token,'action':action,'subject_id':subject_id,'memory_key':memory_key,
                 'source_digest':source_digest,'content_digest':content_digest,'expires_at':created+ttl,'state':'issued'}
+
+    def issue_candidate_memory_approval(self, owner_id, work_id, candidate_id, content_digest,
+                                        ttl=600, now=None):
+        """Validate a pending candidate and insert its approval in one transaction."""
+        if not isinstance(candidate_id,str) or not candidate_id:raise ValueError('승인 대상을 확인하세요.')
+        if not isinstance(content_digest,str) or len(content_digest)!=64:raise ValueError('승인 내용을 확인하세요.')
+        if isinstance(ttl,bool) or not isinstance(ttl,(int,float)) or not 1<=ttl<=900:raise ValueError('승인 유효 시간을 확인하세요.')
+        created=time.time() if now is None else float(now);token=secrets.token_urlsafe(32)
+        owner_key=self._memory_binding(owner_id);work_key=self._work_binding(work_id)
+        token_hash=self._exact_memory_token_hash(token)
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            candidate=db.execute(
+                "SELECT memory_key,content_digest,state FROM memory_candidates WHERE id=? AND owner_key=? AND work_key=?",
+                (candidate_id,owner_key,work_key),
+            ).fetchone()
+            if not candidate or candidate['state']!='pending' or not hmac.compare_digest(str(candidate['content_digest']),content_digest):
+                raise ValueError('기억 후보를 다시 확인하세요.')
+            value=(token_hash,owner_key,work_key,'accept-candidate',candidate_id,candidate['memory_key'],
+                   content_digest,content_digest,created,created+ttl,'issued',None)
+            db.execute('INSERT INTO memory_approvals VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',value)
+        return {'approval_token':token,'action':'accept-candidate','subject_id':candidate_id,
+                'memory_key':candidate['memory_key'],'source_digest':content_digest,
+                'content_digest':content_digest,'expires_at':created+ttl,'state':'issued'}
 
     def _exact_memory_token_hash(self, token):
         secret=self.secret('memory_exact_approval_secret',create=lambda:secrets.token_hex(32))
@@ -351,7 +387,7 @@ class QuickStore:
         if not isinstance(approval_token,str) or not approval_token:raise ValueError('정확한 승인이 필요합니다.')
         row=db.execute('SELECT * FROM memory_approvals WHERE token_hash=?',(self._exact_memory_token_hash(approval_token),)).fetchone()
         if not row:raise ValueError('정확한 승인이 필요합니다.')
-        expected=(self._memory_binding(owner_id),self._memory_binding(work_id),action,subject_id,memory_key,source_digest,content_digest)
+        expected=(self._memory_binding(owner_id),self._work_binding(work_id),action,subject_id,memory_key,source_digest,content_digest)
         observed=tuple(row[key] for key in ('owner_key','work_key','action','subject_id','memory_key','source_digest','content_digest'))
         if any(not hmac.compare_digest(str(left),str(right)) for left,right in zip(expected,observed)):
             raise ValueError('정확한 승인이 필요합니다.')
@@ -364,7 +400,7 @@ class QuickStore:
         return row
 
     def accept_memory_candidate(self, owner_id, work_id, candidate_id, content_digest, approval_token, now=None):
-        observed=time.time() if now is None else float(now);owner_key=self._memory_binding(owner_id);work_key=self._memory_binding(work_id)
+        observed=time.time() if now is None else float(now);owner_key=self._memory_binding(owner_id);work_key=self._work_binding(work_id)
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
             candidate=db.execute('SELECT * FROM memory_candidates WHERE id=? AND owner_key=? AND work_key=?',(candidate_id,owner_key,work_key)).fetchone()
@@ -382,7 +418,7 @@ class QuickStore:
             return result
 
     def reject_memory_candidate(self, owner_id, work_id, candidate_id, content_digest, now=None):
-        owner_key=self._memory_binding(owner_id);work_key=self._memory_binding(work_id)
+        owner_key=self._memory_binding(owner_id);work_key=self._work_binding(work_id)
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
             row=db.execute('SELECT * FROM memory_candidates WHERE id=? AND owner_key=? AND work_key=?',
@@ -400,7 +436,7 @@ class QuickStore:
     def correct_memory(self, owner_id, work_id, memory_id, memory_key, current_digest, content,
                        approval_token, now=None):
         memory_key,content=self._memory_value(memory_key,content);replacement_digest=self.memory_digest(memory_key,content)
-        observed=time.time() if now is None else float(now);owner_key=self._memory_binding(owner_id);work_key=self._memory_binding(work_id)
+        observed=time.time() if now is None else float(now);owner_key=self._memory_binding(owner_id);work_key=self._work_binding(work_id)
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
             approval=self._exact_approval(db,approval_token,owner_id,work_id,'correct-memory',memory_id,memory_key,current_digest,replacement_digest,observed)

@@ -72,6 +72,53 @@ class MemoryServiceTests(unittest.TestCase):
         with self.store.db() as db:
             self.assertEqual(db.execute("SELECT state FROM memory_approvals WHERE expires=?", (expiring_approval["expires_at"],)).fetchone()["state"], "expired")
 
+    def test_owner_wide_candidate_page_returns_actionable_opaque_work_reference(self):
+        candidate = self.service.propose("owner-a", "private-work-name", "timezone", "Asia/Seoul")
+        row = self.service.list_candidates("owner-a")["candidates"][0]
+        self.assertEqual(row["id"], candidate["id"])
+        self.assertRegex(row["work_ref"], r"^workref:[0-9a-f]{64}$")
+        self.assertNotIn("private-work-name", json.dumps(row))
+        inspected = self.service.inspect_candidate("owner-a", row["work_ref"], row["id"])
+        approval = self.service.request_candidate_approval(
+            "owner-a", row["work_ref"], row["id"], inspected["content_digest"]
+        )
+        accepted = self.service.approve_candidate(
+            "owner-a", row["work_ref"], row["id"], inspected["content_digest"], approval["approval_token"]
+        )
+        self.assertEqual(accepted["content"], "Asia/Seoul")
+
+    def test_candidate_approval_rejection_race_never_leaves_issued_approval(self):
+        for index in range(12):
+            candidate = self.service.propose("owner-a", f"work-{index}", f"key-{index}", f"value-{index}")
+            barrier = threading.Barrier(2)
+
+            def approve():
+                barrier.wait()
+                try:
+                    return self.service.request_candidate_approval(
+                        "owner-a", f"work-{index}", candidate["id"], candidate["content_digest"]
+                    )
+                except MemoryServiceError:
+                    return None
+
+            def reject():
+                barrier.wait()
+                return self.service.reject_candidate(
+                    "owner-a", f"work-{index}", candidate["id"], candidate["content_digest"]
+                )
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                approval_future = pool.submit(approve)
+                rejection_future = pool.submit(reject)
+                approval_future.result()
+                rejection_future.result()
+            with self.store.db() as db:
+                issued = db.execute(
+                    "SELECT COUNT(*) FROM memory_approvals WHERE owner_key=? AND subject_id=? AND state='issued'",
+                    (self.store._memory_binding("owner-a"), candidate["id"]),
+                ).fetchone()[0]
+            self.assertEqual(issued, 0)
+
     def test_correction_approval_is_rejected_at_exact_expiry(self):
         original = self.service.remember("owner-a", "work-a", "meeting-time", "morning")
         approval = self.service.request_correction(
@@ -118,10 +165,10 @@ class MemoryServiceTests(unittest.TestCase):
         restored = QuickStore(restore_owner_state(archive, self.root.parent / "restored-rejected"))
         with restored.db() as db:
             restored_candidate = db.execute("SELECT memory_key,content FROM memory_candidates WHERE id=?", (candidate["id"],)).fetchone()
-            restored_approvals = db.execute("SELECT owner_key,memory_key FROM memory_approvals WHERE subject_id=?", (candidate["id"],)).fetchall()
+            restored_approvals = db.execute("SELECT owner_key,memory_key,state FROM memory_approvals WHERE subject_id=?", (candidate["id"],)).fetchall()
         self.assertEqual((restored_candidate["memory_key"], restored_candidate["content"]), ("", ""))
-        self.assertEqual([(row["owner_key"], row["memory_key"]) for row in restored_approvals], [
-            (self.store._memory_binding("owner-b"), "other-owner-key")
+        self.assertEqual([(row["owner_key"], row["memory_key"], row["state"]) for row in restored_approvals], [
+            (self.store._memory_binding("owner-b"), "", "revoked")
         ])
         portable_bytes = (Path(restored.root) / "private" / "quickstart.db").read_bytes()
         self.assertNotIn(b"vegetarian", portable_bytes)
@@ -277,6 +324,12 @@ class MemoryServiceTests(unittest.TestCase):
         restored_store = QuickStore(restore_owner_state(archive, self.root.parent / "restored"))
         restored = MemoryService(restored_store, now=lambda: self.now[0])
         self.assertEqual(restored.inspect_candidate("owner-a", "work-a", candidate["id"])["state"], "pending")
+        with restored_store.db() as db:
+            portable_approval = db.execute(
+                "SELECT state,memory_key FROM memory_approvals WHERE subject_id=?",
+                (candidate["id"],),
+            ).fetchone()
+        self.assertEqual((portable_approval["state"], portable_approval["memory_key"]), ("revoked", ""))
         with self.assertRaises(ValueError):
             restored.approve_candidate(
                 "owner-a", "work-a", candidate["id"], candidate["content_digest"], approval["approval_token"]

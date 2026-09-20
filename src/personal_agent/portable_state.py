@@ -45,6 +45,11 @@ def _portable_db(source, target):
                                 error='Restored work was quarantined; submit a new request to retry.',
                                 delivery=CASE WHEN delivery IN ('sending','pending') THEN 'unknown' ELSE delivery END
                             WHERE status IN ('queued','running')""")
+        if "memory_approvals" in tables:
+            # Approval tokens are runtime-secret-bound and cannot survive a
+            # portable boundary. Quarantine outstanding rows and remove the
+            # raw owner memory label retained by an issued approval.
+            copy.execute("UPDATE memory_approvals SET state='revoked',memory_key='' WHERE state='issued'")
         row = copy.execute("SELECT value FROM config WHERE key='a2a_delegations'").fetchone()
         if row:
             try: delegations = json.loads(row[0])

@@ -90,13 +90,13 @@ class MemoryService:
 
     def request_candidate_approval(self, owner_id, work_id, candidate_id, content_digest, ttl=600):
         """Issue a short-lived approval for the exact inspected candidate."""
-        row = self.inspect_candidate(owner_id, work_id, candidate_id)
-        if row["state"] != "pending" or row["content_digest"] != content_digest:
-            raise MemoryServiceError("memory candidate changed or was already decided")
-        return self.store.issue_exact_memory_approval(
-            owner_id, work_id, "accept-candidate", candidate_id, row["memory_key"],
-            content_digest, content_digest, ttl=ttl, now=self.now()
-        )
+        owner_id, work_id = self._request(owner_id, work_id)
+        try:
+            return self.store.issue_candidate_memory_approval(
+                owner_id, work_id, candidate_id, content_digest, ttl=ttl, now=self.now()
+            )
+        except ValueError:
+            raise MemoryServiceError("memory candidate changed or was already decided") from None
 
     def approve_candidate(self, owner_id, work_id, candidate_id, content_digest, approval_token):
         owner_id, work_id = self._request(owner_id, work_id)

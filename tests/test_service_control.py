@@ -466,6 +466,8 @@ class ServiceControlTests(unittest.TestCase):
                 self.assertFalse(result["ok"])
                 self.assertEqual(result["data_dir"], str(installed_data.resolve()))
                 self.assertTrue(result["data_preserved"])
+                self.assertEqual(result["observed_status"], "running")
+                self.assertTrue(result["background_available"])
 
     def test_status_and_uninstall_work_after_cli_has_been_removed(self):
         self.controller.install()

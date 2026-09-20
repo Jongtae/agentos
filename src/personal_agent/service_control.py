@@ -571,15 +571,33 @@ def service_action(action: str, **controller_options: object) -> dict[str, objec
                   "uninstall": controller.uninstall}
     if action not in operations:
         raise ValueError(f"Unsupported service action: {action}")
+
+    def failure_receipt(error: ServiceControlError) -> dict[str, object]:
+        try:
+            observed = controller.status()
+            availability: object = (
+                "unknown" if observed.get("status") == "unknown"
+                else bool(observed.get("background_available"))
+            )
+            observed_status = observed.get("status", "unknown")
+        except Exception:
+            availability = "unknown"
+            observed_status = "unknown"
+        return {
+            **error.as_dict(),
+            "background_available": availability,
+            "observed_status": observed_status,
+            "operation": action,
+            "data_dir": str(controller._reported_data_dir()),
+            "data_preserved": True,
+        }
     try:
         return operations[action]()
     except ServiceControlError as exc:
-        return {**exc.as_dict(), "operation": action,
-                "data_dir": str(controller._reported_data_dir()), "data_preserved": True}
+        return failure_receipt(exc)
     except OSError as exc:
         bounded = ServiceControlError(
             f"The service files could not be updated: {type(exc).__name__}",
             "Check the owner LaunchAgents and AgentOS data-directory permissions and free disk space, then retry; owner data was not deleted.",
         )
-        return {**bounded.as_dict(), "operation": action,
-                "data_dir": str(controller._reported_data_dir()), "data_preserved": True}
+        return failure_receipt(bounded)

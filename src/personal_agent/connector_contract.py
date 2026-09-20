@@ -30,6 +30,8 @@ _MISSING_CONNECTOR_STATE = object()
 _MISSING_CONNECTOR_ROW = object()
 _MISSING_PENDING_STATE = object()
 _CONNECTOR_STATE_LOCK = threading.RLock()
+_CONNECTOR_DISPATCH_LOCKS_GUARD = threading.Lock()
+_CONNECTOR_DISPATCH_LOCKS: dict[tuple[str, str, str], threading.RLock] = {}
 _PENDING_WORK_LOCK = threading.RLock()
 
 
@@ -279,6 +281,11 @@ class ConnectorRegistry:
         self.clock = clock
         self.revision_factory = revision_factory
         self._definitions: dict[str, ConnectorSpec] = {}
+        store_path = getattr(store, "path", None)
+        try:
+            self._dispatch_namespace = "path:" + str(store_path.resolve())
+        except (AttributeError, OSError, RuntimeError):
+            self._dispatch_namespace = f"object:{id(store)}"
         # QuickStore is single-process; share one process lock across registry
         # instances so read-modify-write lifecycle updates cannot resurrect a
         # stale grant. This does not claim multi-process CAS semantics.
@@ -310,6 +317,34 @@ class ConnectorRegistry:
         """Serialize an authority check with a dependent local state write."""
         with self._lock:
             yield
+
+    @contextmanager
+    def _dispatch_guard(self, owner_id: str, connector_ids: Iterable[str]):
+        """Order provider dispatch against lifecycle transitions per connector.
+
+        The process-wide authority lock remains free during network I/O. A
+        transition that begins after this lease waits until the in-flight
+        dispatch finishes; a dispatch that begins after a transition observes
+        the new revision before contacting its provider.
+        """
+        owner = _owner_key(owner_id)
+        identifiers = tuple(sorted(set(connector_ids)))
+        if not identifiers:
+            raise ConnectorContractError("unknown_connector")
+        for connector_id in identifiers:
+            self.definition(connector_id)
+        locks = []
+        with _CONNECTOR_DISPATCH_LOCKS_GUARD:
+            for connector_id in identifiers:
+                key = (self._dispatch_namespace, owner, connector_id)
+                locks.append(_CONNECTOR_DISPATCH_LOCKS.setdefault(key, threading.RLock()))
+        for lock in locks:
+            lock.acquire()
+        try:
+            yield
+        finally:
+            for lock in reversed(locks):
+                lock.release()
 
     @staticmethod
     def _unknown_health() -> ConnectorHealth:
@@ -426,41 +461,42 @@ class ConnectorRegistry:
                 raise ConnectorContractError("scope_mismatch")
         elif granted:
             raise ConnectorContractError("inactive_grant")
-        with self._lock:
-            rows = self._rows()
-            owner = _owner_key(owner_id)
-            owner_rows = rows.get(owner, {})
-            if not isinstance(owner_rows, dict):
-                raise ConnectorContractError("invalid_stored_state")
-            prior_status = self._status_from_row(
-                connector,
-                owner_rows.get(connector_id, _MISSING_CONNECTOR_ROW),
-            )
-            prior_revision = prior_status.connection_revision
-            try:
-                changed_at = _finite_timestamp(self.clock(), "changed_at")
-            except ValueError:
-                raise ConnectorContractError("invalid_clock") from None
-            for _ in range(8):
+        with self._dispatch_guard(owner_id, (connector_id,)):
+            with self._lock:
+                rows = self._rows()
+                owner = _owner_key(owner_id)
+                owner_rows = rows.get(owner, {})
+                if not isinstance(owner_rows, dict):
+                    raise ConnectorContractError("invalid_stored_state")
+                prior_status = self._status_from_row(
+                    connector,
+                    owner_rows.get(connector_id, _MISSING_CONNECTOR_ROW),
+                )
+                prior_revision = prior_status.connection_revision
                 try:
-                    connection_revision = _connection_revision(self.revision_factory())
+                    changed_at = _finite_timestamp(self.clock(), "changed_at")
                 except ValueError:
-                    raise ConnectorContractError("invalid_revision") from None
-                if connection_revision != prior_revision:
-                    break
-            else:
-                raise ConnectorContractError("revision_generation_failed")
-            owner_rows[connector_id] = {
-                "state": state.value,
-                "granted_scopes": list(granted) if state is ConnectorState.CONNECTED else [],
-                "changed_at": changed_at,
-                "connection_revision": connection_revision,
-                "health": {"state": HealthState.UNKNOWN.value, "checked_at": None, "recovery": None},
-            }
-            rows[owner] = owner_rows
-            self.store.put(CONNECTOR_STATE_KEY, rows)
-            # Keep commit and returned lifecycle revision in one serial order.
-            return self.status(owner_id, connector_id)
+                    raise ConnectorContractError("invalid_clock") from None
+                for _ in range(8):
+                    try:
+                        connection_revision = _connection_revision(self.revision_factory())
+                    except ValueError:
+                        raise ConnectorContractError("invalid_revision") from None
+                    if connection_revision != prior_revision:
+                        break
+                else:
+                    raise ConnectorContractError("revision_generation_failed")
+                owner_rows[connector_id] = {
+                    "state": state.value,
+                    "granted_scopes": list(granted) if state is ConnectorState.CONNECTED else [],
+                    "changed_at": changed_at,
+                    "connection_revision": connection_revision,
+                    "health": {"state": HealthState.UNKNOWN.value, "checked_at": None, "recovery": None},
+                }
+                rows[owner] = owner_rows
+                self.store.put(CONNECTOR_STATE_KEY, rows)
+                # Keep commit and returned lifecycle revision in one serial order.
+                return self.status(owner_id, connector_id)
 
     def record_health(
         self,

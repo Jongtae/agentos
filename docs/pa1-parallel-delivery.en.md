@@ -115,6 +115,66 @@ For every delegated worktree, record in the issue/PR or ledger:
 
 Do not record secrets, private owner payloads, raw mail/calendar contents, hidden reasoning, or credentials.
 
+
+## Dynamic worker capability routing
+
+The owner should not need to choose a worker model or reasoning effort for every PA1 child. The EPIC-PA1 coordinator selects an execution profile from the current task, uses the cheapest profile that is appropriate, and escalates when the task crosses a higher-risk boundary.
+
+These profiles describe required capability/risk handling. Exact model names are preferred mappings only when the execution environment explicitly supports and confirms them.
+
+### Profiles
+
+- **economy** — bounded mechanical implementation, straightforward tests/fixtures/documentation, or a narrow repair with an established root cause. Preferred mapping: Luna Medium or equivalent.
+- **standard** — ordinary feature implementation with clear acceptance criteria and isolated ownership. Preferred mapping: Sol Medium or equivalent.
+- **critical** — architecture/shared contracts, OAuth/credential boundaries, authorization/privacy/external effects, replay/idempotency/recovery, cross-worktree reconciliation, central orchestration, security-sensitive repairs, or release convergence. Preferred mapping: Sol High or equivalent.
+
+If an exact preferred model/effort is unavailable, use the closest available capability level that is appropriate. Do not block safe progress merely because a preferred model name is unavailable.
+
+Never claim that a model or reasoning effort was used unless the execution environment accepted or exposed that setting. When observable, record requested and accepted/observed settings separately.
+
+### Initial PA1 routing
+
+- PA1-FDN-01 / #387 — `critical`
+- PA1-INSTALL-01 / #388 — `standard`
+- PA1-GMAIL-01 / #389 — `standard`; escalate for OAuth/security/credential decisions
+- PA1-CALENDAR-01 / #390 — `standard`; escalate for OAuth/approval/idempotency/external-effect decisions
+- PA1-RESEARCH-01 / #391 — `standard`; escalate for SSRF/private-egress/security-boundary changes
+- PA1-MEMORY-01 / #392 — `standard`; escalate for canonical-Memory authority/approval/privacy changes
+- WEB-ADMIN-01 / #382 — `standard`
+- PA1-CONV-01 / #393 — `critical`
+- PA1-INT-01 / #394 — `critical`
+
+Mechanical follow-up work may be de-escalated to `economy` after the architecture/root cause is settled.
+
+### Mandatory escalation
+
+Escalate the current work to `critical` when any of these becomes true:
+
+- a shared contract must change;
+- a child needs a file outside its declared ownership;
+- OAuth, credentials, tokens, authentication, authorization or approval semantics change;
+- private owner data may cross a new boundary;
+- an external write/effect is introduced or changed;
+- replay, idempotency, restart or unknown-effect recovery becomes material;
+- two child contracts conflict;
+- a cross-worktree integration failure has no obvious local cause;
+- CI repeatedly fails without a confident root cause;
+- a security or architecture review finding is raised;
+- fixing the issue would require weakening an existing invariant or test;
+- the worker cannot establish the root cause with high confidence.
+
+Escalation does not widen issue authority. If the fix requires shared ownership or broader scope, update the owning issue/contract first or defer the shared change to #393/#394.
+
+### Review-driven routing
+
+Use review findings as routing signals:
+
+- mechanical/local finding -> `economy` or `standard`;
+- ordinary behavioral/product finding -> `standard`;
+- security, authorization, privacy, OAuth, recovery, architecture, or cross-contract finding -> `critical`.
+
+After a critical architectural/root-cause decision is settled, repetitive follow-up may return to a cheaper profile.
+
 ## Evidence classes
 
 Keep these distinct:

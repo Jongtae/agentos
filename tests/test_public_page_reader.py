@@ -3,6 +3,7 @@ import http.client
 import io
 import unittest
 from unittest.mock import patch
+from urllib.parse import urlsplit
 
 from personal_agent.local_tools import PublicPageReader, normalize_public_url
 
@@ -86,6 +87,15 @@ class PublicPageReaderTests(unittest.TestCase):
         self.assertEqual(opener.requests,[])
         reader.read('https://example.com:80/path',approved_urls=['https://example.com:80/path'])
         self.assertEqual(opener.requests[0][0].full_url,'https://example.com:80/path')
+
+    def test_host_header_preserves_scheme_specific_authority_and_ipv6_brackets(self):
+        authority=PublicPageReader._host_header
+        self.assertEqual(authority(urlsplit('http://example.com:443/path')),'example.com:443')
+        self.assertEqual(authority(urlsplit('https://example.com:80/path')),'example.com:80')
+        self.assertEqual(authority(urlsplit('http://example.com:80/path')),'example.com')
+        self.assertEqual(authority(urlsplit('https://example.com:443/path')),'example.com')
+        self.assertEqual(authority(urlsplit('https://[2606:2800:220:1:248:1893:25c8:1946]:80/path')),
+                         '[2606:2800:220:1:248:1893:25c8:1946]:80')
 
     def test_owner_scope_rejects_public_redirect_collector(self):
         opener=Opener(Response(status=302, headers={'Location':'https://collector.example/collect?x=1'}))

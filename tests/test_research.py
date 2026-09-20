@@ -76,11 +76,20 @@ class PublicResearchTests(unittest.TestCase):
             ('access token ghp_1234567890abcdefghijklmnop','owner_public_request'),
             ('ghp_1234567890abcdefghijklmnop','public_task_input'),
             ('password hunter2','owner_public_request'),
+            ('password correcthorsebatterystaple','owner_public_request'),
+            ('api key abcdefghijklmnopqrstuv','owner_public_request'),
+            ('access token longalphabeticvalue','public_task_input'),
         ]
         for query,source in cases:
             with self.subTest(query=query),self.assertRaises(ValueError):
                 research.run('product_comparison',query,query_source=source)
         self.assertEqual(calls,[])
+
+    def test_ordinary_public_credential_topics_are_not_overblocked(self):
+        for query in ('password manager comparison','api key security best practices',
+                      'access token documentation','refresh token rotation guide'):
+            with self.subTest(query=query):
+                self.assertEqual(validate_public_query(query,'owner_public_request'),query)
 
     def test_unsafe_search_urls_are_never_selected(self):
         def unsafe(_query):
@@ -146,6 +155,33 @@ class PublicResearchTests(unittest.TestCase):
         self.assertEqual(result['dynamic_facts']['fee']['status'],'unknown')
         self.assertEqual(result['dynamic_facts']['inventory']['status'],'unknown')
         self.assertEqual(result['dynamic_facts']['payable_total']['status'],'unknown')
+
+    def test_estimated_conditional_and_pre_fee_dynamic_facts_stay_unknown(self):
+        cases={
+            'fee':('A service fee might be 10%.','A service fee is estimated at 10%.'),
+            'inventory':('Inventory is expected to be available.','Inventory is likely available.'),
+            'payable_total':('Estimated total price USD 100.','Payable total might be USD 100.',
+                             'Total price USD 100 before taxes and fees.','Total price is shown at checkout.'),
+        }
+        for dynamic,contents in cases.items():
+            for content in contents:
+                with self.subTest(dynamic=dynamic,content=content):
+                    reader=Reader({'https://alpha.example/item':{
+                        'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+                    result=PublicResearch(search_result,reader,max_pages=1).run(
+                        'travel_plan','museum plan',query_source='owner_public_request')
+                    self.assertEqual(result['dynamic_facts'][dynamic]['status'],'unknown')
+                    if content == 'Total price USD 100 before taxes and fees.':
+                        self.assertEqual(result['dynamic_facts']['fee']['status'],'unknown')
+
+    def test_exact_tied_dynamic_values_remain_observed(self):
+        content='Service fee: USD 25. Grand total: USD 125. Rooms are available.'
+        reader=Reader({'https://alpha.example/item':{
+            'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+        result=PublicResearch(search_result,reader,max_pages=1).run(
+            'travel_plan','museum plan',query_source='owner_public_request')
+        for dynamic in ('fee','inventory','payable_total'):
+            self.assertEqual(result['dynamic_facts'][dynamic]['status'],'observed')
 
     def test_query_validation_requires_explicit_public_provenance(self):
         self.assertEqual(validate_public_query('  public hotels Seoul  ','owner_public_request'),'public hotels Seoul')

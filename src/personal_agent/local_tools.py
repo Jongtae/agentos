@@ -102,9 +102,19 @@ class PublicPageReader:
                 raise ValueError('개인 네트워크나 메타데이터 주소에는 접근할 수 없습니다.')
         return addresses
 
+    @staticmethod
+    def _host_header(parsed):
+        host=parsed.hostname
+        try: literal=ipaddress.ip_address(host)
+        except ValueError: literal=None
+        if literal is not None and literal.version == 6: host=f'[{host}]'
+        port=parsed.port or (443 if parsed.scheme=='https' else 80)
+        default_port=443 if parsed.scheme=='https' else 80
+        return host if port == default_port else f'{host}:{port}'
+
     def _open_pinned(self, url, addresses):
         parsed=urlsplit(url); port=parsed.port or (443 if parsed.scheme=='https' else 80)
-        host_header=parsed.hostname if port in (80,443) else f'{parsed.hostname}:{port}'
+        host_header=self._host_header(parsed)
         path=urlunsplit(('', '', parsed.path or '/', parsed.query, ''))
         last=None
         for address in addresses:

@@ -242,12 +242,23 @@ class PublicResearchTests(unittest.TestCase):
         self.assertEqual(result['dynamic_facts']['payable_total']['status'],'unknown')
 
     def test_amount_bearing_extra_charge_keeps_total_unknown(self):
-        content='Grand total: USD 100. Tax of USD 10 is extra.'
-        reader=Reader({'https://alpha.example/item':{
-            'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
-        result=PublicResearch(search_result,reader,max_pages=1).run(
-            'travel_plan','museum plan',query_source='owner_public_request')
-        self.assertEqual(result['dynamic_facts']['payable_total']['status'],'unknown')
+        for content in ('Grand total: USD 100. Tax of USD 10 is extra.',
+                        'Grand total: USD 100. This does not include taxes.'):
+            with self.subTest(content=content):
+                reader=Reader({'https://alpha.example/item':{
+                    'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+                result=PublicResearch(search_result,reader,max_pages=1).run(
+                    'travel_plan','museum plan',query_source='owner_public_request')
+                self.assertEqual(result['dynamic_facts']['payable_total']['status'],'unknown')
+
+    def test_existentially_negated_total_is_not_observed(self):
+        for content in ('No grand total of USD 100 is shown.','There is no grand total of USD 100.'):
+            with self.subTest(content=content):
+                reader=Reader({'https://alpha.example/item':{
+                    'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+                result=PublicResearch(search_result,reader,max_pages=1).run(
+                    'travel_plan','museum plan',query_source='owner_public_request')
+                self.assertEqual(result['dynamic_facts']['payable_total']['status'],'unknown')
 
     def test_hedged_inventory_and_unrelated_prices_do_not_observe_dynamic_values(self):
         content=('Rooms may be available. Fees may apply; rooms start at USD 100. '

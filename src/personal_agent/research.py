@@ -115,8 +115,10 @@ ADJACENT_QUALIFIER_ONLY = re.compile(
 ANAPHORIC_QUALIFIER = re.compile(
     r'(?i)^\s*(?:this|that|it|these|those)\b[^.!?]{0,120}\b(?:may|might|could|can|possibly|probably|likely|'
     r'expected|estimated|estimate|approximately|about|around|subject\s+to|depending\s+on|on\s+request|'
-    r'only\s+(?:if|when|for|to)|appl(?:y|ies)\s+(?:if|when|only|to|for)|for\s+(?:loyalty\s+)?members?\s+only)\b'
+    r'only\s+(?:if|when|for|to)|appl(?:y|ies)\s+(?:if|when|only|to|for)|for\s+(?:loyalty\s+)?members?\s+only|'
+    r'does?\s+not\s+include)\b'
 )
+NEGATED_TOTAL_EXISTENCE = re.compile(r'(?i)^\s*(?:no\b|there\s+(?:is|are|was|were)\s+no\b)')
 DYNAMIC_SUBJECT_PATTERNS = {
     'fee': FACT_PATTERNS['fee'],
     'inventory': re.compile(r'(?i)\b(?:availability|inventory|stock|room|rooms|ticket|tickets|seat|seats|product|products|item|items)\b|재고|매진|예약'),
@@ -210,6 +212,7 @@ def _qualified_dynamic(name, evidence):
             context=' '.join(context_units)
             if (adjacent_condition or classified_text.rstrip().endswith('?') or NON_ASSERTIVE_DYNAMIC.search(classified_text) or
                     DYNAMIC_DISQUALIFIER.search(context) or
+                    (name == 'payable_total' and NEGATED_TOTAL_EXISTENCE.search(classified_text)) or
                     (name == 'payable_total' and INCOMPLETE_TOTAL.search(context))): continue
             tied=(name == 'inventory')
             if name == 'inventory' and INVENTORY_METADATA.search(classified_text): continue

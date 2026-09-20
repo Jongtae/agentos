@@ -27,7 +27,7 @@ HIGH_CONFIDENCE_SECRET_PATTERNS = (
     re.compile(r'(?i)\bsk-[a-z0-9_-]{12,}\b'),
     re.compile(r'(?i)\b(?:gh[pousr]_[a-z0-9]{16,}|github_pat_[a-z0-9_]{16,}|glpat-[a-z0-9_-]{16,}|xox[baprs]-[a-z0-9-]{10,}|npm_[a-z0-9]{16,}|pypi-[a-z0-9_-]{16,}|AKIA[A-Z0-9]{16})\b'),
     re.compile(r'(?i)-----BEGIN [A-Z0-9 -]*PRIVATE KEY(?: BLOCK)?-----'),
-    re.compile(r'(?i)\b[a-z][a-z0-9+.-]*://[^\s/@:]+:[^\s/@]+@'),
+    re.compile(r'(?i)\b[a-z][a-z0-9+.-]*://[^\s/@]*@'),
     re.compile(r'(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*(?![A-Za-z0-9_-])'),
     re.compile(
         r'(?i)\b(?:path|file|source)\s*(?::|=|,|;|->|\bis\b|\bas\b)\s*'
@@ -103,7 +103,7 @@ ADJACENT_QUALIFIER_ONLY = re.compile(
 ANAPHORIC_QUALIFIER = re.compile(
     r'(?i)^\s*(?:this|that|it|these|those)\b[^.!?]{0,120}\b(?:may|might|could|can|possibly|probably|likely|'
     r'expected|estimated|estimate|approximately|about|around|subject\s+to|depending\s+on|on\s+request|'
-    r'only\s+(?:if|when|for|to)|appl(?:y|ies)\s+(?:if|when|only)|for\s+(?:loyalty\s+)?members?\s+only)\b'
+    r'only\s+(?:if|when|for|to)|appl(?:y|ies)\s+(?:if|when|only|to|for)|for\s+(?:loyalty\s+)?members?\s+only)\b'
 )
 DYNAMIC_SUBJECT_PATTERNS = {
     'fee': FACT_PATTERNS['fee'],
@@ -175,18 +175,20 @@ def _qualified_dynamic(name, evidence):
         for text in row['observed_details'][name]:
             classified_text=_rendered_evidence_text(text)
             context_units=[classified_text]
+            adjacent_condition=False
             try: position=units.index(text)
             except ValueError: position=-1
             if position >= 0:
                 for neighbor_position in range(max(0,position-1),min(len(units),position+2)):
                     if neighbor_position == position: continue
                     neighbor=_rendered_evidence_text(units[neighbor_position])
-                    if (ADJACENT_QUALIFIER_ONLY.search(neighbor) or
-                            (neighbor_position > position and ANAPHORIC_QUALIFIER.search(neighbor)) or
+                    is_forward_anaphor=neighbor_position > position and ANAPHORIC_QUALIFIER.search(neighbor)
+                    if is_forward_anaphor: adjacent_condition=True
+                    if (ADJACENT_QUALIFIER_ONLY.search(neighbor) or is_forward_anaphor or
                             DYNAMIC_SUBJECT_PATTERNS[name].search(neighbor)):
                         context_units.append(neighbor)
             context=' '.join(context_units)
-            if (classified_text.rstrip().endswith('?') or NON_ASSERTIVE_DYNAMIC.search(classified_text) or
+            if (adjacent_condition or classified_text.rstrip().endswith('?') or NON_ASSERTIVE_DYNAMIC.search(classified_text) or
                     DYNAMIC_DISQUALIFIER.search(context) or INCOMPLETE_TOTAL.search(context)): continue
             tied=(name == 'inventory')
             if name == 'inventory' and INVENTORY_METADATA.search(classified_text): continue

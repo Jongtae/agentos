@@ -131,6 +131,8 @@ class PublicResearchTests(unittest.TestCase):
             (r'compare \/server\private/receipt.txt','owner_public_request'),
             ('-----BEGIN PRIVATE KEY----- abcdef -----END PRIVATE KEY-----','owner_public_request'),
             ('compare https://alice:supersecret@example.com/private','owner_public_request'),
+            ('compare https://:supersecret@example.com/private','owner_public_request'),
+            ('compare https://alice%3Asupersecret@example.com/private','owner_public_request'),
             ('eyJ9.e30.','owner_public_request'),
             ('file; secrets.txt','owner_public_request'),
             ('path as Documents/tax-return.pdf','owner_public_request'),
@@ -347,6 +349,8 @@ class PublicResearchTests(unittest.TestCase):
             ('payable_total','Grand total: USD 100. This applies when paying by card.'),
             ('inventory','Rooms are available. This is for members only.'),
             ('fee','Service fee: USD 10. This may\u200b change.'),
+            ('fee','Service fee: USD 10. This applies to members only.'),
+            ('payable_total','Grand total: USD 100. This applies for card payments.'),
         )
         for dynamic,content in cases:
             with self.subTest(dynamic=dynamic):

@@ -793,7 +793,11 @@ class GmailConnectorTests(unittest.TestCase):
     def test_related_body_rejects_explicit_empty_root_selector(self):
         self.connect()
         encoded=base64.urlsafe_b64encode(b"inline-first").decode()
-        for content_type in ('multipart/related; start=""','multipart/related; start=<>'):
+        for content_type in (
+            'multipart/related; start=""','multipart/related; start=<>',
+            'multipart/related; start="<root"','multipart/related; start="root>"',
+            'multipart/related; start="root"','multipart/related; start="<<root>>"',
+        ):
             with self.subTest(content_type=content_type):
                 self.responses.append({
                     "id":"m_1","threadId":"t_1","payload":{

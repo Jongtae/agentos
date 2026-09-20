@@ -826,9 +826,10 @@ class GmailConnector:
                     return related_children[0][1]
                 if len(start_values) != 1 or not isinstance(start_values[0], str):
                     raise GmailError("invalid_provider_response")
-                wanted = start_values[0].strip().strip("<>")
-                if not wanted:
+                start_match = re.fullmatch(r"<([^<>\s\x00-\x1f\x7f]{1,998})>", start_values[0].strip())
+                if start_match is None:
                     raise GmailError("invalid_provider_response")
+                wanted = start_match.group(1)
                 for child, rendered in related_children:
                     child_headers = child.get("headers", []) if isinstance(child, dict) else []
                     if not isinstance(child_headers, list):
@@ -839,7 +840,10 @@ class GmailConnector:
                         value = header.get("value")
                         if not isinstance(value, str) or len(value) > 1024:
                             raise GmailError("invalid_provider_response")
-                        if value.strip().strip("<>") == wanted:
+                        content_id_match = re.fullmatch(r"<([^<>\s\x00-\x1f\x7f]{1,998})>", value.strip())
+                        if content_id_match is None:
+                            raise GmailError("invalid_provider_response")
+                        if content_id_match.group(1) == wanted:
                             return rendered
                 raise GmailError("invalid_provider_response")
             return [candidate for group in children for candidate in group]

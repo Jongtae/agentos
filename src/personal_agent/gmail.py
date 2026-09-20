@@ -220,6 +220,31 @@ def _decoded_header(value: object, maximum: int) -> str:
         raise GmailError("invalid_provider_response") from None
 
 
+def _mime_parameter_names(value: str) -> list[str]:
+    """Return raw parameter names without collapsing case-insensitive duplicates."""
+    segments = []
+    start = 0
+    quoted = False
+    escaped = False
+    for index, character in enumerate(value):
+        if escaped:
+            escaped = False
+        elif quoted and character == "\\":
+            escaped = True
+        elif character == '"':
+            quoted = not quoted
+        elif character == ";" and not quoted:
+            segments.append(value[start:index])
+            start = index + 1
+    segments.append(value[start:])
+    names = []
+    for segment in segments[1:]:
+        match = re.match(r"\s*([!#$%&'*+.^_`|~0-9A-Za-z-]+)\s*=", segment)
+        if match is not None:
+            names.append(match.group(1).casefold())
+    return names
+
+
 class GmailConnector:
     """Minimum-authority Gmail OAuth, bounded search, and explicit body read."""
 
@@ -750,6 +775,8 @@ class GmailConnector:
             disposition_present = False
             content_type = ""
             security_headers: set[str] = set()
+            if "headers" in part and not isinstance(headers, list):
+                raise GmailError("invalid_provider_response")
             if isinstance(headers, list):
                 if len(headers) > 100:
                     exhausted = True
@@ -792,10 +819,12 @@ class GmailConnector:
                 parsed_content_type = HeaderParser(policy=policy.default).parsestr(
                     "Content-Type: " + content_type + "\n\n"
                 )["Content-Type"]
+                parameter_names = _mime_parameter_names(content_type)
                 if (
                     parsed_content_type is None
                     or parsed_content_type.defects
                     or parsed_content_type.content_type.lower() != normalized_mime
+                    or len(parameter_names) != len(set(parameter_names))
                 ):
                     raise GmailError("invalid_provider_response")
                 if normalized_mime in {"text/plain", "text/html"}:
@@ -804,7 +833,7 @@ class GmailConnector:
                         not isinstance(charset_value, str) or not charset_value.strip()
                     ):
                         raise GmailError("invalid_provider_response")
-                    charset = charset_value.strip() if isinstance(charset_value, str) else None
+                    charset = charset_value.strip() if isinstance(charset_value, str) else "us-ascii"
             is_attachment = (
                 isinstance(filename, str)
                 and bool(filename.strip())

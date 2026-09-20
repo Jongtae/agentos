@@ -747,6 +747,7 @@ class GmailConnectorTests(unittest.TestCase):
             "text/plain; charset=   ",
             'text/plain; charset="utf-8',
             "text/plain; charset=utf-8; charset=iso-8859-1",
+            "text/plain; charset=utf-8; CHARSET=iso-8859-1",
         ):
             with self.subTest(content_type=content_type):
                 self.responses.clear()
@@ -777,6 +778,34 @@ class GmailConnectorTests(unittest.TestCase):
                     },
                 })
                 self.assertEqual(self.read().body, "plain body")
+
+        self.responses.append({
+            "id": "m_1",
+            "threadId": "t_1",
+            "payload": {
+                "mimeType": "text/plain",
+                "headers": [{"name": "Content-Type", "value": "text/plain"}],
+                "body": {"data": base64.urlsafe_b64encode("café".encode()).decode()},
+            },
+        })
+        with self.assertRaises(GmailError) as non_ascii_default:
+            self.read()
+        self.assertEqual(non_ascii_default.exception.reason, "invalid_provider_response")
+
+    def test_malformed_header_container_is_rejected(self):
+        self.connect()
+        self.responses.append({
+            "id": "m_1",
+            "threadId": "t_1",
+            "payload": {
+                "mimeType": "text/plain",
+                "headers": {"name": "Content-Disposition", "value": "attachment"},
+                "body": {"data": base64.urlsafe_b64encode(b"must not be body").decode()},
+            },
+        })
+        with self.assertRaises(GmailError) as malformed:
+            self.read()
+        self.assertEqual(malformed.exception.reason, "invalid_provider_response")
 
     def test_present_valid_charset_requires_strict_body_decoding(self):
         self.connect()
@@ -862,6 +891,7 @@ class GmailConnectorTests(unittest.TestCase):
             'multipart/related; start=""','multipart/related; start=<>',
             'multipart/related; start="<root"','multipart/related; start="root>"',
             'multipart/related; start="root"','multipart/related; start="<<root>>"',
+            'multipart/related; start="<root>"; START="<other>"',
         ):
             with self.subTest(content_type=content_type):
                 self.responses.append({

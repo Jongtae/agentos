@@ -45,6 +45,7 @@ _MAX_RESULTS = 20
 _MAX_QUERY_LENGTH = 512
 _MAX_BODY_BYTES = 1_048_576
 _MESSAGE_ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
+_ATTACHMENT_ID = re.compile(r"[A-Za-z0-9_-]{1,4096}\Z")
 _OAUTH_LOCK = threading.RLock()
 
 
@@ -394,7 +395,27 @@ class GmailConnector:
         if returned_id != message_id:
             raise GmailError("invalid_provider_response")
         thread_id = self._message_id(response.get("threadId"))
-        body, mime_type = self._body(response.get("payload"))
+        def load_attachment(attachment_id: str) -> str:
+            if not _ATTACHMENT_ID.fullmatch(attachment_id):
+                raise GmailError("invalid_provider_response")
+            attachment = self._get(
+                owner_id,
+                MESSAGES_ENDPOINT
+                + "/"
+                + quote(message_id, safe="")
+                + "/attachments/"
+                + quote(attachment_id, safe=""),
+                {},
+                headers,
+                connection_revision,
+                access_token,
+            )
+            encoded = attachment.get("data")
+            if not isinstance(encoded, str):
+                raise GmailError("invalid_provider_response")
+            return encoded
+
+        body, mime_type = self._body(response.get("payload"), load_attachment)
         return GmailMessage(message_id, thread_id, mime_type, body)
 
     def mark_reauthentication_required(self, owner_id: str) -> dict:
@@ -528,20 +549,7 @@ class GmailConnector:
         connection_revision: str,
         access_token: str,
     ) -> dict:
-        with self.registry._authority_guard():
-            current = self.registry.status(owner_id, GMAIL_CONNECTOR_ID)
-            try:
-                current_tokens = self.store.secret(TOKEN_SECRET_KEY)
-            except GmailError:
-                raise GmailReauthenticationRequired("reauth_required") from None
-            if (
-                current.state is not ConnectorState.CONNECTED
-                or current.connection_revision != connection_revision
-                or not isinstance(current_tokens, dict)
-                or current_tokens.get("owner") != _owner_key(owner_id)
-                or current_tokens.get("access_token") != access_token
-            ):
-                raise GmailError("superseded_connection")
+        self._assert_current_request(owner_id, connection_revision, access_token)
         if not callable(self.transport):
             raise GmailError("transport_unavailable")
         try:
@@ -549,6 +557,7 @@ class GmailConnector:
         except Exception:
             raise GmailError("provider_unavailable") from None
         if isinstance(response, dict):
+            self._assert_current_request(owner_id, connection_revision, access_token)
             status = response.get("status_code")
             if status == 401:
                 with self.registry._authority_guard():
@@ -568,6 +577,37 @@ class GmailConnector:
                 raise GmailError("provider_rejected")
             return response
         raise GmailError("invalid_provider_response")
+
+    def _assert_current_request(
+        self,
+        owner_id: str,
+        connection_revision: str,
+        access_token: str,
+    ) -> None:
+        with self.registry._authority_guard():
+            current = self.registry.status(owner_id, GMAIL_CONNECTOR_ID)
+            try:
+                current_tokens = self.store.secret(TOKEN_SECRET_KEY)
+            except GmailError:
+                raise GmailReauthenticationRequired("reauth_required") from None
+            if (
+                current.state is not ConnectorState.CONNECTED
+                or current.connection_revision != connection_revision
+                or not isinstance(current_tokens, dict)
+                or current_tokens.get("owner") != _owner_key(owner_id)
+                or current_tokens.get("access_token") != access_token
+            ):
+                raise GmailError("superseded_connection")
+            expires_at = current_tokens.get("expires_at")
+            if (
+                isinstance(expires_at, bool)
+                or not isinstance(expires_at, (int, float))
+                or not math.isfinite(expires_at)
+                or _finite_now(self.now) >= expires_at
+            ):
+                self.store.secret(TOKEN_SECRET_KEY, {})
+                self.registry.transition(owner_id, GMAIL_CONNECTOR_ID, ConnectorState.REAUTH_REQUIRED)
+                raise GmailReauthenticationRequired("reauth_required")
 
     @staticmethod
     def _message_id(value: object) -> str:
@@ -597,10 +637,10 @@ class GmailConnector:
             headers.get("date", ""),
         )
 
-    def _body(self, payload: object) -> tuple[str, str]:
+    def _body(self, payload: object, attachment_loader: Callable[[str], str] | None = None) -> tuple[str, str]:
         if not isinstance(payload, dict):
             raise GmailError("invalid_provider_response")
-        candidates: list[tuple[str, str, str | None]] = []
+        candidates: list[tuple[str, str | None, str | None, str | None]] = []
 
         def visit(part: object, depth: int = 0) -> None:
             if not isinstance(part, dict) or depth > 20 or len(candidates) >= 100:
@@ -634,14 +674,24 @@ class GmailConnector:
                 not is_attachment
                 and normalized_mime in {"text/plain", "text/html"}
                 and isinstance(body, dict)
-                and isinstance(body.get("data"), str)
+                and (
+                    isinstance(body.get("data"), str)
+                    or isinstance(body.get("attachmentId"), str)
+                )
             ):
                 charset = None
                 if content_type:
                     message = Message()
                     message["content-type"] = content_type
                     charset = message.get_content_charset()
-                candidates.append((normalized_mime, body["data"], charset))
+                candidates.append(
+                    (
+                        normalized_mime,
+                        body.get("data") if isinstance(body.get("data"), str) else None,
+                        charset,
+                        body.get("attachmentId") if isinstance(body.get("attachmentId"), str) else None,
+                    )
+                )
             parts = part.get("parts", [])
             if isinstance(parts, list):
                 for child in parts[:100]:
@@ -650,10 +700,14 @@ class GmailConnector:
         visit(payload)
         if not candidates:
             return "", _bounded_text(payload.get("mimeType"), 160)
-        mime_type, encoded, charset = next(
+        mime_type, encoded, charset, attachment_id = next(
             (item for item in candidates if item[0] == "text/plain"),
             candidates[0],
         )
+        if encoded is None:
+            if attachment_id is None or attachment_loader is None:
+                raise GmailError("invalid_provider_response")
+            encoded = attachment_loader(attachment_id)
         if len(encoded) > (_MAX_BODY_BYTES * 4 // 3) + 8:
             raise GmailError("body_too_large")
         try:

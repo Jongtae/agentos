@@ -265,6 +265,41 @@ class GmailConnectorTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(self.gmail.status("owner-a")["state"], "disconnected")
 
+    def test_inflight_success_is_discarded_after_authority_revocation(self):
+        self.connect()
+
+        def revoke_during_read(_method, _endpoint, _params, _headers):
+            self.registry.transition("owner-a", GMAIL_CONNECTOR_ID, ConnectorState.BLOCKED)
+            return {
+                "id": "m_1",
+                "threadId": "t_1",
+                "payload": {
+                    "mimeType": "text/plain",
+                    "body": {"data": base64.urlsafe_b64encode(b"must not escape").decode()},
+                },
+            }
+
+        self.gmail.transport = revoke_during_read
+        with self.assertRaises(GmailError) as revoked:
+            self.gmail.read_message("owner-a", "m_1")
+        self.assertEqual(revoked.exception.reason, "superseded_connection")
+        self.assertEqual(self.gmail.status("owner-a")["state"], "blocked")
+
+    def test_expiry_during_provider_call_discards_response_and_stops_followups(self):
+        self.connect()
+        calls = []
+
+        def expire_during_list(method, endpoint, params, headers):
+            calls.append((method, endpoint, params, headers))
+            self.clock[0] += 61
+            return {"messages": [{"id": "m_1"}]}
+
+        self.gmail.transport = expire_during_list
+        with self.assertRaises(GmailReauthenticationRequired):
+            self.gmail.search("owner-a", "receipt")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(self.gmail.status("owner-a")["state"], "reauth_required")
+
     def test_explicit_body_read_is_source_attributable_ephemeral_and_get_only(self):
         self.connect()
         encoded = base64.urlsafe_b64encode(b"private mail body").rstrip(b"=").decode()
@@ -377,6 +412,29 @@ class GmailConnectorTests(unittest.TestCase):
         with self.assertRaises(GmailError) as malformed:
             self.gmail.read_message("owner-a", "m_1")
         self.assertEqual(malformed.exception.reason, "invalid_provider_response")
+
+    def test_body_attachment_id_is_fetched_with_same_bounded_authority(self):
+        self.connect()
+        encoded = base64.urlsafe_b64encode(b"separate body").decode()
+        self.responses.extend(
+            [
+                {
+                    "id": "m_1",
+                    "threadId": "t_1",
+                    "payload": {
+                        "mimeType": "text/plain",
+                        "body": {"attachmentId": "attachment_1"},
+                    },
+                },
+                {"data": encoded, "size": len(b"separate body")},
+            ]
+        )
+        message = self.gmail.read_message("owner-a", "m_1")
+        self.assertEqual(message.body, "separate body")
+        self.assertEqual(
+            self.calls[-1][1],
+            MESSAGES_ENDPOINT + "/m_1/attachments/attachment_1",
+        )
 
     def test_expiry_and_provider_revocation_clear_tokens_and_require_reauth(self):
         self.connect()

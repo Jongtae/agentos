@@ -312,6 +312,56 @@ class ConnectorContractTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(next(iter(rows.values()))["state"], "completed")
 
+    def test_claim_remains_authoritative_after_disconnect_until_complete(self):
+        self.connect()
+        handle = self.pending.issue(
+            "owner-a", WORK_1, GMAIL.connector_id, GMAIL.required_scopes
+        )
+        claimed = self.pending.claim(
+            handle.token, "owner-a", GMAIL.connector_id, GMAIL.required_scopes, HANDOFF_1
+        )
+        self.registry.transition("owner-a", GMAIL.connector_id, ConnectorState.DISCONNECTED)
+        recovered = self.pending.claim(
+            handle.token, "owner-a", GMAIL.connector_id, GMAIL.required_scopes, HANDOFF_1
+        )
+        self.assertEqual(recovered, claimed)
+        with self.assertRaises(ConnectorContractError) as competitor:
+            self.pending.claim(
+                handle.token, "owner-a", GMAIL.connector_id, GMAIL.required_scopes, HANDOFF_2
+            )
+        self.assertEqual(competitor.exception.reason, "resume_claimed")
+        self.assertEqual(
+            self.pending.complete(
+                handle.token, "owner-a", GMAIL.connector_id, HANDOFF_1
+            ),
+            claimed,
+        )
+        self.connect()
+        with self.assertRaises(ConnectorContractError) as duplicate:
+            self.pending.issue(
+                "owner-a", WORK_1, GMAIL.connector_id, GMAIL.required_scopes
+            )
+        self.assertEqual(duplicate.exception.reason, "work_already_completed")
+        self.assertEqual(len(self.store.config(PENDING_WORK_KEY)), 1)
+
+    def test_pending_offer_is_superseded_when_initial_connection_check_fails(self):
+        self.connect()
+        handle = self.pending.issue(
+            "owner-a", WORK_1, GMAIL.connector_id, GMAIL.required_scopes
+        )
+        self.registry.transition("owner-a", GMAIL.connector_id, ConnectorState.REAUTH_REQUIRED)
+        with self.assertRaises(ConnectorContractError) as rejected:
+            self.pending.claim(
+                handle.token, "owner-a", GMAIL.connector_id, GMAIL.required_scopes, HANDOFF_1
+            )
+        self.assertEqual(rejected.exception.reason, ConnectorState.REAUTH_REQUIRED.value)
+        self.connect()
+        with self.assertRaises(ConnectorContractError) as terminal:
+            self.pending.claim(
+                handle.token, "owner-a", GMAIL.connector_id, GMAIL.required_scopes, HANDOFF_1
+            )
+        self.assertEqual(terminal.exception.reason, "superseded_resume")
+
     def test_reissue_supersedes_only_unclaimed_pending_handle(self):
         self.connect()
         first = self.pending.issue(
@@ -527,6 +577,35 @@ class ConnectorContractTests(unittest.TestCase):
                 self.assertEqual(rejected.exception.reason, "invalid_resume")
                 rows.pop(key)
                 self.store.put(PENDING_WORK_KEY, rows)
+
+    def test_malformed_top_level_pending_state_never_becomes_an_empty_registry(self):
+        handle = self.pending.issue(
+            "owner-a", WORK_1, GMAIL.connector_id, GMAIL.required_scopes
+        )
+        self.connect()
+        for malformed in (None, [], "corrupt"):
+            with self.subTest(malformed=malformed):
+                self.store.put(PENDING_WORK_KEY, malformed)
+                operations = (
+                    lambda: self.pending.issue(
+                        "owner-a", WORK_2, GMAIL.connector_id, GMAIL.required_scopes
+                    ),
+                    lambda: self.pending.claim(
+                        handle.token,
+                        "owner-a",
+                        GMAIL.connector_id,
+                        GMAIL.required_scopes,
+                        HANDOFF_1,
+                    ),
+                    lambda: self.pending.complete(
+                        handle.token, "owner-a", GMAIL.connector_id, HANDOFF_1
+                    ),
+                )
+                for operation in operations:
+                    with self.assertRaises(ConnectorContractError) as rejected:
+                        operation()
+                    self.assertEqual(rejected.exception.reason, "invalid_resume")
+                    self.assertEqual(self.store.config(PENDING_WORK_KEY), malformed)
 
     def test_capability_compatibility_is_deterministic_and_disconnect_revokes(self):
         registry = CapabilityRegistry(self.store)

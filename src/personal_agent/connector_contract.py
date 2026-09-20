@@ -24,6 +24,7 @@ import uuid
 CONNECTOR_STATE_KEY = "connector_contract_state"
 PENDING_WORK_KEY = "connector_pending_work"
 _IDENTIFIER = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,95})\Z")
+_MISSING_PENDING_STATE = object()
 _CONNECTOR_STATE_LOCK = threading.RLock()
 _PENDING_WORK_LOCK = threading.RLock()
 
@@ -506,8 +507,12 @@ class PendingWorkRegistry:
         return hashlib.sha256(_work_reference(handoff_id).encode()).hexdigest()
 
     def _rows(self) -> dict:
-        value = self.store.config(PENDING_WORK_KEY, {})
-        return value if isinstance(value, dict) else {}
+        value = self.store.config(PENDING_WORK_KEY, _MISSING_PENDING_STATE)
+        if value is _MISSING_PENDING_STATE:
+            return {}
+        if not isinstance(value, dict):
+            raise ConnectorContractError("invalid_resume")
+        return value
 
     def _validated_row(self, row: object) -> tuple[ResumeState, str, str, str, tuple[str, ...], float, int]:
         if not isinstance(row, dict) or set(row) != self._FIELDS:
@@ -710,8 +715,16 @@ class PendingWorkRegistry:
             state, saved_owner, work_id, saved_connector, expected, _expires, _sequence = self._validated_row(row)
             if state in self._TERMINAL:
                 raise ConnectorContractError(self._terminal_reason(state))
-            if state is ResumeState.CLAIMED and row["claim_digest"] != claim_digest:
-                raise ConnectorContractError("resume_claimed")
+            if state is ResumeState.CLAIMED:
+                if row["claim_digest"] != claim_digest:
+                    raise ConnectorContractError("resume_claimed")
+                if saved_owner != owner or saved_connector != connector_id or actual != expected:
+                    reason = "scope_mismatch" if actual != expected else "invalid_resume"
+                    raise ConnectorContractError(reason)
+                # The initial claim already established connector authority. A
+                # later disconnect/reauth/blocked transition must not destroy a
+                # handoff that may already be durably scheduled under this ID.
+                return PendingWorkReference(work_id, connector_id, expected)
             if saved_owner != owner or saved_connector != connector_id or actual != expected:
                 row["state"] = ResumeState.SUPERSEDED.value
                 row["completed_at"] = None
@@ -727,11 +740,10 @@ class PendingWorkRegistry:
                 row["terminal_at"] = now
                 self.store.put(PENDING_WORK_KEY, rows)
                 raise exc
-            if state is ResumeState.PENDING:
-                row["state"] = ResumeState.CLAIMED.value
-                row["claim_digest"] = claim_digest
-                row["claimed_at"] = now
-                self.store.put(PENDING_WORK_KEY, rows)
+            row["state"] = ResumeState.CLAIMED.value
+            row["claim_digest"] = claim_digest
+            row["claimed_at"] = now
+            self.store.put(PENDING_WORK_KEY, rows)
             return PendingWorkReference(work_id, connector_id, expected)
 
     def complete(

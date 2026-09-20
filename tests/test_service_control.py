@@ -219,9 +219,8 @@ class ServiceControlTests(unittest.TestCase):
         self.assertTrue(failing_runner.running)
         self.assertGreaterEqual(failing_runner.bootstrap_count, 2)
 
-    def test_upgrade_rolls_back_when_process_runs_but_health_endpoint_fails(self):
+    def test_upgrade_retries_health_until_application_is_ready(self):
         self.controller.install()
-        previous = self.controller.plist_path.read_bytes()
         replacement = self.root / "brew-prefix/bin/agentos"
         replacement.parent.mkdir(parents=True)
         replacement.write_text("#!/bin/sh\n")
@@ -234,10 +233,43 @@ class ServiceControlTests(unittest.TestCase):
             uid=501,
             health_probe=lambda: next(health),
         )
+        result = upgraded.upgrade()
+        self.assertEqual(result["status"], "running")
+        self.assertTrue(self.runner.running)
+
+    def test_upgrade_rolls_back_when_health_never_becomes_ready(self):
+        self.controller.install()
+        previous = self.controller.plist_path.read_bytes()
+        replacement = self.root / "brew-prefix/bin/agentos"
+        replacement.parent.mkdir(parents=True)
+        replacement.write_text("#!/bin/sh\n")
+        replacement.chmod(0o755)
+        health = iter([False] * 20 + [True])
+        upgraded = ServiceController(
+            home=self.home,
+            cli_path=replacement,
+            runner=self.runner,
+            uid=501,
+            health_probe=lambda: next(health),
+        )
         with self.assertRaisesRegex(ServiceControlError, "was rolled back"):
             upgraded.upgrade()
         self.assertEqual(upgraded.plist_path.read_bytes(), previous)
         self.assertTrue(self.runner.running)
+
+    def test_failed_first_install_does_not_delete_plist_when_bootout_is_unverified(self):
+        self.runner.fail["bootout"] = "permission denied"
+        controller = ServiceController(
+            home=self.home,
+            cli_path=self.cli,
+            runner=self.runner,
+            uid=501,
+            health_probe=lambda: False,
+        )
+        with self.assertRaisesRegex(ServiceControlError, "rollback could not be verified"):
+            controller.install()
+        self.assertTrue(controller.plist_path.exists())
+        self.assertTrue(self.runner.loaded)
 
     def test_upgrade_staging_failure_does_not_stop_previous_loaded_service(self):
         self.controller.install()
@@ -336,6 +368,15 @@ class ServiceControlTests(unittest.TestCase):
         self.assertTrue(removed["changed"])
         self.assertFalse(self.runner.loaded)
         self.assertEqual(self.runner.commands[-1], ["launchctl", "bootout", self.controller.service_target])
+
+    def test_stop_orphaned_job_reports_not_installed(self):
+        self.controller.install()
+        self.controller.plist_path.unlink()
+        stopped = self.controller.stop()
+        self.assertEqual(stopped["status"], "not_installed")
+        self.assertFalse(stopped["installed"])
+        self.assertFalse(stopped["background_available"])
+        self.assertIn("install", stopped["next_action"])
 
     def test_static_template_has_no_fixed_homebrew_prefix(self):
         template = (Path(__file__).resolve().parents[1] / "deploy/com.personal-agentos.plist").read_text()

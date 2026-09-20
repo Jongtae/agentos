@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from typing import Callable, Mapping, Sequence
 from urllib.request import urlopen
 
@@ -157,6 +158,7 @@ class ServiceController:
         # negative health behavior when needed. The real launchctl path always
         # confirms the loopback application endpoint before claiming success.
         self.health_probe = health_probe or (_probe_healthz if runner is _run else lambda: True)
+        self.health_wait = time.sleep if health_probe is None and runner is _run else lambda _seconds: None
         self.uid = os.getuid() if uid is None else uid
         self.domain = f"gui/{self.uid}"
         self.service_target = f"{self.domain}/{LABEL}"
@@ -230,10 +232,16 @@ class ServiceController:
             observed = self._observed_status()
         if not observed["background_available"]:
             raise ServiceControlError("A running AgentOS background process was not observed.", next_action)
-        try:
-            healthy = self.health_probe() is True
-        except Exception:
-            healthy = False
+        healthy = False
+        for attempt in range(20):
+            try:
+                healthy = self.health_probe() is True
+            except Exception:
+                healthy = False
+            if healthy:
+                break
+            if attempt < 19:
+                self.health_wait(0.2)
         if not healthy:
             raise ServiceControlError(
                 "The AgentOS process was running but its application health check did not pass.",
@@ -287,8 +295,17 @@ class ServiceController:
         except (ServiceControlError, OSError) as failure:
             # Bootstrap may succeed while the new executable exits immediately.
             # Remove that definition before restoring the last known one.
-            self._launchctl("bootout", self.domain, str(self.plist_path))
+            removed = self._launchctl("bootout", self.domain, str(self.plist_path))
             try:
+                if removed.returncode:
+                    remaining = self._observed_status()
+                    if remaining["status"] not in {"stopped", "not_installed"}:
+                        detail = _clean_error(removed)
+                        raise ServiceControlError(
+                            "The failed replacement service could not be stopped"
+                            + (f": {detail}" if detail else ""),
+                            "Run service status and stop the registered job before reinstalling; owner data was retained.",
+                        )
                 if previous is None:
                     self.plist_path.unlink(missing_ok=True)
                 else:
@@ -349,8 +366,11 @@ class ServiceController:
         )
         self._require(stopped, "The AgentOS background service could not stop",
                       "Run service status and retry stop; no owner data was deleted.")
-        return {"ok": True, "operation": "stop", "changed": True, "status": "stopped", "installed": True,
-                "background_available": False, "data_dir": str(self.data_dir), "data_preserved": True}
+        installed = self.plist_path.exists()
+        return {"ok": True, "operation": "stop", "changed": True,
+                "status": "stopped" if installed else "not_installed", "installed": installed,
+                "background_available": False, "data_dir": str(self.data_dir), "data_preserved": True,
+                **({} if installed else {"next_action": "Run service install before starting the background service."})}
 
     def restart(self) -> dict[str, object]:
         if not self.plist_path.exists():

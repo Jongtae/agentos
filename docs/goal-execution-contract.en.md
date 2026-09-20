@@ -56,6 +56,40 @@ An independent review artifact is required before completion when a goal changes
 
 The single existing delivery automation reads this contract and may resume only the named active goal after checking issue, branch, plan, contract, and task state. It may advance only to an already enumerated substep, must not create another automation, and must not run concurrently with an already active task. It remains paused when there is no active top-level goal and after top-level closeout; retries require a meaningful changed condition.
 
+
+## Verification budget and stable-head review
+
+The goal lifecycle preserves required evidence while avoiding validation churn that consumes more execution context than the change itself.
+
+### Implementation and remediation loop
+
+1. During implementation, run the smallest focused tests that exercise the changed contract.
+2. Keep related edits/remediation local to the worktree until they form a coherent checkpoint; do not push every micro-fix merely to ask CI or a reviewer the same question again.
+3. When the work is review-ready, push a stable head and run the declared complete validation set required by the source plan.
+4. Request independent review only on that stable head.
+5. Collect all known compatible findings from the review pass and remediate them together. Use focused tests while fixing them.
+6. If review findings require any remediation commit, keep using focused tests while fixing them, then run the required exact-head full validation and applicable independent re-review once on the consolidated final remediation head before merge. No post-review commit may be merged with only an independent review artifact for an earlier head.
+
+### Soft verification budget
+
+For a normal review-ready work unit, the expected broad cycle budget is:
+
+- **cycle 1:** stable-head full validation + required independent review;
+- **cycle 2:** one consolidated full validation + re-review after review findings require changes to the reviewed head.
+
+A third or later full-suite/re-review cycle is permitted when correctness requires it; it is not a bypassable hard limit. Before triggering that cycle, record why another broad pass is necessary, such as a newly discovered security/authority defect, changed shared contract, flaky or unknown root cause, or material cross-worktree conflict. Repeated broad cycles without a new reason are a signal to stop micro-fixing, establish the root cause, and batch remediation.
+
+### No redundant gate work
+
+- Do not request review again for an unchanged head.
+- Do not request duplicate review while the current review is running.
+- Do not repeatedly poll CI/review when no decision depends on a new state transition.
+- Do not run the full suite after every narrow mechanical edit solely for reassurance; run focused tests and batch compatible changes. If those edits occur after independent review, the consolidated final head must still receive the applicable independent re-review before merge.
+- Automatic CI triggered by a push is still authoritative evidence; reduce avoidable trigger frequency by pushing coherent checkpoints, not by disabling required workflows.
+- Never skip, weaken, relabel, or bypass tests, branch protection, exact-head validation, or independent review to save context/compute.
+
+Broader validation may be run earlier whenever security, authentication/OAuth, privacy, external effects, shared contracts, replay/idempotency/recovery, or uncertain root cause makes narrow testing insufficient.
+
 ## Terminal-state discipline
 
 - A goal is **complete** only when a current requirement-to-evidence audit proves every completion item, merged artifact, required CI result, and tracker/roadmap/ledger closeout. A top-level goal additionally proves every enumerated substep and requirement is complete, owner-setting-only, or separately decision-required. Intent, a partial fixture, a closed issue, an unmerged branch, or a narrow test cannot prove a broader claim.

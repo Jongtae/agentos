@@ -87,6 +87,10 @@ assert.equal(incoherent.response,undefined);
 assert.deepEqual([ui.statusText(incoherent),ui.taskOutcome(incoherent).title],['진행 중','진행 중']);
 const coherent=ui.mergeTaskProgress({tasks:[{id:'done',status:'succeeded',status_kind:'finished'}]},null,[{id:'done',status:'succeeded',response:'terminal result',channel:'telegram:fixture'}]).tasks[0];
 assert.deepEqual([ui.statusText(coherent),ui.taskOutcome(coherent).title,ui.requestSource(coherent)],['완료','결과','Telegram']);
+const partial=ui.mergeTaskProgress({tasks:[{id:'partial',status:'partial',status_kind:'finished',error:'second half unavailable'}]},null,[{id:'partial',response:'first half'}]).tasks[0];
+assert.equal(partial.error,'second half unavailable');
+assert.match(ui.taskOutcome(partial).text,/second half unavailable/);
+assert.deepEqual(ui.taskOutcome({status:'cancelled'}),{title:'취소됨',text:'이 작업은 취소되어 더 이상 실행되지 않습니다.',kind:'attention'});
 assert(ui.isDiagnosticTask({title:'/start abc'}));
 assert(!ui.isDiagnosticTask({title:'compare flights'}));
 const proofA=ui.modelDraftFingerprint({provider:'openai',endpoint:'https://api.example/v1/',model:'m',credential_revision:1});
@@ -99,6 +103,14 @@ const space={memories:[{id:'exact',memory_key:'durable-key',content:'exact durab
 assert.deepEqual(ui.filterLocalRecords(space,'durable-key','all').map(x=>x.id),['exact']);
 assert.deepEqual(ui.filterLocalRecords(space,'durable-key','saved').map(x=>x.id),['exact']);
 assert.deepEqual(ui.filterLocalRecords(space,'needle-after-truncation','all').map(x=>x.id),['long']);
+assert.deepEqual(ui.workspaceSaveCandidates([{id:'unassigned',status:'succeeded'},{id:'here',workspace_id:'w',status:'partial'},{id:'elsewhere',workspace_id:'other',status:'succeeded'},{id:'queued',status:'queued'}],'w',[{job_id:'here'}]).map(x=>x.id),['unassigned']);
+assert.deepEqual(ui.modelPresetDraft({provider:'compatible',endpoint:'https://openrouter.ai/api/v1/',model:'fixture/free'}),{provider:'compatible',endpoint:'https://openrouter.ai/api/v1',model:'fixture/free',api_key:''});
+assert.deepEqual(ui.capabilityActions({state:'enabled'}),['pause','disconnect']);
+assert.deepEqual(ui.capabilityActions({state:'paused'}),['resume']);
+assert.deepEqual(ui.capabilityActions({state:'disconnected'}),[]);
+assert.match(ui.contextSharingWarning({sharing_requires_policy_and_per_request_approval:true}),/각 Telegram 작업마다/);
+assert.equal(ui.settingsFeedbackId('subscription'),'subscription-feedback');
+const removed=[];assert.equal(ui.clearMobileDetailWhenEmpty({classList:{remove:value=>removed.push(value)}},[]),true);assert.deepEqual(removed,['mobile-detail']);
 let detailLoads=0;
 await ui.refreshSelectedTaskDetail({id:'one',events_count:1,observed_at:10,status:'running',events:[{id:1}]},{id:'one',events_count:2,observed_at:11,status:'running'},async id=>{detailLoads++;return {id,events:[{id:1},{id:2}]};});
 assert.equal(detailLoads,1);
@@ -114,13 +126,13 @@ const verified=await guard.test(current,async()=>{testRequests++;return {ok:true
 assert.equal(verified.accepted,true);assert.equal(guard.canApply(current),true);
 assert.equal(await guard.apply(current,async payload=>{saveRequests++;assert.equal('credential_revision' in payload,false);}),true);
 assert.equal(testRequests,2);assert.equal(saveRequests,1);
-console.log(JSON.stringify({checks:15}));
+console.log(JSON.stringify({checks:24}));
 })().catch(error=>{console.error(error);process.exit(1);});
 """
         result = subprocess.run(
             [node, '-e', script, str(ROOT / 'src/personal_agent/web/app.js')],
             check=True, capture_output=True, text=True, timeout=20)
-        self.assertEqual(json.loads(result.stdout)['checks'], 15)
+        self.assertEqual(json.loads(result.stdout)['checks'], 24)
 
     def test_model_apply_has_one_explicit_test_and_credential_revision(self):
         app = (ROOT / 'src/personal_agent/web/app.js').read_text()
@@ -138,6 +150,18 @@ console.log(JSON.stringify({checks:15}));
         self.assertIn('id="workspace-detail"', html)
         self.assertIn("api('/api/workspaces/'+encodeURIComponent(id))", app)
         self.assertIn("'/save-result'", app)
+        self.assertIn('workspaceSaveCandidates', app)
+
+    def test_capability_lifecycle_uses_existing_confirmed_settings_route(self):
+        app = (ROOT / 'src/personal_agent/web/app.js').read_text()
+        html = (ROOT / 'src/personal_agent/web/index.html').read_text()
+        self.assertIn('id="capability-controls"', html)
+        self.assertIn("api('/api/settings/request',{operation:'draft'", app)
+        self.assertIn("api('/api/settings/request',{operation:'confirm'", app)
+        self.assertIn("api('/api/settings/request',{operation:'cancel'", app)
+        self.assertIn("$('brand-home').onclick", app)
+        self.assertIn("setError('subscription-feedback',error)", app)
+        self.assertIn('각 Telegram 작업마다 공유 승인이 필요합니다.', app)
 
     def test_browser_fixture_and_exact_runner_transcript_are_checked_in(self):
         fixture = ROOT / 'tests/web_management_browser_fixture.py'

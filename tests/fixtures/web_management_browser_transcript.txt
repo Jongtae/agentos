@@ -187,3 +187,39 @@ In a fresh browser-fixture process, direct interaction also observed:
 
 No credential in this transcript is real; fixture-unsaved-token is inert text and
 was never submitted.
+
+Exact-head review repairs: unassigned result, preset, capability, mobile delete
+-------------------------------------------------------------------------------
+In a fresh fixture process at 1280x900, the project detail rendered the completed
+Telegram fixture job with no workspace_id as:
+
+  미지정 작업 · fixture project result
+  완료 결과 저장
+
+The fixture intentionally omits workspace_id from both Telegram jobs. This is
+renderer evidence only; no live Telegram or connector was used.
+
+For the OpenRouter preset regression, the headed browser interaction was:
+
+  fill API 키 with secret-that-must-clear
+  click 도구 지원 무료 모델 보기
+  click Fixture Free · fixture/free
+  evaluate the API 키/provider/endpoint/model controls
+
+Observed result:
+  {"value":"","provider":"compatible","endpoint":"https://openrouter.ai/api/v1","model":"fixture/free"}
+
+For the local capability lifecycle, entering 외부 연결 rendered the enabled
+google-drive-read fixture capability. Clicking 일시 정지 first rendered an explicit
+google-drive-read pause preview and 확인/취소 controls. Only after clicking 확인 did
+the UI render paused and 다시 시작. /control/requests recorded two POST
+/api/settings/request entries (draft, then confirm); no connector was contacted.
+
+At 390x844, the browser searched durable-key, opened the only matching record,
+clicked 삭제 and then 삭제 확인. The fixture accepted the real DELETE and the
+post-delete browser evaluation returned:
+
+  {"detailClass":"panel detail","backVisible":false,"empty":true}
+
+Thus deleting the last matching row exits the fixed mobile-detail overlay and
+returns to the visible empty list. This remains deterministic fixture evidence.

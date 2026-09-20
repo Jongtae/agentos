@@ -23,12 +23,15 @@ class Fixture:
     task_polls = 0
     requests = []
     results = []
+    memories = [{"id": "memory-exact", "memory_key": "durable-key", "content": "exact durable memory", "created": 2}, {"id": "memory-long", "content": LONG_MEMORY, "created": 1}]
+    capability_state = "enabled"
+    drafts = {}
 
     @classmethod
     def task(cls, detail=False):
         task = {"id": "task-382", "title": "브라우저 회귀 확인", "status": "running", "status_kind": "active", "started_at": 1, "observed_at": cls.events[-1]["created"], "events_count": len(cls.events), "waits": [], "artifacts": [], "configured": {}, "observed": {}}
         if detail:
-            task.update(events=cls.events, source_references=[], conversation={"job_id": "task-382", "workspace_id": "workspace-382"})
+            task.update(events=cls.events, source_references=[], conversation={"job_id": "task-382"})
         return task
 
 
@@ -77,8 +80,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"tasks": [Fixture.task()], "unknown_detail_message": "fixture"})
         elif path == "/api/tasks/task-382": self.send_json({"tasks": [Fixture.task(True)], "selected": Fixture.task(True), "unknown_detail_message": "fixture"})
         elif path == "/api/home": self.send_json({"state": "working", "workspaces": [{"id": "workspace-382", "title": "회귀 프로젝트"}]})
-        elif path == "/api/state": self.send_json({"settings": {"model": {"provider": "openai", "endpoint": "https://example.invalid/v1", "model": "fixture-model"}, "model_ready": False, "subscription_engines": {"engines": []}, "context_inbox": {"sources": {}, "items": []}, "telegram": {"enabled": True, "paired": True, "username": "fixture_bot"}, "document_boundary": {}}, "jobs": [{"id": "task-382", "workspace_id": "workspace-382", "status": "running", "response": None, "message": "fixture Telegram request", "channel": "telegram:fixture-owner"}, {"id": "project-job", "workspace_id": "workspace-382", "status": "succeeded", "response": "fixture project result", "message": "fixture project request", "channel": "telegram:fixture-owner"}], "tool_events": [], "healthy": True})
-        elif path == "/api/personal-space": self.send_json({"memories": [{"id": "memory-exact", "memory_key": "durable-key", "content": "exact durable memory", "created": 2}, {"id": "memory-long", "content": LONG_MEMORY, "created": 1}], "context": [], "results": []})
+        elif path == "/api/state": self.send_json({"settings": {"model": {"provider": "openai", "endpoint": "https://example.invalid/v1", "model": "fixture-model"}, "model_ready": False, "subscription_engines": {"engines": []}, "context_inbox": {"sources": {}, "items": []}, "telegram": {"enabled": True, "paired": True, "username": "fixture_bot"}, "conversation_settings": {"state": "read", "capabilities": [{"id": "google-drive-read", "kind": "connector", "state": Fixture.capability_state, "recovery": "Owner can resume after review."}]}, "document_boundary": {}}, "jobs": [{"id": "task-382", "status": "running", "response": None, "message": "fixture Telegram request", "channel": "telegram:fixture-owner"}, {"id": "project-job", "status": "succeeded", "response": "fixture project result", "message": "fixture project request", "channel": "telegram:fixture-owner"}], "tool_events": [], "healthy": True})
+        elif path == "/api/personal-space": self.send_json({"memories": Fixture.memories, "context": [], "results": []})
         elif path == "/api/workspaces/workspace-382": self.send_json({"id": "workspace-382", "title": "회귀 프로젝트", "purpose": "상세/결과 저장 회귀", "results": Fixture.results, "messages": []})
         elif path == "/control/counts": self.send_json({"test_requests": Fixture.test_requests, "apply_requests": Fixture.apply_requests, "events": len(Fixture.events), "task_polls": Fixture.task_polls})
         elif path == "/control/requests": self.send_json({"requests": Fixture.requests})
@@ -103,6 +106,27 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/model":
             Fixture.apply_requests += 1
             self.send_json({"ok": True})
+        elif path == "/api/openrouter/models":
+            self.send_json({"models": [{"id": "fixture/free", "name": "Fixture Free"}]})
+        elif path == "/api/settings/request":
+            operation = body.get("operation")
+            if operation == "draft":
+                action = body.get("intent", "").split()[-1]
+                preview = {"id": "fixture-draft", "target": "google-drive-read", "action": action, "effect": f"google-drive-read {action}", "digest": f"fixture-{action}"}
+                Fixture.drafts[preview["id"]] = preview
+                self.send_json({"state": "awaiting-confirmation", "preview": preview})
+            elif operation == "confirm":
+                preview = Fixture.drafts.pop(body.get("draft_id"), None)
+                if not preview or body.get("digest") != preview["digest"]:
+                    self.send_json({"error": "invalid draft"}, 409)
+                else:
+                    Fixture.capability_state = {"pause": "paused", "disconnect": "disconnected", "resume": "enabled"}[preview["action"]]
+                    self.send_json({"state": "applied", "capability": {"id": "google-drive-read", "state": Fixture.capability_state}})
+            elif operation == "cancel":
+                Fixture.drafts.pop(body.get("draft_id"), None)
+                self.send_json({"state": "cancelled"})
+            else:
+                self.send_json({"error": "unsupported settings operation"}, 400)
         elif path == "/api/workspaces/workspace-382/save-result":
             Fixture.results[:] = [{"id": "result-1", "job_id": body.get("job_id"), "content": "fixture project result", "created": 3}]
             self.send_json({"id": "workspace-382", "title": "회귀 프로젝트", "purpose": "상세/결과 저장 회귀", "results": Fixture.results, "messages": []})
@@ -115,7 +139,14 @@ class Handler(BaseHTTPRequestHandler):
         self.reject_observed_method("PATCH")
 
     def do_DELETE(self):
-        self.reject_observed_method("DELETE")
+        path = urlsplit(self.path).path
+        if path.startswith("/api/personal-space/memories/"):
+            self.observe("DELETE", path)
+            memory_id = path.rsplit("/", 1)[-1]
+            Fixture.memories[:] = [item for item in Fixture.memories if item["id"] != memory_id]
+            self.send_json({"deleted": memory_id})
+        else:
+            self.reject_observed_method("DELETE")
 
 
 if __name__ == "__main__":

@@ -141,7 +141,7 @@ NON_ASSERTIVE_DYNAMIC = re.compile(
 )
 INCOMPLETE_TOTAL = re.compile(
     r'(?i)\b(?:subtotal|before\s+(?:(?:sales|local|city|state|federal|hotel|tourist|value[- ]added)\s+)?(?:vat|tax|taxes|fee|fees|service charge|service charges)|'
-    r'excluding\s+(?:(?:sales|local|city|state|federal|hotel|tourist|value[- ]added)\s+)?(?:vat|tax|taxes|fee|fees|service charge|service charges)|'
+    r'exclud(?:e|es|ing)\s+(?:(?:sales|local|city|state|federal|hotel|tourist|value[- ]added)\s+)?(?:vat|tax|taxes|fee|fees|service charge|service charges)|'
     r'plus\s+(?:(?:[$€£¥₩]\s?\d[\d,.]*|(?:USD|EUR|GBP|JPY|KRW)\s?\d[\d,.]*|\d+(?:\.\d+)?\s*%)\s+)?(?:(?:sales|local|city|state|federal|hotel|tourist|value[- ]added)\s+)?(?:vat|tax|taxes|fee|fees|service charge|service charges)|'
     r'(?:vat|tax|taxes|fee|fees|resort fee|resort fees|service charge|service charges)[^.!?]{0,30}\b(?:not\s+included|excluded|extra|additional)\b|not\s+including\s+(?:vat|tax|taxes|fee|fees|resort fee|resort fees|service charge|service charges))\b|'
     r'\+\s*(?:\d+(?:\.\d+)?\s*%\s+)?(?:vat|tax|taxes|fee|fees|service charge|service charges)\b|'
@@ -194,6 +194,9 @@ DYNAMIC_SUBJECT_PATTERNS = {
     'inventory': re.compile(r'(?i)\b(?:availability|inventory|stock|room|rooms|ticket|tickets|seat|seats|product|products|item|items)\b|재고|매진|예약'),
     'payable_total': re.compile(r'(?i)\b(?:total|total due|payable total|grand total|total price)\b|총\s*결제|결제\s*금액'),
 }
+FORWARD_SUBJECT_QUALIFIER = re.compile(
+    r'(?i)\b(?:excludes?|var(?:y|ies)|changes?|fluctuat(?:e|es))\b'
+)
 
 
 def validate_public_query(query, query_source):
@@ -301,7 +304,8 @@ def _qualified_dynamic(name, evidence):
                     is_forward_subject_qualifier=(
                         neighbor_position > position
                         and DYNAMIC_SUBJECT_PATTERNS[name].search(neighbor)
-                        and DYNAMIC_DISQUALIFIER.search(neighbor)
+                        and (DYNAMIC_DISQUALIFIER.search(neighbor) or
+                             FORWARD_SUBJECT_QUALIFIER.search(neighbor))
                         and not clause_pattern(neighbor)
                     )
                     if is_forward_anaphor or is_forward_subject_qualifier: adjacent_condition=True

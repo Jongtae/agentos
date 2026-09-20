@@ -574,6 +574,9 @@ class PublicResearchTests(unittest.TestCase):
             ('inventory','Rooms are available. Availability is subject to change.'),
             ('payable_total','Grand total: USD 100. Total is subject to taxes.'),
             ('fee','Service fee: USD 10. Fees may vary.'),
+            ('inventory','Rooms are available. Availability changes frequently.'),
+            ('payable_total','Grand total: USD 100. Total excludes taxes.'),
+            ('fee','Service fee: USD 10. Fees vary by date.'),
         )
         for dynamic,content in cases:
             with self.subTest(dynamic=dynamic):

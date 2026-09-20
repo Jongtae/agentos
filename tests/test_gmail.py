@@ -748,6 +748,14 @@ class GmailConnectorTests(unittest.TestCase):
             'text/plain; charset="utf-8',
             "text/plain; charset=utf-8; charset=iso-8859-1",
             "text/plain; charset=utf-8; CHARSET=iso-8859-1",
+            # A CFWS comment must not hide a duplicate parameter name. Python's
+            # header parser drops the comment and selects the case variant, so a
+            # raw scanner that stops at "(" would leave the charset ambiguous.
+            "text/plain; charset=us-ascii; (x) CHARSET=utf-8",
+            "text/plain; charset=us-ascii; (nested (comment)) CHARSET=utf-8",
+            "text/plain; (c) charset=us-ascii; CHARSET=utf-8",
+            # An unterminated comment or quoted string is malformed.
+            "text/plain; charset=utf-8; (unterminated",
         ):
             with self.subTest(content_type=content_type):
                 self.responses.clear()
@@ -766,7 +774,14 @@ class GmailConnectorTests(unittest.TestCase):
 
     def test_present_content_type_can_omit_optional_charset(self):
         self.connect()
-        for content_type in ("text/plain", "text/plain; format=flowed"):
+        for content_type in (
+            "text/plain",
+            "text/plain; format=flowed",
+            # A comment is legal CFWS and must not turn a single parameter into
+            # a duplicate or otherwise reject an ordinary part.
+            "text/plain; (only one) charset=us-ascii",
+            'text/plain; name="paren(in)quotes.txt"',
+        ):
             with self.subTest(content_type=content_type):
                 self.responses.append({
                     "id": "m_1",

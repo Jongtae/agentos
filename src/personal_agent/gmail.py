@@ -220,8 +220,58 @@ def _decoded_header(value: object, maximum: int) -> str:
         raise GmailError("invalid_provider_response") from None
 
 
+def _strip_mime_comments(value: str) -> str:
+    """Replace RFC 5322 CFWS comments with a single space.
+
+    Python's header parser removes comments before exposing parameters, so a
+    raw scanner that does not understand them can miss a duplicate such as
+    ``charset=us-ascii; (x) CHARSET=utf-8`` and leave the effective value
+    ambiguous. Comments nest, quoted strings hide them, and a quoted pair
+    escapes the next character in either context. An unterminated comment or
+    quoted string is a malformed provider response.
+    """
+    out: list[str] = []
+    quoted = False
+    depth = 0
+    index = 0
+    length = len(value)
+    while index < length:
+        character = value[index]
+        if character == "\\" and (quoted or depth):
+            if index + 1 >= length:
+                raise GmailError("invalid_provider_response")
+            if quoted:
+                out.append(character)
+                out.append(value[index + 1])
+            index += 2
+            continue
+        if quoted:
+            out.append(character)
+            if character == '"':
+                quoted = False
+        elif depth:
+            if character == "(":
+                depth += 1
+            elif character == ")":
+                depth -= 1
+                if depth == 0:
+                    out.append(" ")
+        elif character == '"':
+            quoted = True
+            out.append(character)
+        elif character == "(":
+            depth += 1
+        else:
+            out.append(character)
+        index += 1
+    if depth or quoted:
+        raise GmailError("invalid_provider_response")
+    return "".join(out)
+
+
 def _mime_parameter_names(value: str) -> list[str]:
     """Return raw parameter names without collapsing case-insensitive duplicates."""
+    value = _strip_mime_comments(value)
     segments = []
     start = 0
     quoted = False

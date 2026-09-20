@@ -154,6 +154,8 @@ class PublicResearchTests(unittest.TestCase):
             ('https://example.com/?connect.sid=supersecret123456789','owner_public_request'),
             ('ASP.NET_SessionId=supersecret123456789','owner_public_request'),
             ('laravel_session=supersecret123456789','owner_public_request'),
+            ('.AspNetCore.Session=supersecret123456789','owner_public_request'),
+            ('https://example.com/?%2EAspNetCore%2ESession=supersecret123456789','owner_public_request'),
             ('$HOME/.ssh/id_rsa','owner_public_request'),
             ('${HOME}/Documents/private.txt','owner_public_request'),
             ('Basic dTpw','owner_public_request'),
@@ -363,12 +365,20 @@ class PublicResearchTests(unittest.TestCase):
             'travel_plan','museum plan',query_source='owner_public_request')
         self.assertEqual(current['dynamic_facts']['inventory']['status'],'observed')
 
+        reader=Reader({'https://alpha.example/item':{
+            'url':'https://alpha.example/item','retrieved_at':2,
+            'content':'Rooms are available. They were renovated in 2020.'}})
+        current=PublicResearch(search_result,reader,max_pages=1).run(
+            'travel_plan','museum plan',query_source='owner_public_request')
+        self.assertEqual(current['dynamic_facts']['inventory']['status'],'observed')
+
     def test_currency_amounts_without_price_meaning_are_not_labeled_prices(self):
         for content in ('Save USD 10 today.', 'Get a USD 25 credit with trade-in.',
                         'The manufacturer donated USD 100.', 'The price dropped by USD 10.',
                         'Price includes a USD 25 trade-in credit.', 'Save USD 10 on the price.',
                         'USD 10 off the price.', 'Price discount: USD 10.',
-                        'Price decreased USD 10.'):
+                        'Price decreased USD 10.', 'Price discounted by USD 10.',
+                        'Price dropped $10.', 'Price reduction: USD 10.'):
             with self.subTest(content=content):
                 reader=Reader({'https://alpha.example/item':{
                     'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
@@ -465,6 +475,13 @@ class PublicResearchTests(unittest.TestCase):
         for dynamic in ('fee','inventory','payable_total'):
             self.assertEqual(result['dynamic_facts'][dynamic]['status'],'observed')
             self.assertIn(result['dynamic_facts'][dynamic]['evidence'][0]['exact_text'],result['brief'])
+
+        reader=Reader({'https://alpha.example/item':{
+            'url':'https://alpha.example/item','retrieved_at':2,
+            'content':'No service fee will be charged.'}})
+        result=PublicResearch(search_result,reader,max_pages=1).run(
+            'travel_plan','museum plan',query_source='owner_public_request')
+        self.assertEqual(result['dynamic_facts']['fee']['status'],'observed')
 
     def test_unrestricted_dynamic_facts_remain_observed(self):
         cases=(

@@ -32,7 +32,7 @@ HIGH_CONFIDENCE_SECRET_PATTERNS = (
     re.compile(r'(?i)\b[a-z][a-z0-9+.-]*://[^\s/@]*@'),
     re.compile(r'(?i)\b(?:cookie|set-cookie)\s*:\s*\S+'),
     re.compile(r'(?i)\btoken\s*=\s*[^&\s]+'),
-    re.compile(r'(?i)\b(?:phpsessid|sessionid|jsessionid|csrftoken|connect\.sid|asp\.net_sessionid|laravel_session)\s*=\s*[^&\s]+'),
+    re.compile(r'(?i)(?:\b(?:phpsessid|sessionid|jsessionid|csrftoken|connect\.sid|asp\.net_sessionid|laravel_session)|\.aspnetcore\.session)\s*=\s*[^&\s]+'),
     re.compile(r'(?i)\bsecret\s+[a-z0-9_-]{20,}\b'),
     re.compile(r'(?i)\b[A-Z][A-Z0-9_]{1,80}(?:_PASSWORD|_PASSWD|_SECRET|_SECRET_KEY|_PRIVATE_KEY|_CLIENT_SECRET|_TOKEN|_API_KEY|_ACCESS_KEY)\s*=\s*\S+'),
     re.compile(r'(?i)\b(?:PGPASSWORD|MYSQL_PWD|REDISCLI_AUTH)\s*=\s*\S+'),
@@ -67,7 +67,7 @@ FACT_PATTERNS = {
 }
 PRICE_ADJUSTMENT = re.compile(
     r'(?i)(?:(?:\b(?:price|cost|fare|rate)\b|가격|요금)[^.!?]{0,45}(?:'
-    r'\b(?:drop(?:ped)?|reduc(?:e|ed)|decreas(?:e|ed)|discount(?:ed)?)\s*'
+    r'\b(?:drop(?:ped)?|reduc(?:e|ed)|reduction|decreas(?:e|ed)|discount(?:ed)?)\s*'
     r'(?!to\b)(?:(?:by|of)\s+|:\s*)?'
     r'(?:[$€£¥₩]\s?\d|(?:USD|EUR|GBP|JPY|KRW)\s?\d|\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW))|'
     r'\b(?:includes?|with)\b[^.!?]{0,25}'
@@ -94,7 +94,7 @@ TOTAL_VALUE_PATTERNS = (
     re.compile(r'(?i)(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b)\s*(?:\b(?:total due|payable total|grand total|total price)\b|총\s*결제(?:액)?|결제\s*금액)'),
 )
 DYNAMIC_DISQUALIFIER = re.compile(
-    r'(?i)\b(?:may|might|could|can|should|would|will|shall|going\s+to|possibly|probably|likely|expected|estimated|estimate|approximately|approximate|about|around|roughly|range|ranges|ranging|between|except|projected|potential|check|subject to|up to|at least|at most|starting at|starts at|if|unless|when|upon|provided|on request|depending on)\b|'
+    r'(?i)\b(?:may|might|could|can|should|would|possibly|probably|likely|expected|estimated|estimate|approximately|approximate|about|around|roughly|range|ranges|ranging|between|except|projected|potential|check|subject to|up to|at least|at most|starting at|starts at|if|unless|when|upon|provided|on request|depending on)\b|'
     r'\b(?:(?:for|to)\s+(?:loyalty\s+)?members?\s+only|(?:members?|loyalty)[- ]only|with\s+(?:an?\s+)?membership|only\s+(?:for|to)\s+(?:loyalty\s+)?members?)\b|'
     r'\bonly\s+(?:for|to|with|on)\b|'
     r'\b(?:do|does|did)\s+not\s+(?:guarantee|confirm|promise)\b|'
@@ -119,6 +119,14 @@ HISTORICAL_ANAPHOR = re.compile(
     r'\b(?:last|previous|prior)\s+(?:year|month|week|season|quarter)\b|'
     r'\b(?:in|during)\s+(?:19|20)\d{2}\b|'
     r'\b(?:as\s+of|from|through|until)\b[^.!?]{0,24}\b(?:19|20)\d{2}\b)'
+)
+HISTORICAL_ELLIPSIS = re.compile(
+    r'(?i)^\s*(?:this|that|it|these|those|they)(?:\s+information)?\s+'
+    r'(?:was|were|is|are)\s+(?:'
+    r'(?:in|during|as\s+of|from|through|until)\b|'
+    r'(?:last|previous|prior)\s+(?:year|month|week|season|quarter)\b|'
+    r'(?:available|unavailable|sold\s+out)\b|'
+    r'(?:[$€£¥₩]\s?\d|(?:USD|EUR|GBP|JPY|KRW)\s?\d|\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)))'
 )
 NON_ASSERTIVE_DYNAMIC = re.compile(
     r'(?i)^\s*(?:are|is|was|were|do|does|did|can|could|will|would|should|may|might|has|have|had)\b|'
@@ -272,8 +280,11 @@ def _qualified_dynamic(name, evidence):
                 for neighbor_position in range(max(0,position-1),min(len(units),position+2)):
                     if neighbor_position == position: continue
                     neighbor=_rendered_evidence_text(units[neighbor_position])
+                    historical_anaphor=(HISTORICAL_ANAPHOR.search(neighbor) and
+                                         (DYNAMIC_SUBJECT_PATTERNS[name].search(neighbor) or
+                                          HISTORICAL_ELLIPSIS.search(neighbor)))
                     is_forward_anaphor=neighbor_position > position and (
-                        ANAPHORIC_QUALIFIER.search(neighbor) or HISTORICAL_ANAPHOR.search(neighbor)
+                        ANAPHORIC_QUALIFIER.search(neighbor) or historical_anaphor
                     )
                     if is_forward_anaphor: adjacent_condition=True
                     if (ADJACENT_QUALIFIER_ONLY.search(neighbor) or is_forward_anaphor or
@@ -291,9 +302,13 @@ def _qualified_dynamic(name, evidence):
             fact_context=' '.join(fact_clauses or [classified_text])
             historical=all(HISTORICAL_DYNAMIC.search(part) for part in fact_clauses or [classified_text])
             negated_assertion=bool(NEGATED_DYNAMIC_ASSERTION.search(context))
-            explicit_no_charge=name == 'fee' and bool(FEE_NOT_CHARGED.search(classified_text))
+            explicit_no_charge=name == 'fee' and bool(
+                FEE_NOT_CHARGED.search(classified_text) or
+                FEE_VALUE_PATTERNS[2].search(classified_text)
+            )
             if (adjacent_condition or classified_text.rstrip().endswith('?') or NON_ASSERTIVE_DYNAMIC.search(classified_text) or
-                    DYNAMIC_DISQUALIFIER.search(context) or FUTURE_DYNAMIC.search(fact_context) or historical or
+                    DYNAMIC_DISQUALIFIER.search(context) or
+                    (FUTURE_DYNAMIC.search(fact_context) and not explicit_no_charge) or historical or
                     (negated_assertion and not explicit_no_charge) or
                     (name == 'payable_total' and NEGATED_TOTAL_EXISTENCE.search(classified_text)) or
                     (name == 'payable_total' and INCOMPLETE_TOTAL.search(context))): continue

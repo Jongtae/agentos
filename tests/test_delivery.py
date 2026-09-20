@@ -114,23 +114,25 @@ class DeliveryTests(unittest.TestCase):
         self.assertNotIn('DRIVE-LOCAL-OP-01', controller.plan.documented_completed())
         self.assertNotIn('SCN-I-01', controller.plan.documented_completed())
 
-    def test_use01_goal_ready_never_starts_heartbeat_or_external_commands(self):
+    def test_pa1_goal_ready_never_starts_heartbeat_or_external_commands(self):
         runner=Runner()
         controller=self.controller(runner)
         plan=controller.plan
-        self.assertEqual(plan.next_goal()['id'], 'USE-01')
+        self.assertEqual(plan.next_goal()['id'], 'EPIC-PA1')
         self.assertEqual(plan.next_goal()['status'], 'owner-activated-goal-ready')
-        self.assertEqual(plan.items['USE-01']['issue'], 358)
-        self.assertEqual(plan.items['USE-01']['depends_on'], ['GOV-USE-01'])
-        self.assertEqual(plan.items['USE-01']['activation_status'], 'owner-activated-goal-ready')
-        self.assertEqual(plan.items['USE-01']['contract'], 'use-01-goal-readiness.en.md')
-        self.assertIn('GOV-USE-01', plan.documented_completed())
-        self.assertIn('DOGFOOD-01', plan.documented_completed())
-        self.assertNotIn('USE-01', plan.documented_completed())
+        self.assertEqual(plan.items['EPIC-PA1']['issue'], 386)
+        self.assertEqual(plan.items['EPIC-PA1']['depends_on'], ['GOV-PA1-01'])
+        self.assertEqual(plan.items['EPIC-PA1']['activation_status'], 'owner-activated-goal-ready')
+        self.assertEqual(plan.items['EPIC-PA1']['contract'], 'pa1-parallel-delivery.en.md')
+        self.assertIn('GOV-PA1-01', plan.documented_completed())
+        self.assertNotIn('EPIC-PA1', plan.documented_completed())
         self.assertIsNone(plan.select({}))
-        self.assertIsNone(plan.select({'active':'USE-01','status':'running'}))
+        self.assertIsNone(plan.select({'active':'EPIC-PA1','status':'running'}))
         self.assertEqual(controller.run_once(dry_run=False)['status'], 'awaiting-owner-activated-goal')
         self.assertEqual(runner.calls, [])
+        self.assertEqual(plan.items['PA1-FDN-01']['activation_status'], 'parent-controlled')
+        self.assertEqual(plan.items['PA1-GMAIL-01']['parallel_group'], 'pa1-wave-1')
+        self.assertEqual(plan.items['WEB-ADMIN-01']['activation_status'], 'parent-controlled')
         self.assertFalse(any(
             (item.get('issue') in range(335,347) or item.get('issue') in {359,360})
             and item.get('activation_status') in {'owner-activated-goal-ready','active'}
@@ -138,13 +140,13 @@ class DeliveryTests(unittest.TestCase):
         ))
         self.assertEqual(plan.items['SITE-01']['activation_status'], 'owner-deferred')
 
-    def test_use01_requires_explicit_active_transition_and_stops_after_completion(self):
+    def test_pa1_requires_explicit_active_transition_and_stops_after_completion(self):
         altered=json.loads((self.root/'delivery-plan.yaml').read_text())
         altered['next_goal']['status']='active'  # Test fixture only, never repository activation.
         (self.root/'delivery-plan.yaml').write_text(json.dumps(altered))
         plan=DeliveryPlan(self.root/'delivery-plan.yaml')
-        self.assertEqual(plan.select({})['id'], 'USE-01')
-        altered['history']['documented_completed_iterations'].append('USE-01')
+        self.assertEqual(plan.select({})['id'], 'EPIC-PA1')
+        altered['history']['documented_completed_iterations'].append('EPIC-PA1')
         altered['next_goal']={'id':None,'status':'complete'}
         (self.root/'delivery-plan.yaml').write_text(json.dumps(altered))
         self.assertIsNone(DeliveryPlan(self.root/'delivery-plan.yaml').select({}))

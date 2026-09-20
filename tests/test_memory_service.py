@@ -42,6 +42,9 @@ class MemoryServiceTests(unittest.TestCase):
         approval = self.service.request_candidate_approval(
             "owner-a", "work-a", candidate["id"], inspected["content_digest"], ttl=10
         )
+        sibling = self.service.request_candidate_approval(
+            "owner-a", "work-a", candidate["id"], inspected["content_digest"], ttl=10
+        )
         for owner, work, digest in (
             ("owner-b", "work-a", inspected["content_digest"]),
             ("owner-a", "work-b", inspected["content_digest"]),
@@ -58,6 +61,16 @@ class MemoryServiceTests(unittest.TestCase):
         self.assertEqual(replayed["id"], accepted["id"])
         self.assertEqual(len(self.store.memories("owner-a")), 1)
         self.assertEqual(self.service.inspect_candidate("owner-a", "work-a", candidate["id"])["state"], "accepted")
+        with self.store.db() as db:
+            sibling_row = db.execute(
+                "SELECT state,memory_key FROM memory_approvals WHERE token_hash=?",
+                (self.store._exact_memory_token_hash(sibling["approval_token"]),),
+            ).fetchone()
+        self.assertEqual((sibling_row["state"], sibling_row["memory_key"]), ("revoked", ""))
+        with self.assertRaises(ValueError):
+            self.service.approve_candidate(
+                "owner-a", "work-a", candidate["id"], inspected["content_digest"], sibling["approval_token"]
+            )
 
         expiring = self.service.propose("owner-a", "work-a", "timezone", "Asia/Seoul")
         expiring_approval = self.service.request_candidate_approval(
@@ -130,6 +143,36 @@ class MemoryServiceTests(unittest.TestCase):
                 "owner-a", "work-a", original["id"], "meeting-time", "morning", "afternoons", approval["approval_token"]
             )
         self.assertEqual(self.service.inspect_memory("owner-a", original["id"])["content"], "morning")
+
+    def test_correction_approval_delete_race_never_leaves_orphan_approval(self):
+        for index in range(12):
+            memory = self.service.remember("owner-a", f"work-{index}", f"key-{index}", "before")
+            barrier = threading.Barrier(2)
+
+            def approve():
+                barrier.wait()
+                try:
+                    return self.service.request_correction(
+                        "owner-a", f"work-{index}", memory["id"], f"key-{index}", "before", "after"
+                    )
+                except MemoryServiceError:
+                    return None
+
+            def delete():
+                barrier.wait()
+                return self.service.delete("owner-a", memory["id"])
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                approval_future = pool.submit(approve)
+                deletion_future = pool.submit(delete)
+                approval_future.result()
+                deletion_future.result()
+            with self.store.db() as db:
+                issued = db.execute(
+                    "SELECT COUNT(*) FROM memory_approvals WHERE owner_key=? AND subject_id=? AND state='issued'",
+                    (self.store._memory_binding("owner-a"), memory["id"]),
+                ).fetchone()[0]
+            self.assertEqual(issued, 0)
 
     def test_candidate_rejection_is_exact_and_never_creates_memory(self):
         candidate = self.service.propose("owner-a", "work-a", "food", "vegetarian")

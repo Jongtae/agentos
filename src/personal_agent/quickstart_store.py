@@ -378,6 +378,31 @@ class QuickStore:
                 'memory_key':candidate['memory_key'],'source_digest':content_digest,
                 'content_digest':content_digest,'expires_at':created+ttl,'state':'issued'}
 
+    def issue_correction_memory_approval(self, owner_id, work_id, memory_id, memory_key,
+                                         current_digest, replacement_digest, ttl=600, now=None):
+        """Validate current Memory and insert its correction approval atomically."""
+        if not isinstance(memory_id,str) or not memory_id or not isinstance(memory_key,str) or not memory_key:raise ValueError('승인 대상을 확인하세요.')
+        if any(not isinstance(value,str) or len(value)!=64 for value in (current_digest,replacement_digest)):raise ValueError('승인 내용을 확인하세요.')
+        if isinstance(ttl,bool) or not isinstance(ttl,(int,float)) or not 1<=ttl<=900:raise ValueError('승인 유효 시간을 확인하세요.')
+        created=time.time() if now is None else float(now);token=secrets.token_urlsafe(32)
+        owner_key=self._memory_binding(owner_id);work_key=self._work_binding(work_id)
+        token_hash=self._exact_memory_token_hash(token)
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            current=db.execute(
+                "SELECT memory_key,content_digest FROM memories WHERE id=? AND owner_key=? AND state='current'",
+                (memory_id,owner_key),
+            ).fetchone()
+            if (not current or current['memory_key']!=memory_key
+                    or not hmac.compare_digest(str(current['content_digest']),current_digest)):
+                raise ValueError('수정할 기억을 다시 확인하세요.')
+            value=(token_hash,owner_key,work_key,'correct-memory',memory_id,memory_key,
+                   current_digest,replacement_digest,created,created+ttl,'issued',None)
+            db.execute('INSERT INTO memory_approvals VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',value)
+        return {'approval_token':token,'action':'correct-memory','subject_id':memory_id,
+                'memory_key':memory_key,'source_digest':current_digest,
+                'content_digest':replacement_digest,'expires_at':created+ttl,'state':'issued'}
+
     def _exact_memory_token_hash(self, token):
         secret=self.secret('memory_exact_approval_secret',create=lambda:secrets.token_hex(32))
         return hmac.new(secret.encode(),token.encode(),hashlib.sha256).hexdigest()
@@ -415,6 +440,10 @@ class QuickStore:
             result=self._save_memory(db,candidate['memory_key'],candidate['content'],owner_key,work_key,candidate_id)
             db.execute("UPDATE memory_candidates SET state='accepted',decided=?,resulting_memory_id=? WHERE id=? AND state='pending'",(observed,result['id'],candidate_id))
             db.execute("UPDATE memory_approvals SET state='consumed',result_id=? WHERE token_hash=? AND state='issued'",(result['id'],approval['token_hash']))
+            db.execute("""UPDATE memory_approvals SET state='revoked',memory_key=''
+                          WHERE owner_key=? AND work_key=? AND action='accept-candidate'
+                            AND subject_id=? AND token_hash<>? AND state='issued'""",
+                       (owner_key,work_key,candidate_id,approval['token_hash']))
             return result
 
     def reject_memory_candidate(self, owner_id, work_id, candidate_id, content_digest, now=None):

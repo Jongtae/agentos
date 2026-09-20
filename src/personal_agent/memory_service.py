@@ -114,15 +114,15 @@ class MemoryService:
                            current_content, replacement_content, ttl=600):
         """Bind correction approval to owner, Work, key, old value, and new value."""
         owner_id, work_id = self._request(owner_id, work_id)
-        row = self.inspect_memory(owner_id, memory_id)
         current_digest = self.store.memory_digest(memory_key, current_content)
         replacement_digest = self.store.memory_digest(memory_key, replacement_content)
-        if row["memory_key"] != memory_key or row["content_digest"] != current_digest:
-            raise MemoryServiceError("memory key or current value changed")
-        return self.store.issue_exact_memory_approval(
-            owner_id, work_id, "correct-memory", memory_id, memory_key,
-            current_digest, replacement_digest, ttl=ttl, now=self.now()
-        )
+        try:
+            return self.store.issue_correction_memory_approval(
+                owner_id, work_id, memory_id, memory_key, current_digest,
+                replacement_digest, ttl=ttl, now=self.now()
+            )
+        except ValueError:
+            raise MemoryServiceError("memory key or current value changed") from None
 
     def correct(self, owner_id, work_id, memory_id, memory_key, current_content,
                 replacement_content, approval_token):

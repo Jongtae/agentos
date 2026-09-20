@@ -24,6 +24,7 @@ import uuid
 CONNECTOR_STATE_KEY = "connector_contract_state"
 PENDING_WORK_KEY = "connector_pending_work"
 _IDENTIFIER = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,95})\Z")
+_CONNECTOR_STATE_LOCK = threading.RLock()
 _PENDING_WORK_LOCK = threading.RLock()
 
 
@@ -74,6 +75,14 @@ class ResumeState(str, Enum):
     COMPLETED = "completed"
     SUPERSEDED = "superseded"
     EXPIRED = "expired"
+
+
+_ALLOWED_HEALTH_BY_CONNECTOR_STATE = {
+    ConnectorState.DISCONNECTED: frozenset({HealthState.UNKNOWN}),
+    ConnectorState.CONNECTED: frozenset({HealthState.UNKNOWN, HealthState.HEALTHY, HealthState.UNAVAILABLE}),
+    ConnectorState.REAUTH_REQUIRED: frozenset({HealthState.UNKNOWN}),
+    ConnectorState.BLOCKED: frozenset({HealthState.UNKNOWN}),
+}
 
 
 def _nonempty(value: object, field: str, *, maximum: int = 200) -> str:
@@ -237,7 +246,10 @@ class ConnectorRegistry:
         self.store = store
         self.clock = clock
         self._definitions: dict[str, ConnectorSpec] = {}
-        self._lock = threading.RLock()
+        # QuickStore is single-process; share one process lock across registry
+        # instances so read-modify-write lifecycle updates cannot resurrect a
+        # stale grant. This does not claim multi-process CAS semantics.
+        self._lock = _CONNECTOR_STATE_LOCK
         for connector in connectors:
             self.register(connector)
 
@@ -269,41 +281,44 @@ class ConnectorRegistry:
         return value if isinstance(value, dict) else {}
 
     def status(self, owner_id: str, connector_id: str) -> ConnectorStatus:
-        connector = self.definition(connector_id)
-        owner_rows = self._rows().get(_owner_key(owner_id), {})
-        if not isinstance(owner_rows, dict):
-            raise ConnectorContractError("invalid_stored_state")
-        row = owner_rows.get(connector_id, {})
-        if not isinstance(row, dict):
-            raise ConnectorContractError("invalid_stored_state")
-        if row and set(row) != {"state", "granted_scopes", "changed_at", "health"}:
-            raise ConnectorContractError("invalid_stored_state")
-        try:
-            state = ConnectorState(row.get("state", ConnectorState.DISCONNECTED.value))
-            granted = _scopes(row.get("granted_scopes", ()))
-            _finite_timestamp(row["changed_at"], "changed_at") if row else None
-            health_row = row["health"] if row else None
-            if health_row is None:
-                health = self._unknown_health()
-            else:
-                if not isinstance(health_row, dict) or set(health_row) != {"state", "checked_at", "recovery"}:
-                    raise ValueError("invalid health")
-                health_state = HealthState(health_row["state"])
-                health_checked_at = (
-                    _finite_timestamp(health_row["checked_at"], "health.checked_at")
-                    if health_row["checked_at"] is not None
-                    else None
-                )
-                recovery = RecoveryAction(health_row["recovery"]) if health_row["recovery"] is not None else None
-                health = ConnectorHealth(health_state, health_checked_at, recovery)
-        except (TypeError, ValueError):
-            raise ConnectorContractError("invalid_stored_state") from None
-        if state is ConnectorState.CONNECTED:
-            if granted != connector.required_scopes:
+        with self._lock:
+            connector = self.definition(connector_id)
+            owner_rows = self._rows().get(_owner_key(owner_id), {})
+            if not isinstance(owner_rows, dict):
                 raise ConnectorContractError("invalid_stored_state")
-        elif granted:
-            raise ConnectorContractError("invalid_stored_state")
-        return ConnectorStatus(connector_id, state, connector.required_scopes, granted, health)
+            row = owner_rows.get(connector_id, {})
+            if not isinstance(row, dict):
+                raise ConnectorContractError("invalid_stored_state")
+            if row and set(row) != {"state", "granted_scopes", "changed_at", "health"}:
+                raise ConnectorContractError("invalid_stored_state")
+            try:
+                state = ConnectorState(row.get("state", ConnectorState.DISCONNECTED.value))
+                granted = _scopes(row.get("granted_scopes", ()))
+                _finite_timestamp(row["changed_at"], "changed_at") if row else None
+                health_row = row["health"] if row else None
+                if health_row is None:
+                    health = self._unknown_health()
+                else:
+                    if not isinstance(health_row, dict) or set(health_row) != {"state", "checked_at", "recovery"}:
+                        raise ValueError("invalid health")
+                    health_state = HealthState(health_row["state"])
+                    health_checked_at = (
+                        _finite_timestamp(health_row["checked_at"], "health.checked_at")
+                        if health_row["checked_at"] is not None
+                        else None
+                    )
+                    recovery = RecoveryAction(health_row["recovery"]) if health_row["recovery"] is not None else None
+                    health = ConnectorHealth(health_state, health_checked_at, recovery)
+            except (TypeError, ValueError):
+                raise ConnectorContractError("invalid_stored_state") from None
+            if state is ConnectorState.CONNECTED:
+                if granted != connector.required_scopes:
+                    raise ConnectorContractError("invalid_stored_state")
+            elif granted:
+                raise ConnectorContractError("invalid_stored_state")
+            if health.state not in _ALLOWED_HEALTH_BY_CONNECTOR_STATE[state]:
+                raise ConnectorContractError("invalid_stored_state")
+            return ConnectorStatus(connector_id, state, connector.required_scopes, granted, health)
 
     def transition(
         self,
@@ -439,6 +454,7 @@ class PendingWorkRegistry:
         "claimed_at",
         "completed_at",
         "terminal_at",
+        "sequence",
     }
     _TERMINAL = {ResumeState.COMPLETED, ResumeState.SUPERSEDED, ResumeState.EXPIRED}
 
@@ -493,7 +509,7 @@ class PendingWorkRegistry:
         value = self.store.config(PENDING_WORK_KEY, {})
         return value if isinstance(value, dict) else {}
 
-    def _validated_row(self, row: object) -> tuple[ResumeState, str, str, str, tuple[str, ...], float]:
+    def _validated_row(self, row: object) -> tuple[ResumeState, str, str, str, tuple[str, ...], float, int]:
         if not isinstance(row, dict) or set(row) != self._FIELDS:
             raise ConnectorContractError("invalid_resume")
         try:
@@ -510,6 +526,9 @@ class PendingWorkRegistry:
             if not scopes or not set(scopes).issubset(connector.required_scopes):
                 raise ValueError("scopes")
             expires_at = _finite_timestamp(row["expires_at"], "expires_at")
+            sequence = row["sequence"]
+            if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence <= 0:
+                raise ValueError("sequence")
             claim_digest = row["claim_digest"]
             if claim_digest is not None and (
                 not isinstance(claim_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", claim_digest)
@@ -546,31 +565,38 @@ class PendingWorkRegistry:
                 raise ValueError("claim timestamp")
         except (ConnectorContractError, TypeError, ValueError):
             raise ConnectorContractError("invalid_resume") from None
-        return state, owner, work_id, connector_id, scopes, expires_at
+        return state, owner, work_id, connector_id, scopes, expires_at, sequence
 
     def _prune(self, rows: dict, now: float, *, reserve: int = 0) -> None:
+        sequences = []
         for row in rows.values():
-            state, _owner, _work, _connector, _scopes_value, expires_at = self._validated_row(row)
-            if state in {ResumeState.PENDING, ResumeState.CLAIMED} and now >= expires_at:
+            state, _owner, _work, _connector, _scopes_value, expires_at, sequence = self._validated_row(row)
+            sequences.append(sequence)
+            # Expiry closes only an unclaimed offer. Once Work has been returned
+            # to a claimant, that claimant remains authoritative until complete;
+            # silently expiring it could let a second handoff schedule the Work.
+            if state is ResumeState.PENDING and now >= expires_at:
                 row["state"] = ResumeState.EXPIRED.value
                 row["completed_at"] = None
                 row["terminal_at"] = now
+        if len(sequences) != len(set(sequences)):
+            raise ConnectorContractError("invalid_resume")
         removable = []
         for key, row in rows.items():
-            state, _owner, _work, _connector, _scopes_value, _expires = self._validated_row(row)
+            state, _owner, _work, _connector, _scopes_value, _expires, sequence = self._validated_row(row)
             if state in self._TERMINAL:
                 terminal_at = _finite_timestamp(row["terminal_at"], "terminal_at")
                 if now - terminal_at >= self.terminal_retention_seconds:
-                    removable.append((terminal_at, key))
-        for _terminal_at, key in sorted(removable):
+                    removable.append((terminal_at, sequence, key))
+        for _terminal_at, _sequence, key in sorted(removable):
             rows.pop(key, None)
         if len(rows) + reserve > self.max_records:
             terminal = sorted(
-                (_finite_timestamp(row["terminal_at"], "terminal_at"), key)
+                (_finite_timestamp(row["terminal_at"], "terminal_at"), row["sequence"], key)
                 for key, row in rows.items()
                 if ResumeState(row["state"]) in self._TERMINAL
             )
-            for _terminal_at, key in terminal:
+            for _terminal_at, _sequence, key in terminal:
                 if len(rows) + reserve <= self.max_records:
                     break
                 rows.pop(key, None)
@@ -610,15 +636,24 @@ class PendingWorkRegistry:
             except ValueError:
                 raise ConnectorContractError("invalid_clock") from None
             self._prune(rows, now)
+            matches = []
             for row in rows.values():
-                state, saved_owner, saved_work, saved_connector, saved_scopes, _expires = self._validated_row(row)
+                state, saved_owner, saved_work, saved_connector, saved_scopes, _expires, _sequence = self._validated_row(row)
                 if (
-                    state in {ResumeState.PENDING, ResumeState.CLAIMED}
-                    and saved_owner == owner
+                    saved_owner == owner
                     and saved_work == work_id
                     and saved_connector == connector_id
                     and saved_scopes == requested
                 ):
+                    matches.append((state, row))
+            if any(state is ResumeState.CLAIMED for state, _row in matches):
+                raise ConnectorContractError("work_already_claimed")
+            if any(state is ResumeState.COMPLETED for state, _row in matches):
+                # This bounded local tombstone prevents immediate duplicate
+                # handoff. #393 remains authoritative after retention pruning.
+                raise ConnectorContractError("work_already_completed")
+            for state, row in matches:
+                if state is ResumeState.PENDING:
                     row["state"] = ResumeState.SUPERSEDED.value
                     row["completed_at"] = None
                     row["terminal_at"] = now
@@ -629,6 +664,7 @@ class PendingWorkRegistry:
                     break
             else:
                 raise ConnectorContractError("token_generation_failed")
+            sequence = max((row["sequence"] for row in rows.values()), default=0) + 1
             rows[self._token_key(token)] = {
                 "owner": owner,
                 "work_id": work_id,
@@ -640,6 +676,7 @@ class PendingWorkRegistry:
                 "claimed_at": None,
                 "completed_at": None,
                 "terminal_at": None,
+                "sequence": sequence,
             }
             self.store.put(PENDING_WORK_KEY, rows)
         return ResumeHandle(token, connector_id, requested, expires_at)
@@ -670,7 +707,7 @@ class PendingWorkRegistry:
             if row is None:
                 raise ConnectorContractError("invalid_resume")
             self.store.put(PENDING_WORK_KEY, rows)
-            state, saved_owner, work_id, saved_connector, expected, _expires = self._validated_row(row)
+            state, saved_owner, work_id, saved_connector, expected, _expires, _sequence = self._validated_row(row)
             if state in self._TERMINAL:
                 raise ConnectorContractError(self._terminal_reason(state))
             if state is ResumeState.CLAIMED and row["claim_digest"] != claim_digest:
@@ -721,7 +758,7 @@ class PendingWorkRegistry:
             if row is None:
                 raise ConnectorContractError("invalid_resume")
             self.store.put(PENDING_WORK_KEY, rows)
-            state, saved_owner, work_id, saved_connector, expected, _expires = self._validated_row(row)
+            state, saved_owner, work_id, saved_connector, expected, _expires, _sequence = self._validated_row(row)
             if state in self._TERMINAL:
                 raise ConnectorContractError(self._terminal_reason(state))
             if state is ResumeState.PENDING:

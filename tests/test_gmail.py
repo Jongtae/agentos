@@ -915,6 +915,19 @@ class GmailConnectorTests(unittest.TestCase):
         self.assertEqual(self.gmail.status("owner-a")["state"], "reauth_required")
         self.assertEqual(self.store.secret(self.secret_key("gmail_oauth_tokens")), {})
 
+    def test_redirect_and_malformed_provider_statuses_fail_closed(self):
+        self.connect()
+        self.responses.append({"status_code": 302, "messages": []})
+        with self.assertRaises(GmailError) as redirected:
+            self.gmail.search("owner-a", "receipt")
+        self.assertEqual(redirected.exception.reason, "provider_rejected")
+
+        for status in ("200", True):
+            self.responses.append({"status_code": status, "messages": []})
+            with self.assertRaises(GmailError) as malformed:
+                self.gmail.search("owner-a", "receipt")
+            self.assertEqual(malformed.exception.reason, "invalid_provider_response")
+
     def test_owner_namespaced_oauth_state_and_tokens_do_not_overwrite_or_cross_revoke(self):
         _offer_a,state_a=self.begin("owner-a")
         _offer_b,state_b=self.begin("owner-b")

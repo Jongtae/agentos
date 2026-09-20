@@ -626,6 +626,8 @@ class GmailConnector:
         if isinstance(response, dict):
             self._assert_current_request(owner_id, connection_revision, access_token)
             status = response.get("status_code")
+            if status is not None and (isinstance(status, bool) or not isinstance(status, int)):
+                raise GmailError("invalid_provider_response")
             if status == 401:
                 with self.registry._authority_guard():
                     current = self.registry.status(owner_id, GMAIL_CONNECTOR_ID)
@@ -641,7 +643,7 @@ class GmailConnector:
                     self.store.secret(token_key, {})
                     self.registry.transition(owner_id, GMAIL_CONNECTOR_ID, ConnectorState.REAUTH_REQUIRED)
                 raise GmailReauthenticationRequired("reauth_required")
-            if isinstance(status, int) and status >= 400:
+            if isinstance(status, int) and not 200 <= status < 300:
                 raise GmailError("provider_rejected")
             return response
         raise GmailError("invalid_provider_response")

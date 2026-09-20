@@ -1,18 +1,22 @@
-Implement WEB-ADMIN-01 / issue #382 in Jongtae/personal-agentos.
+Prepare or implement WEB-ADMIN-01 / issue #382 in Jongtae/personal-agentos, subject to the readiness and activation gate below.
 
-This prompt authorizes implementation only when explicitly invoked by the owner. Recording it in GitHub does not start a worker. Read current main, #382, root and web/AGENTS.md, docs/web-management-contract.en.md and the current incremental-delivery contract. If the new documents are not on main yet, read their current PR #380 versions. The old utility-v1 prototype is historical, NOT the navigation specification.
+Recording this prompt in GitHub does not start a worker or authorize product implementation. Read current main, #382, root and web/AGENTS.md, docs/web-management-contract.en.md and the current Goal Execution / Incremental Delivery contracts. If the new documents are not on main yet, read their current PR #380 versions. The old utility-v1 prototype is historical, NOT the navigation specification.
 
-FIRST
-Use codex/382-web-management-utility and preserve unrelated local work. Inspect overlapping settings PR #373 and current merged fixes without blindly merging or resetting either. Complete #382 W0: establish its goal-ready entry in both delivery-plan copies before product edits, preserving parity/history and any existing active work. Do not create another preparation epic or activate a heartbeat.
+READINESS AND ACTIVATION GATE
+First inspect both the issue and source delivery plan. W1-W3 may begin only when WEB-ADMIN-01 already has a dependency-satisfied goal-ready record in both, and the owner explicitly activates that ready goal under the existing selection rules. Preserve any other active goal. Do not infer activation from this document, an issue update, or the creation of a plan entry.
 
-PRODUCT
+If the source record is missing or not ready, this invocation is limited to W0 preparation: inspect current state and overlapping PR #373, prepare the bounded goal-ready entry in both delivery-plan copies on codex/382-web-management-utility, preserve parity/history and existing active work, and validate/review/merge that preparation normally. Then STOP and report readiness and the single owner activation action required. Do not continue into W1-W3 in that same preparation invocation. W0 stays within #382; do not create another preparation epic, change the active goal, or activate a heartbeat.
+
+If readiness and explicit activation are already established, use codex/382-web-management-utility, recheck current main and the recorded scope, preserve unrelated work and current merged fixes, and perform only the product increments below. Do not blindly merge or reset the overlapping settings branch.
+
+PRODUCT — ONLY AFTER THE GATE
 The local web is a management utility, not another chat client. Telegram is the current conversation channel; AgentOS owns work/history/memory/results/permissions independently of the channel.
 
 W1: Show only one destination: task status, records or settings. Settings contain AI connection, files/output, external connections and privacy/diagnostics. Remove default web composer/Telegram transcript, duplicated navigation, permanent onboarding and project prompts. Projects remain reachable secondary grouping. Navigation replaces panes, with stable draft/search/selection/focus and sensible mobile/back behavior.
 
 W2: Reuse actual jobs/events/results. Default list shows meaningful tasks rather than every channel message. Keep /start and probes in retained connection activity. Detail shows result or required action first, observed timeline next, technical detail on demand. Original request context is task-scoped and expanded explicitly. Show real text/artifacts, not an empty Result heading. Do not invent model identity, ETA or effects. Use only existing supported approval/cancel controls.
 
-W3: Make records searchable, typed and actionable without opening policy forms. Keep backend types and correct action/error handling. Show each actual execution route: selected subscription CLI is not disconnected just because the direct API is unset. Preserve exact-draft test/apply and previous working configuration on failure. Connected services show status/manage before credential fields. Clarify reference/output folders without silently merging grants. Use brief contextual help and safe result formatting, not dashboards or glossary panels.
+W3: Make records searchable, typed and actionable without opening policy forms. Keep backend types and correct action/error handling. Show actual execution precedence: a selected subscription CLI is not disconnected just because the direct API is unset; do not assume web/Telegram routes are independently selected. Preserve exact-draft test/apply and previous working configuration on failure. Connected services show status/manage before credential fields. Clarify reference/output folders without silently merging grants. Use brief contextual help and safe result formatting, not dashboards or glossary panels.
 
 PRESERVE
 Telegram ingest/reply, chat APIs, internal history/context, existing projects, records, original files, credentials and approvals. Removing visible chat does not authorize deleting data. No new framework, storage system, provider, paid call, live credentials, deployment, package platform or authority expansion. Do not execute #381 or other successor goals.
@@ -20,4 +24,4 @@ Telegram ingest/reply, chat APIs, internal history/context, existing projects, r
 VERIFY AND SHIP
 Prove #382 A1-A8 through actual service/browser paths with synthetic fixtures, desktop and 390px mobile, polling/navigation, empty/failure states and restart. Keep backend/channel regression coverage when replacing old web-chat presentation tests. Run required repository CI and bounded independent UX/convergence review; inspect authority deltas only where changed.
 
-Ship small verified increments; a shell-only merge does not close #382. Merge normally with exact head, verify main and reconcile trackers. External review/permission waits get integration_pending with exact gate, evidence, next actor and one resume action; no admin bypass, repeated unchanged polling or false completion. Stop after this issue. Concise English progress; Korean final report with actual screens, evidence, limitations and local test steps.
+Ship small verified increments; neither W0 preparation nor a shell-only merge closes #382. Merge normally with exact head, verify main and reconcile trackers. External review/permission waits get integration_pending with exact gate, evidence, next actor and one resume action; no admin bypass, repeated unchanged polling or false completion. Stop after the authorized phase/issue. Concise English progress; Korean final report with actual screens, evidence, limitations and local test steps.

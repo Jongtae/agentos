@@ -162,7 +162,7 @@ class ServiceController:
             detail = _clean_error(result)
             raise ServiceControlError(f"{message}: {detail}" if detail else message, next_action)
 
-    def _write_plist(self, contents: bytes) -> None:
+    def _stage_plist(self, contents: bytes) -> Path:
         parent = self.plist_path.parent
         parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.data_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -173,10 +173,18 @@ class ServiceController:
                 stream.flush()
                 os.fsync(stream.fileno())
             os.chmod(temporary, 0o600)
-            os.replace(temporary, self.plist_path)
-        finally:
+            return Path(temporary)
+        except BaseException:
             if os.path.exists(temporary):
                 os.unlink(temporary)
+            raise
+
+    def _write_plist(self, contents: bytes) -> None:
+        temporary = self._stage_plist(contents)
+        try:
+            os.replace(temporary, self.plist_path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def _confirm_running(self, next_action: str) -> dict[str, object]:
         observed = self._observed_status()
@@ -198,18 +206,30 @@ class ServiceController:
                 "A different AgentOS service definition is already installed.",
                 "Run the explicit service upgrade action to replace it without deleting owner data.",
             )
+        prior_status = self._observed_status() if previous is not None else None
+        was_loaded = prior_status is not None and prior_status["status"] != "stopped"
         if previous == desired:
             if upgrade:
+                if not was_loaded:
+                    return {**prior_status, "operation": "upgrade", "changed": False, "data_preserved": True}
                 restarted = self.restart()
                 return {**restarted, "operation": "upgrade", "data_preserved": True}
             return self.start()
-        was_loaded = previous is not None and self._observed_status()["status"] != "stopped"
-        if was_loaded:
-            stopped = self._launchctl("bootout", self.domain, str(self.plist_path))
-            self._require(stopped, "The existing service could not be stopped for upgrade",
-                          "Run service stop and retry upgrade; the existing definition and owner data were retained.")
+        # Stage and fsync the replacement while the prior service is still
+        # running. Permission/capacity failures therefore cannot stop a known-
+        # good service before a replacement is ready to commit.
+        staged = self._stage_plist(desired)
+        replacement_committed = False
         try:
-            self._write_plist(desired)
+            if was_loaded:
+                stopped = self._launchctl("bootout", self.domain, str(self.plist_path))
+                self._require(stopped, "The existing service could not be stopped for upgrade",
+                              "Run service stop and retry upgrade; the existing definition and owner data were retained.")
+            os.replace(staged, self.plist_path)
+            replacement_committed = True
+            if previous is not None and not was_loaded:
+                observed = self._observed_status()
+                return {**observed, "operation": "upgrade", "changed": True, "data_preserved": True}
             started = self._launchctl("bootstrap", self.domain, str(self.plist_path))
             self._require(
                 started,
@@ -227,7 +247,8 @@ class ServiceController:
                 if previous is None:
                     self.plist_path.unlink(missing_ok=True)
                 else:
-                    self._write_plist(previous)
+                    if replacement_committed:
+                        self._write_plist(previous)
                     if was_loaded:
                         restored = self._launchctl("bootstrap", self.domain, str(self.plist_path))
                         self._require(
@@ -247,6 +268,8 @@ class ServiceController:
                 f"The service upgrade did not become healthy and was rolled back: {failure}",
                 "Inspect service status and use foreground `agentos start` before retrying; owner data was retained.",
             ) from failure
+        finally:
+            staged.unlink(missing_ok=True)
         return {**observed, "operation": "upgrade" if previous is not None else "install", "data_preserved": True}
 
     def upgrade(self) -> dict[str, object]:

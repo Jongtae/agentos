@@ -155,7 +155,28 @@ class ServiceControlTests(unittest.TestCase):
         upgraded = self.controller.upgrade()
         self.assertEqual(upgraded["operation"], "upgrade")
         verbs = [command[1] for command in self.runner.commands[before:]]
-        self.assertEqual(verbs, ["print", "bootout", "bootstrap", "print"])
+        self.assertEqual(verbs, ["print", "print", "bootout", "bootstrap", "print"])
+
+    def test_upgrade_preserves_explicitly_stopped_state_for_same_or_changed_plist(self):
+        self.controller.install()
+        self.controller.stop()
+        before = len(self.runner.commands)
+        unchanged = self.controller.upgrade()
+        self.assertEqual(unchanged["status"], "stopped")
+        self.assertFalse(unchanged["changed"])
+        self.assertNotIn("bootstrap", [command[1] for command in self.runner.commands[before:]])
+
+        replacement = self.root / "brew-prefix/bin/agentos"
+        replacement.parent.mkdir(parents=True)
+        replacement.write_text("#!/bin/sh\n")
+        replacement.chmod(0o755)
+        changed = ServiceController(home=self.home, cli_path=replacement, runner=self.runner, uid=501)
+        before = len(self.runner.commands)
+        upgraded = changed.upgrade()
+        self.assertEqual(upgraded["status"], "stopped")
+        self.assertTrue(upgraded["changed"])
+        self.assertNotIn("bootstrap", [command[1] for command in self.runner.commands[before:]])
+        self.assertEqual(plistlib.loads(changed.plist_path.read_bytes())["ProgramArguments"][0], str(replacement.absolute()))
 
     def test_upgrade_confirmation_failure_restores_previous_plist_and_service(self):
         original_runner = self.runner
@@ -177,7 +198,7 @@ class ServiceControlTests(unittest.TestCase):
         self.assertTrue(failing_runner.running)
         self.assertGreaterEqual(failing_runner.bootstrap_count, 2)
 
-    def test_upgrade_write_failure_restores_previous_plist_and_loaded_service(self):
+    def test_upgrade_staging_failure_does_not_stop_previous_loaded_service(self):
         self.controller.install()
         previous = self.controller.plist_path.read_bytes()
         replacement = self.root / "brew-prefix/bin/agentos"
@@ -185,20 +206,14 @@ class ServiceControlTests(unittest.TestCase):
         replacement.write_text("#!/bin/sh\n")
         replacement.chmod(0o755)
         upgraded = ServiceController(home=self.home, cli_path=replacement, runner=self.runner, uid=501)
-        original_write = upgraded._write_plist
-        desired = render_plist(replacement.absolute(), upgraded.data_dir)
-
-        def fail_after_replacement(contents):
-            original_write(contents)
-            if contents == desired:
-                raise OSError("disk failure after replacement")
-
-        with patch.object(upgraded, "_write_plist", side_effect=fail_after_replacement):
-            with self.assertRaisesRegex(ServiceControlError, "was rolled back"):
+        before = len(self.runner.commands)
+        with patch.object(upgraded, "_stage_plist", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
                 upgraded.upgrade()
         self.assertEqual(upgraded.plist_path.read_bytes(), previous)
         self.assertTrue(self.runner.loaded)
         self.assertTrue(self.runner.running)
+        self.assertNotIn("bootout", [command[1] for command in self.runner.commands[before:]])
 
     def test_failed_rollback_is_reported_as_unverified(self):
         self.controller.install()

@@ -656,11 +656,12 @@ class GmailConnector:
     def _body(self, payload: object, attachment_loader: Callable[[str], str] | None = None) -> tuple[str, str]:
         if not isinstance(payload, dict):
             raise GmailError("invalid_provider_response")
-        candidates: list[tuple[str, str | None, str | None, str | None]] = []
+        candidate_count = 0
 
-        def visit(part: object, depth: int = 0) -> None:
-            if not isinstance(part, dict) or depth > 20 or len(candidates) >= 100:
-                return
+        def visit(part: object, depth: int = 0) -> list[tuple[str, str | None, str | None, str | None]]:
+            nonlocal candidate_count
+            if not isinstance(part, dict) or depth > 20 or candidate_count >= 100:
+                return []
             mime_type = part.get("mimeType")
             body = part.get("body")
             filename = part.get("filename")
@@ -684,11 +685,10 @@ class GmailConnector:
                 and bool(filename.strip())
             ) or disposition.split(";", 1)[0].strip().lower() == "attachment"
             if is_attachment:
-                return
+                return []
             normalized_mime = mime_type.lower() if isinstance(mime_type, str) else ""
             if (
-                not is_attachment
-                and normalized_mime in {"text/plain", "text/html"}
+                normalized_mime in {"text/plain", "text/html"}
                 and isinstance(body, dict)
                 and (
                     isinstance(body.get("data"), str)
@@ -700,44 +700,54 @@ class GmailConnector:
                     message = Message()
                     message["content-type"] = content_type
                     charset = message.get_content_charset()
-                candidates.append(
-                    (
-                        normalized_mime,
-                        body.get("data") if isinstance(body.get("data"), str) else None,
-                        charset,
-                        body.get("attachmentId") if isinstance(body.get("attachmentId"), str) else None,
-                    )
-                )
+                candidate_count += 1
+                return [(
+                    normalized_mime,
+                    body.get("data") if isinstance(body.get("data"), str) else None,
+                    charset,
+                    body.get("attachmentId") if isinstance(body.get("attachmentId"), str) else None,
+                )]
+            children: list[list[tuple[str, str | None, str | None, str | None]]] = []
             parts = part.get("parts", [])
             if isinstance(parts, list):
                 for child in parts[:100]:
-                    visit(child, depth + 1)
+                    rendered = visit(child, depth + 1)
+                    if rendered:
+                        children.append(rendered)
+            if normalized_mime == "multipart/alternative":
+                return next(
+                    (group for group in children if any(item[0] == "text/plain" for item in group)),
+                    children[0] if children else [],
+                )
+            return [candidate for group in children for candidate in group]
 
-        visit(payload)
+        candidates = visit(payload)
         if not candidates:
             return "", _bounded_text(payload.get("mimeType"), 160)
-        mime_type, encoded, charset, attachment_id = next(
-            (item for item in candidates if item[0] == "text/plain"),
-            candidates[0],
-        )
-        if encoded is None:
-            if attachment_id is None or attachment_loader is None:
+        decoded_parts: list[str] = []
+        decoded_bytes = 0
+        for mime_type, encoded, charset, attachment_id in candidates:
+            if encoded is None:
+                if attachment_id is None or attachment_loader is None:
+                    raise GmailError("invalid_provider_response")
+                encoded = attachment_loader(attachment_id)
+            if len(encoded) > (_MAX_BODY_BYTES * 4 // 3) + 8:
+                raise GmailError("body_too_large")
+            try:
+                decoded = base64.b64decode(encoded + "=" * (-len(encoded) % 4), altchars=b"-_", validate=True)
+            except (TypeError, ValueError):
+                raise GmailError("invalid_provider_response") from None
+            decoded_bytes += len(decoded)
+            if decoded_bytes > _MAX_BODY_BYTES:
+                raise GmailError("body_too_large")
+            encoding = charset or "utf-8"
+            if not isinstance(encoding, str) or len(encoding) > 64:
                 raise GmailError("invalid_provider_response")
-            encoded = attachment_loader(attachment_id)
-        if len(encoded) > (_MAX_BODY_BYTES * 4 // 3) + 8:
-            raise GmailError("body_too_large")
-        try:
-            decoded = base64.b64decode(encoded + "=" * (-len(encoded) % 4), altchars=b"-_", validate=True)
-        except (TypeError, ValueError):
-            raise GmailError("invalid_provider_response") from None
-        if len(decoded) > _MAX_BODY_BYTES:
-            raise GmailError("body_too_large")
-        encoding = charset or "utf-8"
-        if not isinstance(encoding, str) or len(encoding) > 64:
-            raise GmailError("invalid_provider_response")
-        try:
-            codecs.lookup(encoding)
-            text = decoded.decode(encoding, errors="replace")
-        except (LookupError, TypeError):
-            raise GmailError("invalid_provider_response") from None
-        return text, mime_type
+            try:
+                codecs.lookup(encoding)
+                decoded_parts.append(decoded.decode(encoding, errors="replace"))
+            except (LookupError, TypeError, ValueError, UnicodeError):
+                raise GmailError("invalid_provider_response") from None
+        mime_types = {item[0] for item in candidates}
+        result_mime = candidates[0][0] if len(mime_types) == 1 else _bounded_text(payload.get("mimeType"), 160)
+        return "\n\n".join(decoded_parts), result_mime

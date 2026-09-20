@@ -426,6 +426,55 @@ class GmailConnectorTests(unittest.TestCase):
             self.gmail.read_message("owner-a", "m_1")
         self.assertEqual(malformed.exception.reason, "invalid_provider_response")
 
+    def test_charset_lookup_and_decode_failures_are_bounded_provider_errors(self):
+        self.connect()
+        for charset in ("undefined", "utf-8\x00"):
+            with self.subTest(charset=charset):
+                self.responses.clear()
+                self.responses.append(
+                    {
+                        "id": "m_1",
+                        "threadId": "t_1",
+                        "payload": {
+                            "mimeType": "text/plain",
+                            "headers": [
+                                {"name": "Content-Type", "value": f'text/plain; charset="{charset}"'}
+                            ],
+                            "body": {"data": base64.urlsafe_b64encode(b"body").decode()},
+                        },
+                    }
+                )
+                with self.assertRaises(GmailError) as malformed:
+                    self.gmail.read_message("owner-a", "m_1")
+                self.assertEqual(malformed.exception.reason, "invalid_provider_response")
+
+    def test_mixed_body_combines_serial_parts_but_alternative_chooses_plain(self):
+        self.connect()
+        encode = lambda value: base64.urlsafe_b64encode(value.encode()).decode()
+        self.responses.append(
+            {
+                "id": "m_1",
+                "threadId": "t_1",
+                "payload": {
+                    "mimeType": "multipart/mixed",
+                    "parts": [
+                        {"mimeType": "text/plain", "body": {"data": encode("intro")}},
+                        {
+                            "mimeType": "multipart/alternative",
+                            "parts": [
+                                {"mimeType": "text/html", "body": {"data": encode("<p>main</p>")}},
+                                {"mimeType": "text/plain", "body": {"data": encode("main")}},
+                            ],
+                        },
+                        {"mimeType": "text/plain", "body": {"data": encode("footer")}},
+                    ],
+                },
+            }
+        )
+        message = self.gmail.read_message("owner-a", "m_1")
+        self.assertEqual(message.body, "intro\n\nmain\n\nfooter")
+        self.assertEqual(message.mime_type, "text/plain")
+
     def test_body_attachment_id_is_fetched_with_same_bounded_authority(self):
         self.connect()
         encoded = base64.urlsafe_b64encode(b"separate body").decode()

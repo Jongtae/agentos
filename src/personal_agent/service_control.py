@@ -208,8 +208,8 @@ class ServiceController:
             stopped = self._launchctl("bootout", self.domain, str(self.plist_path))
             self._require(stopped, "The existing service could not be stopped for upgrade",
                           "Run service stop and retry upgrade; the existing definition and owner data were retained.")
-        self._write_plist(desired)
         try:
+            self._write_plist(desired)
             started = self._launchctl("bootstrap", self.domain, str(self.plist_path))
             self._require(
                 started,
@@ -219,16 +219,30 @@ class ServiceController:
             observed = self._confirm_running(
                 "Run the service restart action; use foreground `agentos start` to view a startup error."
             )
-        except ServiceControlError as failure:
+        except (ServiceControlError, OSError) as failure:
             # Bootstrap may succeed while the new executable exits immediately.
             # Remove that definition before restoring the last known one.
             self._launchctl("bootout", self.domain, str(self.plist_path))
-            if previous is None:
-                self.plist_path.unlink(missing_ok=True)
-            else:
-                self._write_plist(previous)
-                if was_loaded:
-                    self._launchctl("bootstrap", self.domain, str(self.plist_path))
+            try:
+                if previous is None:
+                    self.plist_path.unlink(missing_ok=True)
+                else:
+                    self._write_plist(previous)
+                    if was_loaded:
+                        restored = self._launchctl("bootstrap", self.domain, str(self.plist_path))
+                        self._require(
+                            restored,
+                            "The previous service definition could not be restored",
+                            "Reinstall the service definition, inspect service status, and use foreground `agentos start`; owner data was retained.",
+                        )
+                        self._confirm_running(
+                            "The previous service was restored on disk but not observed running; inspect service status and use foreground `agentos start`."
+                        )
+            except (ServiceControlError, OSError) as rollback_failure:
+                raise ServiceControlError(
+                    f"The service upgrade failed and rollback could not be verified: {rollback_failure}",
+                    "Reinstall the service definition, inspect service status, and use foreground `agentos start`; owner data was retained.",
+                ) from failure
             raise ServiceControlError(
                 f"The service upgrade did not become healthy and was rolled back: {failure}",
                 "Inspect service status and use foreground `agentos start` before retrying; owner data was retained.",

@@ -64,6 +64,14 @@ class ExitAfterFirstBootstrap(FakeLaunchctl):
         return result
 
 
+class FailBothBootstraps(FakeLaunchctl):
+    def __call__(self, command):
+        if list(command)[:2] == ["launchctl", "bootstrap"]:
+            self.commands.append(list(command))
+            return CommandResult(1, stderr="bootstrap rejected")
+        return super().__call__(command)
+
+
 class ServiceControlTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -168,6 +176,45 @@ class ServiceControlTests(unittest.TestCase):
         self.assertTrue(failing_runner.loaded)
         self.assertTrue(failing_runner.running)
         self.assertGreaterEqual(failing_runner.bootstrap_count, 2)
+
+    def test_upgrade_write_failure_restores_previous_plist_and_loaded_service(self):
+        self.controller.install()
+        previous = self.controller.plist_path.read_bytes()
+        replacement = self.root / "brew-prefix/bin/agentos"
+        replacement.parent.mkdir(parents=True)
+        replacement.write_text("#!/bin/sh\n")
+        replacement.chmod(0o755)
+        upgraded = ServiceController(home=self.home, cli_path=replacement, runner=self.runner, uid=501)
+        original_write = upgraded._write_plist
+        desired = render_plist(replacement.absolute(), upgraded.data_dir)
+
+        def fail_after_replacement(contents):
+            original_write(contents)
+            if contents == desired:
+                raise OSError("disk failure after replacement")
+
+        with patch.object(upgraded, "_write_plist", side_effect=fail_after_replacement):
+            with self.assertRaisesRegex(ServiceControlError, "was rolled back"):
+                upgraded.upgrade()
+        self.assertEqual(upgraded.plist_path.read_bytes(), previous)
+        self.assertTrue(self.runner.loaded)
+        self.assertTrue(self.runner.running)
+
+    def test_failed_rollback_is_reported_as_unverified(self):
+        self.controller.install()
+        previous = self.controller.plist_path.read_bytes()
+        replacement = self.root / "brew-prefix/bin/agentos"
+        replacement.parent.mkdir(parents=True)
+        replacement.write_text("#!/bin/sh\n")
+        replacement.chmod(0o755)
+        failing_runner = FailBothBootstraps()
+        failing_runner.loaded = True
+        failing_runner.running = True
+        upgraded = ServiceController(home=self.home, cli_path=replacement, runner=failing_runner, uid=501)
+        with self.assertRaisesRegex(ServiceControlError, "rollback could not be verified"):
+            upgraded.upgrade()
+        self.assertEqual(upgraded.plist_path.read_bytes(), previous)
+        self.assertFalse(failing_runner.running)
 
     def test_failed_install_rolls_back_and_never_claims_background(self):
         self.runner.fail["bootstrap"] = "Bootstrap failed: permission denied"

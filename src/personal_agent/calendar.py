@@ -407,7 +407,7 @@ class CalendarConnector:
         with _LOCK:
             rows = self._rows()
             row = self._owned(rows, ident, owner)
-            if row.get("state") == "approved" and self._now() > row.get("expires", 0):
+            if row.get("state") == "approved" and self._now() >= row.get("expires", 0):
                 row.update(state="expired", error_class="approval-expired", effect="none")
                 rows[ident] = row
                 self._put(rows)

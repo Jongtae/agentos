@@ -214,7 +214,10 @@ class CalendarTests(unittest.TestCase):
         )
         draft = calendar.draft_create(EVENT, "owner")
         approval = calendar.approve(draft["id"], "owner")["approval_id"]
+        status_draft = calendar.draft_create(EVENT, "owner")
+        calendar.approve(status_draft["id"], "owner")
         clock[0] = 900
+        self.assertEqual(calendar.status(status_draft["id"], "owner")["state"], "expired")
         with self.assertRaises(CalendarError) as expired:
             calendar.create(draft["id"], approval, "owner")
         self.assertEqual(expired.exception.reason, "approval-expired")

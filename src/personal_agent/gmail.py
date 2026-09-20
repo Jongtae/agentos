@@ -12,9 +12,10 @@ from __future__ import annotations
 import base64
 import codecs
 from dataclasses import dataclass
+from email import policy
 from email.errors import HeaderParseError
 from email.header import decode_header
-from email.message import Message
+from email.parser import HeaderParser
 import hashlib
 import hmac
 import json
@@ -783,20 +784,27 @@ class GmailConnector:
                 main_type = content_type.split(";", 1)[0].strip().lower()
                 if (
                     not content_type.strip()
+                    or any(ord(character) < 32 or ord(character) == 127 for character in content_type)
                     or re.fullmatch(r"[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+", main_type) is None
                     or main_type != normalized_mime
                 ):
                     raise GmailError("invalid_provider_response")
-                parsed_content_type = Message()
-                parsed_content_type["content-type"] = content_type
-                parameters = parsed_content_type.get_params(header="content-type", unquote=True) or []
-                charsets = [value for name, value in parameters[1:] if str(name).lower() == "charset"]
-                if len(charsets) > 1:
+                parsed_content_type = HeaderParser(policy=policy.default).parsestr(
+                    "Content-Type: " + content_type + "\n\n"
+                )["Content-Type"]
+                if (
+                    parsed_content_type is None
+                    or parsed_content_type.defects
+                    or parsed_content_type.content_type.lower() != normalized_mime
+                ):
                     raise GmailError("invalid_provider_response")
                 if normalized_mime in {"text/plain", "text/html"}:
-                    if len(charsets) != 1 or not isinstance(charsets[0], str) or not charsets[0].strip():
+                    charset_value = parsed_content_type.params.get("charset")
+                    if charset_value is not None and (
+                        not isinstance(charset_value, str) or not charset_value.strip()
+                    ):
                         raise GmailError("invalid_provider_response")
-                    charset = charsets[0].strip()
+                    charset = charset_value.strip() if isinstance(charset_value, str) else None
             is_attachment = (
                 isinstance(filename, str)
                 and bool(filename.strip())
@@ -847,8 +855,8 @@ class GmailConnector:
                     return []
                 start_values = []
                 if parsed_content_type is not None:
-                    parameters = parsed_content_type.get_params(header="content-type") or []
-                    start_values = [value for name, value in parameters[1:] if str(name).lower() == "start"]
+                    if "start" in parsed_content_type.params:
+                        start_values = [parsed_content_type.params["start"]]
                 if not start_values:
                     return related_children[0][1]
                 if len(start_values) != 1 or not isinstance(start_values[0], str):

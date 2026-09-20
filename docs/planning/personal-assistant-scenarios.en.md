@@ -1,6 +1,6 @@
 # Personal Assistant Scenarios and Acceptance Catalogue
 
-> **Design candidate v0.2 — 2026-09-20. PLANNING ONLY; all new behavioral tests below are NOT RUN.**
+> **Design candidate v0.3 — 2026-09-20. PLANNING ONLY; all new behavioral tests below are NOT RUN.**
 > [Experience/requirements](personal-assistant-experience.en.md) · [Decisions/provenance](personal-assistant-decisions.en.md) · [Discussion #381](https://github.com/Jongtae/personal-agentos/issues/381) · [Documentation #383](https://github.com/Jongtae/personal-agentos/issues/383)
 
 ## How to read these cases
@@ -249,6 +249,32 @@ A cancellation/removal must target only the relevant authorized item/allocation;
 
 **Links:** REQ-02, REQ-21, REQ-22.
 
+## S-14 — repeated burden can prompt a responsibility proposal, not silent enrollment
+
+**Purpose:** Preserve real proactivity without turning learned patterns into hidden standing authority.
+
+**Fixture:** Over several cleanly attributable Sunday interactions, the user has repeatedly asked for help deciding a family meal and has corrected the assistant in ways that show the repeated burden is the decision itself. No continuing meal-preparation mandate exists yet. The fixture permits local use of the relevant conversation/result history for this proposal test; it does **not** permit background merchant lookup, proactive notification, public-profile research or purchasing. The exact number of prior interactions is a fixture parameter, not a universal product threshold.
+
+**Expected behavior before acceptance:** Each explicit meal request still receives useful reactive help under S-01A. The assistant may identify the repeated burden and, at an appropriate conversational moment, propose a bounded responsibility rather than forcing the user to rediscover settings:
+
+> “주말마다 메뉴 고르는 게 반복해서 번거로우신 것 같아요. 앞으로는 평소 선호를 참고해서 후보를 미리 준비해두고, 물어보시면 바로 보여드릴까요? 먼저 알림을 보내거나 주문까지 하지는 않게 할 수 있어요.”
+
+This is a **proposal**, not a statement that the assistant has already started monitoring. It should explain the useful outcome and important limits in ordinary language. It must not claim “I learned your routine so I enabled this” or perform a network lookup merely to make the proposal feel smart.
+
+**Acceptance path:** If the user accepts, the product uses the applicable settings/authority flow to establish the exact responsibility: principal, purpose, permitted context/sources, preparation behavior, notification behavior, destinations/budget, expiry/review and prohibited actions. An ambiguous “응, 알아서 해줘” must be resolved to an understandable bounded preset before unattended effects begin. The next occurrence can then follow S-01B within that accepted scope.
+
+**Decline/deferral variants:**
+- “이번에는 그냥 내가 물어볼게” does not create a mandate and should not be treated as a permanent refusal unless the user says so.
+- “앞으로 이런 제안 하지 마” suppresses future responsibility proposals of the applicable class under settings policy; it does not disable reactive meal help.
+- No response is not acceptance.
+- A later similar user request is not permission to repeatedly nag about enabling automation; proposal frequency is bounded and meaningful-change based.
+
+**Learning boundary:** The assistant may learn that the user finds repeated meal selection burdensome when that conclusion is legitimately supported and permitted, but it must not infer that a specific recommended meal was eaten, that all family members share the same preference, or that the user permanently wants proactive notifications. Confirmed responsibility settings and actual outcomes remain distinct from the pattern that motivated the proposal.
+
+**T-14:** Before explicit acceptance, standing mandate count, unsolicited message count, merchant/network preparation count and external-effect count are zero for the pattern alone; reactive usefulness remains available. A single permitted proposal can be produced from the fixture history without public identity research. After acceptance, only the reviewed responsibility's capabilities/data/destinations may be used. Decline/no-response cases do not silently activate or repeatedly re-propose. Measure whether the eventual accepted responsibility reduces repeated explanation/decision work rather than merely increasing automation events.
+
+**Links:** PA-P1–PA-P4, PA-P6; REQ-23–REQ-28. This case is a future fixture, not evidence that automatic burden detection exists.
+
 ## Acceptance matrix and evidence records
 
 All entries are **planned/not run**. T-01 has separately observable reactive/prepared variants. Each case includes one or more independent fixtures; counts are not claimed benchmark results.
@@ -269,12 +295,29 @@ All entries are **planned/not run**. T-01 has separately observable reactive/pre
 | T-11 | Budget/causal-loop/fairness trace | Bounded useful preparation |
 | T-12 | Local race and provider unknown-outcome fixtures | No duplicate effect; no false undo |
 | T-13 | Migration/restart/relink/provider-path fixtures | Durable owner continuity and separation |
+| T-14 | Repeated-burden history, proposal/accept/decline traces and effect counts | Useful proactivity without silent responsibility activation |
 
 For each future run record: exact commit, fixture revision, scenario/requirement IDs, initial policy/grants, event order/frozen time, expected and observed outputs/state/effects, failure/partial/unsupported status, invocation/latency/budget telemetry and its availability, and evidence class. Capture minimal structured/redacted receipts, not hidden reasoning or raw secrets.
 
 Deterministic fixtures prove only the designed state/policy behavior under those fixtures. Add separate supported-model evaluation with declared model/destinations/budget and held-out paraphrases. Real Telegram/peer/provider behavior needs separate operating observation. Cart/order actions need their own explicit authority and evidence. Source inspection, a scenario document, a test count or a generated screenshot is not a live capability claim.
 
 Measure owner effort (repeated explanation, unnecessary questions, manual relays and corrections), useful outcome quality, preparation reuse/waste, message burden, missed useful windows, scope/authority violations, duplicate effects, uncertain-result recovery, latency and resource cost. Freeze a rubric and denominators before tuning. No numeric quality/notification/latency target is adopted merely by this catalogue.
+
+## Product-principle coverage
+
+The principles in the experience document are intended to be tested through observable cases rather than treated as slogans.
+
+| Principle | Primary scenarios | Regression question |
+| --- | --- | --- |
+| PA-P1 Reduce owner burden | S-01, S-03, S-05, S-14 | Did the owner explain, choose, relay or check less while still getting the intended result? |
+| PA-P2 Learn context without category collapse | S-01, S-02, S-10, S-14 | Did learning improve the next interaction without turning an inference/recommendation/exception into false durable truth? |
+| PA-P3 Proactive inside accepted responsibility | S-01, S-03, S-05, S-14 | Were routine sub-decisions handled without approval fatigue, while genuinely new intent/authority still reached the right person? |
+| PA-P4 Treat attention as scarce | S-01, S-06, S-07, S-14 | Were useful preparations separated from interruptions, and were meaningful deadline/failure exceptions still surfaced? |
+| PA-P5 Preserve scope and source authority | S-03–S-05, S-08, S-09 | Did valid collaboration succeed without cross-scope leakage or paraphrase overriding the source? |
+| PA-P6 Truthful state and easy correction/recovery | S-02, S-04–S-07, S-12 | Could a short correction update the right state, and did unknown/external effects remain truthful? |
+| PA-P7 Per-person personalization and worker replaceability | S-07, S-08, S-13 | Did preferences/state remain attributed to the right principal across channel/runtime/migration changes? |
+
+A negative-only implementation cannot satisfy these principles: refusing every read, share or preparation may preserve a boundary but fails the usefulness cases. Likewise a highly proactive implementation fails if it creates unnecessary interruptions, hidden authority expansion or false completion.
 
 ## Pending refinements through owner dialogue
 

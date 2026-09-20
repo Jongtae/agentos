@@ -95,7 +95,7 @@ def _bounded_complete_text(value, limit=MAX_PAGE_CONTENT_CHARACTERS):
     clean=re.sub(r'\s+',' ',value).strip()
     if len(clean) <= limit: return clean,False
     prefix=clean[:limit]
-    boundaries=[match.end() for match in re.finditer(r'[.!?](?=\s|$)',prefix)]
+    boundaries=[match.end() for match in re.finditer(r'(?:[.!?](?=\s|$)|[。！？])',prefix)]
     if boundaries:
         return prefix[:boundaries[-1]].strip(),True
     # Punctuationless navigation, table, and catalog text is still useful. End

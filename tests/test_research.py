@@ -117,6 +117,9 @@ class PublicResearchTests(unittest.TestCase):
             ('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.t-IDcSemACt8x4iTMCda8Yhe3iZaWbvV5XKSTbuAn0M','owner_public_request'),
             (r'compare \\server\private\receipt.txt','owner_public_request'),
             ('compare //server/private/receipt.txt','owner_public_request'),
+            ('compare ./secrets.txt','owner_public_request'),
+            ('compare ../secrets.txt','owner_public_request'),
+            ('compare /private','owner_public_request'),
             ('path:/root/.ssh/id_rsa','owner_public_request'),
             ('file:/root/.ssh/id_rsa','owner_public_request'),
             ('source:/home/alice/tax.pdf','owner_public_request'),
@@ -158,7 +161,8 @@ class PublicResearchTests(unittest.TestCase):
                       'compare password requirements and api key permissions',
                       'authorization header format','compare https://example.com/public/path',
                       'compare "https://example.com/public/path"','JWT format examples',
-                      'basic authentication overview','bearer authentication examples'):
+                      'basic authentication overview','Basic Authentication overview',
+                      'bearer authentication examples','Bearer authorization examples'):
             with self.subTest(query=query):
                 self.assertEqual(validate_public_query(query,'owner_public_request'),query)
 
@@ -218,7 +222,9 @@ class PublicResearchTests(unittest.TestCase):
 
     def test_discount_amount_is_not_misreported_as_fee_value(self):
         for content in ('Service fee reduced by USD 10.','Service fee includes a USD 10 discount.',
-                        'USD 10 off service fee.','USD 10 discount on fee.','USD 10 reduction in fee.'):
+                        'USD 10 off service fee.','USD 10 discount on fee.','USD 10 reduction in fee.',
+                        'Save USD 10 on the service fee.','The USD 10 fee is discounted.',
+                        '10% off service fee.','10% discount on fee.'):
             with self.subTest(content=content):
                 reader=Reader({'https://alpha.example/item':{
                     'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
@@ -233,6 +239,14 @@ class PublicResearchTests(unittest.TestCase):
         result=PublicResearch(search_result,reader,max_pages=1).run(
             'travel_plan','museum plan',query_source='owner_public_request')
         self.assertEqual(result['dynamic_facts']['fee']['status'],'observed')
+        self.assertEqual(result['dynamic_facts']['payable_total']['status'],'unknown')
+
+    def test_amount_bearing_extra_charge_keeps_total_unknown(self):
+        content='Grand total: USD 100. Tax of USD 10 is extra.'
+        reader=Reader({'https://alpha.example/item':{
+            'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+        result=PublicResearch(search_result,reader,max_pages=1).run(
+            'travel_plan','museum plan',query_source='owner_public_request')
         self.assertEqual(result['dynamic_facts']['payable_total']['status'],'unknown')
 
     def test_hedged_inventory_and_unrelated_prices_do_not_observe_dynamic_values(self):

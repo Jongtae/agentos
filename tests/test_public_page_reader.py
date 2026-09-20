@@ -77,6 +77,15 @@ class PublicPageReaderTests(unittest.TestCase):
         self.assertLessEqual(len(result['content']),24000)
         self.assertTrue(result['content'].endswith('catalog-item'))
 
+    def test_cjk_page_truncation_keeps_complete_unicode_sentences(self):
+        sentence='公開情報です。'
+        body=('<div>'+sentence*5000+'</div>').encode()
+        result=PublicPageReader(opener=Opener(Response(body)),resolver=public_dns).read('https://example.com/catalog')
+        self.assertTrue(result['content_truncated'])
+        self.assertTrue(result['content'])
+        self.assertLessEqual(len(result['content']),24000)
+        self.assertTrue(result['content'].endswith('。'))
+
     def test_validates_redirect_target_before_request(self):
         opener=Opener(Response(status=302, headers={'Location':'http://169.254.169.254/latest'}))
         def redirect_dns(host, port, type=None, timeout=None):

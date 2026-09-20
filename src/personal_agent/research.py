@@ -18,7 +18,6 @@ ALLOWED_QUERY_SOURCES = frozenset({'owner_public_request', 'public_task_input'})
 HIGH_CONFIDENCE_SECRET_PATTERNS = (
     re.compile(r'(?i)\bauthorization\s*:\s*\S+'),
     re.compile(r'(?i)\bauthorization\s*:?\s*(?:bearer|basic)\s+\S+'),
-    re.compile(r'(?i:\bbasic)\s+(?=[A-Za-z0-9+/=]{8,}(?:\s|$))(?=[A-Za-z0-9+/=]*[A-Z0-9+/=])[A-Za-z0-9+/=]{8,}'),
     re.compile(r'(?i:\bbearer)\s*:\s*\S{8,}'),
     re.compile(r'(?i)\b(?:client[_ -]?secret|secret)\b\s*(?::|=|\bis\b|\bequals\b|,)\s*\S+'),
     re.compile(r'(?i)\b(?:sk_live_|rk_live_)[a-z0-9]{12,}\b'),
@@ -36,13 +35,13 @@ HIGH_CONFIDENCE_SECRET_PATTERNS = (
         r'(?:~?[/\\]\S+|[a-z]:[/\\]\S+|[^\s`"\'\[\](){}]+[/\\][^\s`"\'\[\](){}]+|'
         r'[^\s`"\'\[\](){}]+\.[a-z0-9]{1,16}\b)'
     ),
-    re.compile(r'(?i)(?:file://|(?<![:/\\])[/\\]{2,}[^/\\\s`"\'\[\](){}]+[/\\][^\s`"\'\[\](){}]+|(?<![\w:/\\])(?:~[/\\]|/[^\s/`"\'\[\](){}]+/[^\s`"\'\[\](){}]+)|(?<![\w])[a-z]:[/\\][^\s`"\'\[\](){}]+)'),
+    re.compile(r'(?i)(?:file://|(?<![:/\\])[/\\]{2,}[^/\\\s`"\'\[\](){}]+[/\\][^\s`"\'\[\](){}]+|(?<![\w:/\\])(?:\.{1,2}[/\\][^\s`"\'\[\](){}]+|~[/\\][^\s`"\'\[\](){}]+|/[^\s/`"\'\[\](){}]+(?:/[^\s`"\'\[\](){}]+)?)|(?<![\w])[a-z]:[/\\][^\s`"\'\[\](){}]+)'),
 )
 CREDENTIAL_LABEL = r'(?:password|passwd|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|secret)'
 LABEL_OCCURRENCE = re.compile(rf'(?i)\b{CREDENTIAL_LABEL}\b')
 LABEL_ASSIGNMENT = re.compile(rf'(?i)\b{CREDENTIAL_LABEL}\b\s*(?::|,|=|\bis\b)\s*\S+')
 PUBLIC_CREDENTIAL_TOPICS = frozenset({
-    'about','and','are','authentication','best','compare','comparison','documentation','docs','examples','explain','expiry','expiration','for','how','information','latest','overview',
+    'about','and','are','authentication','authorization','best','compare','comparison','documentation','docs','examples','explain','expiry','expiration','for','how','information','latest','overview',
     'format','guide','management','manager','permissions','policies','policy','requirements','revocation',
     'rotation','scopes','security','to','tutorial','practices','what',
 })
@@ -77,7 +76,7 @@ INCOMPLETE_TOTAL = re.compile(
     r'(?i)\b(?:subtotal|before\s+(?:(?:sales|local|city|state|federal|hotel|tourist|value[- ]added)\s+)?(?:vat|tax|taxes|fee|fees|service charge|service charges)|'
     r'excluding\s+(?:(?:sales|local|city|state|federal|hotel|tourist|value[- ]added)\s+)?(?:vat|tax|taxes|fee|fees|service charge|service charges)|'
     r'plus\s+(?:(?:[$€£¥₩]\s?\d[\d,.]*|(?:USD|EUR|GBP|JPY|KRW)\s?\d[\d,.]*|\d+(?:\.\d+)?\s*%)\s+)?(?:(?:sales|local|city|state|federal|hotel|tourist|value[- ]added)\s+)?(?:vat|tax|taxes|fee|fees|service charge|service charges)|'
-    r'(?:vat|tax|taxes|fee|fees|resort fee|resort fees|service charge|service charges)\s+(?:not\s+included|excluded|extra|additional)|not\s+including\s+(?:vat|tax|taxes|fee|fees|resort fee|resort fees|service charge|service charges))\b|'
+    r'(?:vat|tax|taxes|fee|fees|resort fee|resort fees|service charge|service charges)[^.!?]{0,30}\b(?:not\s+included|excluded|extra|additional)\b|not\s+including\s+(?:vat|tax|taxes|fee|fees|resort fee|resort fees|service charge|service charges))\b|'
     r'\+\s*(?:\d+(?:\.\d+)?\s*%\s+)?(?:vat|tax|taxes|fee|fees|service charge|service charges)\b|'
     r'세금\s*전|수수료\s*전|세금\s*별도|수수료\s*별도'
 )
@@ -93,12 +92,14 @@ FEE_NEGATED_PROPERTY = re.compile(
 )
 FEE_NONVALUE_CONTEXT = re.compile(
     r'(?i)\b(?:fee|fees|tax|taxes|surcharge|service charge)\b[^.!?]{0,35}'
-    r'\b(?:reduced?|reduction|discount|credit|saving|decreased?|lowered?|off)\b'
+    r'\b(?:reduced?|reduction|discount(?:ed)?|credit|saving|decreased?|lowered?|off)\b'
 )
 FEE_NONVALUE_CONTEXT_REVERSE = re.compile(
-    r'(?i)(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b)'
-    r'[^.!?]{0,20}\b(?:off|discount|reduction|credit|savings?)\b[^.!?]{0,20}'
-    r'\b(?:fee|fees|tax|taxes|surcharge|service charge)\b'
+    r'(?ix)(?:'
+    r'\bsav(?:e|ing)\b[^.!?]{0,15}(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b|\b\d+(?:\.\d+)?\s*%)[^.!?]{0,25}\b(?:fee|fees|tax|taxes|surcharge|service\ charge)\b|'
+    r'(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b|\b\d+(?:\.\d+)?\s*%)[^.!?]{0,20}\b(?:off|discount|reduction|credit|savings?)\b[^.!?]{0,20}\b(?:fee|fees|tax|taxes|surcharge|service\ charge)\b|'
+    r'(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b|\b\d+(?:\.\d+)?\s*%)[^.!?]{0,15}\b(?:fee|fees|tax|taxes|surcharge|service\ charge)\b[^.!?]{0,20}\b(?:discounted?|reduced?|credited?|lowered?)\b'
+    r')'
 )
 INVENTORY_METADATA = re.compile(
     r'(?i)\b(?:stock|inventory|room|rooms|ticket|tickets|seat|seats)\s+'
@@ -108,7 +109,7 @@ ADJACENT_QUALIFIER_ONLY = re.compile(
     r'(?i)^\s*(?:estimated|estimate|approximately|approximate|about|around|roughly|possibly|probably|likely|expected|projected|potential|'
     r'(?:only\s+)?(?:if|unless|when|upon|provided)\b[^.!?]*|subject\s+to\b[^.!?]*|on\s+request|depending\s+on\b[^.!?]*|'
     r'before\s+[^.!?]*(?:tax|taxes|vat|fee|fees|charge|charges)|excluding\s+[^.!?]*(?:tax|taxes|vat|fee|fees|charge|charges)|'
-    r'plus\s+[^.!?]*(?:tax|taxes|vat|fee|fees|charge|charges)|(?:tax|taxes|vat|fee|fees|charge|charges)\s+(?:not\s+included|excluded|extra|additional)|'
+    r'plus\s+[^.!?]*(?:tax|taxes|vat|fee|fees|charge|charges)|(?:tax|taxes|vat|fee|fees|charge|charges)[^.!?]{0,30}\b(?:not\s+included|excluded|extra|additional)\b|'
     r'(?:for|to)\s+(?:loyalty\s+)?members?\s+only|(?:members?|loyalty)[- ]only|with\s+(?:an?\s+)?membership)\s*[.!?]?\s*$'
 )
 ANAPHORIC_QUALIFIER = re.compile(
@@ -136,6 +137,10 @@ def validate_public_query(query, query_source):
     if bearer_value:
         bearer_token=bearer_value.group(1).strip('"\'.-_/@#$%^&*+=\\|<>`~').casefold()
         if bearer_token not in PUBLIC_CREDENTIAL_TOPICS: sensitive=True
+    basic_value=re.search(r'(?i)\bbasic\s+([^\s,;:!?()\[\]{}]{8,})',scan_query)
+    if basic_value:
+        basic_token=basic_value.group(1).strip('"\'.-_/@#$%^&*+=\\|<>`~').casefold()
+        if basic_token not in PUBLIC_CREDENTIAL_TOPICS: sensitive=True
     sensitive=sensitive or bool(LABEL_ASSIGNMENT.search(scan_query))
     labels=list(LABEL_OCCURRENCE.finditer(scan_query))
     if labels:
@@ -154,7 +159,7 @@ def _sentences(content):
     content=re.sub(r'\s+', ' ', content or '').strip()
     if not content:
         return []
-    return [part.strip() for part in re.split(r'(?<=[.!?])\s+|\s*[|]\s*', content) if part.strip()]
+    return [part.strip() for part in re.split(r'(?<=[.!?])\s+|(?<=[。！？])\s*|\s*[|]\s*', content) if part.strip()]
 
 
 def _bounded_evidence(content):

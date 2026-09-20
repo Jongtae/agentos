@@ -795,6 +795,7 @@ class GmailConnector:
             if normalized_mime == "message/rfc822" and depth > 0:
                 return []
             children: list[list[tuple[str, str | None, str | None, str | None]]] = []
+            related_children: list[tuple[object, list[tuple[str, str | None, str | None, str | None]]]] = []
             parts = part.get("parts", [])
             if isinstance(parts, list):
                 if len(parts) > 100:
@@ -804,6 +805,7 @@ class GmailConnector:
                         exhausted = True
                         break
                     rendered = visit(child, depth + 1)
+                    related_children.append((child, rendered))
                     if rendered:
                         children.append(rendered)
             if normalized_mime == "multipart/alternative":
@@ -811,6 +813,30 @@ class GmailConnector:
                     (group for group in children if any(item[0] == "text/plain" for item in group)),
                     children[0] if children else [],
                 )
+            if normalized_mime == "multipart/related":
+                if not related_children:
+                    return []
+                start = None
+                if content_type:
+                    message = Message()
+                    message["content-type"] = content_type
+                    start = message.get_param("start", header="content-type")
+                if not start:
+                    return related_children[0][1]
+                wanted = str(start).strip().strip("<>")
+                for child, rendered in related_children:
+                    child_headers = child.get("headers", []) if isinstance(child, dict) else []
+                    if not isinstance(child_headers, list):
+                        continue
+                    for header in child_headers[:100]:
+                        if not isinstance(header, dict) or str(header.get("name", "")).lower() != "content-id":
+                            continue
+                        value = header.get("value")
+                        if not isinstance(value, str) or len(value) > 1024:
+                            raise GmailError("invalid_provider_response")
+                        if value.strip().strip("<>") == wanted:
+                            return rendered
+                raise GmailError("invalid_provider_response")
             return [candidate for group in children for candidate in group]
 
         candidates = visit(payload)

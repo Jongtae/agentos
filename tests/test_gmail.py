@@ -755,6 +755,41 @@ class GmailConnectorTests(unittest.TestCase):
         self.assertEqual(message.body, "intro\n\nmain\n\nfooter")
         self.assertEqual(message.mime_type, "text/plain")
 
+    def test_related_body_selects_only_root_and_excludes_inline_text_resources(self):
+        self.connect()
+        encode = lambda value: base64.urlsafe_b64encode(value.encode()).decode()
+        for content_type,parts,expected,mime_type in (
+            (
+                "multipart/related",
+                [
+                    {"mimeType":"text/html","body":{"data":encode("<p>root</p>")}},
+                    {"mimeType":"text/plain","body":{"data":encode("inline resource")}},
+                ],
+                "<p>root</p>",
+                "text/html",
+            ),
+            (
+                'multipart/related; start="<root-part>"',
+                [
+                    {"mimeType":"text/plain","headers":[{"name":"Content-ID","value":"<resource>"}],"body":{"data":encode("resource")}},
+                    {"mimeType":"text/html","headers":[{"name":"Content-ID","value":"<root-part>"}],"body":{"data":encode("<p>selected root</p>")}},
+                ],
+                "<p>selected root</p>",
+                "text/html",
+            ),
+        ):
+            with self.subTest(content_type=content_type):
+                self.responses.append({
+                    "id":"m_1","threadId":"t_1","payload":{
+                        "mimeType":"multipart/related",
+                        "headers":[{"name":"Content-Type","value":content_type}],
+                        "parts":parts,
+                    },
+                })
+                message=self.read()
+                self.assertEqual(message.body,expected)
+                self.assertEqual(message.mime_type,mime_type)
+
     def test_body_attachment_id_is_fetched_with_same_bounded_authority(self):
         self.connect()
         encoded = base64.urlsafe_b64encode(b"separate body").decode()

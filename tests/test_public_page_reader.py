@@ -59,6 +59,13 @@ class PublicPageReaderTests(unittest.TestCase):
         self.assertNotIn('checkout',result['content'])
         self.assertIn('no cookies, login, JavaScript or mutation',result['scope'])
 
+    def test_page_content_truncation_keeps_only_complete_sentences(self):
+        body=('<p>'+('A'*23970)+'.</p><p>Grand total USD 100 before taxes and fees.</p>').encode()
+        result=PublicPageReader(opener=Opener(Response(body)),resolver=public_dns).read('https://example.com/long')
+        self.assertTrue(result['content_truncated'])
+        self.assertTrue(result['content'].endswith('.'))
+        self.assertNotIn('Grand total USD 1',result['content'])
+
     def test_validates_redirect_target_before_request(self):
         opener=Opener(Response(status=302, headers={'Location':'http://169.254.169.254/latest'}))
         def redirect_dns(host, port, type=None):
@@ -120,6 +127,17 @@ class PublicPageReaderTests(unittest.TestCase):
                     'https://[2606:2800:220:1:248:1893:25c8:1946]:/path'):
             with self.subTest(url=url),self.assertRaisesRegex(ValueError,'포트'):
                 normalize_public_url(url)
+
+    @patch('personal_agent.local_tools.socket.create_connection')
+    def test_multiple_addresses_share_one_monotonic_deadline(self,create_connection):
+        now=[0.0];timeouts=[]
+        def fail(_address,timeout):
+            timeouts.append(timeout);now[0]+=7;raise OSError('unreachable')
+        create_connection.side_effect=fail
+        reader=PublicPageReader(clock=lambda:now[0])
+        with self.assertRaisesRegex(Exception,'시간이 제한'):
+            reader._open_pinned('http://example.com/', ['93.184.216.1','93.184.216.2','93.184.216.3'],deadline=12)
+        self.assertEqual(timeouts,[12.0,5.0])
 
     def test_owner_scope_rejects_public_redirect_collector(self):
         opener=Opener(Response(status=302, headers={'Location':'https://collector.example/collect?x=1'}))

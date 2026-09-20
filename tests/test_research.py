@@ -88,6 +88,12 @@ class PublicResearchTests(unittest.TestCase):
             ('hf_abcdefghijklmnopqrstuvwxyz','owner_public_request'),
             ('client_secret=correcthorsebatterystaple','owner_public_request'),
             ('secret: correcthorsebatterystaple','owner_public_request'),
+            ('Basic dXNlcjpwYXNz','owner_public_request'),
+            ('client_secret is correcthorsebatterystaple','owner_public_request'),
+            ('secret is correcthorsebatterystaple','owner_public_request'),
+            ('password requirements correcthorsebatterystaple','owner_public_request'),
+            ('access token scopes actualsecretvalue','owner_public_request'),
+            ('password, correcthorsebatterystaple','owner_public_request'),
         ]
         for query,source in cases:
             with self.subTest(query=query),self.assertRaises(ValueError):
@@ -97,7 +103,8 @@ class PublicResearchTests(unittest.TestCase):
     def test_ordinary_public_credential_topics_are_not_overblocked(self):
         for query in ('password manager comparison','api key security best practices',
                       'access token documentation','refresh token rotation guide','password requirements',
-                      'api key permissions','api key examples','access token scopes','refresh token revocation'):
+                      'api key permissions','api key examples','access token scopes','refresh token revocation',
+                      'compare password requirements and api key permissions'):
             with self.subTest(query=query):
                 self.assertEqual(validate_public_query(query,'owner_public_request'),query)
 
@@ -171,15 +178,20 @@ class PublicResearchTests(unittest.TestCase):
             'fee':('A service fee might be 10%.','A service fee is estimated at 10%.',
                    'Service fee can be 10%.','Service fee should be 10%.','Service fee is about 10%.',
                    'Service fee is around 10%.','Service fee is up to 10%.','No fee unless you cancel.',
-                   'Service fee: USD 10 if paying by card.','No booking fee if you join membership.'),
+                   'Service fee: USD 10 if paying by card.','No booking fee if you join membership.',
+                   'Service fee ranges from USD 10 to USD 20.','Service fee is roughly 10%.',
+                   'Service fee is between USD 10 and USD 20.'),
             'inventory':('Inventory is expected to be available.','Inventory is likely available.',
                          'Rooms are available if you call.','Rooms are available on request.',
-                         'Rooms are available if you book 3 nights.'),
+                         'Rooms are available if you book 3 nights.','Rooms are available except on weekends.'),
             'payable_total':('Estimated total price USD 100.','Payable total might be USD 100.',
                              'Total price USD 100 before taxes and fees.','Total price is shown at checkout.',
                              'Grand total is about USD 100.','Grand total is up to USD 100.',
                              'Grand total USD 100 if paid today.',
-                             'Total price USD 100 before service charges.'),
+                             'Total price USD 100 before service charges.',
+                             'Grand total ranges from USD 100 to USD 200.',
+                             'Grand total USD 100, taxes additional.',
+                             'Grand total USD 100 not including resort fees.'),
         }
         for dynamic,contents in cases.items():
             for content in contents:
@@ -193,13 +205,33 @@ class PublicResearchTests(unittest.TestCase):
                         self.assertEqual(result['dynamic_facts']['fee']['status'],'unknown')
 
     def test_exact_tied_dynamic_values_remain_observed(self):
-        content='Service fee: USD 25. Grand total: USD 125. Rooms are available.'
+        content='Service fee: USD 25. Grand total: USD 125. Rooms are available. Tickets are unavailable.'
         reader=Reader({'https://alpha.example/item':{
             'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
         result=PublicResearch(search_result,reader,max_pages=1).run(
             'travel_plan','museum plan',query_source='owner_public_request')
         for dynamic in ('fee','inventory','payable_total'):
             self.assertEqual(result['dynamic_facts'][dynamic]['status'],'observed')
+            self.assertIn(result['dynamic_facts'][dynamic]['evidence'][0]['exact_text'],result['brief'])
+
+    def test_unrelated_available_words_do_not_create_inventory_or_zero_fee_facts(self):
+        for content in ('Customer service is available.','No fee information is available.'):
+            with self.subTest(content=content):
+                reader=Reader({'https://alpha.example/item':{
+                    'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+                result=PublicResearch(search_result,reader,max_pages=1).run(
+                    'travel_plan','museum plan',query_source='owner_public_request')
+                self.assertEqual(result['dynamic_facts']['inventory']['status'],'unknown')
+                self.assertEqual(result['dynamic_facts']['fee']['status'],'unknown')
+
+    def test_does_not_classify_or_emit_a_sentence_cut_by_evidence_limit(self):
+        content=('A'*3980)+'. Grand total USD 100 before taxes and fees.'
+        reader=Reader({'https://alpha.example/item':{
+            'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+        result=PublicResearch(search_result,reader,max_pages=1).run(
+            'travel_plan','museum plan',query_source='owner_public_request')
+        self.assertEqual(result['dynamic_facts']['payable_total']['status'],'unknown')
+        self.assertNotIn('Grand total USD 1',result['evidence'][0]['evidence_excerpt'])
 
     def test_query_validation_requires_explicit_public_provenance(self):
         self.assertEqual(validate_public_query('  public hotels Seoul  ','owner_public_request'),'public hotels Seoul')

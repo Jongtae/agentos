@@ -122,6 +122,14 @@ class PublicResearchTests(unittest.TestCase):
             ('source:/home/alice/tax.pdf','owner_public_request'),
             ('file: secrets.txt','owner_public_request'),
             ('path: Documents/tax-return.pdf','owner_public_request'),
+            ('eyJ9.e30.x','owner_public_request'),
+            ('file= secrets.txt','owner_public_request'),
+            ('path is Documents/tax-return.pdf','owner_public_request'),
+            ('source, private-notes.md','owner_public_request'),
+            ('api\u200b_key=actualsecretvalue','owner_public_request'),
+            (r'compare \\\server\private\receipt.txt','owner_public_request'),
+            (r'compare \/server\private/receipt.txt','owner_public_request'),
+            ('-----BEGIN PRIVATE KEY----- abcdef -----END PRIVATE KEY-----','owner_public_request'),
         ]
         for query,source in cases:
             with self.subTest(query=query),self.assertRaises(ValueError):
@@ -322,6 +330,21 @@ class PublicResearchTests(unittest.TestCase):
                     'travel_plan','museum plan',query_source='owner_public_request')
                 self.assertEqual(result['dynamic_facts'][dynamic]['status'],'observed')
                 self.assertIn(exact,result['brief'])
+
+    def test_anaphoric_adjacent_uncertainty_keeps_dynamic_facts_unknown(self):
+        cases=(
+            ('payable_total','Grand total: USD 100. This is an estimate.'),
+            ('fee','Service fee: USD 10. This may change.'),
+            ('inventory','Rooms are available. This is only expected.'),
+            ('fee','Service fee: USD 10. This applies only if paying by card.'),
+        )
+        for dynamic,content in cases:
+            with self.subTest(dynamic=dynamic):
+                reader=Reader({'https://alpha.example/item':{
+                    'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+                result=PublicResearch(search_result,reader,max_pages=1).run(
+                    'travel_plan','museum plan',query_source='owner_public_request')
+                self.assertEqual(result['dynamic_facts'][dynamic]['status'],'unknown')
 
     def test_search_title_controls_and_whitespace_cannot_add_brief_lines(self):
         def titled(query):

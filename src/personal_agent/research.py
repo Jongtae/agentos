@@ -26,13 +26,14 @@ HIGH_CONFIDENCE_SECRET_PATTERNS = (
     re.compile(r'(?i)\bhf_[a-z0-9]{16,}\b'),
     re.compile(r'(?i)\bsk-[a-z0-9_-]{12,}\b'),
     re.compile(r'(?i)\b(?:gh[pousr]_[a-z0-9]{16,}|github_pat_[a-z0-9_]{16,}|glpat-[a-z0-9_-]{16,}|xox[baprs]-[a-z0-9-]{10,}|npm_[a-z0-9]{16,}|pypi-[a-z0-9_-]{16,}|AKIA[A-Z0-9]{16})\b'),
-    re.compile(r'(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(?![A-Za-z0-9_-])'),
+    re.compile(r'(?i)-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'),
+    re.compile(r'(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(?![A-Za-z0-9_-])'),
     re.compile(
-        r'(?i)\b(?:path|file|source)\s*:\s*'
+        r'(?i)\b(?:path|file|source)\s*(?::|=|,|\bis\b)\s*'
         r'(?:~?[/\\]\S+|[a-z]:[/\\]\S+|[^\s`"\'\[\](){}]+[/\\][^\s`"\'\[\](){}]+|'
         r'[^\s`"\'\[\](){}]+\.[a-z0-9]{1,16}\b)'
     ),
-    re.compile(r'(?i)(?:file://|(?<!:)/{2}[^/\s`"\'\[\](){}]+/[^\s`"\'\[\](){}]+|(?<!\\)\\{2}[^\\\s`"\'\[\](){}]+\\[^\s`"\'\[\](){}]+|(?<![\w:/\\])(?:~[/\\]|/[^\s/`"\'\[\](){}]+/[^\s`"\'\[\](){}]+)|(?<![\w])[a-z]:[/\\][^\s`"\'\[\](){}]+)'),
+    re.compile(r'(?i)(?:file://|(?<![:/\\])[/\\]{2,}[^/\\\s`"\'\[\](){}]+[/\\][^\s`"\'\[\](){}]+|(?<![\w:/\\])(?:~[/\\]|/[^\s/`"\'\[\](){}]+/[^\s`"\'\[\](){}]+)|(?<![\w])[a-z]:[/\\][^\s`"\'\[\](){}]+)'),
 )
 CREDENTIAL_LABEL = r'(?:password|passwd|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|secret)'
 LABEL_OCCURRENCE = re.compile(rf'(?i)\b{CREDENTIAL_LABEL}\b')
@@ -98,6 +99,10 @@ ADJACENT_QUALIFIER_ONLY = re.compile(
     r'plus\s+[^.!?]*(?:tax|taxes|vat|fee|fees|charge|charges)|(?:tax|taxes|vat|fee|fees|charge|charges)\s+(?:not\s+included|excluded|extra|additional)|'
     r'(?:for|to)\s+(?:loyalty\s+)?members?\s+only|(?:members?|loyalty)[- ]only|with\s+(?:an?\s+)?membership)\s*[.!?]?\s*$'
 )
+ANAPHORIC_QUALIFIER = re.compile(
+    r'(?i)^\s*(?:this|that|it|these|those)\b[^.!?]{0,120}\b(?:may|might|could|can|possibly|probably|likely|'
+    r'expected|estimated|estimate|approximately|about|around|subject\s+to|depending\s+on|on\s+request|only\s+(?:if|when|for|to))\b'
+)
 DYNAMIC_SUBJECT_PATTERNS = {
     'fee': FACT_PATTERNS['fee'],
     'inventory': re.compile(r'(?i)\b(?:availability|inventory|stock|room|rooms|ticket|tickets|seat|seats|product|products|item|items)\b|재고|매진|예약'),
@@ -112,11 +117,12 @@ def validate_public_query(query, query_source):
     if not isinstance(query, str) or not 1 <= len(query.strip()) <= 500:
         raise ValueError('공개 검색어는 1~500자로 입력하세요.')
     public_query=query.strip()
-    sensitive=any(pattern.search(public_query) for pattern in HIGH_CONFIDENCE_SECRET_PATTERNS)
-    sensitive=sensitive or bool(LABEL_ASSIGNMENT.search(public_query))
-    labels=list(LABEL_OCCURRENCE.finditer(public_query))
+    scan_query=''.join(character for character in public_query if unicodedata.category(character) != 'Cf')
+    sensitive=any(pattern.search(scan_query) for pattern in HIGH_CONFIDENCE_SECRET_PATTERNS)
+    sensitive=sensitive or bool(LABEL_ASSIGNMENT.search(scan_query))
+    labels=list(LABEL_OCCURRENCE.finditer(scan_query))
     if labels:
-        topic_text=LABEL_OCCURRENCE.sub(' ',public_query)
+        topic_text=LABEL_OCCURRENCE.sub(' ',scan_query)
         tokens=[]
         for raw in re.findall(r'[^\s,;:!?()\[\]{}]+',topic_text):
             token=raw.strip('"\'.-_/@#$%^&*+=\\|<>`~').casefold()
@@ -165,7 +171,7 @@ def _qualified_dynamic(name, evidence):
             except ValueError: position=-1
             if position >= 0:
                 for neighbor in units[max(0,position-1):position]+units[position+1:position+2]:
-                    if (ADJACENT_QUALIFIER_ONLY.search(neighbor) or
+                    if (ADJACENT_QUALIFIER_ONLY.search(neighbor) or ANAPHORIC_QUALIFIER.search(neighbor) or
                             DYNAMIC_SUBJECT_PATTERNS[name].search(neighbor)):
                         context_units.append(neighbor)
             context=' '.join(context_units)

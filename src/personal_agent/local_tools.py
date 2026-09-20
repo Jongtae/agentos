@@ -96,7 +96,12 @@ def _bounded_complete_text(value, limit=MAX_PAGE_CONTENT_CHARACTERS):
     if len(clean) <= limit: return clean,False
     prefix=clean[:limit]
     boundaries=[match.end() for match in re.finditer(r'[.!?](?=\s|$)',prefix)]
-    return (prefix[:boundaries[-1]].strip() if boundaries else ''),True
+    if boundaries:
+        return prefix[:boundaries[-1]].strip(),True
+    # Punctuationless navigation, table, and catalog text is still useful. End
+    # at a complete token so truncation never exposes a partial word or number.
+    token_boundary=prefix.rfind(' ')
+    return (prefix[:token_boundary].strip() if token_boundary > 0 else ''),True
 
 
 def normalize_public_url(value):

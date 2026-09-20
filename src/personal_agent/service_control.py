@@ -44,6 +44,7 @@ class ServiceControlError(RuntimeError):
 Runner = Callable[[Sequence[str]], CommandResult]
 Which = Callable[[str], str | None]
 HealthProbe = Callable[..., bool]
+ListenerOwner = Callable[[int], bool]
 
 
 def _run(command: Sequence[str]) -> CommandResult:
@@ -127,6 +128,7 @@ class ServiceController:
         which: Which = shutil.which,
         uid: int | None = None,
         health_probe: HealthProbe | None = None,
+        listener_owner: ListenerOwner | None = None,
     ):
         env = os.environ if environ is None else environ
         self.home = Path(home if home is not None else Path.home()).expanduser().resolve()
@@ -161,6 +163,9 @@ class ServiceController:
         self._production_health_probe = health_probe is None and runner is _run
         self.health_wait = time.sleep if health_probe is None and runner is _run else lambda _seconds: None
         self.monotonic = time.monotonic
+        self.listener_owner = listener_owner or (
+            self._listener_owned_by_pid if self._production_health_probe else lambda _pid: True
+        )
         self.uid = os.getuid() if uid is None else uid
         self.domain = f"gui/{self.uid}"
         self.service_target = f"{self.domain}/{LABEL}"
@@ -184,34 +189,62 @@ class ServiceController:
                     "next_action": ("Run the service start action; if it fails, reinstall the service definition."
                                     if not_loaded else "launchd status could not be read; retry before assuming the service is available.")}
         match = re.search(r"^\s*state\s*=\s*([^\s]+)", result.stdout, re.MULTILINE)
+        pid_match = re.search(r"^\s*pid\s*=\s*(\d+)", result.stdout, re.MULTILINE)
         state = match.group(1).lower() if match else "loaded"
         running = state == "running"
         return {"ok": True, "status": "running" if running else "loaded_not_running", "launchd_state": state,
                 "installed": definition_exists, "background_available": running, "data_dir": str(self.data_dir),
+                **({"process_id": int(pid_match.group(1))} if pid_match else {}),
                 **({} if running and definition_exists else {"next_action": (
                     "Run service uninstall to disable the orphaned registered job, then reinstall."
                     if not definition_exists
                     else "Run the service restart action, then inspect status again."
                 )})}
 
+    def _listener_owned_by_pid(self, pid: int) -> bool:
+        lsof = self._which("lsof")
+        if not lsof:
+            fallback = Path("/usr/sbin/lsof")
+            lsof = str(fallback) if fallback.is_file() and os.access(fallback, os.X_OK) else None
+        if not lsof:
+            return False
+        result = self.runner([lsof, "-nP", "-a", "-p", str(pid), "-iTCP:8787", "-sTCP:LISTEN", "-t"])
+        return result.returncode == 0 and str(pid) in result.stdout.split()
+
+    def _application_healthy(self, observed: Mapping[str, object], timeout: float = 2.0) -> bool:
+        if self._production_health_probe:
+            pid = observed.get("process_id")
+            try:
+                owned = isinstance(pid, int) and self.listener_owner(pid)
+            except Exception:
+                owned = False
+            if not owned:
+                return False
+        try:
+            return (
+                self.health_probe(timeout)
+                if self._production_health_probe
+                else self.health_probe()
+            ) is True
+        except Exception:
+            return False
+
     def status(self) -> dict[str, object]:
         observed = self._observed_status()
         if observed.get("background_available"):
-            try:
-                healthy = (
-                    self.health_probe(2.0)
-                    if self._production_health_probe
-                    else self.health_probe()
-                ) is True
-            except Exception:
-                healthy = False
+            healthy = self._application_healthy(observed)
             if not healthy:
+                installed = bool(observed.get("installed"))
                 return {
                     **observed,
                     "status": "running_unhealthy",
                     "process_running": True,
                     "background_available": False,
-                    "next_action": "Run service restart; use foreground `agentos start` to inspect application health.",
+                    "next_action": (
+                        "Run service restart; use foreground `agentos start` to inspect application health."
+                        if installed else
+                        "Run service uninstall to remove the orphaned job, then reinstall the service definition."
+                    ),
                 }
         return observed
 
@@ -258,14 +291,7 @@ class ServiceController:
             remaining = deadline - self.monotonic()
             if remaining <= 0:
                 break
-            try:
-                healthy = (
-                    self.health_probe(min(1.0, remaining))
-                    if self._production_health_probe
-                    else self.health_probe()
-                ) is True
-            except Exception:
-                healthy = False
+            healthy = self._application_healthy(observed, min(1.0, remaining))
             if healthy:
                 break
             if attempt < 19:

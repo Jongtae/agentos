@@ -28,6 +28,7 @@ class FakeLaunchctl:
         self.commands = []
         self.loaded = False
         self.running = False
+        self.pid = 4321
         self.fail = {}
 
     def __call__(self, command):
@@ -40,7 +41,7 @@ class FakeLaunchctl:
             if not self.loaded:
                 return CommandResult(113, stderr="Could not find service")
             state = "running" if self.running else "exited"
-            return CommandResult(0, stdout=f"{LABEL} = {{\n state = {state}\n}}\n")
+            return CommandResult(0, stdout=f"{LABEL} = {{\n state = {state}\n pid = {self.pid}\n}}\n")
         if command[:2] == ["launchctl", "bootstrap"]:
             self.loaded = self.running = True
         elif command[:2] == ["launchctl", "bootout"]:
@@ -343,6 +344,22 @@ class ServiceControlTests(unittest.TestCase):
             unhealthy.start()
         self.assertTrue(self.runner.running)
 
+    def test_health_success_requires_listener_owned_by_launchd_pid(self):
+        self.controller.install()
+        controller = ServiceController(
+            home=self.home,
+            cli_path=self.cli,
+            runner=self.runner,
+            uid=501,
+            health_probe=lambda _timeout: True,
+            listener_owner=lambda pid: pid == 9999,
+        )
+        controller._production_health_probe = True
+        status = controller.status()
+        self.assertEqual(status["process_id"], self.runner.pid)
+        self.assertEqual(status["status"], "running_unhealthy")
+        self.assertFalse(status["background_available"])
+
     def test_health_retry_uses_one_shared_four_second_deadline(self):
         self.controller.install()
         clock = [0.0]
@@ -406,6 +423,22 @@ class ServiceControlTests(unittest.TestCase):
         self.assertTrue(removed["changed"])
         self.assertFalse(self.runner.loaded)
         self.assertEqual(self.runner.commands[-1], ["launchctl", "bootout", self.controller.service_target])
+
+    def test_unhealthy_orphan_status_preserves_uninstall_recovery(self):
+        self.controller.install()
+        self.controller.plist_path.unlink()
+        controller = ServiceController(
+            home=self.home,
+            cli_path=self.cli,
+            runner=self.runner,
+            uid=501,
+            health_probe=lambda: False,
+        )
+        status = controller.status()
+        self.assertEqual(status["status"], "running_unhealthy")
+        self.assertFalse(status["installed"])
+        self.assertIn("uninstall", status["next_action"])
+        self.assertIn("reinstall", status["next_action"])
 
     def test_stop_orphaned_job_reports_not_installed(self):
         self.controller.install()

@@ -5,6 +5,7 @@ browser, account, cart, reservation, booking, or payment surface.
 """
 import re
 import time
+import unicodedata
 
 from .local_tools import normalize_public_url
 from .providers import ProviderError
@@ -25,7 +26,9 @@ HIGH_CONFIDENCE_SECRET_PATTERNS = (
     re.compile(r'(?i)\bhf_[a-z0-9]{16,}\b'),
     re.compile(r'(?i)\bsk-[a-z0-9_-]{12,}\b'),
     re.compile(r'(?i)\b(?:gh[pousr]_[a-z0-9]{16,}|github_pat_[a-z0-9_]{16,}|glpat-[a-z0-9_-]{16,}|xox[baprs]-[a-z0-9-]{10,}|npm_[a-z0-9]{16,}|pypi-[a-z0-9_-]{16,}|AKIA[A-Z0-9]{16})\b'),
-    re.compile(r'(?i)(?:file://|(?<![\w:/\\])(?:~[/\\]|/[^\s/`"\'\[\](){}]+/[^\s`"\'\[\](){}]+)|(?<![\w])[a-z]:[/\\][^\s`"\'\[\](){}]+)'),
+    re.compile(r'(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])'),
+    re.compile(r'(?i)\b(?:path|file|source)\s*:\s*(?:~?[/\\]|[a-z]:[/\\])\S+'),
+    re.compile(r'(?i)(?:file://|(?<!:)/{2}[^/\s`"\'\[\](){}]+/[^\s`"\'\[\](){}]+|(?<!\\)\\{2}[^\\\s`"\'\[\](){}]+\\[^\s`"\'\[\](){}]+|(?<![\w:/\\])(?:~[/\\]|/[^\s/`"\'\[\](){}]+/[^\s`"\'\[\](){}]+)|(?<![\w])[a-z]:[/\\][^\s`"\'\[\](){}]+)'),
 )
 CREDENTIAL_LABEL = r'(?:password|passwd|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|secret)'
 LABEL_OCCURRENCE = re.compile(rf'(?i)\b{CREDENTIAL_LABEL}\b')
@@ -54,6 +57,7 @@ TOTAL_VALUE_PATTERNS = (
 DYNAMIC_DISQUALIFIER = re.compile(
     r'(?i)\b(?:may|might|could|can|should|would|possibly|probably|likely|expected|estimated|estimate|approximately|approximate|about|around|roughly|range|ranges|ranging|between|except|projected|potential|check|subject to|up to|at least|at most|starting at|starts at|if|unless|when|upon|provided|on request|depending on)\b|'
     r'\b(?:is|are|was|were|be|been|has|have)\s+not\b|'
+    r'\b(?:(?:for|to)\s+(?:loyalty\s+)?members?\s+only|(?:members?|loyalty)[- ]only|with\s+(?:an?\s+)?membership|only\s+(?:for|to)\s+(?:loyalty\s+)?members?)\b|'
     r'확인\s*필요|변동\s*가능|예상|추정|약\s*\d'
 )
 NON_ASSERTIVE_DYNAMIC = re.compile(
@@ -83,6 +87,18 @@ INVENTORY_METADATA = re.compile(
     r'(?i)\b(?:stock|inventory|room|rooms|ticket|tickets|seat|seats)\s+'
     r'(?:information|details|data|status)\b[^.!?]{0,25}\b(?:available|unavailable)\b'
 )
+ADJACENT_QUALIFIER_ONLY = re.compile(
+    r'(?i)^\s*(?:estimated|estimate|approximately|approximate|about|around|roughly|possibly|probably|likely|expected|projected|potential|'
+    r'(?:only\s+)?(?:if|unless|when|upon|provided)\b[^.!?]*|subject\s+to\b[^.!?]*|on\s+request|depending\s+on\b[^.!?]*|'
+    r'before\s+[^.!?]*(?:tax|taxes|vat|fee|fees|charge|charges)|excluding\s+[^.!?]*(?:tax|taxes|vat|fee|fees|charge|charges)|'
+    r'plus\s+[^.!?]*(?:tax|taxes|vat|fee|fees|charge|charges)|(?:tax|taxes|vat|fee|fees|charge|charges)\s+(?:not\s+included|excluded|extra|additional)|'
+    r'(?:for|to)\s+(?:loyalty\s+)?members?\s+only|(?:members?|loyalty)[- ]only|with\s+(?:an?\s+)?membership)\s*[.!?]?\s*$'
+)
+DYNAMIC_SUBJECT_PATTERNS = {
+    'fee': FACT_PATTERNS['fee'],
+    'inventory': re.compile(r'(?i)\b(?:availability|inventory|stock|room|rooms|ticket|tickets|seat|seats|product|products|item|items)\b|재고|매진|예약'),
+    'payable_total': FACT_PATTERNS['payable_total'],
+}
 
 
 def validate_public_query(query, query_source):
@@ -140,11 +156,15 @@ def _qualified_dynamic(name, evidence):
     for row in evidence:
         units=_sentences(row['evidence_excerpt'])
         for text in row['observed_details'][name]:
-            context=text
+            context_units=[text]
             try: position=units.index(text)
             except ValueError: position=-1
             if position >= 0:
-                context=' '.join(units[max(0,position-1):position+2])
+                for neighbor in units[max(0,position-1):position]+units[position+1:position+2]:
+                    if (ADJACENT_QUALIFIER_ONLY.search(neighbor) or
+                            DYNAMIC_SUBJECT_PATTERNS[name].search(neighbor)):
+                        context_units.append(neighbor)
+            context=' '.join(context_units)
             if (text.rstrip().endswith('?') or NON_ASSERTIVE_DYNAMIC.search(text) or
                     DYNAMIC_DISQUALIFIER.search(context) or INCOMPLETE_TOTAL.search(context)): continue
             tied=(name == 'inventory')
@@ -160,7 +180,12 @@ def _qualified_dynamic(name, evidence):
 
 
 def _normalized_search_text(value, limit):
-    return re.sub(r'[\s\x00-\x1f\x7f-\x9f]+',' ',str(value)).strip()[:limit]
+    clean=''.join(
+        '' if unicodedata.category(character) == 'Cf' else
+        ' ' if character.isspace() or unicodedata.category(character) == 'Cc' else character
+        for character in str(value)
+    )
+    return re.sub(r' +',' ',clean).strip()[:limit]
 
 
 class PublicResearch:

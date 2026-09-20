@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 import hashlib
 import json
+import threading
 
 from personal_agent.calendar import (
     CALENDAR_CONNECTOR_ID,
@@ -203,6 +204,34 @@ class CalendarTests(unittest.TestCase):
             )
         self.assertEqual(changed.exception.reason,"scope-denied")
         self.assertEqual(changed.exception.recovery,"reconnect")
+
+    def test_query_dispatch_is_ordered_before_concurrent_revocation(self):
+        authority_checked=threading.Event()
+        allow_dispatch=threading.Event()
+        transition_finished=threading.Event()
+        original_authorize=self.calendar._authorize
+
+        def paused_authorize(*args):
+            snapshot=original_authorize(*args)
+            authority_checked.set()
+            self.assertTrue(allow_dispatch.wait(1))
+            return snapshot
+
+        self.calendar._authorize=paused_authorize
+        query=threading.Thread(target=lambda:self.calendar.query(
+            "owner","2026-09-21T00:00:00+09:00","2026-09-28T00:00:00+09:00","Asia/Seoul"))
+        query.start();self.assertTrue(authority_checked.wait(1))
+
+        def revoke():
+            self.registry.transition("owner",CALENDAR_CONNECTOR_ID,ConnectorState.DISCONNECTED)
+            transition_finished.set()
+
+        revocation=threading.Thread(target=revoke);revocation.start()
+        self.assertFalse(transition_finished.wait(.05))
+        allow_dispatch.set();query.join(1);revocation.join(1)
+        self.assertFalse(query.is_alive());self.assertFalse(revocation.is_alive())
+        self.assertEqual([call[0] for call in self.provider.calls],["query"])
+        self.assertTrue(transition_finished.is_set())
 
     def test_create_exact_preview_one_time_approval_and_idempotency(self):
         draft = self.calendar.draft_create(EVENT, "owner")

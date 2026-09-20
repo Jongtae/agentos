@@ -143,6 +143,25 @@ class GoogleCalendarTests(unittest.TestCase):
                     calendar.query("2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", "UTC", 10)
                 self.assertEqual((error.exception.reason, error.exception.effect), (reason, "none"))
 
+    def test_query_rejects_over_limit_and_unbounded_provider_fields(self):
+        event={
+            "id":"event-1","summary":"review",
+            "start":{"dateTime":"2026-01-01T00:00:00Z"},
+            "end":{"dateTime":"2026-01-01T01:00:00Z"},
+        }
+        cases=(
+            {"items":[event,event]},
+            {"items":[{**event,"summary":"x"*1001}]},
+            {"items":[{**event,"id":"x"*1025}]},
+            {"items":[{**event,"status":7}]},
+        )
+        for response in cases:
+            with self.subTest(response_size=len(response["items"])):
+                calendar=GoogleCalendar(lambda *_args,response=response:response)
+                with self.assertRaises(GoogleCalendarError) as malformed:
+                    calendar.query("2026-01-01T00:00:00Z","2026-01-02T00:00:00Z","UTC",1)
+                self.assertEqual(malformed.exception.reason,"malformed-response")
+
     def test_write_timeout_server_failure_and_malformed_are_unknown(self):
         transports = (
             (lambda *_: (_ for _ in ()).throw(TimeoutError()), "provider-timeout"),

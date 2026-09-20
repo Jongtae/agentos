@@ -90,6 +90,8 @@ class GoogleCalendar:
             raise GoogleCalendarError("provider-error", "unknown" if mutation else "none") from None
 
     def query(self, time_min: str, time_max: str, timezone: str, max_results: int) -> list[dict]:
+        if isinstance(max_results, bool) or not isinstance(max_results, int) or not 1 <= max_results <= 100:
+            raise GoogleCalendarError("malformed-response")
         query = urlencode(
             {
                 "timeMin": time_min,
@@ -110,6 +112,8 @@ class GoogleCalendar:
         )
         if not isinstance(response, dict) or not isinstance(response.get("items"), list):
             raise GoogleCalendarError("malformed-response")
+        if len(response["items"]) > max_results:
+            raise GoogleCalendarError("malformed-response")
         events = []
         for item in response["items"]:
             if (
@@ -122,17 +126,30 @@ class GoogleCalendar:
                 raise GoogleCalendarError("malformed-response")
             start = item["start"].get("dateTime", item["start"].get("date"))
             end = item["end"].get("dateTime", item["end"].get("date"))
-            if not isinstance(start, str) or not isinstance(end, str):
+            optional = {
+                key: item.get(key, "")
+                for key in ("etag", "summary", "location", "status")
+            }
+            if (
+                len(item["id"]) > 1024
+                or not isinstance(start, str) or not 1 <= len(start) <= 128
+                or not isinstance(end, str) or not 1 <= len(end) <= 128
+                or any(not isinstance(value, str) for value in optional.values())
+                or len(optional["etag"]) > 1024
+                or len(optional["summary"]) > 1000
+                or len(optional["location"]) > 1000
+                or len(optional["status"]) > 64
+            ):
                 raise GoogleCalendarError("malformed-response")
             events.append(
                 {
                     "id": item["id"],
-                    "etag": item.get("etag", "") if isinstance(item.get("etag", ""), str) else "",
-                    "summary": item.get("summary", "") if isinstance(item.get("summary", ""), str) else "",
+                    "etag": optional["etag"],
+                    "summary": optional["summary"],
                     "start": start,
                     "end": end,
-                    "location": item.get("location", "") if isinstance(item.get("location", ""), str) else "",
-                    "status": item.get("status", "") if isinstance(item.get("status", ""), str) else "",
+                    "location": optional["location"],
+                    "status": optional["status"],
                 }
             )
         return events

@@ -375,6 +375,7 @@ class CalendarTests(unittest.TestCase):
         restored = CalendarCreate(self.store, lambda *_: self.fail("portable evidence dispatched"))
         status = restored.status("portable", "restored-owner")
         self.assertEqual(status["state"], "created")
+        self.assertEqual(status["action"], "unknown")
         self.assertEqual(status["result"], {"id": "event-1"})
         self.assertNotIn("restored-owner", str(restored._rows()))
 
@@ -392,6 +393,25 @@ class CalendarTests(unittest.TestCase):
         self.assertEqual(uncertain["state"], "outcome-unknown")
         self.assertEqual(uncertain["effect"], "unknown")
         self.assertEqual(uncertain["recovery"], "inspect-calendar-before-retry")
+
+        for pending_state in ("awaiting-approval", "approved"):
+            with self.subTest(pending_state=pending_state):
+                ident = "pending-" + pending_state
+                self.store.put(
+                    "calendar_create",
+                    {
+                        ident: {
+                            "id": ident,
+                            "state": pending_state,
+                            "hash": "redacted-hash",
+                        }
+                    },
+                )
+                quarantined = restored.status(ident, "restored-owner")
+                self.assertEqual(quarantined["state"], "expired")
+                self.assertEqual(quarantined["action"], "unknown")
+                self.assertEqual(quarantined["error_class"], "restored-approval-quarantined")
+                self.assertEqual(quarantined["recovery"], "request-new-approval")
 
     def test_write_authority_check_and_executing_commit_share_registry_guard(self):
         draft = self.calendar.draft_create(EVENT, "owner")

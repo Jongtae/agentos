@@ -280,39 +280,52 @@ class CalendarConnector:
             raise CalendarError("draft-not-found")
         owner_key = _owner_key(owner)
         stored_owner = row.get("owner")
-        if "action" not in row:
-            if "payload" not in row:
-                portable_fields = {"id", "state", "hash", "error_class", "result"}
-                portable_state = row.get("state")
-                if (
-                    not set(row).issubset(portable_fields)
-                    or portable_state not in {
-                        "created", "completed", "failed", "expired", "executing", "outcome-unknown"
-                    }
-                ):
-                    raise CalendarError("invalid-stored-state")
-                # Portable restore intentionally retains only terminal,
-                # content-free recovery evidence. Rebind that evidence to the
-                # restored owner without manufacturing executable authority.
+        if "payload" not in row:
+            portable_fields = {
+                "id", "state", "hash", "error_class", "result", "action", "portable_evidence"
+            }
+            portable_state = row.get("state")
+            if (
+                not set(row).issubset(portable_fields)
+                or portable_state not in {
+                    "awaiting-approval", "approved", "created", "completed", "failed",
+                    "expired", "executing", "outcome-unknown",
+                }
+            ):
+                raise CalendarError("invalid-stored-state")
+            portable_action = row.get("action")
+            if portable_action not in _ACTIONS:
+                portable_action = "unknown"
+            quarantined_approval = portable_state in {"awaiting-approval", "approved"}
+            row.update(
+                action=portable_action,
+                payload={},
+                event_id="",
+                event_version="",
+                owner=owner_key,
+                state=(
+                    "expired"
+                    if quarantined_approval
+                    else "outcome-unknown" if portable_state == "executing" else portable_state
+                ),
+                effect=(
+                    "unknown"
+                    if portable_state in {"executing", "outcome-unknown"}
+                    else "observed" if isinstance(row.get("result"), dict) else "none"
+                ),
+                portable_evidence=True,
+            )
+            if portable_state == "executing":
+                row["recovery"] = "inspect-calendar-before-retry"
+            elif quarantined_approval:
                 row.update(
-                    action="create",
-                    payload={},
-                    event_id="",
-                    event_version="",
-                    owner=owner_key,
-                    state="outcome-unknown" if portable_state == "executing" else portable_state,
-                    effect=(
-                        "unknown"
-                        if portable_state in {"executing", "outcome-unknown"}
-                        else "observed" if isinstance(row.get("result"), dict) else "none"
-                    ),
-                    portable_evidence=True,
+                    error_class="restored-approval-quarantined",
+                    recovery="request-new-approval",
                 )
-                if portable_state == "executing":
-                    row["recovery"] = "inspect-calendar-before-retry"
-                rows[ident] = row
-                self._put(rows)
-                return row
+            rows[ident] = row
+            self._put(rows)
+            return row
+        if "action" not in row:
             # The pre-PA1 CalendarCreate schema stored a raw owner (or None)
             # and did not include action/effect fields. Normalize one legacy
             # row atomically when its historical owner next accesses it.

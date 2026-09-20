@@ -106,7 +106,8 @@ For every delegated worktree, record in the issue/PR or ledger:
 - base `main` SHA;
 - declared owned files;
 - requested worker/model/reasoning when material;
-- accepted/observed execution setting when available;
+- tool-accepted model/reasoning setting when observable;
+- observed execution model/reasoning setting when observable, otherwise explicit `unknown`;
 - targeted and full validation actually run;
 - implementation state;
 - PR/head SHA;
@@ -130,7 +131,7 @@ These profiles describe required capability/risk handling. Exact model names are
 
 If an exact preferred model/effort is unavailable, use the closest available capability level that is appropriate. Do not block safe progress merely because a preferred model name is unavailable.
 
-Never claim that a model or reasoning effort was used unless the execution environment accepted or exposed that setting. When observable, record requested and accepted/observed settings separately.
+Never claim that a model or reasoning effort was actually used merely because a tool accepted the request. Record three distinct fields when material: `requested`, `tool_accepted`, and `observed_execution`. If the environment does not expose the setting actually used for execution, record `observed_execution: unknown`; do not promote `tool_accepted` into observed evidence.
 
 ### Initial PA1 routing
 

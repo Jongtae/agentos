@@ -1,6 +1,6 @@
 # Personal Assistant Experience and Scoped Attention
 
-> **Design candidate v0.2 — 2026-09-20. PLANNING ONLY; runtime implementation NOT ACTIVATED.**
+> **Design candidate v0.3 — 2026-09-20. PLANNING ONLY; runtime implementation NOT ACTIVATED.**
 > Discussion: [#381](https://github.com/Jongtae/personal-agentos/issues/381). Documentation work: [#383](https://github.com/Jongtae/personal-agentos/issues/383).
 > Baseline inspected: `c6a78466ea82cfc90d79d434c733ccab37339039`. This document does not replace the current single-owner architecture or migrate v0.1 schemas.
 
@@ -14,13 +14,39 @@ Only these planning documents are changed by this work. No production source, sc
 
 ## 1. Product outcome
 
-The owner says an ordinary sentence, receives a useful prepared option, and changes it with a short follow-up rather than repeatedly supplying their profile and coordinating people manually. An assistant can prepare before being asked **only within a previously assigned responsibility and current authority**. It speaks when useful, not merely because it has generated another idea.
+The owner says an ordinary sentence, receives a useful prepared option, and changes it with a short follow-up rather than repeatedly supplying their profile and coordinating people manually. Over time, the assistant should learn from permitted context and confirmed outcomes so that the owner has less explaining, choosing, relaying and checking to do. Within an accepted continuing responsibility and current authority it can prepare or act without decomposing every harmless step back into another approval question. Outside that responsibility it may notice a repeated burden and **propose** taking it on, but observation alone never activates authority. It speaks when useful, not merely because it has generated another idea.
 
 One installation may eventually host several people, while each person has their own coherent assistant experience. Household, company, school and other collaborations are overlapping relationships, not a global shared memory. A household installation is a deployment hypothesis, not a forecast that every household will adopt the product.
 
 The system must also work for someone with no public profile, no connected email/calendar and no peers. Start with the present request and permitted conversation; ask only missing decision-critical questions; build optional persistent context through explicit owner choices. Public self-research and social discovery are not prerequisites or defaults. A lack of external connectors should narrow capabilities honestly, not make ordinary dialogue unusable.
 
 Product identity remains **owner-authoritative Personal AI Kernel + Agent Distribution Platform**. This design improves the default experience without replacing that identity, the useful file-workspace path or the package ecosystem with a family-only shopping assistant.
+
+## 1.1 Enduring personal-assistant principles — candidate product constitution
+
+These are the proposed **stable product promises** behind the mechanisms in this document. They are intentionally more durable than the current Attention data model, ranking algorithm, model provider or UI. A better implementation may replace Attention or a mandate representation; it should not casually reverse these promises.
+
+**PA-P1 — Reduce the owner's burden, not merely complete internal steps.** Optimize for less repeated explanation, menu/list triage, manual relay, follow-up checking and avoidable decision work. Search, delegation, notification or queue insertion is not success unless it advances the user's intended outcome to the promised boundary. A blocked or partial result remains explicit.
+
+**PA-P2 — Learn useful context without collapsing fact, inference, preference and temporary state.** Reuse permitted, still-valid context and confirmed outcomes so the assistant improves over time. Keep recommendations separate from actual choices, today's exception separate from durable preference, one family member's preference separate from another's, home location separate from current location, and model inference separate from authoritative Memory.
+
+**PA-P3 — Be proactive inside accepted responsibility, and ask only for genuinely new judgment or authority.** Once the user has assigned an outcome and bounded scope, resolve routine sub-decisions with available evidence and allowed tools rather than asking permission for every harmless step. If information can be obtained through already-authorized retrieval, retrieve it before asking the user. Ask when the user's intent, another principal's commitment, a material constraint or authority must actually change.
+
+**PA-P4 — Treat human attention as a scarce resource.** Preparing, executing and interrupting are separate decisions. Normal progress may remain silent or appear on the next relevant request; meaningful exceptions, deadline conflicts and decisions can justify interruption under policy. Silence is not success when an assigned outcome is predictably going to fail.
+
+**PA-P5 — Preserve context boundaries and source authority across people and relationships.** Personal, household, company, school and other scopes do not merge merely because they share a device, person, model or peer. Share only the permitted projection required for the collaboration. The requester's authorized source governs what they requested; counterpart commitments, jointly accepted terms and external observations retain their own authorities.
+
+**PA-P6 — Tell the truth about observed state and make correction, pause and recovery easy.** Requested, received, accepted, prepared, carted, ordered, delivered, failed and unknown are different states. Do not turn a timeout into success or a local cancellation into an external undo. A short correction should update only the intended scope and invalidate dependent preparation without forcing the user to restart the whole conversation.
+
+**PA-P7 — Personalization is per person; durable state survives replaceable workers.** Tone, formality, preferred address, verbosity and reaction style are assistant settings. Context, Memory, responsibilities, Work, Artifacts, Evidence and authority belong to AgentOS/principals rather than a particular LLM, subscription CLI, channel or specialist. A future multi-principal installation must preserve this attribution during migration.
+
+### Principles versus mechanisms
+
+These principles are intended to provide **product constancy**. The implementation remains free to evolve. \`Attention\`, \`Responsibility mandate\`, a particular event loop, A2A, BDI-inspired vocabulary, notification ranking, model choice and storage layout are mechanisms or candidate contracts, not constitutional requirements by themselves.
+
+When a future spec or PR materially affects the assistant experience, it should identify the relevant PA-P principles and demonstrate both sides of the requirement: useful allowed behavior and denied/contained unauthorized behavior. A change that lowers cost or simplifies code but causes repeated questions, lost context, unnecessary interruptions or hidden authority expansion is not automatically an improvement.
+
+Adopting these principles into the canonical product/development constitution is a **separate governance change**. In particular, the current canonical development constitution says “one owner, one durable personal state”; future multi-principal support must amend or qualify that rule explicitly rather than treating this planning document as a silent migration.
 
 ## 2. Corrected architecture: a policy-controlled loop, not a linear autonomy ladder
 
@@ -260,7 +286,14 @@ A sleeping/offline laptop cannot perform local work. On recovery, reevaluate use
 | REQ-19 | Restart/offline behavior expires obsolete candidates and preserves unresolved obligations | S-06, S-12 |
 | REQ-20 | Feedback/correction changes only its intended scope; no automatic memory/permission expansion | S-02, S-07 |
 | REQ-21 | Reuse current primitives and retain source-controlled compatibility/migration boundaries | S-13 |
-| REQ-22 | Separate source inspection, deterministic replay, model quality, live channels and real effects | S-00–S-13 |
+| REQ-22 | Separate source inspection, deterministic replay, model quality, live channels and real effects | S-00–S-14 |
+| REQ-23 | Measure success by reduced owner explanation/decision/relay/checking burden at the promised outcome boundary, not internal activity counts | S-01, S-03, S-05, S-14 |
+| REQ-24 | Permitted learning improves future assistance while keeping recommendation, actual outcome, temporary state, durable preference and person-specific facts distinct | S-01, S-02, S-10, S-14 |
+| REQ-25 | Within accepted responsibility, resolve routine decisions using current evidence/allowed retrieval; ask only for missing material judgment or new authority | S-01, S-03, S-05, S-14 |
+| REQ-26 | Preparation/execution/interaction priorities are distinct; user attention is budgeted and meaningful exceptions are not suppressed | S-01, S-06, S-07, S-14 |
+| REQ-27 | The assistant may propose taking on a repeated burden but cannot silently convert observation or habit into a standing responsibility | S-00, S-07, S-10, S-14 |
+| REQ-28 | Product-principle traceability is part of future specs/evals while mechanism choice remains replaceable | S-00–S-14 |
+| REQ-29 | Future multi-principal durable state is attributed per principal and migrated explicitly from the current single-owner contract | S-08, S-13 |
 
 ## 11. Current-code seams and proposed changes
 
@@ -281,6 +314,8 @@ This is a mapping of inspected source and proposed responsibility, not an implem
 Attention and mandates can initially be typed local records/projections linked to existing primitives. They do not each require a microservice. Physical tables/modules are deliberately not finalized. No b3os dependency, message broker cluster, global vector memory, blanket browser control, mandatory BDI runtime or new model framework is required for the first slice.
 
 ## 12. Staged adoption and evidence gates
+
+Before any stage is promoted, review its impact against PA-P1–PA-P7. The principles do not replace authority/security gates; they add the product-usefulness invariant that permitted assistance should actually reduce owner work. A stage that only adds internal machinery or notifications without improving a named scenario should not advance on that evidence alone.
 
 **Stage 0 — this documentation candidate.** Resolve product semantics using scenario traces and decision records. No feature execution or claim of independent review. Separate canonical adoption from merging a clearly marked proposal.
 

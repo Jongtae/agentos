@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="900" viewBox="0 0 1800 900" role="img" aria-labelledby="title desc">
+  <title id="title">BDI-inspired attention lens for Personal AgentOS</title>
+  <desc id="desc">Conceptual mapping from request, belief view and desire through attention and intention to enforced runtime work and artifacts, with a feedback loop that does not imply automatic durable memory.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#061521"/><stop offset="1" stop-color="#0b2632"/></linearGradient>
+    <linearGradient id="focus" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#174a45"/><stop offset="1" stop-color="#11394c"/></linearGradient>
+  </defs>
+  <rect width="1800" height="900" fill="url(#bg)"/>
+  <text x="70" y="80" fill="#f5fbff" font-family="Arial,Helvetica,sans-serif" font-size="48" font-weight="700">BDI-inspired attention lens</text>
+  <text x="70" y="120" fill="#b8cad6" font-family="Arial,Helvetica,sans-serif" font-size="21">Conceptual design lens — not a canonical runtime API, hidden chain-of-thought, or shipped state machine.</text>
+
+  <g font-family="Arial,Helvetica,sans-serif">
+    <rect x="60" y="220" rx="20" width="185" height="300" fill="#0e2635" stroke="#2b566b"/>
+    <text x="87" y="262" fill="#63e6be" font-size="20" font-weight="700">Owner request</text>
+    <text x="87" y="304" fill="#dce9ef" font-size="16"><tspan x="87">Question, goal,</tspan><tspan x="87" dy="24">or correction.</tspan></text>
+
+    <rect x="270" y="220" rx="20" width="240" height="300" fill="#0e2635" stroke="#2b566b"/>
+    <text x="298" y="262" fill="#63e6be" font-size="20" font-weight="700">Belief view</text>
+    <text x="298" y="298" fill="#dce9ef" font-size="15"><tspan x="298">Authorized ContextSnapshot</tspan><tspan x="298" dy="25">Accepted Memory</tspan><tspan x="298" dy="25">Evidence / prior artifacts</tspan><tspan x="298" dy="25">Current capability + Grant facts</tspan></text>
+    <text x="298" y="430" fill="#83a7b9" font-size="14"><tspan x="298">ContextSnapshot is task-scoped.</tspan><tspan x="298" dy="22">It is not automatic durable Memory.</tspan></text>
+
+    <rect x="535" y="220" rx="20" width="210" height="300" fill="#0e2635" stroke="#2b566b"/>
+    <text x="563" y="262" fill="#63e6be" font-size="20" font-weight="700">Desire</text>
+    <text x="563" y="300" fill="#dce9ef" font-size="16"><tspan x="563">The owner’s wanted</tspan><tspan x="563" dy="24">outcome and current</tspan><tspan x="563" dy="24">success criteria.</tspan></text>
+
+    <rect x="770" y="185" rx="24" width="260" height="370" fill="url(#focus)" stroke="#59e3b7" stroke-width="3"/>
+    <text x="800" y="238" fill="#7ff0c6" font-size="24" font-weight="700">Attention</text>
+    <text x="800" y="280" fill="#f5fbff" font-size="17">Select what matters for this step:</text>
+    <text x="800" y="324" fill="#dce9ef" font-size="16">• What is relevant now?</text>
+    <text x="800" y="360" fill="#dce9ef" font-size="16">• What is authorized to use?</text>
+    <text x="800" y="396" fill="#dce9ef" font-size="16">• What destination/effect is involved?</text>
+    <text x="800" y="432" fill="#dce9ef" font-size="16">• Does the next step need approval?</text>
+    <text x="800" y="492" fill="#a8c8d4" font-size="14"><tspan x="800">A routing/focus concept,</tspan><tspan x="800" dy="21">not a new source of authority.</tspan></text>
+
+    <rect x="1055" y="220" rx="20" width="215" height="300" fill="#0e2635" stroke="#2b566b"/>
+    <text x="1083" y="262" fill="#63e6be" font-size="20" font-weight="700">Intention</text>
+    <text x="1083" y="300" fill="#dce9ef" font-size="16"><tspan x="1083">Current bounded plan</tspan><tspan x="1083" dy="24">and next executable step.</tspan></text>
+
+    <rect x="1295" y="220" rx="20" width="215" height="300" fill="#0e2635" stroke="#2b566b"/>
+    <text x="1323" y="262" fill="#63e6be" font-size="19" font-weight="700">Runtime boundary</text>
+    <text x="1323" y="300" fill="#dce9ef" font-size="15"><tspan x="1323">Capability mediation</tspan><tspan x="1323" dy="24">Current Grant checks</tspan><tspan x="1323" dy="24">Approval where required</tspan><tspan x="1323" dy="24">Selected bounded runtime</tspan></text>
+
+    <rect x="1535" y="220" rx="20" width="205" height="300" fill="#0e2635" stroke="#2b566b"/>
+    <text x="1563" y="262" fill="#63e6be" font-size="19" font-weight="700">Work + result</text>
+    <text x="1563" y="300" fill="#dce9ef" font-size="15"><tspan x="1563">Work / Event</tspan><tspan x="1563" dy="24">Artifact</tspan><tspan x="1563" dy="24">Evidence</tspan><tspan x="1563" dy="24">Observed / unknown effects</tspan></text>
+  </g>
+
+  <g stroke="#5bc0eb" stroke-width="5" fill="none">
+    <path d="M245 370 H270"/><path d="M510 370 H535"/><path d="M745 370 H770"/><path d="M1030 370 H1055"/><path d="M1270 370 H1295"/><path d="M1510 370 H1535"/>
+  </g>
+  <g fill="#5bc0eb">
+    <polygon points="270,370 252,360 252,380"/><polygon points="535,370 517,360 517,380"/><polygon points="770,370 752,360 752,380"/><polygon points="1055,370 1037,360 1037,380"/><polygon points="1295,370 1277,360 1277,380"/><polygon points="1535,370 1517,360 1517,380"/>
+  </g>
+
+  <path d="M1638 535 C1638 670 390 690 390 545" stroke="#63e6be" stroke-width="4" fill="none"/>
+  <polygon points="390,535 380,554 400,554" fill="#63e6be"/>
+  <rect x="590" y="625" rx="18" width="880" height="105" fill="#0d2230" stroke="#356174"/>
+  <text x="1030" y="663" text-anchor="middle" fill="#dce9ef" font-family="Arial,Helvetica,sans-serif" font-size="17">Artifacts and Evidence may inform future task context.</text>
+  <text x="1030" y="696" text-anchor="middle" fill="#9fb6c3" font-family="Arial,Helvetica,sans-serif" font-size="16">A third party proposes a MemoryCandidate; policy / owner decides whether it becomes canonical Memory.</text>
+
+  <rect x="70" y="785" rx="16" width="1660" height="60" fill="#091c28" stroke="#25485a"/>
+  <text x="900" y="823" text-anchor="middle" fill="#a9becb" font-family="Arial,Helvetica,sans-serif" font-size="16">Canonical primitives remain: Owner · Context · Memory · Artifact · Capability · Runtime · Grant · Work · Event · Evidence</text>
+</svg>

@@ -221,13 +221,19 @@ class ServiceController:
             if not owned:
                 return False
         try:
-            return (
+            healthy = (
                 self.health_probe(timeout)
                 if self._production_health_probe
                 else self.health_probe()
             ) is True
         except Exception:
             return False
+        if healthy and self._production_health_probe:
+            try:
+                return self.listener_owner(pid)
+            except Exception:
+                return False
+        return healthy
 
     def status(self) -> dict[str, object]:
         observed = self._observed_status()

@@ -346,13 +346,14 @@ class ServiceControlTests(unittest.TestCase):
 
     def test_health_success_requires_listener_owned_by_launchd_pid(self):
         self.controller.install()
+        ownership = iter((True, False))
         controller = ServiceController(
             home=self.home,
             cli_path=self.cli,
             runner=self.runner,
             uid=501,
             health_probe=lambda _timeout: True,
-            listener_owner=lambda pid: pid == 9999,
+            listener_owner=lambda pid: pid == self.runner.pid and next(ownership),
         )
         controller._production_health_probe = True
         status = controller.status()

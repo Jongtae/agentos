@@ -1,6 +1,6 @@
 # Personal Assistant Decision and Research Ledger
 
-> **Design candidate v0.2 — 2026-09-20. Documentation only; runtime implementation NOT ACTIVATED.**
+> **Design candidate v0.3 — 2026-09-20. Documentation only; runtime implementation NOT ACTIVATED.**
 > [Experience/requirements](personal-assistant-experience.en.md) · [Scenarios](personal-assistant-scenarios.en.md)
 > [Discussion #381](https://github.com/Jongtae/personal-agentos/issues/381) · [Documentation work #383](https://github.com/Jongtae/personal-agentos/issues/383)
 
@@ -31,6 +31,8 @@ The repository account used to post a comment or commit is not proof the owner a
 | D-09 | Deepen Attention / Prepare / Interrupt / Act as the next design question. Source: owner's later discussion of the supplied structure, captured by [#383](https://github.com/Jongtae/personal-agentos/issues/383) | Approval to explore the concept, not approval of every lifecycle, mandate field or numeric threshold. REQ-06–REQ-11. |
 | D-10 | Public self-research cannot be the product's required source of personalization; assistants should interact inside real, permitted relationships rather than autonomously choosing contacts. Source: owner's post-article objection and current design request, captured by [#383](https://github.com/Jongtae/personal-agentos/issues/383) | Do not assert that ordinary users can never benefit from public data; require usefulness without it and make it optional. Do not automatically contact even a known person without covering authority. REQ-01, REQ-14. |
 | D-11 | Runtime implementation remains on hold; restored execution capacity alone does not activate a goal. [#381](https://github.com/Jongtae/personal-agentos/issues/381) | This later request enables bounded design documentation, not paid evaluation, background coding or product automation. |
+| D-12 | The owner accepted the revised product center: the assistant should increasingly understand the person through permitted context, proactively handle routine parts of delegated life/work, and reduce repeated explaining, deciding, relaying and checking rather than becoming a passive “safe chatbot.” Source: the follow-up design discussion consolidated in [#383](https://github.com/Jongtae/personal-agentos/issues/383#issuecomment-5748808831). | Proactivity stays bounded by source/scope/action authority; this does not authorize a specific algorithm, connector or hidden background service. PA-P1–PA-P6; REQ-23–REQ-27. |
+| D-13 | The owner explicitly asked that this thinking become durable principles so implementation, evolution and maintenance preserve the product's intent. [Owner direction](https://github.com/Jongtae/personal-agentos/issues/383#issuecomment-5748808831) | Product promises should have constancy; mechanisms remain replaceable. Canonical constitution adoption and the current single-owner invariant require a separate governance/adoption change. PA-P1–PA-P7; REQ-28–REQ-29. |
 
 Repository-sourced companion direction: [#382](https://github.com/Jongtae/personal-agentos/issues/382) makes Telegram the default conversation surface and local web a management utility. Treat it as that issue's successor plan, not a change implemented by these documents. Preserve current APIs/history; do not launch a second chat-client redesign.
 
@@ -80,6 +82,16 @@ Validate current authority/terms and commit action intent atomically within the 
 
 **Alternative not chosen:** b3os runtime dependency, global vector memory, mandatory BDI engine, simultaneous household federation and shopping launch. **Open:** exact resource limits and evidence-based promotion thresholds. **References:** REQ-18–REQ-22, S-06/S-11/S-13.
 
+### P-07 — use enduring product principles as a spec/evaluation gate, not as a frozen implementation
+
+**Status:** Assistant proposal implementing D-13 in this candidate. **Motivation:** A sequence of individually reasonable features can drift into a product that is safe but passive, proactive but intrusive, or technically correct while increasing owner work. The product needs a stable layer above mechanisms.
+
+Propose PA-P1–PA-P7 in the experience document as the candidate personal-assistant product constitution. Future assistant-facing specs and PRs identify the affected principles and show scenario evidence for useful allowed behavior as well as contained unauthorized behavior. Evaluation includes repeated explanation, unnecessary questions, manual relay/checking, interruption burden and correction effort—not merely tool-call success or notification counts.
+
+Attention, mandates, BDI vocabulary, A2A, ranking functions, storage tables, UI layouts and model providers remain replaceable. Replacing a mechanism is welcome when it preserves or improves the principles. Weakening a principle or changing multi-principal ownership semantics requires an explicit adoption/governance decision and migration impact review rather than an incidental feature PR.
+
+**Alternative not chosen:** freeze the current Attention architecture as the permanent product identity, or rely on general development/security rules without an assistant-experience invariant. **Open:** final constitutional wording, governance location and adoption timing. **References:** PA-P1–PA-P7, REQ-23–REQ-29, S-14.
+
 ## Supersession and clarification table
 
 | Earlier shorthand | Current qualified meaning | Source |
@@ -94,9 +106,19 @@ Validate current authority/terms and commit action intent atomically within the 
 | “Sunday 10:30 is salience” | Clock time is an observation; task relevance is evaluated from it | P-03 |
 | Useful public-profile research is the default | Optional scoped source; no-profile/no-connector usefulness is required | D-10/P-05 |
 | “BDI should be run” | Research analogy only; no BDI runtime selected or launched | P-06 |
+| “Only explicitly delegated work may be proactive” | Reactive help remains available without setup; repeated burdens may trigger a bounded proposal to take responsibility, but unattended preparation/action begins only after covering authority | D-12 + P-01/P-07 |
+| “The safest assistant asks whenever a decision appears” | Within accepted responsibility the assistant resolves routine sub-decisions using current evidence and allowed retrieval; it asks for genuinely new user judgment, counterpart commitment or authority | D-12 + PA-P3 |
+| “Silence is a successful attention policy” | Silence can be correct for routine progress, but failing to surface a credible deadline/failure exception can violate the assigned outcome | D-12 + PA-P4 |
+| “Attention is the permanent architecture” | Attention is a current mechanism/candidate contract; PA-P1–PA-P7 are the intended durable product promises | D-13 + P-07 |
 | #381 says no branch solely because it exists | The owner's later explicit design request scopes documentation branch/PR in #383; implementation hold unchanged | D-11 / #383 |
 
 The current canonical single-owner architecture and v0.1 schemas are **not superseded** by these proposal documents. A later explicit adoption/migration must identify exact clauses/versions changed and retain existing behavior. Neither doc length nor a merged proposal proves a runtime property.
+
+## Candidate product-principle status
+
+PA-P1–PA-P7 are now the v0.3 candidate's top-level assistant principles. They are stronger than ordinary design suggestions in this planning branch because D-13 explicitly asks for product constancy, but they are **not yet canonical repository constitution clauses**. The current canonical development constitution and single-owner architecture remain in force until a dedicated adoption issue analyzes conflicts, migration and evidence and receives the required review/owner approval.
+
+This distinction is intentional: implementers should use the principles to evaluate this candidate and future proposals, while no document in this branch may silently mutate shipped ownership or authority semantics.
 
 ## Research provenance and limitations
 

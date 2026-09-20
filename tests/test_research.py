@@ -150,6 +150,10 @@ class PublicResearchTests(unittest.TestCase):
             ('https://example.com/?sessionid=supersecret123456789','owner_public_request'),
             ('JSESSIONID=supersecret123456789','owner_public_request'),
             ('csrftoken=supersecret123456789','owner_public_request'),
+            ('PHPSESSID=supersecret123456789','owner_public_request'),
+            ('https://example.com/?connect.sid=supersecret123456789','owner_public_request'),
+            ('Basic dTpw','owner_public_request'),
+            ('PGPASSWORD=hunter2value','owner_public_request'),
             ('token=supersecret123456789','owner_public_request'),
             ('compare https://example.com/?token=supersecret123456789','owner_public_request'),
             ('compare https://example.com/?%74oken=supersecret123456789','owner_public_request'),
@@ -323,6 +327,7 @@ class PublicResearchTests(unittest.TestCase):
             'Grand total: USD 100 as of 2020.',
             'Service fee: USD 10 through December 2020.',
             'Rooms are available. This information is from 2020.',
+            'We do not guarantee a grand total of USD 100.',
         ):
             with self.subTest(content=content):
                 reader=Reader({'https://alpha.example/item':{
@@ -340,6 +345,13 @@ class PublicResearchTests(unittest.TestCase):
 
         reader=Reader({'https://alpha.example/item':{
             'url':'https://alpha.example/item','retrieved_at':2,
+            'content':'Rooms were unavailable in 2020, but rooms are available now.'}})
+        current=PublicResearch(search_result,reader,max_pages=1).run(
+            'travel_plan','museum plan',query_source='owner_public_request')
+        self.assertEqual(current['dynamic_facts']['inventory']['status'],'observed')
+
+        reader=Reader({'https://alpha.example/item':{
+            'url':'https://alpha.example/item','retrieved_at':2,
             'content':'Rooms were renovated in 2020; rooms are available.'}})
         current=PublicResearch(search_result,reader,max_pages=1).run(
             'travel_plan','museum plan',query_source='owner_public_request')
@@ -347,7 +359,8 @@ class PublicResearchTests(unittest.TestCase):
 
     def test_currency_amounts_without_price_meaning_are_not_labeled_prices(self):
         for content in ('Save USD 10 today.', 'Get a USD 25 credit with trade-in.',
-                        'The manufacturer donated USD 100.'):
+                        'The manufacturer donated USD 100.', 'The price dropped by USD 10.',
+                        'Price includes a USD 25 trade-in credit.'):
             with self.subTest(content=content):
                 reader=Reader({'https://alpha.example/item':{
                     'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
@@ -366,6 +379,7 @@ class PublicResearchTests(unittest.TestCase):
         for content in (
             'Rooms are available only for stays of three nights.',
             'Grand total: USD 100. Welcome. Grand total: USD 100. Taxes are extra.',
+            'Rooms are available. They are only for members.',
         ):
             with self.subTest(content=content):
                 reader=Reader({'https://alpha.example/item':{

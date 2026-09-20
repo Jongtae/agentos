@@ -3,6 +3,8 @@
 This module deliberately stops at evidence assembly.  It has no authenticated
 browser, account, cart, reservation, booking, or payment surface.
 """
+import base64
+import binascii
 import re
 import time
 import unicodedata
@@ -30,9 +32,10 @@ HIGH_CONFIDENCE_SECRET_PATTERNS = (
     re.compile(r'(?i)\b[a-z][a-z0-9+.-]*://[^\s/@]*@'),
     re.compile(r'(?i)\b(?:cookie|set-cookie)\s*:\s*\S+'),
     re.compile(r'(?i)\btoken\s*=\s*[^&\s]+'),
-    re.compile(r'(?i)\b(?:sessionid|jsessionid|csrftoken)\s*=\s*[^&\s]+'),
+    re.compile(r'(?i)\b(?:phpsessid|sessionid|jsessionid|csrftoken|connect\.sid)\s*=\s*[^&\s]+'),
     re.compile(r'(?i)\bsecret\s+[a-z0-9_-]{20,}\b'),
     re.compile(r'(?i)\b[A-Z][A-Z0-9_]{1,80}(?:_PASSWORD|_PASSWD|_SECRET|_SECRET_KEY|_PRIVATE_KEY|_CLIENT_SECRET|_TOKEN|_API_KEY|_ACCESS_KEY)\s*=\s*\S+'),
+    re.compile(r'(?i)\b(?:PGPASSWORD|MYSQL_PWD|REDISCLI_AUTH)\s*=\s*\S+'),
     re.compile(r'(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*(?![A-Za-z0-9_-])'),
     re.compile(
         r'(?i)\b(?:path|file|source)\s*(?::|=|,|;|->|\bis\b|\bas\b)\s*'
@@ -61,6 +64,11 @@ FACT_PATTERNS = {
     'inventory': re.compile(r'(?i)\b(?:in stock|out of stock|sold out)\b|\b(?:product|products|item|items|room|rooms|ticket|tickets|seat|seats|inventory|stock)\b[^.!?]{0,40}\b(?:available|unavailable)\b|\b(?:available|unavailable)\b[^.!?]{0,40}\b(?:product|products|item|items|room|rooms|ticket|tickets|seat|seats|inventory|stock)\b|재고\s*(?:있음|없음|보유)|매진|예약\s*가능'),
     'payable_total': re.compile(r'(?i)\b(?:total due|payable total|grand total|total price)\b|총\s*결제|결제\s*금액'),
 }
+PRICE_ADJUSTMENT = re.compile(
+    r'(?i)(?:\b(?:price|cost|fare|rate)\b|가격|요금)[^.!?]{0,45}'
+    r'\b(?:drop(?:ped)?|reduc(?:e|ed|tion)|decreas(?:e|ed)|discount(?:ed)?|'
+    r'trade[- ]in|credit|saving)\b'
+)
 FEE_VALUE_PATTERNS = (
     re.compile(r'(?i)(?:\b(?:fee|fees|tax|taxes|surcharge|resort fee|service charge)\b|수수료|세금|부가세)[^;.!?]{0,20}(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b|\b\d+(?:\.\d+)?\s*%|\b(?:none|zero|free|included|waived)\b|없음|무료|포함)'),
     re.compile(r'(?i)(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b|\b\d+(?:\.\d+)?\s*%)[^;.!?]{0,20}(?:\b(?:fee|fees|tax|taxes|surcharge|resort fee|service charge)\b|수수료|세금|부가세)'),
@@ -78,6 +86,8 @@ DYNAMIC_DISQUALIFIER = re.compile(
     r'(?i)\b(?:may|might|could|can|should|would|possibly|probably|likely|expected|estimated|estimate|approximately|approximate|about|around|roughly|range|ranges|ranging|between|except|projected|potential|check|subject to|up to|at least|at most|starting at|starts at|if|unless|when|upon|provided|on request|depending on)\b|'
     r'\b(?:(?:for|to)\s+(?:loyalty\s+)?members?\s+only|(?:members?|loyalty)[- ]only|with\s+(?:an?\s+)?membership|only\s+(?:for|to)\s+(?:loyalty\s+)?members?)\b|'
     r'\bonly\s+(?:for|to|with|on)\b|'
+    r'\b(?:do|does|did)\s+not\s+(?:guarantee|confirm|promise)\b|'
+    r'\b(?:not|never)\s+(?:guaranteed|confirmed|promised)\b|'
     r'확인\s*필요|변동\s*가능|예상|추정|약\s*\d'
 )
 NEGATED_DYNAMIC_ASSERTION = re.compile(r'(?i)\b(?:is|are|was|were|be|been|has|have)\s+not\b')
@@ -140,7 +150,7 @@ ADJACENT_QUALIFIER_ONLY = re.compile(
     r'(?:for|to)\s+(?:loyalty\s+)?members?\s+only|(?:members?|loyalty)[- ]only|with\s+(?:an?\s+)?membership)\s*[.!?]?\s*$'
 )
 ANAPHORIC_QUALIFIER = re.compile(
-    r'(?i)^\s*(?:this|that|it|these|those)\b[^.!?]{0,120}\b(?:may|might|could|can|possibly|probably|likely|'
+    r'(?i)^\s*(?:this|that|it|these|those|they)\b[^.!?]{0,120}\b(?:may|might|could|can|possibly|probably|likely|'
     r'expected|estimated|estimate|approximately|about|around|subject\s+to|depending\s+on|on\s+request|'
     r'only\s+(?:if|when|for|to)|appl(?:y|ies)\s+(?:if|when|only|to|for)|for\s+(?:loyalty\s+)?members?\s+only|'
     r'(?:does?|do)\s+not\s+include|doesn[\'’]t\s+include|excludes?)\b'
@@ -172,10 +182,14 @@ def validate_public_query(query, query_source):
     if bearer_value:
         bearer_token=bearer_value.group(1).strip('"\'.-_/@#$%^&*+=\\|<>`~').casefold()
         if bearer_token not in PUBLIC_CREDENTIAL_TOPICS: sensitive=True
-    basic_value=re.search(r'(?i)\bbasic\s+([^\s,;:!?()\[\]{}]{8,})',scan_query)
+    basic_value=re.search(r'(?i)\bbasic\s+([A-Za-z0-9+/]{4,}={0,2})\b',scan_query)
     if basic_value:
-        basic_token=basic_value.group(1).strip('"\'.-_/@#$%^&*+=\\|<>`~').casefold()
-        if basic_token not in PUBLIC_CREDENTIAL_TOPICS: sensitive=True
+        basic_token=basic_value.group(1)
+        try:
+            decoded=base64.b64decode(basic_token+'='*((-len(basic_token))%4),validate=True)
+        except (binascii.Error,ValueError):
+            decoded=b''
+        if b':' in decoded or basic_token.casefold() not in PUBLIC_CREDENTIAL_TOPICS: sensitive=True
     sensitive=sensitive or bool(LABEL_ASSIGNMENT.search(scan_query))
     labels=list(LABEL_OCCURRENCE.finditer(scan_query))
     if labels:
@@ -217,6 +231,8 @@ def _observed_details(content):
     _excerpt,sentences=_bounded_evidence(content)
     for sentence in sentences:
         for key,pattern in FACT_PATTERNS.items():
+            if key == 'price' and PRICE_ADJUSTMENT.search(sentence):
+                continue
             if pattern.search(sentence) and sentence not in details[key]:
                 details[key].append(sentence)
     return {key:(value if key in ('fee','inventory','payable_total') else value[:5])
@@ -252,7 +268,7 @@ def _qualified_dynamic(name, evidence):
             )
             fact_clauses=[part for part in re.split(r'(?i)\s*(?:;|,(?=\s*[A-Za-z])|\band\b|\bbut\b)\s*',classified_text)
                           if clause_pattern(part)]
-            historical=any(HISTORICAL_DYNAMIC.search(part) for part in fact_clauses or [classified_text])
+            historical=all(HISTORICAL_DYNAMIC.search(part) for part in fact_clauses or [classified_text])
             negated_assertion=bool(NEGATED_DYNAMIC_ASSERTION.search(context))
             explicit_no_charge=name == 'fee' and bool(FEE_NOT_CHARGED.search(classified_text))
             if (adjacent_condition or classified_text.rstrip().endswith('?') or NON_ASSERTIVE_DYNAMIC.search(classified_text) or

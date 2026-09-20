@@ -114,11 +114,14 @@ class PublicResearchTests(unittest.TestCase):
             ('compare C:/private/receipt.txt','owner_public_request'),
             ('compare [C:/private/receipt.txt]','owner_public_request'),
             ('eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.signature','owner_public_request'),
+            ('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.t-IDcSemACt8x4iTMCda8Yhe3iZaWbvV5XKSTbuAn0M','owner_public_request'),
             (r'compare \\server\private\receipt.txt','owner_public_request'),
             ('compare //server/private/receipt.txt','owner_public_request'),
             ('path:/root/.ssh/id_rsa','owner_public_request'),
             ('file:/root/.ssh/id_rsa','owner_public_request'),
             ('source:/home/alice/tax.pdf','owner_public_request'),
+            ('file: secrets.txt','owner_public_request'),
+            ('path: Documents/tax-return.pdf','owner_public_request'),
         ]
         for query,source in cases:
             with self.subTest(query=query),self.assertRaises(ValueError):
@@ -335,6 +338,19 @@ class PublicResearchTests(unittest.TestCase):
         self.assertNotIn('\x00',result['brief'])
         self.assertNotIn('\u202e',result['brief'])
         self.assertNotIn('\u2066',result['brief'])
+
+    def test_page_format_controls_are_preserved_as_evidence_but_not_rendered(self):
+        content='Grand total: USD 100\u202e. Service fee: USD 5\u2066.'
+        reader=Reader({'https://alpha.example/item':{
+            'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+        result=PublicResearch(search_result,reader,max_pages=1).run(
+            'travel_plan','museum plan',query_source='owner_public_request')
+        self.assertEqual(result['evidence'][0]['evidence_excerpt'],content)
+        self.assertIn('\u202e',result['dynamic_facts']['payable_total']['evidence'][0]['exact_text'])
+        self.assertNotIn('\u202e',result['brief'])
+        self.assertNotIn('\u2066',result['brief'])
+        self.assertIn('Grand total: USD 100.',result['brief'])
+        self.assertIn('Service fee: USD 5.',result['brief'])
 
     def test_unrelated_available_words_do_not_create_inventory_or_zero_fee_facts(self):
         for content in ('Customer service is available.','No fee information is available.',

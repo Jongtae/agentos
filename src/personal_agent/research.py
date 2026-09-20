@@ -26,8 +26,12 @@ HIGH_CONFIDENCE_SECRET_PATTERNS = (
     re.compile(r'(?i)\bhf_[a-z0-9]{16,}\b'),
     re.compile(r'(?i)\bsk-[a-z0-9_-]{12,}\b'),
     re.compile(r'(?i)\b(?:gh[pousr]_[a-z0-9]{16,}|github_pat_[a-z0-9_]{16,}|glpat-[a-z0-9_-]{16,}|xox[baprs]-[a-z0-9-]{10,}|npm_[a-z0-9]{16,}|pypi-[a-z0-9_-]{16,}|AKIA[A-Z0-9]{16})\b'),
-    re.compile(r'(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])'),
-    re.compile(r'(?i)\b(?:path|file|source)\s*:\s*(?:~?[/\\]|[a-z]:[/\\])\S+'),
+    re.compile(r'(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(?![A-Za-z0-9_-])'),
+    re.compile(
+        r'(?i)\b(?:path|file|source)\s*:\s*'
+        r'(?:~?[/\\]\S+|[a-z]:[/\\]\S+|[^\s`"\'\[\](){}]+[/\\][^\s`"\'\[\](){}]+|'
+        r'[^\s`"\'\[\](){}]+\.[a-z0-9]{1,16}\b)'
+    ),
     re.compile(r'(?i)(?:file://|(?<!:)/{2}[^/\s`"\'\[\](){}]+/[^\s`"\'\[\](){}]+|(?<!\\)\\{2}[^\\\s`"\'\[\](){}]+\\[^\s`"\'\[\](){}]+|(?<![\w:/\\])(?:~[/\\]|/[^\s/`"\'\[\](){}]+/[^\s`"\'\[\](){}]+)|(?<![\w])[a-z]:[/\\][^\s`"\'\[\](){}]+)'),
 )
 CREDENTIAL_LABEL = r'(?:password|passwd|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|secret)'
@@ -188,6 +192,16 @@ def _normalized_search_text(value, limit):
     return re.sub(r' +',' ',clean).strip()[:limit]
 
 
+def _rendered_evidence_text(value):
+    """Remove display controls from untrusted page text without changing stored evidence."""
+    clean=''.join(
+        '' if unicodedata.category(character) == 'Cf' else
+        ' ' if character.isspace() or unicodedata.category(character) == 'Cc' else character
+        for character in str(value)
+    )
+    return re.sub(r' +',' ',clean).strip()
+
+
 class PublicResearch:
     """Search, select, and read a small public source set using injected tools."""
     def __init__(self, search, page_reader, clock=time.time, max_pages=MAX_RESEARCH_PAGES):
@@ -268,11 +282,11 @@ class PublicResearch:
                 emitted=0
                 for text in row['observed_details'][kind]:
                     if any(FACT_PATTERNS[name].search(text) for name in dynamic_names): continue
-                    lines.append(f"  - {kind}: {text}");emitted+=1
+                    lines.append(f"  - {kind}: {_rendered_evidence_text(text)}");emitted+=1
                     if emitted == 2: break
         for name,label in (('fee','fee'),('inventory','inventory'),('payable_total','payable_total')):
             for item in dynamic[name]['evidence'][:5]:
-                lines.append(f"- [{item['source_id']}] {label}: {item['exact_text']}")
+                lines.append(f"- [{item['source_id']}] {label}: {_rendered_evidence_text(item['exact_text'])}")
         for name,label in (('inventory','재고/예약 가능 여부'),('payable_total','총 결제액'),('fee','추가 수수료')):
             if dynamic[name]['status']=='unknown': lines.append(f'- {label}: 확인된 공개 근거가 없어 알 수 없음')
         lines.append('- 이 결과는 비교/계획용이며 구매, 예약, 결제나 재고 확보를 의미하지 않습니다.')

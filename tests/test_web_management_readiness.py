@@ -1,6 +1,8 @@
-"""Non-executing WEB-ADMIN-01 readiness regressions (issue #379)."""
+"""WEB-ADMIN-01 governance and interaction regressions."""
 import json
 from pathlib import Path
+import shutil
+import subprocess
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,6 +46,57 @@ class WebManagementReadinessTests(unittest.TestCase):
         self.assertIn('Do not infer activation from this document', prompt)
         self.assertIn('Do not continue into W1-W3 in that same preparation invocation', prompt)
         self.assertIn('Do not execute #381 or other successor goals', prompt)
+
+    def test_management_is_the_only_default_product_surface(self):
+        html = (ROOT / 'src/personal_agent/web/index.html').read_text()
+        self.assertEqual(html.count('data-view="tasks"'), 1)
+        self.assertEqual(html.count('data-view="records"'), 1)
+        self.assertEqual(html.count('data-view="settings"'), 1)
+        self.assertNotIn('id="chat-form"', html)
+        self.assertNotIn('id="messages"', html)
+        self.assertNotIn('대화</button>', html)
+        self.assertIn('data-settings="ai"', html)
+        self.assertIn('data-settings="files"', html)
+        self.assertIn('data-settings="external"', html)
+        self.assertIn('data-settings="privacy"', html)
+
+    def test_source_derived_task_record_and_model_regressions(self):
+        node = shutil.which('node')
+        if node is None:
+            self.skipTest('Node is needed for JavaScript behavior checks')
+        script = r"""
+const assert=require('node:assert/strict');
+const ui=require(process.argv[1]);
+const old={tasks:[{id:'one',status:'running',status_kind:'active',events:[{id:1}],response:null},{id:'two',events:[{id:2}]}]};
+const fresh={tasks:[{id:'one',status:'succeeded',status_kind:'finished',result_available:true},{id:'two',status:'failed'}]};
+const merged=ui.mergeTaskProgress(fresh,old,[{id:'one',response:'fresh text',message:'owner request',channel:'telegram:fixture'}]);
+assert.equal(merged.tasks[0].status,'succeeded');
+assert.equal(merged.tasks[0].response,'fresh text');
+assert.deepEqual(merged.tasks[0].events,[{id:1}]);
+assert.equal(merged.tasks[1].id,'two');
+assert(ui.isDiagnosticTask({title:'/start abc'}));
+assert(!ui.isDiagnosticTask({title:'compare flights'}));
+const proofA=ui.modelDraftFingerprint({provider:'openai',endpoint:'https://api.example/v1/',model:'m',credential_revision:1});
+const proofB=ui.modelDraftFingerprint({provider:'openai',endpoint:'https://api.example/v1',model:'m',credential_revision:2});
+assert.notEqual(proofA,proofB);
+const records=ui.recordItems({memories:[{id:'n',content:'note'},{id:'m',memory_key:'pref',content:'memory'}],context:[{id:'c',source_kind:'text'}],results:[{id:'r',content:'artifact'}]});
+assert.deepEqual(records.map(x=>[x.id,x.type,x.deleteKind]),[['n','saved','memories'],['m','memory','memories'],['c','temporary',undefined],['r','artifact','results']]);
+console.log(JSON.stringify({checks:6}));
+"""
+        result = subprocess.run(
+            [node, '-e', script, str(ROOT / 'src/personal_agent/web/app.js')],
+            check=True, capture_output=True, text=True, timeout=20)
+        self.assertEqual(json.loads(result.stdout)['checks'], 6)
+
+    def test_model_apply_has_one_explicit_test_and_credential_revision(self):
+        app = (ROOT / 'src/personal_agent/web/app.js').read_text()
+        apply_body = app[app.index("$('model-form').onsubmit"):app.index('function renderExecutionConnection')]
+        self.assertNotIn("api('/api/model/test'", apply_body)
+        self.assertIn('credential_revision', app)
+        self.assertIn('sequence!==testSequence', app)
+        self.assertIn('proof!==modelDraftFingerprint(modelDraft())', app)
+        self.assertIn("method||(body===undefined?'GET':'POST')", app)
+        self.assertIn("'/api/personal-space/'+item.deleteKind", app)
 
 
 if __name__ == '__main__':

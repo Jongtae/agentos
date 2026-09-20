@@ -15,49 +15,45 @@ def test_settings_uses_goal_oriented_owner_language():
     assert "참고 폴더" in HTML
     assert "결과 저장 폴더" in HTML
     assert "프로젝트는 대화와 결과" in HTML
-    assert "Confirm ${preview.id}" in APP  # internal API text remains unreachable as primary IA
+    assert "현재 상태를 먼저 확인" in HTML
 
 
 def test_model_flow_tests_exact_draft_before_apply_and_requires_new_destination_key():
     assert "api('/api/model/test',draft)" in APP
-    assert "modelDraftVerified!==modelDraftFingerprint(draft)" in APP
+    assert "verifiedDraft!==proof" in APP
+    assert "credential_revision" in APP
     assert "apply-model" in HTML
     assert "require_key" in APP
 
 
 def test_refresh_does_not_replace_active_editing_surfaces():
     assert "contextDraftDirty" in APP
-    assert "conversationSettingsFingerprint" in APP
-    assert "if(settingsFingerprint!==conversationSettingsFingerprint)" in APP
     assert "if(!contextDraftDirty" in APP
+    assert "if(!modelLoaded)" in APP
 
 
 def test_mobile_checkbox_is_not_full_width_input():
-    assert ".check-row input[type=checkbox]{width:auto" in CSS
-    assert "@media(max-width:520px)" in CSS
+    assert ".check-row input{width:auto" in CSS
+    assert "@media(max-width:620px)" in CSS
 
 
-def test_owner_flow_has_five_destinations_and_three_step_first_use_path():
-    assert "renderOwnerFlow" in APP
-    for label in ("대화", "작업 현황", "내 기록", "프로젝트", "설정"):
-        assert label in APP
-    for label in ("AI 연결", "파일 위치 설정", "첫 요청 실행"):
-        assert label in APP
-    assert "home.model_connected" in APP
-    assert "state.settings.file_workspace" in APP
-    assert "home.conversation?.length" in APP
+def test_owner_flow_has_three_management_destinations_and_optional_projects():
+    for destination in ('data-view="tasks"', 'data-view="records"', 'data-view="settings"'):
+        assert HTML.count(destination) == 1
+    assert 'id="chat-form"' not in HTML
+    assert 'id="projects"' in HTML
+    assert "setup-checklist" not in APP
 
 
 def test_guidance_preserves_observed_progress_and_ai_state_boundaries():
     assert "관찰된 과정" in APP
-    assert "예상 시간은 추정하지 않고" in APP
-    assert "저장된 설정" in APP
-    assert "테스트한 설정" in APP
-    assert "최근 응답 모델" in APP
+    assert "결과 정보 없음" in APP
+    assert "모델 정보 미제공" in APP
+    assert "실제 실행은 작업에서 확인" in APP
 
 
 def test_records_surface_each_owner_record_type():
-    for label in ("메모", "기억", "임시 자료", "저장된 결과", "활동 기록"):
+    for label in ("메모", "기억", "임시 자료", "저장된 결과"):
         assert label in APP
-    assert "showRecordCategories" in APP
-    assert "space.result_count" in APP
+    assert "recordItems" in APP
+    assert "deleteKind:'results'" in APP

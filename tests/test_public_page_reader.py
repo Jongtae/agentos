@@ -24,7 +24,7 @@ class Opener:
     def open(self, request, timeout=None): self.requests.append((request,timeout)); return self.response
 
 
-def public_dns(host, port, type=None):
+def public_dns(host, port, type=None, timeout=None):
     return [(None,None,None,None,('93.184.216.34', port))]
 
 
@@ -39,7 +39,7 @@ class PublicPageReaderTests(unittest.TestCase):
 
     def test_rejects_url_credentials_and_private_dns(self):
         with self.assertRaises(ValueError): PublicPageReader(resolver=public_dns).read('https://user:pass@example.com/')
-        def private_dns(host, port, type=None): return [(None,None,None,None,('127.0.0.1', port))]
+        def private_dns(host, port, type=None, timeout=None): return [(None,None,None,None,('127.0.0.1', port))]
         with self.assertRaisesRegex(ValueError, '개인 네트워크'):
             PublicPageReader(opener=Opener(Response()), resolver=private_dns).read('https://example.com/')
 
@@ -68,9 +68,9 @@ class PublicPageReaderTests(unittest.TestCase):
 
     def test_validates_redirect_target_before_request(self):
         opener=Opener(Response(status=302, headers={'Location':'http://169.254.169.254/latest'}))
-        def redirect_dns(host, port, type=None):
+        def redirect_dns(host, port, type=None, timeout=None):
             if host == '169.254.169.254': return [(None,None,None,None,('169.254.169.254', port))]
-            return public_dns(host, port, type)
+            return public_dns(host, port, type, timeout)
         with self.assertRaisesRegex(ValueError, '개인 네트워크'):
             PublicPageReader(opener=opener, resolver=redirect_dns).read('https://example.com/')
         self.assertEqual(len(opener.requests), 1)
@@ -106,8 +106,8 @@ class PublicPageReaderTests(unittest.TestCase):
 
     def test_rejects_port_zero_for_hostname_ipv4_and_bracketed_ipv6_before_resolution(self):
         resolutions=[]
-        def resolver(host,port,type=None):
-            resolutions.append((host,port));return public_dns(host,port,type)
+        def resolver(host,port,type=None,timeout=None):
+            resolutions.append((host,port));return public_dns(host,port,type,timeout)
         opener=Opener(Response())
         reader=PublicPageReader(opener=opener,resolver=resolver)
         for url in ('http://example.com:0/path','https://93.184.216.34:0/path',
@@ -138,6 +138,85 @@ class PublicPageReaderTests(unittest.TestCase):
         with self.assertRaisesRegex(Exception,'시간이 제한'):
             reader._open_pinned('http://example.com/', ['93.184.216.1','93.184.216.2','93.184.216.3'],deadline=12)
         self.assertEqual(timeouts,[12.0,5.0])
+
+    @patch('personal_agent.local_tools.http.client.HTTPSConnection')
+    @patch('personal_agent.local_tools.socket.create_connection')
+    def test_connect_tls_request_and_headers_consume_one_deadline(self,create_connection,https_connection):
+        now=[0.0];socket_timeouts=[];connect_timeouts=[]
+        class Sock:
+            def settimeout(self,value): socket_timeouts.append(value)
+            def close(self): pass
+        sock=Sock()
+        class Context:
+            def wrap_socket(self,raw,server_hostname=None): now[0]+=4;return raw
+        class Connection:
+            def __init__(self): self._context=Context();self.sock=None;self.initial_timeout=None
+            def request(self,*args,**kwargs): now[0]+=2
+            def getresponse(self): now[0]+=2;return Response()
+            def close(self): pass
+        connection=Connection()
+        def construct(*args,**kwargs): connection.initial_timeout=kwargs['timeout'];return connection
+        https_connection.side_effect=construct
+        def connect(_address,timeout): connect_timeouts.append(timeout);now[0]+=3;return sock
+        create_connection.side_effect=connect
+        reader=PublicPageReader(clock=lambda:now[0])
+        reader._open_pinned('https://example.com/',['93.184.216.34'],deadline=12)
+        self.assertEqual(connection.initial_timeout,12.0)
+        self.assertEqual(connect_timeouts,[12.0])
+        self.assertEqual(socket_timeouts,[9.0,5.0,3.0])
+        self.assertEqual(now[0],11.0)
+
+    def test_dns_and_response_phases_share_one_absolute_deadline(self):
+        now=[0.0];resolution_timeouts=[];open_timeouts=[]
+        def resolver(host,port,type=None,timeout=None):
+            resolution_timeouts.append(timeout);now[0]+=4
+            return public_dns(host,port,type,timeout)
+        class SlowOpener:
+            def open(self,request,timeout=None):
+                open_timeouts.append(timeout);now[0]+=9
+                return Response()
+        reader=PublicPageReader(opener=SlowOpener(),resolver=resolver,clock=lambda:now[0])
+        with self.assertRaisesRegex(Exception,'시간이 제한'):
+            reader.read('https://example.com/')
+        self.assertEqual(resolution_timeouts,[12.0])
+        self.assertEqual(open_timeouts,[8.0])
+
+    def test_dns_exhaustion_stops_before_transport(self):
+        now=[0.0];opened=[]
+        def resolver(host,port,type=None,timeout=None):
+            self.assertEqual(timeout,12.0);now[0]=12.0
+            return public_dns(host,port,type,timeout)
+        class NeverOpen:
+            def open(self,request,timeout=None): opened.append(request);return Response()
+        with self.assertRaisesRegex(Exception,'시간이 제한'):
+            PublicPageReader(opener=NeverOpen(),resolver=resolver,clock=lambda:now[0]).read('https://example.com/')
+        self.assertEqual(opened,[])
+
+    def test_body_reads_receive_decreasing_deadline_and_cannot_overrun(self):
+        now=[0.0]
+        class SlowResponse(Response):
+            def read(self,size=-1):
+                now[0]+=7
+                return b'chunk' if now[0] < 14 else b''
+        with self.assertRaisesRegex(Exception,'시간이 제한'):
+            PublicPageReader(opener=Opener(SlowResponse()),resolver=public_dns,clock=lambda:now[0]).read('https://example.com/')
+
+    def test_honors_safe_declared_charset_without_corrupting_exact_price(self):
+        body='<html><p>Price: £100.</p></html>'.encode('iso-8859-1')
+        result=PublicPageReader(opener=Opener(Response(
+            body,headers={'Content-Type':'text/html; charset=iso-8859-1'})),resolver=public_dns).read('https://example.com/')
+        self.assertIn('£100',result['content'])
+        self.assertNotIn('�',result['content'])
+
+    def test_rejects_unsupported_invalid_or_mismatched_charset(self):
+        cases=(
+            (b'plain',{'Content-Type':'text/plain; charset=utf-16'}),
+            (b'plain',{'Content-Type':'text/plain; charset='}),
+            (b'\xff',{'Content-Type':'text/plain; charset=utf-8'}),
+        )
+        for body,headers in cases:
+            with self.subTest(headers=headers),self.assertRaisesRegex(ValueError,'인코딩'):
+                PublicPageReader(opener=Opener(Response(body,headers=headers)),resolver=public_dns).read('https://example.com/')
 
     def test_owner_scope_rejects_public_redirect_collector(self):
         opener=Opener(Response(status=302, headers={'Location':'https://collector.example/collect?x=1'}))

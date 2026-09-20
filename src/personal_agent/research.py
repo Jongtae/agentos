@@ -18,7 +18,7 @@ HIGH_CONFIDENCE_SECRET_PATTERNS = (
     re.compile(r'(?i)\bauthorization\s*:?\s*(?:bearer|basic)\s+\S+'),
     re.compile(r'(?i)\bbasic\s+\S{8,}'),
     re.compile(r'(?i)\bbearer\s*:?\s+\S{8,}'),
-    re.compile(r'(?i)\b(?:client[_ -]?secret|secret)\b\s*(?::|=|\bis\b|,)\s*\S+'),
+    re.compile(r'(?i)\b(?:client[_ -]?secret|secret)\b\s*(?::|=|\bis\b|\bequals\b|,)\s*\S+'),
     re.compile(r'(?i)\b(?:sk_live_|rk_live_)[a-z0-9]{12,}\b'),
     re.compile(r'\bAIzaSy[A-Za-z0-9_-]{20,}\b'),
     re.compile(r'(?i)\bhf_[a-z0-9]{16,}\b'),
@@ -26,12 +26,12 @@ HIGH_CONFIDENCE_SECRET_PATTERNS = (
     re.compile(r'(?i)\b(?:gh[pousr]_[a-z0-9]{16,}|github_pat_[a-z0-9_]{16,}|glpat-[a-z0-9_-]{16,}|xox[baprs]-[a-z0-9-]{10,}|npm_[a-z0-9]{16,}|pypi-[a-z0-9_-]{16,}|AKIA[A-Z0-9]{16})\b'),
     re.compile(r'(?i)(?:file://|/Users/|/home/|\\Users\\)'),
 )
-CREDENTIAL_LABEL = r'(?:password|passwd|api[_ -]?key|access[_ -]?token|refresh[_ -]?token)'
+CREDENTIAL_LABEL = r'(?:password|passwd|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|secret)'
 LABEL_OCCURRENCE = re.compile(rf'(?i)\b{CREDENTIAL_LABEL}\b')
 LABEL_ASSIGNMENT = re.compile(rf'(?i)\b{CREDENTIAL_LABEL}\b\s*(?::|,|=|\bis\b)\s*\S+')
 PUBLIC_CREDENTIAL_TOPICS = frozenset({
     'about','and','are','authentication','best','compare','comparison','documentation','docs','examples','explain','expiry','expiration','for','how','information','latest','overview',
-    'format','guide','manager','permissions','policies','policy','requirements','revocation',
+    'format','guide','management','manager','permissions','policies','policy','requirements','revocation',
     'rotation','scopes','security','to','tutorial','practices','what',
 })
 FACT_PATTERNS = {
@@ -55,9 +55,16 @@ DYNAMIC_DISQUALIFIER = re.compile(
     r'확인\s*필요|변동\s*가능|예상|추정|약\s*\d'
 )
 INCOMPLETE_TOTAL = re.compile(
-    r'(?i)\b(?:subtotal|before\s+(?:tax|taxes|fee|fees|service charge|service charges)|excluding\s+(?:tax|taxes|fee|fees|service charge|service charges)|plus\s+(?:tax|taxes|fee|fees|service charge|service charges)|'
-    r'(?:tax|taxes|fee|fees|resort fee|resort fees|service charge|service charges)\s+(?:not\s+included|excluded|extra|additional)|not\s+including\s+(?:tax|taxes|fee|fees|resort fee|resort fees|service charge|service charges))\b|'
+    r'(?i)\b(?:subtotal|before\s+(?:vat|tax|taxes|fee|fees|service charge|service charges)|excluding\s+(?:vat|tax|taxes|fee|fees|service charge|service charges)|plus\s+(?:vat|tax|taxes|fee|fees|service charge|service charges)|'
+    r'(?:vat|tax|taxes|fee|fees|resort fee|resort fees|service charge|service charges)\s+(?:not\s+included|excluded|extra|additional)|not\s+including\s+(?:vat|tax|taxes|fee|fees|resort fee|resort fees|service charge|service charges))\b|'
+    r'\+\s*(?:vat|tax|taxes|fee|fees|service charge|service charges)\b|'
     r'세금\s*전|수수료\s*전|세금\s*별도|수수료\s*별도'
+)
+FEE_MISSING_DISCLOSURE = re.compile(
+    r'(?i)\bno\s+(?:\w+\s+){0,2}(?:fee|fees|tax|taxes|surcharge)\b[^.!?]{0,30}'
+    r'\b(?:disclosed|listed|published|provided|shown|stated|available)\b|'
+    r'\b(?:fee|fees|tax|taxes|surcharge)\b[^.!?]{0,30}\b(?:not|never)\b[^.!?]{0,15}'
+    r'\b(?:disclosed|listed|published|provided|shown|stated|available)\b'
 )
 
 
@@ -73,7 +80,10 @@ def validate_public_query(query, query_source):
     labels=list(LABEL_OCCURRENCE.finditer(public_query))
     if labels:
         topic_text=LABEL_OCCURRENCE.sub(' ',public_query)
-        tokens=[token.casefold() for token in re.findall(r'[A-Za-z]+',topic_text)]
+        tokens=[]
+        for raw in re.findall(r'[^\s,;:!?()\[\]{}]+',topic_text):
+            token=raw.strip('"\'.-_/@#$%^&*+=\\|<>`~').casefold()
+            if token: tokens.append(token)
         if not tokens or any(token not in PUBLIC_CREDENTIAL_TOPICS for token in tokens): sensitive=True
     if sensitive:
         raise ValueError('자격 증명 정보나 개인 파일 내용은 공개 검색어로 전송할 수 없습니다.')
@@ -114,6 +124,7 @@ def _qualified_dynamic(name, evidence):
             if DYNAMIC_DISQUALIFIER.search(text) or INCOMPLETE_TOTAL.search(text): continue
             tied=(name == 'inventory')
             if name == 'fee':
+                if FEE_MISSING_DISCLOSURE.search(text): continue
                 tied=bool(FEE_VALUE_PATTERNS[0].search(text) or FEE_VALUE_PATTERNS[2].search(text) or
                           (FEE_VALUE_PATTERNS[1].search(text) and not FACT_PATTERNS['payable_total'].search(text)))
             elif name == 'payable_total':

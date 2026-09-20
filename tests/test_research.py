@@ -94,6 +94,12 @@ class PublicResearchTests(unittest.TestCase):
             ('password requirements correcthorsebatterystaple','owner_public_request'),
             ('access token scopes actualsecretvalue','owner_public_request'),
             ('password, correcthorsebatterystaple','owner_public_request'),
+            ('client secret correcthorsebatterystaple','owner_public_request'),
+            ('client secret equals correcthorsebatterystaple','owner_public_request'),
+            ('secret correcthorsebatterystaple','owner_public_request'),
+            ('secret equals correcthorsebatterystaple','owner_public_request'),
+            ('password requirements 123456789','owner_public_request'),
+            ('password requirements 올바른비밀번호','owner_public_request'),
         ]
         for query,source in cases:
             with self.subTest(query=query),self.assertRaises(ValueError):
@@ -104,6 +110,7 @@ class PublicResearchTests(unittest.TestCase):
         for query in ('password manager comparison','api key security best practices',
                       'access token documentation','refresh token rotation guide','password requirements',
                       'api key permissions','api key examples','access token scopes','refresh token revocation',
+                      'client secret rotation guide','secret management best practices',
                       'compare password requirements and api key permissions'):
             with self.subTest(query=query):
                 self.assertEqual(validate_public_query(query,'owner_public_request'),query)
@@ -191,7 +198,10 @@ class PublicResearchTests(unittest.TestCase):
                              'Total price USD 100 before service charges.',
                              'Grand total ranges from USD 100 to USD 200.',
                              'Grand total USD 100, taxes additional.',
-                             'Grand total USD 100 not including resort fees.'),
+                             'Grand total USD 100 not including resort fees.',
+                             'Grand total USD 100 before VAT.',
+                             'Grand total USD 100 excluding VAT.',
+                             'Grand total USD 100 + tax.'),
         }
         for dynamic,contents in cases.items():
             for content in contents:
@@ -215,7 +225,8 @@ class PublicResearchTests(unittest.TestCase):
             self.assertIn(result['dynamic_facts'][dynamic]['evidence'][0]['exact_text'],result['brief'])
 
     def test_unrelated_available_words_do_not_create_inventory_or_zero_fee_facts(self):
-        for content in ('Customer service is available.','No fee information is available.'):
+        for content in ('Customer service is available.','No fee information is available.',
+                        'No booking fee was disclosed.','No fee is listed.','No fee has been published.'):
             with self.subTest(content=content):
                 reader=Reader({'https://alpha.example/item':{
                     'url':'https://alpha.example/item','retrieved_at':2,'content':content}})

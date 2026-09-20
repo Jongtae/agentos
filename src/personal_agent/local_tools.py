@@ -2,9 +2,13 @@
 import json
 import http.client
 import ipaddress
+import codecs
+from contextlib import contextmanager
+import multiprocessing
 import re
 import socket
 import ssl
+import threading
 import time
 import zlib
 import xml.etree.ElementTree as ET
@@ -31,6 +35,43 @@ DENIED_PUBLIC_HOSTS = frozenset({
     'instance-data', 'instance-data.ec2.internal',
 })
 DENIED_PUBLIC_HOST_SUFFIXES = ('.localhost', '.local', '.internal', '.home.arpa')
+SAFE_PAGE_CHARSETS = frozenset({'ascii', 'iso8859-1', 'utf-8'})
+
+
+def _resolver_process(send_connection, host, port):
+    """Resolve in an expendable process so a stuck system resolver is bounded."""
+    try:
+        send_connection.send((True, socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)))
+    except BaseException as exc:  # the parent receives only a bounded, non-sensitive error class
+        send_connection.send((False, type(exc).__name__))
+    finally:
+        send_connection.close()
+
+
+def _bounded_system_resolver(host, port, *, type=socket.SOCK_STREAM, timeout):
+    del type
+    if timeout <= 0:
+        raise TimeoutError('resolver deadline exhausted')
+    methods=multiprocessing.get_all_start_methods()
+    context=multiprocessing.get_context('fork' if 'fork' in methods else methods[0])
+    receive,send=context.Pipe(duplex=False)
+    process=context.Process(target=_resolver_process,args=(send,host,port),daemon=True)
+    started=time.monotonic();process.start();send.close()
+    try:
+        remaining=timeout-(time.monotonic()-started)
+        if remaining <= 0 or not receive.poll(remaining):
+            raise TimeoutError('resolver deadline exhausted')
+        ok,payload=receive.recv()
+        if not ok:
+            raise OSError(f'resolver failed: {payload}')
+        return payload
+    finally:
+        receive.close()
+        if process.is_alive(): process.terminate()
+        process.join(.1)
+        if process.is_alive():
+            process.kill();process.join()
+        process.close()
 
 
 def _denied_address(address):
@@ -95,16 +136,46 @@ class PublicPageReader:
     """Small, anonymous, read-only page reader with an explicit egress boundary."""
     def __init__(self, opener=None, resolver=None, clock=None):
         self.opener = opener
-        self.resolver = resolver or socket.getaddrinfo
+        self.resolver = resolver or _bounded_system_resolver
         self.clock = clock or time.monotonic
+
+    def _remaining(self, deadline):
+        remaining=deadline-self.clock()
+        if remaining <= 0:
+            raise ProviderError('공개 페이지 읽기 시간이 제한을 초과했습니다.')
+        return remaining
+
+    @contextmanager
+    def _deadline_guard(self, deadline, close):
+        """Interrupt a blocking socket phase at the one request deadline."""
+        expired=threading.Event()
+        def expire():
+            expired.set()
+            try: close()
+            except OSError: pass
+        timer=threading.Timer(self._remaining(deadline),expire)
+        timer.daemon=True;timer.start()
+        try:
+            yield
+        except BaseException:
+            timer.cancel();timer.join()
+            if expired.is_set():
+                raise ProviderError('공개 페이지 읽기 시간이 제한을 초과했습니다.') from None
+            raise
+        else:
+            timer.cancel();timer.join()
+            if expired.is_set():
+                raise ProviderError('공개 페이지 읽기 시간이 제한을 초과했습니다.')
+            self._remaining(deadline)
 
     @staticmethod
     def _safe_url(value):
         return normalize_public_url(value)
 
-    def _validate_host(self, url):
+    def _validate_host(self, url, deadline=None):
         parsed=urlsplit(url); host=parsed.hostname
         port=_explicit_port(parsed) or (443 if parsed.scheme=='https' else 80)
+        deadline=self.clock()+MAX_PAGE_SECONDS if deadline is None else deadline
         try:
             literal=ipaddress.ip_address(host)
         except ValueError:
@@ -112,7 +183,12 @@ class PublicPageReader:
         if literal is not None:
             addresses={str(literal)}
         else:
-            try: addresses={item[4][0] for item in self.resolver(host, port, type=socket.SOCK_STREAM)}
+            try:
+                addresses={item[4][0] for item in self.resolver(
+                    host,port,type=socket.SOCK_STREAM,timeout=self._remaining(deadline))}
+                self._remaining(deadline)
+            except ProviderError: raise
+            except TimeoutError: raise ProviderError('공개 페이지 읽기 시간이 제한을 초과했습니다.') from None
             except (OSError, ValueError): raise ValueError('공개 페이지의 주소를 확인하지 못했습니다.') from None
         if not addresses: raise ValueError('공개 페이지 주소가 없습니다.')
         for raw in addresses:
@@ -141,37 +217,65 @@ class PublicPageReader:
         deadline=self.clock()+MAX_PAGE_SECONDS if deadline is None else deadline
         last=None
         for address in addresses:
-            remaining=deadline-self.clock()
-            if remaining <= 0: raise ProviderError('공개 페이지 읽기 시간이 제한을 초과했습니다.')
             conn=None
             try:
                 if parsed.scheme=='https':
-                    conn=http.client.HTTPSConnection(parsed.hostname,port,timeout=remaining,context=ssl.create_default_context())
-                    raw=socket.create_connection((address,port),remaining)
-                    conn.sock=conn._context.wrap_socket(raw,server_hostname=parsed.hostname)
+                    conn=http.client.HTTPSConnection(parsed.hostname,port,timeout=self._remaining(deadline),context=ssl.create_default_context())
+                    raw=socket.create_connection((address,port),self._remaining(deadline))
+                    raw.settimeout(self._remaining(deadline))
+                    with self._deadline_guard(deadline,raw.close):
+                        conn.sock=conn._context.wrap_socket(raw,server_hostname=parsed.hostname)
                 else:
-                    conn=http.client.HTTPConnection(parsed.hostname,port,timeout=remaining)
-                    conn.sock=socket.create_connection((address,port),remaining)
-                conn.request('GET',path,headers={'Host':host_header,'User-Agent':'AgentOS public-page-reader/1.0','Accept':'text/html,text/plain,application/xhtml+xml;q=0.9','Connection':'close'})
-                response=conn.getresponse(); response._agentos_connection=conn
+                    conn=http.client.HTTPConnection(parsed.hostname,port,timeout=self._remaining(deadline))
+                    conn.sock=socket.create_connection((address,port),self._remaining(deadline))
+                conn.sock.settimeout(self._remaining(deadline))
+                with self._deadline_guard(deadline,conn.close):
+                    conn.request('GET',path,headers={'Host':host_header,'User-Agent':'AgentOS public-page-reader/1.0','Accept':'text/html,text/plain,application/xhtml+xml;q=0.9','Connection':'close'})
+                conn.sock.settimeout(self._remaining(deadline))
+                with self._deadline_guard(deadline,conn.close):
+                    response=conn.getresponse()
+                response._agentos_connection=conn
                 return response
             except (OSError, ssl.SSLError) as exc:
                 last=exc
                 if conn: conn.close()
         raise OSError('all validated public addresses failed') from last
 
+    def _set_response_deadline(self, response, deadline):
+        remaining=self._remaining(deadline)
+        connection=getattr(response,'_agentos_connection',None)
+        sock=getattr(connection,'sock',None)
+        if sock is None:
+            sock=getattr(getattr(getattr(response,'fp',None),'raw',None),'_sock',None)
+        if sock is not None:
+            sock.settimeout(remaining)
+        return remaining
+
+    @staticmethod
+    def _page_charset(content_type):
+        match=re.search(r'(?i)(?:^|;)\s*charset\s*=\s*(?:"([^"]+)"|\'([^\']+)\'|([^;\s]+))',content_type)
+        if 'charset' in content_type.casefold() and not match:
+            raise ValueError('공개 페이지 문자 인코딩이 올바르지 않습니다.')
+        declared=next((part for part in match.groups() if part is not None),None) if match else 'utf-8'
+        try: canonical=codecs.lookup(declared.strip()).name
+        except (LookupError,ValueError):
+            raise ValueError('지원하지 않는 공개 페이지 문자 인코딩입니다.') from None
+        if canonical not in SAFE_PAGE_CHARSETS:
+            raise ValueError('지원하지 않는 공개 페이지 문자 인코딩입니다.')
+        return canonical
+
     def read(self, url, approved_urls=None):
-        current=self._safe_url(url); started=self.clock()
+        current=self._safe_url(url); started=self.clock();deadline=started+MAX_PAGE_SECONDS
         approved={normalize_public_url(item) for item in approved_urls} if approved_urls is not None else None
         for redirect in range(MAX_PAGE_REDIRECTS+1):
-            if self.clock()-started > MAX_PAGE_SECONDS: raise ProviderError('공개 페이지 읽기 시간이 제한을 초과했습니다.')
+            self._remaining(deadline)
             if approved is not None and current not in approved:
                 raise ValueError('소유자가 승인한 공개 페이지 범위를 벗어난 주소입니다.')
-            addresses=self._validate_host(current)
+            addresses=self._validate_host(current,deadline)
             request=Request(current, headers={'User-Agent':'AgentOS public-page-reader/1.0','Accept':'text/html,text/plain,application/xhtml+xml;q=0.9'})
-            remaining=MAX_PAGE_SECONDS-(self.clock()-started)
-            if remaining <= 0: raise ProviderError('공개 페이지 읽기 시간이 제한을 초과했습니다.')
-            try: response=self.opener.open(request, timeout=remaining) if self.opener else self._open_pinned(current,addresses,started+MAX_PAGE_SECONDS)
+            try:
+                response=self.opener.open(request, timeout=self._remaining(deadline)) if self.opener else self._open_pinned(current,addresses,deadline)
+                self._remaining(deadline)
             except (OSError, http.client.HTTPException) as exc: raise ProviderError('공개 페이지를 가져오지 못했습니다.') from exc
             status=getattr(response,'status',200); location=response.headers.get('Location') if hasattr(response,'headers') else None
             if status in (301,302,303,307,308) or location:
@@ -179,14 +283,17 @@ class PublicPageReader:
                 if redirect >= MAX_PAGE_REDIRECTS: raise ValueError('공개 페이지 이동 횟수 제한을 초과했습니다.')
                 current=self._safe_url(urljoin(current,location)); continue
             if status < 200 or status >= 300: raise ProviderError('공개 페이지가 정상 응답하지 않았습니다.')
-            content_type=(response.headers.get('Content-Type','') if hasattr(response,'headers') else '').split(';',1)[0].lower()
-            if content_type and not (content_type.startswith('text/') or content_type in ('application/xhtml+xml','application/xml')):
+            content_type=response.headers.get('Content-Type','') if hasattr(response,'headers') else ''
+            media_type=content_type.split(';',1)[0].strip().lower()
+            if media_type and not (media_type.startswith('text/') or media_type in ('application/xhtml+xml','application/xml')):
                 raise ValueError('HTML 또는 텍스트 공개 페이지만 읽을 수 있습니다.')
+            charset=self._page_charset(content_type)
             encoding=(response.headers.get('Content-Encoding','') if hasattr(response,'headers') else '').lower()
             raw=bytearray()
             while True:
-                if self.clock()-started > MAX_PAGE_SECONDS: raise ProviderError('공개 페이지 읽기 시간이 제한을 초과했습니다.')
-                chunk=response.read(min(64*1024, MAX_PAGE_BYTES-len(raw)+1))
+                self._set_response_deadline(response,deadline)
+                with self._deadline_guard(deadline,getattr(response,'close',lambda:None)):
+                    chunk=response.read(min(64*1024, MAX_PAGE_BYTES-len(raw)+1))
                 if not chunk: break
                 raw.extend(chunk)
                 if len(raw)>MAX_PAGE_BYTES: raise ValueError('공개 페이지 응답 크기 제한을 초과했습니다.')
@@ -202,7 +309,9 @@ class PublicPageReader:
                 except ValueError: raise
                 except (OSError, zlib.error): raise ValueError('압축된 공개 페이지를 해석하지 못했습니다.') from None
             else: data=bytes(raw)
-            text=data.decode('utf-8','replace')
+            try: text=data.decode(charset,'strict')
+            except UnicodeDecodeError:
+                raise ValueError('공개 페이지 문자 인코딩과 응답 내용이 일치하지 않습니다.') from None
             parser=_PageText(); parser.feed(text)
             clean,truncated=_bounded_complete_text(' '.join(parser.parts))
             return {'tool':'public_page_read','url':current,'retrieved_at':time.time(),'content':clean,

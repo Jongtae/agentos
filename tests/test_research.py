@@ -157,6 +157,7 @@ class PublicResearchTests(unittest.TestCase):
             ('$HOME/.ssh/id_rsa','owner_public_request'),
             ('${HOME}/Documents/private.txt','owner_public_request'),
             ('Basic dTpw','owner_public_request'),
+            ('Basic dTo=','owner_public_request'),
             ('PGPASSWORD=hunter2value','owner_public_request'),
             ('token=supersecret123456789','owner_public_request'),
             ('compare https://example.com/?token=supersecret123456789','owner_public_request'),
@@ -365,7 +366,9 @@ class PublicResearchTests(unittest.TestCase):
     def test_currency_amounts_without_price_meaning_are_not_labeled_prices(self):
         for content in ('Save USD 10 today.', 'Get a USD 25 credit with trade-in.',
                         'The manufacturer donated USD 100.', 'The price dropped by USD 10.',
-                        'Price includes a USD 25 trade-in credit.'):
+                        'Price includes a USD 25 trade-in credit.', 'Save USD 10 on the price.',
+                        'USD 10 off the price.', 'Price discount: USD 10.',
+                        'Price decreased USD 10.'):
             with self.subTest(content=content):
                 reader=Reader({'https://alpha.example/item':{
                     'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
@@ -576,12 +579,14 @@ class PublicResearchTests(unittest.TestCase):
                 self.assertIn('일부만 확인됨',result['brief'])
 
     def test_future_inventory_is_not_reported_as_current(self):
-        reader=Reader({'https://alpha.example/item':{
-            'url':'https://alpha.example/item','retrieved_at':2,
-            'content':'Rooms will be available next year.'}})
-        result=PublicResearch(search_result,reader,max_pages=1).run(
-            'travel_plan','museum plan',query_source='owner_public_request')
-        self.assertEqual(result['dynamic_facts']['inventory']['status'],'unknown')
+        for content in ('Rooms will be available next year.', 'Rooms are available tomorrow.',
+                        'Rooms are available in October 2027.', 'Rooms are available in 2027.'):
+            with self.subTest(content=content):
+                reader=Reader({'https://alpha.example/item':{
+                    'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+                result=PublicResearch(search_result,reader,max_pages=1).run(
+                    'travel_plan','museum plan',query_source='owner_public_request')
+                self.assertEqual(result['dynamic_facts']['inventory']['status'],'unknown')
 
     def test_search_title_controls_and_whitespace_cannot_add_brief_lines(self):
         def titled(query):

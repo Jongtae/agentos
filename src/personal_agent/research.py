@@ -66,12 +66,19 @@ FACT_PATTERNS = {
     'payable_total': re.compile(r'(?i)\b(?:total due|payable total|grand total|total price)\b|총\s*결제|결제\s*금액'),
 }
 PRICE_ADJUSTMENT = re.compile(
-    r'(?i)(?:\b(?:price|cost|fare|rate)\b|가격|요금)[^.!?]{0,45}(?:'
-    r'\b(?:drop(?:ped)?|reduc(?:e|ed)|decreas(?:e|ed))\s+by\s+'
+    r'(?i)(?:(?:\b(?:price|cost|fare|rate)\b|가격|요금)[^.!?]{0,45}(?:'
+    r'\b(?:drop(?:ped)?|reduc(?:e|ed)|decreas(?:e|ed)|discount(?:ed)?)\s*'
+    r'(?!to\b)(?:(?:by|of)\s+|:\s*)?'
     r'(?:[$€£¥₩]\s?\d|(?:USD|EUR|GBP|JPY|KRW)\s?\d|\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW))|'
     r'\b(?:includes?|with)\b[^.!?]{0,25}'
     r'(?:[$€£¥₩]\s?\d|(?:USD|EUR|GBP|JPY|KRW)\s?\d|\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW))'
-    r'[^.!?]{0,20}\b(?:trade[- ]in\s+)?(?:credit|discount|saving)\b)'
+    r'[^.!?]{0,20}\b(?:trade[- ]in\s+)?(?:credit|discount|saving)\b)|'
+    r'\b(?:save|saving|discount)\b[^.!?]{0,15}'
+    r'(?:[$€£¥₩]\s?\d|(?:USD|EUR|GBP|JPY|KRW)\s?\d|\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW))'
+    r'[^.!?]{0,20}\b(?:on\s+)?(?:the\s+)?(?:price|cost|fare|rate)\b|'
+    r'(?:[$€£¥₩]\s?\d|(?:USD|EUR|GBP|JPY|KRW)\s?\d|\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW))'
+    r'[^.!?]{0,15}\b(?:off|discount|saving)\b[^.!?]{0,15}'
+    r'(?:\b(?:the\s+)?(?:price|cost|fare|rate)\b|가격|요금))'
 )
 FEE_VALUE_PATTERNS = (
     re.compile(r'(?i)(?:\b(?:fee|fees|tax|taxes|surcharge|resort fee|service charge)\b|수수료|세금|부가세)[^;.!?]{0,20}(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b|\b\d+(?:\.\d+)?\s*%|\b(?:none|zero|free|included|waived)\b|없음|무료|포함)'),
@@ -88,12 +95,16 @@ TOTAL_VALUE_PATTERNS = (
 )
 DYNAMIC_DISQUALIFIER = re.compile(
     r'(?i)\b(?:may|might|could|can|should|would|will|shall|going\s+to|possibly|probably|likely|expected|estimated|estimate|approximately|approximate|about|around|roughly|range|ranges|ranging|between|except|projected|potential|check|subject to|up to|at least|at most|starting at|starts at|if|unless|when|upon|provided|on request|depending on)\b|'
-    r'\bnext\s+(?:year|month|week|season|quarter)\b|'
     r'\b(?:(?:for|to)\s+(?:loyalty\s+)?members?\s+only|(?:members?|loyalty)[- ]only|with\s+(?:an?\s+)?membership|only\s+(?:for|to)\s+(?:loyalty\s+)?members?)\b|'
     r'\bonly\s+(?:for|to|with|on)\b|'
     r'\b(?:do|does|did)\s+not\s+(?:guarantee|confirm|promise)\b|'
     r'\b(?:not|never)\s+(?:guaranteed|confirmed|promised)\b|'
     r'확인\s*필요|변동\s*가능|예상|추정|약\s*\d'
+)
+FUTURE_DYNAMIC = re.compile(
+    r'(?i)\b(?:will|shall|going\s+to|tomorrow|later|upcoming)\b|'
+    r'\bnext\s+(?:year|month|week|season|quarter|Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\b|'
+    r'\b(?:in|on|from|starting)\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(?:19|20)\d{2}\b'
 )
 NEGATED_DYNAMIC_ASSERTION = re.compile(r'(?i)\b(?:is|are|was|were|be|been|has|have)\s+not\b')
 HISTORICAL_DYNAMIC = re.compile(
@@ -155,7 +166,7 @@ ADJACENT_QUALIFIER_ONLY = re.compile(
     r'(?:for|to)\s+(?:loyalty\s+)?members?\s+only|(?:members?|loyalty)[- ]only|with\s+(?:an?\s+)?membership)\s*[.!?]?\s*$'
 )
 ANAPHORIC_QUALIFIER = re.compile(
-    r'(?i)^\s*(?:this|that|it|these|those|they)\b[^.!?]{0,120}\b(?:may|might|could|can|possibly|probably|likely|'
+    r'(?i)^\s*(?:this|that|it|these|those|they)\b[^.!?]{0,120}\b(?:may|might|could|can|will|shall|tomorrow|next\s+|possibly|probably|likely|'
     r'expected|estimated|estimate|approximately|about|around|subject\s+to|depending\s+on|on\s+request|'
     r'only\s+(?:if|when|for|to)|appl(?:y|ies)\s+(?:if|when|only|to|for)|for\s+(?:loyalty\s+)?members?\s+only|'
     r'(?:does?|do)\s+not\s+include|doesn[\'’]t\s+include|excludes?)\b'
@@ -187,7 +198,7 @@ def validate_public_query(query, query_source):
     if bearer_value:
         bearer_token=bearer_value.group(1).strip('"\'.-_/@#$%^&*+=\\|<>`~').casefold()
         if bearer_token not in PUBLIC_CREDENTIAL_TOPICS: sensitive=True
-    basic_value=re.search(r'(?i)\bbasic\s+([A-Za-z0-9+/]{4,}={0,2})\b',scan_query)
+    basic_value=re.search(r'(?i)\bbasic\s+([A-Za-z0-9+/=]{4,})(?![A-Za-z0-9+/=])',scan_query)
     if basic_value:
         basic_token=basic_value.group(1)
         try:
@@ -277,11 +288,12 @@ def _qualified_dynamic(name, evidence):
             )
             fact_clauses=[part for part in re.split(r'(?i)\s*(?:;|,(?=\s*[A-Za-z])|\band\b|\bbut\b)\s*',classified_text)
                           if clause_pattern(part)]
+            fact_context=' '.join(fact_clauses or [classified_text])
             historical=all(HISTORICAL_DYNAMIC.search(part) for part in fact_clauses or [classified_text])
             negated_assertion=bool(NEGATED_DYNAMIC_ASSERTION.search(context))
             explicit_no_charge=name == 'fee' and bool(FEE_NOT_CHARGED.search(classified_text))
             if (adjacent_condition or classified_text.rstrip().endswith('?') or NON_ASSERTIVE_DYNAMIC.search(classified_text) or
-                    DYNAMIC_DISQUALIFIER.search(context) or historical or
+                    DYNAMIC_DISQUALIFIER.search(context) or FUTURE_DYNAMIC.search(fact_context) or historical or
                     (negated_assertion and not explicit_no_charge) or
                     (name == 'payable_total' and NEGATED_TOTAL_EXISTENCE.search(classified_text)) or
                     (name == 'payable_total' and INCOMPLETE_TOTAL.search(context))): continue

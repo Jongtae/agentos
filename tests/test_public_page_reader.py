@@ -40,6 +40,14 @@ class PublicPageReaderTests(unittest.TestCase):
         self.assertEqual(result['url'], 'https://example.com/event')
         self.assertEqual(opener.requests[0][0].get_header('User-agent'), 'AgentOS public-page-reader/1.0')
 
+    def test_plain_text_preserves_literal_angle_bracket_qualifiers(self):
+        body=b'Grand total: USD 100 <before taxes>.'
+        result=PublicPageReader(
+            opener=Opener(Response(body,headers={'Content-Type':'text/plain'})),
+            resolver=public_dns,
+        ).read('https://example.com/total')
+        self.assertEqual(result['content'],'Grand total: USD 100 <before taxes>.')
+
     def test_rejects_url_credentials_and_private_dns(self):
         with self.assertRaises(ValueError): PublicPageReader(resolver=public_dns).read('https://user:pass@example.com/')
         def private_dns(host, port, type=None, timeout=None): return [(None,None,None,None,('127.0.0.1', port))]

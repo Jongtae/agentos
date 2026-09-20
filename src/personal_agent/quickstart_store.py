@@ -471,8 +471,11 @@ class QuickStore:
             if kind=='results': deleted=db.execute('DELETE FROM workspace_results WHERE id=?',(item_id,)).rowcount
             elif kind=='memory_candidates':
                 db.execute('BEGIN IMMEDIATE')
-                deleted_approvals=db.execute('DELETE FROM memory_approvals WHERE subject_id=?',(item_id,)).rowcount
-                deleted=db.execute("DELETE FROM memory_candidates WHERE id=? AND state IN ('pending','rejected')",(item_id,)).rowcount
+                candidate=db.execute("SELECT owner_key FROM memory_candidates WHERE id=? AND state IN ('pending','rejected')",(item_id,)).fetchone()
+                deleted_approvals=(db.execute('DELETE FROM memory_approvals WHERE owner_key=? AND subject_id=?',(candidate['owner_key'],item_id)).rowcount
+                                   if candidate else 0)
+                deleted=(db.execute("DELETE FROM memory_candidates WHERE id=? AND owner_key=? AND state IN ('pending','rejected')",(item_id,candidate['owner_key'])).rowcount
+                         if candidate else 0)
             else: deleted=db.execute('DELETE FROM notes WHERE id=?',(item_id,)).rowcount
         result={'deleted':bool(deleted),'id':item_id,'kind':kind}
         if kind=='memory_candidates':

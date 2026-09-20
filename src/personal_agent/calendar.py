@@ -7,6 +7,7 @@ exact event content is returned only by the owner-bound preview.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from datetime import datetime, timedelta
 import hashlib
 import hmac
@@ -246,22 +247,53 @@ class CalendarConnector:
         if not isinstance(ident, str):
             raise CalendarError("draft-not-found")
         row = rows.get(ident)
-        if not isinstance(row, dict) or not hmac.compare_digest(str(row.get("owner", "")), _owner_key(owner)):
+        if not isinstance(row, dict):
+            raise CalendarError("draft-not-found")
+        owner_key = _owner_key(owner)
+        stored_owner = row.get("owner")
+        if "action" not in row:
+            # The pre-PA1 CalendarCreate schema stored a raw owner (or None)
+            # and did not include action/effect fields. Normalize one legacy
+            # row atomically when its historical owner next accesses it.
+            if stored_owner is not None and not (
+                isinstance(stored_owner, str)
+                and hmac.compare_digest(stored_owner, owner)
+            ):
+                raise CalendarError("draft-not-found")
+            payload = row.get("payload")
+            if not isinstance(payload, dict):
+                raise CalendarError("invalid-stored-state")
+            bound = {"action": "create", "payload": payload, "event_id": "", "event_version": ""}
+            digest = _canonical(bound)
+            row.update(
+                action="create",
+                event_id="",
+                event_version="",
+                owner=owner_key,
+                hash=digest,
+                effect="observed" if row.get("state") == "created" else "none",
+            )
+            if row.get("state") in {"approved", "created"}:
+                row["approval_hash"] = digest
+            rows[ident] = row
+            self._put(rows)
+        elif not hmac.compare_digest(str(stored_owner or ""), owner_key):
             raise CalendarError("draft-not-found")
         return row
 
     def preview(self, ident: str, owner: str) -> dict:
-        row = self._owned(self._rows(), ident, owner)
-        return {
-            "id": ident,
-            "action": row["action"],
-            "calendar": "primary",
-            "event_id": row.get("event_id", ""),
-            "event_version": row.get("event_version", ""),
-            "payload": dict(row.get("payload", {})),
-            "payload_hash": row["hash"],
-            "state": row["state"],
-        }
+        with _LOCK:
+            row = self._owned(self._rows(), ident, owner)
+            return {
+                "id": ident,
+                "action": row["action"],
+                "calendar": "primary",
+                "event_id": row.get("event_id", ""),
+                "event_version": row.get("event_version", ""),
+                "payload": dict(row.get("payload", {})),
+                "payload_hash": row["hash"],
+                "state": row["state"],
+            }
 
     def approve(self, ident: str, owner: str) -> dict:
         with _LOCK:
@@ -293,13 +325,21 @@ class CalendarConnector:
                 self._put(rows)
             state = "outcome-unknown" if row.get("state") == "executing" else row.get("state")
             effect = "unknown" if row.get("state") == "executing" else row.get("effect", "none")
+            result = row.get("result", {})
+            safe_result = {}
+            if isinstance(result, dict):
+                if isinstance(result.get("id"), str):
+                    safe_result["id"] = result["id"]
+                for field in ("updated", "cancelled"):
+                    if result.get(field) is True:
+                        safe_result[field] = True
             return {
                 "id": ident,
                 "action": row.get("action", "create"),
                 "state": state,
                 "payload_hash": row.get("hash", ""),
                 "event_ref_hash": hashlib.sha256(str(row.get("event_id", "")).encode()).hexdigest() if row.get("event_id") else "",
-                "result": dict(row.get("result", {})),
+                "result": safe_result,
                 "error_class": row.get("error_class", ""),
                 "effect": effect,
                 "recovery": row.get("recovery", ""),
@@ -340,16 +380,21 @@ class CalendarConnector:
                 rows[ident] = row
                 self._put(rows)
                 raise CalendarError("payload-changed")
-            try:
-                self._authorize(owner, CALENDAR_WRITE_SCOPE)
-            except CalendarError as error:
-                row.update(state="failed", error_class=error.reason, effect="none", recovery=error.recovery)
+            authority_guard = self.registry._authority_guard() if self.registry is not None else nullcontext()
+            with authority_guard:
+                try:
+                    self._authorize(owner, CALENDAR_WRITE_SCOPE)
+                except CalendarError as error:
+                    row.update(state="failed", error_class=error.reason, effect="none", recovery=error.recovery)
+                    rows[ident] = row
+                    self._put(rows)
+                    raise
+                # Persist the dispatch commitment while the same connector
+                # authority revision is guarded. A later revocation applies
+                # to later work and cannot race into this pre-dispatch gap.
+                row.update(state="executing", effect="unknown", approval_used_at=self._now())
                 rows[ident] = row
                 self._put(rows)
-                raise
-            row.update(state="executing", effect="unknown", approval_used_at=self._now())
-            rows[ident] = row
-            self._put(rows)
 
         try:
             action = row["action"]

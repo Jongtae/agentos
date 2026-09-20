@@ -210,6 +210,90 @@ class CalendarTests(unittest.TestCase):
         self.assertNotIn("owner-secret-id", str(self.calendar._rows()))
         self.assertNotIn("event_id", status)
 
+        self.registry.transition(
+            "owner-secret-id",
+            CALENDAR_CONNECTOR_ID,
+            ConnectorState.CONNECTED,
+            granted_scopes=(CALENDAR_READ_SCOPE, CALENDAR_WRITE_SCOPE),
+        )
+        approval = self.calendar.approve(draft["id"], "owner-secret-id")["approval_id"]
+        self.calendar.create(draft["id"], approval, "owner-secret-id")
+        completed = self.calendar.status(draft["id"], "owner-secret-id")
+        self.assertEqual(completed["result"], {"id": "new-event"})
+        self.assertNotIn(EVENT["summary"], str(completed))
+        self.assertNotIn(EVENT["description"], str(completed))
+
+    def test_legacy_rows_migrate_raw_or_unbound_owner_without_losing_retry(self):
+        for legacy_owner in ("owner", None):
+            with self.subTest(legacy_owner=legacy_owner):
+                ident = "legacy-" + (legacy_owner or "unbound")
+                legacy_hash = "legacy-content-hash"
+                self.store.put(
+                    "calendar_create",
+                    {
+                        ident: {
+                            "id": ident,
+                            "payload": dict(EVENT),
+                            "hash": legacy_hash,
+                            "owner": legacy_owner,
+                            "state": "created",
+                            "approval": "legacy-approval",
+                            "approval_hash": legacy_hash,
+                            "expires": 9999999999,
+                            "result": {"id": "legacy-event", "summary": EVENT["summary"]},
+                        }
+                    },
+                )
+                legacy = CalendarCreate(self.store, lambda *_: self.fail("legacy retry dispatched"))
+                self.assertEqual(
+                    legacy.create(ident, "legacy-approval", "owner"),
+                    {"id": "legacy-event", "summary": EVENT["summary"]},
+                )
+                migrated = legacy._rows()[ident]
+                self.assertNotEqual(migrated["owner"], "owner")
+                self.assertEqual(migrated["action"], "create")
+                self.assertEqual(legacy.status(ident, "owner")["result"], {"id": "legacy-event"})
+
+        calls = []
+        self.store.put(
+            "calendar_create",
+            {
+                "legacy-approved": {
+                    "id": "legacy-approved",
+                    "payload": dict(EVENT),
+                    "hash": "legacy-content-hash",
+                    "owner": "owner",
+                    "state": "approved",
+                    "approval": "legacy-approval",
+                    "approval_hash": "legacy-content-hash",
+                    "expires": 9999999999,
+                }
+            },
+        )
+        legacy = CalendarCreate(
+            self.store,
+            lambda *_: calls.append("create") or {"id": "migrated-event"},
+        )
+        self.assertEqual(
+            legacy.create("legacy-approved", "legacy-approval", "owner")["id"],
+            "migrated-event",
+        )
+        self.assertEqual(calls, ["create"])
+
+    def test_write_authority_check_and_executing_commit_share_registry_guard(self):
+        draft = self.calendar.draft_create(EVENT, "owner")
+        approval = self.approve(draft)
+        observations = []
+        original_authorize = self.calendar._authorize
+
+        def observed_authorize(owner, scope):
+            observations.append(self.registry._lock._is_owned())
+            return original_authorize(owner, scope)
+
+        self.calendar._authorize = observed_authorize
+        self.calendar.create(draft["id"], approval, "owner")
+        self.assertEqual(observations, [True])
+
     def test_legacy_create_surface_remains_idempotent(self):
         calls = []
         legacy = CalendarCreate(

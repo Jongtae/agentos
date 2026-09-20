@@ -31,7 +31,7 @@ _MISSING_CONNECTOR_ROW = object()
 _MISSING_PENDING_STATE = object()
 _CONNECTOR_STATE_LOCK = threading.RLock()
 _CONNECTOR_DISPATCH_LOCKS_GUARD = threading.Lock()
-_CONNECTOR_DISPATCH_LOCKS: dict[tuple[str, str], threading.RLock] = {}
+_CONNECTOR_DISPATCH_LOCKS: dict[tuple[str, str, str], threading.RLock] = {}
 _PENDING_WORK_LOCK = threading.RLock()
 
 
@@ -281,6 +281,11 @@ class ConnectorRegistry:
         self.clock = clock
         self.revision_factory = revision_factory
         self._definitions: dict[str, ConnectorSpec] = {}
+        store_path = getattr(store, "path", None)
+        try:
+            self._dispatch_namespace = "path:" + str(store_path.resolve())
+        except (AttributeError, OSError, RuntimeError):
+            self._dispatch_namespace = f"object:{id(store)}"
         # QuickStore is single-process; share one process lock across registry
         # instances so read-modify-write lifecycle updates cannot resurrect a
         # stale grant. This does not claim multi-process CAS semantics.
@@ -331,7 +336,7 @@ class ConnectorRegistry:
         locks = []
         with _CONNECTOR_DISPATCH_LOCKS_GUARD:
             for connector_id in identifiers:
-                key = (owner, connector_id)
+                key = (self._dispatch_namespace, owner, connector_id)
                 locks.append(_CONNECTOR_DISPATCH_LOCKS.setdefault(key, threading.RLock()))
         for lock in locks:
             lock.acquire()

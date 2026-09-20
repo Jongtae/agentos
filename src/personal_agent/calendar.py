@@ -261,7 +261,7 @@ class CalendarConnector:
         if self.registry is not None:
             dispatch_guard = self.registry._dispatch_guard(
                 owner,
-                (CALENDAR_CONNECTOR_ID, CALENDAR_WRITE_CONNECTOR_ID),
+                (CALENDAR_CONNECTOR_ID,),
             )
         else:
             dispatch_guard = nullcontext()
@@ -279,11 +279,11 @@ class CalendarConnector:
                 raise self._provider_error(error) from None
             if self.registry is not None:
                 with self.registry._authority_guard():
-                    for connector_id, expected_revision in authority_snapshot or ():
-                        current = self.registry.status(owner, connector_id)
-                        if (current.state is not ConnectorState.CONNECTED or
-                                current.connection_revision != expected_revision):
-                            raise CalendarError("scope-denied", recovery="reconnect")
+                    expected_revision = dict(authority_snapshot or ()).get(CALENDAR_CONNECTOR_ID)
+                    current = self.registry.status(owner, CALENDAR_CONNECTOR_ID)
+                    if (expected_revision is None or current.state is not ConnectorState.CONNECTED or
+                            current.connection_revision != expected_revision):
+                        raise CalendarError("scope-denied", recovery="reconnect")
             else:
                 self._authorize(owner, CALENDAR_READ_SCOPE)
         return {

@@ -233,6 +233,52 @@ class CalendarTests(unittest.TestCase):
         self.assertEqual([call[0] for call in self.provider.calls],["query"])
         self.assertTrue(transition_finished.is_set())
 
+    def test_query_does_not_lease_unneeded_write_authority(self):
+        provider_started=threading.Event();allow_provider=threading.Event()
+        transition_finished=threading.Event();errors=[]
+        original_query=self.provider.query
+
+        def paused_query(*args):
+            provider_started.set()
+            if not allow_provider.wait(1): raise AssertionError("provider wait timed out")
+            return original_query(*args)
+
+        self.provider.query=paused_query
+        query=threading.Thread(target=lambda:self.calendar.query(
+            "owner","2026-09-21T00:00:00+09:00","2026-09-28T00:00:00+09:00","Asia/Seoul"))
+
+        def disconnect_write():
+            try:self.registry.transition("owner",CALENDAR_WRITE_CONNECTOR_ID,ConnectorState.DISCONNECTED)
+            except Exception as error:errors.append(error)
+            finally:transition_finished.set()
+
+        query.start();self.assertTrue(provider_started.wait(1))
+        transition=threading.Thread(target=disconnect_write);transition.start()
+        self.assertTrue(transition_finished.wait(1))
+        allow_provider.set();query.join(1);transition.join(1)
+        self.assertFalse(query.is_alive());self.assertFalse(errors)
+        self.assertEqual(self.registry.status("owner",CALENDAR_WRITE_CONNECTOR_ID).state,
+                         ConnectorState.DISCONNECTED)
+
+    def test_dispatch_locks_do_not_cross_owner_store_namespaces(self):
+        other_store=QuickStore(self.temp.name+"-independent-runtime")
+        other_registry=ConnectorRegistry(other_store,(CALENDAR_SPEC,CALENDAR_WRITE_SPEC))
+        other_registry.transition("owner",CALENDAR_CONNECTOR_ID,ConnectorState.CONNECTED,
+                                  granted_scopes=(CALENDAR_READ_SCOPE,))
+        lease_started=threading.Event();release_lease=threading.Event();transition_finished=threading.Event()
+
+        def hold_lease():
+            with self.registry._dispatch_guard("owner",(CALENDAR_CONNECTOR_ID,)):
+                lease_started.set();release_lease.wait(1)
+
+        lease=threading.Thread(target=hold_lease);lease.start();self.assertTrue(lease_started.wait(1))
+        transition=threading.Thread(target=lambda:(
+            other_registry.transition("owner",CALENDAR_CONNECTOR_ID,ConnectorState.DISCONNECTED),
+            transition_finished.set()))
+        transition.start();self.assertTrue(transition_finished.wait(1))
+        release_lease.set();lease.join(1);transition.join(1)
+        self.assertFalse(lease.is_alive());self.assertFalse(transition.is_alive())
+
     def test_query_and_concurrent_scope_expiry_use_one_lock_order(self):
         provider_started=threading.Event();allow_provider=threading.Event()
         marker_finished=threading.Event();errors=[]

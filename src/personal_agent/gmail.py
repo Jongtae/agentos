@@ -528,6 +528,20 @@ class GmailConnector:
         connection_revision: str,
         access_token: str,
     ) -> dict:
+        with self.registry._authority_guard():
+            current = self.registry.status(owner_id, GMAIL_CONNECTOR_ID)
+            try:
+                current_tokens = self.store.secret(TOKEN_SECRET_KEY)
+            except GmailError:
+                raise GmailReauthenticationRequired("reauth_required") from None
+            if (
+                current.state is not ConnectorState.CONNECTED
+                or current.connection_revision != connection_revision
+                or not isinstance(current_tokens, dict)
+                or current_tokens.get("owner") != _owner_key(owner_id)
+                or current_tokens.get("access_token") != access_token
+            ):
+                raise GmailError("superseded_connection")
         if not callable(self.transport):
             raise GmailError("transport_unavailable")
         try:
@@ -653,6 +667,7 @@ class GmailConnector:
             raise GmailError("invalid_provider_response")
         try:
             codecs.lookup(encoding)
-        except LookupError:
+            text = decoded.decode(encoding, errors="replace")
+        except (LookupError, TypeError):
             raise GmailError("invalid_provider_response") from None
-        return decoded.decode(encoding, errors="replace"), mime_type
+        return text, mime_type

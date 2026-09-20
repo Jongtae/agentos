@@ -249,6 +249,22 @@ class GmailConnectorTests(unittest.TestCase):
         results = self.gmail.search("owner-a", "receipt", max_results=1)
         self.assertEqual([item.message_id for item in results], ["m_1"])
 
+    def test_search_rechecks_authority_before_each_metadata_request(self):
+        self.connect()
+        calls = []
+
+        def revoke_after_list(method, endpoint, params, headers):
+            calls.append((method, endpoint, params, headers))
+            self.registry.transition("owner-a", GMAIL_CONNECTOR_ID, ConnectorState.DISCONNECTED)
+            return {"messages": [{"id": "m_1"}]}
+
+        self.gmail.transport = revoke_after_list
+        with self.assertRaises(GmailError) as revoked:
+            self.gmail.search("owner-a", "receipt")
+        self.assertEqual(revoked.exception.reason, "superseded_connection")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(self.gmail.status("owner-a")["state"], "disconnected")
+
     def test_explicit_body_read_is_source_attributable_ephemeral_and_get_only(self):
         self.connect()
         encoded = base64.urlsafe_b64encode(b"private mail body").rstrip(b"=").decode()
@@ -342,6 +358,25 @@ class GmailConnectorTests(unittest.TestCase):
         message = self.gmail.read_message("owner-a", "m_1")
         self.assertEqual(message.body, "<p>main body</p>")
         self.assertEqual(message.mime_type, "text/html")
+
+    def test_non_text_registered_codec_is_rejected_as_provider_data(self):
+        self.connect()
+        self.responses.append(
+            {
+                "id": "m_1",
+                "threadId": "t_1",
+                "payload": {
+                    "mimeType": "text/plain",
+                    "headers": [
+                        {"name": "Content-Type", "value": "text/plain; charset=base64_codec"}
+                    ],
+                    "body": {"data": base64.urlsafe_b64encode(b"body").decode()},
+                },
+            }
+        )
+        with self.assertRaises(GmailError) as malformed:
+            self.gmail.read_message("owner-a", "m_1")
+        self.assertEqual(malformed.exception.reason, "invalid_provider_response")
 
     def test_expiry_and_provider_revocation_clear_tokens_and_require_reauth(self):
         self.connect()

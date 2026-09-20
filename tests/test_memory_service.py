@@ -98,7 +98,26 @@ class MemoryServiceTests(unittest.TestCase):
         )
         self.assertEqual(rejected["state"], "rejected")
         self.assertEqual(replayed["state"], "rejected")
+        self.assertEqual(rejected["content"], "")
+        self.assertEqual(rejected["memory_key"], "")
+        with self.store.db() as db:
+            stored = db.execute("SELECT memory_key,content FROM memory_candidates WHERE id=?", (candidate["id"],)).fetchone()
+        self.assertEqual((stored["memory_key"], stored["content"]), ("", ""))
         self.assertEqual(self.store.memories("owner-a"), [])
+
+    def test_personal_space_candidate_delete_atomically_revokes_issued_approval(self):
+        candidate = self.service.propose("owner-a", "work-a", "private-key", "private candidate")
+        self.service.request_candidate_approval(
+            "owner-a", "work-a", candidate["id"], candidate["content_digest"]
+        )
+        deleted = self.store.delete_personal_space_item("memory_candidates", candidate["id"])
+        self.assertTrue(deleted["deleted"])
+        self.assertEqual(deleted["deleted_approval_count"], 1)
+        self.assertEqual(deleted["retained_private_copies"], "unknown_outside_store")
+        self.assertFalse(deleted["external_archives_affected"])
+        with self.store.db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM memory_candidates WHERE id=?", (candidate["id"],)).fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM memory_approvals WHERE subject_id=?", (candidate["id"],)).fetchone()[0], 0)
 
     def test_correction_approval_cannot_be_reused_for_wrong_key_value_owner_or_work(self):
         original = self.service.remember("owner-a", "work-a", "meeting-time", "morning")

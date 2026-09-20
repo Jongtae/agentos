@@ -390,7 +390,7 @@ class QuickStore:
             if row['state']=='rejected':
                 return {key:row[key] for key in ('id','memory_key','content','created','state','content_digest','decided','resulting_memory_id')}
             if row['state']!='pending':raise ValueError('이미 결정된 기억 후보입니다.')
-            db.execute("UPDATE memory_candidates SET state='rejected',decided=? WHERE id=? AND state='pending'",(time.time() if now is None else float(now),candidate_id))
+            db.execute("UPDATE memory_candidates SET state='rejected',decided=?,memory_key='',content='' WHERE id=? AND state='pending'",(time.time() if now is None else float(now),candidate_id))
             result=db.execute('SELECT * FROM memory_candidates WHERE id=?',(candidate_id,)).fetchone()
             return {key:result[key] for key in ('id','memory_key','content','created','state','content_digest','decided','resulting_memory_id')}
 
@@ -469,9 +469,16 @@ class QuickStore:
                 return {**result,'kind':'memories'}
         with self.db() as db:
             if kind=='results': deleted=db.execute('DELETE FROM workspace_results WHERE id=?',(item_id,)).rowcount
-            elif kind=='memory_candidates': deleted=db.execute("DELETE FROM memory_candidates WHERE id=? AND state='pending'",(item_id,)).rowcount
+            elif kind=='memory_candidates':
+                db.execute('BEGIN IMMEDIATE')
+                deleted_approvals=db.execute('DELETE FROM memory_approvals WHERE subject_id=?',(item_id,)).rowcount
+                deleted=db.execute("DELETE FROM memory_candidates WHERE id=? AND state IN ('pending','rejected')",(item_id,)).rowcount
             else: deleted=db.execute('DELETE FROM notes WHERE id=?',(item_id,)).rowcount
-        return {'deleted':bool(deleted),'id':item_id,'kind':kind}
+        result={'deleted':bool(deleted),'id':item_id,'kind':kind}
+        if kind=='memory_candidates':
+            result.update(deleted_approval_count=deleted_approvals,
+                          retained_private_copies='unknown_outside_store',external_archives_affected=False)
+        return result
 
     def workspaces(self, include_archived=False):
         query='SELECT * FROM workspaces'+('' if include_archived else " WHERE status='active'")+' ORDER BY updated DESC LIMIT 100'

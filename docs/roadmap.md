@@ -8,6 +8,8 @@ Use the [Goal Execution Contract](goal-execution-contract.en.md): the canonical 
 
 | Work | Status and evidence boundary |
 | --- | --- |
+| GOV-PA1-01 / [#385](https://github.com/Jongtae/personal-agentos/issues/385) | Preparation in PR branch: finite PA1 issue graph, parallel-worktree ownership and source-plan selector only; no runtime or external operation. |
+| EPIC-PA1 / [#386](https://github.com/Jongtae/personal-agentos/issues/386) | Prepared owner-activated top-level first-completion program. After #385 merges and explicit owner activation, one controlling conversation may coordinate only the enumerated dependency-satisfied child worktrees under [PA1 parallel delivery](pa1-parallel-delivery.en.md). |
 | GOV-USE-01 / [#357](https://github.com/Jongtae/personal-agentos/issues/357) | Complete only upon PR #361 merge after required CI and independent review. Product/docs/governance/static evaluation specification; no runtime feature, model-quality result or live operation. |
 | USE-01 / [#358](https://github.com/Jongtae/personal-agentos/issues/358) | Complete on merge of [PR #362](https://github.com/Jongtae/personal-agentos/pull/362) after required CI and independent review. Deterministic development evidence is 72/72; live provider quality remains `not_run/pending_owner_operation`. No successor is selected. |
 | OBS-01 / [#359](https://github.com/Jongtae/personal-agentos/issues/359) | Planned/inactive: actual progress, redacted tool/action receipts and owner controls on current Work paths. Coordinate with USE-01 without a circular prerequisite. |

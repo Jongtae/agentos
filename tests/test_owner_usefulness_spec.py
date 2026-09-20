@@ -67,6 +67,7 @@ class OwnerUsefulnessSpecificationTests(unittest.TestCase):
         self.assertEqual(selected["depends_on"], ["GOV-PA1-01"])
         self.assertEqual(selected["activation_status"], "owner-activated-goal-ready")
         self.assertIn("GOV-PA1-01", plan["history"]["documented_completed_iterations"])
+        self.assertIn("USE-01", plan["history"]["documented_completed_iterations"])
         self.assertNotIn("EPIC-PA1", plan["history"]["documented_completed_iterations"])
         use01 = next(item for item in plan["iterations"] if item["id"] == "USE-01")
         self.assertEqual(use01["issue"], 358)

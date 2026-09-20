@@ -27,11 +27,13 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         self.assertEqual(epic["activation_status"], "owner-activated-goal-ready")
         completed = self.plan["history"]["documented_completed_iterations"]
         self.assertIn("GOV-PA1-01", completed)
+        self.assertIn("USE-01", completed)
         self.assertNotIn("EPIC-PA1", completed)
         self.assertEqual(self.program["active_substeps"], [])
         tasks = (ROOT / "TASKS.md").read_text(encoding="utf-8")
         self.assertIn("selects EPIC-PA1 as goal-ready only", tasks)
         self.assertNotIn("selects USE-01 as goal-ready", tasks)
+        self.assertIn("#358 did not select a successor; EPIC-PA1 is separately prepared by #385", tasks)
 
     def test_epic_is_the_only_nonterminal_program_authority(self):
         nonterminal = [

@@ -20,7 +20,7 @@ PA1 reuses the completed file-workspace baseline rather than rebuilding it. #363
 | Work unit | Issue | Current boundary |
 | --- | --- | --- |
 | GOV-USE-01: product, control, usefulness and backlog alignment | [#357](https://github.com/Jongtae/personal-agentos/issues/357) | Complete only on merge of PR #361 after required CI and independent review. Documentation/governance/static evaluation specification, not product runtime or measured model quality. |
-| USE-01: useful research, file artifacts and continuity | [#358](https://github.com/Jongtae/personal-agentos/issues/358) | Complete on merge of [PR #362](https://github.com/Jongtae/personal-agentos/pull/362) after required CI and independent review. Deterministic evaluator is 72/72; live provider quality remains `not_run/pending_owner_operation`. No successor is selected. |
+| USE-01: useful research, file artifacts and continuity | [#358](https://github.com/Jongtae/personal-agentos/issues/358) | Development closeout recorded from merged [PR #362](https://github.com/Jongtae/personal-agentos/pull/362) and the closed issue. Deterministic evaluator is 72/72; live provider quality remains `not_run/pending_owner_operation`. #358 did not select a successor; EPIC-PA1 is separately prepared by #385. |
 | OBS-01: observed progress, redacted receipts and owner controls | [#359](https://github.com/Jongtae/personal-agentos/issues/359) | Planned/inactive; uses current Work evidence and does not become a prerequisite cycle for USE-01. |
 | AGENT-UX-01: useful install/run/revoke/remove/replacement | [#360](https://github.com/Jongtae/personal-agentos/issues/360) | Planned/inactive; consumes existing package/security/runtime/SDK implementation, not a second installer. |
 

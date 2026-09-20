@@ -197,5 +197,27 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         self.assertIn("Tool acceptance is not proof of execution", self.program["routing_policy"]["truthfulness"])
 
 
+    def test_owner_only_operating_gates_do_not_stop_safe_development(self):
+        policy = self.program["owner_operating_gate_policy"]
+        self.assertEqual(policy["treatment"], "operating-validation-not-implementation-blocker")
+        self.assertEqual(policy["pending_state"], "owner_validation_pending")
+        self.assertIs(policy["continue_safe_work"], True)
+        self.assertEqual(policy["batch_at"], "PA1-INT-01")
+        self.assertEqual(policy["final_checklist_owner"], "PA1-INT-01")
+        self.assertIn("all remaining safe", policy["stop_program_only_when"])
+        self.assertIn("development_complete and operating_validated remain separate", policy["evidence_boundary"])
+        self.assertEqual(self.program["active_substeps"], [])
+        self.assertEqual(self.plan["next_goal"]["status"], "owner-activated-goal-ready")
+
+    def test_owner_gate_contract_batches_live_checks_without_fabricating_success(self):
+        text = (ROOT / self.program["contract"]).read_text(encoding="utf-8")
+        self.assertIn("## Owner-only operating gates", text)
+        self.assertIn("owner_validation_pending", text)
+        self.assertIn("Continue-before-stopping rule", text)
+        self.assertIn("Batched owner validation", text)
+        self.assertIn("PA1-INT-01 / #394 owns the consolidated owner-validation checklist", text)
+        self.assertIn("Unknown/unrun live operation is never converted into success", text)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -12,17 +12,18 @@ from dataclasses import dataclass
 from enum import Enum
 import base64
 import hashlib
+import math
 import re
 import secrets
 import threading
 import time
 from typing import Callable, Iterable, Protocol
+import uuid
 
 
 CONNECTOR_STATE_KEY = "connector_contract_state"
 PENDING_WORK_KEY = "connector_pending_work"
 _IDENTIFIER = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,95})\Z")
-_WORK_REFERENCE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,159})\Z")
 _PENDING_WORK_LOCK = threading.RLock()
 
 
@@ -96,6 +97,25 @@ def _owner_key(owner_id: str) -> str:
     return hashlib.sha256(_nonempty(owner_id, "owner_id").encode()).hexdigest()
 
 
+def _work_reference(work_id: object) -> str:
+    """Accept the canonical UUID form emitted by the authoritative Work store."""
+    if not isinstance(work_id, str) or len(work_id) != 36:
+        raise ValueError("work_id must be a canonical UUID4 Work reference")
+    try:
+        parsed = uuid.UUID(work_id)
+    except (AttributeError, ValueError):
+        raise ValueError("work_id must be a canonical UUID4 Work reference") from None
+    if parsed.version != 4 or str(parsed) != work_id:
+        raise ValueError("work_id must be a canonical UUID4 Work reference")
+    return work_id
+
+
+def _finite_timestamp(value: object, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ValueError(f"{field} must be a finite numeric timestamp")
+    return float(value)
+
+
 @dataclass(frozen=True)
 class ConnectorSpec:
     connector_id: str
@@ -114,10 +134,8 @@ class ConnectorHealth:
     recovery: RecoveryAction | None
 
     def __post_init__(self) -> None:
-        if self.checked_at is not None and (
-            isinstance(self.checked_at, bool) or not isinstance(self.checked_at, (int, float))
-        ):
-            raise ValueError("checked_at must be a timestamp or None")
+        if self.checked_at is not None:
+            _finite_timestamp(self.checked_at, "checked_at")
         if self.state is HealthState.HEALTHY and self.recovery is not None:
             raise ValueError("healthy connector metadata cannot request recovery")
 
@@ -287,15 +305,20 @@ class ConnectorRegistry:
         row = owner_rows.get(connector_id, {})
         if not isinstance(row, dict):
             raise ConnectorContractError("invalid_stored_state")
+        if row and set(row) != {"state", "granted_scopes", "checked_at"}:
+            raise ConnectorContractError("invalid_stored_state")
         try:
             state = ConnectorState(row.get("state", ConnectorState.DISCONNECTED.value))
             granted = _scopes(row.get("granted_scopes", ()))
+            checked_at = _finite_timestamp(row["checked_at"], "checked_at") if row else None
         except (TypeError, ValueError):
             raise ConnectorContractError("invalid_stored_state") from None
-        if state is not ConnectorState.CONNECTED:
-            granted = ()
-        checked_at = row.get("checked_at")
-        health = self._default_health(state, checked_at if isinstance(checked_at, (int, float)) else None)
+        if state is ConnectorState.CONNECTED:
+            if granted != connector.required_scopes:
+                raise ConnectorContractError("invalid_stored_state")
+        elif granted:
+            raise ConnectorContractError("invalid_stored_state")
+        health = self._default_health(state, checked_at)
         return ConnectorStatus(connector_id, state, connector.required_scopes, granted, health)
 
     def transition(
@@ -315,6 +338,10 @@ class ConnectorRegistry:
                 raise ConnectorContractError("scope_mismatch")
         elif granted:
             raise ConnectorContractError("inactive_grant")
+        try:
+            checked_at = _finite_timestamp(self.clock(), "checked_at")
+        except ValueError:
+            raise ConnectorContractError("invalid_clock") from None
         with self._lock:
             rows = self._rows()
             owner = _owner_key(owner_id)
@@ -324,7 +351,7 @@ class ConnectorRegistry:
             owner_rows[connector_id] = {
                 "state": state.value,
                 "granted_scopes": list(granted) if state is ConnectorState.CONNECTED else [],
-                "checked_at": self.clock(),
+                "checked_at": checked_at,
             }
             rows[owner] = owner_rows
             self.store.put(CONNECTOR_STATE_KEY, rows)
@@ -416,8 +443,7 @@ class PendingWorkRegistry:
         requested = _scopes(required_scopes)
         if not requested or not set(requested).issubset(connector.required_scopes):
             raise ConnectorContractError("scope_mismatch")
-        if not isinstance(work_id, str) or not _WORK_REFERENCE.fullmatch(work_id):
-            raise ValueError("work_id must be an opaque Work reference")
+        work_id = _work_reference(work_id)
         if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, (int, float)) or not 0 < ttl_seconds <= 3600:
             raise ValueError("ttl_seconds must be between zero and one hour")
         owner = _owner_key(owner_id)
@@ -429,7 +455,11 @@ class PendingWorkRegistry:
                     break
             else:
                 raise ConnectorContractError("token_generation_failed")
-            expires_at = self.clock() + float(ttl_seconds)
+            try:
+                now = _finite_timestamp(self.clock(), "current time")
+                expires_at = _finite_timestamp(now + float(ttl_seconds), "expires_at")
+            except ValueError:
+                raise ConnectorContractError("invalid_clock") from None
             rows[self._token_key(token)] = {
                 "owner": owner,
                 "work_id": work_id,
@@ -458,24 +488,41 @@ class PendingWorkRegistry:
             row = rows.get(key)
             if not isinstance(row, dict):
                 raise ConnectorContractError("invalid_resume")
-            if row.get("used"):
+            if set(row) != {"owner", "work_id", "connector_id", "required_scopes", "expires_at", "used"}:
+                raise ConnectorContractError("invalid_resume")
+            if not isinstance(row.get("used"), bool):
+                raise ConnectorContractError("invalid_resume")
+            if row["used"]:
                 raise ConnectorContractError("replayed_resume")
+            try:
+                expires_at = _finite_timestamp(row["expires_at"], "expires_at")
+                now = _finite_timestamp(self.clock(), "current time")
+                work_id = _work_reference(row["work_id"])
+                expected = _scopes(row["required_scopes"])
+            except (TypeError, ValueError):
+                raise ConnectorContractError("invalid_resume") from None
+            if not isinstance(row.get("owner"), str) or not re.fullmatch(r"[0-9a-f]{64}", row["owner"]):
+                raise ConnectorContractError("invalid_resume")
+            if not isinstance(row.get("connector_id"), str) or not _IDENTIFIER.fullmatch(row["connector_id"]):
+                raise ConnectorContractError("invalid_resume")
+            try:
+                connector = self.connector_registry.definition(row["connector_id"])
+            except ConnectorContractError:
+                raise ConnectorContractError("invalid_resume") from None
+            if not expected or not set(expected).issubset(connector.required_scopes):
+                raise ConnectorContractError("invalid_resume")
             row["used"] = True
             rows[key] = row
             self.store.put(PENDING_WORK_KEY, rows)
-            expires_at = row.get("expires_at")
-            if isinstance(expires_at, bool) or not isinstance(expires_at, (int, float)):
-                raise ConnectorContractError("invalid_resume")
-            if self.clock() >= expires_at:
+            if now >= expires_at:
                 raise ConnectorContractError("expired_resume")
             if row.get("owner") != owner or row.get("connector_id") != connector_id:
                 raise ConnectorContractError("invalid_resume")
-            self.connector_registry.require_connected(owner_id, connector_id, granted_scopes)
-            expected = _scopes(row.get("required_scopes", ()))
-            actual = _scopes(granted_scopes)
+            try:
+                actual = _scopes(granted_scopes)
+            except (TypeError, ValueError):
+                raise ConnectorContractError("scope_mismatch") from None
+            self.connector_registry.require_connected(owner_id, connector_id, actual)
             if actual != expected:
                 raise ConnectorContractError("scope_mismatch")
-            work_id = row.get("work_id")
-            if not isinstance(work_id, str) or not work_id:
-                raise ConnectorContractError("invalid_resume")
             return PendingWorkReference(work_id, connector_id, expected)

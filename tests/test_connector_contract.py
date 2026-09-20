@@ -1,4 +1,6 @@
+import hashlib
 import json
+import math
 import tempfile
 import unittest
 
@@ -22,6 +24,10 @@ CALENDAR = ConnectorSpec(
     "google-calendar-owner",
     ("calendar.events.read", "calendar.events.write"),
 )
+WORK_1 = "11111111-1111-4111-8111-111111111111"
+WORK_2 = "22222222-2222-4222-8222-222222222222"
+WORK_3 = "33333333-3333-4333-8333-333333333333"
+WORK_4 = "44444444-4444-4444-8444-444444444444"
 
 
 class ConnectorContractTests(unittest.TestCase):
@@ -65,7 +71,7 @@ class ConnectorContractTests(unittest.TestCase):
 
     def test_typed_states_health_and_redacted_required_results(self):
         handle = self.pending.issue(
-            "owner-a", "work-1", GMAIL.connector_id, GMAIL.required_scopes
+            "owner-a", WORK_1, GMAIL.connector_id, GMAIL.required_scopes
         )
         result = self.registry.required_result(
             "owner-a", GMAIL.connector_id, resume_token=handle.token
@@ -74,7 +80,7 @@ class ConnectorContractTests(unittest.TestCase):
         self.assertEqual(result.as_dict()["recovery"], "connect")
         rendered = json.dumps(result.as_dict())
         self.assertNotIn("owner-a", rendered)
-        self.assertNotIn("work-1", rendered)
+        self.assertNotIn(WORK_1, rendered)
 
         reauth = self.registry.transition(
             "owner-a", GMAIL.connector_id, ConnectorState.REAUTH_REQUIRED
@@ -111,7 +117,7 @@ class ConnectorContractTests(unittest.TestCase):
 
     def test_resume_is_owner_bound_opaque_minimal_and_exactly_once(self):
         handle = self.pending.issue(
-            "owner-a", "work-123", GMAIL.connector_id, GMAIL.required_scopes
+            "owner-a", WORK_1, GMAIL.connector_id, GMAIL.required_scopes
         )
         stored = json.dumps(self.store.config(PENDING_WORK_KEY))
         self.assertNotIn(handle.token, stored)
@@ -126,26 +132,30 @@ class ConnectorContractTests(unittest.TestCase):
         reference = self.pending.consume(
             handle.token, "owner-a", GMAIL.connector_id, GMAIL.required_scopes
         )
-        self.assertEqual(reference.work_id, "work-123")
+        self.assertEqual(reference.work_id, WORK_1)
         with self.assertRaises(ConnectorContractError) as replayed:
             self.pending.consume(
                 handle.token, "owner-a", GMAIL.connector_id, GMAIL.required_scopes
             )
         self.assertEqual(replayed.exception.reason, "replayed_resume")
 
-        with self.assertRaises(ValueError):
-            self.pending.issue(
-                "owner-a",
-                "show my full private mail request",
-                GMAIL.connector_id,
-                GMAIL.required_scopes,
-            )
+        for unsafe in (
+            "show my full private mail request",
+            "show_my_full_private_mail_request",
+            "c2hvdyBteSBmdWxsIHByaXZhdGUgbWFpbCByZXF1ZXN0",
+            "x" * 161,
+            "11111111-1111-1111-8111-111111111111",
+        ):
+            with self.subTest(unsafe=unsafe), self.assertRaises(ValueError):
+                self.pending.issue(
+                    "owner-a", unsafe, GMAIL.connector_id, GMAIL.required_scopes
+                )
 
     def test_wrong_owner_expiry_and_scope_mismatch_are_rejected_and_consumed(self):
         self.connect()
         cases = (
-            ("wrong-owner", lambda handle: ("owner-b", GMAIL.connector_id, GMAIL.required_scopes), "invalid_resume"),
-            ("scope", lambda handle: ("owner-a", GMAIL.connector_id, ("gmail.modify",)), "scope_mismatch"),
+            (WORK_2, lambda handle: ("owner-b", GMAIL.connector_id, GMAIL.required_scopes), "invalid_resume"),
+            (WORK_3, lambda handle: ("owner-a", GMAIL.connector_id, ("gmail.modify",)), "scope_mismatch"),
         )
         for work_id, arguments, reason in cases:
             with self.subTest(work_id):
@@ -162,7 +172,7 @@ class ConnectorContractTests(unittest.TestCase):
                 self.assertEqual(replayed.exception.reason, "replayed_resume")
 
         expired = self.pending.issue(
-            "owner-a", "expired", GMAIL.connector_id, GMAIL.required_scopes, ttl_seconds=1
+            "owner-a", WORK_4, GMAIL.connector_id, GMAIL.required_scopes, ttl_seconds=1
         )
         self.now[0] += 1
         with self.assertRaises(ConnectorContractError) as rejected:
@@ -170,6 +180,54 @@ class ConnectorContractTests(unittest.TestCase):
                 expired.token, "owner-a", GMAIL.connector_id, GMAIL.required_scopes
             )
         self.assertEqual(rejected.exception.reason, "expired_resume")
+
+    def test_corrupt_connected_grants_and_health_timestamp_fail_closed(self):
+        self.connect()
+        rows = self.store.config(CONNECTOR_STATE_KEY)
+        owner_rows = next(iter(rows.values()))
+        for grants in ([], ["gmail.readonly", "gmail.modify"]):
+            with self.subTest(grants=grants):
+                owner_rows[GMAIL.connector_id]["granted_scopes"] = grants
+                self.store.put(CONNECTOR_STATE_KEY, rows)
+                with self.assertRaises(ConnectorContractError) as rejected:
+                    self.registry.status("owner-a", GMAIL.connector_id)
+                self.assertEqual(rejected.exception.reason, "invalid_stored_state")
+
+        owner_rows[GMAIL.connector_id]["granted_scopes"] = list(GMAIL.required_scopes)
+        owner_rows[GMAIL.connector_id]["checked_at"] = math.nan
+        self.store.put(CONNECTOR_STATE_KEY, rows)
+        with self.assertRaises(ConnectorContractError) as rejected:
+            self.registry.require_connected("owner-a", GMAIL.connector_id, GMAIL.required_scopes)
+        self.assertEqual(rejected.exception.reason, "invalid_stored_state")
+
+    def test_corrupt_pending_schema_work_reference_and_expiry_fail_closed(self):
+        self.connect()
+        corruptions = (
+            ("work_id", "PRIVATE_PAYLOAD_WITH_UNDERSCORES"),
+            ("work_id", "cHJpdmF0ZV9tYWlsX3JlcXVlc3Q"),
+            ("expires_at", True),
+            ("expires_at", math.nan),
+            ("expires_at", math.inf),
+            ("expires_at", "tomorrow"),
+            ("used", "false"),
+            ("required_scopes", "gmail.readonly"),
+        )
+        work_ids = (WORK_1, WORK_2, WORK_3, WORK_4)
+        for index, (field, value) in enumerate(corruptions):
+            with self.subTest(field=field, value=value):
+                work_id = work_ids[index % len(work_ids)]
+                handle = self.pending.issue(
+                    "owner-a", work_id, GMAIL.connector_id, GMAIL.required_scopes
+                )
+                rows = self.store.config(PENDING_WORK_KEY)
+                key = hashlib.sha256(handle.token.encode()).hexdigest()
+                rows[key][field] = value
+                self.store.put(PENDING_WORK_KEY, rows)
+                with self.assertRaises(ConnectorContractError) as rejected:
+                    self.pending.consume(
+                        handle.token, "owner-a", GMAIL.connector_id, GMAIL.required_scopes
+                    )
+                self.assertEqual(rejected.exception.reason, "invalid_resume")
 
     def test_capability_compatibility_is_deterministic_and_disconnect_revokes(self):
         registry = CapabilityRegistry(self.store)

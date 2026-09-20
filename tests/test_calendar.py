@@ -232,6 +232,60 @@ class CalendarTests(unittest.TestCase):
         self.assertTrue(disconnect_finished.is_set())
         self.assertEqual([call[0] for call in self.provider.calls], ["create"])
 
+    def test_status_and_preview_remain_available_during_provider_mutation(self):
+        provider_started = threading.Event()
+        allow_provider = threading.Event()
+        inspection_finished = threading.Event()
+        inspections = {}
+        errors = []
+        original_create = self.provider.create
+
+        def paused_create(*args):
+            provider_started.set()
+            if not allow_provider.wait(1):
+                raise AssertionError("provider wait timed out")
+            return original_create(*args)
+
+        self.provider.create = paused_create
+        draft = self.calendar.draft_create(EVENT, "owner")
+        approval = self.approve(draft)
+
+        def create():
+            try:
+                self.calendar.create(draft["id"], approval, "owner")
+            except Exception as error:
+                errors.append(error)
+
+        def inspect():
+            try:
+                inspections["status"] = self.calendar.status(draft["id"], "owner")
+                inspections["preview"] = self.calendar.preview(draft["id"], "owner")
+            except Exception as error:
+                errors.append(error)
+            finally:
+                inspection_finished.set()
+
+        mutation = threading.Thread(target=create)
+        mutation.start()
+        self.assertTrue(provider_started.wait(1))
+        inspection = threading.Thread(target=inspect)
+        inspection.start()
+        try:
+            self.assertTrue(inspection_finished.wait(.2))
+            self.assertEqual(
+                (inspections["status"]["state"], inspections["status"]["effect"]),
+                ("outcome-unknown", "unknown"),
+            )
+            self.assertEqual(inspections["preview"]["state"], "executing")
+        finally:
+            allow_provider.set()
+            mutation.join(1)
+            inspection.join(1)
+
+        self.assertFalse(mutation.is_alive())
+        self.assertFalse(inspection.is_alive())
+        self.assertFalse(errors)
+
     def test_query_releases_global_authority_lock_during_provider_dispatch(self):
         observed = []
         original_query = self.provider.query

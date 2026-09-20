@@ -267,16 +267,45 @@ Thus the prior tested draft cannot be applied after OAuth changes the stored
 connection, including same-destination credential replacement. This used only the
 local fixture; no provider call or live credential was involved.
 
-Project count and bounded capability controls
----------------------------------------------
-In a fresh headed fixture run, the project row initially showed 0개 완료 결과.
-After saving the eligible unassigned result, the browser fetched Personal Space and
-immediately observed the durable saved-result count rather than the job assignment:
+Project detail races, durable count boundaries, and bounded capability controls
+---------------------------------------------------------------------------
+The fixture exposes two project-detail read models while its global Personal Space
+feed intentionally contains only results from the second project. A fresh headed
+browser therefore rendered the rows from each durable project detail, not by
+misreading that global latest-results feed as totals:
 
-  {"workspaceRow":"1개 완료 결과","savedResults":1}
+  회귀 프로젝트 · 0개 완료 결과
+  다른 프로젝트 · 30개 이상 완료 결과
 
-The executable Node regression separately proves that an older out-of-order project
-response is rejected when either its selected ID or request sequence is stale. It
-also proves that `isolated-runtime-placeholder` receives no lifecycle buttons while
-the four exact capability IDs understood by the existing settings parser retain
-their valid controls. These are owned frontend/fixture observations only.
+The second detail contains the API limit of 30 results, so the UI truthfully renders
+"30개 이상" rather than claiming that the bounded response is an exact total.
+
+Next the fixture delayed the first project's save response. The browser clicked its
+완료 결과 저장 control and selected 다른 프로젝트 before the delayed response
+completed. The final browser evaluation was:
+
+  {"selected":["다른 프로젝트"],"detail":"다른 프로젝트","rows":["회귀 프로젝트 · 1개 완료 결과","다른 프로젝트 · 30개 이상 완료 결과"]}
+
+The completed save updated the first project's durable count, but its late response
+did not replace the currently selected second-project detail.
+
+The executable Node regression also proves that `isolated-runtime-placeholder`
+receives no lifecycle buttons while the four exact capability IDs understood by the
+existing settings parser retain their valid controls. These are owned frontend and
+fixture observations only.
+
+In-flight OAuth refresh ordering and unsaved file drafts
+--------------------------------------------------------
+In a fresh headed browser, the three file controls were given unsaved local values.
+The fixture then delayed and captured a pre-OAuth `/api/state` response. While that
+poll was in flight it changed its stored model to the inert OpenRouter fixture and
+sent the same-origin completion signal. After the stale response and the queued
+post-OAuth refresh both completed, the browser observed:
+
+  {"provider":"compatible","model":"fixture/connected","root":"/tmp/unsaved-root","reference":"/tmp/unsaved-reference","output":"/tmp/unsaved-output","applyDisabled":true}
+
+Thus the stale poll cannot mark the pre-OAuth model current, the queued refresh
+loads the connected model, the prior Apply proof stays invalid, and model/OAuth
+rehydration does not overwrite unrelated unsaved file drafts. All callback, model,
+and file values in this run were fixture-only; no live provider or owner path was
+used.

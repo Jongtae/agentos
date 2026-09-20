@@ -117,7 +117,8 @@ assert.equal(ui.isOpenRouterCompletion({origin:'http://owner.local',data:{type:'
 assert.equal(ui.isOpenRouterCompletion({origin:'http://attacker.local',data:{type:'agentos-openrouter-connected'}},'http://owner.local'),false);
 assert.equal(ui.shouldRenderWorkspaceDetail('second','first',1,2),false);
 assert.equal(ui.shouldRenderWorkspaceDetail('second','second',2,2),true);
-assert.equal(ui.workspaceResultCount({results:[{workspace_id:'one'},{workspace_id:'two'},{workspace_id:'one'}]},'one'),2);
+assert.deepEqual(ui.workspaceResultSummary({results:[{id:'one'},{id:'two'}]}),{count:2,capped:false,label:'2개 완료 결과'});
+assert.deepEqual(ui.workspaceResultSummary({results:Array.from({length:30},(_,id)=>({id}))}),{count:30,capped:true,label:'30개 이상 완료 결과'});
 const removed=[];assert.equal(ui.clearMobileDetailWhenEmpty({classList:{remove:value=>removed.push(value)}},[]),true);assert.deepEqual(removed,['mobile-detail']);
 let detailLoads=0;
 await ui.refreshSelectedTaskDetail({id:'one',events_count:1,observed_at:10,status:'running',events:[{id:1}]},{id:'one',events_count:2,observed_at:11,status:'running'},async id=>{detailLoads++;return {id,events:[{id:1},{id:2}]};});
@@ -134,13 +135,13 @@ const verified=await guard.test(current,async()=>{testRequests++;return {ok:true
 assert.equal(verified.accepted,true);assert.equal(guard.canApply(current),true);
 assert.equal(await guard.apply(current,async payload=>{saveRequests++;assert.equal('credential_revision' in payload,false);}),true);
 assert.equal(testRequests,2);assert.equal(saveRequests,1);
-console.log(JSON.stringify({checks:31}));
+console.log(JSON.stringify({checks:32}));
 })().catch(error=>{console.error(error);process.exit(1);});
 """
         result = subprocess.run(
             [node, '-e', script, str(ROOT / 'src/personal_agent/web/app.js')],
             check=True, capture_output=True, text=True, timeout=20)
-        self.assertEqual(json.loads(result.stdout)['checks'], 31)
+        self.assertEqual(json.loads(result.stdout)['checks'], 32)
 
     def test_model_apply_has_one_explicit_test_and_credential_revision(self):
         app = (ROOT / 'src/personal_agent/web/app.js').read_text()
@@ -160,6 +161,19 @@ console.log(JSON.stringify({checks:31}));
         self.assertIn("api('/api/workspaces/'+encodeURIComponent(id))", app)
         self.assertIn("'/save-result'", app)
         self.assertIn('workspaceSaveCandidates', app)
+        self.assertIn('shouldRenderWorkspaceDetail(selectedWorkspaceId,workspaceId,request,workspaceDetailSequence)', app)
+        self.assertIn('loadWorkspaceResultSummaries(home.workspaces)', app)
+        self.assertNotIn('workspaceResultCount(lastSpace', app)
+
+    def test_oauth_refresh_and_file_drafts_have_independent_stale_guards(self):
+        app = (ROOT / 'src/personal_agent/web/app.js').read_text()
+        self.assertIn('if(refreshing){refreshQueued=true;return;}', app)
+        self.assertIn('requestedModelRevision===modelLoadRevision', app)
+        self.assertIn('if(refreshQueued){refreshQueued=false;void refresh();}', app)
+        self.assertGreaterEqual(app.count('invalidateModelLoad()'), 4)
+        hydration = app[app.index('if(!modelLoaded){if(requestedModelRevision'):app.index("$('task-refresh-state').textContent='방금 확인'")]
+        self.assertNotIn("$('root-paths').value", hydration.split('if(!fileSettingsLoaded)')[0])
+        self.assertIn("$('root-paths').value", hydration.split('if(!fileSettingsLoaded)')[1])
 
     def test_capability_lifecycle_uses_existing_confirmed_settings_route(self):
         app = (ROOT / 'src/personal_agent/web/app.js').read_text()
@@ -193,7 +207,9 @@ console.log(JSON.stringify({checks:31}));
         self.assertIn('"popupClosed":true,"key":"","provider":"compatible"', transcript)
         self.assertIn('"beforeOAuthApplyDisabled":false', transcript)
         self.assertIn('"afterOAuthApplyDisabled":true', transcript)
-        self.assertIn('{"workspaceRow":"1개 완료 결과","savedResults":1}', transcript)
+        self.assertIn('다른 프로젝트 · 30개 이상 완료 결과', transcript)
+        self.assertIn('{"selected":["다른 프로젝트"],"detail":"다른 프로젝트"', transcript)
+        self.assertIn('"root":"/tmp/unsaved-root","reference":"/tmp/unsaved-reference"', transcript)
         self.assertIn('does not run AgentService', transcript)
 
     def test_browser_fixture_observer_captures_every_mutating_http_verb(self):

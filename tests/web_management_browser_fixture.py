@@ -28,6 +28,10 @@ class Fixture:
     drafts = {}
     tasks_empty = False
     model = {"provider": "openai", "endpoint": "https://example.invalid/v1", "model": "fixture-model"}
+    other_results = [{"id": f"other-{index}", "job_id": f"other-job-{index}", "workspace_id": "workspace-other", "content": f"other result {index}", "created": 100 + index} for index in range(30)]
+    delay_state = False
+    state_inflight = False
+    delay_save = False
 
     @classmethod
     def task(cls, detail=False):
@@ -81,12 +85,21 @@ class Handler(BaseHTTPRequestHandler):
             Fixture.task_polls += 1
             self.send_json({"tasks": [] if Fixture.tasks_empty else [Fixture.task()], "unknown_detail_message": "fixture"})
         elif path == "/api/tasks/task-382": self.send_json({"tasks": [Fixture.task(True)], "selected": Fixture.task(True), "unknown_detail_message": "fixture"})
-        elif path == "/api/home": self.send_json({"state": "working", "workspaces": [{"id": "workspace-382", "title": "회귀 프로젝트"}]})
-        elif path == "/api/state": self.send_json({"settings": {"model": Fixture.model, "model_ready": False, "subscription_engines": {"engines": []}, "context_inbox": {"sources": {}, "items": []}, "telegram": {"enabled": True, "paired": True, "username": "fixture_bot"}, "conversation_settings": {"state": "read", "capabilities": [{"id": "google-drive-read", "kind": "connector", "state": Fixture.capability_state, "recovery": "Owner can resume after review."}]}, "document_boundary": {}}, "jobs": [{"id": "task-382", "status": "running", "response": None, "message": "fixture Telegram request", "channel": "telegram:fixture-owner"}, {"id": "project-job", "status": "succeeded", "response": "fixture project result", "message": "fixture project request", "channel": "telegram:fixture-owner"}], "tool_events": [], "healthy": True})
-        elif path == "/api/personal-space": self.send_json({"memories": Fixture.memories, "context": [], "results": Fixture.results})
+        elif path == "/api/home": self.send_json({"state": "working", "workspaces": [{"id": "workspace-382", "title": "회귀 프로젝트", "updated": 1}, {"id": "workspace-other", "title": "다른 프로젝트", "updated": 2}]})
+        elif path == "/api/state":
+            model = dict(Fixture.model)
+            if Fixture.delay_state:
+                Fixture.delay_state = False
+                Fixture.state_inflight = True
+                time.sleep(1.5)
+                Fixture.state_inflight = False
+            self.send_json({"settings": {"model": model, "model_ready": False, "subscription_engines": {"engines": []}, "file_roots": [], "file_workspace": {"references": [], "workspace": ""}, "context_inbox": {"sources": {}, "items": []}, "telegram": {"enabled": True, "paired": True, "username": "fixture_bot"}, "conversation_settings": {"state": "read", "capabilities": [{"id": "google-drive-read", "kind": "connector", "state": Fixture.capability_state, "recovery": "Owner can resume after review."}]}, "document_boundary": {}}, "jobs": [{"id": "task-382", "status": "running", "response": None, "message": "fixture Telegram request", "channel": "telegram:fixture-owner"}, {"id": "project-job", "status": "succeeded", "response": "fixture project result", "message": "fixture project request", "channel": "telegram:fixture-owner"}], "tool_events": [], "healthy": True})
+        elif path == "/api/personal-space": self.send_json({"memories": Fixture.memories, "context": [], "results": Fixture.other_results[-50:]})
         elif path == "/api/workspaces/workspace-382": self.send_json({"id": "workspace-382", "title": "회귀 프로젝트", "purpose": "상세/결과 저장 회귀", "results": Fixture.results, "messages": []})
+        elif path == "/api/workspaces/workspace-other": self.send_json({"id": "workspace-other", "title": "다른 프로젝트", "purpose": "늦은 응답 격리 회귀", "results": Fixture.other_results, "messages": []})
         elif path == "/control/counts": self.send_json({"test_requests": Fixture.test_requests, "apply_requests": Fixture.apply_requests, "events": len(Fixture.events), "task_polls": Fixture.task_polls})
         elif path == "/control/requests": self.send_json({"requests": Fixture.requests})
+        elif path == "/control/state-inflight": self.send_json({"state_inflight": Fixture.state_inflight})
         else: self.send_json({"error": path}, 404)
 
     def do_POST(self):
@@ -104,6 +117,15 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/control/empty-tasks":
             Fixture.tasks_empty = True
             self.send_json({"tasks_empty": True})
+        elif path == "/control/delay-state":
+            Fixture.delay_state = True
+            self.send_json({"delay_state": True})
+        elif path == "/control/set-openrouter":
+            Fixture.model = {"provider": "compatible", "endpoint": "https://openrouter.ai/api/v1", "model": "fixture/connected"}
+            self.send_json({"model": Fixture.model})
+        elif path == "/control/delay-save":
+            Fixture.delay_save = True
+            self.send_json({"delay_save": True})
         elif path == "/api/model/test":
             Fixture.test_requests += 1
             time.sleep(0.8)
@@ -136,6 +158,9 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.send_json({"error": "unsupported settings operation"}, 400)
         elif path == "/api/workspaces/workspace-382/save-result":
+            if Fixture.delay_save:
+                Fixture.delay_save = False
+                time.sleep(1.2)
             Fixture.results[:] = [{"id": "result-1", "job_id": body.get("job_id"), "workspace_id": "workspace-382", "content": "fixture project result", "created": 3}]
             self.send_json({"id": "workspace-382", "title": "회귀 프로젝트", "purpose": "상세/결과 저장 회귀", "results": Fixture.results, "messages": []})
         else: self.send_json({"error": path}, 404)

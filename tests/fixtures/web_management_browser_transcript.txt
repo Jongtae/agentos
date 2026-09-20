@@ -250,3 +250,33 @@ then cleared and reloaded the stale form. Its evaluation observed:
 
 No real OpenRouter account, credential, provider request, or external network effect
 was used; `stale-secret`, the code, state, and verifier are inert fixture strings.
+
+OAuth invalidates an already-enabled exact-draft proof
+-----------------------------------------------------
+In a fresh headed run, the direct form was filled with `prior-tested-key` and its
+explicit fixture test completed. Before OAuth, the browser observed:
+
+  {"beforeOAuthApplyDisabled":false,"key":"prior-tested-key"}
+
+The same inert local callback flow above then completed. After the popup signalled
+and closed, the opener observed:
+
+  {"popupClosed":true,"afterOAuthApplyDisabled":true,"key":"","provider":"compatible","model":"fixture/connected","modelFeedback":"연결 결과가 바뀌었습니다. 적용 전에 다시 테스트하세요."}
+
+Thus the prior tested draft cannot be applied after OAuth changes the stored
+connection, including same-destination credential replacement. This used only the
+local fixture; no provider call or live credential was involved.
+
+Project count and bounded capability controls
+---------------------------------------------
+In a fresh headed fixture run, the project row initially showed 0개 완료 결과.
+After saving the eligible unassigned result, the browser fetched Personal Space and
+immediately observed the durable saved-result count rather than the job assignment:
+
+  {"workspaceRow":"1개 완료 결과","savedResults":1}
+
+The executable Node regression separately proves that an older out-of-order project
+response is rejected when either its selected ID or request sequence is stale. It
+also proves that `isolated-runtime-placeholder` receives no lifecycle buttons while
+the four exact capability IDs understood by the existing settings parser retain
+their valid controls. These are owned frontend/fixture observations only.

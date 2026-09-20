@@ -83,7 +83,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/tasks/task-382": self.send_json({"tasks": [Fixture.task(True)], "selected": Fixture.task(True), "unknown_detail_message": "fixture"})
         elif path == "/api/home": self.send_json({"state": "working", "workspaces": [{"id": "workspace-382", "title": "회귀 프로젝트"}]})
         elif path == "/api/state": self.send_json({"settings": {"model": Fixture.model, "model_ready": False, "subscription_engines": {"engines": []}, "context_inbox": {"sources": {}, "items": []}, "telegram": {"enabled": True, "paired": True, "username": "fixture_bot"}, "conversation_settings": {"state": "read", "capabilities": [{"id": "google-drive-read", "kind": "connector", "state": Fixture.capability_state, "recovery": "Owner can resume after review."}]}, "document_boundary": {}}, "jobs": [{"id": "task-382", "status": "running", "response": None, "message": "fixture Telegram request", "channel": "telegram:fixture-owner"}, {"id": "project-job", "status": "succeeded", "response": "fixture project result", "message": "fixture project request", "channel": "telegram:fixture-owner"}], "tool_events": [], "healthy": True})
-        elif path == "/api/personal-space": self.send_json({"memories": Fixture.memories, "context": [], "results": []})
+        elif path == "/api/personal-space": self.send_json({"memories": Fixture.memories, "context": [], "results": Fixture.results})
         elif path == "/api/workspaces/workspace-382": self.send_json({"id": "workspace-382", "title": "회귀 프로젝트", "purpose": "상세/결과 저장 회귀", "results": Fixture.results, "messages": []})
         elif path == "/control/counts": self.send_json({"test_requests": Fixture.test_requests, "apply_requests": Fixture.apply_requests, "events": len(Fixture.events), "task_polls": Fixture.task_polls})
         elif path == "/control/requests": self.send_json({"requests": Fixture.requests})
@@ -136,7 +136,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.send_json({"error": "unsupported settings operation"}, 400)
         elif path == "/api/workspaces/workspace-382/save-result":
-            Fixture.results[:] = [{"id": "result-1", "job_id": body.get("job_id"), "content": "fixture project result", "created": 3}]
+            Fixture.results[:] = [{"id": "result-1", "job_id": body.get("job_id"), "workspace_id": "workspace-382", "content": "fixture project result", "created": 3}]
             self.send_json({"id": "workspace-382", "title": "회귀 프로젝트", "purpose": "상세/결과 저장 회귀", "results": Fixture.results, "messages": []})
         else: self.send_json({"error": path}, 404)
 

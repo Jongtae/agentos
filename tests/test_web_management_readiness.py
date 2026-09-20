@@ -105,15 +105,19 @@ assert.deepEqual(ui.filterLocalRecords(space,'durable-key','saved').map(x=>x.id)
 assert.deepEqual(ui.filterLocalRecords(space,'needle-after-truncation','all').map(x=>x.id),['long']);
 assert.deepEqual(ui.workspaceSaveCandidates([{id:'unassigned',status:'succeeded'},{id:'here',workspace_id:'w',status:'partial'},{id:'elsewhere',workspace_id:'other',status:'succeeded'},{id:'queued',status:'queued'}],'w',[{job_id:'here'}]).map(x=>x.id),['unassigned']);
 assert.deepEqual(ui.modelPresetDraft({provider:'compatible',endpoint:'https://openrouter.ai/api/v1/',model:'fixture/free'}),{provider:'compatible',endpoint:'https://openrouter.ai/api/v1',model:'fixture/free',api_key:''});
-assert.deepEqual(ui.capabilityActions({state:'enabled'}),['pause','disconnect']);
-assert.deepEqual(ui.capabilityActions({state:'paused'}),['resume']);
-assert.deepEqual(ui.capabilityActions({state:'disconnected'}),[]);
+assert.deepEqual(ui.capabilityActions({id:'google-drive-read',state:'enabled'}),['pause','disconnect']);
+assert.deepEqual(ui.capabilityActions({id:'google-drive-read',state:'paused'}),['resume']);
+assert.deepEqual(ui.capabilityActions({id:'google-drive-read',state:'disconnected'}),[]);
+assert.deepEqual(ui.capabilityActions({id:'isolated-runtime-placeholder',state:'enabled'}),[]);
 assert.match(ui.contextSharingWarning({sharing_requires_policy_and_per_request_approval:true}),/각 Telegram 작업마다/);
 assert.equal(ui.settingsFeedbackId('subscription'),'subscription-feedback');
 const disclosureStore=new Map(),nested={open:true},technical={open:true,querySelector:selector=>selector==='details'?nested:null};
 ui.rememberTaskDisclosures(disclosureStore,'task',technical);technical.open=false;nested.open=false;ui.restoreTaskDisclosures(disclosureStore,'task',technical,nested);assert.equal(technical.open,true);assert.equal(nested.open,true);
 assert.equal(ui.isOpenRouterCompletion({origin:'http://owner.local',data:{type:'agentos-openrouter-connected'}},'http://owner.local'),true);
 assert.equal(ui.isOpenRouterCompletion({origin:'http://attacker.local',data:{type:'agentos-openrouter-connected'}},'http://owner.local'),false);
+assert.equal(ui.shouldRenderWorkspaceDetail('second','first',1,2),false);
+assert.equal(ui.shouldRenderWorkspaceDetail('second','second',2,2),true);
+assert.equal(ui.workspaceResultCount({results:[{workspace_id:'one'},{workspace_id:'two'},{workspace_id:'one'}]},'one'),2);
 const removed=[];assert.equal(ui.clearMobileDetailWhenEmpty({classList:{remove:value=>removed.push(value)}},[]),true);assert.deepEqual(removed,['mobile-detail']);
 let detailLoads=0;
 await ui.refreshSelectedTaskDetail({id:'one',events_count:1,observed_at:10,status:'running',events:[{id:1}]},{id:'one',events_count:2,observed_at:11,status:'running'},async id=>{detailLoads++;return {id,events:[{id:1},{id:2}]};});
@@ -130,13 +134,13 @@ const verified=await guard.test(current,async()=>{testRequests++;return {ok:true
 assert.equal(verified.accepted,true);assert.equal(guard.canApply(current),true);
 assert.equal(await guard.apply(current,async payload=>{saveRequests++;assert.equal('credential_revision' in payload,false);}),true);
 assert.equal(testRequests,2);assert.equal(saveRequests,1);
-console.log(JSON.stringify({checks:27}));
+console.log(JSON.stringify({checks:31}));
 })().catch(error=>{console.error(error);process.exit(1);});
 """
         result = subprocess.run(
             [node, '-e', script, str(ROOT / 'src/personal_agent/web/app.js')],
             check=True, capture_output=True, text=True, timeout=20)
-        self.assertEqual(json.loads(result.stdout)['checks'], 27)
+        self.assertEqual(json.loads(result.stdout)['checks'], 31)
 
     def test_model_apply_has_one_explicit_test_and_credential_revision(self):
         app = (ROOT / 'src/personal_agent/web/app.js').read_text()
@@ -147,6 +151,7 @@ console.log(JSON.stringify({checks:27}));
         self.assertIn('modelGuard.apply', app)
         self.assertIn("method||(body===undefined?'GET':'POST')", app)
         self.assertIn("'/api/personal-space/'+item.deleteKind", app)
+        self.assertEqual(app.count("invalidateModelDraft('연결 결과가 바뀌었습니다. 적용 전에 다시 테스트하세요.')"), 2)
 
     def test_project_detail_and_result_save_actions_remain_available(self):
         app = (ROOT / 'src/personal_agent/web/app.js').read_text()
@@ -186,6 +191,9 @@ console.log(JSON.stringify({checks:27}));
         self.assertIn('{"technical":true,"original":true,"events":2}', transcript)
         self.assertIn('{"detailClass":"panel detail","empty":true}', transcript)
         self.assertIn('"popupClosed":true,"key":"","provider":"compatible"', transcript)
+        self.assertIn('"beforeOAuthApplyDisabled":false', transcript)
+        self.assertIn('"afterOAuthApplyDisabled":true', transcript)
+        self.assertIn('{"workspaceRow":"1개 완료 결과","savedResults":1}', transcript)
         self.assertIn('does not run AgentService', transcript)
 
     def test_browser_fixture_observer_captures_every_mutating_http_verb(self):

@@ -3,6 +3,7 @@ from pathlib import Path
 import plistlib
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from personal_agent.service_control import (
     CommandResult,
@@ -47,6 +48,20 @@ class FakeLaunchctl:
         elif command[:2] == ["launchctl", "kickstart"]:
             self.loaded = self.running = True
         return CommandResult(0)
+
+
+class ExitAfterFirstBootstrap(FakeLaunchctl):
+    def __init__(self):
+        super().__init__()
+        self.bootstrap_count = 0
+
+    def __call__(self, command):
+        result = super().__call__(command)
+        if list(command)[:2] == ["launchctl", "bootstrap"]:
+            self.bootstrap_count += 1
+            if self.bootstrap_count == 1:
+                self.running = False
+        return result
 
 
 class ServiceControlTests(unittest.TestCase):
@@ -126,6 +141,34 @@ class ServiceControlTests(unittest.TestCase):
         self.assertEqual(marker.read_text(), "keep")
         self.assertFalse(upgraded.plist_path.exists())
 
+    def test_explicit_unchanged_upgrade_restarts_running_process(self):
+        self.controller.install()
+        before = len(self.runner.commands)
+        upgraded = self.controller.upgrade()
+        self.assertEqual(upgraded["operation"], "upgrade")
+        verbs = [command[1] for command in self.runner.commands[before:]]
+        self.assertEqual(verbs, ["print", "bootout", "bootstrap", "print"])
+
+    def test_upgrade_confirmation_failure_restores_previous_plist_and_service(self):
+        original_runner = self.runner
+        self.controller.install()
+        previous = self.controller.plist_path.read_bytes()
+        replacement = self.root / "brew-prefix/bin/agentos"
+        replacement.parent.mkdir(parents=True)
+        replacement.write_text("#!/bin/sh\n")
+        replacement.chmod(0o755)
+        failing_runner = ExitAfterFirstBootstrap()
+        failing_runner.loaded = original_runner.loaded
+        failing_runner.running = original_runner.running
+        failing_runner.fail["kickstart"] = "new executable exited"
+        upgraded = ServiceController(home=self.home, cli_path=replacement, runner=failing_runner, uid=501)
+        with self.assertRaisesRegex(ServiceControlError, "rolled back"):
+            upgraded.upgrade()
+        self.assertEqual(upgraded.plist_path.read_bytes(), previous)
+        self.assertTrue(failing_runner.loaded)
+        self.assertTrue(failing_runner.running)
+        self.assertGreaterEqual(failing_runner.bootstrap_count, 2)
+
     def test_failed_install_rolls_back_and_never_claims_background(self):
         self.runner.fail["bootstrap"] = "Bootstrap failed: permission denied"
         with self.assertRaises(ServiceControlError) as caught:
@@ -163,6 +206,14 @@ class ServiceControlTests(unittest.TestCase):
         self.assertFalse(result["background_available"])
         self.assertTrue(result["data_preserved"])
         self.assertIn("foreground", result["next_action"])
+
+    def test_service_action_bounds_filesystem_failures(self):
+        with patch.object(ServiceController, "install", side_effect=OSError("disk full")):
+            result = service_action("install", home=self.home, cli_path=self.cli, runner=self.runner, uid=501)
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["background_available"])
+        self.assertTrue(result["data_preserved"])
+        self.assertIn("permissions", result["next_action"])
 
     def test_status_and_uninstall_work_after_cli_has_been_removed(self):
         self.controller.install()

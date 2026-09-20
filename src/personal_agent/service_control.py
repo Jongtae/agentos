@@ -199,6 +199,9 @@ class ServiceController:
                 "Run the explicit service upgrade action to replace it without deleting owner data.",
             )
         if previous == desired:
+            if upgrade:
+                restarted = self.restart()
+                return {**restarted, "operation": "upgrade", "data_preserved": True}
             return self.start()
         was_loaded = previous is not None and self._observed_status()["status"] != "stopped"
         if was_loaded:
@@ -206,23 +209,30 @@ class ServiceController:
             self._require(stopped, "The existing service could not be stopped for upgrade",
                           "Run service stop and retry upgrade; the existing definition and owner data were retained.")
         self._write_plist(desired)
-        started = self._launchctl("bootstrap", self.domain, str(self.plist_path))
-        if started.returncode:
-            # Best-effort rollback never deletes the owner's data directory.
+        try:
+            started = self._launchctl("bootstrap", self.domain, str(self.plist_path))
+            self._require(
+                started,
+                "The service definition was not activated",
+                "Run the service status action, then retry install; foreground `agentos start` remains available.",
+            )
+            observed = self._confirm_running(
+                "Run the service restart action; use foreground `agentos start` to view a startup error."
+            )
+        except ServiceControlError as failure:
+            # Bootstrap may succeed while the new executable exits immediately.
+            # Remove that definition before restoring the last known one.
+            self._launchctl("bootout", self.domain, str(self.plist_path))
             if previous is None:
                 self.plist_path.unlink(missing_ok=True)
             else:
                 self._write_plist(previous)
                 if was_loaded:
                     self._launchctl("bootstrap", self.domain, str(self.plist_path))
-            detail = _clean_error(started)
             raise ServiceControlError(
-                "The service definition was not activated" + (f": {detail}" if detail else "."),
-                "Run the service status action, then retry install; foreground `agentos start` remains available.",
-            )
-        observed = self._confirm_running(
-            "Run the service restart action; use foreground `agentos start` to view a startup error."
-        )
+                f"The service upgrade did not become healthy and was rolled back: {failure}",
+                "Inspect service status and use foreground `agentos start` before retrying; owner data was retained.",
+            ) from failure
         return {**observed, "operation": "upgrade" if previous is not None else "install", "data_preserved": True}
 
     def upgrade(self) -> dict[str, object]:
@@ -303,3 +313,9 @@ def service_action(action: str, **controller_options: object) -> dict[str, objec
         return operations[action]()
     except ServiceControlError as exc:
         return {**exc.as_dict(), "operation": action, "data_dir": str(controller.data_dir), "data_preserved": True}
+    except OSError as exc:
+        bounded = ServiceControlError(
+            f"The service files could not be updated: {type(exc).__name__}",
+            "Check the owner LaunchAgents and AgentOS data-directory permissions and free disk space, then retry; owner data was not deleted.",
+        )
+        return {**bounded.as_dict(), "operation": action, "data_dir": str(controller.data_dir), "data_preserved": True}

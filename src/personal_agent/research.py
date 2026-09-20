@@ -30,6 +30,7 @@ HIGH_CONFIDENCE_SECRET_PATTERNS = (
     re.compile(r'(?i)\b[a-z][a-z0-9+.-]*://[^\s/@]*@'),
     re.compile(r'(?i)\b(?:cookie|set-cookie)\s*:\s*\S+'),
     re.compile(r'(?i)\btoken\s*=\s*[^&\s]+'),
+    re.compile(r'(?i)\b(?:sessionid|jsessionid|csrftoken)\s*=\s*[^&\s]+'),
     re.compile(r'(?i)\bsecret\s+[a-z0-9_-]{20,}\b'),
     re.compile(r'(?i)\b[A-Z][A-Z0-9_]{1,80}(?:_PASSWORD|_PASSWD|_SECRET|_SECRET_KEY|_PRIVATE_KEY|_CLIENT_SECRET|_TOKEN|_API_KEY|_ACCESS_KEY)\s*=\s*\S+'),
     re.compile(r'(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*(?![A-Za-z0-9_-])'),
@@ -49,7 +50,12 @@ PUBLIC_CREDENTIAL_TOPICS = frozenset({
     'rotation','scopes','security','to','tutorial','practices','what',
 })
 FACT_PATTERNS = {
-    'price': re.compile(r'(?i)(?:[$€£¥₩]\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d)'),
+    'price': re.compile(
+        r'(?i)(?:\b(?:price|costs?|costing|fare|rate|priced)\b|가격|요금)'
+        r'[^;.!?]{0,30}(?:[$€£¥₩]\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d)|'
+        r'(?:[$€£¥₩]\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d)'
+        r'[^;.!?]{0,20}(?:\b(?:price|cost|fare|rate)\b|가격|요금)'
+    ),
     'date': re.compile(r'(?i)(?:\b\d{4}-\d{1,2}-\d{1,2}\b|\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:,\s*\d{4})?\b|\b\d{1,2}월\s*\d{1,2}일\b)'),
     'fee': re.compile(r'(?i)\b(?:fee|fees|tax|taxes|surcharge|resort fee|service charge)\b|수수료|세금|부가세'),
     'inventory': re.compile(r'(?i)\b(?:in stock|out of stock|sold out)\b|\b(?:product|products|item|items|room|rooms|ticket|tickets|seat|seats|inventory|stock)\b[^.!?]{0,40}\b(?:available|unavailable)\b|\b(?:available|unavailable)\b[^.!?]{0,40}\b(?:product|products|item|items|room|rooms|ticket|tickets|seat|seats|inventory|stock)\b|재고\s*(?:있음|없음|보유)|매진|예약\s*가능'),
@@ -78,13 +84,15 @@ NEGATED_DYNAMIC_ASSERTION = re.compile(r'(?i)\b(?:is|are|was|were|be|been|has|ha
 HISTORICAL_DYNAMIC = re.compile(
     r'(?i)\b(?:was|were|had\s+been|used\s+to|previously|formerly|historically)\b|'
     r'\b(?:last|previous|prior)\s+(?:year|month|week|season|quarter)\b|'
-    r'\b(?:in|during)\s+(?:19|20)\d{2}\b'
+    r'\b(?:in|during)\s+(?:19|20)\d{2}\b|'
+    r'\b(?:as\s+of|through|until)\b[^.!?]{0,24}\b(?:19|20)\d{2}\b'
 )
 HISTORICAL_ANAPHOR = re.compile(
-    r'(?i)^\s*(?:this|that|it|these|those)\b[^.!?]{0,120}(?:'
+    r'(?i)^\s*(?:this|that|it|these|those)(?:\s+information)?\b[^.!?]{0,120}(?:'
     r'\b(?:was|were|previously|formerly|historically)\b|'
     r'\b(?:last|previous|prior)\s+(?:year|month|week|season|quarter)\b|'
-    r'\b(?:in|during)\s+(?:19|20)\d{2}\b)'
+    r'\b(?:in|during)\s+(?:19|20)\d{2}\b|'
+    r'\b(?:as\s+of|from|through|until)\b[^.!?]{0,24}\b(?:19|20)\d{2}\b)'
 )
 NON_ASSERTIVE_DYNAMIC = re.compile(
     r'(?i)^\s*(?:are|is|was|were|do|does|did|can|could|will|would|should|may|might|has|have|had)\b|'
@@ -236,8 +244,14 @@ def _qualified_dynamic(name, evidence):
                             DYNAMIC_SUBJECT_PATTERNS[name].search(neighbor)):
                         context_units.append(neighbor)
             context=' '.join(context_units)
+            clause_pattern=(
+                (lambda part: bool(FACT_PATTERNS['inventory'].search(part))) if name == 'inventory' else
+                (lambda part: any(pattern.search(part) for pattern in TOTAL_VALUE_PATTERNS)) if name == 'payable_total' else
+                (lambda part: bool(FEE_NOT_CHARGED.search(part) or
+                                   any(pattern.search(part) for pattern in FEE_VALUE_PATTERNS)))
+            )
             fact_clauses=[part for part in re.split(r'(?i)\s*(?:;|,(?=\s*[A-Za-z])|\band\b|\bbut\b)\s*',classified_text)
-                          if DYNAMIC_SUBJECT_PATTERNS[name].search(part)]
+                          if clause_pattern(part)]
             historical=any(HISTORICAL_DYNAMIC.search(part) for part in fact_clauses or [classified_text])
             negated_assertion=bool(NEGATED_DYNAMIC_ASSERTION.search(context))
             explicit_no_charge=name == 'fee' and bool(FEE_NOT_CHARGED.search(classified_text))

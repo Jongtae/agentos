@@ -147,6 +147,9 @@ class PublicResearchTests(unittest.TestCase):
             ('DJANGO_SECRET_KEY=supersecret123456789','owner_public_request'),
             ('api%25E2%2580%258B_key=supersecret123456789','owner_public_request'),
             ('Cookie: sessionid=supersecret','owner_public_request'),
+            ('https://example.com/?sessionid=supersecret123456789','owner_public_request'),
+            ('JSESSIONID=supersecret123456789','owner_public_request'),
+            ('csrftoken=supersecret123456789','owner_public_request'),
             ('token=supersecret123456789','owner_public_request'),
             ('compare https://example.com/?token=supersecret123456789','owner_public_request'),
             ('compare https://example.com/?%74oken=supersecret123456789','owner_public_request'),
@@ -164,6 +167,7 @@ class PublicResearchTests(unittest.TestCase):
                       'access token documentation','refresh token rotation guide','password requirements',
                       'api key permissions','api key examples','access token scopes','refresh token revocation',
                       'client secret rotation guide','secret management best practices',
+                      'session cookie security best practices',
                       'compare password requirements and api key permissions',
                       'authorization header format','compare https://example.com/public/path',
                       'compare "https://example.com/public/path"','JWT format examples',
@@ -315,6 +319,10 @@ class PublicResearchTests(unittest.TestCase):
             'Service fee was USD 10.',
             'Grand total was USD 100.',
             'Rooms are available. That was in 2020.',
+            'Rooms are available as of 2020.',
+            'Grand total: USD 100 as of 2020.',
+            'Service fee: USD 10 through December 2020.',
+            'Rooms are available. This information is from 2020.',
         ):
             with self.subTest(content=content):
                 reader=Reader({'https://alpha.example/item':{
@@ -329,6 +337,23 @@ class PublicResearchTests(unittest.TestCase):
         current=PublicResearch(search_result,reader,max_pages=1).run(
             'travel_plan','museum plan',query_source='owner_public_request')
         self.assertEqual(current['dynamic_facts']['inventory']['status'],'observed')
+
+        reader=Reader({'https://alpha.example/item':{
+            'url':'https://alpha.example/item','retrieved_at':2,
+            'content':'Rooms were renovated in 2020; rooms are available.'}})
+        current=PublicResearch(search_result,reader,max_pages=1).run(
+            'travel_plan','museum plan',query_source='owner_public_request')
+        self.assertEqual(current['dynamic_facts']['inventory']['status'],'observed')
+
+    def test_currency_amounts_without_price_meaning_are_not_labeled_prices(self):
+        for content in ('Save USD 10 today.', 'Get a USD 25 credit with trade-in.',
+                        'The manufacturer donated USD 100.'):
+            with self.subTest(content=content):
+                reader=Reader({'https://alpha.example/item':{
+                    'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+                result=PublicResearch(search_result,reader,max_pages=1).run(
+                    'product_comparison','headphones',query_source='owner_public_request')
+                self.assertNotIn('  - price:',result['brief'])
 
         reader=Reader({'https://alpha.example/item':{
             'url':'https://alpha.example/item','retrieved_at':2,

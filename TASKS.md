@@ -2,6 +2,19 @@
 
 Active work is executed only from a goal-ready issue and active delivery-plan entry under the [Goal Execution Contract](docs/goal-execution-contract.en.md). Status tables are trackers, not authority to activate reserved work.
 
+## Prepared — PA1 first Telegram personal-assistant completion
+
+| Work unit | Issue | Current boundary |
+| --- | --- | --- |
+| GOV-PA1-01: parallel program preparation | [#385](https://github.com/Jongtae/personal-agentos/issues/385) | Preparation branch/PR only; issue graph, source-plan selector and ownership rules. No product implementation or external operation. |
+| EPIC-PA1: first Telegram personal-assistant completion | [#386](https://github.com/Jongtae/personal-agentos/issues/386) | Owner-activated goal-ready only after #385 merges; one controlling conversation may coordinate enumerated child worktrees under [the PA1 contract](docs/pa1-parallel-delivery.en.md). |
+| PA1-FDN-01 | [#387](https://github.com/Jongtae/personal-agentos/issues/387) | Wave 0 serialized connector/resume/ownership seam. |
+| PA1 Wave 1 | [#388](https://github.com/Jongtae/personal-agentos/issues/388), [#389](https://github.com/Jongtae/personal-agentos/issues/389), [#390](https://github.com/Jongtae/personal-agentos/issues/390), [#391](https://github.com/Jongtae/personal-agentos/issues/391), [#392](https://github.com/Jongtae/personal-agentos/issues/392), [#382](https://github.com/Jongtae/personal-agentos/issues/382) | Parallel-safe only after #387; disjoint owned files, no integration-owned shared edits. |
+| PA1-CONV-01 | [#393](https://github.com/Jongtae/personal-agentos/issues/393) | Wave 2 central Telegram capability handoff and exactly-once resume after connector contracts stabilize. |
+| PA1-INT-01 | [#394](https://github.com/Jongtae/personal-agentos/issues/394) | Wave 3 sole integration owner and final J1–J8 requirement-to-evidence audit. |
+
+PA1 reuses the completed file-workspace baseline rather than rebuilding it. #363/#364/#383 remain separate follow-up/design records and are not automatic PA1 blockers; concrete PA1 defects still belong to the relevant child. No second heartbeat, live credential use, purchasing/booking/payment, marketplace work or multi-principal runtime is authorized by preparation.
+
 ## Current — useful default agents and observable owner control
 
 | Work unit | Issue | Current boundary |

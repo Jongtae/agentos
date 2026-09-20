@@ -107,7 +107,7 @@ class Handler(BaseHTTPRequestHandler):
                 time.sleep(1.5)
                 Fixture.state_inflight = False
             self.send_json({"settings": {"model": model, "model_ready": False, "subscription_engines": {"engines": []}, "file_roots": [{"path": path} for path in file_roots], "file_workspace": file_workspace, "context_inbox": {"sources": {}, "items": []}, "telegram": {"enabled": True, "paired": True, "username": "fixture_bot"}, "conversation_settings": {"state": "read", "capabilities": [{"id": "google-drive-read", "kind": "connector", "state": Fixture.capability_state, "recovery": "Owner can resume after review."}]}, "document_boundary": {}}, "jobs": [{"id": "task-382", "status": "running", "response": None, "message": "fixture Telegram request", "channel": "telegram:fixture-owner"}, {"id": "project-job", "status": "succeeded", "response": "fixture project result", "message": "fixture project request", "channel": "telegram:fixture-owner"}], "tool_events": [], "healthy": True})
-        elif path == "/api/personal-space": self.send_json({"memories": Fixture.memories, "context": [], "results": Fixture.other_results[-50:]})
+        elif path == "/api/personal-space": self.send_json({"memories": Fixture.memories, "context": [], "results": (Fixture.results + Fixture.other_results)[-50:]})
         elif path == "/api/workspaces/workspace-382": self.send_json({"id": "workspace-382", "title": "회귀 프로젝트", "purpose": "상세/결과 저장 회귀", "result_count": len(Fixture.results), "saved_job_ids": [item["job_id"] for item in Fixture.results], "results": Fixture.results, "messages": []})
         elif path == "/api/workspaces/workspace-other":
             detail = {"id": "workspace-other", "title": "다른 프로젝트", "purpose": "늦은 응답 격리 회귀", "result_count": len(Fixture.other_results) + 1, "saved_job_ids": [item["job_id"] for item in Fixture.other_results] + ["project-job"], "results": [dict(item) for item in Fixture.other_results], "messages": []}
@@ -218,11 +218,17 @@ class Handler(BaseHTTPRequestHandler):
         elif path.startswith("/api/personal-space/results/"):
             self.observe("DELETE", path)
             result_id = path.rsplit("/", 1)[-1]
-            before = len(Fixture.other_results)
-            Fixture.other_results[:] = [item for item in Fixture.other_results if item["id"] != result_id]
-            deleted = len(Fixture.other_results) != before
-            if deleted: Fixture.workspace_updated["workspace-other"] += 1
-            self.send_json({"deleted": deleted, "id": result_id, "kind": "results", "workspace_id": "workspace-other" if deleted else None})
+            before = len(Fixture.results)
+            Fixture.results[:] = [item for item in Fixture.results if item["id"] != result_id]
+            if len(Fixture.results) != before:
+                Fixture.workspace_updated["workspace-382"] += 1
+                self.send_json({"deleted": True, "id": result_id, "kind": "results", "workspace_id": "workspace-382"})
+            else:
+                before = len(Fixture.other_results)
+                Fixture.other_results[:] = [item for item in Fixture.other_results if item["id"] != result_id]
+                deleted = len(Fixture.other_results) != before
+                if deleted: Fixture.workspace_updated["workspace-other"] += 1
+                self.send_json({"deleted": deleted, "id": result_id, "kind": "results", "workspace_id": "workspace-other" if deleted else None})
         else:
             self.reject_observed_method("DELETE")
 

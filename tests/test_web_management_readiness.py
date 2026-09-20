@@ -117,6 +117,9 @@ assert.equal(ui.isOpenRouterCompletion({origin:'http://owner.local',data:{type:'
 assert.equal(ui.isOpenRouterCompletion({origin:'http://attacker.local',data:{type:'agentos-openrouter-connected'}},'http://owner.local'),false);
 assert.equal(ui.shouldRenderWorkspaceDetail('second','first',1,2),false);
 assert.equal(ui.shouldRenderWorkspaceDetail('second','second',2,2),true);
+assert.equal(ui.shouldInvalidateWorkspaceDetailForDeletion({deleteKind:'memories'},'second'),false);
+assert.equal(ui.shouldInvalidateWorkspaceDetailForDeletion({deleteKind:'results',workspace_id:'first'},'second'),false);
+assert.equal(ui.shouldInvalidateWorkspaceDetailForDeletion({deleteKind:'results',workspace_id:'second'},'second'),true);
 assert.deepEqual(ui.workspaceResultSummary({result_count:42,results:[{id:'one'},{id:'two'}]}),{count:42,label:'42개 완료 결과'});
 assert.deepEqual(ui.workspaceResultSummary({results:[{id:'one'},{id:'two'}]}),{count:2,label:'2개 완료 결과'});
 const removed=[];assert.equal(ui.clearMobileDetailWhenEmpty({classList:{remove:value=>removed.push(value)}},[]),true);assert.deepEqual(removed,['mobile-detail']);
@@ -135,13 +138,13 @@ const verified=await guard.test(current,async()=>{testRequests++;return {ok:true
 assert.equal(verified.accepted,true);assert.equal(guard.canApply(current),true);
 assert.equal(await guard.apply(current,async payload=>{saveRequests++;assert.equal('credential_revision' in payload,false);}),true);
 assert.equal(testRequests,2);assert.equal(saveRequests,1);
-console.log(JSON.stringify({checks:32}));
+console.log(JSON.stringify({checks:35}));
 })().catch(error=>{console.error(error);process.exit(1);});
 """
         result = subprocess.run(
             [node, '-e', script, str(ROOT / 'src/personal_agent/web/app.js')],
             check=True, capture_output=True, text=True, timeout=20)
-        self.assertEqual(json.loads(result.stdout)['checks'], 32)
+        self.assertEqual(json.loads(result.stdout)['checks'], 35)
 
     def test_model_apply_has_one_explicit_test_and_credential_revision(self):
         app = (ROOT / 'src/personal_agent/web/app.js').read_text()
@@ -178,7 +181,7 @@ console.log(JSON.stringify({checks:32}));
         self.assertIn('fileWorkspaceLoaded=false', app)
         self.assertIn('requestedRootsRevision===rootsLoadRevision', app)
         self.assertIn('requestedFileWorkspaceRevision===fileWorkspaceLoadRevision', app)
-        self.assertIn('workspaceDetailSequence++;try{const deleted=', app)
+        self.assertIn('shouldInvalidateWorkspaceDetailForDeletion(item,selectedWorkspaceId)', app)
 
     def test_workspace_result_projection_is_complete_and_duplicate_save_is_not_success(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -243,6 +246,8 @@ console.log(JSON.stringify({checks:32}));
         self.assertIn('"detail":"다른 프로젝트","saveButtons":0', transcript)
         self.assertIn('"root":"/tmp/race-saved-root","reference":"/tmp/race-saved-reference"', transcript)
         self.assertIn('"deletedVisible":false,"visibleResults":29', transcript)
+        self.assertIn('{"selected":"다른 프로젝트","detail":"다른 프로젝트","results":30}', transcript)
+        self.assertIn('"projectA":"회귀 프로젝트 · 0개 완료 결과","results":30', transcript)
         self.assertIn('does not run AgentService', transcript)
 
     def test_browser_fixture_observer_captures_every_mutating_http_verb(self):

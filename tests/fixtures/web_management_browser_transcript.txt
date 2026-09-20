@@ -376,3 +376,20 @@ completed, the browser observed:
 The deletion invalidated the earlier detail sequence before mutation. Consequently
 the captured 31-result response could neither render nor cache itself under the new
 workspace revision.
+
+Unrelated deletions do not cancel pending selected-project detail
+-----------------------------------------------------------------
+Two fresh headed scenarios delayed the initial project-B detail while an unrelated
+record was deleted. Deleting a memory during the pending B request produced:
+
+  {"selected":"다른 프로젝트","detail":"다른 프로젝트","results":30}
+
+In a separate fresh fixture state, project A first saved one result. Project B was
+then selected with its detail response delayed, and the A result was deleted while
+B remained selected. After every response completed, Chromium observed:
+
+  {"selected":"다른 프로젝트","detail":"다른 프로젝트","projectA":"회귀 프로젝트 · 0개 완료 결과","results":30}
+
+Deletion invalidation is now scoped to a result in the currently selected project.
+Memory deletion and deletion in A therefore leave B's pending request valid, while
+the earlier selected-project deletion case still invalidates and reloads B.

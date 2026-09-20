@@ -71,6 +71,11 @@ class PublicResearchTests(unittest.TestCase):
             ('compare /Users/alice/private/receipt.pdf','owner_public_request'),
             ('api_key=super-secret-value','owner_public_request'),
             ('Bearer: secret-token','public_task_input'),
+            ('Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.private.signature','owner_public_request'),
+            ('Bearer eyJhbGciOiJIUzI1NiJ9.private.signature','owner_public_request'),
+            ('access token ghp_1234567890abcdefghijklmnop','owner_public_request'),
+            ('ghp_1234567890abcdefghijklmnop','public_task_input'),
+            ('password hunter2','owner_public_request'),
         ]
         for query,source in cases:
             with self.subTest(query=query),self.assertRaises(ValueError):
@@ -116,6 +121,28 @@ class PublicResearchTests(unittest.TestCase):
         result=PublicResearch(search_result,reader,max_pages=1).run(
             'travel_plan','museum plan',query_source='owner_public_request')
         self.assertEqual(result['search_retrieved_at'],1700000000.25)
+        self.assertEqual(result['dynamic_facts']['fee']['status'],'unknown')
+        self.assertEqual(result['dynamic_facts']['inventory']['status'],'unknown')
+        self.assertEqual(result['dynamic_facts']['payable_total']['status'],'unknown')
+
+    def test_percentage_and_no_fee_are_observed_without_unknown_fee_brief(self):
+        for content in ('Service fee: 10%.','No booking fee.'):
+            with self.subTest(content=content):
+                reader=Reader({'https://alpha.example/item':{
+                    'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+                result=PublicResearch(search_result,reader,max_pages=1).run(
+                    'travel_plan','museum plan',query_source='owner_public_request')
+                self.assertEqual(result['dynamic_facts']['fee']['status'],'observed')
+                self.assertNotIn('추가 수수료: 확인된 공개 근거가 없어 알 수 없음',result['brief'])
+                self.assertIn(content,result['dynamic_facts']['fee']['evidence'][0]['exact_text'])
+
+    def test_hedged_inventory_and_unrelated_prices_do_not_observe_dynamic_values(self):
+        content=('Rooms may be available. Fees may apply; rooms start at USD 100. '
+                 'The total price is shown at checkout; products start at USD 10.')
+        reader=Reader({'https://alpha.example/item':{
+            'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+        result=PublicResearch(search_result,reader,max_pages=1).run(
+            'travel_plan','museum plan',query_source='owner_public_request')
         self.assertEqual(result['dynamic_facts']['fee']['status'],'unknown')
         self.assertEqual(result['dynamic_facts']['inventory']['status'],'unknown')
         self.assertEqual(result['dynamic_facts']['payable_total']['status'],'unknown')

@@ -55,7 +55,8 @@ def normalize_public_url(value):
     try: port=parsed.port
     except ValueError: raise ValueError('공개 페이지 URL의 포트가 올바르지 않습니다.') from None
     if literal is not None and literal.version == 6: host=f'[{host}]'
-    if port is not None and port not in (80,443): host=f'{host}:{port}'
+    default_port=80 if parsed.scheme.casefold() == 'http' else 443
+    if port is not None and port != default_port: host=f'{host}:{port}'
     query=urlencode(sorted(parse_qsl(parsed.query,keep_blank_values=True)))
     return urlunsplit((parsed.scheme.casefold(),host,parsed.path or '/',query,''))
 

@@ -74,6 +74,19 @@ class PublicPageReaderTests(unittest.TestCase):
             reader.read('https://example.com/event', approved_urls=['https://example.com/other'])
         self.assertEqual(normalize_public_url('HTTPS://Example.com/event?b=2&a=1#frag'), 'https://example.com/event?a=1&b=2')
 
+    def test_normalization_preserves_scheme_mismatched_explicit_ports_and_scope(self):
+        self.assertEqual(normalize_public_url('http://example.com:443/path'),'http://example.com:443/path')
+        self.assertEqual(normalize_public_url('https://example.com:80/path'),'https://example.com:80/path')
+        self.assertEqual(normalize_public_url('http://example.com:80/path'),'http://example.com/path')
+        self.assertEqual(normalize_public_url('https://example.com:443/path'),'https://example.com/path')
+        opener=Opener(Response())
+        reader=PublicPageReader(opener=opener,resolver=public_dns)
+        with self.assertRaisesRegex(ValueError,'승인한 공개 페이지 범위'):
+            reader.read('http://example.com:443/path',approved_urls=['http://example.com/path'])
+        self.assertEqual(opener.requests,[])
+        reader.read('https://example.com:80/path',approved_urls=['https://example.com:80/path'])
+        self.assertEqual(opener.requests[0][0].full_url,'https://example.com:80/path')
+
     def test_owner_scope_rejects_public_redirect_collector(self):
         opener=Opener(Response(status=302, headers={'Location':'https://collector.example/collect?x=1'}))
         reader=PublicPageReader(opener=opener, resolver=public_dns)

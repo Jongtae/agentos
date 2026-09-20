@@ -15,8 +15,12 @@ MAX_EVIDENCE_CHARACTERS = 4_000
 ALLOWED_MODES = frozenset({'product_comparison', 'travel_plan'})
 ALLOWED_QUERY_SOURCES = frozenset({'owner_public_request', 'public_task_input'})
 SENSITIVE_QUERY_PATTERNS = (
-    re.compile(r'(?i)\b(?:password|passwd|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|bearer)\b\s*[:=]'),
+    re.compile(r'(?i)\b(?:password|passwd|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|authorization)\b\s*[:=]\s*\S+'),
+    re.compile(r'(?i)\bauthorization\s*:\s*(?:bearer|basic)\s+\S+'),
+    re.compile(r'(?i)\bbearer\s*:?\s+[a-z0-9._~+/=-]{8,}'),
+    re.compile(r'(?i)\b(?:password|passwd|api[_ -]?key|access[_ -]?token|refresh[_ -]?token)\b\s+(?=\S{6,})(?=\S*\d)\S+'),
     re.compile(r'(?i)\bsk-[a-z0-9_-]{12,}\b'),
+    re.compile(r'(?i)\b(?:gh[pousr]_[a-z0-9]{16,}|github_pat_[a-z0-9_]{16,}|glpat-[a-z0-9_-]{16,}|xox[baprs]-[a-z0-9-]{10,}|npm_[a-z0-9]{16,}|pypi-[a-z0-9_-]{16,}|AKIA[A-Z0-9]{16})\b'),
     re.compile(r'(?i)(?:file://|/Users/|/home/|\\Users\\)'),
 )
 FACT_PATTERNS = {
@@ -26,6 +30,16 @@ FACT_PATTERNS = {
     'inventory': re.compile(r'(?i)\b(?:in stock|out of stock|available|unavailable|sold out)\b|재고\s*(?:있음|없음|보유)|매진|예약\s*가능'),
     'payable_total': re.compile(r'(?i)\b(?:total due|payable total|grand total|total price)\b|총\s*결제|결제\s*금액'),
 }
+FEE_VALUE_PATTERNS = (
+    re.compile(r'(?i)(?:\b(?:fee|fees|tax|taxes|surcharge|resort fee|service charge)\b|수수료|세금|부가세)[^;.!?]{0,20}(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b|\b\d+(?:\.\d+)?\s*%|\b(?:none|zero|free|included|waived)\b|없음|무료|포함)'),
+    re.compile(r'(?i)(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b|\b\d+(?:\.\d+)?\s*%)[^;.!?]{0,20}(?:\b(?:fee|fees|tax|taxes|surcharge|resort fee|service charge)\b|수수료|세금|부가세)'),
+    re.compile(r'(?i)\bno\s+(?:\w+\s+){0,2}(?:fee|fees|tax|taxes|surcharge)\b|\bfee[- ]free\b'),
+)
+TOTAL_VALUE_PATTERNS = (
+    re.compile(r'(?i)(?:\b(?:total due|payable total|grand total|total price)\b|총\s*결제(?:액)?|결제\s*금액)[^;.!?]{0,20}(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b)'),
+    re.compile(r'(?i)(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b)[^;.!?]{0,20}(?:\b(?:total due|payable total|grand total|total price)\b|총\s*결제(?:액)?|결제\s*금액)'),
+)
+HEDGED_INVENTORY = re.compile(r'(?i)\b(?:may|might|could|possibly|check|subject to)\b|확인\s*필요|변동\s*가능')
 
 
 def validate_public_query(query, query_source):
@@ -59,8 +73,12 @@ def _observed_details(content):
 
 def _dynamic_observed(name, evidence):
     details=[text for row in evidence for text in row['observed_details'][name]]
-    if name in ('fee','payable_total'):
-        return any(FACT_PATTERNS['price'].search(text) for text in details)
+    if name == 'fee':
+        return any(any(pattern.search(text) for pattern in FEE_VALUE_PATTERNS) for text in details)
+    if name == 'payable_total':
+        return any(any(pattern.search(text) for pattern in TOTAL_VALUE_PATTERNS) for text in details)
+    if name == 'inventory':
+        return any(not HEDGED_INVENTORY.search(text) for text in details)
     return bool(details)
 
 

@@ -694,8 +694,10 @@ class GmailConnector:
         raw_headers = payload.get("headers") if isinstance(payload, dict) else None
         if not isinstance(raw_headers, list):
             raise GmailError("invalid_provider_response")
+        if len(raw_headers) > 100:
+            raise GmailError("invalid_provider_response")
         headers: dict[str, str] = {}
-        for item in raw_headers[:100]:
+        for item in raw_headers:
             if isinstance(item, dict) and isinstance(item.get("name"), str):
                 name = item["name"].lower()
                 if name in {"subject", "from", "date"} and name not in headers:
@@ -741,9 +743,15 @@ class GmailConnector:
                     if not isinstance(name, str) or not isinstance(value, str):
                         continue
                     if name.lower() == "content-disposition" and not disposition:
-                        disposition = value[:1024]
+                        if len(value) > 1024:
+                            exhausted = True
+                            return []
+                        disposition = value
                     elif name.lower() == "content-type" and not content_type:
-                        content_type = value[:1024]
+                        if len(value) > 1024:
+                            exhausted = True
+                            return []
+                        content_type = value
             is_attachment = (
                 isinstance(filename, str)
                 and bool(filename.strip())

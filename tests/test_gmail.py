@@ -279,6 +279,17 @@ class GmailConnectorTests(unittest.TestCase):
             self.gmail.search("owner-a", "receipt")
         self.assertEqual(rejected.exception.reason, "invalid_provider_response")
 
+    def test_search_rejects_metadata_header_list_overflow(self):
+        self.connect()
+        overflow = self.metadata()
+        overflow["payload"]["headers"] = [
+            {"name": "X-Unrelated", "value": str(index)} for index in range(100)
+        ] + [{"name": "Subject", "value": "Must not be silently omitted"}]
+        self.responses.extend([{"messages": [{"id": "m_1"}]}, overflow])
+        with self.assertRaises(GmailError) as rejected:
+            self.gmail.search("owner-a", "receipt")
+        self.assertEqual(rejected.exception.reason, "invalid_provider_response")
+
     def test_search_limits_and_provider_over_return_are_bounded(self):
         self.connect()
         for invalid in (0, 21, True):
@@ -539,6 +550,52 @@ class GmailConnectorTests(unittest.TestCase):
                             "body": {"data": base64.urlsafe_b64encode(b"ATTACHMENT").decode()},
                         },
                     ],
+                },
+            }
+        )
+        with self.assertRaises(GmailError) as bounded:
+            self.read()
+        self.assertEqual(bounded.exception.reason, "message_too_complex")
+
+    def test_oversized_disposition_value_cannot_hide_attachment(self):
+        self.connect()
+        self.responses.append(
+            {
+                "id": "m_1",
+                "threadId": "t_1",
+                "payload": {
+                    "mimeType": "text/plain",
+                    "headers": [
+                        {
+                            "name": "Content-Disposition",
+                            "value": (" " * 1024) + "attachment; filename=hidden.txt",
+                        }
+                    ],
+                    "body": {"data": base64.urlsafe_b64encode(b"ATTACHMENT").decode()},
+                },
+            }
+        )
+        with self.assertRaises(GmailError) as bounded:
+            self.read()
+        self.assertEqual(bounded.exception.reason, "message_too_complex")
+
+    def test_oversized_content_type_value_cannot_hide_charset(self):
+        self.connect()
+        self.responses.append(
+            {
+                "id": "m_1",
+                "threadId": "t_1",
+                "payload": {
+                    "mimeType": "text/plain",
+                    "headers": [
+                        {
+                            "name": "Content-Type",
+                            "value": "text/plain; x=" + ("a" * 1024) + "; charset=iso-8859-1",
+                        }
+                    ],
+                    "body": {
+                        "data": base64.urlsafe_b64encode("café".encode("iso-8859-1")).decode()
+                    },
                 },
             }
         )

@@ -25,6 +25,17 @@ PRIVATE_NETWORKS = tuple(ipaddress.ip_network(value) for value in (
     '::/128', '::1/128', 'fc00::/7', 'fe80::/10', 'ff00::/8',
     '2001:db8::/32',
 ))
+DENIED_PUBLIC_HOSTS = frozenset({
+    'localhost', 'metadata', 'metadata.google.internal',
+    'instance-data', 'instance-data.ec2.internal',
+})
+DENIED_PUBLIC_HOST_SUFFIXES = ('.localhost', '.local', '.internal', '.home.arpa')
+
+
+def _denied_address(address):
+    return (any(address in network for network in PRIVATE_NETWORKS) or address.is_private or
+            address.is_loopback or address.is_link_local or address.is_reserved or
+            address.is_multicast or address.is_unspecified)
 
 
 def normalize_public_url(value):
@@ -34,8 +45,16 @@ def normalize_public_url(value):
     parsed=urlsplit(value)
     if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password:
         raise ValueError('로그인 정보가 없는 HTTP(S) 공개 페이지만 읽을 수 있습니다.')
-    host=parsed.hostname.casefold()
-    port=parsed.port
+    host=parsed.hostname.casefold().rstrip('.')
+    if host in DENIED_PUBLIC_HOSTS or host.endswith(DENIED_PUBLIC_HOST_SUFFIXES):
+        raise ValueError('개인 네트워크나 메타데이터 주소에는 접근할 수 없습니다.')
+    try: literal=ipaddress.ip_address(host)
+    except ValueError: literal=None
+    if literal is not None and _denied_address(literal):
+        raise ValueError('개인 네트워크나 메타데이터 주소에는 접근할 수 없습니다.')
+    try: port=parsed.port
+    except ValueError: raise ValueError('공개 페이지 URL의 포트가 올바르지 않습니다.') from None
+    if literal is not None and literal.version == 6: host=f'[{host}]'
     if port is not None and port not in (80,443): host=f'{host}:{port}'
     query=urlencode(sorted(parse_qsl(parsed.query,keep_blank_values=True)))
     return urlunsplit((parsed.scheme.casefold(),host,parsed.path or '/',query,''))
@@ -65,13 +84,20 @@ class PublicPageReader:
 
     def _validate_host(self, url):
         parsed=urlsplit(url); host=parsed.hostname
-        try: addresses={item[4][0] for item in self.resolver(host, parsed.port or (443 if parsed.scheme=='https' else 80), type=socket.SOCK_STREAM)}
-        except (OSError, ValueError): raise ValueError('공개 페이지의 주소를 확인하지 못했습니다.') from None
+        try:
+            literal=ipaddress.ip_address(host)
+        except ValueError:
+            literal=None
+        if literal is not None:
+            addresses={str(literal)}
+        else:
+            try: addresses={item[4][0] for item in self.resolver(host, parsed.port or (443 if parsed.scheme=='https' else 80), type=socket.SOCK_STREAM)}
+            except (OSError, ValueError): raise ValueError('공개 페이지의 주소를 확인하지 못했습니다.') from None
         if not addresses: raise ValueError('공개 페이지 주소가 없습니다.')
         for raw in addresses:
             try: address=ipaddress.ip_address(raw)
             except ValueError: raise ValueError('페이지 주소가 올바르지 않습니다.') from None
-            if any(address in network for network in PRIVATE_NETWORKS) or address.is_private or address.is_loopback or address.is_link_local or address.is_reserved:
+            if _denied_address(address):
                 raise ValueError('개인 네트워크나 메타데이터 주소에는 접근할 수 없습니다.')
         return addresses
 

@@ -42,6 +42,22 @@ class PublicPageReaderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '개인 네트워크'):
             PublicPageReader(opener=Opener(Response()), resolver=private_dns).read('https://example.com/')
 
+    def test_rejects_literal_private_link_local_and_metadata_hosts_without_request(self):
+        opener=Opener(Response())
+        for url in ('http://127.0.0.1/admin','http://10.0.0.8/','http://[::1]/',
+                    'http://169.254.169.254/latest/meta-data/','https://metadata.google.internal/'):
+            with self.subTest(url=url), self.assertRaisesRegex(ValueError, '개인 네트워크|메타데이터'):
+                PublicPageReader(opener=opener,resolver=public_dns).read(url)
+        self.assertEqual(opener.requests,[])
+
+    def test_request_is_anonymous_and_does_not_run_page_javascript(self):
+        opener=Opener(Response(b'<html><button>Buy</button><script>fetch("/checkout")</script></html>'))
+        result=PublicPageReader(opener=opener,resolver=public_dns).read('https://example.com/item')
+        headers=dict(opener.requests[0][0].header_items())
+        self.assertNotIn('Cookie',headers);self.assertNotIn('Authorization',headers)
+        self.assertNotIn('checkout',result['content'])
+        self.assertIn('no cookies, login, JavaScript or mutation',result['scope'])
+
     def test_validates_redirect_target_before_request(self):
         opener=Opener(Response(status=302, headers={'Location':'http://169.254.169.254/latest'}))
         def redirect_dns(host, port, type=None):

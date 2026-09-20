@@ -9,18 +9,25 @@ CATALOGUE=(
  {'id':'isolated-runtime-placeholder','kind':'runtime','version':'1','tools':[],'scopes':[]},
 )
 STATES={'available','connected-disabled','enabled','paused','auth-required','error','disconnected'}
+_MISSING_CAPABILITY_STATE=object()
+_INVALID_CAPABILITY_STATE='저장된 capability 상태를 확인하세요.'
 
 class CapabilityRegistry:
  def __init__(self,store): self.store=store
+ def _saved(self):
+  saved=self.store.config('capability_registry',_MISSING_CAPABILITY_STATE)
+  if saved is _MISSING_CAPABILITY_STATE:return {}
+  if not isinstance(saved,dict) or any(not isinstance(value,dict) for value in saved.values()):
+   raise ValueError(_INVALID_CAPABILITY_STATE)
+  return saved
  def list(self):
-  saved=self.store.config('capability_registry',{})
-  saved=saved if isinstance(saved,dict) else {}
+  saved=self._saved()
   return [{**item,'tools':list(item['tools']),'scopes':list(item['scopes']),'state':saved.get(item['id'],{}).get('state','available'),'grant':list(saved.get(item['id'],{}).get('grant',[]))} for item in CATALOGUE]
  def transition(self,capability_id,target,approved_scopes=()):
   item=next((x for x in CATALOGUE if x['id']==capability_id),None)
   if not item or target not in STATES: raise ValueError('검토된 capability와 상태를 확인하세요.')
   if target=='enabled' and set(item['scopes'])!=set(approved_scopes): raise ValueError('선언된 scope의 명시 승인이 필요합니다.')
-  saved=self.store.config('capability_registry',{});prior=saved.get(capability_id,{})
+  saved=self._saved();prior=saved.get(capability_id,{})
   event={'state':target,'changed_at':time.time()}
   if target=='enabled': event['approved_scopes']=sorted(approved_scopes)
   grant=event.get('approved_scopes',prior.get('grant',[]))

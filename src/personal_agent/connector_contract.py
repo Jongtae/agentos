@@ -27,6 +27,7 @@ PENDING_WORK_KEY = "connector_pending_work"
 _IDENTIFIER = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,95})\Z")
 _CONNECTION_REVISION_BYTES = 16
 _MISSING_CONNECTOR_STATE = object()
+_MISSING_CONNECTOR_ROW = object()
 _MISSING_PENDING_STATE = object()
 _CONNECTOR_STATE_LOCK = threading.RLock()
 _PENDING_WORK_LOCK = threading.RLock()
@@ -314,60 +315,75 @@ class ConnectorRegistry:
             raise ConnectorContractError("invalid_stored_state")
         return value
 
+    def _status_from_row(self, connector: ConnectorSpec, row: object) -> ConnectorStatus:
+        if row is _MISSING_CONNECTOR_ROW:
+            return ConnectorStatus(
+                connector.connector_id,
+                ConnectorState.DISCONNECTED,
+                connector.required_scopes,
+                (),
+                self._unknown_health(),
+                None,
+            )
+        if not isinstance(row, dict) or set(row) != {
+            "state",
+            "granted_scopes",
+            "changed_at",
+            "health",
+            "connection_revision",
+        }:
+            raise ConnectorContractError("invalid_stored_state")
+        try:
+            state = ConnectorState(row["state"])
+            granted = _scopes(row["granted_scopes"])
+            _finite_timestamp(row["changed_at"], "changed_at")
+            connection_revision = _connection_revision(row["connection_revision"])
+            health_row = row["health"]
+            if not isinstance(health_row, dict) or set(health_row) != {
+                "state",
+                "checked_at",
+                "recovery",
+            }:
+                raise ValueError("invalid health")
+            health_state = HealthState(health_row["state"])
+            health_checked_at = (
+                _finite_timestamp(health_row["checked_at"], "health.checked_at")
+                if health_row["checked_at"] is not None
+                else None
+            )
+            recovery = (
+                RecoveryAction(health_row["recovery"])
+                if health_row["recovery"] is not None
+                else None
+            )
+            health = ConnectorHealth(health_state, health_checked_at, recovery)
+        except (TypeError, ValueError):
+            raise ConnectorContractError("invalid_stored_state") from None
+        if state is ConnectorState.CONNECTED:
+            if granted != connector.required_scopes:
+                raise ConnectorContractError("invalid_stored_state")
+        elif granted:
+            raise ConnectorContractError("invalid_stored_state")
+        if health.state not in _ALLOWED_HEALTH_BY_CONNECTOR_STATE[state]:
+            raise ConnectorContractError("invalid_stored_state")
+        return ConnectorStatus(
+            connector.connector_id,
+            state,
+            connector.required_scopes,
+            granted,
+            health,
+            connection_revision,
+        )
+
     def status(self, owner_id: str, connector_id: str) -> ConnectorStatus:
         with self._lock:
             connector = self.definition(connector_id)
             owner_rows = self._rows().get(_owner_key(owner_id), {})
             if not isinstance(owner_rows, dict):
                 raise ConnectorContractError("invalid_stored_state")
-            row = owner_rows.get(connector_id, {})
-            if not isinstance(row, dict):
-                raise ConnectorContractError("invalid_stored_state")
-            if row and set(row) != {
-                "state",
-                "granted_scopes",
-                "changed_at",
-                "health",
-                "connection_revision",
-            }:
-                raise ConnectorContractError("invalid_stored_state")
-            try:
-                state = ConnectorState(row.get("state", ConnectorState.DISCONNECTED.value))
-                granted = _scopes(row.get("granted_scopes", ()))
-                _finite_timestamp(row["changed_at"], "changed_at") if row else None
-                connection_revision = (
-                    _connection_revision(row["connection_revision"]) if row else None
-                )
-                health_row = row["health"] if row else None
-                if health_row is None:
-                    health = self._unknown_health()
-                else:
-                    if not isinstance(health_row, dict) or set(health_row) != {"state", "checked_at", "recovery"}:
-                        raise ValueError("invalid health")
-                    health_state = HealthState(health_row["state"])
-                    health_checked_at = (
-                        _finite_timestamp(health_row["checked_at"], "health.checked_at")
-                        if health_row["checked_at"] is not None
-                        else None
-                    )
-                    recovery = RecoveryAction(health_row["recovery"]) if health_row["recovery"] is not None else None
-                    health = ConnectorHealth(health_state, health_checked_at, recovery)
-            except (TypeError, ValueError):
-                raise ConnectorContractError("invalid_stored_state") from None
-            if state is ConnectorState.CONNECTED:
-                if granted != connector.required_scopes:
-                    raise ConnectorContractError("invalid_stored_state")
-            elif granted:
-                raise ConnectorContractError("invalid_stored_state")
-            if health.state not in _ALLOWED_HEALTH_BY_CONNECTOR_STATE[state]:
-                raise ConnectorContractError("invalid_stored_state")
-            return ConnectorStatus(
-                connector_id,
-                state,
-                connector.required_scopes,
-                granted,
-                health,
-                connection_revision,
+            return self._status_from_row(
+                connector,
+                owner_rows.get(connector_id, _MISSING_CONNECTOR_ROW),
             )
 
     def transition(
@@ -393,15 +409,11 @@ class ConnectorRegistry:
             owner_rows = rows.get(owner, {})
             if not isinstance(owner_rows, dict):
                 raise ConnectorContractError("invalid_stored_state")
-            prior_revision = None
-            prior_row = owner_rows.get(connector_id)
-            if prior_row is not None:
-                if not isinstance(prior_row, dict):
-                    raise ConnectorContractError("invalid_stored_state")
-                try:
-                    prior_revision = _connection_revision(prior_row["connection_revision"])
-                except (KeyError, ValueError):
-                    raise ConnectorContractError("invalid_stored_state") from None
+            prior_status = self._status_from_row(
+                connector,
+                owner_rows.get(connector_id, _MISSING_CONNECTOR_ROW),
+            )
+            prior_revision = prior_status.connection_revision
             try:
                 changed_at = _finite_timestamp(self.clock(), "changed_at")
             except ValueError:
@@ -424,7 +436,8 @@ class ConnectorRegistry:
             }
             rows[owner] = owner_rows
             self.store.put(CONNECTOR_STATE_KEY, rows)
-        return self.status(owner_id, connector_id)
+            # Keep commit and returned lifecycle revision in one serial order.
+            return self.status(owner_id, connector_id)
 
     def record_health(
         self,
@@ -469,7 +482,7 @@ class ConnectorRegistry:
                 "recovery": recovery.value if recovery else None,
             }
             self.store.put(CONNECTOR_STATE_KEY, rows)
-        return self.status(owner_id, connector_id)
+            return self.status(owner_id, connector_id)
 
     def require_connected(
         self,

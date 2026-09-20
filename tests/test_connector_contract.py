@@ -38,6 +38,7 @@ WORK_4 = "44444444-4444-4444-8444-444444444444"
 HANDOFF_1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 HANDOFF_2 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 REVISION_1 = "AQEBAQEBAQEBAQEBAQEBAQ"
+REVISION_2 = "AgICAgICAgICAgICAgICAg"
 
 
 def work_id(number):
@@ -849,6 +850,7 @@ class ConnectorContractTests(unittest.TestCase):
         ):
             for health in observed:
                 with self.subTest(lifecycle=lifecycle, health=health["state"]):
+                    self.store.put(CONNECTOR_STATE_KEY, {})
                     self.registry.transition("owner-a", GMAIL.connector_id, lifecycle)
                     rows = self.store.config(CONNECTOR_STATE_KEY)
                     owner_rows = next(iter(rows.values()))
@@ -912,6 +914,118 @@ class ConnectorContractTests(unittest.TestCase):
         self.assertFalse(store.overlap)
         self.assertEqual(first.status("owner-a", GMAIL.connector_id).state, ConnectorState.CONNECTED)
         self.assertEqual(second.status("owner-a", CALENDAR.connector_id).state, ConnectorState.CONNECTED)
+
+    def test_transition_returns_its_own_revision_before_next_transition_commits(self):
+        class BarrierStore:
+            def __init__(self):
+                self.values = {}
+                self.first_commit = threading.Event()
+                self.release_first = threading.Event()
+                self.block_first = True
+
+            def config(self, key, default=None):
+                return copy.deepcopy(self.values[key]) if key in self.values else default
+
+            def put(self, key, value):
+                self.values[key] = copy.deepcopy(value)
+                if key == CONNECTOR_STATE_KEY and self.block_first:
+                    self.block_first = False
+                    self.first_commit.set()
+                    if not self.release_first.wait(timeout=5):
+                        raise RuntimeError("transition test barrier timed out")
+
+        class AttemptRegistry(ConnectorRegistry):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.attempted = threading.Event()
+
+            def transition(self, *args, **kwargs):
+                self.attempted.set()
+                return super().transition(*args, **kwargs)
+
+        store = BarrierStore()
+        first = ConnectorRegistry(
+            store,
+            (GMAIL,),
+            clock=lambda: self.now[0],
+            revision_factory=lambda: REVISION_1,
+        )
+        second = AttemptRegistry(
+            store,
+            (GMAIL,),
+            clock=lambda: self.now[0],
+            revision_factory=lambda: REVISION_2,
+        )
+        pool = ThreadPoolExecutor(max_workers=2)
+        try:
+            first_future = pool.submit(
+                first.transition,
+                "owner-a",
+                GMAIL.connector_id,
+                ConnectorState.CONNECTED,
+                granted_scopes=GMAIL.required_scopes,
+            )
+            self.assertTrue(store.first_commit.wait(timeout=5))
+            second_future = pool.submit(
+                second.transition,
+                "owner-a",
+                GMAIL.connector_id,
+                ConnectorState.CONNECTED,
+                granted_scopes=GMAIL.required_scopes,
+            )
+            self.assertTrue(second.attempted.wait(timeout=5))
+            self.assertFalse(second_future.done())
+            store.release_first.set()
+            first_status = first_future.result(timeout=5)
+            second_status = second_future.result(timeout=5)
+        finally:
+            store.release_first.set()
+            pool.shutdown(wait=True)
+
+        self.assertEqual(first_status.connection_revision, REVISION_1)
+        self.assertEqual(second_status.connection_revision, REVISION_2)
+        with self.assertRaises(ConnectorContractError) as stale:
+            first.record_health(
+                "owner-a",
+                GMAIL.connector_id,
+                HealthState.HEALTHY,
+                expected_revision=first_status.connection_revision,
+            )
+        self.assertEqual(stale.exception.reason, "stale_connection_revision")
+        self.assertEqual(
+            second.status("owner-a", GMAIL.connector_id).health.state,
+            HealthState.UNKNOWN,
+        )
+
+    def test_transition_rejects_entire_corrupt_existing_row_without_overwrite(self):
+        self.connect()
+        baseline = self.store.config(CONNECTOR_STATE_KEY)
+        corruptions = (
+            ("extra", "private"),
+            ("state", "invented"),
+            ("granted_scopes", []),
+            ("changed_at", math.nan),
+            ("health", {"state": "healthy", "checked_at": None, "recovery": None}),
+            ("connection_revision", "not-a-revision"),
+        )
+        for field, value in corruptions:
+            with self.subTest(field=field):
+                rows = copy.deepcopy(baseline)
+                owner_rows = next(iter(rows.values()))
+                owner_rows[GMAIL.connector_id][field] = value
+                self.store.put(CONNECTOR_STATE_KEY, rows)
+                before = json.dumps(
+                    self.store.config(CONNECTOR_STATE_KEY), sort_keys=True, allow_nan=True
+                )
+                with self.assertRaises(ConnectorContractError) as rejected:
+                    self.registry.transition(
+                        "owner-a", GMAIL.connector_id, ConnectorState.DISCONNECTED
+                    )
+                self.assertEqual(rejected.exception.reason, "invalid_stored_state")
+                after = json.dumps(
+                    self.store.config(CONNECTOR_STATE_KEY), sort_keys=True, allow_nan=True
+                )
+                self.assertEqual(after, before)
 
     def test_malformed_top_level_connector_state_fails_closed_without_overwrite(self):
         for malformed in (None, [], "corrupt", 42, True):
@@ -1012,6 +1126,28 @@ class ConnectorContractTests(unittest.TestCase):
         registry.transition("google-drive-read", "enabled", ("read",))
         self.assertEqual(registry.transition("google-drive-read", "paused")["grant"], ["read"])
         self.assertEqual(registry.transition("google-drive-read", "disconnected")["grant"], [])
+
+    def test_capability_registry_top_level_corruption_fails_closed_without_overwrite(self):
+        registry = CapabilityRegistry(self.store)
+        self.assertTrue(registry.list())
+        self.assertIsNone(self.store.config("capability_registry"))
+        for malformed in (None, [], "corrupt", 42, True):
+            with self.subTest(malformed=malformed):
+                self.store.put("capability_registry", malformed)
+                operations = (
+                    registry.list,
+                    lambda: registry.transition(
+                        "google-drive-read", "enabled", ("read",)
+                    ),
+                    lambda: registry.require_enabled("google-drive-read", "read"),
+                )
+                for operation in operations:
+                    with self.assertRaises(ValueError) as rejected:
+                        operation()
+                    self.assertEqual(
+                        str(rejected.exception), "저장된 capability 상태를 확인하세요."
+                    )
+                    self.assertEqual(self.store.config("capability_registry"), malformed)
 
 if __name__ == "__main__":
     unittest.main()

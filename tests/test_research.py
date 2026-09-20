@@ -100,6 +100,11 @@ class PublicResearchTests(unittest.TestCase):
             ('secret equals correcthorsebatterystaple','owner_public_request'),
             ('password requirements 123456789','owner_public_request'),
             ('password requirements 올바른비밀번호','owner_public_request'),
+            ('Authorization: Token abcdefghijklmnop','owner_public_request'),
+            ('Authorization: AWS4-HMAC-SHA256 Credential=AKIAEXAMPLE','owner_public_request'),
+            ('compare /root/.ssh/id_rsa','owner_public_request'),
+            ('compare ~/Documents/tax-return.txt','owner_public_request'),
+            (r'compare C:\private\receipt.txt','owner_public_request'),
         ]
         for query,source in cases:
             with self.subTest(query=query),self.assertRaises(ValueError):
@@ -111,7 +116,8 @@ class PublicResearchTests(unittest.TestCase):
                       'access token documentation','refresh token rotation guide','password requirements',
                       'api key permissions','api key examples','access token scopes','refresh token revocation',
                       'client secret rotation guide','secret management best practices',
-                      'compare password requirements and api key permissions'):
+                      'compare password requirements and api key permissions',
+                      'authorization header format','compare https://example.com/public/path'):
             with self.subTest(query=query):
                 self.assertEqual(validate_public_query(query,'owner_public_request'),query)
 
@@ -208,7 +214,9 @@ class PublicResearchTests(unittest.TestCase):
                              'Grand total USD 100 excluding local VAT.',
                              'Grand total USD 100 plus 10% tax.',
                              'Grand total USD 100?',
-                             'The grand total is not USD 100.'),
+                             'The grand total is not USD 100.',
+                             'Grand total includes a USD 25 service fee.',
+                             'Total price reduced by USD 10.'),
         }
         for dynamic,contents in cases.items():
             for content in contents:
@@ -243,6 +251,22 @@ class PublicResearchTests(unittest.TestCase):
                     'travel_plan','museum plan',query_source='owner_public_request')
                 self.assertEqual(result['dynamic_facts']['inventory']['status'],'unknown')
                 self.assertEqual(result['dynamic_facts']['fee']['status'],'unknown')
+
+    def test_negated_fee_properties_and_inventory_metadata_stay_unknown(self):
+        cases=(
+            ('fee','No booking fee is refundable.'),
+            ('fee','No booking fee was waived.'),
+            ('inventory','Stock information is available.'),
+            ('inventory','Inventory details are unavailable.'),
+        )
+        for dynamic,content in cases:
+            with self.subTest(dynamic=dynamic,content=content):
+                reader=Reader({'https://alpha.example/item':{
+                    'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+                result=PublicResearch(search_result,reader,max_pages=1).run(
+                    'travel_plan','museum plan',query_source='owner_public_request')
+                self.assertEqual(result['dynamic_facts'][dynamic]['status'],'unknown')
+                self.assertNotIn(content,result['brief'])
 
     def test_does_not_classify_or_emit_a_sentence_cut_by_evidence_limit(self):
         content=('A'*3980)+'. Grand total USD 100 before taxes and fees.'

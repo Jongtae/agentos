@@ -15,6 +15,7 @@ MAX_EVIDENCE_CHARACTERS = 4_000
 ALLOWED_MODES = frozenset({'product_comparison', 'travel_plan'})
 ALLOWED_QUERY_SOURCES = frozenset({'owner_public_request', 'public_task_input'})
 HIGH_CONFIDENCE_SECRET_PATTERNS = (
+    re.compile(r'(?i)\bauthorization\s*:\s*\S+'),
     re.compile(r'(?i)\bauthorization\s*:?\s*(?:bearer|basic)\s+\S+'),
     re.compile(r'(?i)\bbasic\s+\S{8,}'),
     re.compile(r'(?i)\bbearer\s*:?\s+\S{8,}'),
@@ -24,7 +25,7 @@ HIGH_CONFIDENCE_SECRET_PATTERNS = (
     re.compile(r'(?i)\bhf_[a-z0-9]{16,}\b'),
     re.compile(r'(?i)\bsk-[a-z0-9_-]{12,}\b'),
     re.compile(r'(?i)\b(?:gh[pousr]_[a-z0-9]{16,}|github_pat_[a-z0-9_]{16,}|glpat-[a-z0-9_-]{16,}|xox[baprs]-[a-z0-9-]{10,}|npm_[a-z0-9]{16,}|pypi-[a-z0-9_-]{16,}|AKIA[A-Z0-9]{16})\b'),
-    re.compile(r'(?i)(?:file://|/Users/|/home/|\\Users\\)'),
+    re.compile(r'(?i)(?:file://|(?:^|\s)~[/\\]|(?:^|\s)/[^\s/]+/[^\s]+|(?:^|\s)[a-z]:\\[^\s]+)'),
 )
 CREDENTIAL_LABEL = r'(?:password|passwd|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|secret)'
 LABEL_OCCURRENCE = re.compile(rf'(?i)\b{CREDENTIAL_LABEL}\b')
@@ -44,11 +45,11 @@ FACT_PATTERNS = {
 FEE_VALUE_PATTERNS = (
     re.compile(r'(?i)(?:\b(?:fee|fees|tax|taxes|surcharge|resort fee|service charge)\b|수수료|세금|부가세)[^;.!?]{0,20}(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b|\b\d+(?:\.\d+)?\s*%|\b(?:none|zero|free|included|waived)\b|없음|무료|포함)'),
     re.compile(r'(?i)(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b|\b\d+(?:\.\d+)?\s*%)[^;.!?]{0,20}(?:\b(?:fee|fees|tax|taxes|surcharge|resort fee|service charge)\b|수수료|세금|부가세)'),
-    re.compile(r'(?i)\bno\s+(?:\w+\s+){0,2}(?:fee|fees|tax|taxes|surcharge)\b(?!\s+(?:information|details|data|amount|rate)\b)|\bfee[- ]free\b'),
+    re.compile(r'(?i)\bno\s+(?:\w+\s+){0,2}(?:fee|fees|tax|taxes|surcharge)\b\s*(?:[.!?]|$)|\bfee[- ]free\b'),
 )
 TOTAL_VALUE_PATTERNS = (
-    re.compile(r'(?i)(?:\b(?:total due|payable total|grand total|total price)\b|총\s*결제(?:액)?|결제\s*금액)[^;.!?]{0,20}(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b)'),
-    re.compile(r'(?i)(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b)[^;.!?]{0,20}(?:\b(?:total due|payable total|grand total|total price)\b|총\s*결제(?:액)?|결제\s*금액)'),
+    re.compile(r'(?i)(?:\b(?:total due|payable total|grand total|total price)\b|총\s*결제(?:액)?|결제\s*금액)\s*(?::|=|\bis\b|\bof\b)?\s*(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b)'),
+    re.compile(r'(?i)(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b)\s*(?:\b(?:total due|payable total|grand total|total price)\b|총\s*결제(?:액)?|결제\s*금액)'),
 )
 DYNAMIC_DISQUALIFIER = re.compile(
     r'(?i)\b(?:may|might|could|can|should|would|possibly|probably|likely|expected|estimated|estimate|approximately|approximate|about|around|roughly|range|ranges|ranging|between|except|projected|potential|check|subject to|up to|at least|at most|starting at|starts at|if|unless|when|upon|provided|on request|depending on)\b|'
@@ -68,6 +69,14 @@ FEE_MISSING_DISCLOSURE = re.compile(
     r'\b(?:disclosed|listed|published|provided|shown|stated|available)\b|'
     r'\b(?:fee|fees|tax|taxes|surcharge)\b[^.!?]{0,30}\b(?:not|never)\b[^.!?]{0,15}'
     r'\b(?:disclosed|listed|published|provided|shown|stated|available)\b'
+)
+FEE_NEGATED_PROPERTY = re.compile(
+    r'(?i)\bno\s+(?:\w+\s+){0,2}(?:fee|fees|tax|taxes|surcharge)\b[^.!?]{0,25}'
+    r'\b(?:refundable|refunded|waived|included|charged|credited)\b'
+)
+INVENTORY_METADATA = re.compile(
+    r'(?i)\b(?:stock|inventory|room|rooms|ticket|tickets|seat|seats)\s+'
+    r'(?:information|details|data|status)\b[^.!?]{0,25}\b(?:available|unavailable)\b'
 )
 
 
@@ -126,8 +135,9 @@ def _qualified_dynamic(name, evidence):
         for text in row['observed_details'][name]:
             if text.rstrip().endswith('?') or DYNAMIC_DISQUALIFIER.search(text) or INCOMPLETE_TOTAL.search(text): continue
             tied=(name == 'inventory')
+            if name == 'inventory' and INVENTORY_METADATA.search(text): continue
             if name == 'fee':
-                if FEE_MISSING_DISCLOSURE.search(text): continue
+                if FEE_MISSING_DISCLOSURE.search(text) or FEE_NEGATED_PROPERTY.search(text): continue
                 tied=bool(FEE_VALUE_PATTERNS[0].search(text) or FEE_VALUE_PATTERNS[2].search(text) or
                           (FEE_VALUE_PATTERNS[1].search(text) and not FACT_PATTERNS['payable_total'].search(text)))
             elif name == 'payable_total':

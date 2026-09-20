@@ -50,9 +50,20 @@ class MemoryService:
             None, memory_key, content, owner_id=owner_id, work_id=work_id
         )
 
-    def list_memories(self, owner_id):
+    @staticmethod
+    def _page(limit, offset):
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise MemoryServiceError("memory page size is invalid")
+        if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+            raise MemoryServiceError("memory page offset is invalid")
+        return limit, offset
+
+    def list_memories(self, owner_id, *, limit=50, offset=0):
         self._identity(owner_id, "owner")
-        return {"state": "current", "memories": self.store.memories(owner_id)}
+        limit, offset = self._page(limit, offset)
+        rows = self.store.memories(owner_id, limit=limit + 1, offset=offset)
+        return {"state": "current", "memories": rows[:limit],
+                "next_offset": offset + limit if len(rows) > limit else None}
 
     def inspect_memory(self, owner_id, memory_id):
         self._identity(owner_id, "owner")
@@ -61,11 +72,14 @@ class MemoryService:
             raise MemoryServiceError("memory not found")
         return row
 
-    def list_candidates(self, owner_id, work_id=None):
+    def list_candidates(self, owner_id, work_id=None, *, limit=50, offset=0):
         self._identity(owner_id, "owner")
         if work_id is not None:
             self._identity(work_id, "work")
-        return {"state": "pending", "candidates": self.store.memory_candidates(owner_id, work_id)}
+        limit, offset = self._page(limit, offset)
+        rows = self.store.memory_candidates(owner_id, work_id, limit=limit + 1, offset=offset)
+        return {"state": "pending", "candidates": rows[:limit],
+                "next_offset": offset + limit if len(rows) > limit else None}
 
     def inspect_candidate(self, owner_id, work_id, candidate_id):
         owner_id, work_id = self._request(owner_id, work_id)

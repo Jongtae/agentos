@@ -69,6 +69,8 @@ class MemoryServiceTests(unittest.TestCase):
                 "owner-a", "work-a", expiring["id"], expiring["content_digest"], expiring_approval["approval_token"]
             )
         self.assertEqual(self.service.inspect_candidate("owner-a", "work-a", expiring["id"])["state"], "pending")
+        with self.store.db() as db:
+            self.assertEqual(db.execute("SELECT state FROM memory_approvals WHERE expires=?", (expiring_approval["expires_at"],)).fetchone()["state"], "expired")
 
     def test_correction_approval_is_rejected_at_exact_expiry(self):
         original = self.service.remember("owner-a", "work-a", "meeting-time", "morning")
@@ -157,7 +159,8 @@ class MemoryServiceTests(unittest.TestCase):
         self.assertEqual(deleted["deleted_memory_count"], 2)
         self.assertEqual(deleted["deleted_candidate_count"], 1)
         self.assertEqual(deleted["deleted_approval_count"], 2)
-        self.assertFalse(deleted["retained_private_copies"])
+        self.assertEqual(deleted["retained_private_copies"], "unknown_outside_store")
+        self.assertFalse(deleted["external_archives_affected"])
         with self.store.db() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM memories WHERE id IN (?,?)", (accepted["id"], corrected["id"])).fetchone()[0], 0)
             self.assertEqual(db.execute("SELECT COUNT(*) FROM memory_candidates WHERE id=?", (candidate["id"],)).fetchone()[0], 0)
@@ -238,6 +241,18 @@ class MemoryServiceTests(unittest.TestCase):
             self.service.propose("owner-a", "work-a", f"candidate-{index}", f"proposal-{index}")
         self.assertEqual(len(self.service.list_memories("owner-a")["memories"]), 50)
         self.assertEqual(len(self.service.list_candidates("owner-a")["candidates"]), 50)
+        memory_first = self.service.list_memories("owner-a", limit=50)
+        memory_second = self.service.list_memories("owner-a", limit=50, offset=memory_first["next_offset"])
+        candidate_first = self.service.list_candidates("owner-a", limit=50)
+        candidate_second = self.service.list_candidates("owner-a", limit=50, offset=candidate_first["next_offset"])
+        self.assertEqual(len({row["id"] for row in memory_first["memories"] + memory_second["memories"]}), 51)
+        self.assertEqual(len({row["id"] for row in candidate_first["candidates"] + candidate_second["candidates"]}), 51)
+        self.assertIsNone(memory_second["next_offset"])
+        self.assertIsNone(candidate_second["next_offset"])
+        with self.assertRaises(MemoryServiceError):
+            self.service.list_memories("owner-a", limit=101)
+        with self.assertRaises(MemoryServiceError):
+            self.service.list_candidates("owner-a", offset=-1)
         status = self.service.status("owner-a")
         self.assertEqual(status["current_memory_count"], 51)
         self.assertEqual(status["candidate_counts"], {"pending": 51, "accepted": 0, "rejected": 0})

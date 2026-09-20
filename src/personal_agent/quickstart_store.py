@@ -292,14 +292,16 @@ class QuickStore:
         value=dict(row)
         return {key:value[key] for key in ('id','memory_key','content','created','state','content_digest','decided','resulting_memory_id')}
 
-    def memory_candidates(self, owner_id=None, work_id=None, include_decided=False):
+    def memory_candidates(self, owner_id=None, work_id=None, include_decided=False, limit=50, offset=0):
+        if isinstance(limit,bool) or not isinstance(limit,int) or not 1<=limit<=101:raise ValueError('기억 후보 조회 범위를 확인하세요.')
+        if isinstance(offset,bool) or not isinstance(offset,int) or offset<0:raise ValueError('기억 후보 조회 위치를 확인하세요.')
         clauses=[];parameters=[]
         if owner_id is not None:clauses.append('owner_key=?');parameters.append(self._memory_binding(owner_id))
         if work_id is not None:clauses.append('work_key=?');parameters.append(self._memory_binding(work_id))
         if not include_decided:clauses.append("state='pending'")
         where=(' WHERE '+' AND '.join(clauses)) if clauses else ''
         with self.db() as db:
-            rows=db.execute('SELECT id,job_id,memory_key,content,created,state,content_digest,decided,resulting_memory_id FROM memory_candidates'+where+' ORDER BY created DESC LIMIT 50',parameters)
+            rows=db.execute('SELECT id,job_id,memory_key,content,created,state,content_digest,decided,resulting_memory_id FROM memory_candidates'+where+' ORDER BY created DESC,id DESC LIMIT ? OFFSET ?',(*parameters,limit,offset))
             return [dict(r) for r in rows]
 
     def memory(self, memory_id, owner_id='local-owner', current_only=True):
@@ -308,11 +310,13 @@ class QuickStore:
         with self.db() as db:
             return self._memory_row(db.execute(query,(memory_id,self._memory_binding(owner_id))).fetchone())
 
-    def memories(self, owner_id=None):
+    def memories(self, owner_id=None, limit=50, offset=0):
+        if isinstance(limit,bool) or not isinstance(limit,int) or not 1<=limit<=101:raise ValueError('기억 조회 범위를 확인하세요.')
+        if isinstance(offset,bool) or not isinstance(offset,int) or offset<0:raise ValueError('기억 조회 위치를 확인하세요.')
         where="state='current'";parameters=[]
         if owner_id is not None:where+=" AND owner_key=?";parameters.append(self._memory_binding(owner_id))
         with self.db() as db:
-            return [self._memory_row(r) for r in db.execute('SELECT * FROM memories WHERE '+where+' ORDER BY created DESC LIMIT 50',parameters)]
+            return [self._memory_row(r) for r in db.execute('SELECT * FROM memories WHERE '+where+' ORDER BY created DESC,id DESC LIMIT ? OFFSET ?',(*parameters,limit,offset))]
 
     def memory_status_counts(self, owner_id):
         """Return authoritative aggregate counts, independent of list pagination."""
@@ -353,7 +357,9 @@ class QuickStore:
             raise ValueError('정확한 승인이 필요합니다.')
         if row['state']=='consumed':return row
         if row['state']!='issued' or float(row['expires'])<=now:
-            if row['state']=='issued':db.execute("UPDATE memory_approvals SET state='expired' WHERE token_hash=?",(row['token_hash'],))
+            if row['state']=='issued':
+                db.execute("UPDATE memory_approvals SET state='expired' WHERE token_hash=?",(row['token_hash'],))
+                db.commit()
             raise ValueError('승인이 만료되었습니다.')
         return row
 
@@ -410,7 +416,7 @@ class QuickStore:
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
             current=db.execute("SELECT id,supersedes FROM memories WHERE id=? AND owner_key=? AND state='current'",(memory_id,owner_key)).fetchone()
-            if not current:return {'deleted':False,'id':memory_id,'kind':'memory','deleted_memory_count':0,'deleted_candidate_count':0,'deleted_approval_count':0,'retained_private_copies':False}
+            if not current:return {'deleted':False,'id':memory_id,'kind':'memory','deleted_memory_count':0,'deleted_candidate_count':0,'deleted_approval_count':0,'retained_private_copies':'unknown_outside_store','external_archives_affected':False}
             memory_ids=[];cursor=current
             while cursor:
                 memory_ids.append(cursor['id'])
@@ -433,7 +439,8 @@ class QuickStore:
                 candidate_deleted=db.execute(f'DELETE FROM memory_candidates WHERE owner_key=? AND id IN ({candidate_marks})',(owner_key,*candidates)).rowcount
             memory_deleted=db.execute(f'DELETE FROM memories WHERE owner_key=? AND id IN ({marks})',(owner_key,*memory_ids)).rowcount
         return {'deleted':bool(memory_deleted),'id':memory_id,'kind':'memory','deleted_memory_count':memory_deleted,
-                'deleted_candidate_count':candidate_deleted,'deleted_approval_count':approval_deleted,'retained_private_copies':False}
+                'deleted_candidate_count':candidate_deleted,'deleted_approval_count':approval_deleted,
+                'retained_private_copies':'unknown_outside_store','external_archives_affected':False}
 
     def delete_memory(self, owner_id, memory_id):
         if not isinstance(memory_id,str) or not memory_id:raise ValueError('삭제할 기억을 확인하세요.')

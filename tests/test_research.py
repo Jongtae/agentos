@@ -183,7 +183,8 @@ class PublicResearchTests(unittest.TestCase):
                       'authorization header format','compare https://example.com/public/path',
                       'compare "https://example.com/public/path"','JWT format examples',
                       'basic authentication overview','Basic Authentication overview',
-                      'bearer authentication examples','Bearer authorization examples'):
+                      'bearer authentication examples','Bearer authorization examples',
+                      'basic economy fare comparison','basic room rates Seoul'):
             with self.subTest(query=query):
                 self.assertEqual(validate_public_query(query,'owner_public_request'),query)
         for query in ('Secret Garden hotel Seoul','secret beach hotels Bali'):
@@ -234,7 +235,8 @@ class PublicResearchTests(unittest.TestCase):
         self.assertEqual(result['dynamic_facts']['payable_total']['status'],'unknown')
 
     def test_percentage_and_no_fee_are_observed_without_unknown_fee_brief(self):
-        for content in ('Service fee: 10%.','No booking fee.','No service fee is charged.',
+        for content in ('Service fee: 10%.','No booking fee.','There is no service charge.',
+                        'No service fee is charged.',
                         'Service fee is not charged.','Fees are not charged.'):
             with self.subTest(content=content):
                 reader=Reader({'https://alpha.example/item':{
@@ -394,6 +396,23 @@ class PublicResearchTests(unittest.TestCase):
                     'product_comparison','headphones',query_source='owner_public_request')
                 self.assertIn('  - price:',result['brief'])
 
+        for content in ('Price increased by USD 10.', 'Price increase: USD 10.',
+                        'Price rose USD 10.', 'Price raised by USD 10.'):
+            with self.subTest(content=content):
+                reader=Reader({'https://alpha.example/item':{
+                    'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+                result=PublicResearch(search_result,reader,max_pages=1).run(
+                    'product_comparison','headphones',query_source='owner_public_request')
+                self.assertNotIn('  - price:',result['brief'])
+
+        for content in ('Price increased to USD 100.', 'Price rose to USD 100.'):
+            with self.subTest(content=content):
+                reader=Reader({'https://alpha.example/item':{
+                    'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+                result=PublicResearch(search_result,reader,max_pages=1).run(
+                    'product_comparison','headphones',query_source='owner_public_request')
+                self.assertIn('  - price:',result['brief'])
+
         reader=Reader({'https://alpha.example/item':{
             'url':'https://alpha.example/item','retrieved_at':2,
             'content':'The hotel opened in 2020, and rooms are available.'}})
@@ -539,6 +558,16 @@ class PublicResearchTests(unittest.TestCase):
                     'travel_plan','museum plan',query_source='owner_public_request')
                 self.assertEqual(result['dynamic_facts'][dynamic]['status'],'observed')
                 self.assertIn(exact,result['brief'])
+
+    def test_adjacent_inventory_assertions_keep_their_own_qualifiers(self):
+        content='Rooms may be available next week. Rooms are available today.'
+        reader=Reader({'https://alpha.example/item':{
+            'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+        result=PublicResearch(search_result,reader,max_pages=1).run(
+            'travel_plan','museum plan',query_source='owner_public_request')
+        self.assertEqual(result['dynamic_facts']['inventory']['status'],'observed')
+        self.assertEqual(result['dynamic_facts']['inventory']['evidence'],[
+            {'source_id':'S1','exact_text':'Rooms are available today.'}])
 
     def test_anaphoric_adjacent_uncertainty_keeps_dynamic_facts_unknown(self):
         cases=(

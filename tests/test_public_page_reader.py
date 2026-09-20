@@ -304,6 +304,21 @@ class PublicPageReaderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '압축 해제'):
             PublicPageReader(opener=Opener(Response(body, headers={'Content-Type':'text/plain','Content-Encoding':'gzip'})), resolver=public_dns).read('https://example.com/')
 
+    def test_rejects_truncated_or_concatenated_gzip_evidence(self):
+        complete=gzip.compress(b'Grand total: USD 100.')
+        for body in (complete[:-8], complete + gzip.compress(b'Injected total: USD 1.')):
+            with self.subTest(size=len(body)),self.assertRaisesRegex(ValueError,'압축'):
+                PublicPageReader(
+                    opener=Opener(Response(body,headers={'Content-Type':'text/plain','Content-Encoding':'gzip'})),
+                    resolver=public_dns,
+                ).read('https://example.com/')
+
+    def test_rejects_missing_content_type_instead_of_treating_html_as_text(self):
+        response=Response(b'<script>Grand total: USD 1.</script>')
+        response.headers=Headers({})
+        with self.assertRaisesRegex(ValueError,'콘텐츠 유형'):
+            PublicPageReader(opener=Opener(response),resolver=public_dns).read('https://example.com/')
+
     def test_malformed_http_is_a_recoverable_provider_failure(self):
         class Broken:
             def open(self, request, timeout=None): raise http.client.BadStatusLine('broken')

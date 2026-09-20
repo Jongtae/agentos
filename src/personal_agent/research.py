@@ -80,10 +80,16 @@ PRICE_ADJUSTMENT = re.compile(
     r'[^.!?]{0,15}\b(?:off|discount|saving)\b[^.!?]{0,15}'
     r'(?:\b(?:the\s+)?(?:price|cost|fare|rate)\b|가격|요금))'
 )
+PRICE_INCREASE_AMOUNT = re.compile(
+    r'(?i)(?:\b(?:price|cost|fare|rate)\b|가격|요금)[^.!?]{0,45}'
+    r'\b(?:increas(?:e|ed)|rais(?:e|ed)|rise|rose)\b\s*'
+    r'(?!to\b)(?:(?:by|of)\s+|:\s*)?'
+    r'(?:[$€£¥₩]\s?\d|(?:USD|EUR|GBP|JPY|KRW)\s?\d|\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW))'
+)
 FEE_VALUE_PATTERNS = (
     re.compile(r'(?i)(?:\b(?:fee|fees|tax|taxes|surcharge|resort fee|service charge)\b|수수료|세금|부가세)[^;.!?]{0,20}(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b|\b\d+(?:\.\d+)?\s*%|\b(?:none|zero|free|included|waived)\b|없음|무료|포함)'),
     re.compile(r'(?i)(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b|\b\d+(?:\.\d+)?\s*%)[^;.!?]{0,20}(?:\b(?:fee|fees|tax|taxes|surcharge|resort fee|service charge)\b|수수료|세금|부가세)'),
-    re.compile(r'(?i)\bno\s+(?:\w+\s+){0,2}(?:fee|fees|tax|taxes|surcharge)\b\s*(?:(?:is|will\s+be)\s+charged\b\s*)?(?:[.!?]|$)|\bfee[- ]free\b'),
+    re.compile(r'(?i)\bno\s+(?:\w+\s+){0,2}(?:fee|fees|tax|taxes|surcharge|service charge|service charges)\b\s*(?:(?:is|will\s+be)\s+charged\b\s*)?(?:[.!?]|$)|\bfee[- ]free\b'),
 )
 FEE_NOT_CHARGED = re.compile(
     r'(?i)\b(?:fee|fees|tax|taxes|surcharge|resort fee|service charge)\b[^;.!?]{0,24}'
@@ -213,7 +219,7 @@ def validate_public_query(query, query_source):
             decoded=base64.b64decode(basic_token+'='*((-len(basic_token))%4),validate=True)
         except (binascii.Error,ValueError):
             decoded=b''
-        if b':' in decoded or basic_token.casefold() not in PUBLIC_CREDENTIAL_TOPICS: sensitive=True
+        if b':' in decoded: sensitive=True
     sensitive=sensitive or bool(LABEL_ASSIGNMENT.search(scan_query))
     labels=list(LABEL_OCCURRENCE.finditer(scan_query))
     if labels:
@@ -259,7 +265,7 @@ def _observed_details(content):
     _excerpt,sentences,_truncated=_bounded_evidence(content)
     for sentence in sentences:
         for key,pattern in FACT_PATTERNS.items():
-            if key == 'price' and PRICE_ADJUSTMENT.search(sentence):
+            if key == 'price' and (PRICE_ADJUSTMENT.search(sentence) or PRICE_INCREASE_AMOUNT.search(sentence)):
                 continue
             if pattern.search(sentence) and sentence not in details[key]:
                 details[key].append(sentence)
@@ -287,8 +293,7 @@ def _qualified_dynamic(name, evidence):
                         ANAPHORIC_QUALIFIER.search(neighbor) or historical_anaphor
                     )
                     if is_forward_anaphor: adjacent_condition=True
-                    if (ADJACENT_QUALIFIER_ONLY.search(neighbor) or is_forward_anaphor or
-                            DYNAMIC_SUBJECT_PATTERNS[name].search(neighbor)):
+                    if ADJACENT_QUALIFIER_ONLY.search(neighbor) or is_forward_anaphor:
                         context_units.append(neighbor)
             context=' '.join(context_units)
             clause_pattern=(

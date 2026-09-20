@@ -333,6 +333,8 @@ class PublicPageReader:
             if status < 200 or status >= 300: raise ProviderError('공개 페이지가 정상 응답하지 않았습니다.')
             content_type=response.headers.get('Content-Type','') if hasattr(response,'headers') else ''
             media_type=content_type.split(';',1)[0].strip().lower()
+            if not media_type:
+                raise ValueError('콘텐츠 유형이 없는 공개 페이지는 안전하게 읽을 수 없습니다.')
             if media_type and not (media_type.startswith('text/') or media_type in ('application/xhtml+xml','application/xml')):
                 raise ValueError('HTML 또는 텍스트 공개 페이지만 읽을 수 있습니다.')
             encoding=(response.headers.get('Content-Encoding','') if hasattr(response,'headers') else '').lower()
@@ -355,6 +357,8 @@ class PublicPageReader:
                         if len(expanded)>MAX_PAGE_DECOMPRESSED_BYTES: raise ValueError('압축 해제 후 공개 페이지 크기 제한을 초과했습니다.')
                     expanded.extend(decompressor.flush(MAX_PAGE_DECOMPRESSED_BYTES-len(expanded)+1))
                     if len(expanded)>MAX_PAGE_DECOMPRESSED_BYTES: raise ValueError('압축 해제 후 공개 페이지 크기 제한을 초과했습니다.')
+                    if not decompressor.eof or decompressor.unused_data or decompressor.unconsumed_tail:
+                        raise ValueError('압축된 공개 페이지를 완전히 해석하지 못했습니다.')
                     data=bytes(expanded)
                 except ValueError: raise
                 except (OSError, zlib.error): raise ValueError('압축된 공개 페이지를 해석하지 못했습니다.') from None

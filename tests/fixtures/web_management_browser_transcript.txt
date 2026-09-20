@@ -223,3 +223,30 @@ post-delete browser evaluation returned:
 
 Thus deleting the last matching row exits the fixed mobile-detail overlay and
 returns to the visible empty list. This remains deterministic fixture evidence.
+
+Polling disclosures, OAuth popup handoff, and empty mobile tasks
+----------------------------------------------------------------
+At 1280x900, the headed browser expanded both 실행 상세 and its nested 원래 요청
+보기 disclosure. The fixture appended a second event and the browser waited through
+three polling intervals. The post-poll evaluation observed:
+
+  {"technical":true,"original":true,"events":2}
+
+At 390x844, the browser selected the only task to enter its fixed detail overlay.
+POST /control/empty-tasks then made the next read return no ordinary tasks. After
+polling, the evaluation observed:
+
+  {"detailClass":"panel detail","empty":true}
+
+The task overlay therefore exited to the visible empty task list.
+
+For the same-origin OpenRouter callback contract, the main headed page stored an
+inert fixture flow, placed `stale-secret` in the form, and opened the fixture callback
+popup at `/?code=fixture-code&state=fixture-state`. The popup POSTed only to the
+local fixture `/api/openrouter/connect`, signalled its opener, and closed. The opener
+then cleared and reloaded the stale form. Its evaluation observed:
+
+  {"popupClosed":true,"key":"","provider":"compatible","model":"fixture/connected","feedback":"OpenRouter 연결 결과를 저장했습니다."}
+
+No real OpenRouter account, credential, provider request, or external network effect
+was used; `stale-secret`, the code, state, and verifier are inert fixture strings.

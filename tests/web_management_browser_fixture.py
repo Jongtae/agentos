@@ -26,6 +26,8 @@ class Fixture:
     memories = [{"id": "memory-exact", "memory_key": "durable-key", "content": "exact durable memory", "created": 2}, {"id": "memory-long", "content": LONG_MEMORY, "created": 1}]
     capability_state = "enabled"
     drafts = {}
+    tasks_empty = False
+    model = {"provider": "openai", "endpoint": "https://example.invalid/v1", "model": "fixture-model"}
 
     @classmethod
     def task(cls, detail=False):
@@ -77,10 +79,10 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/status": self.send_json({"claimed": True, "authenticated": True, "local_access": True})
         elif path == "/api/tasks":
             Fixture.task_polls += 1
-            self.send_json({"tasks": [Fixture.task()], "unknown_detail_message": "fixture"})
+            self.send_json({"tasks": [] if Fixture.tasks_empty else [Fixture.task()], "unknown_detail_message": "fixture"})
         elif path == "/api/tasks/task-382": self.send_json({"tasks": [Fixture.task(True)], "selected": Fixture.task(True), "unknown_detail_message": "fixture"})
         elif path == "/api/home": self.send_json({"state": "working", "workspaces": [{"id": "workspace-382", "title": "회귀 프로젝트"}]})
-        elif path == "/api/state": self.send_json({"settings": {"model": {"provider": "openai", "endpoint": "https://example.invalid/v1", "model": "fixture-model"}, "model_ready": False, "subscription_engines": {"engines": []}, "context_inbox": {"sources": {}, "items": []}, "telegram": {"enabled": True, "paired": True, "username": "fixture_bot"}, "conversation_settings": {"state": "read", "capabilities": [{"id": "google-drive-read", "kind": "connector", "state": Fixture.capability_state, "recovery": "Owner can resume after review."}]}, "document_boundary": {}}, "jobs": [{"id": "task-382", "status": "running", "response": None, "message": "fixture Telegram request", "channel": "telegram:fixture-owner"}, {"id": "project-job", "status": "succeeded", "response": "fixture project result", "message": "fixture project request", "channel": "telegram:fixture-owner"}], "tool_events": [], "healthy": True})
+        elif path == "/api/state": self.send_json({"settings": {"model": Fixture.model, "model_ready": False, "subscription_engines": {"engines": []}, "context_inbox": {"sources": {}, "items": []}, "telegram": {"enabled": True, "paired": True, "username": "fixture_bot"}, "conversation_settings": {"state": "read", "capabilities": [{"id": "google-drive-read", "kind": "connector", "state": Fixture.capability_state, "recovery": "Owner can resume after review."}]}, "document_boundary": {}}, "jobs": [{"id": "task-382", "status": "running", "response": None, "message": "fixture Telegram request", "channel": "telegram:fixture-owner"}, {"id": "project-job", "status": "succeeded", "response": "fixture project result", "message": "fixture project request", "channel": "telegram:fixture-owner"}], "tool_events": [], "healthy": True})
         elif path == "/api/personal-space": self.send_json({"memories": Fixture.memories, "context": [], "results": []})
         elif path == "/api/workspaces/workspace-382": self.send_json({"id": "workspace-382", "title": "회귀 프로젝트", "purpose": "상세/결과 저장 회귀", "results": Fixture.results, "messages": []})
         elif path == "/control/counts": self.send_json({"test_requests": Fixture.test_requests, "apply_requests": Fixture.apply_requests, "events": len(Fixture.events), "task_polls": Fixture.task_polls})
@@ -99,6 +101,9 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/control/append-event":
             Fixture.events.append({"id": len(Fixture.events) + 1, "tool": "fixture", "status": "succeeded", "created": Fixture.events[-1]["created"] + 1, "summary": "폴링으로 추가된 이벤트", "details": {}})
             self.send_json({"events": len(Fixture.events)})
+        elif path == "/control/empty-tasks":
+            Fixture.tasks_empty = True
+            self.send_json({"tasks_empty": True})
         elif path == "/api/model/test":
             Fixture.test_requests += 1
             time.sleep(0.8)
@@ -108,6 +113,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": True})
         elif path == "/api/openrouter/models":
             self.send_json({"models": [{"id": "fixture/free", "name": "Fixture Free"}]})
+        elif path == "/api/openrouter/connect":
+            Fixture.model = {"provider": "compatible", "endpoint": "https://openrouter.ai/api/v1", "model": "fixture/connected"}
+            self.send_json({"connected": True})
         elif path == "/api/settings/request":
             operation = body.get("operation")
             if operation == "draft":

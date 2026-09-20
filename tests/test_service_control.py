@@ -446,6 +446,27 @@ class ServiceControlTests(unittest.TestCase):
         self.assertTrue(result["data_preserved"])
         self.assertIn("permissions", result["next_action"])
 
+    def test_failed_stop_and_uninstall_report_installed_data_path(self):
+        installed_data = self.root / "installed-owner-state"
+        controller = ServiceController(
+            home=self.home, data_dir=installed_data, cli_path=self.cli, runner=self.runner, uid=501
+        )
+        controller.install()
+        self.runner.fail["disable"] = "permission denied"
+        options = {
+            "home": self.home,
+            "cli_path": self.cli,
+            "runner": self.runner,
+            "uid": 501,
+            "environ": {"AGENTOS_DATA": str(self.root / "unrelated")},
+        }
+        for action in ("stop", "uninstall"):
+            with self.subTest(action=action):
+                result = service_action(action, **options)
+                self.assertFalse(result["ok"])
+                self.assertEqual(result["data_dir"], str(installed_data.resolve()))
+                self.assertTrue(result["data_preserved"])
+
     def test_status_and_uninstall_work_after_cli_has_been_removed(self):
         self.controller.install()
         self.cli.unlink()

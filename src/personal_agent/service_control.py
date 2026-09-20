@@ -574,10 +574,12 @@ def service_action(action: str, **controller_options: object) -> dict[str, objec
     try:
         return operations[action]()
     except ServiceControlError as exc:
-        return {**exc.as_dict(), "operation": action, "data_dir": str(controller.data_dir), "data_preserved": True}
+        return {**exc.as_dict(), "operation": action,
+                "data_dir": str(controller._reported_data_dir()), "data_preserved": True}
     except OSError as exc:
         bounded = ServiceControlError(
             f"The service files could not be updated: {type(exc).__name__}",
             "Check the owner LaunchAgents and AgentOS data-directory permissions and free disk space, then retry; owner data was not deleted.",
         )
-        return {**bounded.as_dict(), "operation": action, "data_dir": str(controller.data_dir), "data_preserved": True}
+        return {**bounded.as_dict(), "operation": action,
+                "data_dir": str(controller._reported_data_dir()), "data_preserved": True}

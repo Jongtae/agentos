@@ -110,6 +110,10 @@ class MemoryServiceTests(unittest.TestCase):
         self.service.request_candidate_approval(
             "owner-a", "work-a", candidate["id"], candidate["content_digest"]
         )
+        self.store.issue_exact_memory_approval(
+            "owner-b", "work-b", "accept-candidate", candidate["id"], candidate["memory_key"],
+            candidate["content_digest"], candidate["content_digest"], now=self.now[0]
+        )
         deleted = self.store.delete_personal_space_item("memory_candidates", candidate["id"])
         self.assertTrue(deleted["deleted"])
         self.assertEqual(deleted["deleted_approval_count"], 1)
@@ -117,7 +121,9 @@ class MemoryServiceTests(unittest.TestCase):
         self.assertFalse(deleted["external_archives_affected"])
         with self.store.db() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM memory_candidates WHERE id=?", (candidate["id"],)).fetchone()[0], 0)
-            self.assertEqual(db.execute("SELECT COUNT(*) FROM memory_approvals WHERE subject_id=?", (candidate["id"],)).fetchone()[0], 0)
+            retained = db.execute("SELECT owner_key FROM memory_approvals WHERE subject_id=?", (candidate["id"],)).fetchall()
+        self.assertEqual(len(retained), 1)
+        self.assertEqual(retained[0]["owner_key"], self.store._memory_binding("owner-b"))
 
     def test_correction_approval_cannot_be_reused_for_wrong_key_value_owner_or_work(self):
         original = self.service.remember("owner-a", "work-a", "meeting-time", "morning")

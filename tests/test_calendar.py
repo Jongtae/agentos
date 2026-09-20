@@ -269,7 +269,7 @@ class CalendarTests(unittest.TestCase):
         self.assertEqual(len([call for call in self.provider.calls if call[0] == "create"]), 1)
 
     def test_event_version_rejects_header_controls_before_approval(self):
-        for version in ('"v1"\r\nX-Injected: yes', '"v1"\x00', '"버전"'):
+        for version in ('"v1"\r\nX-Injected: yes', '"v1"\x00', '"버전"', '*', '"v1", "v2"', 'unquoted'):
             with self.subTest(version=version):
                 with self.assertRaises(CalendarError) as rejected:
                     self.calendar.draft_cancel("event", version, "owner")

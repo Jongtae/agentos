@@ -94,7 +94,9 @@ def _event_id(value: object) -> str:
 
 def _etag(value: object) -> str:
     text = _bounded_text(value, "event-version", 1024)
-    if any(ord(character) < 32 or ord(character) > 126 for character in text):
+    # One concrete RFC 9110 entity-tag only. Wildcards and comma-separated
+    # lists would authorize mutation against a version the owner did not review.
+    if re.fullmatch(r'(?:W/)?"[\x21\x23-\x7e]*"', text) is None:
         raise CalendarError("invalid-event-version")
     return text
 

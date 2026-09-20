@@ -267,24 +267,24 @@ Thus the prior tested draft cannot be applied after OAuth changes the stored
 connection, including same-destination credential replacement. This used only the
 local fixture; no provider call or live credential was involved.
 
-Project detail races, durable count boundaries, and bounded capability controls
----------------------------------------------------------------------------
+Project detail races, exact durable counts, and bounded capability controls
+-------------------------------------------------------------------------
 The fixture exposes two project-detail read models while its global Personal Space
 feed intentionally contains only results from the second project. A fresh headed
 browser therefore rendered the rows from each durable project detail, not by
 misreading that global latest-results feed as totals:
 
   회귀 프로젝트 · 0개 완료 결과
-  다른 프로젝트 · 30개 이상 완료 결과
+  다른 프로젝트 · 31개 완료 결과
 
-The second detail contains the API limit of 30 results, so the UI truthfully renders
-"30개 이상" rather than claiming that the bounded response is an exact total.
+The second detail still displays only its newest 30 result bodies, but its separate
+aggregate projection reports the exact durable count of 31.
 
 Next the fixture delayed the first project's save response. The browser clicked its
 완료 결과 저장 control and selected 다른 프로젝트 before the delayed response
 completed. The final browser evaluation was:
 
-  {"selected":["다른 프로젝트"],"detail":"다른 프로젝트","rows":["회귀 프로젝트 · 1개 완료 결과","다른 프로젝트 · 30개 이상 완료 결과"]}
+  {"selected":["다른 프로젝트"],"detail":"다른 프로젝트","rows":["회귀 프로젝트 · 1개 완료 결과","다른 프로젝트 · 31개 완료 결과"]}
 
 The completed save updated the first project's durable count, but its late response
 did not replace the currently selected second-project detail.
@@ -309,3 +309,44 @@ loads the connected model, the prior Apply proof stays invalid, and model/OAuth
 rehydration does not overwrite unrelated unsaved file drafts. All callback, model,
 and file values in this run were fixture-only; no live provider or owner path was
 used.
+
+Independent file-form saves preserve the other draft
+----------------------------------------------------
+In headed Chromium the file-workspace reference/output controls were first given
+unsaved values, then the separate roots form was saved. After its refresh:
+
+  {"root":"/tmp/saved-root","reference":"/tmp/unsaved-reference","output":"/tmp/unsaved-output"}
+
+The reverse adversarial order then placed an unsaved root in the roots form and
+saved the file-workspace form. After that refresh:
+
+  {"root":"/tmp/unsaved-root","reference":"/tmp/saved-reference","output":"/tmp/saved-output"}
+
+Each successful form rehydrated only its own server-normalized fields. No owner
+path was used; every value and response came from the local fixture.
+
+Late mobile task detail cannot reopen an empty overlay
+------------------------------------------------------
+At 390x844 the fixture delayed `/api/tasks/task-382` for three seconds. The browser
+selected that task, the fixture emptied the task list before the delayed response,
+and the browser waited until both a polling refresh and the late response completed.
+The final evaluation observed:
+
+  {"detailClass":"panel detail","empty":true,"taskId":"","selectedRows":0}
+
+The empty transition invalidated both the selected task and its request sequence;
+the stale detail response therefore could not restore `mobile-detail`.
+
+Deletion count invalidation and saved membership beyond the display window
+--------------------------------------------------------------------------
+The fixture project had 31 durable results while exposing only 30 result bodies.
+Its 31st saved job was also present in the latest task read model. Before deletion,
+after deleting one visible result, and after opening the project, Chromium observed:
+
+  {"before":["회귀 프로젝트 · 0개 완료 결과","다른 프로젝트 · 31개 완료 결과"],"after":["회귀 프로젝트 · 0개 완료 결과","다른 프로젝트 · 30개 완료 결과"],"detail":"다른 프로젝트","saveButtons":0}
+
+Thus deletion invalidated and refreshed the cached aggregate immediately, while
+authoritative saved-job membership prevented the older saved job outside the 30-row
+display page from reappearing as a save candidate. The executable store regression
+also inserts 31 results, verifies the 30-body/31-count projection, rejects a duplicate
+save without advancing the project revision, and advances that revision on deletion.

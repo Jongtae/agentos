@@ -103,7 +103,7 @@ const space={memories:[{id:'exact',memory_key:'durable-key',content:'exact durab
 assert.deepEqual(ui.filterLocalRecords(space,'durable-key','all').map(x=>x.id),['exact']);
 assert.deepEqual(ui.filterLocalRecords(space,'durable-key','saved').map(x=>x.id),['exact']);
 assert.deepEqual(ui.filterLocalRecords(space,'needle-after-truncation','all').map(x=>x.id),['long']);
-assert.deepEqual(ui.workspaceSaveCandidates([{id:'unassigned',status:'succeeded'},{id:'here',workspace_id:'w',status:'partial'},{id:'elsewhere',workspace_id:'other',status:'succeeded'},{id:'queued',status:'queued'}],'w',[{job_id:'here'}]).map(x=>x.id),['unassigned']);
+assert.deepEqual(ui.workspaceSaveCandidates([{id:'unassigned',status:'succeeded'},{id:'here',workspace_id:'w',status:'partial'},{id:'elsewhere',workspace_id:'other',status:'succeeded'},{id:'queued',status:'queued'}],'w',['here']).map(x=>x.id),['unassigned']);
 assert.deepEqual(ui.modelPresetDraft({provider:'compatible',endpoint:'https://openrouter.ai/api/v1/',model:'fixture/free'}),{provider:'compatible',endpoint:'https://openrouter.ai/api/v1',model:'fixture/free',api_key:''});
 assert.deepEqual(ui.capabilityActions({id:'google-drive-read',state:'enabled'}),['pause','disconnect']);
 assert.deepEqual(ui.capabilityActions({id:'google-drive-read',state:'paused'}),['resume']);
@@ -117,8 +117,8 @@ assert.equal(ui.isOpenRouterCompletion({origin:'http://owner.local',data:{type:'
 assert.equal(ui.isOpenRouterCompletion({origin:'http://attacker.local',data:{type:'agentos-openrouter-connected'}},'http://owner.local'),false);
 assert.equal(ui.shouldRenderWorkspaceDetail('second','first',1,2),false);
 assert.equal(ui.shouldRenderWorkspaceDetail('second','second',2,2),true);
-assert.deepEqual(ui.workspaceResultSummary({results:[{id:'one'},{id:'two'}]}),{count:2,capped:false,label:'2개 완료 결과'});
-assert.deepEqual(ui.workspaceResultSummary({results:Array.from({length:30},(_,id)=>({id}))}),{count:30,capped:true,label:'30개 이상 완료 결과'});
+assert.deepEqual(ui.workspaceResultSummary({result_count:42,results:[{id:'one'},{id:'two'}]}),{count:42,label:'42개 완료 결과'});
+assert.deepEqual(ui.workspaceResultSummary({results:[{id:'one'},{id:'two'}]}),{count:2,label:'2개 완료 결과'});
 const removed=[];assert.equal(ui.clearMobileDetailWhenEmpty({classList:{remove:value=>removed.push(value)}},[]),true);assert.deepEqual(removed,['mobile-detail']);
 let detailLoads=0;
 await ui.refreshSelectedTaskDetail({id:'one',events_count:1,observed_at:10,status:'running',events:[{id:1}]},{id:'one',events_count:2,observed_at:11,status:'running'},async id=>{detailLoads++;return {id,events:[{id:1},{id:2}]};});
@@ -172,8 +172,33 @@ console.log(JSON.stringify({checks:32}));
         self.assertIn('if(refreshQueued){refreshQueued=false;void refresh();}', app)
         self.assertGreaterEqual(app.count('invalidateModelLoad()'), 4)
         hydration = app[app.index('if(!modelLoaded){if(requestedModelRevision'):app.index("$('task-refresh-state').textContent='방금 확인'")]
-        self.assertNotIn("$('root-paths').value", hydration.split('if(!fileSettingsLoaded)')[0])
-        self.assertIn("$('root-paths').value", hydration.split('if(!fileSettingsLoaded)')[1])
+        self.assertNotIn("$('root-paths').value", hydration.split('if(!rootsLoaded)')[0])
+        self.assertIn("$('root-paths').value", hydration.split('if(!rootsLoaded)')[1])
+        self.assertIn('rootsLoaded=false', app)
+        self.assertIn('fileWorkspaceLoaded=false', app)
+
+    def test_workspace_result_projection_is_complete_and_duplicate_save_is_not_success(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = QuickStore(directory)
+            workspace = store.create_workspace('durable projection')
+            jobs = [store.enqueue(f'/note result {index}', f'projection-{index}') for index in range(31)]
+            with store.db() as db:
+                for index, job_id in enumerate(jobs):
+                    db.execute("UPDATE jobs SET status='succeeded',response=? WHERE id=?", (f'result {index}', job_id))
+            for job_id in jobs:
+                store.save_workspace_result(workspace['id'], job_id)
+            detail = store.workspace_detail(workspace['id'])
+            self.assertEqual(detail['result_count'], 31)
+            self.assertEqual(len(detail['results']), 30)
+            self.assertEqual(set(detail['saved_job_ids']), set(jobs))
+            revision = detail['updated']
+            with self.assertRaisesRegex(ValueError, '이미 프로젝트에 저장'):
+                store.save_workspace_result(workspace['id'], jobs[0])
+            self.assertEqual(store.workspace(workspace['id'])['updated'], revision)
+            deleted = store.delete_personal_space_item('results', detail['results'][0]['id'])
+            self.assertEqual(deleted['workspace_id'], workspace['id'])
+            self.assertEqual(store.workspace_detail(workspace['id'])['result_count'], 30)
+            self.assertGreater(store.workspace(workspace['id'])['updated'], revision)
 
     def test_capability_lifecycle_uses_existing_confirmed_settings_route(self):
         app = (ROOT / 'src/personal_agent/web/app.js').read_text()
@@ -207,9 +232,12 @@ console.log(JSON.stringify({checks:32}));
         self.assertIn('"popupClosed":true,"key":"","provider":"compatible"', transcript)
         self.assertIn('"beforeOAuthApplyDisabled":false', transcript)
         self.assertIn('"afterOAuthApplyDisabled":true', transcript)
-        self.assertIn('다른 프로젝트 · 30개 이상 완료 결과', transcript)
+        self.assertIn('다른 프로젝트 · 31개 완료 결과', transcript)
         self.assertIn('{"selected":["다른 프로젝트"],"detail":"다른 프로젝트"', transcript)
         self.assertIn('"root":"/tmp/unsaved-root","reference":"/tmp/unsaved-reference"', transcript)
+        self.assertIn('"root":"/tmp/saved-root","reference":"/tmp/unsaved-reference"', transcript)
+        self.assertIn('"taskId":"","selectedRows":0', transcript)
+        self.assertIn('"detail":"다른 프로젝트","saveButtons":0', transcript)
         self.assertIn('does not run AgentService', transcript)
 
     def test_browser_fixture_observer_captures_every_mutating_http_verb(self):

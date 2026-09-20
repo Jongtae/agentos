@@ -96,7 +96,7 @@ def _etag(value: object) -> str:
     text = _bounded_text(value, "event-version", 1024)
     # One concrete RFC 9110 entity-tag only. Wildcards and comma-separated
     # lists would authorize mutation against a version the owner did not review.
-    if re.fullmatch(r'(?:W/)?"[\x21\x23-\x7e]*"', text) is None:
+    if re.fullmatch(r'"[\x21\x23-\x7e]*"', text) is None:
         raise CalendarError("invalid-event-version")
     return text
 
@@ -287,7 +287,7 @@ class CalendarConnector:
         stored_owner = row.get("owner")
         if "payload" not in row:
             portable_fields = {
-                "id", "state", "hash", "error_class", "result", "action", "portable_evidence"
+                "id", "state", "hash", "error_class", "result", "action", "recovery", "portable_evidence"
             }
             portable_state = row.get("state")
             if (
@@ -301,6 +301,11 @@ class CalendarConnector:
             portable_action = row.get("action")
             if portable_action not in _ACTIONS:
                 portable_action = "unknown"
+            if row.get("recovery", "") not in {
+                "", "inspect-calendar-before-retry", "reconnect", "request-new-approval",
+                "request-new-draft", "review-request",
+            }:
+                raise CalendarError("invalid-stored-state")
             quarantined_approval = portable_state in {"awaiting-approval", "approved"}
             portable_unknown_effect = (
                 portable_state in {"executing", "outcome-unknown"}

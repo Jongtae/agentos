@@ -1,5 +1,7 @@
 import tempfile
 import unittest
+from pathlib import Path
+import shutil
 
 from personal_agent.calendar import (
     CALENDAR_CONNECTOR_ID,
@@ -15,6 +17,7 @@ from personal_agent.google_calendar import (
     GoogleCalendarError,
 )
 from personal_agent.quickstart_store import QuickStore
+from personal_agent.portable_state import export_owner_state, restore_owner_state
 
 
 EVENT = {
@@ -269,12 +272,45 @@ class CalendarTests(unittest.TestCase):
         self.assertEqual(len([call for call in self.provider.calls if call[0] == "create"]), 1)
 
     def test_event_version_rejects_header_controls_before_approval(self):
-        for version in ('"v1"\r\nX-Injected: yes', '"v1"\x00', '"버전"', '*', '"v1", "v2"', 'unquoted'):
+        for version in ('"v1"\r\nX-Injected: yes', '"v1"\x00', '"버전"', '*', '"v1", "v2"', 'unquoted', 'W/"v1"'):
             with self.subTest(version=version):
                 with self.assertRaises(CalendarError) as rejected:
                     self.calendar.draft_cancel("event", version, "owner")
                 self.assertEqual(rejected.exception.reason, "invalid-event-version")
         self.assertFalse(self.provider.calls)
+
+    def test_portable_export_preserves_action_and_safe_failure_recovery(self):
+        self.store.put(
+            "calendar_create",
+            {
+                "completed-update": {
+                    "id": "completed-update",
+                    "state": "completed",
+                    "hash": "redacted-hash",
+                    "action": "update",
+                    "result": {"id": "event-1", "updated": True},
+                },
+                "failed-scope": {
+                    "id": "failed-scope",
+                    "state": "failed",
+                    "hash": "redacted-hash",
+                    "action": "cancel",
+                    "error_class": "scope-expired",
+                    "recovery": "reconnect",
+                },
+            },
+        )
+        root = Path(self.temp.name)
+        archive = export_owner_state(root, root.with_name(root.name + "-calendar-owner.tar.gz"))
+        restored_root = root.with_name(root.name + "-calendar-restored")
+        self.addCleanup(shutil.rmtree, restored_root, True)
+        self.addCleanup(lambda: archive.unlink(missing_ok=True))
+        restored_store = QuickStore(restore_owner_state(archive, restored_root))
+        restored = CalendarConnector(restored_store, self.provider, authority=lambda *_: False)
+        completed = restored.status("completed-update", "restored-owner")
+        failed = restored.status("failed-scope", "restored-owner")
+        self.assertEqual((completed["state"], completed["action"]), ("completed", "update"))
+        self.assertEqual((failed["state"], failed["action"], failed["recovery"]), ("failed", "cancel", "reconnect"))
 
     def test_approval_expiring_while_waiting_for_authority_is_not_dispatched(self):
         clock = [1000.0]

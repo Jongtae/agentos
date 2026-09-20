@@ -10,7 +10,9 @@ request primitive.
 from __future__ import annotations
 
 import base64
+import codecs
 from dataclasses import dataclass
+from email.message import Message
 import hashlib
 import hmac
 import json
@@ -249,11 +251,6 @@ class GmailConnector:
         return self.registry.required_result(owner_id, GMAIL_CONNECTOR_ID).as_dict()
 
     def begin_oauth(self, owner_id: str) -> dict:
-        current = self.registry.status(owner_id, GMAIL_CONNECTOR_ID)
-        if current.state is ConnectorState.CONNECTED:
-            raise GmailError("already_connected")
-        if current.state is ConnectorState.BLOCKED:
-            raise GmailError("blocked")
         owner = _owner_key(owner_id)
         created_at = _finite_now(self.now)
         verifier, challenge = _pkce_pair()
@@ -261,17 +258,25 @@ class GmailConnector:
         signing_key = secrets.token_bytes(32)
         signature = hmac.new(signing_key, f"{owner}:{nonce}".encode(), hashlib.sha256).hexdigest()
         state = nonce + "." + signature
-        pending = {
-            "status": "pending",
-            "owner": owner,
-            "state": state,
-            "signing_key": base64.urlsafe_b64encode(signing_key).decode(),
-            "verifier": verifier,
-            "created_at": created_at,
-            "expires_at": created_at + self.oauth_ttl_seconds,
-        }
         with _OAUTH_LOCK:
-            self.store.secret(PENDING_SECRET_KEY, pending)
+            with self.registry._authority_guard():
+                current = self.registry.status(owner_id, GMAIL_CONNECTOR_ID)
+                if current.state is ConnectorState.CONNECTED:
+                    raise GmailError("already_connected")
+                if current.state is ConnectorState.BLOCKED:
+                    raise GmailError("blocked")
+                pending = {
+                    "status": "pending",
+                    "owner": owner,
+                    "state": state,
+                    "signing_key": base64.urlsafe_b64encode(signing_key).decode(),
+                    "verifier": verifier,
+                    "created_at": created_at,
+                    "expires_at": created_at + self.oauth_ttl_seconds,
+                    "connector_state": current.state.value,
+                    "connection_revision": current.connection_revision,
+                }
+                self.store.secret(PENDING_SECRET_KEY, pending)
         query = {
             "client_id": self.client_id,
             "redirect_uri": self.redirect_uri,
@@ -315,19 +320,26 @@ class GmailConnector:
             except Exception:
                 raise GmailError("token_exchange_failed") from None
             tokens = self._validated_tokens(response, pending["owner"])
-            self.store.secret(TOKEN_SECRET_KEY, tokens)
-            try:
-                self.registry.transition(
-                    owner_id,
-                    GMAIL_CONNECTOR_ID,
-                    ConnectorState.CONNECTED,
-                    granted_scopes=(GMAIL_READONLY_SCOPE,),
-                )
-            except Exception:
-                # Never leave usable credentials behind if durable lifecycle
-                # metadata cannot be committed.
-                self.store.secret(TOKEN_SECRET_KEY, {})
-                raise GmailError("connection_commit_failed") from None
+            with self.registry._authority_guard():
+                current = self.registry.status(owner_id, GMAIL_CONNECTOR_ID)
+                if (
+                    current.state.value != pending.get("connector_state")
+                    or current.connection_revision != pending.get("connection_revision")
+                ):
+                    raise GmailError("connector_authority_changed")
+                self.store.secret(TOKEN_SECRET_KEY, tokens)
+                try:
+                    self.registry.transition(
+                        owner_id,
+                        GMAIL_CONNECTOR_ID,
+                        ConnectorState.CONNECTED,
+                        granted_scopes=(GMAIL_READONLY_SCOPE,),
+                    )
+                except Exception:
+                    # Never leave usable credentials behind if durable lifecycle
+                    # metadata cannot be committed.
+                    self.store.secret(TOKEN_SECRET_KEY, {})
+                    raise GmailError("connection_commit_failed") from None
             return self.status(owner_id)
 
     def search(self, owner_id: str, query: str, *, max_results: int = 10) -> tuple[GmailSearchResult, ...]:
@@ -542,15 +554,46 @@ class GmailConnector:
     def _body(self, payload: object) -> tuple[str, str]:
         if not isinstance(payload, dict):
             raise GmailError("invalid_provider_response")
-        candidates: list[tuple[str, str]] = []
+        candidates: list[tuple[str, str, str | None]] = []
 
         def visit(part: object, depth: int = 0) -> None:
             if not isinstance(part, dict) or depth > 20 or len(candidates) >= 100:
                 return
             mime_type = part.get("mimeType")
             body = part.get("body")
-            if mime_type in {"text/plain", "text/html"} and isinstance(body, dict) and isinstance(body.get("data"), str):
-                candidates.append((mime_type, body["data"]))
+            filename = part.get("filename")
+            headers = part.get("headers", [])
+            disposition = ""
+            content_type = ""
+            if isinstance(headers, list):
+                for header in headers[:100]:
+                    if not isinstance(header, dict):
+                        continue
+                    name = header.get("name")
+                    value = header.get("value")
+                    if not isinstance(name, str) or not isinstance(value, str):
+                        continue
+                    if name.lower() == "content-disposition" and not disposition:
+                        disposition = value[:1024]
+                    elif name.lower() == "content-type" and not content_type:
+                        content_type = value[:1024]
+            is_attachment = (
+                isinstance(filename, str)
+                and bool(filename.strip())
+            ) or disposition.split(";", 1)[0].strip().lower() == "attachment"
+            normalized_mime = mime_type.lower() if isinstance(mime_type, str) else ""
+            if (
+                not is_attachment
+                and normalized_mime in {"text/plain", "text/html"}
+                and isinstance(body, dict)
+                and isinstance(body.get("data"), str)
+            ):
+                charset = None
+                if content_type:
+                    message = Message()
+                    message["content-type"] = content_type
+                    charset = message.get_content_charset()
+                candidates.append((normalized_mime, body["data"], charset))
             parts = part.get("parts", [])
             if isinstance(parts, list):
                 for child in parts[:100]:
@@ -559,7 +602,10 @@ class GmailConnector:
         visit(payload)
         if not candidates:
             return "", _bounded_text(payload.get("mimeType"), 160)
-        mime_type, encoded = next((item for item in candidates if item[0] == "text/plain"), candidates[0])
+        mime_type, encoded, charset = next(
+            (item for item in candidates if item[0] == "text/plain"),
+            candidates[0],
+        )
         if len(encoded) > (_MAX_BODY_BYTES * 4 // 3) + 8:
             raise GmailError("body_too_large")
         try:
@@ -568,4 +614,11 @@ class GmailConnector:
             raise GmailError("invalid_provider_response") from None
         if len(decoded) > _MAX_BODY_BYTES:
             raise GmailError("body_too_large")
-        return decoded.decode("utf-8", errors="replace"), mime_type
+        encoding = charset or "utf-8"
+        if not isinstance(encoding, str) or len(encoding) > 64:
+            raise GmailError("invalid_provider_response")
+        try:
+            codecs.lookup(encoding)
+        except LookupError:
+            raise GmailError("invalid_provider_response") from None
+        return decoded.decode(encoding, errors="replace"), mime_type

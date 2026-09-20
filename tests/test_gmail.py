@@ -169,6 +169,27 @@ class GmailConnectorTests(unittest.TestCase):
             )
         self.assertEqual(other.status("owner-a")["state"], "disconnected")
 
+    def test_callback_cannot_restore_authority_changed_after_oauth_started(self):
+        for changed_state in (ConnectorState.BLOCKED, ConnectorState.DISCONNECTED):
+            with self.subTest(changed_state=changed_state):
+                self.registry.transition("owner-a", GMAIL_CONNECTOR_ID, ConnectorState.DISCONNECTED)
+                _offer, state = self.begin()
+                self.registry.transition("owner-a", GMAIL_CONNECTOR_ID, changed_state)
+                with self.assertRaises(GmailError) as rejected:
+                    self.gmail.complete_oauth(
+                        "owner-a",
+                        {"state": state, "code": "oauth-code"},
+                        lambda _: {
+                            "access_token": "must-not-survive",
+                            "refresh_token": "must-not-survive",
+                            "expires_in": 60,
+                            "scope": GMAIL_READONLY_SCOPE,
+                        },
+                    )
+                self.assertEqual(rejected.exception.reason, "connector_authority_changed")
+                self.assertEqual(self.gmail.status("owner-a")["state"], changed_state.value)
+                self.assertFalse(self.store.secret("gmail_oauth_tokens"))
+
     def test_plaintext_store_and_implicit_insecure_callback_are_rejected(self):
         with self.assertRaises(ValueError):
             GmailConnector(self.raw_store, "client", "https://connect.example.test/callback")
@@ -253,6 +274,40 @@ class GmailConnectorTests(unittest.TestCase):
         self.assertNotIn("private mail body", str(self.gmail.portable_status("owner-a")))
         self.assertEqual(self.calls[-1][0:3], ("GET", MESSAGES_ENDPOINT + "/m_1", {"format": "full"}))
         self.assertNotIn("private mail body", str(self.raw_store.config("connector_contract_state")))
+
+    def test_body_ignores_text_attachments_and_honors_declared_charset(self):
+        self.connect()
+        html = "<p>café</p>".encode("iso-8859-1")
+        attachment = base64.urlsafe_b64encode(b"attachment text").decode()
+        self.responses.append(
+            {
+                "id": "m_1",
+                "threadId": "t_1",
+                "payload": {
+                    "mimeType": "multipart/mixed",
+                    "parts": [
+                        {
+                            "mimeType": "text/plain",
+                            "filename": "notes.txt",
+                            "headers": [
+                                {"name": "Content-Disposition", "value": "attachment; filename=notes.txt"}
+                            ],
+                            "body": {"data": attachment},
+                        },
+                        {
+                            "mimeType": "text/html",
+                            "headers": [
+                                {"name": "Content-Type", "value": "text/html; charset=iso-8859-1"}
+                            ],
+                            "body": {"data": base64.urlsafe_b64encode(html).decode()},
+                        },
+                    ],
+                },
+            }
+        )
+        message = self.gmail.read_message("owner-a", "m_1")
+        self.assertEqual(message.body, "<p>café</p>")
+        self.assertEqual(message.mime_type, "text/html")
 
     def test_expiry_and_provider_revocation_clear_tokens_and_require_reauth(self):
         self.connect()

@@ -8,6 +8,7 @@ Use the [Goal Execution Contract](goal-execution-contract.en.md): the canonical 
 
 | Work | Status and evidence boundary |
 | --- | --- |
+| GOV-EXEC-01 / [#408](https://github.com/Jongtae/personal-agentos/issues/408) | Complete on merge after exact-head CI/review: repository-wide stable-head verification budget. Focused tests and batched remediation reduce redundant full-suite/re-review churn without weakening branch protection, exact-head validation, independent review, or security/authority escalation. |
 | GOV-PA1-01 / [#385](https://github.com/Jongtae/personal-agentos/issues/385) | Preparation in PR branch: finite PA1 issue graph, parallel-worktree ownership and source-plan selector only; no runtime or external operation. |
 | GOV-PA1-03 / [#399](https://github.com/Jongtae/personal-agentos/issues/399) | Complete on merge of PR #400 after current CI/review: owner-only credentials/OAuth/live observations are operating-validation gates, not premature implementation blockers; safe PA1 development continues and #394 consolidates final `owner_validation_pending` checks. |
 | EPIC-PA1 / [#386](https://github.com/Jongtae/personal-agentos/issues/386) | Prepared owner-activated top-level first-completion program. After #385 merges and explicit owner activation, one controlling conversation may coordinate only the enumerated dependency-satisfied child worktrees under [PA1 parallel delivery](pa1-parallel-delivery.en.md). |

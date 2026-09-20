@@ -139,6 +139,20 @@ Relevant security, package authority, sandbox/supply-chain, recovery, external-b
 
 Completion is rejected unless a current requirement-to-evidence audit maps every acceptance criterion to merged artifacts, required CI, and relevant tracker/roadmap/ledger closeout. A local command, fixture, signature, package manifest, closed issue, branch or PR alone never proves live capability completion.
 
+
+## Verification budget and stable-head review
+
+Required CI, branch protection, exact-head validation, independent review, and truthful evidence remain mandatory. Verification efficiency changes **when** broad validation/review is triggered, not whether required gates exist.
+
+- During implementation and review remediation, run focused tests for the contract being changed. Keep related fixes together and prefer coherent checkpoint pushes over pushing every micro-edit when a push triggers full CI or review.
+- Request full repository validation and independent review on a stable, review-ready head. After review, collect all known compatible findings and remediate them in one batch before requesting another full validation/re-review cycle.
+- Normal soft budget after review-ready is one stable-head full validation/review plus one consolidated post-review full validation/re-review when material findings require it. A third or later broad cycle is allowed when necessary, but the PR must record why another cycle is required (for example a new security finding, changed shared contract, flaky/unknown root cause, or material cross-worktree conflict).
+- Never request re-review for an unchanged head, request duplicate review while one is already running, or repeatedly poll CI/review when no decision can be made from a new result. Inspect gates at meaningful transitions.
+- A narrow mechanical fix should use focused tests first and be batched before the eventual exact-head merge gate. If it changes a previously reviewed head, the final consolidated head still receives the applicable independent re-review before merge. Do not weaken, skip, or relabel required tests/review to save compute, time, or context.
+- Broaden validation/review earlier when security, authentication/OAuth, privacy, external effects, shared contracts, replay/idempotency/recovery, or an uncertain root cause is involved.
+
+A critical execution profile is not permission for unlimited validation churn. If broad cycles keep repeating, stop micro-fixing, establish the root cause, batch the remediation, and document the reason for any additional cycle.
+
 ## Truthfulness and safety
 
 The canonical process is [development governance](docs/development-governance.en.md) plus this Constitution. Older Master Plan contracts continue to govern their historical scopes; successor Agent Distribution Platform work uses its newly activated contract when selected.

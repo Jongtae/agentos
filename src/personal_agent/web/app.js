@@ -37,7 +37,7 @@ let claimed=false,authenticated=false,refreshing=false,modelLoaded=false,activeM
 const modelGuard=createModelDraftGuard();
 let activeView='tasks',activeSettings='ai',selectedTaskId='',selectedRecordKey='',selectedWorkspaceId='',taskProgress=null,lastState=null,lastSpace=null,taskRenderFingerprint='',recordRenderFingerprint='',taskDetailSequence=0;
 const expandedTaskEvents=new Set();
-let contextDraftDirty=false,recordDeletePending='';
+let contextDraftDirty=false,telegramDraftOpen=false,recordDeletePending='';
 let bootstrap=new URLSearchParams(location.hash.slice(1)).get('setup')||'';
 if(bootstrap)history.replaceState(null,'',location.pathname+location.search);
 
@@ -124,12 +124,12 @@ $('roots-form').onsubmit=event=>{event.preventDefault();busy(event.submitter,asy
 $('file-workspace-form').onsubmit=event=>{event.preventDefault();busy(event.submitter,async()=>{try{await api('/api/file-workspace',{references:$('file-reference-paths').value.split('\n').map(value=>value.trim()).filter(Boolean),workspace:$('file-workspace-path').value.trim()});$('file-workspace-feedback').textContent='파일 위치를 저장했습니다.';await refresh();}catch(error){setError('file-workspace-feedback',error);}});};
 function renderDocumentBoundary(boundary){const box=$('document-boundary');box.replaceChildren();if(!boundary)return;if(!boundary.external_model){box.append(element('p','문서 발췌문은 현재 외부 모델 경로로 전송되지 않습니다.'));return;}if(boundary.approved){box.append(element('p','현재 모델과 폴더에 대한 문서 공유가 승인되었습니다.'));return;}box.append(element('p','외부 AI에 필요한 문서 발췌문을 보내기 전 승인이 필요합니다.'));const button=element('button','문서 발췌문 전송 승인');button.onclick=()=>busy(button,async()=>{try{await api('/api/documents/approval',{approved:true});await refresh();}catch(error){setError('roots-feedback',error);}});box.append(button);}
 
-function renderTelegram(settings){const tg=settings.telegram||{},box=$('telegram-current');box.replaceChildren(element('strong','Telegram'));if(tg.enabled){box.append(element('p',tg.paired?`연결됨 · @${tg.username||'개인 봇'}`:'봇 설정됨 · 소유자 연결 대기'));$('telegram-form').hidden=true;$('telegram-change').textContent='연결 변경';}else{box.append(element('p','연결되지 않음'));$('telegram-change').textContent='Telegram 연결 설정';}$('telegram-status').textContent=settings.telegram_status?.message||'';$('disconnect').hidden=!tg.enabled;$('new-pair').hidden=!tg.enabled;if(tg.paired)$('telegram-pair').hidden=true;}
-$('telegram-change').onclick=()=>{$('telegram-form').hidden=!$('telegram-form').hidden;if(!$('telegram-form').hidden)$('telegram-token').focus();};
+function renderTelegram(settings){const tg=settings.telegram||{},box=$('telegram-current');box.replaceChildren(element('strong','Telegram'));if(tg.enabled){box.append(element('p',tg.paired?`연결됨 · @${tg.username||'개인 봇'}`:'봇 설정됨 · 소유자 연결 대기'));if(!telegramDraftOpen)$('telegram-form').hidden=true;$('telegram-change').textContent='연결 변경';}else{box.append(element('p','연결되지 않음'));$('telegram-change').textContent='Telegram 연결 설정';}$('telegram-status').textContent=settings.telegram_status?.message||'';$('disconnect').hidden=!tg.enabled;$('new-pair').hidden=!tg.enabled;if(tg.paired)$('telegram-pair').hidden=true;}
+$('telegram-change').onclick=()=>{telegramDraftOpen=$('telegram-form').hidden;$('telegram-form').hidden=!telegramDraftOpen;if(telegramDraftOpen)$('telegram-token').focus();};
 function showPair(data){$('pair-link').href=data.url;$('telegram-pair').hidden=false;$('telegram-token').value='';}
-$('telegram-form').onsubmit=event=>{event.preventDefault();busy(event.submitter,async()=>{try{showPair(await api('/api/telegram',{token:$('telegram-token').value}));await refresh();}catch(error){setError('telegram-status',error);}});};
+$('telegram-form').onsubmit=event=>{event.preventDefault();busy(event.submitter,async()=>{try{showPair(await api('/api/telegram',{token:$('telegram-token').value}));telegramDraftOpen=false;await refresh();}catch(error){setError('telegram-status',error);}});};
 $('new-pair').onclick=async()=>{try{showPair(await api('/api/telegram/pair',{}));}catch(error){setError('telegram-status',error);}};
-$('disconnect').onclick=async()=>{try{await api('/api/telegram/disconnect',{});$('telegram-pair').hidden=true;await refresh();}catch(error){setError('telegram-status',error);}};
+$('disconnect').onclick=async()=>{try{await api('/api/telegram/disconnect',{});telegramDraftOpen=false;$('telegram-pair').hidden=true;await refresh();}catch(error){setError('telegram-status',error);}};
 
 function renderDiagnostics(state,tasks){const events=state?.tool_events||[],current=events[0];$('tool-status').textContent=current?`${current.tool} · ${current.status}`:'관찰된 도구 활동이 없습니다.';const list=$('tool-history');list.replaceChildren();events.slice(0,20).forEach(event=>list.append(element('p',`${safeTime(event.created)} · ${event.tool} · ${event.status}`)));const hidden=(tasks||[]).filter(isDiagnosticTask).length;$('diagnostic-activity').textContent=`기본 작업 목록에서 구분한 연결·진단 활동 ${hidden}개`;}
 

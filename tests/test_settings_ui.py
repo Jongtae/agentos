@@ -31,6 +31,8 @@ def test_refresh_does_not_replace_active_editing_surfaces():
     assert "contextDraftDirty" in APP
     assert "if(!contextDraftDirty" in APP
     assert "if(!modelLoaded)" in APP
+    assert "telegramDraftOpen" in APP
+    assert "if(!telegramDraftOpen)" in APP
 
 
 def test_mobile_checkbox_is_not_full_width_input():

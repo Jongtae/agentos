@@ -360,6 +360,43 @@ class CalendarTests(unittest.TestCase):
         self.assertEqual(preview["action"], "create")
         self.assertNotEqual(unicode_legacy._rows()["legacy-unicode"]["owner"], "소유자")
 
+    def test_invalid_legacy_approved_payload_is_quarantined_before_provider_dispatch(self):
+        for invalid_payload in (
+            {**EVENT, "start": "a", "end": "b"},
+            {**EVENT, "start": "2026-10-01", "end": "2026-10-02"},
+        ):
+            with self.subTest(payload=invalid_payload):
+                self.store.put(
+                    "calendar_create",
+                    {
+                        "legacy-invalid": {
+                            "id": "legacy-invalid",
+                            "payload": invalid_payload,
+                            "hash": "legacy-content-hash",
+                            "owner": "owner",
+                            "state": "approved",
+                            "approval": "legacy-approval",
+                            "approval_hash": "legacy-content-hash",
+                            "expires": 9999999999,
+                        }
+                    },
+                )
+                calls = []
+                legacy = CalendarCreate(
+                    self.store,
+                    lambda *_: calls.append("create") or {"id": "must-not-dispatch"},
+                )
+                with self.assertRaises(CalendarError) as rejected:
+                    legacy.create("legacy-invalid", "legacy-approval", "owner")
+                self.assertEqual(rejected.exception.reason, "exact-approval-required")
+                migrated = legacy._rows()["legacy-invalid"]
+                self.assertEqual(migrated["state"], "expired")
+                self.assertEqual(migrated["error_class"], "legacy-payload-invalid")
+                self.assertEqual(migrated["recovery"], "request-new-draft")
+                self.assertNotIn("approval", migrated)
+                self.assertNotIn("approval_hash", migrated)
+                self.assertEqual(calls, [])
+
     def test_portable_terminal_calendar_evidence_remains_readable(self):
         self.store.put(
             "calendar_create",

@@ -334,6 +334,11 @@ class CalendarConnector:
             payload = row.get("payload")
             if not isinstance(payload, dict):
                 raise CalendarError("invalid-stored-state")
+            legacy_payload_valid = True
+            try:
+                _validate_event(payload)
+            except CalendarError:
+                legacy_payload_valid = False
             bound = {"action": "create", "payload": payload, "event_id": "", "event_version": ""}
             digest = _canonical(bound)
             row.update(
@@ -344,7 +349,16 @@ class CalendarConnector:
                 hash=digest,
                 effect="observed" if row.get("state") == "created" else "none",
             )
-            if row.get("state") in {"approved", "created"}:
+            if not legacy_payload_valid and row.get("state") in {"awaiting-approval", "approved"}:
+                row.update(
+                    state="expired",
+                    error_class="legacy-payload-invalid",
+                    recovery="request-new-draft",
+                    effect="none",
+                )
+                row.pop("approval", None)
+                row.pop("approval_hash", None)
+            elif row.get("state") in {"approved", "created"}:
                 row["approval_hash"] = digest
             rows[ident] = row
             self._put(rows)

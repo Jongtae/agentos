@@ -192,7 +192,9 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         self.assertIn("## Dynamic worker capability routing", text)
         self.assertIn("### Mandatory escalation", text)
         self.assertIn("Escalation does not widen issue authority", text)
-        self.assertIn("`requested`, `tool_accepted`, and `observed_execution`", text)\n        self.assertIn("`observed_execution: unknown`", text)\n        self.assertIn("Tool acceptance is not proof of execution", self.program["routing_policy"]["truthfulness"])
+        self.assertIn("`requested`, `tool_accepted`, and `observed_execution`", text)
+        self.assertIn("`observed_execution: unknown`", text)
+        self.assertIn("Tool acceptance is not proof of execution", self.program["routing_policy"]["truthfulness"])
 
 
 if __name__ == "__main__":

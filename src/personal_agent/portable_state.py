@@ -64,7 +64,7 @@ def _portable_db(source, target):
                 for ident, item in drafts.items():
                     if not isinstance(item, dict):
                         continue
-                    record = {key: item[key] for key in ('id', 'state', 'hash', 'error_class') if key in item}
+                    record = {key: item[key] for key in ('id', 'state', 'hash', 'error_class', 'action', 'recovery') if key in item}
                     if isinstance(item.get('result'), dict) and isinstance(item['result'].get('id'), str):
                         record['result'] = {'id': item['result']['id']}
                     safe[ident] = record

@@ -1,3 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict><key>Label</key><string>com.personal-agentos</string><key>ProgramArguments</key><array><string>/opt/homebrew/bin/agentos</string><string>start</string><string>--no-browser</string></array><key>RunAtLoad</key><true/><key>KeepAlive</key><true/></dict></plist>
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.personal-agentos</string>
+  <key>ProgramArguments</key>
+  <array>
+    <!-- service_control replaces these tokens with resolved absolute paths. -->
+    <string>__AGENTOS_CLI__</string>
+    <string>start</string>
+    <string>--no-browser</string>
+    <string>--host</string><string>127.0.0.1</string>
+    <string>--data</string><string>__AGENTOS_DATA__</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ProcessType</key><string>Background</string>
+</dict>
+</plist>

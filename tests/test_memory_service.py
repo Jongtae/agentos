@@ -144,6 +144,36 @@ class MemoryServiceTests(unittest.TestCase):
             )
         self.assertEqual(self.service.inspect_memory("owner-a", original["id"])["content"], "morning")
 
+    def test_correction_consumption_revokes_siblings_and_owner_supersession(self):
+        original = self.service.remember("owner-a", "work-a", "private-key", "before")
+        first = self.service.request_correction(
+            "owner-a", "work-a", original["id"], "private-key", "before", "after"
+        )
+        sibling = self.service.request_correction(
+            "owner-a", "work-b", original["id"], "private-key", "before", "after"
+        )
+        self.service.correct(
+            "owner-a", "work-a", original["id"], "private-key", "before", "after", first["approval_token"]
+        )
+        with self.store.db() as db:
+            sibling_row = db.execute(
+                "SELECT state,memory_key FROM memory_approvals WHERE token_hash=?",
+                (self.store._exact_memory_token_hash(sibling["approval_token"]),),
+            ).fetchone()
+        self.assertEqual((sibling_row["state"], sibling_row["memory_key"]), ("revoked", ""))
+
+        current = self.service.list_memories("owner-a")["memories"][0]
+        superseded_approval = self.service.request_correction(
+            "owner-a", "work-c", current["id"], "private-key", "after", "later"
+        )
+        self.service.remember("owner-a", "work-owner", "private-key", "owner replacement")
+        with self.store.db() as db:
+            superseded_row = db.execute(
+                "SELECT state,memory_key FROM memory_approvals WHERE token_hash=?",
+                (self.store._exact_memory_token_hash(superseded_approval["approval_token"]),),
+            ).fetchone()
+        self.assertEqual((superseded_row["state"], superseded_row["memory_key"]), ("revoked", ""))
+
     def test_correction_approval_delete_race_never_leaves_orphan_approval(self):
         for index in range(12):
             memory = self.service.remember("owner-a", f"work-{index}", f"key-{index}", "before")

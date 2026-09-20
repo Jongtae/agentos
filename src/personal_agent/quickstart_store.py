@@ -239,10 +239,22 @@ class QuickStore:
         value=dict(row)
         return {key:value[key] for key in ('id','memory_key','content','created','supersedes','state','content_digest','candidate_id') if key in value}
 
-    def _save_memory(self, db, memory_key, content, owner_key, work_key=None, candidate_id=None):
+    def _save_memory(self, db, memory_key, content, owner_key, work_key=None, candidate_id=None,
+                     preserve_correction_token=None):
         memory_id=str(uuid.uuid4());digest=self.memory_digest(memory_key,content)
         previous=db.execute("SELECT id FROM memories WHERE owner_key=? AND memory_key=? AND state='current' ORDER BY created DESC LIMIT 1",(owner_key,memory_key)).fetchone()
-        if previous:db.execute("UPDATE memories SET state='superseded' WHERE id=? AND owner_key=?",(previous['id'],owner_key))
+        if previous:
+            db.execute("UPDATE memories SET state='superseded' WHERE id=? AND owner_key=?",(previous['id'],owner_key))
+            if preserve_correction_token is None:
+                db.execute("""UPDATE memory_approvals SET state='revoked',memory_key=''
+                              WHERE owner_key=? AND action='correct-memory'
+                                AND subject_id=? AND state='issued'""",
+                           (owner_key,previous['id']))
+            else:
+                db.execute("""UPDATE memory_approvals SET state='revoked',memory_key=''
+                              WHERE owner_key=? AND action='correct-memory'
+                                AND subject_id=? AND token_hash<>? AND state='issued'""",
+                           (owner_key,previous['id'],preserve_correction_token))
         db.execute('INSERT INTO memories(id,memory_key,content,created,supersedes,state,owner_key,work_key,content_digest,candidate_id) VALUES (?,?,?,?,?,?,?,?,?,?)',
                    (memory_id,memory_key,content,time.time(),previous['id'] if previous else None,'current',owner_key,work_key,digest,candidate_id))
         return self._memory_row(db.execute('SELECT * FROM memories WHERE id=?',(memory_id,)).fetchone())
@@ -476,7 +488,8 @@ class QuickStore:
             current=db.execute("SELECT * FROM memories WHERE id=? AND owner_key=? AND state='current'",(memory_id,owner_key)).fetchone()
             if not current or current['memory_key']!=memory_key or not hmac.compare_digest(str(current['content_digest']),str(current_digest)):
                 raise ValueError('수정할 기억을 다시 확인하세요.')
-            result=self._save_memory(db,memory_key,content,owner_key,work_key)
+            result=self._save_memory(db,memory_key,content,owner_key,work_key,
+                                     preserve_correction_token=approval['token_hash'])
             db.execute("UPDATE memory_approvals SET state='consumed',result_id=? WHERE token_hash=? AND state='issued'",(result['id'],approval['token_hash']))
             return result
 

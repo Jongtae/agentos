@@ -105,6 +105,9 @@ class PublicResearchTests(unittest.TestCase):
             ('compare /root/.ssh/id_rsa','owner_public_request'),
             ('compare ~/Documents/tax-return.txt','owner_public_request'),
             (r'compare C:\private\receipt.txt','owner_public_request'),
+            ('compare "/root/.ssh/id_rsa"','owner_public_request'),
+            ('compare (/home/alice/tax.pdf)','owner_public_request'),
+            (r'compare "C:\private\receipt.txt"','owner_public_request'),
         ]
         for query,source in cases:
             with self.subTest(query=query),self.assertRaises(ValueError):
@@ -117,7 +120,8 @@ class PublicResearchTests(unittest.TestCase):
                       'api key permissions','api key examples','access token scopes','refresh token revocation',
                       'client secret rotation guide','secret management best practices',
                       'compare password requirements and api key permissions',
-                      'authorization header format','compare https://example.com/public/path'):
+                      'authorization header format','compare https://example.com/public/path',
+                      'compare "https://example.com/public/path"'):
             with self.subTest(query=query):
                 self.assertEqual(validate_public_query(query,'owner_public_request'),query)
 
@@ -194,11 +198,13 @@ class PublicResearchTests(unittest.TestCase):
                    'Service fee: USD 10 if paying by card.','No booking fee if you join membership.',
                    'Service fee ranges from USD 10 to USD 20.','Service fee is roughly 10%.',
                    'Service fee is between USD 10 and USD 20.','Is the service fee 10%?',
-                   'The service fee is not 10%.'),
+                   'The service fee is not 10%.','Is the service fee 10%.',
+                   "Service fee isn't USD 10."),
             'inventory':('Inventory is expected to be available.','Inventory is likely available.',
                          'Rooms are available if you call.','Rooms are available on request.',
                          'Rooms are available if you book 3 nights.','Rooms are available except on weekends.',
-                         'Are rooms available?','Rooms are not available.'),
+                         'Are rooms available?','Rooms are not available.','Are rooms available.',
+                         "Rooms aren't available."),
             'payable_total':('Estimated total price USD 100.','Payable total might be USD 100.',
                              'Total price USD 100 before taxes and fees.','Total price is shown at checkout.',
                              'Grand total is about USD 100.','Grand total is up to USD 100.',
@@ -216,7 +222,11 @@ class PublicResearchTests(unittest.TestCase):
                              'Grand total USD 100?',
                              'The grand total is not USD 100.',
                              'Grand total includes a USD 25 service fee.',
-                             'Total price reduced by USD 10.'),
+                             'Total price reduced by USD 10.',
+                             'Grand total USD 100. Taxes not included.',
+                             'Grand total USD 100. Before sales tax.',
+                             'Grand total USD 100. Plus USD 10 tax.',
+                             'Before sales tax. Grand total USD 100.'),
         }
         for dynamic,contents in cases.items():
             for content in contents:
@@ -232,7 +242,7 @@ class PublicResearchTests(unittest.TestCase):
 
     def test_exact_tied_dynamic_values_remain_observed(self):
         content=('Service fee: USD 25. Grand total: USD 125. Rooms are available. Tickets are unavailable. '
-                 'Grand total: USD 110 including local VAT.')
+                 'Grand total: USD 110 including local VAT. Grand total: USD 115. Taxes included.')
         reader=Reader({'https://alpha.example/item':{
             'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
         result=PublicResearch(search_result,reader,max_pages=1).run(

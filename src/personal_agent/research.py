@@ -25,7 +25,7 @@ HIGH_CONFIDENCE_SECRET_PATTERNS = (
     re.compile(r'(?i)\bhf_[a-z0-9]{16,}\b'),
     re.compile(r'(?i)\bsk-[a-z0-9_-]{12,}\b'),
     re.compile(r'(?i)\b(?:gh[pousr]_[a-z0-9]{16,}|github_pat_[a-z0-9_]{16,}|glpat-[a-z0-9_-]{16,}|xox[baprs]-[a-z0-9-]{10,}|npm_[a-z0-9]{16,}|pypi-[a-z0-9_-]{16,}|AKIA[A-Z0-9]{16})\b'),
-    re.compile(r'(?i)(?:file://|(?:^|\s)~[/\\]|(?:^|\s)/[^\s/]+/[^\s]+|(?:^|\s)[a-z]:\\[^\s]+)'),
+    re.compile(r'(?i)(?:file://|(?:^|[\s"\'(])(?:~[/\\]|/[^\s/"\'()]+/[^\s"\'()]+|[a-z]:\\[^\s"\'()]+))'),
 )
 CREDENTIAL_LABEL = r'(?:password|passwd|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|secret)'
 LABEL_OCCURRENCE = re.compile(rf'(?i)\b{CREDENTIAL_LABEL}\b')
@@ -56,10 +56,15 @@ DYNAMIC_DISQUALIFIER = re.compile(
     r'\b(?:is|are|was|were|be|been|has|have)\s+not\b|'
     r'확인\s*필요|변동\s*가능|예상|추정|약\s*\d'
 )
+NON_ASSERTIVE_DYNAMIC = re.compile(
+    r'(?i)^\s*(?:are|is|was|were|do|does|did|can|could|will|would|should|may|might|has|have|had)\b|'
+    r"\b(?:isn['’]t|aren['’]t|wasn['’]t|weren['’]t|doesn['’]t|don['’]t|didn['’]t|"
+    r"hasn['’]t|haven['’]t|hadn['’]t|won['’]t|wouldn['’]t|shouldn['’]t|can['’]t|couldn['’]t)\b"
+)
 INCOMPLETE_TOTAL = re.compile(
     r'(?i)\b(?:subtotal|before\s+(?:(?:sales|local|city|state|federal|hotel|tourist|value[- ]added)\s+)?(?:vat|tax|taxes|fee|fees|service charge|service charges)|'
     r'excluding\s+(?:(?:sales|local|city|state|federal|hotel|tourist|value[- ]added)\s+)?(?:vat|tax|taxes|fee|fees|service charge|service charges)|'
-    r'plus\s+(?:\d+(?:\.\d+)?\s*%\s+)?(?:(?:sales|local|city|state|federal|hotel|tourist|value[- ]added)\s+)?(?:vat|tax|taxes|fee|fees|service charge|service charges)|'
+    r'plus\s+(?:(?:[$€£¥₩]\s?\d[\d,.]*|(?:USD|EUR|GBP|JPY|KRW)\s?\d[\d,.]*|\d+(?:\.\d+)?\s*%)\s+)?(?:(?:sales|local|city|state|federal|hotel|tourist|value[- ]added)\s+)?(?:vat|tax|taxes|fee|fees|service charge|service charges)|'
     r'(?:vat|tax|taxes|fee|fees|resort fee|resort fees|service charge|service charges)\s+(?:not\s+included|excluded|extra|additional)|not\s+including\s+(?:vat|tax|taxes|fee|fees|resort fee|resort fees|service charge|service charges))\b|'
     r'\+\s*(?:\d+(?:\.\d+)?\s*%\s+)?(?:vat|tax|taxes|fee|fees|service charge|service charges)\b|'
     r'세금\s*전|수수료\s*전|세금\s*별도|수수료\s*별도'
@@ -132,8 +137,16 @@ def _observed_details(content):
 def _qualified_dynamic(name, evidence):
     qualified=[]
     for row in evidence:
+        units=_sentences(row['evidence_excerpt'])
         for text in row['observed_details'][name]:
-            if text.rstrip().endswith('?') or DYNAMIC_DISQUALIFIER.search(text) or INCOMPLETE_TOTAL.search(text): continue
+            context=text
+            if name == 'payable_total':
+                try: position=units.index(text)
+                except ValueError: position=-1
+                if position >= 0:
+                    context=' '.join(units[max(0,position-1):position+2])
+            if (text.rstrip().endswith('?') or NON_ASSERTIVE_DYNAMIC.search(text) or
+                    DYNAMIC_DISQUALIFIER.search(text) or INCOMPLETE_TOTAL.search(context)): continue
             tied=(name == 'inventory')
             if name == 'inventory' and INVENTORY_METADATA.search(text): continue
             if name == 'fee':

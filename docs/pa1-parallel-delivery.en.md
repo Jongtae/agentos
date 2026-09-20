@@ -176,6 +176,45 @@ Use review findings as routing signals:
 
 After a critical architectural/root-cause decision is settled, repetitive follow-up may return to a cheaper profile.
 
+
+## Owner-only operating gates
+
+An owner-only action such as entering a credential, completing OAuth consent, pairing a live Telegram bot, or observing a real launchd/Homebrew effect is an **operating-validation gate**, not a reason to stop safe PA1 development early.
+
+When a child reaches such a gate, it must first complete every safe development activity that does not require the owner action, including where applicable:
+
+- contracts, adapters and injected transports;
+- positive and negative tests;
+- replay, idempotency, restart and recovery behavior;
+- Telegram/web integration;
+- PR, CI and independent review;
+- synthetic/service/integration E2E;
+- documentation and owner runbook steps.
+
+The unavailable live step is recorded as `owner_validation_pending`. That state does not block unrelated dependency-satisfied PA1 work and does not by itself prevent a child from reaching development completion when its issue contract explicitly permits live operating evidence to remain pending.
+
+Development completion and operating validation are separate evidence dimensions. Fixture/mock/injected-transport success must never be described as live-provider success.
+
+### Continue-before-stopping rule
+
+The PA1 coordinator must continue other safe dependency-satisfied work after an owner-only gate is identified. It may stop the whole program early only when the missing owner action genuinely prevents all remaining safe implementation/integration work and no other dependency-safe work remains.
+
+Do not repeatedly ask the owner for the same unavailable live action while safe implementation remains.
+
+### Batched owner validation
+
+PA1-INT-01 / #394 owns the consolidated owner-validation checklist. Whenever practical, defer owner-only operating checks until development integration is otherwise complete, then present one minimal checklist instead of interrupting the owner separately for each child.
+
+Expected PA1 live checks, when applicable, include:
+
+- Telegram bot token/pairing and one live request/result;
+- Gmail OAuth and one bounded read/search;
+- Calendar OAuth and bounded read/create/update/cancel smoke;
+- Homebrew/launchd/background start/restart observation;
+- any other exact PA1 live effect that cannot be proven in CI.
+
+Each item remains `owner_validation_pending` until actually observed. Unknown/unrun live operation is never converted into success merely because development tests passed.
+
 ## Evidence classes
 
 Keep these distinct:

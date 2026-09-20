@@ -345,6 +345,33 @@ class QuickstartTests(unittest.TestCase):
         self.assertIn('Ollama response',[m.get('content','') for m in sent])
         self.assertEqual(self.store.jobs()[0]['provider'],'compatible')
 
+    def test_strict_web_model_flow_allows_keyless_ollama(self):
+        self.model('compatible','https://example.test/v1','private-key')
+        draft={'provider':'ollama','endpoint':'http://127.0.0.1:11434',
+               'model':'local-model','api_key':'','require_key':True}
+        tested=self.service.test_model(draft,strict=True)
+        self.assertTrue(tested['ok'])
+        self.assertGreaterEqual(len(tested['test_proof']),32)
+        draft['test_proof']=tested['test_proof']
+        saved=self.service.save_model(draft,strict=True)
+        self.assertEqual(saved['model']['provider'],'ollama')
+        self.assertTrue(saved['model_ready'])
+        self.assertEqual(self.store.secret('model_key'),'')
+
+    def test_strict_model_save_requires_exact_single_use_server_proof(self):
+        self.model('compatible','https://example.test/v1','old-key')
+        draft={'provider':'openai','endpoint':'https://api.openai.com/v1',
+               'model':'tested-model','api_key':'new-key','require_key':True}
+        tested=self.service.test_model(draft,strict=True)
+        with self.assertRaises(ValueError):
+            self.service.save_model({**draft,'model':'untested','test_proof':tested['test_proof']},strict=True)
+        with self.assertRaises(ValueError):
+            self.service.save_model({**draft,'api_key':'different-key','test_proof':tested['test_proof']},strict=True)
+        saved=self.service.save_model({**draft,'test_proof':tested['test_proof']},strict=True)
+        self.assertTrue(saved['model_ready'])
+        with self.assertRaises(ValueError):
+            self.service.save_model({**draft,'test_proof':tested['test_proof']},strict=True)
+
     def test_all_model_protocols(self):
         for provider,endpoint in [('ollama','http://localhost:11434'),('compatible','https://example.test/v1'),('openai','https://api.openai.com/v1'),('anthropic','https://api.anthropic.com')]:
             self.model(provider,endpoint,'test-key')
@@ -477,7 +504,9 @@ finally:
         server,thread,client,base=start_server(self.service)
         try:
             request(client,base,'/api/claim',{'code':self.store.bootstrap.read_text(),'password':password})
-            request(client,base,'/api/model',{'provider':'compatible','endpoint':'https://example.test/v1','model':'test-model','api_key':'fixture-key'})
+            model={'provider':'compatible','endpoint':'https://example.test/v1','model':'test-model','api_key':'fixture-key'}
+            tested=request(client,base,'/api/model/test',model)
+            request(client,base,'/api/model',{**model,'test_proof':tested['test_proof']})
             self.assertTrue(request(client,base,'/api/model/test',{})['ok'])
             request(client,base,'/api/file-workspace',{'references':[str(reference)],'workspace':str(workspace)})
             request(client,base,'/api/documents/approval',{'approved':True})

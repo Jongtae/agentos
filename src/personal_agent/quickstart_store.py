@@ -9,6 +9,7 @@ import secrets
 import sqlite3
 import threading
 import time
+import unicodedata
 import uuid
 
 
@@ -59,6 +60,11 @@ class QuickStore:
     def db(self):
         conn = sqlite3.connect(self.path, timeout=10)
         conn.row_factory = sqlite3.Row
+        conn.create_function(
+            'unicode_search_key', 1,
+            lambda value: unicodedata.normalize('NFKC', str(value or '')).casefold(),
+            deterministic=True,
+        )
         try:
             with conn:
                 yield conn
@@ -243,16 +249,69 @@ class QuickStore:
             candidates=[dict(r) for r in db.execute("SELECT id,job_id,memory_key,content,created,state FROM memory_candidates WHERE state='pending' ORDER BY created DESC LIMIT 50")]
         return {'memories':memories,'memory_count':len(memories),'memory_candidates':candidates,'memory_candidate_count':len(candidates),'results':results,'result_count':len(results),'context':context,'context_count':len(context),'evidence':evidence}
 
+    def personal_records(self, query='', record_filter='all', limit=100, offset=0):
+        if not isinstance(query,str) or len(query)>160:
+            raise ValueError('기록 검색어를 확인하세요.')
+        if record_filter not in ('all','saved','note','memory','temporary','artifact'):
+            raise ValueError('기록 유형을 확인하세요.')
+        if (isinstance(limit,bool) or not isinstance(limit,int) or not 1<=limit<=100 or
+                isinstance(offset,bool) or not isinstance(offset,int) or not 0<=offset<=2_147_483_647):
+            raise ValueError('기록 페이지 범위를 확인하세요.')
+        now=time.time()
+        union='''
+            SELECT id,'note' AS type,'메모' AS label,'' AS memory_key,content,created,
+                   NULL AS expires_at,'' AS sharing_state,'' AS source_kind,'' AS source_app,
+                   '' AS workspace_id,'' AS job_id,'memories' AS deleteKind FROM notes
+            UNION ALL
+            SELECT id,'memory','기억',memory_key,content,created,NULL,'','','','','','memories'
+              FROM memories WHERE state='current'
+            UNION ALL
+            SELECT id,'temporary','임시 자료','',source_kind||' · '||source_app||' · '||sharing_state,
+                   captured_at,expires_at,sharing_state,source_kind,source_app,'','',''
+              FROM context_events WHERE expires_at>?
+            UNION ALL
+            SELECT id,'artifact','저장된 결과','',content,created,NULL,'','','',workspace_id,job_id,'results'
+              FROM workspace_results
+        '''
+        escaped=unicodedata.normalize('NFKC',query).casefold().replace('\\','\\\\').replace('%','\\%').replace('_','\\_')
+        needle=f'%{escaped}%'
+        where='''
+            WHERE (?='all' OR (?='saved' AND type IN ('note','memory')) OR type=?)
+              AND (?='' OR unicode_search_key(coalesce(memory_key,'')||' '||content||' '||source_kind||' '||source_app)
+                   LIKE ? ESCAPE '\\')
+        '''
+        params=(now,record_filter,record_filter,record_filter,query,needle)
+        with self.db() as db:
+            db.execute('DELETE FROM context_events WHERE expires_at<=?',(now,))
+            rows=[dict(row) for row in db.execute(
+                f'SELECT * FROM ({union}) {where} ORDER BY created DESC,id DESC LIMIT ? OFFSET ?',
+                (*params,limit,offset),
+            )]
+            match_count=db.execute(f'SELECT COUNT(*) FROM ({union}) {where}',params).fetchone()[0]
+            counts={
+                'note':db.execute('SELECT COUNT(*) FROM notes').fetchone()[0],
+                'memory':db.execute("SELECT COUNT(*) FROM memories WHERE state='current'").fetchone()[0],
+                'temporary':db.execute('SELECT COUNT(*) FROM context_events WHERE expires_at>?',(now,)).fetchone()[0],
+                'artifact':db.execute('SELECT COUNT(*) FROM workspace_results').fetchone()[0],
+            }
+        return {'items':rows,'counts':counts,'match_count':match_count,'offset':offset,'limit':limit,
+                'has_more':offset+len(rows)<match_count}
+
     def delete_personal_space_item(self, kind, item_id):
         if kind not in ('memories','memory_candidates','results') or not isinstance(item_id,str) or not item_id:
             raise ValueError('삭제할 Personal Space 항목을 확인하세요.')
         with self.db() as db:
-            if kind=='results': deleted=db.execute('DELETE FROM workspace_results WHERE id=?',(item_id,)).rowcount
+            workspace_id=None
+            if kind=='results':
+                row=db.execute('SELECT workspace_id FROM workspace_results WHERE id=?',(item_id,)).fetchone()
+                workspace_id=row['workspace_id'] if row else None
+                deleted=db.execute('DELETE FROM workspace_results WHERE id=?',(item_id,)).rowcount
+                if deleted:db.execute('UPDATE workspaces SET updated=? WHERE id=?',(time.time(),workspace_id))
             elif kind=='memory_candidates': deleted=db.execute("DELETE FROM memory_candidates WHERE id=? AND state='pending'",(item_id,)).rowcount
             else:
                 deleted=db.execute('DELETE FROM memories WHERE id=?',(item_id,)).rowcount
                 if not deleted: deleted=db.execute('DELETE FROM notes WHERE id=?',(item_id,)).rowcount
-        return {'deleted':bool(deleted),'id':item_id,'kind':kind}
+        return {'deleted':bool(deleted),'id':item_id,'kind':kind,'workspace_id':workspace_id}
 
     def workspaces(self, include_archived=False):
         query='SELECT * FROM workspaces'+('' if include_archived else " WHERE status='active'")+' ORDER BY updated DESC LIMIT 100'
@@ -292,7 +351,8 @@ class QuickStore:
             if not job:raise ValueError('저장할 완료 결과를 찾을 수 없습니다.')
             detail=db.execute("SELECT detail FROM tool_events WHERE job_id=? AND tool!='model' AND status='succeeded' ORDER BY id DESC LIMIT 8",(job_id,)).fetchall()
             evidence=json.dumps([row['detail'][:500] for row in detail],ensure_ascii=False)
-            db.execute('INSERT INTO workspace_results VALUES (?,?,?,?,?,?) ON CONFLICT(workspace_id,job_id) DO NOTHING',(str(uuid.uuid4()),workspace_id,job_id,job['response'] or '',evidence,time.time()))
+            inserted=db.execute('INSERT INTO workspace_results VALUES (?,?,?,?,?,?) ON CONFLICT(workspace_id,job_id) DO NOTHING',(str(uuid.uuid4()),workspace_id,job_id,job['response'] or '',evidence,time.time())).rowcount
+            if not inserted:raise ValueError('이미 프로젝트에 저장된 완료 결과입니다.')
             db.execute('UPDATE workspaces SET updated=? WHERE id=?',(time.time(),workspace_id))
         return self.workspace_detail(workspace_id)
 
@@ -301,6 +361,8 @@ class QuickStore:
         if not workspace:return None
         with self.db() as db:
             workspace['results']=[dict(row) for row in db.execute('SELECT id,job_id,content,created FROM workspace_results WHERE workspace_id=? ORDER BY created DESC LIMIT 30',(workspace_id,))]
+            workspace['result_count']=db.execute('SELECT COUNT(*) FROM workspace_results WHERE workspace_id=?',(workspace_id,)).fetchone()[0]
+            workspace['saved_job_ids']=[row['job_id'] for row in db.execute('SELECT job_id FROM workspace_results WHERE workspace_id=? AND job_id IN (SELECT id FROM jobs ORDER BY created DESC LIMIT 40)',(workspace_id,))]
             workspace['messages']=[dict(row) for row in db.execute('SELECT id,role,content,channel,created,workspace_id,job_id FROM messages WHERE workspace_id=? ORDER BY id DESC LIMIT 100',(workspace_id,))][::-1]
         return workspace
 

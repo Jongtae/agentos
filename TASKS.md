@@ -40,7 +40,7 @@ Read [Owner Control](docs/owner-control-contract.en.md), [Default Agent Usefulne
 | --- | --- | --- |
 | DOGFOOD-01: owner-usable local browser, provider, file workspace, and restart path | [#351](https://github.com/Jongtae/personal-agentos/issues/351) | Complete on merge of PR #354 with deterministic local HTTP/worker evidence and independent authority/convergence review; live-provider/browser operation remains owner-controlled and is not claimed by repository tests. |
 
-DOGFOOD-01 selected no successor at its historical closeout. The current preparation above selects USE-01 as goal-ready only; no product successor is executing. Issues #335–#346 remain planned and require separate explicit owner activation.
+DOGFOOD-01 selected no successor at its historical closeout. The current preparation above selects EPIC-PA1 as goal-ready only; no product successor is executing. Issues #335–#346 remain planned and require separate explicit owner activation.
 
 ## Deferred — Product information and policy site
 

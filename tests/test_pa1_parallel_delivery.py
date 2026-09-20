@@ -29,6 +29,9 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         self.assertIn("GOV-PA1-01", completed)
         self.assertNotIn("EPIC-PA1", completed)
         self.assertEqual(self.program["active_substeps"], [])
+        tasks = (ROOT / "TASKS.md").read_text(encoding="utf-8")
+        self.assertIn("selects EPIC-PA1 as goal-ready only", tasks)
+        self.assertNotIn("selects USE-01 as goal-ready", tasks)
 
     def test_epic_is_the_only_nonterminal_program_authority(self):
         nonterminal = [

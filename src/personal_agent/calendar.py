@@ -195,13 +195,22 @@ class CalendarConnector:
             return CALENDAR_WRITE_CONNECTOR_ID
         raise CalendarError("scope-denied", recovery="reconnect")
 
-    def _authorize(self, owner: str, scope: str) -> tuple[str, str] | None:
+    def _authorize(self, owner: str, scope: str) -> tuple[tuple[str, str], ...] | None:
         _owner_key(owner)
         try:
             if self.registry is not None:
                 connector_id = self._connector_for_scope(scope)
-                status = self.registry.require_connected(owner, connector_id, (scope,))
-                return connector_id, status.connection_revision
+                self.registry.require_connected(owner, connector_id, (scope,))
+                # Both records describe authority backed by this connector's
+                # one injected Google credential. Capture each currently
+                # connected revision so a provider 401 can revoke the shared
+                # credential lifecycle without revoking a later reconnect.
+                snapshot = []
+                for candidate in (CALENDAR_CONNECTOR_ID, CALENDAR_WRITE_CONNECTOR_ID):
+                    status = self.registry.status(owner, candidate)
+                    if status.state is ConnectorState.CONNECTED:
+                        snapshot.append((candidate, status.connection_revision))
+                return tuple(snapshot)
             elif not self.authority(owner, scope):
                 raise CalendarError("scope-denied", recovery="reconnect")
         except ConnectorContractError as error:
@@ -209,17 +218,21 @@ class CalendarConnector:
             raise CalendarError(reason, recovery="reconnect") from None
         return None
 
-    def _mark_scope_expired(self, owner: str, connection: tuple[str, str] | None) -> None:
-        if self.registry is None or connection is None:
+    def _mark_scope_expired(
+        self,
+        owner: str,
+        authority_snapshot: tuple[tuple[str, str], ...] | None,
+    ) -> None:
+        if self.registry is None or authority_snapshot is None:
             return
-        connector_id, expected_revision = connection
         with self.registry._authority_guard():
-            current = self.registry.status(owner, connector_id)
-            if (
-                current.state is ConnectorState.CONNECTED
-                and current.connection_revision == expected_revision
-            ):
-                self.registry.transition(owner, connector_id, ConnectorState.REAUTH_REQUIRED)
+            for connector_id, expected_revision in authority_snapshot:
+                current = self.registry.status(owner, connector_id)
+                if (
+                    current.state is ConnectorState.CONNECTED
+                    and current.connection_revision == expected_revision
+                ):
+                    self.registry.transition(owner, connector_id, ConnectorState.REAUTH_REQUIRED)
 
     @staticmethod
     def _provider_error(error: GoogleCalendarError) -> CalendarError:
@@ -243,12 +256,12 @@ class CalendarConnector:
             raise CalendarError("invalid-limit")
         authority_guard = self.registry._authority_guard() if self.registry is not None else nullcontext()
         with authority_guard:
-            connection_revision = self._authorize(owner, CALENDAR_READ_SCOPE)
+            authority_snapshot = self._authorize(owner, CALENDAR_READ_SCOPE)
             try:
                 events = self.provider.query(start, end, timezone, max_results)
             except GoogleCalendarError as error:
                 if error.reason == "scope-expired":
-                    self._mark_scope_expired(owner, connection_revision)
+                    self._mark_scope_expired(owner, authority_snapshot)
                 raise self._provider_error(error) from None
         return {
             "events": events,
@@ -496,7 +509,12 @@ class CalendarConnector:
             if row.get("state") != "approved" or not _constant_text_equal(row.get("approval"), approval):
                 raise CalendarError("exact-approval-required")
             if self._now() >= row.get("expires", 0):
-                row.update(state="expired", error_class="approval-expired", effect="none")
+                row.update(
+                    state="expired",
+                    error_class="approval-expired",
+                    effect="none",
+                    recovery="request-new-approval",
+                )
                 rows[ident] = row
                 self._put(rows)
                 raise CalendarError("approval-expired", recovery="request-new-approval")
@@ -514,7 +532,7 @@ class CalendarConnector:
             authority_guard = self.registry._authority_guard() if self.registry is not None else nullcontext()
             with authority_guard:
                 try:
-                    connection_revision = self._authorize(owner, CALENDAR_WRITE_SCOPE)
+                    authority_snapshot = self._authorize(owner, CALENDAR_WRITE_SCOPE)
                 except CalendarError as error:
                     row.update(state="failed", error_class=error.reason, effect="none", recovery=error.recovery)
                     rows[ident] = row
@@ -548,7 +566,7 @@ class CalendarConnector:
                 safe_result = {"id": result["id"], "cancelled": True}
         except GoogleCalendarError as provider_error:
             if provider_error.reason == "scope-expired":
-                self._mark_scope_expired(owner, connection_revision)
+                self._mark_scope_expired(owner, authority_snapshot)
             error = self._provider_error(provider_error)
             with _LOCK:
                 rows = self._rows()

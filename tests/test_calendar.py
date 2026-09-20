@@ -263,6 +263,7 @@ class CalendarTests(unittest.TestCase):
         with self.assertRaises(CalendarError) as expired:
             calendar.create(draft["id"], approval, "owner")
         self.assertEqual(expired.exception.reason, "approval-expired")
+        self.assertEqual(calendar.status(draft["id"], "owner")["recovery"], "request-new-approval")
         self.assertFalse(self.provider.calls)
 
         self.provider.error = GoogleCalendarError("scope-expired")
@@ -275,12 +276,22 @@ class CalendarTests(unittest.TestCase):
             self.registry.status("owner", CALENDAR_WRITE_CONNECTOR_ID).state,
             ConnectorState.REAUTH_REQUIRED,
         )
+        self.assertEqual(
+            self.registry.status("owner", CALENDAR_CONNECTOR_ID).state,
+            ConnectorState.REAUTH_REQUIRED,
+        )
 
         self.registry.transition(
             "owner",
             CALENDAR_WRITE_CONNECTOR_ID,
             ConnectorState.CONNECTED,
             granted_scopes=(CALENDAR_WRITE_SCOPE,),
+        )
+        self.registry.transition(
+            "owner",
+            CALENDAR_CONNECTOR_ID,
+            ConnectorState.CONNECTED,
+            granted_scopes=(CALENDAR_READ_SCOPE,),
         )
         with self.assertRaises(CalendarError):
             self.calendar.query(
@@ -293,11 +304,21 @@ class CalendarTests(unittest.TestCase):
             self.registry.status("owner", CALENDAR_CONNECTOR_ID).state,
             ConnectorState.REAUTH_REQUIRED,
         )
+        self.assertEqual(
+            self.registry.status("owner", CALENDAR_WRITE_CONNECTOR_ID).state,
+            ConnectorState.REAUTH_REQUIRED,
+        )
         self.registry.transition(
             "owner",
             CALENDAR_CONNECTOR_ID,
             ConnectorState.CONNECTED,
             granted_scopes=(CALENDAR_READ_SCOPE,),
+        )
+        self.registry.transition(
+            "owner",
+            CALENDAR_WRITE_CONNECTOR_ID,
+            ConnectorState.CONNECTED,
+            granted_scopes=(CALENDAR_WRITE_SCOPE,),
         )
         self.provider.error = GoogleCalendarError("provider-timeout", "unknown")
         uncertain = self.calendar.draft_create(EVENT, "owner")
@@ -309,6 +330,51 @@ class CalendarTests(unittest.TestCase):
         with self.assertRaises(CalendarError):
             self.calendar.create(uncertain["id"], uncertain_approval, "owner")
         self.assertEqual(len([call for call in self.provider.calls if call[0] == "create"]), 1)
+
+    def test_scope_expiry_does_not_revoke_a_newer_sibling_reconnect(self):
+        read_before = self.registry.status("owner", CALENDAR_CONNECTOR_ID).connection_revision
+        draft = self.calendar.draft_create(EVENT, "owner")
+        approval = self.approve(draft)
+
+        def rejected_after_read_reconnect(_payload, _key):
+            self.registry.transition("owner", CALENDAR_CONNECTOR_ID, ConnectorState.REAUTH_REQUIRED)
+            reconnected = self.registry.transition(
+                "owner",
+                CALENDAR_CONNECTOR_ID,
+                ConnectorState.CONNECTED,
+                granted_scopes=(CALENDAR_READ_SCOPE,),
+            )
+            self.assertNotEqual(reconnected.connection_revision, read_before)
+            raise GoogleCalendarError("scope-expired")
+
+        self.provider.create = rejected_after_read_reconnect
+        with self.assertRaises(CalendarError) as rejected:
+            self.calendar.create(draft["id"], approval, "owner")
+        self.assertEqual(rejected.exception.reason, "scope-expired")
+        self.assertEqual(
+            self.registry.status("owner", CALENDAR_CONNECTOR_ID).state,
+            ConnectorState.CONNECTED,
+        )
+        self.assertEqual(
+            self.registry.status("owner", CALENDAR_WRITE_CONNECTOR_ID).state,
+            ConnectorState.REAUTH_REQUIRED,
+        )
+
+    def test_read_credential_rejection_blocks_later_write_before_provider_call(self):
+        self.provider.error = GoogleCalendarError("scope-expired")
+        with self.assertRaises(CalendarError):
+            self.calendar.query(
+                "owner",
+                "2026-09-21T00:00:00+09:00",
+                "2026-09-28T00:00:00+09:00",
+                "Asia/Seoul",
+            )
+        draft = self.calendar.draft_cancel("event", '"v1"', "owner")
+        approval = self.approve(draft)
+        with self.assertRaises(CalendarError) as denied:
+            self.calendar.cancel(draft["id"], approval, "owner")
+        self.assertEqual(denied.exception.reason, "scope-expired")
+        self.assertEqual([call[0] for call in self.provider.calls], ["query"])
 
     def test_event_version_rejects_header_controls_before_approval(self):
         for version in ('"v1"\r\nX-Injected: yes', '"v1"\x00', '"버전"', '*', '"v1", "v2"', 'unquoted', 'W/"v1"'):

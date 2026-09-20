@@ -142,6 +142,8 @@ class PublicResearchTests(unittest.TestCase):
             ('AWS_SECRET_ACCESS_KEY=supersecret','owner_public_request'),
             ('DATABASE_PASSWORD=supersecret','owner_public_request'),
             ('Cookie: sessionid=supersecret','owner_public_request'),
+            ('Bearer abcdefghijklmnop','owner_public_request'),
+            ('bEaReR AbCdEfGhIjKlMnOp','owner_public_request'),
         ]
         for query,source in cases:
             with self.subTest(query=query),self.assertRaises(ValueError):
@@ -215,7 +217,8 @@ class PublicResearchTests(unittest.TestCase):
                 self.assertIn(content,result['dynamic_facts']['fee']['evidence'][0]['exact_text'])
 
     def test_discount_amount_is_not_misreported_as_fee_value(self):
-        for content in ('Service fee reduced by USD 10.','Service fee includes a USD 10 discount.'):
+        for content in ('Service fee reduced by USD 10.','Service fee includes a USD 10 discount.',
+                        'USD 10 off service fee.','USD 10 discount on fee.','USD 10 reduction in fee.'):
             with self.subTest(content=content):
                 reader=Reader({'https://alpha.example/item':{
                     'url':'https://alpha.example/item','retrieved_at':2,'content':content}})

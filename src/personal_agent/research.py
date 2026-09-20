@@ -95,6 +95,11 @@ FEE_NONVALUE_CONTEXT = re.compile(
     r'(?i)\b(?:fee|fees|tax|taxes|surcharge|service charge)\b[^.!?]{0,35}'
     r'\b(?:reduced?|reduction|discount|credit|saving|decreased?|lowered?|off)\b'
 )
+FEE_NONVALUE_CONTEXT_REVERSE = re.compile(
+    r'(?i)(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b)'
+    r'[^.!?]{0,20}\b(?:off|discount|reduction|credit|savings?)\b[^.!?]{0,20}'
+    r'\b(?:fee|fees|tax|taxes|surcharge|service charge)\b'
+)
 INVENTORY_METADATA = re.compile(
     r'(?i)\b(?:stock|inventory|room|rooms|ticket|tickets|seat|seats)\s+'
     r'(?:information|details|data|status)\b[^.!?]{0,25}\b(?:available|unavailable)\b'
@@ -127,6 +132,10 @@ def validate_public_query(query, query_source):
     public_query=query.strip()
     scan_query=''.join(character for character in public_query if unicodedata.category(character) != 'Cf')
     sensitive=any(pattern.search(scan_query) for pattern in HIGH_CONFIDENCE_SECRET_PATTERNS)
+    bearer_value=re.search(r'(?i)\bbearer\s+([^\s,;:!?()\[\]{}]{8,})',scan_query)
+    if bearer_value:
+        bearer_token=bearer_value.group(1).strip('"\'.-_/@#$%^&*+=\\|<>`~').casefold()
+        if bearer_token not in PUBLIC_CREDENTIAL_TOPICS: sensitive=True
     sensitive=sensitive or bool(LABEL_ASSIGNMENT.search(scan_query))
     labels=list(LABEL_OCCURRENCE.finditer(scan_query))
     if labels:
@@ -201,7 +210,8 @@ def _qualified_dynamic(name, evidence):
             if name == 'inventory' and INVENTORY_METADATA.search(classified_text): continue
             if name == 'fee':
                 if (FEE_MISSING_DISCLOSURE.search(classified_text) or FEE_NEGATED_PROPERTY.search(classified_text) or
-                        FEE_NONVALUE_CONTEXT.search(classified_text)): continue
+                        FEE_NONVALUE_CONTEXT.search(classified_text) or
+                        FEE_NONVALUE_CONTEXT_REVERSE.search(classified_text)): continue
                 tied=bool(FEE_VALUE_PATTERNS[0].search(classified_text) or FEE_VALUE_PATTERNS[2].search(classified_text) or
                           (FEE_VALUE_PATTERNS[1].search(classified_text) and not FACT_PATTERNS['payable_total'].search(classified_text)))
             elif name == 'payable_total':

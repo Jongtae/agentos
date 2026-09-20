@@ -122,6 +122,8 @@ def test_verification_budget_requires_stable_heads_and_batched_remediation() -> 
         "unknown root cause",
         "do not run the full suite after every narrow mechanical edit",
         "never skip, weaken, relabel, or bypass",
+        "no post-review commit may be merged",
+        "consolidated final remediation head",
     )
     _assert_all(
         pa1,
@@ -133,4 +135,6 @@ def test_verification_budget_requires_stable_heads_and_batched_remediation() -> 
         "critical",
         "auth/oauth",
         "batch findings",
+        "any post-review pa1 commit",
+        "consolidated final head",
     )

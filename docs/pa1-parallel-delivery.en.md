@@ -185,7 +185,7 @@ PA1 applies the repository-wide [Goal Execution Contract](goal-execution-contrac
 - Use targeted tests during implementation and remediation.
 - Push a coherent review-ready checkpoint rather than each micro-fix.
 - Run required full validation and request independent review on a stable head.
-- Batch compatible findings from one review pass before another full-suite/re-review cycle.
+- Batch compatible findings from one review pass before another full-suite/re-review cycle. Any post-review PA1 commit must be covered by the applicable independent review on the consolidated final head before merge.
 - The normal soft budget is one review-ready broad cycle plus one consolidated remediation broad cycle when needed. A third or later broad cycle must record the new reason that makes it necessary.
 - Do not request re-review for an unchanged head, duplicate a running review, or poll CI/review repeatedly without a decision point.
 - Required exact-head CI/review and security/authority escalation remain mandatory; this budget reduces redundant cycles and never weakens evidence.

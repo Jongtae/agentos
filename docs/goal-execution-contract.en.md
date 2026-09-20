@@ -68,14 +68,14 @@ The goal lifecycle preserves required evidence while avoiding validation churn t
 3. When the work is review-ready, push a stable head and run the declared complete validation set required by the source plan.
 4. Request independent review only on that stable head.
 5. Collect all known compatible findings from the review pass and remediate them together. Use focused tests while fixing them.
-6. If the remediation materially changes the reviewed behavior, run the required exact-head full validation and re-review once on the consolidated remediation head before merge.
+6. If review findings require any remediation commit, keep using focused tests while fixing them, then run the required exact-head full validation and applicable independent re-review once on the consolidated final remediation head before merge. No post-review commit may be merged with only an independent review artifact for an earlier head.
 
 ### Soft verification budget
 
 For a normal review-ready work unit, the expected broad cycle budget is:
 
 - **cycle 1:** stable-head full validation + required independent review;
-- **cycle 2:** one consolidated full validation + re-review after material review findings, when needed.
+- **cycle 2:** one consolidated full validation + re-review after review findings require changes to the reviewed head.
 
 A third or later full-suite/re-review cycle is permitted when correctness requires it; it is not a bypassable hard limit. Before triggering that cycle, record why another broad pass is necessary, such as a newly discovered security/authority defect, changed shared contract, flaky or unknown root cause, or material cross-worktree conflict. Repeated broad cycles without a new reason are a signal to stop micro-fixing, establish the root cause, and batch remediation.
 
@@ -84,7 +84,7 @@ A third or later full-suite/re-review cycle is permitted when correctness requir
 - Do not request review again for an unchanged head.
 - Do not request duplicate review while the current review is running.
 - Do not repeatedly poll CI/review when no decision depends on a new state transition.
-- Do not run the full suite after every narrow mechanical edit solely for reassurance; run focused tests, batch compatible changes, then use the required exact-head full gate.
+- Do not run the full suite after every narrow mechanical edit solely for reassurance; run focused tests and batch compatible changes. If those edits occur after independent review, the consolidated final head must still receive the applicable independent re-review before merge.
 - Automatic CI triggered by a push is still authoritative evidence; reduce avoidable trigger frequency by pushing coherent checkpoints, not by disabling required workflows.
 - Never skip, weaken, relabel, or bypass tests, branch protection, exact-head validation, or independent review to save context/compute.
 

@@ -776,13 +776,33 @@ class GmailConnector:
                             return []
                         content_type = value
             disposition_kind = disposition.split(";", 1)[0].strip().lower()
+            normalized_mime = mime_type.lower() if isinstance(mime_type, str) else ""
+            parsed_content_type = None
+            charset = None
+            if "content-type" in security_headers:
+                main_type = content_type.split(";", 1)[0].strip().lower()
+                if (
+                    not content_type.strip()
+                    or re.fullmatch(r"[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+", main_type) is None
+                    or main_type != normalized_mime
+                ):
+                    raise GmailError("invalid_provider_response")
+                parsed_content_type = Message()
+                parsed_content_type["content-type"] = content_type
+                parameters = parsed_content_type.get_params(header="content-type", unquote=True) or []
+                charsets = [value for name, value in parameters[1:] if str(name).lower() == "charset"]
+                if len(charsets) > 1:
+                    raise GmailError("invalid_provider_response")
+                if normalized_mime in {"text/plain", "text/html"}:
+                    if len(charsets) != 1 or not isinstance(charsets[0], str) or not charsets[0].strip():
+                        raise GmailError("invalid_provider_response")
+                    charset = charsets[0].strip()
             is_attachment = (
                 isinstance(filename, str)
                 and bool(filename.strip())
             ) or (disposition_present and disposition_kind != "inline")
             if is_attachment:
                 return []
-            normalized_mime = mime_type.lower() if isinstance(mime_type, str) else ""
             if (
                 normalized_mime in {"text/plain", "text/html"}
                 and isinstance(body, dict)
@@ -791,11 +811,6 @@ class GmailConnector:
                     or isinstance(body.get("attachmentId"), str)
                 )
             ):
-                charset = None
-                if content_type:
-                    message = Message()
-                    message["content-type"] = content_type
-                    charset = message.get_content_charset()
                 candidate_count += 1
                 return [(
                     normalized_mime,
@@ -831,10 +846,8 @@ class GmailConnector:
                 if not related_children:
                     return []
                 start_values = []
-                if content_type:
-                    message = Message()
-                    message["content-type"] = content_type
-                    parameters = message.get_params(header="content-type") or []
+                if parsed_content_type is not None:
+                    parameters = parsed_content_type.get_params(header="content-type") or []
                     start_values = [value for name, value in parameters[1:] if str(name).lower() == "start"]
                 if not start_values:
                     return related_children[0][1]
@@ -895,7 +908,7 @@ class GmailConnector:
                 raise GmailError("invalid_provider_response")
             try:
                 codecs.lookup(encoding)
-                decoded_parts.append(decoded.decode(encoding, errors="replace"))
+                decoded_parts.append(decoded.decode(encoding, errors="strict"))
             except (LookupError, TypeError, ValueError, UnicodeError):
                 raise GmailError("invalid_provider_response") from None
         mime_types = {item[0] for item in candidates}

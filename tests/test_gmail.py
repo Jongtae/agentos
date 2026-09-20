@@ -739,6 +739,45 @@ class GmailConnectorTests(unittest.TestCase):
                     self.read()
                 self.assertEqual(malformed.exception.reason, "invalid_provider_response")
 
+    def test_present_content_type_must_match_mime_and_have_one_charset(self):
+        self.connect()
+        for content_type in (
+            "application/octet-stream; charset=utf-8",
+            "text/plain",
+            'text/plain; charset=""',
+            "text/plain; charset=   ",
+            "text/plain; charset=utf-8; charset=iso-8859-1",
+        ):
+            with self.subTest(content_type=content_type):
+                self.responses.clear()
+                self.responses.append({
+                    "id": "m_1",
+                    "threadId": "t_1",
+                    "payload": {
+                        "mimeType": "text/plain",
+                        "headers": [{"name": "Content-Type", "value": content_type}],
+                        "body": {"data": base64.urlsafe_b64encode(b"private body").decode()},
+                    },
+                })
+                with self.assertRaises(GmailError) as malformed:
+                    self.read()
+                self.assertEqual(malformed.exception.reason, "invalid_provider_response")
+
+    def test_present_valid_charset_requires_strict_body_decoding(self):
+        self.connect()
+        self.responses.append({
+            "id": "m_1",
+            "threadId": "t_1",
+            "payload": {
+                "mimeType": "text/plain",
+                "headers": [{"name": "Content-Type", "value": "text/plain; charset=utf-8"}],
+                "body": {"data": base64.urlsafe_b64encode(b"private \xff body").decode()},
+            },
+        })
+        with self.assertRaises(GmailError) as malformed:
+            self.read()
+        self.assertEqual(malformed.exception.reason, "invalid_provider_response")
+
     def test_mixed_body_combines_serial_parts_but_alternative_chooses_plain(self):
         self.connect()
         encode = lambda value: base64.urlsafe_b64encode(value.encode()).decode()

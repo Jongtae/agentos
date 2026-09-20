@@ -31,7 +31,7 @@ HIGH_CONFIDENCE_SECRET_PATTERNS = (
     re.compile(r'(?i)\b(?:cookie|set-cookie)\s*:\s*\S+'),
     re.compile(r'(?i)\btoken\s*=\s*[^&\s]+'),
     re.compile(r'(?i)\bsecret\s+[a-z0-9_-]{20,}\b'),
-    re.compile(r'(?i)\b[A-Z][A-Z0-9_]{1,80}(?:_PASSWORD|_PASSWD|_SECRET|_TOKEN|_API_KEY|_ACCESS_KEY)\s*=\s*\S+'),
+    re.compile(r'(?i)\b[A-Z][A-Z0-9_]{1,80}(?:_PASSWORD|_PASSWD|_SECRET|_SECRET_KEY|_PRIVATE_KEY|_CLIENT_SECRET|_TOKEN|_API_KEY|_ACCESS_KEY)\s*=\s*\S+'),
     re.compile(r'(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*(?![A-Za-z0-9_-])'),
     re.compile(
         r'(?i)\b(?:path|file|source)\s*(?::|=|,|;|->|\bis\b|\bas\b)\s*'
@@ -71,6 +71,7 @@ TOTAL_VALUE_PATTERNS = (
 DYNAMIC_DISQUALIFIER = re.compile(
     r'(?i)\b(?:may|might|could|can|should|would|possibly|probably|likely|expected|estimated|estimate|approximately|approximate|about|around|roughly|range|ranges|ranging|between|except|projected|potential|check|subject to|up to|at least|at most|starting at|starts at|if|unless|when|upon|provided|on request|depending on)\b|'
     r'\b(?:(?:for|to)\s+(?:loyalty\s+)?members?\s+only|(?:members?|loyalty)[- ]only|with\s+(?:an?\s+)?membership|only\s+(?:for|to)\s+(?:loyalty\s+)?members?)\b|'
+    r'\bonly\s+(?:for|to|with|on)\b|'
     r'확인\s*필요|변동\s*가능|예상|추정|약\s*\d'
 )
 NEGATED_DYNAMIC_ASSERTION = re.compile(r'(?i)\b(?:is|are|was|were|be|been|has|have)\s+not\b')
@@ -78,6 +79,12 @@ HISTORICAL_DYNAMIC = re.compile(
     r'(?i)\b(?:was|were|had\s+been|used\s+to|previously|formerly|historically)\b|'
     r'\b(?:last|previous|prior)\s+(?:year|month|week|season|quarter)\b|'
     r'\b(?:in|during)\s+(?:19|20)\d{2}\b'
+)
+HISTORICAL_ANAPHOR = re.compile(
+    r'(?i)^\s*(?:this|that|it|these|those)\b[^.!?]{0,120}(?:'
+    r'\b(?:was|were|previously|formerly|historically)\b|'
+    r'\b(?:last|previous|prior)\s+(?:year|month|week|season|quarter)\b|'
+    r'\b(?:in|during)\s+(?:19|20)\d{2}\b)'
 )
 NON_ASSERTIVE_DYNAMIC = re.compile(
     r'(?i)^\s*(?:are|is|was|were|do|does|did|can|could|will|would|should|may|might|has|have|had)\b|'
@@ -148,9 +155,10 @@ def validate_public_query(query, query_source):
     if not isinstance(query, str) or not 1 <= len(query.strip()) <= 500:
         raise ValueError('공개 검색어는 1~500자로 입력하세요.')
     public_query=query.strip()
-    raw_scan=''.join(character for character in public_query if unicodedata.category(character) != 'Cf')
-    decoded_scan=unquote(raw_scan)
-    scan_query=' '.join((raw_scan,decoded_scan,unquote(decoded_scan)))
+    strip_controls=lambda value:''.join(character for character in value if unicodedata.category(character) != 'Cf')
+    raw_scan=strip_controls(public_query)
+    decoded_scan=strip_controls(unquote(raw_scan))
+    scan_query=' '.join((raw_scan,decoded_scan,strip_controls(unquote(decoded_scan))))
     sensitive=any(pattern.search(scan_query) for pattern in HIGH_CONFIDENCE_SECRET_PATTERNS)
     bearer_value=re.search(r'(?i)\bbearer\s+([^\s,;:!?()\[\]{}]{8,})',scan_query)
     if bearer_value:
@@ -215,22 +223,26 @@ def _qualified_dynamic(name, evidence):
             classified_text=_rendered_evidence_text(text)
             context_units=[classified_text]
             adjacent_condition=False
-            try: position=units.index(text)
-            except ValueError: position=-1
-            if position >= 0:
+            positions=[index for index,unit in enumerate(units) if unit == text]
+            for position in positions:
                 for neighbor_position in range(max(0,position-1),min(len(units),position+2)):
                     if neighbor_position == position: continue
                     neighbor=_rendered_evidence_text(units[neighbor_position])
-                    is_forward_anaphor=neighbor_position > position and ANAPHORIC_QUALIFIER.search(neighbor)
+                    is_forward_anaphor=neighbor_position > position and (
+                        ANAPHORIC_QUALIFIER.search(neighbor) or HISTORICAL_ANAPHOR.search(neighbor)
+                    )
                     if is_forward_anaphor: adjacent_condition=True
                     if (ADJACENT_QUALIFIER_ONLY.search(neighbor) or is_forward_anaphor or
                             DYNAMIC_SUBJECT_PATTERNS[name].search(neighbor)):
                         context_units.append(neighbor)
             context=' '.join(context_units)
+            fact_clauses=[part for part in re.split(r'(?i)\s*(?:;|,(?=\s*[A-Za-z])|\band\b|\bbut\b)\s*',classified_text)
+                          if DYNAMIC_SUBJECT_PATTERNS[name].search(part)]
+            historical=any(HISTORICAL_DYNAMIC.search(part) for part in fact_clauses or [classified_text])
             negated_assertion=bool(NEGATED_DYNAMIC_ASSERTION.search(context))
             explicit_no_charge=name == 'fee' and bool(FEE_NOT_CHARGED.search(classified_text))
             if (adjacent_condition or classified_text.rstrip().endswith('?') or NON_ASSERTIVE_DYNAMIC.search(classified_text) or
-                    DYNAMIC_DISQUALIFIER.search(context) or HISTORICAL_DYNAMIC.search(classified_text) or
+                    DYNAMIC_DISQUALIFIER.search(context) or historical or
                     (negated_assertion and not explicit_no_charge) or
                     (name == 'payable_total' and NEGATED_TOTAL_EXISTENCE.search(classified_text)) or
                     (name == 'payable_total' and INCOMPLETE_TOTAL.search(context))): continue

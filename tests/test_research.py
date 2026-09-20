@@ -144,6 +144,8 @@ class PublicResearchTests(unittest.TestCase):
             ('-----BEGIN PGP PRIVATE KEY BLOCK----- abcdef','owner_public_request'),
             ('AWS_SECRET_ACCESS_KEY=supersecret','owner_public_request'),
             ('DATABASE_PASSWORD=supersecret','owner_public_request'),
+            ('DJANGO_SECRET_KEY=supersecret123456789','owner_public_request'),
+            ('api%25E2%2580%258B_key=supersecret123456789','owner_public_request'),
             ('Cookie: sessionid=supersecret','owner_public_request'),
             ('token=supersecret123456789','owner_public_request'),
             ('compare https://example.com/?token=supersecret123456789','owner_public_request'),
@@ -312,6 +314,7 @@ class PublicResearchTests(unittest.TestCase):
             'Tickets were sold out last year.',
             'Service fee was USD 10.',
             'Grand total was USD 100.',
+            'Rooms are available. That was in 2020.',
         ):
             with self.subTest(content=content):
                 reader=Reader({'https://alpha.example/item':{
@@ -326,6 +329,25 @@ class PublicResearchTests(unittest.TestCase):
         current=PublicResearch(search_result,reader,max_pages=1).run(
             'travel_plan','museum plan',query_source='owner_public_request')
         self.assertEqual(current['dynamic_facts']['inventory']['status'],'observed')
+
+        reader=Reader({'https://alpha.example/item':{
+            'url':'https://alpha.example/item','retrieved_at':2,
+            'content':'The hotel opened in 2020, and rooms are available.'}})
+        current=PublicResearch(search_result,reader,max_pages=1).run(
+            'travel_plan','museum plan',query_source='owner_public_request')
+        self.assertEqual(current['dynamic_facts']['inventory']['status'],'observed')
+
+    def test_general_eligibility_and_repeated_qualifiers_remain_unknown(self):
+        for content in (
+            'Rooms are available only for stays of three nights.',
+            'Grand total: USD 100. Welcome. Grand total: USD 100. Taxes are extra.',
+        ):
+            with self.subTest(content=content):
+                reader=Reader({'https://alpha.example/item':{
+                    'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+                result=PublicResearch(search_result,reader,max_pages=1).run(
+                    'travel_plan','museum plan',query_source='owner_public_request')
+                self.assertTrue(all(value['status']=='unknown' for value in result['dynamic_facts'].values()))
 
     def test_estimated_conditional_and_pre_fee_dynamic_facts_stay_unknown(self):
         cases={

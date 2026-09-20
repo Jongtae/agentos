@@ -147,6 +147,8 @@ class PublicResearchTests(unittest.TestCase):
             ('Cookie: sessionid=supersecret','owner_public_request'),
             ('token=supersecret123456789','owner_public_request'),
             ('compare https://example.com/?token=supersecret123456789','owner_public_request'),
+            ('compare https://example.com/?%74oken=supersecret123456789','owner_public_request'),
+            ('compare https://example.com/?token%3Dsupersecret123456789','owner_public_request'),
             ('Bearer abcdefghijklmnop','owner_public_request'),
             ('bEaReR AbCdEfGhIjKlMnOp','owner_public_request'),
         ]
@@ -165,6 +167,9 @@ class PublicResearchTests(unittest.TestCase):
                       'compare "https://example.com/public/path"','JWT format examples',
                       'basic authentication overview','Basic Authentication overview',
                       'bearer authentication examples','Bearer authorization examples'):
+            with self.subTest(query=query):
+                self.assertEqual(validate_public_query(query,'owner_public_request'),query)
+        for query in ('Secret Garden hotel Seoul','secret beach hotels Bali'):
             with self.subTest(query=query):
                 self.assertEqual(validate_public_query(query,'owner_public_request'),query)
 
@@ -212,7 +217,8 @@ class PublicResearchTests(unittest.TestCase):
         self.assertEqual(result['dynamic_facts']['payable_total']['status'],'unknown')
 
     def test_percentage_and_no_fee_are_observed_without_unknown_fee_brief(self):
-        for content in ('Service fee: 10%.','No booking fee.','No service fee is charged.'):
+        for content in ('Service fee: 10%.','No booking fee.','No service fee is charged.',
+                        'Service fee is not charged.','Fees are not charged.'):
             with self.subTest(content=content):
                 reader=Reader({'https://alpha.example/item':{
                     'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
@@ -280,6 +286,7 @@ class PublicResearchTests(unittest.TestCase):
             'No discounts apply; grand total is USD 100.',
             'No booking fee applies; grand total is USD 100.',
             'No surprise: grand total is USD 100.',
+            'No surprise, grand total is USD 100.',
         ):
             with self.subTest(content=content):
                 reader=Reader({'https://alpha.example/item':{
@@ -298,6 +305,27 @@ class PublicResearchTests(unittest.TestCase):
         self.assertEqual(result['dynamic_facts']['fee']['status'],'unknown')
         self.assertEqual(result['dynamic_facts']['inventory']['status'],'unknown')
         self.assertEqual(result['dynamic_facts']['payable_total']['status'],'unknown')
+
+    def test_historical_dynamic_facts_remain_unknown(self):
+        for content in (
+            'Rooms were available in 2020.',
+            'Tickets were sold out last year.',
+            'Service fee was USD 10.',
+            'Grand total was USD 100.',
+        ):
+            with self.subTest(content=content):
+                reader=Reader({'https://alpha.example/item':{
+                    'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+                result=PublicResearch(search_result,reader,max_pages=1).run(
+                    'travel_plan','museum plan',query_source='owner_public_request')
+                self.assertTrue(all(value['status']=='unknown' for value in result['dynamic_facts'].values()))
+
+        reader=Reader({'https://alpha.example/item':{
+            'url':'https://alpha.example/item','retrieved_at':2,
+            'content':'The room was renovated in 2020. Rooms are available.'}})
+        current=PublicResearch(search_result,reader,max_pages=1).run(
+            'travel_plan','museum plan',query_source='owner_public_request')
+        self.assertEqual(current['dynamic_facts']['inventory']['status'],'observed')
 
     def test_estimated_conditional_and_pre_fee_dynamic_facts_stay_unknown(self):
         cases={

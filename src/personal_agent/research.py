@@ -6,6 +6,7 @@ browser, account, cart, reservation, booking, or payment surface.
 import re
 import time
 import unicodedata
+from urllib.parse import unquote
 
 from .local_tools import normalize_public_url
 from .providers import ProviderError
@@ -29,6 +30,7 @@ HIGH_CONFIDENCE_SECRET_PATTERNS = (
     re.compile(r'(?i)\b[a-z][a-z0-9+.-]*://[^\s/@]*@'),
     re.compile(r'(?i)\b(?:cookie|set-cookie)\s*:\s*\S+'),
     re.compile(r'(?i)\btoken\s*=\s*[^&\s]+'),
+    re.compile(r'(?i)\bsecret\s+[a-z0-9_-]{20,}\b'),
     re.compile(r'(?i)\b[A-Z][A-Z0-9_]{1,80}(?:_PASSWORD|_PASSWD|_SECRET|_TOKEN|_API_KEY|_ACCESS_KEY)\s*=\s*\S+'),
     re.compile(r'(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*(?![A-Za-z0-9_-])'),
     re.compile(
@@ -38,9 +40,9 @@ HIGH_CONFIDENCE_SECRET_PATTERNS = (
     ),
     re.compile(r'(?i)(?:file://|(?<![:/\\])[/\\]{2,}[^/\\\s`"\'\[\](){}]+[/\\][^\s`"\'\[\](){}]+|(?<![\w:/\\])(?:\.{1,2}[/\\][^\s`"\'\[\](){}]+|~[/\\][^\s`"\'\[\](){}]+|/[^\s/`"\'\[\](){}]+(?:/[^\s`"\'\[\](){}]+)?)|(?<![\w])[a-z]:[/\\][^\s`"\'\[\](){}]+)'),
 )
-CREDENTIAL_LABEL = r'(?:password|passwd|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|secret)'
+CREDENTIAL_LABEL = r'(?:password|passwd|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret)'
 LABEL_OCCURRENCE = re.compile(rf'(?i)\b{CREDENTIAL_LABEL}\b')
-LABEL_ASSIGNMENT = re.compile(rf'(?i)\b{CREDENTIAL_LABEL}\b\s*(?::|,|=|\bis\b)\s*\S+')
+LABEL_ASSIGNMENT = re.compile(rf'(?i)\b(?:{CREDENTIAL_LABEL}|secret)\b\s*(?::|,|=|\bis\b)\s*\S+')
 PUBLIC_CREDENTIAL_TOPICS = frozenset({
     'about','and','are','authentication','authorization','best','compare','comparison','documentation','docs','examples','explain','expiry','expiration','for','how','information','latest','overview',
     'format','guide','management','manager','permissions','policies','policy','requirements','revocation',
@@ -56,7 +58,11 @@ FACT_PATTERNS = {
 FEE_VALUE_PATTERNS = (
     re.compile(r'(?i)(?:\b(?:fee|fees|tax|taxes|surcharge|resort fee|service charge)\b|수수료|세금|부가세)[^;.!?]{0,20}(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b|\b\d+(?:\.\d+)?\s*%|\b(?:none|zero|free|included|waived)\b|없음|무료|포함)'),
     re.compile(r'(?i)(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b|\b\d+(?:\.\d+)?\s*%)[^;.!?]{0,20}(?:\b(?:fee|fees|tax|taxes|surcharge|resort fee|service charge)\b|수수료|세금|부가세)'),
-    re.compile(r'(?i)\bno\s+(?:\w+\s+){0,2}(?:fee|fees|tax|taxes|surcharge)\b\s*(?:(?:is|was|will\s+be)\s+charged\b\s*)?(?:[.!?]|$)|\bfee[- ]free\b'),
+    re.compile(r'(?i)\bno\s+(?:\w+\s+){0,2}(?:fee|fees|tax|taxes|surcharge)\b\s*(?:(?:is|will\s+be)\s+charged\b\s*)?(?:[.!?]|$)|\bfee[- ]free\b'),
+)
+FEE_NOT_CHARGED = re.compile(
+    r'(?i)\b(?:fee|fees|tax|taxes|surcharge|resort fee|service charge)\b[^;.!?]{0,24}'
+    r'\b(?:is|are|will\s+be)\s+not\s+charged\b'
 )
 TOTAL_VALUE_PATTERNS = (
     re.compile(r'(?i)(?:\b(?:total due|payable total|grand total|total price)\b|총\s*결제(?:액)?|결제\s*금액)\s*(?::|=|\bis\b|\bof\b)?\s*(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b)'),
@@ -64,9 +70,14 @@ TOTAL_VALUE_PATTERNS = (
 )
 DYNAMIC_DISQUALIFIER = re.compile(
     r'(?i)\b(?:may|might|could|can|should|would|possibly|probably|likely|expected|estimated|estimate|approximately|approximate|about|around|roughly|range|ranges|ranging|between|except|projected|potential|check|subject to|up to|at least|at most|starting at|starts at|if|unless|when|upon|provided|on request|depending on)\b|'
-    r'\b(?:is|are|was|were|be|been|has|have)\s+not\b|'
     r'\b(?:(?:for|to)\s+(?:loyalty\s+)?members?\s+only|(?:members?|loyalty)[- ]only|with\s+(?:an?\s+)?membership|only\s+(?:for|to)\s+(?:loyalty\s+)?members?)\b|'
     r'확인\s*필요|변동\s*가능|예상|추정|약\s*\d'
+)
+NEGATED_DYNAMIC_ASSERTION = re.compile(r'(?i)\b(?:is|are|was|were|be|been|has|have)\s+not\b')
+HISTORICAL_DYNAMIC = re.compile(
+    r'(?i)\b(?:was|were|had\s+been|used\s+to|previously|formerly|historically)\b|'
+    r'\b(?:last|previous|prior)\s+(?:year|month|week|season|quarter)\b|'
+    r'\b(?:in|during)\s+(?:19|20)\d{2}\b'
 )
 NON_ASSERTIVE_DYNAMIC = re.compile(
     r'(?i)^\s*(?:are|is|was|were|do|does|did|can|could|will|would|should|may|might|has|have|had)\b|'
@@ -120,7 +131,7 @@ ANAPHORIC_QUALIFIER = re.compile(
     r'(?:does?|do)\s+not\s+include|doesn[\'’]t\s+include|excludes?)\b'
 )
 NEGATED_TOTAL_EXISTENCE = re.compile(
-    r'(?i)(?:^\s*no\s+(?:(?![;:.!?]).){0,40}\b(?:total due|payable total|grand total|total price)\b|'
+    r'(?i)(?:^\s*no\s+(?:(?![,;:.!?]).){0,40}\b(?:total due|payable total|grand total|total price)\b|'
     r'\bthere\s+(?:is|are|was|were)\s+no\s+(?:(?![;.!?]).){0,40}\b(?:total due|payable total|grand total|total price)\b)'
 )
 DYNAMIC_SUBJECT_PATTERNS = {
@@ -137,7 +148,9 @@ def validate_public_query(query, query_source):
     if not isinstance(query, str) or not 1 <= len(query.strip()) <= 500:
         raise ValueError('공개 검색어는 1~500자로 입력하세요.')
     public_query=query.strip()
-    scan_query=''.join(character for character in public_query if unicodedata.category(character) != 'Cf')
+    raw_scan=''.join(character for character in public_query if unicodedata.category(character) != 'Cf')
+    decoded_scan=unquote(raw_scan)
+    scan_query=' '.join((raw_scan,decoded_scan,unquote(decoded_scan)))
     sensitive=any(pattern.search(scan_query) for pattern in HIGH_CONFIDENCE_SECRET_PATTERNS)
     bearer_value=re.search(r'(?i)\bbearer\s+([^\s,;:!?()\[\]{}]{8,})',scan_query)
     if bearer_value:
@@ -214,8 +227,11 @@ def _qualified_dynamic(name, evidence):
                             DYNAMIC_SUBJECT_PATTERNS[name].search(neighbor)):
                         context_units.append(neighbor)
             context=' '.join(context_units)
+            negated_assertion=bool(NEGATED_DYNAMIC_ASSERTION.search(context))
+            explicit_no_charge=name == 'fee' and bool(FEE_NOT_CHARGED.search(classified_text))
             if (adjacent_condition or classified_text.rstrip().endswith('?') or NON_ASSERTIVE_DYNAMIC.search(classified_text) or
-                    DYNAMIC_DISQUALIFIER.search(context) or
+                    DYNAMIC_DISQUALIFIER.search(context) or HISTORICAL_DYNAMIC.search(classified_text) or
+                    (negated_assertion and not explicit_no_charge) or
                     (name == 'payable_total' and NEGATED_TOTAL_EXISTENCE.search(classified_text)) or
                     (name == 'payable_total' and INCOMPLETE_TOTAL.search(context))): continue
             tied=(name == 'inventory')
@@ -225,6 +241,7 @@ def _qualified_dynamic(name, evidence):
                         FEE_NONVALUE_CONTEXT.search(classified_text) or
                         FEE_NONVALUE_CONTEXT_REVERSE.search(classified_text)): continue
                 tied=bool(FEE_VALUE_PATTERNS[0].search(classified_text) or FEE_VALUE_PATTERNS[2].search(classified_text) or
+                          FEE_NOT_CHARGED.search(classified_text) or
                           (FEE_VALUE_PATTERNS[1].search(classified_text) and not FACT_PATTERNS['payable_total'].search(classified_text)))
             elif name == 'payable_total':
                 tied=any(pattern.search(classified_text) for pattern in TOTAL_VALUE_PATTERNS)

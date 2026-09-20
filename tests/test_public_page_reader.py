@@ -302,5 +302,11 @@ class PublicPageReaderTests(unittest.TestCase):
         with self.assertRaisesRegex(Exception, '공개 페이지를 가져오지 못했습니다'):
             PublicPageReader(opener=Broken(), resolver=public_dns).read('https://example.com/')
 
+    def test_malformed_chunked_body_is_a_recoverable_provider_failure(self):
+        class Malformed(Response):
+            def read(self,size=-1): raise http.client.IncompleteRead(b'partial',10)
+        with self.assertRaisesRegex(Exception,'응답을 해석하지 못했습니다'):
+            PublicPageReader(opener=Opener(Malformed()),resolver=public_dns).read('https://example.com/')
+
 
 if __name__ == '__main__': unittest.main()

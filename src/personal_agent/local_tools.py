@@ -337,13 +337,16 @@ class PublicPageReader:
                 raise ValueError('HTML 또는 텍스트 공개 페이지만 읽을 수 있습니다.')
             encoding=(response.headers.get('Content-Encoding','') if hasattr(response,'headers') else '').lower()
             raw=bytearray()
-            while True:
-                self._set_response_deadline(response,deadline)
-                with self._deadline_guard(deadline,lambda:self._interrupt_response(response)):
-                    chunk=response.read(min(64*1024, MAX_PAGE_BYTES-len(raw)+1))
-                if not chunk: break
-                raw.extend(chunk)
-                if len(raw)>MAX_PAGE_BYTES: raise ValueError('공개 페이지 응답 크기 제한을 초과했습니다.')
+            try:
+                while True:
+                    self._set_response_deadline(response,deadline)
+                    with self._deadline_guard(deadline,lambda:self._interrupt_response(response)):
+                        chunk=response.read(min(64*1024, MAX_PAGE_BYTES-len(raw)+1))
+                    if not chunk: break
+                    raw.extend(chunk)
+                    if len(raw)>MAX_PAGE_BYTES: raise ValueError('공개 페이지 응답 크기 제한을 초과했습니다.')
+            except http.client.HTTPException as exc:
+                raise ProviderError('공개 페이지 응답을 해석하지 못했습니다.') from exc
             if encoding == 'gzip':
                 try:
                     decompressor=zlib.decompressobj(16 + zlib.MAX_WBITS); expanded=bytearray()

@@ -115,6 +115,11 @@ const disclosureStore=new Map(),nested={open:true},technical={open:true,querySel
 ui.rememberTaskDisclosures(disclosureStore,'task',technical);technical.open=false;nested.open=false;ui.restoreTaskDisclosures(disclosureStore,'task',technical,nested);assert.equal(technical.open,true);assert.equal(nested.open,true);
 assert.equal(ui.isOpenRouterCompletion({origin:'http://owner.local',data:{type:'agentos-openrouter-connected'}},'http://owner.local'),true);
 assert.equal(ui.isOpenRouterCompletion({origin:'http://attacker.local',data:{type:'agentos-openrouter-connected'}},'http://owner.local'),false);
+const openRouterFlow={verifier:'v'.repeat(64),state:'12345678-1234-1234-1234-123456789abc',url:'https://openrouter.ai/auth?callback_url=x',expires:2000};
+assert.deepEqual(ui.parseOpenRouterFlow(JSON.stringify(openRouterFlow),1000),openRouterFlow);
+assert.equal(ui.parseOpenRouterFlow(JSON.stringify({...openRouterFlow,expires:999}),1000),null);
+assert.equal(ui.parseOpenRouterFlow(JSON.stringify({...openRouterFlow,url:'https://attacker.example/auth'}),1000),null);
+assert.equal(ui.parseOpenRouterFlow('{malformed',1000),null);
 assert.equal(ui.shouldRenderWorkspaceDetail('second','first',1,2),false);
 assert.equal(ui.shouldRenderWorkspaceDetail('second','second',2,2),true);
 assert.equal(ui.shouldInvalidateWorkspaceDetailForDeletion({deleteKind:'memories'},'second'),false);

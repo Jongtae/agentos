@@ -91,6 +91,8 @@ class CalendarTests(unittest.TestCase):
         self.assertNotIn("private agenda", str(result["evidence"]))
         with self.assertRaises(CalendarError):
             self.calendar.query("owner", "2026-01-01T00:00:00Z", "2028-01-01T00:00:00Z", "UTC")
+        with self.assertRaises(CalendarError):
+            self.calendar.query("owner", "2026-01-01T00:00:00", "2026-01-02T00:00:00", "UTC")
 
         disconnected = CalendarConnector(
             QuickStore(self.temp.name + "-other"),
@@ -157,6 +159,7 @@ class CalendarTests(unittest.TestCase):
         for payload in (
             {**EVENT, "attendees": [{"email": "person@example.test"}]},
             {**EVENT, "recurrence": ["RRULE:FREQ=DAILY"]},
+            {**EVENT, "timezone": "Not/A-Timezone"},
             {"start": EVENT["start"]},
         ):
             with self.assertRaises(CalendarError):

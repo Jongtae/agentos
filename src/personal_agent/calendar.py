@@ -16,6 +16,7 @@ import secrets
 import threading
 import time
 import uuid
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .connector_contract import ConnectorContractError, ConnectorRegistry, ConnectorSpec
 from .google_calendar import (
@@ -60,13 +61,24 @@ def _bounded_text(value: object, field: str, maximum: int, *, empty: bool = Fals
     return value
 
 
-def _timestamp(value: object, field: str) -> datetime:
+def _timestamp(value: object, field: str, *, require_offset: bool = False) -> datetime:
     text = _bounded_text(value, field, 64)
     try:
         parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
         raise CalendarError(f"invalid-{field}") from None
+    if require_offset and (parsed.tzinfo is None or parsed.utcoffset() is None):
+        raise CalendarError(f"invalid-{field}")
     return parsed
+
+
+def _timezone(value: object) -> str:
+    name = _bounded_text(value, "timezone", 128)
+    try:
+        ZoneInfo(name)
+    except (ValueError, ZoneInfoNotFoundError):
+        raise CalendarError("invalid-timezone") from None
+    return name
 
 
 def _event_id(value: object) -> str:
@@ -107,7 +119,7 @@ def _validate_event(payload: object, *, partial: bool = False) -> dict:
         result.update(
             start=payload["start"],
             end=payload["end"],
-            timezone=_bounded_text(payload["timezone"], "timezone", 128),
+            timezone=_timezone(payload["timezone"]),
         )
     if not result:
         raise CalendarError("invalid-event")
@@ -170,15 +182,16 @@ class CalendarConnector:
         return CalendarError(error.reason, effect=error.effect, recovery=recovery)
 
     def query(self, owner: str, start: str, end: str, timezone: str, *, max_results: int = 50) -> dict:
-        start_at = _timestamp(start, "start")
-        end_at = _timestamp(end, "end")
+        # Google events.list requires RFC3339 bounds with an explicit offset.
+        start_at = _timestamp(start, "start", require_offset=True)
+        end_at = _timestamp(end, "end", require_offset=True)
         try:
             invalid_window = start_at >= end_at or end_at - start_at > _MAX_WINDOW
         except TypeError:
             invalid_window = True
         if invalid_window:
             raise CalendarError("invalid-window")
-        timezone = _bounded_text(timezone, "timezone", 128)
+        timezone = _timezone(timezone)
         if isinstance(max_results, bool) or not isinstance(max_results, int) or not 1 <= max_results <= 100:
             raise CalendarError("invalid-limit")
         self._authorize(owner, CALENDAR_READ_SCOPE)

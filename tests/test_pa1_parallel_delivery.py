@@ -30,6 +30,27 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         self.assertNotIn("EPIC-PA1", completed)
         self.assertEqual(self.program["active_substeps"], [])
 
+    def test_epic_is_the_only_nonterminal_program_authority(self):
+        nonterminal = [
+            name for name, program in self.plan["programs"].items()
+            if program.get("status") != "complete"
+        ]
+        self.assertEqual(nonterminal, ["EPIC-PA1"])
+        self.assertEqual(self.program["status"], "owner-activated-goal-ready")
+        self.assertEqual(self.program["issue"], 386)
+
+    def test_children_are_parent_controlled_and_cannot_self_activate(self):
+        child_ids = set(self.program["ordered_substeps"])
+        self.assertTrue(child_ids)
+        for child_id in child_ids:
+            child = self.items[child_id]
+            self.assertEqual(child["program"], "EPIC-PA1")
+            self.assertEqual(child["activation_status"], "parent-controlled")
+            self.assertNotIn(child.get("activation_status"), {
+                "active", "owner-activated-goal-ready"
+            })
+        self.assertEqual(self.program["active_substeps"], [])
+
     def test_finite_wave_graph_and_issue_mapping(self):
         self.assertEqual(self.program["ordered_substeps"], [
             "PA1-FDN-01",
@@ -86,6 +107,27 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
             else:
                 self.assertEqual(overlap, set(), child)
 
+    def test_shared_wiring_stays_with_convergence_owners(self):
+        shared = set(self.program["shared_files"])
+        self.assertEqual(
+            set(self.items["PA1-INT-01"]["owns"]),
+            shared,
+        )
+        self.assertIn(
+            "src/personal_agent/quickstart_service.py",
+            self.items["PA1-CONV-01"]["owns"],
+        )
+        for child_id in self.program["parallel_groups"]["wave-1"]:
+            owned_shared = set(self.items[child_id].get("owns", [])) & shared
+            if child_id == "WEB-ADMIN-01":
+                self.assertEqual(owned_shared, {
+                    "src/personal_agent/web/index.html",
+                    "src/personal_agent/web/app.js",
+                    "src/personal_agent/web/style.css",
+                })
+            else:
+                self.assertEqual(owned_shared, set())
+
     def test_dependencies_force_foundation_conversation_then_integration(self):
         for child in ("PA1-INSTALL-01", "PA1-GMAIL-01", "PA1-CALENDAR-01",
                       "PA1-RESEARCH-01", "PA1-MEMORY-01"):
@@ -110,6 +152,9 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         self.assertIn("## Owner activation prompt", text)
         self.assertIn("second heartbeat", text)
         self.assertIn("live credentials", text)
+        self.assertIn("purchases", text)
+        self.assertIn("booking", text)
+        self.assertIn("payment", text)
 
 
 if __name__ == "__main__":

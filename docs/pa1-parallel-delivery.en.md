@@ -4,7 +4,7 @@
 
 This is the execution contract for [EPIC-PA1 / #386](https://github.com/Jongtae/personal-agentos/issues/386), prepared by [GOV-PA1-01 / #385](https://github.com/Jongtae/personal-agentos/issues/385).
 
-It defines how **one explicitly active top-level PA1 goal** may use multiple isolated child branches/worktrees without making the owner manually create or coordinate those worktrees. It is development infrastructure only. It does not add an AgentOS runtime scheduler, a second delivery heartbeat, credentials, provider access, deployment, or external actions.
+It defines how **one explicitly active top-level PA1 goal** may use multiple isolated child branches/worktrees without making the owner manually create or coordinate those worktrees. It is development infrastructure only. It does not add an AgentOS runtime scheduler, a second delivery heartbeat, credentials, provider access, deployment, or external actions such as purchases, bookings, or payments.
 
 EPIC-PA1 remains inactive until this contract and its delivery-plan registration merge and the owner explicitly activates #386.
 

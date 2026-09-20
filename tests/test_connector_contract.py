@@ -304,7 +304,7 @@ class ConnectorContractTests(unittest.TestCase):
         self.assertEqual(
             set(row),
             {
-                "owner", "work_id", "connector_id", "required_scopes", "expires_at",
+                "owner", "work_id", "connector_id", "required_scopes", "connector_scopes", "expires_at",
                 "state", "claim_digest", "claimed_at", "completed_at", "terminal_at", "sequence",
             },
         )
@@ -652,6 +652,172 @@ class ConnectorContractTests(unittest.TestCase):
             )
         self.assertEqual(completed.exception.reason, "work_already_completed")
 
+    def test_historical_pending_rows_survive_definition_changes_without_bricking(self):
+        old_registry = ConnectorRegistry(
+            self.store,
+            (GMAIL, CALENDAR, MULTI_SCOPE),
+            clock=lambda: self.now[0],
+        )
+        for connector in (GMAIL, CALENDAR, MULTI_SCOPE):
+            old_registry.transition(
+                "owner-a",
+                connector.connector_id,
+                ConnectorState.CONNECTED,
+                granted_scopes=connector.required_scopes,
+            )
+        old_pending = PendingWorkRegistry(
+            self.store, old_registry, clock=lambda: self.now[0]
+        )
+        removed_offer = old_pending.issue(
+            "owner-a", work_id(30), GMAIL.connector_id, GMAIL.required_scopes
+        )
+        removed_claimed = old_pending.issue(
+            "owner-a", work_id(31), GMAIL.connector_id, GMAIL.required_scopes
+        )
+        old_pending.claim(
+            removed_claimed.token,
+            "owner-a",
+            GMAIL.connector_id,
+            GMAIL.required_scopes,
+            work_id(131),
+        )
+        removed_completed = old_pending.issue(
+            "owner-a", work_id(32), GMAIL.connector_id, GMAIL.required_scopes
+        )
+        old_pending.claim(
+            removed_completed.token,
+            "owner-a",
+            GMAIL.connector_id,
+            GMAIL.required_scopes,
+            work_id(132),
+        )
+        old_pending.complete(
+            removed_completed.token,
+            "owner-a",
+            GMAIL.connector_id,
+            work_id(132),
+        )
+        changed_offer = old_pending.issue(
+            "owner-a", work_id(33), MULTI_SCOPE.connector_id, ("mail.read",)
+        )
+        changed_claimed = old_pending.issue(
+            "owner-a", work_id(34), MULTI_SCOPE.connector_id, ("mail.write",)
+        )
+        old_pending.claim(
+            changed_claimed.token,
+            "owner-a",
+            MULTI_SCOPE.connector_id,
+            ("mail.write",),
+            work_id(134),
+        )
+        rows = self.store.config(PENDING_WORK_KEY)
+        for legacy_handle in (
+            removed_offer,
+            removed_claimed,
+            removed_completed,
+        ):
+            rows[hashlib.sha256(legacy_handle.token.encode()).hexdigest()].pop(
+                "connector_scopes"
+            )
+        self.store.put(PENDING_WORK_KEY, rows)
+
+        updated_multi = ConnectorSpec(MULTI_SCOPE.connector_id, ("mail.archive",))
+        updated_registry = ConnectorRegistry(
+            self.store,
+            (CALENDAR, updated_multi),
+            clock=lambda: self.now[0],
+        )
+        updated_pending = PendingWorkRegistry(
+            self.store, updated_registry, clock=lambda: self.now[0]
+        )
+        unrelated = updated_pending.issue(
+            "owner-a", work_id(35), CALENDAR.connector_id, ("calendar.events.read",)
+        )
+        unrelated_reference = updated_pending.claim(
+            unrelated.token,
+            "owner-a",
+            CALENDAR.connector_id,
+            ("calendar.events.read",),
+            work_id(135),
+        )
+        self.assertEqual(unrelated_reference.work_id, work_id(35))
+        updated_pending.complete(
+            unrelated.token, "owner-a", CALENDAR.connector_id, work_id(135)
+        )
+
+        for handle, connector_id, scopes in (
+            (removed_offer, GMAIL.connector_id, GMAIL.required_scopes),
+            (changed_offer, MULTI_SCOPE.connector_id, ("mail.read",)),
+        ):
+            with self.subTest(stale_offer=connector_id):
+                with self.assertRaises(ConnectorContractError) as stale:
+                    updated_pending.claim(
+                        handle.token,
+                        "owner-a",
+                        connector_id,
+                        scopes,
+                        work_id(136),
+                    )
+                self.assertEqual(stale.exception.reason, "superseded_resume")
+
+        self.assertEqual(
+            updated_pending.claim(
+                removed_claimed.token,
+                "owner-a",
+                GMAIL.connector_id,
+                GMAIL.required_scopes,
+                work_id(131),
+            ).work_id,
+            work_id(31),
+        )
+        with self.assertRaises(ConnectorContractError) as competitor:
+            updated_pending.claim(
+                removed_claimed.token,
+                "owner-a",
+                GMAIL.connector_id,
+                GMAIL.required_scopes,
+                work_id(231),
+            )
+        self.assertEqual(competitor.exception.reason, "resume_claimed")
+        updated_pending.complete(
+            removed_claimed.token, "owner-a", GMAIL.connector_id, work_id(131)
+        )
+        self.assertEqual(
+            updated_pending.claim(
+                changed_claimed.token,
+                "owner-a",
+                MULTI_SCOPE.connector_id,
+                ("mail.write",),
+                work_id(134),
+            ).work_id,
+            work_id(34),
+        )
+        updated_pending.complete(
+            changed_claimed.token,
+            "owner-a",
+            MULTI_SCOPE.connector_id,
+            work_id(134),
+        )
+
+        restored_registry = ConnectorRegistry(
+            self.store,
+            (GMAIL, CALENDAR, updated_multi),
+            clock=lambda: self.now[0],
+        )
+        restored_pending = PendingWorkRegistry(
+            self.store, restored_registry, clock=lambda: self.now[0]
+        )
+        for connector_id, duplicate_work, scopes in (
+            (GMAIL.connector_id, work_id(32), GMAIL.required_scopes),
+            (MULTI_SCOPE.connector_id, work_id(34), updated_multi.required_scopes),
+        ):
+            with self.subTest(completed_tombstone=connector_id):
+                with self.assertRaises(ConnectorContractError) as completed:
+                    restored_pending.issue(
+                        "owner-a", duplicate_work, connector_id, scopes
+                    )
+                self.assertEqual(completed.exception.reason, "work_already_completed")
+
     def test_reissue_rejects_claimed_and_completed_work_but_claimant_recovers(self):
         self.connect()
         first = self.pending.issue(
@@ -818,26 +984,79 @@ class ConnectorContractTests(unittest.TestCase):
         pending.issue("owner-a", work_id(21), GMAIL.connector_id, GMAIL.required_scopes)
         self.assertNotIn(hashlib.sha256(expiring.token.encode()).hexdigest(), self.store.config(PENDING_WORK_KEY))
 
-    def test_corrupt_connected_grants_and_health_timestamp_fail_closed(self):
+    def test_stale_scope_grants_require_reauth_and_allow_safe_recovery(self):
+        connected = self.connect()
+        self.registry.record_health(
+            "owner-a",
+            GMAIL.connector_id,
+            HealthState.HEALTHY,
+            expected_revision=connected.connection_revision,
+        )
+        baseline = self.store.config(CONNECTOR_STATE_KEY)
+        expanded = ConnectorSpec(
+            GMAIL.connector_id, ("gmail.modify", "gmail.readonly")
+        )
+        expanded_registry = ConnectorRegistry(
+            self.store, (expanded,), clock=lambda: self.now[0]
+        )
+        stale = expanded_registry.status("owner-a", GMAIL.connector_id)
+        self.assertEqual(stale.state, ConnectorState.REAUTH_REQUIRED)
+        self.assertEqual(stale.granted_scopes, ())
+        self.assertEqual(stale.health.state, HealthState.UNKNOWN)
+        self.assertEqual(self.store.config(CONNECTOR_STATE_KEY), baseline)
+        with self.assertRaises(ConnectorContractError) as rejected:
+            expanded_registry.require_connected(
+                "owner-a", GMAIL.connector_id, ("gmail.readonly",)
+            )
+        self.assertEqual(rejected.exception.reason, ConnectorState.REAUTH_REQUIRED.value)
+
+        for target in (
+            ConnectorState.DISCONNECTED,
+            ConnectorState.REAUTH_REQUIRED,
+            ConnectorState.BLOCKED,
+        ):
+            with self.subTest(target=target):
+                self.store.put(CONNECTOR_STATE_KEY, copy.deepcopy(baseline))
+                recovered = expanded_registry.transition(
+                    "owner-a", GMAIL.connector_id, target
+                )
+                self.assertEqual(recovered.state, target)
+                self.assertEqual(recovered.granted_scopes, ())
+
+        self.store.put(CONNECTOR_STATE_KEY, copy.deepcopy(baseline))
+        expanded_connected = expanded_registry.transition(
+            "owner-a",
+            GMAIL.connector_id,
+            ConnectorState.CONNECTED,
+            granted_scopes=expanded.required_scopes,
+        )
+        self.assertEqual(expanded_connected.granted_scopes, expanded.required_scopes)
+
+        reduced_registry = ConnectorRegistry(
+            self.store, (GMAIL,), clock=lambda: self.now[0]
+        )
+        reduced_stale = reduced_registry.status("owner-a", GMAIL.connector_id)
+        self.assertEqual(reduced_stale.state, ConnectorState.REAUTH_REQUIRED)
+        self.assertEqual(reduced_stale.granted_scopes, ())
+        reduced_connected = reduced_registry.transition(
+            "owner-a",
+            GMAIL.connector_id,
+            ConnectorState.CONNECTED,
+            granted_scopes=GMAIL.required_scopes,
+        )
+        self.assertEqual(reduced_connected.state, ConnectorState.CONNECTED)
+        self.assertEqual(reduced_connected.granted_scopes, GMAIL.required_scopes)
+
+    def test_corrupt_connected_timestamp_still_fails_closed(self):
         self.connect()
         rows = self.store.config(CONNECTOR_STATE_KEY)
         owner_rows = next(iter(rows.values()))
-        for grants in ([], ["gmail.readonly", "gmail.modify"]):
-            with self.subTest(grants=grants):
-                owner_rows[GMAIL.connector_id]["granted_scopes"] = grants
-                self.store.put(CONNECTOR_STATE_KEY, rows)
-                with self.assertRaises(ConnectorContractError) as rejected:
-                    self.registry.status("owner-a", GMAIL.connector_id)
-                self.assertEqual(rejected.exception.reason, "invalid_stored_state")
-
-        owner_rows[GMAIL.connector_id]["granted_scopes"] = list(GMAIL.required_scopes)
         owner_rows[GMAIL.connector_id]["changed_at"] = math.nan
         self.store.put(CONNECTOR_STATE_KEY, rows)
         with self.assertRaises(ConnectorContractError) as rejected:
             self.registry.require_connected("owner-a", GMAIL.connector_id, GMAIL.required_scopes)
         self.assertEqual(rejected.exception.reason, "invalid_stored_state")
 
-        owner_rows[GMAIL.connector_id]["changed_at"] = self.now[0]
     def test_all_nonconnected_observed_health_pairs_fail_closed(self):
         observed = (
             {"state": "healthy", "checked_at": self.now[0], "recovery": None},
@@ -1003,7 +1222,7 @@ class ConnectorContractTests(unittest.TestCase):
         corruptions = (
             ("extra", "private"),
             ("state", "invented"),
-            ("granted_scopes", []),
+            ("granted_scopes", "gmail.readonly"),
             ("changed_at", math.nan),
             ("health", {"state": "healthy", "checked_at": None, "recovery": None}),
             ("connection_revision", "not-a-revision"),
@@ -1066,6 +1285,7 @@ class ConnectorContractTests(unittest.TestCase):
             ("expires_at", "tomorrow"),
             ("state", "invented"),
             ("required_scopes", "gmail.readonly"),
+            ("connector_scopes", "gmail.readonly"),
             ("claimed_at", 1000.0),
             ("extra", "private"),
             ("sequence", 0),

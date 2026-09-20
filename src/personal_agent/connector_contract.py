@@ -209,6 +209,14 @@ class ConnectorStatus:
 
 
 @dataclass(frozen=True)
+class _StoredConnectorRow:
+    state: ConnectorState
+    granted_scopes: tuple[str, ...]
+    health: ConnectorHealth
+    connection_revision: str
+
+
+@dataclass(frozen=True)
 class ConnectorResult:
     """A redacted result safe for a conversation or management surface."""
 
@@ -315,16 +323,7 @@ class ConnectorRegistry:
             raise ConnectorContractError("invalid_stored_state")
         return value
 
-    def _status_from_row(self, connector: ConnectorSpec, row: object) -> ConnectorStatus:
-        if row is _MISSING_CONNECTOR_ROW:
-            return ConnectorStatus(
-                connector.connector_id,
-                ConnectorState.DISCONNECTED,
-                connector.required_scopes,
-                (),
-                self._unknown_health(),
-                None,
-            )
+    def _validated_stored_row(self, row: object) -> _StoredConnectorRow:
         if not isinstance(row, dict) or set(row) != {
             "state",
             "granted_scopes",
@@ -359,20 +358,44 @@ class ConnectorRegistry:
             health = ConnectorHealth(health_state, health_checked_at, recovery)
         except (TypeError, ValueError):
             raise ConnectorContractError("invalid_stored_state") from None
-        if state is ConnectorState.CONNECTED:
-            if granted != connector.required_scopes:
-                raise ConnectorContractError("invalid_stored_state")
-        elif granted:
+        if state is not ConnectorState.CONNECTED and granted:
             raise ConnectorContractError("invalid_stored_state")
         if health.state not in _ALLOWED_HEALTH_BY_CONNECTOR_STATE[state]:
             raise ConnectorContractError("invalid_stored_state")
+        return _StoredConnectorRow(state, granted, health, connection_revision)
+
+    def _status_from_row(self, connector: ConnectorSpec, row: object) -> ConnectorStatus:
+        if row is _MISSING_CONNECTOR_ROW:
+            return ConnectorStatus(
+                connector.connector_id,
+                ConnectorState.DISCONNECTED,
+                connector.required_scopes,
+                (),
+                self._unknown_health(),
+                None,
+            )
+        stored = self._validated_stored_row(row)
+        if (
+            stored.state is ConnectorState.CONNECTED
+            and stored.granted_scopes != connector.required_scopes
+        ):
+            # A definition update revokes the usefulness of the historical
+            # grant without making the structurally valid row unrecoverable.
+            return ConnectorStatus(
+                connector.connector_id,
+                ConnectorState.REAUTH_REQUIRED,
+                connector.required_scopes,
+                (),
+                self._unknown_health(),
+                stored.connection_revision,
+            )
         return ConnectorStatus(
             connector.connector_id,
-            state,
+            stored.state,
             connector.required_scopes,
-            granted,
-            health,
-            connection_revision,
+            stored.granted_scopes,
+            stored.health,
+            stored.connection_revision,
         )
 
     def status(self, owner_id: str, connector_id: str) -> ConnectorStatus:
@@ -532,7 +555,7 @@ class PendingWorkRegistry:
     calls ``complete``; no atomic exactly-once external execution is claimed.
     """
 
-    _FIELDS = {
+    _LEGACY_FIELDS = {
         "owner",
         "work_id",
         "connector_id",
@@ -545,6 +568,7 @@ class PendingWorkRegistry:
         "terminal_at",
         "sequence",
     }
+    _FIELDS = _LEGACY_FIELDS | {"connector_scopes"}
     _TERMINAL = {ResumeState.COMPLETED, ResumeState.SUPERSEDED, ResumeState.EXPIRED}
 
     def __init__(
@@ -603,7 +627,10 @@ class PendingWorkRegistry:
         return value
 
     def _validated_row(self, row: object) -> tuple[ResumeState, str, str, str, tuple[str, ...], float, int]:
-        if not isinstance(row, dict) or set(row) != self._FIELDS:
+        if not isinstance(row, dict):
+            raise ConnectorContractError("invalid_resume")
+        fields = frozenset(row)
+        if fields not in {frozenset(self._LEGACY_FIELDS), frozenset(self._FIELDS)}:
             raise ConnectorContractError("invalid_resume")
         try:
             state = ResumeState(row["state"])
@@ -614,10 +641,13 @@ class PendingWorkRegistry:
             connector_id = row["connector_id"]
             if not isinstance(connector_id, str) or not _IDENTIFIER.fullmatch(connector_id):
                 raise ValueError("connector")
-            connector = self.connector_registry.definition(connector_id)
             scopes = _scopes(row["required_scopes"])
-            if not scopes or not set(scopes).issubset(connector.required_scopes):
+            if not scopes:
                 raise ValueError("scopes")
+            if "connector_scopes" in row:
+                connector_scopes = _scopes(row["connector_scopes"])
+                if not set(scopes).issubset(connector_scopes):
+                    raise ValueError("connector scopes")
             expires_at = _finite_timestamp(row["expires_at"], "expires_at")
             sequence = row["sequence"]
             if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence <= 0:
@@ -660,6 +690,25 @@ class PendingWorkRegistry:
             raise ConnectorContractError("invalid_resume") from None
         return state, owner, work_id, connector_id, scopes, expires_at, sequence
 
+    def _pending_definition_is_current(
+        self,
+        connector_id: str,
+        scopes: tuple[str, ...],
+        connector_scopes: tuple[str, ...] | None,
+    ) -> bool:
+        if connector_scopes is None:
+            return False
+        try:
+            connector = self.connector_registry.definition(connector_id)
+        except ConnectorContractError as exc:
+            if exc.reason == "unknown_connector":
+                return False
+            raise
+        return (
+            connector_scopes == connector.required_scopes
+            and set(scopes).issubset(connector.required_scopes)
+        )
+
     def _prune(self, rows: dict, now: float, *, reserve: int = 0) -> None:
         sequences = []
         for row in rows.values():
@@ -668,7 +717,17 @@ class PendingWorkRegistry:
             # Expiry closes only an unclaimed offer. Once Work has been returned
             # to a claimant, that claimant remains authoritative until complete;
             # silently expiring it could let a second handoff schedule the Work.
-            if state is ResumeState.PENDING and now >= expires_at:
+            if state is ResumeState.PENDING and not self._pending_definition_is_current(
+                _connector,
+                _scopes_value,
+                _scopes(row["connector_scopes"])
+                if "connector_scopes" in row
+                else None,
+            ):
+                row["state"] = ResumeState.SUPERSEDED.value
+                row["completed_at"] = None
+                row["terminal_at"] = now
+            elif state is ResumeState.PENDING and now >= expires_at:
                 row["state"] = ResumeState.EXPIRED.value
                 row["completed_at"] = None
                 row["terminal_at"] = now
@@ -762,6 +821,7 @@ class PendingWorkRegistry:
                 "work_id": work_id,
                 "connector_id": connector_id,
                 "required_scopes": list(requested),
+                "connector_scopes": list(connector.required_scopes),
                 "expires_at": expires_at,
                 "state": ResumeState.PENDING.value,
                 "claim_digest": None,

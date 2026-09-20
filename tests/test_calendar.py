@@ -269,11 +269,37 @@ class CalendarTests(unittest.TestCase):
         self.assertEqual(len([call for call in self.provider.calls if call[0] == "create"]), 1)
 
     def test_event_version_rejects_header_controls_before_approval(self):
-        for version in ('"v1"\r\nX-Injected: yes', '"v1"\x00'):
+        for version in ('"v1"\r\nX-Injected: yes', '"v1"\x00', '"버전"'):
             with self.subTest(version=version):
                 with self.assertRaises(CalendarError) as rejected:
                     self.calendar.draft_cancel("event", version, "owner")
                 self.assertEqual(rejected.exception.reason, "invalid-event-version")
+        self.assertFalse(self.provider.calls)
+
+    def test_approval_expiring_while_waiting_for_authority_is_not_dispatched(self):
+        clock = [1000.0]
+        calendar = CalendarConnector(
+            self.store,
+            self.provider,
+            registry=self.registry,
+            now=lambda: clock[0],
+            approval_ttl=1,
+        )
+        draft = calendar.draft_create(EVENT, "owner")
+        approval = calendar.approve(draft["id"], "owner")["approval_id"]
+        clock[0] = 1000.5
+        original_authorize = calendar._authorize
+
+        def delayed_authorize(owner, scope):
+            result = original_authorize(owner, scope)
+            clock[0] = 1001.0
+            return result
+
+        calendar._authorize = delayed_authorize
+        with self.assertRaises(CalendarError) as expired:
+            calendar.create(draft["id"], approval, "owner")
+        self.assertEqual(expired.exception.reason, "approval-expired")
+        self.assertEqual(calendar.status(draft["id"], "owner")["state"], "expired")
         self.assertFalse(self.provider.calls)
 
     def test_status_and_stored_owner_are_redacted(self):

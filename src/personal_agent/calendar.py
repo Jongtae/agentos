@@ -94,7 +94,7 @@ def _event_id(value: object) -> str:
 
 def _etag(value: object) -> str:
     text = _bounded_text(value, "event-version", 1024)
-    if any(ord(character) < 32 or ord(character) == 127 for character in text):
+    if any(ord(character) < 32 or ord(character) > 126 for character in text):
         raise CalendarError("invalid-event-version")
     return text
 
@@ -492,10 +492,17 @@ class CalendarConnector:
                     rows[ident] = row
                     self._put(rows)
                     raise
+                observed_at = self._now()
+                if observed_at >= row.get("expires", 0):
+                    row.update(state="expired", error_class="approval-expired", effect="none",
+                               recovery="request-new-approval")
+                    rows[ident] = row
+                    self._put(rows)
+                    raise CalendarError("approval-expired", recovery="request-new-approval")
                 # Persist the dispatch commitment while the same connector
                 # authority revision is guarded. A later revocation applies
                 # to later work and cannot race into this pre-dispatch gap.
-                row.update(state="executing", effect="unknown", approval_used_at=self._now())
+                row.update(state="executing", effect="unknown", approval_used_at=observed_at)
                 rows[ident] = row
                 self._put(rows)
 

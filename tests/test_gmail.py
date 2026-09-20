@@ -518,6 +518,34 @@ class GmailConnectorTests(unittest.TestCase):
         self.assertEqual(message.body, "<p>café</p>")
         self.assertEqual(message.mime_type, "text/html")
 
+    def test_oversized_header_list_cannot_hide_attachment_disposition(self):
+        self.connect()
+        self.responses.append(
+            {
+                "id": "m_1",
+                "threadId": "t_1",
+                "payload": {
+                    "mimeType": "multipart/mixed",
+                    "parts": [
+                        {
+                            "mimeType": "text/html",
+                            "body": {"data": base64.urlsafe_b64encode(b"<p>main</p>").decode()},
+                        },
+                        {
+                            "mimeType": "text/plain",
+                            "headers": [
+                                {"name": "X-Unrelated", "value": str(index)} for index in range(100)
+                            ] + [{"name": "Content-Disposition", "value": "attachment"}],
+                            "body": {"data": base64.urlsafe_b64encode(b"ATTACHMENT").decode()},
+                        },
+                    ],
+                },
+            }
+        )
+        with self.assertRaises(GmailError) as bounded:
+            self.read()
+        self.assertEqual(bounded.exception.reason, "message_too_complex")
+
     def test_top_level_rfc822_payload_exposes_its_selected_message_body(self):
         self.connect()
         self.responses.append(

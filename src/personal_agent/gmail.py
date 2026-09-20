@@ -731,6 +731,8 @@ class GmailConnector:
             disposition = ""
             content_type = ""
             if isinstance(headers, list):
+                if len(headers) > 100:
+                    exhausted = True
                 for header in headers[:100]:
                     if not isinstance(header, dict):
                         continue

@@ -91,3 +91,46 @@ def test_ci_runs_the_governance_contract_test_as_part_of_full_pytest() -> None:
     # Running the whole tests directory keeps this guard in the required CI job
     # without maintaining a second, drift-prone governance-only command.
     _assert_all(workflow, "python3 -m pytest -q tests")
+
+
+def test_verification_budget_requires_stable_heads_and_batched_remediation() -> None:
+    agents = _read("AGENTS.md")
+    goal = _read("docs/goal-execution-contract.en.md")
+    pa1 = _read("docs/pa1-parallel-delivery.en.md")
+
+    for text in (agents, goal):
+        _assert_all(
+            text,
+            "verification budget",
+            "stable",
+            "focused tests",
+            "coherent checkpoint",
+            "batch",
+            "unchanged head",
+            "duplicate review",
+            "poll",
+            "exact-head",
+            "independent review",
+        )
+
+    _assert_all(
+        goal,
+        "cycle 1",
+        "cycle 2",
+        "third or later",
+        "newly discovered security",
+        "unknown root cause",
+        "do not run the full suite after every narrow mechanical edit",
+        "never skip, weaken, relabel, or bypass",
+    )
+    _assert_all(
+        pa1,
+        "## Verification budget",
+        "soft budget",
+        "one review-ready broad cycle",
+        "one consolidated remediation broad cycle",
+        "third or later broad cycle",
+        "critical",
+        "auth/oauth",
+        "batch findings",
+    )

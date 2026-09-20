@@ -225,14 +225,18 @@ class CalendarConnector:
     ) -> None:
         if self.registry is None or authority_snapshot is None:
             return
-        with self.registry._authority_guard():
-            for connector_id, expected_revision in authority_snapshot:
-                current = self.registry.status(owner, connector_id)
-                if (
-                    current.state is ConnectorState.CONNECTED
-                    and current.connection_revision == expected_revision
-                ):
-                    self.registry.transition(owner, connector_id, ConnectorState.REAUTH_REQUIRED)
+        for connector_id, expected_revision in authority_snapshot:
+            # Keep the same dispatch -> authority lock order used by provider
+            # operations and lifecycle transitions. This is reentrant for the
+            # query that observed a 401 and cannot deadlock a concurrent read.
+            with self.registry._dispatch_guard(owner, (connector_id,)):
+                with self.registry._authority_guard():
+                    current = self.registry.status(owner, connector_id)
+                    if (
+                        current.state is ConnectorState.CONNECTED
+                        and current.connection_revision == expected_revision
+                    ):
+                        self.registry.transition(owner, connector_id, ConnectorState.REAUTH_REQUIRED)
 
     @staticmethod
     def _provider_error(error: GoogleCalendarError) -> CalendarError:

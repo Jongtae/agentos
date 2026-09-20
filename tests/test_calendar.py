@@ -233,6 +233,36 @@ class CalendarTests(unittest.TestCase):
         self.assertEqual([call[0] for call in self.provider.calls],["query"])
         self.assertTrue(transition_finished.is_set())
 
+    def test_query_and_concurrent_scope_expiry_use_one_lock_order(self):
+        provider_started=threading.Event();allow_provider=threading.Event()
+        marker_finished=threading.Event();errors=[]
+        original_query=self.provider.query
+
+        def paused_query(*args):
+            provider_started.set()
+            if not allow_provider.wait(1): raise AssertionError("provider wait timed out")
+            return original_query(*args)
+
+        self.provider.query=paused_query
+        snapshot=tuple(
+            (connector_id,self.registry.status("owner",connector_id).connection_revision)
+            for connector_id in (CALENDAR_CONNECTOR_ID,CALENDAR_WRITE_CONNECTOR_ID)
+        )
+        query=threading.Thread(target=lambda:self.calendar.query(
+            "owner","2026-09-21T00:00:00+09:00","2026-09-28T00:00:00+09:00","Asia/Seoul"))
+
+        def expire():
+            try:self.calendar._mark_scope_expired("owner",snapshot)
+            except Exception as error:errors.append(error)
+            finally:marker_finished.set()
+
+        query.start();self.assertTrue(provider_started.wait(1))
+        marker=threading.Thread(target=expire);marker.start()
+        self.assertFalse(marker_finished.wait(.05))
+        allow_provider.set();query.join(1);marker.join(1)
+        self.assertFalse(query.is_alive());self.assertFalse(marker.is_alive())
+        self.assertFalse(errors);self.assertTrue(marker_finished.is_set())
+
     def test_create_exact_preview_one_time_approval_and_idempotency(self):
         draft = self.calendar.draft_create(EVENT, "owner")
         self.assertEqual(draft["action"], "create")

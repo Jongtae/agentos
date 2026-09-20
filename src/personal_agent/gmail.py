@@ -457,6 +457,7 @@ class GmailConnector:
             return encoded
 
         body, mime_type = self._body(response.get("payload"), load_attachment)
+        self._assert_current_request(owner_id, connection_revision, access_token)
         return GmailMessage(message_id, thread_id, connection_revision, mime_type, body)
 
     def mark_reauthentication_required(

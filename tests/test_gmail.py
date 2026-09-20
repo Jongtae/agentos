@@ -322,6 +322,28 @@ class GmailConnectorTests(unittest.TestCase):
         self.assertEqual(revoked.exception.reason, "superseded_connection")
         self.assertEqual(self.gmail.status("owner-a")["state"], "blocked")
 
+    def test_body_is_discarded_when_authority_changes_during_final_parsing(self):
+        self.connect()
+        self.responses.append(
+            {
+                "id": "m_1",
+                "threadId": "t_1",
+                "payload": {"mimeType": "text/plain", "body": {"data": "cHJpdmF0ZQ=="}},
+            }
+        )
+        original_body = self.gmail._body
+
+        def revoke_during_parse(payload, attachment_loader=None):
+            parsed = original_body(payload, attachment_loader)
+            self.registry.transition("owner-a", GMAIL_CONNECTOR_ID, ConnectorState.BLOCKED)
+            return parsed
+
+        self.gmail._body = revoke_during_parse
+        with self.assertRaises(GmailError) as revoked:
+            self.read()
+        self.assertEqual(revoked.exception.reason, "superseded_connection")
+        self.assertEqual(self.gmail.status("owner-a")["state"], "blocked")
+
     def test_expiry_during_provider_call_discards_response_and_stops_followups(self):
         self.connect()
         calls = []

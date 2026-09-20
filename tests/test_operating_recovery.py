@@ -1,6 +1,7 @@
 import tempfile
 from pathlib import Path
 import pytest
+from personal_agent.capabilities import CapabilityRegistry
 from personal_agent.connector_contract import (
     CONNECTOR_STATE_KEY,
     PENDING_WORK_KEY,
@@ -30,6 +31,9 @@ def test_restore_quarantines_incomplete_jobs_without_replay_or_duplicate():
         queued=source.enqueue("queued work","restore-queued"); running=source.enqueue("running work","restore-running")
         with source.db() as db:db.execute("UPDATE jobs SET status='running',delivery='sending' WHERE id=?",(running,))
         connector=ConnectorSpec("google-gmail-read",("gmail.readonly",))
+        capabilities=CapabilityRegistry(source)
+        capabilities.transition("google-drive-read","enabled",("read",))
+        assert capabilities.require_enabled("google-drive-read","read")["state"]=="enabled"
         registry=ConnectorRegistry(source,(connector,))
         registry.transition("owner-a",connector.connector_id,ConnectorState.CONNECTED,granted_scopes=connector.required_scopes)
         pending=PendingWorkRegistry(source,registry)
@@ -45,6 +49,9 @@ def test_restore_quarantines_incomplete_jobs_without_replay_or_duplicate():
         assert restored.job(queued)["status"]=="interrupted"; assert restored.job(running)["status"]=="interrupted"
         assert restored.job(running)["delivery"]=="unknown"
         assert restored.config(CONNECTOR_STATE_KEY) is None; assert restored.config(PENDING_WORK_KEY) is None
+        assert restored.config("capability_registry") is None
+        with pytest.raises(ValueError,match="현재 사용할 수 없습니다"):
+            CapabilityRegistry(restored).require_enabled("google-drive-read","read")
         assert restored.config("durable_evidence")=={"receipt":"preserved"}
         assert restored.enqueue("queued work","restore-queued")==queued; assert AgentService(restored).run_one() is False
 

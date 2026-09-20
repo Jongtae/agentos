@@ -1125,6 +1125,10 @@ class ConnectorContractTests(unittest.TestCase):
         self.assertTrue(all(item["grant"] == [] for item in registry.list()))
         registry.transition("google-drive-read", "enabled", ("read",))
         self.assertEqual(registry.transition("google-drive-read", "paused")["grant"], ["read"])
+        self.assertEqual(
+            registry.transition("google-drive-read", "enabled", ("read",))["grant"],
+            ["read"],
+        )
         self.assertEqual(registry.transition("google-drive-read", "disconnected")["grant"], [])
 
     def test_capability_registry_top_level_corruption_fails_closed_without_overwrite(self):
@@ -1148,6 +1152,124 @@ class ConnectorContractTests(unittest.TestCase):
                         str(rejected.exception), "저장된 capability 상태를 확인하세요."
                     )
                     self.assertEqual(self.store.config("capability_registry"), malformed)
+
+    def test_capability_registry_inner_rows_are_strict_and_cannot_fabricate_authority(self):
+        registry = CapabilityRegistry(self.store)
+        enabled = registry.transition("google-drive-read", "enabled", ("read",))
+        self.assertEqual(registry.require_enabled("google-drive-read", "read"), enabled)
+        canonical = self.store.config("capability_registry")
+        row = canonical["google-drive-read"]
+        self.assertEqual(set(row), {"state", "changed_at", "grant", "audit"})
+        self.assertEqual(
+            set(row["audit"][-1]), {"state", "changed_at", "approved_scopes"}
+        )
+
+        corruptions = {}
+        corruptions["fabricated_enabled"] = {
+            "google-drive-read": {"state": "enabled", "grant": ["read"]}
+        }
+        missing = copy.deepcopy(canonical)
+        missing["google-drive-read"].pop("audit")
+        corruptions["missing_field"] = missing
+        extra = copy.deepcopy(canonical)
+        extra["google-drive-read"]["private"] = "payload"
+        corruptions["extra_field"] = extra
+        invented = copy.deepcopy(canonical)
+        invented["google-drive-read"]["state"] = "invented"
+        corruptions["invented_state"] = invented
+        for name, timestamp in (("bool_timestamp", True), ("nan_timestamp", math.nan)):
+            malformed = copy.deepcopy(canonical)
+            malformed["google-drive-read"]["changed_at"] = timestamp
+            corruptions[name] = malformed
+        for name, grant in (
+            ("scalar_grant", "read"),
+            ("duplicate_grant", ["read", "read"]),
+            ("undeclared_grant", ["write"]),
+            ("missing_enabled_grant", []),
+        ):
+            malformed = copy.deepcopy(canonical)
+            malformed["google-drive-read"]["grant"] = grant
+            corruptions[name] = malformed
+        inactive_grant = copy.deepcopy(canonical)
+        inactive_row = inactive_grant["google-drive-read"]
+        inactive_row["state"] = "disconnected"
+        inactive_row["grant"] = ["read"]
+        inactive_row["audit"][-1] = {
+            "state": "disconnected",
+            "changed_at": inactive_row["changed_at"],
+        }
+        corruptions["inactive_grant"] = inactive_grant
+        for name, audit in (
+            ("scalar_audit", "event"),
+            ("empty_audit", []),
+            (
+                "oversize_audit",
+                [
+                    {"state": "available", "changed_at": float(number)}
+                    for number in range(51)
+                ],
+            ),
+        ):
+            malformed = copy.deepcopy(canonical)
+            malformed["google-drive-read"]["audit"] = audit
+            corruptions[name] = malformed
+        event_extra = copy.deepcopy(canonical)
+        event_extra["google-drive-read"]["audit"][-1]["extra"] = True
+        corruptions["event_extra"] = event_extra
+        event_bad_time = copy.deepcopy(canonical)
+        event_bad_time["google-drive-read"]["audit"][-1]["changed_at"] = math.inf
+        corruptions["event_bad_time"] = event_bad_time
+        event_bad_state = copy.deepcopy(canonical)
+        event_bad_state["google-drive-read"]["audit"][-1]["state"] = "invented"
+        corruptions["event_bad_state"] = event_bad_state
+        event_missing_approval = copy.deepcopy(canonical)
+        event_missing_approval["google-drive-read"]["audit"][-1].pop("approved_scopes")
+        corruptions["event_missing_approval"] = event_missing_approval
+        event_bad_approval = copy.deepcopy(canonical)
+        event_bad_approval["google-drive-read"]["audit"][-1]["approved_scopes"] = ["write"]
+        corruptions["event_bad_approval"] = event_bad_approval
+        last_event_mismatch = copy.deepcopy(canonical)
+        last_event_mismatch["google-drive-read"]["audit"].append(
+            {"state": "paused", "changed_at": row["changed_at"]}
+        )
+        corruptions["last_event_mismatch"] = last_event_mismatch
+        inappropriate_approval = copy.deepcopy(canonical)
+        inappropriate_approval["google-drive-read"]["state"] = "paused"
+        inappropriate_approval["google-drive-read"]["audit"][-1] = {
+            "state": "paused",
+            "changed_at": row["changed_at"],
+            "approved_scopes": ["read"],
+        }
+        corruptions["inappropriate_event_approval"] = inappropriate_approval
+        unknown = copy.deepcopy(canonical)
+        unknown["unknown-capability"] = copy.deepcopy(row)
+        corruptions["unknown_capability"] = unknown
+
+        for name, malformed in corruptions.items():
+            with self.subTest(name=name):
+                self.store.put("capability_registry", malformed)
+                before = json.dumps(
+                    self.store.config("capability_registry"), sort_keys=True, allow_nan=True
+                )
+                operations = (
+                    registry.list,
+                    lambda: registry.transition(
+                        "google-drive-read", "enabled", ("read",)
+                    ),
+                    lambda: registry.require_enabled("google-drive-read", "read"),
+                )
+                for operation in operations:
+                    with self.assertRaises(ValueError) as rejected:
+                        operation()
+                    self.assertEqual(
+                        str(rejected.exception), "저장된 capability 상태를 확인하세요."
+                    )
+                    after = json.dumps(
+                        self.store.config("capability_registry"),
+                        sort_keys=True,
+                        allow_nan=True,
+                    )
+                    self.assertEqual(after, before)
 
 if __name__ == "__main__":
     unittest.main()

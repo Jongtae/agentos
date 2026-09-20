@@ -166,6 +166,12 @@ class GoogleCalendarTests(unittest.TestCase):
             calendar.update("event", '"stale"', {"summary": "changed"})
         self.assertEqual((error.exception.reason, error.exception.effect), ("stale-event", "none"))
 
+    def test_forbidden_response_does_not_claim_scope_expiry(self):
+        calendar = GoogleCalendar(lambda *_: (_ for _ in ()).throw(GoogleCalendarHTTPError(403)))
+        with self.assertRaises(GoogleCalendarError) as error:
+            calendar.query("2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", "UTC", 10)
+        self.assertEqual((error.exception.reason, error.exception.effect), ("provider-rejected", "none"))
+
 
 if __name__ == "__main__":
     unittest.main()

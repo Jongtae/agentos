@@ -300,6 +300,13 @@ class CalendarConnector:
             if portable_action not in _ACTIONS:
                 portable_action = "unknown"
             quarantined_approval = portable_state in {"awaiting-approval", "approved"}
+            portable_unknown_effect = (
+                portable_state in {"executing", "outcome-unknown"}
+                or (
+                    portable_state == "failed"
+                    and row.get("error_class") in {"transport-error", "malformed-response", "provider-timeout"}
+                )
+            )
             row.update(
                 action=portable_action,
                 payload={},
@@ -309,16 +316,16 @@ class CalendarConnector:
                 state=(
                     "expired"
                     if quarantined_approval
-                    else "outcome-unknown" if portable_state == "executing" else portable_state
+                    else "outcome-unknown" if portable_unknown_effect else portable_state
                 ),
                 effect=(
                     "unknown"
-                    if portable_state in {"executing", "outcome-unknown"}
+                    if portable_unknown_effect
                     else "observed" if isinstance(row.get("result"), dict) else "none"
                 ),
                 portable_evidence=True,
             )
-            if portable_state == "executing":
+            if portable_unknown_effect:
                 row["recovery"] = "inspect-calendar-before-retry"
             elif quarantined_approval:
                 row.update(

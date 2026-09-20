@@ -463,6 +463,18 @@ class CalendarTests(unittest.TestCase):
         self.assertEqual(uncertain["effect"], "unknown")
         self.assertEqual(uncertain["recovery"], "inspect-calendar-before-retry")
 
+        for error_class in ("transport-error", "malformed-response", "provider-timeout"):
+            with self.subTest(portable_error=error_class):
+                ident = "failed-" + error_class
+                self.store.put(
+                    "calendar_create",
+                    {ident: {"id": ident, "state": "failed", "hash": "redacted-hash", "error_class": error_class}},
+                )
+                failed = restored.status(ident, "restored-owner")
+                self.assertEqual(failed["state"], "outcome-unknown")
+                self.assertEqual(failed["effect"], "unknown")
+                self.assertEqual(failed["recovery"], "inspect-calendar-before-retry")
+
         for pending_state in ("awaiting-approval", "approved"):
             with self.subTest(pending_state=pending_state):
                 ident = "pending-" + pending_state

@@ -72,8 +72,10 @@ class GoogleCalendar:
         try:
             return self.transport(method, url, body, self._headers(headers))
         except GoogleCalendarHTTPError as error:
-            if error.status in {401, 403}:
+            if error.status == 401:
                 raise GoogleCalendarError("scope-expired") from None
+            if error.status == 403:
+                raise GoogleCalendarError("provider-rejected") from None
             if error.status == 412:
                 raise GoogleCalendarError("stale-event") from None
             if error.status >= 500 and mutation:

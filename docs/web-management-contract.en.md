@@ -57,7 +57,7 @@ Use **참고 폴더** for input and **결과 저장 폴더** for generated files
 
 ## 6. Connections, states and guidance
 
-The principal setting is the selected execution connection. If different routes use different connections, show each route honestly. A selected subscription CLI must not be labelled 'no AI connected' merely because a direct API provider is unset. Do not imply one global model across multiple routes.
+The principal setting is the selected execution connection. Show actual backend precedence, not an assumed channel split: on the inspected implementation a selected subscription CLI takes precedence for both web and Telegram AI jobs, and editing/testing a direct API does not switch that selection. A selected CLI must not be labelled 'no AI connected' merely because a direct API provider is unset. If future supported routes genuinely differ, identify them independently rather than inventing a global model. Preserve the current route restrictions and show unsupported operations honestly.
 
 Distinguish configuration, owner-attested login, verified readiness, and actually observed execution/model. Missing model information is '모델 정보 미제공', not a fabricated model. Local process execution does not prove local-only model processing. Data-location/sharing copy comes from the effective route and policy, not reassuring boilerplate.
 
@@ -71,7 +71,9 @@ Polling must not destroy draft input, caret/selection, search results, pending c
 
 ## 7. Bounded implementation and evidence
 
-#382 owns three product increments: W1 management shell/removal of duplication; W2 task/result monitor; W3 records/settings/content alignment. W0 is a brief current-state and delivery-plan alignment in that same issue, not another preparation project. The exact branch is `codex/382-web-management-utility`.
+#382 owns three product increments: W1 management shell/removal of duplication; W2 task/result monitor; W3 records/settings/content alignment. W0 checks current source, overlap and readiness in that same issue, not another preparation project. The exact branch is `codex/382-web-management-utility`.
+
+Readiness must exist in both the issue and source plan before explicit activation under the existing selection rules. If it is absent or incomplete, an invocation is limited to W0 preparation and must stop after normal validation/review/merge; it does not continue into W1-W3 in that same preparation invocation. If the dependency-satisfied ready record already exists, verify it and the owner's explicit activation before product work. Registering a ready entry does not select a goal, displace another goal or start a worker/heartbeat. Preserve plan parity and history.
 
 Reuse current vanilla HTML/CSS/JS and backend contracts. Necessary read-model fixes are allowed; replacing the frontend framework, message infrastructure, storage system or authority model is not. Preserve Telegram ingestion/delivery, internal conversations and existing APIs. Changing obsolete UI assertions requires replacement backend/channel coverage, not wholesale removal of tests.
 
@@ -83,8 +85,8 @@ For external merge waits, use the existing integration_pending receipt: exact he
 
 ## 8. Recording versus execution
 
-This contract and issue #382 make the work explicit and discoverable. They do not run a coding worker. The short [Codex handoff](design/utility-v1/CODEX_PROMPT.txt) is used in the owner's available Codex session; that later invocation authorizes the bounded implementation and its first readiness step. No new automation or provider access is configured by this record.
+This contract, source-plan readiness record and issue #382 make the work explicit and discoverable. They do not run a coding worker. The [Codex handoff](design/utility-v1/CODEX_PROMPT.txt) first checks already-recorded readiness and explicit owner activation. Missing readiness permits preparation only, followed by a stop and a separate owner activation action; it is not permission to implement first and reconcile governance afterward. No new automation or provider access is configured by this record.
 
-Keep four facts separate in reports: decision recorded; task specified; implementation executed; verified/merged. Documentation CI does not demonstrate that the owner's local web changed. Read the current checkout explicitly in an already-running Codex session rather than assuming it automatically noticed this new decision.
+Keep four facts separate in reports: decision recorded; task specified/ready; implementation executed; verified/merged. Documentation CI does not demonstrate that the owner's local web changed. Read the current checkout explicitly in an already-running Codex session rather than assuming it automatically noticed this new decision.
 
 The original screenshots and conversations remain private input. Repository evidence uses synthetic examples only. The author's environment did not connect to the owner's local server; screenshot diagnosis and source inspection are not a live browser audit of the current installation.

@@ -245,6 +245,63 @@ class AgentService:
                 'telegram_paired':bool(tg.get('enabled') and tg.get('user_id')),'recovery':recovery,
                 'workspaces':workspaces,'workspace_suggestion':len(conversation)>=4 and not workspaces}
 
+    @staticmethod
+    def _progress_title(message, job_id):
+        text=' '.join(str(message or '').split())
+        text=re.sub(r'(?:sk-|Bearer\s+)[A-Za-z0-9._-]+','[가림]',text,flags=re.I)
+        text=re.sub(r'(?<!\w)/(?:Users|home)/[^\s]+','[경로 가림]',text)
+        return (text[:72]+'…') if len(text)>72 else (text or f'작업 {job_id[:8]}')
+
+    @staticmethod
+    def _progress_status(job):
+        status=job.get('status')
+        if status in ('queued','running'):return 'active','진행 중'
+        if status in ('awaiting_context','awaiting_drive') or job.get('delivery')=='unknown':return 'attention','확인 필요'
+        if status in ('failed','partial','interrupted'):return 'attention','확인 필요'
+        if status in ('cancelled',):return 'finished','취소됨'
+        if status in ('succeeded',):return 'finished','완료'
+        return 'attention','상태 알 수 없음'
+
+    @staticmethod
+    def _progress_event(event):
+        trace=event.get('trace') or {}
+        status=event.get('status')
+        error=trace.get('error')
+        if isinstance(error,str):
+            error=re.sub(r'(?:sk-|Bearer\s+)[A-Za-z0-9._-]+','[가림]',error,flags=re.I)
+            error=re.sub(r'(?<!\w)/(?:Users|home)/[^\s]+','[경로 가림]',error)
+        summary={'running':'실행을 시작했습니다.','succeeded':'실행을 완료했습니다.','failed':error or '실행하지 못했습니다.'}.get(status,'관찰된 이벤트입니다.')
+        safe={}
+        for key in ('scope','engine','mode','exit_code','attempt'):
+            if key in trace and isinstance(trace[key],(str,int,float,bool)):safe[key]=trace[key]
+        if trace.get('evidence'):summary='근거를 확인했습니다.'
+        return {'id':event['id'],'job_id':event['job_id'],'tool':event['tool'],'status':status,'created':event['created'],'summary':summary,'details':safe}
+
+    def task_progress(self, job_id=None):
+        jobs=self.store.jobs()
+        configured=self.store.config('model',{})
+        selected_subscription=self.subscription_engine_status().get('selected')
+        observed=[]
+        for job in jobs:
+            kind,label=self._progress_status(job)
+            events=self.store.task_events(job['id'])
+            last=max([job.get('created') or 0,*[event['created'] for event in events]])
+            waits=[]
+            if job.get('status')=='awaiting_context':waits.append('입력 대기')
+            elif job.get('status')=='awaiting_drive':waits.append('연결 선택 대기')
+            for notification in self.store.task_notifications(job['id']):
+                if notification['kind'] in ('approval_needed','context_approval_needed') and notification['state'] in ('queued','sent'):
+                    waits.append('승인 대기')
+            artifacts=[{'id':item['id'],'kind':'저장된 결과' if 'path' not in item else '파일 결과','path':item.get('path'),'workspace_id':item.get('workspace_id'),'created':item.get('created'),'state':item.get('state','current')} for item in self.store.task_artifacts(job['id'])]
+            task={'id':job['id'],'title':self._progress_title(job.get('message'),job['id']),'status':job.get('status'),'status_kind':kind,'status_label':label,'started_at':job.get('created'),'observed_at':last,'result_available':bool(job.get('response')) and job.get('status') in ('succeeded','partial'),'workspace_id':job.get('workspace_id'),'events_count':len(events),'waits':waits,'configured':{'provider':configured.get('provider'),'model':configured.get('model'),'runtime':selected_subscription or (configured.get('provider') if configured else None)},'observed':{'provider':job.get('provider'),'model':job.get('model'),'runtime':job.get('provider') or None},'artifacts':artifacts}
+            if job_id==job['id']:
+                task['events']=[self._progress_event(event) for event in events]
+                task['source_references']=self.store.evidence_summary(job['id'])
+                task['error']=job.get('error') if job.get('status') in ('failed','partial','interrupted') else None
+                task['conversation']={'job_id':job['id'],'workspace_id':job.get('workspace_id')}
+            observed.append(task)
+        return {'tasks':observed,'selected':next((task for task in observed if task['id']==job_id),None),'unknown_detail_message':'중간 실행 정보가 저장되지 않은 구간은 마지막으로 관찰된 이벤트만 표시합니다.'}
+
     def create_workspace(self, body):
         if not isinstance(body,dict):raise ValueError('작업공간 정보를 확인하세요.')
         return self.store.create_workspace(body.get('title',''),body.get('purpose',''))
@@ -485,7 +542,7 @@ class AgentService:
         rows=rows if isinstance(rows,list) else []
         self.store.put('file_workspace_document_jobs',[*{*rows,job_id}][-100:])
 
-    def save_model(self, body):
+    def save_model(self, body, strict=False):
         config=validate_model(body)
         key=body.get('api_key','')
         if not isinstance(key,str) or len(key)>4096: raise ValueError('올바른 API 키를 입력하세요.')
@@ -493,6 +550,8 @@ class AgentService:
             previous=self.store.config('model',{})
             changed=any(config.get(k)!=previous.get(k) for k in ('provider','endpoint'))
             # Never silently send an existing key to a newly selected host/provider.
+            if changed and not key and (strict or body.get('require_key')):
+                raise ValueError('연결 대상이 바뀌었습니다. 새 API 키를 입력한 뒤 적용하세요.')
             if key or changed or body.get('clear_key'):
                 self.store.secret('model_key',key)
             self.store.put('model',config)
@@ -535,10 +594,15 @@ class AgentService:
         if not isinstance(data,dict) or not isinstance(data.get('models'),list):raise ProviderError('모델 목록을 읽을 수 없습니다.')
         return {'models':[{'name':m['name'],'size':m.get('size',0)} for m in data['models'] if isinstance(m,dict) and isinstance(m.get('name'),str)]}
 
-    def test_model(self):
+    def test_model(self, draft=None, strict=False):
         with self.lock:
-            config=self.store.config('model',{})
-            key=self.store.secret('model_key')
+            config=validate_model(draft) if draft is not None else self.store.config('model',{})
+            key=(draft or {}).get('api_key','') if draft is not None else ''
+            current=self.store.config('model',{})
+            if not key and config.get('provider')==current.get('provider') and config.get('endpoint')==current.get('endpoint'):
+                key=self.store.secret('model_key')
+            if draft is not None and (strict or draft.get('require_key')) and any(config.get(k)!=current.get(k) for k in ('provider','endpoint')) and not key:
+                raise ValueError('연결 대상이 바뀌었습니다. 새 API 키를 입력한 뒤 테스트하세요.')
         if not config:
             raise ValueError('먼저 모델을 선택하세요.')
         now=time.time()

@@ -319,6 +319,9 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                                        'state':handoff.status()['state'] if handoff else 'not-configured'})
             if not self.auth():return
             if path=='/api/home':return self.reply(200,service.home())
+            if path=='/api/tasks':return self.reply(200,service.task_progress())
+            if path.startswith('/api/tasks/'):
+                return self.reply(200,service.task_progress(path.rsplit('/',1)[-1]))
             if path=='/api/capabilities':return self.reply(200,{'capabilities':CapabilityRegistry(store).list()})
             if path=='/api/settings':return self.reply(200,service.conversation_settings_request({'operation':'read'}))
             if path=='/api/capability-recommendations':return self.reply(200,service.capability_recommendation_request({'outcome':parse_qs(parts.query).get('outcome',[''])[0]}))
@@ -422,8 +425,8 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 if path=='/api/context-inbox/telegram-policy':return self.reply(200,service.set_context_telegram_policy(body))
                 if path=='/api/documents/approval':return self.reply(200,service.set_document_approval(body))
                 if path=='/api/public-pages/approval':return self.reply(200,service.set_public_page_approval(body))
-                if path=='/api/model':return self.reply(200,service.save_model(body))
-                if path=='/api/model/test':return self.reply(200,service.test_model())
+                if path=='/api/model':return self.reply(200,service.save_model(body,strict=True))
+                if path=='/api/model/test':return self.reply(200,service.test_model(body or None,strict=True))
                 if path=='/api/telegram':return self.reply(200,service.connect_telegram(body))
                 if path=='/api/telegram/pair':return self.reply(200,service.pair_telegram())
                 if path=='/api/telegram/verify':return self.reply(202,service.queue_telegram_connection_verification())

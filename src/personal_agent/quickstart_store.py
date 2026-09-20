@@ -368,6 +368,28 @@ class QuickStore:
             events.append({**row,'trace':trace if isinstance(trace,dict) else {'error':'실행 근거 형식이 올바르지 않습니다.'}})
         return events
 
+    def task_events(self, job_id):
+        with self.db() as db:
+            rows=[dict(r) for r in db.execute("SELECT id,job_id,tool,status,detail,created FROM tool_events WHERE job_id=? AND tool!='model' ORDER BY id",(job_id,))]
+        events=[]
+        for row in rows:
+            try:trace=json.loads(row.pop('detail'))
+            except (TypeError,ValueError):trace={'error':'실행 근거를 읽을 수 없습니다.'}
+            events.append({**row,'trace':trace if isinstance(trace,dict) else {'error':'실행 근거 형식이 올바르지 않습니다.'}})
+        return events
+
+    def task_artifacts(self, job_id):
+        with self.db() as db:
+            artifacts=[dict(row) for row in db.execute('SELECT id,workspace_id,job_id,created FROM workspace_results WHERE job_id=? ORDER BY created DESC',(job_id,))]
+            tables={row['name'] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if 'file_workspace_results' in tables:
+                artifacts.extend(dict(row) for row in db.execute('SELECT id,workspace_id,request_id AS job_id,path,created,state FROM file_workspace_results WHERE request_id=? ORDER BY created DESC',(job_id,)))
+        return artifacts
+
+    def task_notifications(self, job_id):
+        with self.db() as db:
+            return [dict(row) for row in db.execute('SELECT kind,state,created FROM telegram_notifications WHERE job_id=? ORDER BY created',(job_id,))]
+
     def evidence_summary(self, job_id):
         """Return categories and counts only; never expose tool payloads."""
         with self.db() as db:

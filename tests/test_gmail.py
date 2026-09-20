@@ -407,6 +407,30 @@ class GmailConnectorTests(unittest.TestCase):
         self.assertEqual(message.body, "<p>main body</p>")
         self.assertEqual(message.mime_type, "text/html")
 
+    def test_body_excludes_undispositioned_attached_message_subtree(self):
+        self.connect()
+        self.responses.append(
+            {
+                "id": "m_1",
+                "threadId": "t_1",
+                "payload": {
+                    "mimeType": "multipart/mixed",
+                    "parts": [
+                        {"mimeType": "text/plain", "body": {"data": base64.urlsafe_b64encode(b"main body").decode()}},
+                        {
+                            "mimeType": "message/rfc822",
+                            "parts": [
+                                {"mimeType": "text/plain", "body": {"data": base64.urlsafe_b64encode(b"attached body").decode()}},
+                            ],
+                        },
+                    ],
+                },
+            }
+        )
+        message = self.gmail.read_message("owner-a", "m_1")
+        self.assertEqual(message.body, "main body")
+        self.assertNotIn("attached", message.body)
+
     def test_non_text_registered_codec_is_rejected_as_provider_data(self):
         self.connect()
         self.responses.append(

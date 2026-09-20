@@ -707,6 +707,11 @@ class GmailConnector:
                     charset,
                     body.get("attachmentId") if isinstance(body.get("attachmentId"), str) else None,
                 )]
+            # A nested message/rfc822 is an attached message even when Gmail
+            # omits filename and Content-Disposition metadata. Its descendants
+            # are not part of the current message body.
+            if normalized_mime == "message/rfc822":
+                return []
             children: list[list[tuple[str, str | None, str | None, str | None]]] = []
             parts = part.get("parts", [])
             if isinstance(parts, list):

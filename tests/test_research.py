@@ -187,10 +187,12 @@ class PublicResearchTests(unittest.TestCase):
                    'Service fee is around 10%.','Service fee is up to 10%.','No fee unless you cancel.',
                    'Service fee: USD 10 if paying by card.','No booking fee if you join membership.',
                    'Service fee ranges from USD 10 to USD 20.','Service fee is roughly 10%.',
-                   'Service fee is between USD 10 and USD 20.'),
+                   'Service fee is between USD 10 and USD 20.','Is the service fee 10%?',
+                   'The service fee is not 10%.'),
             'inventory':('Inventory is expected to be available.','Inventory is likely available.',
                          'Rooms are available if you call.','Rooms are available on request.',
-                         'Rooms are available if you book 3 nights.','Rooms are available except on weekends.'),
+                         'Rooms are available if you book 3 nights.','Rooms are available except on weekends.',
+                         'Are rooms available?','Rooms are not available.'),
             'payable_total':('Estimated total price USD 100.','Payable total might be USD 100.',
                              'Total price USD 100 before taxes and fees.','Total price is shown at checkout.',
                              'Grand total is about USD 100.','Grand total is up to USD 100.',
@@ -201,7 +203,12 @@ class PublicResearchTests(unittest.TestCase):
                              'Grand total USD 100 not including resort fees.',
                              'Grand total USD 100 before VAT.',
                              'Grand total USD 100 excluding VAT.',
-                             'Grand total USD 100 + tax.'),
+                             'Grand total USD 100 + tax.',
+                             'Grand total USD 100 before sales tax.',
+                             'Grand total USD 100 excluding local VAT.',
+                             'Grand total USD 100 plus 10% tax.',
+                             'Grand total USD 100?',
+                             'The grand total is not USD 100.'),
         }
         for dynamic,contents in cases.items():
             for content in contents:
@@ -211,11 +218,13 @@ class PublicResearchTests(unittest.TestCase):
                     result=PublicResearch(search_result,reader,max_pages=1).run(
                         'travel_plan','museum plan',query_source='owner_public_request')
                     self.assertEqual(result['dynamic_facts'][dynamic]['status'],'unknown')
+                    self.assertNotIn(content,result['brief'])
                     if content == 'Total price USD 100 before taxes and fees.':
                         self.assertEqual(result['dynamic_facts']['fee']['status'],'unknown')
 
     def test_exact_tied_dynamic_values_remain_observed(self):
-        content='Service fee: USD 25. Grand total: USD 125. Rooms are available. Tickets are unavailable.'
+        content=('Service fee: USD 25. Grand total: USD 125. Rooms are available. Tickets are unavailable. '
+                 'Grand total: USD 110 including local VAT.')
         reader=Reader({'https://alpha.example/item':{
             'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
         result=PublicResearch(search_result,reader,max_pages=1).run(

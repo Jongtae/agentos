@@ -52,12 +52,15 @@ TOTAL_VALUE_PATTERNS = (
 )
 DYNAMIC_DISQUALIFIER = re.compile(
     r'(?i)\b(?:may|might|could|can|should|would|possibly|probably|likely|expected|estimated|estimate|approximately|approximate|about|around|roughly|range|ranges|ranging|between|except|projected|potential|check|subject to|up to|at least|at most|starting at|starts at|if|unless|when|upon|provided|on request|depending on)\b|'
+    r'\b(?:is|are|was|were|be|been|has|have)\s+not\b|'
     r'확인\s*필요|변동\s*가능|예상|추정|약\s*\d'
 )
 INCOMPLETE_TOTAL = re.compile(
-    r'(?i)\b(?:subtotal|before\s+(?:vat|tax|taxes|fee|fees|service charge|service charges)|excluding\s+(?:vat|tax|taxes|fee|fees|service charge|service charges)|plus\s+(?:vat|tax|taxes|fee|fees|service charge|service charges)|'
+    r'(?i)\b(?:subtotal|before\s+(?:(?:sales|local|city|state|federal|hotel|tourist|value[- ]added)\s+)?(?:vat|tax|taxes|fee|fees|service charge|service charges)|'
+    r'excluding\s+(?:(?:sales|local|city|state|federal|hotel|tourist|value[- ]added)\s+)?(?:vat|tax|taxes|fee|fees|service charge|service charges)|'
+    r'plus\s+(?:\d+(?:\.\d+)?\s*%\s+)?(?:(?:sales|local|city|state|federal|hotel|tourist|value[- ]added)\s+)?(?:vat|tax|taxes|fee|fees|service charge|service charges)|'
     r'(?:vat|tax|taxes|fee|fees|resort fee|resort fees|service charge|service charges)\s+(?:not\s+included|excluded|extra|additional)|not\s+including\s+(?:vat|tax|taxes|fee|fees|resort fee|resort fees|service charge|service charges))\b|'
-    r'\+\s*(?:vat|tax|taxes|fee|fees|service charge|service charges)\b|'
+    r'\+\s*(?:\d+(?:\.\d+)?\s*%\s+)?(?:vat|tax|taxes|fee|fees|service charge|service charges)\b|'
     r'세금\s*전|수수료\s*전|세금\s*별도|수수료\s*별도'
 )
 FEE_MISSING_DISCLOSURE = re.compile(
@@ -121,7 +124,7 @@ def _qualified_dynamic(name, evidence):
     qualified=[]
     for row in evidence:
         for text in row['observed_details'][name]:
-            if DYNAMIC_DISQUALIFIER.search(text) or INCOMPLETE_TOTAL.search(text): continue
+            if text.rstrip().endswith('?') or DYNAMIC_DISQUALIFIER.search(text) or INCOMPLETE_TOTAL.search(text): continue
             tied=(name == 'inventory')
             if name == 'fee':
                 if FEE_MISSING_DISCLOSURE.search(text): continue
@@ -205,10 +208,15 @@ class PublicResearch:
     def _brief(mode,evidence,dynamic):
         heading='상품 비교 근거' if mode=='product_comparison' else '여행 계획 근거'
         lines=[heading]
+        dynamic_names=('fee','inventory','payable_total')
         for row in evidence:
             lines.append(f"- [{row['source_id']}] {row['title']} · 조회 시각: {row['retrieved_at']}")
             for kind in ('price','date'):
-                for text in row['observed_details'][kind][:2]: lines.append(f"  - {kind}: {text}")
+                emitted=0
+                for text in row['observed_details'][kind]:
+                    if any(FACT_PATTERNS[name].search(text) for name in dynamic_names): continue
+                    lines.append(f"  - {kind}: {text}");emitted+=1
+                    if emitted == 2: break
         for name,label in (('fee','fee'),('inventory','inventory'),('payable_total','payable_total')):
             for item in dynamic[name]['evidence'][:5]:
                 lines.append(f"- [{item['source_id']}] {label}: {item['exact_text']}")

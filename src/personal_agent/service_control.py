@@ -254,6 +254,13 @@ class ServiceController:
         cli_path = resolve_cli_path(self._cli_path, which=self._which, runner=self.runner)
         desired = render_plist(cli_path, self.data_dir)
         previous = self.plist_path.read_bytes() if self.plist_path.exists() else None
+        if previous is None:
+            orphan = self._observed_status()
+            if orphan["status"] != "not_installed":
+                raise ServiceControlError(
+                    "A registered AgentOS service exists without its installed definition.",
+                    "Run service uninstall to remove the orphaned job, then retry install; owner data is retained.",
+                )
         if previous is not None and previous != desired and not upgrade:
             raise ServiceControlError(
                 "A different AgentOS service definition is already installed.",
@@ -350,9 +357,21 @@ class ServiceController:
             started = self._launchctl("bootstrap", self.domain, str(self.plist_path))
         self._require(started, "The AgentOS background service could not start",
                       "Run service status; use foreground `agentos start` to view a startup error.")
-        observed = self._confirm_running(
-            "Use foreground `agentos start` to inspect the startup failure, then retry service start."
-        )
+        try:
+            observed = self._confirm_running(
+                "Use foreground `agentos start` to inspect the startup failure, then retry service start."
+            )
+        except ServiceControlError as failure:
+            removed = self._launchctl("bootout", self.domain, str(self.plist_path))
+            if removed.returncode and self._observed_status()["status"] not in {"stopped", "not_installed"}:
+                raise ServiceControlError(
+                    f"The service did not become healthy and cleanup could not be verified: {failure}",
+                    "Run service status and stop before retrying; use foreground `agentos start` to inspect startup.",
+                ) from failure
+            raise ServiceControlError(
+                f"The service did not become healthy and was stopped: {failure}",
+                "Use foreground `agentos start` to inspect the startup failure, then retry service start.",
+            ) from failure
         return {**observed, "operation": "start", "changed": True}
 
     def stop(self) -> dict[str, object]:
@@ -384,7 +403,19 @@ class ServiceController:
         started = self._launchctl("bootstrap", self.domain, str(self.plist_path))
         self._require(started, "The AgentOS background service could not restart",
                       "Use foreground `agentos start` to inspect the startup failure, then retry service restart.")
-        observed = self._confirm_running("Use foreground `agentos start` to inspect the startup failure.")
+        try:
+            observed = self._confirm_running("Use foreground `agentos start` to inspect the startup failure.")
+        except ServiceControlError as failure:
+            removed = self._launchctl("bootout", self.domain, str(self.plist_path))
+            if removed.returncode and self._observed_status()["status"] not in {"stopped", "not_installed"}:
+                raise ServiceControlError(
+                    f"The service did not become healthy and cleanup could not be verified: {failure}",
+                    "Run service status and stop before retrying; use foreground `agentos start` to inspect startup.",
+                ) from failure
+            raise ServiceControlError(
+                f"The service did not become healthy and was stopped: {failure}",
+                "Use foreground `agentos start` to inspect the startup failure, then retry service restart.",
+            ) from failure
         return {**observed, "operation": "restart", "changed": True, "data_preserved": True}
 
     def uninstall(self) -> dict[str, object]:

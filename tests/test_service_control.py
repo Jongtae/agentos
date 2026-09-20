@@ -378,6 +378,37 @@ class ServiceControlTests(unittest.TestCase):
         self.assertFalse(stopped["background_available"])
         self.assertIn("install", stopped["next_action"])
 
+    def test_install_rejects_orphaned_registered_job_without_mutating_it(self):
+        self.controller.install()
+        self.controller.plist_path.unlink()
+        before = list(self.runner.commands)
+        with self.assertRaisesRegex(ServiceControlError, "without its installed definition"):
+            self.controller.install()
+        self.assertTrue(self.runner.loaded)
+        self.assertTrue(self.runner.running)
+        self.assertFalse(self.controller.plist_path.exists())
+        self.assertNotIn("bootout", [command[1] for command in self.runner.commands[len(before):]])
+
+    def test_start_and_restart_stop_jobs_that_fail_health_confirmation(self):
+        self.controller.plist_path.parent.mkdir(parents=True)
+        self.controller.plist_path.write_bytes(render_plist(self.cli, self.controller.data_dir))
+        for operation in ("start", "restart"):
+            with self.subTest(operation=operation):
+                self.runner.loaded = False
+                self.runner.running = False
+                controller = ServiceController(
+                    home=self.home,
+                    cli_path=self.cli,
+                    runner=self.runner,
+                    uid=501,
+                    health_probe=lambda: False,
+                )
+                with self.assertRaisesRegex(ServiceControlError, "was stopped"):
+                    getattr(controller, operation)()
+                self.assertFalse(self.runner.loaded)
+                self.assertFalse(self.runner.running)
+                self.assertEqual(self.runner.commands[-1][1], "bootout")
+
     def test_static_template_has_no_fixed_homebrew_prefix(self):
         template = (Path(__file__).resolve().parents[1] / "deploy/com.personal-agentos.plist").read_text()
         self.assertNotIn("/opt/homebrew", template)

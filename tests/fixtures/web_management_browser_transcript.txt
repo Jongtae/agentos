@@ -393,3 +393,28 @@ B remained selected. After every response completed, Chromium observed:
 Deletion invalidation is now scoped to a result in the currently selected project.
 Memory deletion and deletion in A therefore leave B's pending request valid, while
 the earlier selected-project deletion case still invalidates and reloads B.
+
+Authoritative record pagination, retained selection, and deletion race
+---------------------------------------------------------------------
+On 2026-09-21 a fresh headed Chromium run used the local fixture's
+`/control/add-record-pages` control to add 105 synthetic notes. Opening `내 기록`
+issued `/api/personal-records` and showed authoritative totals before pagination:
+
+  {"notes":106,"memories":1,"temporary":0,"artifacts":30,"firstPage":100,"hasMore":true}
+
+After `더 보기`, the browser selected `extra durable note 104`, navigated to
+`작업 현황`, and returned to `내 기록`. The second page and exact detail remained:
+
+  {"selectedAfterReturn":"extra durable note 104","latePageRetained":true}
+
+For the mutation race, the fixture captured a pre-delete records response and held
+it for five seconds (`records-inflight=true`). While it was pending, Chromium used
+the two-step confirmation to delete `memory-exact`. The authoritative post-delete
+reload completed, then the captured stale response returned. The final snapshot was:
+
+  {"deleted":"memory-exact","memoryCount":0,"resurrected":false}
+
+The mutation invalidated the older records request before issuing DELETE and did
+not depend on the legacy `/api/personal-space` GET before refreshing authoritative
+records. These were synthetic fixture records only; no owner data, live provider,
+or external mutation was used.

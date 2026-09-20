@@ -550,7 +550,7 @@ class AgentService:
             previous=self.store.config('model',{})
             changed=any(config.get(k)!=previous.get(k) for k in ('provider','endpoint'))
             # Never silently send an existing key to a newly selected host/provider.
-            if changed and not key and (strict or body.get('require_key')):
+            if changed and config.get('provider') != 'ollama' and not key and (strict or body.get('require_key')):
                 raise ValueError('연결 대상이 바뀌었습니다. 새 API 키를 입력한 뒤 적용하세요.')
             if key or changed or body.get('clear_key'):
                 self.store.secret('model_key',key)
@@ -601,7 +601,9 @@ class AgentService:
             current=self.store.config('model',{})
             if not key and config.get('provider')==current.get('provider') and config.get('endpoint')==current.get('endpoint'):
                 key=self.store.secret('model_key')
-            if draft is not None and (strict or draft.get('require_key')) and any(config.get(k)!=current.get(k) for k in ('provider','endpoint')) and not key:
+            if (draft is not None and config.get('provider') != 'ollama' and
+                    (strict or draft.get('require_key')) and
+                    any(config.get(k)!=current.get(k) for k in ('provider','endpoint')) and not key):
                 raise ValueError('연결 대상이 바뀌었습니다. 새 API 키를 입력한 뒤 테스트하세요.')
         if not config:
             raise ValueError('먼저 모델을 선택하세요.')

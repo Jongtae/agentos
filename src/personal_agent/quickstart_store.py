@@ -9,6 +9,7 @@ import secrets
 import sqlite3
 import threading
 import time
+import unicodedata
 import uuid
 
 
@@ -59,6 +60,11 @@ class QuickStore:
     def db(self):
         conn = sqlite3.connect(self.path, timeout=10)
         conn.row_factory = sqlite3.Row
+        conn.create_function(
+            'unicode_search_key', 1,
+            lambda value: unicodedata.normalize('NFKC', str(value or '')).casefold(),
+            deterministic=True,
+        )
         try:
             with conn:
                 yield conn
@@ -267,11 +273,11 @@ class QuickStore:
             SELECT id,'artifact','저장된 결과','',content,created,NULL,'','','',workspace_id,job_id,'results'
               FROM workspace_results
         '''
-        escaped=query.casefold().replace('\\','\\\\').replace('%','\\%').replace('_','\\_')
+        escaped=unicodedata.normalize('NFKC',query).casefold().replace('\\','\\\\').replace('%','\\%').replace('_','\\_')
         needle=f'%{escaped}%'
         where='''
             WHERE (?='all' OR (?='saved' AND type IN ('note','memory')) OR type=?)
-              AND (?='' OR lower(coalesce(memory_key,'')||' '||content||' '||source_kind||' '||source_app)
+              AND (?='' OR unicode_search_key(coalesce(memory_key,'')||' '||content||' '||source_kind||' '||source_app)
                    LIKE ? ESCAPE '\\')
         '''
         params=(now,record_filter,record_filter,record_filter,query,needle)

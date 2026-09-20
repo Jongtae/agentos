@@ -100,6 +100,8 @@ const records=ui.recordItems({memories:[{id:'n',content:'note'},{id:'m',memory_k
 assert.deepEqual(records.map(x=>[x.id,x.type,x.deleteKind]),[['n','saved','memories'],['m','memory','memories'],['c','temporary',undefined],['r','artifact','results']]);
 const projected=ui.recordItems({items:[{id:'old',type:'note',label:'메모',content:'authoritative',deleteKind:'memories'}]});
 assert.deepEqual(projected,[{id:'old',type:'note',label:'메모',content:'authoritative',deleteKind:'memories'}]);
+assert.equal(ui.recordPageMatches({query:'durable-key',filter:'all'},' durable-key ','all'),true);
+assert.equal(ui.recordPageMatches({query:'durable-key',filter:'all'},'other','all'),false);
 const long='x'.repeat(300)+'needle-after-truncation';
 const space={memories:[{id:'exact',memory_key:'durable-key',content:'exact durable memory'},{id:'long',content:long}]};
 assert.deepEqual(ui.filterLocalRecords(space,'durable-key','all').map(x=>x.id),['exact']);
@@ -145,13 +147,13 @@ const verified=await guard.test(current,async()=>{testRequests++;return {ok:true
 assert.equal(verified.accepted,true);assert.equal(guard.canApply(current),true);
 assert.equal(await guard.apply(current,async payload=>{saveRequests++;assert.equal('credential_revision' in payload,false);}),true);
 assert.equal(testRequests,2);assert.equal(saveRequests,1);
-console.log(JSON.stringify({checks:36}));
+console.log(JSON.stringify({checks:38}));
 })().catch(error=>{console.error(error);process.exit(1);});
 """
         result = subprocess.run(
             [node, '-e', script, str(ROOT / 'src/personal_agent/web/app.js')],
             check=True, capture_output=True, text=True, timeout=20)
-        self.assertEqual(json.loads(result.stdout)['checks'], 36)
+        self.assertEqual(json.loads(result.stdout)['checks'], 38)
 
     def test_model_apply_has_one_explicit_test_and_credential_revision(self):
         app = (ROOT / 'src/personal_agent/web/app.js').read_text()
@@ -162,6 +164,10 @@ console.log(JSON.stringify({checks:36}));
         self.assertIn('modelGuard.apply', app)
         self.assertIn("method||(body===undefined?'GET':'POST')", app)
         self.assertIn("'/api/personal-space/'+item.deleteKind", app)
+        deletion = app[app.index("if(item.deleteKind)"):app.index("$('record-search').onsubmit")]
+        self.assertIn('recordLoadSequence++', deletion)
+        self.assertNotIn("api('/api/personal-space')", deletion)
+        self.assertIn('recordPageMatches(lastRecords', app)
         self.assertEqual(app.count("invalidateModelDraft('연결 결과가 바뀌었습니다. 적용 전에 다시 테스트하세요.')"), 2)
 
     def test_project_detail_and_result_save_actions_remain_available(self):
@@ -244,6 +250,18 @@ console.log(JSON.stringify({checks:36}));
             self.assertEqual(artifact['match_count'], 1)
             self.assertEqual(artifact['items'][0]['id'], 'result-0')
 
+    def test_personal_records_search_uses_one_unicode_normalization(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = QuickStore(directory)
+            with store.db() as db:
+                db.execute('INSERT INTO notes VALUES (?,?,?)',('accent','CAFÉ',1))
+                db.execute('INSERT INTO notes VALUES (?,?,?)',('eszett','Straße',2))
+                db.execute('INSERT INTO notes VALUES (?,?,?)',('combining','Cafe\u0301',3))
+            self.assertEqual({item['id'] for item in store.personal_records('café')['items']},
+                             {'accent','combining'})
+            self.assertEqual([item['id'] for item in store.personal_records('STRASSE')['items']],
+                             ['eszett'])
+
     def test_capability_lifecycle_uses_existing_confirmed_settings_route(self):
         app = (ROOT / 'src/personal_agent/web/app.js').read_text()
         html = (ROOT / 'src/personal_agent/web/index.html').read_text()
@@ -285,6 +303,8 @@ console.log(JSON.stringify({checks:36}));
         self.assertIn('"root":"/tmp/race-saved-root","reference":"/tmp/race-saved-reference"', transcript)
         self.assertIn('"deletedVisible":false,"visibleResults":29', transcript)
         self.assertIn('{"selected":"다른 프로젝트","detail":"다른 프로젝트","results":30}', transcript)
+        self.assertIn('{"selectedAfterReturn":"extra durable note 104","latePageRetained":true}', transcript)
+        self.assertIn('{"deleted":"memory-exact","memoryCount":0,"resurrected":false}', transcript)
         self.assertIn('"projectA":"회귀 프로젝트 · 0개 완료 결과","results":30', transcript)
         self.assertIn('does not run AgentService', transcript)
 

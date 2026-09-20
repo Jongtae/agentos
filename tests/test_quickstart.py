@@ -345,6 +345,15 @@ class QuickstartTests(unittest.TestCase):
         self.assertIn('Ollama response',[m.get('content','') for m in sent])
         self.assertEqual(self.store.jobs()[0]['provider'],'compatible')
 
+    def test_strict_web_model_flow_allows_keyless_ollama(self):
+        self.model('compatible','https://example.test/v1','private-key')
+        draft={'provider':'ollama','endpoint':'http://127.0.0.1:11434',
+               'model':'local-model','api_key':'','require_key':True}
+        self.assertTrue(self.service.test_model(draft,strict=True)['ok'])
+        saved=self.service.save_model(draft,strict=True)
+        self.assertEqual(saved['model']['provider'],'ollama')
+        self.assertEqual(self.store.secret('model_key'),'')
+
     def test_all_model_protocols(self):
         for provider,endpoint in [('ollama','http://localhost:11434'),('compatible','https://example.test/v1'),('openai','https://api.openai.com/v1'),('anthropic','https://api.anthropic.com')]:
             self.model(provider,endpoint,'test-key')

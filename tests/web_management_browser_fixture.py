@@ -24,6 +24,7 @@ class Fixture:
     requests = []
     results = []
     memories = [{"id": "memory-exact", "memory_key": "durable-key", "content": "exact durable memory", "created": 2}, {"id": "memory-long", "content": LONG_MEMORY, "created": 1}]
+    extra_memories = []
     capability_state = "enabled"
     drafts = {}
     tasks_empty = False
@@ -35,6 +36,8 @@ class Fixture:
     delay_task_detail = False
     delay_workspace_detail = False
     workspace_detail_inflight = False
+    delay_records = False
+    records_inflight = False
     file_roots = []
     file_workspace = {"references": [], "workspace": ""}
     workspace_updated = {"workspace-382": 1, "workspace-other": 2}
@@ -117,7 +120,7 @@ class Handler(BaseHTTPRequestHandler):
             items = [
                 {**item, "type": "memory" if item.get("memory_key") else "note",
                  "label": "기억" if item.get("memory_key") else "메모", "deleteKind": "memories"}
-                for item in Fixture.memories
+                for item in Fixture.memories + Fixture.extra_memories
             ] + [
                 {**item, "type": "artifact", "label": "저장된 결과", "deleteKind": "results"}
                 for item in Fixture.results + Fixture.other_results
@@ -130,6 +133,11 @@ class Handler(BaseHTTPRequestHandler):
                        (not query or query in " ".join(str(item.get(key, "")) for key in
                                                        ("label", "memory_key", "content", "source_kind")).casefold())]
             page = matches[offset:offset + limit]
+            if Fixture.delay_records:
+                Fixture.delay_records = False
+                Fixture.records_inflight = True
+                time.sleep(5.0)
+                Fixture.records_inflight = False
             self.send_json({"items": page, "counts": counts, "match_count": len(matches),
                             "offset": offset, "limit": limit, "has_more": offset + len(page) < len(matches)})
         elif path == "/api/workspaces/workspace-382": self.send_json({"id": "workspace-382", "title": "회귀 프로젝트", "purpose": "상세/결과 저장 회귀", "result_count": len(Fixture.results), "saved_job_ids": [item["job_id"] for item in Fixture.results], "results": Fixture.results, "messages": []})
@@ -145,6 +153,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/control/requests": self.send_json({"requests": Fixture.requests})
         elif path == "/control/state-inflight": self.send_json({"state_inflight": Fixture.state_inflight})
         elif path == "/control/workspace-detail-inflight": self.send_json({"workspace_detail_inflight": Fixture.workspace_detail_inflight})
+        elif path == "/control/records-inflight": self.send_json({"records_inflight": Fixture.records_inflight})
         else: self.send_json({"error": path}, 404)
 
     def do_POST(self):
@@ -165,6 +174,16 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/control/delay-state":
             Fixture.delay_state = True
             self.send_json({"delay_state": True})
+        elif path == "/control/add-record-pages":
+            Fixture.extra_memories = [
+                {"id": f"extra-memory-{index}", "content": f"extra durable note {index}",
+                 "created": 1000 + index}
+                for index in range(105)
+            ]
+            self.send_json({"extra_memories": len(Fixture.extra_memories)})
+        elif path == "/control/delay-records":
+            Fixture.delay_records = True
+            self.send_json({"delay_records": True})
         elif path == "/control/set-openrouter":
             Fixture.model = {"provider": "compatible", "endpoint": "https://openrouter.ai/api/v1", "model": "fixture/connected"}
             self.send_json({"model": Fixture.model})
@@ -238,6 +257,7 @@ class Handler(BaseHTTPRequestHandler):
             self.observe("DELETE", path)
             memory_id = path.rsplit("/", 1)[-1]
             Fixture.memories[:] = [item for item in Fixture.memories if item["id"] != memory_id]
+            Fixture.extra_memories[:] = [item for item in Fixture.extra_memories if item["id"] != memory_id]
             self.send_json({"deleted": memory_id})
         elif path.startswith("/api/personal-space/results/"):
             self.observe("DELETE", path)

@@ -1,0 +1,51 @@
+WEB-ADMIN-01 #382 deterministic browser transcript
+Evidence class: local synthetic HTTP fixture + real Chromium browser; no live model,
+Telegram, connector, or external effect was invoked.
+
+Runner (terminal 1, repository root):
+  python3 tests/web_management_browser_fixture.py --port 18782
+  # output: fixture-only http://127.0.0.1:18782
+
+Runner (terminal 2, repository root):
+  PWCLI=/Users/jongtaelee/.codex/skills/playwright/scripts/playwright_cli.sh
+  bash "$PWCLI" open http://127.0.0.1:18782/#tasks --headed
+  bash "$PWCLI" resize 1280 900
+  bash "$PWCLI" snapshot
+  curl -s -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:18782/control/append-event
+  sleep 3
+  bash "$PWCLI" snapshot
+  bash "$PWCLI" resize 390 844
+  bash "$PWCLI" snapshot
+
+Observed 2026-09-21 KST:
+  - desktop 1280x900 rendered only 작업 현황 / 내 기록 / 설정;
+  - after append-event returned {"events": 2}, the already-selected task changed
+    from one timeline item at observed_at=1 to two items at observed_at=2 without
+    reselection;
+  - at 390x844, selecting the task opened its detail with a 목록으로 control.
+
+Record-search steps in the same browser:
+  - open 내 기록, fill "durable-key", click 찾기;
+  - output: 로컬 원문 기록 1개를 찾았습니다.; exact durable-memory row visible;
+  - fill "needle-after-truncation", click 찾기;
+  - output: 로컬 원문 기록 1개를 찾았습니다.; the match beyond character
+    300 remained visible.
+
+R5/R6 steps in a fresh fixture process:
+  - open 설정 > AI 연결 > 직접 API 설정 변경;
+  - fill API key old-key, test, then change only the key to new-key;
+  - observed apply disabled and "입력한 설정이 바뀌었습니다. 다시 테스트하세요.";
+  - test new-key, apply once, then:
+      curl -s http://127.0.0.1:18782/control/counts
+      {"test_requests": 2, "apply_requests": 1, "events": 2}
+    Applying performed no hidden third test.
+  - the deterministic deferred stale-success race is also executed by
+    test_source_derived_task_record_and_model_regressions (Node, not a string
+    assertion): an old success resolves after key-only invalidation and is rejected.
+
+Project preservation steps:
+  - open 내 기록 > 프로젝트 > 회귀 프로젝트;
+  - observed purpose, no saved results, and 완료 결과 저장 action;
+  - click 완료 결과 저장;
+  - observed "완료 결과를 프로젝트에 저장했습니다." and fixture result in
+    저장된 결과.

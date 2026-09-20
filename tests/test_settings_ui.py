@@ -19,8 +19,9 @@ def test_settings_uses_goal_oriented_owner_language():
 
 
 def test_model_flow_tests_exact_draft_before_apply_and_requires_new_destination_key():
-    assert "api('/api/model/test',draft)" in APP
-    assert "verifiedDraft!==proof" in APP
+    assert "api('/api/model/test',value)" in APP
+    assert "modelGuard.test" in APP
+    assert "modelGuard.apply" in APP
     assert "credential_revision" in APP
     assert "apply-model" in HTML
     assert "require_key" in APP

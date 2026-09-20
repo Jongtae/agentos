@@ -72,6 +72,7 @@ class WebManagementReadinessTests(unittest.TestCase):
         script = r"""
 const assert=require('node:assert/strict');
 const ui=require(process.argv[1]);
+(async()=>{
 const old={tasks:[{id:'one',status:'running',status_kind:'active',events:[{id:1}],response:null},{id:'two',events:[{id:2}]}]};
 const fresh={tasks:[{id:'one',status:'succeeded',status_kind:'finished',result_available:true},{id:'two',status:'failed'}]};
 const merged=ui.mergeTaskProgress(fresh,old,[{id:'one',response:'fresh text',message:'owner request',channel:'telegram:fixture'}]);
@@ -86,22 +87,61 @@ const proofB=ui.modelDraftFingerprint({provider:'openai',endpoint:'https://api.e
 assert.notEqual(proofA,proofB);
 const records=ui.recordItems({memories:[{id:'n',content:'note'},{id:'m',memory_key:'pref',content:'memory'}],context:[{id:'c',source_kind:'text'}],results:[{id:'r',content:'artifact'}]});
 assert.deepEqual(records.map(x=>[x.id,x.type,x.deleteKind]),[['n','saved','memories'],['m','memory','memories'],['c','temporary',undefined],['r','artifact','results']]);
-console.log(JSON.stringify({checks:6}));
+const long='x'.repeat(300)+'needle-after-truncation';
+const space={memories:[{id:'exact',memory_key:'durable-key',content:'exact durable memory'},{id:'long',content:long}]};
+assert.deepEqual(ui.filterLocalRecords(space,'durable-key','all').map(x=>x.id),['exact']);
+assert.deepEqual(ui.filterLocalRecords(space,'durable-key','saved').map(x=>x.id),['exact']);
+assert.deepEqual(ui.filterLocalRecords(space,'needle-after-truncation','all').map(x=>x.id),['long']);
+let detailLoads=0;
+await ui.refreshSelectedTaskDetail({id:'one',events_count:1,observed_at:10,status:'running',events:[{id:1}]},{id:'one',events_count:2,observed_at:11,status:'running'},async id=>{detailLoads++;return {id,events:[{id:1},{id:2}]};});
+assert.equal(detailLoads,1);
+await ui.refreshSelectedTaskDetail({id:'one',events_count:2,observed_at:11,status:'running',events:[{id:1},{id:2}]},{id:'one',events_count:2,observed_at:11,status:'running'},async()=>{detailLoads++;});
+assert.equal(detailLoads,1);
+const guard=ui.createModelDraftGuard();
+let resolveOld,testRequests=0,saveRequests=0,current={provider:'openai',endpoint:'https://example.test/v1',model:'first',api_key:'old'};
+const pending=guard.test(current,()=>{testRequests++;return new Promise(resolve=>{resolveOld=resolve;});},()=>current);
+current={...current,api_key:'new'};guard.invalidate();resolveOld({ok:true});
+assert.deepEqual(await pending,{accepted:false,stale:true,result:{ok:true}});
+assert.equal(guard.canApply(current),false);
+const verified=await guard.test(current,async()=>{testRequests++;return {ok:true};},()=>current);
+assert.equal(verified.accepted,true);assert.equal(guard.canApply(current),true);
+assert.equal(await guard.apply(current,async payload=>{saveRequests++;assert.equal('credential_revision' in payload,false);}),true);
+assert.equal(testRequests,2);assert.equal(saveRequests,1);
+console.log(JSON.stringify({checks:12}));
+})().catch(error=>{console.error(error);process.exit(1);});
 """
         result = subprocess.run(
             [node, '-e', script, str(ROOT / 'src/personal_agent/web/app.js')],
             check=True, capture_output=True, text=True, timeout=20)
-        self.assertEqual(json.loads(result.stdout)['checks'], 6)
+        self.assertEqual(json.loads(result.stdout)['checks'], 12)
 
     def test_model_apply_has_one_explicit_test_and_credential_revision(self):
         app = (ROOT / 'src/personal_agent/web/app.js').read_text()
         apply_body = app[app.index("$('model-form').onsubmit"):app.index('function renderExecutionConnection')]
         self.assertNotIn("api('/api/model/test'", apply_body)
         self.assertIn('credential_revision', app)
-        self.assertIn('sequence!==testSequence', app)
-        self.assertIn('proof!==modelDraftFingerprint(modelDraft())', app)
+        self.assertIn('modelGuard.test', app)
+        self.assertIn('modelGuard.apply', app)
         self.assertIn("method||(body===undefined?'GET':'POST')", app)
         self.assertIn("'/api/personal-space/'+item.deleteKind", app)
+
+    def test_project_detail_and_result_save_actions_remain_available(self):
+        app = (ROOT / 'src/personal_agent/web/app.js').read_text()
+        html = (ROOT / 'src/personal_agent/web/index.html').read_text()
+        self.assertIn('id="workspace-detail"', html)
+        self.assertIn("api('/api/workspaces/'+encodeURIComponent(id))", app)
+        self.assertIn("'/save-result'", app)
+
+    def test_browser_fixture_and_exact_runner_transcript_are_checked_in(self):
+        fixture = ROOT / 'tests/web_management_browser_fixture.py'
+        transcript = (ROOT / 'tests/fixtures/web_management_browser_transcript.txt').read_text()
+        subprocess.run(
+            [shutil.which('python3') or 'python3', '-m', 'py_compile', str(fixture)],
+            check=True, capture_output=True, text=True, timeout=20)
+        self.assertIn('python3 tests/web_management_browser_fixture.py --port 18782', transcript)
+        self.assertIn('bash "$PWCLI" resize 390 844', transcript)
+        self.assertIn('{"test_requests": 2, "apply_requests": 1', transcript)
+        self.assertIn('no live model', transcript)
 
     def test_synthetic_telegram_request_reaches_web_read_models_without_web_chat(self):
         calls = []

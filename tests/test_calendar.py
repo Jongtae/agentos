@@ -189,6 +189,21 @@ class CalendarTests(unittest.TestCase):
                     self.calendar.draft_update("event", '"v1"', payload, "owner")
         self.assertFalse(self.provider.calls)
 
+        with self.assertRaises(CalendarError):
+            self.calendar.draft_create(
+                {**EVENT, "start": "2026-09-22", "end": "2026-09-23"},
+                "owner",
+            )
+        local = self.calendar.draft_create(
+            {
+                **EVENT,
+                "start": "2026-09-22T10:00:00",
+                "end": "2026-09-22T11:00:00",
+            },
+            "owner",
+        )
+        self.assertEqual(local["payload"]["start"], "2026-09-22T10:00:00")
+
     def test_expired_approval_scope_expiry_and_unknown_effect_are_truthful(self):
         clock = [0.0]
         calendar = CalendarConnector(
@@ -362,6 +377,21 @@ class CalendarTests(unittest.TestCase):
         self.assertEqual(status["state"], "created")
         self.assertEqual(status["result"], {"id": "event-1"})
         self.assertNotIn("restored-owner", str(restored._rows()))
+
+        self.store.put(
+            "calendar_create",
+            {
+                "in-flight": {
+                    "id": "in-flight",
+                    "state": "executing",
+                    "hash": "redacted-hash",
+                }
+            },
+        )
+        uncertain = restored.status("in-flight", "restored-owner")
+        self.assertEqual(uncertain["state"], "outcome-unknown")
+        self.assertEqual(uncertain["effect"], "unknown")
+        self.assertEqual(uncertain["recovery"], "inspect-calendar-before-retry")
 
     def test_write_authority_check_and_executing_commit_share_registry_guard(self):
         draft = self.calendar.draft_create(EVENT, "owner")

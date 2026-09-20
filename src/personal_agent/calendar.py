@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import json
 import math
+import re
 import secrets
 import threading
 import time
@@ -37,6 +38,9 @@ CALENDAR_SPEC = ConnectorSpec(
 _ACTIONS = frozenset({"create", "update", "cancel"})
 _CONTENT_FIELDS = frozenset({"summary", "start", "end", "timezone", "location", "description"})
 _MAX_WINDOW = timedelta(days=366)
+_RFC3339_LOCAL = re.compile(
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})?\Z"
+)
 _LOCK = threading.RLock()
 
 
@@ -64,6 +68,8 @@ def _bounded_text(value: object, field: str, maximum: int, *, empty: bool = Fals
 
 def _timestamp(value: object, field: str, *, require_offset: bool = False) -> datetime:
     text = _bounded_text(value, field, 64)
+    if _RFC3339_LOCAL.fullmatch(text) is None:
+        raise CalendarError(f"invalid-{field}")
     try:
         parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
@@ -277,9 +283,12 @@ class CalendarConnector:
         if "action" not in row:
             if "payload" not in row:
                 portable_fields = {"id", "state", "hash", "error_class", "result"}
+                portable_state = row.get("state")
                 if (
                     not set(row).issubset(portable_fields)
-                    or row.get("state") not in {"created", "completed", "failed", "expired", "outcome-unknown"}
+                    or portable_state not in {
+                        "created", "completed", "failed", "expired", "executing", "outcome-unknown"
+                    }
                 ):
                     raise CalendarError("invalid-stored-state")
                 # Portable restore intentionally retains only terminal,
@@ -291,9 +300,16 @@ class CalendarConnector:
                     event_id="",
                     event_version="",
                     owner=owner_key,
-                    effect="observed" if isinstance(row.get("result"), dict) else "none",
+                    state="outcome-unknown" if portable_state == "executing" else portable_state,
+                    effect=(
+                        "unknown"
+                        if portable_state in {"executing", "outcome-unknown"}
+                        else "observed" if isinstance(row.get("result"), dict) else "none"
+                    ),
                     portable_evidence=True,
                 )
+                if portable_state == "executing":
+                    row["recovery"] = "inspect-calendar-before-retry"
                 rows[ident] = row
                 self._put(rows)
                 return row

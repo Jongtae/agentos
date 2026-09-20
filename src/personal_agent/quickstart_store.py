@@ -12,6 +12,9 @@ import time
 import uuid
 
 
+_MEMORY_EXACT_SECRET_LOCK = threading.RLock()
+
+
 class QuickStore:
     def __init__(self, root):
         self.root = Path(root).resolve()
@@ -63,7 +66,7 @@ class QuickStore:
                 db.execute('UPDATE memories SET owner_key=?,content_digest=? WHERE id=?',
                            (row['owner_key'] or default_owner,row['content_digest'] or self.memory_digest(row['memory_key'],row['content']),row['id']))
             for row in db.execute('SELECT id,job_id,memory_key,content,owner_key,work_key,content_digest FROM memory_candidates'):
-                db.execute('UPDATE memory_candidates SET owner_key=?,work_key=?,content_digest=? WHERE id=?',
+                db.execute('UPDATE memory_candidates SET job_id=NULL,owner_key=?,work_key=?,content_digest=? WHERE id=?',
                            (row['owner_key'] or default_owner,row['work_key'] or self._memory_binding(row['job_id'] or 'legacy-work'),
                             row['content_digest'] or self.memory_digest(row['memory_key'],row['content']),row['id']))
         self.path.chmod(0o600)
@@ -239,7 +242,7 @@ class QuickStore:
         candidate_id=str(uuid.uuid4());digest=self.memory_digest(memory_key,content)
         with self.db() as db:
             db.execute('INSERT INTO memory_candidates(id,job_id,memory_key,content,created,state,owner_key,work_key,content_digest) VALUES (?,?,?,?,?,?,?,?,?)',
-                       (candidate_id,job_id,memory_key,content,time.time(),'pending',owner_key,work_key,digest))
+                       (candidate_id,None,memory_key,content,time.time(),'pending',owner_key,work_key,digest))
         return {'id':candidate_id,'memory_key':memory_key,'content':content,'content_digest':digest,'state':'pending','saved':False}
 
     def issue_memory_approval(self, job_id, owner_message, ttl=600):
@@ -256,7 +259,7 @@ class QuickStore:
         return {'job_id':job_id,'message_hash':message_hash,'expires_at':expires_at,'token':token}
 
     def verify_memory_approval(self, approval, job_id):
-        if not isinstance(approval,dict) or approval.get('job_id')!=job_id or approval.get('expires_at',0)<time.time(): return False
+        if not isinstance(approval,dict) or approval.get('job_id')!=job_id or approval.get('expires_at',0)<=time.time(): return False
         job=self.job(job_id)
         if not job: return False
         message_hash=hashlib.sha256(str(job.get('message','')).encode()).hexdigest()
@@ -301,6 +304,17 @@ class QuickStore:
         with self.db() as db:
             return [self._memory_row(r) for r in db.execute('SELECT * FROM memories WHERE '+where+' ORDER BY created DESC LIMIT 50',parameters)]
 
+    def memory_status_counts(self, owner_id):
+        """Return authoritative aggregate counts, independent of list pagination."""
+        owner_key=self._memory_binding(owner_id)
+        with self.db() as db:
+            current=db.execute("SELECT COUNT(*) FROM memories WHERE owner_key=? AND state='current'",(owner_key,)).fetchone()[0]
+            candidate_rows=db.execute('SELECT state,COUNT(*) AS count FROM memory_candidates WHERE owner_key=? GROUP BY state',(owner_key,))
+            candidates={state:0 for state in ('pending','accepted','rejected')}
+            for row in candidate_rows:
+                if row['state'] in candidates:candidates[row['state']]=row['count']
+        return {'current_memory_count':current,'candidate_counts':candidates}
+
     def issue_exact_memory_approval(self, owner_id, work_id, action, subject_id, memory_key,
                                     source_digest, content_digest, ttl=600, now=None):
         if action not in ('accept-candidate','correct-memory'):raise ValueError('승인 대상을 확인하세요.')
@@ -315,9 +329,13 @@ class QuickStore:
                 'source_digest':source_digest,'content_digest':content_digest,'expires_at':created+ttl,'state':'issued'}
 
     def _exact_memory_token_hash(self, token):
-        secret=self.secret('memory_exact_approval_secret')
-        if not secret:
-            secret=secrets.token_hex(32);self.secret('memory_exact_approval_secret',secret)
+        # The process-wide lock covers read/create/write across QuickStore
+        # instances which point at the same owner runtime.  ``secret_lock`` is
+        # re-entrant, so the existing private-file helper remains serialized.
+        with _MEMORY_EXACT_SECRET_LOCK:
+            secret=self.secret('memory_exact_approval_secret')
+            if not secret:
+                secret=secrets.token_hex(32);self.secret('memory_exact_approval_secret',secret)
         return hmac.new(secret.encode(),token.encode(),hashlib.sha256).hexdigest()
 
     def _exact_approval(self, db, approval_token, owner_id, work_id, action, subject_id,
@@ -330,7 +348,7 @@ class QuickStore:
         if any(not hmac.compare_digest(str(left),str(right)) for left,right in zip(expected,observed)):
             raise ValueError('정확한 승인이 필요합니다.')
         if row['state']=='consumed':return row
-        if row['state']!='issued' or float(row['expires'])<now:
+        if row['state']!='issued' or float(row['expires'])<=now:
             if row['state']=='issued':db.execute("UPDATE memory_approvals SET state='expired' WHERE token_hash=?",(row['token_hash'],))
             raise ValueError('승인이 만료되었습니다.')
         return row
@@ -386,9 +404,34 @@ class QuickStore:
 
     def delete_memory(self, owner_id, memory_id):
         if not isinstance(memory_id,str) or not memory_id:raise ValueError('삭제할 기억을 확인하세요.')
+        owner_key=self._memory_binding(owner_id)
         with self.db() as db:
-            deleted=db.execute("DELETE FROM memories WHERE id=? AND owner_key=? AND state='current'",(memory_id,self._memory_binding(owner_id))).rowcount
-        return {'deleted':bool(deleted),'id':memory_id,'kind':'memory'}
+            db.execute('BEGIN IMMEDIATE')
+            current=db.execute("SELECT id,supersedes FROM memories WHERE id=? AND owner_key=? AND state='current'",(memory_id,owner_key)).fetchone()
+            if not current:return {'deleted':False,'id':memory_id,'kind':'memory','deleted_memory_count':0,'deleted_candidate_count':0,'deleted_approval_count':0,'retained_private_copies':False}
+            memory_ids=[];cursor=current
+            while cursor:
+                memory_ids.append(cursor['id'])
+                cursor=(db.execute('SELECT id,supersedes FROM memories WHERE id=? AND owner_key=?',(cursor['supersedes'],owner_key)).fetchone()
+                        if cursor['supersedes'] else None)
+            marks=','.join('?' for _ in memory_ids)
+            candidates=[row['id'] for row in db.execute(
+                f'SELECT id FROM memory_candidates WHERE owner_key=? AND state=\'accepted\' AND resulting_memory_id IN ({marks})',
+                (owner_key,*memory_ids))]
+            approval_subjects=memory_ids+candidates
+            approval_deleted=0
+            if approval_subjects:
+                approval_marks=','.join('?' for _ in approval_subjects)
+                approval_deleted=db.execute(
+                    f'DELETE FROM memory_approvals WHERE owner_key=? AND (subject_id IN ({approval_marks}) OR result_id IN ({approval_marks}))',
+                    (owner_key,*approval_subjects,*approval_subjects)).rowcount
+            candidate_deleted=0
+            if candidates:
+                candidate_marks=','.join('?' for _ in candidates)
+                candidate_deleted=db.execute(f'DELETE FROM memory_candidates WHERE owner_key=? AND id IN ({candidate_marks})',(owner_key,*candidates)).rowcount
+            memory_deleted=db.execute(f'DELETE FROM memories WHERE owner_key=? AND id IN ({marks})',(owner_key,*memory_ids)).rowcount
+        return {'deleted':bool(memory_deleted),'id':memory_id,'kind':'memory','deleted_memory_count':memory_deleted,
+                'deleted_candidate_count':candidate_deleted,'deleted_approval_count':approval_deleted,'retained_private_copies':False}
 
     def personal_space(self):
         now=time.time()

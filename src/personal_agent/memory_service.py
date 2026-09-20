@@ -47,7 +47,7 @@ class MemoryService:
         """Store model-originated text only as pending owner review."""
         owner_id, work_id = self._request(owner_id, work_id)
         return self.store.save_memory_candidate(
-            work_id, memory_key, content, owner_id=owner_id, work_id=work_id
+            None, memory_key, content, owner_id=owner_id, work_id=work_id
         )
 
     def list_memories(self, owner_id):
@@ -126,16 +126,10 @@ class MemoryService:
     def status(self, owner_id):
         """Return counts only; status never carries private Memory content."""
         self._identity(owner_id, "owner")
-        memories = self.store.memories(owner_id)
-        candidates = self.store.memory_candidates(owner_id, include_decided=True)
-        states = {state: 0 for state in ("pending", "accepted", "rejected")}
-        for row in candidates:
-            if row["state"] in states:
-                states[row["state"]] += 1
+        counts = self.store.memory_status_counts(owner_id)
         return {
             "state": "ready",
-            "current_memory_count": len(memories),
-            "candidate_counts": states,
+            **counts,
             "private_content_included": False,
         }
 

@@ -1,6 +1,8 @@
 import json
+import threading
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from personal_agent.memory_service import MemoryService, MemoryServiceError
@@ -61,12 +63,24 @@ class MemoryServiceTests(unittest.TestCase):
         expiring_approval = self.service.request_candidate_approval(
             "owner-a", "work-a", expiring["id"], expiring["content_digest"], ttl=1
         )
-        self.now[0] += 2
+        self.now[0] = expiring_approval["expires_at"]
         with self.assertRaisesRegex(ValueError, "만료"):
             self.service.approve_candidate(
                 "owner-a", "work-a", expiring["id"], expiring["content_digest"], expiring_approval["approval_token"]
             )
         self.assertEqual(self.service.inspect_candidate("owner-a", "work-a", expiring["id"])["state"], "pending")
+
+    def test_correction_approval_is_rejected_at_exact_expiry(self):
+        original = self.service.remember("owner-a", "work-a", "meeting-time", "morning")
+        approval = self.service.request_correction(
+            "owner-a", "work-a", original["id"], "meeting-time", "morning", "afternoons", ttl=1
+        )
+        self.now[0] = approval["expires_at"]
+        with self.assertRaisesRegex(ValueError, "만료"):
+            self.service.correct(
+                "owner-a", "work-a", original["id"], "meeting-time", "morning", "afternoons", approval["approval_token"]
+            )
+        self.assertEqual(self.service.inspect_memory("owner-a", original["id"])["content"], "morning")
 
     def test_candidate_rejection_is_exact_and_never_creates_memory(self):
         candidate = self.service.propose("owner-a", "work-a", "food", "vegetarian")
@@ -122,6 +136,41 @@ class MemoryServiceTests(unittest.TestCase):
         self.assertEqual(self.store.notes()[0]["content"], "unrelated note")
         self.assertEqual(self.store.workspace("workspace")["id"], "workspace")
 
+    def test_delete_removes_superseded_chain_candidate_copy_and_bound_approvals(self):
+        candidate = self.service.propose("owner-a", "work-a", "food", "vegetarian")
+        candidate_approval = self.service.request_candidate_approval(
+            "owner-a", "work-a", candidate["id"], candidate["content_digest"]
+        )
+        accepted = self.service.approve_candidate(
+            "owner-a", "work-a", candidate["id"], candidate["content_digest"], candidate_approval["approval_token"]
+        )
+        correction_approval = self.service.request_correction(
+            "owner-a", "work-a", accepted["id"], "food", "vegetarian", "vegan"
+        )
+        corrected = self.service.correct(
+            "owner-a", "work-a", accepted["id"], "food", "vegetarian", "vegan", correction_approval["approval_token"]
+        )
+        unrelated = self.service.remember("owner-a", "work-b", "timezone", "Asia/Seoul")
+        pending = self.service.propose("owner-a", "work-b", "language", "Korean")
+
+        deleted = self.service.delete("owner-a", corrected["id"])
+        self.assertEqual(deleted["deleted_memory_count"], 2)
+        self.assertEqual(deleted["deleted_candidate_count"], 1)
+        self.assertEqual(deleted["deleted_approval_count"], 2)
+        self.assertFalse(deleted["retained_private_copies"])
+        with self.store.db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM memories WHERE id IN (?,?)", (accepted["id"], corrected["id"])).fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM memory_candidates WHERE id=?", (candidate["id"],)).fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM memory_approvals").fetchone()[0], 0)
+        archive = export_owner_state(self.root, self.root / "deleted-owner.tar.gz")
+        restored = QuickStore(restore_owner_state(archive, self.root.parent / "restored-delete"))
+        with restored.db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM memories WHERE id IN (?,?)", (accepted["id"], corrected["id"])).fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM memory_candidates WHERE id=?", (candidate["id"],)).fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM memory_approvals").fetchone()[0], 0)
+        self.assertEqual(self.service.inspect_memory("owner-a", unrelated["id"])["content"], "Asia/Seoul")
+        self.assertEqual(self.service.inspect_candidate("owner-a", "work-b", pending["id"])["state"], "pending")
+
     def test_restart_preserves_accepted_state_without_promoting_pending(self):
         accepted = self.service.remember("owner-a", "work-a", "food", "vegetarian")
         pending = self.service.propose("owner-a", "work-a", "timezone", "Asia/Seoul")
@@ -151,6 +200,76 @@ class MemoryServiceTests(unittest.TestCase):
                 "owner-a", "work-a", candidate["id"], candidate["content_digest"], approval["approval_token"]
             )
         self.assertEqual(restored.inspect_candidate("owner-a", "work-a", candidate["id"])["state"], "pending")
+
+    def test_status_counts_all_rows_beyond_paginated_owner_lists(self):
+        for index in range(51):
+            self.service.remember("owner-a", "work-a", f"memory-{index}", f"value-{index}")
+            self.service.propose("owner-a", "work-a", f"candidate-{index}", f"proposal-{index}")
+        self.assertEqual(len(self.service.list_memories("owner-a")["memories"]), 50)
+        self.assertEqual(len(self.service.list_candidates("owner-a")["candidates"]), 50)
+        status = self.service.status("owner-a")
+        self.assertEqual(status["current_memory_count"], 51)
+        self.assertEqual(status["candidate_counts"], {"pending": 51, "accepted": 0, "rejected": 0})
+
+    def test_service_candidate_never_persists_raw_work_id_in_legacy_or_portable_state(self):
+        self.store.claim(self.store.bootstrap.read_text(), "a-long-test-password")
+        work_id = "private-work-label"
+        candidate = self.service.propose("owner-a", work_id, "food", "vegetarian")
+        with self.store.db() as db:
+            row = db.execute("SELECT job_id,work_key FROM memory_candidates WHERE id=?", (candidate["id"],)).fetchone()
+            self.assertIsNone(row["job_id"])
+            self.assertNotEqual(row["work_key"], work_id)
+            # Simulate the raw duplicate written by the reviewed pre-fix head.
+            db.execute("UPDATE memory_candidates SET job_id=? WHERE id=?", (work_id, candidate["id"]))
+        migrated_store = QuickStore(self.root)
+        with migrated_store.db() as db:
+            self.assertIsNone(db.execute("SELECT job_id FROM memory_candidates WHERE id=?", (candidate["id"],)).fetchone()["job_id"])
+        archive = export_owner_state(self.root, self.root / "owner.tar.gz")
+        restored_store = QuickStore(restore_owner_state(archive, self.root.parent / "restored-work"))
+        with restored_store.db() as db:
+            row = db.execute("SELECT job_id,work_key FROM memory_candidates WHERE id=?", (candidate["id"],)).fetchone()
+            self.assertIsNone(row["job_id"])
+            self.assertNotEqual(row["work_key"], work_id)
+
+    def test_first_use_exact_approval_secret_is_atomic_across_store_instances(self):
+        second_store = QuickStore(self.root)
+        second_service = MemoryService(second_store, now=lambda: self.now[0])
+        first_candidate = self.service.propose("owner-a", "work-a", "first", "one")
+        second_candidate = second_service.propose("owner-a", "work-b", "second", "two")
+        barrier = threading.Barrier(2)
+
+        def coordinate_first_read(store):
+            original = store.secret
+
+            def coordinated(key, value=None):
+                if key == "memory_exact_approval_secret" and value is None:
+                    observed = original(key)
+                    try:
+                        barrier.wait(timeout=0.2)
+                    except threading.BrokenBarrierError:
+                        pass
+                    return observed
+                return original(key, value)
+
+            store.secret = coordinated
+
+        coordinate_first_read(self.store)
+        coordinate_first_read(second_store)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first_future = pool.submit(
+                self.service.request_candidate_approval, "owner-a", "work-a", first_candidate["id"], first_candidate["content_digest"]
+            )
+            second_future = pool.submit(
+                second_service.request_candidate_approval, "owner-a", "work-b", second_candidate["id"], second_candidate["content_digest"]
+            )
+            first_approval, second_approval = first_future.result(), second_future.result()
+        first = self.service.approve_candidate(
+            "owner-a", "work-a", first_candidate["id"], first_candidate["content_digest"], first_approval["approval_token"]
+        )
+        second = second_service.approve_candidate(
+            "owner-a", "work-b", second_candidate["id"], second_candidate["content_digest"], second_approval["approval_token"]
+        )
+        self.assertEqual({first["content"], second["content"]}, {"one", "two"})
 
     def test_private_rows_require_exact_owner_binding(self):
         memory = self.service.remember("owner-a", "work-a", "food", "vegetarian")

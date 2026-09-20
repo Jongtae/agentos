@@ -625,8 +625,9 @@ class GmailConnector:
             raise GmailError("provider_unavailable") from None
         if isinstance(response, dict):
             self._assert_current_request(owner_id, connection_revision, access_token)
+            has_status = "status_code" in response
             status = response.get("status_code")
-            if status is not None and (isinstance(status, bool) or not isinstance(status, int)):
+            if has_status and (isinstance(status, bool) or not isinstance(status, int)):
                 raise GmailError("invalid_provider_response")
             if status == 401:
                 with self.registry._authority_guard():
@@ -772,10 +773,11 @@ class GmailConnector:
                             exhausted = True
                             return []
                         content_type = value
+            disposition_kind = disposition.split(";", 1)[0].strip().lower()
             is_attachment = (
                 isinstance(filename, str)
                 and bool(filename.strip())
-            ) or disposition.split(";", 1)[0].strip().lower() == "attachment"
+            ) or disposition_kind not in {"", "inline"}
             if is_attachment:
                 return []
             normalized_mime = mime_type.lower() if isinstance(mime_type, str) else ""

@@ -922,11 +922,27 @@ class GmailConnectorTests(unittest.TestCase):
             self.gmail.search("owner-a", "receipt")
         self.assertEqual(redirected.exception.reason, "provider_rejected")
 
-        for status in ("200", True):
+        for status in ("200", True, None):
             self.responses.append({"status_code": status, "messages": []})
             with self.assertRaises(GmailError) as malformed:
                 self.gmail.search("owner-a", "receipt")
             self.assertEqual(malformed.exception.reason, "invalid_provider_response")
+
+    def test_unknown_content_disposition_is_not_admitted_as_message_body(self):
+        self.connect()
+        encoded = base64.urlsafe_b64encode(b"must not be body").decode()
+        self.responses.append({
+            "id": "m_1",
+            "threadId": "t_1",
+            "payload": {
+                "mimeType": "text/plain",
+                "headers": [{"name": "Content-Disposition", "value": "x-vendor-attachment"}],
+                "body": {"data": encoded},
+            },
+        })
+        message = self.read()
+        self.assertEqual(message.body, "")
+        self.assertNotIn("must not be body", repr(message.as_dict()))
 
     def test_owner_namespaced_oauth_state_and_tokens_do_not_overwrite_or_cross_revoke(self):
         _offer_a,state_a=self.begin("owner-a")

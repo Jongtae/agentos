@@ -1,5 +1,6 @@
 """Private, single-owner persistence for the quickstart."""
 from contextlib import contextmanager
+import fcntl
 import hashlib
 import hmac
 import json
@@ -12,7 +13,7 @@ import time
 import uuid
 
 
-_MEMORY_EXACT_SECRET_LOCK = threading.RLock()
+_SECRET_STATE_LOCK = threading.RLock()
 
 
 class QuickStore:
@@ -25,7 +26,8 @@ class QuickStore:
         self.path = self.private/'quickstart.db'
         self.bootstrap = self.private/'bootstrap'
         self.secret_path = self.private/'connections.json'
-        self.secret_lock = threading.RLock()
+        self.secret_lock_path = self.private/'connections.lock'
+        self.secret_lock = _SECRET_STATE_LOCK
         with self.db() as db:
             db.executescript('''
             CREATE TABLE IF NOT EXISTS auth(id INTEGER PRIMARY KEY CHECK(id=1), salt TEXT, password TEXT);
@@ -151,13 +153,23 @@ class QuickStore:
         with self.db() as db:
             db.execute('INSERT INTO config VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(key,json.dumps(value)))
 
-    def secret(self, key, value=None):
+    def secret(self, key, value=None, create=None):
+        if value is not None and create is not None:raise ValueError('secret value and factory are mutually exclusive')
         with self.secret_lock:
-            values = json.loads(self.secret_path.read_text()) if self.secret_path.exists() else {}
-            if value is not None:
-                values[key] = value
-                self.write_private(self.secret_path, json.dumps(values))
-            return values.get(key,'')
+            lock_fd=os.open(self.secret_lock_path,os.O_RDWR|os.O_CREAT,0o600)
+            try:
+                fcntl.flock(lock_fd,fcntl.LOCK_EX)
+                values=json.loads(self.secret_path.read_text()) if self.secret_path.exists() else {}
+                if value is not None:
+                    values[key]=value
+                    self.write_private(self.secret_path,json.dumps(values))
+                elif create is not None and not values.get(key):
+                    values[key]=create()
+                    self.write_private(self.secret_path,json.dumps(values))
+                return values.get(key,'')
+            finally:
+                fcntl.flock(lock_fd,fcntl.LOCK_UN)
+                os.close(lock_fd)
 
     def enqueue(self, message, request_key, channel='web', chat_id=None, workspace_id=None, db=None):
         if not isinstance(message,str) or not message.strip() or len(message)>12000:
@@ -329,13 +341,7 @@ class QuickStore:
                 'source_digest':source_digest,'content_digest':content_digest,'expires_at':created+ttl,'state':'issued'}
 
     def _exact_memory_token_hash(self, token):
-        # The process-wide lock covers read/create/write across QuickStore
-        # instances which point at the same owner runtime.  ``secret_lock`` is
-        # re-entrant, so the existing private-file helper remains serialized.
-        with _MEMORY_EXACT_SECRET_LOCK:
-            secret=self.secret('memory_exact_approval_secret')
-            if not secret:
-                secret=secrets.token_hex(32);self.secret('memory_exact_approval_secret',secret)
+        secret=self.secret('memory_exact_approval_secret',create=lambda:secrets.token_hex(32))
         return hmac.new(secret.encode(),token.encode(),hashlib.sha256).hexdigest()
 
     def _exact_approval(self, db, approval_token, owner_id, work_id, action, subject_id,
@@ -402,9 +408,7 @@ class QuickStore:
             db.execute("UPDATE memory_approvals SET state='consumed',result_id=? WHERE token_hash=? AND state='issued'",(result['id'],approval['token_hash']))
             return result
 
-    def delete_memory(self, owner_id, memory_id):
-        if not isinstance(memory_id,str) or not memory_id:raise ValueError('삭제할 기억을 확인하세요.')
-        owner_key=self._memory_binding(owner_id)
+    def _delete_memory_chain(self, owner_key, memory_id):
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
             current=db.execute("SELECT id,supersedes FROM memories WHERE id=? AND owner_key=? AND state='current'",(memory_id,owner_key)).fetchone()
@@ -433,6 +437,10 @@ class QuickStore:
         return {'deleted':bool(memory_deleted),'id':memory_id,'kind':'memory','deleted_memory_count':memory_deleted,
                 'deleted_candidate_count':candidate_deleted,'deleted_approval_count':approval_deleted,'retained_private_copies':False}
 
+    def delete_memory(self, owner_id, memory_id):
+        if not isinstance(memory_id,str) or not memory_id:raise ValueError('삭제할 기억을 확인하세요.')
+        return self._delete_memory_chain(self._memory_binding(owner_id),memory_id)
+
     def personal_space(self):
         now=time.time()
         with self.db() as db:
@@ -449,12 +457,15 @@ class QuickStore:
     def delete_personal_space_item(self, kind, item_id):
         if kind not in ('memories','memory_candidates','results') or not isinstance(item_id,str) or not item_id:
             raise ValueError('삭제할 Personal Space 항목을 확인하세요.')
+        if kind=='memories':
+            with self.db() as db: memory=db.execute("SELECT owner_key FROM memories WHERE id=? AND state='current'",(item_id,)).fetchone()
+            if memory:
+                result=self._delete_memory_chain(memory['owner_key'],item_id)
+                return {**result,'kind':'memories'}
         with self.db() as db:
             if kind=='results': deleted=db.execute('DELETE FROM workspace_results WHERE id=?',(item_id,)).rowcount
             elif kind=='memory_candidates': deleted=db.execute("DELETE FROM memory_candidates WHERE id=? AND state='pending'",(item_id,)).rowcount
-            else:
-                deleted=db.execute('DELETE FROM memories WHERE id=?',(item_id,)).rowcount
-                if not deleted: deleted=db.execute('DELETE FROM notes WHERE id=?',(item_id,)).rowcount
+            else: deleted=db.execute('DELETE FROM notes WHERE id=?',(item_id,)).rowcount
         return {'deleted':bool(deleted),'id':item_id,'kind':kind}
 
     def workspaces(self, include_archived=False):

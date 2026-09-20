@@ -171,6 +171,37 @@ class MemoryServiceTests(unittest.TestCase):
         self.assertEqual(self.service.inspect_memory("owner-a", unrelated["id"])["content"], "Asia/Seoul")
         self.assertEqual(self.service.inspect_candidate("owner-a", "work-b", pending["id"])["state"], "pending")
 
+    def test_personal_space_delete_uses_chain_cleanup_and_preserves_notes(self):
+        candidate = self.service.propose("owner-a", "work-a", "food", "vegetarian")
+        candidate_approval = self.service.request_candidate_approval(
+            "owner-a", "work-a", candidate["id"], candidate["content_digest"]
+        )
+        accepted = self.service.approve_candidate(
+            "owner-a", "work-a", candidate["id"], candidate["content_digest"], candidate_approval["approval_token"]
+        )
+        correction_approval = self.service.request_correction(
+            "owner-a", "work-a", accepted["id"], "food", "vegetarian", "vegan"
+        )
+        corrected = self.service.correct(
+            "owner-a", "work-a", accepted["id"], "food", "vegetarian", "vegan", correction_approval["approval_token"]
+        )
+        unrelated = self.service.remember("owner-a", "work-b", "timezone", "Asia/Seoul")
+        with self.store.db() as db:
+            db.execute("INSERT INTO notes VALUES (?,?,?)", (corrected["id"], "unrelated note", 1.0))
+
+        deleted = self.store.delete_personal_space_item("memories", corrected["id"])
+        self.assertTrue(deleted["deleted"])
+        self.assertEqual(deleted["kind"], "memories")
+        self.assertEqual(deleted["deleted_memory_count"], 2)
+        self.assertEqual(deleted["deleted_candidate_count"], 1)
+        self.assertEqual(deleted["deleted_approval_count"], 2)
+        with self.store.db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM memories WHERE id IN (?,?)", (accepted["id"], corrected["id"])).fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM memory_candidates WHERE id=?", (candidate["id"],)).fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM memory_approvals").fetchone()[0], 0)
+        self.assertEqual(self.store.notes()[0]["content"], "unrelated note")
+        self.assertEqual(self.service.inspect_memory("owner-a", unrelated["id"])["content"], "Asia/Seoul")
+
     def test_restart_preserves_accepted_state_without_promoting_pending(self):
         accepted = self.service.remember("owner-a", "work-a", "food", "vegetarian")
         pending = self.service.propose("owner-a", "work-a", "timezone", "Asia/Seoul")
@@ -231,45 +262,38 @@ class MemoryServiceTests(unittest.TestCase):
             self.assertIsNone(row["job_id"])
             self.assertNotEqual(row["work_key"], work_id)
 
-    def test_first_use_exact_approval_secret_is_atomic_across_store_instances(self):
+    def test_connections_secret_transaction_is_atomic_across_keys_and_store_instances(self):
         second_store = QuickStore(self.root)
-        second_service = MemoryService(second_store, now=lambda: self.now[0])
-        first_candidate = self.service.propose("owner-a", "work-a", "first", "one")
-        second_candidate = second_service.propose("owner-a", "work-b", "second", "two")
+        candidate = self.service.propose("owner-a", "work-a", "first", "one")
         barrier = threading.Barrier(2)
+        original_write = QuickStore.write_private
 
-        def coordinate_first_read(store):
-            original = store.secret
+        def coordinated_write(path, content):
+            if Path(path) == self.store.secret_path:
+                try:
+                    barrier.wait(timeout=0.2)
+                except threading.BrokenBarrierError:
+                    pass
+            return original_write(path, content)
 
-            def coordinated(key, value=None):
-                if key == "memory_exact_approval_secret" and value is None:
-                    observed = original(key)
-                    try:
-                        barrier.wait(timeout=0.2)
-                    except threading.BrokenBarrierError:
-                        pass
-                    return observed
-                return original(key, value)
-
-            store.secret = coordinated
-
-        coordinate_first_read(self.store)
-        coordinate_first_read(second_store)
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            first_future = pool.submit(
-                self.service.request_candidate_approval, "owner-a", "work-a", first_candidate["id"], first_candidate["content_digest"]
-            )
-            second_future = pool.submit(
-                second_service.request_candidate_approval, "owner-a", "work-b", second_candidate["id"], second_candidate["content_digest"]
-            )
-            first_approval, second_approval = first_future.result(), second_future.result()
-        first = self.service.approve_candidate(
-            "owner-a", "work-a", first_candidate["id"], first_candidate["content_digest"], first_approval["approval_token"]
+        QuickStore.write_private = staticmethod(coordinated_write)
+        try:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                approval_future = pool.submit(
+                    self.service.request_candidate_approval, "owner-a", "work-a", candidate["id"], candidate["content_digest"]
+                )
+                credential_future = pool.submit(second_store.secret, "telegram_token", "telegram-secret")
+                approval, credential = approval_future.result(), credential_future.result()
+        finally:
+            QuickStore.write_private = staticmethod(original_write)
+        values = json.loads(self.store.secret_path.read_text())
+        self.assertEqual(credential, "telegram-secret")
+        self.assertEqual(values["telegram_token"], "telegram-secret")
+        self.assertTrue(values["memory_exact_approval_secret"])
+        accepted = self.service.approve_candidate(
+            "owner-a", "work-a", candidate["id"], candidate["content_digest"], approval["approval_token"]
         )
-        second = second_service.approve_candidate(
-            "owner-a", "work-b", second_candidate["id"], second_candidate["content_digest"], second_approval["approval_token"]
-        )
-        self.assertEqual({first["content"], second["content"]}, {"one", "two"})
+        self.assertEqual(accepted["content"], "one")
 
     def test_private_rows_require_exact_owner_binding(self):
         memory = self.service.remember("owner-a", "work-a", "food", "vegetarian")

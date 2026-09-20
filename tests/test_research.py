@@ -152,6 +152,10 @@ class PublicResearchTests(unittest.TestCase):
             ('csrftoken=supersecret123456789','owner_public_request'),
             ('PHPSESSID=supersecret123456789','owner_public_request'),
             ('https://example.com/?connect.sid=supersecret123456789','owner_public_request'),
+            ('ASP.NET_SessionId=supersecret123456789','owner_public_request'),
+            ('laravel_session=supersecret123456789','owner_public_request'),
+            ('$HOME/.ssh/id_rsa','owner_public_request'),
+            ('${HOME}/Documents/private.txt','owner_public_request'),
             ('Basic dTpw','owner_public_request'),
             ('PGPASSWORD=hunter2value','owner_public_request'),
             ('token=supersecret123456789','owner_public_request'),
@@ -323,6 +327,7 @@ class PublicResearchTests(unittest.TestCase):
             'Service fee was USD 10.',
             'Grand total was USD 100.',
             'Rooms are available. That was in 2020.',
+            'Rooms are available. They were in 2020.',
             'Rooms are available as of 2020.',
             'Grand total: USD 100 as of 2020.',
             'Service fee: USD 10 through December 2020.',
@@ -367,6 +372,14 @@ class PublicResearchTests(unittest.TestCase):
                 result=PublicResearch(search_result,reader,max_pages=1).run(
                     'product_comparison','headphones',query_source='owner_public_request')
                 self.assertNotIn('  - price:',result['brief'])
+
+        for content in ('Price reduced to USD 90.', 'Price dropped to USD 90.'):
+            with self.subTest(content=content):
+                reader=Reader({'https://alpha.example/item':{
+                    'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+                result=PublicResearch(search_result,reader,max_pages=1).run(
+                    'product_comparison','headphones',query_source='owner_public_request')
+                self.assertIn('  - price:',result['brief'])
 
         reader=Reader({'https://alpha.example/item':{
             'url':'https://alpha.example/item','retrieved_at':2,
@@ -544,7 +557,31 @@ class PublicResearchTests(unittest.TestCase):
             'product_comparison','catalog',query_source='owner_public_request')
         self.assertTrue(result['evidence'][0]['evidence_excerpt'])
         self.assertLessEqual(len(result['evidence'][0]['evidence_excerpt']),4000)
+        self.assertTrue(result['evidence'][0]['content_truncated'])
+        self.assertIn('일부만 확인됨',result['brief'])
         self.assertEqual(result['dynamic_facts']['payable_total']['status'],'unknown')
+
+    def test_local_evidence_cap_and_reader_flag_are_both_disclosed(self):
+        for content,reader_truncated in (
+            ('Sentence. '*1000,False),
+            ('Short complete page.',True),
+        ):
+            with self.subTest(reader_truncated=reader_truncated):
+                reader=Reader({'https://alpha.example/item':{
+                    'url':'https://alpha.example/item','retrieved_at':2,'content':content,
+                    'content_truncated':reader_truncated}})
+                result=PublicResearch(search_result,reader,max_pages=1).run(
+                    'product_comparison','catalog',query_source='owner_public_request')
+                self.assertTrue(result['evidence'][0]['content_truncated'])
+                self.assertIn('일부만 확인됨',result['brief'])
+
+    def test_future_inventory_is_not_reported_as_current(self):
+        reader=Reader({'https://alpha.example/item':{
+            'url':'https://alpha.example/item','retrieved_at':2,
+            'content':'Rooms will be available next year.'}})
+        result=PublicResearch(search_result,reader,max_pages=1).run(
+            'travel_plan','museum plan',query_source='owner_public_request')
+        self.assertEqual(result['dynamic_facts']['inventory']['status'],'unknown')
 
     def test_search_title_controls_and_whitespace_cannot_add_brief_lines(self):
         def titled(query):

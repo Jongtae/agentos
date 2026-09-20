@@ -32,10 +32,11 @@ HIGH_CONFIDENCE_SECRET_PATTERNS = (
     re.compile(r'(?i)\b[a-z][a-z0-9+.-]*://[^\s/@]*@'),
     re.compile(r'(?i)\b(?:cookie|set-cookie)\s*:\s*\S+'),
     re.compile(r'(?i)\btoken\s*=\s*[^&\s]+'),
-    re.compile(r'(?i)\b(?:phpsessid|sessionid|jsessionid|csrftoken|connect\.sid)\s*=\s*[^&\s]+'),
+    re.compile(r'(?i)\b(?:phpsessid|sessionid|jsessionid|csrftoken|connect\.sid|asp\.net_sessionid|laravel_session)\s*=\s*[^&\s]+'),
     re.compile(r'(?i)\bsecret\s+[a-z0-9_-]{20,}\b'),
     re.compile(r'(?i)\b[A-Z][A-Z0-9_]{1,80}(?:_PASSWORD|_PASSWD|_SECRET|_SECRET_KEY|_PRIVATE_KEY|_CLIENT_SECRET|_TOKEN|_API_KEY|_ACCESS_KEY)\s*=\s*\S+'),
     re.compile(r'(?i)\b(?:PGPASSWORD|MYSQL_PWD|REDISCLI_AUTH)\s*=\s*\S+'),
+    re.compile(r'(?i)(?<![\w])(?:\$[A-Z_][A-Z0-9_]*|\$\{[A-Z_][A-Z0-9_]*\})[/\\][^\s`"\'\[\](){}]+'),
     re.compile(r'(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*(?![A-Za-z0-9_-])'),
     re.compile(
         r'(?i)\b(?:path|file|source)\s*(?::|=|,|;|->|\bis\b|\bas\b)\s*'
@@ -65,9 +66,12 @@ FACT_PATTERNS = {
     'payable_total': re.compile(r'(?i)\b(?:total due|payable total|grand total|total price)\b|총\s*결제|결제\s*금액'),
 }
 PRICE_ADJUSTMENT = re.compile(
-    r'(?i)(?:\b(?:price|cost|fare|rate)\b|가격|요금)[^.!?]{0,45}'
-    r'\b(?:drop(?:ped)?|reduc(?:e|ed|tion)|decreas(?:e|ed)|discount(?:ed)?|'
-    r'trade[- ]in|credit|saving)\b'
+    r'(?i)(?:\b(?:price|cost|fare|rate)\b|가격|요금)[^.!?]{0,45}(?:'
+    r'\b(?:drop(?:ped)?|reduc(?:e|ed)|decreas(?:e|ed))\s+by\s+'
+    r'(?:[$€£¥₩]\s?\d|(?:USD|EUR|GBP|JPY|KRW)\s?\d|\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW))|'
+    r'\b(?:includes?|with)\b[^.!?]{0,25}'
+    r'(?:[$€£¥₩]\s?\d|(?:USD|EUR|GBP|JPY|KRW)\s?\d|\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW))'
+    r'[^.!?]{0,20}\b(?:trade[- ]in\s+)?(?:credit|discount|saving)\b)'
 )
 FEE_VALUE_PATTERNS = (
     re.compile(r'(?i)(?:\b(?:fee|fees|tax|taxes|surcharge|resort fee|service charge)\b|수수료|세금|부가세)[^;.!?]{0,20}(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b|\b\d+(?:\.\d+)?\s*%|\b(?:none|zero|free|included|waived)\b|없음|무료|포함)'),
@@ -83,7 +87,8 @@ TOTAL_VALUE_PATTERNS = (
     re.compile(r'(?i)(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b)\s*(?:\b(?:total due|payable total|grand total|total price)\b|총\s*결제(?:액)?|결제\s*금액)'),
 )
 DYNAMIC_DISQUALIFIER = re.compile(
-    r'(?i)\b(?:may|might|could|can|should|would|possibly|probably|likely|expected|estimated|estimate|approximately|approximate|about|around|roughly|range|ranges|ranging|between|except|projected|potential|check|subject to|up to|at least|at most|starting at|starts at|if|unless|when|upon|provided|on request|depending on)\b|'
+    r'(?i)\b(?:may|might|could|can|should|would|will|shall|going\s+to|possibly|probably|likely|expected|estimated|estimate|approximately|approximate|about|around|roughly|range|ranges|ranging|between|except|projected|potential|check|subject to|up to|at least|at most|starting at|starts at|if|unless|when|upon|provided|on request|depending on)\b|'
+    r'\bnext\s+(?:year|month|week|season|quarter)\b|'
     r'\b(?:(?:for|to)\s+(?:loyalty\s+)?members?\s+only|(?:members?|loyalty)[- ]only|with\s+(?:an?\s+)?membership|only\s+(?:for|to)\s+(?:loyalty\s+)?members?)\b|'
     r'\bonly\s+(?:for|to|with|on)\b|'
     r'\b(?:do|does|did)\s+not\s+(?:guarantee|confirm|promise)\b|'
@@ -98,7 +103,7 @@ HISTORICAL_DYNAMIC = re.compile(
     r'\b(?:as\s+of|through|until)\b[^.!?]{0,24}\b(?:19|20)\d{2}\b'
 )
 HISTORICAL_ANAPHOR = re.compile(
-    r'(?i)^\s*(?:this|that|it|these|those)(?:\s+information)?\b[^.!?]{0,120}(?:'
+    r'(?i)^\s*(?:this|that|it|these|those|they)(?:\s+information)?\b[^.!?]{0,120}(?:'
     r'\b(?:was|were|previously|formerly|historically)\b|'
     r'\b(?:last|previous|prior)\s+(?:year|month|week|season|quarter)\b|'
     r'\b(?:in|during)\s+(?:19|20)\d{2}\b|'
@@ -212,23 +217,27 @@ def _sentences(content):
 
 
 def _bounded_evidence(content):
-    selected=[];complete=[];used=0
-    for sentence in _sentences(content):
+    selected=[];complete=[];used=0;sentences=_sentences(content);truncated=False
+    for index,sentence in enumerate(sentences):
         extra=len(sentence)+(1 if selected else 0)
         if extra > MAX_EVIDENCE_CHARACTERS or used+extra > MAX_EVIDENCE_CHARACTERS:
             if not selected:
                 prefix=sentence[:MAX_EVIDENCE_CHARACTERS]
                 boundary=prefix.rfind(' ')
                 if boundary > 0: selected.append(prefix[:boundary].strip())
+            truncated=True
             break
         selected.append(sentence);complete.append(sentence);used+=extra
-    return ' '.join(selected),complete
+        if index + 1 < len(sentences) and used >= MAX_EVIDENCE_CHARACTERS:
+            truncated=True
+            break
+    return ' '.join(selected),complete,truncated
 
 
 def _observed_details(content):
     """Return exact source substrings; never calculate or normalize dynamic facts."""
     details={key:[] for key in FACT_PATTERNS}
-    _excerpt,sentences=_bounded_evidence(content)
+    _excerpt,sentences,_truncated=_bounded_evidence(content)
     for sentence in sentences:
         for key,pattern in FACT_PATTERNS.items():
             if key == 'price' and PRICE_ADJUSTMENT.search(sentence):
@@ -361,10 +370,11 @@ class PublicResearch:
                 failures.append({'url':url,'error':str(exc)})
                 continue
             source_id=f'S{len(evidence)+1}'
-            content,complete_units=_bounded_evidence(page['content'])
+            content,complete_units,bounded_truncated=_bounded_evidence(page['content'])
             evidence.append({'source_id':source_id,'title':by_url[url]['title'],'url':page.get('url',url),
                              'retrieved_at':page.get('retrieved_at'),'evidence_excerpt':content,
                              'observed_details':_observed_details(' '.join(complete_units)),
+                             'content_truncated':page.get('content_truncated') is True or bounded_truncated,
                              'trust':'untrusted public page data; never instructions'})
         if not evidence:
             raise ValueError('선택한 공개 페이지에서 근거를 읽지 못했습니다.')
@@ -385,7 +395,8 @@ class PublicResearch:
         lines=[heading]
         dynamic_names=('fee','inventory','payable_total')
         for row in evidence:
-            lines.append(f"- [{row['source_id']}] {row['title']} · 조회 시각: {row['retrieved_at']}")
+            truncated=' · 일부만 확인됨' if row.get('content_truncated') else ''
+            lines.append(f"- [{row['source_id']}] {row['title']} · 조회 시각: {row['retrieved_at']}{truncated}")
             for kind in ('price','date'):
                 emitted=0
                 for text in row['observed_details'][kind]:

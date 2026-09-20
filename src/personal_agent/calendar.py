@@ -30,10 +30,15 @@ from .google_calendar import (
 
 
 CALENDAR_CONNECTOR_ID = "google-calendar"
+CALENDAR_WRITE_CONNECTOR_ID = "google-calendar-write"
 CALENDAR_STATE_KEY = "calendar_create"
 CALENDAR_SPEC = ConnectorSpec(
     CALENDAR_CONNECTOR_ID,
-    (CALENDAR_READ_SCOPE, CALENDAR_WRITE_SCOPE),
+    (CALENDAR_READ_SCOPE,),
+)
+CALENDAR_WRITE_SPEC = ConnectorSpec(
+    CALENDAR_WRITE_CONNECTOR_ID,
+    (CALENDAR_WRITE_SCOPE,),
 )
 _ACTIONS = frozenset({"create", "update", "cancel"})
 _CONTENT_FIELDS = frozenset({"summary", "start", "end", "timezone", "location", "description"})
@@ -171,6 +176,7 @@ class CalendarConnector:
         self.approval_factory = approval_factory
         if self.registry is not None:
             self.registry.register(CALENDAR_SPEC)
+            self.registry.register(CALENDAR_WRITE_SPEC)
 
     def _rows(self) -> dict:
         rows = self.store.config(CALENDAR_STATE_KEY, {})
@@ -181,12 +187,21 @@ class CalendarConnector:
     def _put(self, rows: dict) -> None:
         self.store.put(CALENDAR_STATE_KEY, rows)
 
-    def _authorize(self, owner: str, scope: str) -> str | None:
+    @staticmethod
+    def _connector_for_scope(scope: str) -> str:
+        if scope == CALENDAR_READ_SCOPE:
+            return CALENDAR_CONNECTOR_ID
+        if scope == CALENDAR_WRITE_SCOPE:
+            return CALENDAR_WRITE_CONNECTOR_ID
+        raise CalendarError("scope-denied", recovery="reconnect")
+
+    def _authorize(self, owner: str, scope: str) -> tuple[str, str] | None:
         _owner_key(owner)
         try:
             if self.registry is not None:
-                status = self.registry.require_connected(owner, CALENDAR_CONNECTOR_ID, (scope,))
-                return status.connection_revision
+                connector_id = self._connector_for_scope(scope)
+                status = self.registry.require_connected(owner, connector_id, (scope,))
+                return connector_id, status.connection_revision
             elif not self.authority(owner, scope):
                 raise CalendarError("scope-denied", recovery="reconnect")
         except ConnectorContractError as error:
@@ -194,16 +209,17 @@ class CalendarConnector:
             raise CalendarError(reason, recovery="reconnect") from None
         return None
 
-    def _mark_scope_expired(self, owner: str, expected_revision: str | None) -> None:
-        if self.registry is None or expected_revision is None:
+    def _mark_scope_expired(self, owner: str, connection: tuple[str, str] | None) -> None:
+        if self.registry is None or connection is None:
             return
+        connector_id, expected_revision = connection
         with self.registry._authority_guard():
-            current = self.registry.status(owner, CALENDAR_CONNECTOR_ID)
+            current = self.registry.status(owner, connector_id)
             if (
                 current.state is ConnectorState.CONNECTED
                 and current.connection_revision == expected_revision
             ):
-                self.registry.transition(owner, CALENDAR_CONNECTOR_ID, ConnectorState.REAUTH_REQUIRED)
+                self.registry.transition(owner, connector_id, ConnectorState.REAUTH_REQUIRED)
 
     @staticmethod
     def _provider_error(error: GoogleCalendarError) -> CalendarError:
@@ -430,7 +446,12 @@ class CalendarConnector:
             rows = self._rows()
             row = self._owned(rows, ident, owner)
             if row.get("state") == "approved" and self._now() >= row.get("expires", 0):
-                row.update(state="expired", error_class="approval-expired", effect="none")
+                row.update(
+                    state="expired",
+                    error_class="approval-expired",
+                    effect="none",
+                    recovery="request-new-approval",
+                )
                 rows[ident] = row
                 self._put(rows)
             state = "outcome-unknown" if row.get("state") == "executing" else row.get("state")

@@ -219,6 +219,26 @@ class ServiceControlTests(unittest.TestCase):
         self.assertTrue(failing_runner.running)
         self.assertGreaterEqual(failing_runner.bootstrap_count, 2)
 
+    def test_upgrade_rolls_back_when_process_runs_but_health_endpoint_fails(self):
+        self.controller.install()
+        previous = self.controller.plist_path.read_bytes()
+        replacement = self.root / "brew-prefix/bin/agentos"
+        replacement.parent.mkdir(parents=True)
+        replacement.write_text("#!/bin/sh\n")
+        replacement.chmod(0o755)
+        health = iter((False, True))
+        upgraded = ServiceController(
+            home=self.home,
+            cli_path=replacement,
+            runner=self.runner,
+            uid=501,
+            health_probe=lambda: next(health),
+        )
+        with self.assertRaisesRegex(ServiceControlError, "was rolled back"):
+            upgraded.upgrade()
+        self.assertEqual(upgraded.plist_path.read_bytes(), previous)
+        self.assertTrue(self.runner.running)
+
     def test_upgrade_staging_failure_does_not_stop_previous_loaded_service(self):
         self.controller.install()
         previous = self.controller.plist_path.read_bytes()
@@ -304,6 +324,18 @@ class ServiceControlTests(unittest.TestCase):
         controller = ServiceController(home=self.home, cli_path=self.cli, runner=self.runner, uid=501)
         self.assertEqual(controller.status()["status"], "running")
         self.assertTrue(controller.uninstall()["data_preserved"])
+
+    def test_missing_plist_does_not_hide_orphaned_registered_job(self):
+        self.controller.install()
+        self.controller.plist_path.unlink()
+        status = self.controller.status()
+        self.assertEqual(status["status"], "running")
+        self.assertFalse(status["installed"])
+        self.assertTrue(status["background_available"])
+        removed = self.controller.uninstall()
+        self.assertTrue(removed["changed"])
+        self.assertFalse(self.runner.loaded)
+        self.assertEqual(self.runner.commands[-1], ["launchctl", "bootout", self.controller.service_target])
 
     def test_static_template_has_no_fixed_homebrew_prefix(self):
         template = (Path(__file__).resolve().parents[1] / "deploy/com.personal-agentos.plist").read_text()

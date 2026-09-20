@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import tempfile
 from typing import Callable, Mapping, Sequence
+from urllib.request import urlopen
 
 
 LABEL = "com.personal-agentos"
@@ -41,6 +42,7 @@ class ServiceControlError(RuntimeError):
 
 Runner = Callable[[Sequence[str]], CommandResult]
 Which = Callable[[str], str | None]
+HealthProbe = Callable[[], bool]
 
 
 def _run(command: Sequence[str]) -> CommandResult:
@@ -50,6 +52,14 @@ def _run(command: Sequence[str]) -> CommandResult:
 
 def _clean_error(result: CommandResult) -> str:
     return " ".join((result.stderr or result.stdout).strip().split())[:300]
+
+
+def _probe_healthz() -> bool:
+    try:
+        with urlopen("http://127.0.0.1:8787/healthz", timeout=2) as response:
+            return response.status == 200
+    except Exception:
+        return False
 
 
 def resolve_cli_path(
@@ -115,6 +125,7 @@ class ServiceController:
         runner: Runner = _run,
         which: Which = shutil.which,
         uid: int | None = None,
+        health_probe: HealthProbe | None = None,
     ):
         env = os.environ if environ is None else environ
         self.home = Path(home if home is not None else Path.home()).expanduser().resolve()
@@ -142,6 +153,10 @@ class ServiceController:
         self._cli_path = cli_path
         self._which = which
         self.runner = runner
+        # An injected command runner is a test boundary and must inject its own
+        # negative health behavior when needed. The real launchctl path always
+        # confirms the loopback application endpoint before claiming success.
+        self.health_probe = health_probe or (_probe_healthz if runner is _run else lambda: True)
         self.uid = os.getuid() if uid is None else uid
         self.domain = f"gui/{self.uid}"
         self.service_target = f"{self.domain}/{LABEL}"
@@ -153,13 +168,14 @@ class ServiceController:
             return CommandResult(127, stderr=f"{type(exc).__name__}: launchctl is unavailable")
 
     def _observed_status(self) -> dict[str, object]:
-        if not self.plist_path.exists():
-            return {"ok": True, "status": "not_installed", "installed": False, "background_available": False,
-                    "data_dir": str(self.data_dir), "data_preserved": self.data_dir.exists()}
+        definition_exists = self.plist_path.exists()
         result = self._launchctl("print", self.service_target)
         if result.returncode != 0:
             not_loaded = result.returncode == 113 or "could not find service" in _clean_error(result).lower()
-            return {"ok": not_loaded, "status": "stopped" if not_loaded else "unknown", "installed": True,
+            if not_loaded and not definition_exists:
+                return {"ok": True, "status": "not_installed", "installed": False, "background_available": False,
+                        "data_dir": str(self.data_dir), "data_preserved": self.data_dir.exists()}
+            return {"ok": not_loaded, "status": "stopped" if not_loaded else "unknown", "installed": definition_exists,
                     "background_available": False, "data_dir": str(self.data_dir),
                     "next_action": ("Run the service start action; if it fails, reinstall the service definition."
                                     if not_loaded else "launchd status could not be read; retry before assuming the service is available.")}
@@ -167,8 +183,12 @@ class ServiceController:
         state = match.group(1).lower() if match else "loaded"
         running = state == "running"
         return {"ok": True, "status": "running" if running else "loaded_not_running", "launchd_state": state,
-                "installed": True, "background_available": running, "data_dir": str(self.data_dir),
-                **({} if running else {"next_action": "Run the service restart action, then inspect status again."})}
+                "installed": definition_exists, "background_available": running, "data_dir": str(self.data_dir),
+                **({} if running and definition_exists else {"next_action": (
+                    "Run service uninstall to disable the orphaned registered job, then reinstall."
+                    if not definition_exists
+                    else "Run the service restart action, then inspect status again."
+                )})}
 
     def status(self) -> dict[str, object]:
         return self._observed_status()
@@ -210,6 +230,15 @@ class ServiceController:
             observed = self._observed_status()
         if not observed["background_available"]:
             raise ServiceControlError("A running AgentOS background process was not observed.", next_action)
+        try:
+            healthy = self.health_probe() is True
+        except Exception:
+            healthy = False
+        if not healthy:
+            raise ServiceControlError(
+                "The AgentOS process was running but its application health check did not pass.",
+                next_action,
+            )
         return observed
 
     def install(self, *, upgrade: bool = False) -> dict[str, object]:
@@ -310,12 +339,14 @@ class ServiceController:
         return {**observed, "operation": "start", "changed": True}
 
     def stop(self) -> dict[str, object]:
-        if not self.plist_path.exists():
-            return {**self._observed_status(), "operation": "stop", "changed": False}
         current = self._observed_status()
-        if current["status"] == "stopped":
+        if current["status"] in {"stopped", "not_installed"}:
             return {**current, "operation": "stop", "changed": False}
-        stopped = self._launchctl("bootout", self.domain, str(self.plist_path))
+        stopped = (
+            self._launchctl("bootout", self.domain, str(self.plist_path))
+            if self.plist_path.exists()
+            else self._launchctl("bootout", self.service_target)
+        )
         self._require(stopped, "The AgentOS background service could not stop",
                       "Run service status and retry stop; no owner data was deleted.")
         return {"ok": True, "operation": "stop", "changed": True, "status": "stopped", "installed": True,
@@ -338,16 +369,20 @@ class ServiceController:
 
     def uninstall(self) -> dict[str, object]:
         """Remove only service registration; durable owner data is always retained."""
-        if self.plist_path.exists():
-            current = self._observed_status()
-            if current["status"] != "stopped":
-                stopped = self._launchctl("bootout", self.domain, str(self.plist_path))
-                self._require(stopped, "The service could not be disabled, so uninstall was not completed",
-                              "Run service stop and retry uninstall; no owner data was deleted.")
+        current = self._observed_status()
+        job_registered = current["status"] not in {"stopped", "not_installed"}
+        definition_exists = self.plist_path.exists()
+        if job_registered:
+            stopped = (
+                self._launchctl("bootout", self.domain, str(self.plist_path))
+                if definition_exists
+                else self._launchctl("bootout", self.service_target)
+            )
+            self._require(stopped, "The service could not be disabled, so uninstall was not completed",
+                          "Run service stop and retry uninstall; no owner data was deleted.")
+        if definition_exists:
             self.plist_path.unlink()
-            changed = True
-        else:
-            changed = False
+        changed = job_registered or definition_exists
         return {"ok": True, "operation": "uninstall", "changed": changed, "status": "not_installed",
                 "installed": False, "background_available": False, "data_dir": str(self.data_dir),
                 "data_preserved": True,

@@ -89,6 +89,13 @@ class CalendarTests(unittest.TestCase):
     def approve(self, draft):
         return self.calendar.approve(draft["id"], "owner")["approval_id"]
 
+    def test_invalid_registry_owner_is_rejected_before_draft_persistence(self):
+        for owner in ("   ", "x" * 201):
+            with self.subTest(owner_length=len(owner)), self.assertRaises(CalendarError) as rejected:
+                self.calendar.draft_create(EVENT, owner)
+            self.assertEqual(rejected.exception.reason, "invalid-owner")
+            self.assertEqual(self.calendar._rows(), {})
+
     def test_query_requires_explicit_bounded_window_and_read_authority(self):
         result = self.calendar.query(
             "owner",

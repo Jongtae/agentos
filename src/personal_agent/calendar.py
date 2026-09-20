@@ -69,7 +69,7 @@ class _ScopeExpiryAfterDispatch(Exception):
 
 
 def _owner_key(owner: object) -> str:
-    if not isinstance(owner, str) or not owner or len(owner) > 256:
+    if not isinstance(owner, str) or not owner.strip() or len(owner) > 200:
         raise CalendarError("invalid-owner")
     return hashlib.sha256(owner.encode()).hexdigest()
 
@@ -518,9 +518,9 @@ class CalendarConnector:
     def _visible_row(self, ident: str, owner: str, *, expire_approval: bool = False) -> dict:
         """Return an owner-visible snapshot without blocking active provider I/O.
 
-        Only an approved row needs the write-dispatch lease to compare its bound
-        connection revision. Executing and terminal rows are already durable and
-        must remain inspectable while a provider call holds that lease.
+        Revision comparison is a local authority snapshot, not provider
+        dispatch. It deliberately avoids the write-dispatch lease so executing
+        and terminal rows remain inspectable while a provider call holds it.
         """
         with _LOCK:
             rows = self._rows()
@@ -534,29 +534,8 @@ class CalendarConnector:
                 )
                 rows[ident] = row
                 self._put(rows)
-            needs_revision_check = row.get("state") == "approved"
-            if not needs_revision_check:
-                return dict(row)
-
-        dispatch_guard = (
-            self.registry._dispatch_guard(owner, (CALENDAR_WRITE_CONNECTOR_ID,))
-            if self.registry is not None else nullcontext()
-        )
-        with dispatch_guard:
-            with _LOCK:
-                rows = self._rows()
-                row = self._owned(rows, ident, owner)
-                if expire_approval and row.get("state") == "approved" and self._now() >= row.get("expires", 0):
-                    row.update(
-                        state="expired",
-                        error_class="approval-expired",
-                        effect="none",
-                        recovery="request-new-draft",
-                    )
-                    rows[ident] = row
-                    self._put(rows)
-                self._invalidate_stale_approval(rows, row, ident, owner)
-                return dict(row)
+            self._invalidate_stale_approval(rows, row, ident, owner)
+            return dict(row)
 
     def _invalidate_stale_approval(self, rows: dict, row: dict, ident: str, owner: str) -> None:
         if self.registry is None or row.get("state") != "approved":

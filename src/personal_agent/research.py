@@ -25,7 +25,7 @@ HIGH_CONFIDENCE_SECRET_PATTERNS = (
     re.compile(r'(?i)\bhf_[a-z0-9]{16,}\b'),
     re.compile(r'(?i)\bsk-[a-z0-9_-]{12,}\b'),
     re.compile(r'(?i)\b(?:gh[pousr]_[a-z0-9]{16,}|github_pat_[a-z0-9_]{16,}|glpat-[a-z0-9_-]{16,}|xox[baprs]-[a-z0-9-]{10,}|npm_[a-z0-9]{16,}|pypi-[a-z0-9_-]{16,}|AKIA[A-Z0-9]{16})\b'),
-    re.compile(r'(?i)(?:file://|(?:^|[\s"\'(])(?:~[/\\]|/[^\s/"\'()]+/[^\s"\'()]+|[a-z]:\\[^\s"\'()]+))'),
+    re.compile(r'(?i)(?:file://|(?<![\w:/\\])(?:~[/\\]|/[^\s/`"\'\[\](){}]+/[^\s`"\'\[\](){}]+)|(?<![\w])[a-z]:[/\\][^\s`"\'\[\](){}]+)'),
 )
 CREDENTIAL_LABEL = r'(?:password|passwd|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|secret)'
 LABEL_OCCURRENCE = re.compile(rf'(?i)\b{CREDENTIAL_LABEL}\b')
@@ -131,7 +131,8 @@ def _observed_details(content):
         for key,pattern in FACT_PATTERNS.items():
             if pattern.search(sentence) and sentence not in details[key]:
                 details[key].append(sentence)
-    return {key:value[:5] for key,value in details.items()}
+    return {key:(value if key in ('fee','inventory','payable_total') else value[:5])
+            for key,value in details.items()}
 
 
 def _qualified_dynamic(name, evidence):
@@ -140,13 +141,12 @@ def _qualified_dynamic(name, evidence):
         units=_sentences(row['evidence_excerpt'])
         for text in row['observed_details'][name]:
             context=text
-            if name == 'payable_total':
-                try: position=units.index(text)
-                except ValueError: position=-1
-                if position >= 0:
-                    context=' '.join(units[max(0,position-1):position+2])
+            try: position=units.index(text)
+            except ValueError: position=-1
+            if position >= 0:
+                context=' '.join(units[max(0,position-1):position+2])
             if (text.rstrip().endswith('?') or NON_ASSERTIVE_DYNAMIC.search(text) or
-                    DYNAMIC_DISQUALIFIER.search(text) or INCOMPLETE_TOTAL.search(context)): continue
+                    DYNAMIC_DISQUALIFIER.search(context) or INCOMPLETE_TOTAL.search(context)): continue
             tied=(name == 'inventory')
             if name == 'inventory' and INVENTORY_METADATA.search(text): continue
             if name == 'fee':
@@ -156,7 +156,11 @@ def _qualified_dynamic(name, evidence):
             elif name == 'payable_total':
                 tied=any(pattern.search(text) for pattern in TOTAL_VALUE_PATTERNS)
             if tied: qualified.append({'source_id':row['source_id'],'exact_text':text})
-    return qualified
+    return qualified[:5]
+
+
+def _normalized_search_text(value, limit):
+    return re.sub(r'[\s\x00-\x1f\x7f-\x9f]+',' ',str(value)).strip()[:limit]
 
 
 class PublicResearch:
@@ -182,8 +186,9 @@ class PublicResearch:
             try: normalized=normalize_public_url(row['url'])
             except (TypeError,ValueError): continue
             if normalized not in [item['url'] for item in candidates]:
-                candidates.append({'url':normalized,'title':str(row.get('title') or normalized)[:300],
-                                   'snippet':str(row.get('snippet') or '')[:1800]})
+                title=_normalized_search_text(row.get('title') or normalized,300) or normalized
+                candidates.append({'url':normalized,'title':title,
+                                   'snippet':_normalized_search_text(row.get('snippet') or '',1800)})
         if not candidates:
             raise ValueError('읽을 수 있는 공개 HTTP(S) 검색 결과가 없습니다.')
         candidate_urls={row['url'] for row in candidates}

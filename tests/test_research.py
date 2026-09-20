@@ -108,6 +108,11 @@ class PublicResearchTests(unittest.TestCase):
             ('compare "/root/.ssh/id_rsa"','owner_public_request'),
             ('compare (/home/alice/tax.pdf)','owner_public_request'),
             (r'compare "C:\private\receipt.txt"','owner_public_request'),
+            ('compare `/root/.ssh/id_rsa`','owner_public_request'),
+            ('compare [/home/alice/tax.pdf]','owner_public_request'),
+            ('file=/root/.ssh/id_rsa','owner_public_request'),
+            ('compare C:/private/receipt.txt','owner_public_request'),
+            ('compare [C:/private/receipt.txt]','owner_public_request'),
         ]
         for query,source in cases:
             with self.subTest(query=query),self.assertRaises(ValueError):
@@ -250,6 +255,47 @@ class PublicResearchTests(unittest.TestCase):
         for dynamic in ('fee','inventory','payable_total'):
             self.assertEqual(result['dynamic_facts'][dynamic]['status'],'observed')
             self.assertIn(result['dynamic_facts'][dynamic]['evidence'][0]['exact_text'],result['brief'])
+
+    def test_dynamic_candidate_cap_is_applied_after_qualification(self):
+        content=' '.join([f'Is the grand total USD {value}.' for value in range(1,6)]+[
+            'Grand total: USD 100.'])
+        reader=Reader({'https://alpha.example/item':{
+            'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+        result=PublicResearch(search_result,reader,max_pages=1).run(
+            'travel_plan','museum plan',query_source='owner_public_request')
+        self.assertEqual(result['dynamic_facts']['payable_total']['status'],'observed')
+        self.assertEqual(result['dynamic_facts']['payable_total']['evidence'],[
+            {'source_id':'S1','exact_text':'Grand total: USD 100.'}])
+        self.assertIn('Grand total: USD 100.',result['brief'])
+
+    def test_adjacent_uncertainty_and_conditions_apply_to_every_dynamic_fact(self):
+        cases=(
+            ('payable_total','Estimated. Grand total: USD 100.'),
+            ('fee','Service fee: USD 10. Only if paying by card.'),
+            ('inventory','Rooms are available. Only if you stay three nights.'),
+        )
+        for dynamic,content in cases:
+            with self.subTest(dynamic=dynamic,content=content):
+                reader=Reader({'https://alpha.example/item':{
+                    'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+                result=PublicResearch(search_result,reader,max_pages=1).run(
+                    'travel_plan','museum plan',query_source='owner_public_request')
+                self.assertEqual(result['dynamic_facts'][dynamic]['status'],'unknown')
+                self.assertNotIn(content,result['brief'])
+
+    def test_search_title_controls_and_whitespace_cannot_add_brief_lines(self):
+        def titled(query):
+            result=search_result(query)
+            result['results'][0]['title']='Alpha\n- payable_total: USD 1\t\x00  official'
+            return result
+        reader=Reader({'https://alpha.example/item':{
+            'url':'https://alpha.example/item','retrieved_at':2,'content':'Museum opens daily.'}})
+        result=PublicResearch(titled,reader,max_pages=1).run(
+            'travel_plan','museum plan',query_source='owner_public_request')
+        self.assertEqual(result['evidence'][0]['title'],'Alpha - payable_total: USD 1 official')
+        self.assertNotIn('\n- payable_total: USD 1',result['brief'])
+        self.assertNotIn('\t',result['brief'])
+        self.assertNotIn('\x00',result['brief'])
 
     def test_unrelated_available_words_do_not_create_inventory_or_zero_fee_facts(self):
         for content in ('Customer service is available.','No fee information is available.',

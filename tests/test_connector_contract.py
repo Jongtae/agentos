@@ -37,6 +37,7 @@ WORK_3 = "33333333-3333-4333-8333-333333333333"
 WORK_4 = "44444444-4444-4444-8444-444444444444"
 HANDOFF_1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 HANDOFF_2 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+REVISION_1 = "AQEBAQEBAQEBAQEBAQEBAQ"
 
 
 def work_id(number):
@@ -48,10 +49,18 @@ class ConnectorContractTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.store = QuickStore(self.temp.name)
         self.now = [1000.0]
+        self.revision_number = [0]
+
+        def revision_factory():
+            self.revision_number[0] += 1
+            raw = self.revision_number[0].to_bytes(16, "big")
+            return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
         self.registry = ConnectorRegistry(
             self.store,
             (GMAIL, CALENDAR),
             clock=lambda: self.now[0],
+            revision_factory=revision_factory,
         )
         self.pending = PendingWorkRegistry(
             self.store,
@@ -112,8 +121,12 @@ class ConnectorContractTests(unittest.TestCase):
         connected = self.connect()
         self.assertEqual(connected.health.state, HealthState.UNKNOWN)
         self.assertIsNone(connected.health.checked_at)
+        self.assertIsNotNone(connected.connection_revision)
         healthy = self.registry.record_health(
-            "owner-a", GMAIL.connector_id, HealthState.HEALTHY
+            "owner-a",
+            GMAIL.connector_id,
+            HealthState.HEALTHY,
+            expected_revision=connected.connection_revision,
         )
         self.assertEqual(healthy.state, ConnectorState.CONNECTED)
         self.assertEqual(healthy.health.state, HealthState.HEALTHY)
@@ -122,6 +135,7 @@ class ConnectorContractTests(unittest.TestCase):
             "owner-a",
             GMAIL.connector_id,
             HealthState.UNAVAILABLE,
+            expected_revision=connected.connection_revision,
             recovery=RecoveryAction.REAUTHENTICATE,
         )
         self.assertEqual(unavailable.health.state, HealthState.UNAVAILABLE)
@@ -134,10 +148,128 @@ class ConnectorContractTests(unittest.TestCase):
         )
         self.assertEqual(transitioned.health.state, HealthState.UNKNOWN)
         self.assertIsNone(transitioned.health.checked_at)
+        self.assertNotEqual(transitioned.connection_revision, connected.connection_revision)
         with self.assertRaises(ConnectorContractError):
             self.registry.record_health(
-                "owner-a", GMAIL.connector_id, HealthState.UNKNOWN
+                "owner-a",
+                GMAIL.connector_id,
+                HealthState.UNKNOWN,
+                expected_revision=transitioned.connection_revision,
             )
+
+    def test_health_observation_is_bound_to_connection_revision(self):
+        connection_a = self.connect()
+        revision_a = connection_a.connection_revision
+        self.registry.transition("owner-a", GMAIL.connector_id, ConnectorState.DISCONNECTED)
+        connection_b = self.connect()
+        self.assertNotEqual(connection_b.connection_revision, revision_a)
+
+        with self.assertRaises(ConnectorContractError) as stale:
+            self.registry.record_health(
+                "owner-a",
+                GMAIL.connector_id,
+                HealthState.HEALTHY,
+                expected_revision=revision_a,
+            )
+        self.assertEqual(stale.exception.reason, "stale_connection_revision")
+        current = self.registry.status("owner-a", GMAIL.connector_id)
+        self.assertEqual(current.connection_revision, connection_b.connection_revision)
+        self.assertEqual(current.health.state, HealthState.UNKNOWN)
+
+        observed = self.registry.record_health(
+            "owner-a",
+            GMAIL.connector_id,
+            HealthState.HEALTHY,
+            expected_revision=connection_b.connection_revision,
+        )
+        self.assertEqual(observed.health.state, HealthState.HEALTHY)
+
+    def test_concurrent_stale_health_result_cannot_mark_reconnected_lifecycle(self):
+        connection_a = self.connect()
+        observation_started = threading.Barrier(2)
+        release_result = threading.Event()
+
+        def finish_observation():
+            observation_started.wait(timeout=5)
+            if not release_result.wait(timeout=5):
+                raise RuntimeError("health observation test barrier timed out")
+            return self.registry.record_health(
+                "owner-a",
+                GMAIL.connector_id,
+                HealthState.HEALTHY,
+                expected_revision=connection_a.connection_revision,
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            future = pool.submit(finish_observation)
+            observation_started.wait(timeout=5)
+            self.registry.transition("owner-a", GMAIL.connector_id, ConnectorState.DISCONNECTED)
+            connection_b = self.connect()
+            release_result.set()
+            with self.assertRaises(ConnectorContractError) as stale:
+                future.result(timeout=5)
+        self.assertEqual(stale.exception.reason, "stale_connection_revision")
+        current = self.registry.status("owner-a", GMAIL.connector_id)
+        self.assertEqual(current.connection_revision, connection_b.connection_revision)
+        self.assertEqual(current.health.state, HealthState.UNKNOWN)
+
+    def test_connection_revision_is_strict_opaque_and_owner_safe(self):
+        disconnected = self.registry.status("owner-a", GMAIL.connector_id)
+        self.assertIsNone(disconnected.connection_revision)
+        connected = self.connect()
+        rendered = json.dumps(connected.as_dict())
+        self.assertIn(connected.connection_revision, rendered)
+        self.assertNotIn("owner-a", rendered)
+
+        rows = self.store.config(CONNECTOR_STATE_KEY)
+        owner_rows = next(iter(rows.values()))
+        for malformed in (None, "", "private connection secret", "!" * 22, "A" * 200):
+            with self.subTest(malformed=malformed):
+                owner_rows[GMAIL.connector_id]["connection_revision"] = malformed
+                self.store.put(CONNECTOR_STATE_KEY, rows)
+                operations = (
+                    lambda: self.registry.status("owner-a", GMAIL.connector_id),
+                    lambda: self.registry.transition(
+                        "owner-a",
+                        GMAIL.connector_id,
+                        ConnectorState.CONNECTED,
+                        granted_scopes=GMAIL.required_scopes,
+                    ),
+                    lambda: self.registry.record_health(
+                        "owner-a",
+                        GMAIL.connector_id,
+                        HealthState.HEALTHY,
+                        expected_revision=REVISION_1,
+                    ),
+                    lambda: self.registry.require_connected(
+                        "owner-a", GMAIL.connector_id, GMAIL.required_scopes
+                    ),
+                )
+                for operation in operations:
+                    with self.assertRaises(ConnectorContractError) as rejected:
+                        operation()
+                    self.assertEqual(rejected.exception.reason, "invalid_stored_state")
+                    stored = self.store.config(CONNECTOR_STATE_KEY)
+                    stored_owner = next(iter(stored.values()))
+                    self.assertEqual(
+                        stored_owner[GMAIL.connector_id]["connection_revision"], malformed
+                    )
+
+        with tempfile.TemporaryDirectory() as root:
+            rejecting = ConnectorRegistry(
+                QuickStore(root),
+                (GMAIL,),
+                clock=lambda: self.now[0],
+                revision_factory=lambda: "private connection secret",
+            )
+            with self.assertRaises(ConnectorContractError) as invalid:
+                rejecting.transition(
+                    "owner-a",
+                    GMAIL.connector_id,
+                    ConnectorState.CONNECTED,
+                    granted_scopes=GMAIL.required_scopes,
+                )
+            self.assertEqual(invalid.exception.reason, "invalid_revision")
 
     def test_unknown_connector_and_scope_mismatch_fail_closed(self):
         with self.assertRaisesRegex(ConnectorContractError, "connector contract rejected") as unknown:
@@ -251,6 +383,95 @@ class ConnectorContractTests(unittest.TestCase):
                 expired.token, "owner-a", GMAIL.connector_id, GMAIL.required_scopes, HANDOFF_1
             )
         self.assertEqual(rejected.exception.reason, "expired_resume")
+
+    def test_pending_time_is_sampled_after_waiting_for_serialization_lock(self):
+        class WaitingLock:
+            def __init__(self):
+                self.underlying = threading.RLock()
+                self.attempted = threading.Event()
+
+            def __enter__(self):
+                self.attempted.set()
+                self.underlying.acquire()
+                return self
+
+            def __exit__(self, _kind, _value, _traceback):
+                self.underlying.release()
+
+        self.connect()
+        expiring = self.pending.issue(
+            "owner-a",
+            WORK_1,
+            GMAIL.connector_id,
+            GMAIL.required_scopes,
+            ttl_seconds=1,
+        )
+        claim_gate = WaitingLock()
+        self.pending._lock = claim_gate
+        claim_gate.underlying.acquire()
+        claim_lock_held = True
+        pool = ThreadPoolExecutor(max_workers=1)
+        try:
+            claim_future = pool.submit(
+                self.pending.claim,
+                expiring.token,
+                "owner-a",
+                GMAIL.connector_id,
+                GMAIL.required_scopes,
+                HANDOFF_1,
+            )
+            self.assertTrue(claim_gate.attempted.wait(timeout=5))
+            self.now[0] = expiring.expires_at
+            claim_gate.underlying.release()
+            claim_lock_held = False
+            with self.assertRaises(ConnectorContractError) as expired:
+                claim_future.result(timeout=5)
+        finally:
+            if claim_lock_held:
+                claim_gate.underlying.release()
+            pool.shutdown(wait=True)
+        self.assertEqual(expired.exception.reason, "expired_resume")
+
+        pending = PendingWorkRegistry(
+            self.store, self.registry, clock=lambda: self.now[0]
+        )
+        handle = pending.issue(
+            "owner-a", WORK_2, GMAIL.connector_id, GMAIL.required_scopes
+        )
+        pending.claim(
+            handle.token,
+            "owner-a",
+            GMAIL.connector_id,
+            GMAIL.required_scopes,
+            HANDOFF_2,
+        )
+        complete_gate = WaitingLock()
+        pending._lock = complete_gate
+        complete_gate.underlying.acquire()
+        complete_lock_held = True
+        completed_at = self.now[0] + 10
+        pool = ThreadPoolExecutor(max_workers=1)
+        try:
+            complete_future = pool.submit(
+                pending.complete,
+                handle.token,
+                "owner-a",
+                GMAIL.connector_id,
+                HANDOFF_2,
+            )
+            self.assertTrue(complete_gate.attempted.wait(timeout=5))
+            self.now[0] = completed_at
+            complete_gate.underlying.release()
+            complete_lock_held = False
+            self.assertEqual(complete_future.result(timeout=5).work_id, WORK_2)
+        finally:
+            if complete_lock_held:
+                complete_gate.underlying.release()
+            pool.shutdown(wait=True)
+        row = self.store.config(PENDING_WORK_KEY)[
+            hashlib.sha256(handle.token.encode()).hexdigest()
+        ]
+        self.assertEqual(row["completed_at"], completed_at)
 
     def test_competing_claims_are_serialized_but_same_claim_is_recoverable(self):
         self.connect()
@@ -705,7 +926,10 @@ class ConnectorContractTests(unittest.TestCase):
                         granted_scopes=GMAIL.required_scopes,
                     ),
                     lambda: self.registry.record_health(
-                        "owner-a", GMAIL.connector_id, HealthState.HEALTHY
+                        "owner-a",
+                        GMAIL.connector_id,
+                        HealthState.HEALTHY,
+                        expected_revision=REVISION_1,
                     ),
                     lambda: self.registry.require_connected(
                         "owner-a", GMAIL.connector_id, GMAIL.required_scopes

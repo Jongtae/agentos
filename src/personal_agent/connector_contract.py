@@ -25,6 +25,7 @@ import uuid
 CONNECTOR_STATE_KEY = "connector_contract_state"
 PENDING_WORK_KEY = "connector_pending_work"
 _IDENTIFIER = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,95})\Z")
+_CONNECTION_REVISION_BYTES = 16
 _MISSING_CONNECTOR_STATE = object()
 _MISSING_PENDING_STATE = object()
 _CONNECTOR_STATE_LOCK = threading.RLock()
@@ -136,6 +137,20 @@ def _finite_timestamp(value: object, field: str) -> float:
     return float(value)
 
 
+def _connection_revision(value: object) -> str:
+    """Validate a canonical opaque 128-bit connector lifecycle revision."""
+    if not isinstance(value, str) or len(value) != 22:
+        raise ValueError("connection_revision must be a canonical opaque revision")
+    try:
+        decoded = base64.b64decode(value + "==", altchars=b"-_", validate=True)
+    except (TypeError, ValueError):
+        raise ValueError("connection_revision must be a canonical opaque revision") from None
+    canonical = base64.urlsafe_b64encode(decoded).rstrip(b"=").decode()
+    if len(decoded) != _CONNECTION_REVISION_BYTES or canonical != value:
+        raise ValueError("connection_revision must be a canonical opaque revision")
+    return value
+
+
 @dataclass(frozen=True)
 class ConnectorSpec:
     connector_id: str
@@ -175,6 +190,7 @@ class ConnectorStatus:
     required_scopes: tuple[str, ...]
     granted_scopes: tuple[str, ...]
     health: ConnectorHealth
+    connection_revision: str | None
 
     def as_dict(self) -> dict:
         return {
@@ -182,6 +198,7 @@ class ConnectorStatus:
             "state": self.state.value,
             "required_scopes": list(self.required_scopes),
             "granted_scopes": list(self.granted_scopes),
+            "connection_revision": self.connection_revision,
             "health": {
                 "state": self.health.state.value,
                 "checked_at": self.health.checked_at,
@@ -245,9 +262,13 @@ class ConnectorRegistry:
         connectors: Iterable[ConnectorSpec] = (),
         *,
         clock: Callable[[], float] = time.time,
+        revision_factory: Callable[[], str] = lambda: secrets.token_urlsafe(
+            _CONNECTION_REVISION_BYTES
+        ),
     ):
         self.store = store
         self.clock = clock
+        self.revision_factory = revision_factory
         self._definitions: dict[str, ConnectorSpec] = {}
         # QuickStore is single-process; share one process lock across registry
         # instances so read-modify-write lifecycle updates cannot resurrect a
@@ -302,12 +323,21 @@ class ConnectorRegistry:
             row = owner_rows.get(connector_id, {})
             if not isinstance(row, dict):
                 raise ConnectorContractError("invalid_stored_state")
-            if row and set(row) != {"state", "granted_scopes", "changed_at", "health"}:
+            if row and set(row) != {
+                "state",
+                "granted_scopes",
+                "changed_at",
+                "health",
+                "connection_revision",
+            }:
                 raise ConnectorContractError("invalid_stored_state")
             try:
                 state = ConnectorState(row.get("state", ConnectorState.DISCONNECTED.value))
                 granted = _scopes(row.get("granted_scopes", ()))
                 _finite_timestamp(row["changed_at"], "changed_at") if row else None
+                connection_revision = (
+                    _connection_revision(row["connection_revision"]) if row else None
+                )
                 health_row = row["health"] if row else None
                 if health_row is None:
                     health = self._unknown_health()
@@ -331,7 +361,14 @@ class ConnectorRegistry:
                 raise ConnectorContractError("invalid_stored_state")
             if health.state not in _ALLOWED_HEALTH_BY_CONNECTOR_STATE[state]:
                 raise ConnectorContractError("invalid_stored_state")
-            return ConnectorStatus(connector_id, state, connector.required_scopes, granted, health)
+            return ConnectorStatus(
+                connector_id,
+                state,
+                connector.required_scopes,
+                granted,
+                health,
+                connection_revision,
+            )
 
     def transition(
         self,
@@ -350,20 +387,39 @@ class ConnectorRegistry:
                 raise ConnectorContractError("scope_mismatch")
         elif granted:
             raise ConnectorContractError("inactive_grant")
-        try:
-            changed_at = _finite_timestamp(self.clock(), "changed_at")
-        except ValueError:
-            raise ConnectorContractError("invalid_clock") from None
         with self._lock:
             rows = self._rows()
             owner = _owner_key(owner_id)
             owner_rows = rows.get(owner, {})
             if not isinstance(owner_rows, dict):
                 raise ConnectorContractError("invalid_stored_state")
+            prior_revision = None
+            prior_row = owner_rows.get(connector_id)
+            if prior_row is not None:
+                if not isinstance(prior_row, dict):
+                    raise ConnectorContractError("invalid_stored_state")
+                try:
+                    prior_revision = _connection_revision(prior_row["connection_revision"])
+                except (KeyError, ValueError):
+                    raise ConnectorContractError("invalid_stored_state") from None
+            try:
+                changed_at = _finite_timestamp(self.clock(), "changed_at")
+            except ValueError:
+                raise ConnectorContractError("invalid_clock") from None
+            for _ in range(8):
+                try:
+                    connection_revision = _connection_revision(self.revision_factory())
+                except ValueError:
+                    raise ConnectorContractError("invalid_revision") from None
+                if connection_revision != prior_revision:
+                    break
+            else:
+                raise ConnectorContractError("revision_generation_failed")
             owner_rows[connector_id] = {
                 "state": state.value,
                 "granted_scopes": list(granted) if state is ConnectorState.CONNECTED else [],
                 "changed_at": changed_at,
+                "connection_revision": connection_revision,
                 "health": {"state": HealthState.UNKNOWN.value, "checked_at": None, "recovery": None},
             }
             rows[owner] = owner_rows
@@ -376,6 +432,7 @@ class ConnectorRegistry:
         connector_id: str,
         health_state: HealthState,
         *,
+        expected_revision: str,
         recovery: RecoveryAction | None = None,
     ) -> ConnectorStatus:
         """Record an observed provider check without changing connection state."""
@@ -389,13 +446,19 @@ class ConnectorRegistry:
         if health_state is HealthState.UNAVAILABLE and not isinstance(recovery, RecoveryAction):
             raise ConnectorContractError("invalid_health")
         try:
-            checked_at = _finite_timestamp(self.clock(), "health.checked_at")
+            expected_revision = _connection_revision(expected_revision)
         except ValueError:
-            raise ConnectorContractError("invalid_clock") from None
+            raise ConnectorContractError("invalid_revision") from None
         with self._lock:
             status = self.status(owner_id, connector_id)
             if status.state is not ConnectorState.CONNECTED:
                 raise ConnectorContractError("not_connected")
+            if status.connection_revision != expected_revision:
+                raise ConnectorContractError("stale_connection_revision")
+            try:
+                checked_at = _finite_timestamp(self.clock(), "health.checked_at")
+            except ValueError:
+                raise ConnectorContractError("invalid_clock") from None
             rows = self._rows()
             owner_rows = rows.get(_owner_key(owner_id))
             if not isinstance(owner_rows, dict) or not isinstance(owner_rows.get(connector_id), dict):
@@ -712,11 +775,14 @@ class PendingWorkRegistry:
         try:
             claim_digest = self._claim_key(handoff_id)
             actual = _scopes(granted_scopes)
-            now = _finite_timestamp(self.clock(), "current time")
         except (TypeError, ValueError):
             raise ConnectorContractError("invalid_resume") from None
         with self._lock:
             rows = self._rows()
+            try:
+                now = _finite_timestamp(self.clock(), "current time")
+            except ValueError:
+                raise ConnectorContractError("invalid_clock") from None
             self._prune(rows, now)
             key = self._token_key(token)
             row = rows.get(key)
@@ -775,11 +841,14 @@ class PendingWorkRegistry:
         owner = _owner_key(owner_id)
         try:
             claim_digest = self._claim_key(handoff_id)
-            now = _finite_timestamp(self.clock(), "current time")
         except ValueError:
             raise ConnectorContractError("invalid_resume") from None
         with self._lock:
             rows = self._rows()
+            try:
+                now = _finite_timestamp(self.clock(), "current time")
+            except ValueError:
+                raise ConnectorContractError("invalid_clock") from None
             self._prune(rows, now)
             key = self._token_key(token)
             row = rows.get(key)

@@ -295,6 +295,43 @@ class MemoryServiceTests(unittest.TestCase):
         )
         self.assertEqual(accepted["content"], "one")
 
+    def test_legacy_memory_approval_secret_first_use_is_atomic_across_store_instances(self):
+        second_store = QuickStore(self.root)
+        first_job = self.store.enqueue("Remember morning meetings.", "legacy-approval-one")
+        second_job = second_store.enqueue("Remember vegetarian food.", "legacy-approval-two")
+        barrier = threading.Barrier(2)
+        first_secret, second_secret = self.store.secret, second_store.secret
+
+        def coordinated(original):
+            def call(key, value=None, create=None):
+                result = original(key, value, create)
+                # This forces the reviewed separate-get/set implementation to
+                # let both instances observe absence before either setter.
+                if key == "memory_approval_secret" and value is None and create is None:
+                    try:
+                        barrier.wait(timeout=0.2)
+                    except threading.BrokenBarrierError:
+                        pass
+                return result
+            return call
+
+        self.store.secret = coordinated(first_secret)
+        second_store.secret = coordinated(second_secret)
+        try:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                first_future = pool.submit(
+                    self.store.issue_memory_approval, first_job, "Remember morning meetings."
+                )
+                second_future = pool.submit(
+                    second_store.issue_memory_approval, second_job, "Remember vegetarian food."
+                )
+                first_approval, second_approval = first_future.result(), second_future.result()
+        finally:
+            self.store.secret = first_secret
+            second_store.secret = second_secret
+        self.assertTrue(self.store.verify_memory_approval(first_approval, first_job))
+        self.assertTrue(second_store.verify_memory_approval(second_approval, second_job))
+
     def test_private_rows_require_exact_owner_binding(self):
         memory = self.service.remember("owner-a", "work-a", "food", "vegetarian")
         candidate = self.service.propose("owner-a", "work-a", "timezone", "Asia/Seoul")

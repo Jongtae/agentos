@@ -263,9 +263,7 @@ class QuickStore:
         if not job or job.get('message')!=owner_message: raise ValueError('소유자 요청을 확인할 수 없습니다.')
         expires_at=int(time.time()+ttl)
         message_hash=hashlib.sha256(owner_message.encode()).hexdigest()
-        secret=self.secret('memory_approval_secret')
-        if not secret:
-            secret=secrets.token_hex(32); self.secret('memory_approval_secret',secret)
+        secret=self.secret('memory_approval_secret',create=lambda:secrets.token_hex(32))
         payload=f'{job_id}|{message_hash}|{expires_at}'
         token=hmac.new(secret.encode(),payload.encode(),hashlib.sha256).hexdigest()
         return {'job_id':job_id,'message_hash':message_hash,'expires_at':expires_at,'token':token}

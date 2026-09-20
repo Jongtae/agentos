@@ -97,6 +97,30 @@ class PublicPageReaderTests(unittest.TestCase):
         self.assertEqual(authority(urlsplit('https://[2606:2800:220:1:248:1893:25c8:1946]:80/path')),
                          '[2606:2800:220:1:248:1893:25c8:1946]:80')
 
+    def test_rejects_port_zero_for_hostname_ipv4_and_bracketed_ipv6_before_resolution(self):
+        resolutions=[]
+        def resolver(host,port,type=None):
+            resolutions.append((host,port));return public_dns(host,port,type)
+        opener=Opener(Response())
+        reader=PublicPageReader(opener=opener,resolver=resolver)
+        for url in ('http://example.com:0/path','https://93.184.216.34:0/path',
+                    'https://[2606:2800:220:1:248:1893:25c8:1946]:0/path'):
+            with self.subTest(url=url),self.assertRaisesRegex(ValueError,'포트'):
+                reader.read(url,approved_urls=[url])
+            with self.subTest(host=url),self.assertRaisesRegex(ValueError,'포트'):
+                PublicPageReader._host_header(urlsplit(url))
+            with self.subTest(resolve=url),self.assertRaisesRegex(ValueError,'포트'):
+                reader._validate_host(url)
+            with self.subTest(connect=url),self.assertRaisesRegex(ValueError,'포트'):
+                reader._open_pinned(url,{'93.184.216.34'})
+        self.assertEqual(resolutions,[]);self.assertEqual(opener.requests,[])
+
+    def test_rejects_empty_or_out_of_range_explicit_ports(self):
+        for url in ('http://example.com:/path','https://example.com:65536/path',
+                    'https://[2606:2800:220:1:248:1893:25c8:1946]:/path'):
+            with self.subTest(url=url),self.assertRaisesRegex(ValueError,'포트'):
+                normalize_public_url(url)
+
     def test_owner_scope_rejects_public_redirect_collector(self):
         opener=Opener(Response(status=302, headers={'Location':'https://collector.example/collect?x=1'}))
         reader=PublicPageReader(opener=opener, resolver=public_dns)

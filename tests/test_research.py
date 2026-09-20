@@ -79,6 +79,15 @@ class PublicResearchTests(unittest.TestCase):
             ('password correcthorsebatterystaple','owner_public_request'),
             ('api key abcdefghijklmnopqrstuv','owner_public_request'),
             ('access token longalphabeticvalue','public_task_input'),
+            ('password is correcthorsebatterystaple','owner_public_request'),
+            ('api key is abcdefghijklmnop','owner_public_request'),
+            ('Authorization Basic dXNlcjpwYXNz','owner_public_request'),
+            ('sk_live_abcdefghijklmnopqrstuvwxyz','owner_public_request'),
+            ('rk_live_abcdefghijklmnopqrstuvwxyz','owner_public_request'),
+            ('AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZ123456','owner_public_request'),
+            ('hf_abcdefghijklmnopqrstuvwxyz','owner_public_request'),
+            ('client_secret=correcthorsebatterystaple','owner_public_request'),
+            ('secret: correcthorsebatterystaple','owner_public_request'),
         ]
         for query,source in cases:
             with self.subTest(query=query),self.assertRaises(ValueError):
@@ -87,7 +96,8 @@ class PublicResearchTests(unittest.TestCase):
 
     def test_ordinary_public_credential_topics_are_not_overblocked(self):
         for query in ('password manager comparison','api key security best practices',
-                      'access token documentation','refresh token rotation guide'):
+                      'access token documentation','refresh token rotation guide','password requirements',
+                      'api key permissions','api key examples','access token scopes','refresh token revocation'):
             with self.subTest(query=query):
                 self.assertEqual(validate_public_query(query,'owner_public_request'),query)
 
@@ -158,10 +168,18 @@ class PublicResearchTests(unittest.TestCase):
 
     def test_estimated_conditional_and_pre_fee_dynamic_facts_stay_unknown(self):
         cases={
-            'fee':('A service fee might be 10%.','A service fee is estimated at 10%.'),
-            'inventory':('Inventory is expected to be available.','Inventory is likely available.'),
+            'fee':('A service fee might be 10%.','A service fee is estimated at 10%.',
+                   'Service fee can be 10%.','Service fee should be 10%.','Service fee is about 10%.',
+                   'Service fee is around 10%.','Service fee is up to 10%.','No fee unless you cancel.',
+                   'Service fee: USD 10 if paying by card.','No booking fee if you join membership.'),
+            'inventory':('Inventory is expected to be available.','Inventory is likely available.',
+                         'Rooms are available if you call.','Rooms are available on request.',
+                         'Rooms are available if you book 3 nights.'),
             'payable_total':('Estimated total price USD 100.','Payable total might be USD 100.',
-                             'Total price USD 100 before taxes and fees.','Total price is shown at checkout.'),
+                             'Total price USD 100 before taxes and fees.','Total price is shown at checkout.',
+                             'Grand total is about USD 100.','Grand total is up to USD 100.',
+                             'Grand total USD 100 if paid today.',
+                             'Total price USD 100 before service charges.'),
         }
         for dynamic,contents in cases.items():
             for content in contents:

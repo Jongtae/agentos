@@ -14,15 +14,25 @@ MAX_RESEARCH_PAGES = 3
 MAX_EVIDENCE_CHARACTERS = 4_000
 ALLOWED_MODES = frozenset({'product_comparison', 'travel_plan'})
 ALLOWED_QUERY_SOURCES = frozenset({'owner_public_request', 'public_task_input'})
-SENSITIVE_QUERY_PATTERNS = (
-    re.compile(r'(?i)\b(?:password|passwd|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|authorization)\b\s*[:=]\s*\S+'),
-    re.compile(r'(?i)\bauthorization\s*:\s*(?:bearer|basic)\s+\S+'),
-    re.compile(r'(?i)\bbearer\s*:?\s+[a-z0-9._~+/=-]{8,}'),
-    re.compile(r'(?i)\b(?:password|passwd|api[_ -]?key|access[_ -]?token|refresh[_ -]?token)\b\s+(?!(?:manager|security|documentation|docs|format|rotation|expiry|expiration|policy|policies|guide|tutorial|comparison|authentication|best)\b)\S{6,}'),
+HIGH_CONFIDENCE_SECRET_PATTERNS = (
+    re.compile(r'(?i)\bauthorization\s*:?\s*(?:bearer|basic)\s+\S+'),
+    re.compile(r'(?i)\bbearer\s*:?\s+\S{8,}'),
+    re.compile(r'(?i)\b(?:client[_ -]?secret|secret)\b\s*[:=]\s*\S+'),
+    re.compile(r'(?i)\b(?:sk_live_|rk_live_)[a-z0-9]{12,}\b'),
+    re.compile(r'\bAIzaSy[A-Za-z0-9_-]{20,}\b'),
+    re.compile(r'(?i)\bhf_[a-z0-9]{16,}\b'),
     re.compile(r'(?i)\bsk-[a-z0-9_-]{12,}\b'),
     re.compile(r'(?i)\b(?:gh[pousr]_[a-z0-9]{16,}|github_pat_[a-z0-9_]{16,}|glpat-[a-z0-9_-]{16,}|xox[baprs]-[a-z0-9-]{10,}|npm_[a-z0-9]{16,}|pypi-[a-z0-9_-]{16,}|AKIA[A-Z0-9]{16})\b'),
     re.compile(r'(?i)(?:file://|/Users/|/home/|\\Users\\)'),
 )
+CREDENTIAL_LABEL = r'(?:password|passwd|api[_ -]?key|access[_ -]?token|refresh[_ -]?token)'
+LABELLED_VALUE = re.compile(rf'(?i)\b{CREDENTIAL_LABEL}\b\s*(?::|=|\bis\b)\s*["\']?\S+["\']?')
+WHITESPACE_VALUE = re.compile(rf'(?i)\b{CREDENTIAL_LABEL}\b\s+(?P<value>\S+)')
+PUBLIC_CREDENTIAL_TOPICS = frozenset({
+    'authentication','best','comparison','documentation','docs','examples','expiry','expiration',
+    'format','guide','manager','permissions','policies','policy','requirements','revocation',
+    'rotation','scopes','security','tutorial',
+})
 FACT_PATTERNS = {
     'price': re.compile(r'(?i)(?:[$€£¥₩]\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d)'),
     'date': re.compile(r'(?i)(?:\b\d{4}-\d{1,2}-\d{1,2}\b|\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:,\s*\d{4})?\b|\b\d{1,2}월\s*\d{1,2}일\b)'),
@@ -39,13 +49,13 @@ TOTAL_VALUE_PATTERNS = (
     re.compile(r'(?i)(?:\b(?:total due|payable total|grand total|total price)\b|총\s*결제(?:액)?|결제\s*금액)[^;.!?]{0,20}(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b)'),
     re.compile(r'(?i)(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b)[^;.!?]{0,20}(?:\b(?:total due|payable total|grand total|total price)\b|총\s*결제(?:액)?|결제\s*금액)'),
 )
-HEDGED_DYNAMIC = re.compile(
-    r'(?i)\b(?:may|might|could|possibly|probably|likely|expected|estimated|estimate|approximately|approximate|projected|potential|check|subject to)\b|'
+DYNAMIC_DISQUALIFIER = re.compile(
+    r'(?i)\b(?:may|might|could|can|should|would|possibly|probably|likely|expected|estimated|estimate|approximately|approximate|about|around|projected|potential|check|subject to|up to|at least|at most|starting at|starts at|if|unless|when|upon|provided|on request|depending on)\b|'
     r'확인\s*필요|변동\s*가능|예상|추정|약\s*\d'
 )
 INCOMPLETE_TOTAL = re.compile(
-    r'(?i)\b(?:subtotal|before\s+(?:tax|taxes|fee|fees)|excluding\s+(?:tax|taxes|fee|fees)|plus\s+(?:tax|taxes|fee|fees)|'
-    r'(?:tax|taxes|fee|fees)\s+(?:not\s+included|excluded|extra))\b|'
+    r'(?i)\b(?:subtotal|before\s+(?:tax|taxes|fee|fees|service charge|service charges)|excluding\s+(?:tax|taxes|fee|fees|service charge|service charges)|plus\s+(?:tax|taxes|fee|fees|service charge|service charges)|'
+    r'(?:tax|taxes|fee|fees|service charge|service charges)\s+(?:not\s+included|excluded|extra))\b|'
     r'세금\s*전|수수료\s*전|세금\s*별도|수수료\s*별도'
 )
 
@@ -57,7 +67,12 @@ def validate_public_query(query, query_source):
     if not isinstance(query, str) or not 1 <= len(query.strip()) <= 500:
         raise ValueError('공개 검색어는 1~500자로 입력하세요.')
     public_query=query.strip()
-    if any(pattern.search(public_query) for pattern in SENSITIVE_QUERY_PATTERNS):
+    sensitive=any(pattern.search(public_query) for pattern in HIGH_CONFIDENCE_SECRET_PATTERNS)
+    sensitive=sensitive or bool(LABELLED_VALUE.search(public_query))
+    whitespace=WHITESPACE_VALUE.search(public_query)
+    if whitespace and whitespace.group('value').casefold().strip('"\'.,?!') not in PUBLIC_CREDENTIAL_TOPICS:
+        sensitive=True
+    if sensitive:
         raise ValueError('자격 증명 정보나 개인 파일 내용은 공개 검색어로 전송할 수 없습니다.')
     return public_query
 
@@ -81,7 +96,7 @@ def _observed_details(content):
 
 def _dynamic_observed(name, evidence):
     details=[text for row in evidence for text in row['observed_details'][name]]
-    qualified=[text for text in details if not HEDGED_DYNAMIC.search(text) and not INCOMPLETE_TOTAL.search(text)]
+    qualified=[text for text in details if not DYNAMIC_DISQUALIFIER.search(text) and not INCOMPLETE_TOTAL.search(text)]
     if name == 'fee':
         for text in qualified:
             if FEE_VALUE_PATTERNS[0].search(text) or FEE_VALUE_PATTERNS[2].search(text): return True

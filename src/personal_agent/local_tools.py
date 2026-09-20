@@ -38,6 +38,17 @@ def _denied_address(address):
             address.is_multicast or address.is_unspecified)
 
 
+def _explicit_port(parsed):
+    authority=parsed.netloc.rsplit('@',1)[-1]
+    if authority.endswith(':'):
+        raise ValueError('공개 페이지 URL의 포트가 올바르지 않습니다.')
+    try: port=parsed.port
+    except ValueError: raise ValueError('공개 페이지 URL의 포트가 올바르지 않습니다.') from None
+    if port is not None and not 1 <= port <= 65535:
+        raise ValueError('공개 페이지 URL의 포트가 올바르지 않습니다.')
+    return port
+
+
 def normalize_public_url(value):
     """Return the exact, approval-comparable public URL form."""
     if not isinstance(value, str) or len(value) > 2048:
@@ -52,8 +63,7 @@ def normalize_public_url(value):
     except ValueError: literal=None
     if literal is not None and _denied_address(literal):
         raise ValueError('개인 네트워크나 메타데이터 주소에는 접근할 수 없습니다.')
-    try: port=parsed.port
-    except ValueError: raise ValueError('공개 페이지 URL의 포트가 올바르지 않습니다.') from None
+    port=_explicit_port(parsed)
     if literal is not None and literal.version == 6: host=f'[{host}]'
     default_port=80 if parsed.scheme.casefold() == 'http' else 443
     if port is not None and port != default_port: host=f'{host}:{port}'
@@ -85,6 +95,7 @@ class PublicPageReader:
 
     def _validate_host(self, url):
         parsed=urlsplit(url); host=parsed.hostname
+        port=_explicit_port(parsed) or (443 if parsed.scheme=='https' else 80)
         try:
             literal=ipaddress.ip_address(host)
         except ValueError:
@@ -92,7 +103,7 @@ class PublicPageReader:
         if literal is not None:
             addresses={str(literal)}
         else:
-            try: addresses={item[4][0] for item in self.resolver(host, parsed.port or (443 if parsed.scheme=='https' else 80), type=socket.SOCK_STREAM)}
+            try: addresses={item[4][0] for item in self.resolver(host, port, type=socket.SOCK_STREAM)}
             except (OSError, ValueError): raise ValueError('공개 페이지의 주소를 확인하지 못했습니다.') from None
         if not addresses: raise ValueError('공개 페이지 주소가 없습니다.')
         for raw in addresses:
@@ -108,12 +119,14 @@ class PublicPageReader:
         try: literal=ipaddress.ip_address(host)
         except ValueError: literal=None
         if literal is not None and literal.version == 6: host=f'[{host}]'
-        port=parsed.port or (443 if parsed.scheme=='https' else 80)
+        explicit_port=_explicit_port(parsed)
+        port=explicit_port if explicit_port is not None else (443 if parsed.scheme=='https' else 80)
         default_port=443 if parsed.scheme=='https' else 80
         return host if port == default_port else f'{host}:{port}'
 
     def _open_pinned(self, url, addresses):
-        parsed=urlsplit(url); port=parsed.port or (443 if parsed.scheme=='https' else 80)
+        parsed=urlsplit(url); explicit_port=_explicit_port(parsed)
+        port=explicit_port if explicit_port is not None else (443 if parsed.scheme=='https' else 80)
         host_header=self._host_header(parsed)
         path=urlunsplit(('', '', parsed.path or '/', parsed.query, ''))
         last=None

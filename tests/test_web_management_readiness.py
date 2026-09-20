@@ -98,6 +98,8 @@ const proofB=ui.modelDraftFingerprint({provider:'openai',endpoint:'https://api.e
 assert.notEqual(proofA,proofB);
 const records=ui.recordItems({memories:[{id:'n',content:'note'},{id:'m',memory_key:'pref',content:'memory'}],context:[{id:'c',source_kind:'text'}],results:[{id:'r',content:'artifact'}]});
 assert.deepEqual(records.map(x=>[x.id,x.type,x.deleteKind]),[['n','saved','memories'],['m','memory','memories'],['c','temporary',undefined],['r','artifact','results']]);
+const projected=ui.recordItems({items:[{id:'old',type:'note',label:'메모',content:'authoritative',deleteKind:'memories'}]});
+assert.deepEqual(projected,[{id:'old',type:'note',label:'메모',content:'authoritative',deleteKind:'memories'}]);
 const long='x'.repeat(300)+'needle-after-truncation';
 const space={memories:[{id:'exact',memory_key:'durable-key',content:'exact durable memory'},{id:'long',content:long}]};
 assert.deepEqual(ui.filterLocalRecords(space,'durable-key','all').map(x=>x.id),['exact']);
@@ -143,13 +145,13 @@ const verified=await guard.test(current,async()=>{testRequests++;return {ok:true
 assert.equal(verified.accepted,true);assert.equal(guard.canApply(current),true);
 assert.equal(await guard.apply(current,async payload=>{saveRequests++;assert.equal('credential_revision' in payload,false);}),true);
 assert.equal(testRequests,2);assert.equal(saveRequests,1);
-console.log(JSON.stringify({checks:35}));
+console.log(JSON.stringify({checks:36}));
 })().catch(error=>{console.error(error);process.exit(1);});
 """
         result = subprocess.run(
             [node, '-e', script, str(ROOT / 'src/personal_agent/web/app.js')],
             check=True, capture_output=True, text=True, timeout=20)
-        self.assertEqual(json.loads(result.stdout)['checks'], 35)
+        self.assertEqual(json.loads(result.stdout)['checks'], 36)
 
     def test_model_apply_has_one_explicit_test_and_credential_revision(self):
         app = (ROOT / 'src/personal_agent/web/app.js').read_text()
@@ -210,6 +212,37 @@ console.log(JSON.stringify({checks:35}));
             self.assertEqual(deleted['workspace_id'], workspace['id'])
             self.assertEqual(store.workspace_detail(workspace['id'])['result_count'], 30)
             self.assertGreater(store.workspace(workspace['id'])['updated'], revision)
+
+    def test_personal_records_search_counts_and_pagination_cover_all_durable_rows(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = QuickStore(directory)
+            workspace = store.create_workspace('authoritative records')
+            with store.db() as db:
+                for index in range(60):
+                    content = 'unique-oldest-note' if index == 0 else f'note {index}'
+                    db.execute('INSERT INTO notes VALUES (?,?,?)',
+                               (f'note-{index}', content, float(index)))
+                for index in range(55):
+                    content = 'unique-oldest-artifact' if index == 0 else f'artifact {index}'
+                    db.execute('INSERT INTO workspace_results VALUES (?,?,?,?,?,?)',
+                               (f'result-{index}', workspace['id'], f'job-{index}', content, '',
+                                float(100 + index)))
+
+            first = store.personal_records(limit=50)
+            self.assertEqual(first['counts']['note'], 60)
+            self.assertEqual(first['counts']['artifact'], 55)
+            self.assertEqual(first['match_count'], 115)
+            self.assertEqual(len(first['items']), 50)
+            self.assertTrue(first['has_more'])
+            second = store.personal_records(limit=50, offset=50)
+            third = store.personal_records(limit=50, offset=100)
+            self.assertEqual(len(second['items']), 50)
+            self.assertEqual(len(third['items']), 15)
+            self.assertFalse(third['has_more'])
+            self.assertEqual(store.personal_records('unique-oldest-note')['items'][0]['id'], 'note-0')
+            artifact = store.personal_records('unique-oldest-artifact', 'artifact')
+            self.assertEqual(artifact['match_count'], 1)
+            self.assertEqual(artifact['items'][0]['id'], 'result-0')
 
     def test_capability_lifecycle_uses_existing_confirmed_settings_route(self):
         app = (ROOT / 'src/personal_agent/web/app.js').read_text()

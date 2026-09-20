@@ -243,6 +243,54 @@ class QuickStore:
             candidates=[dict(r) for r in db.execute("SELECT id,job_id,memory_key,content,created,state FROM memory_candidates WHERE state='pending' ORDER BY created DESC LIMIT 50")]
         return {'memories':memories,'memory_count':len(memories),'memory_candidates':candidates,'memory_candidate_count':len(candidates),'results':results,'result_count':len(results),'context':context,'context_count':len(context),'evidence':evidence}
 
+    def personal_records(self, query='', record_filter='all', limit=100, offset=0):
+        if not isinstance(query,str) or len(query)>160:
+            raise ValueError('기록 검색어를 확인하세요.')
+        if record_filter not in ('all','saved','note','memory','temporary','artifact'):
+            raise ValueError('기록 유형을 확인하세요.')
+        if (isinstance(limit,bool) or not isinstance(limit,int) or not 1<=limit<=100 or
+                isinstance(offset,bool) or not isinstance(offset,int) or not 0<=offset<=2_147_483_647):
+            raise ValueError('기록 페이지 범위를 확인하세요.')
+        now=time.time()
+        union='''
+            SELECT id,'note' AS type,'메모' AS label,'' AS memory_key,content,created,
+                   NULL AS expires_at,'' AS sharing_state,'' AS source_kind,'' AS source_app,
+                   '' AS workspace_id,'' AS job_id,'memories' AS deleteKind FROM notes
+            UNION ALL
+            SELECT id,'memory','기억',memory_key,content,created,NULL,'','','','','','memories'
+              FROM memories WHERE state='current'
+            UNION ALL
+            SELECT id,'temporary','임시 자료','',source_kind||' · '||source_app||' · '||sharing_state,
+                   captured_at,expires_at,sharing_state,source_kind,source_app,'','',''
+              FROM context_events WHERE expires_at>?
+            UNION ALL
+            SELECT id,'artifact','저장된 결과','',content,created,NULL,'','','',workspace_id,job_id,'results'
+              FROM workspace_results
+        '''
+        escaped=query.casefold().replace('\\','\\\\').replace('%','\\%').replace('_','\\_')
+        needle=f'%{escaped}%'
+        where='''
+            WHERE (?='all' OR (?='saved' AND type IN ('note','memory')) OR type=?)
+              AND (?='' OR lower(coalesce(memory_key,'')||' '||content||' '||source_kind||' '||source_app)
+                   LIKE ? ESCAPE '\\')
+        '''
+        params=(now,record_filter,record_filter,record_filter,query,needle)
+        with self.db() as db:
+            db.execute('DELETE FROM context_events WHERE expires_at<=?',(now,))
+            rows=[dict(row) for row in db.execute(
+                f'SELECT * FROM ({union}) {where} ORDER BY created DESC,id DESC LIMIT ? OFFSET ?',
+                (*params,limit,offset),
+            )]
+            match_count=db.execute(f'SELECT COUNT(*) FROM ({union}) {where}',params).fetchone()[0]
+            counts={
+                'note':db.execute('SELECT COUNT(*) FROM notes').fetchone()[0],
+                'memory':db.execute("SELECT COUNT(*) FROM memories WHERE state='current'").fetchone()[0],
+                'temporary':db.execute('SELECT COUNT(*) FROM context_events WHERE expires_at>?',(now,)).fetchone()[0],
+                'artifact':db.execute('SELECT COUNT(*) FROM workspace_results').fetchone()[0],
+            }
+        return {'items':rows,'counts':counts,'match_count':match_count,'offset':offset,'limit':limit,
+                'has_more':offset+len(rows)<match_count}
+
     def delete_personal_space_item(self, kind, item_id):
         if kind not in ('memories','memory_candidates','results') or not isinstance(item_id,str) or not item_id:
             raise ValueError('삭제할 Personal Space 항목을 확인하세요.')

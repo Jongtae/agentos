@@ -9,7 +9,7 @@ import json
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "src" / "personal_agent" / "web"
@@ -73,7 +73,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"error": f"{method} is not supported by this fixture"}, 405)
 
     def do_GET(self):
-        path = urlsplit(self.path).path
+        parsed = urlsplit(self.path)
+        path = parsed.path
         self.observe("GET", path)
         if path == "/favicon.ico":
             self.send_response(204)
@@ -108,6 +109,29 @@ class Handler(BaseHTTPRequestHandler):
                 Fixture.state_inflight = False
             self.send_json({"settings": {"model": model, "model_ready": False, "subscription_engines": {"engines": []}, "file_roots": [{"path": path} for path in file_roots], "file_workspace": file_workspace, "context_inbox": {"sources": {}, "items": []}, "telegram": {"enabled": True, "paired": True, "username": "fixture_bot"}, "conversation_settings": {"state": "read", "capabilities": [{"id": "google-drive-read", "kind": "connector", "state": Fixture.capability_state, "recovery": "Owner can resume after review."}]}, "document_boundary": {}}, "jobs": [{"id": "task-382", "status": "running", "response": None, "message": "fixture Telegram request", "channel": "telegram:fixture-owner"}, {"id": "project-job", "status": "succeeded", "response": "fixture project result", "message": "fixture project request", "channel": "telegram:fixture-owner"}], "tool_events": [], "healthy": True})
         elif path == "/api/personal-space": self.send_json({"memories": Fixture.memories, "context": [], "results": (Fixture.results + Fixture.other_results)[-50:]})
+        elif path == "/api/personal-records":
+            query = parse_qs(parsed.query).get("query", [""])[0].casefold()
+            record_filter = parse_qs(parsed.query).get("filter", ["all"])[0]
+            limit = int(parse_qs(parsed.query).get("limit", ["100"])[0])
+            offset = int(parse_qs(parsed.query).get("offset", ["0"])[0])
+            items = [
+                {**item, "type": "memory" if item.get("memory_key") else "note",
+                 "label": "기억" if item.get("memory_key") else "메모", "deleteKind": "memories"}
+                for item in Fixture.memories
+            ] + [
+                {**item, "type": "artifact", "label": "저장된 결과", "deleteKind": "results"}
+                for item in Fixture.results + Fixture.other_results
+            ]
+            counts = {kind: sum(item["type"] == kind for item in items)
+                      for kind in ("note", "memory", "temporary", "artifact")}
+            matches = [item for item in items if
+                       (record_filter == "all" or item["type"] == record_filter or
+                        (record_filter == "saved" and item["type"] in ("note", "memory"))) and
+                       (not query or query in " ".join(str(item.get(key, "")) for key in
+                                                       ("label", "memory_key", "content", "source_kind")).casefold())]
+            page = matches[offset:offset + limit]
+            self.send_json({"items": page, "counts": counts, "match_count": len(matches),
+                            "offset": offset, "limit": limit, "has_more": offset + len(page) < len(matches)})
         elif path == "/api/workspaces/workspace-382": self.send_json({"id": "workspace-382", "title": "회귀 프로젝트", "purpose": "상세/결과 저장 회귀", "result_count": len(Fixture.results), "saved_job_ids": [item["job_id"] for item in Fixture.results], "results": Fixture.results, "messages": []})
         elif path == "/api/workspaces/workspace-other":
             detail = {"id": "workspace-other", "title": "다른 프로젝트", "purpose": "늦은 응답 격리 회귀", "result_count": len(Fixture.other_results) + 1, "saved_job_ids": [item["job_id"] for item in Fixture.other_results] + ["project-job"], "results": [dict(item) for item in Fixture.other_results], "messages": []}

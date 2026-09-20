@@ -145,6 +145,7 @@ class GoogleCalendarTests(unittest.TestCase):
         transports = (
             (lambda *_: (_ for _ in ()).throw(TimeoutError()), "provider-timeout"),
             (lambda *_: (_ for _ in ()).throw(GoogleCalendarHTTPError(503)), "provider-error"),
+            (lambda *_: (_ for _ in ()).throw(ValueError("private parser detail")), "provider-error"),
             (lambda *_: {}, "malformed-response"),
         )
         payload = {

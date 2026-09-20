@@ -214,7 +214,7 @@ class CalendarTests(unittest.TestCase):
         )
         draft = calendar.draft_create(EVENT, "owner")
         approval = calendar.approve(draft["id"], "owner")["approval_id"]
-        clock[0] = 901
+        clock[0] = 900
         with self.assertRaises(CalendarError) as expired:
             calendar.create(draft["id"], approval, "owner")
         self.assertEqual(expired.exception.reason, "approval-expired")
@@ -248,7 +248,6 @@ class CalendarTests(unittest.TestCase):
             self.registry.status("owner", CALENDAR_CONNECTOR_ID).state,
             ConnectorState.REAUTH_REQUIRED,
         )
-
         self.registry.transition(
             "owner",
             CALENDAR_CONNECTOR_ID,
@@ -265,6 +264,14 @@ class CalendarTests(unittest.TestCase):
         with self.assertRaises(CalendarError):
             self.calendar.create(uncertain["id"], uncertain_approval, "owner")
         self.assertEqual(len([call for call in self.provider.calls if call[0] == "create"]), 1)
+
+    def test_event_version_rejects_header_controls_before_approval(self):
+        for version in ('"v1"\r\nX-Injected: yes', '"v1"\x00'):
+            with self.subTest(version=version):
+                with self.assertRaises(CalendarError) as rejected:
+                    self.calendar.draft_cancel("event", version, "owner")
+                self.assertEqual(rejected.exception.reason, "invalid-event-version")
+        self.assertFalse(self.provider.calls)
 
     def test_status_and_stored_owner_are_redacted(self):
         draft = self.calendar.draft_create(EVENT, "owner-secret-id")

@@ -93,7 +93,10 @@ def _event_id(value: object) -> str:
 
 
 def _etag(value: object) -> str:
-    return _bounded_text(value, "event-version", 1024)
+    text = _bounded_text(value, "event-version", 1024)
+    if any(ord(character) < 32 or ord(character) == 127 for character in text):
+        raise CalendarError("invalid-event-version")
+    return text
 
 
 def _canonical(value: dict) -> str:
@@ -449,7 +452,7 @@ class CalendarConnector:
                 raise CalendarError("unknown-external-outcome", effect="unknown", recovery="inspect-calendar-before-retry")
             if row.get("state") != "approved" or not _constant_text_equal(row.get("approval"), approval):
                 raise CalendarError("exact-approval-required")
-            if self._now() > row.get("expires", 0):
+            if self._now() >= row.get("expires", 0):
                 row.update(state="expired", error_class="approval-expired", effect="none")
                 rows[ident] = row
                 self._put(rows)

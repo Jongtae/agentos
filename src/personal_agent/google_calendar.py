@@ -81,6 +81,11 @@ class GoogleCalendar:
             raise GoogleCalendarError("provider-rejected") from None
         except (TimeoutError, OSError):
             raise GoogleCalendarError("provider-timeout", "unknown" if mutation else "none") from None
+        except Exception:
+            # Injected transports and response decoders are an external trust
+            # boundary. Never expose their exception text; after a mutation
+            # attempt, conservatively preserve an unknown-effect receipt.
+            raise GoogleCalendarError("provider-error", "unknown" if mutation else "none") from None
 
     def query(self, time_min: str, time_max: str, timezone: str, max_results: int) -> list[dict]:
         query = urlencode(

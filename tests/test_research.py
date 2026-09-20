@@ -130,6 +130,7 @@ class PublicResearchTests(unittest.TestCase):
             (r'compare \\\server\private\receipt.txt','owner_public_request'),
             (r'compare \/server\private/receipt.txt','owner_public_request'),
             ('-----BEGIN PRIVATE KEY----- abcdef -----END PRIVATE KEY-----','owner_public_request'),
+            ('compare https://alice:supersecret@example.com/private','owner_public_request'),
         ]
         for query,source in cases:
             with self.subTest(query=query),self.assertRaises(ValueError):

@@ -248,13 +248,30 @@ class PublicPageReader:
 
     def _set_response_deadline(self, response, deadline):
         remaining=self._remaining(deadline)
+        sock=self._response_socket(response)
+        if sock is not None:
+            sock.settimeout(remaining)
+        return remaining
+
+    @staticmethod
+    def _response_socket(response):
         connection=getattr(response,'_agentos_connection',None)
         sock=getattr(connection,'sock',None)
         if sock is None:
             sock=getattr(getattr(getattr(response,'fp',None),'raw',None),'_sock',None)
+        return sock
+
+    @classmethod
+    def _interrupt_response(cls, response):
+        sock=cls._response_socket(response)
         if sock is not None:
-            sock.settimeout(remaining)
-        return remaining
+            try: sock.shutdown(socket.SHUT_RDWR)
+            except OSError: pass
+            try: sock.close()
+            except OSError: pass
+            return
+        try: response.close()
+        except OSError: pass
 
     @staticmethod
     def _page_charset(content_type):
@@ -297,7 +314,7 @@ class PublicPageReader:
             raw=bytearray()
             while True:
                 self._set_response_deadline(response,deadline)
-                with self._deadline_guard(deadline,getattr(response,'close',lambda:None)):
+                with self._deadline_guard(deadline,lambda:self._interrupt_response(response)):
                     chunk=response.read(min(64*1024, MAX_PAGE_BYTES-len(raw)+1))
                 if not chunk: break
                 raw.extend(chunk)

@@ -1,6 +1,9 @@
 import gzip
 import http.client
 import io
+import socket
+import threading
+import time
 import unittest
 from unittest.mock import patch
 from urllib.parse import urlsplit
@@ -208,6 +211,26 @@ class PublicPageReaderTests(unittest.TestCase):
                 return b'chunk' if now[0] < 14 else b''
         with self.assertRaisesRegex(Exception,'시간이 제한'):
             PublicPageReader(opener=Opener(SlowResponse()),resolver=public_dns,clock=lambda:now[0]).read('https://example.com/')
+
+    @patch('personal_agent.local_tools.MAX_PAGE_SECONDS',0.05)
+    def test_body_watchdog_shuts_down_socket_to_interrupt_blocking_read(self):
+        released=threading.Event();shutdowns=[]
+        class Sock:
+            def settimeout(self,_value): pass
+            def shutdown(self,how): shutdowns.append(how);released.set()
+            def close(self): released.set()
+        class Connection:
+            sock=Sock()
+        class BlockingResponse(Response):
+            _agentos_connection=Connection()
+            def read(self,size=-1):
+                released.wait(1)
+                return b''
+        started=time.monotonic()
+        with self.assertRaisesRegex(Exception,'시간이 제한'):
+            PublicPageReader(opener=Opener(BlockingResponse()),resolver=public_dns).read('https://example.com/')
+        self.assertLess(time.monotonic()-started,0.5)
+        self.assertEqual(shutdowns,[socket.SHUT_RDWR])
 
     def test_honors_safe_declared_charset_without_corrupting_exact_price(self):
         body='<html><p>Price: £100.</p></html>'.encode('iso-8859-1')

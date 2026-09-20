@@ -332,7 +332,8 @@ class CalendarConnector:
                 portable_action = "unknown"
             if row.get("recovery", "") not in {
                 "", "inspect-calendar-before-retry", "reconnect", "request-new-approval",
-                "request-new-draft", "review-request",
+                "request-new-draft", "reconnect-and-request-new-draft", "review-request",
+                "review-request-and-request-new-draft",
             }:
                 raise CalendarError("invalid-stored-state")
             quarantined_approval = portable_state in {"awaiting-approval", "approved"}
@@ -366,8 +367,18 @@ class CalendarConnector:
             elif quarantined_approval:
                 row.update(
                     error_class="restored-approval-quarantined",
-                    recovery="request-new-approval",
+                    recovery="request-new-draft",
                 )
+            elif portable_state == "expired" and row.get("recovery") == "request-new-approval":
+                row["recovery"] = "request-new-draft"
+            elif (
+                portable_state == "failed"
+                and row.get("error_class") in {"scope-denied", "scope-expired"}
+                and row.get("recovery") == "reconnect"
+            ):
+                row["recovery"] = "reconnect-and-request-new-draft"
+            elif portable_state == "failed" and row.get("recovery") == "review-request":
+                row["recovery"] = "review-request-and-request-new-draft"
             rows[ident] = row
             self._put(rows)
             return row
@@ -418,6 +429,22 @@ class CalendarConnector:
             self._put(rows)
         elif not _constant_text_equal(stored_owner, owner_key):
             raise CalendarError("draft-not-found")
+        if row.get("state") == "expired" and row.get("recovery") == "request-new-approval":
+            row["recovery"] = "request-new-draft"
+            rows[ident] = row
+            self._put(rows)
+        elif (
+            row.get("state") == "failed"
+            and row.get("error_class") in {"scope-denied", "scope-expired"}
+            and row.get("recovery") == "reconnect"
+        ):
+            row["recovery"] = "reconnect-and-request-new-draft"
+            rows[ident] = row
+            self._put(rows)
+        elif row.get("state") == "failed" and row.get("recovery") == "review-request":
+            row["recovery"] = "review-request-and-request-new-draft"
+            rows[ident] = row
+            self._put(rows)
         return row
 
     def preview(self, ident: str, owner: str) -> dict:
@@ -463,7 +490,7 @@ class CalendarConnector:
                     state="expired",
                     error_class="approval-expired",
                     effect="none",
-                    recovery="request-new-approval",
+                    recovery="request-new-draft",
                 )
                 rows[ident] = row
                 self._put(rows)
@@ -513,11 +540,11 @@ class CalendarConnector:
                     state="expired",
                     error_class="approval-expired",
                     effect="none",
-                    recovery="request-new-approval",
+                    recovery="request-new-draft",
                 )
                 rows[ident] = row
                 self._put(rows)
-                raise CalendarError("approval-expired", recovery="request-new-approval")
+                raise CalendarError("approval-expired", recovery="request-new-draft")
             bound = {
                 "action": row.get("action"),
                 "payload": row.get("payload"),
@@ -525,26 +552,36 @@ class CalendarConnector:
                 "event_version": row.get("event_version", ""),
             }
             if _canonical(bound) != row.get("hash") or row.get("approval_hash") != row.get("hash"):
-                row.update(state="failed", error_class="payload-changed", effect="none")
+                row.update(
+                    state="failed",
+                    error_class="payload-changed",
+                    effect="none",
+                    recovery="request-new-draft",
+                )
                 rows[ident] = row
                 self._put(rows)
-                raise CalendarError("payload-changed")
+                raise CalendarError("payload-changed", recovery="request-new-draft")
             authority_guard = self.registry._authority_guard() if self.registry is not None else nullcontext()
             with authority_guard:
                 try:
                     authority_snapshot = self._authorize(owner, CALENDAR_WRITE_SCOPE)
                 except CalendarError as error:
-                    row.update(state="failed", error_class=error.reason, effect="none", recovery=error.recovery)
+                    recovery = (
+                        "reconnect-and-request-new-draft"
+                        if error.recovery == "reconnect"
+                        else "request-new-draft"
+                    )
+                    row.update(state="failed", error_class=error.reason, effect="none", recovery=recovery)
                     rows[ident] = row
                     self._put(rows)
-                    raise
+                    raise CalendarError(error.reason, effect=error.effect, recovery=recovery) from None
                 observed_at = self._now()
                 if observed_at >= row.get("expires", 0):
                     row.update(state="expired", error_class="approval-expired", effect="none",
-                               recovery="request-new-approval")
+                               recovery="request-new-draft")
                     rows[ident] = row
                     self._put(rows)
-                    raise CalendarError("approval-expired", recovery="request-new-approval")
+                    raise CalendarError("approval-expired", recovery="request-new-draft")
                 # Persist the dispatch commitment while the same connector
                 # authority revision is guarded. A later revocation applies
                 # to later work and cannot race into this pre-dispatch gap.
@@ -568,6 +605,18 @@ class CalendarConnector:
             if provider_error.reason == "scope-expired":
                 self._mark_scope_expired(owner, authority_snapshot)
             error = self._provider_error(provider_error)
+            if error.recovery == "reconnect":
+                error = CalendarError(
+                    error.reason,
+                    effect=error.effect,
+                    recovery="reconnect-and-request-new-draft",
+                )
+            elif error.effect == "none":
+                error = CalendarError(
+                    error.reason,
+                    effect="none",
+                    recovery="review-request-and-request-new-draft",
+                )
             with _LOCK:
                 rows = self._rows()
                 current = self._owned(rows, ident, owner)

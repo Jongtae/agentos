@@ -138,11 +138,33 @@ class CalendarTests(unittest.TestCase):
         approval = calendar.approve(draft["id"], "reader")["approval_id"]
         with self.assertRaises(CalendarError) as denied:
             calendar.create(draft["id"], approval, "reader")
-        self.assertEqual((denied.exception.reason, denied.exception.effect), ("scope-denied", "none"))
-        self.assertEqual([call[0] for call in provider.calls], ["query"])
+        self.assertEqual(
+            (denied.exception.reason, denied.exception.effect, denied.exception.recovery),
+            ("scope-denied", "none", "reconnect-and-request-new-draft"),
+        )
+        self.assertEqual(
+            calendar.status(draft["id"], "reader")["recovery"],
+            "reconnect-and-request-new-draft",
+        )
+        with self.assertRaises(CalendarError):
+            calendar.approve(draft["id"], "reader")
         self.assertEqual(
             registry.status("reader", CALENDAR_WRITE_CONNECTOR_ID).state,
             ConnectorState.DISCONNECTED,
+        )
+        registry.transition(
+            "reader",
+            CALENDAR_WRITE_CONNECTOR_ID,
+            ConnectorState.CONNECTED,
+            granted_scopes=(CALENDAR_WRITE_SCOPE,),
+        )
+        replacement = calendar.draft_create(EVENT, "reader")
+        replacement_approval = calendar.approve(replacement["id"], "reader")["approval_id"]
+        self.assertEqual(calendar.create(replacement["id"], replacement_approval, "reader")["id"], "new-event")
+        self.assertEqual([call[0] for call in provider.calls], ["query", "create"])
+        self.assertEqual(
+            registry.status("reader", CALENDAR_WRITE_CONNECTOR_ID).state,
+            ConnectorState.CONNECTED,
         )
 
     def test_query_authority_guard_covers_provider_dispatch(self):
@@ -208,7 +230,11 @@ class CalendarTests(unittest.TestCase):
         self.calendar._put(rows)
         with self.assertRaises(CalendarError) as changed:
             self.calendar.update(draft["id"], approval, "owner")
-        self.assertEqual(changed.exception.reason, "payload-changed")
+        self.assertEqual(
+            (changed.exception.reason, changed.exception.recovery),
+            ("payload-changed", "request-new-draft"),
+        )
+        self.assertEqual(self.calendar.status(draft["id"], "owner")["recovery"], "request-new-draft")
         self.assertFalse(self.provider.calls)
 
         foreign = self.calendar.draft_cancel("event-3", '"v1"', "owner")
@@ -259,19 +285,26 @@ class CalendarTests(unittest.TestCase):
         calendar.approve(status_draft["id"], "owner")
         clock[0] = 900
         status = calendar.status(status_draft["id"], "owner")
-        self.assertEqual((status["state"], status["recovery"]), ("expired", "request-new-approval"))
+        self.assertEqual((status["state"], status["recovery"]), ("expired", "request-new-draft"))
         with self.assertRaises(CalendarError) as expired:
             calendar.create(draft["id"], approval, "owner")
         self.assertEqual(expired.exception.reason, "approval-expired")
-        self.assertEqual(calendar.status(draft["id"], "owner")["recovery"], "request-new-approval")
+        self.assertEqual(calendar.status(draft["id"], "owner")["recovery"], "request-new-draft")
         self.assertFalse(self.provider.calls)
 
         self.provider.error = GoogleCalendarError("scope-expired")
         stale_scope = self.calendar.draft_cancel("event", '"v1"', "owner")
         with self.assertRaises(CalendarError) as scope:
             self.calendar.cancel(stale_scope["id"], self.approve(stale_scope), "owner")
-        self.assertEqual((scope.exception.reason, scope.exception.effect), ("scope-expired", "none"))
-        self.assertEqual(self.calendar.status(stale_scope["id"], "owner")["state"], "failed")
+        self.assertEqual(
+            (scope.exception.reason, scope.exception.effect, scope.exception.recovery),
+            ("scope-expired", "none", "reconnect-and-request-new-draft"),
+        )
+        self.assertEqual(
+            (self.calendar.status(stale_scope["id"], "owner")["state"],
+             self.calendar.status(stale_scope["id"], "owner")["recovery"]),
+            ("failed", "reconnect-and-request-new-draft"),
+        )
         self.assertEqual(
             self.registry.status("owner", CALENDAR_WRITE_CONNECTOR_ID).state,
             ConnectorState.REAUTH_REQUIRED,
@@ -401,7 +434,7 @@ class CalendarTests(unittest.TestCase):
                     "hash": "redacted-hash",
                     "action": "cancel",
                     "error_class": "scope-expired",
-                    "recovery": "reconnect",
+                    "recovery": "reconnect-and-request-new-draft",
                 },
             },
         )
@@ -415,7 +448,10 @@ class CalendarTests(unittest.TestCase):
         completed = restored.status("completed-update", "restored-owner")
         failed = restored.status("failed-scope", "restored-owner")
         self.assertEqual((completed["state"], completed["action"]), ("completed", "update"))
-        self.assertEqual((failed["state"], failed["action"], failed["recovery"]), ("failed", "cancel", "reconnect"))
+        self.assertEqual(
+            (failed["state"], failed["action"], failed["recovery"]),
+            ("failed", "cancel", "reconnect-and-request-new-draft"),
+        )
 
     def test_approval_expiring_while_waiting_for_authority_is_not_dispatched(self):
         clock = [1000.0]
@@ -439,8 +475,15 @@ class CalendarTests(unittest.TestCase):
         calendar._authorize = delayed_authorize
         with self.assertRaises(CalendarError) as expired:
             calendar.create(draft["id"], approval, "owner")
-        self.assertEqual(expired.exception.reason, "approval-expired")
-        self.assertEqual(calendar.status(draft["id"], "owner")["state"], "expired")
+        self.assertEqual(
+            (expired.exception.reason, expired.exception.recovery),
+            ("approval-expired", "request-new-draft"),
+        )
+        self.assertEqual(
+            (calendar.status(draft["id"], "owner")["state"],
+             calendar.status(draft["id"], "owner")["recovery"]),
+            ("expired", "request-new-draft"),
+        )
         self.assertFalse(self.provider.calls)
 
     def test_status_and_stored_owner_are_redacted(self):
@@ -659,7 +702,7 @@ class CalendarTests(unittest.TestCase):
                 self.assertEqual(quarantined["state"], "expired")
                 self.assertEqual(quarantined["action"], "unknown")
                 self.assertEqual(quarantined["error_class"], "restored-approval-quarantined")
-                self.assertEqual(quarantined["recovery"], "request-new-approval")
+                self.assertEqual(quarantined["recovery"], "request-new-draft")
 
     def test_write_authority_check_and_executing_commit_share_registry_guard(self):
         draft = self.calendar.draft_create(EVENT, "owner")

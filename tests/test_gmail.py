@@ -270,6 +270,15 @@ class GmailConnectorTests(unittest.TestCase):
         self.assertEqual(result.subject, "안녕")
         self.assertEqual(result.sender, "안녕 <vendor@example.test>")
 
+    def test_search_bounds_malformed_rfc2047_parser_errors(self):
+        self.connect()
+        malformed = self.metadata()
+        malformed["payload"]["headers"][0]["value"] = "=?utf-8?b?a?="
+        self.responses.extend([{"messages": [{"id": "m_1"}]}, malformed])
+        with self.assertRaises(GmailError) as rejected:
+            self.gmail.search("owner-a", "receipt")
+        self.assertEqual(rejected.exception.reason, "invalid_provider_response")
+
     def test_search_limits_and_provider_over_return_are_bounded(self):
         self.connect()
         for invalid in (0, 21, True):
@@ -487,6 +496,27 @@ class GmailConnectorTests(unittest.TestCase):
         message = self.read()
         self.assertEqual(message.body, "<p>café</p>")
         self.assertEqual(message.mime_type, "text/html")
+
+    def test_top_level_rfc822_payload_exposes_its_selected_message_body(self):
+        self.connect()
+        self.responses.append(
+            {
+                "id": "m_1",
+                "threadId": "t_1",
+                "payload": {
+                    "mimeType": "message/rfc822",
+                    "parts": [
+                        {
+                            "mimeType": "text/plain",
+                            "body": {"data": base64.urlsafe_b64encode(b"top-level body").decode()},
+                        }
+                    ],
+                },
+            }
+        )
+        message = self.read()
+        self.assertEqual(message.body, "top-level body")
+        self.assertEqual(message.mime_type, "text/plain")
 
     def test_body_does_not_traverse_nested_attachment_subtrees(self):
         self.connect()

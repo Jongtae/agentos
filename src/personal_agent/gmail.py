@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import codecs
 from dataclasses import dataclass
+from email.errors import HeaderParseError
 from email.header import decode_header
 from email.message import Message
 import hashlib
@@ -209,7 +210,7 @@ def _decoded_header(value: object, maximum: int) -> str:
             else:
                 raise TypeError("invalid header fragment")
         return _bounded_text("".join(parts), maximum)
-    except (LookupError, TypeError, ValueError, UnicodeError):
+    except (HeaderParseError, LookupError, TypeError, ValueError, UnicodeError):
         raise GmailError("invalid_provider_response") from None
 
 
@@ -760,7 +761,7 @@ class GmailConnector:
             # A nested message/rfc822 is an attached message even when Gmail
             # omits filename and Content-Disposition metadata. Its descendants
             # are not part of the current message body.
-            if normalized_mime == "message/rfc822":
+            if normalized_mime == "message/rfc822" and depth > 0:
                 return []
             children: list[list[tuple[str, str | None, str | None, str | None]]] = []
             parts = part.get("parts", [])

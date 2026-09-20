@@ -104,6 +104,7 @@ class EncryptedGmailSecretStore:
 class GmailSearchResult:
     message_id: str
     thread_id: str
+    connection_revision: str
     subject: str
     sender: str
     date: str
@@ -115,6 +116,7 @@ class GmailSearchResult:
             "resource": "message",
             "message_id": self.message_id,
             "thread_id": self.thread_id,
+            "connection_revision": self.connection_revision,
         }
 
     def as_dict(self) -> dict:
@@ -137,6 +139,7 @@ class GmailMessage:
 
     message_id: str
     thread_id: str
+    connection_revision: str
     mime_type: str
     body: str
 
@@ -147,6 +150,7 @@ class GmailMessage:
             "resource": "message",
             "message_id": self.message_id,
             "thread_id": self.thread_id,
+            "connection_revision": self.connection_revision,
         }
 
     def as_dict(self) -> dict:
@@ -401,7 +405,7 @@ class GmailConnector:
                 connection_revision,
                 access_token,
             )
-            results.append(self._search_result(message_id, metadata))
+            results.append(self._search_result(message_id, metadata, connection_revision))
         return tuple(results)
 
     def read_message(self, owner_id: str, message_id: str) -> GmailMessage:
@@ -441,7 +445,7 @@ class GmailConnector:
             return encoded
 
         body, mime_type = self._body(response.get("payload"), load_attachment)
-        return GmailMessage(message_id, thread_id, mime_type, body)
+        return GmailMessage(message_id, thread_id, connection_revision, mime_type, body)
 
     def mark_reauthentication_required(
         self,
@@ -654,7 +658,12 @@ class GmailConnector:
             raise GmailError("invalid_message_id")
         return value
 
-    def _search_result(self, requested_id: str, response: dict) -> GmailSearchResult:
+    def _search_result(
+        self,
+        requested_id: str,
+        response: dict,
+        connection_revision: str,
+    ) -> GmailSearchResult:
         if not isinstance(response, dict) or self._message_id(response.get("id")) != requested_id:
             raise GmailError("invalid_provider_response")
         thread_id = self._message_id(response.get("threadId"))
@@ -671,6 +680,7 @@ class GmailConnector:
         return GmailSearchResult(
             requested_id,
             thread_id,
+            connection_revision,
             headers.get("subject", ""),
             headers.get("from", ""),
             headers.get("date", ""),
@@ -680,11 +690,13 @@ class GmailConnector:
         if not isinstance(payload, dict):
             raise GmailError("invalid_provider_response")
         candidate_count = 0
+        visited_count = 0
 
         def visit(part: object, depth: int = 0) -> list[tuple[str, str | None, str | None, str | None]]:
-            nonlocal candidate_count
-            if not isinstance(part, dict) or depth > 20 or candidate_count >= 100:
+            nonlocal candidate_count, visited_count
+            if not isinstance(part, dict) or depth > 20 or visited_count >= 100:
                 return []
+            visited_count += 1
             mime_type = part.get("mimeType")
             body = part.get("body")
             filename = part.get("filename")
@@ -739,6 +751,8 @@ class GmailConnector:
             parts = part.get("parts", [])
             if isinstance(parts, list):
                 for child in parts[:100]:
+                    if visited_count >= 100:
+                        break
                     rendered = visit(child, depth + 1)
                     if rendered:
                         children.append(rendered)

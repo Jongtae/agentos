@@ -232,6 +232,10 @@ class GmailConnectorTests(unittest.TestCase):
         self.assertEqual(results[0].subject, "Booking receipt")
         self.assertEqual(results[0].source["message_id"], "m_1")
         self.assertEqual(
+            results[0].source["connection_revision"],
+            self.gmail.status("owner-a")["connection_revision"],
+        )
+        self.assertEqual(
             [(call[0], call[1], call[2]) for call in self.calls],
             [
                 (
@@ -346,11 +350,47 @@ class GmailConnectorTests(unittest.TestCase):
         self.assertEqual(message.body, "private mail body")
         self.assertEqual(message.mime_type, "text/plain")
         self.assertEqual(message.source["message_id"], "m_1")
+        self.assertEqual(
+            message.source["connection_revision"],
+            self.gmail.status("owner-a")["connection_revision"],
+        )
         self.assertEqual(message.as_evidence(), {"source": message.source, "body_included": False})
         self.assertNotIn("private mail body", repr(message))
         self.assertNotIn("private mail body", str(self.gmail.portable_status("owner-a")))
         self.assertEqual(self.calls[-1][0:3], ("GET", MESSAGES_ENDPOINT + "/m_1", {"format": "full"}))
         self.assertNotIn("private mail body", str(self.raw_store.config("connector_contract_state")))
+
+    def test_source_identity_changes_when_owner_reconnects(self):
+        self.connect(access_token="first-access", refresh_token="first-refresh")
+        first_revision = self.gmail.status("owner-a")["connection_revision"]
+        self.responses.extend([{"messages": [{"id": "m_1"}]}, self.metadata()])
+        first = self.gmail.search("owner-a", "receipt")[0]
+
+        self.registry.transition("owner-a", GMAIL_CONNECTOR_ID, ConnectorState.DISCONNECTED)
+        self.connect(access_token="second-access", refresh_token="second-refresh")
+        second_revision = self.gmail.status("owner-a")["connection_revision"]
+        self.responses.extend([{"messages": [{"id": "m_1"}]}, self.metadata()])
+        second = self.gmail.search("owner-a", "receipt")[0]
+
+        self.assertNotEqual(first_revision, second_revision)
+        self.assertEqual(first.source["connection_revision"], first_revision)
+        self.assertEqual(second.source["connection_revision"], second_revision)
+
+    def test_body_traversal_is_bounded_by_all_visited_nodes(self):
+        self.connect()
+        shared = {"mimeType": "multipart/mixed", "parts": []}
+        shared["parts"] = [shared] * 100
+        self.responses.append(
+            {
+                "id": "m_1",
+                "threadId": "t_1",
+                "payload": {"mimeType": "multipart/mixed", "parts": [shared] * 100},
+            }
+        )
+
+        message = self.gmail.read_message("owner-a", "m_1")
+        self.assertEqual(message.body, "")
+        self.assertEqual(message.mime_type, "multipart/mixed")
 
     def test_body_ignores_text_attachments_and_honors_declared_charset(self):
         self.connect()

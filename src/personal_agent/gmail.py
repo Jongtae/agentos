@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import codecs
 from dataclasses import dataclass
+from email.header import decode_header
 from email.message import Message
 import hashlib
 import hmac
@@ -189,6 +190,23 @@ def _bounded_text(value: object, maximum: int) -> str:
     if not isinstance(value, str):
         return ""
     return " ".join(value.split())[:maximum]
+
+
+def _decoded_header(value: object, maximum: int) -> str:
+    if not isinstance(value, str) or len(value) > 4096:
+        raise GmailError("invalid_provider_response")
+    try:
+        parts = []
+        for fragment, charset in decode_header(value):
+            if isinstance(fragment, bytes):
+                parts.append(fragment.decode(charset or "ascii"))
+            elif isinstance(fragment, str):
+                parts.append(fragment)
+            else:
+                raise TypeError("invalid header fragment")
+        return _bounded_text("".join(parts), maximum)
+    except (LookupError, TypeError, ValueError, UnicodeError):
+        raise GmailError("invalid_provider_response") from None
 
 
 class GmailConnector:
@@ -448,7 +466,12 @@ class GmailConnector:
         owner = _owner_key(owner_id)
         if owner != pending.get("owner"):
             raise GmailError("wrong_owner")
-        if not isinstance(state, str) or not secrets.compare_digest(state, str(pending.get("state", ""))):
+        try:
+            supplied_state = state.encode("ascii") if isinstance(state, str) and len(state) <= 512 else b""
+            expected_state = str(pending.get("state", "")).encode("ascii")
+        except UnicodeEncodeError:
+            raise GmailError("state_mismatch") from None
+        if not supplied_state or not secrets.compare_digest(supplied_state, expected_state):
             raise GmailError("state_mismatch")
         try:
             nonce, signature = state.rsplit(".", 1)
@@ -644,7 +667,7 @@ class GmailConnector:
             if isinstance(item, dict) and isinstance(item.get("name"), str):
                 name = item["name"].lower()
                 if name in {"subject", "from", "date"} and name not in headers:
-                    headers[name] = _bounded_text(item.get("value"), {"subject": 512, "from": 320, "date": 128}[name])
+                    headers[name] = _decoded_header(item.get("value"), {"subject": 512, "from": 320, "date": 128}[name])
         return GmailSearchResult(
             requested_id,
             thread_id,

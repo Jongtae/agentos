@@ -124,6 +124,9 @@ class GmailConnectorTests(unittest.TestCase):
         with self.assertRaises(GmailError) as tampered:
             self.gmail.complete_oauth("owner-a", {"state": state + "x", "code": "code"}, lambda _: {})
         self.assertEqual(tampered.exception.reason, "state_mismatch")
+        with self.assertRaises(GmailError) as non_ascii:
+            self.gmail.complete_oauth("owner-a", {"state": "상태", "code": "code"}, lambda _: {})
+        self.assertEqual(non_ascii.exception.reason, "state_mismatch")
 
         self.clock[0] += 601
         with self.assertRaises(GmailError) as expired:
@@ -245,6 +248,16 @@ class GmailConnectorTests(unittest.TestCase):
         )
         self.assertTrue(all(call[0] == "GET" for call in self.calls))
         self.assertTrue(all(set(call[2]).isdisjoint({"addLabelIds", "removeLabelIds", "raw"}) for call in self.calls))
+
+    def test_search_decodes_bounded_rfc2047_metadata_headers(self):
+        self.connect()
+        encoded = self.metadata()
+        encoded["payload"]["headers"][0]["value"] = "=?UTF-8?B?7JWI64WV?="
+        encoded["payload"]["headers"][1]["value"] = "=?UTF-8?B?7JWI64WV?= <vendor@example.test>"
+        self.responses.extend([{"messages": [{"id": "m_1"}]}, encoded])
+        result = self.gmail.search("owner-a", "booking")[0]
+        self.assertEqual(result.subject, "안녕")
+        self.assertEqual(result.sender, "안녕 <vendor@example.test>")
 
     def test_search_limits_and_provider_over_return_are_bounded(self):
         self.connect()

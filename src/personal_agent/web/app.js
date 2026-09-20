@@ -36,7 +36,7 @@ function modelDraft(){if(!activeModelDestination)activeModelDestination=[$('prov
 function modelDraftFingerprint(d){return [d.provider,d.endpoint,d.model].join('|');}
 $('provider').onchange=()=>{const p=providers[$('provider').value];$('endpoint').value=p.endpoint;if(p.model)$('model-name').value=p.model;$('endpoint-help').textContent=p.help;$('api-key').value='';modelDraftVerified='';$('apply-model').disabled=true;$('model-feedback').textContent='연결 대상이 바뀌면 새 키가 필요합니다. 이 설정을 테스트한 뒤 적용하세요.';};
 ['endpoint','model-name','api-key'].forEach(id=>$(id).addEventListener('input',()=>{modelDraftVerified='';$('apply-model').disabled=true;}));
-$('model-form').onsubmit=async e=>{e.preventDefault();const draft=modelDraft();if(modelDraftVerified!==modelDraftFingerprint(draft)){$('model-feedback').textContent='먼저 현재 입력한 설정을 테스트하세요.';return;}await busy(e.submitter,async()=>{try{await api('/api/model',draft);$('api-key').value='';$('model-feedback').textContent='테스트한 설정을 현재 사용 모델로 적용했습니다.';modelDraftVerified='';$('apply-model').disabled=true;modelLoaded=false;await refresh();await api('/api/model/test',{});await refresh();}catch(e){error('model-feedback',e);}});};
+$('model-form').onsubmit=async e=>{e.preventDefault();const draft=modelDraft();if(modelDraftVerified!==modelDraftFingerprint(draft)){$('model-feedback').textContent='먼저 현재 입력한 설정을 테스트하세요.';return;}await busy(e.submitter,async()=>{try{await api('/api/model',draft);$('api-key').value='';$('model-feedback').textContent='테스트한 직접 API 설정을 저장했습니다. 구독 CLI가 선택되어 있으면 요청에는 CLI가 우선합니다.';modelDraftVerified='';$('apply-model').disabled=true;modelLoaded=false;await refresh();await api('/api/model/test',{});await refresh();}catch(e){error('model-feedback',e);}});};
 $('test-model').onclick=async()=>busy($('test-model'),async()=>{const draft=modelDraft();try{const data=await api('/api/model/test',draft);if(!data.ok)throw new Error(data.error||'도구 호출을 확인하지 못했습니다.');modelDraftVerified=modelDraftFingerprint(draft);$('apply-model').disabled=false;$('model-feedback').textContent='이 설정의 텍스트 응답과 도구 호출을 확인했습니다. 성공한 설정만 적용할 수 있습니다.';}catch(e){modelDraftVerified='';$('apply-model').disabled=true;error('model-feedback',e);}});
 function showPair(data){$('pair-link').href=data.url;$('telegram-pair').hidden=false;$('telegram-token').value='';}
 $('telegram-form').onsubmit=async e=>{e.preventDefault();await busy(e.submitter,async()=>{try{showPair(await api('/api/telegram',{token:$('telegram-token').value}));await refresh();}catch(e){error('telegram-status',e);}});};
@@ -83,10 +83,45 @@ $('context-config').onsubmit=async e=>{e.preventDefault();await busy(e.submitter
 ['context-text','context-url'].forEach(id=>$(id).addEventListener('change',()=>{contextDraftDirty=true;}));
 $('context-capture').onsubmit=async e=>{e.preventDefault();await busy(e.submitter,async()=>{try{await api('/api/context-inbox/capture',{source_kind:$('context-kind').value,content:$('context-content').value});$('context-content').value='';$('context-feedback').textContent='이 컴퓨터의 인박스에만 저장했습니다.';await refresh();}catch(e){error('context-feedback',e);}});};
 $('context-telegram-policy').onclick=async()=>busy($('context-telegram-policy'),async()=>{try{await api('/api/context-inbox/telegram-policy',{approved:true});$('context-feedback').textContent='현재 모델의 Telegram 컨텍스트 공유 정책을 승인했습니다. 외부 모델 작업은 Telegram에서 다시 한 번 승인해야 합니다.';await refresh();}catch(e){error('context-feedback',e);}});
+function showExecutionConnection(settings){
+ const model=settings.model||{}, subscription=settings.subscription_engines||{};
+ const selected=(subscription.engines||[]).find(engine=>engine.id===subscription.selected);
+ const shownProvider=displayProvider(model), active=$('active-ai');
+ active.replaceChildren(element('strong','현재 요청 실행 연결'));
+ if(subscription.selected){
+  active.append(element('p',`${selected?.name||'선택된 구독 CLI'} · 구독 CLI 우선`));
+  active.append(element('p','웹·Telegram의 AI 요청은 선택한 구독 CLI를 우선 사용합니다. 직접 API를 설정하거나 테스트해도 이 선택은 바뀌지 않습니다.'));
+  active.append(element('p',selected?.installed===false?'선택한 CLI를 찾지 못했습니다. 설치 상태를 확인하거나 다른 CLI로 전환하세요. 직접 API로 자동 전환하지 않습니다.':selected?.connected?'공식 로그인은 사용자 확인 기록입니다. 실제 응답 확인과는 다릅니다.':'공식 로그인 확인 상태를 알 수 없습니다.'));
+  active.append(element('p','모델 정보 미제공 · 실제 실행 결과는 작업 현황에서 확인하세요.'));
+  active.append(element('p','파일 작업공간 요약은 현재 구독 CLI에서 지원하지 않습니다.'));
+  active.append(element('small',model.model?`저장된 직접 API: ${providerNames[shownProvider]||shownProvider} · ${model.model} (현재 요청에서는 구독 CLI가 우선)`:'직접 API 미설정 · 구독 CLI 선택과 별개입니다.'));
+  return;
+ }
+ active.append(element('p',model.model?`${providerNames[shownProvider]||shownProvider} · ${model.model} · 직접 API`:'직접 API 미설정 · 구독 CLI도 선택되지 않았습니다.'));
+ if(model.model){
+  active.append(element('p',settings.model_ready?'직접 API 테스트 통과 · 실제 요청 결과는 작업 현황에서 확인하세요.':settings.model_test?.error?'직접 API 확인 실패 · '+settings.model_test.error:'직접 API 확인 필요'));
+  if(settings.model_test?.time)active.append(element('small','마지막 API 확인: '+new Date(settings.model_test.time*1000).toLocaleString()));
+ }
+}
 function showSubscriptionEngines(subscription){
- let box=$('subscription-engines');if(!box){box=element('section');box.id='subscription-engines';box.className='subscription-engines';const title=element('h2','구독으로 연결하기');const help=element('p','Codex 또는 Claude Code의 공식 CLI에 먼저 로그인하세요. AgentOS는 API 키를 요구하거나 로그인 정보를 읽지 않습니다.');box.append(title,help);$('settings-panel').prepend(box);}
- for(const old of [...box.querySelectorAll('.subscription-engine')])old.remove();
- for(const engine of subscription?.engines||[]){const card=element('div',undefined,'subscription-engine');card.append(element('strong',engine.name));if(engine.connected){card.append(element('p','연결됨 · 공식 로그인은 사용자 확인으로만 기록되었습니다. AgentOS는 API 키나 로그인 정보를 읽지 않고, 제한된 AgentOS 도구로만 이 엔진을 실행합니다.'));box.append(card);continue;}if(!engine.installed){const p=element('p',`CLI를 찾지 못했습니다. 공식 설치 안내에서 설치한 뒤 ${engine.login_command} 명령으로 로그인하세요. `);const link=element('a','공식 안내 ↗');link.href=engine.login_url;link.target='_blank';link.rel='noreferrer noopener';p.append(link);card.append(p);box.append(card);continue;}card.append(element('p',`터미널에서 ${engine.login_command}을 실행해 공식 로그인 후 연결하세요.`));const button=element('button',`${engine.name} 로그인 완료 · 연결`);button.type='button';button.onclick=()=>busy(button,async()=>{try{await api('/api/subscription-engines/connect',{engine:engine.id,officially_authenticated:true});await refresh();}catch(e){error('global-error',e);}});card.append(button);box.append(card);}
+ let box=$('subscription-engines');if(!box){box=element('section');box.id='subscription-engines';$('settings-panel').append(box);}
+ const fingerprint=JSON.stringify(subscription||{});
+ if(box.dataset.subscriptionState===fingerprint)return;
+ box.dataset.subscriptionState=fingerprint;
+ box.replaceChildren(element('h3','구독 CLI 선택'),element('p','Codex 또는 Claude Code의 공식 CLI에 먼저 로그인하세요. 로그인 완료 버튼은 사용자의 확인이며, AgentOS는 로그인 정보를 읽거나 여기에서 실제 모델 응답을 검사하지 않습니다.'));
+ const selected=subscription?.selected||'';
+ for(const engine of subscription?.engines||[]){
+  const current=engine.id===selected;
+  const card=element('div',undefined,current?'subscription-engine status-card':'subscription-engine');card.append(element('strong',engine.name));
+  if(current)card.append(element('p','현재 선택됨 · 웹·Telegram 요청에 우선 사용'));
+  if(!engine.installed){const p=element('p',`CLI를 찾지 못했습니다. 공식 설치 안내에서 설치한 뒤 ${engine.login_command} 명령으로 로그인하세요. `);const link=element('a','공식 안내 ↗');link.href=engine.login_url;link.target='_blank';link.rel='noreferrer noopener';p.append(link);card.append(p);box.append(card);continue;}
+  if(current){card.append(element('p','다른 엔진으로 바꾸려면 해당 CLI의 공식 로그인을 마친 뒤 아래 전환 버튼을 누르세요.'));box.append(card);continue;}
+  card.append(element('p',`터미널에서 ${engine.login_command}을 실행하고 공식 로그인을 완료했는지 확인하세요.`));
+  const button=element('button',`${engine.name} 로그인 완료 · ${selected?'전환':'선택'}`);button.type='button';
+  button.onclick=()=>busy(button,async()=>{try{await api('/api/subscription-engines/connect',{engine:engine.id,officially_authenticated:true});await refresh();}catch(e){error('subscription-feedback',e);}});
+  card.append(button);box.append(card);
+ }
+ const feedback=element('p',undefined,'error');feedback.id='subscription-feedback';feedback.setAttribute('role','alert');box.append(feedback);
 }
 function showOnboarding(guide){
  const box=$('onboarding-guide');box.replaceChildren(element('h2','설치 및 복구 안내'));
@@ -134,14 +169,14 @@ async function refresh(){
  const home=await api('/api/home');const state=await api('/api/state');const space=await api('/api/personal-space');const guide=await api('/api/onboarding');const settings=state.settings;const model=settings.model;const tg=settings.telegram;hasModel=home.model_connected;showSubscriptionEngines(settings.subscription_engines);showOnboarding(guide);showWorkspaces(home,state);showPersonalSpace(space);const settingsFingerprint=JSON.stringify(settings.conversation_settings);if(settingsFingerprint!==conversationSettingsFingerprint){conversationSettingsFingerprint=settingsFingerprint;showConversationSettings(settings.conversation_settings);}$('home-next-action').textContent=home.next_action;const suggestion=$('workspace-suggestion');suggestion.replaceChildren();if(home.workspace_suggestion){suggestion.hidden=false;suggestion.append(document.createTextNode('이 대화를 프로젝트로 정리할까요? '));const button=element('button','프로젝트 만들기');button.type='button';button.onclick=()=>{$('workspace-link').click();$('workspace-title').focus();};suggestion.append(button);}else suggestion.hidden=true;
  const delivery=settings.delivery||{};let deliveryView=$('delivery-status');if(!deliveryView){deliveryView=element('div',undefined);deliveryView.id='delivery-status';document.querySelector('.workspace-heading').append(deliveryView);}deliveryView.replaceChildren();if(delivery.active){deliveryView.append(element('p',`전달 루프 · ${delivery.milestone||''} ${delivery.active} · ${delivery.status||'대기'}`));deliveryView.append(element('p',`최근 검증: ${delivery.last_validation==='passed'?'통과':delivery.last_validation==='failed'?'보류':'아직 없음'}`));if(String(delivery.status||'').startsWith('blocked-')){const reasons={'blocked-validation-failed':'실제 인수 검증이 아직 통과하지 않았습니다.','blocked-external-rate-limit':'외부 서비스 한도를 기다리고 있습니다.','blocked-approval':'사람의 승인 또는 권한이 필요합니다.'};deliveryView.append(element('p',reasons[delivery.status]||'전달 루프가 검증 문제를 해결할 때까지 대기 중입니다.'));}if(delivery.next_retry_at)deliveryView.append(element('p','다음 재시도: '+new Date(delivery.next_retry_at*1000).toLocaleString()));const issue=delivery.issue||(delivery.issues||{})[delivery.active];if(issue){const link=element('a','GitHub 이터레이션 보기');link.href='https://github.com/Jongtae/personal-agentos/issues/'+encodeURIComponent(issue);link.target='_blank';link.rel='noreferrer noopener';deliveryView.append(link);}}else deliveryView.append(element('p','전달 루프 · 아직 실행 기록이 없습니다.'));
  const acceptance=settings.telegram_task_card_acceptance;let acceptanceView=$('telegram-task-card-acceptance');if(!acceptanceView){acceptanceView=element('div',undefined);acceptanceView.id='telegram-task-card-acceptance';document.querySelector('.workspace-heading').append(acceptanceView);}acceptanceView.replaceChildren();if(tg.paired&&acceptance){const checks=acceptance.checks||{};const observed=['shared_web_evidence_observed','restart_continuity_observed'];const automatic=['paired_private_owner','task_card_cancellation','document_approval_callback','terminal_notification'].every(k=>checks[k]);if(acceptance.passed){acceptanceView.append(element('p','Telegram 실제 사용 확인이 기록되었습니다. 다음 릴리스 검증에 반영됩니다.'));}else if(automatic&&Object.values(acceptance.message_channels||{}).every(Boolean)){acceptanceView.append(element('p','Telegram 카드·취소·문서 승인·알림을 확인했다면, 웹 기록과 재시작 후 연속성도 확인했음을 기록하세요.'));const button=element('button','실제 Telegram 흐름 확인 기록');button.type='button';button.onclick=()=>busy(button,async()=>{try{await api('/api/telegram/task-card-acceptance',{web_confirmed:true,restart_confirmed:true});await refresh();}catch(e){error('global-error',e);}});acceptanceView.append(button);}else{acceptanceView.append(element('p','Telegram 실제 사용 확인 대기 중 · 카드 취소, 문서 승인, 완료 알림을 차례로 확인하면 여기에서 마무리할 수 있습니다.'));}}
- const shownProvider=displayProvider(model);const active=$('active-ai');active.replaceChildren();active.append(element('strong','현재 사용 중인 AI'));active.append(element('p',model.model?`${providerNames[shownProvider]||shownProvider} · ${model.model}`:'아직 연결되지 않음'));active.append(element('p',settings.model_ready?'준비됨 · 도구 호출 확인됨':settings.model_test?.error?'확인 실패 · '+settings.model_test.error:'확인 필요'));if(settings.model_test?.time)active.append(element('small','마지막 확인: '+new Date(settings.model_test.time*1000).toLocaleString()));
+ showExecutionConnection(settings);
  const currentTool=(state.tool_events||[]).find(e=>e.job_id===state.jobs[0]?.id);
  $('tool-status').textContent=currentTool?({running:'실행 중',succeeded:'실행 완료',failed:'실행 실패'}[currentTool.status]+' · '+currentTool.tool+' · 내 AgentOS에서 실행'):'';
  $('tool-history').replaceChildren();for(const e of state.tool_events||[]){const trace=e.trace||{};const attempt=trace.attempt?' · '+trace.attempt+'회차':'';const error=trace.error?' · '+trace.error:'';$('tool-history').append(element('div',new Date(e.created*1000).toLocaleTimeString()+' · '+e.tool+' · '+({running:'실행 중',succeeded:'완료',failed:'실패'}[e.status]||e.status)+attempt+error));}
  $('runtime-badge').textContent=home.state==='working'?'작업 중':home.state==='attention'?'확인 필요':'준비됨';
  if(!modelLoaded){if(model.provider){$('provider').value=displayProvider(model);$('endpoint').value=model.endpoint;$('model-name').value=model.model;activeModelDestination=[model.provider,model.endpoint].join('|');}$('endpoint-help').textContent=providers[$('provider').value].help;$('root-paths').value=(settings.file_roots||[]).map(r=>r.path).join('\n');$('file-reference-paths').value=(settings.file_workspace?.references||[]).map(r=>r.path).join('\n');$('file-workspace-path').value=settings.file_workspace?.workspace||'';modelLoaded=true;}showDocumentBoundary(settings.document_boundary);showContextInbox(settings.context_inbox);
  const tested=settings.model_test;
- $('model-label').textContent=home.model_connected?'AI 연결됨':'메모 준비됨';
+ $('model-label').textContent=settings.subscription_engines?.selected?'구독 CLI 선택됨':home.model_connected?'직접 API 연결됨':'메모 준비됨';
  $('key-hint').textContent=settings.has_api_key?'키가 저장되어 있습니다. 빈칸으로 저장하면 같은 연결의 키를 유지합니다.':'키는 대화 기록과 분리된 개인 설정 파일에 저장합니다.';
  $('telegram-status').textContent=settings.telegram_status?.message||'아직 연결되지 않았습니다.';
  $('disconnect').hidden=!tg.enabled;$('new-pair').hidden=!tg.enabled;
@@ -182,8 +217,8 @@ async function finishOpenRouter(){
  try{
  const flow=JSON.parse(localStorage.getItem('openrouter-flow')||'null');
  if(!flow||flow.state!==returnedState||Date.now()>flow.expires)throw new Error('연결 시간이 지났습니다. 계정 연결을 다시 눌러 주세요.');
- const connected=await api('/api/openrouter/connect',{code,verifier:flow.verifier});localStorage.removeItem('openrouter-flow');localStorage.setItem('openrouter-connected',String(Date.now()));modelLoaded=false;await refresh();$('easy-feedback').textContent=connected.model_test?.ok?'OpenRouter 무료 모델과 도구 호출을 확인했습니다. 이제 Telegram과 웹에서 바로 대화할 수 있습니다.':(connected.model_test?.error||'OpenRouter는 연결됐지만 도구 호출 모델을 확인하지 못했습니다. 아래 목록에서 다른 무료 모델을 선택해 주세요.');
- $('easy-feedback').textContent='계정이 연결됐습니다. “도구 지원 무료 모델 보기”에서 모델 하나를 선택해 확인해 주세요.';$('message').focus();if(window.opener)window.close();
+ const connected=await api('/api/openrouter/connect',{code,verifier:flow.verifier});localStorage.removeItem('openrouter-flow');localStorage.setItem('openrouter-connected',String(Date.now()));modelLoaded=false;await refresh();$('easy-feedback').textContent=connected.model_test?.ok?'OpenRouter 직접 API와 도구 호출을 확인했습니다. 구독 CLI가 선택되어 있으면 요청에는 CLI가 우선합니다.':(connected.model_test?.error||'OpenRouter는 연결됐지만 도구 호출 모델을 확인하지 못했습니다. 아래 목록에서 다른 무료 모델을 선택해 주세요.');
+ $('message').focus();if(window.opener)window.close();
  }catch(e){error('easy-feedback',e);$('resume-openrouter').hidden=false;}
 }
 $('find-local').onclick=()=>busy($('find-local'),async()=>{
@@ -191,7 +226,7 @@ $('find-local').onclick=()=>busy($('find-local'),async()=>{
  try{
  const data=await api('/api/ollama/models',{});
  $('local-help').textContent=data.models.length?'사용할 모델을 선택하세요.':'Ollama는 실행 중이지만 모델이 없습니다. Ollama에서 모델을 먼저 다운로드해 주세요.';
- for(const m of data.models){const button=element('button',m.name);button.type='button';button.onclick=()=>busy(button,async()=>{try{await api('/api/model',{provider:'ollama',endpoint:'http://127.0.0.1:11434',model:m.name});modelLoaded=false;await refresh();$('local-help').textContent='연결했습니다. 대화창에서 메시지를 보내세요.';}catch(e){error('local-help',e);}});$('local-models').append(button);}
+ for(const m of data.models){const button=element('button',m.name);button.type='button';button.onclick=()=>busy(button,async()=>{try{await api('/api/model',{provider:'ollama',endpoint:'http://127.0.0.1:11434',model:m.name});modelLoaded=false;await refresh();$('local-help').textContent='로컬 모델 설정을 저장했습니다. 도구 호출 확인은 아직 하지 않았습니다. 구독 CLI가 선택되어 있으면 요청에는 CLI가 우선합니다.';}catch(e){error('local-help',e);}});$('local-models').append(button);}
  }catch(e){$('local-help').textContent='실행 중인 Ollama를 찾지 못했습니다. 아래 설치 안내에서 설치하고 실행한 뒤 다시 찾아 주세요.';}
 });
 
@@ -204,7 +239,7 @@ if(localStorage.getItem('openrouter-flow')){$('resume-openrouter').hidden=false;
 window.addEventListener('storage',async e=>{if(e.key==='openrouter-connected'){modelLoaded=false;await refresh();$('resume-openrouter').hidden=true;$('easy-feedback').textContent='계정이 연결됐습니다. 도구 지원 무료 모델을 골라 확인해 주세요.';$('message').focus();}});
 $('load-free-models').onclick=()=>busy($('load-free-models'),async()=>{
  try{const data=await api('/api/openrouter/models',{});$('free-model-list').replaceChildren();
- for(const m of data.models){const button=element('button',m.name+' · '+m.id);button.type='button';button.onclick=()=>busy(button,async()=>{try{await api('/api/model',{provider:'compatible',endpoint:'https://openrouter.ai/api/v1',model:m.id});const checked=await api('/api/model/test',{});modelLoaded=false;await refresh();$('easy-feedback').textContent=checked.ok?'무료 모델과 도구 호출을 연결했습니다. 이제 메시지를 보내 보세요.':(checked.error||'이 무료 모델의 도구 호출을 확인하지 못했습니다. 다른 모델을 골라 주세요.');}catch(e){error('easy-feedback',e);}});$('free-model-list').append(button);}
+ for(const m of data.models){const button=element('button',m.name+' · '+m.id);button.type='button';button.onclick=()=>busy(button,async()=>{try{await api('/api/model',{provider:'compatible',endpoint:'https://openrouter.ai/api/v1',model:m.id});const checked=await api('/api/model/test',{});modelLoaded=false;await refresh();$('easy-feedback').textContent=checked.ok?'직접 API와 도구 호출을 확인했습니다. 구독 CLI가 선택되어 있으면 요청에는 CLI가 우선합니다.':(checked.error||'이 무료 모델의 도구 호출을 확인하지 못했습니다. 다른 모델을 골라 주세요.');}catch(e){error('easy-feedback',e);}});$('free-model-list').append(button);}
  if(!data.models.length)$('free-model-list').append(element('p','현재 확인된 도구 지원 무료 모델이 없습니다. 잠시 후 다시 확인하세요.'));
  }catch(e){$('free-model-list').replaceChildren(element('p','목록을 가져오지 못했습니다. 잠시 후 다시 시도하세요.'));}
 });
@@ -220,7 +255,7 @@ async function renderOwnerFlow(){
  const ready=!!home.model_connected, files=!!(state.settings.file_roots?.length||state.settings.file_workspace?.references?.length||state.settings.file_workspace?.workspace), firstRequest=!!home.conversation?.length;
  let checklist=$('setup-checklist');if(!checklist){checklist=element('section',undefined,'setup-checklist');checklist.id='setup-checklist';const intro=element('div');intro.append(element('p','처음 사용하기','eyebrow'),element('h2','내 작업 흐름을 3단계로 준비해요'));intro.append(element('p','필요한 것만 연결하고, 첫 요청의 실제 결과를 확인하면 준비가 끝납니다.'));const steps=element('div',undefined,'setup-steps');steps.id='setup-steps';checklist.append(intro,steps);const more=element('details');more.innerHTML='<summary>더 알아보기</summary><p>진행률이나 예상 시간은 추정하지 않고 AgentOS가 실제로 관찰한 상태만 보여줍니다.</p>';checklist.append(more);$('workspace-suggestion').after(checklist);}
  checklist.hidden=ready&&files&&firstRequest;const steps=$('setup-steps');steps.replaceChildren();const items=[['AI 연결',ready,'AI를 연결하고, 정확히 이 설정을 테스트한 뒤 적용하세요.',()=>{openConnections();$('settings-panel').scrollIntoView({behavior:'smooth'});}],["파일 위치 설정",files,'참고 폴더와 결과 저장 폴더를 구분해 지정하세요.',()=>{openConnections();$('files-section').scrollIntoView({behavior:'smooth'});}],["첫 요청 실행",firstRequest,'대화에서 요청을 보내고 관찰된 과정과 결과를 확인하세요.',()=>{$('message').focus();}]];items.forEach(([title,done,help,action],index)=>{const row=element('div',undefined,'setup-step '+(done?'done':''));row.append(element('span',done?'✓':String(index+1),'setup-step-mark'));const copy=element('div');copy.append(element('strong',title),element('p',done?'완료됨':help));row.append(copy);if(!done){const button=element('button',index===2?'요청 작성':'설정하기');button.type='button';button.onclick=action;row.append(button);}steps.append(row);});showRecordCategories(space);
- const card=$('active-ai');if(card&&!card.querySelector('[data-ai-state]')){const stateBox=element('div',undefined,'ai-state-grid');stateBox.dataset.aiState='true';stateBox.append(element('p','저장된 설정 · 아래 편집 화면에 저장된 값','ai-state-muted'),element('p','테스트한 설정 · 성공한 초안만 적용 가능','ai-state-muted'),element('p','현재 사용 모델 · 대화에 적용된 모델','ai-state-muted'),element('p','최근 응답 모델 · 작업 현황에서 관찰된 값','ai-state-muted'));card.append(stateBox);}
+ const card=$('active-ai');if(card&&!card.querySelector('[data-ai-state]')){const stateBox=element('div',undefined,'ai-state-grid');stateBox.dataset.aiState='true';stateBox.append(element('p','저장된 설정 · 아래 편집 화면에 저장된 값','ai-state-muted'),element('p','테스트한 설정 · 성공한 초안만 적용 가능','ai-state-muted'),element('p','현재 요청 실행 연결 · 위에 표시된 우선순위','ai-state-muted'),element('p','최근 응답 모델 · 작업 현황에서 관찰된 값','ai-state-muted'));card.append(stateBox);}
 }
 setInterval(()=>{if(authenticated)renderOwnerFlow();},2500);
 

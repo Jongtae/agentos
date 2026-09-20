@@ -28,6 +28,7 @@ HIGH_CONFIDENCE_SECRET_PATTERNS = (
     re.compile(r'(?i)-----BEGIN [A-Z0-9 -]*PRIVATE KEY(?: BLOCK)?-----'),
     re.compile(r'(?i)\b[a-z][a-z0-9+.-]*://[^\s/@]*@'),
     re.compile(r'(?i)\b(?:cookie|set-cookie)\s*:\s*\S+'),
+    re.compile(r'(?i)\btoken\s*=\s*[^&\s]+'),
     re.compile(r'(?i)\b[A-Z][A-Z0-9_]{1,80}(?:_PASSWORD|_PASSWD|_SECRET|_TOKEN|_API_KEY|_ACCESS_KEY)\s*=\s*\S+'),
     re.compile(r'(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*(?![A-Za-z0-9_-])'),
     re.compile(
@@ -55,7 +56,7 @@ FACT_PATTERNS = {
 FEE_VALUE_PATTERNS = (
     re.compile(r'(?i)(?:\b(?:fee|fees|tax|taxes|surcharge|resort fee|service charge)\b|수수료|세금|부가세)[^;.!?]{0,20}(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b|\b\d+(?:\.\d+)?\s*%|\b(?:none|zero|free|included|waived)\b|없음|무료|포함)'),
     re.compile(r'(?i)(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b|\b\d+(?:\.\d+)?\s*%)[^;.!?]{0,20}(?:\b(?:fee|fees|tax|taxes|surcharge|resort fee|service charge)\b|수수료|세금|부가세)'),
-    re.compile(r'(?i)\bno\s+(?:\w+\s+){0,2}(?:fee|fees|tax|taxes|surcharge)\b\s*(?:[.!?]|$)|\bfee[- ]free\b'),
+    re.compile(r'(?i)\bno\s+(?:\w+\s+){0,2}(?:fee|fees|tax|taxes|surcharge)\b\s*(?:(?:is|was|will\s+be)\s+charged\b\s*)?(?:[.!?]|$)|\bfee[- ]free\b'),
 )
 TOTAL_VALUE_PATTERNS = (
     re.compile(r'(?i)(?:\b(?:total due|payable total|grand total|total price)\b|총\s*결제(?:액)?|결제\s*금액)\s*(?::|=|\bis\b|\bof\b)?\s*(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b)'),
@@ -88,7 +89,7 @@ FEE_MISSING_DISCLOSURE = re.compile(
 )
 FEE_NEGATED_PROPERTY = re.compile(
     r'(?i)\bno\s+(?:\w+\s+){0,2}(?:fee|fees|tax|taxes|surcharge)\b[^.!?]{0,25}'
-    r'\b(?:refundable|refunded|waived|included|charged|credited)\b'
+    r'\b(?:refundable|refunded|waived|included|credited)\b'
 )
 FEE_NONVALUE_CONTEXT = re.compile(
     r'(?i)\b(?:fee|fees|tax|taxes|surcharge|service charge)\b[^.!?]{0,35}'
@@ -116,9 +117,12 @@ ANAPHORIC_QUALIFIER = re.compile(
     r'(?i)^\s*(?:this|that|it|these|those)\b[^.!?]{0,120}\b(?:may|might|could|can|possibly|probably|likely|'
     r'expected|estimated|estimate|approximately|about|around|subject\s+to|depending\s+on|on\s+request|'
     r'only\s+(?:if|when|for|to)|appl(?:y|ies)\s+(?:if|when|only|to|for)|for\s+(?:loyalty\s+)?members?\s+only|'
-    r'does?\s+not\s+include)\b'
+    r'(?:does?|do)\s+not\s+include|doesn[\'’]t\s+include|excludes?)\b'
 )
-NEGATED_TOTAL_EXISTENCE = re.compile(r'(?i)^\s*(?:no\b|there\s+(?:is|are|was|were)\s+no\b)')
+NEGATED_TOTAL_EXISTENCE = re.compile(
+    r'(?i)(?:^\s*no\s+(?:(?![;:.!?]).){0,40}\b(?:total due|payable total|grand total|total price)\b|'
+    r'\bthere\s+(?:is|are|was|were)\s+no\s+(?:(?![;.!?]).){0,40}\b(?:total due|payable total|grand total|total price)\b)'
+)
 DYNAMIC_SUBJECT_PATTERNS = {
     'fee': FACT_PATTERNS['fee'],
     'inventory': re.compile(r'(?i)\b(?:availability|inventory|stock|room|rooms|ticket|tickets|seat|seats|product|products|item|items)\b|재고|매진|예약'),

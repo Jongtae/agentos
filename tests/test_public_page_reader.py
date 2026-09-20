@@ -248,6 +248,27 @@ class PublicPageReaderTests(unittest.TestCase):
         self.assertIn('£100',result['content'])
         self.assertNotIn('�',result['content'])
 
+    def test_honors_supported_html_meta_charset_when_http_omits_it(self):
+        for declaration in (
+            '<meta charset="iso-8859-1">',
+            '<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">',
+        ):
+            with self.subTest(declaration=declaration):
+                body=f'<html><head>{declaration}</head><body>Price: £100.</body></html>'.encode('iso-8859-1')
+                result=PublicPageReader(opener=Opener(Response(
+                    body,headers={'Content-Type':'text/html'})),resolver=public_dns).read('https://example.com/')
+                self.assertIn('£100',result['content'])
+
+    def test_ignores_non_charset_meta_attributes_and_rejects_conflicting_meta_charsets(self):
+        ignored=b'<html><head><!-- <meta charset="iso-8859-1"> --><meta data-charset="iso-8859-1"></head><body>plain</body></html>'
+        result=PublicPageReader(opener=Opener(Response(
+            ignored,headers={'Content-Type':'text/html'})),resolver=public_dns).read('https://example.com/')
+        self.assertIn('plain',result['content'])
+        conflicting=b'<meta charset="utf-8"><meta charset="iso-8859-1">'
+        with self.assertRaisesRegex(ValueError,'인코딩'):
+            PublicPageReader(opener=Opener(Response(
+                conflicting,headers={'Content-Type':'text/html'})),resolver=public_dns).read('https://example.com/')
+
     def test_rejects_unsupported_invalid_or_mismatched_charset(self):
         cases=(
             (b'plain',{'Content-Type':'text/plain; charset=utf-16'}),

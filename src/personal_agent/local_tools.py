@@ -137,6 +137,20 @@ class _PageText(HTMLParser):
         if not self.skip and data.strip(): self.parts.append(data.strip())
 
 
+class _PageCharset(HTMLParser):
+    def __init__(self):
+        super().__init__();self.declarations=[]
+    def handle_starttag(self,tag,attrs):
+        if tag.casefold()!='meta': return
+        values={str(name).casefold():value for name,value in attrs if value is not None}
+        if values.get('charset'):
+            self.declarations.append(values['charset'].strip())
+            return
+        if values.get('http-equiv','').casefold()!='content-type': return
+        match=re.search(r'(?i)(?:^|;)\s*charset\s*=\s*([^;\s]+)',values.get('content',''))
+        if match: self.declarations.append(match.group(1).strip('"\''))
+
+
 class PublicPageReader:
     """Small, anonymous, read-only page reader with an explicit egress boundary."""
     def __init__(self, opener=None, resolver=None, clock=None):
@@ -274,11 +288,23 @@ class PublicPageReader:
         except OSError: pass
 
     @staticmethod
-    def _page_charset(content_type):
+    def _page_charset(content_type, html_prefix=b''):
         match=re.search(r'(?i)(?:^|;)\s*charset\s*=\s*(?:"([^"]+)"|\'([^\']+)\'|([^;\s]+))',content_type)
         if 'charset' in content_type.casefold() and not match:
             raise ValueError('공개 페이지 문자 인코딩이 올바르지 않습니다.')
-        declared=next((part for part in match.groups() if part is not None),None) if match else 'utf-8'
+        declared=next((part for part in match.groups() if part is not None),None) if match else None
+        if declared is None and html_prefix:
+            preview=bytes(html_prefix[:4096]).decode('ascii','ignore')
+            parser=_PageCharset();parser.feed(preview)
+            canonical_declarations=set()
+            for value in parser.declarations:
+                try: canonical_declarations.add(codecs.lookup(value).name)
+                except (LookupError,ValueError):
+                    raise ValueError('지원하지 않는 공개 페이지 문자 인코딩입니다.') from None
+            if len(canonical_declarations)>1:
+                raise ValueError('공개 페이지 문자 인코딩이 올바르지 않습니다.')
+            if canonical_declarations: declared=canonical_declarations.pop()
+        if declared is None: declared='utf-8'
         try: canonical=codecs.lookup(declared.strip()).name
         except (LookupError,ValueError):
             raise ValueError('지원하지 않는 공개 페이지 문자 인코딩입니다.') from None
@@ -309,7 +335,6 @@ class PublicPageReader:
             media_type=content_type.split(';',1)[0].strip().lower()
             if media_type and not (media_type.startswith('text/') or media_type in ('application/xhtml+xml','application/xml')):
                 raise ValueError('HTML 또는 텍스트 공개 페이지만 읽을 수 있습니다.')
-            charset=self._page_charset(content_type)
             encoding=(response.headers.get('Content-Encoding','') if hasattr(response,'headers') else '').lower()
             raw=bytearray()
             while True:
@@ -331,6 +356,10 @@ class PublicPageReader:
                 except ValueError: raise
                 except (OSError, zlib.error): raise ValueError('압축된 공개 페이지를 해석하지 못했습니다.') from None
             else: data=bytes(raw)
+            charset=self._page_charset(
+                content_type,
+                data if media_type in ('text/html','application/xhtml+xml') else b'',
+            )
             try: text=data.decode(charset,'strict')
             except UnicodeDecodeError:
                 raise ValueError('공개 페이지 문자 인코딩과 응답 내용이 일치하지 않습니다.') from None

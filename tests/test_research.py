@@ -145,6 +145,8 @@ class PublicResearchTests(unittest.TestCase):
             ('AWS_SECRET_ACCESS_KEY=supersecret','owner_public_request'),
             ('DATABASE_PASSWORD=supersecret','owner_public_request'),
             ('Cookie: sessionid=supersecret','owner_public_request'),
+            ('token=supersecret123456789','owner_public_request'),
+            ('compare https://example.com/?token=supersecret123456789','owner_public_request'),
             ('Bearer abcdefghijklmnop','owner_public_request'),
             ('bEaReR AbCdEfGhIjKlMnOp','owner_public_request'),
         ]
@@ -210,7 +212,7 @@ class PublicResearchTests(unittest.TestCase):
         self.assertEqual(result['dynamic_facts']['payable_total']['status'],'unknown')
 
     def test_percentage_and_no_fee_are_observed_without_unknown_fee_brief(self):
-        for content in ('Service fee: 10%.','No booking fee.'):
+        for content in ('Service fee: 10%.','No booking fee.','No service fee is charged.'):
             with self.subTest(content=content):
                 reader=Reader({'https://alpha.example/item':{
                     'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
@@ -251,6 +253,19 @@ class PublicResearchTests(unittest.TestCase):
                     'travel_plan','museum plan',query_source='owner_public_request')
                 self.assertEqual(result['dynamic_facts']['payable_total']['status'],'unknown')
 
+    def test_forward_total_exclusions_cover_contractions_plurals_and_equivalents(self):
+        for content in (
+            "Grand total: USD 100. This doesn't include taxes.",
+            'Grand total: USD 100. These do not include taxes.',
+            'Grand total: USD 100. This excludes taxes.',
+        ):
+            with self.subTest(content=content):
+                reader=Reader({'https://alpha.example/item':{
+                    'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+                result=PublicResearch(search_result,reader,clock=lambda:3,max_pages=1).run(
+                    'product_comparison','headphones',query_source='owner_public_request')
+                self.assertEqual(result['dynamic_facts']['payable_total']['status'],'unknown')
+
     def test_existentially_negated_total_is_not_observed(self):
         for content in ('No grand total of USD 100 is shown.','There is no grand total of USD 100.'):
             with self.subTest(content=content):
@@ -259,6 +274,19 @@ class PublicResearchTests(unittest.TestCase):
                 result=PublicResearch(search_result,reader,max_pages=1).run(
                     'travel_plan','museum plan',query_source='owner_public_request')
                 self.assertEqual(result['dynamic_facts']['payable_total']['status'],'unknown')
+
+    def test_unrelated_leading_no_does_not_negate_total(self):
+        for content in (
+            'No discounts apply; grand total is USD 100.',
+            'No booking fee applies; grand total is USD 100.',
+            'No surprise: grand total is USD 100.',
+        ):
+            with self.subTest(content=content):
+                reader=Reader({'https://alpha.example/item':{
+                    'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+                result=PublicResearch(search_result,reader,clock=lambda:3,max_pages=1).run(
+                    'product_comparison','headphones',query_source='owner_public_request')
+                self.assertEqual(result['dynamic_facts']['payable_total']['status'],'observed')
 
     def test_hedged_inventory_and_unrelated_prices_do_not_observe_dynamic_values(self):
         content=('Rooms may be available. Fees may apply; rooms start at USD 100. '

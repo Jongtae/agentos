@@ -26,11 +26,11 @@ HIGH_CONFIDENCE_SECRET_PATTERNS = (
     re.compile(r'(?i)\bhf_[a-z0-9]{16,}\b'),
     re.compile(r'(?i)\bsk-[a-z0-9_-]{12,}\b'),
     re.compile(r'(?i)\b(?:gh[pousr]_[a-z0-9]{16,}|github_pat_[a-z0-9_]{16,}|glpat-[a-z0-9_-]{16,}|xox[baprs]-[a-z0-9-]{10,}|npm_[a-z0-9]{16,}|pypi-[a-z0-9_-]{16,}|AKIA[A-Z0-9]{16})\b'),
-    re.compile(r'(?i)-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'),
+    re.compile(r'(?i)-----BEGIN [A-Z0-9 -]*PRIVATE KEY(?: BLOCK)?-----'),
     re.compile(r'(?i)\b[a-z][a-z0-9+.-]*://[^\s/@:]+:[^\s/@]+@'),
-    re.compile(r'(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(?![A-Za-z0-9_-])'),
+    re.compile(r'(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*(?![A-Za-z0-9_-])'),
     re.compile(
-        r'(?i)\b(?:path|file|source)\s*(?::|=|,|\bis\b)\s*'
+        r'(?i)\b(?:path|file|source)\s*(?::|=|,|;|->|\bis\b|\bas\b)\s*'
         r'(?:~?[/\\]\S+|[a-z]:[/\\]\S+|[^\s`"\'\[\](){}]+[/\\][^\s`"\'\[\](){}]+|'
         r'[^\s`"\'\[\](){}]+\.[a-z0-9]{1,16}\b)'
     ),
@@ -102,7 +102,8 @@ ADJACENT_QUALIFIER_ONLY = re.compile(
 )
 ANAPHORIC_QUALIFIER = re.compile(
     r'(?i)^\s*(?:this|that|it|these|those)\b[^.!?]{0,120}\b(?:may|might|could|can|possibly|probably|likely|'
-    r'expected|estimated|estimate|approximately|about|around|subject\s+to|depending\s+on|on\s+request|only\s+(?:if|when|for|to))\b'
+    r'expected|estimated|estimate|approximately|about|around|subject\s+to|depending\s+on|on\s+request|'
+    r'only\s+(?:if|when|for|to)|appl(?:y|ies)\s+(?:if|when|only)|for\s+(?:loyalty\s+)?members?\s+only)\b'
 )
 DYNAMIC_SUBJECT_PATTERNS = {
     'fee': FACT_PATTERNS['fee'],
@@ -142,12 +143,17 @@ def _sentences(content):
 
 
 def _bounded_evidence(content):
-    selected=[];used=0
+    selected=[];complete=[];used=0
     for sentence in _sentences(content):
         extra=len(sentence)+(1 if selected else 0)
-        if extra > MAX_EVIDENCE_CHARACTERS or used+extra > MAX_EVIDENCE_CHARACTERS: break
-        selected.append(sentence);used+=extra
-    return ' '.join(selected),selected
+        if extra > MAX_EVIDENCE_CHARACTERS or used+extra > MAX_EVIDENCE_CHARACTERS:
+            if not selected:
+                prefix=sentence[:MAX_EVIDENCE_CHARACTERS]
+                boundary=prefix.rfind(' ')
+                if boundary > 0: selected.append(prefix[:boundary].strip())
+            break
+        selected.append(sentence);complete.append(sentence);used+=extra
+    return ' '.join(selected),complete
 
 
 def _observed_details(content):
@@ -167,25 +173,29 @@ def _qualified_dynamic(name, evidence):
     for row in evidence:
         units=_sentences(row['evidence_excerpt'])
         for text in row['observed_details'][name]:
-            context_units=[text]
+            classified_text=_rendered_evidence_text(text)
+            context_units=[classified_text]
             try: position=units.index(text)
             except ValueError: position=-1
             if position >= 0:
-                for neighbor in units[max(0,position-1):position]+units[position+1:position+2]:
-                    if (ADJACENT_QUALIFIER_ONLY.search(neighbor) or ANAPHORIC_QUALIFIER.search(neighbor) or
+                for neighbor_position in range(max(0,position-1),min(len(units),position+2)):
+                    if neighbor_position == position: continue
+                    neighbor=_rendered_evidence_text(units[neighbor_position])
+                    if (ADJACENT_QUALIFIER_ONLY.search(neighbor) or
+                            (neighbor_position > position and ANAPHORIC_QUALIFIER.search(neighbor)) or
                             DYNAMIC_SUBJECT_PATTERNS[name].search(neighbor)):
                         context_units.append(neighbor)
             context=' '.join(context_units)
-            if (text.rstrip().endswith('?') or NON_ASSERTIVE_DYNAMIC.search(text) or
+            if (classified_text.rstrip().endswith('?') or NON_ASSERTIVE_DYNAMIC.search(classified_text) or
                     DYNAMIC_DISQUALIFIER.search(context) or INCOMPLETE_TOTAL.search(context)): continue
             tied=(name == 'inventory')
-            if name == 'inventory' and INVENTORY_METADATA.search(text): continue
+            if name == 'inventory' and INVENTORY_METADATA.search(classified_text): continue
             if name == 'fee':
-                if FEE_MISSING_DISCLOSURE.search(text) or FEE_NEGATED_PROPERTY.search(text): continue
-                tied=bool(FEE_VALUE_PATTERNS[0].search(text) or FEE_VALUE_PATTERNS[2].search(text) or
-                          (FEE_VALUE_PATTERNS[1].search(text) and not FACT_PATTERNS['payable_total'].search(text)))
+                if FEE_MISSING_DISCLOSURE.search(classified_text) or FEE_NEGATED_PROPERTY.search(classified_text): continue
+                tied=bool(FEE_VALUE_PATTERNS[0].search(classified_text) or FEE_VALUE_PATTERNS[2].search(classified_text) or
+                          (FEE_VALUE_PATTERNS[1].search(classified_text) and not FACT_PATTERNS['payable_total'].search(classified_text)))
             elif name == 'payable_total':
-                tied=any(pattern.search(text) for pattern in TOTAL_VALUE_PATTERNS)
+                tied=any(pattern.search(classified_text) for pattern in TOTAL_VALUE_PATTERNS)
             if tied: qualified.append({'source_id':row['source_id'],'exact_text':text})
     return qualified[:5]
 

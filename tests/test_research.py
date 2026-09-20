@@ -131,6 +131,12 @@ class PublicResearchTests(unittest.TestCase):
             (r'compare \/server\private/receipt.txt','owner_public_request'),
             ('-----BEGIN PRIVATE KEY----- abcdef -----END PRIVATE KEY-----','owner_public_request'),
             ('compare https://alice:supersecret@example.com/private','owner_public_request'),
+            ('eyJ9.e30.','owner_public_request'),
+            ('file; secrets.txt','owner_public_request'),
+            ('path as Documents/tax-return.pdf','owner_public_request'),
+            ('source -> private-notes.md','owner_public_request'),
+            ('-----BEGIN ENCRYPTED PRIVATE KEY----- abcdef','owner_public_request'),
+            ('-----BEGIN PGP PRIVATE KEY BLOCK----- abcdef','owner_public_request'),
         ]
         for query,source in cases:
             with self.subTest(query=query),self.assertRaises(ValueError):
@@ -338,6 +344,9 @@ class PublicResearchTests(unittest.TestCase):
             ('fee','Service fee: USD 10. This may change.'),
             ('inventory','Rooms are available. This is only expected.'),
             ('fee','Service fee: USD 10. This applies only if paying by card.'),
+            ('payable_total','Grand total: USD 100. This applies when paying by card.'),
+            ('inventory','Rooms are available. This is for members only.'),
+            ('fee','Service fee: USD 10. This may\u200b change.'),
         )
         for dynamic,content in cases:
             with self.subTest(dynamic=dynamic):
@@ -346,6 +355,25 @@ class PublicResearchTests(unittest.TestCase):
                 result=PublicResearch(search_result,reader,max_pages=1).run(
                     'travel_plan','museum plan',query_source='owner_public_request')
                 self.assertEqual(result['dynamic_facts'][dynamic]['status'],'unknown')
+
+    def test_preceding_unrelated_anaphoric_uncertainty_does_not_hide_exact_fact(self):
+        content='Shipping date is estimated. This may change. Service fee: USD 10.'
+        reader=Reader({'https://alpha.example/item':{
+            'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+        result=PublicResearch(search_result,reader,max_pages=1).run(
+            'travel_plan','museum plan',query_source='owner_public_request')
+        self.assertEqual(result['dynamic_facts']['fee']['status'],'observed')
+        self.assertIn('Service fee: USD 10.',result['brief'])
+
+    def test_long_punctuationless_page_keeps_bounded_evidence_without_dynamic_claim(self):
+        content=('catalog item '*3000)+'Grand total USD 100'
+        reader=Reader({'https://alpha.example/item':{
+            'url':'https://alpha.example/item','retrieved_at':2,'content':content,'content_truncated':True}})
+        result=PublicResearch(search_result,reader,max_pages=1).run(
+            'product_comparison','catalog',query_source='owner_public_request')
+        self.assertTrue(result['evidence'][0]['evidence_excerpt'])
+        self.assertLessEqual(len(result['evidence'][0]['evidence_excerpt']),4000)
+        self.assertEqual(result['dynamic_facts']['payable_total']['status'],'unknown')
 
     def test_search_title_controls_and_whitespace_cannot_add_brief_lines(self):
         def titled(query):

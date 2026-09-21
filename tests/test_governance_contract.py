@@ -138,3 +138,62 @@ def test_verification_budget_requires_stable_heads_and_batched_remediation() -> 
         "any post-review pa1 commit",
         "consolidated final head",
     )
+
+
+def test_execution_cursor_bootstrap_is_thin_and_canonical() -> None:
+    agents = _read("AGENTS.md")
+    goal = _read("docs/goal-execution-contract.en.md")
+    pa1 = _read("docs/pa1-parallel-delivery.en.md")
+    claude = _read("CLAUDE.md")
+    protocol = _read("docs/execution-cursor.en.md")
+
+    _assert_all(
+        agents,
+        "## Execution cursor and delta resume",
+        "cursor-first",
+        "bounded full reconciliation",
+        "monotonically increasing",
+        "same cursor comment",
+    )
+    _assert_all(
+        goal,
+        "## Execution cursor and delta resume",
+        "current `main`",
+        "governing contract shas",
+        "full reconciliation triggers",
+        "delta updates",
+    )
+    _assert_all(
+        pa1,
+        "## Execution cursor",
+        "EPIC-PA1 / #386",
+        "<!-- agentos-execution-cursor:v1 -->",
+        "Full PA1 issue/PR reconciliation is anomaly recovery",
+    )
+    _assert_all(
+        claude,
+        "thin bootstrap",
+        "Read `AGENTS.md`",
+        "read the execution cursor comment",
+        "Do not reread every PA1 issue",
+        "update the same #386 cursor comment",
+    )
+    _assert_all(
+        protocol,
+        "agentos-execution-cursor/v1",
+        "cache, not authority",
+        "generation",
+        "full reconciliation",
+        "meaningful transition",
+    )
+
+
+def test_delivery_plan_registers_pa1_execution_cursor() -> None:
+    import json
+    plan = json.loads(_read("delivery-plan.yaml"))
+    cursor = plan["programs"]["EPIC-PA1"]["execution_cursor"]
+    assert cursor["issue"] == 386
+    assert cursor["marker"] == "<!-- agentos-execution-cursor:v1 -->"
+    assert cursor["schema"] == "agentos-execution-cursor/v1"
+    assert cursor["protocol"] == "docs/execution-cursor.en.md"
+    assert "cache-only" in cursor["authority"]

@@ -4,7 +4,7 @@
 
 This is the canonical development-constitution layer for repository work. It defines durable engineering principles that every new specification, plan, issue, implementation and review must preserve unless the owner explicitly changes the constitution in a dedicated governance issue.
 
-It adapts useful patterns from spec-driven development and explicit state/authority governance. It is a **development process contract**, not a Personal AgentOS runtime dependency and not evidence of live autonomous operation.
+It adapts useful patterns from spec-driven development and explicit state/authority governance. It is a **development process contract**, not a Personal AgentOS runtime dependency and not evidence of live autonomous operation. It is tool-agnostic: humans and every coding assistant are bound by it whether or not that tool recognizes a repository-specific instruction filename.
 
 ## Development sequence
 
@@ -15,7 +15,7 @@ Every material product change should progress through:
 - **Constitution**: confirm the change does not violate durable product/security principles.
 - **Spec**: state owner outcome, behavior, boundaries, non-goals and acceptance criteria without prematurely selecting an implementation.
 - **Authority/Threat Model**: state what data, permissions, runtimes, packages, networks, secrets and external effects are involved; identify abuse/failure paths.
-- **Plan**: choose architecture, compatibility/migration strategy, implementation sequence and evidence plan.
+- **Plan**: perform the Existing Solutions Review, then choose architecture, compatibility/migration strategy, implementation sequence and evidence plan.
 - **Tasks**: create bounded issue-linked work units with dependencies and explicit stopping rules.
 - **Implement**: change only the activated bounded goal, preserving existing state/evidence.
 - **Verify**: map every acceptance criterion to current automated/operating evidence, including negative tests where authority/security is involved.
@@ -83,6 +83,22 @@ Completing a substep or program does not authorize the next feature. Only an exp
 
 Identity verification, MFA/CAPTCHA, legal/vendor agreement acceptance, payment, sensitive external-action approval, material product-policy expansion and other declared owner-only decisions cannot be simulated or silently bypassed to preserve automation.
 
+### C15. Reuse first: Adopt → Adapt → Build
+
+Commodity infrastructure is not a Personal AgentOS differentiator and must not be reimplemented by default. Before materially implementing or replacing a protocol, SDK/client, authentication/OAuth flow, connector transport, parser, scheduler, storage/migration utility, schema validator, model-provider compatibility layer, agent-protocol bridge, or similar general-purpose infrastructure, perform an **Existing Solutions Review**.
+
+Use this decision order:
+
+1. **Adopt** an official SDK, maintained reference implementation, standard-library facility, or established protocol implementation when it satisfies the contract.
+2. **Adapt** a mature maintained open-source implementation behind a narrow AgentOS-owned adapter when direct adoption would couple external semantics to kernel policy.
+3. **Build** custom infrastructure only when suitable Adopt/Adapt candidates cannot satisfy the required behavior, authority boundary, deployment constraint, security requirement, compatibility need, or licence obligation.
+
+The issue or plan must record the candidates considered, maintenance/security/licence/compatibility fit, the selected `Adopt / Adapt / Build` decision, and why rejected candidates are insufficient. A preference for fewer dependencies, implementation familiarity, or the fact that custom code is possible is not sufficient justification for Build.
+
+Reuse-first does **not** delegate Personal AgentOS sovereignty. AgentOS continues to own canonical owner state, Context/Memory authority, Grants and approvals, capability mediation, data/egress policy, Work/Event/Evidence semantics, Artifact provenance, recovery and revocation. External libraries remain subordinate implementation details behind these boundaries and never gain authority merely because they implement a transport or protocol.
+
+Reuse also carries supply-chain obligations: use exact supported versions where appropriate, review licence and provenance, track security/maintenance risk, keep replaceable adapters narrow, and define update/rollback behavior when dependency changes can affect authority or compatibility. Do not fork, vendor or copy an external project when a dependency or thin adapter provides the required behavior unless the issue records a concrete reason.
+
 ## AgentPackage-specific review checklist
 
 Any PR that changes package/runtime/distribution behavior must answer:
@@ -97,6 +113,7 @@ Any PR that changes package/runtime/distribution behavior must answer:
 8. What current negative tests prove undeclared/excess authority is denied?
 9. What evidence class supports the capability claim?
 10. Does the change preserve kernel authority and portability?
+11. What Existing Solutions Review supports the Adopt / Adapt / Build decision for any commodity infrastructure introduced or replaced?
 
 ## Change policy
 

@@ -3,6 +3,12 @@
 Protocol discovery is answered in-process.  The single approved tool call is
 forwarded to AgentOS's internal HTTP callback with the execution-scoped bearer
 capability; no owner storage or filesystem path is accepted by this process.
+
+The protocol version comes from the mcp-types registry, but that
+package's envelope models are deliberately not adopted: JSONRPCRequest
+accepts an unknown top-level key and model_dump then drops it, so a
+request this bridge rejects would be normalised into a clean-looking
+one and forwarded. Envelope validation stays hand-written here.
 """
 
 from __future__ import annotations

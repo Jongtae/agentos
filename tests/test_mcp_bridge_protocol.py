@@ -28,6 +28,36 @@ BRIDGES = (mcp_bridge, isolated_engine_mcp_bridge)
 
 
 class ProtocolVersionRegistryTests(unittest.TestCase):
+    def test_registry_handshake_set_is_the_reviewed_one(self):
+        """Pin the registry the bridges were reviewed against.
+
+        LATEST_HANDSHAKE_VERSION is HANDSHAKE_PROTOCOL_VERSIONS[-1], and the
+        registry is additive, so a minor SDK release that appends a
+        handshake-era revision silently changes what both bridges advertise
+        at the isolation boundary - to a revision nobody implemented or
+        reviewed.
+
+        Every other assertion in this file is written in terms of
+        LATEST_HANDSHAKE_VERSION or HANDSHAKE_PROTOCOL_VERSIONS, so they move
+        with the SDK and cannot detect that. Simulating a 2.3.0 that appends
+        one revision leaves this whole suite green while both bridges
+        advertise it.
+
+        Retiring the hardcoded literal made backward drift visible. Without
+        this pin it made forward drift *less* visible than before, because
+        previously a human had to edit a literal to change the answer. There
+        is no lockfile, so a rebuild of Dockerfile.engine is enough.
+
+        A failure here is not a bug: it means the SDK added a revision and a
+        human must decide whether these bridges implement it.
+        """
+        from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS
+
+        self.assertEqual(
+            HANDSHAKE_PROTOCOL_VERSIONS,
+            ("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"),
+        )
+
     def test_no_bridge_hardcodes_a_protocol_revision(self):
         """The literal both bridges used to carry must not come back."""
         for module in BRIDGES:

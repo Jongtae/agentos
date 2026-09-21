@@ -1,4 +1,11 @@
-"""Minimal stdio MCP bridge; AgentOS, never the engine, owns tool execution."""
+"""Minimal stdio MCP bridge; AgentOS, never the engine, owns tool execution.
+
+The protocol version comes from the mcp-types registry, but that
+package's envelope models are deliberately not adopted: JSONRPCRequest
+accepts an unknown top-level key and model_dump then drops it, so a
+request this bridge rejects would be normalised into a clean-looking
+one and forwarded. Envelope validation stays hand-written here.
+"""
 import argparse
 import json
 import sys

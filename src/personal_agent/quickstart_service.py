@@ -144,6 +144,17 @@ class AgentService:
         self.isolated_mcp_proxy=IsolatedMcpProxy(self.isolated_mcp_registry)
         # Capability adapters never receive an HTTP or Telegram endpoint.  A
         # caller may supply reviewed adapters only through this policy owner.
+        #
+        # `drive=` is left unpopulated on purpose, which PA1-CONV-01 / #393
+        # decided rather than inherited.  The shipped Drive connector gates
+        # every read on a Google Picker selection keyed by an integer Telegram
+        # chat id, and an orchestrator request carries a string owner instead,
+        # so nothing can be handed in here that satisfies
+        # `PersonalAssistantOrchestrator._drive_adapter('read')` without
+        # bypassing that gate.  The owner-reachable Drive path is
+        # `selected_drive_context` below, which holds the chat id.  The full
+        # reasoning and the condition that turns this into a defect are
+        # recorded at `_drive_adapter`; do not wire `drive=` without it.
         self.assistant_orchestrator=assistant_orchestrator or PersonalAssistantOrchestrator(store)
         self.settings_orchestrator=SettingsOrchestrator(store)
         self.recommendation_orchestrator=CapabilityRecommendationOrchestrator(store)

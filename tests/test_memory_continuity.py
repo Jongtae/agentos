@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from personal_agent.agent_runtime import Capabilities
+from personal_agent.memory_service import MemoryService
 from personal_agent.quickstart_store import QuickStore
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService
@@ -72,6 +73,52 @@ class MemoryContinuityTests(unittest.TestCase):
             caps.execute('list_memory',{})
             with self.assertRaisesRegex(ValueError,'공개 검색어'):
                 caps.execute('web_search',{'query':'memory content'})
+
+    def test_memory_service_read_blocks_public_egress_in_the_same_turn(self):
+        """The service read surface must arm the same guard as list_memory.
+
+        agent_runtime.Capabilities refuses web_search/public_page_read while
+        its turn-scoped `evidence` is non-empty, and its own list_memory action
+        arms that guard. MemoryService is a second read surface over the same
+        private rows, so a conversation layer that reads Memory through the
+        service (#393/#394 wiring) must arm the guard too.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            store=QuickStore(Path(tmp)/'state'); store.save_memory('meeting-time','afternoons')
+            caps=Capabilities(store,None,{},'','job',lambda *args:None)
+            service=MemoryService(store,private_read_sink=caps.evidence.append)
+            listed=service.list_memories('local-owner')
+            self.assertEqual(listed['memories'][0]['content'],'afternoons')
+            self.assertTrue(listed['private_content_included'])
+            self.assertTrue(listed['egress_guard_armed'])
+            with self.assertRaisesRegex(ValueError,'공개 검색어'):
+                caps.execute('web_search',{'query':'memory content'})
+            with self.assertRaisesRegex(ValueError,'연결 문서 내용과 함께'):
+                caps.execute('public_page_read',{'url':'https://example.invalid/'})
+
+    def test_memory_service_inspect_also_arms_the_public_egress_guard(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store=QuickStore(Path(tmp)/'state'); saved=store.save_memory('meeting-time','afternoons')
+            caps=Capabilities(store,None,{},'','job',lambda *args:None)
+            service=MemoryService(store,private_read_sink=caps.evidence.append)
+            self.assertTrue(service.inspect_memory('local-owner',saved['id'])['egress_guard_armed'])
+            with self.assertRaisesRegex(ValueError,'공개 검색어'):
+                caps.execute('web_search',{'query':'memory content'})
+
+    def test_memory_service_cannot_be_wired_without_an_explicit_egress_decision(self):
+        """An integration cannot forget the guard: there is no default sink."""
+        with tempfile.TemporaryDirectory() as tmp:
+            store=QuickStore(Path(tmp)/'state'); store.save_memory('meeting-time','afternoons')
+            with self.assertRaises(TypeError):
+                MemoryService(store)
+            caps=Capabilities(store,None,{},'','job',lambda *args:None)
+            opted_out=MemoryService(store,private_read_sink=MemoryService.NO_EGRESS_GUARD)
+            listed=opted_out.list_memories('local-owner')
+            # The opt-out is only valid for a surface with no same-turn public
+            # egress, and it says so in the result rather than silently.
+            self.assertTrue(listed['private_content_included'])
+            self.assertFalse(listed['egress_guard_armed'])
+            self.assertEqual(caps.evidence,[])
 
 
 if __name__=='__main__': unittest.main()

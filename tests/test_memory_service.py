@@ -1,4 +1,5 @@
 import json
+import secrets
 import sqlite3
 import threading
 import tempfile
@@ -18,8 +19,29 @@ class MemoryServiceTests(unittest.TestCase):
         self.root = Path(self.temp.name) / "state"
         self.store = QuickStore(self.root)
         self.now = [1000.0]
-        self.service = MemoryService(self.store, now=lambda: self.now[0])
+        self.service = MemoryService(self.store, now=lambda: self.now[0],
+                                     private_read_sink=MemoryService.NO_EGRESS_GUARD)
 
+    def _insert_unrelated_owner_approval(self, owner_id, work_id, subject_id, memory_key, digest, ttl=600):
+        """Insert an unrelated owner's issued approval row directly.
+
+        No production issuer can mint this row: both real issuers validate that
+        the subject belongs to the requesting owner and Work inside the same
+        transaction. The row exists only so a test can prove that owner-a's
+        lifecycle never revokes, rewrites or deletes another owner's approval.
+        """
+        token = secrets.token_urlsafe(32)
+        with self.store.db() as db:
+            db.execute(
+                """INSERT INTO memory_approvals
+                   (token_hash,owner_key,work_key,action,subject_id,memory_key,source_digest,
+                    content_digest,created,expires,state,result_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,'issued',NULL)""",
+                (self.store._exact_memory_token_hash(token), self.store._memory_binding(owner_id),
+                 self.store._work_binding(work_id), "accept-candidate", subject_id, memory_key,
+                 digest, digest, self.now[0], self.now[0] + ttl),
+            )
+        return token
     def test_explicit_owner_write_is_canonical_but_model_write_is_only_candidate(self):
         saved = self.service.write(
             "owner-a", "work-a", "meeting-time", "morning",
@@ -93,7 +115,10 @@ class MemoryServiceTests(unittest.TestCase):
         )
         owner_value = self.service.remember("owner-a", "work-owner", "meeting-time", "owner value")
 
-        with self.assertRaisesRegex(ValueError, "변경"):
+        # A revoked token reports the same generic failure as any unusable
+        # token: distinguishing revocation would leak the binding a holder
+        # guessed. The owner surface re-reads state, asserted below.
+        with self.assertRaisesRegex(ValueError, "정확한 승인이 필요합니다"):
             self.service.approve_candidate(
                 "owner-a", "work-a", candidate["id"], candidate["content_digest"], approval["approval_token"]
             )
@@ -117,7 +142,7 @@ class MemoryServiceTests(unittest.TestCase):
         # and withdraws an explicit choice, returning the key to absent.
         written = self.service.remember("owner-a", "work-owner", "meeting-time", "evening")
         self.store.delete_memory("owner-a", written["id"])
-        with self.assertRaisesRegex(ValueError, "변경"):
+        with self.assertRaisesRegex(ValueError, "정확한 승인이 필요합니다"):
             self.service.approve_candidate(
                 "owner-a", "work-a", candidate["id"], candidate["content_digest"],
                 approval["approval_token"],
@@ -127,6 +152,40 @@ class MemoryServiceTests(unittest.TestCase):
              if row["memory_key"] == "meeting-time"],
             [],
         )
+        self.assertEqual(self.service.inspect_candidate("owner-a", "work-a", candidate["id"])["state"], "pending")
+        with self.store.db() as db:
+            self.assertEqual(db.execute(
+                "SELECT COUNT(*) FROM memory_approvals WHERE state='issued'").fetchone()[0], 0)
+
+    def test_expected_state_binding_still_refuses_if_revocation_is_bypassed(self):
+        """The second mechanism must hold on its own.
+
+        Owner writes revoke approvals issued against the same key, so the
+        expected-memory comparison is normally never reached. Re-arm the
+        revoked row to simulate a regression in that first mechanism and prove
+        the canonical-state binding independently refuses the stale approval.
+        """
+        candidate = self.service.propose("owner-a", "work-a", "meeting-time", "candidate value")
+        approval = self.service.request_candidate_approval(
+            "owner-a", "work-a", candidate["id"], candidate["content_digest"]
+        )
+        token_hash = self.store._exact_memory_token_hash(approval["approval_token"])
+        owner_value = self.service.remember("owner-a", "work-owner", "meeting-time", "owner value")
+        with self.store.db() as db:
+            db.execute("UPDATE memory_approvals SET state='issued',memory_key='meeting-time' WHERE token_hash=?",
+                       (token_hash,))
+
+        with self.assertRaisesRegex(ValueError, "변경"):
+            self.service.approve_candidate(
+                "owner-a", "work-a", candidate["id"], candidate["content_digest"], approval["approval_token"]
+            )
+
+        self.assertEqual(self.service.inspect_candidate("owner-a", "work-a", candidate["id"])["state"], "pending")
+        self.assertEqual(self.service.inspect_memory("owner-a", owner_value["id"])["content"], "owner value")
+        with self.store.db() as db:
+            row = db.execute("SELECT state,memory_key FROM memory_approvals WHERE token_hash=?",
+                             (token_hash,)).fetchone()
+        self.assertEqual((row["state"], row["memory_key"]), ("revoked", ""))
 
     def test_candidate_approval_is_bound_to_existing_memory_but_not_unrelated_keys(self):
         original = self.service.remember("owner-a", "work-owner", "meeting-time", "morning")
@@ -135,7 +194,7 @@ class MemoryServiceTests(unittest.TestCase):
             "owner-a", "work-a", stale_candidate["id"], stale_candidate["content_digest"]
         )
         self.service.remember("owner-a", "work-owner", "meeting-time", "evening")
-        with self.assertRaisesRegex(ValueError, "변경"):
+        with self.assertRaisesRegex(ValueError, "정확한 승인이 필요합니다"):
             self.service.approve_candidate(
                 "owner-a", "work-a", stale_candidate["id"], stale_candidate["content_digest"],
                 stale_approval["approval_token"],
@@ -184,37 +243,58 @@ class MemoryServiceTests(unittest.TestCase):
         )
         self.assertEqual(accepted["content"], "Asia/Seoul")
 
-    def test_candidate_approval_rejection_race_never_leaves_issued_approval(self):
-        for index in range(12):
-            candidate = self.service.propose("owner-a", f"work-{index}", f"key-{index}", f"value-{index}")
-            barrier = threading.Barrier(2)
+    def _issued_approval_count(self, subject_id):
+        with self.store.db() as db:
+            return db.execute(
+                "SELECT COUNT(*) FROM memory_approvals WHERE owner_key=? AND subject_id=? AND state='issued'",
+                (self.store._memory_binding("owner-a"), subject_id),
+            ).fetchone()[0]
 
-            def approve():
-                barrier.wait()
-                try:
-                    return self.service.request_candidate_approval(
-                        "owner-a", f"work-{index}", candidate["id"], candidate["content_digest"]
-                    )
-                except MemoryServiceError:
-                    return None
+    def _decide_inside_issue_window(self, decide):
+        """Run `decide` in the issuer's last pre-transaction instant.
 
-            def reject():
-                barrier.wait()
-                return self.service.reject_candidate(
-                    "owner-a", f"work-{index}", candidate["id"], candidate["content_digest"]
-                )
+        The issuing paths hash the approval token before opening their
+        BEGIN IMMEDIATE transaction, so patching the hash is a deterministic
+        hook for the exact window a barrier race could only hit by luck: the
+        competing decision commits first, and the issuer must then observe it
+        inside its own transaction.
+        """
+        original = self.store._exact_memory_token_hash
+        state = {"fired": False}
 
-            with ThreadPoolExecutor(max_workers=2) as pool:
-                approval_future = pool.submit(approve)
-                rejection_future = pool.submit(reject)
-                approval_future.result()
-                rejection_future.result()
-            with self.store.db() as db:
-                issued = db.execute(
-                    "SELECT COUNT(*) FROM memory_approvals WHERE owner_key=? AND subject_id=? AND state='issued'",
-                    (self.store._memory_binding("owner-a"), candidate["id"]),
-                ).fetchone()[0]
-            self.assertEqual(issued, 0)
+        def hook(token):
+            if not state["fired"]:
+                state["fired"] = True
+                decide()
+            return original(token)
+
+        self.store._exact_memory_token_hash = hook
+        self.addCleanup(lambda: self.store.__dict__.pop("_exact_memory_token_hash", None))
+        return state
+
+    def test_candidate_approval_and_rejection_never_leave_an_issued_approval(self):
+        """Both deterministic orderings, instead of a probabilistic barrier race."""
+        # Ordering 1: the rejection commits inside the issuer's window.
+        candidate = self.service.propose("owner-a", "work-a", "key-one", "value-one")
+        window = self._decide_inside_issue_window(lambda: self.service.reject_candidate(
+            "owner-a", "work-a", candidate["id"], candidate["content_digest"]))
+        with self.assertRaises(MemoryServiceError):
+            self.service.request_candidate_approval(
+                "owner-a", "work-a", candidate["id"], candidate["content_digest"])
+        self.assertTrue(window["fired"])
+        self.assertEqual(self._issued_approval_count(candidate["id"]), 0)
+        self.assertEqual(
+            self.service.inspect_candidate("owner-a", "work-a", candidate["id"])["state"], "rejected")
+        self.assertEqual(self.store.memories("owner-a"), [])
+
+        # Ordering 2: the approval is issued first and the rejection must clear it.
+        other = self.service.propose("owner-a", "work-b", "key-two", "value-two")
+        self.service.request_candidate_approval(
+            "owner-a", "work-b", other["id"], other["content_digest"])
+        self.assertEqual(self._issued_approval_count(other["id"]), 1)
+        self.service.reject_candidate("owner-a", "work-b", other["id"], other["content_digest"])
+        self.assertEqual(self._issued_approval_count(other["id"]), 0)
+        self.assertEqual(self.store.memories("owner-a"), [])
 
     def test_correction_approval_is_rejected_at_exact_expiry(self):
         original = self.service.remember("owner-a", "work-a", "meeting-time", "morning")
@@ -258,44 +338,37 @@ class MemoryServiceTests(unittest.TestCase):
             ).fetchone()
         self.assertEqual((superseded_row["state"], superseded_row["memory_key"]), ("revoked", ""))
 
-    def test_correction_approval_delete_race_never_leaves_orphan_approval(self):
-        for index in range(12):
-            memory = self.service.remember("owner-a", f"work-{index}", f"key-{index}", "before")
-            barrier = threading.Barrier(2)
+    def test_correction_approval_and_delete_never_leave_an_orphan_approval(self):
+        """Both deterministic orderings, instead of a probabilistic barrier race."""
+        # Ordering 1: the delete commits inside the issuer's window.
+        memory = self.service.remember("owner-a", "work-a", "key-one", "before")
+        window = self._decide_inside_issue_window(lambda: self.service.delete("owner-a", memory["id"]))
+        with self.assertRaises(MemoryServiceError):
+            self.service.request_correction(
+                "owner-a", "work-a", memory["id"], "key-one", "before", "after")
+        self.assertTrue(window["fired"])
+        self.assertEqual(self._issued_approval_count(memory["id"]), 0)
+        self.assertEqual(self.store.memory(memory["id"], "owner-a", current_only=False), None)
 
-            def approve():
-                barrier.wait()
-                try:
-                    return self.service.request_correction(
-                        "owner-a", f"work-{index}", memory["id"], f"key-{index}", "before", "after"
-                    )
-                except MemoryServiceError:
-                    return None
-
-            def delete():
-                barrier.wait()
-                return self.service.delete("owner-a", memory["id"])
-
-            with ThreadPoolExecutor(max_workers=2) as pool:
-                approval_future = pool.submit(approve)
-                deletion_future = pool.submit(delete)
-                approval_future.result()
-                deletion_future.result()
-            with self.store.db() as db:
-                issued = db.execute(
-                    "SELECT COUNT(*) FROM memory_approvals WHERE owner_key=? AND subject_id=? AND state='issued'",
-                    (self.store._memory_binding("owner-a"), memory["id"]),
-                ).fetchone()[0]
-            self.assertEqual(issued, 0)
+        # Ordering 2: the approval is issued first and the delete must clear it.
+        other = self.service.remember("owner-a", "work-b", "key-two", "before")
+        approval = self.service.request_correction(
+            "owner-a", "work-b", other["id"], "key-two", "before", "after")
+        self.assertEqual(self._issued_approval_count(other["id"]), 1)
+        self.service.delete("owner-a", other["id"])
+        self.assertEqual(self._issued_approval_count(other["id"]), 0)
+        with self.assertRaises(ValueError):
+            self.service.correct("owner-a", "work-b", other["id"], "key-two", "before", "after",
+                                 approval["approval_token"])
+        self.assertEqual(self.store.memories("owner-a"), [])
 
     def test_candidate_rejection_is_exact_and_never_creates_memory(self):
         candidate = self.service.propose("owner-a", "work-a", "food", "vegetarian")
         self.service.request_candidate_approval(
             "owner-a", "work-a", candidate["id"], candidate["content_digest"]
         )
-        self.store.issue_exact_memory_approval(
-            "owner-b", "work-b", "accept-candidate", candidate["id"], "other-owner-key",
-            candidate["content_digest"], candidate["content_digest"], now=self.now[0]
+        self._insert_unrelated_owner_approval(
+            "owner-b", "work-b", candidate["id"], "other-owner-key", candidate["content_digest"]
         )
         with self.assertRaises(ValueError):
             self.service.reject_candidate("owner-a", "wrong-work", candidate["id"], candidate["content_digest"])
@@ -337,9 +410,8 @@ class MemoryServiceTests(unittest.TestCase):
         self.service.request_candidate_approval(
             "owner-a", "work-a", candidate["id"], candidate["content_digest"]
         )
-        self.store.issue_exact_memory_approval(
-            "owner-b", "work-b", "accept-candidate", candidate["id"], candidate["memory_key"],
-            candidate["content_digest"], candidate["content_digest"], now=self.now[0]
+        self._insert_unrelated_owner_approval(
+            "owner-b", "work-b", candidate["id"], candidate["memory_key"], candidate["content_digest"]
         )
         deleted = self.store.delete_personal_space_item("memory_candidates", candidate["id"])
         self.assertTrue(deleted["deleted"])
@@ -460,7 +532,8 @@ class MemoryServiceTests(unittest.TestCase):
     def test_restart_preserves_accepted_state_without_promoting_pending(self):
         accepted = self.service.remember("owner-a", "work-a", "food", "vegetarian")
         pending = self.service.propose("owner-a", "work-a", "timezone", "Asia/Seoul")
-        restarted = MemoryService(QuickStore(self.root), now=lambda: self.now[0])
+        restarted = MemoryService(QuickStore(self.root), now=lambda: self.now[0],
+                                  private_read_sink=MemoryService.NO_EGRESS_GUARD)
         self.assertEqual(restarted.inspect_memory("owner-a", accepted["id"])["content"], "vegetarian")
         self.assertEqual(restarted.inspect_candidate("owner-a", "work-a", pending["id"])["state"], "pending")
         self.assertEqual(len(restarted.list_memories("owner-a")["memories"]), 1)
@@ -479,7 +552,8 @@ class MemoryServiceTests(unittest.TestCase):
 
         archive = export_owner_state(self.root, self.root / "owner.tar.gz")
         restored_store = QuickStore(restore_owner_state(archive, self.root.parent / "restored"))
-        restored = MemoryService(restored_store, now=lambda: self.now[0])
+        restored = MemoryService(restored_store, now=lambda: self.now[0],
+                                 private_read_sink=MemoryService.NO_EGRESS_GUARD)
         self.assertEqual(restored.inspect_candidate("owner-a", "work-a", candidate["id"])["state"], "pending")
         with restored_store.db() as db:
             portable_approval = db.execute(
@@ -614,6 +688,145 @@ class MemoryServiceTests(unittest.TestCase):
             self.service.inspect_candidate("owner-a", "work-b", candidate["id"])
         self.assertEqual(self.service.list_memories("owner-b")["memories"], [])
         self.assertEqual(self.service.list_candidates("owner-b")["candidates"], [])
+
+    def test_service_requires_an_explicit_same_turn_egress_decision(self):
+        """A private read must arm the caller's egress guard or say it did not."""
+        with self.assertRaises(TypeError):
+            MemoryService(self.store)
+        with self.assertRaises(MemoryServiceError):
+            MemoryService(self.store, private_read_sink="not-a-sink")
+
+        markers = []
+        guarded = MemoryService(self.store, now=lambda: self.now[0], private_read_sink=markers.append)
+        stored = self.service.remember("owner-a", "work-a", "private-key", "private value")
+        candidate = self.service.propose("owner-a", "work-a", "candidate-key", "candidate value")
+
+        listed = guarded.list_memories("owner-a")
+        inspected = guarded.inspect_memory("owner-a", stored["id"])
+        listed_candidates = guarded.list_candidates("owner-a")
+        inspected_candidate = guarded.inspect_candidate("owner-a", "work-a", candidate["id"])
+        for read in (listed, inspected, listed_candidates, inspected_candidate):
+            self.assertTrue(read["private_content_included"])
+            self.assertTrue(read["egress_guard_armed"])
+        self.assertEqual(inspected["content"], "private value")
+        self.assertEqual(len(markers), 4)
+
+        # The marker arms the guard without copying private material into it.
+        encoded = json.dumps(markers)
+        for private in ("private-key", "private value", "candidate-key", "candidate value", "owner-a", "work-a"):
+            self.assertNotIn(private, encoded)
+
+        # Counts-only surfaces carry no private content and must not arm it.
+        self.assertFalse(guarded.status("owner-a")["private_content_included"])
+        guarded.portable_status("owner-a")
+        self.assertEqual(len(markers), 4)
+
+        # An explicit opt-out still reports, truthfully, that nothing was armed.
+        self.assertFalse(self.service.list_memories("owner-a")["egress_guard_armed"])
+        self.assertTrue(self.service.list_memories("owner-a")["private_content_included"])
+
+    def test_write_rejects_an_unknown_origin_instead_of_defaulting(self):
+        for origin in ("bogus", "", None, "OWNER"):
+            with self.assertRaises(MemoryServiceError):
+                self.service.write("owner-a", "work-a", "meeting-time", "morning",
+                                   origin=origin, explicit_owner_request=True)
+        with self.assertRaises(MemoryServiceError):
+            self.service.write("owner-a", "work-a", "meeting-time", "morning",
+                               origin="owner", explicit_owner_request="yes")
+        self.assertEqual(self.store.memories("owner-a"), [])
+        self.assertEqual(self.store.memory_candidates("owner-a"), [])
+
+    def test_delete_fails_closed_rather_than_reporting_a_delete_of_nothing(self):
+        """A UI must not be able to render a successful delete of no row."""
+        first = self.service.remember("owner-a", "work-a", "food", "vegetarian")
+        second = self.service.remember("owner-a", "work-a", "food", "vegan")
+
+        with self.assertRaises(MemoryServiceError):
+            self.service.delete("owner-a", "no-such-memory")
+        with self.assertRaises(MemoryServiceError):
+            self.service.delete("owner-a", first["id"])  # superseded, not current
+        with self.assertRaises(MemoryServiceError):
+            self.service.delete("owner-b", second["id"])  # another owner's row
+
+        # The store keeps returning a truthful receipt for the same attempts.
+        receipt = self.store.delete_memory("owner-a", first["id"])
+        self.assertEqual((receipt["deleted"], receipt["deleted_memory_count"]), (False, 0))
+        self.assertEqual(self.store.memory(first["id"], "owner-a", current_only=False)["state"], "superseded")
+        self.assertEqual([row["id"] for row in self.store.memories("owner-a")], [second["id"]])
+        self.assertTrue(self.service.delete("owner-a", second["id"])["deleted"])
+
+    def test_personal_space_delete_of_a_superseded_row_preserves_chain_and_binding(self):
+        first = self.service.remember("owner-a", "work-a", "food", "first")
+        candidate = self.service.propose("owner-a", "work-a", "food", "second")
+        candidate_approval = self.service.request_candidate_approval(
+            "owner-a", "work-a", candidate["id"], candidate["content_digest"]
+        )
+        middle = self.service.approve_candidate(
+            "owner-a", "work-a", candidate["id"], candidate["content_digest"],
+            candidate_approval["approval_token"]
+        )
+        correction = self.service.request_correction(
+            "owner-a", "work-a", middle["id"], "food", "second", "third"
+        )
+        head = self.service.remember("owner-a", "work-a", "food", "third")
+        unrelated = self.service.remember("owner-b", "work-a", "food", "other owner value")
+        with self.store.db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM memory_approvals WHERE subject_id=?",
+                                        (middle["id"],)).fetchone()[0], 1)
+
+        deleted = self.store.delete_personal_space_item("memories", middle["id"])
+        self.assertTrue(deleted["deleted"])
+        self.assertEqual(deleted["deleted_memory_count"], 1)
+        self.assertEqual(deleted["deleted_candidate_count"], 1)
+        # The correction approval bound to the row plus the consumed candidate
+        # approval whose result_id is the row.
+        self.assertEqual(deleted["deleted_approval_count"], 2)
+        self.assertEqual(deleted["retained_private_copies"], "unknown_outside_store")
+        self.assertFalse(deleted["external_archives_affected"])
+        with self.store.db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM memories WHERE id=?", (middle["id"],)).fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM memory_candidates WHERE id=?", (candidate["id"],)).fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM memory_approvals WHERE subject_id=?", (middle["id"],)).fetchone()[0], 0)
+            # The chain is spliced, not left dangling at the deleted row.
+            self.assertEqual(db.execute("SELECT supersedes FROM memories WHERE id=?", (head["id"],)).fetchone()[0], first["id"])
+        with self.assertRaises(ValueError):
+            self.service.correct("owner-a", "work-a", middle["id"], "food", "second", "third",
+                                 correction["approval_token"])
+
+        # The remaining chain delete still reaches the spliced ancestor and
+        # reports a truthful count.
+        chain = self.service.delete("owner-a", head["id"])
+        self.assertEqual(chain["deleted_memory_count"], 2)
+        self.assertEqual(self.store.memories("owner-a"), [])
+        self.assertEqual(self.service.inspect_memory("owner-b", unrelated["id"])["content"], "other owner value")
+
+    def test_portable_export_redacts_the_memory_label_of_every_approval_row(self):
+        candidate = self.service.propose("owner-a", "work-a", "consumed-key", "consumed value")
+        approval = self.service.request_candidate_approval(
+            "owner-a", "work-a", candidate["id"], candidate["content_digest"]
+        )
+        self.service.approve_candidate(
+            "owner-a", "work-a", candidate["id"], candidate["content_digest"], approval["approval_token"]
+        )
+        expiring = self.service.propose("owner-a", "work-a", "expired-key", "expired value")
+        expiring_approval = self.service.request_candidate_approval(
+            "owner-a", "work-a", expiring["id"], expiring["content_digest"], ttl=1
+        )
+        self.now[0] = expiring_approval["expires_at"]
+        with self.assertRaises(ValueError):
+            self.service.approve_candidate(
+                "owner-a", "work-a", expiring["id"], expiring["content_digest"],
+                expiring_approval["approval_token"]
+            )
+        with self.store.db() as db:
+            live = {row["state"]: row["memory_key"] for row in db.execute("SELECT state,memory_key FROM memory_approvals")}
+        self.assertEqual(live, {"consumed": "consumed-key", "expired": "expired-key"})
+
+        archive = export_owner_state(self.root, self.root / "approvals.tar.gz")
+        restored = QuickStore(restore_owner_state(archive, self.root.parent / "restored-approvals"))
+        with restored.db() as db:
+            exported = sorted((row["state"], row["memory_key"]) for row in db.execute("SELECT state,memory_key FROM memory_approvals"))
+        self.assertEqual(exported, [("consumed", ""), ("expired", "")])
 
 
 if __name__ == "__main__":

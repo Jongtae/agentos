@@ -370,23 +370,6 @@ class QuickStore:
                 if row['state'] in candidates:candidates[row['state']]=row['count']
         return {'current_memory_count':current,'candidate_counts':candidates}
 
-    def issue_exact_memory_approval(self, owner_id, work_id, action, subject_id, memory_key,
-                                    source_digest, content_digest, ttl=600, now=None):
-        if action not in ('accept-candidate','correct-memory'):raise ValueError('승인 대상을 확인하세요.')
-        if not isinstance(subject_id,str) or not subject_id or not isinstance(memory_key,str) or not memory_key:raise ValueError('승인 대상을 확인하세요.')
-        if not isinstance(source_digest,str) or len(source_digest)!=64 or not isinstance(content_digest,str) or len(content_digest)!=64:raise ValueError('승인 내용을 확인하세요.')
-        if isinstance(ttl,bool) or not isinstance(ttl,(int,float)) or not 1<=ttl<=900:raise ValueError('승인 유효 시간을 확인하세요.')
-        created=time.time() if now is None else float(now);token=secrets.token_urlsafe(32)
-        value=(self._exact_memory_token_hash(token),self._memory_binding(owner_id),self._work_binding(work_id),action,
-               subject_id,memory_key,source_digest,content_digest,created,created+ttl,'issued',None)
-        with self.db() as db:
-            db.execute('''INSERT INTO memory_approvals
-                          (token_hash,owner_key,work_key,action,subject_id,memory_key,source_digest,
-                           content_digest,created,expires,state,result_id)
-                          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',value)
-        return {'approval_token':token,'action':action,'subject_id':subject_id,'memory_key':memory_key,
-                'source_digest':source_digest,'content_digest':content_digest,'expires_at':created+ttl,'state':'issued'}
-
     def issue_candidate_memory_approval(self, owner_id, work_id, candidate_id, content_digest,
                                         ttl=600, now=None):
         """Validate a pending candidate and insert its approval in one transaction."""
@@ -451,21 +434,31 @@ class QuickStore:
         secret=self.secret('memory_exact_approval_secret',create=lambda:secrets.token_hex(32))
         return hmac.new(secret.encode(),token.encode(),hashlib.sha256).hexdigest()
 
-    def _exact_approval(self, db, approval_token, owner_id, work_id, action, subject_id,
-                        memory_key, source_digest, content_digest, now):
+    def _exact_memory_token_lookup(self, approval_token):
+        """Hash an approval token before any write transaction opens.
+
+        ``secret()`` reads the secret file under an inter-process ``flock`` and
+        may fsync a first-use write.  Doing that while holding a
+        ``BEGIN IMMEDIATE`` SQLite write lock would hold the database lock for
+        the duration of unrelated file I/O, so every caller hashes first, as
+        the two issuing paths already do.
+        """
         if not isinstance(approval_token,str) or not approval_token:raise ValueError('정확한 승인이 필요합니다.')
-        row=db.execute('SELECT * FROM memory_approvals WHERE token_hash=?',(self._exact_memory_token_hash(approval_token),)).fetchone()
+        return self._exact_memory_token_hash(approval_token)
+
+    def _exact_approval(self, db, token_hash, owner_id, work_id, action, subject_id,
+                        memory_key, source_digest, content_digest, now):
+        row=db.execute('SELECT * FROM memory_approvals WHERE token_hash=?',(token_hash,)).fetchone()
         if not row:raise ValueError('정확한 승인이 필요합니다.')
         if row['state']=='revoked':
             # A revoked row no longer carries its memory key, so the full
-            # binding check below cannot run. Still confirm the owner, work,
-            # action and subject before explaining why the token stopped
-            # working; anything else stays generic.
-            revoked_expected=(self._memory_binding(owner_id),self._work_binding(work_id),action,subject_id)
-            revoked_observed=tuple(row[key] for key in ('owner_key','work_key','action','subject_id'))
-            if all(hmac.compare_digest(str(left),str(right))
-                   for left,right in zip(revoked_expected,revoked_observed)):
-                raise ValueError('승인 이후 현재 기억이 변경되었습니다.')
+            # binding check below cannot run.  Explaining *why* a revoked token
+            # stopped working would mean comparing the caller-supplied
+            # owner/work/action/subject against the stored row and reporting a
+            # distinguishable error, which is an oracle telling a token holder
+            # whether its guessed binding matched.  Revocation is therefore
+            # reported exactly like any unusable token; the owner surface
+            # re-reads current Memory state to explain what changed.
             raise ValueError('정확한 승인이 필요합니다.')
         expected=(self._memory_binding(owner_id),self._work_binding(work_id),action,subject_id,memory_key,source_digest,content_digest)
         observed=tuple(row[key] for key in ('owner_key','work_key','action','subject_id','memory_key','source_digest','content_digest'))
@@ -481,11 +474,12 @@ class QuickStore:
 
     def accept_memory_candidate(self, owner_id, work_id, candidate_id, content_digest, approval_token, now=None):
         observed=time.time() if now is None else float(now);owner_key=self._memory_binding(owner_id);work_key=self._work_binding(work_id)
+        token_hash=self._exact_memory_token_lookup(approval_token)
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
             candidate=db.execute('SELECT * FROM memory_candidates WHERE id=? AND owner_key=? AND work_key=?',(candidate_id,owner_key,work_key)).fetchone()
             if not candidate or candidate['content_digest']!=content_digest:raise ValueError('기억 후보를 다시 확인하세요.')
-            approval=self._exact_approval(db,approval_token,owner_id,work_id,'accept-candidate',candidate_id,
+            approval=self._exact_approval(db,token_hash,owner_id,work_id,'accept-candidate',candidate_id,
                                           candidate['memory_key'],candidate['content_digest'],candidate['content_digest'],observed)
             if approval['state']=='consumed':
                 result=self._memory_row(db.execute('SELECT * FROM memories WHERE id=?',(approval['result_id'],)).fetchone())
@@ -533,9 +527,10 @@ class QuickStore:
                        approval_token, now=None):
         memory_key,content=self._memory_value(memory_key,content);replacement_digest=self.memory_digest(memory_key,content)
         observed=time.time() if now is None else float(now);owner_key=self._memory_binding(owner_id);work_key=self._work_binding(work_id)
+        token_hash=self._exact_memory_token_lookup(approval_token)
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
-            approval=self._exact_approval(db,approval_token,owner_id,work_id,'correct-memory',memory_id,memory_key,current_digest,replacement_digest,observed)
+            approval=self._exact_approval(db,token_hash,owner_id,work_id,'correct-memory',memory_id,memory_key,current_digest,replacement_digest,observed)
             if approval['state']=='consumed':
                 result=self._memory_row(db.execute('SELECT * FROM memories WHERE id=?',(approval['result_id'],)).fetchone())
                 if result:return result
@@ -672,12 +667,36 @@ class QuickStore:
                          if candidate else 0)
             else:
                 # A current memory is already routed through the approval-aware
-                # chain above, so only a superseded row can reach this path.
-                deleted=db.execute('DELETE FROM memories WHERE id=?',(item_id,)).rowcount
-                if not deleted: deleted=db.execute('DELETE FROM notes WHERE id=?',(item_id,)).rowcount
+                # chain above, so only a superseded row, or a note sharing the
+                # Personal Space 'memories' bucket, can reach this path. Keep
+                # the owner predicate, remove approvals bound to the row, and
+                # splice the row out of the supersession chain: leaving a
+                # dangling 'supersedes' pointer would stop a later chain delete
+                # early and orphan the remaining ancestors while reporting an
+                # untruthful deleted_memory_count.
+                db.execute('BEGIN IMMEDIATE')
+                superseded=db.execute("SELECT owner_key,supersedes FROM memories WHERE id=? AND state='superseded'",(item_id,)).fetchone()
+                if superseded:
+                    owner_key=superseded['owner_key']
+                    deleted_approvals=db.execute('DELETE FROM memory_approvals WHERE owner_key=? AND (subject_id=? OR result_id=?)',
+                                                 (owner_key,item_id,item_id)).rowcount
+                    db.execute('UPDATE memories SET supersedes=? WHERE supersedes=? AND owner_key=?',
+                               (superseded['supersedes'],item_id,owner_key))
+                    # Mirror _delete_memory_chain: the accepted candidate holds a
+                    # plaintext copy of the same value, so it must not outlive it.
+                    deleted_candidates=db.execute("DELETE FROM memory_candidates WHERE owner_key=? AND state='accepted' AND resulting_memory_id=?",
+                                                  (owner_key,item_id)).rowcount
+                    memory_deleted=db.execute('DELETE FROM memories WHERE id=? AND owner_key=?',(item_id,owner_key)).rowcount
+                else:
+                    memory_deleted=deleted_candidates=0
+                deleted=memory_deleted or db.execute('DELETE FROM notes WHERE id=?',(item_id,)).rowcount
         result={'deleted':bool(deleted),'id':item_id,'kind':kind,'workspace_id':workspace_id}
         if kind=='memory_candidates':
             result.update(deleted_approval_count=deleted_approvals,
+                          retained_private_copies='unknown_outside_store',external_archives_affected=False)
+        elif kind=='memories' and memory_deleted:
+            result.update(deleted_memory_count=memory_deleted,deleted_candidate_count=deleted_candidates,
+                          deleted_approval_count=deleted_approvals,
                           retained_private_copies='unknown_outside_store',external_archives_affected=False)
         return result
 

@@ -822,7 +822,22 @@ class PublicResearchTests(unittest.TestCase):
                     'travel_plan','museum plan',query_source='owner_public_request')
                 self.assertEqual(result['dynamic_facts'][dynamic]['status'],'unknown')
 
-    def test_room_pricing_qualifiers_do_not_hide_exact_availability(self):
+    def test_pricing_only_neighbour_over_suppresses_inventory_as_a_known_limit(self):
+        """A pricing remark beside an availability claim suppresses the fact.
+
+        This is over-suppression and it is recorded rather than fixed. An
+        exemption for "names the counted entity only in a pricing context"
+        was implemented and reverted: to take effect it had to bypass the
+        qualification path, which also cleared neighbours disclaiming the
+        page itself - "Room prices shown are sample data for this mock
+        page." and "Room rates on this page are not live." both flipped from
+        `unknown` to `observed`. Six such shapes regressed against three
+        over-suppressions recovered.
+
+        Pinned so the trade is visible: if a future change makes these
+        `observed`, it must show the disclaiming shapes still read
+        `unknown`.
+        """
         for content in (
             'Rooms are available today. Room rates may vary.',
             'Rooms are available today. Room rates vary by date.',
@@ -832,9 +847,29 @@ class PublicResearchTests(unittest.TestCase):
                     'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
                 result=PublicResearch(search_result,reader,max_pages=1).run(
                     'travel_plan','museum plan',query_source='owner_public_request')
-                self.assertEqual(result['dynamic_facts']['inventory']['status'],'observed')
-                self.assertEqual(result['dynamic_facts']['inventory']['evidence'],[
-                    {'source_id':'S1','exact_text':'Rooms are available today.'}])
+                self.assertEqual(result['dynamic_facts']['inventory']['status'],'unknown')
+
+    def test_page_level_disclaimer_in_a_pricing_sentence_still_qualifies_inventory(self):
+        """The shapes the reverted exemption would have cleared.
+
+        Each names the counted entity and a pricing term but disclaims the
+        page or its data, so it bears on availability too and must not leave
+        the fact committed.
+        """
+        for content in (
+            'Rooms are available today. Room prices shown are sample data for this mock page.',
+            'Rooms are available today. Our room rates are demonstration placeholders only.',
+            'Rooms are available today. Room rates on this page are not live.',
+            'Rooms are available today. Room charges here are illustrative and this listing is a template.',
+            'Rooms are available today. Ticket prices refer to our Tokyo branch, not this listing.',
+            'Rooms are available today. Seat fares are stale; nothing here reflects the reservation system.',
+        ):
+            with self.subTest(content=content):
+                reader=Reader({'https://alpha.example/item':{
+                    'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+                result=PublicResearch(search_result,reader,max_pages=1).run(
+                    'travel_plan','museum plan',query_source='owner_public_request')
+                self.assertEqual(result['dynamic_facts']['inventory']['status'],'unknown')
 
     def test_anaphoric_adjacent_uncertainty_keeps_dynamic_facts_unknown(self):
         cases=(

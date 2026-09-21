@@ -419,13 +419,15 @@ FACT_ENTITY_TERMS = {
         r'객실|좌석|티켓'
     ),
 }
-# A countable inventory entity may also appear in a sentence about a different
-# property. "Room rates may vary" qualifies pricing, not whether rooms are
-# available. Keep these property vocabularies separate unless the sentence
-# also names availability itself.
-INVENTORY_PRICING_TERMS = re.compile(
-    r'(?i)\b(?:rates?|prices?|pricing|fares?|costs?|fees?|charges?|surcharges?|taxes?|discounts?)\b'
-)
+# Known limitation, deliberately not carved out: a neighbour that names the
+# counted entity only in a pricing context ("Room rates may vary") still
+# qualifies inventory, so the fact reads `unknown`. An exemption for that
+# shape was tried and reverted: because it has to bypass the qualification
+# path to take effect, it also cleared neighbours that disclaim the page
+# itself ("Room prices shown are sample data for this mock page.",
+# "Room rates on this page are not live."), turning six safe `unknown`
+# results into `observed`. Over-suppression is the safe direction here;
+# claiming availability from a page that calls itself sample data is not.
 # Availability is boolean, so a neighbour asserting the OPPOSITE state is a
 # contradiction, not a confirmation. Without this, `FACT_PATTERNS['inventory']`
 # matched "sold out" as readily as "available" and a neighbour denying
@@ -628,10 +630,6 @@ def _neighbor_clears(name, neighbor, fact_text):
         # is this fact's own subject. Both bear on the fact only in the
         # present; a past-tense remark about them is history (see above).
         entity_terms=FACT_ENTITY_TERMS.get(name)
-        if (name == 'inventory' and entity_terms and entity_terms.search(neighbor)
-                and INVENTORY_PRICING_TERMS.search(neighbor)
-                and not FACT_PROPERTY_TERMS['inventory'].search(neighbor)):
-            return True
         bears_on_fact=bool((entity_terms and entity_terms.search(neighbor))
                            or PERSONAL_ANAPHORIC_SUBJECT.search(neighbor))
     if not bears_on_fact:
@@ -790,11 +788,6 @@ def _qualified_dynamic(name, evidence):
                     is_forward_subject_qualifier=(
                         neighbor_position > position
                         and DYNAMIC_SUBJECT_PATTERNS[name].search(neighbor)
-                        and not (
-                            name == 'inventory'
-                            and INVENTORY_PRICING_TERMS.search(neighbor)
-                            and not FACT_PROPERTY_TERMS['inventory'].search(neighbor)
-                        )
                         and (DYNAMIC_DISQUALIFIER.search(neighbor) or
                              FORWARD_SUBJECT_QUALIFIER.search(neighbor))
                         and not clause_pattern(neighbor)

@@ -158,16 +158,22 @@ class DeliveryTests(unittest.TestCase):
         item=next(entry for entry in altered['iterations'] if entry['id']==declared)
         dependencies=item.get('depends_on', [])
 
-        # Active transition alone is not enough while a dependency is undocumented.
         altered['next_goal']['status']='active'  # Test fixture only, never repository activation.
         documented=altered['history']['documented_completed_iterations']
-        missing=[name for name in dependencies if name not in documented]
-        if missing:
-            (self.root/'delivery-plan.yaml').write_text(json.dumps(altered))
-            self.assertIsNone(DeliveryPlan(self.root/'delivery-plan.yaml').select({}))
+        self.assertTrue(dependencies, 'the declared goal must declare a governance dependency')
 
-        # With dependencies documented, the declared goal becomes selectable.
-        documented.extend(missing)
+        # Active transition alone is not enough. Withhold each dependency in
+        # turn and require selection to refuse. Unconditional on purpose: an
+        # earlier form ran this only `if missing`, so emptying depends_on in
+        # the plan silently disarmed the only test guarding the gate.
+        for dependency in dependencies:
+            withheld=[name for name in documented if name != dependency]
+            altered['history']['documented_completed_iterations']=withheld
+            (self.root/'delivery-plan.yaml').write_text(json.dumps(altered))
+            self.assertIsNone(DeliveryPlan(self.root/'delivery-plan.yaml').select({}), dependency)
+        altered['history']['documented_completed_iterations']=documented
+
+        # With every dependency documented, the declared goal becomes selectable.
         (self.root/'delivery-plan.yaml').write_text(json.dumps(altered))
         self.assertEqual(DeliveryPlan(self.root/'delivery-plan.yaml').select({})['id'], declared)
 

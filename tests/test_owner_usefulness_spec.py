@@ -65,6 +65,14 @@ class OwnerUsefulnessSpecificationTests(unittest.TestCase):
         selected = next(item for item in plan["iterations"] if item["id"] == declared)
         self.assertIsInstance(selected["issue"], int)
         self.assertEqual(selected["activation_status"], "owner-activated-goal-ready")
+        # The declared top-level goal must declare its activation-governance
+        # dependency. This is a governance rule, not a transient fact: without
+        # it a program can be flipped to active with no governance merged.
+        # Generalised from the original `== ["GOV-PA1-01"]`, which pinned the
+        # same rule to whichever program happened to be declared.
+        self.assertTrue(selected.get("depends_on"), selected)
+        for dependency in selected["depends_on"]:
+            self.assertIn(dependency, plan["history"]["documented_completed_iterations"])
         # Goal-readiness must not execute, whichever program is declared.
         self.assertNotEqual(plan["next_goal"]["status"], "active")
         self.assertIn("GOV-PA1-01", plan["history"]["documented_completed_iterations"])

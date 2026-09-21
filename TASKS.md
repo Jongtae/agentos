@@ -8,6 +8,12 @@ Active work is executed only from a goal-ready issue and active delivery-plan en
 | --- | --- | --- |
 | GOV-EXEC-01: verification budget and stable-head review | [#408](https://github.com/Jongtae/personal-agentos/issues/408) | Complete on merge after exact-head CI/review. Keeps required CI/review gates while using focused tests during implementation, coherent checkpoint pushes, batched review remediation, a soft two-broad-cycle expectation, and no duplicate review/polling. |
 
+## Execution-state efficiency
+
+| Work unit | Issue | Current boundary |
+| --- | --- | --- |
+| GOV-EXEC-02: execution cursor and thin agent bootstrap | [#410](https://github.com/Jongtae/personal-agentos/issues/410) | Complete on merge after required CI/review. Adds cursor-first/delta-read resume, a thin Claude bootstrap and structural cursor validation; GitHub/repository evidence remains canonical and full reconciliation is anomaly-only. |
+
 ## Prepared — PA1 first Telegram personal-assistant completion
 
 | Work unit | Issue | Current boundary |

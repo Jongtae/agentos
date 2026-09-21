@@ -379,6 +379,74 @@ class PublicPageReaderTests(unittest.TestCase):
                 self.assertNotIn('Grand total', result['content'])
                 self.assertNotIn('<item>', result['content'])
 
+    def test_peripheral_page_text_is_retained_as_evidence(self):
+        """Navigation, table and footer text is evidence, not boilerplate.
+
+        REUSE-R7 measured main-content extraction libraries against real pages.
+        On weather.gov trafilatura 2.2.0 returned 296 of the 2282 characters
+        this reader reports and readability-lxml 0.9 returned 299; on a news
+        front page they returned 7616 and 750 of 9876, and readability returned
+        nothing at all for a link-index page. Those libraries optimise for an
+        article body, while this reader's contract is every string the page
+        displays. A future extractor must keep this passing.
+        """
+        body=(b'<html><body>'
+              b'<nav><a href="/severe">Severe Weather</a><a href="/marine">Marine</a></nav>'
+              b'<main><p>Rain is forecast Monday.</p></main>'
+              b'<table><tr><td>KRW</td><td>1320</td></tr></table>'
+              b'<footer>Contact Us</footer></body></html>')
+        result=PublicPageReader(opener=Opener(Response(body=body)),resolver=public_dns).read('https://example.com/')
+        for visible in ('Severe Weather','Marine','Rain is forecast Monday.','KRW','1320','Contact Us'):
+            with self.subTest(visible=visible):
+                self.assertIn(visible, result['content'])
+
+    def test_display_conditional_markup_is_not_reported_as_visible_text(self):
+        """noscript and template bodies are not shown to a reader of the page.
+
+        Reporting them would turn markup the page never renders into an
+        observed fact. trafilatura 2.2.0 emits noscript text, so this is a
+        behavioural boundary an extractor swap has to respect.
+        """
+        body=(b'<html><body>'
+              b'<noscript>Enable JavaScript to see the total.</noscript>'
+              b'<template><p>Unrendered draft row</p></template>'
+              b'<style>.total{color:red}</style>'
+              b'<p>Rain is forecast Monday.</p></body></html>')
+        result=PublicPageReader(opener=Opener(Response(body=body)),resolver=public_dns).read('https://example.com/')
+        self.assertIn('Rain is forecast Monday.', result['content'])
+        for hidden in ('Enable JavaScript','Unrendered draft row','color:red'):
+            with self.subTest(hidden=hidden):
+                self.assertNotIn(hidden, result['content'])
+
+    def test_xhtml_headings_are_retained_with_body_text(self):
+        """A heading carries the subject the body text refers to.
+
+        An earlier revision of this docstring claimed trafilatura 2.2.0 drops
+        the heading for the XHTML form of a page it keeps for the HTML form.
+        That is false and did not reproduce: independent review tried the
+        markup below plus five variants and found the behaviour identical for
+        both dialects. The correction is recorded rather than quietly
+        removed, because the claim was committed here as an observed fact.
+
+        The reproducible finding is different and supports the same
+        conclusion: trafilatura 2.2.0 drops h1 headings on longer documents,
+        for XHTML and HTML alike. It also returns nothing at all for
+        application/xml and text/xml, two of the four media types this reader
+        accepts.
+
+        Both media types are exercised below so heading retention is pinned
+        for each, whatever a future candidate does with the dialect.
+        """
+        body=(b'<?xml version="1.0" encoding="utf-8"?>'
+              b'<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Rate card</title></head>'
+              b'<body><h1>Daily rate</h1><p>The rate is 120 USD.</p></body></html>')
+        for media_type in ('application/xhtml+xml','text/html'):
+            with self.subTest(media_type=media_type):
+                opener=Opener(Response(body=body, headers={'Content-Type':media_type}))
+                result=PublicPageReader(opener=opener, resolver=public_dns).read('https://example.com/rates')
+                self.assertIn('Daily rate', result['content'])
+                self.assertIn('The rate is 120 USD.', result['content'])
+
     def test_malformed_http_is_a_recoverable_provider_failure(self):
         class Broken:
             def open(self, request, timeout=None): raise http.client.BadStatusLine('broken')

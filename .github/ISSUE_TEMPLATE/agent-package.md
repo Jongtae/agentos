@@ -45,6 +45,21 @@ Publisher identity, signature/integrity, provenance/SBOM, behavioural/conformanc
 
 At minimum consider malicious package, permission expansion, secret exfiltration, undeclared egress, memory poisoning, prompt injection, dependency substitution, malicious update, confused deputy, replay/stale approval and package removal/recovery.
 
+
+## Existing solutions review (Adopt / Adapt / Build)
+
+Required when this work materially implements or replaces commodity infrastructure. Otherwise write `N/A`.
+
+- problem/boundary:
+- official SDK/reference/standard candidates:
+- mature open-source candidates:
+- maintenance/security/supply-chain fit:
+- licence fit:
+- runtime/deployment/compatibility fit:
+- decision: `Adopt / Adapt / Build`
+- why rejected candidates are insufficient:
+- AgentOS-owned policy/authority boundary kept outside the dependency:
+
 ## Acceptance criteria
 
 - [ ]

@@ -12,6 +12,11 @@ Relevant [Development Constitution](../docs/development-constitution.en.md) prin
 
 ## What changed
 
+
+## Existing solutions review (Adopt / Adapt / Build)
+
+For material commodity infrastructure introduced/replaced by this PR, record official/reference and mature OSS candidates, maintenance/security/licence/compatibility fit, the `Adopt / Adapt / Build` decision, and why rejected candidates are insufficient. Otherwise write `N/A`.
+
 ## Authority / threat model
 
 What owner data, Grants, packages/runtimes, filesystem scopes, network destinations, secrets, external recipients/actions, or human gates are involved?

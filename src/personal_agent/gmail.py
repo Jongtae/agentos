@@ -25,9 +25,10 @@ import secrets
 import threading
 import time
 from typing import Callable
-from urllib.parse import quote, urlencode, urlsplit
+from urllib.parse import quote, urlsplit
 
 from cryptography.fernet import Fernet, InvalidToken
+from oauthlib.oauth2 import WebApplicationClient
 
 from .connector_contract import (
     ConnectorContractError,
@@ -253,10 +254,17 @@ def _finite_now(now: Callable[[], float]) -> float:
     return float(value)
 
 
+# See the REUSE-R1b (#427) Existing Solutions Review in ``drive_web_oauth`` for
+# why ``google-auth``/``google-auth-oauthlib`` are rejected, why ``oauthlib`` is
+# adopted for authorization-request construction only, and in particular why
+# ``prepare_request_body``/``parse_request_body_response`` must NOT be adopted
+# for the token exchange or for scope enforcement in ``_validated_tokens``.
 def _pkce_pair() -> tuple[str, str]:
-    verifier = secrets.token_urlsafe(64)
-    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
-    return verifier, challenge
+    # "S256" is passed explicitly: ``create_code_challenge`` silently falls back
+    # to the unprotected ``plain`` transform when the method is omitted.
+    client = WebApplicationClient("")
+    verifier = client.create_code_verifier(96)
+    return verifier, client.create_code_challenge(verifier, "S256")
 
 
 def _bounded_text(value: object, maximum: int) -> str:
@@ -501,21 +509,21 @@ class GmailConnector:
                     "connection_revision": current.connection_revision,
                 }
                 self.store.secret(f"{PENDING_SECRET_KEY}:{owner}", pending)
-        query = {
-            "client_id": self.client_id,
-            "redirect_uri": self.redirect_uri,
-            "response_type": "code",
-            "scope": GMAIL_READONLY_SCOPE,
-            "access_type": "offline",
-            "include_granted_scopes": "false",
-            "code_challenge": challenge,
-            "code_challenge_method": "S256",
-            "state": state,
-        }
+        authorization_url = WebApplicationClient(self.client_id).prepare_request_uri(
+            AUTHORIZATION_ENDPOINT,
+            redirect_uri=self.redirect_uri,
+            scope=[GMAIL_READONLY_SCOPE],
+            state=state,
+            code_challenge=challenge,
+            code_challenge_method="S256",
+            access_type="offline",
+            # Never widen the grant to scopes this owner approved elsewhere.
+            include_granted_scopes="false",
+        )
         required = self.connection_required(owner_id)
         return {
             **required,
-            "authorization_url": AUTHORIZATION_ENDPOINT + "?" + urlencode(query),
+            "authorization_url": authorization_url,
             "expires_at": pending["expires_at"],
         }
 

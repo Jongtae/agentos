@@ -117,6 +117,7 @@ INTENT_WORKSPACE_SEARCH = 'workspace-search'
 INTENT_NOTE_CREATE = 'note-create'
 INTENT_NOTE_LIST = 'note-list'
 INTENT_CALENDAR_CREATE = 'calendar-create'
+INTENT_MAIL_SEARCH = 'mail-search'
 INTENT_RESEARCH = 'research'
 INTENT_CONVERSATION = 'conversation'
 INTENT_AMBIGUOUS = 'ambiguous'
@@ -146,6 +147,7 @@ INTENT_LABELS = {
     INTENT_NOTE_CREATE: '메모 기록',
     INTENT_NOTE_LIST: '메모 목록',
     INTENT_CALENDAR_CREATE: '일정 만들기',
+    INTENT_MAIL_SEARCH: '메일 찾기',
     INTENT_RESEARCH: '웹 조사',
     INTENT_CONVERSATION: '대화로 답하기',
 }
@@ -203,6 +205,18 @@ _WORKSPACE_VERBS = ('찾아', '찾을', '검색', '열어', '보여', '가져와
 _CALENDAR_OBJECTS = ('일정', '미팅', '회의', '약속', 'calendar', 'meeting', 'appointment', 'event')
 _CALENDAR_VERBS = ('잡아', '잡을', '잡고', '잡아줘', '만들어', '등록', '추가', '넣어', '예약',
                    'create', 'add', 'book', 'schedule', 'set up', 'put')
+
+# Mail is a read.  The object cues below never pair with a send/reply verb,
+# so "메일 보내줘" cannot become a mailbox read: it matches no rule and stays
+# on the ordinary conversation route.  Sending mail is not a capability this
+# conversation offers at all.
+_MAIL_OBJECTS = ('메일', '이메일', '받은편지함', '메일함', 'email', 'emails', 'mail', 'inbox', 'gmail')
+# The polite ``-해/-해줘`` forms are listed as cues in their own right, not
+# stripped afterwards: ``_without_cues`` removes the longest match first, so
+# listing them keeps "확인해줘" from leaving "해줘" behind in the query.
+_MAIL_VERBS = ('찾아', '찾을', '찾아줘', '검색해줘', '검색해', '검색', '읽어', '확인해줘', '확인해',
+               '확인', '보여', '알려', '왔',
+               'search', 'find', 'look', 'check', 'show', 'read', 'any')
 
 _RESEARCH_CUES = ('웹에서', '웹 검색', '인터넷', '온라인', '검색해', '찾아봐', '조사해', '알아봐', '최신 정보',
                   'web search', 'search the web', 'look up', 'research', 'find out', 'online',
@@ -342,6 +356,7 @@ RECOMMENDATION_CLARIFICATION = ('추천할 수 있는 결과 유형은 private-d
 SETTINGS_READ_FORM = '/settings'
 KNOWLEDGE_CLARIFICATION = '개인 공간에서 무엇을 찾을지 두 글자 이상으로 알려 주세요.'
 NOTE_CLARIFICATION = '무엇을 기록할지 내용을 함께 적어 주세요.'
+MAIL_CLARIFICATION = '메일에서 무엇을 찾을지 두 글자 이상으로 알려 주세요.'
 
 
 class _Candidate:
@@ -478,6 +493,18 @@ class IntentClassifier:
             return head
         return None
 
+    def _rule_mail(self, text, lowered):
+        """Recognise a mailbox *read*; the query is never persisted anywhere."""
+        objects = _cue_hits(text, lowered, _MAIL_OBJECTS)
+        verbs = _cue_hits(text, lowered, _MAIL_VERBS)
+        if not (objects and verbs):
+            return None
+        quoted = _QUOTED.findall(text)
+        query = quoted[0] if quoted else _strip_noise(_without_cues(text, (*objects, *verbs)))
+        if len(query) < 2:
+            return _Candidate(INTENT_MAIL_SEARCH, None, (*objects, *verbs), MAIL_CLARIFICATION)
+        return _Candidate(INTENT_MAIL_SEARCH, query, (*objects, *verbs))
+
     def _rule_calendar(self, text, lowered):
         objects = _cue_hits(text, lowered, _CALENDAR_OBJECTS)
         verbs = _cue_hits(text, lowered, _CALENDAR_VERBS)
@@ -507,7 +534,8 @@ class IntentClassifier:
         correction = _cue_hits(text, lowered, _CORRECTION_CUES)
         candidates = []
         for rule in (self._rule_recommendation, self._rule_knowledge, self._rule_settings,
-                     self._rule_workspace, self._rule_note, self._rule_calendar):
+                     self._rule_workspace, self._rule_note, self._rule_calendar,
+                     self._rule_mail):
             found = rule(text, lowered)
             if found is not None:
                 candidates.append(found)
@@ -591,3 +619,320 @@ class IntentClassifier:
                                                     'reason': 'narrowed-an-agentos-candidate'})
         decision.model_suggestion = record
         return decision
+
+
+# ---------------------------------------------------------------------------
+# Connector prerequisites, connection handoff and exactly-once resume
+# ---------------------------------------------------------------------------
+# Nothing below invents a replay, owner-binding, one-time-state or expiry
+# scheme.  Two pieces of hard-won repository machinery are reused as-is:
+#
+#   * the Wave 0 ``PendingWorkRegistry`` owns the authority state machine -
+#     pending/claimed/completed/superseded/expired, the hashed owner binding,
+#     exact scope equality, connector-definition drift detection, and the
+#     claim digest that distinguishes an authorized claimant recovering a lost
+#     response from a second claimant replaying one.  Its own docstrings name
+#     #393 as the layer that must "durably schedule with the same
+#     caller-supplied handoff ID before it calls ``complete``".  That durable
+#     schedule is the missing half supplied here.
+#   * ``quickstart_service``'s Telegram ``generation`` is the existing marker
+#     for "this bot connection is no longer the one that was talking".  A
+#     handoff parked under an older generation is refused rather than resumed,
+#     exactly as ``ingest_update`` and ``poll_telegram`` already refuse an
+#     update from a superseded generation.
+#
+# The compare-and-set on the parked job row is modelled on the shipped Drive
+# resume (``select_drive_files`` -> ``UPDATE jobs ... WHERE id=? AND
+# status='awaiting_drive'``), generalised from one connector to the contract.
+import secrets as _secrets
+import threading
+import uuid
+
+from .calendar import CALENDAR_WRITE_CONNECTOR_ID
+# ``_owner_key`` is imported rather than reimplemented on purpose.  The
+# index below and the contract row it points at must agree on what "the same
+# owner" means; two independent hashes could only ever disagree, and a
+# disagreement would be a wrong-owner check that quietly stops matching.
+from .connector_contract import (ConnectorContractError, ConnectorResult, ConnectorResultKind,
+                                 ConnectorState, PendingWorkRegistry, RecoveryAction, _owner_key)
+from .gmail import GMAIL_CONNECTOR_ID
+
+#: Which connector one routing decision needs, decided by AgentOS before any
+#: capability is touched.  A missing entry means the intent needs no connector.
+#: ``calendar-create`` maps to the *write* connector deliberately: this
+#: repository models the calendar read and write grants as two connectors so a
+#: read grant can never imply a write grant, so "the calendar scope is
+#: missing" and "the calendar is not connected" are the same owner-safe
+#: handoff against different connector rows.
+CONNECTOR_BY_INTENT = {
+    INTENT_MAIL_SEARCH: GMAIL_CONNECTOR_ID,
+    INTENT_CALENDAR_CREATE: CALENDAR_WRITE_CONNECTOR_ID,
+}
+
+CONNECTOR_LABELS = {
+    GMAIL_CONNECTOR_ID: 'Gmail',
+    CALENDAR_WRITE_CONNECTOR_ID: 'Google Calendar 일정 만들기',
+}
+
+#: One sentence of guidance per unmet state, naming exactly one next action.
+#: None of these claims a connection happened, that a tool ran, or how long it
+#: will take.  The request is explicitly described as *not executed*.
+HANDOFF_GUIDANCE = {
+    ConnectorResultKind.CONNECTION_REQUIRED:
+        '{label} 연결이 아직 없어 이 요청을 실행하지 않았습니다. 지금 필요한 다음 단계는 하나입니다: '
+        '{label}을(를) 연결해 주세요. 연결이 확인되면 방금 요청을 한 번만 이어서 처리합니다.',
+    ConnectorResultKind.REAUTH_REQUIRED:
+        '{label} 연결을 다시 인증해야 해서 이 요청을 실행하지 않았습니다. 지금 필요한 다음 단계는 하나입니다: '
+        '{label}을(를) 다시 인증해 주세요. 인증이 확인되면 방금 요청을 한 번만 이어서 처리합니다.',
+    ConnectorResultKind.BLOCKED:
+        '{label} 접근이 차단되어 있어 이 요청을 실행하지 않았습니다. 지금 필요한 다음 단계는 하나입니다: '
+        '{label}의 접근 권한을 확인해 주세요. 차단이 풀릴 때까지 이 요청은 이어서 처리하지 않습니다.',
+}
+
+CONNECTOR_UNAVAILABLE = ('{label} 기능이 이 로컬 설치에 구성되어 있지 않습니다. '
+                         '소유자가 로컬 설정을 마친 뒤 다시 요청해 주세요.')
+
+#: Durable key for the one owner-safe pending-resume index.  It is written to
+#: the secret store rather than ``config`` so the opaque resume handle is not
+#: reachable from status, onboarding, progress or portable-state surfaces.
+CONVERSATION_RESUME_KEY = 'conversation_pending_resume'
+
+RESUME_TTL_SECONDS = 900
+
+#: Mirrors the process-wide locks in ``connector_contract`` and
+#: ``drive_web_oauth``: the index may be reconstructed by another handoff
+#: instance in the same runtime, so the lock must not be instance-local.
+_RESUME_LOCK = threading.RLock()
+
+
+class ConversationHandoffError(ValueError):
+    """Fail-closed resume refusal whose text discloses no owner data."""
+
+    def __init__(self, reason='rejected'):
+        super().__init__('conversation resume rejected')
+        self.reason = reason
+
+
+#: Every refusal is a stated outcome, never a silent no-op.  Reasons coming
+#: from the Wave 0 contract keep the contract's own vocabulary.
+RESUME_REFUSALS = {
+    'no_pending_work': '이어서 처리할 요청이 없어 아무 작업도 실행하지 않았습니다.',
+    'wrong_owner': '이 연결은 다른 소유자의 것이라 요청을 이어서 처리하지 않았습니다.',
+    'generation_changed': 'Telegram 봇 연결이 교체되어 이전 요청은 이어서 처리하지 않았습니다. 필요하면 다시 요청해 주세요.',
+    'expired_resume': '연결을 기다리던 요청이 만료되어 이어서 처리하지 않았습니다. 다시 요청해 주세요.',
+    'superseded_resume': '요청이 바뀌어 이전 요청은 이어서 처리하지 않았습니다.',
+    'replayed_resume': '이미 이어서 처리한 요청이라 다시 실행하지 않았습니다.',
+    'resume_claimed': '이 요청은 이미 다른 연결 완료 처리가 진행 중이라 다시 실행하지 않았습니다.',
+    'unclaimed_resume': '연결 확인이 완료되지 않아 요청을 이어서 처리하지 않았습니다.',
+    'scope_mismatch': '승인된 권한 범위가 요청에 필요한 범위와 달라 요청을 이어서 처리하지 않았습니다.',
+    'disconnected': '연결이 확인되지 않아 요청을 이어서 처리하지 않았습니다.',
+    'reauth_required': '연결을 다시 인증해야 해서 요청을 이어서 처리하지 않았습니다.',
+    'blocked': '연결이 차단되어 있어 요청을 이어서 처리하지 않았습니다.',
+    'denied': '연결이 승인되지 않아 요청을 실행하지 않았습니다. 필요하면 다시 연결한 뒤 요청해 주세요.',
+    'callback_failed': '연결을 완료하지 못해 요청을 실행하지 않았습니다. 다시 연결해 주세요.',
+    'work_already_claimed': '이 요청의 연결 처리가 이미 진행 중입니다. 새로 실행하지 않았습니다.',
+    'work_already_completed': '이 요청은 이미 처리되어 다시 실행하지 않았습니다.',
+    'invalid_resume': '이어서 처리할 유효한 연결 요청을 찾지 못했습니다.',
+}
+
+RESUME_REFUSAL_DEFAULT = '연결을 확인하지 못해 요청을 이어서 처리하지 않았습니다.'
+
+SUPERSEDED_WORK_ERROR = '요청이 바뀌어 이전 요청을 취소했습니다. 연결이 끝나도 이전 요청은 실행하지 않습니다.'
+
+
+class ConnectorHandoff:
+    """Prerequisite detection, owner-safe parking and exactly-once resume.
+
+    The pending record persisted here is deliberately as content free as
+    :class:`ConversationFocus`.  It holds a connector identifier, two opaque
+    identifiers, one opaque handle, a hashed owner and the Telegram
+    generation - no utterance, no subject, no extracted argument and no
+    connector payload.  The owner's words stay in the ``jobs`` row they
+    already created; this record points at that Work rather than copying it,
+    so a pasted secret cannot reach durable state through the resume path.
+    """
+
+    def __init__(self, store, connector_registry, pending_registry=None, *,
+                 now=time.time, ttl_seconds=RESUME_TTL_SECONDS):
+        self.store = store
+        self.connectors = connector_registry
+        self.pending = pending_registry or PendingWorkRegistry(store, connector_registry, clock=now)
+        self.now = now
+        self.ttl_seconds = ttl_seconds
+
+    # -- prerequisite detection ---------------------------------------------
+    @staticmethod
+    def requirement(decision):
+        """The connector one routing decision needs, before anything runs.
+
+        An ambiguous decision selected no capability, so it can require none.
+        """
+        if decision is None or decision.intent == INTENT_AMBIGUOUS:
+            return None
+        return CONNECTOR_BY_INTENT.get(decision.intent)
+
+    def known(self, connector_id):
+        try:
+            self.connectors.definition(connector_id)
+        except ConnectorContractError:
+            return False
+        return True
+
+    def prerequisite(self, owner_id, connector_id):
+        """Return the unmet :class:`ConnectorResult`, or None when ready."""
+        connector = self.connectors.definition(connector_id)
+        status = self.connectors.status(owner_id, connector_id)
+        if status.state is not ConnectorState.CONNECTED:
+            return self.connectors.required_result(owner_id, connector_id)
+        if not set(connector.required_scopes).issubset(status.granted_scopes):
+            # Defence in depth.  ``ConnectorRegistry.transition`` refuses to
+            # record CONNECTED unless the granted set equals the required set,
+            # so a connected row with a narrower grant can only come from a
+            # stale or edited store.  Treating it as ready would run a request
+            # against authority the owner never approved, so it fails closed
+            # into the same re-authentication handoff.
+            return ConnectorResult(ConnectorResultKind.REAUTH_REQUIRED, connector_id,
+                                   connector.required_scopes, RecoveryAction.REAUTHENTICATE)
+        return None
+
+    @staticmethod
+    def guidance(result):
+        """The smallest next action, with no claim that anything ran."""
+        label = CONNECTOR_LABELS.get(result.connector_id, result.connector_id)
+        return HANDOFF_GUIDANCE[result.kind].format(label=label)
+
+    @staticmethod
+    def unavailable(connector_id):
+        return CONNECTOR_UNAVAILABLE.format(label=CONNECTOR_LABELS.get(connector_id, connector_id))
+
+    # -- the owner-safe pending record --------------------------------------
+    def _rows(self):
+        raw = self.store.secret(CONVERSATION_RESUME_KEY)
+        return dict(raw) if isinstance(raw, dict) else {}
+
+    def record(self, connector_id):
+        row = self._rows().get(connector_id)
+        if not isinstance(row, dict) or not row.get('resume_token') or not row.get('work_id'):
+            return None
+        return row
+
+    def park(self, owner_id, work_id, connector_id, *, generation=''):
+        """Park one Work against one connector and return (handle, superseded).
+
+        One conversation has one pending handoff per connector.  Parking a new
+        Work therefore releases whatever was pending for that connector and
+        reports it, so the caller can cancel the Work that is being replaced
+        rather than leaving two resume paths racing for the same connection.
+        """
+        connector = self.connectors.definition(connector_id)
+        handle = self.pending.issue(owner_id, work_id, connector_id,
+                                    connector.required_scopes, ttl_seconds=self.ttl_seconds)
+        row = {'connector_id': connector_id,
+               'work_id': work_id,
+               'handoff_id': str(uuid.uuid4()),
+               'resume_token': handle.token,
+               'owner': _owner_key(owner_id),
+               'generation': generation if isinstance(generation, str) else ''}
+        with _RESUME_LOCK:
+            rows = self._rows()
+            previous = rows.get(connector_id)
+            rows[connector_id] = row
+            self.store.secret(CONVERSATION_RESUME_KEY, rows)
+        superseded = (previous.get('work_id')
+                      if isinstance(previous, dict) and previous.get('work_id') != work_id else None)
+        return handle, superseded
+
+    def _release(self, connector_id, handoff_id=None):
+        """Drop one index entry, but never one a newer park already replaced."""
+        with _RESUME_LOCK:
+            rows = self._rows()
+            current = rows.get(connector_id)
+            if not isinstance(current, dict):
+                return None
+            if handoff_id is not None and current.get('handoff_id') != handoff_id:
+                return None
+            rows.pop(connector_id, None)
+            self.store.secret(CONVERSATION_RESUME_KEY, rows)
+            return current.get('work_id')
+
+    def supersede(self, connector_id=None):
+        """Destroy resume paths so a changed request cannot execute later.
+
+        Supersession is enforced by destroying the only copy of the resume
+        handle.  Without it nothing can claim the handoff, so the contract row
+        can only terminate by expiry; the Wave 0 contract has no owner
+        initiated cancel for a *different* Work on the same connector, and
+        adding one belongs to a file this issue does not own.  Recorded as an
+        integration need for PA1-INT-01 / #394.
+        """
+        with _RESUME_LOCK:
+            rows = self._rows()
+            targets = [key for key in rows if connector_id is None or key == connector_id]
+            dropped = [rows[key]['work_id'] for key in targets
+                       if isinstance(rows.get(key), dict) and rows[key].get('work_id')]
+            if not targets:
+                return []
+            for key in targets:
+                rows.pop(key, None)
+            self.store.secret(CONVERSATION_RESUME_KEY, rows)
+        return dropped
+
+    def deny(self, owner_id, connector_id):
+        """Record an explicitly refused or failed connection, and resume nothing."""
+        record = self.record(connector_id)
+        if record is None:
+            raise ConversationHandoffError('no_pending_work')
+        self._assert_owner(record, owner_id)
+        self._release(connector_id, record.get('handoff_id'))
+        return record['work_id']
+
+    @staticmethod
+    def _assert_owner(record, owner_id):
+        if not _secrets.compare_digest(str(record.get('owner', '')), _owner_key(owner_id)):
+            raise ConversationHandoffError('wrong_owner')
+
+    # -- exactly-once resume -------------------------------------------------
+    def resume(self, owner_id, connector_id, granted_scopes, schedule, *, generation=''):
+        """Resume the parked Work exactly once after a reported connection.
+
+        The order is ``claim`` -> durable schedule -> ``complete``, which is
+        the order the Wave 0 contract documents, and it gives three
+        independent barriers against a second execution:
+
+        1. the index entry is released once the resume finishes, so an
+           ordinary duplicate callback finds nothing to resume;
+        2. the contract row is COMPLETED, so a duplicate that still holds the
+           handle is refused as ``replayed_resume``;
+        3. ``schedule`` is a compare-and-set on the parked Work row, so even
+           an authorized claimant recovering a lost response after a restart
+           re-queues nothing.
+
+        Barrier 3 is the one that actually enforces exactly-once, because it
+        is the only one that stays correct when the process dies between
+        ``claim`` and ``complete``: that recovery path is *meant* to succeed
+        at the contract layer.  Removing the ``AND status=...`` predicate
+        would make this at-least-once.
+        """
+        record = self.record(connector_id)
+        if record is None:
+            raise ConversationHandoffError('no_pending_work')
+        self._assert_owner(record, owner_id)
+        expected = generation if isinstance(generation, str) else ''
+        if str(record.get('generation', '')) != expected:
+            raise ConversationHandoffError('generation_changed')
+        try:
+            reference = self.pending.claim(record['resume_token'], owner_id, connector_id,
+                                           granted_scopes, record['handoff_id'])
+        except ConnectorContractError as exc:
+            # The handoff is dead: releasing the index keeps a dead handle from
+            # being retried, and the caller still receives an explicit refusal.
+            self._release(connector_id, record.get('handoff_id'))
+            raise ConversationHandoffError(exc.reason) from None
+        scheduled = bool(schedule(reference.work_id))
+        self.pending.complete(record['resume_token'], owner_id, connector_id, record['handoff_id'])
+        self._release(connector_id, record.get('handoff_id'))
+        return reference.work_id, scheduled
+
+    @staticmethod
+    def refusal_text(reason):
+        return RESUME_REFUSALS.get(reason, RESUME_REFUSAL_DEFAULT)

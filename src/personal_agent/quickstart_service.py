@@ -20,10 +20,14 @@ from .settings_orchestrator import SettingsOrchestrator, SettingsError
 from .capability_recommendations import CapabilityRecommendationOrchestrator
 from .personal_knowledge import PersonalKnowledgeOrchestrator
 from .file_workspace import FileWorkspace
-from .conversation_handoff import (TelegramChannel, ConversationFocus, IntentClassifier,
+from .connector_contract import ConnectorContractError
+from .gmail import GMAIL_CONNECTOR_ID
+from .conversation_handoff import (TelegramChannel, ConnectorHandoff, ConversationFocus,
+                                   ConversationHandoffError, IntentClassifier,
                                    INTENT_ASSISTANT, INTENT_GREETING, INTENT_KNOWLEDGE,
-                                   INTENT_NOTE_CREATE, INTENT_NOTE_LIST, INTENT_RECOMMENDATION,
-                                   INTENT_SETTINGS, INTENT_WORKSPACE_SEARCH)
+                                   INTENT_MAIL_SEARCH, INTENT_NOTE_CREATE, INTENT_NOTE_LIST,
+                                   INTENT_RECOMMENDATION, INTENT_SETTINGS,
+                                   INTENT_WORKSPACE_SEARCH, SUPERSEDED_WORK_ERROR)
 
 SYSTEM = ('You are the user’s personal AgentOS assistant. Respond in the user’s language. '
           'This preview supports conversation, notes, connected local documents, and local read-only web search and weather tools. '
@@ -124,7 +128,7 @@ def subscription_public_evidence(result):
 class AgentService:
     def __init__(self, store, adapter=None, telegram_transport=None, subscription_engines=None, execution_adapter=None,
                  assistant_orchestrator=None, isolated_engine_adapter=None, isolated_mcp_registry=None,
-                 drive_web_oauth=None):
+                 drive_web_oauth=None, connector_registry=None, gmail=None):
         self.store=store
         self.adapter=adapter or ModelAdapter()
         self.telegram_transport=telegram_transport or request_json
@@ -151,6 +155,13 @@ class AgentService:
         # This is injected only by an owner-local deployment which supplies an
         # encrypted secret store and its local key.  It is never auto-enabled.
         self.drive_web_oauth=drive_web_oauth
+        # Connector prerequisite/handoff/resume.  Like `drive_web_oauth` this
+        # is injected by an owner-local deployment and is never auto-enabled:
+        # with no registry there are no declared connectors, so no ordinary
+        # request can be parked waiting for one.
+        self.connector_registry=connector_registry
+        self.connector_handoff=ConnectorHandoff(store,connector_registry) if connector_registry else None
+        self.gmail=gmail
         self.drive_read=None
         self.drive_picker_config=None
         self.lock=threading.RLock()
@@ -282,7 +293,7 @@ class AgentService:
     def _progress_status(job):
         status=job.get('status')
         if status in ('queued','running'):return 'active','진행 중'
-        if status in ('awaiting_context','awaiting_drive') or job.get('delivery')=='unknown':return 'attention','확인 필요'
+        if status in ('awaiting_context','awaiting_drive','awaiting_connection') or job.get('delivery')=='unknown':return 'attention','확인 필요'
         if status in ('failed','partial','interrupted'):return 'attention','확인 필요'
         if status in ('cancelled',):return 'finished','취소됨'
         if status in ('succeeded',):return 'finished','완료'
@@ -315,6 +326,7 @@ class AgentService:
             waits=[]
             if job.get('status')=='awaiting_context':waits.append('입력 대기')
             elif job.get('status')=='awaiting_drive':waits.append('연결 선택 대기')
+            elif job.get('status')=='awaiting_connection':waits.append('연결 대기')
             for notification in self.store.task_notifications(job['id']):
                 if notification['kind'] in ('approval_needed','context_approval_needed') and notification['state'] in ('queued','sent'):
                     waits.append('승인 대기')
@@ -704,6 +716,137 @@ class AgentService:
         """Thin delegation to the transport seam for the stored bot token."""
         return self.telegram.call(method,body)
 
+    # -- connector prerequisite, handoff and exactly-once resume ----------
+    def connector_owner_id(self, job):
+        """One connector owner identity, stable across bot generations.
+
+        A job's `channel` embeds the Telegram generation, so the `owner`
+        string `run_one` builds for capability orchestrators changes every
+        time the bot is reconnected.  A connector grant must not be orphaned
+        by reconnecting a bot, so connector identity is the paired chat
+        itself; every web/local job is the one local owner.
+        """
+        chat=job.get('chat_id')
+        return f'telegram:{chat}' if isinstance(chat,int) else 'local-owner'
+
+    def telegram_generation(self):
+        generation=self.store.config('telegram',{}).get('generation')
+        return generation if isinstance(generation,str) else ''
+
+    def _owner_generation(self, owner_id):
+        """Bind a paired-chat handoff to the bot generation that created it."""
+        return self.telegram_generation() if str(owner_id).startswith('telegram:') else ''
+
+    def _notify_owner(self, owner_id, text):
+        """Best-effort owner message; a lost bubble never changes durable state."""
+        chat=str(owner_id)[len('telegram:'):] if str(owner_id).startswith('telegram:') else ''
+        if not chat.isdigit():return False
+        try:
+            self.telegram.send_message(int(chat),text)
+        except ProviderError:
+            return False
+        return True
+
+    def connection_handoff(self, job, decision):
+        """Owner guidance when a required connector is unavailable, else None.
+
+        Nothing is invoked here and no connection is ever reported as having
+        happened.  When the capability is not configured in this installation
+        at all there is no connection to offer, so the request fails with that
+        stated reason instead of being parked for a handoff that cannot come.
+        """
+        connector_id=ConnectorHandoff.requirement(decision)
+        if connector_id is None:
+            return None
+        if not self.connector_handoff:
+            # This installation declares no connectors at all, so there is no
+            # prerequisite to detect and no connection to offer.  Injecting
+            # nothing must change nothing: every intent keeps exactly the
+            # behaviour it had before this unit, which the pre-existing suite
+            # is the evidence for.
+            return None
+        if not self.connector_handoff.known(connector_id):
+            raise ValueError(ConnectorHandoff.unavailable(connector_id))
+        owner_id=self.connector_owner_id(job)
+        result=self.connector_handoff.prerequisite(owner_id,connector_id)
+        if result is None:
+            return None
+        try:
+            _handle,superseded=self.connector_handoff.park(owner_id,job['id'],connector_id,
+                                                           generation=self._owner_generation(owner_id))
+        except ConnectorContractError as exc:
+            raise ValueError(ConnectorHandoff.refusal_text(exc.reason)) from None
+        if superseded:
+            self.cancel_superseded_work([superseded])
+        return self.connector_handoff.guidance(result)
+
+    def cancel_superseded_work(self, work_ids):
+        """Cancel parked Work whose resume path a newer request replaced.
+
+        Both statements are guarded on `awaiting_connection`, so a Work that
+        already resumed, failed or was cancelled is never rewritten.
+        """
+        if not work_ids:return []
+        cancelled=[]
+        with self.store.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            for work_id in work_ids:
+                db.execute("UPDATE jobs SET delivery='cancelled' WHERE id=? AND status='awaiting_connection' AND delivery='pending'",(work_id,))
+                if db.execute("UPDATE jobs SET status='cancelled',error=? WHERE id=? AND status='awaiting_connection'",(SUPERSEDED_WORK_ERROR,work_id)).rowcount==1:
+                    cancelled.append(work_id)
+        return cancelled
+
+    def supersede_pending_handoffs(self, except_work_id=None):
+        """Drop every pending resume path because the owner changed course."""
+        if not self.connector_handoff:return []
+        dropped=[work_id for work_id in self.connector_handoff.supersede() if work_id!=except_work_id]
+        return self.cancel_superseded_work(dropped)
+
+    def _schedule_resumed_work(self, work_id):
+        """Re-queue one parked Work and report whether *this* call did it.
+
+        The `AND status='awaiting_connection'` predicate is the exactly-once
+        decision, and it is the same compare-and-set the shipped Drive resume
+        already uses.  `rowcount` is read rather than discarded precisely so a
+        duplicate callback, a recovered claim and a restart are observably
+        refused here instead of silently making the resume at-least-once.
+        """
+        with self.store.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            return db.execute("UPDATE jobs SET status='queued',error=NULL,delivery='none' WHERE id=? AND status='awaiting_connection'",(work_id,)).rowcount==1
+
+    def resume_connector_work(self, connector_id, owner_id, granted_scopes):
+        """Resume the Work parked for one connector, exactly once.
+
+        This never reports a connection itself.  The caller must already have
+        observed one, and the Wave 0 contract re-checks `require_connected`
+        inside `claim`, so a handoff whose connector is denied, disconnected,
+        re-auth pending or blocked is refused rather than resumed.
+        """
+        if not self.connector_handoff:
+            raise ValueError(ConnectorHandoff.unavailable(connector_id))
+        try:
+            work_id,scheduled=self.connector_handoff.resume(
+                owner_id,connector_id,granted_scopes,self._schedule_resumed_work,
+                generation=self._owner_generation(owner_id))
+        except ConversationHandoffError as exc:
+            self._notify_owner(owner_id,ConnectorHandoff.refusal_text(exc.reason))
+            raise
+        return {'work_id':work_id,'scheduled':scheduled,'connector_id':connector_id}
+
+    def deny_connector_work(self, connector_id, owner_id, reason='denied'):
+        """Fail the parked Work explicitly after a refused or failed connection."""
+        if not self.connector_handoff:
+            raise ValueError(ConnectorHandoff.unavailable(connector_id))
+        work_id=self.connector_handoff.deny(owner_id,connector_id)
+        text=ConnectorHandoff.refusal_text(reason)
+        with self.store.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            db.execute("UPDATE jobs SET delivery='cancelled' WHERE id=? AND status='awaiting_connection' AND delivery='pending'",(work_id,))
+            db.execute("UPDATE jobs SET status='failed',error=? WHERE id=? AND status='awaiting_connection'",(text,work_id))
+        self._notify_owner(owner_id,text)
+        return work_id
+
     @staticmethod
     def requests_drive_access(text):
         if not isinstance(text, str):
@@ -864,6 +1007,7 @@ class AgentService:
         if state=='running':return '요청을 처리하고 있어요.'
         if state in ('succeeded','partial'):return '처리가 끝났습니다. 아래 결과를 확인하세요.'
         if state=='interrupted':return '작업이 중단되었습니다. 자동으로 다시 실행하지 않았습니다.'
+        if state=='awaiting_connection':return '필요한 연결을 기다리고 있습니다. 연결이 확인되면 이 요청을 한 번만 이어서 처리합니다.'
         return f'이 요청은 {labels.get(state,state)} 상태입니다.'
 
     @staticmethod
@@ -928,7 +1072,8 @@ class AgentService:
         still running or a result that was certainly delivered.
         """
         labels={'queued':'대기 중','running':'진행 중','succeeded':'완료','partial':'일부 완료',
-                'failed':'완료하지 못함','cancelled':'취소됨','interrupted':'중단됨'}
+                'failed':'완료하지 못함','cancelled':'취소됨','interrupted':'중단됨',
+                'awaiting_connection':'연결 대기'}
         with self.store.db() as db:
             job=db.execute('SELECT status,delivery FROM jobs WHERE id=?',(job_id,)).fetchone()
             rows=db.execute('SELECT tool,status FROM tool_events WHERE job_id=? AND tool!=? ORDER BY id LIMIT 12',(job_id,'model')).fetchall()
@@ -942,6 +1087,8 @@ class AgentService:
             lines.append('에이전트가 작업을 처리하고 있습니다.')
         elif job['status']=='interrupted':
             lines.append('재시작으로 작업이 중단되었습니다. 자동으로 다시 실행하지 않았습니다.')
+        elif job['status']=='awaiting_connection':
+            lines.append('필요한 연결을 기다리고 있습니다. 아직 아무 작업도 실행하지 않았습니다.')
         else:
             lines.append('전체 결과는 AgentOS 웹에서 확인하세요.')
         if job['delivery']=='unknown':
@@ -1199,6 +1346,23 @@ class AgentService:
                 decision=self.classify_intent(prompt)
                 self.conversation_focus.record(decision)
                 owner=f"channel:{job['channel']}:{job.get('chat_id') or 'local'}"
+                # WU2 computed `supersedes_previous` and wired it to nothing.
+                # This is where it becomes an effect: the owner changed their
+                # mind, so any resume path still waiting for a connection must
+                # not execute its stale intent when that connection succeeds.
+                if decision.supersedes_previous:
+                    self.supersede_pending_handoffs(job['id'])
+                # Prerequisite detection runs before `decision.executes` is
+                # consulted.  When the capability is missing, "connect it" is
+                # a smaller and truer next action than asking the owner for
+                # detail they would only discover was useless afterwards.
+                guidance=self.connection_handoff(job,decision)
+                if guidance is not None:
+                    with self.store.db() as db:
+                        db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('assistant',guidance,job['channel'],time.time(),job.get('workspace_id'),job['id']))
+                        db.execute("UPDATE jobs SET status='awaiting_connection',response=?,error=NULL,delivery=? WHERE id=?",(guidance,'pending' if job['chat_id'] else 'none',job['id']))
+                    self.update_task_card(job,'awaiting_connection')
+                    return True
                 if not decision.executes:
                     # Ambiguous, missing a required detail, or a consequential
                     # effect that was only inferred.  Answer the owner and
@@ -1225,6 +1389,19 @@ class AgentService:
                     result=self.personal_assistant_request({'message':decision.argument}, owner_id=owner)
                     response=result['response']
                     outcome='succeeded' if result['state'] in ('completed','requested','awaiting-approval','fallback') else 'failed'
+                elif decision.intent==INTENT_MAIL_SEARCH:
+                    if self.gmail is None:
+                        raise ValueError(ConnectorHandoff.unavailable(GMAIL_CONNECTOR_ID))
+                    results=self.gmail.search(self.connector_owner_id(job),decision.argument,max_results=10)
+                    response='\n'.join(f"{row.subject} · {row.sender} · {row.date}" for row in results) or '조건에 맞는 메일을 찾지 못했습니다.'
+                    # Subject/sender/date are private mail metadata.  They are
+                    # shown in the owner's own conversation, never written to a
+                    # tool event: `GmailSearchResult.as_evidence` is the only
+                    # form allowed in evidence.  Marking the job also reuses the
+                    # existing document-history boundary, so this turn is
+                    # stripped from later history whenever an external model or
+                    # subscription engine would otherwise receive it.
+                    self.record_file_workspace_document_job(job['id'])
                 elif decision.intent==INTENT_WORKSPACE_SEARCH:
                     results=FileWorkspace(self.store).search(decision.argument)
                     if not results: response='현재 원본과 일치하는 저장 결과를 찾지 못했습니다.'

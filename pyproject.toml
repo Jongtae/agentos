@@ -7,7 +7,9 @@ name = "personal-agentos"
 version = "1.0.4"
 description = "A lightweight self-hosted personal agent with browser setup"
 requires-python = ">=3.12"
-dependencies = ["pypdf>=5.0", "python-docx>=1.1", "openpyxl>=3.1", "cryptography>=42.0"]
+# oauthlib: RFC 6749/7636 authorization-request construction (REUSE-R1b #427).
+# BSD-3-Clause, zero mandatory dependencies, imports no HTTP library.
+dependencies = ["pypdf>=5.0", "python-docx>=1.1", "openpyxl>=3.1", "cryptography>=42.0", "oauthlib>=3.3.1,<4"]
 
 [project.optional-dependencies]
 schema-validation = ["jsonschema[format]>=4.23"]

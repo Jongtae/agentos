@@ -200,6 +200,34 @@ class DriveWebOAuthTests(unittest.TestCase):
         with self.assertRaises(DriveWebOAuthError):
             self.flow.complete({"state": state, "code": "short-code"}, 42, lambda _: {"access_token": "a", "scope": DRIVE_FILE, "expires_in": 60})
 
+    def test_callback_granting_more_than_drive_file_is_rejected_and_stores_no_token(self):
+        """An over-granted response must fail closed, not silently store wider authority.
+
+        Google may return additional scopes (for example when the owner's
+        account already granted them and ``include_granted_scopes`` is not
+        disabled).  A subset test would accept that token and this connector
+        would then hold authority the owner never approved for it.
+        """
+        _offer, state = self.begin()
+        over_granted = DRIVE_FILE + " https://www.googleapis.com/auth/gmail.readonly"
+        with self.assertRaises(DriveScopeError):
+            self.flow.complete(
+                {"state": state, "code": "short-code"}, 42,
+                lambda _: {"access_token": "access-secret", "scope": over_granted, "expires_in": 60},
+            )
+        self.assertEqual(self.flow.status()["state"], "scope-rejected")
+        self.assertEqual(self.encrypted_store.secret("drive_web_oauth_tokens"), "")
+        self.assertNotIn("access-secret", str(self.store.secret("encrypted:drive_web_oauth_tokens")))
+
+    def test_callback_granting_exactly_drive_file_is_accepted(self):
+        """The tightened check must not reject the only scope this connector requests."""
+        _offer, state = self.begin()
+        self.flow.complete(
+            {"state": state, "code": "short-code"}, 42,
+            lambda _: {"access_token": "access-secret", "scope": DRIVE_FILE, "expires_in": 60},
+        )
+        self.assertEqual(self.flow.status()["state"], "connected")
+
     def test_corrupted_encrypted_secret_fails_closed_without_disclosing_plaintext(self):
         """Unreadable ciphertext must raise the redacted error, never a partial credential."""
         self.connect()

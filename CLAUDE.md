@@ -10,7 +10,7 @@ The imported files are the canonical repository execution contract and Developme
 3. For EPIC-PA1 / #386, read the execution cursor comment marked `<!-- agentos-execution-cursor:v1 -->` first.
 4. Verify only the cursor's current main SHA, governing contract SHAs, and referenced PR/head/state needed for the next action.
 5. Read only that issue/PR and its actionable evidence. Do not reread every PA1 issue, PR, CI history, review thread or tracker while the cursor remains consistent.
-6. Perform full reconciliation only for the anomaly triggers in `docs/execution-cursor.en.md`.
+6. Perform full reconciliation only when the cursor is contradicted by current state: its recorded main SHA, PR head or issue/PR state no longer matches GitHub, a referenced branch or PR is missing, or required CI/review evidence it cites cannot be found.
 7. Follow the repository verification budget: targeted tests while editing, batched remediation, coherent checkpoint pushes, stable-head CI/review, no duplicate review/polling.
 8. After a meaningful state transition, update the same #386 cursor comment and increment its generation. Do not append a new cursor history comment.
 9. The cursor is a cache, never authority. Current GitHub/repository evidence wins on conflict.

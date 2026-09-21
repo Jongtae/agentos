@@ -1,11 +1,13 @@
 import tempfile
 import threading
+import base64
+import hashlib
 import unittest
 from urllib.parse import parse_qs, urlparse
 
 from cryptography.fernet import Fernet
 
-from personal_agent.drive_web_oauth import DRIVE_FILE, EncryptedDriveSecretStore, DriveScopeError, DriveWebOAuthError, DriveWebOAuthHandoff
+from personal_agent.drive_web_oauth import DRIVE_FILE, PENDING_KEY, EncryptedDriveSecretStore, DriveScopeError, DriveWebOAuthError, DriveWebOAuthHandoff
 from personal_agent.quickstart_store import QuickStore
 from personal_agent.quickstart_service import AgentService
 from personal_agent.providers import ProviderError
@@ -40,6 +42,22 @@ class DriveWebOAuthTests(unittest.TestCase):
         self.assertEqual(query["scope"], [DRIVE_FILE])
         self.assertEqual(query["code_challenge_method"], ["S256"])
         self.assertNotIn("code_verifier", query)
+        # Asserting the advertised method alone is not enough. oauthlib's
+        # create_code_challenge silently returns the verifier unchanged - a
+        # plain challenge - when the method argument is omitted, so a URL can
+        # advertise S256 while carrying no transform at all. The hand-rolled
+        # sha256 this replaced could not fail that way, so adoption
+        # introduced the mode; pin the derivation itself.
+        verifier = self.encrypted_store.secret(PENDING_KEY)["verifier"]
+        expected = base64.urlsafe_b64encode(
+            hashlib.sha256(verifier.encode()).digest()
+        ).rstrip(b"=").decode()
+        self.assertEqual(query["code_challenge"], [expected])
+        self.assertNotEqual(query["code_challenge"], [verifier])
+        # begin() and authorization_url() derive the challenge separately
+        # from the same verifier and nothing tied them together, so a change
+        # to one could silently disagree with the other.
+        self.assertEqual(offer["code_challenge"], expected)
 
     def test_local_only_mode_requires_explicit_opt_in_and_uses_loopback(self):
         with self.assertRaises(ValueError):

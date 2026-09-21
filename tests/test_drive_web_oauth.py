@@ -1,11 +1,13 @@
 import tempfile
 import threading
+import base64
+import hashlib
 import unittest
 from urllib.parse import parse_qs, urlparse
 
 from cryptography.fernet import Fernet
 
-from personal_agent.drive_web_oauth import DRIVE_FILE, EncryptedDriveSecretStore, DriveScopeError, DriveWebOAuthError, DriveWebOAuthHandoff
+from personal_agent.drive_web_oauth import DRIVE_FILE, PENDING_KEY, EncryptedDriveSecretStore, DriveScopeError, DriveWebOAuthError, DriveWebOAuthHandoff
 from personal_agent.quickstart_store import QuickStore
 from personal_agent.quickstart_service import AgentService
 from personal_agent.providers import ProviderError
@@ -40,6 +42,22 @@ class DriveWebOAuthTests(unittest.TestCase):
         self.assertEqual(query["scope"], [DRIVE_FILE])
         self.assertEqual(query["code_challenge_method"], ["S256"])
         self.assertNotIn("code_verifier", query)
+        # Asserting the advertised method alone is not enough. oauthlib's
+        # create_code_challenge silently returns the verifier unchanged - a
+        # plain challenge - when the method argument is omitted, so a URL can
+        # advertise S256 while carrying no transform at all. The hand-rolled
+        # sha256 this replaced could not fail that way, so adoption
+        # introduced the mode; pin the derivation itself.
+        verifier = self.encrypted_store.secret(PENDING_KEY)["verifier"]
+        expected = base64.urlsafe_b64encode(
+            hashlib.sha256(verifier.encode()).digest()
+        ).rstrip(b"=").decode()
+        self.assertEqual(query["code_challenge"], [expected])
+        self.assertNotEqual(query["code_challenge"], [verifier])
+        # begin() and authorization_url() derive the challenge separately
+        # from the same verifier and nothing tied them together, so a change
+        # to one could silently disagree with the other.
+        self.assertEqual(offer["code_challenge"], expected)
 
     def test_local_only_mode_requires_explicit_opt_in_and_uses_loopback(self):
         with self.assertRaises(ValueError):
@@ -184,6 +202,78 @@ class DriveWebOAuthTests(unittest.TestCase):
         self.flow.mark_reauthentication_required()
         with self.assertRaises(DriveWebOAuthError):
             self.flow.read_selected(42,"picked",lambda *_: "must not run")
+
+    def test_callback_without_the_requested_scope_is_rejected_and_stores_no_token(self):
+        """A grant that omits drive.file must fail closed, leaving no usable credential."""
+        _offer, state = self.begin()
+        with self.assertRaises(DriveScopeError):
+            self.flow.complete(
+                {"state": state, "code": "short-code"}, 42,
+                lambda _: {"access_token": "access-secret", "scope": "https://www.googleapis.com/auth/userinfo.email", "expires_in": 60},
+            )
+        self.assertEqual(self.flow.status()["state"], "scope-rejected")
+        self.assertEqual(self.encrypted_store.secret("drive_web_oauth_tokens"), "")
+        self.assertNotIn("access-secret", str(self.store.secret("encrypted:drive_web_oauth_tokens")))
+        # The pending state is consumed, so the same callback cannot be replayed.
+        with self.assertRaises(DriveWebOAuthError):
+            self.flow.complete({"state": state, "code": "short-code"}, 42, lambda _: {"access_token": "a", "scope": DRIVE_FILE, "expires_in": 60})
+
+    def test_callback_granting_more_than_drive_file_is_rejected_and_stores_no_token(self):
+        """An over-granted response must fail closed, not silently store wider authority.
+
+        Google may return additional scopes (for example when the owner's
+        account already granted them and ``include_granted_scopes`` is not
+        disabled).  A subset test would accept that token and this connector
+        would then hold authority the owner never approved for it.
+        """
+        _offer, state = self.begin()
+        over_granted = DRIVE_FILE + " https://www.googleapis.com/auth/gmail.readonly"
+        with self.assertRaises(DriveScopeError):
+            self.flow.complete(
+                {"state": state, "code": "short-code"}, 42,
+                lambda _: {"access_token": "access-secret", "scope": over_granted, "expires_in": 60},
+            )
+        self.assertEqual(self.flow.status()["state"], "scope-rejected")
+        self.assertEqual(self.encrypted_store.secret("drive_web_oauth_tokens"), "")
+        self.assertNotIn("access-secret", str(self.store.secret("encrypted:drive_web_oauth_tokens")))
+
+    def test_callback_granting_exactly_drive_file_is_accepted(self):
+        """The tightened check must not reject the only scope this connector requests.
+
+        Also pins the exchange leg. The authorization-URL assertion binds the
+        advertised challenge to the *stored* verifier; without this, the
+        verifier actually presented at the token endpoint is unbound, and a
+        divergent or omitted code_verifier survives the whole suite. Gmail
+        pins this leg, so Drive does too - Google would answer
+        ``invalid_grant`` rather than accept a broken proof, but a fail-closed
+        bug is still a bug worth catching here rather than live.
+        """
+        _offer, state = self.begin()
+        stored = self.encrypted_store.secret(PENDING_KEY)["verifier"]
+        seen = []
+
+        def exchange(request):
+            seen.append(request)
+            return {"access_token": "access-secret", "scope": DRIVE_FILE, "expires_in": 60}
+
+        self.flow.complete({"state": state, "code": "short-code"}, 42, exchange)
+        self.assertEqual(self.flow.status()["state"], "connected")
+        self.assertEqual(seen[0]["code_verifier"], stored)
+
+    def test_corrupted_encrypted_secret_fails_closed_without_disclosing_plaintext(self):
+        """Unreadable ciphertext must raise the redacted error, never a partial credential."""
+        self.connect()
+        self.store.secret("encrypted:drive_web_oauth_tokens", "not-a-valid-fernet-token")
+        with self.assertRaises(DriveWebOAuthError) as caught:
+            self.encrypted_store.secret("drive_web_oauth_tokens")
+        self.assertNotIn("access-secret", str(caught.exception))
+        with self.assertRaises(DriveWebOAuthError):
+            self.flow.read_selected(42, "picked", lambda *_: "must not run")
+        # A wrong local key is equally unreadable: the key is not recoverable from storage.
+        rekeyed = EncryptedDriveSecretStore(self.store, Fernet.generate_key())
+        self.store.secret("encrypted:drive_web_oauth_tokens", "gAAAAA" + "B" * 40)
+        with self.assertRaises(DriveWebOAuthError):
+            rekeyed.secret("drive_web_oauth_tokens")
 
 
 if __name__ == "__main__":

@@ -70,6 +70,9 @@ class GmailConnectorTests(unittest.TestCase):
 
     def connect(self, owner="owner-a", access_token="access-secret", refresh_token="refresh-secret"):
         _offer, state = self.begin(owner)
+        self.challenge = parse_qs(
+            urlparse(_offer["authorization_url"]).query
+        )["code_challenge"][0]
         seen = []
 
         def exchange(request):
@@ -138,6 +141,19 @@ class GmailConnectorTests(unittest.TestCase):
         )
         self.assertEqual(request["grant_type"], "authorization_code")
         self.assertNotEqual(request["code_verifier"], "oauth-code")
+        # The advertised method is not the guarantee. oauthlib's
+        # create_code_challenge silently returns the verifier unchanged - a
+        # plain challenge - when the method argument is omitted, so a URL can
+        # carry code_challenge_method=S256 over no transform at all. The
+        # hand-rolled sha256 this replaced could not fail that way, so
+        # adoption introduced the mode. Tie the advertised challenge to the
+        # verifier actually presented at exchange.
+        verifier = request["code_verifier"]
+        expected = base64.urlsafe_b64encode(
+            hashlib.sha256(verifier.encode()).digest()
+        ).rstrip(b"=").decode()
+        self.assertEqual(self.challenge, expected)
+        self.assertNotEqual(self.challenge, verifier)
         self.assertEqual(result["granted_scopes"], [GMAIL_READONLY_SCOPE])
         self.assertNotIn("drive", str(result).lower())
         self.assertNotIn("calendar", str(result).lower())

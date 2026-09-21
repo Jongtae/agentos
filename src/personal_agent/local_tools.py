@@ -14,7 +14,7 @@ import zlib
 import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
-from urllib.request import Request, build_opener
+from urllib.request import OpenerDirector, Request, build_opener
 from .providers import NoRedirect, ProviderError, request_json
 
 
@@ -162,6 +162,28 @@ class _PageCharset(HTMLParser):
 class PublicPageReader:
     """Small, anonymous, read-only page reader with an explicit egress boundary."""
     def __init__(self, opener=None, resolver=None, clock=None):
+        """Build a reader whose production transport is the pinned connection path.
+
+        ``opener`` is a TEST-ONLY transport seam. The production path passes
+        ``opener=None`` and uses :meth:`_open_pinned`, which connects only to an
+        address this request already validated, so a resolver that answers
+        public at validation time and private at connect time cannot be
+        followed. An injected opener cannot honour that pinning: it re-resolves
+        the host itself and may follow redirects this reader never validated.
+
+        Two guards keep that seam from becoming a production egress path:
+
+        * a real ``urllib`` :class:`~urllib.request.OpenerDirector` is refused
+          here, so ``build_opener()``/``urlopen`` machinery can never be wired
+          in by accident;
+        * :meth:`_reject_unvalidated_transport` rejects any injected response
+          that reports a final URL other than the one this reader validated,
+          which is what an opener that silently followed a redirect produces.
+        """
+        if isinstance(opener, OpenerDirector):
+            raise TypeError(
+                'opener is a test-only transport seam; production public page reads must use '
+                'the address-pinned connection path (opener=None)')
         self.opener = opener
         self.resolver = resolver or _bounded_system_resolver
         self.clock = clock or time.monotonic
@@ -244,7 +266,7 @@ class PublicPageReader:
         deadline=self.clock()+MAX_PAGE_SECONDS if deadline is None else deadline
         last=None
         for address in addresses:
-            conn=None
+            conn=None;raw=None
             try:
                 if parsed.scheme=='https':
                     conn=http.client.HTTPSConnection(parsed.hostname,port,timeout=self._remaining(deadline),context=ssl.create_default_context())
@@ -265,8 +287,49 @@ class PublicPageReader:
                 return response
             except (OSError, ssl.SSLError) as exc:
                 last=exc
-                if conn: conn.close()
+                self._discard_connection(conn,raw)
+            except BaseException:
+                # The deadline guard raises ProviderError, not OSError. Without
+                # this arm an expired deadline unwinds past the handler above
+                # and leaks both the pinned socket and the connection object.
+                self._discard_connection(conn,raw)
+                raise
         raise OSError('all validated public addresses failed') from last
+
+    @staticmethod
+    def _discard_connection(conn, raw):
+        """Release a connection attempt. A wrapped TLS socket detaches ``raw``, so closing both is safe."""
+        for target in (conn, raw):
+            if target is None: continue
+            try: target.close()
+            except OSError: pass
+
+    def _release_response(self, response, deadline):
+        """Close a response this reader will not parse so a redirect cannot leak a socket."""
+        try:
+            self._set_response_deadline(response,deadline)
+            reader=getattr(response,'read',None)
+            if callable(reader): reader(64*1024)
+        except (OSError, ValueError, ProviderError, http.client.HTTPException): pass
+        for target in (response, getattr(response,'_agentos_connection',None)):
+            closer=getattr(target,'close',None)
+            if callable(closer):
+                try: closer()
+                except OSError: pass
+
+    @staticmethod
+    def _reject_unvalidated_transport(response, validated_url):
+        """Refuse a transport that answered for an address/URL this request never validated."""
+        reported=getattr(response,'url',None)
+        if reported is None:
+            getter=getattr(response,'geturl',None)
+            reported=getter() if callable(getter) else None
+        if reported is None: return
+        try: normalized=normalize_public_url(reported)
+        except (TypeError,ValueError):
+            raise ValueError('공개 페이지 전송 계층이 확인되지 않은 주소를 반환했습니다.') from None
+        if normalized != validated_url:
+            raise ValueError('공개 페이지 전송 계층이 확인되지 않은 주소를 반환했습니다.')
 
     def _set_response_deadline(self, response, deadline):
         remaining=self._remaining(deadline)
@@ -333,11 +396,19 @@ class PublicPageReader:
                 response=self.opener.open(request, timeout=self._remaining(deadline)) if self.opener else self._open_pinned(current,addresses,deadline)
                 self._remaining(deadline)
             except (OSError, http.client.HTTPException) as exc: raise ProviderError('공개 페이지를 가져오지 못했습니다.') from exc
+            if self.opener is not None: self._reject_unvalidated_transport(response,current)
             status=getattr(response,'status',200); location=response.headers.get('Location') if hasattr(response,'headers') else None
             if status in (301,302,303,307,308) or location:
+                self._release_response(response,deadline)
                 if not location: raise ProviderError('공개 페이지 이동을 확인하지 못했습니다.')
                 if redirect >= MAX_PAGE_REDIRECTS: raise ValueError('공개 페이지 이동 횟수 제한을 초과했습니다.')
-                current=self._safe_url(urljoin(current,location)); continue
+                target=self._safe_url(urljoin(current,location))
+                # A redirect must never move the chain from an authenticated,
+                # confidential channel to a cleartext one. The remaining hops
+                # would be observable and modifiable by anyone on the path.
+                if urlsplit(current).scheme == 'https' and urlsplit(target).scheme != 'https':
+                    raise ValueError('보안 연결(HTTPS)에서 비보안 주소로 이동하는 공개 페이지는 읽을 수 없습니다.')
+                current=target; continue
             if status < 200 or status >= 300: raise ProviderError('공개 페이지가 정상 응답하지 않았습니다.')
             content_type=response.headers.get('Content-Type','') if hasattr(response,'headers') else ''
             media_type=content_type.split(';',1)[0].strip().lower()

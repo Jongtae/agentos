@@ -1,14 +1,22 @@
 import gzip
 import http.client
 import io
+import ipaddress
 import socket
 import threading
 import time
 import unittest
 from unittest.mock import patch
 from urllib.parse import urlsplit
+from urllib.request import build_opener
 
-from personal_agent.local_tools import PublicPageReader, normalize_public_url
+from personal_agent.local_tools import PublicPageReader, _denied_address, normalize_public_url
+from personal_agent.providers import ProviderError
+
+
+def system_resolver(host, port, type=None, timeout=None):
+    """Resolve through the real platform parser without the subprocess wrapper."""
+    return socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
 
 
 class Headers(dict):
@@ -342,6 +350,105 @@ class PublicPageReaderTests(unittest.TestCase):
             def read(self,size=-1): raise http.client.IncompleteRead(b'partial',10)
         with self.assertRaisesRegex(Exception,'응답을 해석하지 못했습니다'):
             PublicPageReader(opener=Opener(Malformed()),resolver=public_dns).read('https://example.com/')
+
+    @patch('personal_agent.local_tools.socket.create_connection')
+    def test_connects_only_to_an_address_validated_in_this_request(self,create_connection):
+        """A resolver answering public at validation and private at connect must not be followed."""
+        answers=['93.184.216.34','127.0.0.1']
+        attempts=[]
+        def resolver(host,port,type=None,timeout=None):
+            return [(None,None,None,None,(answers.pop(0),port))]
+        def connect(address,timeout):
+            attempts.append(address);raise OSError('refused')
+        create_connection.side_effect=connect
+        with self.assertRaises((ProviderError,OSError)):
+            PublicPageReader(resolver=resolver).read('http://example.com/')
+        self.assertEqual(attempts,[('93.184.216.34',80)])
+        # The private second answer is still queued: the connect phase pinned
+        # the validated address instead of resolving the host a second time.
+        self.assertEqual(answers,['127.0.0.1'])
+
+    @patch('personal_agent.local_tools.socket.create_connection')
+    def test_encoded_loopback_host_forms_never_reach_a_private_address(self,create_connection):
+        attempts=[]
+        def connect(address,timeout):
+            attempts.append(address[0]);raise OSError('refused')
+        create_connection.side_effect=connect
+        for url in ('http://2130706433/','http://127.1/'):
+            with self.subTest(url=url),self.assertRaisesRegex(ValueError,'개인 네트워크|메타데이터'):
+                PublicPageReader(resolver=system_resolver).read(url)
+        self.assertEqual(attempts,[])
+        # macOS resolves 0177.0.0.1 to the public 177.0.0.1 while glibc gives
+        # 127.0.0.1. Address pinning makes that divergence harmless, so assert
+        # the security outcome rather than the platform's resolver quirk: the
+        # reader either refuses the host or connects only to the exact public
+        # address it validated, never to loopback.
+        for url in ('http://0177.0.0.1/','http://0x7f.1/'):
+            with self.subTest(url=url):
+                attempts.clear()
+                try: PublicPageReader(resolver=system_resolver).read(url)
+                except (ValueError,ProviderError,OSError): pass
+                for raw in attempts:
+                    self.assertFalse(_denied_address(ipaddress.ip_address(raw)),raw)
+
+    def test_redirect_to_a_cleartext_scheme_is_refused(self):
+        opener=Opener(Response(status=302,headers={'Location':'http://example.com/downgraded'}))
+        with self.assertRaisesRegex(ValueError,'비보안'):
+            PublicPageReader(opener=opener,resolver=public_dns).read('https://example.com/start')
+        self.assertEqual(len(opener.requests),1)
+        # An upgrade in the other direction stays allowed.
+        class Upgrade:
+            def __init__(self):
+                self.requests=[]
+                self.responses=[Response(status=302,headers={'Location':'https://example.com/secure'}),Response()]
+            def open(self,request,timeout=None):
+                self.requests.append(request);return self.responses.pop(0)
+        upgrade=Upgrade()
+        result=PublicPageReader(opener=upgrade,resolver=public_dns).read('http://example.com/start')
+        self.assertEqual(result['url'],'https://example.com/secure')
+        self.assertEqual(upgrade.requests[-1].full_url,'https://example.com/secure')
+
+    def test_redirect_releases_the_previous_response_and_connection(self):
+        closed=[]
+        class Connection:
+            def close(self): closed.append('connection')
+        class Redirecting(Response):
+            _agentos_connection=Connection()
+            def __init__(self):
+                super().__init__(status=302,headers={'Content-Type':'text/html','Location':'https://example.com/next'})
+            def close(self): closed.append('response')
+        class Chain:
+            def __init__(self): self.responses=[Redirecting(),Response()]
+            def open(self,request,timeout=None): return self.responses.pop(0)
+        PublicPageReader(opener=Chain(),resolver=public_dns).read('https://example.com/start')
+        self.assertEqual(sorted(closed),['connection','response'])
+
+    @patch('personal_agent.local_tools.MAX_PAGE_SECONDS',0.05)
+    @patch('personal_agent.local_tools.socket.create_connection')
+    def test_deadline_expiry_during_connect_does_not_leak_the_socket(self,create_connection):
+        closed=[]
+        class Sock:
+            def settimeout(self,_value): pass
+            def close(self): closed.append('socket')
+        def connect(_address,timeout):
+            time.sleep(0.2);return Sock()
+        create_connection.side_effect=connect
+        reader=PublicPageReader(resolver=public_dns)
+        with self.assertRaisesRegex(Exception,'시간이 제한'):
+            reader.read('http://example.com/')
+        # The expired deadline raises ProviderError, not OSError. The pinned
+        # connection must still be released on that unwind path.
+        self.assertIn('socket',closed)
+
+    def test_a_real_urllib_opener_is_refused_as_a_production_transport(self):
+        with self.assertRaisesRegex(TypeError,'test-only'):
+            PublicPageReader(opener=build_opener())
+
+    def test_injected_transport_may_not_report_an_unvalidated_final_url(self):
+        class Wandering(Response):
+            url='https://collector.example/collect'
+        with self.assertRaisesRegex(ValueError,'확인되지 않은 주소'):
+            PublicPageReader(opener=Opener(Wandering()),resolver=public_dns).read('https://example.com/event')
 
 
 if __name__ == '__main__': unittest.main()

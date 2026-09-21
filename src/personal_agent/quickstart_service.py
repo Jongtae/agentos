@@ -19,6 +19,7 @@ from .personal_assistant import PersonalAssistantOrchestrator
 from .settings_orchestrator import SettingsOrchestrator, SettingsError
 from .capability_recommendations import CapabilityRecommendationOrchestrator
 from .personal_knowledge import PersonalKnowledgeOrchestrator
+from .memory_service import MemoryService
 from .file_workspace import FileWorkspace
 from .connector_contract import ConnectorContractError, _owner_key
 from .gmail import GMAIL_CONNECTOR_ID, GmailError
@@ -246,6 +247,52 @@ class AgentService:
             raise ValueError('개인 지식 검색 요청을 확인하세요.')
         return self.personal_knowledge_orchestrator.retrieve(owner_id,channel,body.get('query'))
 
+    def memory_candidate_request(self, body, owner_id='local-owner'):
+        """The owner's inspect / approve / reject path for pending MemoryCandidates.
+
+        #386 J6 requires the owner to be able to *act* on a model-originated
+        MemoryCandidate, not merely to see that one exists.  ``MemoryService``
+        already owns that whole lifecycle and ``QuickStore`` already enforces
+        it; this method is only the surface wiring #394 owns and adds no
+        Memory policy of its own.
+
+        ``private_read_sink`` is ``NO_EGRESS_GUARD`` deliberately, which the
+        ``memory_service`` module docstring requires to be explicit rather
+        than defaulted.  That guard exists so a *model turn* which reads
+        private Memory cannot also reach a public destination in the same
+        turn.  This entry point is reached only from an owner-authenticated
+        local HTTP request: it constructs no ``Capabilities``, runs no model
+        and calls no network tool, so there is no same-turn public
+        destination for a guard to protect.  Do not reuse this method from a
+        conversation turn - that path must pass the turn-scoped sink instead.
+
+        The Work binding travels as the opaque ``work_ref`` the store already
+        returns with every candidate row (``workref:`` + the stored work key).
+        ``QuickStore._work_binding`` accepts exactly that form, so the owner
+        surface can act on a candidate without ever learning or echoing the
+        raw Work identifier that produced it.
+        """
+        if not isinstance(body,dict):raise ValueError('기억 후보 요청을 확인하세요.')
+        memory=MemoryService(self.store,private_read_sink=MemoryService.NO_EGRESS_GUARD)
+        operation=body.get('operation','list')
+        if operation=='list':return dict(memory.list_candidates(owner_id))
+        work_ref,candidate_id=body.get('work_ref'),body.get('id')
+        if operation=='inspect':return dict(memory.inspect_candidate(owner_id,work_ref,candidate_id))
+        # Approval is a consequential write to canonical Memory, so the store
+        # requires a token bound to the exact owner, Work, candidate and
+        # content digest the owner inspected, plus the Memory state that key
+        # held at issue time.  Issuing and consuming it inside one request
+        # would make that binding vacuous, so 'request-approval' and 'accept'
+        # stay two owner steps and the digest is never inferred server-side.
+        digest=body.get('content_digest')
+        if operation=='request-approval':
+            return memory.request_candidate_approval(owner_id,work_ref,candidate_id,digest)
+        if operation=='accept':
+            return memory.approve_candidate(owner_id,work_ref,candidate_id,digest,body.get('approval_token'))
+        if operation=='reject':
+            return memory.reject_candidate(owner_id,work_ref,candidate_id,digest)
+        raise ValueError('검토된 기억 후보 요청을 확인하세요.')
+
     def classify_intent(self, prompt, model_suggestion=None):
         """Decide where one owner utterance goes, before anything is invoked.
 
@@ -331,13 +378,45 @@ class AgentService:
         return 'attention','상태 알 수 없음'
 
     @staticmethod
+    def _redact_reason(text):
+        """Redact credentials and host paths out of an owner-visible reason."""
+        if not isinstance(text,str):return None
+        text=re.sub(r'(?:sk-|Bearer\s+)[A-Za-z0-9._-]+','[가림]',text,flags=re.I)
+        return re.sub(r'(?<!\w)/(?:Users|home)/[^\s]+','[경로 가림]',text)
+
+    @staticmethod
+    def _failure_cause(refusals):
+        """Name why a run ended 'failed'/'partial' on the owner task surface.
+
+        ``run_agent`` can return a model answer *and* a failed outcome: a tool
+        was refused or errored, the model wrote text anyway.  The job row then
+        kept that text in ``response`` and left ``error`` NULL, so the task
+        card showed '확인 필요' with no cause and the reason survived only in
+        ``tool_events``.  This repository requires failures to stay explicit,
+        so the cause is promoted from the events actually observed for this
+        Work - never invented, and never a tool payload.
+
+        Only the tool name and its already-redacted reason string travel.
+        Both are values ``task_progress`` already returns to this same
+        owner-authenticated surface through ``_progress_event``, so no
+        argument, document excerpt or result content reaches a surface that
+        did not already carry it.  ``deliver_one`` reads ``error`` only when
+        ``response`` is empty, which is exactly the case this does not
+        change, so no new text reaches Telegram either.
+        """
+        reasons=[]
+        for tool,reason in refusals:
+            text=AgentService._redact_reason(reason)
+            entry=f'{tool}: {text}' if text else str(tool)
+            if entry not in reasons:reasons.append(entry)
+        if not reasons:return None
+        return ('완료하지 못한 도구 실행 — '+' · '.join(reasons[:3]))[:400]
+
+    @staticmethod
     def _progress_event(event):
         trace=event.get('trace') or {}
         status=event.get('status')
-        error=trace.get('error')
-        if isinstance(error,str):
-            error=re.sub(r'(?:sk-|Bearer\s+)[A-Za-z0-9._-]+','[가림]',error,flags=re.I)
-            error=re.sub(r'(?<!\w)/(?:Users|home)/[^\s]+','[경로 가림]',error)
+        error=AgentService._redact_reason(trace.get('error'))
         summary={'running':'실행을 시작했습니다.','succeeded':'실행을 완료했습니다.','failed':error or '실행하지 못했습니다.'}.get(status,'관찰된 이벤트입니다.')
         safe={}
         for key in ('scope','engine','mode','exit_code','attempt'):
@@ -1478,6 +1557,7 @@ class AgentService:
             outcome='succeeded'
             approval_needed=[False]
             context_approval_needed=[False]
+            refusals=[]
             try:
                 prompt=job['message'].strip()
                 owner_memory_approval=self.store.issue_memory_approval(job['id'],prompt) if self.explicit_memory_request(prompt) else None
@@ -1621,6 +1701,10 @@ class AgentService:
                     original_record=record
                     def record(tool,status,detail):
                         if (tool in ('find_files','read_file') and status=='failed' and boundary['requires_approval']):approval_needed[0]=True
+                        if status=='failed' and tool!='model':
+                            try:reason=json.loads(detail).get('error')
+                            except (TypeError,ValueError):reason=None
+                            refusals.append((tool,reason if isinstance(reason,str) else None))
                         original_record(tool,status,detail)
                     if subscription.get('id'):
                         if workspace_request:
@@ -1693,7 +1777,8 @@ class AgentService:
                         response+='\n\n컨텍스트 출처:\n'+'\n'.join(context_sources)
                 with self.store.db() as db:
                     db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('assistant',response,job['channel'],time.time(),job.get('workspace_id'),job['id']))
-                    db.execute("UPDATE jobs SET status=?,response=?,provider=?,model=?,delivery=? WHERE id=?",(outcome,response,provider,model,'pending' if job['chat_id'] else 'none',job['id']))
+                    cause=self._failure_cause(refusals) if outcome in ('failed','partial') else None
+                    db.execute("UPDATE jobs SET status=?,response=?,error=?,provider=?,model=?,delivery=? WHERE id=?",(outcome,response,cause,provider,model,'pending' if job['chat_id'] else 'none',job['id']))
             except (ValueError,ProviderError,ExecutionError,OSError) as exc:
                 response=str(exc)
                 with self.store.db() as db:

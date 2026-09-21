@@ -417,6 +417,8 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             if path=='/api/settings':return self.reply(200,service.conversation_settings_request({'operation':'read'}))
             if path=='/api/capability-recommendations':return self.reply(200,service.capability_recommendation_request({'outcome':parse_qs(parts.query).get('outcome',[''])[0]}))
             if path=='/api/personal-knowledge':return self.reply(200,service.personal_knowledge_request({'query':parse_qs(parts.query).get('query',[''])[0]}, channel='local-companion'))
+            if path=='/api/personal-space/memory-candidates':
+                return self.reply(200,service.memory_candidate_request({'operation':'list'}))
             if path=='/api/personal-space':return self.reply(200,store.personal_space())
             if path=='/api/personal-records':
                 values=parse_qs(parts.query)
@@ -521,6 +523,8 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 if path=='/api/settings/request':return self.reply(200,service.conversation_settings_request(body))
                 if path=='/api/capability-recommendations':return self.reply(200,service.capability_recommendation_request(body))
                 if path=='/api/personal-knowledge':return self.reply(200,service.personal_knowledge_request(body, channel='local-companion'))
+                if path=='/api/personal-space/memory-candidates/request':
+                    return self.reply(200,service.memory_candidate_request(body))
                 if path=='/api/context-inbox/telegram-policy':return self.reply(200,service.set_context_telegram_policy(body))
                 if path=='/api/documents/approval':return self.reply(200,service.set_document_approval(body))
                 if path=='/api/public-pages/approval':return self.reply(200,service.set_public_page_approval(body))

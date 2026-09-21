@@ -30,7 +30,12 @@ class DriveWebOAuthTests(unittest.TestCase):
 
     def connect(self):
         _offer, state = self.begin()
-        return self.flow.complete({"state": state, "code": "short-code"}, 42, lambda request: {"access_token": "access-secret", "refresh_token": "refresh-secret", "scope": DRIVE_FILE, "expires_in": 60})
+        # The scope is deliberately whitespace-padded: with a verbatim value,
+        # storing the provider's text and storing the validated constant are
+        # indistinguishable, and the assertion in
+        # test_the_validated_scope_is_stored_rather_than_the_providers_text
+        # would pass either way.
+        return self.flow.complete({"state": state, "code": "short-code"}, 42, lambda request: {"access_token": "access-secret", "refresh_token": "refresh-secret", "scope": "  %s  " % DRIVE_FILE, "expires_in": 60})
 
     def test_telegram_offer_is_https_and_oauth_uses_pkce_and_drive_file_only(self):
         offer, state = self.begin()
@@ -92,6 +97,11 @@ class DriveWebOAuthTests(unittest.TestCase):
                 self.encrypted_store.secret(TOKEN_KEY, tokens)
                 with self.assertRaises(DriveScopeError):
                     self.flow.read_selected(42, "f1", lambda *args: "body")
+                # The transition is what the reconnect prompt depends on:
+                # quickstart_service only offers reconnection once the state
+                # stops being "connected". Without it the owner repeats the
+                # same failure with no prompt.
+                self.assertEqual(self.flow.status()["state"], "scope-rejected")
 
     def test_read_selected_checks_the_credential_even_without_the_selection_gate(self):
         """Pins the redundant check in ``read_selected``.

@@ -1022,6 +1022,57 @@ class PublicResearchTests(unittest.TestCase):
             with self.subTest(query=query):
                 self.assertEqual(validate_public_query(query,'owner_public_request'),query)
 
+    def test_environment_variable_suffix_vocabulary_has_no_terminal_escape(self):
+        """The suffix list is a vocabulary, so it is where this class hid last.
+
+        Three "unifications" on this path were each partial. After the
+        separator sets were shared, `DB_PWD`, `APP_PASS` and `SSH_KEY` - all
+        plausible real env-var names - were still absent from the suffix
+        vocabulary, and a terminal plural or version digit (`MY_API_KEYS`,
+        `MY_API_KEY2`) defeated a match anchored on the bare suffix. Every
+        shape below reached the search provider before this test existed.
+        """
+        leaking = (
+            "DB_PWD: hunter2",
+            "APP_PASS: hunter2",
+            "SSH_KEY: abcdef123456",
+            "VAULT_AUTH: abcdef123456",
+            "AWS_CREDENTIALS: abcdef123456",
+            "APP_APIKEY: abcdef123456",
+            "MY_SECRETKEY: abcdef123456",
+            "MY_API_KEYS: abcdef123456",
+            "DB_PASSWORDS: hunter2",
+            "APP_TOKENS: abcdef123456",
+            "MY_API_KEY2: abcdef123456",
+            "MY_API_KEY_V2: abcdef123456",
+            "MY.API.KEY: abcdef123456",
+        )
+        for query in leaking:
+            with self.subTest(query=query):
+                with self.assertRaisesRegex(ValueError, '자격 증명'):
+                    validate_public_query(query, "owner_public_request")
+
+    def test_capitalised_public_queries_are_not_mistaken_for_env_variables(self):
+        """Widening the suffix vocabulary must not swallow ordinary queries.
+
+        `PASS`, `KEY` and `AUTH` are common words, so the guard has to stay
+        anchored on the underscore/dot-joined SCREAMING_SNAKE shape rather
+        than on the word alone.
+        """
+        allowed = (
+            "THE BEST HOTELS IN SEOUL",
+            "MUSEUM PASS PRICE",
+            "NEW YORK CITY GUIDE",
+            "JR PASS comparison",
+            "I-PASS toll road",
+            "API design best practices",
+            "Secret Garden hotel Seoul",
+            "basic room rates Seoul",
+        )
+        for query in allowed:
+            with self.subTest(query=query):
+                validate_public_query(query, "owner_public_request")
+
     def test_environment_variable_secrets_block_every_shared_separator(self):
         """`PGPASSWORD=hunter2` was blocked while `PGPASSWORD: hunter2` was not.
 

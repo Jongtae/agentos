@@ -78,11 +78,23 @@ PATH_LABEL = r'(?:path|file|source)'
 # every other label path it must use LABEL_SEPARATOR: keeping a private
 # `\s*=\s*` here is what left `PGPASSWORD: hunter2`, `MY_API_KEY: ...` and
 # `DB_PASSWORD -> ...` allowed while `PGPASSWORD=hunter2` was blocked.
+# The suffix list is a vocabulary, so it is the remaining place this defect
+# class can hide: DB_PWD, APP_PASS and SSH_KEY are plausible real env-var
+# names, and a terminal plural or version digit (MY_API_KEYS, MY_API_KEY2)
+# defeated a terminal-only match. Both are closed below. A dot separator is
+# accepted alongside the underscore for the same reason.
 ENV_CREDENTIAL_SUFFIX = (
-    r'(?:_PASSWORD|_PASSWD|_SECRET|_SECRET_KEY|_PRIVATE_KEY|_CLIENT_SECRET|'
-    r'_TOKEN|_API_KEY|_ACCESS_KEY)'
+    r'(?:[_.](?:PASSWORD|PASSWD|PWD|PASS|SECRET|SECRET_KEY|SECRETKEY|PRIVATE_KEY|'
+    r'PRIVATEKEY|CLIENT_SECRET|TOKEN|API_KEY|APIKEY|ACCESS_KEY|ACCESSKEY|KEY|AUTH|'
+    r'CREDENTIAL|CREDENTIALS))'
 )
-ENV_CREDENTIAL_LABEL = rf'(?<![A-Za-z0-9])[A-Z][A-Z0-9_]{{0,80}}{ENV_CREDENTIAL_SUFFIX}'
+# Tolerate a terminal plural or version suffix so MY_API_KEYS and MY_API_KEY_V2
+# cannot slip past a match anchored on the bare suffix.
+ENV_CREDENTIAL_TAIL = r'(?:S|ES|[0-9]{1,3}|_V[0-9]{1,3})?'
+ENV_CREDENTIAL_LABEL = (
+    rf'(?<![A-Za-z0-9])[A-Z][A-Z0-9_.]{{0,80}}{ENV_CREDENTIAL_SUFFIX}'
+    rf'{ENV_CREDENTIAL_TAIL}(?![A-Za-z0-9_])'
+)
 ENV_CREDENTIAL_NAME = r'(?:PGPASSWORD|MYSQL_PWD|REDISCLI_AUTH)'
 IDENTITY_LABEL = (
     r'(?:passport(?:\s*(?:no\.?|number))?|여권\s*번호|social\s+security\s+number|ssn|'

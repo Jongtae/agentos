@@ -3,6 +3,12 @@
 Protocol discovery is answered in-process.  The single approved tool call is
 forwarded to AgentOS's internal HTTP callback with the execution-scoped bearer
 capability; no owner storage or filesystem path is accepted by this process.
+
+The protocol version comes from the mcp-types registry, but that
+package's envelope models are deliberately not adopted: JSONRPCRequest
+accepts an unknown top-level key and model_dump then drops it, so a
+request this bridge rejects would be normalised into a clean-looking
+one and forwarded. Envelope validation stays hand-written here.
 """
 
 from __future__ import annotations
@@ -12,6 +18,8 @@ from http.client import HTTPConnection
 import json
 import sys
 from urllib.parse import urlsplit
+
+from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS, LATEST_HANDSHAKE_VERSION
 
 
 LIST_NOTES_TOOL = {
@@ -23,6 +31,21 @@ LIST_NOTES_TOOL = {
         "additionalProperties": False,
     },
 }
+
+
+def negotiated_protocol_version(offered):
+    """Return the handshake revision this bridge will speak with the engine.
+
+    The supported set is the ``mcp_types`` registry rather than a literal, so
+    it tracks the official SDK.  ``initialize`` is a handshake method, so an
+    unrecognised offer is answered with the newest *handshake* revision;
+    ``LATEST_PROTOCOL_VERSION`` may name a stateless per-request revision this
+    bridge does not implement.  Only a known revision is echoed back, so an
+    arbitrary engine-supplied string is never reflected to the peer.
+    """
+    if isinstance(offered, str) and offered in HANDSHAKE_PROTOCOL_VERSIONS:
+        return offered
+    return LATEST_HANDSHAKE_VERSION
 
 
 class BridgeError(ValueError):
@@ -117,8 +140,10 @@ def serve(callback_url: str, token: str, task_id: str, *, timeout: float = 10.0)
             if isinstance(ident, bool) or not isinstance(ident, (str, int)):
                 raise BridgeError("invalid request id")
             if method == "initialize":
+                params = request.get("params")
+                offered = params.get("protocolVersion") if isinstance(params, dict) else None
                 result = {
-                    "protocolVersion": "2024-11-05",
+                    "protocolVersion": negotiated_protocol_version(offered),
                     "capabilities": {"tools": {}},
                     "serverInfo": {"name": "agentos-isolated", "version": "1"},
                 }

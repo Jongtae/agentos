@@ -13,6 +13,8 @@ import json
 import sys
 from urllib.parse import urlsplit
 
+from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS, LATEST_HANDSHAKE_VERSION
+
 
 LIST_NOTES_TOOL = {
     "name": "list_notes",
@@ -23,6 +25,21 @@ LIST_NOTES_TOOL = {
         "additionalProperties": False,
     },
 }
+
+
+def negotiated_protocol_version(offered):
+    """Return the handshake revision this bridge will speak with the engine.
+
+    The supported set is the ``mcp_types`` registry rather than a literal, so
+    it tracks the official SDK.  ``initialize`` is a handshake method, so an
+    unrecognised offer is answered with the newest *handshake* revision;
+    ``LATEST_PROTOCOL_VERSION`` may name a stateless per-request revision this
+    bridge does not implement.  Only a known revision is echoed back, so an
+    arbitrary engine-supplied string is never reflected to the peer.
+    """
+    if isinstance(offered, str) and offered in HANDSHAKE_PROTOCOL_VERSIONS:
+        return offered
+    return LATEST_HANDSHAKE_VERSION
 
 
 class BridgeError(ValueError):
@@ -117,8 +134,10 @@ def serve(callback_url: str, token: str, task_id: str, *, timeout: float = 10.0)
             if isinstance(ident, bool) or not isinstance(ident, (str, int)):
                 raise BridgeError("invalid request id")
             if method == "initialize":
+                params = request.get("params")
+                offered = params.get("protocolVersion") if isinstance(params, dict) else None
                 result = {
-                    "protocolVersion": "2024-11-05",
+                    "protocolVersion": negotiated_protocol_version(offered),
                     "capabilities": {"tools": {}},
                     "serverInfo": {"name": "agentos-isolated", "version": "1"},
                 }

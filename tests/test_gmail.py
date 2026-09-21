@@ -1693,6 +1693,10 @@ class GmailConnectorTests(unittest.TestCase):
             ("Content-Type", ""),
             ("Content-Type", "   "),
             ("Content-Type", "notatype"),
+            # A doubled interior semicolon IS a defect, unlike a trailing
+            # one: CPython records InvalidHeaderDefect for the empty
+            # segment between two parameters but not for one at the end.
+            ("Content-Type", "text/plain;; charset=utf-8"),
             # The same rule applies to the disposition header, which decides
             # whether the part may become the body at all.
             ("Content-Disposition", "inline\r"),
@@ -1717,6 +1721,132 @@ class GmailConnectorTests(unittest.TestCase):
                     self.read()
                 self.assertEqual(malformed.exception.reason, "invalid_provider_response")
                 self.assertNotIn("private body", str(malformed.exception))
+
+    def test_empty_parameter_segments_do_not_refuse_ordinary_mail(self):
+        """A trailing semicolon must not make a message unreadable.
+
+        The duplicate-name check compares how many parameters were written
+        against how many survived folding. ``get_params`` emits a nameless
+        ``('', '')`` entry for an empty segment, so counting those refused a
+        header that CPython records no defect for - an ordinary trailing
+        semicolon, which any sender can append.
+
+        The harm was not a rejected header. The refusal happens inside
+        ``_body``, so ``read_message`` returns nothing and the owner loses
+        subject, sender and date as well. A previous review cycle fixed
+        exactly that harm class; the count heuristic reopened it, and the
+        defect table added alongside it did not contain a single trailing
+        semicolon - another enumeration.
+        """
+        self.connect()
+        encoded = base64.urlsafe_b64encode(b"readable body").decode()
+        for header_name, value in (
+            ("Content-Type", "text/plain;"),
+            ("Content-Type", "text/plain ;"),
+            ("Content-Type", "text/plain;\t"),
+            ("Content-Type", "text/plain; charset=utf-8;"),
+            ("Content-Type", "text/plain; charset=utf-8; "),
+            ("Content-Disposition", "inline;"),
+            ("Content-Disposition", "inline ;"),
+            ("Content-Disposition", 'inline; filename="a.txt";'),
+        ):
+            with self.subTest(header=header_name, value=repr(value)):
+                self.responses.clear()
+                self.responses.append({
+                    "id": "m_1",
+                    "threadId": "t_1",
+                    "payload": {
+                        "mimeType": "text/plain",
+                        "headers": [{"name": header_name, "value": value}],
+                        "body": {"data": encoded},
+                    },
+                })
+                self.assertEqual(self.read().body, "readable body")
+
+        # The same shape on an explicitly declared attachment must still give
+        # the truthful empty body rather than an error.
+        self.responses.clear()
+        self.responses.append({
+            "id": "m_1",
+            "threadId": "t_1",
+            "payload": {
+                "mimeType": "multipart/mixed",
+                "parts": [{
+                    "mimeType": "application/pdf",
+                    "filename": "invoice.pdf",
+                    "headers": [{
+                        "name": "Content-Disposition",
+                        "value": 'attachment; filename="invoice.pdf";',
+                    }],
+                    "body": {"attachmentId": "a1"},
+                }],
+            },
+        })
+        self.assertEqual(self.read().body, "")
+
+    def test_media_type_grammar_is_delegated_but_still_agreement_bound(self):
+        """Record what removing the hand-written media-type regex widened.
+
+        The regex rejected any type outside its own character class. The
+        parsed type is now compared for equality against Gmail's ``mimeType``
+        instead, which constrains agreement rather than grammar, so
+        spec-conformant CFWS around the solidus and token characters the old
+        class omitted are accepted where they previously were not.
+
+        This is a deliberate widening and is pinned here so it cannot drift
+        further unnoticed. It crosses no boundary: the charset allowlist is
+        unchanged, and only ``text/plain`` and ``text/html`` are ever decoded
+        as a body, so a type outside that pair still yields a truthful empty
+        body rather than rendered content.
+        """
+        self.connect()
+        encoded = base64.urlsafe_b64encode(b"cfws body").decode()
+        # CFWS around the solidus is legal and now yields the body.
+        for value in ("text /plain", "text/ plain", "text / plain"):
+            with self.subTest(accepted=value):
+                self.responses.clear()
+                self.responses.append({
+                    "id": "m_1",
+                    "threadId": "t_1",
+                    "payload": {
+                        "mimeType": "text/plain",
+                        "headers": [{"name": "Content-Type", "value": value}],
+                        "body": {"data": encoded},
+                    },
+                })
+                self.assertEqual(self.read().body, "cfws body")
+
+        # A type the old regex rejected is accepted by the grammar but is not
+        # text/plain or text/html, so it is never decoded as a body.
+        for value in ("text/plain%", "text/plain*", "text/plain|"):
+            with self.subTest(not_decoded=value):
+                self.responses.clear()
+                self.responses.append({
+                    "id": "m_1",
+                    "threadId": "t_1",
+                    "payload": {
+                        "mimeType": value,
+                        "headers": [{"name": "Content-Type", "value": value}],
+                        "body": {"data": encoded},
+                    },
+                })
+                self.assertEqual(self.read().body, "")
+
+        # Disagreement between the parsed type and Gmail's own mimeType is
+        # still refused - that is the check the regex was replaced by.
+        self.responses.clear()
+        self.responses.append({
+            "id": "m_1",
+            "threadId": "t_1",
+            "payload": {
+                "mimeType": "text/plain",
+                "headers": [{"name": "Content-Type", "value": "text/html"}],
+                "body": {"data": encoded},
+            },
+        })
+        with self.assertRaises(GmailError) as mismatch:
+            self.read()
+        self.assertEqual(mismatch.exception.reason, "invalid_provider_response")
 
     def test_rfc2231_extended_parameter_cannot_smuggle_a_blocked_charset(self):
         """An RFC 2231 charset reaches the allowlist like any other.

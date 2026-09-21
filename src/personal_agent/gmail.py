@@ -337,6 +337,14 @@ def _assert_unique_mime_parameters(name: str, value: str, parsed) -> None:
     written = holder.get_params(header=name)
     if written is None:
         raise GmailError("invalid_provider_response")
+    # An empty segment - a trailing or doubled semicolon - makes get_params()
+    # emit a nameless ('', '') entry that has no counterpart in the parsed
+    # mapping. CPython records no defect for it because it is not malformed
+    # enough to be one, so counting it would refuse ordinary mail: a single
+    # trailing semicolon, which any sender can append, would make a message
+    # permanently unreadable and cost the owner subject, sender and date as
+    # well as the body.
+    written = [parameter for parameter in written if parameter[0]]
     # get_params() prepends the bare type/disposition token, which is not a
     # parameter; the parsed mapping does not include it.
     if len(written) - 1 != len(dict(parsed.params)):

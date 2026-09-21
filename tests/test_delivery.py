@@ -5,7 +5,11 @@ from unittest.mock import patch
 from pathlib import Path
 from types import SimpleNamespace
 
-from delivery_state_invariants import assert_declared_goal_shape
+from delivery_state_invariants import (
+    assert_declared_goal_shape,
+    assert_no_unauthorised_execution_authority,
+    closed_out_programs,
+)
 from personal_agent.delivery import DeliveryController, DeliveryError, DeliveryPlan, StateStore
 from personal_agent.handoff import Candidate, Issue
 
@@ -161,15 +165,24 @@ class DeliveryTests(unittest.TestCase):
             self.assertIsNone(plan.select({'active':declared,'status':'running'}))
         else:
             # Closed out: no program is declared or armed, so the heartbeat
-            # has nothing to pick up even with a stale running state.
+            # has nothing to pick up even with a stale running state. The
+            # stale id is derived rather than named, so this covers whichever
+            # program closed out.
             self.assertIsNone(declared)
-            self.assertIsNone(plan.select({'active':'EPIC-REUSE-01','status':'running'}))
+            closed=closed_out_programs(live)
+            self.assertTrue(closed)
+            for name in closed:
+                self.assertIsNone(plan.select({'active':name,'status':'running'}))
         self.assertIsNone(plan.select({}))
-        # EPIC-PA1 keeps its enumerated substeps while paused, but neither it
-        # nor any substep may be selected.
+        # EPIC-PA1 keeps its enumerated substeps in either role, and neither
+        # it nor any substep may be selected without an explicit `active`
+        # transition. `assertNotEqual(declared, 'EPIC-PA1')` used to stand
+        # here; it pinned which program was next rather than the rule, so it
+        # is replaced by the generic bar on any program that a completion or
+        # pause record says must stay quiet.
         self.assertEqual(plan.items['EPIC-PA1']['issue'], 386)
         self.assertEqual(plan.items['EPIC-PA1']['contract'], 'pa1-parallel-delivery.en.md')
-        self.assertNotEqual(declared, 'EPIC-PA1')
+        assert_no_unauthorised_execution_authority(self, live)
         self.assertIsNone(plan.select({'active':'EPIC-PA1','status':'running'}))
         self.assertEqual(controller.run_once(dry_run=False)['status'], 'awaiting-owner-activated-goal')
         self.assertEqual(runner.calls, [])

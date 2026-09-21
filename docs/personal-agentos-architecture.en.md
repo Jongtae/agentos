@@ -153,6 +153,16 @@ One capability can have several runtimes; one runtime can expose multiple capabi
 
 A worker may request escalation, append current evidence and propose memory; it cannot mint Grants, rewrite sealed history or self-certify final Work completion. AgentOS validates outcome evidence. Reroute/fallback needs covering destination/data/budget authority. A future remote runtime's unavailable model telemetry remains unknown.
 
+### Provider-independent decision layer
+
+Bounded semantic judgments such as Attention relevance, candidate selection, routing, result scoring, or whether another reasoning/evidence step is needed may use a replaceable **DecisionEngine**. The contract is owned by AgentOS and remains provider-neutral; providers only implement it.
+
+Decision inference is not policy or authority. A decision result/confidence may inform deterministic AgentOS policy, but it cannot mint/widen Grants, bypass approval, authorize new egress, mutate canonical Memory, rewrite Evidence, or self-certify final Work completion. Known deterministic rules remain code.
+
+Implementations may include rules, the existing LLM path, local/small models, or optional specialist providers. Jev is currently only an optional/experimental adapter candidate; Jev-specific concepts such as `Choice`, `Score`, or `Noul` must be translated at the adapter boundary rather than becoming kernel vocabulary or a mandatory dependency.
+
+External decision providers remain subject to Work-scoped Context minimization, destination/Grant checks, budgets, cancellation, truthful provider/evidence reporting, and explicit fallback/safe-stop semantics. See [Provider-independent Decision Layer](decision-layer.en.md) and [#415](https://github.com/Jongtae/personal-agentos/issues/415).
+
 ### Ruflo's place
 
 An optional delegated Runtime Adapter. Its swarm/agents/memory are runtime-local. Durable proposals return as MemoryCandidates; nested agents/tools cannot exceed current parent Grants. Swapping/removing Ruflo cannot erase owner state or rewrite history. It is not required for the first useful default assistant or Files package.

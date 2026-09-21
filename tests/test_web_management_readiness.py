@@ -86,6 +86,12 @@ class WebManagementReadinessTests(unittest.TestCase):
         self.assertIn('data-settings="files"', html)
         self.assertIn('data-settings="external"', html)
         self.assertIn('data-settings="privacy"', html)
+        # The J6 MemoryCandidate control is a management control inside the
+        # existing records view: it adds no top-level view and no second
+        # conversation surface.
+        self.assertEqual(html.count('id="memory-candidates"'), 1)
+        self.assertGreater(html.index('id="memory-candidates"'), html.index('id="view-records"'))
+        self.assertLess(html.index('id="memory-candidates"'), html.index('id="view-settings"'))
 
     def test_source_derived_task_record_and_model_regressions(self):
         node = shutil.which('node')

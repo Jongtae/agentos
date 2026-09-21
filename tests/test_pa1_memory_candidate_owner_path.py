@@ -30,6 +30,8 @@ request to ``make_handler``.  The only injected seam is the outbound model
 transport.  Nothing here is evidence about a live provider.
 """
 import json
+import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -45,6 +47,7 @@ from personal_agent.quickstart import configured_service, make_handler
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
 
+ROOT = Path(__file__).resolve().parents[1]
 OWNER_PASSWORD = 'a-long-wu4-owner-password'
 MODEL_ANSWER = '방금 이야기만 정리했습니다.'
 
@@ -394,6 +397,179 @@ class OwnerMemoryCandidateAuthority(_OwnerSurface):
                             approval_token=issued['approval_token'])
         self.assertEqual(replayed['id'], accepted['id'])
         self.assertEqual(len(self.store.memories()), 1)
+
+
+class OwnerReachesTheCandidatePathFromTheManagementUI(_OwnerSurface):
+    """WU5: J6's inspect/approve/reject is reachable without hand-built HTTP.
+
+    WU4 made the path exist over HTTP; nothing in the shipped management UI
+    referenced it, so the only owner who could use it was one willing to
+    write requests by hand.  The control added here lives in the existing
+    records view, and the tests below check the two things that make it an
+    owner control rather than a button: the request bodies it builds are
+    accepted by the shipped route, and the digest it offers for approval is
+    the one the owner inspected.
+
+    `ui(...)` executes the real `app.js` export under Node, so the assertions
+    are about the shipped file rather than a restatement of it.  The
+    browser-rendered DOM is not exercised; that boundary is checked by source
+    shape, as the neighbouring `app.js` surfaces already are.
+    """
+
+    APP = ROOT / 'src/personal_agent/web/app.js'
+
+    def ui(self, name, *args):
+        """Call one exported `app.js` function under Node and return its result."""
+        node = shutil.which('node')
+        if node is None:
+            self.skipTest('Node is needed for JavaScript behavior checks')
+        script = ('const ui=require(process.argv[1]);'
+                  'const value=ui[process.argv[3]](...JSON.parse(process.argv[2]));'
+                  'process.stdout.write(JSON.stringify(value===undefined?null:value));')
+        result = subprocess.run([node, '-e', script, str(self.APP), json.dumps(args), name],
+                                check=True, capture_output=True, text=True, timeout=20)
+        return json.loads(result.stdout)
+
+    def test_the_control_is_in_the_management_ui_and_adds_no_chat_surface(self):
+        html = (ROOT / 'src/personal_agent/web/index.html').read_text()
+        records = html[html.index('id="view-records"'):html.index('id="view-settings"')]
+        # The control is inside the existing records view, reusing the
+        # master-detail idiom rather than introducing a surface of its own.
+        for marker in ('id="memory-candidates"', 'id="memory-candidate-list"',
+                       'id="memory-candidate-detail"', 'id="memory-candidate-summary"',
+                       'id="memory-candidate-feedback"'):
+            self.assertIn(marker, records)
+        self.assertIn('class="master-detail"', records)
+        # #394: no second default chat surface, and no fourth top-level view.
+        self.assertNotIn('id="chat-form"', html)
+        self.assertNotIn('id="messages"', html)
+        self.assertEqual(html.count('data-view='), 3)
+
+        app = self.APP.read_text()
+        # Wired to the routes WU4 built, not to a stub.
+        self.assertIn("api('/api/personal-space/memory-candidates')", app)
+        self.assertEqual(app.count("api('/api/personal-space/memory-candidates/request'"), 4)
+        # The pending count comes from the refresh that already runs;
+        # `/api/personal-space` cannot decide anything on its own because it
+        # carries neither `work_ref` nor `content_digest`.
+        self.assertIn('memory_candidate_count', app)
+        # The count is rendered from the refresh that already runs, so a
+        # candidate arriving in the background stays discoverable.  Sliced to
+        # `refresh` so the function's own definition cannot satisfy this.
+        refreshing = app[app.index('async function refresh(){'):app.index('async function status(){')]
+        self.assertIn('renderMemoryCandidateSummary(space)', refreshing)
+
+    def test_the_ui_offers_no_state_that_approves_in_one_step(self):
+        app = self.APP.read_text()
+        branch = app[app.index("if(step==='request-approval'){"):app.index('const reject=element')]
+        requesting, accepting = branch.split(' }else{\n')
+        # The step that issues an approval cannot also spend one, and the step
+        # that spends one cannot issue it.
+        self.assertIn("memoryCandidateDecisionBody(memoryCandidateReview,'request-approval')",
+                      requesting)
+        self.assertNotIn("'accept'", requesting)
+        self.assertIn("memoryCandidateDecisionBody(memoryCandidateReview,'accept')", accepting)
+        self.assertNotIn("'request-approval'", accepting)
+        # A missing or non-matching approval refuses rather than sending.
+        self.assertIn('if(!body)return setError', accepting)
+
+    def test_the_ui_request_bodies_drive_the_real_owner_path_in_two_steps(self):
+        self.pending_candidate()
+        row = self.candidates()['candidates'][0]
+
+        # Nothing inspected yet: the only step on offer is inspect, and no
+        # decision body can be built from the list row alone.
+        self.assertEqual(self.ui('memoryCandidateStep', None, row['id']), 'inspect')
+        self.assertIsNone(self.ui('memoryCandidateDecisionBody', None, 'accept'))
+
+        inspected = self.act(operation='inspect', id=row['id'], work_ref=row['work_ref'])
+        review = {'inspected': inspected, 'approval': None}
+        self.assertEqual(self.ui('memoryCandidateStep', review, row['id']), 'request-approval')
+        # Step one is reachable; step two is not, because no approval exists.
+        self.assertIsNone(self.ui('memoryCandidateDecisionBody', review, 'accept'))
+
+        issue = self.ui('memoryCandidateDecisionBody', review, 'request-approval')
+        self.assertEqual(issue['content_digest'], inspected['content_digest'])
+        approval = self.web('/api/personal-space/memory-candidates/request', issue)
+        self.assertTrue(approval['approval_token'])
+        # Step one wrote nothing: the candidate is still pending.
+        self.assertEqual(self.store.memories(), [])
+        self.assertEqual(self.web('/api/personal-space')['memory_candidate_count'], 1)
+
+        review = {'inspected': inspected, 'approval': approval}
+        self.assertEqual(self.ui('memoryCandidateStep', review, row['id']), 'accept')
+        accept = self.ui('memoryCandidateDecisionBody', review, 'accept')
+        self.assertEqual(accept['content_digest'], inspected['content_digest'])
+        self.assertEqual(accept['approval_token'], approval['approval_token'])
+        accepted = self.web('/api/personal-space/memory-candidates/request', accept)
+        self.assertEqual(accepted['content'], CANDIDATE_CONTENT)
+        self.assertEqual(accepted['state'], 'current')
+        self.assertEqual(self.web('/api/personal-space')['memory_candidate_count'], 0)
+
+    def test_the_ui_reject_body_names_the_inspected_candidate(self):
+        self.pending_candidate()
+        row = self.candidates()['candidates'][0]
+        inspected = self.act(operation='inspect', id=row['id'], work_ref=row['work_ref'])
+        reject = self.ui('memoryCandidateDecisionBody',
+                         {'inspected': inspected, 'approval': None}, 'reject')
+        self.assertEqual(reject['content_digest'], inspected['content_digest'])
+        rejected = self.web('/api/personal-space/memory-candidates/request', reject)
+        self.assertEqual(rejected['state'], 'rejected')
+        self.assertEqual(self.store.memories(), [])
+        self.assertEqual(self.candidates()['candidates'], [])
+
+    def test_the_digest_offered_for_approval_is_the_inspected_one(self):
+        """The server binds the two digests, so divergence is constructed here.
+
+        Over the shipped route an approval always echoes the digest it was
+        issued against, which would let a UI that read the digest back off
+        the *approval* look correct forever.  These reviews separate the two,
+        so a body built from anything but what the owner inspected fails.
+        """
+        inspected = {'id': 'candidate-1', 'work_ref': 'workref:w',
+                     'content_digest': 'digest-the-owner-read'}
+        token = 'token-' + 't' * 32
+
+        # An approval issued against other content is not spendable here.
+        other_content = {'approval_token': token, 'subject_id': 'candidate-1',
+                         'source_digest': 'digest-of-something-else',
+                         'content_digest': 'digest-of-something-else'}
+        review = {'inspected': inspected, 'approval': other_content}
+        self.assertFalse(self.ui('memoryCandidateApprovalMatches', review))
+        self.assertEqual(self.ui('memoryCandidateStep', review, 'candidate-1'),
+                         'request-approval')
+        self.assertIsNone(self.ui('memoryCandidateDecisionBody', review, 'accept'))
+
+        # Nor is one issued against another candidate.
+        other_subject = {'approval_token': token, 'subject_id': 'candidate-2',
+                         'source_digest': inspected['content_digest']}
+        self.assertIsNone(self.ui('memoryCandidateDecisionBody',
+                                  {'inspected': inspected, 'approval': other_subject}, 'accept'))
+
+        # Nor an approval with no token at all.
+        self.assertIsNone(self.ui('memoryCandidateDecisionBody',
+                                  {'inspected': inspected,
+                                   'approval': {'subject_id': 'candidate-1',
+                                                'source_digest': inspected['content_digest']}},
+                                  'accept'))
+
+        # A matching approval sends the inspected digest, never the echo.
+        matching = {'approval_token': token, 'subject_id': 'candidate-1',
+                    'source_digest': inspected['content_digest'],
+                    'content_digest': 'echo-that-must-not-be-sent'}
+        body = self.ui('memoryCandidateDecisionBody',
+                       {'inspected': inspected, 'approval': matching}, 'accept')
+        self.assertEqual(body['content_digest'], inspected['content_digest'])
+        self.assertEqual(body['approval_token'], token)
+        self.assertEqual(body['work_ref'], inspected['work_ref'])
+
+    def test_the_section_reacts_to_a_changed_count_without_polling_itself(self):
+        # Closed: never loads.  Open and unchanged: never reloads.  Open and
+        # changed: reloads once per change.
+        self.assertFalse(self.ui('memoryCandidateReloadNeeded', False, 3, None))
+        self.assertTrue(self.ui('memoryCandidateReloadNeeded', True, 3, None))
+        self.assertFalse(self.ui('memoryCandidateReloadNeeded', True, 3, 3))
+        self.assertTrue(self.ui('memoryCandidateReloadNeeded', True, 0, 3))
 
 
 class RefusedRunShowsItsCause(_OwnerSurface):

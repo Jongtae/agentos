@@ -1,6 +1,9 @@
 # Personal AgentOS — Claude Code thin bootstrap
 
-This file is intentionally short. Canonical repository governance lives elsewhere.
+@AGENTS.md
+@docs/development-constitution.en.md
+
+The imported files are the canonical repository execution contract and Development Constitution. This file is intentionally short: it is a Claude Code compatibility/bootstrap entrypoint, not an independent source of policy. Apply the canonical **Reuse first: Adopt → Adapt → Build** and Existing Solutions Review rules from those files rather than restating them here.
 
 1. Read `AGENTS.md` before broad repository or GitHub inspection.
 2. Follow `docs/goal-execution-contract.en.md` and the active program contract referenced by the delivery plan.
@@ -11,4 +14,5 @@ This file is intentionally short. Canonical repository governance lives elsewher
 7. Follow the repository verification budget: targeted tests while editing, batched remediation, coherent checkpoint pushes, stable-head CI/review, no duplicate review/polling.
 8. After a meaningful state transition, update the same #386 cursor comment and increment its generation. Do not append a new cursor history comment.
 9. The cursor is a cache, never authority. Current GitHub/repository evidence wins on conflict.
-10. Do not duplicate canonical governance in this file.
+10. If any tool-specific instruction conflicts with `AGENTS.md` or the Development Constitution, canonical repository governance wins.
+11. Do not duplicate canonical governance in this file.

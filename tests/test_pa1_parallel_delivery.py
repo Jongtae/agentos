@@ -107,6 +107,38 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
                 iteration = self.items[name]
                 self.assertNotEqual(iteration["activation_status"], "owner-activated-goal-ready")
 
+    def test_reuse_concurrency_policy_is_bounded_and_disjointness_required(self):
+        """The parallel exception must stay bounded and conditional.
+
+        #418 forbade parallel children because several substeps share
+        quickstart_service.py, quickstart.py, provider contracts and
+        packaging. Those substeps were split to #420, so the reason no longer
+        covers the activated tranche - but the exception replacing it has to
+        keep both halves: a hard ceiling, and a disjointness precondition.
+        Dropping either turns a bounded exception back into the unlimited
+        parallelism the original rule refused.
+
+        The ceiling is set by review capacity, not file conflict, so it counts
+        children in any state before merge rather than only those being
+        implemented.
+        """
+        policy = self.plan["programs"]["EPIC-REUSE-01"]["concurrency"]
+        self.assertIsInstance(policy["max_open_children"], int)
+        self.assertLessEqual(policy["max_open_children"], 2)
+        self.assertGreaterEqual(policy["max_open_children"], 1)
+        # Disjointness is the precondition, not advice.
+        self.assertTrue(policy["requires"])
+        self.assertIn("disjoint", policy["requires"].lower())
+        # R1's own children share gmail.py and must never run together.
+        self.assertIn(["R1a", "R1b", "R1c"], policy["mutually_exclusive"])
+        self.assertTrue(policy["mutually_exclusive_reason"])
+        # The limit counts review and remediation, which is where the cost is.
+        self.assertIn("remediation", policy["counts"].lower())
+        # Per-child gates are untouched by this exception.
+        unchanged = policy["unchanged"].lower()
+        for gate in ("existing solutions review", "independent review"):
+            self.assertIn(gate, unchanged)
+
     def test_activated_reuse_program_matches_its_declared_scope(self):
         """The program holding the declared goal needs its own regression pins.
 

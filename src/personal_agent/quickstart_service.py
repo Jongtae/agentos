@@ -20,6 +20,7 @@ from .settings_orchestrator import SettingsOrchestrator, SettingsError
 from .capability_recommendations import CapabilityRecommendationOrchestrator
 from .personal_knowledge import PersonalKnowledgeOrchestrator
 from .file_workspace import FileWorkspace
+from .conversation_handoff import TelegramChannel
 
 SYSTEM = ('You are the user’s personal AgentOS assistant. Respond in the user’s language. '
           'This preview supports conversation, notes, connected local documents, and local read-only web search and weather tools. '
@@ -124,6 +125,11 @@ class AgentService:
         self.store=store
         self.adapter=adapter or ModelAdapter()
         self.telegram_transport=telegram_transport or request_json
+        # Transport seam.  Both resolvers are late bound: `telegram_transport`
+        # stays a live reassignable attribute and the bot token is read from
+        # the secret store per call, never captured here.
+        self.telegram=TelegramChannel(lambda:self.telegram_transport,
+                                      lambda:self.store.secret('telegram_token'))
         self.subscription_engines=subscription_engines or SubscriptionEngines()
         self.execution_adapter=execution_adapter or BoundedExecutionAdapter()
         self.isolated_engine_adapter=isolated_engine_adapter
@@ -373,9 +379,9 @@ class AgentService:
             buttons.append([{'text':f'최근 {kind} {index}', 'callback_data':f'p7x:{token}'}])
         buttons.append([{'text':'컨텍스트 없이 진행', 'callback_data':f'p7n:{job_id}'}])
         try:
-            sent=self.telegram_method('sendMessage',{'chat_id':chat_id,
-                'text':'이번 요청에 참고할 개인 컨텍스트를 하나 선택하세요. 내용은 이 목록에 표시되지 않으며, 선택하지 않아도 요청은 그대로 진행할 수 있어요.',
-                'reply_markup':{'inline_keyboard':buttons}})
+            sent=self.telegram.send_message(chat_id,
+                '이번 요청에 참고할 개인 컨텍스트를 하나 선택하세요. 내용은 이 목록에 표시되지 않으며, 선택하지 않아도 요청은 그대로 진행할 수 있어요.',
+                {'inline_keyboard':buttons})
             self.store.save_telegram_context_choice_message(tokens,sent.get('message_id') if isinstance(sent,dict) else None)
             return True
         except ProviderError:
@@ -671,12 +677,12 @@ class AgentService:
                 'test_proof':proof}
 
     def telegram_call(self,token,method,body):
-        result=self.telegram_transport(f'https://api.telegram.org/bot{token}/{method}',body,{},timeout=15)
-        if not result.get('ok'): raise ProviderError('Telegram 요청이 실패했습니다. 봇 설정을 확인하세요.')
-        return result['result']
+        """Thin delegation to the transport seam for an unstored bot token."""
+        return self.telegram.call_with_token(token,method,body)
 
     def telegram_method(self, method, body):
-        return self.telegram_call(self.store.secret('telegram_token'),method,body)
+        """Thin delegation to the transport seam for the stored bot token."""
+        return self.telegram.call(method,body)
 
     @staticmethod
     def requests_drive_access(text):
@@ -690,21 +696,15 @@ class AgentService:
         if not self.drive_web_oauth:
             return False
         offer = self.drive_web_oauth.begin(telegram_owner_id, pending_job_id)
-        self.telegram_method('sendMessage', {
-            'chat_id': telegram_owner_id,
-            'text': offer['message'],
-            'reply_markup': {'inline_keyboard': [[offer['button']]]},
-        })
+        self.telegram.send_message(telegram_owner_id, offer['message'],
+                                   {'inline_keyboard': [[offer['button']]]})
         return True
 
     def publish_drive_connection_status(self, telegram_owner_id):
         """Send only a redacted Drive lifecycle message to the paired owner."""
         if not self.drive_web_oauth:
             return False
-        self.telegram_method('sendMessage', {
-            'chat_id': telegram_owner_id,
-            'text': self.drive_web_oauth.telegram_status_message(),
-        })
+        self.telegram.send_message(telegram_owner_id, self.drive_web_oauth.telegram_status_message())
         return True
 
     def complete_drive_web_oauth(self, callback, telegram_owner_id, exchange):
@@ -729,8 +729,8 @@ class AgentService:
         if job_id:
             with self.store.db() as db:
                 db.execute("UPDATE jobs SET status='queued', error=NULL, delivery='none' WHERE id=? AND status='awaiting_drive'", (job_id,))
-        self.telegram_method('sendMessage', {'chat_id': telegram_owner_id,
-                                             'text': '선택한 Google Drive 파일을 준비했습니다. 원래 요청을 계속합니다.'})
+        self.telegram.send_message(telegram_owner_id,
+                                   '선택한 Google Drive 파일을 준비했습니다. 원래 요청을 계속합니다.')
         return result
 
     def select_drive_picker_files(self, grant, files):
@@ -748,8 +748,8 @@ class AgentService:
             with self.store.db() as db:
                 db.execute("UPDATE jobs SET status='queued', error=NULL, delivery='none' WHERE id=? AND status='awaiting_drive'", (job_id,))
         try:
-            self.telegram_method('sendMessage', {'chat_id':owner,
-                                                  'text':'선택한 Google Drive 파일을 준비했습니다. 요청을 계속합니다.'})
+            self.telegram.send_message(owner,
+                                       '선택한 Google Drive 파일을 준비했습니다. 요청을 계속합니다.')
         except ProviderError:
             # The capability state and queued job stay valid even when a
             # transient Telegram notification cannot be delivered.
@@ -784,8 +784,8 @@ class AgentService:
         token=body.get('token','')
         if not isinstance(token,str) or not 10<=len(token)<=300 or not all(c.isalnum() or c in ':_-' for c in token):
             raise ValueError('BotFather에서 발급한 봇 토큰을 입력하세요.')
-        me=self.telegram_call(token,'getMe',{})
-        webhook=self.telegram_call(token,'getWebhookInfo',{})
+        me=self.telegram.get_me(token)
+        webhook=self.telegram.get_webhook_info(token)
         username=me.get('username') if isinstance(me,dict) else None
         if not isinstance(username,str) or not 5<=len(username)<=64 or not username.replace('_','').isalnum():
             raise ProviderError('Telegram이 유효한 봇 계정을 반환하지 않았습니다.')
@@ -872,19 +872,20 @@ class AgentService:
                      and notification['chat_id']==cfg.get('user_id'))
             self.store.update_notification(notification['id'],'sending' if allowed else 'cancelled')
             if not allowed:return True
-            body={'chat_id':notification['chat_id'],'text':self.notification_text(notification['kind'])}
+            reply_markup=None
             if notification['kind']=='approval_needed':
-                body['reply_markup']={'inline_keyboard':[[
+                reply_markup={'inline_keyboard':[[
                     {'text':'문서 공유 승인','callback_data':f"p7a:{notification['id']}:approve"},
                     {'text':'허용 안 함','callback_data':f"p7a:{notification['id']}:deny"},
                 ]]}
             elif notification['kind']=='context_approval_needed':
-                body['reply_markup']={'inline_keyboard':[[
+                reply_markup={'inline_keyboard':[[
                     {'text':'이번 작업에 컨텍스트 공유 승인','callback_data':f"v1c:{notification['id']}:approve"},
                     {'text':'허용 안 함','callback_data':f"v1c:{notification['id']}:deny"},
                 ]]}
             try:
-                result=self.telegram_method('sendMessage',body)
+                result=self.telegram.send_message(notification['chat_id'],
+                                                  self.notification_text(notification['kind']),reply_markup)
                 message_id=result.get('message_id') if isinstance(result,dict) else None
                 self.store.update_notification(notification['id'],'sent',message_id if isinstance(message_id,int) else None)
             except ProviderError:
@@ -934,11 +935,8 @@ class AgentService:
         # unknown Telegram response could create a second card for one request.
         if self.store.task_card(job_id): return
         try:
-            result=self.telegram_method('sendMessage',{
-                'chat_id':chat_id,
-                'text':self.task_card_text(message,'queued'),
-                'reply_markup':self.task_card_markup(job_id,'queued'),
-            })
+            result=self.telegram.send_message(chat_id,self.task_card_text(message,'queued'),
+                                              self.task_card_markup(job_id,'queued'))
             message_id=result.get('message_id') if isinstance(result,dict) else None
             if isinstance(message_id,int): self.store.save_task_card(job_id,chat_id,message_id,'queued')
         except ProviderError:
@@ -949,10 +947,8 @@ class AgentService:
         if not card or card['state']==state:return
         markup=self.task_card_markup(job['id'],state)
         try:
-            self.telegram_method('editMessageText',{
-                'chat_id':card['chat_id'],'message_id':card['message_id'],
-                'text':self.task_card_text(job['message'],state),'reply_markup':markup,
-            })
+            self.telegram.edit_message_text(card['chat_id'],card['message_id'],
+                                            self.task_card_text(job['message'],state),markup)
             self.store.save_task_card(job['id'],card['chat_id'],card['message_id'],state)
         except ProviderError:
             pass
@@ -975,7 +971,7 @@ class AgentService:
                 card=self.store.task_card(job_id)
                 if (job and card and card['chat_id']==sender and card['message_id']==message.get('message_id')
                         and job['channel']==f"telegram:{generation}" and job['chat_id']==sender):
-                    try:self.telegram_method('sendMessage',{'chat_id':sender,'text':self.task_progress_text(job_id)})
+                    try:self.telegram.send_message(sender,self.task_progress_text(job_id))
                     except ProviderError:pass
                     changed=True
             elif authorized and isinstance(data,str) and data.startswith('p7c:'):
@@ -1005,7 +1001,7 @@ class AgentService:
                             job=dict(job)
                         else: job=None
                     if job:
-                        try:self.telegram_method('editMessageText',{'chat_id':sender,'message_id':message.get('message_id'),'text':'선택한 컨텍스트를 이 요청에만 연결했습니다. 작업을 시작할게요.','reply_markup':{'inline_keyboard':[]}})
+                        try:self.telegram.edit_message_text(sender,message.get('message_id'),'선택한 컨텍스트를 이 요청에만 연결했습니다. 작업을 시작할게요.',{'inline_keyboard':[]})
                         except ProviderError:pass
                         self.create_task_card(job['id'],job['message'],sender)
                         changed=True
@@ -1021,7 +1017,7 @@ class AgentService:
                         job=dict(job)
                     else:job=None
                 if job:
-                    try:self.telegram_method('editMessageText',{'chat_id':sender,'message_id':message.get('message_id'),'text':'컨텍스트 없이 이 요청을 시작할게요.','reply_markup':{'inline_keyboard':[]}})
+                    try:self.telegram.edit_message_text(sender,message.get('message_id'),'컨텍스트 없이 이 요청을 시작할게요.',{'inline_keyboard':[]})
                     except ProviderError:pass
                     self.create_task_card(job['id'],job['message'],sender)
                     changed=True
@@ -1043,9 +1039,8 @@ class AgentService:
                             self.store.put('document_sharing',{})
                             result_kind='denied'
                         self.store.update_notification(notification['id'],result_kind)
-                        try:self.telegram_method('editMessageText',{
-                            'chat_id':sender,'message_id':notification['message_id'],'text':self.notification_text(result_kind),'reply_markup':{'inline_keyboard':[]},
-                        })
+                        try:self.telegram.edit_message_text(sender,notification['message_id'],
+                            self.notification_text(result_kind),{'inline_keyboard':[]})
                         except ProviderError:pass
                         changed=True
             elif authorized and isinstance(data,str) and data.startswith('v1c:'):
@@ -1071,15 +1066,13 @@ class AgentService:
                         else:
                             result_kind='denied'
                         self.store.update_notification(notification['id'],result_kind)
-                        try:self.telegram_method('editMessageText',{
-                            'chat_id':sender,'message_id':notification['message_id'],
-                            'text':('이 작업의 컨텍스트 공유를 승인했습니다. 작업을 계속합니다.' if parts[2]=='approve' else '이 작업의 컨텍스트 공유를 허용하지 않았습니다.'),
-                            'reply_markup':{'inline_keyboard':[]},
-                        })
+                        try:self.telegram.edit_message_text(sender,notification['message_id'],
+                            ('이 작업의 컨텍스트 공유를 승인했습니다. 작업을 계속합니다.' if parts[2]=='approve' else '이 작업의 컨텍스트 공유를 허용하지 않았습니다.'),
+                            {'inline_keyboard':[]})
                         except ProviderError:pass
                         changed=True
             if authorized and isinstance(callback_id,str):
-                try:self.telegram_method('answerCallbackQuery',{'callback_query_id':callback_id,'text':'처리했습니다.' if changed else '처리할 수 있는 요청이 아닙니다.'})
+                try:self.telegram.answer_callback_query(callback_id,'처리했습니다.' if changed else '처리할 수 있는 요청이 아닙니다.')
                 except ProviderError:pass
 
     def ingest_update(self, update, generation):
@@ -1146,7 +1139,7 @@ class AgentService:
             cfg=self.store.config('telegram',{})
             token=self.store.secret('telegram_token')
         if not cfg.get('enabled') or not token: return
-        updates=self.telegram_method('getUpdates',{'offset':cfg.get('cursor',0),'timeout':5,'allowed_updates':['message','callback_query'],'limit':20})
+        updates=self.telegram.get_updates(cfg.get('cursor',0))
         for update in sorted(updates,key=lambda u:u.get('update_id',0)):
             if isinstance(update.get('callback_query'),dict):
                 self.ingest_callback(update['callback_query'],cfg['generation'])
@@ -1391,7 +1384,7 @@ class AgentService:
             if not allowed:return
             text=self.telegram_result_text(job['response'],job['error'])
             try:
-                self.telegram_method('sendMessage',{'chat_id':job['chat_id'],'text':text})
+                self.telegram.send_message(job['chat_id'],text)
                 status='sent'
             except ProviderError:
                 status='unknown'

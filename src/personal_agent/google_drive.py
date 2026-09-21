@@ -82,9 +82,17 @@ class GoogleDriveConnection:
         response = self.transport(TOKEN_ENDPOINT, urlencode({"client_id": self.client_id, "code": callback["code"], "code_verifier": pending["verifier"], "grant_type": "authorization_code", "redirect_uri": self.redirect_uri}), {"Content-Type": "application/x-www-form-urlencoded"})
         if not isinstance(response, dict) or not isinstance(response.get("access_token"), str):
             raise DriveAuthorizationError("Google Drive token exchange failed.")
-        tokens = {key: response[key] for key in ("access_token", "refresh_token", "expires_in", "scope") if key in response}
-        if DRIVE_READONLY not in str(tokens.get("scope", DRIVE_READONLY)):
+        # Exact-set equality, matching ``Gmail._validated_tokens`` and the
+        # drive_web_oauth check.  The previous form defaulted the missing key
+        # to DRIVE_READONLY, so a response that omitted ``scope`` entirely
+        # passed vacuously, and the substring test accepted drive.readonly
+        # *plus* scopes this connector never requested.  Fail closed on both.
+        if set(str(response.get("scope", "")).split()) != {DRIVE_READONLY}:
             raise DriveAuthorizationError("Google Drive read-only scope was not granted.")
+        tokens = {key: response[key] for key in ("access_token", "refresh_token", "expires_in") if key in response}
+        # Store the validated scope rather than the response's, so the
+        # use-time check below compares against a value this code decided.
+        tokens["scope"] = DRIVE_READONLY
         if isinstance(tokens.get("expires_in"), (int, float)):
             tokens["expires_at"] = time.time() + max(0, tokens["expires_in"])
         self.store.secret(TOKEN_SECRET, tokens)
@@ -118,6 +126,13 @@ class GoogleDriveConnection:
             prior = self.status()
             self.store.put(CONNECTION_CONFIG, {"state": "reauth-required", "audit": [*prior["audit"], "token-expired"][-50:]})
             raise DriveAuthorizationError("Google Drive authorization expired; reconnect required.")
+        # Re-validate on use, as Gmail does in ``_authorization_context``.
+        # Tightening the exchange alone would leave a credential stored by the
+        # earlier vacuous check usable forever; this refuses it instead.
+        if set(str(tokens.get("scope", "")).split()) != {DRIVE_READONLY}:
+            prior = self.status()
+            self.store.put(CONNECTION_CONFIG, {"state": "reauth-required", "audit": [*prior["audit"], "scope-rejected"][-50:]})
+            raise DriveAuthorizationError("Google Drive read-only scope was not granted; reconnect required.")
         return GoogleDrive(self.transport, tokens["access_token"])
 
     def _clear_pending(self):

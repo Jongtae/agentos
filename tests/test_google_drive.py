@@ -61,6 +61,71 @@ class DriveTests(unittest.TestCase):
         self.assertEqual(self.connection.status()["state"], "disconnected")
         self.assertEqual(GoogleDrive(lambda *args: (_ for _ in ()).throw(RuntimeError("offline")), "secret").health(), {"ok": False, "error": "RuntimeError"})
 
+    def test_scope_is_exact_at_exchange(self):
+        """SEC-DRIVE-SCOPE-01 / #432.
+
+        The previous check was ``DRIVE_READONLY not in str(tokens.get("scope",
+        DRIVE_READONLY))``.  Its default made the check vacuous when the server
+        omitted ``scope``, and the substring test accepted drive.readonly plus
+        anything else.  Both now fail closed.
+        """
+        refused = [
+            {},                                                   # key absent entirely
+            {"scope": ""},                                        # present but empty
+            {"scope": None},                                      # present but null
+            {"scope": DRIVE_READONLY + " https://www.googleapis.com/auth/drive"},   # over-granted
+            {"scope": "https://www.googleapis.com/auth/drive " + DRIVE_READONLY},   # over-granted, other order
+            {"scope": DRIVE_READONLY + "x"},                      # near-miss suffix
+            {"scope": "https://www.googleapis.com/auth/drive.metadata.readonly"},   # wrong scope
+        ]
+        for extra in refused:
+            with self.subTest(scope=extra.get("scope", "<absent>")):
+                pending = self.connection.connect()
+                self.connection.transport = lambda *args, _e=extra: {"access_token": "secret", **_e}
+                with self.assertRaises(DriveAuthorizationError):
+                    self.connection.complete({"code": "code", "state": pending["state"]})
+                self.assertEqual(self.connection.status()["state"], "disconnected")
+                self.assertEqual(self.store.secret("google_drive_tokens"), "")
+
+    def test_exact_scope_is_accepted_and_stored_canonically(self):
+        """The positive control: the refusals above are the scope gate, not a broken fixture."""
+        pending = self.connection.connect()
+        self.connection.transport = lambda *args: {"access_token": "secret", "scope": "  %s  " % DRIVE_READONLY}
+        self.connection.complete({"code": "code", "state": pending["state"]})
+        self.assertEqual(self.connection.status()["state"], "connected")
+        # Stored as this code's own validated value, not the response's text,
+        # so the use-time check compares against something we decided.
+        self.assertEqual(self.store.secret("google_drive_tokens")["scope"], DRIVE_READONLY)
+
+    def test_a_stored_credential_with_the_wrong_scope_is_refused_on_use(self):
+        """Tightening only the exchange would leave an already-stored credential usable.
+
+        A token accepted by the earlier vacuous check keeps working forever
+        unless the scope is re-checked where it is used, which is what Gmail
+        does in ``_authorization_context``.
+        """
+        pending = self.connection.connect()
+        self.connection.complete({"code": "code", "state": pending["state"]})
+        self.assertIsNotNone(self.connection.adapter())
+        for bad in ("", DRIVE_READONLY + " https://www.googleapis.com/auth/drive", "https://www.googleapis.com/auth/drive"):
+            with self.subTest(scope=bad):
+                tokens = self.store.secret("google_drive_tokens")
+                tokens["scope"] = bad
+                self.store.secret("google_drive_tokens", tokens)
+                with self.assertRaises(DriveAuthorizationError):
+                    self.connection.adapter()
+                self.assertEqual(self.connection.health(), {"ok": False, "state": "reauth-required"})
+
+    def test_a_stored_credential_missing_scope_entirely_is_refused_on_use(self):
+        pending = self.connection.connect()
+        self.connection.complete({"code": "code", "state": pending["state"]})
+        tokens = self.store.secret("google_drive_tokens")
+        tokens.pop("scope")
+        self.store.secret("google_drive_tokens", tokens)
+        with self.assertRaises(DriveAuthorizationError):
+            self.connection.adapter()
+        self.assertEqual(self.connection.health(), {"ok": False, "state": "reauth-required"})
+
     def test_expired_token_requires_reauth_and_reconnect_restores_health(self):
         pending = self.connection.connect(); self.connection.complete({"code": "code", "state": pending["state"]})
         tokens = self.store.secret("google_drive_tokens"); tokens["expires_at"] = 0; self.store.secret("google_drive_tokens", tokens)

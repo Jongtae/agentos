@@ -592,7 +592,14 @@ class PublicResearchTests(unittest.TestCase):
                 self.assertEqual(result['dynamic_facts'][dynamic]['status'],'observed')
                 self.assertIn(exact,result['brief'])
 
-    def test_adjacent_inventory_assertions_keep_their_own_qualifiers(self):
+    def test_unrelated_neighbour_hedge_does_not_qualify_the_inventory_fact(self):
+        """The neighbour hedges its OWN subject (a shuttle), not availability.
+
+        Renamed: this fixture has held no second inventory assertion since
+        the neighbourhood rule was rebuilt, so the previous name ("adjacent
+        inventory assertions keep their own qualifiers") described a case
+        the test no longer exercises.
+        """
         content='Shuttle service may run next week. Rooms are available today.'
         reader=Reader({'https://alpha.example/item':{
             'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
@@ -607,6 +614,74 @@ class PublicResearchTests(unittest.TestCase):
             'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
         return PublicResearch(search_result,reader,max_pages=1).run(
             'travel_plan','museum plan',query_source='owner_public_request')
+
+    def test_prefixed_note_beside_a_total_is_not_an_independent_printed_datum(self):
+        """`LABEL_VALUE_STATEMENT` accepted any colon in the first 40 chars.
+
+        That made every "Warning: ..."/"Disclaimer: ..." vendor note an
+        "independent printed datum", cleared the neighbour test and printed
+        a disclaimed amount into the owner-facing brief. The rescue it exists
+        for is a printed VALUE, so the right-hand side must be value-shaped.
+        """
+        for content in ('Grand total: USD 320. Warning: this page is a demo.',
+                        'Grand total: USD 320. Disclaimer: figures are for layout only.',
+                        'Grand total: USD 320. Note: the operator supplies this page.'):
+            with self.subTest(content=content):
+                self.assertEqual(self._dynamic(content)['dynamic_facts']['payable_total']['status'],'unknown')
+                self.assertNotIn('USD 320',self._dynamic(content)['brief'])
+        # The printed-datum rescue itself must keep working.
+        self.assertEqual(self._dynamic('Price: USD 90. Grand total: USD 320.')
+                         ['dynamic_facts']['payable_total']['status'],'observed')
+
+    def test_neighbour_asserting_the_opposite_availability_contradicts_the_fact(self):
+        """Availability is boolean, so UNavailability is not a restatement.
+
+        `FACT_PATTERNS['inventory']` matches `sold out` as readily as
+        `available`, so a neighbour denying availability used to clear the
+        fact. This is the inventory equivalent of the `TOTAL_ROLE_TERM`
+        conflict check for `payable_total`.
+        """
+        for content in ('Rooms are available. Rooms are sold out.',
+                        'Rooms are available. All rooms are out of stock.',
+                        'Rooms are available. Availability is sold out for these dates.'):
+            with self.subTest(content=content):
+                self.assertEqual(self._dynamic(content)['dynamic_facts']['inventory']['status'],'unknown')
+        # Different counted entities are two data points, not a contradiction.
+        self.assertEqual(self._dynamic('Rooms are available. Tickets are unavailable.')
+                         ['dynamic_facts']['inventory']['status'],'observed')
+
+    def test_present_tense_neighbour_about_the_counted_entity_qualifies_inventory(self):
+        """Countable nouns belong in the inventory neighbour vocabulary.
+
+        Omitting `room`/`suite`/`ticket`/`seat` let a direct present-tense
+        contradiction clear the fact. The recall case they were omitted for
+        is preserved by `_is_past_reference`, which needs an EXPLICIT past
+        time anchor rather than a bare past-tense verb.
+        """
+        for content in ('Rooms are available. Every room is taken through Friday.',
+                        'Rooms are available. The last suite was taken an hour ago.',
+                        'Rooms are available. The remaining seats are held for staff.'):
+            with self.subTest(content=content):
+                self.assertEqual(self._dynamic(content)['dynamic_facts']['inventory']['status'],'unknown')
+        # A dated remark about the entity's history still clears the fact.
+        self.assertEqual(self._dynamic('The room was renovated in 2020. Rooms are available.')
+                         ['dynamic_facts']['inventory']['status'],'observed')
+
+    def test_present_tense_pronoun_neighbour_is_judged_against_the_fact(self):
+        """`it`/`they` refer to an entity, but that entity IS the fact's subject.
+
+        Excluding personal pronouns outright let "They are held for group
+        contracts." and "It is a placeholder." clear the fact they deny.
+        """
+        for dynamic,content in (
+                ('inventory','Rooms are available. They are held for group contracts.'),
+                ('inventory','Rooms are available. It is reserved for a wedding party.'),
+                ('payable_total','Grand total: USD 320. It is a placeholder.')):
+            with self.subTest(content=content):
+                self.assertEqual(self._dynamic(content)['dynamic_facts'][dynamic]['status'],'unknown')
+        # A dated pronoun remark about the entity's history still clears.
+        self.assertEqual(self._dynamic('Rooms are available. They were renovated in 2020.')
+                         ['dynamic_facts']['inventory']['status'],'observed')
 
     def test_vendor_disclaimer_beside_a_total_leaves_the_total_unknown(self):
         """A neighbour that talks about the total without committing to one.
@@ -894,10 +969,21 @@ class PublicResearchTests(unittest.TestCase):
         `set-cookie`/`bearer` accepted only ':' and `phpsessid`/`sessionid`
         only '='/'=>', which allowed `Cookie; PHPSESSID abc123def456` - the
         original defect class verbatim.
+
+        The SCREAMING_SNAKE environment-variable labels are included because
+        they kept a private `\\s*=\\s*` set after the second unification:
+        `PGPASSWORD=hunter2` was blocked while `PGPASSWORD: hunter2`,
+        `MY_API_KEY: ...` and `DB_PASSWORD -> ...` were sent to the search
+        provider. They cannot fall through to LABEL_ASSIGNMENT because the
+        underscore prefix removes the word boundary `\\bapi[_ -]?key\\b`
+        needs, so they must carry LABEL_SEPARATOR themselves.
         """
         separators=(':','=',',',';','|','->','=>',' is ',' equals ',' as ')
         labels=('password','secret','client secret','api key','credentials','token','source','path','file',
-                'authorization','cookie','set-cookie','bearer','phpsessid','sessionid')
+                'authorization','cookie','set-cookie','bearer','phpsessid','sessionid',
+                'MY_API_KEY','DB_PASSWORD','APP_CLIENT_SECRET','STRIPE_TOKEN','SERVICE_ACCESS_KEY',
+                'X_API_KEY','APP_PRIVATE_KEY','SVC_PASSWD','A_SECRET_KEY',
+                'PGPASSWORD','MYSQL_PWD','REDISCLI_AUTH')
         def rejects(query):
             try:
                 validate_public_query(query,'owner_public_request');return False
@@ -917,6 +1003,48 @@ class PublicResearchTests(unittest.TestCase):
             with self.subTest(query=query):
                 with self.assertRaisesRegex(ValueError,'자격 증명'):
                     validate_public_query(query,'owner_public_request')
+
+    def test_basic_auth_credentials_block_every_shared_separator(self):
+        """`basic dXNlcjpwYXNz` was blocked; every other separator was not.
+
+        Found by sweeping the label -> value paths for the ND-3 defect class:
+        the allowlist-aware Basic/Bearer scanners inside
+        `validate_public_query` kept a bare `\\s+` instead of the shared
+        separator, so base64 `user:pass` reached the search provider under
+        ':', ';', ',', '->', '=>', '|', ' is ' and ' as '.
+        """
+        for separator in (' ',': ','; ',', ','-> ','=> ','| ',' is ',' as '):
+            with self.subTest(separator=separator):
+                with self.assertRaisesRegex(ValueError,'자격 증명'):
+                    validate_public_query(f'basic{separator}dXNlcjpwYXNz','owner_public_request')
+        # The allowlist must still pass ordinary public queries.
+        for query in ('basic room rates Seoul','basic economy fare comparison'):
+            with self.subTest(query=query):
+                self.assertEqual(validate_public_query(query,'owner_public_request'),query)
+
+    def test_environment_variable_secrets_block_every_shared_separator(self):
+        """`PGPASSWORD=hunter2` was blocked while `PGPASSWORD: hunter2` was not.
+
+        The two SCREAMING_SNAKE label paths kept a private `\\s*=\\s*` after
+        the shared separator was introduced, so every non-`=` separator sent
+        the credential to the search provider. These labels also cannot fall
+        back to `LABEL_ASSIGNMENT`: the underscore prefix destroys the
+        `\\bapi[_ -]?key\\b` word boundary, so nothing else catches them.
+        """
+        for query in ('PGPASSWORD=hunter2','PGPASSWORD: hunter2','PGPASSWORD; hunter2',
+                      'PGPASSWORD -> hunter2','MY_API_KEY: abcdef123456',
+                      'DB_PASSWORD -> abcdef123456','APP_CLIENT_SECRET; abcdef123456',
+                      'STRIPE_TOKEN | abcdef123456','SERVICE_ACCESS_KEY as abcdef123456',
+                      'MYSQL_PWD: hunter2','REDISCLI_AUTH, hunter2',
+                      'X_API_KEY => abcdef123456','APP_PRIVATE_KEY is abcdef123456'):
+            with self.subTest(query=query):
+                with self.assertRaisesRegex(ValueError,'자격 증명'):
+                    validate_public_query(query,'owner_public_request')
+        # Ordinary public queries must survive the widened separator set.
+        for query in ('Secret Garden hotel Seoul','hotel price comparison 2026',
+                      'best rail pass Japan'):
+            with self.subTest(query=query):
+                self.assertEqual(validate_public_query(query,'owner_public_request'),query)
 
     def test_credential_and_identity_synonyms_are_not_sent_to_the_search_provider(self):
         for query in ('auth token abcdefghijklmnop','auth_token=abcdef123456',

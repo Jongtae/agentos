@@ -71,6 +71,19 @@ NUMERIC_CREDENTIAL_LABEL = (
     r'security\s+code|verification\s+code|비밀번호|인증번호)'
 )
 PATH_LABEL = r'(?:path|file|source)'
+# A SCREAMING_SNAKE environment-variable name cannot reach the tier-1 labels
+# above: `\bapi[_ -]?key\b` has no word boundary inside `MY_API_KEY`, and
+# `\bpassword\b` none inside `DB_PASSWORD`, so an underscore-prefixed label
+# never falls through to LABEL_ASSIGNMENT and needs its own boundary. Like
+# every other label path it must use LABEL_SEPARATOR: keeping a private
+# `\s*=\s*` here is what left `PGPASSWORD: hunter2`, `MY_API_KEY: ...` and
+# `DB_PASSWORD -> ...` allowed while `PGPASSWORD=hunter2` was blocked.
+ENV_CREDENTIAL_SUFFIX = (
+    r'(?:_PASSWORD|_PASSWD|_SECRET|_SECRET_KEY|_PRIVATE_KEY|_CLIENT_SECRET|'
+    r'_TOKEN|_API_KEY|_ACCESS_KEY)'
+)
+ENV_CREDENTIAL_LABEL = rf'(?<![A-Za-z0-9])[A-Z][A-Z0-9_]{{0,80}}{ENV_CREDENTIAL_SUFFIX}'
+ENV_CREDENTIAL_NAME = r'(?:PGPASSWORD|MYSQL_PWD|REDISCLI_AUTH)'
 IDENTITY_LABEL = (
     r'(?:passport(?:\s*(?:no\.?|number))?|여권\s*번호|social\s+security\s+number|ssn|'
     r'national\s+id(?:\s*(?:no\.?|number))?|주민(?:등록)?\s*번호|card\s*(?:no\.?|number)|'
@@ -95,8 +108,8 @@ HIGH_CONFIDENCE_SECRET_PATTERNS = (
     re.compile(rf'(?i)\btoken\b{LABEL_SEPARATOR}[^&\s]+'),
     re.compile(rf'(?i)(?:\b(?:phpsessid|sessionid|jsessionid|csrftoken|connect\.sid|asp\.net_sessionid|laravel_session)|\.aspnetcore\.session){LABEL_SEPARATOR}[^&\s]+'),
     re.compile(r'(?i)\bsecret\s+[a-z0-9_-]{20,}\b'),
-    re.compile(r'(?i)\b[A-Z][A-Z0-9_]{1,80}(?:_PASSWORD|_PASSWD|_SECRET|_SECRET_KEY|_PRIVATE_KEY|_CLIENT_SECRET|_TOKEN|_API_KEY|_ACCESS_KEY)\s*=\s*\S+'),
-    re.compile(r'(?i)\b(?:PGPASSWORD|MYSQL_PWD|REDISCLI_AUTH)\s*=\s*\S+'),
+    re.compile(rf'(?i){ENV_CREDENTIAL_LABEL}{LABEL_SEPARATOR}\S+'),
+    re.compile(rf'(?i)\b{ENV_CREDENTIAL_NAME}\b{LABEL_SEPARATOR}\S+'),
     re.compile(r'(?i)(?<![\w])(?:\$[A-Z_][A-Z0-9_]*|\$\{[A-Z_][A-Z0-9_]*\})[/\\][^\s`"\'\[\](){}]+'),
     re.compile(r'(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*(?![A-Za-z0-9_-])'),
     re.compile(
@@ -177,6 +190,15 @@ FUTURE_DYNAMIC = re.compile(
 NEGATED_DYNAMIC_ASSERTION = re.compile(r'(?i)\b(?:is|are|was|were|be|been|has|have)\s+not\b')
 HISTORICAL_DYNAMIC = re.compile(
     r'(?i)\b(?:was|were|had\s+been|used\s+to|previously|formerly|historically)\b|'
+    r'\b(?:last|previous|prior)\s+(?:year|month|week|season|quarter)\b|'
+    r'\b(?:in|during)\s+(?:19|20)\d{2}\b|'
+    r'\b(?:as\s+of|through|until)\b[^.!?]{0,24}\b(?:19|20)\d{2}\b'
+)
+# ``HISTORICAL_DYNAMIC`` minus the bare past-tense verbs: an EXPLICIT past
+# time anchor. Used by `_is_past_reference` so that past tense alone cannot
+# excuse a neighbour from the fact it contradicts.
+HISTORICAL_TIME_ANCHOR = re.compile(
+    r'(?i)\b(?:previously|formerly|historically)\b|\bused\s+to\b|'
     r'\b(?:last|previous|prior)\s+(?:year|month|week|season|quarter)\b|'
     r'\b(?:in|during)\s+(?:19|20)\d{2}\b|'
     r'\b(?:as\s+of|through|until)\b[^.!?]{0,24}\b(?:19|20)\d{2}\b'
@@ -365,6 +387,32 @@ FACT_PROPERTY_TERMS = {
         r'quantity|quantities)\b|재고|매진|예약\s*가능|잔여'
     ),
 }
+# Countable nouns the inventory fact actually counts. These are a WEAKER tier
+# than the availability vocabulary above: naming a room says the neighbour is
+# about the counted entity, which bears on the fact only while the neighbour
+# speaks in the present. A past-tense remark about the same entity ("The room
+# was renovated in 2020.") is about its history, so it is excluded by
+# `_is_past_reference` below rather than by leaving the nouns out entirely.
+# Leaving them out let a direct present-tense contradiction ("Every room is
+# taken through Friday.") clear the fact.
+FACT_ENTITY_TERMS = {
+    'inventory': re.compile(
+        r'(?i)\b(?:rooms?|suites?|tickets?|seats?|items?|products?|units?|beds?|berths?)\b|'
+        r'객실|좌석|티켓'
+    ),
+}
+# Availability is boolean, so a neighbour asserting the OPPOSITE state is a
+# contradiction, not a confirmation. Without this, `FACT_PATTERNS['inventory']`
+# matched "sold out" as readily as "available" and a neighbour denying
+# availability was treated as restating the fact.
+INVENTORY_AVAILABLE = re.compile(
+    r'(?i)\bin\s*stock\b|\bavailable\b|\brestock(?:ed|ing|s)?\b|\bremaining\b|'
+    r'\bvacanc(?:y|ies)\b|재고\s*(?:있음|보유)|예약\s*가능|잔여'
+)
+INVENTORY_UNAVAILABLE = re.compile(
+    r'(?i)\bout\s+of\s+stock\b|\bsold\s*out\b|\bunavailable\b|\bwaitlist(?:ed)?\b|'
+    r'\bno\s+vacanc(?:y|ies)\b|재고\s*없음|매진'
+)
 # Role separation inside `payable_total`. A component value (a line price, a
 # nightly rate) printed beside a grand total is the commonest legitimate
 # product-page shape and is NOT a conflict. Only two differing TOTAL-role
@@ -401,14 +449,20 @@ SUBORDINATE_BOUNDARY = re.compile(
 # than by the weaker independence test used for a sentence with a subject of
 # its own.
 #
-# A personal pronoun (`it`, `they`) is deliberately excluded. It refers to an
-# ENTITY mentioned in the neighbouring sentence rather than to the assertion
-# itself, so "Rooms are available. They were renovated in 2020." is about the
-# rooms' history, not about whether one can be had.
 ANAPHORIC_SUBJECT = re.compile(
     rf'(?i)^\s*{NEIGHBOR_META_PREFIX}'
     r'(?:(?:this|that|these|those|such)\b|'
     r'the\s+(?:above|former|latter|foregoing|preceding)\b)'
+)
+# A personal pronoun (`it`, `they`) refers to an ENTITY rather than to the
+# assertion, but the entity it refers to IS this fact's subject, so a
+# present-tense pronoun clause ("They are held for group contracts.", "It is
+# a placeholder.") is still a statement about the fact. Excluding these
+# outright let a direct present-tense contradiction clear the fact. The
+# genuine exclusion is narrower and tense-based: see `_is_past_reference`,
+# which keeps "Rooms are available. They were renovated in 2020." observed.
+PERSONAL_ANAPHORIC_SUBJECT = re.compile(
+    rf'(?i)^\s*{NEIGHBOR_META_PREFIX}(?:it|they|them)\b'
 )
 
 
@@ -428,7 +482,15 @@ def _core_affirmative(text):
 # A printed `label: value` line ("Service fee: USD 25.", "Price: USD 90.")
 # has no verb, but it states a self-contained datum rather than commenting on
 # the line beside it, so it counts as an independent statement.
-LABEL_VALUE_STATEMENT = re.compile(r'^\s*[^:=]{1,40}[:=]\s*\S')
+#
+# The right-hand side must itself be VALUE-shaped. Accepting any non-space
+# character made every prefixed note an "independent printed datum", so
+# "Warning: this page is a demo." and every vendor disclaimer written in that
+# shape cleared the neighbour test and left a disclaimed total `observed`.
+LABEL_VALUE_RHS = (
+    r'(?:[$€£¥₩]\s?\d|(?:USD|EUR|GBP|JPY|KRW)\s?\d|\d)'
+)
+LABEL_VALUE_STATEMENT = re.compile(rf'(?i)^\s*[^:=]{{1,40}}[:=]\s*{LABEL_VALUE_RHS}')
 
 
 def _is_independent_statement(text):
@@ -444,10 +506,74 @@ def _is_independent_statement(text):
                 or LABEL_VALUE_STATEMENT.search(text))
 
 
+def _is_past_reference(text):
+    """True for an explicitly dated past neighbour that is otherwise plain.
+
+    Such a sentence describes the entity's history rather than the fact's
+    current value, so a weak-tier entity mention or a personal pronoun in it
+    does not make it a statement about this fact.
+
+    The anchor must be explicit. A bare past-tense verb is not enough: "The
+    last suite was taken an hour ago." is past tense but reports the
+    entity's CURRENT availability, whereas "The room was renovated in 2020."
+    anchors itself to a stated past time. Every non-historical disqualifier
+    still counts, so "It was an estimate." trips ``DYNAMIC_DISQUALIFIER`` and
+    is NOT exempted here.
+    """
+    return bool(
+        HISTORICAL_TIME_ANCHOR.search(text)
+        and not (
+            text.rstrip().endswith('?')
+            or NON_ASSERTIVE_DYNAMIC.search(text)
+            or DYNAMIC_DISQUALIFIER.search(text)
+            or DISCLAIMER_QUALIFIER.search(text)
+            or NEGATED_DYNAMIC_ASSERTION.search(text)
+            or FUTURE_DYNAMIC.search(text)
+        )
+    )
+
+
+def _inventory_polarity(text):
+    """True for an availability claim, False for an unavailability claim.
+
+    ``None`` when the sentence claims both or neither, which is not evidence
+    that it restates the fact.
+    """
+    positive=bool(INVENTORY_AVAILABLE.search(text))
+    negative=bool(INVENTORY_UNAVAILABLE.search(text))
+    if positive == negative:
+        return None
+    return positive
+
+
+def _inventory_entities(text):
+    """The countable entities a sentence speaks about, crudely normalized."""
+    return {match.group(0).casefold().rstrip('s')
+            for match in FACT_ENTITY_TERMS['inventory'].finditer(text)}
+
+
 def _neighbor_states_value(name, neighbor, fact_text):
     """True only when a property-bearing neighbour itself commits to a value."""
     if name == 'inventory':
-        return bool(FACT_PATTERNS['inventory'].search(neighbor))
+        if not FACT_PATTERNS['inventory'].search(neighbor):
+            return False
+        neighbor_state=_inventory_polarity(neighbor)
+        fact_state=_inventory_polarity(fact_text)
+        # An undeterminable state is not a restatement of the fact.
+        if neighbor_state is None or fact_state is None:
+            return False
+        if neighbor_state == fact_state:
+            return True
+        # Availability is boolean, so the OPPOSITE state contradicts the fact
+        # and must yield `unknown`. Entity separation mirrors `TOTAL_ROLE_TERM`
+        # for `payable_total`: two sentences about DIFFERENT counted entities
+        # ("Rooms are available. Tickets are unavailable.") are two data
+        # points, not an ambiguity. A neighbour naming no entity of its own
+        # ("Availability is sold out for these dates.") is about this fact's.
+        fact_entities=_inventory_entities(fact_text)
+        neighbor_entities=_inventory_entities(neighbor)
+        return bool(fact_entities and neighbor_entities
+                    and not fact_entities & neighbor_entities)
     amounts=_stated_amounts(neighbor)
     if not amounts:
         return False
@@ -470,7 +596,16 @@ def _neighbor_clears(name, neighbor, fact_text):
     """
     if ELLIPTICAL_VALUE_NEIGHBOR.search(neighbor) or ANAPHORIC_QUALIFIER.search(neighbor):
         return False
-    if not (FACT_PROPERTY_TERMS[name].search(neighbor) or ANAPHORIC_SUBJECT.search(neighbor)):
+    bears_on_fact=bool(FACT_PROPERTY_TERMS[name].search(neighbor)
+                       or ANAPHORIC_SUBJECT.search(neighbor))
+    if not bears_on_fact and not _is_past_reference(neighbor):
+        # Weak tier: the counted entity, or a personal pronoun whose referent
+        # is this fact's own subject. Both bear on the fact only in the
+        # present; a past-tense remark about them is history (see above).
+        entity_terms=FACT_ENTITY_TERMS.get(name)
+        bears_on_fact=bool((entity_terms and entity_terms.search(neighbor))
+                           or PERSONAL_ANAPHORIC_SUBJECT.search(neighbor))
+    if not bears_on_fact:
         return _is_independent_statement(neighbor)
     return bool(
         _core_affirmative(neighbor)
@@ -526,12 +661,16 @@ def validate_public_query(query, query_source):
     # Every scheme occurrence must be examined. Stopping at the first match
     # lets an allowlisted topic word shield a later credential, as in
     # 'basic room rates Basic dTpw', and transmits it to the search provider.
-    for bearer_value in re.finditer(r'(?i)\bbearer\s+([^\s,;:!?()\[\]{}]{8,})',scan_query):
+    # These two allowlist-aware scanners are label -> value paths as well, so
+    # they take the shared separator too. Keeping a bare `\s+` here left
+    # `basic, dXNlcjpwYXNz` (base64 `user:pass`) allowed on every separator
+    # except a space -- the ND-3 defect class on the Basic-auth path.
+    for bearer_value in re.finditer(rf'(?i)\bbearer(?:{LABEL_SEPARATOR}|\s+)([^\s,;:!?()\[\]{{}}]{{8,}})',scan_query):
         bearer_token=bearer_value.group(1).strip('"\'.-_/@#$%^&*+=\\|<>`~').casefold()
         if bearer_token not in PUBLIC_CREDENTIAL_TOPICS:
             sensitive=True
             break
-    for basic_value in re.finditer(r'(?i)\bbasic\s+([A-Za-z0-9+/=]{4,})(?![A-Za-z0-9+/=])',scan_query):
+    for basic_value in re.finditer(rf'(?i)\bbasic(?:{LABEL_SEPARATOR}|\s+)([A-Za-z0-9+/=]{{4,}})(?![A-Za-z0-9+/=])',scan_query):
         basic_token=basic_value.group(1)
         try:
             decoded=base64.b64decode(basic_token+'='*((-len(basic_token))%4),validate=True)

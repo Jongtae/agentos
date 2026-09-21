@@ -48,6 +48,21 @@ Sandbox, filesystem/process/network boundaries, capability tokens/broker, secret
 
 Permission diff, signature/provenance re-evaluation, advisory/revocation, rollback, disable/quarantine, uninstall, restart and preservation of owner Artifacts/Evidence:
 
+
+## Existing solutions review (Adopt / Adapt / Build)
+
+Required when this work materially implements or replaces commodity infrastructure. Otherwise write `N/A`.
+
+- problem/boundary:
+- official SDK/reference/standard candidates:
+- mature open-source candidates:
+- maintenance/security/supply-chain fit:
+- licence fit:
+- runtime/deployment/compatibility fit:
+- decision: `Adopt / Adapt / Build`
+- why rejected candidates are insufficient:
+- AgentOS-owned policy/authority boundary kept outside the dependency:
+
 ## Acceptance criteria
 
 - [ ]

@@ -1,0 +1,445 @@
+WEB-ADMIN-01 #382 deterministic browser transcript (2026-09-21 KST)
+
+Evidence boundaries
+-------------------
+This is a real headed Chromium run against tests/web_management_browser_fixture.py,
+an independent synthetic HTTP fixture. It does not run AgentService, a real Telegram
+ingest/delivery path, a model/provider, a connector, or any external effect. The
+separate executable Python test
+test_synthetic_telegram_request_reaches_web_read_models_without_web_chat covers
+the injected Telegram service/read-model path. The browser fixture marks its own
+channel as telegram:fixture-owner only so the renderer's provenance projection can
+be inspected; it is not evidence of live or service-backed Telegram operation.
+
+Prerequisite and server (terminal 1, repository root)
+-----------------------------------------------------
+  command -v npx
+  python3 tests/web_management_browser_fixture.py --port 18782
+
+Observed server output:
+  fixture-only http://127.0.0.1:18782
+
+Browser setup (terminal 2, repository root)
+-------------------------------------------
+  PWCLI=/Users/jongtaelee/.codex/skills/playwright/scripts/playwright_cli.sh
+  bash "$PWCLI" open http://127.0.0.1:18782/#tasks --headed
+  bash "$PWCLI" resize 1280 900
+  bash "$PWCLI" snapshot
+
+Observed coherent task projection:
+  list status: 진행 중
+  outcome heading/text: 진행 중 / 새 이벤트를 기다리고 있습니다.
+  no terminal result was rendered beside the active status.
+
+Polling refresh, expanded event, and synthetic provenance (A3/A7/A8)
+--------------------------------------------------------------------
+Refs below are from each immediately preceding clean-run snapshot.
+
+  bash "$PWCLI" click e33
+  bash "$PWCLI" click e35
+  curl -s -X POST -H 'Content-Type: application/json' -d '{}' \
+    http://127.0.0.1:18782/control/reset-observation
+  curl -s -X POST -H 'Content-Type: application/json' -d '{}' \
+    http://127.0.0.1:18782/control/append-event
+  sleep 7
+  curl -s http://127.0.0.1:18782/control/counts
+  bash "$PWCLI" snapshot
+  bash "$PWCLI" click e59
+  bash "$PWCLI" snapshot
+
+Observed outputs:
+  {"events": 2}
+  {"test_requests": 0, "apply_requests": 0, "events": 2, "task_polls": 3}
+  - the selected timeline updated from one to two events without reselection;
+  - the first event remained expanded and still showed 첫 이벤트 after the
+    event-driven rerender and three subsequent polling intervals;
+  - status/outcome remained coherently 진행 중; the succeeded event was an
+    event state, not a fabricated terminal task result;
+  - execution detail rendered 요청 경로 Telegram. This is the explicitly
+    synthetic fixture channel described in the evidence boundary above.
+
+Full local record search, focus/caret, and pending-delete preservation (A4/A7)
+-----------------------------------------------------------------------------
+  bash "$PWCLI" click e10
+  bash "$PWCLI" snapshot
+  bash "$PWCLI" fill e72 durable-key
+  bash "$PWCLI" snapshot
+  bash "$PWCLI" click e112
+  bash "$PWCLI" snapshot
+  bash "$PWCLI" click e72
+  bash "$PWCLI" press End
+  bash "$PWCLI" press ArrowLeft
+  bash "$PWCLI" press ArrowLeft
+  bash "$PWCLI" press ArrowLeft
+  curl -s -X POST -H 'Content-Type: application/json' -d '{}' \
+    http://127.0.0.1:18782/control/reset-observation
+  sleep 7
+  curl -s http://127.0.0.1:18782/control/counts
+  bash "$PWCLI" eval \
+    'el => JSON.stringify({focused:document.activeElement===el,value:el.value,start:el.selectionStart,end:el.selectionEnd})' e72
+  bash "$PWCLI" snapshot
+
+Observed outputs after four polls:
+  {"test_requests": 0, "apply_requests": 0, "events": 2, "task_polls": 4}
+  {"focused":true,"value":"durable-key","start":8,"end":8}
+  snapshot still showed 삭제 확인; no DELETE request occurred.
+
+The full-content search regression also ran in the same browser:
+  bash "$PWCLI" fill e72 needle-after-truncation
+  bash "$PWCLI" click e76
+  bash "$PWCLI" snapshot
+
+Observed: 로컬 원문 기록 1개를 찾았습니다., and the matching row whose
+needle begins after character 300 remained visible. The executable Node regression
+also checks both this case and exact durable-memory-key search.
+
+Unsaved Telegram field plus browser back/forward (A7/A8)
+--------------------------------------------------------
+Starting from records after the steps above:
+
+  bash "$PWCLI" click e11
+  bash "$PWCLI" snapshot
+  bash "$PWCLI" click e135
+  bash "$PWCLI" snapshot
+  bash "$PWCLI" click e154
+  bash "$PWCLI" snapshot
+  bash "$PWCLI" fill e162 fixture-unsaved-token
+  bash "$PWCLI" press ArrowLeft
+  bash "$PWCLI" press ArrowLeft
+  curl -s -X POST -H 'Content-Type: application/json' -d '{}' \
+    http://127.0.0.1:18782/control/reset-observation
+  sleep 7
+  curl -s http://127.0.0.1:18782/control/counts
+  bash "$PWCLI" eval \
+    'el => JSON.stringify({focused:document.activeElement===el,value:el.value,start:el.selectionStart,end:el.selectionEnd})' e162
+
+Observed after three polls:
+  {"test_requests": 0, "apply_requests": 0, "events": 2, "task_polls": 3}
+  {"focused":true,"value":"fixture-unsaved-token","start":19,"end":19}
+
+First positively verify that the fixture observer sees and identifies every relevant
+mutating verb (the fixture rejects these probes with 405 after recording them):
+
+  curl -s -o /dev/null -w '%{http_code}\n' -X PUT -d '{}' \
+    http://127.0.0.1:18782/api/observer-probe
+  curl -s -o /dev/null -w '%{http_code}\n' -X PATCH -d '{}' \
+    http://127.0.0.1:18782/api/observer-probe
+  curl -s -o /dev/null -w '%{http_code}\n' -X DELETE -d '{}' \
+    http://127.0.0.1:18782/api/observer-probe
+  curl -s http://127.0.0.1:18782/control/requests
+
+Observed positive-control output:
+  405
+  405
+  405
+  {"requests":[{"method":"PUT","path":"/api/observer-probe"},
+  {"method":"PATCH","path":"/api/observer-probe"},
+  {"method":"DELETE","path":"/api/observer-probe"}]}
+
+Then reset the proven observer, traverse actual browser history, and inspect the
+same unsaved field and every application request made during pane/history entry:
+
+  curl -s -X POST -H 'Content-Type: application/json' -d '{}' \
+    http://127.0.0.1:18782/control/reset-observation
+  bash "$PWCLI" go-back
+  bash "$PWCLI" go-back
+  bash "$PWCLI" go-forward
+  bash "$PWCLI" go-forward
+  sleep 3
+  bash "$PWCLI" eval \
+    'el => JSON.stringify({value:el.value,visible:!el.closest("form").hidden,url:location.hash})' e162
+  curl -s http://127.0.0.1:18782/control/requests
+
+Observed:
+  {"value":"fixture-unsaved-token","visible":true,"url":"#settings/external"}
+  The request log contained only GET /favicon.ico, /api/tasks, /api/home,
+  /api/state, and /api/personal-space entries. It contained no POST, PUT,
+  PATCH, or DELETE application request. Because the positive control above proves
+  that all four mutating verbs are recorded, their absence is meaningful. The reset
+  control request is deliberately excluded from the application log. Thus pane
+  entry and history navigation were observed read-only, not inferred from source
+  strings.
+
+Mobile list/detail (390x844)
+---------------------------
+  bash "$PWCLI" resize 390 844
+  bash "$PWCLI" click e9
+  bash "$PWCLI" snapshot
+  bash "$PWCLI" click e43
+  bash "$PWCLI" snapshot
+
+Observed: the list-only state became a detail overlay with a visible 목록으로
+control; status/outcome remained the coherent active pair.
+
+R5/R6 deterministic behavior and browser request counts
+---------------------------------------------------------
+The executable Node check in test_source_derived_task_record_and_model_regressions
+starts an unresolved old-key test, changes only the credential revision, resolves
+the old success, and asserts it is rejected. It then tests the new draft and applies
+once, asserting test_requests == 2 and save_requests == 1. This is executable async
+behavior, not a string assertion.
+
+In a fresh browser-fixture process, direct interaction also observed:
+  - changing only the key disabled apply and displayed 다시 테스트하세요;
+  - testing the new key enabled apply;
+  - applying once produced /control/counts values test_requests=2 and
+    apply_requests=1, proving there was no hidden third test.
+
+No credential in this transcript is real; fixture-unsaved-token is inert text and
+was never submitted.
+
+Exact-head review repairs: unassigned result, preset, capability, mobile delete
+-------------------------------------------------------------------------------
+In a fresh fixture process at 1280x900, the project detail rendered the completed
+Telegram fixture job with no workspace_id as:
+
+  미지정 작업 · fixture project result
+  완료 결과 저장
+
+The fixture intentionally omits workspace_id from both Telegram jobs. This is
+renderer evidence only; no live Telegram or connector was used.
+
+For the OpenRouter preset regression, the headed browser interaction was:
+
+  fill API 키 with secret-that-must-clear
+  click 도구 지원 무료 모델 보기
+  click Fixture Free · fixture/free
+  evaluate the API 키/provider/endpoint/model controls
+
+Observed result:
+  {"value":"","provider":"compatible","endpoint":"https://openrouter.ai/api/v1","model":"fixture/free"}
+
+For the local capability lifecycle, entering 외부 연결 rendered the enabled
+google-drive-read fixture capability. Clicking 일시 정지 first rendered an explicit
+google-drive-read pause preview and 확인/취소 controls. Only after clicking 확인 did
+the UI render paused and 다시 시작. /control/requests recorded two POST
+/api/settings/request entries (draft, then confirm); no connector was contacted.
+
+At 390x844, the browser searched durable-key, opened the only matching record,
+clicked 삭제 and then 삭제 확인. The fixture accepted the real DELETE and the
+post-delete browser evaluation returned:
+
+  {"detailClass":"panel detail","backVisible":false,"empty":true}
+
+Thus deleting the last matching row exits the fixed mobile-detail overlay and
+returns to the visible empty list. This remains deterministic fixture evidence.
+
+Polling disclosures, OAuth popup handoff, and empty mobile tasks
+----------------------------------------------------------------
+At 1280x900, the headed browser expanded both 실행 상세 and its nested 원래 요청
+보기 disclosure. The fixture appended a second event and the browser waited through
+three polling intervals. The post-poll evaluation observed:
+
+  {"technical":true,"original":true,"events":2}
+
+At 390x844, the browser selected the only task to enter its fixed detail overlay.
+POST /control/empty-tasks then made the next read return no ordinary tasks. After
+polling, the evaluation observed:
+
+  {"detailClass":"panel detail","empty":true}
+
+The task overlay therefore exited to the visible empty task list.
+
+For the same-origin OpenRouter callback contract, the main headed page stored an
+inert fixture flow, placed `stale-secret` in the form, and opened the fixture callback
+popup at `/?code=fixture-code&state=fixture-state`. The popup POSTed only to the
+local fixture `/api/openrouter/connect`, signalled its opener, and closed. The opener
+then cleared and reloaded the stale form. Its evaluation observed:
+
+  {"popupClosed":true,"key":"","provider":"compatible","model":"fixture/connected","feedback":"OpenRouter 연결 결과를 저장했습니다."}
+
+No real OpenRouter account, credential, provider request, or external network effect
+was used; `stale-secret`, the code, state, and verifier are inert fixture strings.
+
+OAuth invalidates an already-enabled exact-draft proof
+-----------------------------------------------------
+In a fresh headed run, the direct form was filled with `prior-tested-key` and its
+explicit fixture test completed. Before OAuth, the browser observed:
+
+  {"beforeOAuthApplyDisabled":false,"key":"prior-tested-key"}
+
+The same inert local callback flow above then completed. After the popup signalled
+and closed, the opener observed:
+
+  {"popupClosed":true,"afterOAuthApplyDisabled":true,"key":"","provider":"compatible","model":"fixture/connected","modelFeedback":"연결 결과가 바뀌었습니다. 적용 전에 다시 테스트하세요."}
+
+Thus the prior tested draft cannot be applied after OAuth changes the stored
+connection, including same-destination credential replacement. This used only the
+local fixture; no provider call or live credential was involved.
+
+Project detail races, exact durable counts, and bounded capability controls
+-------------------------------------------------------------------------
+The fixture exposes two project-detail read models while its global Personal Space
+feed intentionally contains only results from the second project. A fresh headed
+browser therefore rendered the rows from each durable project detail, not by
+misreading that global latest-results feed as totals:
+
+  회귀 프로젝트 · 0개 완료 결과
+  다른 프로젝트 · 31개 완료 결과
+
+The second detail still displays only its newest 30 result bodies, but its separate
+aggregate projection reports the exact durable count of 31.
+
+Next the fixture delayed the first project's save response. The browser clicked its
+완료 결과 저장 control and selected 다른 프로젝트 before the delayed response
+completed. The final browser evaluation was:
+
+  {"selected":["다른 프로젝트"],"detail":"다른 프로젝트","rows":["회귀 프로젝트 · 1개 완료 결과","다른 프로젝트 · 31개 완료 결과"]}
+
+The completed save updated the first project's durable count, but its late response
+did not replace the currently selected second-project detail.
+
+The executable Node regression also proves that `isolated-runtime-placeholder`
+receives no lifecycle buttons while the four exact capability IDs understood by the
+existing settings parser retain their valid controls. These are owned frontend and
+fixture observations only.
+
+In-flight OAuth refresh ordering and unsaved file drafts
+--------------------------------------------------------
+In a fresh headed browser, the three file controls were given unsaved local values.
+The fixture then delayed and captured a pre-OAuth `/api/state` response. While that
+poll was in flight it changed its stored model to the inert OpenRouter fixture and
+sent the same-origin completion signal. After the stale response and the queued
+post-OAuth refresh both completed, the browser observed:
+
+  {"provider":"compatible","model":"fixture/connected","root":"/tmp/unsaved-root","reference":"/tmp/unsaved-reference","output":"/tmp/unsaved-output","applyDisabled":true}
+
+Thus the stale poll cannot mark the pre-OAuth model current, the queued refresh
+loads the connected model, the prior Apply proof stays invalid, and model/OAuth
+rehydration does not overwrite unrelated unsaved file drafts. All callback, model,
+and file values in this run were fixture-only; no live provider or owner path was
+used.
+
+Independent file-form saves preserve the other draft
+----------------------------------------------------
+In headed Chromium the file-workspace reference/output controls were first given
+unsaved values, then the separate roots form was saved. After its refresh:
+
+  {"root":"/tmp/saved-root","reference":"/tmp/unsaved-reference","output":"/tmp/unsaved-output"}
+
+The reverse adversarial order then placed an unsaved root in the roots form and
+saved the file-workspace form. After that refresh:
+
+  {"root":"/tmp/unsaved-root","reference":"/tmp/saved-reference","output":"/tmp/saved-output"}
+
+Each successful form rehydrated only its own server-normalized fields. No owner
+path was used; every value and response came from the local fixture.
+
+Late mobile task detail cannot reopen an empty overlay
+------------------------------------------------------
+At 390x844 the fixture delayed `/api/tasks/task-382` for three seconds. The browser
+selected that task, the fixture emptied the task list before the delayed response,
+and the browser waited until both a polling refresh and the late response completed.
+The final evaluation observed:
+
+  {"detailClass":"panel detail","empty":true,"taskId":"","selectedRows":0}
+
+The empty transition invalidated both the selected task and its request sequence;
+the stale detail response therefore could not restore `mobile-detail`.
+
+Deletion count invalidation and saved membership beyond the display window
+--------------------------------------------------------------------------
+The fixture project had 31 durable results while exposing only 30 result bodies.
+Its 31st saved job was also present in the latest task read model. Before deletion,
+after deleting one visible result, and after opening the project, Chromium observed:
+
+  {"before":["회귀 프로젝트 · 0개 완료 결과","다른 프로젝트 · 31개 완료 결과"],"after":["회귀 프로젝트 · 0개 완료 결과","다른 프로젝트 · 30개 완료 결과"],"detail":"다른 프로젝트","saveButtons":0}
+
+Thus deletion invalidated and refreshed the cached aggregate immediately, while
+authoritative saved-job membership prevented the older saved job outside the 30-row
+display page from reappearing as a save candidate. The executable store regression
+also inserts 31 results, verifies the 30-body/31-count projection, rejects a duplicate
+save without advancing the project revision, and advances that revision on deletion.
+
+Pre-save polling cannot hydrate either file form from a stale snapshot
+---------------------------------------------------------------------
+In a fresh headed run, the fixture captured an empty file-settings response and
+delayed it while each form was saved. The POST completed during the in-flight poll;
+the browser then waited for both that stale response and the queued fresh refresh.
+After the roots race and then the file-workspace race, Chromium observed:
+
+  {"roots":{"root":"/tmp/race-saved-root","reference":"","output":""},"workspace":{"root":"/tmp/race-saved-root","reference":"/tmp/race-saved-reference","output":"/tmp/race-saved-output"}}
+
+Each pre-save response had older empty data. Neither could hydrate or mark its form
+loaded because its captured generation no longer matched; the queued response loaded
+the saved values. These are fixture paths only, not owner folders.
+
+Pre-delete project detail cannot repopulate the cache
+----------------------------------------------------
+The fixture captured the 31-result project detail, delayed it, and reported the
+request in flight. While it was pending, Chromium deleted `other result 29`. After
+the deletion refresh, fresh selected detail, and delayed pre-delete response all
+completed, the browser observed:
+
+  {"row":"다른 프로젝트 · 30개 완료 결과","detail":"다른 프로젝트","deletedVisible":false,"visibleResults":29}
+
+The deletion invalidated the earlier detail sequence before mutation. Consequently
+the captured 31-result response could neither render nor cache itself under the new
+workspace revision.
+
+Unrelated deletions do not cancel pending selected-project detail
+-----------------------------------------------------------------
+Two fresh headed scenarios delayed the initial project-B detail while an unrelated
+record was deleted. Deleting a memory during the pending B request produced:
+
+  {"selected":"다른 프로젝트","detail":"다른 프로젝트","results":30}
+
+In a separate fresh fixture state, project A first saved one result. Project B was
+then selected with its detail response delayed, and the A result was deleted while
+B remained selected. After every response completed, Chromium observed:
+
+  {"selected":"다른 프로젝트","detail":"다른 프로젝트","projectA":"회귀 프로젝트 · 0개 완료 결과","results":30}
+
+Deletion invalidation is now scoped to a result in the currently selected project.
+Memory deletion and deletion in A therefore leave B's pending request valid, while
+the earlier selected-project deletion case still invalidates and reloads B.
+
+Authoritative record pagination, retained selection, and deletion race
+---------------------------------------------------------------------
+On 2026-09-21 a fresh headed Chromium run used the local fixture's
+`/control/add-record-pages` control to add 105 synthetic notes. Opening `내 기록`
+issued `/api/personal-records` and showed authoritative totals before pagination:
+
+  {"notes":106,"memories":1,"temporary":0,"artifacts":30,"firstPage":100,"hasMore":true}
+
+After `더 보기`, the browser selected `extra durable note 104`, navigated to
+`작업 현황`, and returned to `내 기록`. The second page and exact detail remained:
+
+  {"selectedAfterReturn":"extra durable note 104","latePageRetained":true}
+
+For the mutation race, the fixture captured a pre-delete records response and held
+it for five seconds (`records-inflight=true`). While it was pending, Chromium used
+the two-step confirmation to delete `memory-exact`. The authoritative post-delete
+reload completed, then the captured stale response returned. The final snapshot was:
+
+  {"deleted":"memory-exact","memoryCount":0,"resurrected":false}
+
+The mutation invalidated the older records request before issuing DELETE and did
+not depend on the legacy `/api/personal-space` GET before refreshing authoritative
+records. These were synthetic fixture records only; no owner data, live provider,
+or external mutation was used.
+
+Polling convergence, slow task detail, and failed post-delete reload
+---------------------------------------------------------------------
+On 2026-09-21 a fresh headed Chromium run held `/api/tasks/task-382` for three
+seconds while the two-second management poll continued. After 4.5 seconds the
+selected task still converged to its one observed event instead of repeatedly
+invalidating every slow detail response:
+
+  {"events":1,"detailLoaded":true}
+
+While `내 기록` remained open, the fixture added 105 notes outside the records
+view. The next coalesced polling refresh updated the authoritative totals without
+changing the query or reloading the page:
+
+  {"notes":106,"memories":1,"temporary":0,"artifacts":30}
+
+Finally, Chromium confirmed deletion of `memory-exact` while the fixture forced
+the immediately following `/api/personal-records` reload to return HTTP 500.
+The UI displayed the refresh failure but removed the successfully deleted row
+and its old detail immediately:
+
+  {"durableKeyVisible":0,"error":"fixture records refresh failed","staleDeletedDetail":false}
+
+All controls and records in this run were fixture-only; no owner data, live
+provider, or external mutation was used.

@@ -327,6 +327,14 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             if path=='/api/capability-recommendations':return self.reply(200,service.capability_recommendation_request({'outcome':parse_qs(parts.query).get('outcome',[''])[0]}))
             if path=='/api/personal-knowledge':return self.reply(200,service.personal_knowledge_request({'query':parse_qs(parts.query).get('query',[''])[0]}, channel='local-companion'))
             if path=='/api/personal-space':return self.reply(200,store.personal_space())
+            if path=='/api/personal-records':
+                values=parse_qs(parts.query)
+                try:
+                    result=store.personal_records(
+                        values.get('query',[''])[0],values.get('filter',['all'])[0],
+                        int(values.get('limit',['100'])[0]),int(values.get('offset',['0'])[0]))
+                except (TypeError,ValueError) as error:return self.reply(400,{'error':str(error)})
+                return self.reply(200,result)
             if path=='/api/workspaces':return self.reply(200,{'workspaces':service.store.workspaces()})
             if path.startswith('/api/workspaces/'):
                 return self.reply(200,service.workspace(path.rsplit('/',1)[-1]))

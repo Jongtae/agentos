@@ -13,7 +13,7 @@ from .manifests import validate
 FORMAT = "agentos-owner-state-v1"
 ROOT = "agentos-owner-state"
 DB_RELATIVE = "private/quickstart.db"
-_RESET_CONFIG = ("telegram", "telegram_status", "model", "model_test", "subscription_engine", "document_sharing", "tool_run", "file_roots", "file_workspace", "file_workspace_document_jobs", "capability_registry", "connector_contract_state", "connector_pending_work")
+_RESET_CONFIG = ("telegram", "telegram_status", "model", "model_test", "model_draft_test", "subscription_engine", "document_sharing", "tool_run", "file_roots", "file_workspace", "file_workspace_document_jobs", "capability_registry", "connector_contract_state", "connector_pending_work")
 
 def _sha256(path):
     digest = hashlib.sha256()
@@ -45,6 +45,14 @@ def _portable_db(source, target):
                                 error='Restored work was quarantined; submit a new request to retry.',
                                 delivery=CASE WHEN delivery IN ('sending','pending') THEN 'unknown' ELSE delivery END
                             WHERE status IN ('queued','running')""")
+        if "memory_approvals" in tables:
+            # Approval tokens are runtime-secret-bound and cannot survive a
+            # portable boundary. Quarantine every outstanding row, and remove
+            # the raw owner memory label from *all* approval rows: a consumed
+            # or expired row keeps no useful function after restore, while its
+            # memory_key is a plaintext owner label.
+            copy.execute("UPDATE memory_approvals SET state='revoked' WHERE state='issued'")
+            copy.execute("UPDATE memory_approvals SET memory_key=''")
         row = copy.execute("SELECT value FROM config WHERE key='a2a_delegations'").fetchone()
         if row:
             try: delegations = json.loads(row[0])

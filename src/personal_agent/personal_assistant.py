@@ -30,10 +30,47 @@ class PersonalAssistantOrchestrator:
         self.store.put('personal_assistant_evidence', rows[-100:])
         return event
 
-    def _drive_adapter(self):
+    # PA1-CONV-01 / #393 resolving the Drive `.read()` gap carried from
+    # REUSE-R1c / #442.  The resolution is that this seam stays unsatisfiable
+    # by any shipped class, deliberately, and refuses in the owner's language
+    # instead of crashing.  Recording why, because adapting it looks reasonable
+    # until the two owner identity types are compared.
+    #
+    # `DriveWebOAuthHandoff.read_selected(telegram_owner_id, file_id,
+    # transport)` cannot be adapted to this seam's `.read(file_id)` without
+    # dissolving the gate that makes it safe.  `select_files_for_grant` stores
+    # the Picker selection owner only when `isinstance(owner, int)` -- a
+    # Telegram chat id -- while `_request` below rejects any orchestrator owner
+    # that is not a non-empty `str`, and `assert_selected` compares the two
+    # with `!=`, so `42 != '42'`.  No shipped path writes a non-int selection
+    # owner, so the seam's string owner can never match a record the Picker
+    # flow produced, and `assert_selected` would refuse every request this
+    # seam could make.  The only way to make one pass is to hand it the owner
+    # read back out of the very selection record it is checking, which is the
+    # bypass the issue forbids -- so the adapter is not written.
+    #
+    # Stated precisely because the stronger form is false: `select_files` is
+    # the only writer of the selection key and has no type check of its own,
+    # so the disjointness is a property of the shipped write paths rather
+    # than of the types.  That also makes `assert_selected`'s owner
+    # comparison type-loose, which is recorded in #445.
+    #
+    # This is a decision now and a defect later: it becomes one the moment an
+    # orchestrator request can carry a Drive identity the Picker gate can
+    # actually evaluate, because a refusal would then be hiding a capability
+    # the owner had already authorized.  Until then the owner-reachable Drive
+    # capability is `AgentService.selected_drive_context`, which holds the chat
+    # id the gate needs.  `search` is served here -- the handoff provides it as
+    # a deliberate refusal -- so the required shape is named per call site
+    # rather than assumed, and an absent one is reported instead of leaving the
+    # owner-safe envelope as an AttributeError.
+    def _drive_adapter(self, method):
         if self.drive is None:
-            raise AssistantRequestError('Google Drive 연결을 먼저 설정하세요.')
-        return self.drive.adapter() if hasattr(self.drive, 'adapter') else self.drive
+            raise AssistantRequestError('이 요청 경로에는 Google Drive 어댑터가 연결되어 있지 않습니다. Google Drive 파일은 Telegram 대화에서 Google Drive를 연결하고 Google Picker로 선택해 읽을 수 있습니다.')
+        adapter = self.drive.adapter() if hasattr(self.drive, 'adapter') else self.drive
+        if not callable(getattr(adapter, method, None)):
+            raise AssistantRequestError('연결된 Google Drive 어댑터는 이 동작을 제공하지 않습니다. Google Drive 파일은 Telegram 대화에서 Google Picker로 선택해 읽을 수 있습니다.')
+        return adapter
 
     def _drive_excerpts(self):
         return self.store.config('drive_excerpt_approvals', {})
@@ -85,7 +122,7 @@ class PersonalAssistantOrchestrator:
         if intent == 'drive-search':
             try:
                 self.registry.require_enabled('google-drive-read', 'read')
-                rows = self._drive_adapter().search(value.get('query', message))
+                rows = self._drive_adapter('search').search(value.get('query', message))
                 safe = [{'id': row.get('id', ''), 'name': row.get('name', ''), 'mime_type': row.get('mime_type', '')} for row in rows[:20] if isinstance(row, dict)]
                 evidence = self._evidence('drive-search', 'completed', result_count=len(safe))
                 return {'state': 'completed', 'response': 'Google Drive에서 관련 파일을 찾았습니다.', 'sources': safe, 'evidence': evidence}
@@ -128,7 +165,7 @@ class PersonalAssistantOrchestrator:
             file_id, start, length = value.get('file_id'), value.get('start', 0), value.get('length', 4000)
             if not isinstance(file_id, str) or not file_id or not isinstance(start, int) or start < 0 or not isinstance(length, int) or not 1 <= length <= 4000:
                 raise AssistantRequestError('선택할 Drive 발췌문 범위를 확인하세요.')
-            content = self._drive_adapter().read(file_id)
+            content = self._drive_adapter('read').read(file_id)
             if isinstance(content, dict): content = content.get('text')
             if not isinstance(content, str):
                 raise AssistantRequestError('Drive 파일 내용을 안전하게 읽지 못했습니다.')

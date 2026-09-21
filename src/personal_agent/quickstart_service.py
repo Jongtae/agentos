@@ -20,6 +20,14 @@ from .settings_orchestrator import SettingsOrchestrator, SettingsError
 from .capability_recommendations import CapabilityRecommendationOrchestrator
 from .personal_knowledge import PersonalKnowledgeOrchestrator
 from .file_workspace import FileWorkspace
+from .connector_contract import ConnectorContractError
+from .gmail import GMAIL_CONNECTOR_ID
+from .conversation_handoff import (TelegramChannel, ConnectorHandoff, ConversationFocus,
+                                   ConversationHandoffError, IntentClassifier,
+                                   INTENT_ASSISTANT, INTENT_GREETING, INTENT_KNOWLEDGE,
+                                   INTENT_MAIL_SEARCH, INTENT_NOTE_CREATE, INTENT_NOTE_LIST,
+                                   INTENT_RECOMMENDATION, INTENT_SETTINGS,
+                                   INTENT_WORKSPACE_SEARCH, SUPERSEDED_WORK_ERROR)
 
 SYSTEM = ('You are the user’s personal AgentOS assistant. Respond in the user’s language. '
           'This preview supports conversation, notes, connected local documents, and local read-only web search and weather tools. '
@@ -120,10 +128,15 @@ def subscription_public_evidence(result):
 class AgentService:
     def __init__(self, store, adapter=None, telegram_transport=None, subscription_engines=None, execution_adapter=None,
                  assistant_orchestrator=None, isolated_engine_adapter=None, isolated_mcp_registry=None,
-                 drive_web_oauth=None):
+                 drive_web_oauth=None, connector_registry=None, gmail=None):
         self.store=store
         self.adapter=adapter or ModelAdapter()
         self.telegram_transport=telegram_transport or request_json
+        # Transport seam.  Both resolvers are late bound: `telegram_transport`
+        # stays a live reassignable attribute and the bot token is read from
+        # the secret store per call, never captured here.
+        self.telegram=TelegramChannel(lambda:self.telegram_transport,
+                                      lambda:self.store.secret('telegram_token'))
         self.subscription_engines=subscription_engines or SubscriptionEngines()
         self.execution_adapter=execution_adapter or BoundedExecutionAdapter()
         self.isolated_engine_adapter=isolated_engine_adapter
@@ -131,13 +144,35 @@ class AgentService:
         self.isolated_mcp_proxy=IsolatedMcpProxy(self.isolated_mcp_registry)
         # Capability adapters never receive an HTTP or Telegram endpoint.  A
         # caller may supply reviewed adapters only through this policy owner.
+        #
+        # `drive=` is left unpopulated on purpose, which PA1-CONV-01 / #393
+        # decided rather than inherited.  The shipped Drive connector gates
+        # every read on a Google Picker selection keyed by an integer Telegram
+        # chat id, and an orchestrator request carries a string owner instead,
+        # so nothing can be handed in here that satisfies
+        # `PersonalAssistantOrchestrator._drive_adapter('read')` without
+        # bypassing that gate.  The owner-reachable Drive path is
+        # `selected_drive_context` below, which holds the chat id.  The full
+        # reasoning and the condition that turns this into a defect are
+        # recorded at `_drive_adapter`; do not wire `drive=` without it.
         self.assistant_orchestrator=assistant_orchestrator or PersonalAssistantOrchestrator(store)
         self.settings_orchestrator=SettingsOrchestrator(store)
         self.recommendation_orchestrator=CapabilityRecommendationOrchestrator(store)
         self.personal_knowledge_orchestrator=PersonalKnowledgeOrchestrator(store)
+        # Routing authority.  The classifier reads literal cue tables, never a
+        # model, and the focus record it feeds is content free.
+        self.intent_classifier=IntentClassifier(workspace_search=workspace_search_request)
+        self.conversation_focus=ConversationFocus(store)
         # This is injected only by an owner-local deployment which supplies an
         # encrypted secret store and its local key.  It is never auto-enabled.
         self.drive_web_oauth=drive_web_oauth
+        # Connector prerequisite/handoff/resume.  Like `drive_web_oauth` this
+        # is injected by an owner-local deployment and is never auto-enabled:
+        # with no registry there are no declared connectors, so no ordinary
+        # request can be parked waiting for one.
+        self.connector_registry=connector_registry
+        self.connector_handoff=ConnectorHandoff(store,connector_registry) if connector_registry else None
+        self.gmail=gmail
         self.drive_read=None
         self.drive_picker_config=None
         self.lock=threading.RLock()
@@ -190,6 +225,19 @@ class AgentService:
         if not isinstance(body,dict) or body.get('operation','retrieve')!='retrieve':
             raise ValueError('개인 지식 검색 요청을 확인하세요.')
         return self.personal_knowledge_orchestrator.retrieve(owner_id,channel,body.get('query'))
+
+    def classify_intent(self, prompt, model_suggestion=None):
+        """Decide where one owner utterance goes, before anything is invoked.
+
+        The decision is AgentOS's.  No model is consulted to produce it, and
+        the conversation never routes on a model's opinion of what the owner
+        meant.  ``model_suggestion`` exists so that if a later unit ever does
+        obtain one, there is exactly one constrained way in - it may narrow an
+        ambiguity AgentOS already found and nothing else.  No call site in
+        this service supplies one.
+        """
+        return self.intent_classifier.classify(prompt, model_suggestion=model_suggestion,
+                                               focus=self.conversation_focus.current())
 
     @staticmethod
     def settings_response(result):
@@ -256,7 +304,7 @@ class AgentService:
     def _progress_status(job):
         status=job.get('status')
         if status in ('queued','running'):return 'active','진행 중'
-        if status in ('awaiting_context','awaiting_drive') or job.get('delivery')=='unknown':return 'attention','확인 필요'
+        if status in ('awaiting_context','awaiting_drive','awaiting_connection') or job.get('delivery')=='unknown':return 'attention','확인 필요'
         if status in ('failed','partial','interrupted'):return 'attention','확인 필요'
         if status in ('cancelled',):return 'finished','취소됨'
         if status in ('succeeded',):return 'finished','완료'
@@ -289,6 +337,7 @@ class AgentService:
             waits=[]
             if job.get('status')=='awaiting_context':waits.append('입력 대기')
             elif job.get('status')=='awaiting_drive':waits.append('연결 선택 대기')
+            elif job.get('status')=='awaiting_connection':waits.append('연결 대기')
             for notification in self.store.task_notifications(job['id']):
                 if notification['kind'] in ('approval_needed','context_approval_needed') and notification['state'] in ('queued','sent'):
                     waits.append('승인 대기')
@@ -373,9 +422,9 @@ class AgentService:
             buttons.append([{'text':f'최근 {kind} {index}', 'callback_data':f'p7x:{token}'}])
         buttons.append([{'text':'컨텍스트 없이 진행', 'callback_data':f'p7n:{job_id}'}])
         try:
-            sent=self.telegram_method('sendMessage',{'chat_id':chat_id,
-                'text':'이번 요청에 참고할 개인 컨텍스트를 하나 선택하세요. 내용은 이 목록에 표시되지 않으며, 선택하지 않아도 요청은 그대로 진행할 수 있어요.',
-                'reply_markup':{'inline_keyboard':buttons}})
+            sent=self.telegram.send_message(chat_id,
+                '이번 요청에 참고할 개인 컨텍스트를 하나 선택하세요. 내용은 이 목록에 표시되지 않으며, 선택하지 않아도 요청은 그대로 진행할 수 있어요.',
+                {'inline_keyboard':buttons})
             self.store.save_telegram_context_choice_message(tokens,sent.get('message_id') if isinstance(sent,dict) else None)
             return True
         except ProviderError:
@@ -671,12 +720,170 @@ class AgentService:
                 'test_proof':proof}
 
     def telegram_call(self,token,method,body):
-        result=self.telegram_transport(f'https://api.telegram.org/bot{token}/{method}',body,{},timeout=15)
-        if not result.get('ok'): raise ProviderError('Telegram 요청이 실패했습니다. 봇 설정을 확인하세요.')
-        return result['result']
+        """Thin delegation to the transport seam for an unstored bot token."""
+        return self.telegram.call_with_token(token,method,body)
 
     def telegram_method(self, method, body):
-        return self.telegram_call(self.store.secret('telegram_token'),method,body)
+        """Thin delegation to the transport seam for the stored bot token."""
+        return self.telegram.call(method,body)
+
+    # -- connector prerequisite, handoff and exactly-once resume ----------
+    def connector_owner_id(self, job):
+        """One connector owner identity, stable across bot generations.
+
+        A job's `channel` embeds the Telegram generation, so the `owner`
+        string `run_one` builds for capability orchestrators changes every
+        time the bot is reconnected.  A connector grant must not be orphaned
+        by reconnecting a bot, so connector identity is the paired chat
+        itself; every web/local job is the one local owner.
+        """
+        chat=job.get('chat_id')
+        return f'telegram:{chat}' if isinstance(chat,int) else 'local-owner'
+
+    def telegram_generation(self):
+        generation=self.store.config('telegram',{}).get('generation')
+        return generation if isinstance(generation,str) else ''
+
+    def _owner_generation(self, owner_id):
+        """Bind a paired-chat handoff to the bot generation that created it."""
+        return self.telegram_generation() if str(owner_id).startswith('telegram:') else ''
+
+    def _notify_owner(self, owner_id, text):
+        """Best-effort owner message; a lost bubble never changes durable state.
+
+        The destination is gated on the paired owner, not on ``owner_id``.
+        Callers reach here on refusal paths -- including ``wrong_owner`` -- and
+        ``owner_id`` is exactly the value those paths have just decided not to
+        trust, so deriving a chat id from it would message an unpaired chat at
+        the one moment the code knows better.  Same predicate as every other
+        outbound send in this file.
+        """
+        chat=str(owner_id)[len('telegram:'):] if str(owner_id).startswith('telegram:') else ''
+        if not chat.isdigit():return False
+        cfg=self.store.config('telegram',{})
+        if not (cfg.get('enabled') and chat==str(cfg.get('user_id'))):return False
+        try:
+            self.telegram.send_message(int(chat),text)
+        except ProviderError:
+            return False
+        return True
+
+    def connection_handoff(self, job, decision):
+        """Owner guidance when a required connector is unavailable, else None.
+
+        Nothing is invoked here and no connection is ever reported as having
+        happened.  When the capability is not configured in this installation
+        at all there is no connection to offer, so the request fails with that
+        stated reason instead of being parked for a handoff that cannot come.
+        """
+        connector_id=ConnectorHandoff.requirement(decision)
+        if connector_id is None:
+            return None
+        if not self.connector_handoff:
+            # This installation declares no connectors at all, so there is no
+            # prerequisite to detect and no connection to offer.  Injecting
+            # nothing must change nothing: every intent keeps exactly the
+            # behaviour it had before this unit, which the pre-existing suite
+            # is the evidence for.
+            return None
+        if not self.connector_handoff.known(connector_id):
+            raise ValueError(ConnectorHandoff.unavailable(connector_id))
+        owner_id=self.connector_owner_id(job)
+        result=self.connector_handoff.prerequisite(owner_id,connector_id)
+        if result is None:
+            return None
+        try:
+            _handle,superseded=self.connector_handoff.park(owner_id,job['id'],connector_id,
+                                                           generation=self._owner_generation(owner_id))
+        except ConnectorContractError as exc:
+            raise ValueError(ConnectorHandoff.refusal_text(exc.reason)) from None
+        if superseded:
+            self.cancel_superseded_work([superseded])
+        return self.connector_handoff.guidance(result)
+
+    def cancel_superseded_work(self, work_ids):
+        """Cancel parked Work whose resume path a newer request replaced.
+
+        Both statements are guarded on `awaiting_connection`, so a Work that
+        already resumed, failed or was cancelled is never rewritten.
+        """
+        if not work_ids:return []
+        cancelled=[]
+        with self.store.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            for work_id in work_ids:
+                db.execute("UPDATE jobs SET delivery='cancelled' WHERE id=? AND status='awaiting_connection' AND delivery='pending'",(work_id,))
+                if db.execute("UPDATE jobs SET status='cancelled',error=? WHERE id=? AND status='awaiting_connection'",(SUPERSEDED_WORK_ERROR,work_id)).rowcount==1:
+                    cancelled.append(work_id)
+        return cancelled
+
+    def supersede_pending_handoffs(self, except_work_id=None):
+        """Drop every pending resume path because the owner changed course."""
+        if not self.connector_handoff:return []
+        dropped=[work_id for work_id in self.connector_handoff.supersede() if work_id!=except_work_id]
+        return self.cancel_superseded_work(dropped)
+
+    def _schedule_resumed_work(self, work_id):
+        """Re-queue one parked Work and report whether *this* call did it.
+
+        The `AND status='awaiting_connection'` predicate is the exactly-once
+        decision, and it is the same compare-and-set the shipped Drive resume
+        already uses.  `rowcount` is read rather than discarded precisely so a
+        duplicate callback, a recovered claim and a restart are observably
+        refused here instead of silently making the resume at-least-once.
+        """
+        with self.store.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            return db.execute("UPDATE jobs SET status='queued',error=NULL,delivery='none' WHERE id=? AND status='awaiting_connection'",(work_id,)).rowcount==1
+
+    def resume_connector_work(self, connector_id, owner_id, granted_scopes):
+        """Resume the Work parked for one connector, exactly once.
+
+        This never reports a connection itself.  The caller must already have
+        observed one, and the Wave 0 contract re-checks `require_connected`
+        inside `claim`, so a handoff whose connector is denied, disconnected,
+        re-auth pending or blocked is refused rather than resumed.
+        """
+        if not self.connector_handoff:
+            raise ValueError(ConnectorHandoff.unavailable(connector_id))
+        try:
+            work_id,scheduled=self.connector_handoff.resume(
+                owner_id,connector_id,granted_scopes,self._schedule_resumed_work,
+                generation=self._owner_generation(owner_id),abandon=self._abandon_parked_work)
+        except ConversationHandoffError as exc:
+            self._notify_owner(owner_id,ConnectorHandoff.refusal_text(exc.reason))
+            raise
+        return {'work_id':work_id,'scheduled':scheduled,'connector_id':connector_id}
+
+    def _abandon_parked_work(self, work_id, reason):
+        """Give a Work a terminal state when its handoff died.
+
+        Every exit from `awaiting_connection` is reached through the resume
+        index, so releasing a dead handle without this would strand the Work:
+        it cannot be resumed, superseded or denied, the task card offers no
+        cancel because that button is only drawn for `queued`, and progress
+        reports `연결 대기` indefinitely.  C8 requires a failure to stay
+        explicit, so an expired or otherwise dead handoff fails the Work with
+        the same wording the owner would have seen from an outright denial.
+        """
+        text=ConnectorHandoff.refusal_text(reason)
+        with self.store.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            db.execute("UPDATE jobs SET delivery='cancelled' WHERE id=? AND status='awaiting_connection' AND delivery='pending'",(work_id,))
+            db.execute("UPDATE jobs SET status='failed',error=? WHERE id=? AND status='awaiting_connection'",(text,work_id))
+
+    def deny_connector_work(self, connector_id, owner_id, reason='denied'):
+        """Fail the parked Work explicitly after a refused or failed connection."""
+        if not self.connector_handoff:
+            raise ValueError(ConnectorHandoff.unavailable(connector_id))
+        work_id=self.connector_handoff.deny(owner_id,connector_id)
+        text=ConnectorHandoff.refusal_text(reason)
+        with self.store.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            db.execute("UPDATE jobs SET delivery='cancelled' WHERE id=? AND status='awaiting_connection' AND delivery='pending'",(work_id,))
+            db.execute("UPDATE jobs SET status='failed',error=? WHERE id=? AND status='awaiting_connection'",(text,work_id))
+        self._notify_owner(owner_id,text)
+        return work_id
 
     @staticmethod
     def requests_drive_access(text):
@@ -690,21 +897,15 @@ class AgentService:
         if not self.drive_web_oauth:
             return False
         offer = self.drive_web_oauth.begin(telegram_owner_id, pending_job_id)
-        self.telegram_method('sendMessage', {
-            'chat_id': telegram_owner_id,
-            'text': offer['message'],
-            'reply_markup': {'inline_keyboard': [[offer['button']]]},
-        })
+        self.telegram.send_message(telegram_owner_id, offer['message'],
+                                   {'inline_keyboard': [[offer['button']]]})
         return True
 
     def publish_drive_connection_status(self, telegram_owner_id):
         """Send only a redacted Drive lifecycle message to the paired owner."""
         if not self.drive_web_oauth:
             return False
-        self.telegram_method('sendMessage', {
-            'chat_id': telegram_owner_id,
-            'text': self.drive_web_oauth.telegram_status_message(),
-        })
+        self.telegram.send_message(telegram_owner_id, self.drive_web_oauth.telegram_status_message())
         return True
 
     def complete_drive_web_oauth(self, callback, telegram_owner_id, exchange):
@@ -729,8 +930,8 @@ class AgentService:
         if job_id:
             with self.store.db() as db:
                 db.execute("UPDATE jobs SET status='queued', error=NULL, delivery='none' WHERE id=? AND status='awaiting_drive'", (job_id,))
-        self.telegram_method('sendMessage', {'chat_id': telegram_owner_id,
-                                             'text': '선택한 Google Drive 파일을 준비했습니다. 원래 요청을 계속합니다.'})
+        self.telegram.send_message(telegram_owner_id,
+                                   '선택한 Google Drive 파일을 준비했습니다. 원래 요청을 계속합니다.')
         return result
 
     def select_drive_picker_files(self, grant, files):
@@ -748,8 +949,8 @@ class AgentService:
             with self.store.db() as db:
                 db.execute("UPDATE jobs SET status='queued', error=NULL, delivery='none' WHERE id=? AND status='awaiting_drive'", (job_id,))
         try:
-            self.telegram_method('sendMessage', {'chat_id':owner,
-                                                  'text':'선택한 Google Drive 파일을 준비했습니다. 요청을 계속합니다.'})
+            self.telegram.send_message(owner,
+                                       '선택한 Google Drive 파일을 준비했습니다. 요청을 계속합니다.')
         except ProviderError:
             # The capability state and queued job stay valid even when a
             # transient Telegram notification cannot be delivered.
@@ -784,8 +985,8 @@ class AgentService:
         token=body.get('token','')
         if not isinstance(token,str) or not 10<=len(token)<=300 or not all(c.isalnum() or c in ':_-' for c in token):
             raise ValueError('BotFather에서 발급한 봇 토큰을 입력하세요.')
-        me=self.telegram_call(token,'getMe',{})
-        webhook=self.telegram_call(token,'getWebhookInfo',{})
+        me=self.telegram.get_me(token)
+        webhook=self.telegram.get_webhook_info(token)
         username=me.get('username') if isinstance(me,dict) else None
         if not isinstance(username,str) or not 5<=len(username)<=64 or not username.replace('_','').isalnum():
             raise ProviderError('Telegram이 유효한 봇 계정을 반환하지 않았습니다.')
@@ -844,6 +1045,7 @@ class AgentService:
         if state=='running':return '요청을 처리하고 있어요.'
         if state in ('succeeded','partial'):return '처리가 끝났습니다. 아래 결과를 확인하세요.'
         if state=='interrupted':return '작업이 중단되었습니다. 자동으로 다시 실행하지 않았습니다.'
+        if state=='awaiting_connection':return '필요한 연결을 기다리고 있습니다. 연결이 확인되면 이 요청을 한 번만 이어서 처리합니다.'
         return f'이 요청은 {labels.get(state,state)} 상태입니다.'
 
     @staticmethod
@@ -872,19 +1074,20 @@ class AgentService:
                      and notification['chat_id']==cfg.get('user_id'))
             self.store.update_notification(notification['id'],'sending' if allowed else 'cancelled')
             if not allowed:return True
-            body={'chat_id':notification['chat_id'],'text':self.notification_text(notification['kind'])}
+            reply_markup=None
             if notification['kind']=='approval_needed':
-                body['reply_markup']={'inline_keyboard':[[
+                reply_markup={'inline_keyboard':[[
                     {'text':'문서 공유 승인','callback_data':f"p7a:{notification['id']}:approve"},
                     {'text':'허용 안 함','callback_data':f"p7a:{notification['id']}:deny"},
                 ]]}
             elif notification['kind']=='context_approval_needed':
-                body['reply_markup']={'inline_keyboard':[[
+                reply_markup={'inline_keyboard':[[
                     {'text':'이번 작업에 컨텍스트 공유 승인','callback_data':f"v1c:{notification['id']}:approve"},
                     {'text':'허용 안 함','callback_data':f"v1c:{notification['id']}:deny"},
                 ]]}
             try:
-                result=self.telegram_method('sendMessage',body)
+                result=self.telegram.send_message(notification['chat_id'],
+                                                  self.notification_text(notification['kind']),reply_markup)
                 message_id=result.get('message_id') if isinstance(result,dict) else None
                 self.store.update_notification(notification['id'],'sent',message_id if isinstance(message_id,int) else None)
             except ProviderError:
@@ -907,7 +1110,8 @@ class AgentService:
         still running or a result that was certainly delivered.
         """
         labels={'queued':'대기 중','running':'진행 중','succeeded':'완료','partial':'일부 완료',
-                'failed':'완료하지 못함','cancelled':'취소됨','interrupted':'중단됨'}
+                'failed':'완료하지 못함','cancelled':'취소됨','interrupted':'중단됨',
+                'awaiting_connection':'연결 대기'}
         with self.store.db() as db:
             job=db.execute('SELECT status,delivery FROM jobs WHERE id=?',(job_id,)).fetchone()
             rows=db.execute('SELECT tool,status FROM tool_events WHERE job_id=? AND tool!=? ORDER BY id LIMIT 12',(job_id,'model')).fetchall()
@@ -921,6 +1125,8 @@ class AgentService:
             lines.append('에이전트가 작업을 처리하고 있습니다.')
         elif job['status']=='interrupted':
             lines.append('재시작으로 작업이 중단되었습니다. 자동으로 다시 실행하지 않았습니다.')
+        elif job['status']=='awaiting_connection':
+            lines.append('필요한 연결을 기다리고 있습니다. 아직 아무 작업도 실행하지 않았습니다.')
         else:
             lines.append('전체 결과는 AgentOS 웹에서 확인하세요.')
         if job['delivery']=='unknown':
@@ -934,11 +1140,8 @@ class AgentService:
         # unknown Telegram response could create a second card for one request.
         if self.store.task_card(job_id): return
         try:
-            result=self.telegram_method('sendMessage',{
-                'chat_id':chat_id,
-                'text':self.task_card_text(message,'queued'),
-                'reply_markup':self.task_card_markup(job_id,'queued'),
-            })
+            result=self.telegram.send_message(chat_id,self.task_card_text(message,'queued'),
+                                              self.task_card_markup(job_id,'queued'))
             message_id=result.get('message_id') if isinstance(result,dict) else None
             if isinstance(message_id,int): self.store.save_task_card(job_id,chat_id,message_id,'queued')
         except ProviderError:
@@ -949,10 +1152,8 @@ class AgentService:
         if not card or card['state']==state:return
         markup=self.task_card_markup(job['id'],state)
         try:
-            self.telegram_method('editMessageText',{
-                'chat_id':card['chat_id'],'message_id':card['message_id'],
-                'text':self.task_card_text(job['message'],state),'reply_markup':markup,
-            })
+            self.telegram.edit_message_text(card['chat_id'],card['message_id'],
+                                            self.task_card_text(job['message'],state),markup)
             self.store.save_task_card(job['id'],card['chat_id'],card['message_id'],state)
         except ProviderError:
             pass
@@ -975,7 +1176,7 @@ class AgentService:
                 card=self.store.task_card(job_id)
                 if (job and card and card['chat_id']==sender and card['message_id']==message.get('message_id')
                         and job['channel']==f"telegram:{generation}" and job['chat_id']==sender):
-                    try:self.telegram_method('sendMessage',{'chat_id':sender,'text':self.task_progress_text(job_id)})
+                    try:self.telegram.send_message(sender,self.task_progress_text(job_id))
                     except ProviderError:pass
                     changed=True
             elif authorized and isinstance(data,str) and data.startswith('p7c:'):
@@ -1005,7 +1206,7 @@ class AgentService:
                             job=dict(job)
                         else: job=None
                     if job:
-                        try:self.telegram_method('editMessageText',{'chat_id':sender,'message_id':message.get('message_id'),'text':'선택한 컨텍스트를 이 요청에만 연결했습니다. 작업을 시작할게요.','reply_markup':{'inline_keyboard':[]}})
+                        try:self.telegram.edit_message_text(sender,message.get('message_id'),'선택한 컨텍스트를 이 요청에만 연결했습니다. 작업을 시작할게요.',{'inline_keyboard':[]})
                         except ProviderError:pass
                         self.create_task_card(job['id'],job['message'],sender)
                         changed=True
@@ -1021,7 +1222,7 @@ class AgentService:
                         job=dict(job)
                     else:job=None
                 if job:
-                    try:self.telegram_method('editMessageText',{'chat_id':sender,'message_id':message.get('message_id'),'text':'컨텍스트 없이 이 요청을 시작할게요.','reply_markup':{'inline_keyboard':[]}})
+                    try:self.telegram.edit_message_text(sender,message.get('message_id'),'컨텍스트 없이 이 요청을 시작할게요.',{'inline_keyboard':[]})
                     except ProviderError:pass
                     self.create_task_card(job['id'],job['message'],sender)
                     changed=True
@@ -1043,9 +1244,8 @@ class AgentService:
                             self.store.put('document_sharing',{})
                             result_kind='denied'
                         self.store.update_notification(notification['id'],result_kind)
-                        try:self.telegram_method('editMessageText',{
-                            'chat_id':sender,'message_id':notification['message_id'],'text':self.notification_text(result_kind),'reply_markup':{'inline_keyboard':[]},
-                        })
+                        try:self.telegram.edit_message_text(sender,notification['message_id'],
+                            self.notification_text(result_kind),{'inline_keyboard':[]})
                         except ProviderError:pass
                         changed=True
             elif authorized and isinstance(data,str) and data.startswith('v1c:'):
@@ -1071,15 +1271,13 @@ class AgentService:
                         else:
                             result_kind='denied'
                         self.store.update_notification(notification['id'],result_kind)
-                        try:self.telegram_method('editMessageText',{
-                            'chat_id':sender,'message_id':notification['message_id'],
-                            'text':('이 작업의 컨텍스트 공유를 승인했습니다. 작업을 계속합니다.' if parts[2]=='approve' else '이 작업의 컨텍스트 공유를 허용하지 않았습니다.'),
-                            'reply_markup':{'inline_keyboard':[]},
-                        })
+                        try:self.telegram.edit_message_text(sender,notification['message_id'],
+                            ('이 작업의 컨텍스트 공유를 승인했습니다. 작업을 계속합니다.' if parts[2]=='approve' else '이 작업의 컨텍스트 공유를 허용하지 않았습니다.'),
+                            {'inline_keyboard':[]})
                         except ProviderError:pass
                         changed=True
             if authorized and isinstance(callback_id,str):
-                try:self.telegram_method('answerCallbackQuery',{'callback_query_id':callback_id,'text':'처리했습니다.' if changed else '처리할 수 있는 요청이 아닙니다.'})
+                try:self.telegram.answer_callback_query(callback_id,'처리했습니다.' if changed else '처리할 수 있는 요청이 아닙니다.')
                 except ProviderError:pass
 
     def ingest_update(self, update, generation):
@@ -1146,7 +1344,7 @@ class AgentService:
             cfg=self.store.config('telegram',{})
             token=self.store.secret('telegram_token')
         if not cfg.get('enabled') or not token: return
-        updates=self.telegram_method('getUpdates',{'offset':cfg.get('cursor',0),'timeout':5,'allowed_updates':['message','callback_query'],'limit':20})
+        updates=self.telegram.get_updates(cfg.get('cursor',0))
         for update in sorted(updates,key=lambda u:u.get('update_id',0)):
             if isinstance(update.get('callback_query'),dict):
                 self.ingest_callback(update['callback_query'],cfg['generation'])
@@ -1179,46 +1377,82 @@ class AgentService:
             try:
                 prompt=job['message'].strip()
                 owner_memory_approval=self.store.issue_memory_approval(job['id'],prompt) if self.explicit_memory_request(prompt) else None
-                if prompt in ('/start','/help'):
+                # Routing decision, made by AgentOS before any capability is
+                # touched.  `decision.authority` records whether the owner
+                # said it literally or an AgentOS cue rule derived it; there
+                # is no branch here that a model can reach.
+                decision=self.classify_intent(prompt)
+                self.conversation_focus.record(decision)
+                owner=f"channel:{job['channel']}:{job.get('chat_id') or 'local'}"
+                # WU2 computed `supersedes_previous` and wired it to nothing.
+                # This is where it becomes an effect: the owner changed their
+                # mind, so any resume path still waiting for a connection must
+                # not execute its stale intent when that connection succeeds.
+                if decision.supersedes_previous:
+                    self.supersede_pending_handoffs(job['id'])
+                # Prerequisite detection runs before `decision.executes` is
+                # consulted.  When the capability is missing, "connect it" is
+                # a smaller and truer next action than asking the owner for
+                # detail they would only discover was useless afterwards.
+                guidance=self.connection_handoff(job,decision)
+                if guidance is not None:
+                    with self.store.db() as db:
+                        db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('assistant',guidance,job['channel'],time.time(),job.get('workspace_id'),job['id']))
+                        db.execute("UPDATE jobs SET status='awaiting_connection',response=?,error=NULL,delivery=? WHERE id=?",(guidance,'pending' if job['chat_id'] else 'none',job['id']))
+                    self.update_task_card(job,'awaiting_connection')
+                    return True
+                if not decision.executes:
+                    # Ambiguous, missing a required detail, or a consequential
+                    # effect that was only inferred.  Answer the owner and
+                    # invoke nothing.
+                    response=decision.clarification
+                elif decision.intent==INTENT_GREETING:
                     response='개인 AgentOS에 연결되었습니다. 하고 싶은 일을 자연스럽게 적어 주세요. 웹과 Telegram은 같은 대화 기록을 사용합니다.'
-                elif prompt.startswith('/recommend '):
-                    result=self.capability_recommendation_request({'outcome':prompt[len('/recommend '):].strip()},owner_id=f"channel:{job['channel']}:{job.get('chat_id') or 'local'}",channel=job['channel'])
+                elif decision.intent==INTENT_RECOMMENDATION:
+                    result=self.capability_recommendation_request({'outcome':decision.argument},owner_id=owner,channel=job['channel'])
                     response='\n'.join(f"{row['name']} · {row['reason']} · {row['approval_handoff']}" for row in result['recommendations']) or '검토된 추천이 없습니다.'
-                elif prompt.startswith('/knowledge '):
-                    result=self.personal_knowledge_request({'query':prompt[len('/knowledge '):].strip()}, owner_id=f"channel:{job['channel']}:{job.get('chat_id') or 'local'}", channel=job['channel'])
+                elif decision.intent==INTENT_KNOWLEDGE:
+                    result=self.personal_knowledge_request({'query':decision.argument}, owner_id=owner, channel=job['channel'])
                     response='\n'.join(f"{row['source']} · {row['excerpt']}" for row in result.get('results',[])) or result['response']
                     outcome='succeeded' if result['state'] in ('completed','empty') else 'failed'
-                elif prompt.startswith('/settings '):
-                    result=self.conversation_settings_request({'operation':'text','text':prompt[len('/settings '):]},
-                                                              owner_id=f"channel:{job['channel']}:{job.get('chat_id') or 'local'}", channel=job['channel'])
+                elif decision.intent==INTENT_SETTINGS:
+                    result=self.conversation_settings_request({'operation':'text','text':decision.argument},
+                                                              owner_id=owner, channel=job['channel'])
                     response=self.settings_response(result)
-                elif (prompt in ('/settings', '무엇이 연결되어 있어?', '무엇을 바꿀 수 있어?')
-                      or ('상태 보여' in prompt and any(word in prompt.lower() for word in ('drive','a2a','calendar','드라이브','캘린더')))
-                      or (any(word in prompt.lower() for word in ('pause','disconnect','resume','일시 정지','연결 해제','다시 시작','재개'))
-                          and any(word in prompt.lower() for word in ('drive','a2a','calendar','드라이브','캘린더')))):
-                    result=self.conversation_settings_request({'operation':'text','text':prompt},
-                                                              owner_id=f"channel:{job['channel']}:{job.get('chat_id') or 'local'}", channel=job['channel'])
-                    response=self.settings_response(result)
-                elif prompt.startswith('/assistant '):
+                elif decision.intent==INTENT_ASSISTANT:
                     # Web and paired Telegram jobs share this exact policy
-                    # path.  The command is intentionally explicit while the
-                    # MP1 vocabulary remains small and capability-specific.
-                    result=self.personal_assistant_request({'message':prompt[len('/assistant '):]}, owner_id=f"channel:{job['channel']}:{job.get('chat_id') or 'local'}")
+                    # path.  Only the owner-explicit `/assistant` form reaches
+                    # it: the orchestrator's delegation and Drive vocabulary
+                    # is deliberately not inferable from ordinary prose.
+                    result=self.personal_assistant_request({'message':decision.argument}, owner_id=owner)
                     response=result['response']
                     outcome='succeeded' if result['state'] in ('completed','requested','awaiting-approval','fallback') else 'failed'
-                elif (search_query:=workspace_search_request(prompt)):
-                    results=FileWorkspace(self.store).search(search_query)
+                elif decision.intent==INTENT_MAIL_SEARCH:
+                    if self.gmail is None:
+                        raise ValueError(ConnectorHandoff.unavailable(GMAIL_CONNECTOR_ID))
+                    results=self.gmail.search(self.connector_owner_id(job),decision.argument,max_results=10)
+                    response='\n'.join(f"{row.subject} · {row.sender} · {row.date}" for row in results) or '조건에 맞는 메일을 찾지 못했습니다.'
+                    # Subject/sender/date are private mail metadata.  They are
+                    # shown in the owner's own conversation, never written to a
+                    # tool event: `GmailSearchResult.as_evidence` is the only
+                    # form allowed in evidence.  Marking the job also reuses the
+                    # existing document-history boundary, so this turn is
+                    # stripped from later history whenever an external model or
+                    # subscription engine would otherwise receive it.
+                    self.record_file_workspace_document_job(job['id'])
+                elif decision.intent==INTENT_WORKSPACE_SEARCH:
+                    results=FileWorkspace(self.store).search(decision.argument)
                     if not results: response='현재 원본과 일치하는 저장 결과를 찾지 못했습니다.'
                     else:
                         response='\n\n'.join(f"저장 결과: {item['path']}\n{item['content']}" for item in results)
                         self.record_file_workspace_document_job(job['id'])
-                elif prompt.startswith(('/note ','메모:','기록:')):
-                    note=prompt[6:] if prompt.startswith('/note ') else prompt.split(':',1)[1].strip()
+                elif decision.intent==INTENT_NOTE_CREATE:
+                    note=decision.argument or ''
                     if not note.strip():raise ValueError('기록할 내용을 입력하세요.')
                     with self.store.db() as db:
                         db.execute('INSERT OR IGNORE INTO notes VALUES (?,?,?)',(job['id'],note,time.time()))
                     response='메모를 저장했습니다. /notes로 확인하거나 /summarize로 정리할 수 있습니다.'
-                elif prompt in ('/notes','메모 목록'):
+                elif decision.intent==INTENT_NOTE_LIST:
                     response='\n\n'.join(n['content'] for n in self.store.notes()) or '저장된 메모가 없습니다. /note 내용으로 기록해 보세요.'
                 else:
                     with self.lock:
@@ -1391,7 +1625,7 @@ class AgentService:
             if not allowed:return
             text=self.telegram_result_text(job['response'],job['error'])
             try:
-                self.telegram_method('sendMessage',{'chat_id':job['chat_id'],'text':text})
+                self.telegram.send_message(job['chat_id'],text)
                 status='sent'
             except ProviderError:
                 status='unknown'

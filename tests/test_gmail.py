@@ -21,6 +21,7 @@ from personal_agent.gmail import (
     GmailError,
     GmailReauthenticationRequired,
     _assert_renderable_charset,
+    _parsed_mime_header,
 )
 from personal_agent.quickstart_store import QuickStore
 
@@ -1721,6 +1722,117 @@ class GmailConnectorTests(unittest.TestCase):
                     self.read()
                 self.assertEqual(malformed.exception.reason, "invalid_provider_response")
                 self.assertNotIn("private body", str(malformed.exception))
+
+    def test_mixed_rfc2231_forms_are_judged_on_the_resolved_value(self):
+        """Where these are refused moved, but they are still refused.
+
+        Mixing an RFC 2231 extended parameter with a sectioned continuation
+        (``charset*=utf-8''x; charset*1=y``) was refused at the header gate by
+        the hand-written scanner. The stdlib parser reads it without recording
+        a defect, so the header now parses and the value it resolves to -
+        the sections concatenated - reaches the charset allowlist instead.
+
+        The outcome is unchanged: every form below still fails closed. Pinned
+        because the refusal point moved, which is the kind of change that
+        looks like a widening in a diff and needs to be stated rather than
+        discovered.
+        """
+        self.connect()
+        encoded = base64.urlsafe_b64encode(b"private body").decode()
+        for header_name, value in (
+            ("Content-Type", "text/plain; charset*=utf-8''x; charset*1=y"),
+            ("Content-Type", "text/plain; charset*1=y; charset*=utf-8''x"),
+            ("Content-Type", "text/plain; charset*=us-ascii''utf-7; charset*1=z"),
+            ("Content-Type", "text/plain; charset*=us-ascii''utf-8; charset*1=z"),
+            ("Content-Disposition", "inline; filename*=utf-8''a.txt; filename*1=b"),
+        ):
+            with self.subTest(header=header_name, value=value):
+                self.responses.clear()
+                self.responses.append({
+                    "id": "m_1",
+                    "threadId": "t_1",
+                    "payload": {
+                        "mimeType": "text/plain",
+                        "headers": [{"name": header_name, "value": value}],
+                        "body": {"data": encoded},
+                    },
+                })
+                if header_name == "Content-Type":
+                    with self.assertRaises(GmailError) as refused:
+                        self.read()
+                    self.assertIn(
+                        refused.exception.reason,
+                        {"unsupported_charset", "invalid_provider_response"},
+                    )
+                    self.assertNotIn("private body", str(refused.exception))
+                else:
+                    # A disposition parameter is not decoded, so this one is
+                    # simply read as an inline body rather than refused.
+                    self.assertEqual(self.read().body, "private body")
+
+    def test_no_defect_and_no_duplicate_is_never_refused(self):
+        """The invariant the duplicate check must not violate.
+
+        Two hand-enumerated tables guard this function: one listing
+        malformations that must be refused, one listing legal shapes that must
+        be accepted. Both are lists, and the function's failure mode is
+        precisely "the case nobody listed" - the previous cycle's table missed
+        a trailing semicolon, and the commit that fixed it introduced a crash
+        on an RFC 2231 form that was also not listed.
+
+        So state the rule instead of extending the list: if the stdlib parse
+        records no defect and no parameter name repeats once case and comments
+        are folded, the header is legal as far as this module can tell and
+        must not be refused. Generated inputs, not chosen ones - a future
+        member of the class fails here without anyone having thought of it.
+        """
+        import itertools
+        import re
+        from email.headerregistry import HeaderRegistry
+
+        registry = HeaderRegistry()
+        comment = re.compile(r"\([^()]*\)")
+
+        def folded_names(value):
+            """Parameter names as a sender wrote them, comments stripped."""
+            names = []
+            for segment in value.split(";")[1:]:
+                bare = comment.sub("", segment).split("=", 1)[0].strip().casefold()
+                # An RFC 2231 continuation or extended form is one parameter.
+                bare = re.sub(r"\*\d*\*?$", "", bare)
+                if bare:
+                    names.append(bare)
+            return names
+
+        fragments = (
+            "charset=utf-8", "charset=us-ascii", 'name="a.txt"', "name=a.txt",
+            "format=flowed", "boundary=B", 'start="<root>"',
+            "charset*0=utf-", "charset*1=8", "charset*=us-ascii''utf-8",
+            "name*0=a", "name*1=.txt", "(c)", "", " ", "\t",
+        )
+        refused = []
+        for count in (1, 2, 3):
+            for combination in itertools.product(fragments, repeat=count):
+                value = "text/plain; " + "; ".join(combination)
+                names = folded_names(value)
+                if len(names) != len(set(names)):
+                    continue  # a genuine duplicate; refusal is correct
+                try:
+                    parsed = registry("Content-Type", value)
+                except Exception:
+                    continue  # stdlib itself cannot read it; refusal is correct
+                if parsed.defects:
+                    continue  # the defect gate owns this; refusal is correct
+                try:
+                    _parsed_mime_header("Content-Type", value)
+                except GmailError:
+                    refused.append(value)
+                except Exception as unexpected:
+                    self.fail(
+                        "non-GmailError escaped the connector for "
+                        f"{value!r}: {type(unexpected).__name__}"
+                    )
+        self.assertEqual(refused, [], f"{len(refused)} legal headers refused")
 
     def test_empty_parameter_segments_do_not_refuse_ordinary_mail(self):
         """A trailing semicolon must not make a message unreadable.

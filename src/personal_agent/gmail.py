@@ -16,7 +16,6 @@ from dataclasses import dataclass
 from email.errors import HeaderParseError
 from email.header import decode_header
 from email.headerregistry import HeaderRegistry
-from email.message import Message
 import hashlib
 import hmac
 import json
@@ -315,39 +314,31 @@ def _decoded_header(value: object, maximum: int) -> str:
     return _bounded_text("".join(parts), maximum)
 
 
-def _assert_unique_mime_parameters(name: str, value: str, parsed) -> None:
-    """Refuse a parameter name that repeats once case and comments are folded.
+def _assert_unique_mime_parameters(name: str, value: str) -> None:
+    """Refuse a parameter name that repeats once case is folded.
 
-    RFC 2045 parameter names are case-insensitive, but CPython's duplicate
-    detection keys on the raw spelling, so ``charset=us-ascii; (x)
-    CHARSET=utf-8`` records no defect and is silently resolved last-wins. The
-    parsed header only exposes the already folded mapping, so the repeat is
-    invisible there.
+    RFC 2045 parameter names are case-insensitive, but CPython keys duplicate
+    detection on the raw spelling, so ``charset=us-ascii; (x) CHARSET=utf-8``
+    records no defect and is silently resolved last-wins. The parsed header
+    only exposes the folded mapping, so the repeat is invisible there.
 
-    Rather than reach into the parse tree, compare how many parameters were
-    written against how many survived folding. ``Message.get_params`` is the
-    public accessor for the raw list and keeps every occurrence; the parsed
-    header keeps one entry per distinct name. A mismatch therefore means a
-    name was given twice under different spellings, whatever those spellings
-    were. RFC 2231 continuations are collapsed by both, so a legitimate
-    ``charset*0``/``charset*1`` pair does not trip this.
+    Rather than count parameters or strip comments by hand, hand the same
+    parser a case-folded copy. A name that differed only in case becomes a
+    literal duplicate, and the parser's own duplicate detection - the signal
+    this module already trusts - reports it. Case folding cannot change the
+    grammar, so a header that parses cleanly and repeats nothing still parses
+    cleanly.
+
+    Three earlier attempts at this check were hand-written and each failed in
+    a way its tests did not list: a private parse-tree attribute, then a
+    parameter count that refused an ordinary trailing semicolon, then the same
+    count crashing on an RFC 2231 extended parameter mixed with a sectioned
+    continuation. Reusing the parser removes the surface those shared.
     """
-    holder = Message()
-    holder[name] = value
-    written = holder.get_params(header=name)
-    if written is None:
-        raise GmailError("invalid_provider_response")
-    # An empty segment - a trailing or doubled semicolon - makes get_params()
-    # emit a nameless ('', '') entry that has no counterpart in the parsed
-    # mapping. CPython records no defect for it because it is not malformed
-    # enough to be one, so counting it would refuse ordinary mail: a single
-    # trailing semicolon, which any sender can append, would make a message
-    # permanently unreadable and cost the owner subject, sender and date as
-    # well as the body.
-    written = [parameter for parameter in written if parameter[0]]
-    # get_params() prepends the bare type/disposition token, which is not a
-    # parameter; the parsed mapping does not include it.
-    if len(written) - 1 != len(dict(parsed.params)):
+    folded = value.casefold()
+    if folded == value:
+        return
+    if _MIME_HEADER_CLASSES[name](name, folded).defects:
         raise GmailError("invalid_provider_response")
 
 
@@ -371,11 +362,20 @@ def _parsed_mime_header(name: str, value: str):
     """
     try:
         parsed = _MIME_HEADER_CLASSES[name](name, value)
+        if parsed.defects:
+            raise GmailError("invalid_provider_response")
+        _assert_unique_mime_parameters(name, value)
+    except GmailError:
+        raise
     except (HeaderParseError, IndexError, LookupError, TypeError, ValueError, UnicodeError):
+        # The duplicate check re-reads the header through a second stdlib
+        # accessor, which has its own failure modes: mixing an RFC 2231
+        # extended parameter with a sectioned continuation makes
+        # ``decode_params`` sort ``int`` against ``None`` and raise
+        # ``TypeError``. Any such raise is provider data this module cannot
+        # interpret, so it refuses like every other malformation rather than
+        # escaping the GmailError contract and leaving the connector.
         raise GmailError("invalid_provider_response") from None
-    if parsed.defects:
-        raise GmailError("invalid_provider_response")
-    _assert_unique_mime_parameters(name, value, parsed)
     return parsed
 
 

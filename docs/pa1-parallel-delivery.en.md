@@ -49,6 +49,19 @@ When the owner says to execute EPIC-PA1, the controlling conversation should:
 
 The user should not need to create worktrees or carry implementation context between separate chats.
 
+## Execution cursor
+
+EPIC-PA1 / #386 uses the repository-wide [Execution Cursor Protocol](execution-cursor.en.md).
+
+- Storage: exactly one mutable top-level comment on #386.
+- Marker: `<!-- agentos-execution-cursor:v1 -->`.
+- Normal resume: cursor -> verify current main/contract SHAs/referenced PR head -> read only that issue/PR -> act.
+- Full PA1 issue/PR reconciliation is anomaly recovery, not the default session startup path.
+- The cursor summarizes PA1 state but never activates a child, widens file ownership, substitutes for CI/review evidence, or overrides this contract/delivery plan.
+- Update the same comment after meaningful transitions and increment `generation`; do not create cursor-history comments.
+
+This rule applies to Claude, Codex, and other repository agents. Tool-specific bootstrap files may point to it but must not duplicate canonical PA1 governance.
+
 ## Branch/worktree convention
 
 Preferred branch names:

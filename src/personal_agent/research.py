@@ -790,6 +790,11 @@ def _qualified_dynamic(name, evidence):
                     is_forward_subject_qualifier=(
                         neighbor_position > position
                         and DYNAMIC_SUBJECT_PATTERNS[name].search(neighbor)
+                        and not (
+                            name == 'inventory'
+                            and INVENTORY_PRICING_TERMS.search(neighbor)
+                            and not FACT_PROPERTY_TERMS['inventory'].search(neighbor)
+                        )
                         and (DYNAMIC_DISQUALIFIER.search(neighbor) or
                              FORWARD_SUBJECT_QUALIFIER.search(neighbor))
                         and not clause_pattern(neighbor)

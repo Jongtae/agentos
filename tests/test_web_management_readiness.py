@@ -34,8 +34,10 @@ class WebManagementReadinessTests(unittest.TestCase):
         self.assertNotIn('PA1-FDN-01', completed)
         self.assertNotIn('WEB-ADMIN-01', completed)
         self.assertNotEqual(plan['next_goal']['status'], 'active')
-        self.assertEqual(plan['next_goal']['id'], 'EPIC-PA1')
+        # WEB-ADMIN-01 is a parent-controlled substep and can never be the
+        # declared top-level goal, whichever program currently holds authority.
         self.assertNotEqual(plan['next_goal']['id'], 'WEB-ADMIN-01')
+        self.assertIn(plan['next_goal']['id'], plan['programs'])
         self.assertTrue((ROOT / 'docs' / entry['contract']).is_file())
 
     def test_historical_top02_validation_is_not_weakened(self):

@@ -114,19 +114,23 @@ class DeliveryTests(unittest.TestCase):
         self.assertNotIn('DRIVE-LOCAL-OP-01', controller.plan.documented_completed())
         self.assertNotIn('SCN-I-01', controller.plan.documented_completed())
 
-    def test_pa1_goal_ready_never_starts_heartbeat_or_external_commands(self):
+    def test_goal_ready_never_starts_heartbeat_or_external_commands(self):
         runner=Runner()
         controller=self.controller(runner)
         plan=controller.plan
-        self.assertEqual(plan.next_goal()['id'], 'EPIC-PA1')
+        declared=plan.next_goal()['id']
         self.assertEqual(plan.next_goal()['status'], 'owner-activated-goal-ready')
-        self.assertEqual(plan.items['EPIC-PA1']['issue'], 386)
-        self.assertEqual(plan.items['EPIC-PA1']['depends_on'], ['GOV-PA1-01'])
-        self.assertEqual(plan.items['EPIC-PA1']['activation_status'], 'owner-activated-goal-ready')
-        self.assertEqual(plan.items['EPIC-PA1']['contract'], 'pa1-parallel-delivery.en.md')
-        self.assertIn('GOV-PA1-01', plan.documented_completed())
-        self.assertNotIn('EPIC-PA1', plan.documented_completed())
+        self.assertIsInstance(plan.items[declared]['issue'], int)
+        self.assertEqual(plan.items[declared]['activation_status'], 'owner-activated-goal-ready')
+        self.assertIn('contract', plan.items[declared])
+        self.assertNotIn(declared, plan.documented_completed())
         self.assertIsNone(plan.select({}))
+        self.assertIsNone(plan.select({'active':declared,'status':'running'}))
+        # EPIC-PA1 keeps its enumerated substeps while paused, but neither it
+        # nor any substep may be selected.
+        self.assertEqual(plan.items['EPIC-PA1']['issue'], 386)
+        self.assertEqual(plan.items['EPIC-PA1']['contract'], 'pa1-parallel-delivery.en.md')
+        self.assertNotEqual(declared, 'EPIC-PA1')
         self.assertIsNone(plan.select({'active':'EPIC-PA1','status':'running'}))
         self.assertEqual(controller.run_once(dry_run=False)['status'], 'awaiting-owner-activated-goal')
         self.assertEqual(runner.calls, [])
@@ -140,14 +144,41 @@ class DeliveryTests(unittest.TestCase):
         ))
         self.assertEqual(plan.items['SITE-01']['activation_status'], 'owner-deferred')
 
-    def test_pa1_requires_explicit_active_transition_and_stops_after_completion(self):
+    def test_declared_goal_requires_explicit_active_transition_and_satisfied_dependencies(self):
+        """Selection needs an active transition AND documented dependencies.
+
+        The earlier form hardcoded EPIC-PA1 as the declared goal. That pinned
+        which program was next rather than the rule, so it broke as soon as
+        authority legitimately moved. It also never exercised the dependency
+        gate, which is the half that actually protects against executing a
+        program whose activation governance has not merged.
+        """
         altered=json.loads((self.root/'delivery-plan.yaml').read_text())
+        declared=altered['next_goal']['id']
+        item=next(entry for entry in altered['iterations'] if entry['id']==declared)
+        dependencies=item.get('depends_on', [])
+
+        # Active transition alone is not enough while a dependency is undocumented.
         altered['next_goal']['status']='active'  # Test fixture only, never repository activation.
+        documented=altered['history']['documented_completed_iterations']
+        missing=[name for name in dependencies if name not in documented]
+        if missing:
+            (self.root/'delivery-plan.yaml').write_text(json.dumps(altered))
+            self.assertIsNone(DeliveryPlan(self.root/'delivery-plan.yaml').select({}))
+
+        # With dependencies documented, the declared goal becomes selectable.
+        documented.extend(missing)
         (self.root/'delivery-plan.yaml').write_text(json.dumps(altered))
-        plan=DeliveryPlan(self.root/'delivery-plan.yaml')
-        self.assertEqual(plan.select({})['id'], 'EPIC-PA1')
-        altered['history']['documented_completed_iterations'].append('EPIC-PA1')
+        self.assertEqual(DeliveryPlan(self.root/'delivery-plan.yaml').select({})['id'], declared)
+
+        # Goal-ready without the active transition never selects.
+        altered['next_goal']['status']='owner-activated-goal-ready'
+        (self.root/'delivery-plan.yaml').write_text(json.dumps(altered))
+        self.assertIsNone(DeliveryPlan(self.root/'delivery-plan.yaml').select({}))
+
+        # Completion stops selection.
         altered['next_goal']={'id':None,'status':'complete'}
+        documented.append(declared)
         (self.root/'delivery-plan.yaml').write_text(json.dumps(altered))
         self.assertIsNone(DeliveryPlan(self.root/'delivery-plan.yaml').select({}))
         runner=Runner()

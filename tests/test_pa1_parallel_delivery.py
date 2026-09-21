@@ -19,8 +19,13 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         self.program = self.plan["programs"]["EPIC-PA1"]
 
     def test_epic_is_goal_ready_but_not_active(self):
-        self.assertEqual(self.plan["next_goal"]["id"], "EPIC-PA1")
-        self.assertEqual(self.plan["next_goal"]["status"], "owner-activated-goal-ready")
+        # EPIC-PA1 is owner-paused by #419 so a non-overlapping EPIC-REUSE-01
+        # tranche can run first. What must hold is that goal-readiness alone
+        # never executes, and that a paused program is not the declared goal.
+        self.assertNotEqual(self.plan["next_goal"]["id"], "EPIC-PA1")
+        self.assertNotEqual(self.plan["next_goal"]["status"], "active")
+        self.assertEqual(self.program["status"], "owner-paused")
+        self.assertIn("resume_condition", self.program)
         epic = self.items["EPIC-PA1"]
         self.assertEqual(epic["issue"], 386)
         self.assertEqual(epic["depends_on"], ["GOV-PA1-01"])
@@ -35,14 +40,29 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         self.assertNotIn("selects USE-01 as goal-ready", tasks)
         self.assertIn("#358 did not select a successor; EPIC-PA1 is separately prepared by #385", tasks)
 
-    def test_epic_is_the_only_nonterminal_program_authority(self):
-        nonterminal = [
+    def test_exactly_one_program_holds_execution_authority(self):
+        """Governance allows one active top-level program, not one program.
+
+        The earlier form asserted EPIC-PA1 was the only non-complete program,
+        which pinned a transient fact rather than the rule. A paused program
+        still exists and still owns its substeps; it simply cannot execute.
+        """
+        terminal = {"complete", "owner-paused"}
+        executing = [
             name for name, program in self.plan["programs"].items()
-            if program.get("status") != "complete"
+            if program.get("status") not in terminal
         ]
-        self.assertEqual(nonterminal, ["EPIC-PA1"])
-        self.assertEqual(self.program["status"], "owner-activated-goal-ready")
+        self.assertEqual(len(executing), 1, executing)
+        self.assertEqual(self.plan["next_goal"]["id"], executing[0])
+        self.assertEqual(self.program["status"], "owner-paused")
         self.assertEqual(self.program["issue"], 386)
+
+    def test_a_paused_program_cannot_be_selected_for_execution(self):
+        """Pausing must remove execution authority, not merely relabel it."""
+        from personal_agent.delivery import DeliveryPlan
+        plan = DeliveryPlan(ROOT / "delivery-plan.yaml")
+        self.assertNotEqual(self.plan["next_goal"]["id"], "EPIC-PA1")
+        self.assertIsNone(plan.select({}))
 
     def test_children_are_parent_controlled_and_cannot_self_activate(self):
         child_ids = set(self.program["ordered_substeps"])

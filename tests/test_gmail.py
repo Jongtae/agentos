@@ -1,11 +1,15 @@
 import base64
 import hashlib
+import pathlib
+import re
 import tempfile
+import threading
 import unittest
 from urllib.parse import parse_qs, urlparse
 
 from cryptography.fernet import Fernet
 
+from personal_agent import gmail as gmail_module
 from personal_agent.connector_contract import ConnectorRegistry, ConnectorState
 from personal_agent.gmail import (
     GMAIL_CONNECTOR,
@@ -47,6 +51,14 @@ class GmailConnectorTests(unittest.TestCase):
         )
 
     def tearDown(self):
+        # Every provider call recorded anywhere in this suite must be a read.
+        # This is an observed-call assertion, unlike checking that invented
+        # method names are absent, which passes for any object.
+        self.assertEqual(
+            sorted({call[0] for call in self.calls}) or ["GET"],
+            ["GET"],
+            "a non-GET Gmail provider call was recorded",
+        )
         self.temp.cleanup()
 
     def begin(self, owner="owner-a"):
@@ -780,7 +792,14 @@ class GmailConnectorTests(unittest.TestCase):
             # A comment is legal CFWS and must not turn a single parameter into
             # a duplicate or otherwise reject an ordinary part.
             "text/plain; (only one) charset=us-ascii",
-            'text/plain; name="paren(in)quotes.txt"',
+            # A parenthesis inside a quoted parameter value is data, not CFWS.
+            'text/plain; format="paren(in)quotes"',
+            # HTAB is legal folding whitespace and must not fail the message.
+            "text/plain;\tcharset=us-ascii",
+            "text/plain;\tformat=flowed",
+            # A leading comment must not make the raw main type disagree with
+            # the parsed content type.
+            "(sent by relay) text/plain; charset=us-ascii",
         ):
             with self.subTest(content_type=content_type):
                 self.responses.append({
@@ -1039,9 +1058,13 @@ class GmailConnectorTests(unittest.TestCase):
                 "body": {"data": encoded},
             },
         })
-        message = self.read()
-        self.assertEqual(message.body, "")
-        self.assertNotIn("must not be body", repr(message.as_dict()))
+        # The part is correctly withheld, but the only text in the message was
+        # dropped, so an empty body is an unknown outcome rather than a
+        # successful source-attributed read.
+        with self.assertRaises(GmailError) as dropped:
+            self.read()
+        self.assertEqual(dropped.exception.reason, "body_not_attributable")
+        self.assertNotIn("must not be body", str(dropped.exception))
 
     def test_empty_content_disposition_is_not_treated_as_an_absent_header(self):
         self.connect()
@@ -1057,9 +1080,296 @@ class GmailConnectorTests(unittest.TestCase):
                         "body": {"data": encoded},
                     },
                 })
-                message = self.read()
-                self.assertEqual(message.body, "")
-                self.assertNotIn("must not be body", repr(message.as_dict()))
+                with self.assertRaises(GmailError) as dropped:
+                    self.read()
+                self.assertEqual(dropped.exception.reason, "body_not_attributable")
+                self.assertNotIn("must not be body", str(dropped.exception))
+
+    def test_cfws_comment_in_content_disposition_keeps_an_inline_body(self):
+        """A legal comment must not silently reclassify inline text.
+
+        A naive ``split(";")`` turned ``inline (rendered)`` into an attachment,
+        dropped the part, and returned a *successful* empty body.
+        """
+        self.connect()
+        for disposition in (
+            "inline (rendered by client)",
+            "(added by relay) inline",
+            "inline (nested (comment))",
+            "inline\t",
+        ):
+            with self.subTest(disposition=disposition):
+                self.responses.clear()
+                self.responses.append({
+                    "id": "m_1",
+                    "threadId": "t_1",
+                    "payload": {
+                        "mimeType": "text/plain",
+                        "headers": [{"name": "Content-Disposition", "value": disposition}],
+                        "body": {"data": base64.urlsafe_b64encode(b"inline body").decode()},
+                    },
+                })
+                self.assertEqual(self.read().body, "inline body")
+
+    def test_bodyless_message_is_distinguished_from_a_dropped_candidate(self):
+        self.connect()
+        # A message whose only part is a real non-text attachment genuinely has
+        # no text body. That is a truthful empty read.
+        self.responses.append({
+            "id": "m_1",
+            "threadId": "t_1",
+            "payload": {
+                "mimeType": "multipart/mixed",
+                "parts": [
+                    {
+                        "mimeType": "application/pdf",
+                        "filename": "receipt.pdf",
+                        "body": {"attachmentId": "attachment_1"},
+                    },
+                ],
+            },
+        })
+        message = self.read()
+        self.assertEqual(message.body, "")
+        self.assertEqual(message.mime_type, "multipart/mixed")
+        # The same shape whose only text part was removed by the parser is an
+        # unknown outcome and must not be reported identically.
+        self.responses.append({
+            "id": "m_1",
+            "threadId": "t_1",
+            "payload": {
+                "mimeType": "multipart/mixed",
+                "parts": [
+                    {
+                        "mimeType": "text/plain",
+                        "headers": [
+                            {"name": "Content-Disposition", "value": "attachment; filename=notes.txt"}
+                        ],
+                        "body": {"data": base64.urlsafe_b64encode(b"withheld").decode()},
+                    },
+                ],
+            },
+        })
+        with self.assertRaises(GmailError) as dropped:
+            self.read()
+        self.assertEqual(dropped.exception.reason, "body_not_attributable")
+
+    def test_related_root_that_renders_nothing_is_not_a_silent_empty_body(self):
+        self.connect()
+        # Without a start parameter the first part is the root. It renders
+        # nothing here while a sibling has text, so the empty result is a
+        # parser outcome, not an attributable root body.
+        self.responses.append({
+            "id": "m_1",
+            "threadId": "t_1",
+            "payload": {
+                "mimeType": "multipart/related",
+                "parts": [
+                    {
+                        "mimeType": "image/png",
+                        "filename": "logo.png",
+                        "body": {"attachmentId": "attachment_1"},
+                    },
+                    {
+                        "mimeType": "text/plain",
+                        "body": {"data": base64.urlsafe_b64encode(b"sibling text").decode()},
+                    },
+                ],
+            },
+        })
+        with self.assertRaises(GmailError) as ambiguous:
+            self.read()
+        self.assertEqual(ambiguous.exception.reason, "body_not_attributable")
+
+    def test_content_type_name_parameter_marks_a_text_part_as_an_attachment(self):
+        self.connect()
+        self.responses.append({
+            "id": "m_1",
+            "threadId": "t_1",
+            "payload": {
+                "mimeType": "multipart/mixed",
+                "parts": [
+                    {
+                        "mimeType": "text/plain",
+                        "headers": [
+                            {"name": "Content-Type", "value": 'text/plain; name="transcript.txt"'}
+                        ],
+                        "body": {"data": base64.urlsafe_b64encode(b"ATTACHED TEXT").decode()},
+                    },
+                    {
+                        "mimeType": "text/plain",
+                        "body": {"data": base64.urlsafe_b64encode(b"real body").decode()},
+                    },
+                ],
+            },
+        })
+        message = self.read()
+        self.assertEqual(message.body, "real body")
+        self.assertNotIn("ATTACHED TEXT", message.body)
+
+    def test_utf7_charset_is_refused_for_body_decoding(self):
+        self.connect()
+        for charset in ("utf-7", "UTF-7", "utf7", "unicode-1-1-utf-7"):
+            with self.subTest(charset=charset):
+                self.responses.clear()
+                self.responses.append({
+                    "id": "m_1",
+                    "threadId": "t_1",
+                    "payload": {
+                        "mimeType": "text/html",
+                        "headers": [
+                            {"name": "Content-Type", "value": f"text/html; charset={charset}"}
+                        ],
+                        "body": {"data": base64.urlsafe_b64encode(b"+ADw-script+AD4-").decode()},
+                    },
+                })
+                with self.assertRaises(GmailError) as refused:
+                    self.read()
+                self.assertEqual(refused.exception.reason, "unsupported_charset")
+
+    def test_absent_content_type_uses_the_same_strict_charset_default(self):
+        """A missing Content-Type must not decode more permissively.
+
+        The two paths previously defaulted to utf-8 and us-ascii, so an
+        undeclared part decoded bytes that an identically declared part
+        rejected, which made the strict-charset guarantee unenforceable.
+        """
+        self.connect()
+        non_ascii = base64.urlsafe_b64encode("café".encode()).decode()
+        for headers in ([], [{"name": "Content-Type", "value": "text/plain"}]):
+            with self.subTest(content_type_present=bool(headers)):
+                self.responses.clear()
+                self.responses.append({
+                    "id": "m_1",
+                    "threadId": "t_1",
+                    "payload": {
+                        "mimeType": "text/plain",
+                        "headers": headers,
+                        "body": {"data": non_ascii},
+                    },
+                })
+                with self.assertRaises(GmailError) as strict:
+                    self.read()
+                self.assertEqual(strict.exception.reason, "invalid_provider_response")
+        for headers in ([], [{"name": "Content-Type", "value": "text/plain"}]):
+            with self.subTest(ascii_content_type_present=bool(headers)):
+                self.responses.clear()
+                self.responses.append({
+                    "id": "m_1",
+                    "threadId": "t_1",
+                    "payload": {
+                        "mimeType": "text/plain",
+                        "headers": headers,
+                        "body": {"data": base64.urlsafe_b64encode(b"plain ascii").decode()},
+                    },
+                })
+                self.assertEqual(self.read().body, "plain ascii")
+
+    def test_admitted_body_candidate_count_is_bounded(self):
+        self.connect()
+        encoded = base64.urlsafe_b64encode(b"x").decode()
+        self.responses.append({
+            "id": "m_1",
+            "threadId": "t_1",
+            "payload": {
+                "mimeType": "multipart/mixed",
+                "parts": [
+                    {"mimeType": "text/plain", "body": {"data": encoded}} for _ in range(40)
+                ],
+            },
+        })
+        with self.assertRaises(GmailError) as bounded:
+            self.read()
+        self.assertEqual(bounded.exception.reason, "message_too_complex")
+
+    def test_search_result_exposes_symmetric_redacted_evidence(self):
+        self.connect()
+        self.responses.append({"messages": [{"id": "m_1"}]})
+        self.responses.append(self.metadata())
+        result = self.gmail.search("owner-a", "receipt")[0]
+        evidence = result.as_evidence()
+        self.assertEqual(evidence["metadata_included"], False)
+        self.assertEqual(evidence["source"], result.source)
+        for private in ("Booking receipt", "vendor@example.test", "Mon, 1 Sep 2026"):
+            self.assertNotIn(private, str(evidence))
+        self.assertIn("Booking receipt", str(result.as_dict()))
+
+    def test_adapter_surface_raises_only_gmail_errors(self):
+        for owner in ("", "   ", None, 0, "x" * 201):
+            with self.subTest(owner=repr(owner)):
+                for call in (
+                    self.gmail.status,
+                    self.gmail.portable_status,
+                    self.gmail.connection_required,
+                ):
+                    with self.assertRaises(GmailError) as invalid:
+                        call(owner)
+                    self.assertEqual(invalid.exception.reason, "invalid_owner")
+        self.connect()
+        # required_result raises the shared contract error once connected. The
+        # adapter must translate it so downstream wiring catches one type.
+        with self.assertRaises(GmailError) as connected:
+            self.gmail.connection_required("owner-a")
+        self.assertEqual(connected.exception.reason, "already_connected")
+
+    def test_lifecycle_transition_and_revocation_do_not_deadlock(self):
+        """Pin the repository-wide ``dispatch -> authority`` lock order.
+
+        ``mark_reauthentication_required`` previously took the process-wide
+        authority lock and then called ``transition``, which takes the dispatch
+        lock first. A concurrent registry transition holding dispatch and
+        waiting on authority wedged every connector in the process. The joins
+        below use a timeout so a returning inversion fails instead of hanging.
+        """
+        self.connect()
+        start = threading.Barrier(3, timeout=30)
+        errors = []
+
+        def revoke():
+            try:
+                start.wait()
+                for _ in range(50):
+                    self.gmail.mark_reauthentication_required("owner-a")
+            except Exception as exc:  # pragma: no cover - failure detail only
+                errors.append(exc)
+
+        def cycle():
+            try:
+                start.wait()
+                for _ in range(50):
+                    self.registry.transition(
+                        "owner-a",
+                        GMAIL_CONNECTOR_ID,
+                        ConnectorState.CONNECTED,
+                        granted_scopes=(GMAIL_READONLY_SCOPE,),
+                    )
+                    self.registry.transition(
+                        "owner-a", GMAIL_CONNECTOR_ID, ConnectorState.DISCONNECTED
+                    )
+            except Exception as exc:  # pragma: no cover - failure detail only
+                errors.append(exc)
+
+        # daemon=True so a returning inversion reports a normal test failure
+        # instead of wedging interpreter shutdown on unjoinable threads.
+        threads = [
+            threading.Thread(target=revoke, daemon=True),
+            threading.Thread(target=cycle, daemon=True),
+        ]
+        for thread in threads:
+            thread.start()
+        start.wait()
+        for thread in threads:
+            thread.join(timeout=20)
+        self.assertEqual(
+            [thread.name for thread in threads if thread.is_alive()],
+            [],
+            "Gmail lifecycle locking deadlocked",
+        )
+        self.assertEqual(errors, [])
+        self.assertIn(
+            self.gmail.status("owner-a")["state"],
+            {"connected", "disconnected", "reauth_required"},
+        )
 
     def test_owner_namespaced_oauth_state_and_tokens_do_not_overwrite_or_cross_revoke(self):
         _offer_a,state_a=self.begin("owner-a")
@@ -1162,17 +1472,22 @@ class GmailConnectorTests(unittest.TestCase):
             self.gmail.search("owner-b", "receipt")
         self.assertEqual(error.exception.reason, "connection_required")
         self.assertEqual(self.calls, [])
-        for forbidden in (
-            "send",
-            "reply",
-            "forward",
-            "delete",
-            "archive",
-            "create_draft",
-            "modify_labels",
-            "watch",
-        ):
-            self.assertFalse(hasattr(self.gmail, forbidden), forbidden)
+
+    def test_module_has_no_mutating_http_verb(self):
+        """Assert the read-only surface from the module, not from absent names.
+
+        ``assertFalse(hasattr(obj, "send"))`` for invented method names passes
+        for any object and proves nothing. The connector dispatches through a
+        single caller-supplied transport, so the check that matters is that no
+        mutating verb literal exists in the module at all.
+        """
+        source = pathlib.Path(gmail_module.__file__).read_text()
+        for verb in ("POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRASH"):
+            self.assertIsNone(
+                re.search(rf"""['"]{verb}['"]""", source),
+                f"module contains a {verb} request literal",
+            )
+        self.assertEqual(re.findall(r"""self\.transport\(\s*['"](\w+)['"]""", source), ["GET"])
 
     def test_corrupt_encrypted_secret_fails_closed_without_disclosure(self):
         self.connect()

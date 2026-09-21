@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import codecs
+from contextlib import contextmanager
 from dataclasses import dataclass
 from email import policy
 from email.errors import HeaderParseError
@@ -47,6 +48,16 @@ TOKEN_SECRET_KEY = "gmail_oauth_tokens"
 _MAX_RESULTS = 20
 _MAX_QUERY_LENGTH = 512
 _MAX_BODY_BYTES = 1_048_576
+_MAX_BODY_CANDIDATES = 20
+# RFC 2045 section 5.2: a text/* entity without an explicit charset parameter
+# defaults to us-ascii. Both the "Content-Type present without charset" and the
+# "no Content-Type header at all" paths use this single default so the strict
+# decode below is actually enforceable; two different defaults would let an
+# undeclared part decode bytes that an identically declared part rejects.
+_DEFAULT_TEXT_CHARSET = "us-ascii"
+# utf-7 can encode ASCII-looking markup in a form downstream renderers may
+# re-interpret. It has no legitimate use for this bounded read surface.
+_FORBIDDEN_CHARSETS = frozenset({"utf-7"})
 _MESSAGE_ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 _ATTACHMENT_ID = re.compile(r"[A-Za-z0-9_-]{1,4096}\Z")
 _OAUTH_LOCK = threading.RLock()
@@ -130,6 +141,15 @@ class GmailSearchResult:
             "date": self.date,
             "source": self.source,
         }
+
+    def as_evidence(self) -> dict:
+        """Return portable source evidence without private header metadata.
+
+        ``as_dict`` carries subject/sender/date, which are private mail
+        metadata. Integration code that persists evidence must use this
+        method, mirroring :meth:`GmailMessage.as_evidence`.
+        """
+        return {"source": self.source, "metadata_included": False}
 
     def __repr__(self) -> str:
         return f"GmailSearchResult(message_id={self.message_id!r}, metadata=<redacted>)"
@@ -345,15 +365,50 @@ class GmailConnector:
         self.registry = registry or ConnectorRegistry(store, (GMAIL_CONNECTOR,), clock=now)
         self.registry.register(GMAIL_CONNECTOR)
 
+    @contextmanager
+    def _lifecycle_guard(self, owner_id: str):
+        """Hold the repository-wide ``dispatch -> authority`` lock order.
+
+        ``ConnectorRegistry.transition`` takes the per-owner/connector dispatch
+        lock before the process-wide authority lock, and
+        :mod:`personal_agent.calendar` uses the same order. Taking the
+        authority lock first and then calling ``transition`` would invert that
+        order; because the authority lock is a single module-global lock shared
+        by every connector, one such inversion can wedge the whole process.
+        Every Gmail authority check that may be followed by a lifecycle
+        transition therefore enters through this guard. Both locks are
+        reentrant, so nesting inside this guard is safe.
+        """
+        # Validate through the Gmail owner rule first so an invalid owner
+        # raises GmailError rather than a foreign ValueError from the registry.
+        _owner_key(owner_id)
+        with self.registry._dispatch_guard(owner_id, (GMAIL_CONNECTOR_ID,)):
+            with self.registry._authority_guard():
+                yield
+
+    @staticmethod
+    def _contract_error(exc: ConnectorContractError) -> GmailError:
+        """Translate the shared contract error into the Gmail adapter error."""
+        known = {"already_connected", "unknown_connector", "scope_mismatch", "invalid_stored_state"}
+        return GmailError(exc.reason if exc.reason in known else "invalid_connector_state")
+
     def status(self, owner_id: str) -> dict:
         """Return restart-safe lifecycle metadata with no OAuth or mail data."""
-        return self.registry.status(owner_id, GMAIL_CONNECTOR_ID).as_dict()
+        _owner_key(owner_id)
+        try:
+            return self.registry.status(owner_id, GMAIL_CONNECTOR_ID).as_dict()
+        except ConnectorContractError as exc:
+            raise self._contract_error(exc) from None
 
     def portable_status(self, owner_id: str) -> dict:
         return self.status(owner_id)
 
     def connection_required(self, owner_id: str) -> dict:
-        return self.registry.required_result(owner_id, GMAIL_CONNECTOR_ID).as_dict()
+        _owner_key(owner_id)
+        try:
+            return self.registry.required_result(owner_id, GMAIL_CONNECTOR_ID).as_dict()
+        except ConnectorContractError as exc:
+            raise self._contract_error(exc) from None
 
     def begin_oauth(self, owner_id: str) -> dict:
         owner = _owner_key(owner_id)
@@ -364,7 +419,7 @@ class GmailConnector:
         signature = hmac.new(signing_key, f"{owner}:{nonce}".encode(), hashlib.sha256).hexdigest()
         state = nonce + "." + signature
         with _OAUTH_LOCK:
-            with self.registry._authority_guard():
+            with self._lifecycle_guard(owner_id):
                 current = self.registry.status(owner_id, GMAIL_CONNECTOR_ID)
                 if current.state is ConnectorState.CONNECTED:
                     raise GmailError("already_connected")
@@ -393,7 +448,7 @@ class GmailConnector:
             "code_challenge_method": "S256",
             "state": state,
         }
-        required = self.registry.required_result(owner_id, GMAIL_CONNECTOR_ID).as_dict()
+        required = self.connection_required(owner_id)
         return {
             **required,
             "authorization_url": AUTHORIZATION_ENDPOINT + "?" + urlencode(query),
@@ -413,7 +468,7 @@ class GmailConnector:
             code = callback.get("code")
             if not isinstance(code, str) or not code or len(code) > 4096:
                 raise GmailError("invalid_callback")
-            with self.registry._authority_guard():
+            with self._lifecycle_guard(owner_id):
                 current = self.registry.status(owner_id, GMAIL_CONNECTOR_ID)
                 if (
                     current.state.value != pending.get("connector_state")
@@ -432,7 +487,7 @@ class GmailConnector:
             except Exception:
                 raise GmailError("token_exchange_failed") from None
             tokens = self._validated_tokens(response, pending["owner"])
-            with self.registry._authority_guard():
+            with self._lifecycle_guard(owner_id):
                 current = self.registry.status(owner_id, GMAIL_CONNECTOR_ID)
                 if (
                     current.state.value != pending.get("connector_state")
@@ -552,7 +607,7 @@ class GmailConnector:
         expected_revision: str | None = None,
     ) -> dict:
         """Clear Gmail credentials and fail closed after expiry or revocation."""
-        with self.registry._authority_guard():
+        with self._lifecycle_guard(owner_id):
             current = self.registry.status(owner_id, GMAIL_CONNECTOR_ID)
             if expected_revision is not None and current.connection_revision != expected_revision:
                 return current.as_dict()
@@ -644,7 +699,7 @@ class GmailConnector:
         return tokens
 
     def _authorization_context(self, owner_id: str) -> tuple[dict, str, str]:
-        with self.registry._authority_guard():
+        with self._lifecycle_guard(owner_id):
             try:
                 status = self.registry.require_connected(owner_id, GMAIL_CONNECTOR_ID, (GMAIL_READONLY_SCOPE,))
             except ConnectorContractError as exc:
@@ -706,10 +761,26 @@ class GmailConnector:
             if has_status and (isinstance(status, bool) or not isinstance(status, int)):
                 raise GmailError("invalid_provider_response")
             if status == 401:
-                with self.registry._authority_guard():
+                with self._lifecycle_guard(owner_id):
                     current = self.registry.status(owner_id, GMAIL_CONNECTOR_ID)
                     token_key = _owner_secret_key(TOKEN_SECRET_KEY, owner_id)
-                    current_tokens = self.store.secret(token_key)
+                    try:
+                        current_tokens = self.store.secret(token_key)
+                    except GmailError:
+                        # An unreadable secret must revoke authority here for the
+                        # same reason as in ``_assert_current_request``; leaving
+                        # the connector CONNECTED with an undecryptable token
+                        # would report unusable authority as usable.
+                        if (
+                            current.state is ConnectorState.CONNECTED
+                            and current.connection_revision == connection_revision
+                        ):
+                            self.store.secret(token_key, {})
+                            self.registry.transition(
+                                owner_id, GMAIL_CONNECTOR_ID, ConnectorState.REAUTH_REQUIRED
+                            )
+                            raise GmailReauthenticationRequired("reauth_required") from None
+                        raise GmailError("superseded_connection") from None
                     if (
                         current.state is not ConnectorState.CONNECTED
                         or current.connection_revision != connection_revision
@@ -731,7 +802,7 @@ class GmailConnector:
         connection_revision: str,
         access_token: str,
     ) -> None:
-        with self.registry._authority_guard():
+        with self._lifecycle_guard(owner_id):
             current = self.registry.status(owner_id, GMAIL_CONNECTOR_ID)
             token_key = _owner_secret_key(TOKEN_SECRET_KEY, owner_id)
             try:
@@ -808,9 +879,15 @@ class GmailConnector:
         candidate_count = 0
         visited_count = 0
         exhausted = False
+        # Distinguish "this message genuinely carries no text body" from "the
+        # parser removed every possible body". Only the first may be reported
+        # as a successful empty read.
+        dropped_text_parts = 0
+        ambiguous_selection = False
 
         def visit(part: object, depth: int = 0) -> list[tuple[str, str | None, str | None, str | None]]:
             nonlocal candidate_count, visited_count, exhausted
+            nonlocal dropped_text_parts, ambiguous_selection
             if not isinstance(part, dict):
                 return []
             if depth > 20 or visited_count >= 100:
@@ -853,15 +930,32 @@ class GmailConnector:
                             exhausted = True
                             return []
                         content_type = value
-            disposition_kind = disposition.split(";", 1)[0].strip().lower()
+            # A comment is legal CFWS in Content-Disposition too, so
+            # ``inline (rendered)`` must stay inline rather than silently
+            # becoming an attachment and dropping the body.
+            disposition_kind = (
+                _strip_mime_comments(disposition).split(";", 1)[0].strip().lower()
+                if disposition_present
+                else ""
+            )
             normalized_mime = mime_type.lower() if isinstance(mime_type, str) else ""
             parsed_content_type = None
             charset = None
+            content_type_names = False
             if "content-type" in security_headers:
-                main_type = content_type.split(";", 1)[0].strip().lower()
+                # Derive the main type from the same comment-stripped text the
+                # parameter scanner uses, so a leading comment cannot make the
+                # two views disagree and hard-fail an otherwise valid part.
+                normalized_content_type = _strip_mime_comments(content_type)
+                main_type = normalized_content_type.split(";", 1)[0].strip().lower()
                 if (
                     not content_type.strip()
-                    or any(ord(character) < 32 or ord(character) == 127 for character in content_type)
+                    # HTAB is legal WSP inside a header value. Only the other C0
+                    # controls and DEL indicate a malformed provider response.
+                    or any(
+                        (ord(character) < 32 and character != "\t") or ord(character) == 127
+                        for character in content_type
+                    )
                     or re.fullmatch(r"[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+", main_type) is None
                     or main_type != normalized_mime
                 ):
@@ -883,12 +977,35 @@ class GmailConnector:
                         not isinstance(charset_value, str) or not charset_value.strip()
                     ):
                         raise GmailError("invalid_provider_response")
-                    charset = charset_value.strip() if isinstance(charset_value, str) else "us-ascii"
+                    charset = (
+                        charset_value.strip()
+                        if isinstance(charset_value, str)
+                        else _DEFAULT_TEXT_CHARSET
+                    )
+                    # A ``name`` parameter is the legacy attachment indicator
+                    # that predates Content-Disposition; a text part carrying
+                    # one is an attachment, not the message body.
+                    name_value = parsed_content_type.params.get("name")
+                    content_type_names = isinstance(name_value, str) and bool(name_value.strip())
             is_attachment = (
-                isinstance(filename, str)
-                and bool(filename.strip())
-            ) or (disposition_present and disposition_kind != "inline")
+                (isinstance(filename, str) and bool(filename.strip()))
+                or (disposition_present and disposition_kind != "inline")
+                or content_type_names
+            )
             if is_attachment:
+                if (
+                    normalized_mime in {"text/plain", "text/html"}
+                    and isinstance(body, dict)
+                    and (
+                        isinstance(body.get("data"), str)
+                        or isinstance(body.get("attachmentId"), str)
+                    )
+                ):
+                    # A text part that carried data but was removed as an
+                    # attachment means a possible body was dropped by the
+                    # parser. Record it so an empty result is not reported as
+                    # a successful source-attributed read.
+                    dropped_text_parts += 1
                 return []
             if (
                 normalized_mime in {"text/plain", "text/html"}
@@ -898,6 +1015,12 @@ class GmailConnector:
                     or isinstance(body.get("attachmentId"), str)
                 )
             ):
+                if candidate_count >= _MAX_BODY_CANDIDATES:
+                    # Bound the number of admitted body parts, not only the
+                    # nodes visited, so a wide but shallow tree cannot force an
+                    # unbounded decode.
+                    exhausted = True
+                    return []
                 candidate_count += 1
                 return [(
                     normalized_mime,
@@ -937,7 +1060,14 @@ class GmailConnector:
                     if "start" in parsed_content_type.params:
                         start_values = [parsed_content_type.params["start"]]
                 if not start_values:
-                    return related_children[0][1]
+                    root = related_children[0][1]
+                    if not root and any(rendered for _child, rendered in related_children):
+                        # Without a ``start`` parameter the root is the first
+                        # part. If that part rendered nothing while a sibling
+                        # did, the empty result is a parser outcome rather than
+                        # an attributable root body.
+                        ambiguous_selection = True
+                    return root
                 if len(start_values) != 1 or not isinstance(start_values[0], str):
                     raise GmailError("invalid_provider_response")
                 start_match = re.fullmatch(r"<([^<>\s\x00-\x1f\x7f]{1,998})>", start_values[0].strip())
@@ -973,6 +1103,11 @@ class GmailConnector:
         if exhausted:
             raise GmailError("message_too_complex")
         if not candidates:
+            if dropped_text_parts or ambiguous_selection:
+                # Some text content existed but no part could be attributed as
+                # the message body. Returning "" here would present an unknown
+                # outcome as a successful read.
+                raise GmailError("body_not_attributable")
             return "", _bounded_text(payload.get("mimeType"), 160)
         decoded_parts: list[str] = []
         decoded_bytes = 0
@@ -990,11 +1125,19 @@ class GmailConnector:
             decoded_bytes += len(decoded)
             if decoded_bytes > _MAX_BODY_BYTES:
                 raise GmailError("body_too_large")
-            encoding = charset or "utf-8"
+            # A part with no Content-Type header at all uses the same RFC 2045
+            # default as a part whose Content-Type omits charset, so the strict
+            # decode is enforced identically on both paths.
+            encoding = charset or _DEFAULT_TEXT_CHARSET
             if not isinstance(encoding, str) or len(encoding) > 64:
                 raise GmailError("invalid_provider_response")
             try:
-                codecs.lookup(encoding)
+                codec = codecs.lookup(encoding)
+            except (LookupError, TypeError, ValueError):
+                raise GmailError("invalid_provider_response") from None
+            if codec.name in _FORBIDDEN_CHARSETS:
+                raise GmailError("unsupported_charset")
+            try:
                 decoded_parts.append(decoded.decode(encoding, errors="strict"))
             except (LookupError, TypeError, ValueError, UnicodeError):
                 raise GmailError("invalid_provider_response") from None

@@ -430,7 +430,8 @@ class PublicResearchTests(unittest.TestCase):
                 self.assertIn('  - price:',result['brief'])
 
         for content in ('Price increased by USD 10.', 'Price increase: USD 10.',
-                        'Price rose USD 10.', 'Price raised by USD 10.'):
+                        'Price rose USD 10.', 'Price raised by USD 10.',
+                        'USD 10 increase in price.', 'The price increase was USD 10.'):
             with self.subTest(content=content):
                 reader=Reader({'https://alpha.example/item':{
                     'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
@@ -820,6 +821,20 @@ class PublicResearchTests(unittest.TestCase):
                 result=PublicResearch(search_result,reader,max_pages=1).run(
                     'travel_plan','museum plan',query_source='owner_public_request')
                 self.assertEqual(result['dynamic_facts'][dynamic]['status'],'unknown')
+
+    def test_room_pricing_qualifiers_do_not_hide_exact_availability(self):
+        for content in (
+            'Rooms are available today. Room rates may vary.',
+            'Rooms are available today. Room rates vary by date.',
+        ):
+            with self.subTest(content=content):
+                reader=Reader({'https://alpha.example/item':{
+                    'url':'https://alpha.example/item','retrieved_at':2,'content':content}})
+                result=PublicResearch(search_result,reader,max_pages=1).run(
+                    'travel_plan','museum plan',query_source='owner_public_request')
+                self.assertEqual(result['dynamic_facts']['inventory']['status'],'observed')
+                self.assertEqual(result['dynamic_facts']['inventory']['evidence'],[
+                    {'source_id':'S1','exact_text':'Rooms are available today.'}])
 
     def test_anaphoric_adjacent_uncertainty_keeps_dynamic_facts_unknown(self):
         cases=(

@@ -168,10 +168,16 @@ PRICE_ADJUSTMENT = re.compile(
     r'(?:\b(?:the\s+)?(?:price|cost|fare|rate)\b|가격|요금))'
 )
 PRICE_INCREASE_AMOUNT = re.compile(
-    r'(?i)(?:\b(?:price|cost|fare|rate)\b|가격|요금)[^.!?]{0,45}'
+    r'(?i)(?:'
+    r'(?:\b(?:price|cost|fare|rate)\b|가격|요금)[^.!?]{0,45}'
     r'\b(?:increas(?:e|ed)|rais(?:e|ed)|rise|rose)\b\s*'
-    r'(?!to\b)(?:(?:by|of)\s+|:\s*)?'
+    r'(?!to\b)(?:(?:by|of)\s+|(?:(?:is|was|were)\s+)|:\s*)?'
+    r'(?:[$€£¥₩]\s?\d|(?:USD|EUR|GBP|JPY|KRW)\s?\d|\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW))|'
     r'(?:[$€£¥₩]\s?\d|(?:USD|EUR|GBP|JPY|KRW)\s?\d|\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW))'
+    r'[^.!?]{0,20}\b(?:increase|raise|rise)\b[^.!?]{0,20}'
+    r'(?:\b(?:in|of)\s+(?:the\s+)?(?:price|cost|fare|rate)\b|'
+    r'\b(?:price|cost|fare|rate)\b|가격|요금)'
+    r')'
 )
 FEE_VALUE_PATTERNS = (
     re.compile(r'(?i)(?:\b(?:fee|fees|tax|taxes|surcharge|resort fee|service charge)\b|수수료|세금|부가세)[^;.!?]{0,20}(?:[$€£¥₩]\s?\d|\b(?:USD|EUR|GBP|JPY|KRW)\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|JPY|KRW)\b|\b\d+(?:\.\d+)?\s*%|\b(?:none|zero|free|included|waived)\b|없음|무료|포함)'),
@@ -413,6 +419,13 @@ FACT_ENTITY_TERMS = {
         r'객실|좌석|티켓'
     ),
 }
+# A countable inventory entity may also appear in a sentence about a different
+# property. "Room rates may vary" qualifies pricing, not whether rooms are
+# available. Keep these property vocabularies separate unless the sentence
+# also names availability itself.
+INVENTORY_PRICING_TERMS = re.compile(
+    r'(?i)\b(?:rates?|prices?|pricing|fares?|costs?|fees?|charges?|surcharges?|taxes?|discounts?)\b'
+)
 # Availability is boolean, so a neighbour asserting the OPPOSITE state is a
 # contradiction, not a confirmation. Without this, `FACT_PATTERNS['inventory']`
 # matched "sold out" as readily as "available" and a neighbour denying
@@ -615,6 +628,10 @@ def _neighbor_clears(name, neighbor, fact_text):
         # is this fact's own subject. Both bear on the fact only in the
         # present; a past-tense remark about them is history (see above).
         entity_terms=FACT_ENTITY_TERMS.get(name)
+        if (name == 'inventory' and entity_terms and entity_terms.search(neighbor)
+                and INVENTORY_PRICING_TERMS.search(neighbor)
+                and not FACT_PROPERTY_TERMS['inventory'].search(neighbor)):
+            return True
         bears_on_fact=bool((entity_terms and entity_terms.search(neighbor))
                            or PERSONAL_ANAPHORIC_SUBJECT.search(neighbor))
     if not bears_on_fact:

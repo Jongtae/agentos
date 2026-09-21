@@ -1723,6 +1723,47 @@ class GmailConnectorTests(unittest.TestCase):
                 self.assertEqual(malformed.exception.reason, "invalid_provider_response")
                 self.assertNotIn("private body", str(malformed.exception))
 
+    def test_a_case_varied_duplicate_is_always_refused(self):
+        """The other half of the invariant.
+
+        The sibling property test states that a legal header must not be
+        refused. On its own that is one-directional: an implementation that
+        refuses nothing satisfies it. This states the dual - a parameter name
+        repeated under a different spelling must be refused - so the pair
+        pins both directions of the check rather than only the side that
+        happened to break last.
+
+        Generated pairs, not chosen ones, for the same reason as the sibling.
+        """
+        registry_names = ("charset", "name", "start", "boundary", "format")
+        spellings = (str.upper, str.capitalize, lambda text: text.swapcase())
+        values = ("utf-8", '"a.txt"', '"<root>"', "B", "flowed")
+        refused_count = 0
+        for parameter, value in zip(registry_names, values):
+            for respell in spellings:
+                variant = respell(parameter)
+                if variant == parameter:
+                    continue
+                for first, second in (
+                    (parameter, variant),
+                    (variant, parameter),
+                ):
+                    header = f"text/plain; {first}={value}; {second}={value}"
+                    with self.subTest(header=header):
+                        with self.assertRaises(GmailError) as duplicated:
+                            _parsed_mime_header("Content-Type", header)
+                        self.assertEqual(
+                            duplicated.exception.reason, "invalid_provider_response"
+                        )
+                        refused_count += 1
+                    # The same repeat with a comment hiding one occurrence.
+                    hidden = f"text/plain; {first}={value}; (c) {second}={value}"
+                    with self.subTest(header=hidden):
+                        with self.assertRaises(GmailError):
+                            _parsed_mime_header("Content-Type", hidden)
+                        refused_count += 1
+        self.assertGreater(refused_count, 20, "generator produced too few pairs")
+
     def test_mixed_rfc2231_forms_are_judged_on_the_resolved_value(self):
         """Where these are refused moved, but they are still refused.
 
@@ -1809,6 +1850,12 @@ class GmailConnectorTests(unittest.TestCase):
             "format=flowed", "boundary=B", 'start="<root>"',
             "charset*0=utf-", "charset*1=8", "charset*=us-ascii''utf-8",
             "name*0=a", "name*1=.txt", "(c)", "", " ", "\t",
+            # Upper-case parameter names are what the duplicate check is made
+            # of: it case-folds the value and reparses. Without these the
+            # generator short-circuits on ``folded == value`` for two thirds
+            # of its cases and never exercises the reparse at all - a guard
+            # that does not touch the implementation it guards.
+            "CHARSET=UTF-8", 'Name="A.TXT"', "NAME*0=x", 'Start="<ROOT>"',
         )
         refused = []
         for count in (1, 2, 3):

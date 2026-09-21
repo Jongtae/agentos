@@ -5,6 +5,7 @@ import threading
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 
 from personal_agent.memory_service import MemoryService, MemoryServiceError
@@ -251,36 +252,63 @@ class MemoryServiceTests(unittest.TestCase):
             ).fetchone()[0]
 
     def _decide_inside_issue_window(self, decide):
-        """Run `decide` in the issuer's last pre-transaction instant.
+        """Run `decide` the instant the issuer's validating transaction closes.
 
-        The issuing paths hash the approval token before opening their
-        BEGIN IMMEDIATE transaction, so patching the hash is a deterministic
-        hook for the exact window a barrier race could only hit by luck: the
-        competing decision commits first, and the issuer must then observe it
-        inside its own transaction.
+        Both `issue_candidate_memory_approval` and
+        `issue_correction_memory_approval` validate and insert inside a single
+        `BEGIN IMMEDIATE` transaction. SQLite holds that connection's write
+        lock for the whole transaction, not just around the INSERT, so no
+        other connection can ever commit a competing write strictly *between*
+        the validating SELECT and the INSERT -- that is exactly what makes
+        the issuer safe. Any hook that tries to force a competing write into
+        that interval either blocks on the same lock until the issuer's
+        transaction ends (an artificial delay, not a real interleaving), or
+        never actually reaches the interval at all. Hashing the token before
+        `BEGIN IMMEDIATE` (as the issuers now do) is squarely in that
+        "never reaches it" case: it fires before the transaction, and before
+        the SELECT, so a race staged there is trivially survived by any
+        implementation, atomic or not.
+
+        The earliest point a competing write can *actually* land is the
+        instant the issuer's own transaction commits and its connection
+        closes. This hook wraps `store.db()` so it fires `decide` exactly
+        once, synchronously, right after the *first* transaction the issuer
+        opens closes. For the real, atomic issuer that first transaction is
+        the whole validate+insert unit, so `decide` runs against an approval
+        that is already fully issued and must revoke it -- deterministic, not
+        a race. For a non-atomic issuer that validates in one transaction and
+        inserts in a later, separate one, this hook lands in the real gap
+        between them, before the insert has happened: `decide` then commits
+        against pre-insert state and has nothing to revoke, and the insert
+        that follows blindly commits a now-stale approval. That gap is
+        exactly the defect this regression test exists to catch.
         """
-        original = self.store._exact_memory_token_hash
+        original_db = self.store.db
         state = {"fired": False}
 
-        def hook(token):
+        @contextmanager
+        def patched_db():
+            with original_db() as conn:
+                yield conn
             if not state["fired"]:
                 state["fired"] = True
                 decide()
-            return original(token)
 
-        self.store._exact_memory_token_hash = hook
-        self.addCleanup(lambda: self.store.__dict__.pop("_exact_memory_token_hash", None))
+        self.store.db = patched_db
+        self.addCleanup(lambda: self.store.__dict__.pop("db", None))
         return state
 
     def test_candidate_approval_and_rejection_never_leave_an_issued_approval(self):
         """Both deterministic orderings, instead of a probabilistic barrier race."""
-        # Ordering 1: the rejection commits inside the issuer's window.
+        # Ordering 1: the rejection fires the instant the issuer's own
+        # validating transaction closes -- the earliest a competing write can
+        # actually land. The issuer already committed the approval by then,
+        # so issuance itself succeeds and the rejection must revoke it.
         candidate = self.service.propose("owner-a", "work-a", "key-one", "value-one")
         window = self._decide_inside_issue_window(lambda: self.service.reject_candidate(
             "owner-a", "work-a", candidate["id"], candidate["content_digest"]))
-        with self.assertRaises(MemoryServiceError):
-            self.service.request_candidate_approval(
-                "owner-a", "work-a", candidate["id"], candidate["content_digest"])
+        self.service.request_candidate_approval(
+            "owner-a", "work-a", candidate["id"], candidate["content_digest"])
         self.assertTrue(window["fired"])
         self.assertEqual(self._issued_approval_count(candidate["id"]), 0)
         self.assertEqual(
@@ -340,12 +368,14 @@ class MemoryServiceTests(unittest.TestCase):
 
     def test_correction_approval_and_delete_never_leave_an_orphan_approval(self):
         """Both deterministic orderings, instead of a probabilistic barrier race."""
-        # Ordering 1: the delete commits inside the issuer's window.
+        # Ordering 1: the delete fires the instant the issuer's own
+        # validating transaction closes -- the earliest a competing write can
+        # actually land. The issuer already committed the approval by then,
+        # so issuance itself succeeds and the delete must revoke it.
         memory = self.service.remember("owner-a", "work-a", "key-one", "before")
         window = self._decide_inside_issue_window(lambda: self.service.delete("owner-a", memory["id"]))
-        with self.assertRaises(MemoryServiceError):
-            self.service.request_correction(
-                "owner-a", "work-a", memory["id"], "key-one", "before", "after")
+        self.service.request_correction(
+            "owner-a", "work-a", memory["id"], "key-one", "before", "after")
         self.assertTrue(window["fired"])
         self.assertEqual(self._issued_approval_count(memory["id"]), 0)
         self.assertEqual(self.store.memory(memory["id"], "owner-a", current_only=False), None)

@@ -9,7 +9,10 @@ from urllib import error as urlerror
 from urllib import request as urlrequest
 from urllib.parse import parse_qs, urlsplit
 
-from delivery_state_invariants import assert_declared_goal_shape
+from delivery_state_invariants import (
+    assert_declared_goal_shape,
+    assert_no_unauthorised_execution_authority,
+)
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
 
@@ -48,7 +51,11 @@ class WebManagementReadinessTests(unittest.TestCase):
             self.assertIn(plan['next_goal']['id'], plan['programs'])
         else:
             self.assertIsNone(plan['next_goal']['id'])
-            self.assertEqual(plan['programs']['EPIC-PA1']['status'], 'owner-paused')
+        # `EPIC-PA1 is owner-paused` used to stand in the terminal branch.
+        # It was a cast pin and it only ran in one shape; the rule behind it
+        # -- a closeout never hands authority to a successor -- is asserted
+        # for every program in both shapes instead.
+        assert_no_unauthorised_execution_authority(self, plan)
         self.assertTrue((ROOT / 'docs' / entry['contract']).is_file())
 
     def test_historical_top02_validation_is_not_weakened(self):

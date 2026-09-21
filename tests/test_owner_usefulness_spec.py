@@ -72,23 +72,27 @@ class OwnerUsefulnessSpecificationTests(unittest.TestCase):
         # `== ["GOV-PA1-01"]`, which pinned the rule to whichever program
         # happened to be declared, and applied to the closed-out program too
         # so a closeout cannot erase the requirement.
+        # Subjects are keyed on each program's own role, not on the plan
+        # shape. Keying on the shape meant a program that closed out while a
+        # *different* program held the declared goal was checked by nothing:
+        # the closed-out branch only ran in the terminal shape.
+        closed = closed_out_programs(plan)
+        subjects = {name: "complete" for name in closed}
         if shape == "goal-ready":
-            subjects = [declared]
+            subjects[declared] = "goal-ready"
             self.assertNotIn(declared, documented)
         else:
             self.assertIsNone(declared)
-            subjects = closed_out_programs(plan)
-            self.assertTrue(subjects)
-            for name in subjects:
-                self.assertIn(name, documented)
-        for name in subjects:
+            self.assertTrue(closed)
+        self.assertTrue(subjects)
+        for name in closed:
+            self.assertIn(name, documented)
+        for name, role in sorted(subjects.items()):
             selected = next(item for item in plan["iterations"] if item["id"] == name)
             self.assertIsInstance(selected["issue"], int)
-            self.assertIn(selected["activation_status"],
-                          {"owner-activated-goal-ready", "complete-on-merge"})
-            if shape == "goal-ready":
-                self.assertEqual(selected["activation_status"],
-                                 "owner-activated-goal-ready")
+            expected = ("owner-activated-goal-ready" if role == "goal-ready"
+                        else "complete-on-merge")
+            self.assertEqual(selected["activation_status"], expected, name)
             self.assertTrue(selected.get("depends_on"), selected)
             for dependency in selected["depends_on"]:
                 self.assertIn(dependency, documented)

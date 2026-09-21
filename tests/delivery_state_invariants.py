@@ -21,9 +21,32 @@ anything about it. So each branch below carries its own positive invariants,
 and both branches share the non-execution invariants that were the point of
 the original assertions.
 
+The same mistake then recurred one level down. The callers kept asserting
+*which named program* held which role -- EPIC-PA1 is the paused one,
+EPIC-REUSE-01 is the active one -- which was true when written and stopped
+being true the moment the owner swapped the roles (#443). Most failed loudly.
+One did not fail at all: it iterated the live plan's paused programs, and when
+the only paused program resumed the loop emptied and it passed while asserting
+nothing.
+
+So roles are now derived from the plan ("the declared program", "the paused
+programs", "the closed-out programs") and the *full* invariant is asserted
+for whichever program currently holds each role. Two rules keep that from
+becoming a relaxation:
+
+* a role check may never be satisfiable by an empty subject set -- if no
+  program currently holds a role that must remain tested, the scenario is
+  constructed (see ``synthetic_paused_program``);
+* "nothing terminal may execute" cannot be derived from the status field
+  alone, because ``executing_programs`` is defined by that same field and
+  the check would be a tautology. ``programs_barred_from_authority``
+  therefore derives the bar from independent records -- completion history,
+  ``complete-on-merge`` iterations, and unresumed ``paused_by`` records.
+
 This module is deliberately not named ``test_*``: neither ``pytest tests``
 nor ``unittest discover -s tests`` collects it, so it adds no test cases.
 """
+import contextlib
 import json
 import re
 import tempfile
@@ -40,6 +63,8 @@ ARMED = {"owner-activated-goal-ready", "active"}
 TERMINAL_PROGRAM_STATUS = {"complete", "owner-paused"}
 GOAL_READY = "owner-activated-goal-ready"
 CLOSED_OUT = "complete"
+PAUSED = "owner-paused"
+CLOSED_ON_MERGE = "complete-on-merge"
 
 
 def load_plan(path=PLAN_PATH):
@@ -97,6 +122,277 @@ def closed_out_programs(plan):
             f"programs recorded complete with no iteration record and no legacy exemption: {undocumented}"
         )
     return sorted(complete & set(iterations))
+
+
+def paused_programs(plan):
+    """Programs currently recorded ``owner-paused``."""
+    return sorted(
+        name
+        for name, program in plan.get("programs", {}).items()
+        if program.get("status") == PAUSED
+    )
+
+
+def assert_activation_record(case, label, record):
+    """A pause or resume record must be auditable, not a truthy placeholder.
+
+    These records are the only thing that distinguishes an owner-directed
+    role change from a program quietly regaining authority, so a bare
+    ``True`` or empty dict must not satisfy one.
+    """
+    case.assertIsInstance(record, dict, label)
+    case.assertIsInstance(record.get("issue"), int, f"{label} names no issue")
+    case.assertTrue(record["issue"] > 0, label)
+    reason = record.get("reason")
+    case.assertIsInstance(reason, str, f"{label} records no reason")
+    # No test can confirm an issue exists on GitHub, so the reason is the only
+    # part a reader can audit. "x" is truthy and tells them nothing.
+    case.assertGreaterEqual(len(reason.strip()), MIN_REASON_CHARS,
+                            f"{label} reason is a placeholder, not a record: {reason!r}")
+
+
+#: A reason shorter than this is a placeholder. The bar is deliberately low --
+#: it excludes "x" and "ok", not terse honesty.
+MIN_REASON_CHARS = 24
+
+
+def is_resumed(program):
+    """True when an owner explicitly reactivated a previously paused program.
+
+    The resuming issue may not be the pausing issue: a program cannot lift its
+    own pause, which is the most literal form of self-authorisation.
+    """
+    record = program.get("reactivated_by")
+    paused_by = program.get("paused_by")
+    if not (isinstance(record, dict)
+            and isinstance(record.get("issue"), int)
+            and record["issue"] > 0
+            and isinstance(record.get("reason"), str)
+            and len(record["reason"].strip()) >= MIN_REASON_CHARS):
+        return False
+    if isinstance(paused_by, dict) and record["issue"] == paused_by.get("issue"):
+        return False
+    return True
+
+
+def programs_barred_from_authority(plan):
+    """Programs that evidence *other than their own status* says must be quiet.
+
+    Deriving this from ``programs[*]["status"]`` alone would be circular --
+    ``executing_programs`` is defined by that same field, so "no paused
+    program executes" would be a tautology. The name pins these tests used
+    to carry (``assertNotIn("EPIC-PA1", executing)``) were not tautological
+    precisely because they came from outside the status field.
+
+    So each rule below is an independent record that contradicts execution:
+
+    * the program is listed in the documented completion history;
+    * its iteration is recorded ``complete-on-merge``;
+    * it carries a ``paused_by`` record and no owner ``reactivated_by``.
+
+    Returns ``{name: reason}``. A program escapes only by an explicit,
+    auditable owner record -- which is the transition these tests exist to
+    make visible rather than to forbid.
+    """
+    programs = plan.get("programs", {})
+    iterations = program_iterations(plan)
+    documented = set(plan.get("history", {}).get("documented_completed_iterations", []))
+    barred = {}
+    for name, program in programs.items():
+        if name in documented:
+            barred[name] = "is recorded in the documented completion history"
+        elif iterations.get(name, {}).get("activation_status") == CLOSED_ON_MERGE:
+            barred[name] = "has an iteration recorded complete-on-merge"
+        elif program.get("paused_by") and not is_resumed(program):
+            barred[name] = "carries a pause record and no owner reactivation record"
+    return barred
+
+
+def assert_no_unauthorised_execution_authority(case, plan):
+    """No program may execute or be declared unless it currently may.
+
+    Two independent halves:
+
+    1. Nothing whose recorded status is terminal (paused or complete) may be
+       the declared goal or appear in ``executing``.
+    2. Nothing that outside evidence bars (see
+       ``programs_barred_from_authority``) may hold a non-terminal status,
+       execute, be declared, or keep substeps in flight.
+
+    Half 2 is what replaced the ``EPIC-PA1`` name pins. It is strictly wider:
+    the pins guarded one named program, this guards every program that has
+    ever been closed out or paused, in whichever direction the cast moves.
+    """
+    programs = plan.get("programs", {})
+    goal_id = plan.get("next_goal", {}).get("id")
+    executing = executing_programs(plan)
+
+    for name in sorted(programs):
+        if programs[name].get("status") in TERMINAL_PROGRAM_STATUS:
+            # Only the declared-goal half is assertable here. "a terminal
+            # program is not in `executing`" cannot fail: executing_programs
+            # is *defined* as "status not in TERMINAL_PROGRAM_STATUS", so it
+            # would restate its own input. The status-independent bar below is
+            # what actually catches a quiet program holding authority.
+            case.assertNotEqual(goal_id, name, f"{name} is terminal but is the declared goal")
+
+    for name, reason in sorted(programs_barred_from_authority(plan).items()):
+        program = programs[name]
+        case.assertIn(program.get("status"), TERMINAL_PROGRAM_STATUS,
+                      f"{name} {reason} but its status is {program.get('status')!r}")
+        case.assertNotIn(name, executing, f"{name} {reason} but holds execution authority")
+        case.assertNotEqual(goal_id, name, f"{name} {reason} but is the declared goal")
+        if "active_substeps" in program:
+            case.assertEqual(program["active_substeps"], [],
+                             f"{name} {reason} but keeps substeps in flight")
+        iteration = program_iterations(plan).get(name)
+        if iteration is not None:
+            case.assertNotIn(iteration.get("activation_status"), ARMED,
+                             f"{name} {reason} but its iteration is armed for selection")
+
+
+@contextlib.contextmanager
+def plan_file(plan):
+    """Write a plan variant to a throwaway path for the real loader to read."""
+    with tempfile.TemporaryDirectory() as folder:
+        path = Path(folder) / "delivery-plan.yaml"
+        path.write_text(json.dumps(plan), encoding="utf-8")
+        yield path
+
+
+SYNTHETIC_PAUSED = "SYNTHETIC-PAUSED-01"
+
+
+def synthetic_paused_program(plan, name=SYNTHETIC_PAUSED):
+    """Build a paused top-level program so the pause rule is always testable.
+
+    The pause regressions used to iterate the live plan's paused programs.
+    ``test_a_paused_program_holds_no_running_work`` had no guard against an
+    empty subject set, so when the owner resumed the only paused program it
+    passed while asserting nothing. Its sibling
+    ``test_a_paused_program_cannot_be_selected_even_if_redeclared_active`` did
+    have a guard and failed loudly -- but a guard only converts an evaporated
+    test into a broken one. The scenario is constructed here instead, so it
+    survives a role swap in either direction, and the real paused programs are
+    checked in addition to it rather than instead of it.
+
+    The record is deliberately selectable-if-unpaused: its dependency is
+    drawn from the documented completion history, so the only thing stopping
+    selection is the pause itself. ``assert_pause_survives_redeclaration``
+    proves that with a positive control.
+    """
+    altered = json.loads(json.dumps(plan))
+    iteration_ids = {item["id"] for item in altered["iterations"]}
+    assert name not in iteration_ids and name not in altered["programs"]
+    documented = altered["history"]["documented_completed_iterations"]
+    dependency = next(item for item in documented if item in iteration_ids)
+    altered["programs"][name] = {
+        "issue": 999_002,
+        "status": PAUSED,
+        "active_substeps": [],
+        "ordered_substeps": [],
+        "resume_condition": "Synthetic fixture: resume only on explicit owner direction.",
+        "paused_by": {"issue": 999_003, "reason": "Synthetic pause fixture for the pause regression."},
+    }
+    altered["iterations"].append({
+        "id": name,
+        "issue": 999_002,
+        "milestone": "Fixture milestone",
+        "contract": "fixture-contract.en.md",
+        "activation_status": PAUSED,
+        "depends_on": [dependency],
+    })
+    return altered, name
+
+
+def assert_pause_survives_redeclaration(case, plan, name):
+    """Pausing must remove execution authority, not merely relabel it.
+
+    An earlier form asserted ``select({}) is None`` against the real plan and
+    claimed that proved pausing worked. It did not: selection reads the
+    iterations layer and never ``programs[*]["status"]``, so the assertion
+    passed for an unrelated reason. This forces the path instead --
+    redeclaring the paused program as the *active* goal, the exact mistake a
+    pause has to survive -- and then pays for the refusal with a positive
+    control: arming the same record at the iterations layer, while leaving
+    ``programs[*]["status"]`` paused, IS selectable. That is what makes the
+    two-layer consistency assertion below load-bearing rather than decorative.
+    """
+    from personal_agent.delivery import DeliveryPlan
+
+    program = plan["programs"][name]
+    case.assertEqual(program.get("status"), PAUSED, name)
+    case.assertEqual(program.get("active_substeps", []), [], f"{name} is paused with work in flight")
+    case.assertTrue(program.get("resume_condition"), f"{name} is paused with no resume condition")
+    assert_activation_record(case, f"{name} paused_by", program.get("paused_by"))
+    iteration = program_iterations(plan)[name]
+    # Two-layer consistency. Selection only reads this layer, so a pause
+    # recorded only on the program record would be cosmetic.
+    case.assertNotIn(
+        iteration.get("activation_status"), ARMED,
+        f"{name} is paused at the program layer but armed where selection reads",
+    )
+
+    altered = json.loads(json.dumps(plan))
+    altered["next_goal"] = {"id": name, "status": "active"}
+    with plan_file(altered) as path:
+        case.assertIsNone(
+            DeliveryPlan(path).select({}),
+            f"{name} is paused but was selected after being redeclared active",
+        )
+
+    # Positive control: the identical record, armed at the layer selection
+    # reads, IS selected. Without it the refusal above could come from a
+    # malformed fixture instead of from the pause.
+    armed = json.loads(json.dumps(altered))
+    entry = next(item for item in armed["iterations"] if item["id"] == name)
+    entry["activation_status"] = GOAL_READY
+    with plan_file(armed) as path:
+        selected = DeliveryPlan(path).select({})
+    case.assertIsNotNone(
+        selected,
+        f"{name} did not select even when armed: the refusal above proves nothing",
+    )
+    case.assertEqual(selected["id"], name)
+
+
+def assert_closed_out_record(case, plan, name):
+    """Full closeout requirements for one program recorded complete.
+
+    Extracted from the terminal branch of ``assert_declared_goal_shape`` so
+    it runs in *both* plan shapes. A program that closed out while another
+    program holds the declared goal used to escape every one of these checks
+    purely because the plan was no longer terminal.
+    """
+    programs = plan["programs"]
+    program = programs[name]
+    iteration = program_iterations(plan)[name]
+    completed = plan["history"]["documented_completed_iterations"]
+
+    case.assertEqual(program.get("status"), CLOSED_OUT, name)
+    case.assertEqual(iteration.get("activation_status"), CLOSED_ON_MERGE, name)
+    case.assertIn(name, completed)
+    # A closed-out program keeps no authority, whichever shape the plan is in.
+    case.assertNotEqual(plan.get("next_goal", {}).get("id"), name,
+                        f"{name} is complete but is the declared goal")
+    case.assertNotIn(name, executing_programs(plan))
+    case.assertEqual(program.get("active_substeps", []), [])
+    case.assertTrue(program.get("closeout"), name)
+    done = program.get("completed_substeps", [])
+    case.assertTrue(done, name)
+    assert_substep_evidence_is_complete(case, name, program, done,
+                                        iteration.get("completed_substeps"))
+    # A deferred substep may never be claimed as completed.
+    deferred = program.get("deferred_substeps", {}).get("substeps", [])
+    case.assertFalse(set(deferred) & set(done), name)
+    # Nor may an unexecuted one. Each must name a successor issue, so an
+    # unfinished substep cannot be dropped silently.
+    unexecuted = program.get("unexecuted_substeps", {})
+    case.assertFalse(set(unexecuted) & set(done), name)
+    for substep, record in unexecuted.items():
+        case.assertIsInstance(record.get("successor_issue"), int,
+                              f"{name}: {substep} is unexecuted with no successor issue")
+        case.assertTrue(record.get("reason"), f"{name}: {substep} is unexecuted with no reason")
 
 
 class RecordingRunner:
@@ -238,29 +534,18 @@ def assert_declared_goal_shape(case, plan=None, path=PLAN_PATH):
         case.assertIsNone(goal["id"])
         case.assertEqual(armed, [])
         case.assertEqual(executing, [])
-        closed = closed_out_programs(plan)
-        case.assertTrue(closed, "a terminal plan must record which program closed out")
-        for name in closed:
-            program = programs[name]
-            case.assertIn(name, completed)
-            case.assertEqual(program.get("active_substeps", []), [])
-            case.assertTrue(program.get("closeout"), name)
-            done = program.get("completed_substeps", [])
-            case.assertTrue(done, name)
-            assert_substep_evidence_is_complete(
-                case, name, program, done, program_iterations(plan)[name].get("completed_substeps")
-            )
-            # A deferred substep may never be claimed as completed.
-            deferred = program.get("deferred_substeps", {}).get("substeps", [])
-            case.assertFalse(set(deferred) & set(done), name)
-            # Nor may an unexecuted one. Each must name a successor issue, so
-            # an unfinished substep cannot be dropped silently.
-            unexecuted = program.get("unexecuted_substeps", {})
-            case.assertFalse(set(unexecuted) & set(done), name)
-            for substep, record in unexecuted.items():
-                case.assertIsInstance(record.get("successor_issue"), int,
-                                      f"{name}: {substep} is unexecuted with no successor issue")
-                case.assertTrue(record.get("reason"), f"{name}: {substep} is unexecuted with no reason")
+        case.assertTrue(closed_out_programs(plan),
+                        "a terminal plan must record which program closed out")
+
+    # Shared: every closed-out program carries its full closeout record, in
+    # either shape. This used to sit inside the terminal branch, so a program
+    # that closed out while a *different* program held the declared goal was
+    # checked by nothing at all.
+    for name in closed_out_programs(plan):
+        assert_closed_out_record(case, plan, name)
+
+    # Shared: nothing paused, complete or otherwise barred holds authority.
+    assert_no_unauthorised_execution_authority(case, plan)
 
     # Shared: whichever shape, the heartbeat must refuse to run.
     assert_heartbeat_is_paused(case, plan=plan)

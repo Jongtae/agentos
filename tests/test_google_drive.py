@@ -1,11 +1,27 @@
 import base64
 import hashlib
+import importlib.util
+import sys
 import tempfile
 import unittest
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from personal_agent.google_drive import DRIVE_READONLY, DriveAuthorizationError, GoogleDrive, GoogleDriveConnection
 from personal_agent.quickstart_store import QuickStore
+
+# Retired by REUSE-R1c / #440: the drive.readonly design is superseded by the
+# drive.file + Picker handoff in drive_web_oauth.py, which ships.  The module
+# is preserved outside the installed package and still exercised here, loaded
+# by path the same way the repository already tests other scripts/ modules.
+_LEGACY = Path(__file__).resolve().parents[1] / "scripts" / "legacy" / "drive-readonly" / "google_drive.py"
+_spec = importlib.util.spec_from_file_location("legacy_google_drive", _LEGACY)
+_module = importlib.util.module_from_spec(_spec)
+sys.modules["legacy_google_drive"] = _module
+_spec.loader.exec_module(_module)
+DRIVE_READONLY = _module.DRIVE_READONLY
+DriveAuthorizationError = _module.DriveAuthorizationError
+GoogleDrive = _module.GoogleDrive
+GoogleDriveConnection = _module.GoogleDriveConnection
 
 
 class DriveTests(unittest.TestCase):

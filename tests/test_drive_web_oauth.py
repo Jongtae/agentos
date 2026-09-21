@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, urlparse
 
 from cryptography.fernet import Fernet
 
-from personal_agent.drive_web_oauth import DRIVE_FILE, PENDING_KEY, EncryptedDriveSecretStore, DriveScopeError, DriveWebOAuthError, DriveWebOAuthHandoff
+from personal_agent.drive_web_oauth import DRIVE_FILE, PENDING_KEY, TOKEN_KEY, EncryptedDriveSecretStore, DriveScopeError, DriveWebOAuthError, DriveWebOAuthHandoff
 from personal_agent.quickstart_store import QuickStore
 from personal_agent.quickstart_service import AgentService
 from personal_agent.providers import ProviderError
@@ -58,6 +58,67 @@ class DriveWebOAuthTests(unittest.TestCase):
         # from the same verifier and nothing tied them together, so a change
         # to one could silently disagree with the other.
         self.assertEqual(offer["code_challenge"], expected)
+
+    def test_authorization_request_does_not_widen_the_grant(self):
+        """SEC-DRIVE-SCOPE-01 / #432 item 6, the deferral #427 left here.
+
+        Without this, Google may fold scopes the owner granted elsewhere into
+        the grant, and ``complete``'s exact-set check then hard-fails a
+        connection that previously succeeded. That Google honours it is a live
+        observation this repository has not made.
+        """
+        _offer, state = self.begin()
+        query = parse_qs(urlparse(self.flow.authorization_url(state, 42)).query)
+        self.assertEqual(query["include_granted_scopes"], ["false"])
+        self.assertEqual(query["scope"], [DRIVE_FILE])
+
+    def test_a_stored_credential_with_the_wrong_scope_is_refused_on_every_use(self):
+        """The exchange check alone leaves an already-stored credential usable.
+
+        This is the module that is actually wired into production
+        (``quickstart.py:185``), and ``read_selected`` did not even go through
+        the expiry gate -- it read ``tokens["access_token"]`` directly.
+        """
+        self.connect()
+        self.flow.select_files(42, [{"id": "f1", "name": "doc", "mime_type": "text/plain"}])
+        self.assertTrue(self.flow.assert_selected(42, "f1"))
+        for bad in ("", DRIVE_FILE + " https://www.googleapis.com/auth/drive", "https://www.googleapis.com/auth/drive", None):
+            with self.subTest(scope=bad):
+                tokens = dict(self.encrypted_store.secret(TOKEN_KEY))
+                if bad is None:
+                    tokens.pop("scope", None)
+                else:
+                    tokens["scope"] = bad
+                self.encrypted_store.secret(TOKEN_KEY, tokens)
+                with self.assertRaises(DriveScopeError):
+                    self.flow.read_selected(42, "f1", lambda *args: "body")
+
+    def test_read_selected_checks_the_credential_even_without_the_selection_gate(self):
+        """Pins the redundant check in ``read_selected``.
+
+        ``assert_selected`` reaches the credential gate through ``_connected``,
+        so removing ``read_selected``'s own check passes the rest of this
+        suite.  That makes it untested redundancy unless the selection gate is
+        stubbed out, which is exactly the refactor the redundancy guards
+        against: this is the one place a raw access token reaches an outbound
+        transport.
+        """
+        self.connect()
+        self.flow.select_files(42, [{"id": "f1", "name": "doc", "mime_type": "text/plain"}])
+        self.flow.assert_selected = lambda *args: True
+        self.assertEqual(self.flow.read_selected(42, "f1", lambda *args: "body"), "body")
+        tokens = dict(self.encrypted_store.secret(TOKEN_KEY))
+        tokens["scope"] = DRIVE_FILE + " https://www.googleapis.com/auth/drive"
+        self.encrypted_store.secret(TOKEN_KEY, tokens)
+        with self.assertRaises(DriveScopeError):
+            self.flow.read_selected(42, "f1", lambda *args: "body")
+
+    def test_the_validated_scope_is_stored_rather_than_the_providers_text(self):
+        self.connect()
+        self.assertEqual(self.encrypted_store.secret(TOKEN_KEY)["scope"], DRIVE_FILE)
+        # Positive control: an untampered credential still reads.
+        self.flow.select_files(42, [{"id": "f1", "name": "doc", "mime_type": "text/plain"}])
+        self.assertEqual(self.flow.read_selected(42, "f1", lambda *args: "body"), "body")
 
     def test_local_only_mode_requires_explicit_opt_in_and_uses_loopback(self):
         with self.assertRaises(ValueError):

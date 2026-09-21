@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import tempfile
 import unittest
 from urllib.parse import parse_qs, urlparse
@@ -61,6 +63,29 @@ class DriveTests(unittest.TestCase):
         self.assertEqual(self.connection.status()["state"], "disconnected")
         self.assertEqual(GoogleDrive(lambda *args: (_ for _ in ()).throw(RuntimeError("offline")), "secret").health(), {"ok": False, "error": "RuntimeError"})
 
+    def test_pkce_challenge_is_a_real_s256_transform_and_scope_is_not_widened(self):
+        """SEC-DRIVE-SCOPE-01 / #432 items 4 and 5.
+
+        ``_pkce_pair`` now uses oauthlib, like gmail.py and drive_web_oauth.py.
+        Asserting the advertised method alone is not enough: oauthlib's
+        ``create_code_challenge`` silently returns the verifier unchanged -- a
+        plain challenge -- when the method argument is omitted, so a URL can
+        advertise S256 while carrying no transform. The hand-rolled sha256 this
+        replaced could not fail that way, so adoption introduced the mode.
+        """
+        pending = self.connection.connect()
+        query = parse_qs(urlparse(pending["authorization_url"]).query)
+        self.assertEqual(query["code_challenge_method"], ["S256"])
+        self.assertNotIn("code_verifier", query)
+        verifier = self.store.secret("google_drive_oauth_pending")["verifier"]
+        expected = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+        self.assertEqual(query["code_challenge"], [expected])
+        self.assertNotEqual(query["code_challenge"], [verifier])
+        # Do not let Google fold scopes granted elsewhere into this grant; the
+        # exact-set check would then hard-fail a connection that used to work.
+        self.assertEqual(query["include_granted_scopes"], ["false"])
+        self.assertEqual(query["scope"], [DRIVE_READONLY])
+
     def test_scope_is_exact_at_exchange(self):
         """SEC-DRIVE-SCOPE-01 / #432.
 
@@ -77,9 +102,16 @@ class DriveTests(unittest.TestCase):
             {"scope": "https://www.googleapis.com/auth/drive " + DRIVE_READONLY},   # over-granted, other order
             {"scope": DRIVE_READONLY + "x"},                      # near-miss suffix
             {"scope": "https://www.googleapis.com/auth/drive.metadata.readonly"},   # wrong scope
+            {"scope": DRIVE_READONLY.upper()},                    # OAuth scopes are case-sensitive
+            {"scope": DRIVE_READONLY + "/"},                      # trailing slash
         ]
         for extra in refused:
             with self.subTest(scope=extra.get("scope", "<absent>")):
+                # Fresh store per case: the subtests share self.connection, so
+                # a case that wrongly connects would otherwise contaminate the
+                # ones after it and be scored as extra detections.
+                self.store = QuickStore(tempfile.mkdtemp(dir=self.temp.name))
+                self.connection = GoogleDriveConnection(self.store, self.transport, "public-client-id", "http://127.0.0.1:9999/callback")
                 pending = self.connection.connect()
                 self.connection.transport = lambda *args, _e=extra: {"access_token": "secret", **_e}
                 with self.assertRaises(DriveAuthorizationError):
@@ -115,6 +147,8 @@ class DriveTests(unittest.TestCase):
                 with self.assertRaises(DriveAuthorizationError):
                     self.connection.adapter()
                 self.assertEqual(self.connection.health(), {"ok": False, "state": "reauth-required"})
+                # The audit distinguishes why: a scope refusal is not an expiry.
+                self.assertEqual(self.connection.status()["audit"][-1], "scope-rejected")
 
     def test_a_stored_credential_missing_scope_entirely_is_refused_on_use(self):
         pending = self.connection.connect()

@@ -1,9 +1,9 @@
 """Contract-first, read-only Google Drive adapter with injected transport."""
-import base64
-import hashlib
 import secrets
 import time
 from urllib.parse import quote, urlencode
+
+from oauthlib.oauth2 import WebApplicationClient
 
 DRIVE_READONLY = "https://www.googleapis.com/auth/drive.readonly"
 AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -19,9 +19,12 @@ class DriveAuthorizationError(ValueError):
 
 
 def _pkce_pair():
-    verifier = secrets.token_urlsafe(64)
-    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
-    return verifier, challenge
+    # Same path as gmail.py and drive_web_oauth.py since #429.  "S256" is
+    # passed explicitly: ``create_code_challenge`` silently falls back to the
+    # unprotected ``plain`` transform when the method is omitted.
+    client = WebApplicationClient("")
+    verifier = client.create_code_verifier(96)
+    return verifier, client.create_code_challenge(verifier, "S256")
 
 
 class GoogleDrive:
@@ -65,7 +68,12 @@ class GoogleDriveConnection:
         verifier, challenge = _pkce_pair()
         state = secrets.token_urlsafe(32)
         self.store.secret(PENDING_SECRET, {"state": state, "verifier": verifier, "created_at": time.time()})
-        query = urlencode({"client_id": self.client_id, "redirect_uri": self.redirect_uri, "response_type": "code", "scope": DRIVE_READONLY, "access_type": "offline", "code_challenge": challenge, "code_challenge_method": "S256", "state": state})
+        # ``include_granted_scopes="false"`` matches ``Gmail.begin_oauth``: without
+        # it Google may fold scopes this owner granted elsewhere into the grant,
+        # and the exact-set check below would then hard-fail a connection that
+        # previously succeeded.  Refusing the wider grant is correct, but not
+        # requesting it in the first place is what keeps the refusal rare.
+        query = urlencode({"client_id": self.client_id, "redirect_uri": self.redirect_uri, "response_type": "code", "scope": DRIVE_READONLY, "access_type": "offline", "code_challenge": challenge, "code_challenge_method": "S256", "include_granted_scopes": "false", "state": state})
         return {"authorization_url": AUTHORIZATION_ENDPOINT + "?" + query, "state": state}
 
     def complete(self, callback):

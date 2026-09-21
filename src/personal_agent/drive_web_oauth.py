@@ -178,14 +178,15 @@ class DriveWebOAuthHandoff:
             code_challenge=client.create_code_challenge(pending["verifier"], "S256"),
             code_challenge_method="S256",
             access_type="offline",
-            # DEFERRED (REUSE-R1b #427, owned by SEC-DRIVE-SCOPE-01 #432):
-            # ``Gmail.begin_oauth`` also sends ``include_granted_scopes="false"``
-            # so Google cannot fold previously granted scopes into this grant.
-            # This connector does not yet, which is why ``complete`` must keep
-            # its own exact-set scope check.  Adding the parameter changes the
-            # live authorization request, so it needs owner/live validation and
-            # is intentionally NOT changed here.  Do not close this note without
-            # either sending the parameter or recording why it is unnecessary.
+            # Decided under SEC-DRIVE-SCOPE-01 #432, which owned the deferral
+            # left here by #427.  All three connectors now send it.  Google
+            # documents false as the default, so this is expected to be a no-op
+            # on the wire -- but the default is provider-controlled and the
+            # exact-set check in ``complete`` hard-fails on a folded-in scope,
+            # so the parameter is stated rather than assumed.  That Google
+            # actually honours it is a live observation this repository has not
+            # made; it stays owner_validation_pending.
+            include_granted_scopes="false",
         )
 
     def authorization_url_for_state(self, state):
@@ -230,7 +231,10 @@ class DriveWebOAuthHandoff:
         if set(granted.split()) != {DRIVE_FILE}:
             self._finish("scope-rejected")
             raise DriveScopeError("Google Drive file-selection scope was not granted.")
-        tokens = {key: response[key] for key in ("access_token", "refresh_token", "expires_in", "scope") if key in response}
+        tokens = {key: response[key] for key in ("access_token", "refresh_token", "expires_in") if key in response}
+        # Store the scope this code validated, not the provider's text, so the
+        # use-time check compares against a value decided here.
+        tokens["scope"] = DRIVE_FILE
         if isinstance(tokens.get("expires_in"), (int, float)):
             tokens["expires_at"] = self.now() + max(0, tokens["expires_in"])
         self.store.secret(TOKEN_KEY, tokens)
@@ -310,7 +314,12 @@ class DriveWebOAuthHandoff:
         status/audit/configuration records or relay payloads.
         """
         self.assert_selected(telegram_owner_id, file_id)
-        tokens = self.store.secret(TOKEN_KEY)
+        # Defence in depth.  ``assert_selected`` above already reaches the
+        # credential gate through ``_connected``, so this is redundant today --
+        # deliberately, because this is the one place a raw access token is
+        # handed to an outbound transport, and a refactor that drops the
+        # selection check would otherwise take the credential check with it.
+        tokens = self._authorized_tokens()
         if not callable(transport):
             raise DriveWebOAuthError("An owner-local Drive transport is required.")
         selected = self.store.config(SELECTED_FILES_KEY, {})
@@ -376,13 +385,27 @@ class DriveWebOAuthHandoff:
             raise DriveWebOAuthError("Google Drive connection link expired; request a new link.")
         return pending
 
-    def _connected(self, owner):
+    def _authorized_tokens(self):
+        """Validate the stored credential before any use of its access token.
+
+        The exchange check alone is not enough: a credential stored before that
+        check was tightened, or one altered in the store, would otherwise stay
+        usable indefinitely.  Gmail re-validates the same way in
+        ``_authorization_context``.
+        """
         tokens = self.store.secret(TOKEN_KEY)
         if not isinstance(tokens, dict) or not tokens.get("access_token"):
             raise DriveWebOAuthError("Google Drive is not connected.")
         if isinstance(tokens.get("expires_at"), (int, float)) and self.now() >= tokens["expires_at"]:
             self._finish("reauth-required")
             raise DriveWebOAuthError("Google Drive authorization expired; reconnect required.")
+        if set(str(tokens.get("scope", "")).split()) != {DRIVE_FILE}:
+            self._finish("scope-rejected")
+            raise DriveScopeError("Google Drive file-selection scope was not granted; reconnect required.")
+        return tokens
+
+    def _connected(self, owner):
+        self._authorized_tokens()
         if self.store.config(SELECTED_FILES_KEY, {}).get("owner") not in (None, owner):
             raise DriveWebOAuthError("This Drive connection belongs to another Telegram owner.")
 

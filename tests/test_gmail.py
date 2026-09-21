@@ -20,6 +20,7 @@ from personal_agent.gmail import (
     GmailConnector,
     GmailError,
     GmailReauthenticationRequired,
+    _assert_renderable_charset,
 )
 from personal_agent.quickstart_store import QuickStore
 
@@ -1447,6 +1448,35 @@ class GmailConnectorTests(unittest.TestCase):
         result = self.gmail.search("owner-a", "receipt")[0]
         self.assertEqual(result.subject, "Rezervasyon başarılı")
         self.assertEqual(result.sender, "Café <cafe@example.test>")
+
+    def test_ebcdic_codepages_cannot_synthesise_markup_through_the_allowlist(self):
+        """An allowlist is only a control if every entry respects its own threat.
+
+        cp1026/cp1140/cp875 map byte 0x4C to "<", so admitting them would let
+        source bytes containing no 0x3C decode into markup - exactly the
+        property the gate exists to deny. They were transcribed from Python's
+        standard-encodings table rather than curated; no mail declares EBCDIC.
+        """
+        import codecs
+
+        for charset in ("cp1026", "cp1140", "cp875"):
+            with self.subTest(charset=charset):
+                self.assertEqual(codecs.decode(b"\x4c", charset), "<")
+                with self.assertRaises(GmailError) as caught:
+                    _assert_renderable_charset(charset)
+                self.assertIn("unsupported_charset", str(caught.exception.reason))
+
+    def test_allowlist_covers_mail_charsets_omitted_by_transcription(self):
+        """cp950 and the remaining mac-* pages are real mail charsets.
+
+        big5 was allowed while cp950, its Microsoft superset, was not, and
+        eight of ten mac-* pages were listed. Both gaps are the same
+        transcription accident as the EBCDIC entries, in the opposite
+        direction: refusing mail a reader should be able to open.
+        """
+        for charset in ("cp950", "mac-arabic", "mac-farsi"):
+            with self.subTest(charset=charset):
+                _assert_renderable_charset(charset)
 
     def test_charset_gate_is_an_allowlist_rather_than_a_utf7_denylist(self):
         """Any codec that can synthesise ASCII markup must be refused.

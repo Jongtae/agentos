@@ -19,12 +19,17 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         self.program = self.plan["programs"]["EPIC-PA1"]
 
     def test_epic_is_goal_ready_but_not_active(self):
-        self.assertEqual(self.plan["next_goal"]["id"], "EPIC-PA1")
-        self.assertEqual(self.plan["next_goal"]["status"], "owner-activated-goal-ready")
+        # EPIC-PA1 is owner-paused by #419 so a non-overlapping EPIC-REUSE-01
+        # tranche can run first. What must hold is that goal-readiness alone
+        # never executes, and that a paused program is not the declared goal.
+        self.assertNotEqual(self.plan["next_goal"]["id"], "EPIC-PA1")
+        self.assertNotEqual(self.plan["next_goal"]["status"], "active")
+        self.assertEqual(self.program["status"], "owner-paused")
+        self.assertIn("resume_condition", self.program)
         epic = self.items["EPIC-PA1"]
         self.assertEqual(epic["issue"], 386)
         self.assertEqual(epic["depends_on"], ["GOV-PA1-01"])
-        self.assertEqual(epic["activation_status"], "owner-activated-goal-ready")
+        self.assertEqual(epic["activation_status"], "owner-paused")
         completed = self.plan["history"]["documented_completed_iterations"]
         self.assertIn("GOV-PA1-01", completed)
         self.assertIn("USE-01", completed)
@@ -35,14 +40,94 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         self.assertNotIn("selects USE-01 as goal-ready", tasks)
         self.assertIn("#358 did not select a successor; EPIC-PA1 is separately prepared by #385", tasks)
 
-    def test_epic_is_the_only_nonterminal_program_authority(self):
-        nonterminal = [
+    def test_exactly_one_program_holds_execution_authority(self):
+        """Governance allows one active top-level program, not one program.
+
+        The earlier form asserted EPIC-PA1 was the only non-complete program,
+        which pinned a transient fact rather than the rule. A paused program
+        still exists and still owns its substeps; it simply cannot execute.
+        """
+        terminal = {"complete", "owner-paused"}
+        executing = [
             name for name, program in self.plan["programs"].items()
-            if program.get("status") != "complete"
+            if program.get("status") not in terminal
         ]
-        self.assertEqual(nonterminal, ["EPIC-PA1"])
-        self.assertEqual(self.program["status"], "owner-activated-goal-ready")
+        self.assertEqual(len(executing), 1, executing)
+        self.assertEqual(self.plan["next_goal"]["id"], executing[0])
+        self.assertEqual(self.program["status"], "owner-paused")
         self.assertEqual(self.program["issue"], 386)
+
+    def test_a_paused_program_cannot_be_selected_even_if_redeclared_active(self):
+        """Pausing must remove execution authority, not merely relabel it.
+
+        An earlier form of this test asserted `select({}) is None` against the
+        real plan and claimed that proved pausing worked. It did not: selection
+        reads the iterations layer and never `programs[*]["status"]`, so the
+        assertion passed for an unrelated reason and the test asserted coverage
+        it did not have. The pause is now carried by the paused program's own
+        iteration `activation_status`, which is the value selection actually
+        reads, and this test forces that path.
+        """
+        import json
+        import tempfile
+        from personal_agent.delivery import DeliveryPlan
+
+        plan = json.loads((ROOT / "delivery-plan.yaml").read_text(encoding="utf-8"))
+        paused = [
+            name for name, program in plan["programs"].items()
+            if program.get("status") == "owner-paused"
+        ]
+        self.assertTrue(paused)
+        for name in paused:
+            with self.subTest(program=name):
+                altered = json.loads(json.dumps(plan))
+                # Redeclare the paused program as the active goal - the exact
+                # mistake the pause has to survive.
+                altered["next_goal"] = {"id": name, "status": "active"}
+                with tempfile.TemporaryDirectory() as folder:
+                    path = Path(folder) / "delivery-plan.yaml"
+                    path.write_text(json.dumps(altered), encoding="utf-8")
+                    self.assertIsNone(DeliveryPlan(path).select({}))
+
+    def test_a_paused_program_holds_no_running_work(self):
+        """A paused program must not keep substeps in flight.
+
+        Treating `owner-paused` as terminal for the one-active-program rule is
+        only safe if paused means stopped. Without this, any number of programs
+        could sit `owner-paused` with populated `active_substeps` and the
+        one-program assertion would not notice.
+        """
+        for name, program in self.plan["programs"].items():
+            if program.get("status") != "owner-paused":
+                continue
+            with self.subTest(program=name):
+                self.assertEqual(program.get("active_substeps"), [])
+                self.assertTrue(program.get("resume_condition"))
+                self.assertTrue(program.get("paused_by"))
+                iteration = self.items[name]
+                self.assertNotEqual(iteration["activation_status"], "owner-activated-goal-ready")
+
+    def test_activated_reuse_program_matches_its_declared_scope(self):
+        """The program holding the declared goal needs its own regression pins.
+
+        EPIC-PA1 has a dedicated suite; when authority moved, the new holder
+        shipped with none, so its substep scope, deferral and governance
+        dependency were unprotected.
+        """
+        program = self.plan["programs"]["EPIC-REUSE-01"]
+        self.assertEqual(program["issue"], 418)
+        self.assertEqual(program["ordered_substeps"], ["R1", "R2", "R4", "R7", "R8"])
+        deferred = program["deferred_substeps"]
+        self.assertEqual(deferred["successor_issue"], 420)
+        self.assertEqual(deferred["substeps"], ["R3", "R5", "R6"])
+        # A deferred substep must never appear in the activated tranche.
+        self.assertFalse(set(deferred["substeps"]) & set(program["ordered_substeps"]))
+        # The authority text must keep the prohibitions #418 declares.
+        authority = program["authority"].lower()
+        for prohibition in ("may not", "credential", "authority", "fail-closed"):
+            self.assertIn(prohibition, authority)
+        self.assertTrue(program["non_goals"])
+        self.assertEqual(program["status"], "owner-activated-goal-ready")
 
     def test_children_are_parent_controlled_and_cannot_self_activate(self):
         child_ids = set(self.program["ordered_substeps"])

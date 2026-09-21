@@ -60,15 +60,24 @@ class OwnerUsefulnessSpecificationTests(unittest.TestCase):
         # USE-01 remains preserved historical usefulness work, while PA1 is the
         # newly prepared next top-level program. Goal-ready still means no execution.
         plan = json.loads((ROOT / "delivery-plan.yaml").read_text(encoding="utf-8"))
-        self.assertEqual(plan["next_goal"]["id"], "EPIC-PA1")
+        declared = plan["next_goal"]["id"]
         self.assertEqual(plan["next_goal"]["status"], "owner-activated-goal-ready")
-        selected = next(item for item in plan["iterations"] if item["id"] == "EPIC-PA1")
-        self.assertEqual(selected["issue"], 386)
-        self.assertEqual(selected["depends_on"], ["GOV-PA1-01"])
+        selected = next(item for item in plan["iterations"] if item["id"] == declared)
+        self.assertIsInstance(selected["issue"], int)
         self.assertEqual(selected["activation_status"], "owner-activated-goal-ready")
+        # The declared top-level goal must declare its activation-governance
+        # dependency. This is a governance rule, not a transient fact: without
+        # it a program can be flipped to active with no governance merged.
+        # Generalised from the original `== ["GOV-PA1-01"]`, which pinned the
+        # same rule to whichever program happened to be declared.
+        self.assertTrue(selected.get("depends_on"), selected)
+        for dependency in selected["depends_on"]:
+            self.assertIn(dependency, plan["history"]["documented_completed_iterations"])
+        # Goal-readiness must not execute, whichever program is declared.
+        self.assertNotEqual(plan["next_goal"]["status"], "active")
         self.assertIn("GOV-PA1-01", plan["history"]["documented_completed_iterations"])
         self.assertIn("USE-01", plan["history"]["documented_completed_iterations"])
-        self.assertNotIn("EPIC-PA1", plan["history"]["documented_completed_iterations"])
+        self.assertNotIn(declared, plan["history"]["documented_completed_iterations"])
         use01 = next(item for item in plan["iterations"] if item["id"] == "USE-01")
         self.assertEqual(use01["issue"], 358)
         controller_plan = DeliveryPlan(ROOT / "delivery-plan.yaml")

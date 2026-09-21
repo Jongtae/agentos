@@ -173,7 +173,10 @@ class NegativeResumeTests(HandoffTestCase):
         with self.assertRaises(ConversationHandoffError) as caught:
             self.service.resume_connector_work(GMAIL_CONNECTOR_ID, OWNER, GMAIL_SCOPES)
         self.assertEqual(caught.exception.reason, ConnectorState.DISCONNECTED.value)
-        self.assertEqual(self.store.job(job_id)['status'], 'awaiting_connection')
+        # The contract marks its row SUPERSEDED on every authority and scope
+        # failure, so the handoff is dead here. Parking the Work against a
+        # dead row is the stranding defect; it fails explicitly instead.
+        self.assertEqual(self.store.job(job_id)['status'], 'failed')
         self.assertEqual(self.drain(), 0)
         self.assertEqual(self.searches(), 0)
         # The refusal is stated to the owner rather than silently swallowed.
@@ -187,7 +190,16 @@ class NegativeResumeTests(HandoffTestCase):
         with self.assertRaises(ConversationHandoffError) as caught:
             self.service.resume_connector_work(GMAIL_CONNECTOR_ID, OWNER, GMAIL_SCOPES)
         self.assertEqual(caught.exception.reason, 'expired_resume')
-        self.assertEqual(self.store.job(job_id)['status'], 'awaiting_connection')
+        # An expired handoff is terminal, so the Work must not be left parked.
+        # The original form of this assertion required `awaiting_connection`,
+        # which was the stranded state: releasing the dead handle removes the
+        # only route to resume, supersede or deny the Work, the task card draws
+        # its cancel button for `queued` alone, and progress then reports
+        # "연결 대기" forever with nothing the owner can do. C8 requires the
+        # failure to stay explicit instead.
+        job = self.store.job(job_id)
+        self.assertEqual(job['status'], 'failed')
+        self.assertTrue(job['error'], 'an abandoned Work must carry an owner-readable reason')
         self.assertEqual(self.drain(), 0)
         self.assertEqual(self.searches(), 0)
 
@@ -197,6 +209,8 @@ class NegativeResumeTests(HandoffTestCase):
         with self.assertRaises(ConversationHandoffError) as caught:
             self.service.resume_connector_work(GMAIL_CONNECTOR_ID, OTHER_OWNER, GMAIL_SCOPES)
         self.assertEqual(caught.exception.reason, 'wrong_owner')
+        # Refused before `claim` is reached, so the contract row is untouched
+        # and the handoff stays alive: the rightful owner can still resume.
         self.assertEqual(self.store.job(job_id)['status'], 'awaiting_connection')
         self.assertEqual(self.drain(), 0)
         self.assertEqual(self.searches(), 0)
@@ -222,6 +236,8 @@ class NegativeResumeTests(HandoffTestCase):
         with self.assertRaises(ConversationHandoffError) as caught:
             self.service.resume_connector_work(GMAIL_CONNECTOR_ID, OWNER, GMAIL_SCOPES)
         self.assertEqual(caught.exception.reason, 'generation_changed')
+        # Refused before `claim` is reached, so the contract row is untouched
+        # and the handoff stays alive: the rightful owner can still resume.
         self.assertEqual(self.store.job(job_id)['status'], 'awaiting_connection')
         self.assertEqual(self.searches(), 0)
 
@@ -237,7 +253,10 @@ class NegativeResumeTests(HandoffTestCase):
                 with self.assertRaises(ConversationHandoffError) as caught:
                     self.service.resume_connector_work(GMAIL_CONNECTOR_ID, OWNER, granted)
                 self.assertEqual(caught.exception.reason, 'scope_mismatch')
-                self.assertEqual(self.store.job(job_id)['status'], 'awaiting_connection')
+        # The contract marks its row SUPERSEDED on every authority and scope
+        # failure, so the handoff is dead here. Parking the Work against a
+        # dead row is the stranding defect; it fails explicitly instead.
+                self.assertEqual(self.store.job(job_id)['status'], 'failed')
         self.assertEqual(self.drain(), 0)
         self.assertEqual(self.searches(), 0)
 
@@ -397,6 +416,155 @@ class SupersessionTests(HandoffTestCase):
         self.assertEqual(self.store.job(job_id)['status'], 'succeeded')
 
 
+class PairingBoundaryTests(HandoffTestCase):
+    """Refusal notices must honour the same pairing gate as every other send."""
+
+    def test_a_refusal_notice_never_reaches_an_unpaired_chat(self):
+        """The wrong-owner path is exactly where owner_id must not be trusted.
+
+        `_notify_owner` derived its destination from the caller-supplied
+        owner_id, so a resume attempt naming another chat produced an outbound
+        Telegram message to *that* chat -- at the one moment the code had
+        already decided the value was untrustworthy. Every other send in the
+        service checks the paired user_id and the enabled flag; this one did
+        not.
+        """
+        self.park()
+        self.connect_gmail()
+        before = len(self.sent)
+        with self.assertRaises(ConversationHandoffError) as caught:
+            self.service.resume_connector_work(GMAIL_CONNECTOR_ID, OTHER_OWNER, GMAIL_SCOPES)
+        self.assertEqual(caught.exception.reason, 'wrong_owner')
+        for body in self.sent[before:]:
+            self.assertNotEqual(body.get('chat_id'), OTHER_CHAT,
+                                'a refusal must never be delivered to an unpaired chat')
+
+    def test_the_paired_owner_still_receives_refusals(self):
+        """Positive control: the gate is a gate, not a mute button."""
+        self.park()
+        self.clock[0] += 901
+        self.connect_gmail()
+        before = len(self.sent)
+        with self.assertRaises(ConversationHandoffError):
+            self.service.resume_connector_work(GMAIL_CONNECTOR_ID, OWNER, GMAIL_SCOPES)
+        self.assertTrue([b for b in self.sent[before:] if b.get('chat_id') == CHAT],
+                        'the paired owner must still be told why nothing resumed')
+
+    def test_a_notice_is_withheld_when_telegram_is_disabled(self):
+        cfg = dict(self.store.config('telegram', {}))
+        cfg['enabled'] = False
+        self.store.put('telegram', cfg)
+        self.assertFalse(self.service._notify_owner(OWNER, 'notice'))
+
+
+class AbandonedHandoffTests(HandoffTestCase):
+    """A dead handoff must not leave an unreachable parked Work behind."""
+
+    def test_an_expired_handoff_leaves_no_work_the_owner_cannot_clear(self):
+        """Releasing the handle removes every exit from awaiting_connection.
+
+        Resume, supersession and denial all look the Work up through the resume
+        index, and the task card only draws its cancel button for `queued`, so
+        a released-but-parked Work reported "연결 대기" with nothing the owner
+        could do. C8 requires the failure to stay explicit.
+        """
+        job_id = self.park()
+        self.clock[0] += 901
+        self.connect_gmail()
+        with self.assertRaises(ConversationHandoffError):
+            self.service.resume_connector_work(GMAIL_CONNECTOR_ID, OWNER, GMAIL_SCOPES)
+        self.assertEqual(self.store.job(job_id)['status'], 'failed')
+        # And the stranding route specifically: supersession can no longer
+        # reach it, which is why the terminal state has to be set here.
+        self.assertEqual(self.service.supersede_pending_handoffs(), [])
+        self.assertEqual(self.store.job(job_id)['status'], 'failed')
+
+    def test_a_premature_callback_fails_the_work_explicitly_rather_than_stranding_it(self):
+        """A callback before the connector is connected is terminal by contract.
+
+        `PendingWorkRegistry.claim` transitions its row to SUPERSEDED whenever
+        `require_connected` fails, so the handoff can never succeed again --
+        even though the reason it surfaces is "disconnected", which does not
+        say so. The owner therefore gets an explicit failure and a notice,
+        instead of a job parked against a dead contract row.
+        """
+        job_id = self.park()
+        before = len(self.sent)
+        with self.assertRaises(ConversationHandoffError):
+            self.service.resume_connector_work(GMAIL_CONNECTOR_ID, OWNER, GMAIL_SCOPES)
+        job = self.store.job(job_id)
+        self.assertEqual(job['status'], 'failed')
+        self.assertTrue(job['error'])
+        self.assertTrue([b for b in self.sent[before:] if b.get('chat_id') == CHAT],
+                        'the owner must be told the handoff died')
+        # And connecting afterwards must not silently revive it.
+        self.connect_gmail()
+        with self.assertRaises(ConversationHandoffError) as caught:
+            self.service.resume_connector_work(GMAIL_CONNECTOR_ID, OWNER, GMAIL_SCOPES)
+        self.assertEqual(caught.exception.reason, 'no_pending_work')
+        self.assertEqual(self.searches(), 0)
+
+
+class ShippedPathGuardTests(HandoffTestCase):
+    """The no-connector guards on routes that run in the shipped deployment."""
+
+    def test_a_mail_request_without_gmail_refuses_instead_of_crashing(self):
+        """This is the one WU3-adjacent line that executes without wiring.
+
+        The connector handoff is inert in the shipped deployment, but the
+        mail route is reachable, and `self.gmail` is `None` there. Without
+        the guard the worker raises AttributeError on NoneType, which is the
+        same unhandled-exception shape WU4 fixed one file away.
+        """
+        store = QuickStore(tempfile.mkdtemp(dir=self.temp.name))
+        bare = AgentService(store)  # exactly how the shipped deployment builds it
+        job_id = store.enqueue(MAIL_REQUEST, 'k-bare', 'web', None)
+        self.assertTrue(bare.run_one())
+        job = store.job(job_id)
+        self.assertEqual(job['status'], 'failed')
+        self.assertNotIn('NoneType', str(job.get('error') or ''),
+                         'the owner must get a refusal, not a Python attribute error')
+
+    def test_a_mail_request_without_a_registry_does_not_park(self):
+        """No registry means this installation declares no connectors."""
+        store = QuickStore(tempfile.mkdtemp(dir=self.temp.name))
+        bare = AgentService(store)
+        job_id = store.enqueue(MAIL_REQUEST, 'k-bare2', 'web', None)
+        bare.run_one()
+        self.assertNotEqual(store.job(job_id)['status'], 'awaiting_connection')
+
+
+class ReleaseGuardTests(HandoffTestCase):
+    """The index must only ever be released by the handoff that owns it."""
+
+    def test_a_stale_resume_cannot_release_a_newer_park(self):
+        """Without the handoff_id check an in-flight stale resume would drop
+        the record a newer request had just written, stranding the new Work.
+        """
+        first = self.park()
+        stale = dict(self.handoff.record(GMAIL_CONNECTOR_ID))
+        second = self.park('메일에서 계약서 관련 내용 찾아줘')
+        self.assertEqual(self.store.job(first)['status'], 'cancelled')
+        current = self.handoff.record(GMAIL_CONNECTOR_ID)
+        self.assertNotEqual(current['handoff_id'], stale['handoff_id'])
+
+        self.handoff._release(GMAIL_CONNECTOR_ID, stale['handoff_id'])
+
+        survived = self.handoff.record(GMAIL_CONNECTOR_ID)
+        self.assertIsNotNone(survived, 'a stale handoff must not release the current record')
+        self.assertEqual(survived['handoff_id'], current['handoff_id'])
+        self.assertEqual(survived['work_id'], second)
+
+    def test_a_dead_handle_is_dropped_so_it_cannot_be_retried(self):
+        self.park()
+        self.clock[0] += 901
+        self.connect_gmail()
+        with self.assertRaises(ConversationHandoffError):
+            self.service.resume_connector_work(GMAIL_CONNECTOR_ID, OWNER, GMAIL_SCOPES)
+        self.assertIsNone(self.handoff.record(GMAIL_CONNECTOR_ID),
+                          'a terminal handoff must not stay resumable')
+
+
 class OwnerSafetyTests(HandoffTestCase):
     """The resume reference must be as content free as ConversationFocus."""
 
@@ -518,7 +686,7 @@ class PrerequisiteAndGuidanceTests(HandoffTestCase):
         self.assertEqual(handoff.record(GMAIL_CONNECTOR_ID), None)
 
     def test_an_installation_with_no_registry_keeps_its_previous_behaviour(self):
-        """Injecting nothing must change nothing for any existing intent."""
+        """Injecting no connector registry must change nothing about WU3's handoff."""
         self.service.connector_handoff = None
         self.service.connector_registry = None
         job_id = self.enqueue(CALENDAR_REQUEST)

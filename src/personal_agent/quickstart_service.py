@@ -749,9 +749,19 @@ class AgentService:
         return self.telegram_generation() if str(owner_id).startswith('telegram:') else ''
 
     def _notify_owner(self, owner_id, text):
-        """Best-effort owner message; a lost bubble never changes durable state."""
+        """Best-effort owner message; a lost bubble never changes durable state.
+
+        The destination is gated on the paired owner, not on ``owner_id``.
+        Callers reach here on refusal paths -- including ``wrong_owner`` -- and
+        ``owner_id`` is exactly the value those paths have just decided not to
+        trust, so deriving a chat id from it would message an unpaired chat at
+        the one moment the code knows better.  Same predicate as every other
+        outbound send in this file.
+        """
         chat=str(owner_id)[len('telegram:'):] if str(owner_id).startswith('telegram:') else ''
         if not chat.isdigit():return False
+        cfg=self.store.config('telegram',{})
+        if not (cfg.get('enabled') and chat==str(cfg.get('user_id'))):return False
         try:
             self.telegram.send_message(int(chat),text)
         except ProviderError:
@@ -839,11 +849,28 @@ class AgentService:
         try:
             work_id,scheduled=self.connector_handoff.resume(
                 owner_id,connector_id,granted_scopes,self._schedule_resumed_work,
-                generation=self._owner_generation(owner_id))
+                generation=self._owner_generation(owner_id),abandon=self._abandon_parked_work)
         except ConversationHandoffError as exc:
             self._notify_owner(owner_id,ConnectorHandoff.refusal_text(exc.reason))
             raise
         return {'work_id':work_id,'scheduled':scheduled,'connector_id':connector_id}
+
+    def _abandon_parked_work(self, work_id, reason):
+        """Give a Work a terminal state when its handoff died.
+
+        Every exit from `awaiting_connection` is reached through the resume
+        index, so releasing a dead handle without this would strand the Work:
+        it cannot be resumed, superseded or denied, the task card offers no
+        cancel because that button is only drawn for `queued`, and progress
+        reports `연결 대기` indefinitely.  C8 requires a failure to stay
+        explicit, so an expired or otherwise dead handoff fails the Work with
+        the same wording the owner would have seen from an outright denial.
+        """
+        text=ConnectorHandoff.refusal_text(reason)
+        with self.store.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            db.execute("UPDATE jobs SET delivery='cancelled' WHERE id=? AND status='awaiting_connection' AND delivery='pending'",(work_id,))
+            db.execute("UPDATE jobs SET status='failed',error=? WHERE id=? AND status='awaiting_connection'",(text,work_id))
 
     def deny_connector_work(self, connector_id, owner_id, reason='denied'):
         """Fail the parked Work explicitly after a refused or failed connection."""

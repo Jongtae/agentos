@@ -41,11 +41,19 @@ class PersonalAssistantOrchestrator:
     # dissolving the gate that makes it safe.  `select_files_for_grant` stores
     # the Picker selection owner only when `isinstance(owner, int)` -- a
     # Telegram chat id -- while `_request` below rejects any orchestrator owner
-    # that is not a non-empty `str`.  The two identity spaces cannot intersect,
-    # so `assert_selected` would refuse every request this seam could ever
-    # make, and the only way to make one pass is to hand it the owner read back
-    # out of the very selection record it is checking.  That is the bypass the
-    # issue forbids, so the adapter is not written.
+    # that is not a non-empty `str`, and `assert_selected` compares the two
+    # with `!=`, so `42 != '42'`.  No shipped path writes a non-int selection
+    # owner, so the seam's string owner can never match a record the Picker
+    # flow produced, and `assert_selected` would refuse every request this
+    # seam could make.  The only way to make one pass is to hand it the owner
+    # read back out of the very selection record it is checking, which is the
+    # bypass the issue forbids -- so the adapter is not written.
+    #
+    # Stated precisely because the stronger form is false: `select_files` is
+    # the only writer of the selection key and has no type check of its own,
+    # so the disjointness is a property of the shipped write paths rather
+    # than of the types.  That also makes `assert_selected`'s owner
+    # comparison type-loose, which is recorded in #445.
     #
     # This is a decision now and a defect later: it becomes one the moment an
     # orchestrator request can carry a Drive identity the Picker gate can

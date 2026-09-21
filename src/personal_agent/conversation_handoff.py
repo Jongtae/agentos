@@ -715,6 +715,19 @@ class ConversationHandoffError(ValueError):
 
 #: Every refusal is a stated outcome, never a silent no-op.  Reasons coming
 #: from the Wave 0 contract keep the contract's own vocabulary.
+#: The one claim refusal that leaves the parked Work worth keeping.  The
+#: contract transitions its row to SUPERSEDED on *every* authority and scope
+#: failure -- `require_connected` included -- so a premature callback is
+#: terminal by design even though the reason it surfaces ("disconnected")
+#: does not say so, and a bare `invalid_resume` names a handle that resolves
+#: to nothing.  `resume_claimed` is different: another claim is in flight and
+#: may still complete the Work, so failing it here would be wrong.
+#:
+#: The contract exposes no public state accessor, so this is derived from its
+#: transitions rather than read back. If `PendingWorkRegistry` ever grows one,
+#: ask it instead of inferring -- recorded for #394.
+RETRYABLE_RESUME_REASONS = frozenset({'resume_claimed'})
+
 RESUME_REFUSALS = {
     'no_pending_work': '이어서 처리할 요청이 없어 아무 작업도 실행하지 않았습니다.',
     'wrong_owner': '이 연결은 다른 소유자의 것이라 요청을 이어서 처리하지 않았습니다.',
@@ -892,7 +905,7 @@ class ConnectorHandoff:
             raise ConversationHandoffError('wrong_owner')
 
     # -- exactly-once resume -------------------------------------------------
-    def resume(self, owner_id, connector_id, granted_scopes, schedule, *, generation=''):
+    def resume(self, owner_id, connector_id, granted_scopes, schedule, *, generation='', abandon=None):
         """Resume the parked Work exactly once after a reported connection.
 
         The order is ``claim`` -> durable schedule -> ``complete``, which is
@@ -924,9 +937,20 @@ class ConnectorHandoff:
             reference = self.pending.claim(record['resume_token'], owner_id, connector_id,
                                            granted_scopes, record['handoff_id'])
         except ConnectorContractError as exc:
-            # The handoff is dead: releasing the index keeps a dead handle from
-            # being retried, and the caller still receives an explicit refusal.
+            # Every exit from `awaiting_connection` is reached through this
+            # index -- resume, supersession and denial all look the record up
+            # -- so releasing the handle without also giving the Work a
+            # terminal state stranded it: the job reported "연결 대기" forever,
+            # the task card draws its cancel button for `queued` alone, and no
+            # owner action could clear it.
+            if exc.reason in RETRYABLE_RESUME_REASONS:
+                raise ConversationHandoffError(exc.reason) from None
+            # Terminal: drop the dead handle, and give the Work a terminal
+            # state too, because C8 requires the failure to stay explicit
+            # rather than leaving an unreachable parked job behind.
             self._release(connector_id, record.get('handoff_id'))
+            if abandon is not None:
+                abandon(record['work_id'], exc.reason)
             raise ConversationHandoffError(exc.reason) from None
         scheduled = bool(schedule(reference.work_id))
         self.pending.complete(record['resume_token'], owner_id, connector_id, record['handoff_id'])

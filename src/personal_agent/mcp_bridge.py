@@ -1,13 +1,36 @@
-"""Minimal stdio MCP bridge; AgentOS, never the engine, owns tool execution."""
+"""Minimal stdio MCP bridge; AgentOS, never the engine, owns tool execution.
+
+The protocol version comes from the mcp-types registry, but that
+package's envelope models are deliberately not adopted: JSONRPCRequest
+accepts an unknown top-level key and model_dump then drops it, so a
+request this bridge rejects would be normalised into a clean-looking
+one and forwarded. Envelope validation stays hand-written here.
+"""
 import argparse
 import json
 import sys
 import time
 
+from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS, LATEST_HANDSHAKE_VERSION
+
 from .agent_runtime import Capabilities
 from .bounded_execution import AgentOSMcpTools, ExecutionError
 from .local_tools import LocalTools
 from .quickstart_store import QuickStore
+
+
+def negotiated_protocol_version(offered):
+    """Return the handshake revision this bridge will speak with the peer.
+
+    The registry comes from ``mcp_types`` so the supported set tracks the
+    official SDK instead of a hand-maintained literal.  ``initialize`` is a
+    handshake method, so the counter-offer is the newest *handshake* revision;
+    ``LATEST_PROTOCOL_VERSION`` may name a stateless per-request revision this
+    bridge does not implement.  An unknown or non-string offer is never echoed.
+    """
+    if isinstance(offered, str) and offered in HANDSHAKE_PROTOCOL_VERSIONS:
+        return offered
+    return LATEST_HANDSHAKE_VERSION
 
 
 def _send(value):
@@ -25,7 +48,10 @@ def serve(data, job_id):
         try:
             request = json.loads(line)
             method, ident = request.get('method'), request.get('id')
-            if method == 'initialize': result = {'protocolVersion':'2024-11-05','capabilities':{'tools':{}},'serverInfo':{'name':'agentos','version':'1'}}
+            if method == 'initialize':
+                params = request.get('params')
+                offered = params.get('protocolVersion') if isinstance(params, dict) else None
+                result = {'protocolVersion':negotiated_protocol_version(offered),'capabilities':{'tools':{}},'serverInfo':{'name':'agentos','version':'1'}}
             elif method == 'tools/list': result = {'tools': tools.definitions()}
             elif method == 'tools/call':
                 params = request.get('params', {}); value = tools.call(params.get('name'), params.get('arguments', {}))

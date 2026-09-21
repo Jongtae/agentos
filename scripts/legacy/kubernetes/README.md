@@ -31,8 +31,8 @@ contract that nothing in the repository builds:
 - **Their container contract is not the shipped one.** `cli.py` generates
   manifests for image `personal-agent:dev` on port **8080**. The live
   `deploy/kubernetes/owner-runtime.yaml` uses `personal-agentos:managed` on port
-  **8787**, matching the root `Dockerfile`. `personal-agent:dev` appears exactly
-  once in the repository — as `cli.py`'s own default argument. No Dockerfile
+  **8787**, matching the root `Dockerfile`. `personal-agent:dev` occurs exactly
+  once as executable code — `cli.py`'s own default argument. No Dockerfile
   builds it.
 - **Kubernetes is documented as out of scope.** `QUICKSTART.md:3` states "Docker
   and Kubernetes are not required"; `QUICKSTART.md:83` lists Kubernetes

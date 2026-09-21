@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class WebManagementReadinessTests(unittest.TestCase):
-    def test_mirrored_contract_is_ready_but_not_selected_or_completed(self):
+    def test_mirrored_contract_is_a_parent_controlled_substep_that_never_self_selects(self):
         source = (ROOT / 'delivery-plan.yaml').read_bytes()
         self.assertEqual(source, (ROOT / 'src/personal_agent/delivery-plan.yaml').read_bytes())
         plan = json.loads(source)
@@ -35,8 +35,15 @@ class WebManagementReadinessTests(unittest.TestCase):
         self.assertEqual(entry['parallel_group'], 'pa1-wave-1')
         completed = plan['history']['documented_completed_iterations']
         self.assertTrue({'GOV-USE-01', 'DOGFOOD-01'}.issubset(completed))
-        self.assertNotIn('PA1-FDN-01', completed)
-        self.assertNotIn('WEB-ADMIN-01', completed)
+        # The original form asserted PA1-FDN-01 and WEB-ADMIN-01 were *not*
+        # documented complete. That was a snapshot of the delivery order, not
+        # an invariant, and PA1-INT-01's tracker reconciliation makes it false.
+        # The rule underneath it survives and is stronger: a substep may not be
+        # recorded complete before the dependencies it declares.
+        if 'WEB-ADMIN-01' in completed:
+            missing = [dep for dep in entry['depends_on'] if dep not in completed]
+            self.assertEqual(missing, [],
+                             'WEB-ADMIN-01 is documented complete before ' + str(missing))
         self.assertNotEqual(plan['next_goal']['status'], 'active')
         # WEB-ADMIN-01 is a parent-controlled substep and can never be the
         # declared top-level goal, whichever program currently holds

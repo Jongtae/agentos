@@ -153,6 +153,27 @@ Required CI, branch protection, exact-head validation, independent review, and t
 
 A critical execution profile is not permission for unlimited validation churn. If broad cycles keep repeating, stop micro-fixing, establish the root cause, batch the remediation, and document the reason for any additional cycle.
 
+## Execution cursor and delta resume
+
+For an explicitly active top-level program, maintain one compact **execution cursor** in the authoritative top-level GitHub issue. The cursor is a cache of current execution state, not authority: issues, PRs, current `main`, governing contracts, CI/review evidence, and the delivery plan remain canonical.
+
+Normal session resume is cursor-first:
+
+1. read the single mutable cursor comment identified by the program's declared marker;
+2. verify the cursor's `main_sha`, governing contract blob SHAs, and only the referenced PR/head/state needed for the next action;
+3. read only the referenced issue/PR and evidence required for that action;
+4. continue within the existing goal authority.
+
+Do **not** reread every child issue, PR, CI history, review thread, tracker and contract on every new session while the cursor remains consistent.
+
+Perform a bounded full reconciliation only when the cursor is missing or malformed, a governing contract SHA changed, current main/reference state differs unexpectedly, dependencies contradict the cursor, a merge conflict or unexplained CI/review state exists, or the cursor is too incomplete to choose a safe action. When reconciliation repairs the state, update the same cursor comment rather than creating another cursor.
+
+Cursor updates occur only after meaningful transitions such as a merge/close, coherent stable-head push, CI/review result that changes the next action, blocker, owner-validation change, or durable session handoff. Do not churn the cursor on every micro-edit or status poll.
+
+The cursor uses a monotonically increasing `generation`. A writer must read the current generation before replacing the comment and increment it on update; concurrent/stale writers must reconcile instead of blindly overwriting newer state. Cursor content must not contain credentials, private owner payloads, raw provider data, or hidden reasoning.
+
+See [Execution Cursor Protocol](docs/execution-cursor.en.md).
+
 ## Truthfulness and safety
 
 The canonical process is [development governance](docs/development-governance.en.md) plus this Constitution. Older Master Plan contracts continue to govern their historical scopes; successor Agent Distribution Platform work uses its newly activated contract when selected.

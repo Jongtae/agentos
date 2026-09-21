@@ -257,6 +257,46 @@ class PublicPageReaderTests(unittest.TestCase):
         self.assertLess(time.monotonic()-started,0.5)
         self.assertEqual(shutdowns,[socket.SHUT_RDWR])
 
+    @patch('personal_agent.local_tools.MAX_PAGE_SECONDS',0.1)
+    def test_drip_fed_redirect_body_cannot_outlive_the_page_deadline(self):
+        """A redirect drain bounded only in bytes made MAX_PAGE_SECONDS unenforceable.
+
+        `_set_response_deadline` arms a per-``recv`` socket timeout, and that
+        timeout restarts on every byte, so a server that drips one byte before
+        each expiry stretches the discarded redirect body without limit. The
+        drain is 64 KB, which is ~65k drip intervals per hop across up to four
+        hops. Only the deadline guard, which closes the socket from a timer
+        thread, bounds this in wall-clock time.
+        """
+        class DripSock:
+            def __init__(self,stop): self.stop=stop
+            def settimeout(self,_value): pass
+            def shutdown(self,_how): self.stop.set()
+            def close(self): self.stop.set()
+        class DripConnection:
+            def __init__(self,stop): self.sock=DripSock(stop)
+            def close(self): self.sock.stop.set()
+        class DripRedirect(Response):
+            def __init__(self):
+                super().__init__(b'',status=302,headers={
+                    'Content-Type':'text/html','Location':'https://example.com/next'})
+                self.stop=threading.Event(); self._agentos_connection=DripConnection(self.stop)
+                self.drained=0
+            def read(self,size=-1):
+                body=bytearray()
+                while not self.stop.wait(0.005):
+                    body.extend(b'x')          # one byte per per-recv interval
+                    self.drained+=1
+                return bytes(body)
+        response=DripRedirect()
+        started=time.monotonic()
+        with self.assertRaises(Exception):
+            PublicPageReader(opener=Opener(response),resolver=public_dns).read('https://example.com/')
+        elapsed=time.monotonic()-started
+        self.assertTrue(response.stop.is_set(),'the deadline guard never closed the drained socket')
+        self.assertLess(elapsed,1.0,f'drain ran {elapsed:.3f}s against a 0.1s page budget')
+        self.assertLess(response.drained,64*1024)
+
     def test_honors_safe_declared_charset_without_corrupting_exact_price(self):
         body='<html><p>Price: £100.</p></html>'.encode('iso-8859-1')
         result=PublicPageReader(opener=Opener(Response(

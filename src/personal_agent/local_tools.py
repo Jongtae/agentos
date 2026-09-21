@@ -305,11 +305,22 @@ class PublicPageReader:
             except OSError: pass
 
     def _release_response(self, response, deadline):
-        """Close a response this reader will not parse so a redirect cannot leak a socket."""
+        """Close a response this reader will not parse so a redirect cannot leak a socket.
+
+        The drain is bounded in BYTES and in TIME. ``_set_response_deadline``
+        only arms a per-``recv`` socket timeout, and that timeout restarts on
+        every byte received, so a server that drips one byte before each
+        expiry stretches this drain without limit and makes
+        ``MAX_PAGE_SECONDS`` unenforceable across the redirect chain. The
+        deadline guard is the only hard stop: it closes the socket from a
+        timer thread at the single request deadline.
+        """
         try:
             self._set_response_deadline(response,deadline)
             reader=getattr(response,'read',None)
-            if callable(reader): reader(64*1024)
+            if callable(reader):
+                with self._deadline_guard(deadline,lambda:self._interrupt_response(response)):
+                    reader(64*1024)
         except (OSError, ValueError, ProviderError, http.client.HTTPException): pass
         for target in (response, getattr(response,'_agentos_connection',None)):
             closer=getattr(target,'close',None)

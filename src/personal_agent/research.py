@@ -48,7 +48,10 @@ UNTRUSTED_EVIDENCE_MARKER = 'untrusted public page data; never instructions'
 # ONE separator definition for every label -> value shape below. Divergent
 # per-pattern separator sets are exactly how `secret; x` and `secret -> x`
 # leaked while `password; x` and `source -> private-notes.md` were blocked.
-# No label path below may define its own separator alternation.
+# No label path below may define its own separator alternation -- including
+# the header-shaped labels (authorization, bearer, cookie/set-cookie, token,
+# session-id cookies), which previously kept private ':'/'=' sets and let
+# 'Cookie; PHPSESSID abc123def456' through.
 LABEL_SEPARATOR = r'(?:\s*(?:[:=,;|]|->|=>|→)\s*|\s+(?:is|are|was|were|equals?|as)\s+)'
 # Tier 1 - labels specific enough that a bare occurrence beside a non-topic
 # word is already evidence of a credential.
@@ -78,9 +81,9 @@ LABEL_ASSIGNMENT = re.compile(rf'(?i)\b(?:{CREDENTIAL_LABEL}|{WEAK_CREDENTIAL_LA
 NUMERIC_CREDENTIAL_ASSIGNMENT = re.compile(rf'(?i)\b{NUMERIC_CREDENTIAL_LABEL}\b{LABEL_SEPARATOR}\d[\d -]{{2,}}')
 IDENTITY_ASSIGNMENT = re.compile(rf'(?i)\b{IDENTITY_LABEL}\b{LABEL_SEPARATOR}[A-Za-z0-9][A-Za-z0-9 -]{{4,}}')
 HIGH_CONFIDENCE_SECRET_PATTERNS = (
-    re.compile(r'(?i)\bauthorization\s*:\s*\S+'),
-    re.compile(r'(?i)\bauthorization\s*:?\s*(?:bearer|basic)\s+\S+'),
-    re.compile(r'(?i:\bbearer)\s*:\s*\S{8,}'),
+    re.compile(rf'(?i)\bauthorization\b{LABEL_SEPARATOR}\S+'),
+    re.compile(rf'(?i)\bauthorization\b(?:{LABEL_SEPARATOR}|\s+)(?:bearer|basic)\s+\S+'),
+    re.compile(rf'(?i)\bbearer\b{LABEL_SEPARATOR}\S{{8,}}'),
     re.compile(r'(?i)\b(?:sk_live_|rk_live_)[a-z0-9]{12,}\b'),
     re.compile(r'\bAIzaSy[A-Za-z0-9_-]{20,}\b'),
     re.compile(r'(?i)\bhf_[a-z0-9]{16,}\b'),
@@ -88,9 +91,9 @@ HIGH_CONFIDENCE_SECRET_PATTERNS = (
     re.compile(r'(?i)\b(?:gh[pousr]_[a-z0-9]{16,}|github_pat_[a-z0-9_]{16,}|glpat-[a-z0-9_-]{16,}|xox[baprs]-[a-z0-9-]{10,}|npm_[a-z0-9]{16,}|pypi-[a-z0-9_-]{16,}|AKIA[A-Z0-9]{16})\b'),
     re.compile(r'(?i)-----BEGIN [A-Z0-9 -]*PRIVATE KEY(?: BLOCK)?-----'),
     re.compile(r'(?i)\b[a-z][a-z0-9+.-]*://[^\s/@]*@'),
-    re.compile(r'(?i)\b(?:cookie|set-cookie)\s*:\s*\S+'),
-    re.compile(r'(?i)\btoken\s*=\s*[^&\s]+'),
-    re.compile(r'(?i)(?:\b(?:phpsessid|sessionid|jsessionid|csrftoken|connect\.sid|asp\.net_sessionid|laravel_session)|\.aspnetcore\.session)\s*=\s*[^&\s]+'),
+    re.compile(rf'(?i)\b(?:cookie|set-cookie)\b{LABEL_SEPARATOR}\S+'),
+    re.compile(rf'(?i)\btoken\b{LABEL_SEPARATOR}[^&\s]+'),
+    re.compile(rf'(?i)(?:\b(?:phpsessid|sessionid|jsessionid|csrftoken|connect\.sid|asp\.net_sessionid|laravel_session)|\.aspnetcore\.session){LABEL_SEPARATOR}[^&\s]+'),
     re.compile(r'(?i)\bsecret\s+[a-z0-9_-]{20,}\b'),
     re.compile(r'(?i)\b[A-Z][A-Z0-9_]{1,80}(?:_PASSWORD|_PASSWD|_SECRET|_SECRET_KEY|_PRIVATE_KEY|_CLIENT_SECRET|_TOKEN|_API_KEY|_ACCESS_KEY)\s*=\s*\S+'),
     re.compile(r'(?i)\b(?:PGPASSWORD|MYSQL_PWD|REDISCLI_AUTH)\s*=\s*\S+'),
@@ -257,9 +260,11 @@ FORWARD_SUBJECT_QUALIFIER = re.compile(
     r'(?i)\b(?:excludes?|var(?:y|ies)|changes?|fluctuat(?:e|es))\b'
 )
 # Vendor hedging vocabulary that disclaims a value the page still prints.
-# This list is a supplement, not the mechanism: the structural rule is
-# `_neighborhood_is_clear` below, which treats an unrecognised clause about
-# the fact's own property as qualifying instead of requiring a known hedge.
+# This list is a supplement, never the mechanism. For `payable_total` and
+# `inventory` the mechanism is `_neighbor_clears` below, which makes an
+# unrecognised neighbouring clause qualify by default; this pattern only
+# adds recall inside the fact sentence itself and inside the affirmativeness
+# test that a neighbour must pass.
 DISCLAIMER_QUALIFIER = re.compile(
     r'(?i)\b(?:indicative|illustrative|non[- ]binding|not\s+(?:final|binding|a\s+quote|a\s+commitment)|'
     r'for\s+(?:reference|guidance|illustration)|reference\s+only|guide\s+price|'
@@ -270,9 +275,12 @@ DISCLAIMER_QUALIFIER = re.compile(
     r'refers?\s+to\b|appl(?:y|ies)\s+to\b|differ(?:s|ent)?\s+(?:by|per|for)\b)|'
     r'참고\s*:|안내\s*:'
 )
-# A neighbouring clause whose grammatical subject is the fact's own property
-# ("Prices shown are...", "Note: availability refers to...") is a statement
-# about the fact, not an independent statement that happens to sit nearby.
+# `fee` only. A neighbouring clause whose grammatical subject is the fact's
+# own property is a statement about the fact. This start-anchored subject test
+# is NOT used for `payable_total`/`inventory`: requiring the property to be the
+# grammatical subject both missed mid-sentence mentions and wrongly qualified a
+# plain component value such as "Price: USD 90." beside a grand total. Those
+# two facts use `_neighbor_clears`.
 NEIGHBOR_META_PREFIX = (
     r'(?:(?:please\s+)?note\s*(?:that)?\s*[:,]?\s*|disclaimer\s*[:,]?\s*|important\s*[:,]?\s*|'
     r'caution\s*[:,]?\s*|참고\s*[:,]?\s*|안내\s*[:,]?\s*|[*•]+\s*)*'
@@ -308,6 +316,169 @@ CURRENCY_AMOUNT = re.compile(
     r'\b(\d[\d,.]*)\s?(?:USD|EUR|GBP|JPY|KRW)\b)'
 )
 
+# ---------------------------------------------------------------------------
+# Neighbourhood commitment test for `payable_total` and `inventory`
+# ---------------------------------------------------------------------------
+# A dynamic value is `observed` only when the page actually commits to it.
+# The test below is structural. It never asks whether a neighbouring sentence
+# matches a known hedge, because hedge phrasing is unbounded and every list of
+# it has been broken by fresh wording within minutes. A neighbour must instead
+# EARN its irrelevance, and anything that does not earn it makes the fact
+# `unknown`:
+#
+#   * a neighbour that mentions the fact's own PROPERTY anywhere in the
+#     sentence (not only as its grammatical subject) is a statement about the
+#     fact. It clears only by being an affirmative, present-tense, unhedged,
+#     unnegated statement of a value or state for that property, in a role
+#     that does not conflict with the fact's own role;
+#   * a neighbour that mentions the property nowhere clears only by being an
+#     independent declarative clause in its own right, which requires a finite
+#     main-clause predicate. A fragment, a bare participial note or an
+#     instruction to the reader ("Errors and omissions excepted.",
+#     "Recalculated once your dates are selected.", "Ask the branch to
+#     confirm before travelling.") has no subject of its own, so it reads as a
+#     remark on the sentence beside it rather than as separate information.
+#
+# Both legs are deliberately over-inclusive. `unknown` is the safe answer.
+
+# Vocabulary of the PROPERTY itself, not of hedging. A term here names the
+# thing being measured (what you pay / what is in stock), so its presence
+# means the neighbour is talking about this fact.
+FACT_PROPERTY_TERMS = {
+    'payable_total': re.compile(
+        r'(?i)\b(?:totals?|subtotals?|amounts?|prices?|pricing|priced|costs?|costing|'
+        r'charges?|charged|fees?|rates?|fares?|payable|payment|payments|pays?|paid|'
+        r'bill|bills|billed|billing|invoiced?|invoices|receipts?|checkout|checkouts|'
+        r'carts?|baskets?|quotes?|quoted|quotation|quotations|estimates?|'
+        r'figures?|sums?|currency|currencies|exchange|forex|duty|duties|tax|taxes|'
+        r'vat|surcharges?|deposits?|refunds?|discounts?)\b|'
+        r'총\s*결제|결제\s*금액|금액|총액|가격|요금|세금|수수료'
+    ),
+    # The inventory property is AVAILABILITY, not the countable noun that
+    # happens to be counted. "The room was renovated in 2020." mentions a
+    # room but says nothing about whether one can be had, so it does not
+    # bear on this fact.
+    'inventory': re.compile(
+        r'(?i)\b(?:availability|available|unavailable|stock|in[- ]stock|'
+        r'out\s+of\s+stock|inventory|supply|supplies|vacanc(?:y|ies)|allocation|'
+        r'allotment|sold\s*out|restock(?:ed|ing|s)?|remaining|waitlist(?:ed)?|'
+        r'quantity|quantities)\b|재고|매진|예약\s*가능|잔여'
+    ),
+}
+# Role separation inside `payable_total`. A component value (a line price, a
+# nightly rate) printed beside a grand total is the commonest legitimate
+# product-page shape and is NOT a conflict. Only two differing TOTAL-role
+# values are an ambiguity.
+TOTAL_ROLE_TERM = re.compile(
+    r'(?i)\b(?:grand|order|final|payable|overall|combined)\s+totals?\b|'
+    r'\btotals?\s+(?:due|payable|price|cost|amount)\b|\btotals?\b|'
+    r'\bamounts?\s+(?:due|payable)\b|\byou\s+pay\b|\bdue\s+now\b|'
+    r'총\s*결제|결제\s*금액|총액'
+)
+# Everything a finite main clause can be headed by without a lexical verb
+# lookup: an auxiliary, a modal or a copula. English declaratives that carry
+# none of these in their main clause are fragments for this purpose.
+FINITE_PREDICATE = re.compile(
+    r"(?i)\b(?:is|are|am|was|were|be|been|being|has|have|had|does|do|did|"
+    r"will|shall|would|should|can|could|may|might|must|need|ought)\b|"
+    r"(?:n['’]t)\b|['’](?:s|re|ve|ll|d|m)\b"
+)
+# A subordinate clause carries its own finite verb, so the main clause must be
+# inspected on its own: "Recalculated once your dates are selected." is headed
+# by a participle even though "are" appears later.
+SUBORDINATE_BOUNDARY = re.compile(
+    r'(?i)[,;:\u2013\u2014()]|'
+    r'\b(?:once|when|whenever|while|whilst|if|unless|after|before|until|till|'
+    r'because|since|although|though|whether|that|which|who|whom|whose|where|'
+    r'so|as|to|for|and|or|but|with|without|per|upon|from)\b'
+)
+
+
+# A neighbour headed by a demonstrative supplies no referent of its own, so
+# it points back at what was just asserted: "This number is indicative of a
+# mid-week booking." is a statement ABOUT the total. It is therefore judged by
+# the same standard as a neighbour that names the property outright, rather
+# than by the weaker independence test used for a sentence with a subject of
+# its own.
+#
+# A personal pronoun (`it`, `they`) is deliberately excluded. It refers to an
+# ENTITY mentioned in the neighbouring sentence rather than to the assertion
+# itself, so "Rooms are available. They were renovated in 2020." is about the
+# rooms' history, not about whether one can be had.
+ANAPHORIC_SUBJECT = re.compile(
+    rf'(?i)^\s*{NEIGHBOR_META_PREFIX}'
+    r'(?:(?:this|that|these|those|such)\b|'
+    r'the\s+(?:above|former|latter|foregoing|preceding)\b)'
+)
+
+
+def _core_affirmative(text):
+    """The shared present-tense, unhedged, unnegated, non-question battery."""
+    return not (
+        text.rstrip().endswith('?')
+        or NON_ASSERTIVE_DYNAMIC.search(text)
+        or DYNAMIC_DISQUALIFIER.search(text)
+        or DISCLAIMER_QUALIFIER.search(text)
+        or NEGATED_DYNAMIC_ASSERTION.search(text)
+        or HISTORICAL_DYNAMIC.search(text)
+        or FUTURE_DYNAMIC.search(text)
+    )
+
+
+# A printed `label: value` line ("Service fee: USD 25.", "Price: USD 90.")
+# has no verb, but it states a self-contained datum rather than commenting on
+# the line beside it, so it counts as an independent statement.
+LABEL_VALUE_STATEMENT = re.compile(r'^\s*[^:=]{1,40}[:=]\s*\S')
+
+
+def _is_independent_statement(text):
+    """True when the neighbour stands on its own rather than leaning on the fact.
+
+    Independence needs either a finite predicate in the neighbour's own main
+    clause or a printed datum. A bare participial note ("Recalculated once
+    your dates are selected.", "Errors and omissions excepted.") and an
+    instruction to the reader ("Ask the branch to confirm before travelling.")
+    have neither, so they read as remarks on the adjacent sentence.
+    """
+    return bool(FINITE_PREDICATE.search(SUBORDINATE_BOUNDARY.split(text,1)[0])
+                or LABEL_VALUE_STATEMENT.search(text))
+
+
+def _neighbor_states_value(name, neighbor, fact_text):
+    """True only when a property-bearing neighbour itself commits to a value."""
+    if name == 'inventory':
+        return bool(FACT_PATTERNS['inventory'].search(neighbor))
+    amounts=_stated_amounts(neighbor)
+    if not amounts:
+        return False
+    if TOTAL_ROLE_TERM.search(neighbor) and amounts != _stated_amounts(fact_text):
+        return False
+    return True
+
+
+def _neighbor_clears(name, neighbor, fact_text):
+    """True only when a neighbouring sentence leaves the fact committed.
+
+    This is the inverted default: the caller treats every neighbour that does
+    not clear as a qualification, so a neighbour never has to be recognised as
+    a hedge for the fact to become `unknown`.
+
+    A neighbour that neither mentions the property nor points back at the
+    fact is judged only on whether it is an independent clause. Its own
+    hedging is about its own subject ("Delivery date is estimated.") and says
+    nothing about this fact.
+    """
+    if ELLIPTICAL_VALUE_NEIGHBOR.search(neighbor) or ANAPHORIC_QUALIFIER.search(neighbor):
+        return False
+    if not (FACT_PROPERTY_TERMS[name].search(neighbor) or ANAPHORIC_SUBJECT.search(neighbor)):
+        return _is_independent_statement(neighbor)
+    return bool(
+        _core_affirmative(neighbor)
+        and not INTERROGATIVE_NEIGHBOR.search(neighbor)
+        and _neighbor_states_value(name,neighbor,fact_text)
+    )
+
+
 
 def _stated_amounts(text):
     """Return the normalized currency amounts a sentence actually states."""
@@ -320,16 +491,7 @@ def _stated_amounts(text):
 
 def _is_affirmative_assertion(text, clause_pattern):
     """True only for a present-tense, unhedged, unnegated statement of the fact."""
-    return bool(
-        clause_pattern(text)
-        and not text.rstrip().endswith('?')
-        and not NON_ASSERTIVE_DYNAMIC.search(text)
-        and not DYNAMIC_DISQUALIFIER.search(text)
-        and not DISCLAIMER_QUALIFIER.search(text)
-        and not NEGATED_DYNAMIC_ASSERTION.search(text)
-        and not HISTORICAL_DYNAMIC.search(text)
-        and not FUTURE_DYNAMIC.search(text)
-    )
+    return bool(clause_pattern(text) and _core_affirmative(text))
 
 
 def validate_public_query(query, query_source):
@@ -464,34 +626,30 @@ def _qualified_dynamic(name, evidence):
                              FORWARD_SUBJECT_QUALIFIER.search(neighbor))
                         and not clause_pattern(neighbor)
                     )
-                    # Inverted default. A neighbouring clause whose subject is
-                    # this fact's own property qualifies the fact UNLESS it is
-                    # itself an affirmative, unhedged assertion of that fact.
-                    # Requiring a match against an enumerated hedge list is
-                    # what let 'Prices shown are indicative only and confirmed
-                    # at checkout.' and 'Note: availability refers to our
-                    # Tokyo branch, not this listing.' through.
                     neighbor_asserts=_is_affirmative_assertion(neighbor,clause_pattern)
+                    # `fee` keeps the start-anchored property-subject leg.
                     is_property_qualifier=bool(
-                        not neighbor_asserts
+                        name not in FACT_PROPERTY_TERMS
+                        and not neighbor_asserts
                         and not neighbor.rstrip().endswith('?')
                         and (ELLIPTICAL_VALUE_NEIGHBOR.search(neighbor) or
                              (PROPERTY_SUBJECT_NEIGHBOR[name].search(neighbor) and
                               not INTERROGATIVE_NEIGHBOR.search(neighbor)))
                     )
-                    # Two different affirmative totals in one neighbourhood
-                    # (a promotional total beside the real one) are an
-                    # ambiguity, never a committed amount.
-                    neighbor_amounts=_stated_amounts(neighbor) if neighbor_asserts else set()
-                    is_conflicting_total=bool(
-                        name == 'payable_total' and neighbor_amounts
-                        and neighbor_amounts != _stated_amounts(classified_text)
+                    # Inverted default (see `_neighbor_clears`). For
+                    # `payable_total`/`inventory` every neighbour qualifies the
+                    # fact unless it earns its irrelevance, so no hedge has to
+                    # be recognised for the fact to become `unknown`.
+                    is_uncommitted_neighbor=bool(
+                        name in FACT_PROPERTY_TERMS
+                        and not _neighbor_clears(name,neighbor,classified_text)
                     )
                     if (is_forward_anaphor or is_forward_subject_qualifier or
-                            is_property_qualifier or is_conflicting_total):
+                            is_property_qualifier or is_uncommitted_neighbor):
                         adjacent_condition=True
                     if (ADJACENT_QUALIFIER_ONLY.search(neighbor) or is_forward_anaphor or
-                            is_forward_subject_qualifier or is_property_qualifier):
+                            is_forward_subject_qualifier or is_property_qualifier or
+                            is_uncommitted_neighbor):
                         context_units.append(neighbor)
             context=' '.join(context_units)
             fact_clauses=[part for part in re.split(r'(?i)\s*(?:;|,(?=\s*[A-Za-z])|\band\b|\bbut\b)\s*',classified_text)

@@ -1,15 +1,14 @@
 # Claude Code repository instructions
 
-This file is a compatibility entrypoint for a coding tool. It is **not** an independent source of repository policy.
+@AGENTS.md
+@docs/development-constitution.en.md
 
-Before planning or changing code, read and follow:
+The imported files above are the canonical repository execution contract and Development Constitution. This file is a Claude Code compatibility entrypoint, not an independent source of policy.
 
-1. [AGENTS.md](AGENTS.md) — common repository execution contract.
-2. [Personal AgentOS Development Constitution](docs/development-constitution.en.md) — canonical durable engineering principles.
-3. The activated GitHub issue/spec/goal contract for the work.
+Before planning or changing code, require an activated GitHub issue/spec/goal contract and follow the constitutional **Reuse first: Adopt → Adapt → Build** rule. Before materially implementing or replacing commodity infrastructure, perform and record the Existing Solutions Review required by AGENTS.md.
 
-In particular, the constitutional **Reuse first: Adopt → Adapt → Build** rule is mandatory. Before materially implementing or replacing commodity infrastructure, perform and record the Existing Solutions Review required by AGENTS.md. Prefer an official/established implementation, then a mature OSS implementation behind a narrow AgentOS adapter, and build custom infrastructure only with documented justification.
+Prefer an official/established implementation, then a mature OSS implementation behind a narrow AgentOS adapter, and build custom infrastructure only with documented justification. Fewer dependencies or a preference for writing custom code is not sufficient justification to Build.
 
-Do not treat a preference for fewer dependencies or writing custom code as sufficient justification to Build. Do not outsource AgentOS-owned sovereignty boundaries—owner state, Context/Memory authority, Grants/approvals, capability mediation, data/egress policy, Work/Event/Evidence, Artifact provenance, recovery and revocation—to a dependency.
+Never outsource AgentOS-owned sovereignty boundaries—owner state, Context/Memory authority, Grants/approvals, capability mediation, data/egress policy, Work/Event/Evidence, Artifact provenance, recovery and revocation—to a dependency.
 
-If this file conflicts with AGENTS.md or the Development Constitution, the canonical repository governance wins. If a future coding tool does not recognize this filename, the same repository rules still apply.
+If any tool-specific instruction conflicts with AGENTS.md or the Development Constitution, the canonical repository governance wins.

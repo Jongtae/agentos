@@ -419,10 +419,23 @@ class PublicPageReaderTests(unittest.TestCase):
                 self.assertNotIn(hidden, result['content'])
 
     def test_xhtml_headings_are_retained_with_body_text(self):
-        """An XHTML heading carries the subject the body text refers to.
+        """A heading carries the subject the body text refers to.
 
-        trafilatura 2.2.0 drops the heading for the XHTML form of a page it
-        keeps for the HTML form, and returns nothing for application/xml.
+        An earlier revision of this docstring claimed trafilatura 2.2.0 drops
+        the heading for the XHTML form of a page it keeps for the HTML form.
+        That is false and did not reproduce: independent review tried the
+        markup below plus five variants and found the behaviour identical for
+        both dialects. The correction is recorded rather than quietly
+        removed, because the claim was committed here as an observed fact.
+
+        The reproducible finding is different and supports the same
+        conclusion: trafilatura 2.2.0 drops h1 headings on longer documents,
+        for XHTML and HTML alike. It also returns nothing at all for
+        application/xml and text/xml, two of the four media types this reader
+        accepts.
+
+        Both media types are exercised below so heading retention is pinned
+        for each, whatever a future candidate does with the dialect.
         """
         body=(b'<?xml version="1.0" encoding="utf-8"?>'
               b'<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Rate card</title></head>'

@@ -1081,6 +1081,21 @@ class GmailConnectorTests(unittest.TestCase):
         self.assertNotIn("must not be body", str(dropped.exception))
 
     def test_empty_content_disposition_is_not_treated_as_an_absent_header(self):
+        """A blank disposition is malformed, not an unrecognised disposition.
+
+        RFC 2183 section 2 requires a ``disposition-type`` token, so an empty
+        or whitespace-only value is a header that does not parse rather than a
+        well-formed header naming a role this parser does not know. The stdlib
+        parse records ``HeaderMissingRequiredValue``/``InvalidHeaderDefect``
+        for both spellings, and the defect rule refuses the read.
+
+        This previously reported ``body_not_attributable``, which asserts the
+        stronger and here untrue claim that the message parsed cleanly but no
+        part could be attributed as its body. Both reasons withhold the body;
+        ``invalid_provider_response`` names the actual cause. The
+        unrecognised-but-well-formed case keeps the old reason and is covered
+        by ``test_unknown_content_disposition_is_not_admitted_as_message_body``.
+        """
         self.connect()
         encoded = base64.urlsafe_b64encode(b"must not be body").decode()
         for disposition in ("", "   "):
@@ -1096,7 +1111,7 @@ class GmailConnectorTests(unittest.TestCase):
                 })
                 with self.assertRaises(GmailError) as dropped:
                     self.read()
-                self.assertEqual(dropped.exception.reason, "body_not_attributable")
+                self.assertEqual(dropped.exception.reason, "invalid_provider_response")
                 self.assertNotIn("must not be body", str(dropped.exception))
 
     def test_cfws_comment_in_content_disposition_keeps_an_inline_body(self):
@@ -1638,6 +1653,124 @@ class GmailConnectorTests(unittest.TestCase):
         with self.assertRaises(GmailError) as bounded:
             self.read()
         self.assertEqual(bounded.exception.reason, "message_too_complex")
+
+    def test_stdlib_header_defects_are_a_general_fail_closed_signal(self):
+        """Any defect the stdlib header parse records refuses the read.
+
+        This replaces an enumeration of the malformations this module happened
+        to think of - a hand-written CFWS/comment scanner, a quoted-string
+        aware parameter splitter, an explicit HTAB/control-character sweep and
+        a bespoke duplicate-name check - with the parser's own defect list. A
+        malformation nobody enumerated is now refused for the same reason as
+        one that was.
+
+        The legal constructs this must NOT reject (HTAB folding, nested
+        comments, parentheses inside quoted values, a single leading comment)
+        are asserted by ``test_present_content_type_can_omit_optional_charset``
+        and ``test_cfws_comment_in_content_disposition_keeps_an_inline_body``.
+        """
+        self.connect()
+        encoded = base64.urlsafe_b64encode(b"private body").decode()
+        cases = (
+            # Duplicate conflicting parameter, as the sender spelled it.
+            ("Content-Type", "text/plain; charset=utf-8; charset=iso-8859-1"),
+            # The same duplicate spelled in two cases, optionally hidden behind
+            # a comment. RFC 2045 parameter names are case-insensitive, so
+            # these are one parameter given twice.
+            ("Content-Type", "text/plain; charset=utf-8; CHARSET=iso-8859-1"),
+            ("Content-Type", "text/plain; charset=us-ascii; (x) CHARSET=utf-8"),
+            # Unterminated comment and unterminated quoted string.
+            ("Content-Type", "text/plain; charset=utf-8; (unterminated"),
+            ("Content-Type", "text/plain; charset=(unterminated utf-8"),
+            ("Content-Type", 'text/plain; charset="utf-8'),
+            # Embedded control characters. HTAB is legal and excluded here.
+            ("Content-Type", "text/plain; charset=utf-8\r"),
+            ("Content-Type", "text/plain; charset=utf-8\n"),
+            ("Content-Type", "text/plain; charset=utf-8\x00"),
+            ("Content-Type", "text/plain; charset=utf-8\x01"),
+            ("Content-Type", "text/plain; charset=utf-8\x7f"),
+            # No media type at all.
+            ("Content-Type", ""),
+            ("Content-Type", "   "),
+            ("Content-Type", "notatype"),
+            # The same rule applies to the disposition header, which decides
+            # whether the part may become the body at all.
+            ("Content-Disposition", "inline\r"),
+            ("Content-Disposition", "inline\n"),
+            ("Content-Disposition", "inline\x00"),
+            ("Content-Disposition", 'attachment; filename="unterminated'),
+            ("Content-Disposition", "inline; filename=a; FILENAME=b"),
+        )
+        for header_name, value in cases:
+            with self.subTest(header=header_name, value=repr(value)):
+                self.responses.clear()
+                self.responses.append({
+                    "id": "m_1",
+                    "threadId": "t_1",
+                    "payload": {
+                        "mimeType": "text/plain",
+                        "headers": [{"name": header_name, "value": value}],
+                        "body": {"data": encoded},
+                    },
+                })
+                with self.assertRaises(GmailError) as malformed:
+                    self.read()
+                self.assertEqual(malformed.exception.reason, "invalid_provider_response")
+                self.assertNotIn("private body", str(malformed.exception))
+
+    def test_rfc2231_extended_parameter_cannot_smuggle_a_blocked_charset(self):
+        """An RFC 2231 charset reaches the allowlist like any other.
+
+        ``charset*=us-ascii\'\'utf-7`` parses cleanly - no defect - and the
+        stdlib resolves it to ``utf-7``. The defect rule therefore cannot be
+        the thing that stops it; the curated allowlist has to, and it must see
+        the resolved value rather than the literal parameter text.
+        """
+        self.connect()
+        for encoding, refused_charset in (
+            ("us-ascii''utf-7", "utf-7"),
+            ("us-ascii''unicode_escape", "unicode_escape"),
+        ):
+            with self.subTest(charset=refused_charset):
+                markup = "<script>alert(1)</script>"
+                raw = (
+                    markup.encode("utf-7")
+                    if refused_charset == "utf-7"
+                    else b"\\u003cscript\\u003e"
+                )
+                self.responses.clear()
+                self.responses.append({
+                    "id": "m_1",
+                    "threadId": "t_1",
+                    "payload": {
+                        "mimeType": "text/plain",
+                        "headers": [
+                            {"name": "Content-Type", "value": "text/plain; charset*=" + encoding}
+                        ],
+                        "body": {"data": base64.urlsafe_b64encode(raw).decode()},
+                    },
+                })
+                with self.assertRaises(GmailError) as refused:
+                    self.read()
+                self.assertEqual(refused.exception.reason, "unsupported_charset")
+                self.assertNotIn("script", str(refused.exception))
+
+        # A sectioned continuation naming an allowed charset still decodes, so
+        # the gate reads the reassembled value and does not simply distrust
+        # every RFC 2231 parameter.
+        self.responses.clear()
+        self.responses.append({
+            "id": "m_1",
+            "threadId": "t_1",
+            "payload": {
+                "mimeType": "text/plain",
+                "headers": [
+                    {"name": "Content-Type", "value": "text/plain; charset*0=utf-; charset*1=8"}
+                ],
+                "body": {"data": base64.urlsafe_b64encode("café".encode()).decode()},
+            },
+        })
+        self.assertEqual(self.read().body, "café")
 
     def test_search_result_exposes_symmetric_redacted_evidence(self):
         self.connect()

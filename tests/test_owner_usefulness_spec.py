@@ -4,6 +4,7 @@ import unittest
 from collections import Counter
 from pathlib import Path
 
+from delivery_state_invariants import assert_declared_goal_shape, closed_out_programs
 from personal_agent.delivery import DeliveryPlan
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -57,27 +58,44 @@ class OwnerUsefulnessSpecificationTests(unittest.TestCase):
         self.assertNotIn("actual_success_ratio", gates)
 
     def test_selected_goal_readiness_does_not_enable_execution(self):
-        # USE-01 remains preserved historical usefulness work, while PA1 is the
-        # newly prepared next top-level program. Goal-ready still means no execution.
+        # USE-01 remains preserved historical usefulness work. The top-level
+        # goal itself moves over time and is absent after a closeout, so this
+        # checks the rule in both shapes: goal-readiness never executes, and
+        # a closeout never executes either.
         plan = json.loads((ROOT / "delivery-plan.yaml").read_text(encoding="utf-8"))
+        shape = assert_declared_goal_shape(self, plan)
         declared = plan["next_goal"]["id"]
-        self.assertEqual(plan["next_goal"]["status"], "owner-activated-goal-ready")
-        selected = next(item for item in plan["iterations"] if item["id"] == declared)
-        self.assertIsInstance(selected["issue"], int)
-        self.assertEqual(selected["activation_status"], "owner-activated-goal-ready")
-        # The declared top-level goal must declare its activation-governance
-        # dependency. This is a governance rule, not a transient fact: without
-        # it a program can be flipped to active with no governance merged.
-        # Generalised from the original `== ["GOV-PA1-01"]`, which pinned the
-        # same rule to whichever program happened to be declared.
-        self.assertTrue(selected.get("depends_on"), selected)
-        for dependency in selected["depends_on"]:
-            self.assertIn(dependency, plan["history"]["documented_completed_iterations"])
+        documented = plan["history"]["documented_completed_iterations"]
+        # The activation-governance dependency rule is a governance rule, not
+        # a transient fact: without it a program can be flipped to active with
+        # no governance merged. Generalised from the original
+        # `== ["GOV-PA1-01"]`, which pinned the rule to whichever program
+        # happened to be declared, and applied to the closed-out program too
+        # so a closeout cannot erase the requirement.
+        if shape == "goal-ready":
+            subjects = [declared]
+            self.assertNotIn(declared, documented)
+        else:
+            self.assertIsNone(declared)
+            subjects = closed_out_programs(plan)
+            self.assertTrue(subjects)
+            for name in subjects:
+                self.assertIn(name, documented)
+        for name in subjects:
+            selected = next(item for item in plan["iterations"] if item["id"] == name)
+            self.assertIsInstance(selected["issue"], int)
+            self.assertIn(selected["activation_status"],
+                          {"owner-activated-goal-ready", "complete-on-merge"})
+            if shape == "goal-ready":
+                self.assertEqual(selected["activation_status"],
+                                 "owner-activated-goal-ready")
+            self.assertTrue(selected.get("depends_on"), selected)
+            for dependency in selected["depends_on"]:
+                self.assertIn(dependency, documented)
         # Goal-readiness must not execute, whichever program is declared.
         self.assertNotEqual(plan["next_goal"]["status"], "active")
         self.assertIn("GOV-PA1-01", plan["history"]["documented_completed_iterations"])
         self.assertIn("USE-01", plan["history"]["documented_completed_iterations"])
-        self.assertNotIn(declared, plan["history"]["documented_completed_iterations"])
         use01 = next(item for item in plan["iterations"] if item["id"] == "USE-01")
         self.assertEqual(use01["issue"], 358)
         controller_plan = DeliveryPlan(ROOT / "delivery-plan.yaml")

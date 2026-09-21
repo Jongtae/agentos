@@ -8,6 +8,24 @@ Active work is executed only from a goal-ready issue and active delivery-plan en
 | --- | --- | --- |
 | GOV-EXEC-01: verification budget and stable-head review | [#408](https://github.com/Jongtae/personal-agentos/issues/408) | Complete on merge after exact-head CI/review. Keeps required CI/review gates while using focused tests during implementation, coherent checkpoint pushes, batched review remediation, a soft two-broad-cycle expectation, and no duplicate review/polling. |
 
+## Completed — reuse-first infrastructure migration
+
+| Work unit | Issue | Current boundary |
+| --- | --- | --- |
+| GOV-REUSE-01: reuse-first engineering governance | [#412](https://github.com/Jongtae/personal-agentos/issues/412) | Merged via PR #414. Adds Constitution clause C15 (Adopt → Adapt → Build) and the Existing Solutions Review to `AGENTS.md` and the Development Constitution. Governance only; binds every contributor and coding tool. |
+| GOV-REUSE-ACT-01: activate a non-overlapping tranche | [#419](https://github.com/Jongtae/personal-agentos/issues/419) | Merged via PR #421. Paused EPIC-PA1, activated EPIC-REUSE-01 for R1/R2/R4/R7/R8 only, and registered the PA1-overlapping substeps under dependency-blocked #420. |
+| GOV-REUSE-PAR-01: bounded parallelism | [#424](https://github.com/Jongtae/personal-agentos/issues/424) | Merged via PR #425. At most two open EPIC-REUSE-01 children with disjoint ownership. |
+| EPIC-REUSE-01: replace custom infrastructure with maintained implementations | [#418](https://github.com/Jongtae/personal-agentos/issues/418) | Complete on merge after exact-head CI and independent review. Activated tranche closed, Two Adopt, one Adapt, two evidence-backed Build-retained, one relocation. Static and local automated-suite evidence only; no live provider, Kubernetes, launchd or Homebrew operation was observed. |
+| R1a: Gmail MIME header parsing | [#422](https://github.com/Jongtae/personal-agentos/issues/422) | **Adapt** — stdlib `email.headerregistry`. The audit's `format=RAW` premise was wrong: Gmail already decomposes the tree, so the custom code was header-parameter parsing, not a MIME parser. |
+| R1b: Google OAuth/PKCE mechanics | [#427](https://github.com/Jongtae/personal-agentos/issues/427) | **Adopt** — `oauthlib` for the code verifier/challenge and authorization URL. `google-auth` rejected on recorded grounds. Drive scope check tightened. |
+| R2: MCP protocol version | [#426](https://github.com/Jongtae/personal-agentos/issues/426) | **Adopt** — `mcp-types` official registry replaces the hardcoded version. Envelope models deliberately not adopted; the reason is recorded in both bridge module docstrings. |
+| R4: Codex/Claude execution adapters | [#433](https://github.com/Jongtae/personal-agentos/issues/433) | **Build retained** — both official SDKs measured against the contract and rejected: each spawns the engine with `os.environ.copy()` and lets callers only *add* variables, so neither can express the closed env allowlist; neither enforces a per-turn wall-clock kill; and the Codex SDK speaks the persistent `app-server` protocol rather than the one-shot `exec` this adapter depends on. |
+| R7: public search/page extraction | [#430](https://github.com/Jongtae/personal-agentos/issues/430) | **Build retained** — the audit's candidates have weaker defaults than the hand-written control on the SSRF/private-egress boundary. |
+| R8: legacy and development-runtime cleanup | [#435](https://github.com/Jongtae/personal-agentos/issues/435) | Four modules relocated and **none deleted**; three of them left the installed package (`scripts/e2e.py` was already outside it). Seven kept. Four of eleven were reclassified from "supported" after independent review rejected circular reachability evidence. |
+| REUSE-TRANSPORT-01: provider, Telegram and HTTP transport | [#420](https://github.com/Jongtae/personal-agentos/issues/420) | Deferred, dependency-blocked. R3/R5/R6 need the transport/policy seam that PA1-CONV-01 and PA1-INT-01 own. Not activated by #418's completion. |
+
+EPIC-REUSE-01 closed its activated tranche without selecting a successor. R1 closed on R1a and R1b only: **R1c was never created or executed** and is dispositioned to [#440](https://github.com/Jongtae/personal-agentos/issues/440), which also carries the open `google_drive.py` scope defect [#432](https://github.com/Jongtae/personal-agentos/issues/432). [#420](https://github.com/Jongtae/personal-agentos/issues/420), #440, #432, [#437](https://github.com/Jongtae/personal-agentos/issues/437) and [#438](https://github.com/Jongtae/personal-agentos/issues/438) are registered dispositions and recorded follow-ups, not an execution queue. EPIC-PA1 remains `owner-paused` and requires explicit owner reactivation; #418's completion does not resume it.
+
 ## Prepared — PA1 first Telegram personal-assistant completion
 
 | Work unit | Issue | Current boundary |

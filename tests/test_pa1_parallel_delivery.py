@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 import unittest
 
+from delivery_state_invariants import assert_declared_goal_shape, executing_programs
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -41,21 +43,36 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         self.assertIn("#358 did not select a successor; EPIC-PA1 is separately prepared by #385", tasks)
 
     def test_exactly_one_program_holds_execution_authority(self):
-        """Governance allows one active top-level program, not one program.
+        """Governance allows at most one active top-level program.
 
         The earlier form asserted EPIC-PA1 was the only non-complete program,
         which pinned a transient fact rather than the rule. A paused program
         still exists and still owns its substeps; it simply cannot execute.
+
+        The failure mode this exists to catch is *two* programs holding
+        execution authority at once. Zero is the safer direction, not a
+        violation: AGENTS.md keeps the heartbeat paused "when no top-level
+        goal is active or after top-level closeout". So the count relaxes to
+        `<= 1`, and the zero case pays for that relaxation with positive
+        quiescence assertions -- nothing declared, nothing armed, nothing
+        selectable, heartbeat paused -- rather than merely being tolerated.
         """
-        terminal = {"complete", "owner-paused"}
-        executing = [
-            name for name, program in self.plan["programs"].items()
-            if program.get("status") not in terminal
-        ]
-        self.assertEqual(len(executing), 1, executing)
-        self.assertEqual(self.plan["next_goal"]["id"], executing[0])
+        executing = executing_programs(self.plan)
+        self.assertLessEqual(len(executing), 1, executing)
+        shape = assert_declared_goal_shape(self, self.plan)
+        if executing:
+            self.assertEqual(shape, "goal-ready")
+            self.assertEqual(self.plan["next_goal"]["id"], executing[0])
+            self.assertIsNotNone(self.plan["next_goal"]["id"])
+        else:
+            self.assertEqual(shape, "terminal")
+            self.assertIsNone(self.plan["next_goal"]["id"])
+        # EPIC-PA1 is paused in either shape and never silently regains
+        # authority as a side effect of another program closing out.
         self.assertEqual(self.program["status"], "owner-paused")
         self.assertEqual(self.program["issue"], 386)
+        self.assertNotIn("EPIC-PA1", executing)
+        self.assertNotEqual(self.plan["next_goal"]["id"], "EPIC-PA1")
 
     def test_a_paused_program_cannot_be_selected_even_if_redeclared_active(self):
         """Pausing must remove execution authority, not merely relabel it.
@@ -159,7 +176,37 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         for prohibition in ("may not", "credential", "authority", "fail-closed"):
             self.assertIn(prohibition, authority)
         self.assertTrue(program["non_goals"])
-        self.assertEqual(program["status"], "owner-activated-goal-ready")
+        # The scope pins above hold in both plan shapes. The status does not:
+        # #418 may be the armed declared goal, or closed out. Each shape
+        # carries its own evidence requirement, so neither is a free pass.
+        shape = assert_declared_goal_shape(self, self.plan)
+        self.assertEqual(program["active_substeps"], [])
+        if shape == "goal-ready":
+            self.assertEqual(program["status"], "owner-activated-goal-ready")
+            self.assertEqual(self.plan["next_goal"]["id"], "EPIC-REUSE-01")
+            self.assertEqual(self.items["EPIC-REUSE-01"]["activation_status"],
+                             "owner-activated-goal-ready")
+            self.assertNotIn("EPIC-REUSE-01",
+                             self.plan["history"]["documented_completed_iterations"])
+        else:
+            self.assertEqual(program["status"], "complete")
+            self.assertEqual(self.items["EPIC-REUSE-01"]["activation_status"],
+                             "complete-on-merge")
+            self.assertIn("EPIC-REUSE-01",
+                          self.plan["history"]["documented_completed_iterations"])
+            self.assertTrue(program["closeout"])
+            done = program["completed_substeps"]
+            # Closeout may never claim a substep that was deferred to #420.
+            self.assertFalse(set(deferred["substeps"]) & set(done))
+            # Every activated substep needs recorded evidence, directly or
+            # through every child it was split into.  Matching by prefix is
+            # what let R1a alone stand in for R1, so the structural check in
+            # delivery_state_invariants owns this and is asserted below.
+            for substep in program["ordered_substeps"]:
+                children = program.get("substep_children", {}).get(substep, [])
+                self.assertTrue(substep in done or (children and set(children) <= set(done)), substep)
+            # Closing #418 must not select or resume a successor.
+            self.assertEqual(self.plan["programs"]["EPIC-PA1"]["status"], "owner-paused")
 
     def test_children_are_parent_controlled_and_cannot_self_activate(self):
         child_ids = set(self.program["ordered_substeps"])
@@ -287,7 +334,12 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         self.assertEqual((profiles["critical"]["preferred_model"], profiles["critical"]["preferred_reasoning"]), ("Sol", "High"))
         self.assertEqual(self.program["routing_policy"]["default"], "standard")
         self.assertEqual(self.program["active_substeps"], [])
-        self.assertEqual(self.plan["next_goal"]["status"], "owner-activated-goal-ready")
+        # "Inactive" is the point of this test. It used to be spelled as the
+        # single declared-goal status that happened to hold; the full shape
+        # check below covers that status and adds the invariants that make
+        # each shape genuinely inactive.
+        assert_declared_goal_shape(self, self.plan)
+        self.assertNotIn("EPIC-PA1", executing_programs(self.plan))
 
     def test_child_initial_profiles_match_pa1_risk_routing(self):
         expected = {
@@ -324,7 +376,10 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         self.assertIn("all remaining safe", policy["stop_program_only_when"])
         self.assertIn("development_complete and operating_validated remain separate", policy["evidence_boundary"])
         self.assertEqual(self.program["active_substeps"], [])
-        self.assertEqual(self.plan["next_goal"]["status"], "owner-activated-goal-ready")
+        # The gate policy is metadata on a paused program: no plan shape may
+        # let it start work or start the heartbeat.
+        assert_declared_goal_shape(self, self.plan)
+        self.assertNotIn("EPIC-PA1", executing_programs(self.plan))
 
     def test_owner_gate_contract_batches_live_checks_without_fabricating_success(self):
         text = (ROOT / self.program["contract"]).read_text(encoding="utf-8")

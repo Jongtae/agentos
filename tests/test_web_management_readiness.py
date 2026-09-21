@@ -9,6 +9,7 @@ from urllib import error as urlerror
 from urllib import request as urlrequest
 from urllib.parse import parse_qs, urlsplit
 
+from delivery_state_invariants import assert_declared_goal_shape
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
 
@@ -35,9 +36,19 @@ class WebManagementReadinessTests(unittest.TestCase):
         self.assertNotIn('WEB-ADMIN-01', completed)
         self.assertNotEqual(plan['next_goal']['status'], 'active')
         # WEB-ADMIN-01 is a parent-controlled substep and can never be the
-        # declared top-level goal, whichever program currently holds authority.
+        # declared top-level goal, whichever program currently holds
+        # authority -- and it is not a program, so it cannot become one.
         self.assertNotEqual(plan['next_goal']['id'], 'WEB-ADMIN-01')
-        self.assertIn(plan['next_goal']['id'], plan['programs'])
+        self.assertNotIn('WEB-ADMIN-01', plan['programs'])
+        # A declared goal is always a program. After closeout there is no
+        # declared goal, which has to be a fully quiesced state rather than
+        # simply an unchecked one.
+        shape = assert_declared_goal_shape(self, plan)
+        if shape == 'goal-ready':
+            self.assertIn(plan['next_goal']['id'], plan['programs'])
+        else:
+            self.assertIsNone(plan['next_goal']['id'])
+            self.assertEqual(plan['programs']['EPIC-PA1']['status'], 'owner-paused')
         self.assertTrue((ROOT / 'docs' / entry['contract']).is_file())
 
     def test_historical_top02_validation_is_not_weakened(self):

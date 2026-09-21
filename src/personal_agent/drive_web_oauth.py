@@ -178,7 +178,7 @@ class DriveWebOAuthHandoff:
             code_challenge=client.create_code_challenge(pending["verifier"], "S256"),
             code_challenge_method="S256",
             access_type="offline",
-            # DEFERRED (REUSE-R1b #427, carried to the EPIC-REUSE-01 coordinator):
+            # DEFERRED (REUSE-R1b #427, owned by SEC-DRIVE-SCOPE-01 #432):
             # ``Gmail.begin_oauth`` also sends ``include_granted_scopes="false"``
             # so Google cannot fold previously granted scopes into this grant.
             # This connector does not yet, which is why ``complete`` must keep

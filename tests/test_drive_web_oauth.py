@@ -238,13 +238,27 @@ class DriveWebOAuthTests(unittest.TestCase):
         self.assertNotIn("access-secret", str(self.store.secret("encrypted:drive_web_oauth_tokens")))
 
     def test_callback_granting_exactly_drive_file_is_accepted(self):
-        """The tightened check must not reject the only scope this connector requests."""
+        """The tightened check must not reject the only scope this connector requests.
+
+        Also pins the exchange leg. The authorization-URL assertion binds the
+        advertised challenge to the *stored* verifier; without this, the
+        verifier actually presented at the token endpoint is unbound, and a
+        divergent or omitted code_verifier survives the whole suite. Gmail
+        pins this leg, so Drive does too - Google would answer
+        ``invalid_grant`` rather than accept a broken proof, but a fail-closed
+        bug is still a bug worth catching here rather than live.
+        """
         _offer, state = self.begin()
-        self.flow.complete(
-            {"state": state, "code": "short-code"}, 42,
-            lambda _: {"access_token": "access-secret", "scope": DRIVE_FILE, "expires_in": 60},
-        )
+        stored = self.encrypted_store.secret(PENDING_KEY)["verifier"]
+        seen = []
+
+        def exchange(request):
+            seen.append(request)
+            return {"access_token": "access-secret", "scope": DRIVE_FILE, "expires_in": 60}
+
+        self.flow.complete({"state": state, "code": "short-code"}, 42, exchange)
         self.assertEqual(self.flow.status()["state"], "connected")
+        self.assertEqual(seen[0]["code_verifier"], stored)
 
     def test_corrupted_encrypted_secret_fails_closed_without_disclosing_plaintext(self):
         """Unreadable ciphertext must raise the redacted error, never a partial credential."""

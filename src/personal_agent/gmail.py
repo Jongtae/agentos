@@ -253,6 +253,8 @@ def _finite_now(now: Callable[[], float]) -> float:
     return float(value)
 
 
+# See the REUSE-R1b (#427) note in ``drive_web_oauth`` for why ``google-auth``
+# and ``google-auth-oauthlib`` are deliberately not used for these mechanics.
 def _pkce_pair() -> tuple[str, str]:
     verifier = secrets.token_urlsafe(64)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()

@@ -72,6 +72,17 @@ class EncryptedDriveSecretStore:
         return self.store.config(key, default)
 
 
+# REUSE-R1b (#427): ``google-auth``/``google-auth-oauthlib`` were evaluated as
+# replacements for the OAuth mechanics below and declined.  ``google-auth``
+# contains no PKCE and no authorization-URL builder, and its only
+# authorization-code exchange lives in the private ``google.oauth2._client``.
+# ``Credentials.has_scopes`` is a subset test where this connector needs an
+# exact grant check, ``Credentials.expired`` reads a module-global clock with a
+# 3m45s skew instead of the injected ``now``, and ``before_request`` refreshes
+# silently, which this connector must not do.  ``google-auth-oauthlib`` supplies
+# PKCE but performs the token call itself through ``requests``, replacing the
+# injected ``exchange`` seam with a new egress path and TLS trust store.
+# Keep these stdlib mechanics; do not re-open without new evidence.
 def _pkce_pair():
     verifier = secrets.token_urlsafe(64)
     digest = hashlib.sha256(verifier.encode()).digest()

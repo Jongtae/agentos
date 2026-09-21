@@ -185,6 +185,36 @@ class DriveWebOAuthTests(unittest.TestCase):
         with self.assertRaises(DriveWebOAuthError):
             self.flow.read_selected(42,"picked",lambda *_: "must not run")
 
+    def test_callback_without_the_requested_scope_is_rejected_and_stores_no_token(self):
+        """A grant that omits drive.file must fail closed, leaving no usable credential."""
+        _offer, state = self.begin()
+        with self.assertRaises(DriveScopeError):
+            self.flow.complete(
+                {"state": state, "code": "short-code"}, 42,
+                lambda _: {"access_token": "access-secret", "scope": "https://www.googleapis.com/auth/userinfo.email", "expires_in": 60},
+            )
+        self.assertEqual(self.flow.status()["state"], "scope-rejected")
+        self.assertEqual(self.encrypted_store.secret("drive_web_oauth_tokens"), "")
+        self.assertNotIn("access-secret", str(self.store.secret("encrypted:drive_web_oauth_tokens")))
+        # The pending state is consumed, so the same callback cannot be replayed.
+        with self.assertRaises(DriveWebOAuthError):
+            self.flow.complete({"state": state, "code": "short-code"}, 42, lambda _: {"access_token": "a", "scope": DRIVE_FILE, "expires_in": 60})
+
+    def test_corrupted_encrypted_secret_fails_closed_without_disclosing_plaintext(self):
+        """Unreadable ciphertext must raise the redacted error, never a partial credential."""
+        self.connect()
+        self.store.secret("encrypted:drive_web_oauth_tokens", "not-a-valid-fernet-token")
+        with self.assertRaises(DriveWebOAuthError) as caught:
+            self.encrypted_store.secret("drive_web_oauth_tokens")
+        self.assertNotIn("access-secret", str(caught.exception))
+        with self.assertRaises(DriveWebOAuthError):
+            self.flow.read_selected(42, "picked", lambda *_: "must not run")
+        # A wrong local key is equally unreadable: the key is not recoverable from storage.
+        rekeyed = EncryptedDriveSecretStore(self.store, Fernet.generate_key())
+        self.store.secret("encrypted:drive_web_oauth_tokens", "gAAAAA" + "B" * 40)
+        with self.assertRaises(DriveWebOAuthError):
+            rekeyed.secret("drive_web_oauth_tokens")
+
 
 if __name__ == "__main__":
     unittest.main()

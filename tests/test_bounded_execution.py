@@ -5,7 +5,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from personal_agent.bounded_execution import AgentOSMcpTools, BoundedExecutionAdapter, ExecutionError
+from personal_agent import bounded_execution
+from personal_agent.bounded_execution import (
+    AgentOSMcpTools,
+    BoundedExecutionAdapter,
+    ExecutionError,
+    ReadOnlyAgentOSMcpTools,
+)
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
 from personal_agent.subscription_engines import SubscriptionEngines
@@ -224,3 +230,290 @@ class SubscriptionServiceTests(unittest.TestCase):
         self.assertEqual(subscription_public_lookup_query('/search AgentOS release'), 'AgentOS release')
         self.assertIsNone(subscription_public_lookup_query('/search my api token is abc'))
         self.assertIsNone(subscription_public_lookup_query('내 메모를 정리해줘'))
+
+
+class BoundedExecutionPreservedBoundaryTests(unittest.TestCase):
+    """Execution evidence for each boundary REUSE-R4 must preserve.
+
+    Recorded during the R4 adapter-reuse review (#433).  Neither
+    `openai-codex` nor `claude-agent-sdk` can express these controls: both
+    spawn the engine with `os.environ.copy()` and allow callers only to *add*
+    variables, neither enforces a per-turn wall-clock kill, and the Codex SDK
+    speaks the persistent `app-server` protocol rather than the one-shot
+    `exec` this adapter depends on.  These tests pin the behaviour the
+    adapters keep instead.
+    """
+
+    @staticmethod
+    def _adapter(folder, runner, finder=None):
+        return BoundedExecutionAdapter(
+            finder=finder if finder is not None else (lambda name: '/runtime/' + name),
+            runner=runner,
+            runtime_root=folder,
+        )
+
+    @staticmethod
+    def _ok(stdout):
+        class Done:
+            returncode = 0
+        Done.stdout = stdout
+        return lambda *args, **kwargs: Done()
+
+    # --- bounded environment -------------------------------------------------
+    def test_engine_environment_is_a_closed_allowlist_not_the_host_environment(self):
+        seen = {}
+
+        def runner(argv, **kwargs):
+            seen['env'] = kwargs['env']
+            class Done:
+                returncode = 0
+                stdout = json.dumps({'result': 'ok'})
+            return Done()
+
+        os.environ['AGENTOS_R4_FAKE_SECRET'] = 'must-not-be-inherited'
+        try:
+            with tempfile.TemporaryDirectory() as folder:
+                self._adapter(folder, runner).execute(
+                    'claude-code', 'hello', AgentOSMcpTools(_Capabilities()))
+        finally:
+            os.environ.pop('AGENTOS_R4_FAKE_SECRET', None)
+        # A closed allowlist, not an inherited-and-extended environment.
+        self.assertEqual(set(seen['env']), {'HOME', 'PATH', 'LANG', 'PYTHONPATH'})
+        self.assertNotIn('AGENTOS_R4_FAKE_SECRET', seen['env'])
+        self.assertEqual(seen['env']['PATH'], '/usr/bin:/bin')
+
+    # --- empty per-request workspace ----------------------------------------
+    def test_each_turn_gets_a_fresh_workspace_holding_only_the_bridge_config(self):
+        observed = []
+
+        def runner(argv, **kwargs):
+            run_dir = Path(kwargs['cwd'])
+            observed.append((run_dir, sorted(entry.name for entry in run_dir.iterdir())))
+            class Done:
+                returncode = 0
+                stdout = json.dumps({'result': 'ok'})
+            return Done()
+
+        with tempfile.TemporaryDirectory() as folder:
+            adapter = self._adapter(folder, runner)
+            adapter.execute('claude-code', 'first', AgentOSMcpTools(_Capabilities()))
+            adapter.execute('claude-code', 'second', AgentOSMcpTools(_Capabilities()))
+            first, second = observed
+            self.assertEqual(first[1], ['agentos-mcp.json'])
+            self.assertEqual(second[1], ['agentos-mcp.json'])
+            self.assertNotEqual(first[0], second[0], 'each turn needs its own workspace')
+            # The workspace is removed when the turn ends; nothing survives it.
+            self.assertFalse(first[0].exists())
+            self.assertFalse(second[0].exists())
+            self.assertEqual(sorted(Path(folder).iterdir()), [])
+
+    def test_runtime_root_is_created_private_to_the_owner(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder) / 'engine-runs'
+            adapter = self._adapter(root, self._ok(json.dumps({'result': 'ok'})))
+            adapter.execute('claude-code', 'hello', AgentOSMcpTools(_Capabilities()))
+            self.assertEqual(root.stat().st_mode & 0o777, 0o700)
+
+    # --- sandbox flag stays an AgentOS decision ------------------------------
+    def test_agentos_always_sets_the_sandbox_and_strict_mcp_flags_itself(self):
+        seen = {}
+
+        def runner(argv, **kwargs):
+            seen['argv'] = argv
+            class Done:
+                returncode = 0
+                stdout = json.dumps({'item': {'type': 'agent_message', 'text': 'ok'}})
+            return Done()
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            profile = root / 'profile'
+            profile.mkdir()
+            BoundedExecutionAdapter(finder=lambda _: '/bin/codex', runner=runner,
+                                    runtime_root=root / 'turns',
+                                    codex_home=profile).execute(
+                'codex', 'hello', AgentOSMcpTools(_Capabilities()))
+        argv = seen['argv']
+        self.assertEqual(argv[1:6], ['exec', '--json', '--sandbox', 'read-only',
+                                     '--skip-git-repo-check'])
+        # No generic argv/approval hook: the caller cannot relax these.
+        self.assertNotIn('--dangerously-bypass-approvals-and-sandbox', argv)
+        self.assertNotIn('workspace-write', argv)
+        self.assertNotIn('full-access', argv)
+
+    def test_claude_code_invocation_pins_strict_mcp_config(self):
+        seen = {}
+
+        def runner(argv, **kwargs):
+            seen['argv'] = argv
+            class Done:
+                returncode = 0
+                stdout = json.dumps({'result': 'ok'})
+            return Done()
+
+        with tempfile.TemporaryDirectory() as folder:
+            self._adapter(folder, runner).execute(
+                'claude-code', 'hello', AgentOSMcpTools(_Capabilities()))
+        self.assertIn('--strict-mcp-config', seen['argv'])
+        self.assertIn('--output-format', seen['argv'])
+
+    # --- timeout and output limits ------------------------------------------
+    def test_every_invocation_carries_the_declared_timeout_and_no_shell(self):
+        seen = {}
+
+        def runner(argv, **kwargs):
+            seen['kwargs'] = kwargs
+            class Done:
+                returncode = 0
+                stdout = json.dumps({'result': 'ok'})
+            return Done()
+
+        with tempfile.TemporaryDirectory() as folder:
+            self._adapter(folder, runner).execute(
+                'claude-code', 'hello', AgentOSMcpTools(_Capabilities()))
+        self.assertEqual(seen['kwargs']['timeout'], bounded_execution.MAX_TIMEOUT_SECONDS)
+        self.assertIs(seen['kwargs']['shell'], False)
+        self.assertEqual(seen['kwargs']['stdin'], subprocess.DEVNULL)
+        self.assertIs(seen['kwargs']['capture_output'], True)
+
+    def test_engine_timeout_fails_closed(self):
+        def runner(argv, **kwargs):
+            raise subprocess.TimeoutExpired(argv, bounded_execution.MAX_TIMEOUT_SECONDS)
+
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaises(ExecutionError):
+                self._adapter(folder, runner).execute(
+                    'codex', 'hello', AgentOSMcpTools(_Capabilities()))
+
+    def test_oversized_engine_output_is_refused(self):
+        # Well-formed JSONL carrying a valid final message: only the size
+        # ceiling can reject it, so the assertion cannot pass by accident.
+        oversized = json.dumps({'item': {'type': 'agent_message',
+                                         'text': 'x' * bounded_execution.MAX_OUTPUT_BYTES}})
+        self.assertGreater(len(oversized.encode()), bounded_execution.MAX_OUTPUT_BYTES)
+        self.assertEqual(
+            BoundedExecutionAdapter._content(
+                'codex', json.dumps({'item': {'type': 'agent_message', 'text': 'small'}})),
+            'small', 'the same shape must succeed below the ceiling')
+        with self.assertRaises(ExecutionError):
+            BoundedExecutionAdapter._content('codex', oversized)
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaises(ExecutionError):
+                self._adapter(folder, self._ok(oversized)).execute(
+                    'codex', 'hello', AgentOSMcpTools(_Capabilities()))
+
+    def test_accepted_result_is_truncated_to_the_declared_ceiling(self):
+        long_answer = 'y' * 40_000
+        raw = json.dumps({'item': {'type': 'agent_message', 'text': long_answer}})
+        self.assertEqual(len(BoundedExecutionAdapter._content('codex', raw)), 24_000)
+
+    def test_oversized_or_empty_prompt_is_refused_before_any_spawn(self):
+        calls = []
+
+        def runner(argv, **kwargs):
+            calls.append(argv)
+            raise AssertionError('must not spawn')
+
+        with tempfile.TemporaryDirectory() as folder:
+            adapter = self._adapter(folder, runner)
+            for prompt in ('', '   ', 'z' * (bounded_execution.MAX_PROMPT_BYTES + 1), None):
+                with self.subTest(prompt=type(prompt).__name__):
+                    with self.assertRaises(ExecutionError):
+                        adapter.execute('codex', prompt, AgentOSMcpTools(_Capabilities()))
+        self.assertEqual(calls, [])
+
+    # --- malformed stream / non-zero exit / missing binary -------------------
+    def test_malformed_event_stream_is_refused_even_on_a_zero_exit(self):
+        for raw in ('not json at all', '{"item": ', '', '   \n  \n'):
+            with self.subTest(raw=raw[:12]):
+                with tempfile.TemporaryDirectory() as folder:
+                    with self.assertRaises(ExecutionError):
+                        self._adapter(folder, self._ok(raw)).execute(
+                            'codex', 'hello', AgentOSMcpTools(_Capabilities()))
+
+    def test_event_stream_without_a_final_agent_message_is_refused(self):
+        raw = '\n'.join([
+            json.dumps({'type': 'thread.started'}),
+            json.dumps({'type': 'item.completed',
+                        'item': {'type': 'reasoning', 'text': 'hidden thinking'}}),
+            json.dumps({'type': 'turn.completed', 'usage': {'input_tokens': 1}}),
+        ])
+        with self.assertRaises(ExecutionError):
+            BoundedExecutionAdapter._content('codex', raw)
+
+    def test_non_zero_exit_is_refused_even_with_a_well_formed_answer(self):
+        class Failed:
+            returncode = 3
+            stdout = json.dumps({'item': {'type': 'agent_message', 'text': 'looks fine'}})
+
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaises(ExecutionError):
+                self._adapter(folder, lambda *a, **k: Failed()).execute(
+                    'codex', 'hello', AgentOSMcpTools(_Capabilities()))
+
+    def test_missing_engine_binary_is_refused_before_any_spawn(self):
+        calls = []
+
+        def runner(argv, **kwargs):
+            calls.append(argv)
+            raise AssertionError('must not spawn')
+
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaises(ExecutionError):
+                self._adapter(folder, runner, finder=lambda _: None).execute(
+                    'codex', 'hello', AgentOSMcpTools(_Capabilities()))
+        self.assertEqual(calls, [])
+
+    def test_unsupported_engine_is_refused_before_any_spawn(self):
+        calls = []
+
+        def runner(argv, **kwargs):
+            calls.append(argv)
+            raise AssertionError('must not spawn')
+
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaises(ExecutionError):
+                self._adapter(folder, runner).execute(
+                    'gemini-cli', 'hello', AgentOSMcpTools(_Capabilities()))
+        self.assertEqual(calls, [])
+
+    def test_os_error_while_starting_the_engine_fails_closed(self):
+        def runner(argv, **kwargs):
+            raise OSError('exec format error')
+
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaises(ExecutionError):
+                self._adapter(folder, runner).execute(
+                    'codex', 'hello', AgentOSMcpTools(_Capabilities()))
+
+    # --- Grant mediation -----------------------------------------------------
+    def test_read_only_facade_exposes_only_the_approved_read_tool(self):
+        caps = _Capabilities()
+        tools = ReadOnlyAgentOSMcpTools(caps)
+        self.assertEqual([tool['name'] for tool in tools.definitions()], ['list_notes'])
+        self.assertEqual(tools.call('list_notes', {}), {'ok': True})
+        for name, arguments in (('save_note', {'content': 'x'}),
+                                ('web_search', {'query': 'x'}),
+                                ('list_notes', {'unexpected': 1}),
+                                ('read_file', {'path': '/etc/passwd'})):
+            with self.subTest(tool=name):
+                with self.assertRaises(ExecutionError):
+                    tools.call(name, arguments)
+        # Exactly one mediated call reached AgentOS capabilities.
+        self.assertEqual(caps.calls, [('list_notes', {})])
+
+    def test_tool_definitions_cannot_be_mutated_by_the_engine_facade(self):
+        caps = _Capabilities()
+        tools = AgentOSMcpTools(caps)
+        definitions = tools.definitions()
+        definitions.append({'name': 'run_shell'})
+        definitions[0]['name'] = 'tampered'
+        self.assertEqual([tool['name'] for tool in tools.definitions()],
+                         ['list_notes', 'save_note', 'web_search'])
+
+    def test_non_object_tool_arguments_are_refused(self):
+        tools = AgentOSMcpTools(_Capabilities())
+        for arguments in ('content', ['content'], None, 7):
+            with self.subTest(arguments=type(arguments).__name__):
+                with self.assertRaises(ExecutionError):
+                    tools.call('save_note', arguments)

@@ -14,6 +14,42 @@ A pending review/check, repository merge permission, or disabled native auto-mer
 
 When only an external integration step remains, finish safe in-scope work, record the exact gate, reviewed head, tests, unresolved findings, next actor and resume command, and end the session with `integration_pending`. Do not wait for three identical Goal turns, start another preparation cycle, poll indefinitely, or claim full completion. This narrow integration-wait rule takes precedence over the generic blocked rule below. Required review, actual findings, merged evidence and truthful full-goal closeout remain mandatory. An owner-approved experimental checkpoint must preserve and explicitly transfer deferred criteria; it is not a production or private-data approval.
 
+## Execution cursor and delta resume
+
+An active top-level goal may maintain one compact execution cursor in its authoritative GitHub issue according to [Execution Cursor Protocol](execution-cursor.en.md).
+
+The cursor exists to reduce repeated repository/GitHub context loading. It never grants authority, activates a goal, proves completion, replaces issue/PR evidence, or overrides the active delivery plan.
+
+### Resume path
+
+A fresh agent session should:
+
+1. load repository bootstrap/governance instructions;
+2. read the top-level goal's execution cursor first;
+3. verify only current `main`, governing contract SHAs, and the cursor-referenced PR/head/state;
+4. read the referenced issue/PR needed for the next dependency-safe action;
+5. act without broad rereads while those checks remain consistent.
+
+### Full reconciliation triggers
+
+Perform a bounded full reconciliation only when one or more of these is true:
+
+- the cursor is absent, duplicated, malformed, or fails schema validation;
+- current `main` differs unexpectedly and the transition is not explained by the cursor;
+- a governing contract blob SHA differs;
+- a referenced issue/PR/head/state differs unexpectedly;
+- dependency state is contradictory;
+- a merge conflict or unexplained CI/review condition exists;
+- the cursor/handoff is too incomplete to choose a safe next action.
+
+After reconciliation, repair the same cursor comment and increment its `generation`. Do not append a second cursor.
+
+### Delta updates
+
+Update the cursor only for a state transition that changes the next decision: merge/close, coherent stable head, decisive CI/review result, blocker, owner-validation change, or session handoff. Ordinary polls, local micro-edits, and unchanged review/CI state do not justify cursor churn.
+
+The verification-budget rules still apply. Cursor-first resume reduces rereads; it does not weaken exact-head CI, applicable final-head independent review, branch protection, or completion evidence.
+
 ## Goal-ready record
 
 Before activating a goal, its issue and source plan must identify all of the following.

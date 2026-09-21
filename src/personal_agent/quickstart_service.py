@@ -20,7 +20,10 @@ from .settings_orchestrator import SettingsOrchestrator, SettingsError
 from .capability_recommendations import CapabilityRecommendationOrchestrator
 from .personal_knowledge import PersonalKnowledgeOrchestrator
 from .file_workspace import FileWorkspace
-from .conversation_handoff import TelegramChannel
+from .conversation_handoff import (TelegramChannel, ConversationFocus, IntentClassifier,
+                                   INTENT_ASSISTANT, INTENT_GREETING, INTENT_KNOWLEDGE,
+                                   INTENT_NOTE_CREATE, INTENT_NOTE_LIST, INTENT_RECOMMENDATION,
+                                   INTENT_SETTINGS, INTENT_WORKSPACE_SEARCH)
 
 SYSTEM = ('You are the user’s personal AgentOS assistant. Respond in the user’s language. '
           'This preview supports conversation, notes, connected local documents, and local read-only web search and weather tools. '
@@ -141,6 +144,10 @@ class AgentService:
         self.settings_orchestrator=SettingsOrchestrator(store)
         self.recommendation_orchestrator=CapabilityRecommendationOrchestrator(store)
         self.personal_knowledge_orchestrator=PersonalKnowledgeOrchestrator(store)
+        # Routing authority.  The classifier reads literal cue tables, never a
+        # model, and the focus record it feeds is content free.
+        self.intent_classifier=IntentClassifier(workspace_search=workspace_search_request)
+        self.conversation_focus=ConversationFocus(store)
         # This is injected only by an owner-local deployment which supplies an
         # encrypted secret store and its local key.  It is never auto-enabled.
         self.drive_web_oauth=drive_web_oauth
@@ -196,6 +203,19 @@ class AgentService:
         if not isinstance(body,dict) or body.get('operation','retrieve')!='retrieve':
             raise ValueError('개인 지식 검색 요청을 확인하세요.')
         return self.personal_knowledge_orchestrator.retrieve(owner_id,channel,body.get('query'))
+
+    def classify_intent(self, prompt, model_suggestion=None):
+        """Decide where one owner utterance goes, before anything is invoked.
+
+        The decision is AgentOS's.  No model is consulted to produce it, and
+        the conversation never routes on a model's opinion of what the owner
+        meant.  ``model_suggestion`` exists so that if a later unit ever does
+        obtain one, there is exactly one constrained way in - it may narrow an
+        ambiguity AgentOS already found and nothing else.  No call site in
+        this service supplies one.
+        """
+        return self.intent_classifier.classify(prompt, model_suggestion=model_suggestion,
+                                               focus=self.conversation_focus.current())
 
     @staticmethod
     def settings_response(result):
@@ -1172,46 +1192,52 @@ class AgentService:
             try:
                 prompt=job['message'].strip()
                 owner_memory_approval=self.store.issue_memory_approval(job['id'],prompt) if self.explicit_memory_request(prompt) else None
-                if prompt in ('/start','/help'):
+                # Routing decision, made by AgentOS before any capability is
+                # touched.  `decision.authority` records whether the owner
+                # said it literally or an AgentOS cue rule derived it; there
+                # is no branch here that a model can reach.
+                decision=self.classify_intent(prompt)
+                self.conversation_focus.record(decision)
+                owner=f"channel:{job['channel']}:{job.get('chat_id') or 'local'}"
+                if not decision.executes:
+                    # Ambiguous, missing a required detail, or a consequential
+                    # effect that was only inferred.  Answer the owner and
+                    # invoke nothing.
+                    response=decision.clarification
+                elif decision.intent==INTENT_GREETING:
                     response='개인 AgentOS에 연결되었습니다. 하고 싶은 일을 자연스럽게 적어 주세요. 웹과 Telegram은 같은 대화 기록을 사용합니다.'
-                elif prompt.startswith('/recommend '):
-                    result=self.capability_recommendation_request({'outcome':prompt[len('/recommend '):].strip()},owner_id=f"channel:{job['channel']}:{job.get('chat_id') or 'local'}",channel=job['channel'])
+                elif decision.intent==INTENT_RECOMMENDATION:
+                    result=self.capability_recommendation_request({'outcome':decision.argument},owner_id=owner,channel=job['channel'])
                     response='\n'.join(f"{row['name']} · {row['reason']} · {row['approval_handoff']}" for row in result['recommendations']) or '검토된 추천이 없습니다.'
-                elif prompt.startswith('/knowledge '):
-                    result=self.personal_knowledge_request({'query':prompt[len('/knowledge '):].strip()}, owner_id=f"channel:{job['channel']}:{job.get('chat_id') or 'local'}", channel=job['channel'])
+                elif decision.intent==INTENT_KNOWLEDGE:
+                    result=self.personal_knowledge_request({'query':decision.argument}, owner_id=owner, channel=job['channel'])
                     response='\n'.join(f"{row['source']} · {row['excerpt']}" for row in result.get('results',[])) or result['response']
                     outcome='succeeded' if result['state'] in ('completed','empty') else 'failed'
-                elif prompt.startswith('/settings '):
-                    result=self.conversation_settings_request({'operation':'text','text':prompt[len('/settings '):]},
-                                                              owner_id=f"channel:{job['channel']}:{job.get('chat_id') or 'local'}", channel=job['channel'])
+                elif decision.intent==INTENT_SETTINGS:
+                    result=self.conversation_settings_request({'operation':'text','text':decision.argument},
+                                                              owner_id=owner, channel=job['channel'])
                     response=self.settings_response(result)
-                elif (prompt in ('/settings', '무엇이 연결되어 있어?', '무엇을 바꿀 수 있어?')
-                      or ('상태 보여' in prompt and any(word in prompt.lower() for word in ('drive','a2a','calendar','드라이브','캘린더')))
-                      or (any(word in prompt.lower() for word in ('pause','disconnect','resume','일시 정지','연결 해제','다시 시작','재개'))
-                          and any(word in prompt.lower() for word in ('drive','a2a','calendar','드라이브','캘린더')))):
-                    result=self.conversation_settings_request({'operation':'text','text':prompt},
-                                                              owner_id=f"channel:{job['channel']}:{job.get('chat_id') or 'local'}", channel=job['channel'])
-                    response=self.settings_response(result)
-                elif prompt.startswith('/assistant '):
+                elif decision.intent==INTENT_ASSISTANT:
                     # Web and paired Telegram jobs share this exact policy
-                    # path.  The command is intentionally explicit while the
-                    # MP1 vocabulary remains small and capability-specific.
-                    result=self.personal_assistant_request({'message':prompt[len('/assistant '):]}, owner_id=f"channel:{job['channel']}:{job.get('chat_id') or 'local'}")
+                    # path.  Only the owner-explicit `/assistant` form reaches
+                    # it: the orchestrator's delegation and Drive vocabulary
+                    # is deliberately not inferable from ordinary prose.
+                    result=self.personal_assistant_request({'message':decision.argument}, owner_id=owner)
                     response=result['response']
                     outcome='succeeded' if result['state'] in ('completed','requested','awaiting-approval','fallback') else 'failed'
-                elif (search_query:=workspace_search_request(prompt)):
-                    results=FileWorkspace(self.store).search(search_query)
+                elif decision.intent==INTENT_WORKSPACE_SEARCH:
+                    results=FileWorkspace(self.store).search(decision.argument)
                     if not results: response='현재 원본과 일치하는 저장 결과를 찾지 못했습니다.'
                     else:
                         response='\n\n'.join(f"저장 결과: {item['path']}\n{item['content']}" for item in results)
                         self.record_file_workspace_document_job(job['id'])
-                elif prompt.startswith(('/note ','메모:','기록:')):
-                    note=prompt[6:] if prompt.startswith('/note ') else prompt.split(':',1)[1].strip()
+                elif decision.intent==INTENT_NOTE_CREATE:
+                    note=decision.argument or ''
                     if not note.strip():raise ValueError('기록할 내용을 입력하세요.')
                     with self.store.db() as db:
                         db.execute('INSERT OR IGNORE INTO notes VALUES (?,?,?)',(job['id'],note,time.time()))
                     response='메모를 저장했습니다. /notes로 확인하거나 /summarize로 정리할 수 있습니다.'
-                elif prompt in ('/notes','메모 목록'):
+                elif decision.intent==INTENT_NOTE_LIST:
                     response='\n\n'.join(n['content'] for n in self.store.notes()) or '저장된 메모가 없습니다. /note 내용으로 기록해 보세요.'
                 else:
                     with self.lock:

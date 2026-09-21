@@ -48,16 +48,46 @@ TOKEN_SECRET_KEY = "gmail_oauth_tokens"
 _MAX_RESULTS = 20
 _MAX_QUERY_LENGTH = 512
 _MAX_BODY_BYTES = 1_048_576
-_MAX_BODY_CANDIDATES = 20
+# Bound the number of body parts that survive MIME selection, i.e. the parts a
+# reader would actually see. Counting at admission instead measured a quantity
+# no reader observes: ``multipart/alternative`` discards one of each
+# plain/html pair afterwards, so an ordinary 11-message forwarded thread
+# admitted 22 parts, kept 11, and was still rejected. The traversal cap of 100
+# visited nodes still bounds the pre-selection work, and this cap bounds the
+# per-candidate attachment fetches and decodes that follow selection.
+_MAX_BODY_CANDIDATES = 32
 # RFC 2045 section 5.2: a text/* entity without an explicit charset parameter
 # defaults to us-ascii. Both the "Content-Type present without charset" and the
 # "no Content-Type header at all" paths use this single default so the strict
 # decode below is actually enforceable; two different defaults would let an
 # undeclared part decode bytes that an identically declared part rejects.
 _DEFAULT_TEXT_CHARSET = "us-ascii"
-# utf-7 can encode ASCII-looking markup in a form downstream renderers may
-# re-interpret. It has no legitimate use for this bounded read surface.
-_FORBIDDEN_CHARSETS = frozenset({"utf-7"})
+# Every owner-rendered decode is gated by an allowlist rather than a denylist.
+# The hazard is any codec that turns innocuous-looking source bytes into ASCII
+# markup a downstream renderer may re-interpret, and that class is open-ended:
+# utf-7 spells "<" as "+ADw-", unicode-escape and raw-unicode-escape spell it
+# as "\\u003c", and idna/punycode/rot-13/base64/quopri are transforms rather
+# than mail charsets at all. Enumerating those one at a time left a new hole
+# open after each fix, so the gate names the charsets that legitimately carry
+# mail text instead. Entries are canonical ``codecs.lookup(...).name`` values,
+# so every alias of a listed charset ("UTF-8", "latin-1", "sjis",
+# "ks_c_5601-1987") resolves onto it and every alias of an unlisted one
+# ("utf7", "unicode-1-1-utf-7") resolves off it.
+_ALLOWED_CHARSETS = frozenset({
+    "ascii", "big5", "big5hkscs", "cp1006", "cp1026", "cp1125", "cp1140", "cp1250", "cp1251",
+    "cp1252", "cp1253", "cp1254", "cp1255", "cp1256", "cp1257", "cp1258", "cp437", "cp720",
+    "cp737", "cp775", "cp850", "cp852", "cp855", "cp856", "cp857", "cp858", "cp860", "cp861",
+    "cp862", "cp863", "cp864", "cp865", "cp866", "cp869", "cp874", "cp875", "cp932", "cp949",
+    "euc_jis_2004", "euc_jisx0213", "euc_jp", "euc_kr", "gb18030", "gb2312", "gbk", "hz",
+    "iso2022_jp", "iso2022_jp_1", "iso2022_jp_2", "iso2022_jp_2004", "iso2022_jp_3",
+    "iso2022_jp_ext", "iso2022_kr", "iso8859-1", "iso8859-10", "iso8859-11", "iso8859-13",
+    "iso8859-14", "iso8859-15", "iso8859-16", "iso8859-2", "iso8859-3", "iso8859-4",
+    "iso8859-5", "iso8859-6", "iso8859-7", "iso8859-8", "iso8859-9", "johab", "koi8-r",
+    "koi8-t", "koi8-u", "kz1048", "mac-croatian", "mac-cyrillic", "mac-greek", "mac-iceland",
+    "mac-latin2", "mac-roman", "mac-romanian", "mac-turkish", "ptcp154", "shift_jis",
+    "shift_jis_2004", "shift_jisx0213", "tis-620", "utf-16", "utf-16-be", "utf-16-le",
+    "utf-32", "utf-32-be", "utf-32-le", "utf-8", "utf-8-sig",
+})
 _MESSAGE_ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 _ATTACHMENT_ID = re.compile(r"[A-Za-z0-9_-]{1,4096}\Z")
 _OAUTH_LOCK = threading.RLock()
@@ -223,21 +253,53 @@ def _bounded_text(value: object, maximum: int) -> str:
     return " ".join(value.split())[:maximum]
 
 
+def _assert_renderable_charset(encoding: object) -> None:
+    """Gate every decode whose output is rendered to the owner.
+
+    Both owner-rendered decode paths - the message body and the RFC 2047
+    encoded-words in Subject/From/Date - must apply the same charset rule.
+    Applying it to only one of them left the other able to smuggle
+    ASCII-looking markup past the guard under a different entry point.
+
+    An unknown codec is a malformed provider response; a real codec that is
+    not an allowed mail charset is an explicit refusal.
+    """
+    if not isinstance(encoding, str) or not encoding or len(encoding) > 64:
+        raise GmailError("invalid_provider_response")
+    try:
+        codec = codecs.lookup(encoding)
+    except (LookupError, TypeError, ValueError):
+        raise GmailError("invalid_provider_response") from None
+    if codec.name not in _ALLOWED_CHARSETS:
+        raise GmailError("unsupported_charset")
+
+
 def _decoded_header(value: object, maximum: int) -> str:
     if not isinstance(value, str) or len(value) > 4096:
         raise GmailError("invalid_provider_response")
     try:
-        parts = []
-        for fragment, charset in decode_header(value):
-            if isinstance(fragment, bytes):
-                parts.append(fragment.decode(charset or "ascii"))
-            elif isinstance(fragment, str):
-                parts.append(fragment)
-            else:
-                raise TypeError("invalid header fragment")
-        return _bounded_text("".join(parts), maximum)
+        fragments = decode_header(value)
     except (HeaderParseError, LookupError, TypeError, ValueError, UnicodeError):
         raise GmailError("invalid_provider_response") from None
+    parts = []
+    for fragment, charset in fragments:
+        if isinstance(fragment, bytes):
+            # RFC 2047 lets the sender name any charset for an encoded-word,
+            # and Subject/From are exactly the fields shown to the owner, so
+            # the same gate the body uses applies here. GmailError must not be
+            # swallowed by the malformed-response handler below, so the gate
+            # runs outside the try block.
+            encoding = charset if isinstance(charset, str) and charset.strip() else "ascii"
+            _assert_renderable_charset(encoding)
+            try:
+                parts.append(fragment.decode(encoding, errors="strict"))
+            except (LookupError, TypeError, ValueError, UnicodeError):
+                raise GmailError("invalid_provider_response") from None
+        elif isinstance(fragment, str):
+            parts.append(fragment)
+        else:
+            raise GmailError("invalid_provider_response")
+    return _bounded_text("".join(parts), maximum)
 
 
 def _strip_mime_comments(value: str) -> str:
@@ -876,7 +938,6 @@ class GmailConnector:
     def _body(self, payload: object, attachment_loader: Callable[[str], str] | None = None) -> tuple[str, str]:
         if not isinstance(payload, dict):
             raise GmailError("invalid_provider_response")
-        candidate_count = 0
         visited_count = 0
         exhausted = False
         # Distinguish "this message genuinely carries no text body" from "the
@@ -886,7 +947,7 @@ class GmailConnector:
         ambiguous_selection = False
 
         def visit(part: object, depth: int = 0) -> list[tuple[str, str | None, str | None, str | None]]:
-            nonlocal candidate_count, visited_count, exhausted
+            nonlocal visited_count, exhausted
             nonlocal dropped_text_parts, ambiguous_selection
             if not isinstance(part, dict):
                 return []
@@ -987,24 +1048,44 @@ class GmailConnector:
                     # one is an attachment, not the message body.
                     name_value = parsed_content_type.params.get("name")
                     content_type_names = isinstance(name_value, str) and bool(name_value.strip())
-            is_attachment = (
+            # RFC 2183 section 2.1 makes Content-Disposition the authoritative
+            # statement of a part's role. Gmail's own ``filename`` field and an
+            # explicit ``attachment`` disposition are the sender saying so
+            # outright; nothing is guessed and nothing is lost by withholding
+            # such a part from the body.
+            explicit_attachment = (
                 (isinstance(filename, str) and bool(filename.strip()))
-                or (disposition_present and disposition_kind != "inline")
-                or content_type_names
+                or disposition_kind == "attachment"
             )
-            if is_attachment:
+            # Everything else is this parser guessing. An unrecognised or empty
+            # disposition token is genuinely ambiguous, and the ``name``
+            # parameter is only the pre-RFC-2183 fallback: it is evidence just
+            # when the authoritative header is silent. Letting ``name`` outvote
+            # an explicit ``inline`` made ordinary Outlook/Exchange and
+            # mailing-list mail (``text/plain; name="message.txt"`` plus
+            # ``Content-Disposition: inline``) unreadable.
+            heuristic_attachment = (
+                (disposition_present and disposition_kind not in {"inline", "attachment"})
+                or (content_type_names and disposition_kind != "inline")
+            )
+            if explicit_attachment or heuristic_attachment:
                 if (
-                    normalized_mime in {"text/plain", "text/html"}
+                    not explicit_attachment
+                    and normalized_mime in {"text/plain", "text/html"}
                     and isinstance(body, dict)
                     and (
                         isinstance(body.get("data"), str)
                         or isinstance(body.get("attachmentId"), str)
                     )
                 ):
-                    # A text part that carried data but was removed as an
-                    # attachment means a possible body was dropped by the
-                    # parser. Record it so an empty result is not reported as
-                    # a successful source-attributed read.
+                    # Only a heuristic removal leaves the outcome unknown. A
+                    # sender-declared attachment was classified correctly, so
+                    # counting it as a dropped candidate made the plainest
+                    # bodyless message hard-fail purely because its attachment
+                    # happened to be text/*: an empty message with one .txt
+                    # attached raised while the same shape with a .pdf read
+                    # fine, and the raise cost the owner subject, sender and
+                    # date as well as the body.
                     dropped_text_parts += 1
                 return []
             if (
@@ -1015,13 +1096,6 @@ class GmailConnector:
                     or isinstance(body.get("attachmentId"), str)
                 )
             ):
-                if candidate_count >= _MAX_BODY_CANDIDATES:
-                    # Bound the number of admitted body parts, not only the
-                    # nodes visited, so a wide but shallow tree cannot force an
-                    # unbounded decode.
-                    exhausted = True
-                    return []
-                candidate_count += 1
                 return [(
                     normalized_mime,
                     body.get("data") if isinstance(body.get("data"), str) else None,
@@ -1102,6 +1176,12 @@ class GmailConnector:
         candidates = visit(payload)
         if exhausted:
             raise GmailError("message_too_complex")
+        # Bound the parts that survive selection - the ones actually decoded,
+        # fetched and rendered - rather than the ones merely admitted during
+        # traversal. This runs before any attachment fetch below, so the
+        # per-candidate network work stays bounded.
+        if len(candidates) > _MAX_BODY_CANDIDATES:
+            raise GmailError("message_too_complex")
         if not candidates:
             if dropped_text_parts or ambiguous_selection:
                 # Some text content existed but no part could be attributed as
@@ -1129,14 +1209,7 @@ class GmailConnector:
             # default as a part whose Content-Type omits charset, so the strict
             # decode is enforced identically on both paths.
             encoding = charset or _DEFAULT_TEXT_CHARSET
-            if not isinstance(encoding, str) or len(encoding) > 64:
-                raise GmailError("invalid_provider_response")
-            try:
-                codec = codecs.lookup(encoding)
-            except (LookupError, TypeError, ValueError):
-                raise GmailError("invalid_provider_response") from None
-            if codec.name in _FORBIDDEN_CHARSETS:
-                raise GmailError("unsupported_charset")
+            _assert_renderable_charset(encoding)
             try:
                 decoded_parts.append(decoded.decode(encoding, errors="strict"))
             except (LookupError, TypeError, ValueError, UnicodeError):

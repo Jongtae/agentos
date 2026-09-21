@@ -710,28 +710,41 @@ class GmailConnectorTests(unittest.TestCase):
         self.assertEqual(message.body, "main body")
         self.assertNotIn("attached", message.body)
 
-    def test_non_text_registered_codec_is_rejected_as_provider_data(self):
+    def test_non_text_registered_codec_is_refused_as_an_unsupported_charset(self):
+        """A registered codec that is not a mail charset is refused by name.
+
+        These previously surfaced as ``invalid_provider_response`` only
+        because the narrow utf-7 denylist let them through and the decode
+        happened to fail afterwards. ``undefined`` in particular is a real
+        registered codec. The allowlist now classifies them for what they
+        are, and the rejection no longer depends on a downstream accident.
+        """
         self.connect()
-        self.responses.append(
-            {
-                "id": "m_1",
-                "threadId": "t_1",
-                "payload": {
-                    "mimeType": "text/plain",
-                    "headers": [
-                        {"name": "Content-Type", "value": "text/plain; charset=base64_codec"}
-                    ],
-                    "body": {"data": base64.urlsafe_b64encode(b"body").decode()},
-                },
-            }
-        )
-        with self.assertRaises(GmailError) as malformed:
-            self.read()
-        self.assertEqual(malformed.exception.reason, "invalid_provider_response")
+        for charset in ("base64_codec", "undefined", "rot13", "quopri_codec"):
+            with self.subTest(charset=charset):
+                self.responses.clear()
+                self.responses.append(
+                    {
+                        "id": "m_1",
+                        "threadId": "t_1",
+                        "payload": {
+                            "mimeType": "text/plain",
+                            "headers": [
+                                {"name": "Content-Type", "value": f"text/plain; charset={charset}"}
+                            ],
+                            "body": {"data": base64.urlsafe_b64encode(b"body").decode()},
+                        },
+                    }
+                )
+                with self.assertRaises(GmailError) as refused:
+                    self.read()
+                self.assertEqual(refused.exception.reason, "unsupported_charset")
 
     def test_charset_lookup_and_decode_failures_are_bounded_provider_errors(self):
         self.connect()
-        for charset in ("undefined", "utf-8\x00"):
+        # Both names fail ``codecs.lookup`` outright, which is a malformed
+        # provider response rather than a deliberate charset refusal.
+        for charset in ("x-no-such-charset", "utf-8\x00"):
             with self.subTest(charset=charset):
                 self.responses.clear()
                 self.responses.append(
@@ -1132,8 +1145,14 @@ class GmailConnectorTests(unittest.TestCase):
         message = self.read()
         self.assertEqual(message.body, "")
         self.assertEqual(message.mime_type, "multipart/mixed")
-        # The same shape whose only text part was removed by the parser is an
-        # unknown outcome and must not be reported identically.
+        # The same shape whose only text part was removed by a *heuristic* is
+        # an unknown outcome and must not be reported identically. The
+        # previous version of this test used ``Content-Disposition:
+        # attachment``, which is the sender declaring the part's role outright
+        # - nothing was guessed and nothing was dropped - so it asserted the
+        # opposite of what its own comment claimed. The legacy ``name``
+        # parameter with no Content-Disposition is a real guess, so it is the
+        # shape that belongs here.
         self.responses.append({
             "id": "m_1",
             "threadId": "t_1",
@@ -1143,7 +1162,7 @@ class GmailConnectorTests(unittest.TestCase):
                     {
                         "mimeType": "text/plain",
                         "headers": [
-                            {"name": "Content-Disposition", "value": "attachment; filename=notes.txt"}
+                            {"name": "Content-Type", "value": 'text/plain; name="notes.txt"'}
                         ],
                         "body": {"data": base64.urlsafe_b64encode(b"withheld").decode()},
                     },
@@ -1206,6 +1225,314 @@ class GmailConnectorTests(unittest.TestCase):
         message = self.read()
         self.assertEqual(message.body, "real body")
         self.assertNotIn("ATTACHED TEXT", message.body)
+
+    def test_explicit_inline_disposition_outranks_the_legacy_name_parameter(self):
+        """RFC 2183 section 2.1 makes Content-Disposition authoritative.
+
+        ``name`` is the pre-RFC-2183 fallback and is evidence only when the
+        authoritative header is silent. Letting it override an explicit
+        ``inline`` made ordinary Outlook/Exchange and mailing-list mail
+        unreadable: the single text part was withheld, nothing was left to
+        attribute, and the whole read raised.
+        """
+        self.connect()
+        for disposition in ("inline", "inline (rendered)", 'inline; filename="message.txt"'):
+            with self.subTest(disposition=disposition):
+                self.responses.clear()
+                self.responses.append({
+                    "id": "m_1",
+                    "threadId": "t_1",
+                    "payload": {
+                        "mimeType": "text/plain",
+                        "headers": [
+                            {
+                                "name": "Content-Type",
+                                "value": 'text/plain; charset=utf-8; name="message.txt"',
+                            },
+                            {"name": "Content-Disposition", "value": disposition},
+                        ],
+                        "body": {"data": base64.urlsafe_b64encode(b"readable body").decode()},
+                    },
+                })
+                # Note the third case: a filename *parameter* under an inline
+                # disposition is still inline. Gmail's separate top-level
+                # ``filename`` field is what marks a declared attachment.
+                self.assertEqual(self.read().body, "readable body")
+
+        # The fallback still applies where the authoritative header is silent
+        # or says the opposite, so closing this hole does not reopen the one
+        # the ``name`` heuristic was added for.
+        for headers in (
+            [{"name": "Content-Type", "value": 'text/plain; name="transcript.txt"'}],
+            [
+                {"name": "Content-Type", "value": 'text/plain; name="transcript.txt"'},
+                {"name": "Content-Disposition", "value": "attachment"},
+            ],
+        ):
+            with self.subTest(headers=len(headers)):
+                self.responses.clear()
+                self.responses.append({
+                    "id": "m_1",
+                    "threadId": "t_1",
+                    "payload": {
+                        "mimeType": "multipart/mixed",
+                        "parts": [
+                            {
+                                "mimeType": "text/plain",
+                                "headers": headers,
+                                "body": {"data": base64.urlsafe_b64encode(b"ATTACHED TEXT").decode()},
+                            },
+                            {
+                                "mimeType": "text/plain",
+                                "body": {"data": base64.urlsafe_b64encode(b"real body").decode()},
+                            },
+                        ],
+                    },
+                })
+                message = self.read()
+                self.assertEqual(message.body, "real body")
+                self.assertNotIn("ATTACHED TEXT", message.body)
+
+    def test_sender_declared_text_attachment_is_a_truthful_empty_body(self):
+        """A declared attachment is classified, not dropped.
+
+        Counting it as a dropped candidate made the outcome depend on the
+        attachment's MIME type rather than on whether anything was ambiguous:
+        an empty message with one attached ``.txt``/``.log``/``.html`` raised
+        while the identical shape with a ``.pdf`` returned ``""``. Because
+        ``read_message`` raises, that also cost the owner the rest of the
+        message, which is strictly worse than the truthful empty body.
+        """
+        self.connect()
+        declarations = (
+            # Gmail's own filename field, with no part headers at all.
+            ({"filename": "notes.txt"}, "gmail-filename"),
+            # The sender saying so outright in the authoritative header.
+            (
+                {
+                    "headers": [
+                        {"name": "Content-Disposition", "value": "attachment; filename=notes.txt"}
+                    ]
+                },
+                "declared-attachment",
+            ),
+        )
+        for extra, label in declarations:
+            for mime_type in ("text/plain", "text/html", "application/pdf"):
+                with self.subTest(declaration=label, mime_type=mime_type):
+                    part = {
+                        "mimeType": mime_type,
+                        "body": {"data": base64.urlsafe_b64encode(b"withheld attachment").decode()},
+                    }
+                    part.update(extra)
+                    self.responses.clear()
+                    self.responses.append({
+                        "id": "m_1",
+                        "threadId": "t_1",
+                        "payload": {"mimeType": "multipart/mixed", "parts": [part]},
+                    })
+                    message = self.read()
+                    # The outcome must not depend on the attachment's type.
+                    self.assertEqual(message.body, "")
+                    self.assertEqual(message.mime_type, "multipart/mixed")
+                    self.assertNotIn("withheld attachment", message.body)
+
+    def test_forwarded_alternative_thread_is_bounded_after_selection(self):
+        """The candidate bound must count what a reader would actually see.
+
+        ``multipart/alternative`` discards one of each plain/html pair after
+        admission, so counting at admission tripped the cap at half the parts
+        that survive. An eleven-message quoted thread flattened into
+        ``multipart/mixed`` admitted 22 and kept 11, and was rejected.
+        """
+        self.connect()
+
+        def thread(count):
+            return {
+                "id": "m_1",
+                "threadId": "t_1",
+                "payload": {
+                    "mimeType": "multipart/mixed",
+                    "parts": [
+                        {
+                            "mimeType": "multipart/alternative",
+                            "parts": [
+                                {
+                                    "mimeType": "text/plain",
+                                    "body": {
+                                        "data": base64.urlsafe_b64encode(
+                                            f"reply {index}".encode()
+                                        ).decode()
+                                    },
+                                },
+                                {
+                                    "mimeType": "text/html",
+                                    "body": {
+                                        "data": base64.urlsafe_b64encode(
+                                            f"<p>reply {index}</p>".encode()
+                                        ).decode()
+                                    },
+                                },
+                            ],
+                        }
+                        for index in range(count)
+                    ],
+                },
+            }
+
+        self.responses.append(thread(11))
+        message = self.read()
+        self.assertEqual(
+            message.body, "\n\n".join(f"reply {index}" for index in range(11))
+        )
+        self.assertNotIn("<p>", message.body)
+
+        # The bound still bites once the surviving parts exceed it, and it
+        # still refuses rather than silently truncating a partial body.
+        self.responses.clear()
+        self.responses.append(thread(40))
+        with self.assertRaises(GmailError) as bounded:
+            self.read()
+        self.assertEqual(bounded.exception.reason, "message_too_complex")
+
+    def test_header_encoded_words_use_the_same_charset_gate_as_the_body(self):
+        """Subject/From are owner-rendered text and need the body's gate.
+
+        The charset rule was applied to the body decode only, leaving RFC 2047
+        encoded-words one function away able to smuggle the same ASCII-looking
+        markup into exactly the fields the owner reads.
+        """
+        self.connect()
+        markup = "<script>alert(1)</script>"
+
+        def encoded_word(charset, text, codec=None):
+            raw = text.encode(codec or charset)
+            return "=?%s?B?%s?=" % (charset, base64.b64encode(raw).decode())
+
+        for header in ("Subject", "From"):
+            for charset in ("utf-7", "UTF-7", "unicode_escape", "idna"):
+                with self.subTest(header=header, charset=charset):
+                    if charset == "unicode_escape":
+                        word = "=?unicode_escape?B?%s?=" % base64.b64encode(
+                            b"\\u003cscript\\u003ealert(1)\\u003c/script\\u003e"
+                        ).decode()
+                    elif charset == "idna":
+                        word = "=?idna?B?%s?=" % base64.b64encode(b"example.test.").decode()
+                    else:
+                        word = encoded_word(charset, markup, codec="utf-7")
+                    metadata = self.metadata()
+                    metadata["payload"]["headers"] = [
+                        {"name": name, "value": word if name == header else "plain"}
+                        for name in ("Subject", "From", "Date")
+                    ]
+                    self.responses.clear()
+                    self.responses.append({"messages": [{"id": "m_1"}]})
+                    self.responses.append(metadata)
+                    with self.assertRaises(GmailError) as refused:
+                        self.gmail.search("owner-a", "receipt")
+                    self.assertEqual(refused.exception.reason, "unsupported_charset")
+                    self.assertNotIn("script", str(refused.exception))
+
+        # A legitimate encoded-word in an allowed charset still decodes, so
+        # the gate does not break ordinary non-ASCII mail metadata.
+        metadata = self.metadata()
+        metadata["payload"]["headers"] = [
+            {"name": "Subject", "value": encoded_word("utf-8", "Rezervasyon başarılı")},
+            {"name": "From", "value": encoded_word("iso-8859-1", "Café <cafe@example.test>")},
+            {"name": "Date", "value": "Mon, 1 Sep 2026 10:00:00 +0000"},
+        ]
+        self.responses.clear()
+        self.responses.append({"messages": [{"id": "m_1"}]})
+        self.responses.append(metadata)
+        result = self.gmail.search("owner-a", "receipt")[0]
+        self.assertEqual(result.subject, "Rezervasyon başarılı")
+        self.assertEqual(result.sender, "Café <cafe@example.test>")
+
+    def test_charset_gate_is_an_allowlist_rather_than_a_utf7_denylist(self):
+        """Any codec that can synthesise ASCII markup must be refused.
+
+        utf-7 was only the reported example. ``unicode_escape`` turns
+        ``\\u003c`` into ``<`` for the same reason, and ``idna``/``punycode``
+        are transforms rather than mail charsets. A one-entry denylist left a
+        new hole open behind each fix, so the rule is an allowlist.
+        """
+        self.connect()
+        for charset, raw in (
+            ("unicode_escape", b"\\u003cscript\\u003ealert(1)\\u003c/script\\u003e"),
+            ("raw_unicode_escape", b"\\u003cscript\\u003ealert(1)\\u003c/script\\u003e"),
+            ("idna", b"example.test."),
+            ("punycode", b"example-"),
+            ("hex_codec", b"3c7363726970743e"),
+        ):
+            with self.subTest(charset=charset):
+                self.responses.clear()
+                self.responses.append({
+                    "id": "m_1",
+                    "threadId": "t_1",
+                    "payload": {
+                        "mimeType": "text/html",
+                        "headers": [
+                            {"name": "Content-Type", "value": f"text/html; charset={charset}"}
+                        ],
+                        "body": {"data": base64.urlsafe_b64encode(raw).decode()},
+                    },
+                })
+                with self.assertRaises(GmailError) as refused:
+                    self.read()
+                self.assertEqual(refused.exception.reason, "unsupported_charset")
+                self.assertNotIn("script", str(refused.exception))
+
+    def test_allowlist_still_decodes_the_charsets_real_mail_uses(self):
+        """The allowlist must not reject legitimate real-world mail charsets."""
+        self.connect()
+        samples = (
+            ("us-ascii", "ascii", "plain receipt"),
+            ("utf-8", "utf-8", "Rezervasyon başarılı"),
+            ("UTF-8", "utf-8", "café"),
+            ("utf-16", "utf-16", "café"),
+            ("utf-16le", "utf-16-le", "café"),
+            ("iso-8859-1", "iso-8859-1", "café"),
+            ("latin-1", "iso-8859-1", "café"),
+            ("iso-8859-2", "iso-8859-2", "přehled"),
+            ("iso-8859-7", "iso-8859-7", "καλημέρα"),
+            ("iso-8859-9", "iso-8859-9", "günaydın"),
+            ("iso-8859-15", "iso-8859-15", "20€"),
+            ("windows-1250", "cp1250", "přehled"),
+            ("windows-1251", "cp1251", "привет"),
+            ("windows-1252", "cp1252", "café"),
+            ("windows-1254", "cp1254", "günaydın"),
+            ("windows-1256", "cp1256", "مرحبا"),
+            ("koi8-r", "koi8-r", "привет"),
+            ("koi8-u", "koi8-u", "привіт"),
+            ("Shift_JIS", "shift_jis", "こんにちは"),
+            ("sjis", "shift_jis", "こんにちは"),
+            ("cp932", "cp932", "こんにちは"),
+            ("euc-jp", "euc_jp", "こんにちは"),
+            ("ISO-2022-JP", "iso2022_jp", "こんにちは"),
+            ("euc-kr", "euc_kr", "안녕하세요"),
+            ("ks_c_5601-1987", "euc_kr", "안녕하세요"),
+            ("gb2312", "gb2312", "你好"),
+            ("gbk", "gbk", "你好"),
+            ("gb18030", "gb18030", "你好"),
+            ("big5", "big5", "你好"),
+        )
+        for declared, codec, text in samples:
+            with self.subTest(charset=declared):
+                self.responses.clear()
+                self.responses.append({
+                    "id": "m_1",
+                    "threadId": "t_1",
+                    "payload": {
+                        "mimeType": "text/plain",
+                        "headers": [
+                            {"name": "Content-Type", "value": f"text/plain; charset={declared}"}
+                        ],
+                        "body": {
+                            "data": base64.urlsafe_b64encode(text.encode(codec)).decode()
+                        },
+                    },
+                })
+                self.assertEqual(self.read().body, text)
 
     def test_utf7_charset_is_refused_for_body_decoding(self):
         self.connect()

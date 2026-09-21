@@ -20,8 +20,8 @@ from .settings_orchestrator import SettingsOrchestrator, SettingsError
 from .capability_recommendations import CapabilityRecommendationOrchestrator
 from .personal_knowledge import PersonalKnowledgeOrchestrator
 from .file_workspace import FileWorkspace
-from .connector_contract import ConnectorContractError
-from .gmail import GMAIL_CONNECTOR_ID
+from .connector_contract import ConnectorContractError, _owner_key
+from .gmail import GMAIL_CONNECTOR_ID, GmailError
 from .conversation_handoff import (TelegramChannel, ConnectorHandoff, ConversationFocus,
                                    ConversationHandoffError, IntentClassifier,
                                    INTENT_ASSISTANT, INTENT_GREETING, INTENT_KNOWLEDGE,
@@ -38,6 +38,22 @@ SYSTEM = ('You are the userâ€™s personal AgentOS assistant. Respond in the userâ
 # return native tool calls.  Keep the probe deliberately inert: it is never
 # executed, so testing a connection cannot change a user's data.
 MODEL_TEST_TTL = 24 * 60 * 60
+
+#: Gmail callback failures that prove the callback carried the exact pending
+#: state this owner's `begin_oauth` issued, so the parked Work may be failed.
+#:
+#: `GmailConnector._pending` compares the supplied state against the stored
+#: one with `compare_digest`, and only afterwards can any of these be raised.
+#: The three reasons deliberately left out - `missing_or_replayed_state`,
+#: `wrong_owner` and `state_mismatch` - are exactly the ones an unauthenticated
+#: caller who can reach the loopback callback produces by guessing, and denying
+#: on those would let that caller fail the owner's parked request without ever
+#: contacting Google.  The list is an allowlist rather than an exclusion so a
+#: later reason defaults to leaving the Work parked rather than killing it.
+GMAIL_PROVEN_CALLBACK_REASONS = frozenset({
+    'authorization_denied', 'invalid_callback', 'invalid_state', 'state_expired',
+    'connector_authority_changed', 'token_exchange_failed', 'connection_commit_failed',
+})
 TOOL_PROBE = {
     'type': 'function',
     'function': {
@@ -173,6 +189,10 @@ class AgentService:
         self.connector_registry=connector_registry
         self.connector_handoff=ConnectorHandoff(store,connector_registry) if connector_registry else None
         self.gmail=gmail
+        # Owner-local token-exchange transport for the Gmail callback route,
+        # supplied by the same deployment that supplies `gmail`.  Kept off the
+        # connector so the client secret never enters connector state.
+        self.gmail_token_exchange=None
         self.drive_read=None
         self.drive_picker_config=None
         self.lock=threading.RLock()
@@ -884,6 +904,90 @@ class AgentService:
             db.execute("UPDATE jobs SET status='failed',error=? WHERE id=? AND status='awaiting_connection'",(text,work_id))
         self._notify_owner(owner_id,text)
         return work_id
+
+    # -- the browser half of the connector handoff (PA1-INT-01 / #394) ----
+    def connector_callback_owner(self, connector_id):
+        """Resolve the one owner identity a browser callback may complete for.
+
+        The browser never supplies it.  This installation has exactly two
+        connector owner identities, and `connector_owner_id` above decides
+        which of them a Work belongs to: the paired Telegram chat, or the one
+        local/web owner.  When Work is parked for this connector its index
+        record carries the hashed owner, so the identity is *recovered* by
+        matching that hash against the two candidates this process already
+        knows, never taken from the request.  That is what makes a connection
+        finished in a browser resume the request the same person parked from
+        Telegram, and it is why an unmatched record falls back to the paired
+        owner rather than to whatever the caller would have preferred.
+        """
+        candidates=[]
+        telegram=self.store.config('telegram',{})
+        if isinstance(telegram,dict) and telegram.get('enabled') and telegram.get('user_id') is not None:
+            candidates.append(f"telegram:{telegram['user_id']}")
+        candidates.append('local-owner')
+        record=self.connector_handoff.record(connector_id) if self.connector_handoff else None
+        if isinstance(record,dict):
+            for candidate in candidates:
+                if hmac.compare_digest(_owner_key(candidate),str(record.get('owner',''))):
+                    return candidate
+        return candidates[0]
+
+    def begin_gmail_connection(self):
+        """Return one owner-local Gmail authorization URL; grant nothing here.
+
+        Issuing an authorization URL is not a connection and not a Grant: the
+        connector row stays exactly as it was until Google redirects back and
+        `complete_oauth` commits the scopes the owner actually approved.
+        """
+        if not self.gmail:
+            raise ValueError(ConnectorHandoff.unavailable(GMAIL_CONNECTOR_ID))
+        return self.gmail.begin_oauth(self.connector_callback_owner(GMAIL_CONNECTOR_ID))
+
+    def complete_gmail_connection(self, callback):
+        """Complete one browser OAuth callback, then resume or fail parked Work.
+
+        This never decides that a connection happened.  `complete_oauth` owns
+        that decision and commits it through `ConnectorRegistry.transition`;
+        everything below reads back what AgentOS committed.
+        """
+        if not self.gmail or not callable(self.gmail_token_exchange):
+            raise ValueError(ConnectorHandoff.unavailable(GMAIL_CONNECTOR_ID))
+        owner=self.connector_callback_owner(GMAIL_CONNECTOR_ID)
+        # Read the parked record before the exchange consumes the pending
+        # state, so a callback that arrives with nothing parked is a plain
+        # connection rather than a resume that reports `no_pending_work` to
+        # the owner as if something had gone wrong.
+        parked=bool(self.connector_handoff and self.connector_handoff.record(GMAIL_CONNECTOR_ID))
+        try:
+            status=self.gmail.complete_oauth(owner,dict(callback),self.gmail_token_exchange)
+        except GmailError as exc:
+            if parked and exc.reason in GMAIL_PROVEN_CALLBACK_REASONS:
+                try:
+                    self.deny_connector_work(GMAIL_CONNECTOR_ID,owner,
+                                             'denied' if exc.reason=='authorization_denied' else 'callback_failed')
+                except ValueError:
+                    # `no_pending_work` or `wrong_owner`: the record moved or
+                    # belongs to someone else, so leave that Work alone.
+                    pass
+            raise
+        # The granted set comes from the committed connector row, not from the
+        # browser query string and not from the provider's free-text `scope`.
+        # `transition` refuses to record CONNECTED unless the grant equals the
+        # connector's required scopes, so this is the one value that cannot
+        # disagree with the authority `claim` re-checks, and the malformed
+        # `granted_scopes` path that fails Work while leaving the contract row
+        # pending stays unreachable from this route.
+        granted=tuple(status.get('granted_scopes') or ())
+        result={'connected':True,'connector_id':GMAIL_CONNECTOR_ID,'work_id':None,'scheduled':False}
+        if not parked:
+            return result
+        try:
+            resumed=self.resume_connector_work(GMAIL_CONNECTOR_ID,owner,granted)
+        except ConversationHandoffError as exc:
+            # The connection is real and committed; only the resume was
+            # refused, and `resume_connector_work` has already told the owner.
+            return {**result,'resume_refused':exc.reason}
+        return {**result,'work_id':resumed['work_id'],'scheduled':resumed['scheduled']}
 
     @staticmethod
     def requests_drive_access(text):

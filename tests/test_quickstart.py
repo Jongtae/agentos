@@ -17,6 +17,9 @@ from personal_agent.quickstart_store import QuickStore
 from personal_agent.quickstart_service import AgentService, TELEGRAM_RESULT_PREVIEW_CHARS
 from personal_agent.quickstart import make_handler, configured_service, local_drive_secret_values
 from personal_agent.drive_web_oauth import DriveWebOAuthHandoff, EncryptedDriveSecretStore
+from personal_agent.connector_contract import CONNECTOR_STATE_KEY, PENDING_WORK_KEY, ConnectorState
+from personal_agent.conversation_handoff import CONVERSATION_RESUME_KEY
+from personal_agent.gmail import GMAIL_CONNECTOR_ID, GMAIL_READONLY_SCOPE, GmailError
 from cryptography.fernet import Fernet
 from personal_agent.providers import ModelAdapter, ProviderError
 from personal_agent.file_workspace import FileWorkspace
@@ -1160,6 +1163,366 @@ finally:
             self.assertFalse(self.service.document_boundary()['requires_approval'])
         finally:
             server.shutdown();thread.join();server.server_close()
+
+
+class GmailConnectorWiringTests(unittest.TestCase):
+    """The shipped deployment's half of the PA1-CONV-01 connector handoff.
+
+    #393 built prerequisite detection, parking and exactly-once resume behind
+    a tested adapter boundary and deliberately left the deployment inert:
+    `configured_service` passed neither `connector_registry=` nor `gmail=`,
+    and no route completed an OAuth callback, so no parked Work could ever
+    resume.  PA1-INT-01 owns that boundary, so these tests are about the
+    boundary - configuration, the two routes, and what an installation with
+    no Gmail configuration still does - rather than about the child
+    contracts, which keep their own suites.
+
+    Every OAuth exchange here is a **fixture**.  No live Google call is made,
+    and nothing below is evidence that a live Gmail connection works.
+    """
+
+    CHAT=4242
+    OWNER='telegram:4242'
+    GENERATION='wiring-generation'
+    MAIL_REQUEST='메일에서 예산 관련 내용 찾아줘'
+    CALENDAR_REQUEST='내일 오후 3시에 팀 회의 일정 잡아줘'
+    CLIENT_SECRET='never-return-this-gmail-secret'
+
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.store=QuickStore(self.temp.name)
+        self.sent=[]
+        self.exchanges=[]
+        self.gmail_calls=[]
+        self.env={'AGENTOS_GMAIL_LOCAL_ONLY':'1','AGENTOS_GMAIL_CLIENT_ID':'gmail-client',
+                  'AGENTOS_GMAIL_CLIENT_SECRET':self.CLIENT_SECRET,'AGENTOS_GMAIL_LOCAL_PORT':'8787',
+                  'AGENTOS_GMAIL_ENCRYPTION_KEY':Fernet.generate_key().decode()}
+        self.store.put('telegram',{'enabled':True,'mode':'owner-token','username':'ownerbot',
+                                   'generation':self.GENERATION,'cursor':0,'user_id':self.CHAT})
+        self.keys=iter(range(1000))
+
+    # -- fixtures ---------------------------------------------------------
+    def telegram(self,url,body,headers=None,timeout=60):
+        if url.endswith('/sendMessage') or url.endswith('/editMessageText'):
+            self.sent.append(body)
+            return {'ok':True,'result':{'message_id':len(self.sent)}}
+        raise AssertionError('unexpected outbound call: '+url)
+
+    def gmail_transport(self,method,endpoint,params,headers):
+        self.gmail_calls.append((method,endpoint))
+        if endpoint.endswith('/messages'):
+            return {'messages':[{'id':'m_1','threadId':'t_1'}]}
+        return {'id':'m_1','threadId':'t_1','payload':{'headers':[
+            {'name':'Subject','value':'예산 승인 안내'},
+            {'name':'From','value':'Finance <finance@example.test>'},
+            {'name':'Date','value':'Mon, 1 Sep 2026 10:00:00 +0000'}]}}
+
+    def exchange(self,request):
+        """The fixture token endpoint the route calls instead of Google."""
+        self.exchanges.append(dict(request))
+        return {'access_token':'fixture-access','refresh_token':'fixture-refresh',
+                'expires_in':3600,'scope':GMAIL_READONLY_SCOPE}
+
+    def configured(self,env=None):
+        """One service built exactly the way the shipped entry point builds it."""
+        service=configured_service(self.store,self.env if env is None else env)
+        service.telegram_transport=self.telegram
+        service.adapter=ModelAdapter(self.telegram)
+        if service.gmail is not None:
+            service.gmail.transport=self.gmail_transport
+            service.gmail_token_exchange=self.exchange
+        return service
+
+    def serve(self,service,public_hosts=()):
+        server=ThreadingHTTPServer(('127.0.0.1',0),make_handler(service,public_hosts,'pairing-token'))
+        thread=threading.Thread(target=server.serve_forever);thread.start()
+        def shutdown():
+            server.shutdown();thread.join();server.server_close()
+        self.addCleanup(shutdown)
+        return 'http://127.0.0.1:'+str(server.server_port)
+
+    def enqueue(self,message):
+        return self.store.enqueue(message,f'wiring-{next(self.keys)}',
+                                  channel=f'telegram:{self.GENERATION}',chat_id=self.CHAT)
+
+    def park(self,service):
+        """Run one mail request and assert the shipped service parked it."""
+        job_id=self.enqueue(self.MAIL_REQUEST)
+        self.assertTrue(service.run_one())
+        self.assertEqual(self.store.job(job_id)['status'],'awaiting_connection')
+        return job_id
+
+    def authorization_state(self,service):
+        """Begin an authorization the way `/google-gmail` does, and read its state."""
+        url=service.begin_gmail_connection()['authorization_url']
+        return parse_qs(urlsplit(url).query)['state'][0]
+
+    def login(self,base):
+        self.store.claim(self.store.bootstrap.read_text(),'long-password-test')
+        class NoRedirect(HTTPRedirectHandler):
+            def redirect_request(self,*args,**kwargs):return None
+        client=build_opener(HTTPCookieProcessor(CookieJar()),NoRedirect())
+        client.open(Request(base+'/api/login',data=json.dumps({'password':'long-password-test'}).encode(),
+                            headers={'Content-Type':'application/json'}),timeout=3).read()
+        return client
+
+    def searches(self):
+        """How many Gmail *list* calls happened - one per executed mail Work."""
+        return len([call for call in self.gmail_calls if call[1].endswith('/messages')])
+
+    # -- configuration ----------------------------------------------------
+    def test_gmail_is_offered_only_when_every_owner_local_value_is_present(self):
+        self.assertIsNone(configured_service(self.store,{}).gmail)
+        without_switch={key:value for key,value in self.env.items() if key!='AGENTOS_GMAIL_LOCAL_ONLY'}
+        self.assertIsNone(configured_service(self.store,without_switch).gmail)
+        partial={key:value for key,value in self.env.items() if key!='AGENTOS_GMAIL_CLIENT_SECRET'}
+        self.assertIsNone(configured_service(self.store,partial).gmail)
+        self.assertIsNone(configured_service(self.store,partial).connector_registry)
+        service=configured_service(self.store,self.env)
+        self.assertEqual(service.gmail.redirect_uri,'http://localhost:8787/oauth/gmail/callback')
+        self.assertIs(service.gmail.registry,service.connector_registry)
+        self.assertIsNotNone(service.connector_handoff)
+        # The deployment supplies its own token-exchange transport, the way it
+        # supplies `drive_token_exchange`; the connector never holds the secret.
+        self.assertTrue(callable(service.gmail_token_exchange))
+        self.assertNotIn(self.CLIENT_SECRET,json.dumps(service.settings()))
+        with self.assertRaisesRegex(ValueError,'valid TCP port'):
+            configured_service(self.store,{**self.env,'AGENTOS_GMAIL_LOCAL_PORT':'not-a-port'})
+
+    def test_owner_only_gmail_secret_file_configures_without_environment_secrets(self):
+        with tempfile.TemporaryDirectory() as external:
+            path=os.path.join(external,'gmail-secrets.json')
+            with open(path,'w') as output:
+                json.dump({'client_id':'file-client','client_secret':self.CLIENT_SECRET,
+                           'encryption_key':Fernet.generate_key().decode()},output)
+            os.chmod(path,0o600)
+            service=configured_service(self.store,{'AGENTOS_GMAIL_LOCAL_ONLY':'1','AGENTOS_GMAIL_SECRET_FILE':path})
+            self.assertEqual(service.gmail.client_id,'file-client')
+            self.assertEqual(service.gmail.redirect_uri,'http://localhost:8787/oauth/gmail/callback')
+            self.assertNotIn(self.CLIENT_SECRET,json.dumps(service.settings()))
+            incomplete=os.path.join(external,'incomplete.json')
+            with open(incomplete,'w') as output:
+                json.dump({'client_id':'only-this'},output)
+            os.chmod(incomplete,0o600)
+            with self.assertRaisesRegex(ValueError,'every required'):
+                configured_service(self.store,{'AGENTOS_GMAIL_LOCAL_ONLY':'1','AGENTOS_GMAIL_SECRET_FILE':incomplete})
+
+    def test_drive_and_gmail_token_exchanges_keep_their_own_client_secrets(self):
+        """Both exchanges are closures over `configured_service` locals.
+
+        Reusing one variable name for both client secrets would send the
+        Gmail secret to the Drive token endpoint - one external destination
+        receiving another connector's secret - and no other test would
+        notice, because each connector is correct in isolation.
+        """
+        env={**self.env,'AGENTOS_DRIVE_LOCAL_ONLY':'1','AGENTOS_DRIVE_CLIENT_ID':'drive-client',
+             'AGENTOS_DRIVE_CLIENT_SECRET':'drive-only-secret','AGENTOS_DRIVE_PICKER_API_KEY':'picker-key',
+             'AGENTOS_DRIVE_ENCRYPTION_KEY':Fernet.generate_key().decode(),
+             'AGENTOS_DRIVE_LOCAL_PORT':'8787'}
+        service=configured_service(self.store,env)
+        posted=[]
+        class Response:
+            def __enter__(inner):return inner
+            def __exit__(inner,*args):return False
+            def read(inner):return b'{"access_token":"fixture"}'
+        def fake_urlopen(request,timeout=None):
+            posted.append(request.data.decode())
+            return Response()
+        with patch('personal_agent.quickstart.urlopen',fake_urlopen):
+            service.drive_token_exchange({'code':'drive-code'})
+            service.gmail_token_exchange({'code':'gmail-code'})
+        self.assertIn('client_secret=drive-only-secret',posted[0])
+        self.assertNotIn(self.CLIENT_SECRET,posted[0])
+        self.assertIn('client_secret='+self.CLIENT_SECRET,posted[1])
+        self.assertNotIn('drive-only-secret',posted[1])
+
+    # -- registration is not authorization --------------------------------
+    def test_registering_gmail_declares_a_capability_and_grants_nothing(self):
+        service=self.configured()
+        self.assertEqual([spec.connector_id for spec in service.connector_registry.definitions()],
+                         [GMAIL_CONNECTOR_ID])
+        # Registration wrote no owner row at all: the durable connector state
+        # does not exist until an owner completes an authorization.
+        self.assertIsNone(self.store.config(CONNECTOR_STATE_KEY,None))
+        for owner in (self.OWNER,'local-owner'):
+            status=service.connector_registry.status(owner,GMAIL_CONNECTOR_ID)
+            self.assertEqual(status.state,ConnectorState.DISCONNECTED)
+            self.assertEqual(status.granted_scopes,())
+        with self.assertRaises(GmailError) as caught:
+            service.gmail.search(self.OWNER,'예산')
+        self.assertEqual(caught.exception.reason,'connection_required')
+        self.assertEqual(self.gmail_calls,[])
+        # The observable owner-side proof: the request is parked rather than
+        # executed, so a registered connector is not a connected one.
+        job_id=self.park(service)
+        self.assertIn('연결이 아직 없어',self.store.job(job_id)['response'])
+        self.assertEqual(self.searches(),0)
+
+    def test_calendar_stays_unregistered_so_its_request_still_refuses_cleanly(self):
+        """Records the integration finding, and holds the behaviour it protects.
+
+        No shipped code can obtain a Calendar credential: `CalendarCreate`
+        injects `_LegacyCreateProvider`, which POSTs to a relative path with
+        no API root, and `GoogleCalendar` is constructed only in its own test
+        module.  `AgentService` has no `calendar=` parameter either.  So both
+        Calendar connectors would be permanently DISCONNECTED here.
+
+        Registering their specs anyway is not free, because
+        `CONNECTOR_BY_INTENT` maps `calendar-create` to the write connector:
+        it would convert this clean refusal into Work parked for a connection
+        no route can complete, which only a later request for the same
+        connector would ever release.  That is why Calendar is left out.
+        """
+        service=self.configured()
+        job_id=self.enqueue(self.CALENDAR_REQUEST)
+        self.assertTrue(service.run_one())
+        job=self.store.job(job_id)
+        self.assertEqual(job['status'],'failed')
+        self.assertIn('구성되어 있지 않습니다',job['error'])
+        self.assertIsNone(self.store.config(CONNECTOR_STATE_KEY,None))
+
+    # -- the callback route -----------------------------------------------
+    def test_the_callback_route_completes_a_fixture_exchange_and_resumes_work_once(self):
+        service=self.configured()
+        job_id=self.park(service)
+        base=self.serve(service)
+        client=self.login(base)
+        with self.assertRaises(HTTPError) as redirect:
+            client.open(base+'/google-gmail',timeout=3)
+        self.assertEqual(redirect.exception.code,303)
+        state=parse_qs(urlsplit(redirect.exception.headers['Location']).query)['state'][0]
+        callback=base+'/oauth/gmail/callback?code=fixture-code&state='+state
+        # The browser arrives from Google without the SameSite=Strict cookie,
+        # so this half is deliberately opened by an unauthenticated client.
+        with build_opener().open(callback,timeout=3) as response:
+            self.assertEqual(response.status,200)
+            self.assertIn(b'Gmail connected',response.read())
+        self.assertEqual(len(self.exchanges),1)
+        self.assertEqual(self.exchanges[0]['code'],'fixture-code')
+        self.assertEqual(self.exchanges[0]['redirect_uri'],'http://localhost:8787/oauth/gmail/callback')
+        status=service.connector_registry.status(self.OWNER,GMAIL_CONNECTOR_ID)
+        self.assertEqual(status.state,ConnectorState.CONNECTED)
+        self.assertEqual(status.granted_scopes,(GMAIL_READONLY_SCOPE,))
+        # The Work the owner parked from Telegram is re-queued and then runs.
+        self.assertEqual(self.store.job(job_id)['status'],'queued')
+        self.assertTrue(service.run_one())
+        self.assertEqual(self.store.job(job_id)['status'],'succeeded')
+        self.assertIn('예산 승인 안내',self.store.job(job_id)['response'])
+        self.assertEqual(self.searches(),1)
+        # Firing the identical callback again is the exactly-once case: it is
+        # refused, and it re-queues and re-runs nothing.
+        with self.assertRaises(HTTPError) as replay:
+            build_opener().open(callback,timeout=3)
+        self.assertEqual(replay.exception.code,400)
+        self.assertEqual(self.store.job(job_id)['status'],'succeeded')
+        self.assertFalse(service.run_one())
+        self.assertEqual(self.searches(),1)
+        self.assertEqual(len(self.exchanges),1)
+        self.assertFalse(self.store.secret(CONVERSATION_RESUME_KEY))
+
+    def test_a_denied_authorization_fails_the_parked_work_and_tells_the_owner(self):
+        service=self.configured()
+        job_id=self.park(service)
+        state=self.authorization_state(service)
+        base=self.serve(service)
+        with self.assertRaises(HTTPError) as error:
+            build_opener().open(base+'/oauth/gmail/callback?error=access_denied&state='+state,timeout=3)
+        self.assertEqual(error.exception.code,400)
+        job=self.store.job(job_id)
+        self.assertEqual(job['status'],'failed')
+        self.assertIn('연결이 승인되지 않아',job['error'])
+        self.assertTrue(any('연결이 승인되지 않아' in str(body.get('text','')) for body in self.sent))
+        self.assertEqual(service.connector_registry.status(self.OWNER,GMAIL_CONNECTOR_ID).state,
+                         ConnectorState.DISCONNECTED)
+        self.assertEqual(self.exchanges,[])
+        # The failure is terminal: connecting afterwards must not revive it.
+        with build_opener().open(base+'/oauth/gmail/callback?code=later&state='+self.authorization_state(service),
+                                 timeout=3) as response:
+            self.assertEqual(response.status,200)
+        self.assertEqual(self.store.job(job_id)['status'],'failed')
+        self.assertFalse(service.run_one())
+        self.assertEqual(self.searches(),0)
+
+    def test_a_guessed_callback_neither_connects_nor_fails_parked_work(self):
+        service=self.configured()
+        job_id=self.park(service)
+        self.authorization_state(service)
+        base=self.serve(service)
+        messages=len(self.sent)
+        for query in ('?code=stolen&state=not-the-issued-state',
+                      '?error=access_denied&state=not-the-issued-state',
+                      '?code=stolen'):
+            with self.assertRaises(HTTPError) as error:
+                build_opener().open(base+'/oauth/gmail/callback'+query,timeout=3)
+            self.assertEqual(error.exception.code,400)
+            # Anyone who can reach the loopback port can send these, so they
+            # must not be able to fail the owner's parked request either.
+            self.assertEqual(self.store.job(job_id)['status'],'awaiting_connection')
+        self.assertEqual(service.connector_registry.status(self.OWNER,GMAIL_CONNECTOR_ID).state,
+                         ConnectorState.DISCONNECTED)
+        self.assertEqual(self.exchanges,[])
+        self.assertEqual(len(self.sent),messages)
+
+    def test_the_callback_is_refused_on_a_public_tunnel_host(self):
+        service=self.configured()
+        job_id=self.park(service)
+        state=self.authorization_state(service)
+        base=self.serve(service,['mobile.example.test'])
+        with self.assertRaises(HTTPError) as error:
+            build_opener().open(Request(base+'/oauth/gmail/callback?code=fixture-code&state='+state,
+                                        headers={'Host':'mobile.example.test'}),timeout=3)
+        self.assertEqual(error.exception.code,400)
+        self.assertEqual(self.store.job(job_id)['status'],'awaiting_connection')
+        self.assertEqual(self.exchanges,[])
+        # Refusing the tunnel host did not consume the owner's pending state:
+        # the same callback still completes from loopback.
+        with build_opener().open(base+'/oauth/gmail/callback?code=fixture-code&state='+state,timeout=3) as response:
+            self.assertEqual(response.status,200)
+        self.assertEqual(self.store.job(job_id)['status'],'queued')
+
+    def test_the_authorization_start_route_requires_the_owner_session(self):
+        service=self.configured()
+        base=self.serve(service)
+        with self.assertRaises(HTTPError) as error:
+            build_opener().open(base+'/google-gmail',timeout=3)
+        self.assertEqual(error.exception.code,401)
+        client=self.login(base)
+        with self.assertRaises(HTTPError) as redirect:
+            client.open(base+'/google-gmail',timeout=3)
+        self.assertEqual(redirect.exception.code,303)
+        location=redirect.exception.headers['Location']
+        self.assertTrue(location.startswith('https://accounts.google.com/'))
+        query=parse_qs(urlsplit(location).query)
+        self.assertEqual(query['scope'],[GMAIL_READONLY_SCOPE])
+        self.assertEqual(query['redirect_uri'],['http://localhost:8787/oauth/gmail/callback'])
+        self.assertEqual(query['include_granted_scopes'],['false'])
+        self.assertNotIn(self.CLIENT_SECRET,location)
+        # Issuing an authorization URL is not a connection and not a Grant.
+        self.assertEqual(service.connector_registry.status(self.OWNER,GMAIL_CONNECTOR_ID).state,
+                         ConnectorState.DISCONNECTED)
+
+    # -- the unconfigured installation ------------------------------------
+    def test_an_installation_without_gmail_configuration_is_unchanged(self):
+        service=configured_service(self.store,{})
+        service.telegram_transport=self.telegram
+        self.assertIsNone(service.gmail)
+        self.assertIsNone(service.connector_registry)
+        self.assertIsNone(service.connector_handoff)
+        self.assertIsNone(service.gmail_token_exchange)
+        job_id=self.enqueue(self.MAIL_REQUEST)
+        self.assertTrue(service.run_one())
+        job=self.store.job(job_id)
+        self.assertEqual(job['status'],'failed')
+        self.assertIn('구성되어 있지 않습니다',job['error'])
+        base=self.serve(service)
+        for path in ('/oauth/gmail/callback?code=c&state=s','/google-gmail'):
+            with self.assertRaises(HTTPError) as error:
+                build_opener().open(base+path,timeout=3)
+            self.assertIn(error.exception.code,(400,401))
+        # Nothing about connectors was created by the request or the routes.
+        self.assertIsNone(self.store.config(CONNECTOR_STATE_KEY,None))
+        self.assertIsNone(self.store.config(PENDING_WORK_KEY,None))
+        self.assertFalse(self.store.secret(CONVERSATION_RESUME_KEY))
 
 
 if __name__=='__main__':unittest.main()

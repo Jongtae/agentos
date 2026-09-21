@@ -27,6 +27,8 @@ from .providers import ProviderError
 from .capabilities import CapabilityRegistry
 from .isolated_engine_gateway import IsolatedEngineGateway
 from .drive_web_oauth import DriveWebOAuthHandoff, EncryptedDriveSecretStore, DriveWebOAuthError
+from .connector_contract import ConnectorRegistry
+from .gmail import GMAIL_CONNECTOR, EncryptedGmailSecretStore, GmailConnector
 from cryptography.fernet import Fernet
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -37,15 +39,18 @@ WEB=Path(__file__).parent/'web'
 ISOLATED_MCP_PATH='/internal/isolated-engine/mcp'
 
 
-def local_drive_secret_values(store, environ):
-    """Load owner-local Drive credentials without putting them in process args.
+def local_oauth_secret_values(store, path_value, required, label):
+    """Load owner-local connector credentials without putting them in process args.
 
     The JSON file is intentionally outside AgentOS's data directory, owned by
     the current user, a non-symlink regular file, and mode 0600.  It is a
-    runtime secret boundary for the Fernet key, OAuth client secret, and
-    browser-restricted Picker key; none of these values enter settings/status.
+    runtime secret boundary for the Fernet key, the OAuth client secret, and
+    any browser-restricted key; none of these values enter settings/status.
+
+    One loader serves every local connector because the boundary is a property
+    of the file, not of the connector: a second copy of these checks is a
+    second place for one of them to be dropped.
     """
-    path_value=environ.get('AGENTOS_DRIVE_SECRET_FILE','')
     if not path_value:
         return {}
     path=Path(path_value).expanduser()
@@ -61,13 +66,25 @@ def local_drive_secret_values(store, environ):
             raise ValueError
         value=json.loads(resolved.read_text())
     except (OSError, ValueError, json.JSONDecodeError):
-        raise ValueError('Drive secret file must be an owner-only regular JSON file outside AgentOS data.')
+        raise ValueError(f'{label} secret file must be an owner-only regular JSON file outside AgentOS data.')
     if not isinstance(value,dict):
-        raise ValueError('Drive secret file must contain a JSON object.')
-    values={key:value.get(key,'') for key in ('client_id','client_secret','encryption_key','picker_api_key')}
+        raise ValueError(f'{label} secret file must contain a JSON object.')
+    values={key:value.get(key,'') for key in required}
     if not all(isinstance(item,str) and item for item in values.values()):
-        raise ValueError('Drive secret file must contain every required local Drive value.')
+        raise ValueError(f'{label} secret file must contain every required local {label} value.')
     return values
+
+
+def local_drive_secret_values(store, environ):
+    """Owner-local Drive credentials: OAuth client, Fernet key, Picker key."""
+    return local_oauth_secret_values(store,environ.get('AGENTOS_DRIVE_SECRET_FILE',''),
+                                     ('client_id','client_secret','encryption_key','picker_api_key'),'Drive')
+
+
+def local_gmail_secret_values(store, environ):
+    """Owner-local Gmail credentials: OAuth client and Fernet key, no Picker."""
+    return local_oauth_secret_values(store,environ.get('AGENTOS_GMAIL_SECRET_FILE',''),
+                                     ('client_id','client_secret','encryption_key'),'Gmail')
 
 
 def localhost_tls_context(store):
@@ -200,11 +217,56 @@ def configured_service(store, environ=None):
             # developer key. It is not included in status/settings APIs.
             picker_config={'client_id':client_id,'developer_key':picker_key,
                            'app_id':client_id.split('-',1)[0]}
+    connector_registry=None
+    gmail=None
+    gmail_exchange=None
+    # Every name below is Gmail-prefixed on purpose.  `drive_exchange` above
+    # is a closure over this function's locals and reads `client_secret` when
+    # it is *called*, so reusing that name here would send the Gmail client
+    # secret to the Drive token endpoint - one external destination receiving
+    # another connector's secret - while both connectors still looked correct
+    # in isolation.
+    if environ.get('AGENTOS_GMAIL_LOCAL_ONLY')=='1':
+        gmail_values=local_gmail_secret_values(store,environ)
+        gmail_from_file=bool(environ.get('AGENTOS_GMAIL_SECRET_FILE'))
+        gmail_client_id=gmail_values.get('client_id') if gmail_from_file else environ.get('AGENTOS_GMAIL_CLIENT_ID','')
+        gmail_key=gmail_values.get('encryption_key') if gmail_from_file else environ.get('AGENTOS_GMAIL_ENCRYPTION_KEY','')
+        gmail_client_secret=gmail_values.get('client_secret') if gmail_from_file else environ.get('AGENTOS_GMAIL_CLIENT_SECRET','')
+        if gmail_client_id and gmail_key and gmail_client_secret:
+            gmail_port=environ.get('AGENTOS_GMAIL_LOCAL_PORT','8787')
+            if not str(gmail_port).isdigit() or not 1<=int(gmail_port)<=65535:
+                raise ValueError('Local Gmail callback port must be a valid TCP port.')
+            # Registration is definition only.  `ConnectorRegistry.register`
+            # writes no owner row, and `prerequisite`/`require_connected` keep
+            # reading DISCONNECTED until an owner completes an authorization
+            # and `transition` commits the exact required scope set.  So this
+            # declares that the installation *offers* Gmail; it grants nothing.
+            #
+            # Calendar is deliberately absent, which is an integration finding
+            # rather than an omission: PA1-CALENDAR-01 ships no way to obtain a
+            # Calendar credential, so `google-calendar`/`google-calendar-write`
+            # can never leave DISCONNECTED here.  Registering them anyway would
+            # turn today's truthful "not configured locally" refusal into Work
+            # parked for a connection no shipped route can complete, and only a
+            # later request for the same connector would ever release it.
+            connector_registry=ConnectorRegistry(store,(GMAIL_CONNECTOR,))
+            gmail=GmailConnector(EncryptedGmailSecretStore(store,gmail_key),gmail_client_id,
+                                 f'http://localhost:{gmail_port}/oauth/gmail/callback',
+                                 registry=connector_registry,allow_localhost=True)
+            def gmail_exchange(payload):
+                # The owner-local token endpoint call.  The client secret is
+                # added here and never reaches the connector, its state, or
+                # any status surface.  `grant_type` is already in `payload`.
+                body=urlencode({**payload,'client_secret':gmail_client_secret}).encode()
+                with urlopen(Request('https://oauth2.googleapis.com/token',body,{'Content-Type':'application/x-www-form-urlencoded'}),timeout=15) as response:
+                    return json.loads(response.read())
     service=AgentService(store,subscription_engines=isolated_engines,
-                         isolated_engine_adapter=isolated_engine,drive_web_oauth=drive)
+                         isolated_engine_adapter=isolated_engine,drive_web_oauth=drive,
+                         connector_registry=connector_registry,gmail=gmail)
     service.drive_token_exchange=drive_exchange
     service.drive_read=drive_read
     service.drive_picker_config=picker_config
+    service.gmail_token_exchange=gmail_exchange
     return service
 
 
@@ -299,6 +361,35 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                     return self.reply(200,b'Google Drive connected. Return to Telegram.','text/plain; charset=utf-8')
                 except (AttributeError, DriveWebOAuthError, OSError, ValueError):
                     return self.reply(400,b'Google Drive connection could not be completed. Return to Telegram and request a new link.','text/plain; charset=utf-8')
+            if path=='/google-gmail':
+                # The owner-authenticated half.  Starting an authorization is
+                # a state change for this owner's connector row, so unlike the
+                # callback it is never anonymous, and a tunnel host is refused
+                # because the callback can only ever return to loopback.
+                if not self.auth():return
+                if self.public_host():
+                    return self.reply(400,b'Open AgentOS on its local address to connect Gmail.','text/plain; charset=utf-8')
+                try:return self.redirect(service.begin_gmail_connection()['authorization_url'])
+                except (AttributeError, ValueError, KeyError):
+                    return self.reply(400,b'Gmail connection is unavailable. Check the local Gmail configuration.','text/plain; charset=utf-8')
+            if path=='/oauth/gmail/callback':
+                # Google redirects a browser here, so a session cookie cannot
+                # be required: the cookie is SameSite=Strict and a cross-site
+                # redirect never carries it.  Authority comes from the pending
+                # state instead - owner-bound, HMAC-signed, single use and
+                # consumed before the code is inspected - exactly as the Drive
+                # callback above is protected.  One message for every failure,
+                # so a guess learns nothing about configuration or state.
+                if self.public_host():
+                    return self.reply(400,b'Gmail connection could not be completed. Return to Telegram and request a new link.','text/plain; charset=utf-8')
+                try:
+                    callback={key:values[0] for key,values in parse_qs(parts.query).items()}
+                    service.complete_gmail_connection(callback)
+                except (AttributeError, ValueError, OSError):
+                    return self.reply(400,b'Gmail connection could not be completed. Return to Telegram and request a new link.','text/plain; charset=utf-8')
+                # Says only what happened: the connection.  Whether parked Work
+                # resumed is reported in the conversation that parked it.
+                return self.reply(200,b'Gmail connected. Return to Telegram.','text/plain; charset=utf-8')
             if path=='/google-drive-picker':
                 grant=parse_qs(parts.query).get('grant',[''])[0]
                 if not (getattr(service,'drive_picker_config',None) and service.drive_web_oauth.picker_grant_active(grant)):
@@ -541,6 +632,9 @@ def main():
     handoff_port=args.drive_handoff_port or args.port+1
     if handoff_port==args.port:parser.exit(2,'Drive handoff port must differ from the HTTP callback port.\n')
     env=dict(os.environ);env['AGENTOS_DRIVE_LOCAL_PORT']=str(args.port);env['AGENTOS_DRIVE_HANDOFF_PORT']=str(handoff_port)
+    # The Gmail callback is served by this same HTTP listener, so the redirect
+    # URI must name the port actually bound rather than a separately guessed one.
+    env['AGENTOS_GMAIL_LOCAL_PORT']=str(args.port)
     service=configured_service(store,env)
     public_hosts=args.public_tunnel_host
     public_token=args.public_access_token

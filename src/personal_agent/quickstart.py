@@ -20,13 +20,16 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlsplit
 from .quickstart_store import QuickStore
-from .quickstart_service import AgentService
+from .quickstart_service import AgentService, GMAIL_CONNECT_PATH, LOCAL_ADDRESS_HOST
 from .subscription_engines import SubscriptionEngines
 from .plugins import PluginRegistry
 from .providers import ProviderError
 from .capabilities import CapabilityRegistry
 from .isolated_engine_gateway import IsolatedEngineGateway
 from .drive_web_oauth import DriveWebOAuthHandoff, EncryptedDriveSecretStore, DriveWebOAuthError
+from .connector_contract import ConnectorRegistry
+from .service_control import service_action
+from .gmail import GMAIL_CONNECTOR, EncryptedGmailSecretStore, GmailConnector
 from cryptography.fernet import Fernet
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -37,15 +40,18 @@ WEB=Path(__file__).parent/'web'
 ISOLATED_MCP_PATH='/internal/isolated-engine/mcp'
 
 
-def local_drive_secret_values(store, environ):
-    """Load owner-local Drive credentials without putting them in process args.
+def local_oauth_secret_values(store, path_value, required, label):
+    """Load owner-local connector credentials without putting them in process args.
 
     The JSON file is intentionally outside AgentOS's data directory, owned by
     the current user, a non-symlink regular file, and mode 0600.  It is a
-    runtime secret boundary for the Fernet key, OAuth client secret, and
-    browser-restricted Picker key; none of these values enter settings/status.
+    runtime secret boundary for the Fernet key, the OAuth client secret, and
+    any browser-restricted key; none of these values enter settings/status.
+
+    One loader serves every local connector because the boundary is a property
+    of the file, not of the connector: a second copy of these checks is a
+    second place for one of them to be dropped.
     """
-    path_value=environ.get('AGENTOS_DRIVE_SECRET_FILE','')
     if not path_value:
         return {}
     path=Path(path_value).expanduser()
@@ -61,13 +67,25 @@ def local_drive_secret_values(store, environ):
             raise ValueError
         value=json.loads(resolved.read_text())
     except (OSError, ValueError, json.JSONDecodeError):
-        raise ValueError('Drive secret file must be an owner-only regular JSON file outside AgentOS data.')
+        raise ValueError(f'{label} secret file must be an owner-only regular JSON file outside AgentOS data.')
     if not isinstance(value,dict):
-        raise ValueError('Drive secret file must contain a JSON object.')
-    values={key:value.get(key,'') for key in ('client_id','client_secret','encryption_key','picker_api_key')}
+        raise ValueError(f'{label} secret file must contain a JSON object.')
+    values={key:value.get(key,'') for key in required}
     if not all(isinstance(item,str) and item for item in values.values()):
-        raise ValueError('Drive secret file must contain every required local Drive value.')
+        raise ValueError(f'{label} secret file must contain every required local {label} value.')
     return values
+
+
+def local_drive_secret_values(store, environ):
+    """Owner-local Drive credentials: OAuth client, Fernet key, Picker key."""
+    return local_oauth_secret_values(store,environ.get('AGENTOS_DRIVE_SECRET_FILE',''),
+                                     ('client_id','client_secret','encryption_key','picker_api_key'),'Drive')
+
+
+def local_gmail_secret_values(store, environ):
+    """Owner-local Gmail credentials: OAuth client and Fernet key, no Picker."""
+    return local_oauth_secret_values(store,environ.get('AGENTOS_GMAIL_SECRET_FILE',''),
+                                     ('client_id','client_secret','encryption_key'),'Gmail')
 
 
 def localhost_tls_context(store):
@@ -200,11 +218,56 @@ def configured_service(store, environ=None):
             # developer key. It is not included in status/settings APIs.
             picker_config={'client_id':client_id,'developer_key':picker_key,
                            'app_id':client_id.split('-',1)[0]}
+    connector_registry=None
+    gmail=None
+    gmail_exchange=None
+    # Every name below is Gmail-prefixed on purpose.  `drive_exchange` above
+    # is a closure over this function's locals and reads `client_secret` when
+    # it is *called*, so reusing that name here would send the Gmail client
+    # secret to the Drive token endpoint - one external destination receiving
+    # another connector's secret - while both connectors still looked correct
+    # in isolation.
+    if environ.get('AGENTOS_GMAIL_LOCAL_ONLY')=='1':
+        gmail_values=local_gmail_secret_values(store,environ)
+        gmail_from_file=bool(environ.get('AGENTOS_GMAIL_SECRET_FILE'))
+        gmail_client_id=gmail_values.get('client_id') if gmail_from_file else environ.get('AGENTOS_GMAIL_CLIENT_ID','')
+        gmail_key=gmail_values.get('encryption_key') if gmail_from_file else environ.get('AGENTOS_GMAIL_ENCRYPTION_KEY','')
+        gmail_client_secret=gmail_values.get('client_secret') if gmail_from_file else environ.get('AGENTOS_GMAIL_CLIENT_SECRET','')
+        if gmail_client_id and gmail_key and gmail_client_secret:
+            gmail_port=environ.get('AGENTOS_GMAIL_LOCAL_PORT','8787')
+            if not str(gmail_port).isdigit() or not 1<=int(gmail_port)<=65535:
+                raise ValueError('Local Gmail callback port must be a valid TCP port.')
+            # Registration is definition only.  `ConnectorRegistry.register`
+            # writes no owner row, and `prerequisite`/`require_connected` keep
+            # reading DISCONNECTED until an owner completes an authorization
+            # and `transition` commits the exact required scope set.  So this
+            # declares that the installation *offers* Gmail; it grants nothing.
+            #
+            # Calendar is deliberately absent, which is an integration finding
+            # rather than an omission: PA1-CALENDAR-01 ships no way to obtain a
+            # Calendar credential, so `google-calendar`/`google-calendar-write`
+            # can never leave DISCONNECTED here.  Registering them anyway would
+            # turn today's truthful "not configured locally" refusal into Work
+            # parked for a connection no shipped route can complete, and only a
+            # later request for the same connector would ever release it.
+            connector_registry=ConnectorRegistry(store,(GMAIL_CONNECTOR,))
+            gmail=GmailConnector(EncryptedGmailSecretStore(store,gmail_key),gmail_client_id,
+                                 f'http://localhost:{gmail_port}/oauth/gmail/callback',
+                                 registry=connector_registry,allow_localhost=True)
+            def gmail_exchange(payload):
+                # The owner-local token endpoint call.  The client secret is
+                # added here and never reaches the connector, its state, or
+                # any status surface.  `grant_type` is already in `payload`.
+                body=urlencode({**payload,'client_secret':gmail_client_secret}).encode()
+                with urlopen(Request('https://oauth2.googleapis.com/token',body,{'Content-Type':'application/x-www-form-urlencoded'}),timeout=15) as response:
+                    return json.loads(response.read())
     service=AgentService(store,subscription_engines=isolated_engines,
-                         isolated_engine_adapter=isolated_engine,drive_web_oauth=drive)
+                         isolated_engine_adapter=isolated_engine,drive_web_oauth=drive,
+                         connector_registry=connector_registry,gmail=gmail)
     service.drive_token_exchange=drive_exchange
     service.drive_read=drive_read
     service.drive_picker_config=picker_config
+    service.gmail_token_exchange=gmail_exchange
     return service
 
 
@@ -299,6 +362,35 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                     return self.reply(200,b'Google Drive connected. Return to Telegram.','text/plain; charset=utf-8')
                 except (AttributeError, DriveWebOAuthError, OSError, ValueError):
                     return self.reply(400,b'Google Drive connection could not be completed. Return to Telegram and request a new link.','text/plain; charset=utf-8')
+            if path==GMAIL_CONNECT_PATH:
+                # The owner-authenticated half.  Starting an authorization is
+                # a state change for this owner's connector row, so unlike the
+                # callback it is never anonymous, and a tunnel host is refused
+                # because the callback can only ever return to loopback.
+                if not self.auth():return
+                if self.public_host():
+                    return self.reply(400,b'Open AgentOS on its local address to connect Gmail.','text/plain; charset=utf-8')
+                try:return self.redirect(service.begin_gmail_connection()['authorization_url'])
+                except (AttributeError, ValueError, KeyError):
+                    return self.reply(400,b'Gmail connection is unavailable. Check the local Gmail configuration.','text/plain; charset=utf-8')
+            if path=='/oauth/gmail/callback':
+                # Google redirects a browser here, so a session cookie cannot
+                # be required: the cookie is SameSite=Strict and a cross-site
+                # redirect never carries it.  Authority comes from the pending
+                # state instead - owner-bound, HMAC-signed, single use and
+                # consumed before the code is inspected - exactly as the Drive
+                # callback above is protected.  One message for every failure,
+                # so a guess learns nothing about configuration or state.
+                if self.public_host():
+                    return self.reply(400,b'Gmail connection could not be completed. Return to Telegram and request a new link.','text/plain; charset=utf-8')
+                try:
+                    callback={key:values[0] for key,values in parse_qs(parts.query).items()}
+                    service.complete_gmail_connection(callback)
+                except (AttributeError, ValueError, OSError):
+                    return self.reply(400,b'Gmail connection could not be completed. Return to Telegram and request a new link.','text/plain; charset=utf-8')
+                # Says only what happened: the connection.  Whether parked Work
+                # resumed is reported in the conversation that parked it.
+                return self.reply(200,b'Gmail connected. Return to Telegram.','text/plain; charset=utf-8')
             if path=='/google-drive-picker':
                 grant=parse_qs(parts.query).get('grant',[''])[0]
                 if not (getattr(service,'drive_picker_config',None) and service.drive_web_oauth.picker_grant_active(grant)):
@@ -326,6 +418,8 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             if path=='/api/settings':return self.reply(200,service.conversation_settings_request({'operation':'read'}))
             if path=='/api/capability-recommendations':return self.reply(200,service.capability_recommendation_request({'outcome':parse_qs(parts.query).get('outcome',[''])[0]}))
             if path=='/api/personal-knowledge':return self.reply(200,service.personal_knowledge_request({'query':parse_qs(parts.query).get('query',[''])[0]}, channel='local-companion'))
+            if path=='/api/personal-space/memory-candidates':
+                return self.reply(200,service.memory_candidate_request({'operation':'list'}))
             if path=='/api/personal-space':return self.reply(200,store.personal_space())
             if path=='/api/personal-records':
                 values=parse_qs(parts.query)
@@ -430,6 +524,8 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 if path=='/api/settings/request':return self.reply(200,service.conversation_settings_request(body))
                 if path=='/api/capability-recommendations':return self.reply(200,service.capability_recommendation_request(body))
                 if path=='/api/personal-knowledge':return self.reply(200,service.personal_knowledge_request(body, channel='local-companion'))
+                if path=='/api/personal-space/memory-candidates/request':
+                    return self.reply(200,service.memory_candidate_request(body))
                 if path=='/api/context-inbox/telegram-policy':return self.reply(200,service.set_context_telegram_policy(body))
                 if path=='/api/documents/approval':return self.reply(200,service.set_document_approval(body))
                 if path=='/api/public-pages/approval':return self.reply(200,service.set_public_page_approval(body))
@@ -473,6 +569,52 @@ def plugins_main(argv):
     print(json.dumps(result,ensure_ascii=False))
 
 
+def _local_oauth_secret_target(parser, path_value):
+    """Resolve the ``--secret-file`` destination, refusing a relative path.
+
+    A relative path is refused rather than resolved against the working
+    directory: the runtime later re-reads this file by the absolute value the
+    owner recorded, so a path that means one thing when the file is created
+    and another when the service starts must not be accepted at all.
+    """
+    target=Path(path_value).expanduser()
+    if not target.is_absolute():
+        parser.error('--secret-file must be an absolute path.')
+    return target
+
+
+def _local_oauth_client(parser, source):
+    """Read ``client_id``/``client_secret`` from a downloaded Google *web* client."""
+    try:
+        client=json.loads(source.read_text()).get('web',{})
+        return client['client_id'],client['client_secret']
+    except (OSError, ValueError, KeyError, TypeError):
+        parser.error('--oauth-client-json must be a Google web OAuth client download.')
+
+
+def _write_local_oauth_secret_file(parser, target, values, label):
+    """Create the owner-only 0600 file ``local_oauth_secret_values`` accepts.
+
+    One writer serves every local connector for the same reason one loader
+    reads them: the 0700 parent, the ``O_EXCL`` create, the 0600 mode and the
+    refusal to replace an existing file are properties of the secret-file
+    boundary rather than of the connector, and a second copy of those checks
+    is a second place for one of them to be dropped.  Nothing here prints a
+    credential, and the file never enters process arguments or environment.
+    """
+    try:
+        target.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
+        if target.exists():
+            parser.error(f'Refusing to replace an existing {label} secret file.')
+        descriptor=os.open(target,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+        with os.fdopen(descriptor,'w') as output:
+            json.dump(values,output,separators=(',',':'))
+        os.chmod(target,0o600)
+    except OSError as exc:
+        parser.error(f'Could not create the owner-only {label} secret file: '+str(exc))
+    print(f'Created owner-only local {label} credential file.',flush=True)
+
+
 def drive_config_main(argv):
     """Create a local-only Drive secret file without printing its contents."""
     parser=argparse.ArgumentParser(description='Create an owner-only local Google Drive credential file.')
@@ -481,30 +623,64 @@ def drive_config_main(argv):
     parser.add_argument('--picker-key-stdin',action='store_true',help='Read the restricted Picker API key from standard input.')
     args=parser.parse_args(argv)
     source=Path(args.oauth_client_json).expanduser().resolve(strict=True)
-    target=Path(args.secret_file).expanduser()
-    if not target.is_absolute():
-        parser.error('--secret-file must be an absolute path.')
-    try:
-        client=json.loads(source.read_text()).get('web',{})
-        client_id=client['client_id']; client_secret=client['client_secret']
-    except (OSError, ValueError, KeyError, TypeError):
-        parser.error('--oauth-client-json must be a Google web OAuth client download.')
+    target=_local_oauth_secret_target(parser,args.secret_file)
+    client_id,client_secret=_local_oauth_client(parser,source)
     picker_key=sys.stdin.read().strip() if args.picker_key_stdin else getpass.getpass('Restricted Google Picker API key: ').strip()
     if not picker_key:
         parser.error('A restricted Google Picker API key is required.')
     values={'client_id':client_id,'client_secret':client_secret,'picker_api_key':picker_key,
             'encryption_key':Fernet.generate_key().decode()}
-    try:
-        target.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
-        if target.exists():
-            parser.error('Refusing to replace an existing Drive secret file.')
-        descriptor=os.open(target,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
-        with os.fdopen(descriptor,'w') as output:
-            json.dump(values,output,separators=(',',':'))
-        os.chmod(target,0o600)
-    except OSError as exc:
-        parser.error('Could not create the owner-only Drive secret file: '+str(exc))
-    print('Created owner-only local Drive credential file.',flush=True)
+    _write_local_oauth_secret_file(parser,target,values,'Drive')
+
+
+def gmail_config_main(argv):
+    """Create a local-only Gmail secret file without printing its contents.
+
+    Deliberately the same shape as ``drive-config`` above: the same two
+    arguments, the same absolute-path refusal, the same locally generated
+    Fernet key, the same 0600 exclusive create, the same refusal to replace an
+    existing file.  The one difference is that Gmail has no browser-visible
+    Picker key to collect, so the file holds exactly the three values
+    ``local_gmail_secret_values`` requires and nothing more.
+
+    Writing this file is not a Grant and connects nothing.  It only lets the
+    installation *offer* Gmail; the connector row stays DISCONNECTED until the
+    owner completes an authorization through the ``/google-gmail`` route.
+    """
+    parser=argparse.ArgumentParser(description='Create an owner-only local Gmail credential file.')
+    parser.add_argument('--oauth-client-json',required=True)
+    parser.add_argument('--secret-file',required=True)
+    args=parser.parse_args(argv)
+    source=Path(args.oauth_client_json).expanduser().resolve(strict=True)
+    target=_local_oauth_secret_target(parser,args.secret_file)
+    client_id,client_secret=_local_oauth_client(parser,source)
+    values={'client_id':client_id,'client_secret':client_secret,
+            'encryption_key':Fernet.generate_key().decode()}
+    _write_local_oauth_secret_file(parser,target,values,'Gmail')
+
+
+def service_main(argv):
+    """Expose the installed background-service lifecycle to the owner CLI.
+
+    The lifecycle itself is owned by PA1-INSTALL-01 and is not reimplemented
+    here: this is only the central-CLI wiring for its ``service_action`` seam.
+    The seam's receipt is printed exactly as it was reported, so a launchd
+    operation that was refused can never be rendered here as a success.
+    """
+    parser=argparse.ArgumentParser(prog='agentos service',description='Manage the macOS launchd background service for this owner.')
+    parser.add_argument('action',choices=('install','upgrade','start','stop','restart','status','uninstall'))
+    # Unlike the sibling subcommands this deliberately resolves no default data
+    # directory. ServiceController recovers the directory from the installed
+    # service definition when none is supplied, so injecting a default here
+    # would make status/stop/uninstall report a directory the installed
+    # service does not actually use.
+    parser.add_argument('--data',default=None,help='Override the data directory (default: AGENTOS_DATA, else the installed service definition).')
+    parser.add_argument('--cli-path',default=None,help='Override the agentos executable recorded in the service definition.')
+    args=parser.parse_args(argv)
+    options={name:value for name,value in (('data_dir',args.data),('cli_path',args.cli_path)) if value is not None}
+    receipt=service_action(args.action,**options)
+    print(json.dumps(receipt,ensure_ascii=False,sort_keys=True))
+    return 0 if receipt.get('ok') else 1
 
 
 def main():
@@ -517,6 +693,10 @@ def main():
         return plugins_main(sys.argv[2:])
     if len(sys.argv)>1 and sys.argv[1]=='drive-config':
         return drive_config_main(sys.argv[2:])
+    if len(sys.argv)>1 and sys.argv[1]=='gmail-config':
+        return gmail_config_main(sys.argv[2:])
+    if len(sys.argv)>1 and sys.argv[1]=='service':
+        return service_main(sys.argv[2:])
     if len(sys.argv)>1 and sys.argv[1]=='guide':
         guide=argparse.ArgumentParser(description='Show credential-free AgentOS onboarding and recovery guidance.')
         guide.add_argument('--data',default=os.environ.get('AGENTOS_DATA',str(Path.home()/'.local/share/agentos')))
@@ -541,6 +721,9 @@ def main():
     handoff_port=args.drive_handoff_port or args.port+1
     if handoff_port==args.port:parser.exit(2,'Drive handoff port must differ from the HTTP callback port.\n')
     env=dict(os.environ);env['AGENTOS_DRIVE_LOCAL_PORT']=str(args.port);env['AGENTOS_DRIVE_HANDOFF_PORT']=str(handoff_port)
+    # The Gmail callback is served by this same HTTP listener, so the redirect
+    # URI must name the port actually bound rather than a separately guessed one.
+    env['AGENTOS_GMAIL_LOCAL_PORT']=str(args.port)
     service=configured_service(store,env)
     public_hosts=args.public_tunnel_host
     public_token=args.public_access_token
@@ -558,10 +741,14 @@ def main():
     service.start()
     if handoff_server:
         threading.Thread(target=handoff_server.serve_forever,daemon=True).start()
-    url=f'http://127.0.0.1:{server.server_port}/'
+    # One source for the address AgentOS advertises, so the banner, the setup
+    # link, the browser AgentOS opens and any connector connect link that has
+    # to land on the owner's existing session can never name different hosts.
+    url=f'http://{LOCAL_ADDRESS_HOST}:{server.server_port}/'
+    home=url
     if not store.claimed():url+='#setup='+store.bootstrap.read_text()
     store.write_private(store.private/'setup-link.txt',url)
-    print(f'AgentOS: http://127.0.0.1:{server.server_port}/',flush=True)
+    print(f'AgentOS: {home}',flush=True)
     if public_hosts:
         print(f'Mobile pairing URL: https://{public_hosts[0]}/?access={public_token}',flush=True)
     if not store.claimed():print(f'초기 설정 링크: {store.private / "setup-link.txt"} (개인 파일)',flush=True)
@@ -580,4 +767,4 @@ def main():
         for thread in service.threads:thread.join(timeout=2)
 
 
-if __name__=='__main__':main()
+if __name__=='__main__':sys.exit(main())

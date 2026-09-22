@@ -52,7 +52,22 @@ function recordItems(space){
 }
 function filterLocalRecords(space,query='',filter='all'){const needle=String(query).trim().toLocaleLowerCase();return recordItems(space).filter(item=>(filter==='all'||item.type===filter||(filter==='saved'&&['note','memory'].includes(item.type)))&&(!needle||(`${item.label} ${item.memory_key||''} ${item.content||''} ${item.source_kind||''}`).toLocaleLowerCase().includes(needle)));}
 function recordPageMatches(records,query,filter){return Boolean(records&&records.query===String(query).trim()&&records.filter===filter);}
-if(typeof module!=='undefined'&&module.exports)module.exports={normalizeEndpoint,modelDraftFingerprint,createModelDraftGuard,isDiagnosticTask,statusText,taskOutcome,requestSource,workspaceSaveCandidates,modelPresetDraft,capabilityActions,clearMobileDetailWhenEmpty,contextSharingWarning,settingsFeedbackId,rememberTaskDisclosures,restoreTaskDisclosures,isOpenRouterCompletion,parseOpenRouterFlow,shouldRenderWorkspaceDetail,shouldInvalidateWorkspaceDetailForDeletion,workspaceResultSummary,shouldRefreshSelectedTask,refreshSelectedTaskDetail,mergeTaskProgress,recordItems,filterLocalRecords,recordPageMatches};
+// A MemoryCandidate decision writes canonical Memory, so every request body
+// below is built from `review.inspected` - the candidate row the owner read
+// back - and never from the list page or from the approval the server issued.
+// `approval.source_digest` is compared to, not copied from, the inspected
+// digest: an approval issued against another candidate or other content
+// cannot be spent on what is on screen.
+function memoryCandidateApprovalMatches(review){const inspected=review&&review.inspected,approval=review&&review.approval;return Boolean(inspected&&approval&&approval.approval_token&&approval.subject_id===inspected.id&&approval.source_digest===inspected.content_digest);}
+// Approval stays two owner steps. No state both issues and spends an
+// approval: 'accept' is reachable only once an approval already matches the
+// inspected candidate, which only 'request-approval' can produce.
+function memoryCandidateStep(review,candidateId){if(!review||!review.inspected||review.inspected.id!==candidateId)return 'inspect';return memoryCandidateApprovalMatches(review)?'accept':'request-approval';}
+function memoryCandidateDecisionBody(review,operation){const inspected=review&&review.inspected;if(!inspected||!inspected.id||!inspected.work_ref||!inspected.content_digest)return null;const body={operation,id:inspected.id,work_ref:inspected.work_ref,content_digest:inspected.content_digest};if(operation!=='accept')return body;if(!memoryCandidateApprovalMatches(review))return null;body.approval_token=review.approval.approval_token;return body;}
+// React to a pending count that changed, never to one that merely differs
+// from the loaded page, so an open section cannot poll itself in a loop.
+function memoryCandidateReloadNeeded(open,pendingCount,observedCount){return Boolean(open)&&pendingCount!==observedCount;}
+if(typeof module!=='undefined'&&module.exports)module.exports={normalizeEndpoint,modelDraftFingerprint,createModelDraftGuard,isDiagnosticTask,statusText,taskOutcome,requestSource,workspaceSaveCandidates,modelPresetDraft,capabilityActions,clearMobileDetailWhenEmpty,contextSharingWarning,settingsFeedbackId,rememberTaskDisclosures,restoreTaskDisclosures,isOpenRouterCompletion,parseOpenRouterFlow,shouldRenderWorkspaceDetail,shouldInvalidateWorkspaceDetailForDeletion,workspaceResultSummary,shouldRefreshSelectedTask,refreshSelectedTaskDetail,mergeTaskProgress,recordItems,filterLocalRecords,recordPageMatches,memoryCandidateApprovalMatches,memoryCandidateStep,memoryCandidateDecisionBody,memoryCandidateReloadNeeded};
 
 if(typeof document!=='undefined'){
 const $=id=>document.getElementById(id);
@@ -64,6 +79,7 @@ const modelGuard=createModelDraftGuard();
 let activeView='tasks',activeSettings='ai',selectedTaskId='',selectedRecordKey='',selectedWorkspaceId='',taskProgress=null,lastHome=null,lastState=null,lastSpace=null,lastRecords=null,taskRenderFingerprint='',recordRenderFingerprint='',taskDetailSequence=0,workspaceDetailSequence=0,recordLoadSequence=0;
 const taskDetailInflight=new Map();
 let recordRefreshPromise=null;
+let memoryCandidateRows=null,selectedCandidateId='',memoryCandidateReview=null,memoryCandidateFingerprint='',memoryCandidateLoadSequence=0,memoryCandidateObservedCount=null;
 const workspaceResultSummaries=new Map();
 const expandedTaskEvents=new Set();
 const taskDisclosureState=new Map();
@@ -146,6 +162,54 @@ $('record-search').onsubmit=event=>{event.preventDefault();void loadRecords();};
 $('record-query').oninput=()=>{$('record-search-feedback').textContent='';void loadRecords();};
 $('record-filter').onchange=()=>{recordDeletePending='';void loadRecords();};
 
+// Pending MemoryCandidates. `/api/personal-space` already carries the pending
+// count and content, but not the `work_ref` or `content_digest` a decision
+// needs, so the count keeps the section discoverable on the existing refresh
+// and the actionable rows come from the dedicated owner endpoint.
+async function loadMemoryCandidates(){
+ const request=++memoryCandidateLoadSequence;
+ try{const data=await api('/api/personal-space/memory-candidates');if(request!==memoryCandidateLoadSequence)return;memoryCandidateRows=data.candidates||[];memoryCandidateFingerprint='';renderMemoryCandidates();}catch(error){if(request===memoryCandidateLoadSequence)setError('memory-candidate-feedback',error);}
+}
+function renderMemoryCandidateSummary(space){
+ const count=space?.memory_candidate_count||0;
+ $('memory-candidate-summary').textContent=count?`검토 대기 ${count}개`:'검토 대기 없음';
+ if(memoryCandidateReloadNeeded($('memory-candidates').open,count,memoryCandidateObservedCount)){memoryCandidateObservedCount=count;void loadMemoryCandidates();}
+}
+function renderMemoryCandidates(){
+ const list=$('memory-candidate-list'),detail=$('memory-candidate-detail'),rows=memoryCandidateRows||[];
+ if(selectedCandidateId&&!rows.some(row=>row.id===selectedCandidateId)){selectedCandidateId='';memoryCandidateReview=null;}
+ const fingerprint=JSON.stringify([rows,selectedCandidateId,memoryCandidateReview]);if(memoryCandidateFingerprint===fingerprint)return;memoryCandidateFingerprint=fingerprint;
+ list.replaceChildren();
+ for(const row of rows){const button=element('button',undefined,'item-row'+(row.id===selectedCandidateId?' selected':''));button.type='button';button.append(element('strong',row.memory_key||'기억 키 없음'),element('span',`저장 전 후보 · ${safeTime(row.created)}`));button.onclick=()=>{selectedCandidateId=row.id;memoryCandidateReview=null;memoryCandidateFingerprint='';renderMemoryCandidates();};list.append(button);}
+ if(!rows.length)list.append(element('p','검토를 기다리는 기억 후보가 없습니다.','muted'));
+ const selected=rows.find(row=>row.id===selectedCandidateId);
+ if(!selected)return detail.replaceChildren(element('p','후보를 선택하면 저장 전 내용을 확인할 수 있습니다.','empty-state'));
+ detail.replaceChildren(element('p','저장 전 기억 후보','eyebrow'),element('h4',selected.memory_key||'기억 키 없음'),element('p',`제안 시각 ${safeTime(selected.created)}`,'muted'));
+ const step=memoryCandidateStep(memoryCandidateReview,selected.id);
+ if(step==='inspect'){
+  detail.append(element('p','승인 전에는 기억으로 저장하지 않습니다. 검토를 눌러 이 후보의 현재 내용과 대조값을 확인하세요.','muted'));
+  const inspect=element('button','검토');inspect.type='button';
+  inspect.onclick=()=>busy(inspect,async()=>{try{const inspected=await api('/api/personal-space/memory-candidates/request',{operation:'inspect',id:selected.id,work_ref:selected.work_ref});memoryCandidateReview={inspected,approval:null};memoryCandidateFingerprint='';renderMemoryCandidates();$('memory-candidate-feedback').textContent='';}catch(error){setError('memory-candidate-feedback',error);}});
+  return detail.append(inspect);
+ }
+ const inspected=memoryCandidateReview.inspected,actions=element('div',undefined,'button-row');
+ detail.append(element('p',inspected.content||'내용이 제공되지 않았습니다.','outcome'),element('p',`검토한 내용 대조값 ${inspected.content_digest}`,'technical'));
+ if(step==='request-approval'){
+  const request=element('button','이 내용으로 승인 요청');request.type='button';
+  request.onclick=()=>busy(request,async()=>{try{const approval=await api('/api/personal-space/memory-candidates/request',memoryCandidateDecisionBody(memoryCandidateReview,'request-approval'));memoryCandidateReview={inspected,approval};memoryCandidateFingerprint='';renderMemoryCandidates();$('memory-candidate-feedback').textContent='승인을 요청했습니다. 위 내용을 다시 확인한 뒤 승인을 확정하세요.';}catch(error){setError('memory-candidate-feedback',error);}});
+  actions.append(request);
+ }else{
+  const accept=element('button','확인한 내용으로 승인 확정','primary');accept.type='button';
+  accept.onclick=()=>busy(accept,async()=>{const body=memoryCandidateDecisionBody(memoryCandidateReview,'accept');if(!body)return setError('memory-candidate-feedback',new Error('검토한 내용과 승인이 일치하지 않습니다. 다시 검토하세요.'));try{await api('/api/personal-space/memory-candidates/request',body);memoryCandidateReview=null;selectedCandidateId='';$('memory-candidate-feedback').textContent='검토한 내용을 기억으로 저장했습니다.';await loadMemoryCandidates();await refreshLoadedRecords();await refresh();}catch(error){setError('memory-candidate-feedback',error);}});
+  actions.append(accept);
+  detail.append(element('p',`이 승인은 ${safeTime(memoryCandidateReview.approval.expires_at)}까지만 쓸 수 있고, 그 사이 기억이 바뀌면 무효가 됩니다.`,'technical'));
+ }
+ const reject=element('button','거부');reject.type='button';
+ reject.onclick=()=>busy(reject,async()=>{const body=memoryCandidateDecisionBody(memoryCandidateReview,'reject');if(!body)return setError('memory-candidate-feedback',new Error('검토한 후보를 다시 확인하세요.'));try{await api('/api/personal-space/memory-candidates/request',body);memoryCandidateReview=null;selectedCandidateId='';$('memory-candidate-feedback').textContent='이 후보를 거부했습니다. 기억으로 저장하지 않습니다.';await loadMemoryCandidates();await refresh();}catch(error){setError('memory-candidate-feedback',error);}});
+ actions.append(reject);detail.append(actions);
+}
+$('memory-candidates').ontoggle=()=>{if(!$('memory-candidates').open){memoryCandidateObservedCount=null;return;}memoryCandidateObservedCount=lastSpace?.memory_candidate_count??null;void loadMemoryCandidates();};
+
 function rememberWorkspaceResultSummary(workspace,updated){workspaceResultSummaries.set(workspace.id,{updated,summary:workspaceResultSummary(workspace)});}
 async function loadWorkspaceResultSummaries(workspaces){await Promise.all((workspaces||[]).map(async workspace=>{const cached=workspaceResultSummaries.get(workspace.id);if(cached&&cached.updated===workspace.updated)return;try{const detail=await api('/api/workspaces/'+encodeURIComponent(workspace.id));const current=lastHome?.workspaces?.find(item=>item.id===workspace.id);if(current&&current.updated===workspace.updated){rememberWorkspaceResultSummary(detail,workspace.updated);renderWorkspaces(lastHome,lastState);}}catch(_error){}}));}
 async function selectWorkspace(id){selectedWorkspaceId=id;const request=++workspaceDetailSequence;document.querySelectorAll('.workspace-row').forEach(row=>row.classList.toggle('selected',row.dataset.workspaceId===id));try{const workspace=await api('/api/workspaces/'+encodeURIComponent(id));if(shouldRenderWorkspaceDetail(selectedWorkspaceId,id,request,workspaceDetailSequence)){rememberWorkspaceResultSummary(workspace,lastHome?.workspaces?.find(item=>item.id===id)?.updated);renderWorkspaceDetail(workspace);renderWorkspaces(lastHome,lastState);}}catch(error){if(shouldRenderWorkspaceDetail(selectedWorkspaceId,id,request,workspaceDetailSequence))setError('workspace-feedback',error);}}
@@ -165,6 +229,17 @@ function renderDocumentBoundary(boundary){const box=$('document-boundary');box.r
 
 function renderTelegram(settings){const tg=settings.telegram||{},box=$('telegram-current');box.replaceChildren(element('strong','Telegram'));if(tg.enabled){box.append(element('p',tg.paired?`연결됨 · @${tg.username||'개인 봇'}`:'봇 설정됨 · 소유자 연결 대기'));if(!telegramDraftOpen)$('telegram-form').hidden=true;$('telegram-change').textContent='연결 변경';}else{box.append(element('p','연결되지 않음'));$('telegram-change').textContent='Telegram 연결 설정';}$('telegram-status').textContent=settings.telegram_status?.message||'';$('disconnect').hidden=!tg.enabled;$('new-pair').hidden=!tg.enabled;if(tg.paired)$('telegram-pair').hidden=true;}
 function renderCapabilityPreview(row,preview){let review=row.querySelector('.capability-preview');if(review)review.remove();review=element('div',undefined,'capability-preview');review.append(element('p',preview.effect||`${preview.target} ${preview.action}`));const actions=element('div',undefined,'button-row'),confirm=element('button','확인'),cancel=element('button','취소');confirm.type=cancel.type='button';confirm.onclick=()=>busy(confirm,async()=>{try{await api('/api/settings/request',{operation:'confirm',draft_id:preview.id,digest:preview.digest});$('capability-feedback').textContent='기능 권한 상태를 변경했습니다.';await refresh();}catch(error){setError('capability-feedback',error);}});cancel.onclick=()=>busy(cancel,async()=>{try{await api('/api/settings/request',{operation:'cancel',draft_id:preview.id,digest:preview.digest});review.remove();$('capability-feedback').textContent='변경을 취소했습니다.';}catch(error){setError('capability-feedback',error);}});actions.append(confirm,cancel);review.append(actions);row.append(review);}
+// Owner-visible words for the four contract states.  An unknown value is
+// reported as unknown rather than guessed as connected: a wrong 'connected'
+// here would tell the owner an authorization exists that does not.
+const CONNECTOR_STATES={disconnected:'연결 안 됨',connected:'연결됨',reauth_required:'다시 인증 필요',blocked:'차단됨'};
+// The connect action is a plain same-origin navigation, not an api() call:
+// /google-gmail answers 303 to Google, which fetch would follow cross-origin
+// and discard.  The href stays relative so the owner-session cookie, which is
+// SameSite=Strict and host-scoped, travels whether AgentOS was opened at
+// 127.0.0.1 or localhost.  Drawing the link grants nothing; the route still
+// requires that session and still refuses a tunnel host.
+function renderConnectors(connectors){const box=$('connector-controls');if(!box)return;const rows=connectors||[],fingerprint=JSON.stringify(rows);if(box.dataset.state===fingerprint)return;box.dataset.state=fingerprint;box.replaceChildren();for(const connector of rows){const row=element('div',undefined,'capability-row');row.append(element('strong',connector.label||connector.connector_id),element('p',`${CONNECTOR_STATES[connector.state]||'상태 알 수 없음'} · ${(connector.required_scopes||[]).join(', ')||'요청 권한 없음'}`));if(connector.connect_path&&connector.state!=='blocked'){const link=element('a',connector.state==='connected'?'다시 연결':'연결하기','button-link');link.href=connector.connect_path;link.rel='noreferrer';row.append(link);}box.append(row);}if(!rows.length)box.append(element('p','이 설치에 구성된 외부 연결이 없습니다.','muted'));}
 function renderCapabilities(model){const box=$('capability-controls'),fingerprint=JSON.stringify(model||{});if(box.dataset.state===fingerprint)return;box.dataset.state=fingerprint;box.replaceChildren();for(const capability of model?.capabilities||[]){const row=element('div',undefined,'capability-row');row.append(element('strong',capability.id),element('p',`${capability.state||'상태 알 수 없음'} · ${capability.recovery||'복구 안내 없음'}`));for(const action of capabilityActions(capability)){const labels={pause:'일시 정지',disconnect:'연결 해제',resume:'다시 시작'},button=element('button',labels[action]);button.type='button';button.onclick=()=>busy(button,async()=>{try{const response=await api('/api/settings/request',{operation:'draft',intent:`${capability.id} ${action}`});renderCapabilityPreview(row,response.preview);}catch(error){setError('capability-feedback',error);}});row.append(button);}box.append(row);}if(!(model?.capabilities||[]).length)box.append(element('p','검토된 로컬 기능이 없습니다.','muted'));}
 $('telegram-change').onclick=()=>{telegramDraftOpen=$('telegram-form').hidden;$('telegram-form').hidden=!telegramDraftOpen;if(telegramDraftOpen)$('telegram-token').focus();};
 function showPair(data){$('pair-link').href=data.url;$('telegram-pair').hidden=false;$('telegram-token').value='';}
@@ -177,8 +252,8 @@ function renderDiagnostics(state,tasks){const events=state?.tool_events||[],curr
 async function refresh(){
  if(!authenticated)return;if(refreshing){refreshQueued=true;return;}refreshing=true;const requestedModelRevision=modelLoadRevision,requestedRootsRevision=rootsLoadRevision,requestedFileWorkspaceRevision=fileWorkspaceLoadRevision;$('task-refresh-state').textContent='확인 중…';
  try{
-  const [summary,home,state,space]=await Promise.all([api('/api/tasks'),api('/api/home'),api('/api/state'),api('/api/personal-space')]);const previousSelected=taskProgress?.tasks?.find(task=>task.id===selectedTaskId);lastHome=home;lastState=state;lastSpace=space;taskProgress=mergeTaskProgress(summary,taskProgress,state.jobs);renderTasks();const selected=taskProgress.tasks.find(task=>task.id===selectedTaskId);refreshSelectedTaskDetail(previousSelected,selected,id=>selectTask(id,false));renderRecords();if(activeView==='records')void refreshLoadedRecords();renderWorkspaces(home,state);loadWorkspaceResultSummaries(home.workspaces);
-  const settings=state.settings||{};renderExecutionConnection(settings);renderSubscriptionEngines(settings.subscription_engines);renderTelegram(settings);renderCapabilities(settings.conversation_settings);renderContext(settings.context_inbox);renderDocumentBoundary(settings.document_boundary);renderDiagnostics(state,taskProgress.tasks);$('runtime-badge').textContent=home.state==='working'?'작업 중':home.state==='attention'?'확인 필요':'준비됨';
+  const [summary,home,state,space]=await Promise.all([api('/api/tasks'),api('/api/home'),api('/api/state'),api('/api/personal-space')]);const previousSelected=taskProgress?.tasks?.find(task=>task.id===selectedTaskId);lastHome=home;lastState=state;lastSpace=space;taskProgress=mergeTaskProgress(summary,taskProgress,state.jobs);renderTasks();const selected=taskProgress.tasks.find(task=>task.id===selectedTaskId);refreshSelectedTaskDetail(previousSelected,selected,id=>selectTask(id,false));renderRecords();renderMemoryCandidateSummary(space);if(activeView==='records')void refreshLoadedRecords();renderWorkspaces(home,state);loadWorkspaceResultSummaries(home.workspaces);
+  const settings=state.settings||{};renderExecutionConnection(settings);renderSubscriptionEngines(settings.subscription_engines);renderTelegram(settings);renderCapabilities(settings.conversation_settings);renderConnectors(settings.connectors);renderContext(settings.context_inbox);renderDocumentBoundary(settings.document_boundary);renderDiagnostics(state,taskProgress.tasks);$('runtime-badge').textContent=home.state==='working'?'작업 중':home.state==='attention'?'확인 필요':'준비됨';
   if(!modelLoaded){if(requestedModelRevision===modelLoadRevision){const model=settings.model||{};if(model.provider){$('provider').value=displayProvider(model);$('endpoint').value=model.endpoint||'';$('model-name').value=model.model||'';activeModelDestination=[displayProvider(model),normalizeEndpoint(model.endpoint)].join('|');}$('endpoint-help').textContent=providers[$('provider').value]?.help||'';$('key-hint').textContent=settings.has_api_key?'키가 저장되어 있습니다. 빈칸은 같은 연결의 키를 유지합니다.':'키는 대화 이력과 분리해 저장합니다.';modelLoaded=true;}}
   if(!rootsLoaded&&requestedRootsRevision===rootsLoadRevision){$('root-paths').value=(settings.file_roots||[]).map(item=>item.path).join('\n');rootsLoaded=true;}
   if(!fileWorkspaceLoaded&&requestedFileWorkspaceRevision===fileWorkspaceLoadRevision){$('file-reference-paths').value=(settings.file_workspace?.references||[]).map(item=>item.path).join('\n');$('file-workspace-path').value=settings.file_workspace?.workspace||'';fileWorkspaceLoaded=true;}

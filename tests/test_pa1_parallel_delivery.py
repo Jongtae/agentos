@@ -16,6 +16,7 @@ from delivery_state_invariants import (
     assert_closed_out_record,
     assert_declared_goal_shape,
     assert_no_unauthorised_execution_authority,
+    assert_active_substeps_are_legitimate,
     assert_pause_survives_redeclaration,
     closed_out_programs,
     executing_programs,
@@ -57,7 +58,7 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         self.assertIn("GOV-PA1-01", completed)
         self.assertIn("USE-01", completed)
         self.assertNotIn("EPIC-PA1", completed)
-        self.assertEqual(self.program["active_substeps"], [])
+        assert_active_substeps_are_legitimate(self, self.plan, "EPIC-PA1")
         # The pause history is never erased by a resumption: #419's record
         # and its resume condition stay on the program either way.
         self.assertIn("resume_condition", self.program)
@@ -195,7 +196,15 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         for name in subjects:
             program = self.plan["programs"][name]
             with self.subTest(program=name):
-                self.assertEqual(program.get("active_substeps"), [])
+                if is_resumed(program):
+                    # The record survives resumption on purpose, so the
+                    # subject set cannot evaporate -- but "holds no running
+                    # work" is a claim about being paused *now*. A resumed
+                    # program is allowed work in flight, bounded instead by
+                    # the legitimacy rule.
+                    assert_active_substeps_are_legitimate(self, self.plan, name)
+                else:
+                    self.assertEqual(program.get("active_substeps"), [])
                 self.assertTrue(program.get("resume_condition"))
                 assert_activation_record(self, f"{name} paused_by", program.get("paused_by"))
                 iteration = self.items[name]
@@ -283,7 +292,7 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         # program holds the declared goal -- which is exactly the state the
         # earlier shape-keyed form stopped checking.
         assert_declared_goal_shape(self, self.plan)
-        self.assertEqual(program["active_substeps"], [])
+        assert_active_substeps_are_legitimate(self, self.plan, "EPIC-PA1")
         status = program["status"]
         self.assertIn(status, {"owner-activated-goal-ready", "complete"}, status)
         if status == "owner-activated-goal-ready":
@@ -341,7 +350,7 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
             self.assertNotIn(child.get("activation_status"), {
                 "active", "owner-activated-goal-ready"
             })
-        self.assertEqual(self.program["active_substeps"], [])
+        assert_active_substeps_are_legitimate(self, self.plan, "EPIC-PA1")
 
     def test_finite_wave_graph_and_issue_mapping(self):
         self.assertEqual(self.program["ordered_substeps"], [
@@ -456,7 +465,7 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         self.assertEqual((profiles["standard"]["preferred_model"], profiles["standard"]["preferred_reasoning"]), ("Sol", "Medium"))
         self.assertEqual((profiles["critical"]["preferred_model"], profiles["critical"]["preferred_reasoning"]), ("Sol", "High"))
         self.assertEqual(self.program["routing_policy"]["default"], "standard")
-        self.assertEqual(self.program["active_substeps"], [])
+        assert_active_substeps_are_legitimate(self, self.plan, "EPIC-PA1")
         # "Inactive" is the point of this test. It used to be spelled as the
         # single declared-goal status that happened to hold, then as
         # `EPIC-PA1 not in executing` -- both cast pins. What "inactive"
@@ -505,7 +514,7 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         self.assertEqual(policy["final_checklist_owner"], "PA1-INT-01")
         self.assertIn("all remaining safe", policy["stop_program_only_when"])
         self.assertIn("development_complete and operating_validated remain separate", policy["evidence_boundary"])
-        self.assertEqual(self.program["active_substeps"], [])
+        assert_active_substeps_are_legitimate(self, self.plan, "EPIC-PA1")
         # The gate policy is metadata. It may not start work or start the
         # heartbeat in *any* role -- the earlier form said "on a paused
         # program", which stopped being true when the owner resumed PA1 and

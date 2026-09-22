@@ -498,6 +498,37 @@ def assert_substep_evidence_is_complete(case, name, program, done, detail):
         seen_prs.add(record["pull_request"])
 
 
+def assert_active_substeps_are_legitimate(case, plan, name):
+    """At most one substep in flight, and it must be one the program may run.
+
+    Several tests asserted ``active_substeps == []`` for EPIC-PA1. That was a
+    fact about the cast -- no substep happened to be running -- not an
+    invariant, and it broke the moment the owner activated PA1-INT-01. The
+    property actually worth holding is that the program cannot have work in
+    flight it was never allowed to start: at most one substep, declared in
+    ``ordered_substeps``, not already recorded complete, and whose iteration
+    is still ``parent-controlled`` so a child cannot self-activate.
+    """
+    program = plan["programs"][name]
+    active = program.get("active_substeps", [])
+    case.assertIsInstance(active, list, name)
+    case.assertLessEqual(len(active), 1, f"{name} has more than one substep in flight: {active}")
+    if not active:
+        return None
+    substep = active[0]
+    case.assertIn(substep, program.get("ordered_substeps", []),
+                  f"{name} is running {substep}, which it never enumerated")
+    case.assertNotIn(substep, program.get("completed_substeps", {}),
+                     f"{name} is running {substep} after recording it complete")
+    case.assertNotIn(substep, plan.get("history", {}).get("documented_completed_iterations", []),
+                     f"{name} is running {substep} after documenting it complete")
+    iteration = {item["id"]: item for item in plan["iterations"]}.get(substep)
+    case.assertIsNotNone(iteration, f"{substep} is active with no iteration record")
+    case.assertEqual(iteration.get("activation_status"), "parent-controlled",
+                     f"{substep} is active but not parent-controlled, so it could self-activate")
+    return substep
+
+
 def assert_declared_goal_shape(case, plan=None, path=PLAN_PATH):
     """Assert the plan is in exactly one legitimate shape; return its name.
 

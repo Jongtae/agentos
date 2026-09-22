@@ -54,7 +54,7 @@ all natural-language requests work. Share redacted observations, not private doc
 
 Create your own bot using Telegram's BotFather, paste its token into Settings, and open the generated pairing link in your own Telegram account. Only the paired private account can submit work. The web interface and Telegram share conversation history and notes. AgentOS uses outbound polling, so no public inbound port is needed for Telegram. Use a dedicated bot without an existing webhook.
 
-The computer must remain running and awake for remote requests to be processed. This preview does not install a background login service. Keep the terminal open; Ctrl-C stops AgentOS.
+The computer must remain running and awake for remote requests to be processed. From a source checkout you can register a background login service instead of holding a terminal open; see [Background service (macOS)](#background-service-macos) for exactly what that does and does not cover. Without that service, keep the terminal open; Ctrl-C stops AgentOS.
 
 ## Restart and update
 
@@ -68,9 +68,111 @@ agentos start
 agentos guide
 ```
 
+If you registered the background login service from a source checkout, run `agentos service upgrade` after replacing the executable rather than relying on the foreground command.
+
 Data persists in `~/.local/share/agentos`; uninstalling the formula does not delete it. Back up the entire data directory while AgentOS is stopped. This directory contains your private conversations and credentials; credentials have filesystem permissions, not application-level encryption.
 
 If the browser does not open, use the link in `~/.local/share/agentos/private/setup-link.txt` locally. Do not share that file before setup. After setup, open `http://127.0.0.1:8787`; log in only if you chose a password. An occupied port can be changed using `agentos start --port 8788`. After an unexpected stop, AgentOS marks in-progress work as interrupted and an in-flight Telegram send as unknown; it never silently repeats either. Review the web record and submit a new request if needed. `agentos guide` shows counts and next steps only, never task text or credentials.
+
+## Background service (macOS)
+
+`agentos start` runs in the foreground. On macOS the same executable can instead be
+registered as a per-user launchd login service, so Telegram and web requests are handled
+without an interactive terminal session:
+
+```sh
+agentos service install    # register and start the login service
+agentos service status     # report the observed launchd state and health
+agentos service restart
+agentos service stop       # stop and persistently disable it
+agentos service uninstall  # remove the registration; owner data is retained
+agentos service upgrade    # replace an existing definition, rolling back on failure
+```
+
+From a source checkout the same actions are available as
+`python3 -m personal_agent.quickstart service <action>`. `install` and `upgrade` must record
+an absolute path to the executable launchd will run; they resolve `agentos` from `PATH` and
+then from the Homebrew prefix, so from a source checkout either install the console script
+(`pip install -e .`) or pass `--cli-path /full/path/to/agentos` explicitly. Use `--data` only
+to override the data directory: with no `--data`, the other actions report the directory
+recorded in the installed service definition.
+
+Each action prints the receipt it actually observed and exits non-zero when the operation
+did not succeed. A refused, unhealthy or unreadable service is reported as a failure with a
+`next_action`, never as a success: `background_available` is reported only when a running
+process also passed the loopback health check. `uninstall` removes only the service
+registration and never deletes `~/.local/share/agentos`. The service definition is bound to
+loopback and sets `RunAtLoad`/`KeepAlive`, so it is designed to start again at login.
+
+What this does **not** yet cover, stated exactly:
+
+- **macOS only.** The lifecycle is launchd-specific. There is no systemd equivalent here.
+- **Not in any released build.** The most recent release tag is `v1.0.4` (2026-09-07), which
+  predates this command, and this repository contains no Homebrew formula, tap or checksum.
+  `brew install` / `brew upgrade jongtae/agentos/agentos` will not provide `agentos service`
+  until a later release; today it is reachable only from a source checkout.
+- **Not covered by automated tests of real launchd.** Repository CI runs on Linux and cannot
+  execute launchd. The automated evidence for these commands is injected-runner tests that
+  substitute `launchctl`. A real Homebrew install, a real login service surviving a machine
+  restart, and an end-to-end Telegram result with no terminal open are owner operating
+  validation that this repository has not performed.
+
+## Gmail (source checkout)
+
+AgentOS can read and search your Gmail so a request such as
+`메일에서 예산 관련 내용 찾아줘` is answered instead of refused. It is off unless you
+configure it, and configuring it connects nothing on its own.
+
+Create a Google Cloud OAuth **web** client, add
+`http://localhost:8787/oauth/gmail/callback` as an authorised redirect URI, download the
+client JSON, then write the owner-only credential file:
+
+```sh
+agentos gmail-config \
+  --oauth-client-json ~/Downloads/client_secret_XXXX.json \
+  --secret-file /Users/your-name/.agentos-secrets/gmail.json
+AGENTOS_GMAIL_LOCAL_ONLY=1 \
+AGENTOS_GMAIL_SECRET_FILE=/Users/your-name/.agentos-secrets/gmail.json \
+  agentos start
+```
+
+`gmail-config` is the Gmail counterpart of `drive-config`: it generates the token-store
+encryption key locally, writes a `0600` file owned by you, refuses a relative
+`--secret-file`, and refuses to overwrite an existing one. The client secret and the
+encryption key are never command-line arguments, environment values or log output. The
+file must stay outside `~/.local/share/agentos`; otherwise startup fails closed. If you
+prefer not to keep a file, the equivalent `AGENTOS_GMAIL_CLIENT_ID`,
+`AGENTOS_GMAIL_CLIENT_SECRET` and `AGENTOS_GMAIL_ENCRYPTION_KEY` environment values are
+still read, but the file is the supported boundary.
+
+Then connect, from this computer's browser: **설정 → 외부 연결 → Google 연결 → 연결하기**,
+or open `http://127.0.0.1:8787/google-gmail` in the same browser where you already
+use AgentOS. Google asks you to approve read-only Gmail
+access; AgentOS records the scope Google actually granted. If you asked for something over
+Telegram that needs Gmail, the reply names the connection you need and carries this same
+address, and the original request is resumed exactly once after you connect.
+
+What this does **not** claim, stated exactly:
+
+- **No live Google OAuth has been observed.** The automated evidence is a fixture token
+  endpoint and a fixture Gmail transport inside the repository suite. A real Google
+  consent screen, a real token exchange and a real message list are owner operating
+  validation this repository has not performed.
+- **Read-only.** The only scope requested is `gmail.readonly`, and the connection is
+  recorded only if Google grants exactly that. AgentOS cannot send, reply to, delete,
+  label or archive mail, and nothing here authorises a Calendar, Drive or send scope.
+- **Not in any released build.** The most recent release tag is `v1.0.4` (2026-09-07),
+  which predates these commands. `brew install` / `brew upgrade jongtae/agentos/agentos`
+  will not provide `agentos gmail-config` or the Gmail route until a later release; today
+  they are reachable only from a source checkout.
+- **Connecting is a separate decision from configuring.** Writing the credential file only
+  lets this installation *offer* Gmail. It issues no grant, and the connector stays
+  disconnected until you complete the authorisation yourself. The start route requires
+  your local AgentOS session and refuses a tunnel host, so Gmail cannot be connected from
+  a phone over the mobile pairing link.
+- **Local install is not local-only processing.** Gmail metadata read this way is handled
+  locally, but if you have connected an external model provider, answering a mail question
+  can send that content to the provider you chose.
 
 ## Remote host / source installation
 

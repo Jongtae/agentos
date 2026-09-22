@@ -71,9 +71,16 @@ JOURNEY_EVIDENCE = {
           'install and machine reboot are owner_validation_pending.',
     'J2': 'covered: reference folder connected, prose summary saved as an '
           'artifact with sources, original preserved, reused after restart.',
-    'J3': 'covered offline: parked, authorized through the shipped routes '
-          'against a fixture token endpoint, resumed exactly once. Live '
-          'Gmail is owner_validation_pending.',
+    'J3': 'covered offline, connection and retrieval separately. Parked, '
+          'authorized through the shipped routes against a fixture token '
+          'endpoint, resumed exactly once. Retrieval was a separate seam '
+          'nobody connected: `GmailConnector` took `transport=None` and '
+          'production supplied none, so an owner who completed the OAuth hit '
+          '`transport_unavailable` on their first real search, with no test '
+          'anywhere (#457). The data plane is now wired GET-only to an '
+          'allowlisted host, because the bearer token is already in the '
+          'headers by then. Live Gmail is owner_validation_pending: no real '
+          'Google call has been made.',
     'J4': 'covered offline. Wired end to end: `calendar_query` and three '
           '`calendar_draft_*` tools, an owner-authenticated `/google-calendar` '
           'route for each of the two grants, an unauthenticated-by-necessity '

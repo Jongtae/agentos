@@ -321,13 +321,30 @@ def _https_json_opener(timeout: float) -> Callable:
     never reach the network.
     """
     from urllib.error import HTTPError
-    from urllib.request import Request, urlopen
+    from urllib.request import Request
+
+    from .connector_http import contained_opener
+
+    def permitted(candidate):
+        try:
+            _assert_calendar_url(candidate)
+        except CalendarOAuthError:
+            return False
+        return True
+
+    # The destination check has to hold on every redirect hop, not only on
+    # the URL the caller named. `urllib`'s default handler keeps
+    # `Authorization` across a cross-host redirect and permits an
+    # https->http downgrade, so a single redirect from an allowlisted host
+    # would carry the owner's Calendar token off it -- the same exposure
+    # independent review demonstrated on the Gmail transport.
+    contained = contained_opener(permitted)
 
     def opener(method: str, url: str, body, headers: dict):
         payload = None if body is None else json.dumps(body).encode()
         request = Request(url, payload, dict(headers), method=method)
         try:
-            with urlopen(request, timeout=timeout) as response:
+            with contained.open(request, timeout=timeout) as response:
                 raw = response.read(_MAX_RESPONSE_BYTES + 1)
         except HTTPError as error:
             raise GoogleCalendarHTTPError(int(error.code)) from None

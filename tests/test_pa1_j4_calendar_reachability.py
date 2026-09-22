@@ -338,6 +338,13 @@ class CalendarReachabilityTests(unittest.TestCase):
         because it is one.
         """
         service, base = self.serve()
+        # `resume_connector_work` notifies the owner before it raises, and
+        # without this the refusal went to the REAL Telegram API: independent
+        # review recorded a live DNS lookup and TLS connection to
+        # api.telegram.org from this test. Nothing in this repository is
+        # authorised to make that call.
+        service.telegram_transport = (
+            lambda url, body=None, headers=None, timeout=30: {'ok': True, 'result': {}})
         job_id = service.store.enqueue('내일 3시에 회의 잡아줘', 'park-gen',
                                        channel='telegram:1', chat_id=4242)
         service.store.put('telegram', {'enabled': True, 'user_id': 4242})

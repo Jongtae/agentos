@@ -33,6 +33,7 @@ from .isolated_engine_gateway import IsolatedEngineGateway
 from .drive_web_oauth import DriveWebOAuthHandoff, EncryptedDriveSecretStore, DriveWebOAuthError
 from .connector_contract import ConnectorRegistry
 from .service_control import service_action
+from .connector_http import contained_opener
 from .gmail import (GMAIL_CONNECTOR, EncryptedGmailSecretStore, GmailConnector,
                     GmailError)
 from cryptography.fernet import Fernet
@@ -90,7 +91,11 @@ def local_drive_secret_values(store, environ):
 #: Gmail REST hosts this transport may contact. A bearer token must never
 #: leave the host it was minted for, so the destination is an allowlist and
 #: not "whatever URL the caller built".
-_GMAIL_ALLOWED_HOSTS = ('gmail.googleapis.com', 'www.googleapis.com')
+#: Only the host the Gmail data plane actually calls. `gmail.py` builds every
+#: endpoint from `MESSAGES_ENDPOINT`; `www.googleapis.com` appears there only
+#: inside the scope *string*, never as a destination, and allowlisting it
+#: widened where a token could be sent to a host no code targets.
+_GMAIL_ALLOWED_HOSTS = ('gmail.googleapis.com',)
 
 
 def gmail_http_transport(opener=None, timeout=20):
@@ -107,22 +112,48 @@ def gmail_http_transport(opener=None, timeout=20):
     `GmailConnector` inspects -- in particular a 401 is how it learns to move
     the connector to REAUTH_REQUIRED, and raising would lose that.
     """
+    def permitted(candidate):
+        parts = urlsplit(str(candidate or ''))
+        # Reject userinfo outright, as `_assert_calendar_url` already does.
+        # `parts.hostname` handles `https://host@evil.test` correctly, but a
+        # credential-bearing URL has no legitimate use here and leaving it to
+        # a later parser is how that classic bypass survives a refactor.
+        if parts.username or parts.password:
+            return False
+        return parts.scheme == 'https' and parts.hostname in _GMAIL_ALLOWED_HOSTS
+
+    # The allowlist has to hold across redirects, not only on the URL the
+    # caller named. The default opener carries `Authorization` verbatim to
+    # any host, including an https->http downgrade, for up to ten hops:
+    # independent review drove an owner token to a non-allowlisted host in
+    # cleartext from a single allowlisted first hop.
+    contained = contained_opener(permitted)
+    guarded = opener or contained.open
+
     def transport(method, endpoint, params, headers):
         if method != 'GET':
             raise GmailError('mutation_not_permitted')
         url = str(endpoint or '')
         parts = urlsplit(url)
-        if parts.scheme != 'https' or parts.hostname not in _GMAIL_ALLOWED_HOSTS:
+        if not permitted(url):
             raise GmailError('invalid_provider_endpoint')
         if params:
-            query = urlencode({key: value for key, value in dict(params).items()
+            # `includeSpamTrash=False` would otherwise go out as the Python
+            # literal `False`, which is not what a JSON API expects for a
+            # boolean, and would fail the very first real search.
+            query = urlencode({key: ('true' if value is True else
+                                     'false' if value is False else value)
+                               for key, value in dict(params).items()
                                if value is not None}, doseq=True)
+            # Every connector endpoint is query-free today; preserving an
+            # existing query is kept because dropping it would silently
+            # change a caller's request, and it is pinned by a test rather
+            # than left as an untested claim.
             url = urlunsplit((parts.scheme, parts.netloc, parts.path,
                               '&'.join(filter(None, (parts.query, query))), ''))
         request = Request(url, headers={**(headers or {}), 'Accept': 'application/json'})
         try:
-            with (opener(request, timeout=timeout) if opener
-                  else urlopen(request, timeout=timeout)) as response:
+            with guarded(request, timeout=timeout) as response:
                 body = response.read(2_000_001)
                 if len(body) > 2_000_000:
                     raise GmailError('provider_response_too_large')
@@ -140,6 +171,10 @@ def gmail_http_transport(opener=None, timeout=20):
         except (OSError, ValueError) as exc:
             raise GmailError('provider_unavailable') from exc
 
+    # Exposed so the wiring itself is assertable: an injected opener is a
+    # test's business, but the default must be the contained one.
+    transport.destination_guard = permitted
+    transport.default_opener = contained
     return transport
 
 

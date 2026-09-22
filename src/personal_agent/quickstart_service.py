@@ -160,7 +160,7 @@ def subscription_public_evidence(result):
 class AgentService:
     def __init__(self, store, adapter=None, telegram_transport=None, subscription_engines=None, execution_adapter=None,
                  assistant_orchestrator=None, isolated_engine_adapter=None, isolated_mcp_registry=None,
-                 drive_web_oauth=None, connector_registry=None, gmail=None):
+                 drive_web_oauth=None, connector_registry=None, gmail=None, calendar=None):
         self.store=store
         self.adapter=adapter or ModelAdapter()
         self.telegram_transport=telegram_transport or request_json
@@ -205,6 +205,11 @@ class AgentService:
         self.connector_registry=connector_registry
         self.connector_handoff=ConnectorHandoff(store,connector_registry) if connector_registry else None
         self.gmail=gmail
+        # A `CalendarConnector`, not the legacy `CalendarCreate` facade. The
+        # facade hardcodes `_LegacyCreateProvider` and `authority=lambda: True`,
+        # so it can never reach the real provider and grants itself authority;
+        # it stays available for the older orchestrator path only.
+        self.calendar=calendar
         # Owner-local token-exchange transport for the Gmail callback route,
         # supplied by the same deployment that supplies `gmail`.  Kept off the
         # connector so the client secret never enters connector state.
@@ -1861,7 +1866,7 @@ class AgentService:
                         checked=self.store.config('model_test',{})
                         if checked.get('runtime_model'):
                             runtime_config['model']=checked['runtime_model']
-                        capabilities=Capabilities(self.store,self.adapter,runtime_config,key,job['id'],record,network=self.local_tools,document_access=not boundary['requires_approval'],packages=self.runtime_packages(),document_context=document_history and not boundary['requires_approval'],public_page_scope=self.public_page_boundary(config)['urls'],memory_approval=owner_memory_approval,inherited_provenance=turn_provenance)
+                        capabilities=Capabilities(self.store,self.adapter,runtime_config,key,job['id'],record,network=self.local_tools,document_access=not boundary['requires_approval'],packages=self.runtime_packages(),document_context=document_history and not boundary['requires_approval'],public_page_scope=self.public_page_boundary(config)['urls'],memory_approval=owner_memory_approval,inherited_provenance=turn_provenance,calendar=self.calendar)
                         result=run_agent(self.adapter,runtime_config,key,history,'',capabilities,record)
                         outcome=getattr(result,'outcome','succeeded')
                         response,provider,model=result.content,result.provider,result.model

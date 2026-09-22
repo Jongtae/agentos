@@ -11,8 +11,20 @@
 # Before it, the only links were a prose URL in QUICKSTART.md and a Python
 # default in src/personal_agent/delivery.py.
 #
-# Two placeholders are filled at release time, and only after the tag is
-# pushed, because the archive they describe does not exist until then:
+# THIS FILE IS A REFERENCE COPY, NOT A RENDER SOURCE. Nothing reads it.
+# The release path (`delivery.py:406-408`) clones the tap and rewrites the two
+# lines of the *existing* Formula/agentos.rb with two `re.sub` calls. Do not
+# paste this file into the tap: this header describes in-repo test invariants
+# that are false and meaningless once published.
+#
+# Because nothing reads it, it can drift from the published formula while this
+# repository's suite stays green. If the tap formula changes structurally,
+# re-sync this file in the same release. That obligation is written down in
+# docs/release.en.md step 7 and is not automated.
+#
+# The two placeholders below mark what the release path substitutes, and are
+# only knowable after the tag is pushed, because the archive they describe
+# does not exist until then:
 #
 #   __VERSION__  the release version, matching pyproject.toml, without the `v`
 #   __SHA256__   sha256 of the GitHub-generated tag archive

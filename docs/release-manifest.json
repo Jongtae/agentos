@@ -21,7 +21,8 @@
     {
       "version": "1.1.0",
       "tag": null,
-      "commit": "3bee547719b4fee6d2216e627520d709f704abd0",
+      "commit": null,
+      "why_no_commit": "The commit that gets tagged is the squash-merge commit on main, which does not exist while this entry is unpublished. Recording any earlier SHA here is wrong the moment the PR merges.",
       "archive_sha256": null,
       "state": "unpublished",
       "why_no_checksum": "The GitHub tag archive does not exist until the tag is pushed, and its gzip output is not byte-reproducible from a local `git archive`. A fabricated checksum would produce a formula that reviews as valid and installs nothing.",
@@ -31,7 +32,7 @@
         "J2": "covered",
         "J3": "covered offline - live Google OAuth owner_validation_pending",
         "J4": "not reachable from any channel",
-        "J5": "partial",
+        "J5": "partial - the routing-site provenance refusal ships; the discrimination itself does NOT. research.PublicResearch is imported by nothing in src/, so it is unreachable from any production path in this build",
         "J6": "covered",
         "J7": "covered",
         "J8": "covered"

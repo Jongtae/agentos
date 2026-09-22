@@ -34,6 +34,43 @@ READMES = ('README.md', 'README.ko.md', 'README.ja.md', 'README.zh-CN.md')
 TAP = 'Jongtae/homebrew-agentos'
 FORMULA_NAME = 'jongtae/agentos/agentos'
 
+#: Words that mark the published build as older than `main`, in each language
+#: a README is written in. Naming the version without one of these is how the
+#: original defect read.
+BEHIND_WORDS = ('behind', 'predates', '뒤입니다', '遅れて', '落后')
+
+#: The executable body, pinned literally. Changing the formula means changing
+#: this too, deliberately, in the same commit.
+EXPECTED_FORMULA = '''class Agentos < Formula
+  desc "Self-hosted personal agent with browser setup and Telegram"
+  homepage "https://github.com/Jongtae/personal-agentos"
+  url "https://github.com/Jongtae/personal-agentos/archive/refs/tags/v__VERSION__.tar.gz"
+  sha256 "__SHA256__"
+  depends_on "python@3.13"
+
+  def install
+    system Formula["python@3.13"].opt_bin/"python3.13", "-m", "venv", libexec
+    system libexec/"bin/pip", "install", buildpath
+    (bin/"agentos").write <<~PYTHON
+      #!#{libexec}/bin/python
+      from personal_agent.quickstart import main
+      main()
+    PYTHON
+  end
+
+  def caveats
+    <<~EOS
+      Run agentos start to open browser setup.
+      Data: ~/.local/share/agentos
+      Keep the process running to receive Telegram requests.
+    EOS
+  end
+
+  test do
+    assert_match "personal agent", shell_output("#{bin}/agentos --help")
+  end
+end'''
+
 
 def project_version():
     with open(ROOT / 'pyproject.toml', 'rb') as handle:
@@ -42,6 +79,11 @@ def project_version():
 
 def manifest():
     return json.loads(MANIFEST.read_text(encoding='utf-8'))
+
+
+def version_key(value):
+    """Numeric ordering. ``sorted()`` on the strings puts 1.0.4 after 1.0.10."""
+    return tuple(int(part) for part in value.split('.'))
 
 
 class ReleaseTraceabilityTests(unittest.TestCase):
@@ -71,6 +113,10 @@ class ReleaseTraceabilityTests(unittest.TestCase):
                 self.assertIsNone(row['tag'])
                 self.assertTrue(row.get('why_no_checksum'),
                                 'an absent checksum must say why')
+                # The tagged commit is the squash-merge commit, which does
+                # not exist yet. Any SHA recorded here is wrong on merge.
+                self.assertIsNone(row['commit'])
+                self.assertTrue(row.get('why_no_commit'))
 
     def test_every_published_entry_carries_a_real_checksum(self):
         for row in manifest()['published']:
@@ -129,7 +175,7 @@ class ReleaseTraceabilityTests(unittest.TestCase):
         child. Each README that offers the command must say so within sight
         of it, not only in QUICKSTART.
         """
-        newest = sorted(row['version'] for row in manifest()['published'])[-1]
+        newest = max((row['version'] for row in manifest()['published']), key=version_key)
         for name in READMES:
             body = (ROOT / name).read_text(encoding='utf-8')
             if 'brew install ' + FORMULA_NAME not in body:
@@ -140,6 +186,43 @@ class ReleaseTraceabilityTests(unittest.TestCase):
                 self.assertIn(newest, window,
                               f'{name} offers brew install without naming the '
                               f'version it actually installs')
+                # Naming the version is not enough. Review replaced the
+                # caveat with "v1.0.4, the fully current baseline with every
+                # feature described below" -- the exact claim this test
+                # exists to prevent -- and it still passed.
+                self.assertTrue(
+                    any(word in window for word in BEHIND_WORDS),
+                    f'{name} names the version but does not say it is behind '
+                    f'`main`; naming it while calling it current is the defect')
+                for claim in ('current baseline', '최신 빌드', '现行基线'):
+                    self.assertNotIn(claim, window,
+                                     f'{name} still presents the published '
+                                     f'release as current')
+
+    def test_the_template_body_is_the_expected_formula_and_nothing_else(self):
+        """The part that actually runs on the owner's machine.
+
+        The other template tests pin four strings -- class, homepage, url and
+        the placeholder slots -- and leave the install block free. Review
+        inserted a ``curl … | sh`` into ``def install`` and all twelve tests
+        passed. This is a file whose whole purpose is to be rendered into
+        something Homebrew executes, so the executable body is pinned
+        literally and a change has to be made deliberately here.
+        """
+        body = TEMPLATE.read_text(encoding='utf-8')
+        # Everything from the class declaration on; the comment header above
+        # it is documentation and may change freely.
+        formula = body[body.index('class Agentos < Formula'):]
+        self.assertEqual(formula.strip(), EXPECTED_FORMULA.strip())
+
+    def test_the_template_contains_no_shell_execution(self):
+        """A second, independent net: pinning equality above could be updated
+        carelessly, so name the shapes that must never appear at all."""
+        body = TEMPLATE.read_text(encoding='utf-8').casefold()
+        for forbidden in ('curl', 'wget', '/bin/sh', '/bin/bash', 'eval',
+                          'base64', 'system "sh"', 'popen'):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, body)
 
     def test_the_executable_remediation_names_a_formula_that_exists(self):
         """`brew reinstall personal-agentos` fails: that is the PyPI name.

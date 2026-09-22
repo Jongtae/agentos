@@ -60,12 +60,33 @@ authorized by EPIC-PA1 / #386, which explicitly excludes public deployment.
 6. **Compute the archive checksum** of
    `https://github.com/Jongtae/personal-agentos/archive/refs/tags/vX.Y.Z.tar.gz`.
    `delivery.py` `_archive_sha256` is the reference implementation.
-7. **Render the formula** from `deploy/homebrew/agentos.rb.template`, replacing
-   `__VERSION__` and `__SHA256__`, and open a PR against
-   `Jongtae/homebrew-agentos` `Formula/agentos.rb`.
+7. **Update the tap formula in place.** Clone `Jongtae/homebrew-agentos`, and
+   rewrite the two lines of the existing `Formula/agentos.rb` — the `url` tag
+   and the `sha256` — then open a PR. `delivery.py:406-408` is the reference
+   implementation and does exactly this, with two `re.sub` calls.
+
+   **Do not paste `deploy/homebrew/agentos.rb.template` into the tap.** That
+   file is a reference copy for traceability from this repository, not a
+   render source: nothing reads it, and its 26-line comment header describes
+   in-repo test invariants that are false and meaningless once published.
+   If the tap formula ever changes structurally — a new Python dependency, a
+   different install block — re-sync the template in the same release and say
+   so in the PR. Nothing enforces that automatically; the template can drift
+   from the published formula while this repository's suite stays green,
+   which is the one failure mode this file has.
 8. **Verify the install**: `brew update`, `brew upgrade jongtae/agentos/agentos`,
    `brew test jongtae/agentos/agentos`, then
    `python3 scripts/quickstart_install_check.py`.
+
+9. **Record the published release.** Add the computed `sha256`, the tag and
+   the version to the `published` list in `docs/release-manifest.json`, and
+   remove the matching `unpublished` entry.
+10. **Bump `pyproject.toml` to the next version immediately.** Steps 9 and 10
+    must land together. `test_the_in_tree_version_is_not_a_published_version`
+    fails the moment a version appears in `published` while `pyproject.toml`
+    still names it, so recording the release without bumping turns `main` red
+    — which is the intended signal that source and shipped build have become
+    indistinguishable, not a test defect.
 
 ## Evidence classes
 

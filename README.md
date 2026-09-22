@@ -28,12 +28,14 @@ Useful work and owner control are joint requirements. Control without useful res
 
 ![Install Personal AgentOS](docs/assets/readme/install.svg)
 
+> Installs the latest **published** release, not `main`. See the note below the command.
+
 ```sh
 brew install jongtae/agentos/agentos
 agentos start
 ```
 
-The browser opens at `http://127.0.0.1:8787`. Homebrew is the current macOS developer/self-host path and may differ from current `main`. Model runtimes and model access are separate. Follow [QUICKSTART](QUICKSTART.md) for supported connection choices and the recommended file-workspace test.
+The browser opens at `http://127.0.0.1:8787`. **This installs the newest published release, `v1.0.4` (2026-09-07), which is well behind `main`** — it carries no Gmail connector, no `agentos service`, no PA1 connector contract and no memory service. Homebrew is the macOS self-host path; for anything described below as recent, use a source checkout. [QUICKSTART](QUICKSTART.md) states exactly what each build does and does not cover, and [the release procedure](docs/release.en.md) explains how a release is produced. Model runtimes and model access are separate. Follow [QUICKSTART](QUICKSTART.md) for supported connection choices and the recommended file-workspace test.
 
 For that documented file-workspace path, use a supported **direct model-provider connection**, explicitly grant a reference folder and managed workspace, and approve document sharing before sending approved context to an external provider. The subscription-engine path is not the documented file-workspace dogfood path.
 

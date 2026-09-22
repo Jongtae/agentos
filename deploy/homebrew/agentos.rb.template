@@ -1,0 +1,68 @@
+# Homebrew formula template for the `jongtae/agentos` tap.
+#
+# The published formula does NOT live in this repository -- the tap
+# `Jongtae/homebrew-agentos` is Formula-only by an explicit earlier migration
+# decision (docs/issue-branch-ledger.jsonl, first record). That is why
+# `git ls-files` finds no `.rb` here, and why "no formula exists" is the wrong
+# reading of that absence: a live tap exists and is what `brew install
+# jongtae/agentos/agentos` resolves.
+#
+# This template exists so the relationship is traceable FROM this repository.
+# Before it, the only links were a prose URL in QUICKSTART.md and a Python
+# default in src/personal_agent/delivery.py.
+#
+# THIS FILE IS A REFERENCE COPY, NOT A RENDER SOURCE. Nothing reads it.
+# The release path (`delivery.py:406-408`) clones the tap and rewrites the two
+# lines of the *existing* Formula/agentos.rb with two `re.sub` calls. Do not
+# paste this file into the tap: this header describes in-repo test invariants
+# that are false and meaningless once published.
+#
+# Because nothing reads it, it can drift from the published formula while this
+# repository's suite stays green. If the tap formula changes structurally,
+# re-sync this file in the same release. That obligation is written down in
+# docs/release.en.md step 7 and is not automated.
+#
+# The two placeholders below mark what the release path substitutes, and are
+# only knowable after the tag is pushed, because the archive they describe
+# does not exist until then:
+#
+#   __VERSION__  the release version, matching pyproject.toml, without the `v`
+#   __SHA256__   sha256 of the GitHub-generated tag archive
+#
+# `__SHA256__` is deliberately NOT a plausible-looking hex string. A formula
+# carrying a fabricated checksum would install nothing and would look valid in
+# review; tests/test_release_traceability.py asserts this slot stays a
+# placeholder. GitHub's tarball is not byte-reproducible from a local
+# `git archive`, so this value cannot honestly be precomputed here.
+#
+# See docs/release.en.md for the full procedure.
+
+class Agentos < Formula
+  desc "Self-hosted personal agent with browser setup and Telegram"
+  homepage "https://github.com/Jongtae/personal-agentos"
+  url "https://github.com/Jongtae/personal-agentos/archive/refs/tags/v__VERSION__.tar.gz"
+  sha256 "__SHA256__"
+  depends_on "python@3.13"
+
+  def install
+    system Formula["python@3.13"].opt_bin/"python3.13", "-m", "venv", libexec
+    system libexec/"bin/pip", "install", buildpath
+    (bin/"agentos").write <<~PYTHON
+      #!#{libexec}/bin/python
+      from personal_agent.quickstart import main
+      main()
+    PYTHON
+  end
+
+  def caveats
+    <<~EOS
+      Run agentos start to open browser setup.
+      Data: ~/.local/share/agentos
+      Keep the process running to receive Telegram requests.
+    EOS
+  end
+
+  test do
+    assert_match "personal agent", shell_output("#{bin}/agentos --help")
+  end
+end

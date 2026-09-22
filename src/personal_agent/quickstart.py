@@ -20,7 +20,10 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlsplit
 from .quickstart_store import QuickStore
-from .quickstart_service import AgentService, GMAIL_CONNECT_PATH, LOCAL_ADDRESS_HOST
+from .calendar import CalendarConnector
+from .calendar_oauth import CalendarOAuth, EncryptedCalendarSecretStore, calendar_transport
+from .google_calendar import GoogleCalendar
+from .quickstart_service import AgentService, CALENDAR_CONNECT_PATH, GMAIL_CONNECT_PATH, LOCAL_ADDRESS_HOST
 from .subscription_engines import SubscriptionEngines
 from .plugins import PluginRegistry
 from .providers import ProviderError
@@ -80,6 +83,18 @@ def local_drive_secret_values(store, environ):
     """Owner-local Drive credentials: OAuth client, Fernet key, Picker key."""
     return local_oauth_secret_values(store,environ.get('AGENTOS_DRIVE_SECRET_FILE',''),
                                      ('client_id','client_secret','encryption_key','picker_api_key'),'Drive')
+
+
+def local_calendar_secret_values(store, environ):
+    """Owner-local Calendar credentials: OAuth client and Fernet key.
+
+    Calendar-prefixed throughout. The comment above the Gmail block records a
+    real defect where one connector's closure captured another connector's
+    secret while both looked correct in isolation; separate names and a
+    separate Fernet namespace are what keep these two apart.
+    """
+    return local_oauth_secret_values(store,environ.get('AGENTOS_CALENDAR_SECRET_FILE',''),
+                                     ('client_id','client_secret','encryption_key'),'Calendar')
 
 
 def local_gmail_secret_values(store, environ):
@@ -243,13 +258,17 @@ def configured_service(store, environ=None):
             # and `transition` commits the exact required scope set.  So this
             # declares that the installation *offers* Gmail; it grants nothing.
             #
-            # Calendar is deliberately absent, which is an integration finding
-            # rather than an omission: PA1-CALENDAR-01 ships no way to obtain a
-            # Calendar credential, so `google-calendar`/`google-calendar-write`
-            # can never leave DISCONNECTED here.  Registering them anyway would
-            # turn today's truthful "not configured locally" refusal into Work
-            # parked for a connection no shipped route can complete, and only a
-            # later request for the same connector would ever release it.
+            # Calendar used to be deliberately absent here, because
+            # PA1-CALENDAR-01 shipped no way to obtain a Calendar credential
+            # and registering the specs would have turned a truthful "not
+            # configured locally" refusal into Work parked for a connection no
+            # shipped route could complete.  That reasoning was right and the
+            # condition it depended on is now gone: `calendar_oauth` issues the
+            # credential and `/google-calendar` + `/oauth/calendar/callback`
+            # below complete it.  Registration still grants nothing - both rows
+            # read DISCONNECTED until an owner finishes an authorization - and
+            # the construction is deliberately in the same block as the routes,
+            # because either one alone is the dead end.
             connector_registry=ConnectorRegistry(store,(GMAIL_CONNECTOR,))
             gmail=GmailConnector(EncryptedGmailSecretStore(store,gmail_key),gmail_client_id,
                                  f'http://localhost:{gmail_port}/oauth/gmail/callback',
@@ -261,9 +280,52 @@ def configured_service(store, environ=None):
                 body=urlencode({**payload,'client_secret':gmail_client_secret}).encode()
                 with urlopen(Request('https://oauth2.googleapis.com/token',body,{'Content-Type':'application/x-www-form-urlencoded'}),timeout=15) as response:
                     return json.loads(response.read())
+    # --- Google Calendar (J4) -------------------------------------------
+    # Construction and routes land together, on purpose. `CalendarConnector`
+    # registers both specs on construction, and registering them without a
+    # completable route converts today's truthful refusal into indefinitely
+    # parked Work -- the exact failure the older comment above warned about.
+    calendar_factory=calendar_oauth=None
+    calendar_exchange=None
+    if environ.get('AGENTOS_CALENDAR_LOCAL_ONLY')=='1':
+        calendar_values=local_calendar_secret_values(store,environ)
+        calendar_from_file=bool(environ.get('AGENTOS_CALENDAR_SECRET_FILE'))
+        calendar_client_id=calendar_values.get('client_id') if calendar_from_file else environ.get('AGENTOS_CALENDAR_CLIENT_ID','')
+        calendar_key=calendar_values.get('encryption_key') if calendar_from_file else environ.get('AGENTOS_CALENDAR_ENCRYPTION_KEY','')
+        calendar_client_secret=calendar_values.get('client_secret') if calendar_from_file else environ.get('AGENTOS_CALENDAR_CLIENT_SECRET','')
+        if calendar_client_id and calendar_key and calendar_client_secret:
+            calendar_port=environ.get('AGENTOS_CALENDAR_LOCAL_PORT','8787')
+            if not str(calendar_port).isdigit() or not 1<=int(calendar_port)<=65535:
+                raise ValueError('Local Calendar callback port must be a valid TCP port.')
+            calendar_registry=connector_registry or ConnectorRegistry(store,())
+            calendar_secrets=EncryptedCalendarSecretStore(store,calendar_key)
+            calendar_oauth=CalendarOAuth(calendar_secrets,calendar_client_id,
+                                         f'http://localhost:{calendar_port}/oauth/calendar/callback',
+                                         registry=calendar_registry,allow_localhost=True)
+            # One provider serves reads and writes; the transport picks the
+            # grant from the HTTP method, so a read can never spend the write
+            # credential and vice versa.
+            def calendar_factory(owner_id,_registry=calendar_registry,_secrets=calendar_secrets):
+                return CalendarConnector(store,GoogleCalendar(
+                    calendar_transport(_secrets,_registry,owner_id,allow_writes=True)),
+                    registry=_registry)
+            # `CalendarOAuth` already registered both definitions above, so
+            # the connect route and the parked-Work guidance agree about what
+            # this install offers before any Work builds a connector.
+            # Registering again here was dead code: removing it changed
+            # nothing observable, which is how the mutation found it.
+            connector_registry=calendar_registry
+            def calendar_exchange(payload):
+                # Same shape as the Gmail exchange: the client secret is added
+                # here and never reaches the connector or any status surface.
+                body=urlencode({**payload,'client_secret':calendar_client_secret}).encode()
+                with urlopen(Request('https://oauth2.googleapis.com/token',body,{'Content-Type':'application/x-www-form-urlencoded'}),timeout=15) as response:
+                    return json.loads(response.read())
     service=AgentService(store,subscription_engines=isolated_engines,
                          isolated_engine_adapter=isolated_engine,drive_web_oauth=drive,
-                         connector_registry=connector_registry,gmail=gmail)
+                         connector_registry=connector_registry,gmail=gmail,
+                         calendar_factory=calendar_factory,calendar_oauth=calendar_oauth)
+    service.calendar_token_exchange=calendar_exchange
     service.drive_token_exchange=drive_exchange
     service.drive_read=drive_read
     service.drive_picker_config=picker_config
@@ -391,6 +453,33 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 # Says only what happened: the connection.  Whether parked Work
                 # resumed is reported in the conversation that parked it.
                 return self.reply(200,b'Gmail connected. Return to Telegram.','text/plain; charset=utf-8')
+            if path==CALENDAR_CONNECT_PATH:
+                # Same shape as the Gmail connect route: owner-authenticated,
+                # loopback only. The extra piece is `grant`, because read and
+                # write are separate connectors and the owner authorizes each
+                # deliberately -- there is no path that turns one into both.
+                if not self.auth():return
+                if self.public_host():
+                    return self.reply(400,b'Open AgentOS on its local address to connect Google Calendar.','text/plain; charset=utf-8')
+                grant=parse_qs(parts.query).get('grant',['read'])[0]
+                try:return self.redirect(service.begin_calendar_connection(grant)['authorization_url'])
+                except (AttributeError, ValueError, KeyError):
+                    return self.reply(400,b'Google Calendar connection is unavailable. Check the local Calendar configuration.','text/plain; charset=utf-8')
+            if path=='/oauth/calendar/callback':
+                # Unauthenticated by necessity, exactly as the Gmail callback
+                # is: Google redirects a browser here and the SameSite=Strict
+                # session cookie never survives a cross-site redirect.
+                # Authority is the owner-bound, HMAC-signed, single-use state,
+                # which also carries which of the two grants is completing.
+                # One message for every failure, so a guess learns nothing.
+                if self.public_host():
+                    return self.reply(400,b'Google Calendar connection could not be completed. Start the connection again from AgentOS.','text/plain; charset=utf-8')
+                try:
+                    callback={key:values[0] for key,values in parse_qs(parts.query).items()}
+                    service.complete_calendar_connection(callback)
+                except (AttributeError, ValueError, OSError):
+                    return self.reply(400,b'Google Calendar connection could not be completed. Start the connection again from AgentOS.','text/plain; charset=utf-8')
+                return self.reply(200,b'Google Calendar connected. Return to Telegram.','text/plain; charset=utf-8')
             if path=='/google-drive-picker':
                 grant=parse_qs(parts.query).get('grant',[''])[0]
                 if not (getattr(service,'drive_picker_config',None) and service.drive_web_oauth.picker_grant_active(grant)):
@@ -420,6 +509,20 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             if path=='/api/personal-knowledge':return self.reply(200,service.personal_knowledge_request({'query':parse_qs(parts.query).get('query',[''])[0]}, channel='local-companion'))
             if path=='/api/personal-space/memory-candidates':
                 return self.reply(200,service.memory_candidate_request({'operation':'list'}))
+            if path=='/api/calendar/drafts':
+                # The owner's own surface. A draft the model proposed is
+                # inert until the owner approves and applies it here.
+                #
+                # Tunnel host refused, unlike the neighbouring
+                # memory-candidate surface it is modelled on. That one has no
+                # external effect; this one creates, changes or cancels a
+                # real calendar event, and it is the first route in this
+                # server that does. Every other Calendar route already
+                # refuses a tunnel host and this should not be the exception.
+                if self.public_host():
+                    return self.reply(400,{'error':'Open AgentOS on its local address to review calendar drafts.'})
+                try:return self.reply(200,service.calendar_draft_request({'operation':'list'}))
+                except ValueError as exc:return self.reply(400,{'error':str(exc)})
             if path=='/api/personal-space':return self.reply(200,store.personal_space())
             if path=='/api/personal-records':
                 values=parse_qs(parts.query)
@@ -526,6 +629,13 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 if path=='/api/personal-knowledge':return self.reply(200,service.personal_knowledge_request(body, channel='local-companion'))
                 if path=='/api/personal-space/memory-candidates/request':
                     return self.reply(200,service.memory_candidate_request(body))
+                if path=='/api/calendar/drafts/request':
+                    # See the GET above: this one applies a real external
+                    # effect, so loopback only.
+                    if self.public_host():
+                        return self.reply(400,{'error':'Open AgentOS on its local address to approve a calendar change.'})
+                    try:return self.reply(200,service.calendar_draft_request(body))
+                    except ValueError as exc:return self.reply(400,{'error':str(exc)})
                 if path=='/api/context-inbox/telegram-policy':return self.reply(200,service.set_context_telegram_policy(body))
                 if path=='/api/documents/approval':return self.reply(200,service.set_document_approval(body))
                 if path=='/api/public-pages/approval':return self.reply(200,service.set_public_page_approval(body))
@@ -659,6 +769,31 @@ def gmail_config_main(argv):
     _write_local_oauth_secret_file(parser,target,values,'Gmail')
 
 
+def calendar_config_main(argv):
+    """Create a local-only Calendar secret file without printing its contents.
+
+    The same shape as ``gmail-config``: the same two arguments, the same
+    absolute-path refusal, a locally generated Fernet key, the same 0600
+    exclusive create, the same refusal to replace an existing file.
+
+    Writing this file is not a Grant and connects nothing. It lets the
+    installation *offer* Calendar; both `google-calendar` and
+    `google-calendar-write` stay DISCONNECTED until the owner completes an
+    authorization through ``/google-calendar``, and they are authorized
+    separately so a read grant never widens into a write grant.
+    """
+    parser=argparse.ArgumentParser(description='Create an owner-only local Google Calendar credential file.')
+    parser.add_argument('--oauth-client-json',required=True)
+    parser.add_argument('--secret-file',required=True)
+    args=parser.parse_args(argv)
+    source=Path(args.oauth_client_json).expanduser().resolve(strict=True)
+    target=_local_oauth_secret_target(parser,args.secret_file)
+    client_id,client_secret=_local_oauth_client(parser,source)
+    values={'client_id':client_id,'client_secret':client_secret,
+            'encryption_key':Fernet.generate_key().decode()}
+    _write_local_oauth_secret_file(parser,target,values,'Calendar')
+
+
 def service_main(argv):
     """Expose the installed background-service lifecycle to the owner CLI.
 
@@ -693,6 +828,8 @@ def main():
         return plugins_main(sys.argv[2:])
     if len(sys.argv)>1 and sys.argv[1]=='drive-config':
         return drive_config_main(sys.argv[2:])
+    if len(sys.argv)>1 and sys.argv[1]=='calendar-config':
+        return calendar_config_main(sys.argv[2:])
     if len(sys.argv)>1 and sys.argv[1]=='gmail-config':
         return gmail_config_main(sys.argv[2:])
     if len(sys.argv)>1 and sys.argv[1]=='service':

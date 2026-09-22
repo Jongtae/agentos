@@ -23,6 +23,7 @@ from .memory_service import MemoryService
 from .file_workspace import FileWorkspace
 from .connector_contract import ConnectorContractError, _owner_key
 from .gmail import GMAIL_CONNECTOR_ID, GmailError
+from .calendar import CALENDAR_CONNECTOR_ID, CALENDAR_WRITE_CONNECTOR_ID
 from .conversation_handoff import (CONNECTOR_LABELS, TelegramChannel, ConnectorHandoff,
                                    ConversationFocus,
                                    ConversationHandoffError, IntentClassifier,
@@ -36,6 +37,7 @@ from .conversation_handoff import (CONNECTOR_LABELS, TelegramChannel, ConnectorH
 #: owner is handed and the route that answers it cannot drift apart: a rename
 #: in one place without the other would ship a reachable-looking dead link.
 GMAIL_CONNECT_PATH = '/google-gmail'
+CALENDAR_CONNECT_PATH='/google-calendar'
 
 #: The host AgentOS actually advertises for itself: it is printed at startup,
 #: written to `setup-link.txt` and opened in the owner's browser, so it is the
@@ -160,7 +162,7 @@ def subscription_public_evidence(result):
 class AgentService:
     def __init__(self, store, adapter=None, telegram_transport=None, subscription_engines=None, execution_adapter=None,
                  assistant_orchestrator=None, isolated_engine_adapter=None, isolated_mcp_registry=None,
-                 drive_web_oauth=None, connector_registry=None, gmail=None):
+                 drive_web_oauth=None, connector_registry=None, gmail=None, calendar=None, calendar_oauth=None, calendar_factory=None):
         self.store=store
         self.adapter=adapter or ModelAdapter()
         self.telegram_transport=telegram_transport or request_json
@@ -205,6 +207,21 @@ class AgentService:
         self.connector_registry=connector_registry
         self.connector_handoff=ConnectorHandoff(store,connector_registry) if connector_registry else None
         self.gmail=gmail
+        # A `CalendarConnector`, not the legacy `CalendarCreate` facade. The
+        # facade hardcodes `_LegacyCreateProvider` and `authority=lambda: True`,
+        # so it can never reach the real provider and grants itself authority;
+        # it stays available for the older orchestrator path only.
+        self.calendar=calendar
+        # The OAuth half is separate from the policy connector: `calendar`
+        # answers tool calls, `calendar_oauth` answers the two routes.
+        self.calendar_oauth=calendar_oauth
+        self.calendar_token_exchange=None
+        # A connector is bound to one owner's credential, and this process
+        # serves two connector identities (the paired Telegram chat and the
+        # local owner). So the connector is built per Work from this factory
+        # rather than once at startup; `calendar` stays available for tests
+        # that inject a ready-made one.
+        self.calendar_factory=calendar_factory
         # Owner-local token-exchange transport for the Gmail callback route,
         # supplied by the same deployment that supplies `gmail`.  Kept off the
         # connector so the client secret never enters connector state.
@@ -1052,12 +1069,23 @@ class AgentService:
         not configured, so an installation that cannot offer the connection
         never advertises one.
         """
-        if connector_id!=GMAIL_CONNECTOR_ID or not self.gmail:
+        # Gmail was the only connector when this was written and the check
+        # was written as `!= GMAIL_CONNECTOR_ID`. Calendar has two connector
+        # ids sharing one route, so the mapping is now explicit: an id this
+        # install cannot offer still returns '' and advertises nothing.
+        if connector_id==GMAIL_CONNECTOR_ID and self.gmail:
+            holder,path=self.gmail,GMAIL_CONNECT_PATH
+        elif connector_id in (CALENDAR_CONNECTOR_ID,CALENDAR_WRITE_CONNECTOR_ID) and self.calendar_oauth:
+            # One route starts either grant; the query names which, and the
+            # signed state carries it through the callback.
+            holder=self.calendar_oauth
+            path=CALENDAR_CONNECT_PATH+('?grant=write' if connector_id==CALENDAR_WRITE_CONNECTOR_ID else '?grant=read')
+        else:
             return ''
-        parts=urlsplit(getattr(self.gmail,'redirect_uri','') or '')
+        parts=urlsplit(getattr(holder,'redirect_uri','') or '')
         if parts.scheme!='http' or not parts.port:
             return ''
-        return f'http://{LOCAL_ADDRESS_HOST}:{parts.port}{GMAIL_CONNECT_PATH}'
+        return f'http://{LOCAL_ADDRESS_HOST}:{parts.port}{path}'
 
     def connector_connections(self):
         """Read-only connection state for every connector this install offers.
@@ -1089,7 +1117,7 @@ class AgentService:
                          'label':CONNECTOR_LABELS.get(connector.connector_id,connector.connector_id),
                          'state':status.state.value,
                          'required_scopes':list(status.required_scopes),
-                         'connect_path':GMAIL_CONNECT_PATH if self.connector_connect_url(connector.connector_id) else ''})
+                         'connect_path':(urlsplit(self.connector_connect_url(connector.connector_id)).path+(('?'+urlsplit(self.connector_connect_url(connector.connector_id)).query) if urlsplit(self.connector_connect_url(connector.connector_id)).query else '')) if self.connector_connect_url(connector.connector_id) else ''})
         return rows
 
     def begin_gmail_connection(self):
@@ -1102,6 +1130,149 @@ class AgentService:
         if not self.gmail:
             raise ValueError(ConnectorHandoff.unavailable(GMAIL_CONNECTOR_ID))
         return self.gmail.begin_oauth(self.connector_callback_owner(GMAIL_CONNECTOR_ID))
+
+    def calendar_owner_candidates(self):
+        """The connector identities this install serves, same human, both.
+
+        `connector_owner_id` gives Telegram Work `telegram:<chat>` and
+        web/local Work `local-owner`, and `connector_callback_owner` already
+        treats the two as candidates for one owner. The first version of the
+        approve surface hardcoded `local-owner`, so every draft the model
+        produced from a Telegram request -- the primary J4 journey -- was
+        listed and then refused with an opaque error, and nobody could apply
+        it on a paired install.
+        """
+        candidates = []
+        telegram = self.store.config('telegram', {})
+        if isinstance(telegram, dict) and telegram.get('enabled') and telegram.get('user_id') is not None:
+            candidates.append(f"telegram:{telegram['user_id']}")
+        candidates.append('local-owner')
+        return candidates
+
+    def calendar_draft_request(self, body, owner_id=None):
+        """The owner's approve/apply surface for a Calendar draft.
+
+        Without this nobody could apply a draft at all: the model has no
+        approve tool by design, and the older `PersonalAssistantOrchestrator`
+        path is constructed with `calendar=None` and gates on a different
+        capability identifier, so every `calendar-approve` returned
+        `blocked`.
+
+        `approve` mints the one-time token bound to this owner, draft,
+        payload hash and the write connector's `connection_revision`;
+        `apply` spends it. Neither is reachable from a tool.
+        """
+        if self.calendar is None and self.calendar_factory is None:
+            raise ValueError(ConnectorHandoff.unavailable(CALENDAR_WRITE_CONNECTOR_ID))
+        owners = [owner_id] if owner_id else self.calendar_owner_candidates()
+        operation = (body or {}).get('operation')
+        if operation == 'list':
+            drafts = []
+            for owner in owners:
+                connector = self.calendar_for({'chat_id': int(owner.split(':', 1)[1])}
+                                              if owner.startswith('telegram:') else {})
+                drafts.extend({**row, 'owner': owner} for row in connector.pending(owner))
+            return {'drafts': drafts}
+        draft_id = (body or {}).get('draft_id')
+        if not isinstance(draft_id, str) or not draft_id:
+            raise ValueError('승인할 일정 초안을 선택하세요.')
+        # Act as whichever identity owns the draft. `preview`, `approve` and
+        # `execute` each enforce the owner themselves, so a draft belonging
+        # to neither candidate simply finds no owner and is refused.
+        for owner in owners:
+            connector = self.calendar_for({'chat_id': int(owner.split(':', 1)[1])}
+                                          if owner.startswith('telegram:') else {})
+            try:
+                connector.preview(draft_id, owner)
+            except ValueError:
+                continue
+            if operation == 'preview':
+                return {'preview': connector.preview(draft_id, owner), 'owner': owner}
+            if operation == 'approve':
+                return {'approval': connector.approve(draft_id, owner), 'owner': owner,
+                        'applied': False,
+                        'next_step': '승인만 기록했습니다. 적용하려면 apply를 호출하세요.'}
+            if operation == 'apply':
+                approval = (body or {}).get('approval_id')
+                if not isinstance(approval, str) or not approval:
+                    raise ValueError('승인 토큰이 필요합니다.')
+                return {'result': connector.execute(draft_id, approval, owner),
+                        'owner': owner, 'applied': True}
+            if operation == 'status':
+                return {'status': connector.status(draft_id, owner), 'owner': owner}
+            raise ValueError('지원하지 않는 일정 초안 요청입니다.')
+        raise ValueError('해당 일정 초안을 찾을 수 없습니다.')
+
+    def calendar_for(self, job):
+        """The Calendar connector bound to this Work's owner, or None."""
+        if self.calendar is not None:
+            return self.calendar
+        if self.calendar_factory is None:
+            return None
+        return self.calendar_factory(self.connector_owner_id(job))
+
+    def begin_calendar_connection(self, grant='read'):
+        """Return one owner-local Calendar authorization URL for one grant.
+
+        Read and write are separate connectors and separate credentials, so
+        the owner authorizes them separately and a read grant can never widen
+        into a write grant by accident. Issuing a URL grants nothing: the
+        connector rows stay exactly as they are until Google redirects back.
+        """
+        if not self.calendar_oauth:
+            raise ValueError(ConnectorHandoff.unavailable(CALENDAR_CONNECTOR_ID))
+        if grant not in ('read','write'):
+            raise ValueError('캘린더 연결 범위를 확인하세요.')
+        connector_id=CALENDAR_WRITE_CONNECTOR_ID if grant=='write' else CALENDAR_CONNECTOR_ID
+        owner=self.connector_callback_owner(connector_id)
+        return self.calendar_oauth.begin_oauth(owner,write=grant=='write')
+
+    def complete_calendar_connection(self, callback):
+        """Complete one browser OAuth callback for whichever grant it names.
+
+        The grant is carried by the signed state, not by the query, so a
+        relabelled callback addresses the other grant's pending slot where its
+        signature does not verify. As with Gmail, this never decides that a
+        connection happened - `complete_oauth` owns that and commits it
+        through `ConnectorRegistry.transition`.
+        """
+        if not self.calendar_oauth:
+            raise ValueError(ConnectorHandoff.unavailable(CALENDAR_CONNECTOR_ID))
+        # Which grant is completing decides which owner identity may complete
+        # it. `connector_callback_owner` recovers the identity by matching the
+        # connector's parked record, and no intent maps to the read connector
+        # -- `CONNECTOR_BY_INTENT` only names `google-calendar-write` -- so a
+        # read record can never exist and the read id always falls back to the
+        # first candidate. Resolving both grants through the read id therefore
+        # handed the write callback the wrong owner, its pending slot did not
+        # match, and the write authorization could never complete while the
+        # Work stayed parked. Fail-closed, and still a dead end.
+        connector_id=(CALENDAR_WRITE_CONNECTOR_ID
+                      if self.calendar_oauth.pending_grant(callback)=='write'
+                      else CALENDAR_CONNECTOR_ID)
+        owner=self.connector_callback_owner(connector_id)
+        # Read the parked record before the exchange consumes the pending
+        # state, so a callback that arrives with nothing parked is a plain
+        # connection rather than a resume reporting `no_pending_work` to the
+        # owner as if something had gone wrong. Gmail does this and the first
+        # version of this method did not: the ordinary connect -- the one the
+        # settings payload advertises -- committed the connection and then
+        # returned HTTP 400 telling the owner it had failed.
+        parked=bool(self.connector_handoff and self.connector_handoff.record(connector_id))
+        result=self.calendar_oauth.complete_oauth(owner,callback,self.calendar_token_exchange)
+        connector_id=result.get('connector_id') or connector_id
+        granted=tuple(result.get('granted_scopes') or ())
+        if not parked:
+            return result
+        try:
+            resumed=self.resume_connector_work(connector_id,owner,granted)
+        except (ConnectorContractError,ConversationHandoffError) as exc:
+            # The connection is real and committed; only the resume was
+            # refused, and `resume_connector_work` has already told the owner.
+            return {**result,'resume_refused':exc.reason}
+        if not resumed:
+            return result
+        return {**result,'work_id':resumed['work_id'],'scheduled':resumed['scheduled']}
 
     def complete_gmail_connection(self, callback):
         """Complete one browser OAuth callback, then resume or fail parked Work.
@@ -1861,7 +2032,7 @@ class AgentService:
                         checked=self.store.config('model_test',{})
                         if checked.get('runtime_model'):
                             runtime_config['model']=checked['runtime_model']
-                        capabilities=Capabilities(self.store,self.adapter,runtime_config,key,job['id'],record,network=self.local_tools,document_access=not boundary['requires_approval'],packages=self.runtime_packages(),document_context=document_history and not boundary['requires_approval'],public_page_scope=self.public_page_boundary(config)['urls'],memory_approval=owner_memory_approval,inherited_provenance=turn_provenance)
+                        capabilities=Capabilities(self.store,self.adapter,runtime_config,key,job['id'],record,network=self.local_tools,document_access=not boundary['requires_approval'],packages=self.runtime_packages(),document_context=document_history and not boundary['requires_approval'],public_page_scope=self.public_page_boundary(config)['urls'],memory_approval=owner_memory_approval,inherited_provenance=turn_provenance,calendar=self.calendar_for(job),calendar_owner=self.connector_owner_id(job))
                         result=run_agent(self.adapter,runtime_config,key,history,'',capabilities,record)
                         outcome=getattr(result,'outcome','succeeded')
                         response,provider,model=result.content,result.provider,result.model

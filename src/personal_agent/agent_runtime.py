@@ -18,6 +18,10 @@ DEFINITIONS=[
  schema('web_search','Search public web snippets. Use for current public information, not local files. Never include credentials or private file contents in search terms.',{'query':STRING},['query']),
  schema('public_page_read','Read one anonymous public HTTP(S) page as bounded text. Use only for a user-supplied public URL; no login, cookies, JavaScript, private destinations or mutations.',{'url':STRING},['url']),
  schema('bounded_public_research','Compare public products or plan travel from public web evidence. Runs one bounded public search and reads at most three of its own result pages, then separates facts it actually observed from price/inventory/fee details it could not confirm. Use for a comparison or travel plan, not for a single lookup - web_search is cheaper for that. Never include private file contents or credentials in the query. This cannot purchase, book, reserve, create an account or sign in.',{'mode':{'type':'string','enum':['product_comparison','travel_plan']},'query':STRING},['mode','query']),
+ schema('calendar_query','List the owner\'s calendar events between two RFC3339 timestamps that both carry an explicit UTC offset. Use this to answer what is scheduled. Read-only; returns event ids and versions needed to change or cancel an event.',{'start':STRING,'end':STRING,'timezone':STRING},['start','end','timezone']),
+ schema('calendar_draft_create','Draft a new calendar event and return an exact preview for the owner to approve. This does NOT create the event: nothing reaches the calendar until the owner approves the preview separately. Attendees, invitations and recurrence are not supported. Times are RFC3339 with an explicit UTC offset.',{'summary':STRING,'start':STRING,'end':STRING,'timezone':STRING,'location':STRING,'description':STRING},['summary','start','end','timezone']),
+ schema('calendar_draft_update','Draft a change to one existing event and return an exact preview for the owner to approve. Requires the event_id and event_version returned by calendar_query. Does not apply the change.',{'event_id':STRING,'event_version':STRING,'summary':STRING,'start':STRING,'end':STRING,'timezone':STRING,'location':STRING,'description':STRING},['event_id','event_version']),
+ schema('calendar_draft_cancel','Draft the cancellation of one existing event and return an exact preview for the owner to approve. Requires the event_id and event_version returned by calendar_query. Does not cancel anything.',{'event_id':STRING,'event_version':STRING},['event_id','event_version']),
  schema('weather','Get current weather and 3-day forecast. Prefer this over web_search for weather. Ask for city if absent from conversation. English city spelling and optional ISO country code.',{'city':STRING,'country':STRING},['city']),
  schema('list_roots','List folders explicitly connected by the user. Never assume filesystem access.'),
  schema('find_files','Search names and content in supported documents inside connected folders. Returns relative paths and source locations; call read_file to inspect evidence before answering.',{'query':STRING},['query']),
@@ -195,7 +199,8 @@ def owner_covers(value,owner_words,whole=True):
 # unreachable from a production path until it is made.
 PRIVATE_PROVENANCE={'find_files':'connected-document','read_file':'connected-document',
                     'list_notes':'personal-space','list_memory':'owner-memory',
-                    'save_memory':'owner-memory','list_roots':'owner-folder-names'}
+                    'save_memory':'owner-memory','list_roots':'owner-folder-names',
+                    'calendar_query':'owner-calendar'}
 UNATTRIBUTED_PROVENANCE='unattributed-tool-evidence'
 # The conversational window each label belongs to.  This is the seam #448
 # decides: it asks whether taint derived from the 16-message history window
@@ -217,7 +222,7 @@ UNATTRIBUTED_PROVENANCE='unattributed-tool-evidence'
 # three together rather than two.
 PROVENANCE_WINDOW={'connected-document':'turn','connected-drive-file':'turn',
                    'personal-space':'turn','owner-memory':'turn','owner-context-inbox':'turn',
-                   'owner-folder-names':'turn',
+                   'owner-folder-names':'turn','owner-calendar':'turn',
                    UNATTRIBUTED_PROVENANCE:'turn','conversation-history':'history'}
 EGRESS_TAINT_WINDOWS=frozenset({'turn','history'})
 DELEGATED_PREFIX='delegated:'
@@ -247,7 +252,7 @@ class EvidenceLog(list):
   for item in items:self.append(item)
 
 class Capabilities:
- def __init__(self,store,adapter,config,key,job_id,record,readonly=False,network=None,document_access=True,packages=None,allowed_tools=None,document_context=False,public_page_scope=None,memory_approval=None,inherited_provenance=()):
+ def __init__(self,store,adapter,config,key,job_id,record,readonly=False,network=None,document_access=True,packages=None,allowed_tools=None,document_context=False,public_page_scope=None,memory_approval=None,inherited_provenance=(),calendar=None,calendar_owner=None):
   self.store,self.adapter,self.config,self.key=store,adapter,config,key
   self.job_id,self.record,self.readonly=job_id,record,readonly
   self.network=network or LocalTools()
@@ -255,6 +260,13 @@ class Capabilities:
   self.document_context=document_context
   self.public_page_scope=None if public_page_scope is None else frozenset(public_page_scope)
   self.memory_approval=memory_approval
+  self.calendar=calendar
+  # Connector identity is the paired Telegram chat or the one local owner
+  # (`AgentService.connector_owner_id`), NOT the Memory owner. Using
+  # MEMORY_OWNER here meant a Telegram owner could complete the OAuth and
+  # still be told the calendar was disconnected, because the grant was
+  # written under `telegram:<chat>` and read back under `local-owner`.
+  self.calendar_owner=calendar_owner or MEMORY_OWNER
   self.packages=runtime_packages([]) if packages is None else packages
   self.tools={tool['id']:tool for package in self.packages for tool in package['tools']}
   self.roles={role['id']:{**role,'package_id':package['id']} for package in self.packages for role in package['roles']}
@@ -377,6 +389,46 @@ class Capabilities:
    if self.private_egress_provenance():raise ValueError('연결 문서 내용과 함께 공개 페이지를 조회할 수 없습니다. 문서와 무관한 요청으로 다시 보내 주세요.')
    if not self.public_page_scope:raise ValueError('소유자가 승인한 공개 페이지 범위가 없습니다. 먼저 정확한 주소와 조회 매개변수를 승인하세요.')
    return self.network.execute({'tool':name,'url':args['url'],'approved_urls':list(self.public_page_scope)})
+  if name.startswith('calendar_'):
+   # J4. The model may READ the calendar and may DRAFT a change; it may not
+   # apply one. `CalendarConnector.execute` needs a one-time approval token
+   # bound to this owner, this draft, this payload hash and the write
+   # connector's connection_revision, and nothing the model can call mints
+   # one -- the owner does, through their own surface. So a draft is a
+   # proposal with an exact preview attached, which is what J4 asks for.
+   #
+   # Authority note (integration finding, recorded rather than papered over):
+   # this path uses ConnectorRegistry's `google-calendar`/
+   # `google-calendar-write`, which is the canonical PA1 connector contract
+   # and does scope-exact, revision-bound checks. The older
+   # PersonalAssistantOrchestrator path gates on CapabilityRegistry's
+   # `google-calendar-create` instead. Two identifiers for one capability is
+   # a real inconsistency; it is not resolved here, and the settings surface
+   # still pauses the legacy one.
+   if self.calendar is None:raise ValueError('Google Calendar가 로컬에 구성되어 있지 않습니다. 먼저 캘린더를 연결해 주세요.')
+   owner=self.calendar_owner
+   if name=='calendar_query':
+    # Calendar contents are owner-private and this is the read that makes
+    # `event_id`/`event_version` available to the draft tools.
+    return self._from_private('owner-calendar',self.calendar.query(owner,args['start'],args['end'],args['timezone']))
+   # Refuse an unsupported field rather than filtering it out. The tool
+   # schema already sets additionalProperties:false, but a filter here would
+   # have turned "invite alice@example.com" into a silently attendee-less
+   # event the owner then approves believing the invitation was included.
+   # J4 excludes attendee invitation; saying so is part of excluding it.
+   allowed=('summary','start','end','timezone','location','description')
+   extra=sorted(set(args)-set(allowed)-{'event_id','event_version'})
+   if extra:raise ValueError('이 일정 도구가 지원하지 않는 항목입니다: '+', '.join(extra)+'. 참석자 초대와 반복 일정은 지원하지 않습니다.')
+   content={key:args[key] for key in allowed if args.get(key)}
+   if name=='calendar_draft_create':draft=self.calendar.draft_create(content,owner)
+   elif name=='calendar_draft_update':draft=self.calendar.draft_update(args['event_id'],args['event_version'],content,owner)
+   elif name=='calendar_draft_cancel':draft=self.calendar.draft_cancel(args['event_id'],args['event_version'],owner)
+   else:raise ValueError('허용하지 않은 도구입니다.')
+   preview=self.calendar.preview(draft['id'],owner)
+   result={'draft_id':draft['id'],'action':draft.get('action'),'preview':preview,
+           'applied':False,'requires_owner_approval':True,
+           'next_step':'소유자가 이 미리보기를 승인해야 실제 일정에 반영됩니다.'}
+   self.evidence.append({'tool':name,'result':result});return result
   if name=='bounded_public_research':
    # J5's journey: one bounded public search plus at most three reads of its
    # own results, separating observed facts from unknown price/inventory/fee
@@ -647,7 +699,7 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
     if cache_key not in capabilities.memo:capabilities.memo[cache_key]=capabilities.execute(name,args)
     result=capabilities.memo[cache_key]
     executions.append((name,result))
-    if name in ('find_files','read_file','list_notes','list_memory','save_memory'):capabilities.evidence.append({'tool':name,'result':result})
+    if name in ('find_files','read_file','list_notes','list_memory','save_memory','calendar_query','calendar_draft_create','calendar_draft_update','calendar_draft_cancel'):capabilities.evidence.append({'tool':name,'result':result})
     if result.get('outcome') in ('failed','partial'):failed=True
     invalid_calls.discard(name)
     successful+=1

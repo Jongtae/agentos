@@ -74,10 +74,29 @@ JOURNEY_EVIDENCE = {
     'J3': 'covered offline: parked, authorized through the shipped routes '
           'against a fixture token endpoint, resumed exactly once. Live '
           'Gmail is owner_validation_pending.',
-    'J4': 'not wired. Calendar has no `calendar=` parameter on AgentService, '
-          'no production HTTP transport, and registering its connector specs '
-          'would park Work forever (a C8 regression). The honest current '
-          'behaviour - a clean refusal - is asserted instead.',
+    'J4': 'covered offline. Wired end to end: `calendar_query` and three '
+          '`calendar_draft_*` tools, an owner-authenticated `/google-calendar` '
+          'route for each of the two grants, an unauthenticated-by-necessity '
+          '`/oauth/calendar/callback`, `agentos calendar-config`, and a '
+          'method-selects-grant HTTP transport. The model has no tool that '
+          'applies a change: a draft carries the exact payload and its hash, '
+          'and applying it needs a one-time approval bound to this owner, '
+          'draft, payload hash and the write connector revision, which only '
+          'the owner mints through `/api/calendar/drafts`, which is the '
+          'half that did not exist in the first version - the model could '
+          'draft and nobody could apply. A read grant never becomes a write '
+          'grant. A replayed approval produces no second event, because the '
+          'applied row is terminal and short-circuits - not, as an earlier '
+          'version of this entry implied, because of the idempotency key, '
+          'which is never re-sent on any reachable path. '
+          'Registering the specs is safe now only because the completable '
+          'route landed in the same change. Live Google Calendar OAuth and '
+          'any real event mutation are owner_validation_pending; no live '
+          'call has been made. `calendar_query` is labelled `owner-calendar` '
+          'and closes public destinations for the turn. The natural-language '
+          'create INTENT still has no executing worker branch: it parks, '
+          'resumes and then asks for the missing detail, so the tool path '
+          'is the one that works.',
     'J5': 'covered offline, with the discrimination measured and weak. '
           '`bounded_public_research` is wired and reachable; '
           'tests/test_pa1_j5_research_discrimination.py drives page content '
@@ -623,16 +642,18 @@ class FirstUseEndToEndAcceptance(unittest.TestCase):
                              json.dumps(self.network.plans, ensure_ascii=False))
             self.model_plan = []
 
-        with self.subTest('J4 Calendar is not wired, so it refuses cleanly'):
-            # Recorded behaviour, not an aspiration: `AgentService` has no
-            # `calendar=` parameter, `CalendarCreate` injects the legacy
-            # provider rather than `GoogleCalendar`, and no production
-            # Calendar HTTP transport exists in the tree.  Registering the
-            # connector specs would convert this refusal into Work parked for
-            # a connection no shipped route can complete, which is the C8
-            # regression #394 declined to introduce.  A refusal that names
-            # the reason is the honest outcome, and it is held here so the
-            # decision cannot silently rot into parked Work.
+        with self.subTest('an install without Calendar credentials refuses cleanly'):
+            # This harness builds a service with no Calendar credential, and
+            # that install must keep the refusal it always had.  The comment
+            # here used to say `AgentService` has no `calendar=` parameter
+            # and that no production Calendar transport exists; both were
+            # true until PA1-J4-01 and are now false, sixty lines above a
+            # JOURNEY_EVIDENCE['J4'] saying the opposite.  What is still
+            # true, and what this subtest holds, is narrower: registering
+            # the connector specs is safe only where a completable route
+            # exists, so an install without credentials registers nothing,
+            # advertises nothing, and refuses by naming the reason rather
+            # than parking Work for a connection it cannot offer.
             calendar = self.says(20, '내일 오후 3시에 팀 회의 일정 잡아줘')
             self.drain()
             job = self.store.job(calendar)
@@ -910,7 +931,12 @@ class FirstUseEndToEndAcceptance(unittest.TestCase):
         with self.subTest('the journey map names its own gaps'):
             self.assertEqual(sorted(JOURNEY_EVIDENCE), ['J1', 'J2', 'J3', 'J4',
                                                         'J5', 'J6', 'J7', 'J8'])
-            self.assertIn('not wired', JOURNEY_EVIDENCE['J4'])
+            # J4 said 'not wired' for the whole program and this pinned it.
+            # It is wired now, so the pin moves to what is still missing --
+            # a live Calendar OAuth and any real event mutation -- rather
+            # than being deleted. The guard's job is that the map keeps
+            # naming its own gaps, not that a particular gap stays open.
+            self.assertIn('owner_validation_pending', JOURNEY_EVIDENCE['J4'])
             self.assertIn('owner_validation_pending', JOURNEY_EVIDENCE['J1'])
             self.assertIn('owner_validation_pending', JOURNEY_EVIDENCE['J3'])
             # J6's value-scoped write binding and J8's two authority clauses

@@ -78,17 +78,30 @@ JOURNEY_EVIDENCE = {
           'no production HTTP transport, and registering its connector specs '
           'would park Work forever (a C8 regression). The honest current '
           'behaviour - a clean refusal - is asserted instead.',
-    'J5': 'partial. The routing-site pieces are covered offline: bounded '
-          'public search and page reading against a fake egress layer, with '
-          'cited sources on the owner-visible answer and in the per-source '
-          'tool events, and private-provenance refusal at every public '
-          'destination. No network was touched. The journey itself - '
-          'research discrimination, #391\'s 0/10 and 5/10 - is NOT covered: '
-          '`research.PublicResearch` is imported by nothing in `src/`, and '
-          'wiring it as written would widen egress from owner-approved URLs '
-          'to search-discovered ones. That is an owner authority decision '
-          '(#449) and a #449 non-goal, so the discrimination stays '
-          'unreachable from any production path until it is made.',
+    'J5': 'covered offline, with the discrimination measured and weak. '
+          '`bounded_public_research` is wired and reachable; '
+          'tests/test_pa1_j5_research_discrimination.py drives page content '
+          'the test controls, with no model in the loop, and asserts the '
+          'classification the product produced - so an echo of the model '
+          'cannot pass. Measured recall on ten realistic vendor pages: fee '
+          '7/10, inventory 1/10, payable_total 0/10. The error runs in the '
+          'safe direction (under-claiming, never asserting stock a page did '
+          'not commit to) but inventory discrimination is mostly \'unknown\', '
+          'and raising recall is tracked separately because each point of '
+          'recall risks reading a hedge as a commitment. Private provenance '
+          'closes the destination; non-2xx pages are refused; robots.txt is '
+          'not consulted and a 200-status soft wall would be read. No '
+          'network was touched. Permission delta, stated exactly: the mode '
+          'allowlist and three-page cap bound how MUCH is read, not WHICH '
+          'page - the query is model-authored and the first three search '
+          'results are read in provider order - and the owner-approved '
+          'public_page_scope is not preserved here. Because '
+          'public_page_boundary returns an empty list until the owner '
+          'approves URLs for the current model fingerprint, on a default '
+          'install public_page_read never succeeds, so this gives the model '
+          'its first model-directed full-page read. The inventory leg of '
+          'the discrimination is one recognised phrasing, not a general '
+          'classifier (#459).',
     'J6': 'covered: prose capture as canonical Memory, correction by '
           'supersession, owner review and durable delete through the shipped '
           'surfaces, an unauthorized model write held as a MemoryCandidate, a '
@@ -468,11 +481,17 @@ class FirstUseEndToEndAcceptance(unittest.TestCase):
             self.assertEqual(job['status'], 'succeeded', job['error'])
             # These two assert a ROUND TRIP, not discrimination: both strings
             # are set in `self.model_text` above, so they would pass equally
-            # against a product that echoes whatever the model said.  J5's
-            # "distinguishes observed facts from unknown price/inventory/fees"
-            # is NOT evidenced here; `research.PublicResearch`, which
-            # implements it, is imported nowhere in `src/`.  Tracked as #449,
-            # which records why it is still unwired.  Do not read these as J5.
+            # against a product that echoes whatever the model said.  They are
+            # kept because the round trip is worth pinning, but they are not
+            # J5 evidence and must not be read as such.
+            #
+            # J5's "distinguishes observed facts from unknown
+            # price/inventory/fees" is evidenced in
+            # tests/test_pa1_j5_research_discrimination.py, which drives page
+            # content the test controls through the wired
+            # `bounded_public_research` branch with no model in the loop, so
+            # there is nothing for the product to echo.  It also records the
+            # measured recall, which is poor for inventory.
             self.assertIn('관찰됨', job['response'])
             self.assertIn('확인되지 않음', job['response'])
             # This one is real product evidence: `model_text` contains no URL,

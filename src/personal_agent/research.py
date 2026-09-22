@@ -23,10 +23,18 @@ That check crosses a shared seam this issue (PA1-RESEARCH-01 / #391) does not
 own: it must be added by PA1-CONV-01 (#393) / PA1-INT-01 (#394) when the
 research tool is routed.  It is deliberately **not** implemented here.
 
-Consequently :class:`PublicResearch` must not be wired into a production
-request path until that taint/provenance check exists.  ``query_source`` is a
-caller assertion only (see :func:`validate_public_query`): it is a routing
-label, not verified provenance and not a security boundary.
+That check now exists, and :class:`PublicResearch` IS wired into a production
+request path: ``Capabilities.execute('bounded_public_research', ...)`` in
+``agent_runtime`` refuses on ``private_egress_provenance()`` before reaching
+this module (PA1-J5-01 / #458).  Read that branch's comments for the egress
+boundary this class actually runs behind -- in particular, the URLs read here
+are the ones this class's own search returned, self-approved, and NOT the
+owner-approved ``public_page_scope`` the ``public_page_read`` tool requires.
+
+``query_source`` remains a caller assertion only (see
+:func:`validate_public_query`): it is a routing label, not verified
+provenance and not a security boundary.  The caller's guarantee is
+turn-scoped; a private read in an earlier conversation turn is not covered.
 """
 import base64
 import binascii

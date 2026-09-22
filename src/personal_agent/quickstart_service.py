@@ -333,7 +333,7 @@ class AgentService:
             return memory.reject_candidate(owner_id,work_ref,candidate_id,digest)
         raise ValueError('검토된 기억 후보 요청을 확인하세요.')
 
-    def classify_intent(self, prompt, model_suggestion=None, calendar_pending=None):
+    def classify_intent(self, prompt, model_suggestion=None, calendar_pending=None, owner_id=None):
         """Decide where one owner utterance goes, before anything is invoked.
 
         The decision is AgentOS's.  No model is consulted to produce it, and
@@ -347,7 +347,8 @@ class AgentService:
         waiting reaches the classifier, never what it says.
         """
         if calendar_pending is None:
-            calendar_pending=self.calendar_conversation.has_pending()
+            calendar_pending=(self.calendar_conversation.should_route(owner_id)
+                              if owner_id else self.calendar_conversation.has_pending())
         focus={**self.conversation_focus.current(),'calendar_pending':bool(calendar_pending)}
         return self.intent_classifier.classify(prompt, model_suggestion=model_suggestion, focus=focus)
 
@@ -1834,8 +1835,11 @@ class AgentService:
                 # touched.  `decision.authority` records whether the owner
                 # said it literally or an AgentOS cue rule derived it; there
                 # is no branch here that a model can reach.
-                decision=self.classify_intent(prompt)
+                # The owner is resolved first: a pending draft belongs to one
+                # connector identity, so whether one is pending is a question
+                # about this Work's owner and not about the install.
                 connector_owner=self.connector_owner_id(job)
+                decision=self.classify_intent(prompt,owner_id=connector_owner)
                 # A pending calendar draft claims cue-free follow-ups ("치과",
                 # "오후 4시", "승인").  Anything it does not recognise as its
                 # own - and any other intent - drops the draft, says so, and
@@ -1844,10 +1848,10 @@ class AgentService:
                 # minted.
                 if decision.intent==INTENT_CALENDAR_CREATE and decision.continuation \
                         and not self.calendar_conversation.claims(connector_owner,prompt):
-                    if self.calendar_conversation.clear():calendar_notice=CALENDAR_DROPPED_NOTICE+'\n\n'
-                    decision=self.classify_intent(prompt,calendar_pending=False)
-                elif decision.intent not in (INTENT_CALENDAR_CREATE,INTENT_AMBIGUOUS) and self.calendar_conversation.has_pending():
-                    if self.calendar_conversation.clear():calendar_notice=CALENDAR_DROPPED_NOTICE+'\n\n'
+                    if self.calendar_conversation.clear(connector_owner):calendar_notice=CALENDAR_DROPPED_NOTICE+'\n\n'
+                    decision=self.classify_intent(prompt,calendar_pending=False,owner_id=connector_owner)
+                elif decision.intent not in (INTENT_CALENDAR_CREATE,INTENT_AMBIGUOUS) and self.calendar_conversation.has_pending(connector_owner):
+                    if self.calendar_conversation.clear(connector_owner):calendar_notice=CALENDAR_DROPPED_NOTICE+'\n\n'
                 self.conversation_focus.record(decision)
                 owner=f"channel:{job['channel']}:{job.get('chat_id') or 'local'}"
                 # WU2 computed `supersedes_previous` and wired it to nothing.

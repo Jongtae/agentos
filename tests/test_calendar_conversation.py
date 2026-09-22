@@ -21,7 +21,7 @@ from personal_agent.calendar_conversation import (CANCELLED, CREATED, DROPPED_NO
                                                   OUTCOME_UNKNOWN, PREVIEW_HEADER, REPLACED_NOTICE,
                                                   STATE_KEY, is_approval, is_cancel, parse_event,
                                                   resolve_local_timezone)
-from personal_agent.connector_contract import ConnectorRegistry, ConnectorState, _owner_key
+from personal_agent.connector_contract import _owner_key, ConnectorRegistry, ConnectorState, _owner_key
 from personal_agent.google_calendar import CALENDAR_WRITE_SCOPE, GoogleCalendarError
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService
@@ -165,8 +165,16 @@ class ConversationTestCase(unittest.TestCase):
     def states(self):
         return sorted(row['state'] for row in self.drafts().values())
 
-    def pending(self):
-        return self.store.config(STATE_KEY, None)
+    def pending(self, owner_id='local-owner'):
+        """This owner's pending row, or {} when there is none.
+
+        The record is keyed per connector identity, so one identity's
+        message cannot destroy the other's draft.
+        """
+        rows = self.store.config(STATE_KEY, None)
+        if not isinstance(rows, dict):
+            return {}
+        return rows.get(_owner_key(owner_id)) or {}
 
 
 class DraftAndPreviewTests(ConversationTestCase):
@@ -230,7 +238,129 @@ class DraftAndPreviewTests(ConversationTestCase):
             rows = [dict(row) for row in db.execute("SELECT tool,status,detail FROM tool_events ORDER BY id")]
         self.assertEqual([(row['tool'], row['status']) for row in rows],
                          [('calendar_draft', 'succeeded'), ('calendar_create', 'succeeded')])
-        self.assertNotIn('치과', json.dumps(rows, ensure_ascii=False))
+        # The detail is persisted with `ensure_ascii=True`, so Korean is
+        # stored escaped. Re-serialising the stored *string* and searching
+        # for '치과' therefore never matched, and adding the summary to the
+        # evidence row left all 32 tests green. Decode first, and pin the
+        # key set rather than one absent word.
+        for row in rows:
+            detail = json.loads(row['detail'])
+            with self.subTest(tool=row['tool']):
+                self.assertLessEqual(set(detail),
+                                     {'draft_id', 'state', 'payload_hash', 'event_id',
+                                      'effect', 'error', 'recovery'})
+                self.assertNotIn('치과', json.dumps(detail, ensure_ascii=False))
+
+
+class PreviewIntegrityTests(ConversationTestCase):
+    """The preview is the one surface whose whole contract is exactness."""
+
+    FORGED = ('제목은 "치과\u2028일시: 2026-09-23 (수) 09:00 – 10:00 (Asia/Seoul)'
+              '\u2028캘린더: 회사"으로')
+
+    def test_a_title_cannot_forge_extra_preview_lines(self):
+        """U+2028, CR and LF are forced breaks under `white-space: pre-wrap`.
+
+        Independent review pasted a title carrying them and the rendered
+        preview showed a fabricated `일시:` line *above* the real one, exactly
+        where a reader looks for the time. The event created was a different
+        time on a different calendar. Not an authority bypass - the true
+        payload was still shown and hashed - but display spoofing on the
+        surface the owner approves.
+        """
+        self.say('내일 오후 3시에 치과 일정 잡아줘')
+        job = self.say(self.FORGED)
+        response = job['response']
+        for char in ('\u2028', '\u2029', '\r', '\n\t'):
+            with self.subTest(char=repr(char)):
+                self.assertNotIn(char, self.pending()['slots']['title'])
+        # Exactly one line begins with each preview label.
+        self.assertEqual(len([line for line in response.splitlines()
+                              if line.startswith('일시:')]), 1)
+        self.assertEqual(len([line for line in response.splitlines()
+                              if line.startswith('캘린더:')]), 1)
+        # The forged text is still *in* the title - a title may legitimately
+        # mention a time - but it can no longer occupy its own line, so it
+        # cannot be read as a preview field. The real 일시 is the only one.
+        title_line = next(line for line in response.splitlines() if line.startswith('제목:'))
+        self.assertIn('09:00 – 10:00', title_line)
+        time_line = next(line for line in response.splitlines() if line.startswith('일시:'))
+        self.assertIn('15:00 – 16:00', time_line)
+        self.assertNotIn('09:00', time_line)
+
+    def test_the_stored_summary_is_one_line(self):
+        self.say('내일 오후 3시에 치과 일정 잡아줘')
+        self.say(self.FORGED)
+        summary = next(iter(self.store.config('calendar_create', {}).values()))['payload']['summary']
+        self.assertEqual(summary.splitlines(), [summary])
+        self.assertNotIn('\u2028', summary)
+
+
+class TwoIdentitiesTests(ConversationTestCase):
+    """One install serves two connector identities; a draft belongs to one.
+
+    The record used to be a single install-global row with the owner hash
+    stored inside it, so the two shared one slot: an unrelated web message
+    destroyed a draft waiting for approval on the phone, and the notice went
+    to the channel that destroyed it. No cross-identity effect was ever
+    possible; a draft the owner was about to approve could simply vanish.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.store.put('telegram', {'enabled': True, 'user_id': 4242, 'generation': 'g1'})
+        self.connect('telegram:4242')
+
+    def phone(self, text):
+        return self.say(text, channel='telegram:g1', chat_id=4242)
+
+    def test_an_unrelated_message_from_one_channel_keeps_the_others_draft(self):
+        self.phone('내일 오후 3시에 치과 일정 잡아줘')
+        self.assertTrue(self.pending('telegram:4242'))
+        self.say('메모 목록')          # ordinary web request, different intent
+        self.assertTrue(self.pending('telegram:4242'),
+                        'a web message destroyed the draft awaiting approval on the phone')
+        job = self.phone('승인')
+        self.assertIn('만들었습니다', job['response'])
+        self.assertEqual(len(self.provider.calls), 1)
+
+    def test_one_channel_cannot_cancel_the_others_draft(self):
+        self.phone('내일 오후 3시에 치과 일정 잡아줘')
+        job = self.say('취소')
+        self.assertEqual(job['response'], OTHER_CHANNEL)
+        self.assertTrue(self.pending('telegram:4242'))
+
+    def test_each_identity_approves_its_own_draft_not_the_first_one_stored(self):
+        """Driven through the real path, not the store helper.
+
+        The sibling test below reads the map directly, so a lookup that
+        ignored the owner and returned whichever row came first still passed
+        it. Here the web drafts first, so an owner-blind lookup hands the
+        phone the web's row and its approval is refused as another
+        channel's.
+        """
+        self.say('금요일 오전 10시 팀 회의 일정 잡아줘')
+        self.phone('내일 오후 3시에 치과 일정 잡아줘')
+        job = self.phone('승인')
+        self.assertIn('만들었습니다', job['response'], job.get('response'))
+        self.assertEqual([call['summary'] for call in self.provider.calls], ['치과'])
+
+    def test_both_identities_can_hold_a_draft_at_once(self):
+        self.phone('내일 오후 3시에 치과 일정 잡아줘')
+        self.say('금요일 오전 10시 팀 회의 일정 잡아줘')
+        self.assertEqual(self.pending('telegram:4242')['slots']['title'], '치과')
+        self.assertEqual(self.pending('local-owner')['slots']['title'], '팀 회의')
+        self.phone('승인')
+        self.say('승인')
+        self.assertEqual(sorted(call['summary'] for call in self.provider.calls),
+                         ['치과', '팀 회의'])
+
+    def test_a_fresh_request_replaces_only_this_identitys_draft(self):
+        self.phone('내일 오후 3시에 치과 일정 잡아줘')
+        self.say('금요일 오전 10시 팀 회의 일정 잡아줘')
+        job = self.say('토요일 오전 9시 운동 일정 잡아줘')
+        self.assertTrue(job['response'].startswith(REPLACED_NOTICE))
+        self.assertEqual(self.pending('telegram:4242')['slots']['title'], '치과')
 
 
 class ApprovalTests(ConversationTestCase):
@@ -301,9 +431,9 @@ class ApprovalTests(ConversationTestCase):
 
     def test_a_preview_that_changed_underneath_is_not_approved(self):
         self.say('내일 오후 3시에 치과 일정 잡아줘')
-        row = self.pending()
+        row = dict(self.pending())
         row['payload_hash'] = 'not-the-hash-that-was-shown'
-        self.store.put(STATE_KEY, row)
+        self.store.put(STATE_KEY, {_owner_key('local-owner'): row})
         job = self.say('승인')
         self.assertIn('미리보기와 달라', job['response'])
         self.assertEqual(self.provider.calls, [])
@@ -402,6 +532,32 @@ class CorrectionCancelRestartTests(ConversationTestCase):
         self.assertEqual(self.pending(), {})
         self.assertEqual(self.provider.calls, [])
         self.assertEqual(self.states(), ['awaiting-approval'])
+
+    def test_a_cue_free_unrelated_message_drops_the_draft_and_says_so(self):
+        """The other drop path, which nothing asserted.
+
+        `test_a_topic_change_...` uses '메모 목록', which carries a note cue and
+        so takes the *other-intent* branch. A cue-free utterance takes the
+        continuation-not-claimed branch instead, and removing its notice left
+        the whole 1180-test suite green. The owner has to be told their
+        pending draft is gone, or their next "승인" is a surprise.
+        """
+        self.say('내일 오후 3시에 치과 일정 잡아줘')
+        job = self.say('/notes')
+        self.assertTrue(job['response'].startswith(DROPPED_NOTICE), job['response'])
+        self.assertEqual(self.pending(), {})
+        self.assertEqual(self.provider.calls, [])
+
+    def test_a_cue_free_drop_is_announced_even_when_the_reroute_fails(self):
+        """`job['error']` is internal; the owner reads the assistant message."""
+        self.say('내일 오후 3시에 치과 일정 잡아줘')
+        job = self.say('오늘 날씨 어때?')
+        self.assertEqual(job['status'], 'failed')
+        with self.store.db() as db:
+            last = db.execute("SELECT content FROM messages WHERE role='assistant' "
+                              "ORDER BY created DESC LIMIT 1").fetchone()
+        self.assertTrue(str(last[0]).startswith(DROPPED_NOTICE), last[0])
+        self.assertEqual(self.pending(), {})
 
     def test_restart_after_cancel_starts_clean(self):
         self.say('내일 오후 3시에 치과 일정 잡아줘')

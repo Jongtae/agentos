@@ -42,6 +42,28 @@ PENDING_TTL_SECONDS = 900
 DEFAULT_DURATION_MINUTES = 60
 TIMEZONE_CONFIG_KEY = 'calendar_timezone'
 _MAX_TITLE = 200
+#: Characters that would break the preview into extra lines, or hide inside
+#: one.  The preview is rendered with `white-space: pre-wrap`, where CR, LF,
+#: U+2028 and U+2029 are forced breaks regardless of wrapping, so a title
+#: carrying them can print a second "일시:" line above the real one - the
+#: owner reads a time the draft does not hold.  Independent review built
+#: exactly that. Everything in Cc/Cf goes, plus the separators.
+_TITLE_FORBIDDEN = re.compile(r'[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e'
+                              r'\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064'
+                              r'\u2066-\u206f\ufeff\ufff9-\ufffb]')
+
+
+def clean_title(value):
+    """One line of plain text, or ''.
+
+    Applied at the single point a title enters the draft, so no caller has to
+    remember. Line and paragraph separators become a space rather than being
+    deleted, so "치과<U+2028>일시: ..." reads as the run-on it is instead of
+    silently becoming a shorter, innocent-looking title.
+    """
+    if not isinstance(value, str):
+        return ''
+    return ' '.join(_TITLE_FORBIDDEN.sub(' ', value).split())[:_MAX_TITLE]
 
 STATE_COLLECTING = 'collecting'
 STATE_AWAITING_APPROVAL = 'awaiting-approval'
@@ -552,28 +574,91 @@ class CalendarConversation:
     def _local_now(self):
         return datetime.fromtimestamp(float(self.now()), ZoneInfo(self.timezone()))
 
-    def pending(self):
-        row = self.store.config(STATE_KEY, None)
-        if not isinstance(row, dict) or row.get('state') not in (STATE_COLLECTING, STATE_AWAITING_APPROVAL):
+    def _rows(self):
+        """The per-owner pending map.
+
+        This used to be one install-global row with the owner hash stored
+        inside it. That made the two connector identities - the web owner and
+        the paired Telegram chat - share a single slot: an unrelated web
+        message destroyed a draft waiting for approval on the phone, and the
+        notice went to the channel that destroyed it rather than the one
+        showing the preview. No cross-identity effect was ever possible, but
+        a draft the owner was about to approve could vanish without them
+        being told. Keyed by owner, neither identity can reach the other's.
+        """
+        stored = self.store.config(STATE_KEY, None)
+        if not isinstance(stored, dict):
+            return {}
+        # A pre-upgrade single row is dropped rather than migrated: it is a
+        # 15-minute draft that was never approved, and guessing which owner
+        # it belonged to is worse than asking again.
+        if 'state' in stored:
+            return {}
+        return {key: row for key, row in stored.items() if isinstance(row, dict)}
+
+    def pending(self, owner_id=None):
+        rows = self._rows()
+        if owner_id is None:
+            key, row = next(((k, r) for k, r in rows.items() if self._live(r)), (None, None))
+        else:
+            key = _owner_key(owner_id)
+            row = rows.get(key)
+        if row is None or row.get('state') not in (STATE_COLLECTING, STATE_AWAITING_APPROVAL):
             return None
-        if float(row.get('expires', 0) or 0) <= float(self.now()):
-            self.clear()
+        if not self._live(row):
+            self.clear(owner_id)
             return None
         return row
 
-    def has_pending(self):
-        return self.pending() is not None
+    def _live(self, row):
+        return isinstance(row, dict) and float(row.get('expires', 0) or 0) > float(self.now())
 
-    def clear(self):
-        previous = self.store.config(STATE_KEY, None)
-        self.store.put(STATE_KEY, {})
+    def has_pending(self, owner_id=None):
+        return self.pending(owner_id) is not None
+
+    def should_route(self, owner_id):
+        """Whether cue-free follow-ups should be offered to this flow at all.
+
+        Deliberately wider than `has_pending(owner_id)`: an approval typed on
+        the channel that did *not* draft still has to reach `claims`/`handle`
+        so they can say where the draft is. `claims` is the narrow gate, and
+        the drop branch that follows clears only this owner's row - so a
+        message from one identity can no longer destroy the other's draft,
+        which is what one install-global row allowed.
+        """
+        return self.has_pending(owner_id) or self.pending_elsewhere(owner_id)
+
+    def pending_elsewhere(self, owner_id):
+        """Another identity holds a live draft.
+
+        Used only to answer "that one is on your other channel" instead of
+        dropping the utterance into the ordinary route. It never reads or
+        touches the other row beyond its existence: both identities are the
+        same person, so the pointer is useful, and it is the only thing that
+        crosses.
+        """
+        key = _owner_key(owner_id)
+        return any(other != key and self._live(row) and row.get('state')
+                   for other, row in self._rows().items())
+
+    def clear(self, owner_id=None):
+        rows = self._rows()
+        if owner_id is None:
+            previous = next((r for r in rows.values() if r.get('state')), None)
+            self.store.put(STATE_KEY, {})
+            return previous
+        key = _owner_key(owner_id)
+        previous = rows.pop(key, None)
+        self.store.put(STATE_KEY, rows)
         return previous if isinstance(previous, dict) and previous.get('state') else None
 
     def _save(self, owner_id, state, slots, draft_id='', payload_hash=''):
         row = {'owner': _owner_key(owner_id), 'state': state, 'slots': slots, 'draft_id': draft_id,
                'payload_hash': payload_hash, 'at': float(self.now()),
                'expires': float(self.now()) + self.ttl_seconds}
-        self.store.put(STATE_KEY, row)
+        rows = self._rows()
+        rows[_owner_key(owner_id)] = row
+        self.store.put(STATE_KEY, rows)
         return row
 
     @staticmethod
@@ -588,13 +673,14 @@ class CalendarConversation:
         pending; this is the check that keeps "오늘 날씨 어때?" from being
         swallowed as a title or a date correction.
         """
-        row = self.pending()
+        row = self.pending(owner_id)
         if row is None:
-            return False
+            # An approval or cancel aimed at the other channel's draft is
+            # still claimed, so the answer can say where it is rather than
+            # falling into the ordinary conversation route.
+            return (is_approval(text) or is_cancel(text)) and self.pending_elsewhere(owner_id)
         if is_approval(text) or is_cancel(text):
             return True
-        if not self._owned(row, owner_id):
-            return False
         slots = parse_event(_after_last_correction(text) if _has_correction(text) else text, self._local_now())
         if slots.explicit_title:
             return True
@@ -619,26 +705,29 @@ class CalendarConversation:
         """Answer one calendar turn.  ``fresh`` is a new create request; the
         alternative is a follow-up the classifier routed here while a draft
         was pending, which the caller has already checked with ``claims``."""
-        row = self.pending()
+        row = self.pending(owner_id)
         notice = ''
         if fresh:
             if row is not None:
-                self.clear()
+                self.clear(owner_id)
                 notice = REPLACED_NOTICE + '\n\n'
             tail = _after_last_correction(text) if _has_correction(text) else text
             slots = self._merge({}, parse_event(tail, self._local_now()))
             return notice + self._advance(owner_id, slots, evidence)
         if row is None:
+            if (is_approval(text) or is_cancel(text)) and self.pending_elsewhere(owner_id):
+                # Named, not touched: the other channel's draft is neither
+                # approved nor destroyed from here.
+                return OTHER_CHANNEL
             return NOTHING_PENDING
-        if is_cancel(text):
-            # Cancelling creates nothing, so either channel may do it.
-            self.clear()
-            return CANCELLED
         if not self._owned(row, owner_id):
-            # Ownership is checked before anything is written: the other
-            # channel may neither approve nor take over a half-collected
-            # request.
+            # Ownership is checked before anything is written, and before
+            # cancel: cancelling creates nothing, but it destroys a draft the
+            # other channel is showing, and that channel is never told.
             return OTHER_CHANNEL
+        if is_cancel(text):
+            self.clear(owner_id)
+            return CANCELLED
         if is_approval(text):
             if row['state'] != STATE_AWAITING_APPROVAL:
                 # "네" while a detail is still missing is not an approval of
@@ -661,7 +750,8 @@ class CalendarConversation:
     def _merge(collected, parsed):
         slots = dict(collected)
         if parsed.explicit_title or (parsed.title and not slots.get('title')):
-            slots['title'] = parsed.title
+            # Every title reaching a draft passes through here.
+            slots['title'] = clean_title(parsed.title)
         if parsed.date is not None:
             slots['date'] = parsed.date.isoformat()
         if parsed.start is not None:
@@ -703,7 +793,7 @@ class CalendarConversation:
                    'end': end.isoformat(timespec='seconds'), 'timezone': zone}
         connector = self.connector_for(owner_id)
         if connector is None:
-            self.clear()
+            self.clear(owner_id)
             raise CalendarError('unavailable')
         preview = connector.draft_create(payload, owner_id)
         self._save(owner_id, STATE_AWAITING_APPROVAL, slots, preview['id'], preview['payload_hash'])
@@ -731,22 +821,22 @@ class CalendarConversation:
     def _approve(self, owner_id, row, evidence):
         connector = self.connector_for(owner_id)
         if connector is None:
-            self.clear()
+            self.clear(owner_id)
             raise CalendarError('unavailable')
         draft_id = row.get('draft_id')
         try:
             preview = connector.preview(draft_id, owner_id)
         except CalendarError:
-            self.clear()
+            self.clear(owner_id)
             return CHANGED_UNDER_US
         if preview['state'] != 'awaiting-approval' or preview['payload_hash'] != row.get('payload_hash'):
-            self.clear()
+            self.clear(owner_id)
             return CHANGED_UNDER_US
         # The pending record is dropped *before* dispatch.  The worker is
         # serialised, so this alone makes a second "승인" find nothing; the
         # connector's own approved/executing/completed states are the second
         # and third barriers and are not weakened here.
-        self.clear()
+        self.clear(owner_id)
         try:
             approval = connector.approve(draft_id, owner_id)
             result = connector.execute(draft_id, approval['approval_id'], owner_id)

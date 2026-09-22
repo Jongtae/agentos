@@ -236,6 +236,89 @@ class CalendarToolTests(unittest.TestCase):
 
 
 
+class OwnerApplyPathTests(unittest.TestCase):
+    """Someone must be able to apply a draft, and only the owner.
+
+    Independent review found the honest hole in the first version: the model
+    had no approve tool by design, the older orchestrator path was
+    constructed with `calendar=None` and gated on a different capability
+    identifier, so every `calendar-approve` returned `blocked` -- and no
+    event could ever reach the calendar from any surface. "Wired end to end"
+    was not true. This is the owner's half.
+    """
+
+    def setUp(self):
+        from personal_agent.quickstart_service import AgentService
+        self.temp = tempfile.TemporaryDirectory(dir=str(Path(__file__).resolve().parent))
+        self.addCleanup(self.temp.cleanup)
+        self.store = QuickStore(Path(self.temp.name) / 'data')
+        self.registry = ConnectorRegistry(self.store, (CALENDAR_SPEC, CALENDAR_WRITE_SPEC))
+        self.provider = Provider()
+        self.calendar = CalendarConnector(self.store, self.provider, registry=self.registry)
+        self.service = AgentService(self.store, calendar=self.calendar)
+        self.registry.transition(MEMORY_OWNER, CALENDAR_WRITE_SPEC.connector_id,
+                                 ConnectorState.CONNECTED,
+                                 granted_scopes=(CALENDAR_WRITE_SCOPE,))
+
+    def draft(self):
+        caps = Capabilities(self.store, None, CFG, '', 'job', lambda *a: None,
+                            calendar=self.calendar)
+        return caps.execute('calendar_draft_create',
+                            {'summary': '치과', 'start': '2026-09-25T10:00:00+09:00',
+                             'end': '2026-09-25T11:00:00+09:00', 'timezone': 'Asia/Seoul'})
+
+    def test_the_owner_can_approve_and_apply_a_model_draft(self):
+        draft = self.draft()
+        self.assertEqual(self.provider.calls, [], 'drafting must not touch the provider')
+        approved = self.service.calendar_draft_request(
+            {'operation': 'approve', 'draft_id': draft['draft_id']})
+        self.assertFalse(approved['applied'])
+        applied = self.service.calendar_draft_request(
+            {'operation': 'apply', 'draft_id': draft['draft_id'],
+             'approval_id': approved['approval']['approval_id']})
+        self.assertTrue(applied['applied'])
+        self.assertEqual([call[0] for call in self.provider.calls], ['create'])
+
+    def test_apply_without_an_approval_is_refused(self):
+        draft = self.draft()
+        with self.assertRaises(ValueError):
+            self.service.calendar_draft_request(
+                {'operation': 'apply', 'draft_id': draft['draft_id']})
+        with self.assertRaises(ValueError):
+            self.service.calendar_draft_request(
+                {'operation': 'apply', 'draft_id': draft['draft_id'],
+                 'approval_id': 'guessed-token'})
+        self.assertEqual(self.provider.calls, [])
+
+    def test_replaying_an_approval_produces_no_second_event(self):
+        """C8: a retry must not duplicate a consequential external effect.
+
+        A first version of this test expected the second apply to raise. It
+        does not, and raising is not the property that matters -- `execute`
+        derives a deterministic idempotency key from the approval, so the
+        replay returns the same event without contacting the provider again.
+        No duplicate effect is the contract; an exception would only be one
+        way of getting there, and this way is kinder to a retried request.
+        """
+        draft = self.draft()
+        approved = self.service.calendar_draft_request(
+            {'operation': 'approve', 'draft_id': draft['draft_id']})
+        token = approved['approval']['approval_id']
+        first = self.service.calendar_draft_request(
+            {'operation': 'apply', 'draft_id': draft['draft_id'], 'approval_id': token})
+        second = self.service.calendar_draft_request(
+            {'operation': 'apply', 'draft_id': draft['draft_id'], 'approval_id': token})
+        self.assertEqual([call[0] for call in self.provider.calls], ['create'],
+                         'the provider was contacted twice for one approval')
+        self.assertEqual(first['result']['id'], second['result']['id'])
+
+    def test_the_surface_refuses_when_calendar_is_not_configured(self):
+        from personal_agent.quickstart_service import AgentService
+        bare = AgentService(self.store)
+        with self.assertRaises(ValueError):
+            bare.calendar_draft_request({'operation': 'list'})
+
+
 class CalendarTransportGrantTests(unittest.TestCase):
     """The HTTP method selects the grant, and the two credentials are separate.
 

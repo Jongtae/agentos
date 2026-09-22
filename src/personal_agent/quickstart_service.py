@@ -1131,6 +1131,46 @@ class AgentService:
             raise ValueError(ConnectorHandoff.unavailable(GMAIL_CONNECTOR_ID))
         return self.gmail.begin_oauth(self.connector_callback_owner(GMAIL_CONNECTOR_ID))
 
+    def calendar_draft_request(self, body, owner_id='local-owner'):
+        """The owner's approve/apply surface for a Calendar draft.
+
+        Without this nobody could apply a draft at all: the model has no
+        approve tool by design, and the older `PersonalAssistantOrchestrator`
+        path is constructed with `calendar=None` and gates on a different
+        capability identifier, so every `calendar-approve` returned
+        `blocked`. The model could draft and the owner could not act, which
+        made "wired end to end" untrue.
+
+        `approve` mints the one-time token bound to this owner, draft,
+        payload hash and the write connector's `connection_revision`;
+        `apply` spends it exactly once. Neither is reachable from a tool.
+        """
+        connector=self.calendar_for({}) if self.calendar_factory or self.calendar else None
+        if connector is None:
+            raise ValueError(ConnectorHandoff.unavailable(CALENDAR_WRITE_CONNECTOR_ID))
+        operation=(body or {}).get('operation')
+        if operation=='list':
+            return {'drafts':connector.pending(owner_id) if hasattr(connector,'pending')
+                    else [row for row in (self.store.config('calendar_create',{}) or {}).values()
+                          if isinstance(row,dict) and row.get('state')=='awaiting-approval']}
+        draft_id=(body or {}).get('draft_id')
+        if not isinstance(draft_id,str) or not draft_id:
+            raise ValueError('승인할 일정 초안을 선택하세요.')
+        if operation=='preview':
+            return {'preview':connector.preview(draft_id,owner_id)}
+        if operation=='approve':
+            return {'approval':connector.approve(draft_id,owner_id),
+                    'applied':False,
+                    'next_step':'승인만 기록했습니다. 적용하려면 apply를 호출하세요.'}
+        if operation=='apply':
+            approval=(body or {}).get('approval_id')
+            if not isinstance(approval,str) or not approval:
+                raise ValueError('승인 토큰이 필요합니다.')
+            return {'result':connector.execute(draft_id,approval,owner_id),'applied':True}
+        if operation=='status':
+            return {'status':connector.status(draft_id,owner_id)}
+        raise ValueError('지원하지 않는 일정 초안 요청입니다.')
+
     def calendar_for(self, job):
         """The Calendar connector bound to this Work's owner, or None."""
         if self.calendar is not None:
@@ -1166,13 +1206,37 @@ class AgentService:
         """
         if not self.calendar_oauth:
             raise ValueError(ConnectorHandoff.unavailable(CALENDAR_CONNECTOR_ID))
-        owner=self.connector_callback_owner(CALENDAR_CONNECTOR_ID)
+        # Which grant is completing decides which owner identity may complete
+        # it. `connector_callback_owner` recovers the identity by matching the
+        # connector's parked record, and no intent maps to the read connector
+        # -- `CONNECTOR_BY_INTENT` only names `google-calendar-write` -- so a
+        # read record can never exist and the read id always falls back to the
+        # first candidate. Resolving both grants through the read id therefore
+        # handed the write callback the wrong owner, its pending slot did not
+        # match, and the write authorization could never complete while the
+        # Work stayed parked. Fail-closed, and still a dead end.
+        connector_id=(CALENDAR_WRITE_CONNECTOR_ID
+                      if self.calendar_oauth.pending_grant(callback)=='write'
+                      else CALENDAR_CONNECTOR_ID)
+        owner=self.connector_callback_owner(connector_id)
+        # Read the parked record before the exchange consumes the pending
+        # state, so a callback that arrives with nothing parked is a plain
+        # connection rather than a resume reporting `no_pending_work` to the
+        # owner as if something had gone wrong. Gmail does this and the first
+        # version of this method did not: the ordinary connect -- the one the
+        # settings payload advertises -- committed the connection and then
+        # returned HTTP 400 telling the owner it had failed.
+        parked=bool(self.connector_handoff and self.connector_handoff.record(connector_id))
         result=self.calendar_oauth.complete_oauth(owner,callback,self.calendar_token_exchange)
-        connector_id=result.get('connector_id') or CALENDAR_CONNECTOR_ID
+        connector_id=result.get('connector_id') or connector_id
         granted=tuple(result.get('granted_scopes') or ())
+        if not parked:
+            return result
         try:
             resumed=self.resume_connector_work(connector_id,owner,granted)
-        except ConnectorContractError as exc:
+        except (ConnectorContractError,ConversationHandoffError) as exc:
+            # The connection is real and committed; only the resume was
+            # refused, and `resume_connector_work` has already told the owner.
             return {**result,'resume_refused':exc.reason}
         if not resumed:
             return result

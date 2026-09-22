@@ -32,6 +32,8 @@ from .google_calendar import (
 CALENDAR_CONNECTOR_ID = "google-calendar"
 CALENDAR_WRITE_CONNECTOR_ID = "google-calendar-write"
 CALENDAR_STATE_KEY = "calendar_create"
+#: Upper bound on persisted drafts. See the note in ``_draft``.
+_MAX_DRAFTS = 100
 CALENDAR_SPEC = ConnectorSpec(
     CALENDAR_CONNECTOR_ID,
     (CALENDAR_READ_SCOPE,),
@@ -334,7 +336,24 @@ class CalendarConnector:
                 "hash": _canonical(bound),
                 "state": "awaiting-approval",
                 "effect": "none",
+                "created": self.now(),
             }
+            # Cap the table. `_draft` takes no authority check by design -- a
+            # proposal is not an action -- but once the model can reach it,
+            # nothing bounded how many rows it could persist, and each row
+            # carries owner event content (summary, location, description) in
+            # the plaintext config store. Oldest awaiting-approval rows go
+            # first; anything approved or applied is kept, because that is
+            # evidence rather than a proposal.
+            if len(rows) > _MAX_DRAFTS:
+                disposable = sorted(
+                    (row for row in rows.values()
+                     if isinstance(row, dict) and row.get("state") == "awaiting-approval"
+                     and row.get("id") != ident),
+                    key=lambda row: str(row.get("created", "")),
+                )
+                for row in disposable[: len(rows) - _MAX_DRAFTS]:
+                    rows.pop(row["id"], None)
             self._put(rows)
         return self.preview(ident, owner)
 

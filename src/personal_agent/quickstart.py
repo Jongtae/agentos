@@ -509,6 +509,11 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             if path=='/api/personal-knowledge':return self.reply(200,service.personal_knowledge_request({'query':parse_qs(parts.query).get('query',[''])[0]}, channel='local-companion'))
             if path=='/api/personal-space/memory-candidates':
                 return self.reply(200,service.memory_candidate_request({'operation':'list'}))
+            if path=='/api/calendar/drafts':
+                # The owner's own surface. A draft the model proposed is
+                # inert until the owner approves and applies it here.
+                try:return self.reply(200,service.calendar_draft_request({'operation':'list'}))
+                except ValueError as exc:return self.reply(400,{'error':str(exc)})
             if path=='/api/personal-space':return self.reply(200,store.personal_space())
             if path=='/api/personal-records':
                 values=parse_qs(parts.query)
@@ -615,6 +620,9 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 if path=='/api/personal-knowledge':return self.reply(200,service.personal_knowledge_request(body, channel='local-companion'))
                 if path=='/api/personal-space/memory-candidates/request':
                     return self.reply(200,service.memory_candidate_request(body))
+                if path=='/api/calendar/drafts/request':
+                    try:return self.reply(200,service.calendar_draft_request(body))
+                    except ValueError as exc:return self.reply(400,{'error':str(exc)})
                 if path=='/api/context-inbox/telegram-policy':return self.reply(200,service.set_context_telegram_policy(body))
                 if path=='/api/documents/approval':return self.reply(200,service.set_document_approval(body))
                 if path=='/api/public-pages/approval':return self.reply(200,service.set_public_page_approval(body))

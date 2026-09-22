@@ -555,6 +555,31 @@ class CalendarOAuth:
             "expires_at": pending["expires_at"],
         }
 
+    @staticmethod
+    def pending_grant(callback) -> str | None:
+        """Which grant a callback *claims* to be completing. A hint, not authority.
+
+        The caller needs this before `complete_oauth` runs, because which
+        grant is completing decides which owner identity may complete it and
+        which parked record to read -- and `complete_oauth` consumes the
+        pending state, so it is too late afterwards.
+
+        This reads the leading label off the state and nothing else. It does
+        NOT verify the signature: `_pending` does that, against the slot the
+        label selects, and a relabelled state lands on the other grant's slot
+        where its HMAC does not verify. So a lie here changes which slot is
+        consulted and cannot mint authority. Returning `None` for anything
+        unrecognised keeps the caller on the read grant, which is the
+        narrower of the two.
+        """
+        if not isinstance(callback, dict):
+            return None
+        state = callback.get("state")
+        if not isinstance(state, str):
+            return None
+        label = state.split(".", 1)[0]
+        return label if label in (READ_GRANT, WRITE_GRANT) else None
+
     def complete_oauth(self, owner_id: str, callback: dict, exchange: Callable[[dict], dict]) -> dict:
         """Complete whichever grant the signed callback state identifies."""
         if not isinstance(callback, dict) or not callable(exchange):

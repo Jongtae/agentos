@@ -411,7 +411,15 @@ class Capabilities:
     # Calendar contents are owner-private and this is the read that makes
     # `event_id`/`event_version` available to the draft tools.
     return self._from_private('owner-calendar',self.calendar.query(owner,args['start'],args['end'],args['timezone']))
-   content={key:args[key] for key in ('summary','start','end','timezone','location','description') if args.get(key)}
+   # Refuse an unsupported field rather than filtering it out. The tool
+   # schema already sets additionalProperties:false, but a filter here would
+   # have turned "invite alice@example.com" into a silently attendee-less
+   # event the owner then approves believing the invitation was included.
+   # J4 excludes attendee invitation; saying so is part of excluding it.
+   allowed=('summary','start','end','timezone','location','description')
+   extra=sorted(set(args)-set(allowed)-{'event_id','event_version'})
+   if extra:raise ValueError('이 일정 도구가 지원하지 않는 항목입니다: '+', '.join(extra)+'. 참석자 초대와 반복 일정은 지원하지 않습니다.')
+   content={key:args[key] for key in allowed if args.get(key)}
    if name=='calendar_draft_create':draft=self.calendar.draft_create(content,owner)
    elif name=='calendar_draft_update':draft=self.calendar.draft_update(args['event_id'],args['event_version'],content,owner)
    elif name=='calendar_draft_cancel':draft=self.calendar.draft_cancel(args['event_id'],args['event_version'],owner)

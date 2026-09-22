@@ -120,6 +120,62 @@ What this does **not** yet cover, stated exactly:
   restart, and an end-to-end Telegram result with no terminal open are owner operating
   validation that this repository has not performed.
 
+## Google Calendar (source checkout)
+
+AgentOS can read your calendar and draft changes to it, so `내일 일정 뭐 있어?` is
+answered and `내일 3시에 회의 잡아줘` produces an exact preview for you to approve. It is
+off unless you configure it, and configuring it connects nothing on its own.
+
+**Read and write are two separate connections.** A read grant never becomes a write
+grant: they are separate Google authorizations, separate credentials and separate
+connector records, and you authorize each one deliberately.
+
+Create a Google Cloud OAuth **web** client, add
+`http://localhost:8787/oauth/calendar/callback` as an authorised redirect URI, download
+the client JSON, then write the owner-only credential file:
+
+```sh
+agentos calendar-config \
+  --oauth-client-json ~/Downloads/client_secret_XXXX.json \
+  --secret-file /Users/your-name/.agentos-secrets/calendar.json
+AGENTOS_CALENDAR_LOCAL_ONLY=1 \
+AGENTOS_CALENDAR_SECRET_FILE=/Users/your-name/.agentos-secrets/calendar.json \
+  agentos start
+```
+
+`calendar-config` behaves exactly like `gmail-config`: the encryption key is generated
+locally, the file is `0600` and owned by you, a relative `--secret-file` is refused, and
+an existing file is never overwritten. The client secret never becomes a command-line
+argument, an environment value or log output.
+
+Then open AgentOS on its local address and connect each grant from the settings page —
+`/google-calendar?grant=read` and `/google-calendar?grant=write`. Both routes require
+your owner session and refuse a tunnel host.
+
+**What the model can and cannot do.** The model may read your calendar and may draft a
+create, update or cancel. It has no tool that applies one. A draft carries the exact
+payload that would be sent and its hash; applying it needs a one-time approval bound to
+you, that draft, that payload and the current write connection, and only you can issue
+that — through `/api/calendar/drafts`. Attendee invitation and recurring events are not
+supported and are refused rather than quietly dropped.
+
+Reading your calendar puts event titles in the model's context, so for the rest of that
+turn AgentOS refuses public destinations — web search, public page reads, weather —
+exactly as it does after reading a connected document.
+
+What this does **not** yet cover, stated exactly:
+
+- **No live Google Calendar operation has been observed.** Every test uses an injected
+  transport and a fixture token endpoint. A real OAuth consent, a real event created in
+  a real calendar, and the behaviour of a revoked grant are owner validation this
+  repository has not performed.
+- **Not in any released build.** The most recent release tag predates this command; see
+  [the release procedure](docs/release.en.md).
+- **The natural-language create path still asks a question.** `내일 3시에 회의 잡아줘`
+  parks for a connection and then asks for the missing detail rather than producing a
+  draft on its own; ask for the calendar explicitly, or read first and draft from what
+  you see.
+
 ## Gmail (source checkout)
 
 AgentOS can read and search your Gmail so a request such as

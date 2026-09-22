@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from delivery_state_invariants import (
+    assert_completed_work_is_unselectable,
     assert_declared_goal_shape,
     assert_no_unauthorised_execution_authority,
     closed_out_programs,
@@ -37,9 +38,27 @@ class DeliveryTests(unittest.TestCase):
     def controller(self, runner=None):
         return DeliveryController(self.root, self.state, runner or Runner(), now=lambda: self.clock[0])
 
+    @staticmethod
+    def _arm(plan, identifier):
+        """Make one iteration legitimately armed and not-yet-complete.
+
+        These fixtures used to borrow GOV-01's real `activation_status`,
+        which happened to read `owner-activated-goal-ready` long after GOV-01
+        had completed. GOV-PA1-07 retired that stale arming, so the fixture
+        now constructs the state it is testing instead of depending on a
+        record that was wrong. The rule under test - only an explicit owner
+        `active` transition selects - is unchanged.
+        """
+        completed = plan['history']['documented_completed_iterations']
+        if identifier in completed:
+            completed.remove(identifier)
+        for item in plan['iterations']:
+            if item['id'] == identifier:
+                item['activation_status'] = 'owner-activated-goal-ready'
+        return plan
+
     def activate_governance_goal(self):
-        plan=json.loads((self.root/'delivery-plan.yaml').read_text())
-        plan['history']['documented_completed_iterations'].remove('GOV-01')
+        plan=self._arm(json.loads((self.root/'delivery-plan.yaml').read_text()), 'GOV-01')
         plan['next_goal']={'id':'GOV-01','status':'active'}
         (self.root/'delivery-plan.yaml').write_text(json.dumps(plan))
 
@@ -49,8 +68,7 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(json.loads((root/'delivery-plan.yaml').read_text()), json.loads((root/'src/personal_agent/delivery-plan.yaml').read_text()))
 
     def test_only_explicit_owner_activated_goal_can_be_selected(self):
-        altered=json.loads((self.root/'delivery-plan.yaml').read_text())
-        altered['history']['documented_completed_iterations'].remove('GOV-01')
+        altered=self._arm(json.loads((self.root/'delivery-plan.yaml').read_text()), 'GOV-01')
         altered['next_goal']={'id':'GOV-01','status':'active'}
         (self.root/'delivery-plan.yaml').write_text(json.dumps(altered))
         plan=DeliveryPlan(self.root/'delivery-plan.yaml')
@@ -147,6 +165,26 @@ class DeliveryTests(unittest.TestCase):
         ))
         self.assertNotIn('DRIVE-LOCAL-OP-01', controller.plan.documented_completed())
         self.assertNotIn('SCN-I-01', controller.plan.documented_completed())
+
+    def test_completed_work_is_unselectable_even_if_redeclared_active(self):
+        """The gate every other selection test stops short of.
+
+        `DeliveryPlan.select` needs two things: `next_goal.status == "active"`,
+        and the named iteration carrying `owner-activated-goal-ready`. Every
+        existing test here stops at the first, because the resting plan never
+        has it. So a completed program satisfying the *second* gate went
+        unnoticed for a whole cycle: EPIC-PA1 sat armed at the iterations
+        layer after all nine substeps had merged and their issues had closed,
+        with `next_goal.action` still instructing a worker to advance two
+        closed issues. Nothing was selectable, but only because one field
+        nobody had touched still read `goal-ready`.
+
+        This forces the first gate open for every closed-out program and
+        every completed substep, and requires the second to hold on its own.
+        Each subject carries a positive control, so a refusal cannot come
+        from a malformed fixture.
+        """
+        assert_completed_work_is_unselectable(self)
 
     def test_goal_ready_never_starts_heartbeat_or_external_commands(self):
         runner=Runner()

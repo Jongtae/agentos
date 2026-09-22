@@ -10,6 +10,8 @@ import unittest
 from personal_agent.delivery import DeliveryPlan
 
 from delivery_state_invariants import (
+    CLOSED_ON_MERGE,
+    CLOSED_OUT,
     GOAL_READY,
     PAUSED,
     assert_activation_record,
@@ -37,18 +39,24 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         self.items = {item["id"]: item for item in self.plan["iterations"]}
         self.program = self.plan["programs"]["EPIC-PA1"]
 
-    def test_epic_is_goal_ready_but_not_active(self):
+    def test_epic_never_holds_execution_authority_in_any_of_its_roles(self):
         """Goal-readiness alone never executes, in whichever role PA1 sits.
 
         The earlier form spelled this as "EPIC-PA1 is owner-paused by #419".
         That was true while a non-overlapping EPIC-REUSE-01 tranche ran
         first, but it pinned the cast rather than the rule, so it broke the
         moment the owner legitimately swapped the roles back. EPIC-PA1 has
-        exactly two legitimate roles -- the armed declared goal, or paused --
-        and the invariant is the same in both: nothing is selectable and the
-        heartbeat stays down. The role is now read from the plan and the
-        *full* set of pins for whichever role holds is asserted, so neither
-        role is a free pass.
+        exactly three legitimate roles -- the armed declared goal, paused, or
+        closed out -- and the invariant is the same in all three: nothing is
+        selectable and the heartbeat stays down. The role is read from the
+        plan and the *full* set of pins for whichever role holds is asserted,
+        so no role is a free pass.
+
+        The third role is new. The earlier form asserted EPIC-PA1 was absent
+        from the completed list, which pinned the cast again: it broke the
+        moment the program legitimately finished. What the rule actually
+        forbids is a completed program keeping authority, and that is what is
+        asserted below.
         """
         self.assertNotEqual(self.plan["next_goal"]["status"], "active")
         epic = self.items["EPIC-PA1"]
@@ -57,7 +65,6 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         completed = self.plan["history"]["documented_completed_iterations"]
         self.assertIn("GOV-PA1-01", completed)
         self.assertIn("USE-01", completed)
-        self.assertNotIn("EPIC-PA1", completed)
         assert_active_substeps_are_legitimate(self, self.plan, "EPIC-PA1")
         # The pause history is never erased by a resumption: #419's record
         # and its resume condition stay on the program either way.
@@ -66,8 +73,19 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         assert_activation_record(self, "EPIC-PA1 paused_by", self.program.get("paused_by"))
 
         status = self.program["status"]
-        self.assertIn(status, {GOAL_READY, PAUSED}, status)
-        if status == GOAL_READY:
+        self.assertIn(status, {GOAL_READY, PAUSED, CLOSED_OUT}, status)
+        if status == CLOSED_OUT:
+            # Closed out: recorded complete in every layer selection reads,
+            # holding nothing. `assert_closed_out_record` below carries the
+            # rest -- closeout text, per-substep evidence, no active substeps.
+            self.assertIn("EPIC-PA1", completed)
+            self.assertIsNone(self.plan["next_goal"]["id"])
+            self.assertEqual(epic["activation_status"], CLOSED_ON_MERGE)
+            self.assertNotIn("EPIC-PA1", executing_programs(self.plan))
+            self.assertEqual(self.program.get("remaining_substeps", []), [])
+            assert_closed_out_record(self, self.plan, "EPIC-PA1")
+        elif status == GOAL_READY:
+            self.assertNotIn("EPIC-PA1", completed)
             # Armed: the declaration must agree across all three layers and
             # must be backed by an explicit owner reactivation record, so a
             # resumption cannot happen as a side effect of anything else.
@@ -79,6 +97,7 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         else:
             # Paused: not declared, not armed where selection reads, and the
             # pause record has no matching reactivation.
+            self.assertNotIn("EPIC-PA1", completed)
             self.assertNotEqual(self.plan["next_goal"]["id"], "EPIC-PA1")
             self.assertEqual(epic["activation_status"], PAUSED)
             self.assertFalse(is_resumed(self.program))
@@ -88,12 +107,23 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         shape = assert_declared_goal_shape(self, self.plan)
         if status == GOAL_READY:
             self.assertEqual(shape, "goal-ready")
+        elif status == CLOSED_OUT:
+            self.assertEqual(shape, "terminal")
         assert_no_unauthorised_execution_authority(self, self.plan)
 
+        # The tracker has to name whichever role actually holds, and must
+        # never advertise a successor. Pinning the goal-ready sentence
+        # unconditionally made TASKS.md fail the moment the program
+        # legitimately closed out -- the same cast-not-rule mistake this test
+        # already carries two scars from.
         tasks = (ROOT / "TASKS.md").read_text(encoding="utf-8")
-        self.assertIn("selects EPIC-PA1 as goal-ready only", tasks)
         self.assertNotIn("selects USE-01 as goal-ready", tasks)
         self.assertIn("#358 did not select a successor; EPIC-PA1 is separately prepared by #385", tasks)
+        if status == CLOSED_OUT:
+            self.assertIn("no product successor is selected or executing", tasks)
+            self.assertNotIn("selects EPIC-PA1 as goal-ready only", tasks)
+        else:
+            self.assertIn("selects EPIC-PA1 as goal-ready only", tasks)
 
     def test_exactly_one_program_holds_execution_authority(self):
         """Governance allows at most one active top-level program.
@@ -212,9 +242,15 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
                     # Resumed: the program record and the layer selection
                     # actually reads must agree, and the resumption must be
                     # an explicit owner record rather than a drifted field.
-                    self.assertEqual(program.get("status"), "owner-activated-goal-ready")
+                    # A resumed program that has since finished is the third
+                    # legitimate role; pinning only the armed one meant a
+                    # completed program failed a test about paused work.
+                    self.assertIn(program.get("status"), {GOAL_READY, CLOSED_OUT})
                     self.assertEqual(iteration["activation_status"],
-                                     "owner-activated-goal-ready")
+                                     CLOSED_ON_MERGE if program.get("status") == CLOSED_OUT
+                                     else GOAL_READY)
+                    if program.get("status") == CLOSED_OUT:
+                        self.assertEqual(program.get("active_substeps"), [])
                     assert_activation_record(self, f"{name} reactivated_by",
                                              program.get("reactivated_by"))
                 else:

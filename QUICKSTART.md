@@ -108,9 +108,12 @@ What this does **not** yet cover, stated exactly:
 
 - **macOS only.** The lifecycle is launchd-specific. There is no systemd equivalent here.
 - **Not in any released build.** The most recent release tag is `v1.0.4` (2026-09-07), which
-  predates this command, and this repository contains no Homebrew formula, tap or checksum.
-  `brew install` / `brew upgrade jongtae/agentos/agentos` will not provide `agentos service`
-  until a later release; today it is reachable only from a source checkout.
+  predates this command. The published formula lives in the separate tap
+  `Jongtae/homebrew-agentos` — it is not in this repository by design, so its absence from
+  `git ls-files` here does not mean no artifact exists — and that formula still pins
+  `v1.0.4`. `brew install` / `brew upgrade jongtae/agentos/agentos` will not provide
+  `agentos service` until a later release; today it is reachable only from a source
+  checkout. See [the release procedure](docs/release.en.md).
 - **Not covered by automated tests of real launchd.** Repository CI runs on Linux and cannot
   execute launchd. The automated evidence for these commands is injected-runner tests that
   substitute `launchctl`. A real Homebrew install, a real login service surviving a machine

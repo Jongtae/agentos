@@ -77,7 +77,7 @@ brew install jongtae/agentos/agentos
 agentos start
 ```
 
-Homebrew는 개발자·자체 호스팅 경로이며 최신 main과 다를 수 있습니다. [QUICKSTART](QUICKSTART.md)의 전용 테스트 폴더 시나리오를 따르세요. 문서화된 파일 작업공간 테스트에는 구독형 실행 엔진이 아니라 지원되는 직접 모델 연결을 사용합니다. 계획된 패키지 기능을 이미 사용할 수 있는 명령처럼 안내하지 않습니다.
+**이 명령은 가장 최근 배포본 `v1.0.4`(2026-09-07)를 설치하며, 이는 `main`보다 한참 뒤입니다** — Gmail 커넥터, `agentos service`, PA1 커넥터 계약, 메모리 서비스가 모두 들어 있지 않습니다. Homebrew는 macOS 자체 호스팅 경로이고, 최근 기능은 소스 체크아웃을 사용하세요. 배포 절차는 [release procedure](docs/release.en.md)에 있습니다. [QUICKSTART](QUICKSTART.md)의 전용 테스트 폴더 시나리오를 따르세요. 문서화된 파일 작업공간 테스트에는 구독형 실행 엔진이 아니라 지원되는 직접 모델 연결을 사용합니다. 계획된 패키지 기능을 이미 사용할 수 있는 명령처럼 안내하지 않습니다.
 
 ## 상태 이동과 한계
 

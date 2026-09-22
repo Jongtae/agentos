@@ -1,0 +1,42 @@
+{
+  "$comment": [
+    "Maps a release version to the work it carries, so a reader can tell which",
+    "build contains which journey. The published artifact is the GitHub tag",
+    "archive consumed by Jongtae/homebrew-agentos Formula/agentos.rb; the",
+    "formula is not in this repository by an explicit earlier migration",
+    "decision. See docs/release.en.md."
+  ],
+  "published": [
+    {
+      "version": "1.0.4",
+      "tag": "v1.0.4",
+      "tag_date": "2026-09-07",
+      "archive_sha256": "ef2fccc64af40a7914e2a9341dab8bd71706f37869a2f62dd420e5c3ac8afcfd",
+      "state": "published",
+      "carries": "Pre-EPIC-PA1. Contains no PA1 child: no Gmail connector, no `agentos service`, no PA1 connector contract, no memory service.",
+      "observed": "Tapped and installed locally at the time of writing (`brew list --versions agentos` -> `agentos 1.0.4`). Local operating observation, not a clean-machine install."
+    }
+  ],
+  "unpublished": [
+    {
+      "version": "1.1.0",
+      "tag": null,
+      "commit": "3bee547719b4fee6d2216e627520d709f704abd0",
+      "archive_sha256": null,
+      "state": "unpublished",
+      "why_no_checksum": "The GitHub tag archive does not exist until the tag is pushed, and its gzip output is not byte-reproducible from a local `git archive`. A fabricated checksum would produce a formula that reviews as valid and installs nothing.",
+      "carries": "EPIC-PA1 #386 children: #387 connector seam, #388 install/background lifecycle, #389 Gmail read/search, #390 Calendar policy core, #391 public research, #392 memory candidates, #382 web management, #393 Telegram capability handoff, #394 integration.",
+      "journeys": {
+        "J1": "partial - install/reboot owner_validation_pending",
+        "J2": "covered",
+        "J3": "covered offline - live Google OAuth owner_validation_pending",
+        "J4": "not reachable from any channel",
+        "J5": "partial",
+        "J6": "covered",
+        "J7": "covered",
+        "J8": "covered"
+      },
+      "not_claimed": "No live Google, OpenRouter or Telegram operation has been observed for any journey."
+    }
+  ]
+}

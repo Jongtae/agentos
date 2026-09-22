@@ -70,7 +70,7 @@ brew install jongtae/agentos/agentos
 agentos start
 ```
 
-Homebrew は開発者・セルフホスト用で最新 main と異なる場合があります。[QUICKSTART](QUICKSTART.md) の専用テストフォルダ手順を使用してください。記載されたファイルワークスペースのテストには直接のモデル接続を使います。計画中の機能を実装済みのコマンドとして扱わないでください。
+**このコマンドは最新の公開リリース `v1.0.4`(2026-09-07)をインストールします。これは `main` より大きく遅れており**、Gmail コネクタ、`agentos service`、PA1 コネクタ契約、メモリサービスのいずれも含みません。Homebrew は macOS のセルフホスト経路です。最近の機能にはソースチェックアウトを使用してください。リリース手順は [release procedure](docs/release.en.md) にあります。[QUICKSTART](QUICKSTART.md) の専用テストフォルダ手順を使用してください。記載されたファイルワークスペースのテストには直接のモデル接続を使います。計画中の機能を実装済みのコマンドとして扱わないでください。
 
 対応する永続状態は `scripts/agentos-backup.py DATA ARCHIVE` と `scripts/agentos-restore.py ARCHIVE EMPTY_DATA` で移動できます。接続秘密、セッション、フォルダ Grant、モデル選択、Telegram pairing は移行用アーカイブに含めず、新しい環境で再承認します。全データディレクトリのバックアップとは異なります。
 

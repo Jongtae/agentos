@@ -203,6 +203,17 @@ UNATTRIBUTED_PROVENANCE='unattributed-tool-evidence'
 # private reads, and anything delegated out of them -- is refused under either
 # outcome, so the propagation below is independent of that decision.  An
 # unrecognised label is treated as turn-scoped, which is the refusing side.
+#
+# What #448 decides did widen when `weather` joined the guarded destinations:
+# `document_context` contributes `conversation-history`, so a file-workspace
+# job sitting in the visible 16-message window now closes a plain weather
+# lookup for the rest of that conversation, exactly as it already closed
+# `web_search` and `public_page_read`.  `weather` is deliberately not exempted
+# -- it is a public destination taking an arbitrary 100-character string, so
+# an exemption would make it more permissive than the other two under
+# identical taint with no principled reason -- but the cost lands on the most
+# common benign public call in the product, and #448 now answers for all
+# three together rather than two.
 PROVENANCE_WINDOW={'connected-document':'turn','connected-drive-file':'turn',
                    'personal-space':'turn','owner-memory':'turn','owner-context-inbox':'turn',
                    'owner-folder-names':'turn',
@@ -377,7 +388,15 @@ class Capabilities:
   # owner's life, not a public string, and independent review put one
   # straight into a web_search query from an otherwise clean context. Less
   # material than a document's contents, but the same destination.
-  if name=='list_roots':return self._from_private('owner-folder-names',{'roots':[{'id':r['id'],'name':Path(r['path']).name} for r in self.roots()]})
+  #
+  # An empty list is not owner material. On a fresh install with nothing
+  # connected, tainting here closed every public destination for the rest of
+  # the Work on the strength of zero facts -- review reproduced a first-use
+  # owner asking what is connected and then being refused a weather lookup.
+  # Provenance names a source that actually put something in this context.
+  if name=='list_roots':
+   roots=[{'id':r['id'],'name':Path(r['path']).name} for r in self.roots()]
+   return self._from_private('owner-folder-names',{'roots':roots}) if roots else {'roots':roots}
   # Provenance is taken here, on success, rather than left to `run_agent`'s
   # `capabilities.evidence.append`.  `AgentOSMcpTools`/`ReadOnlyAgentOSMcpTools`
   # call `execute` directly for a subscription engine whose `allowed_tools`

@@ -43,6 +43,11 @@ ADVERSARIAL = [
      'the owner word with its identifier stripped off'),
     ('회의 일정 잡아줘', '회사', 'a different word sharing one CJK character'),
     ('내 차 car 는 파란색', 'card', 'a longer word riding on a short owner word'),
+    ('보증금 1000만원 월세 50만원', '월세 50만원 보증금 1000만원',
+     'a faithful rewrite that moves one number past another - refused by the '
+     'value-level order rule, which is the documented tradeoff and not a bug; '
+     'it falls back to a pending MemoryCandidate the owner can accept'),
+    ('알람은 7시와 9시로', '9시 7시', 'two owner numbers returned in the other order'),
 ]
 
 # Values the owner did say, in the forms a model actually returns them: an
@@ -60,6 +65,11 @@ LEGITIMATE = [
     ('my password manager is bitwarden', 'password manager bitwarden', 'a reordered subset'),
     ('연봉은 1억 2천이야', '1억 2천', 'a figure with its Korean units'),
     ('the conference is friday', 'conference friday', 'the word confidential was tested against'),
+    ('my flight is AB123 on 2026-04-05 seat 12C', 'AB123 2026-04-05 12C',
+     'several digit-bearing tokens kept in the owner order - the ordering rule '
+     'must not refuse a value merely for having more than one number'),
+    ('보증금 1000만원 월세 50만원', '보증금 1000만원 월세 50만원',
+     'the counterpart of the refused reorder above, in the owner order'),
 ]
 
 
@@ -81,8 +91,8 @@ class OwnerCoverageCorpusTests(unittest.TestCase):
 
     def test_the_corpus_covers_both_directions(self):
         """A corpus of one shape proves nothing; guard against it shrinking."""
-        self.assertGreaterEqual(len(ADVERSARIAL), 13)
-        self.assertGreaterEqual(len(LEGITIMATE), 10)
+        self.assertGreaterEqual(len(ADVERSARIAL), 15)
+        self.assertGreaterEqual(len(LEGITIMATE), 12)
 
     def test_digit_order_is_a_property_of_the_whole_value(self):
         """The narrow rule the permuted-account row depends on, stated directly.

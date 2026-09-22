@@ -242,6 +242,47 @@ class RoutingSiteProvenanceTests(unittest.TestCase):
             caps.execute('web_search', {'query': LAUNDERED})
         self.assertEqual(self.egress.plans, [])
 
+    def test_list_roots_with_no_connected_folders_does_not_taint(self):
+        """An empty root list is zero owner facts and must not close anything.
+
+        Review reproduced the first-use case this breaks: nothing connected
+        yet, the owner asks what is connected and then asks for the weather,
+        and the weather lookup is refused on the strength of an empty list -
+        with a message about connected-document contents. Provenance names a
+        source that actually put something in this context.
+        """
+        bare = Capabilities(QuickStore(Path(self.temp.name) / 'empty'), None, CFG, '',
+                            'job', lambda *a: None, network=self.egress)
+        self.assertEqual(bare.execute('list_roots', {}), {'roots': []})
+        self.assertEqual(bare.private_egress_provenance(), [])
+        bare.execute('weather', {'city': '서울'})
+        bare.execute('web_search', {'query': LAUNDERED})
+        self.assertEqual([plan['tool'] for plan in self.egress.plans],
+                         ['weather', 'web_search'])
+
+    def test_weather_follows_the_history_window_like_the_other_destinations(self):
+        """Disclosed consequence of guarding weather: #448 now answers for three.
+
+        ``document_context`` contributes ``conversation-history``, whose window
+        is in ``EGRESS_TAINT_WINDOWS``, so a file-workspace job in the visible
+        16-message window closes a plain weather lookup for the rest of that
+        conversation - exactly as it already closed web_search and
+        public_page_read. weather is deliberately not exempted, because an
+        exemption would make it more permissive than the other two under
+        identical taint. Pinned here so the cost is visible and so #448 can
+        change all three together, rather than discovering this one by
+        surprise.
+        """
+        caps = self.caps(document_context=True)
+        self.assertEqual(caps.private_egress_provenance(), ['conversation-history'])
+        with self.assertRaises(ValueError):
+            caps.execute('weather', {'city': '서울'})
+        with self.assertRaises(ValueError):
+            caps.execute('web_search', {'query': LAUNDERED})
+        self.assertEqual(self.egress.plans, [])
+        # ...and the turn-only reading of #448 reopens all of them together.
+        self.assertEqual(caps.private_egress_provenance(windows={'turn'}), [])
+
     def test_weather_is_a_public_destination_and_is_closed(self):
         """``weather`` sends an arbitrary city string to a third-party geocoder.
 

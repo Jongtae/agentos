@@ -136,7 +136,13 @@ class ServiceCliTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertFalse(receipt["ok"])
         self.assertFalse(receipt["background_available"])
-        self.assertNotEqual(receipt.get("status"), "running")
+        # A failure receipt carries `observed_status`, not `status`, so the
+        # earlier `receipt.get("status") != "running"` compared None to a
+        # string and could not fail under any implementation. Assert the key
+        # that exists, and that no key anywhere claims the service is running.
+        self.assertNotIn("status", receipt, "a failure receipt must not carry a success status")
+        self.assertNotEqual(receipt.get("observed_status"), "running")
+        self.assertNotIn("running", str(receipt.get("observed_status") or ""))
         self.assertTrue(receipt["data_preserved"])
         self.assertIn("next_action", receipt)
         self.assertNotIn("installed successfully", raw.lower())

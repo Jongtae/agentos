@@ -40,10 +40,17 @@ class WebManagementReadinessTests(unittest.TestCase):
         # an invariant, and PA1-INT-01's tracker reconciliation makes it false.
         # The rule underneath it survives and is stronger: a substep may not be
         # recorded complete before the dependencies it declares.
-        if 'WEB-ADMIN-01' in completed:
-            missing = [dep for dep in entry['depends_on'] if dep not in completed]
+        # Applied to every declared dependency, not just this entry's own, so
+        # the PA1-FDN-01 half of the pair this replaced is covered too rather
+        # than silently dropped.
+        for name in sorted({'WEB-ADMIN-01', *entry['depends_on']}):
+            if name not in completed:
+                continue
+            declared = next((item.get('depends_on', []) for item in plan['iterations']
+                             if item['id'] == name), [])
+            missing = [dep for dep in declared if dep not in completed]
             self.assertEqual(missing, [],
-                             'WEB-ADMIN-01 is documented complete before ' + str(missing))
+                             f'{name} is documented complete before {missing}')
         self.assertNotEqual(plan['next_goal']['status'], 'active')
         # WEB-ADMIN-01 is a parent-controlled substep and can never be the
         # declared top-level goal, whichever program currently holds

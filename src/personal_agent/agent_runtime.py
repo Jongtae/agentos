@@ -50,6 +50,8 @@ def memory_words(text):
  """The significant words of one owner utterance or one proposed memory value."""
  return _MEMORY_WORD.findall(str(text or '').casefold())
 
+_MEMORY_DIGITS=re.compile(r'\d+')
+
 def owner_said(word,owner_words):
  """Is one proposed word present in the owner's own authenticated words?
 
@@ -58,15 +60,49 @@ def owner_said(word,owner_words):
  comes back as ``회의를``.  A shared stem is therefore accepted - four
  characters for alphanumeric text, two for CJK where two characters already
  carry a whole morpheme - and only between words of near-equal length, so a
- short proposed word cannot ride on a long unrelated one.  Anything shorter
- than a stem, which includes every bare number, must match exactly: dates,
- amounts and account numbers are never approximated.
+ short proposed word cannot ride on a long unrelated one.
+
+ A token carrying a digit is exempt from all of that and must match exactly.
+ Stem matching on digits is not an approximation of meaning, it is a wrong
+ number: independent review demonstrated ``12345678`` covering ``12349999``,
+ ``1234567890`` covering ``1234567899``, ``5000원`` covering ``50000원`` and
+ ``3월15일`` covering ``3월25일`` - each written straight into canonical
+ Memory.  The earlier form of this docstring claimed bare numbers already
+ matched exactly; that was true only for digit runs shorter than the stem,
+ and the adversarial corpus that "confirmed" it happened to contain only
+ those.  Amounts, dates, account numbers and identifiers are the values where
+ being approximately right is worse than refusing.
  """
+ digits=_MEMORY_DIGITS.findall(word)
  for owner in owner_words:
   if word==owner:return True
-  stem=2 if (_MEMORY_CJK.search(word) or _MEMORY_CJK.search(owner)) else 4
-  if len(word)<stem or len(owner)<stem or abs(len(word)-len(owner))>3:continue
-  if word[:stem]==owner[:stem]:return True
+  owner_digits=_MEMORY_DIGITS.findall(owner)
+  if digits or owner_digits:
+   # Every digit run must be identical and in the same order. A Korean
+   # particle may still differ (`3월15일이야` covers `3월15일`) but no digit
+   # may, so 5000원/50000원 and 12345678/12349999 are refused.
+   if digits!=owner_digits:continue
+   residue,owner_residue=_MEMORY_DIGITS.sub('',word),_MEMORY_DIGITS.sub('',owner)
+   # The digits are already identical; a Korean particle on the owner's own
+   # token must not refuse their own value, so the text around them only has
+   # to agree as far as the shorter one goes.
+   if residue.startswith(owner_residue) or owner_residue.startswith(residue):return True
+   continue
+  if _MEMORY_CJK.search(word) or _MEMORY_CJK.search(owner):
+   # Korean conjugates as well as agglutinates: the owner's `선호를` becomes
+   # the model's `선호합니다`, so neither is a prefix of the other. Two CJK
+   # characters already carry a whole morpheme, so a shared stem is the
+   # right test here and the collision risk is different in kind.
+   if len(word)<2 or len(owner)<2 or abs(len(word)-len(owner))>3:continue
+   if word[:2]==owner[:2]:return True
+   continue
+  # Latin text gets prefix containment rather than a shared stem. Sharing
+  # four characters let `conference` cover `confidential` - a different word
+  # the owner never said. Requiring one to be a prefix of the other still
+  # accepts the inflection this exists for (`meeting`/`meetings`,
+  # `prefer`/`preference`) and refuses words that merely start alike.
+  if len(word)<4 or len(owner)<4:continue
+  if word.startswith(owner) or owner.startswith(word):return True
  return False
 
 def owner_covers(value,owner_words,whole=True):

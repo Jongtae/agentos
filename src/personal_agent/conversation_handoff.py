@@ -126,8 +126,11 @@ AUTHORITY_OWNER = 'owner-explicit'
 AUTHORITY_RULE = 'agentos-rule'
 AUTHORITY_DEFAULT = 'default'
 
-#: Intents whose execution produces an effect the owner would not want guessed.
-#: A consequential intent is reachable from an owner-explicit form only.
+#: Intents whose *effect* the owner would not want guessed.  Prose may reach
+#: a consequential intent, but what it reaches is a draft with an exact
+#: preview; the effect needs the owner's explicit approval of that preview,
+#: which no classification can supply.  A model suggestion still cannot
+#: select one (see ``_with_suggestion``).
 CONSEQUENTIAL_INTENTS = frozenset({INTENT_CALENDAR_CREATE})
 
 #: Routes that answer with the ordinary model conversation.  They never
@@ -347,10 +350,6 @@ _QUOTED = re.compile(r'["“]([^"”]{2,160})["”]')
 AMBIGUOUS_PREFIX = '이 요청이 '
 AMBIGUOUS_SUFFIX = (' 중 무엇인지 확실하지 않아 아무 작업도 실행하지 않았습니다. '
                     '하나만 골라 다시 말씀해 주세요.')
-CONSEQUENTIAL_CLARIFICATIONS = {
-    INTENT_CALENDAR_CREATE: ('일정을 만드는 것은 되돌리기 어려운 작업이라 추측으로 진행하지 않았습니다. '
-                             '만들 일정의 제목과 시작/종료 시각을 알려 주시면 초안을 만들어 승인을 요청할게요.'),
-}
 RECOMMENDATION_CLARIFICATION = ('추천할 수 있는 결과 유형은 private-document-research, specialist-research, '
                                 'local-specialist-processing 입니다. 어떤 결과를 원하시는지 하나만 알려 주세요.')
 SETTINGS_READ_FORM = '/settings'
@@ -506,10 +505,15 @@ class IntentClassifier:
         return _Candidate(INTENT_MAIL_SEARCH, query, (*objects, *verbs))
 
     def _rule_calendar(self, text, lowered):
+        """Recognise a create request; the utterance itself is the argument.
+
+        Title, date and time are read from it by ``calendar_conversation``'s
+        literal rules, so nothing is extracted or persisted here.
+        """
         objects = _cue_hits(text, lowered, _CALENDAR_OBJECTS)
         verbs = _cue_hits(text, lowered, _CALENDAR_VERBS)
         if objects and verbs:
-            return _Candidate(INTENT_CALENDAR_CREATE, None, (*objects, *verbs))
+            return _Candidate(INTENT_CALENDAR_CREATE, text, (*objects, *verbs))
         return None
 
     def _rule_research(self, text, lowered):
@@ -545,7 +549,8 @@ class IntentClassifier:
         elif candidates:
             decision = self._ambiguous(candidates)
         else:
-            decision = self._fallback(text, lowered, focus_intent, bool(correction))
+            decision = self._fallback(text, lowered, focus_intent, bool(correction),
+                                      calendar_pending=bool((focus or {}).get('calendar_pending')))
 
         if focus_intent and (correction or focus_intent != decision.intent) and decision.intent != INTENT_AMBIGUOUS:
             decision.supersedes_previous = True
@@ -556,12 +561,9 @@ class IntentClassifier:
         if candidate.clarification:
             return IntentDecision(candidate.intent, AUTHORITY_RULE, cues=candidate.cues,
                                   clarification=candidate.clarification)
-        if candidate.intent in CONSEQUENTIAL_INTENTS:
-            # A consequential effect is never inferred.  The rules recognised
-            # it, and that recognition buys the owner an explanation, not an
-            # execution.
-            return IntentDecision(candidate.intent, AUTHORITY_RULE, cues=candidate.cues,
-                                  clarification=CONSEQUENTIAL_CLARIFICATIONS[candidate.intent])
+        # A consequential candidate executes only as far as a draft and an
+        # exact preview; ``decision.consequential`` tells the worker so, and
+        # the effect itself waits for the owner's explicit approval.
         return IntentDecision(candidate.intent, AUTHORITY_RULE, argument=candidate.argument,
                               cues=candidate.cues)
 
@@ -573,8 +575,19 @@ class IntentClassifier:
                               cues=tuple(cue for item in candidates for cue in item.cues),
                               clarification=AMBIGUOUS_PREFIX + labels + AMBIGUOUS_SUFFIX)
 
-    def _fallback(self, text, lowered, focus_intent, correction):
-        """No capability rule fired: stay on the ordinary conversation route."""
+    def _fallback(self, text, lowered, focus_intent, correction, calendar_pending=False):
+        """No capability rule fired: stay on the ordinary conversation route.
+
+        The one exception is a pending calendar draft.  Its follow-ups - a
+        title, a time, "승인", "취소", "아니 4시로" - carry no calendar cue, so
+        while the service reports a draft pending they are handed back to it
+        as a continuation.  The service then asks ``CalendarConversation``
+        whether the utterance really belongs to the draft, and re-routes an
+        unrelated one here with the draft dropped.
+        """
+        if calendar_pending:
+            return IntentDecision(INTENT_CALENDAR_CREATE, AUTHORITY_RULE, argument=text,
+                                  cues=('calendar-draft-pending',), continuation=True)
         continuation = _cue_hits(text, lowered, _CONTINUATION_CUES)
         if continuation and not correction and focus_intent in CONTINUABLE_INTENTS:
             return IntentDecision(focus_intent, AUTHORITY_RULE, cues=continuation, continuation=True)

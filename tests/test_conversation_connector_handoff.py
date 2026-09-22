@@ -18,6 +18,7 @@ import unittest
 from cryptography.fernet import Fernet
 
 from personal_agent.calendar import (CALENDAR_READ_SCOPE, CALENDAR_SPEC, CALENDAR_WRITE_CONNECTOR_ID,
+                                     CalendarConnector,
                                      CALENDAR_WRITE_SCOPE, CALENDAR_WRITE_SPEC)
 from personal_agent.connector_contract import (PENDING_WORK_KEY, ConnectorContractError,
                                                ConnectorRegistry, ConnectorState, ConnectorStatus,
@@ -643,7 +644,18 @@ class PrerequisiteAndGuidanceTests(HandoffTestCase):
         self.assertEqual(self.registry.status(OWNER, CALENDAR_WRITE_CONNECTOR_ID).state,
                          ConnectorState.DISCONNECTED)
 
-    def test_calendar_resume_produces_the_next_real_step_not_a_fabricated_draft(self):
+    def test_calendar_resume_produces_the_exact_preview_and_no_effect(self):
+        """The resumed Work is the original utterance, so once the write grant
+        exists it reaches the draft branch: an exact preview, nothing sent."""
+        calls = []
+
+        class Provider:
+            def create(self, payload, key):
+                calls.append(payload)
+                return {'id': 'never', 'version': '"x"'}
+
+        self.service.calendar = CalendarConnector(self.store, Provider(), registry=self.registry)
+        self.service.calendar_conversation._timezone = 'Asia/Seoul'
         job_id = self.park(CALENDAR_REQUEST)
         self.connect_calendar_write()
         self.service.resume_connector_work(CALENDAR_WRITE_CONNECTOR_ID, OWNER,
@@ -651,9 +663,24 @@ class PrerequisiteAndGuidanceTests(HandoffTestCase):
         self.assertEqual(self.drain(), 1)
         job = self.store.job(job_id)
         self.assertEqual(job['status'], 'succeeded')
-        # Honest outcome: no channel path constructs a structured event, so the
-        # resumed Work asks for the missing detail.  It does not invent a draft.
-        self.assertIn('되돌리기 어려운 작업', job['response'])
+        self.assertIn('아직 캘린더에 만들지 않았습니다', job['response'])
+        self.assertIn('팀 회의', job['response'])
+        self.assertIn('15:00 – 16:00', job['response'])
+        drafts = self.store.config('calendar_create', {})
+        self.assertEqual([row['state'] for row in drafts.values()], ['awaiting-approval'])
+        self.assertEqual(calls, [], 'a resumed create request must not reach the provider')
+
+    def test_calendar_resume_without_a_configured_connector_says_so(self):
+        """With the specs registered but no connector object, the honest next
+        step is the configuration refusal, not a question about the event."""
+        job_id = self.park(CALENDAR_REQUEST)
+        self.connect_calendar_write()
+        self.service.resume_connector_work(CALENDAR_WRITE_CONNECTOR_ID, OWNER,
+                                           (CALENDAR_WRITE_SCOPE,))
+        self.assertEqual(self.drain(), 1)
+        job = self.store.job(job_id)
+        self.assertEqual(job['status'], 'failed')
+        self.assertIn('구성되어 있지 않습니다', job['error'])
         self.assertEqual(self.store.config('calendar_create', {}), {})
 
     def test_a_connected_row_with_a_narrower_grant_fails_closed_into_reauth(self):
@@ -686,14 +713,18 @@ class PrerequisiteAndGuidanceTests(HandoffTestCase):
         self.assertEqual(handoff.record(GMAIL_CONNECTOR_ID), None)
 
     def test_an_installation_with_no_registry_keeps_its_previous_behaviour(self):
-        """Injecting no connector registry must change nothing about WU3's handoff."""
+        """Injecting no connector registry must change nothing about WU3's handoff:
+        nothing is parked, and with no connector the request refuses by naming
+        the configuration gap rather than asking about the event."""
         self.service.connector_handoff = None
         self.service.connector_registry = None
         job_id = self.enqueue(CALENDAR_REQUEST)
         self.assertTrue(self.service.run_one())
         job = self.store.job(job_id)
-        self.assertEqual(job['status'], 'succeeded')
-        self.assertIn('되돌리기 어려운 작업', job['response'])
+        self.assertEqual(job['status'], 'failed')
+        self.assertIn('구성되어 있지 않습니다', job['error'])
+        self.assertEqual(self.index(), {})
+        self.assertEqual(self.store.config('calendar_create', {}), {})
 
 
 class MailIntentTests(unittest.TestCase):

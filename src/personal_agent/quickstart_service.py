@@ -23,11 +23,13 @@ from .memory_service import MemoryService
 from .file_workspace import FileWorkspace
 from .connector_contract import ConnectorContractError, _owner_key
 from .gmail import GMAIL_CONNECTOR_ID, GmailError
-from .calendar import CALENDAR_CONNECTOR_ID, CALENDAR_WRITE_CONNECTOR_ID
+from .calendar import CALENDAR_CONNECTOR_ID, CALENDAR_WRITE_CONNECTOR_ID, CalendarError
+from .calendar_conversation import DROPPED_NOTICE as CALENDAR_DROPPED_NOTICE, CalendarConversation
 from .conversation_handoff import (CONNECTOR_LABELS, TelegramChannel, ConnectorHandoff,
                                    ConversationFocus,
                                    ConversationHandoffError, IntentClassifier,
-                                   INTENT_ASSISTANT, INTENT_GREETING, INTENT_KNOWLEDGE,
+                                   INTENT_AMBIGUOUS, INTENT_ASSISTANT, INTENT_CALENDAR_CREATE,
+                                   INTENT_GREETING, INTENT_KNOWLEDGE,
                                    INTENT_MAIL_SEARCH, INTENT_NOTE_CREATE, INTENT_NOTE_LIST,
                                    INTENT_RECOMMENDATION, INTENT_SETTINGS,
                                    INTENT_WORKSPACE_SEARCH, SUPERSEDED_WORK_ERROR)
@@ -222,6 +224,12 @@ class AgentService:
         # rather than once at startup; `calendar` stays available for tests
         # that inject a ready-made one.
         self.calendar_factory=calendar_factory
+        # The natural-language create flow: literal-rule slot collection, an
+        # exact preview, and the owner's explicit approval spending the
+        # connector's own one-time token.  It resolves the connector per turn
+        # through `calendar_for_owner`, so it sees the same owner-bound
+        # connector the tool path and the approve surface use.
+        self.calendar_conversation=CalendarConversation(store,self.calendar_for_owner)
         # Owner-local token-exchange transport for the Gmail callback route,
         # supplied by the same deployment that supplies `gmail`.  Kept off the
         # connector so the client secret never enters connector state.
@@ -325,7 +333,7 @@ class AgentService:
             return memory.reject_candidate(owner_id,work_ref,candidate_id,digest)
         raise ValueError('검토된 기억 후보 요청을 확인하세요.')
 
-    def classify_intent(self, prompt, model_suggestion=None):
+    def classify_intent(self, prompt, model_suggestion=None, calendar_pending=None, owner_id=None):
         """Decide where one owner utterance goes, before anything is invoked.
 
         The decision is AgentOS's.  No model is consulted to produce it, and
@@ -334,9 +342,15 @@ class AgentService:
         obtain one, there is exactly one constrained way in - it may narrow an
         ambiguity AgentOS already found and nothing else.  No call site in
         this service supplies one.
+
+        ``calendar_pending`` is content free: only *that* a calendar draft is
+        waiting reaches the classifier, never what it says.
         """
-        return self.intent_classifier.classify(prompt, model_suggestion=model_suggestion,
-                                               focus=self.conversation_focus.current())
+        if calendar_pending is None:
+            calendar_pending=(self.calendar_conversation.should_route(owner_id)
+                              if owner_id else self.calendar_conversation.has_pending())
+        focus={**self.conversation_focus.current(),'calendar_pending':bool(calendar_pending)}
+        return self.intent_classifier.classify(prompt, model_suggestion=model_suggestion, focus=focus)
 
     @staticmethod
     def settings_response(result):
@@ -1205,11 +1219,14 @@ class AgentService:
 
     def calendar_for(self, job):
         """The Calendar connector bound to this Work's owner, or None."""
+        return self.calendar_for_owner(self.connector_owner_id(job))
+
+    def calendar_for_owner(self, owner_id):
         if self.calendar is not None:
             return self.calendar
         if self.calendar_factory is None:
             return None
-        return self.calendar_factory(self.connector_owner_id(job))
+        return self.calendar_factory(owner_id)
 
     def begin_calendar_connection(self, grant='read'):
         """Return one owner-local Calendar authorization URL for one grant.
@@ -1810,6 +1827,7 @@ class AgentService:
             approval_needed=[False]
             context_approval_needed=[False]
             refusals=[]
+            calendar_notice=''
             try:
                 prompt=job['message'].strip()
                 owner_memory_approval=self.store.issue_memory_approval(job['id'],prompt) if self.explicit_memory_request(prompt) else None
@@ -1817,7 +1835,23 @@ class AgentService:
                 # touched.  `decision.authority` records whether the owner
                 # said it literally or an AgentOS cue rule derived it; there
                 # is no branch here that a model can reach.
-                decision=self.classify_intent(prompt)
+                # The owner is resolved first: a pending draft belongs to one
+                # connector identity, so whether one is pending is a question
+                # about this Work's owner and not about the install.
+                connector_owner=self.connector_owner_id(job)
+                decision=self.classify_intent(prompt,owner_id=connector_owner)
+                # A pending calendar draft claims cue-free follow-ups ("치과",
+                # "오후 4시", "승인").  Anything it does not recognise as its
+                # own - and any other intent - drops the draft, says so, and
+                # is routed exactly as if no draft had been pending.  The
+                # dropped draft can never execute: its approval was never
+                # minted.
+                if decision.intent==INTENT_CALENDAR_CREATE and decision.continuation \
+                        and not self.calendar_conversation.claims(connector_owner,prompt):
+                    if self.calendar_conversation.clear(connector_owner):calendar_notice=CALENDAR_DROPPED_NOTICE+'\n\n'
+                    decision=self.classify_intent(prompt,calendar_pending=False,owner_id=connector_owner)
+                elif decision.intent not in (INTENT_CALENDAR_CREATE,INTENT_AMBIGUOUS) and self.calendar_conversation.has_pending(connector_owner):
+                    if self.calendar_conversation.clear(connector_owner):calendar_notice=CALENDAR_DROPPED_NOTICE+'\n\n'
                 self.conversation_focus.record(decision)
                 owner=f"channel:{job['channel']}:{job.get('chat_id') or 'local'}"
                 # WU2 computed `supersedes_previous` and wired it to nothing.
@@ -1832,6 +1866,7 @@ class AgentService:
                 # detail they would only discover was useless afterwards.
                 guidance=self.connection_handoff(job,decision)
                 if guidance is not None:
+                    guidance=calendar_notice+guidance
                     with self.store.db() as db:
                         db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('assistant',guidance,job['channel'],time.time(),job.get('workspace_id'),job['id']))
                         db.execute("UPDATE jobs SET status='awaiting_connection',response=?,error=NULL,delivery=? WHERE id=?",(guidance,'pending' if job['chat_id'] else 'none',job['id']))
@@ -1863,6 +1898,19 @@ class AgentService:
                     result=self.personal_assistant_request({'message':decision.argument}, owner_id=owner)
                     response=result['response']
                     outcome='succeeded' if result['state'] in ('completed','requested','awaiting-approval','fallback') else 'failed'
+                elif decision.intent==INTENT_CALENDAR_CREATE:
+                    if self.calendar_for_owner(connector_owner) is None:
+                        raise ValueError(ConnectorHandoff.unavailable(CALENDAR_WRITE_CONNECTOR_ID))
+                    def calendar_evidence(tool,status,detail):
+                        # Content-free lifecycle evidence: draft id, state and
+                        # a hash prefix.  Never the title, time or utterance.
+                        with self.store.db() as db:
+                            db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',(job['id'],tool,status,json.dumps(detail),time.time()))
+                    try:
+                        response=self.calendar_conversation.handle(connector_owner,prompt,fresh=not decision.continuation,evidence=calendar_evidence)
+                    except CalendarError as exc:
+                        raise ValueError(ConnectorHandoff.unavailable(CALENDAR_WRITE_CONNECTOR_ID) if exc.reason=='unavailable'
+                                         else f'일정 초안을 만들지 못했습니다 ({exc.reason}). 아무 일정도 만들지 않았습니다.') from None
                 elif decision.intent==INTENT_MAIL_SEARCH:
                     if self.gmail is None:
                         raise ValueError(ConnectorHandoff.unavailable(GMAIL_CONNECTOR_ID))
@@ -2042,6 +2090,7 @@ class AgentService:
                         self.record_file_workspace_document_job(job['id'])
                     if context_sources and '컨텍스트:' not in response:
                         response+='\n\n컨텍스트 출처:\n'+'\n'.join(context_sources)
+                response=calendar_notice+response
                 with self.store.db() as db:
                     db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('assistant',response,job['channel'],time.time(),job.get('workspace_id'),job['id']))
                     cause=self._failure_cause(refusals) if outcome in ('failed','partial') else None
@@ -2049,7 +2098,7 @@ class AgentService:
             except (ValueError,ProviderError,ExecutionError,OSError) as exc:
                 response=str(exc)
                 with self.store.db() as db:
-                    db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('assistant','이 요청은 완료하지 못했습니다: '+response,job['channel'],time.time(),job.get('workspace_id'),job['id']))
+                    db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('assistant',calendar_notice+'이 요청은 완료하지 못했습니다: '+response,job['channel'],time.time(),job.get('workspace_id'),job['id']))
                     db.execute("UPDATE jobs SET status='failed',error=?,delivery=? WHERE id=?",(response,'pending' if job['chat_id'] else 'none',job['id']))
                 outcome='failed'
             self.update_task_card(job,outcome)

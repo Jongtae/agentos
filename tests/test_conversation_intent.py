@@ -75,7 +75,8 @@ PARAPHRASES = {
     ),
 }
 
-#: Recognised, deliberately not executed from ordinary prose.
+#: Recognised from ordinary prose.  What it reaches is a draft with an exact
+#: preview; the effect waits for the owner's explicit approval of that preview.
 CALENDAR_PARAPHRASES = ('내일 오후 3시에 팀 회의 일정 잡아줘', '금요일 약속 하나 등록해줘',
                         'schedule a meeting with the vendor tomorrow',
                         'add a calendar event for friday')
@@ -199,14 +200,33 @@ class ConsequentialEffectTests(unittest.TestCase):
     def setUp(self):
         self.classifier = classifier()
 
-    def test_a_recognised_calendar_request_explains_instead_of_executing(self):
+    def test_a_recognised_calendar_request_is_consequential_and_carries_the_utterance(self):
         for text in CALENDAR_PARAPHRASES:
             with self.subTest(text=text):
                 decision = self.classifier.classify(text)
                 self.assertEqual(decision.intent, INTENT_CALENDAR_CREATE)
                 self.assertTrue(decision.consequential)
-                self.assertFalse(decision.executes)
-                self.assertIn('추측으로 진행하지 않았습니다', decision.clarification)
+                self.assertEqual(decision.authority, AUTHORITY_RULE)
+                # It may proceed - as far as a draft.  The utterance is the
+                # argument the draft rules read; nothing is extracted here.
+                self.assertTrue(decision.executes)
+                self.assertEqual(decision.argument, text)
+
+    def test_a_pending_draft_claims_cue_free_follow_ups_only_while_it_is_pending(self):
+        pending = {'intent': INTENT_CALENDAR_CREATE, 'calendar_pending': True}
+        for text in ('치과', '오후 4시', '승인', 'approve', '취소', '아니 4시로'):
+            with self.subTest(text=text):
+                decision = self.classifier.classify(text, focus=pending)
+                self.assertEqual(decision.intent, INTENT_CALENDAR_CREATE)
+                self.assertTrue(decision.continuation)
+                self.assertEqual(decision.argument, text)
+        # Same focus intent, no pending draft: an ordinary utterance stays on
+        # the conversation route exactly as before.
+        stale = {'intent': INTENT_CALENDAR_CREATE}
+        self.assertEqual(self.classifier.classify('치과', focus=stale).intent, INTENT_CONVERSATION)
+        # A rule that fires still wins over the pending draft.
+        self.assertEqual(self.classifier.classify('메모 목록', focus=pending).intent, INTENT_NOTE_LIST)
+        self.assertEqual(self.classifier.classify('/notes', focus=pending).intent, INTENT_NOTE_LIST)
 
     def test_non_consequential_intents_execute_from_prose(self):
         for intent, rows in PARAPHRASES.items():
@@ -476,14 +496,17 @@ class ServiceRoutingTests(unittest.TestCase):
         self.assertEqual(self.store.config('personal_assistant_evidence', []), [])
         self.assertEqual(self.store.config('settings_change_drafts', {}), {})
 
-    def test_a_natural_calendar_request_explains_and_creates_nothing(self):
+    def test_a_natural_calendar_request_without_a_connector_refuses_and_creates_nothing(self):
+        # This service has no Calendar connector at all.  The refusal names
+        # the reason; it neither asks about the event nor drafts anything.
         for text in CALENDAR_PARAPHRASES:
             with self.subTest(text=text):
                 job = self.run_one(text)
-                self.assertEqual(job['status'], 'succeeded')
-                self.assertIn('추측으로 진행하지 않았습니다', job['response'])
+                self.assertEqual(job['status'], 'failed')
+                self.assertIn('구성되어 있지 않습니다', job['error'])
         self.assertEqual(self.store.config('personal_assistant_evidence', []), [])
-        self.assertEqual(self.store.config('calendar_drafts', {}), {})
+        self.assertEqual(self.store.config('calendar_create', {}), {})
+        self.assertEqual(self.store.config('calendar_conversation', {}), {})
 
     def test_natural_delegation_never_reaches_the_orchestrator(self):
         for text in ('이 작업을 외부 에이전트에게 맡겨줘', 'delegate this task to the external agent'):

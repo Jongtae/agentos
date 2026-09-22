@@ -234,5 +234,113 @@ class CalendarToolTests(unittest.TestCase):
                 self.assertEqual([t for t in role['tools'] if t.startswith('calendar_')], [])
 
 
+
+
+class CalendarTransportGrantTests(unittest.TestCase):
+    """The HTTP method selects the grant, and the two credentials are separate.
+
+    `CalendarConnector` injects one `GoogleCalendar` provider for both reads
+    and writes, so the transport is the only place that can keep the read and
+    write grants apart once a provider call is in flight. A transport that
+    refused mutations outright -- which is what shipped first -- would make
+    the write grant obtainable and unspendable, so J4's create/update/cancel
+    could never complete even with the owner's approval.
+    """
+
+    def setUp(self):
+        from personal_agent.calendar_oauth import (EncryptedCalendarSecretStore,
+                                                   calendar_transport)
+        from cryptography.fernet import Fernet
+        self.calendar_transport = calendar_transport
+        self.temp = tempfile.TemporaryDirectory(dir=str(Path(__file__).resolve().parent))
+        self.addCleanup(self.temp.cleanup)
+        self.store = QuickStore(Path(self.temp.name) / 'data')
+        self.secrets = EncryptedCalendarSecretStore(self.store, Fernet.generate_key().decode())
+        self.registry = ConnectorRegistry(self.store, (CALENDAR_SPEC, CALENDAR_WRITE_SPEC))
+        self.seen = []
+
+    def opener(self, method, url, body, headers):
+        self.seen.append((method, headers.get('Authorization')))
+        return {'items': []}
+
+    def transport(self, **kwargs):
+        return self.calendar_transport(self.secrets, self.registry, MEMORY_OWNER,
+                                       opener=self.opener, **kwargs)
+
+    def connect(self, grant, spec, scope):
+        """Connect a grant AND store a usable token.
+
+        Both matter. A first version of these tests transitioned the registry
+        and stored nothing, so every call raised for want of a token and two
+        mutations survived: a write spending the read grant, and a read
+        carrying a body. The tests passed for the wrong reason.
+        """
+        from personal_agent.calendar_oauth import (TOKEN_SECRET_KEY, _owner_key,
+                                                   _secret_slot)
+        status = self.registry.transition(MEMORY_OWNER, spec.connector_id,
+                                          ConnectorState.CONNECTED,
+                                          granted_scopes=(scope,))
+        self.secrets.secret(_secret_slot(TOKEN_SECRET_KEY, grant, MEMORY_OWNER), {
+            'access_token': f'{grant}-token',
+            'expires_at': 4_102_444_800.0,
+            'owner': _owner_key(MEMORY_OWNER),
+            'grant': grant,
+            'scope': list(spec.required_scopes),
+            'connection_revision': status.connection_revision,
+        })
+        return status
+
+    def test_a_read_only_transport_refuses_a_mutation_before_loading_a_token(self):
+        send = self.transport()
+        from personal_agent.calendar_oauth import CalendarOAuthError
+        for method in ('POST', 'PATCH', 'DELETE', 'PUT'):
+            with self.subTest(method=method):
+                with self.assertRaises(CalendarOAuthError):
+                    send(method, 'https://www.googleapis.com/calendar/v3/calendars/primary/events',
+                         {'summary': 'x'}, {})
+        self.assertEqual(self.seen, [], 'nothing may reach the opener')
+
+    def test_a_write_transport_without_the_write_grant_is_refused(self):
+        """Enabling writes on the transport is not the grant.
+
+        Only the read connector is connected here, so the mutating call must
+        fail on authority, not succeed because `allow_writes=True` was asked
+        for.
+        """
+        from personal_agent.calendar_oauth import CalendarOAuthError
+        from personal_agent.calendar_oauth import READ_GRANT
+        self.connect(READ_GRANT, CALENDAR_SPEC, CALENDAR_READ_SCOPE)
+        # Precondition: the read grant genuinely works, so a later refusal is
+        # about authority and not about a missing token.
+        self.transport()('GET', 'https://www.googleapis.com/calendar/v3/calendars/primary/events',
+                         None, {})
+        self.assertEqual(self.seen[-1], ('GET', 'Bearer read-token'))
+        send = self.transport(allow_writes=True)
+        with self.assertRaises(CalendarOAuthError):
+            send('POST', 'https://www.googleapis.com/calendar/v3/calendars/primary/events',
+                 {'summary': 'x'}, {})
+        self.assertEqual(len(self.seen), 1, 'the write credential was never resolved')
+
+    def test_a_write_spends_the_write_credential_not_the_read_one(self):
+        """The grant follows the method, and they are different tokens."""
+        from personal_agent.calendar_oauth import READ_GRANT, WRITE_GRANT
+        self.connect(READ_GRANT, CALENDAR_SPEC, CALENDAR_READ_SCOPE)
+        self.connect(WRITE_GRANT, CALENDAR_WRITE_SPEC, CALENDAR_WRITE_SCOPE)
+        send = self.transport(allow_writes=True)
+        send('GET', 'https://www.googleapis.com/calendar/v3/calendars/primary/events', None, {})
+        send('POST', 'https://www.googleapis.com/calendar/v3/calendars/primary/events',
+             {'summary': 'x'}, {})
+        self.assertEqual([auth for _, auth in self.seen],
+                         ['Bearer read-token', 'Bearer write-token'])
+
+    def test_a_read_carrying_a_body_is_refused_even_with_a_valid_token(self):
+        from personal_agent.calendar_oauth import CalendarOAuthError, READ_GRANT
+        self.connect(READ_GRANT, CALENDAR_SPEC, CALENDAR_READ_SCOPE)
+        with self.assertRaises(CalendarOAuthError):
+            self.transport()('GET', 'https://www.googleapis.com/calendar/v3/calendars/primary/events',
+                             {'summary': 'x'}, {})
+        self.assertEqual(self.seen, [])
+
+
 if __name__ == '__main__':
     unittest.main()

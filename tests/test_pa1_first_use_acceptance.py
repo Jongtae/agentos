@@ -101,9 +101,12 @@ JOURNEY_EVIDENCE = {
           'any real event mutation are owner_validation_pending; no live '
           'call has been made. `calendar_query` is labelled `owner-calendar` '
           'and closes public destinations for the turn. The natural-language '
-          'create INTENT still has no executing worker branch: it parks, '
-          'resumes and then asks for the missing detail, so the tool path '
-          'is the one that works.',
+          'create intent has its worker branch since PA1-J4-02 / #465: '
+          'literal rules read title, date, time and duration, ask for the '
+          'one missing detail, draft through the same `draft_create`, show '
+          'the exact preview, and spend the same approve/execute pair only '
+          'on the owner\'s explicit "승인". No model is consulted on that '
+          'path.',
     'J5': 'covered offline, with the discrimination measured and weak. '
           '`bounded_public_research` is wired and reachable; '
           'tests/test_pa1_j5_research_discrimination.py drives page content '

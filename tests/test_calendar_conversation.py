@@ -286,6 +286,19 @@ class ApprovalTests(ConversationTestCase):
         (draft,) = self.drafts().values()
         self.assertEqual(draft['owner'], _owner_key('telegram:4242'))
 
+    def test_the_other_channel_cannot_take_over_a_half_collected_request(self):
+        self.store.put('telegram', {'enabled': True, 'user_id': 4242, 'generation': 'g1'})
+        self.connect('telegram:4242')
+        self.say('금요일 약속 하나 등록해줘', channel='telegram:g1', chat_id=4242)
+        before = self.pending()
+        job = self.say('네')  # from the web
+        self.assertEqual(job['response'], OTHER_CHANNEL)
+        self.assertEqual(self.pending(), before, 'the collecting record must not change owner')
+        job = self.say('오후 2시', channel='telegram:g1', chat_id=4242)
+        self.assertIn(PREVIEW_HEADER, job['response'])
+        (draft,) = self.drafts().values()
+        self.assertEqual(draft['owner'], _owner_key('telegram:4242'))
+
     def test_a_preview_that_changed_underneath_is_not_approved(self):
         self.say('내일 오후 3시에 치과 일정 잡아줘')
         row = self.pending()

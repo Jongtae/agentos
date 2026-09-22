@@ -630,19 +630,21 @@ class CalendarConversation:
             return notice + self._advance(owner_id, slots, evidence)
         if row is None:
             return NOTHING_PENDING
+        if is_cancel(text):
+            # Cancelling creates nothing, so either channel may do it.
+            self.clear()
+            return CANCELLED
+        if not self._owned(row, owner_id):
+            # Ownership is checked before anything is written: the other
+            # channel may neither approve nor take over a half-collected
+            # request.
+            return OTHER_CHANNEL
         if is_approval(text):
             if row['state'] != STATE_AWAITING_APPROVAL:
                 # "네" while a detail is still missing is not an approval of
                 # anything; ask again for the detail.
                 return self._advance(owner_id, row.get('slots') or {}, evidence)
-            if not self._owned(row, owner_id):
-                return OTHER_CHANNEL
             return self._approve(owner_id, row, evidence)
-        if is_cancel(text):
-            self.clear()
-            return CANCELLED
-        if not self._owned(row, owner_id):
-            return OTHER_CHANNEL
         parsed = parse_event(_after_last_correction(text) if _has_correction(text) else text, self._local_now())
         collected = dict(row.get('slots') or {})
         if row['state'] == STATE_COLLECTING and not collected.get('title') and not parsed.explicit_title \

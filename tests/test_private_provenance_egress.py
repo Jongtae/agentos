@@ -17,7 +17,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from personal_agent.agent_runtime import Capabilities, run_agent
+from personal_agent.agent_runtime import Capabilities, provenance_window, run_agent
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
@@ -128,6 +128,199 @@ class RoutingSiteProvenanceTests(unittest.TestCase):
         caps.adapter = ModelAdapter(transport)
         self.drive(caps, transport, '노이즈캔슬링 헤드폰 비교해줘')
         self.assertEqual([plan['tool'] for plan in self.egress.plans], ['web_search'])
+
+    def test_a_document_read_by_the_specialist_closes_the_parent_web_search(self):
+        """The mirror of the decisive case: provenance must flow back, not only down.
+
+        Independent review found the downward propagation above was
+        one-directional.  A *clean* parent could delegate the read to its
+        specialist -- all three built-in roles declare find_files and
+        read_file -- take the secret out of the returned report, which is
+        spliced into the parent's context verbatim, and search the public web
+        with it.  ``delegate_agent`` is also absent from ``run_agent``'s
+        evidence allowlist, so the unattributed fail-closed default never
+        covered this path either.
+
+        The parent here performs no private read of its own; everything it
+        knows came back from the child.
+        """
+        parent_bodies = []
+
+        def transport(url, body, headers=None, timeout=60):
+            tools = {tool['function']['name'] for tool in body['tools']}
+
+            def call(name, args):
+                return {'model': 'x', 'choices': [{'message': {'tool_calls': [
+                    {'id': '1', 'function': {'name': name,
+                                             'arguments': json.dumps(args, ensure_ascii=False)}}]}}]}
+
+            if 'delegate_agent' not in tools:            # the specialist
+                turn = len([b for b in child_bodies if True])
+                child_bodies.append(body)
+                if turn == 0:
+                    return call('find_files', {'query': '급여'})
+                if turn == 1:
+                    hit = json.loads(body['messages'][-1]['content'])['files'][0]
+                    return call('read_file', {'root_id': hit['root_id'], 'path': hit['path']})
+                return {'model': 'x', 'choices': [{'message': {
+                    'content': '전문가 보고: 계좌번호 110-222-333333'}}]}
+            parent_bodies.append(body)
+            if len(parent_bodies) == 1:
+                return call('delegate_agent', {'agent_id': 'researcher', 'task': '급여 문서를 찾아 읽어줘'})
+            if len(parent_bodies) == 2:
+                return call('web_search', {'query': LAUNDERED})
+            return {'model': 'x', 'choices': [{'message': {'content': '완료'}}]}
+
+        child_bodies = []
+        caps = self.caps()
+        caps.adapter = ModelAdapter(transport)
+        self.drive(caps, transport, '급여 정보를 찾아서 시세와 비교해줘')
+        # The parent really did receive the secret back -- without this the
+        # test would pass because nothing private ever moved.
+        self.assertIn('110-222-333333',
+                      json.dumps(parent_bodies[-1]['messages'], ensure_ascii=False))
+        # ...the query it then composed shares no token with the secret...
+        self.assertNotIn('110-222-333333', LAUNDERED)
+        # ...and it was refused anyway, because the label came back with the report.
+        self.assertEqual(self.egress.plans, [])
+        self.assertEqual(caps.private_egress_provenance(), ['delegated:connected-document'])
+
+    def test_a_specialist_that_read_nothing_private_leaves_the_parent_open(self):
+        """The opposing pin for the back-propagation: it is provenance, not delegation."""
+        def plan(step, body):
+            if step == 1:
+                return ('delegate_agent', {'agent_id': 'researcher', 'task': '헤드폰을 비교해줘'})
+            if step == 2:
+                return ('web_search', {'query': LAUNDERED})
+            return None
+
+        transport, _parent, _child = self.script(plan)
+        caps = self.caps()
+        caps.adapter = ModelAdapter(transport)
+        self.drive(caps, transport, '헤드폰 비교해줘')
+        self.assertEqual(caps.private_egress_provenance(), [])
+        self.assertIn('web_search', [plan['tool'] for plan in self.egress.plans])
+
+    # -- one test per labelled source, so no two can mask each other --------
+
+    def test_read_file_alone_taints(self):
+        """``read_file`` pins its own label.
+
+        Review found ``read_file`` and ``find_files`` masked each other: every
+        test that exercised one called the other first, so removing either
+        label alone left the suite green.  This calls only ``read_file``.
+        """
+        caps = self.caps()
+        caps.execute('read_file', {'root_id': caps.roots()[0]['id'], 'path': 'pay.txt'})
+        self.assertEqual(caps.private_egress_provenance(), ['connected-document'])
+        with self.assertRaises(ValueError):
+            caps.execute('web_search', {'query': LAUNDERED})
+        self.assertEqual(self.egress.plans, [])
+
+    def test_find_files_alone_taints(self):
+        """``find_files`` pins its own label; the hit list is already private."""
+        caps = self.caps()
+        caps.execute('find_files', {'query': '급여'})
+        self.assertEqual(caps.private_egress_provenance(), ['connected-document'])
+        with self.assertRaises(ValueError):
+            caps.execute('web_search', {'query': LAUNDERED})
+        self.assertEqual(self.egress.plans, [])
+
+    def test_list_roots_alone_taints(self):
+        """Folder basenames are owner-private.
+
+        ``list_roots`` was the tool the labels forgot: review drove a folder
+        name -- the motivating example was ``이혼소송_2026`` -- straight into a
+        web_search query from an otherwise clean context.  Less material than
+        a document's contents, the same destination.
+        """
+        caps = self.caps()
+        roots = caps.execute('list_roots', {})
+        self.assertTrue(roots['roots'])
+        self.assertEqual(caps.private_egress_provenance(), ['owner-folder-names'])
+        with self.assertRaises(ValueError):
+            caps.execute('web_search', {'query': LAUNDERED})
+        self.assertEqual(self.egress.plans, [])
+
+    def test_weather_is_a_public_destination_and_is_closed(self):
+        """``weather`` sends an arbitrary city string to a third-party geocoder.
+
+        It sat unguarded between the two guarded branches, so the provenance
+        model knew the context was private and this branch never asked.  Twelve
+        tool calls per Work at 100 characters each is real exfiltration
+        capacity, and it falsified the property this whole file asserts.
+        """
+        caps = self.caps()
+        caps.execute('read_file', {'root_id': caps.roots()[0]['id'], 'path': 'pay.txt'})
+        with self.assertRaises(ValueError):
+            caps.execute('weather', {'city': '110-222-333333'})
+        self.assertEqual(self.egress.plans, [])
+
+    def test_weather_is_open_from_a_clean_context(self):
+        """The opposing pin: weather is refused by provenance, not disabled."""
+        caps = self.caps()
+        caps.execute('weather', {'city': '서울'})
+        self.assertEqual([plan['tool'] for plan in self.egress.plans], ['weather'])
+
+    def test_weather_is_closed_for_a_tainted_specialist_too(self):
+        """The delegated label closes it on the child side as well."""
+        child = self.caps(inherited_provenance={'delegated:connected-document'})
+        with self.assertRaises(ValueError):
+            child.execute('weather', {'city': '110-222-333333'})
+        self.assertEqual(self.egress.plans, [])
+
+    def test_public_page_read_is_closed_by_provenance_not_by_the_old_flag(self):
+        """``public_page_read`` must consult provenance, not ``evidence``.
+
+        The pre-existing guard was ``if self.evidence or self.document_context``.
+        Both halves of the replacement matter and only one was pinned: review
+        reverted this branch alone to the old flag and the whole suite stayed
+        green.  The two sources below are exactly the ones the flag cannot
+        see -- ``list_notes`` records provenance through ``_from_private``
+        without touching ``self.evidence``, and a delegated child is
+        constructed with an empty evidence list by design.
+        """
+        scope = {'https://example.com/pricing'}
+        url = 'https://example.com/pricing'
+
+        facade = self.caps(public_page_scope=scope)
+        facade.execute('list_notes', {})
+        self.assertEqual(facade.evidence, [], 'precondition: the old flag is blind here')
+        with self.assertRaises(ValueError) as refused:
+            facade.execute('public_page_read', {'url': url})
+        self.assertIn('연결 문서', str(refused.exception))
+
+        child = self.caps(public_page_scope=scope,
+                          inherited_provenance={'delegated:connected-document'})
+        self.assertEqual(child.evidence, [], 'precondition: the old flag is blind here too')
+        with self.assertRaises(ValueError):
+            child.execute('public_page_read', {'url': url})
+
+        self.assertEqual(self.egress.plans, [])
+
+    def test_public_page_read_is_open_from_a_clean_approved_scope(self):
+        """The opposing pin: an approved page is still reachable."""
+        caps = self.caps(public_page_scope={'https://example.com/pricing'})
+        caps.execute('public_page_read', {'url': 'https://example.com/pricing'})
+        self.assertEqual([plan['tool'] for plan in self.egress.plans], ['public_page_read'])
+
+    def test_an_unrecognised_provenance_label_is_treated_as_refusing(self):
+        """The documented fail-closed default, asserted rather than only described.
+
+        ``provenance_window`` maps an unknown label to ``'turn'`` so a source
+        added later without a window entry closes public destinations instead
+        of silently opening them.  Review found this stated in prose at the
+        definition and in the commit message, with no test: flipping the
+        default to a window outside ``EGRESS_TAINT_WINDOWS`` left the suite
+        green.
+        """
+        self.assertEqual(provenance_window('a-source-added-next-year'), 'turn')
+        self.assertEqual(provenance_window('delegated:a-source-added-next-year'), 'turn')
+        caps = self.caps(inherited_provenance={'a-source-added-next-year'})
+        self.assertEqual(caps.private_egress_provenance(), ['a-source-added-next-year'])
+        with self.assertRaises(ValueError):
+            caps.execute('web_search', {'query': LAUNDERED})
+        self.assertEqual(self.egress.plans, [])
 
     def test_delegation_preserves_each_inherited_label_and_its_window(self):
         """The child inherits the parent's labels, not a single flat marker.

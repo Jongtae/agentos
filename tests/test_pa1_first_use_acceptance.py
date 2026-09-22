@@ -78,9 +78,17 @@ JOURNEY_EVIDENCE = {
           'no production HTTP transport, and registering its connector specs '
           'would park Work forever (a C8 regression). The honest current '
           'behaviour - a clean refusal - is asserted instead.',
-    'J5': 'covered offline: bounded public search and page reading against a '
-          'fake egress layer, with cited sources on the owner-visible answer '
-          'and in the per-source tool events. No network was touched.',
+    'J5': 'partial. The routing-site pieces are covered offline: bounded '
+          'public search and page reading against a fake egress layer, with '
+          'cited sources on the owner-visible answer and in the per-source '
+          'tool events, and private-provenance refusal at every public '
+          'destination. No network was touched. The journey itself - '
+          'research discrimination, #391\'s 0/10 and 5/10 - is NOT covered: '
+          '`research.PublicResearch` is imported by nothing in `src/`, and '
+          'wiring it as written would widen egress from owner-approved URLs '
+          'to search-discovered ones. That is an owner authority decision '
+          '(#449) and a #449 non-goal, so the discrimination stays '
+          'unreachable from any production path until it is made.',
     'J6': 'covered: prose capture as canonical Memory, correction by '
           'supersession, owner review and durable delete through the shipped '
           'surfaces, an unauthorized model write held as a MemoryCandidate, a '

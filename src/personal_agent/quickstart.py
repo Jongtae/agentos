@@ -28,6 +28,7 @@ from .capabilities import CapabilityRegistry
 from .isolated_engine_gateway import IsolatedEngineGateway
 from .drive_web_oauth import DriveWebOAuthHandoff, EncryptedDriveSecretStore, DriveWebOAuthError
 from .connector_contract import ConnectorRegistry
+from .service_control import service_action
 from .gmail import GMAIL_CONNECTOR, EncryptedGmailSecretStore, GmailConnector
 from cryptography.fernet import Fernet
 from cryptography import x509
@@ -602,6 +603,30 @@ def drive_config_main(argv):
     print('Created owner-only local Drive credential file.',flush=True)
 
 
+def service_main(argv):
+    """Expose the installed background-service lifecycle to the owner CLI.
+
+    The lifecycle itself is owned by PA1-INSTALL-01 and is not reimplemented
+    here: this is only the central-CLI wiring for its ``service_action`` seam.
+    The seam's receipt is printed exactly as it was reported, so a launchd
+    operation that was refused can never be rendered here as a success.
+    """
+    parser=argparse.ArgumentParser(prog='agentos service',description='Manage the macOS launchd background service for this owner.')
+    parser.add_argument('action',choices=('install','upgrade','start','stop','restart','status','uninstall'))
+    # Unlike the sibling subcommands this deliberately resolves no default data
+    # directory. ServiceController recovers the directory from the installed
+    # service definition when none is supplied, so injecting a default here
+    # would make status/stop/uninstall report a directory the installed
+    # service does not actually use.
+    parser.add_argument('--data',default=None,help='Override the data directory (default: AGENTOS_DATA, else the installed service definition).')
+    parser.add_argument('--cli-path',default=None,help='Override the agentos executable recorded in the service definition.')
+    args=parser.parse_args(argv)
+    options={name:value for name,value in (('data_dir',args.data),('cli_path',args.cli_path)) if value is not None}
+    receipt=service_action(args.action,**options)
+    print(json.dumps(receipt,ensure_ascii=False,sort_keys=True))
+    return 0 if receipt.get('ok') else 1
+
+
 def main():
     # Keep the normal server parser small while exposing delivery as a nested
     # command: `agentos delivery status`.
@@ -612,6 +637,8 @@ def main():
         return plugins_main(sys.argv[2:])
     if len(sys.argv)>1 and sys.argv[1]=='drive-config':
         return drive_config_main(sys.argv[2:])
+    if len(sys.argv)>1 and sys.argv[1]=='service':
+        return service_main(sys.argv[2:])
     if len(sys.argv)>1 and sys.argv[1]=='guide':
         guide=argparse.ArgumentParser(description='Show credential-free AgentOS onboarding and recovery guidance.')
         guide.add_argument('--data',default=os.environ.get('AGENTOS_DATA',str(Path.home()/'.local/share/agentos')))
@@ -678,4 +705,4 @@ def main():
         for thread in service.threads:thread.join(timeout=2)
 
 
-if __name__=='__main__':main()
+if __name__=='__main__':sys.exit(main())

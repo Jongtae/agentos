@@ -999,6 +999,15 @@ finally:
         with restarted.store.db() as db:db.execute("UPDATE jobs SET delivery='sending' WHERE id=?",(job['id'],))
         restarted.store.recover()
         self.assertEqual(restarted.store.job(job['id'])['delivery'],'unknown')
+        # The guarantee this test stopped one line short of: `deliver_one`
+        # selects only delivery='pending', so running the restarted delivery
+        # loop again must not re-send a message the owner may already have
+        # read.  Asserting the terminal state without ever re-running the loop
+        # left that to inspection of the SQL.
+        sent=[call for call in self.calls if call[0].endswith('/sendMessage')]
+        restarted.deliver_one()
+        self.assertEqual(restarted.store.job(job['id'])['delivery'],'unknown')
+        self.assertEqual([call for call in self.calls if call[0].endswith('/sendMessage')],sent)
 
     def test_owner_can_record_live_task_card_attestation_only_after_durable_evidence(self):
         generation=self.pair()

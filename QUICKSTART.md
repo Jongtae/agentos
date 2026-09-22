@@ -54,7 +54,7 @@ all natural-language requests work. Share redacted observations, not private doc
 
 Create your own bot using Telegram's BotFather, paste its token into Settings, and open the generated pairing link in your own Telegram account. Only the paired private account can submit work. The web interface and Telegram share conversation history and notes. AgentOS uses outbound polling, so no public inbound port is needed for Telegram. Use a dedicated bot without an existing webhook.
 
-The computer must remain running and awake for remote requests to be processed. This preview does not install a background login service. Keep the terminal open; Ctrl-C stops AgentOS.
+The computer must remain running and awake for remote requests to be processed. From a source checkout you can register a background login service instead of holding a terminal open; see [Background service (macOS)](#background-service-macos) for exactly what that does and does not cover. Without that service, keep the terminal open; Ctrl-C stops AgentOS.
 
 ## Restart and update
 
@@ -68,9 +68,54 @@ agentos start
 agentos guide
 ```
 
+If you registered the background login service from a source checkout, run `agentos service upgrade` after replacing the executable rather than relying on the foreground command.
+
 Data persists in `~/.local/share/agentos`; uninstalling the formula does not delete it. Back up the entire data directory while AgentOS is stopped. This directory contains your private conversations and credentials; credentials have filesystem permissions, not application-level encryption.
 
 If the browser does not open, use the link in `~/.local/share/agentos/private/setup-link.txt` locally. Do not share that file before setup. After setup, open `http://127.0.0.1:8787`; log in only if you chose a password. An occupied port can be changed using `agentos start --port 8788`. After an unexpected stop, AgentOS marks in-progress work as interrupted and an in-flight Telegram send as unknown; it never silently repeats either. Review the web record and submit a new request if needed. `agentos guide` shows counts and next steps only, never task text or credentials.
+
+## Background service (macOS)
+
+`agentos start` runs in the foreground. On macOS the same executable can instead be
+registered as a per-user launchd login service, so Telegram and web requests are handled
+without an interactive terminal session:
+
+```sh
+agentos service install    # register and start the login service
+agentos service status     # report the observed launchd state and health
+agentos service restart
+agentos service stop       # stop and persistently disable it
+agentos service uninstall  # remove the registration; owner data is retained
+agentos service upgrade    # replace an existing definition, rolling back on failure
+```
+
+From a source checkout the same actions are available as
+`python3 -m personal_agent.quickstart service <action>`. `install` and `upgrade` must record
+an absolute path to the executable launchd will run; they resolve `agentos` from `PATH` and
+then from the Homebrew prefix, so from a source checkout either install the console script
+(`pip install -e .`) or pass `--cli-path /full/path/to/agentos` explicitly. Use `--data` only
+to override the data directory: with no `--data`, the other actions report the directory
+recorded in the installed service definition.
+
+Each action prints the receipt it actually observed and exits non-zero when the operation
+did not succeed. A refused, unhealthy or unreadable service is reported as a failure with a
+`next_action`, never as a success: `background_available` is reported only when a running
+process also passed the loopback health check. `uninstall` removes only the service
+registration and never deletes `~/.local/share/agentos`. The service definition is bound to
+loopback and sets `RunAtLoad`/`KeepAlive`, so it is designed to start again at login.
+
+What this does **not** yet cover, stated exactly:
+
+- **macOS only.** The lifecycle is launchd-specific. There is no systemd equivalent here.
+- **Not in any released build.** The most recent release tag is `v1.0.4` (2026-09-07), which
+  predates this command, and this repository contains no Homebrew formula, tap or checksum.
+  `brew install` / `brew upgrade jongtae/agentos/agentos` will not provide `agentos service`
+  until a later release; today it is reachable only from a source checkout.
+- **Not covered by automated tests of real launchd.** Repository CI runs on Linux and cannot
+  execute launchd. The automated evidence for these commands is injected-runner tests that
+  substitute `launchctl`. A real Homebrew install, a real login service surviving a machine
+  restart, and an end-to-end Telegram result with no terminal open are owner operating
+  validation that this repository has not performed.
 
 ## Remote host / source installation
 

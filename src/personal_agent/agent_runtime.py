@@ -29,6 +29,52 @@ DEFINITIONS=[
  schema('delegate_agent','Give a bounded task to a registered specialist. Pass relevant context explicitly. Separate model execution returns a report; specialists cannot recursively delegate or write notes.',{'agent_id':STRING,'task':STRING},['agent_id','task']),
 ]
 
+#: The single local owner ``Capabilities`` writes Memory for.  ``QuickStore``
+#: uses the same default, and it is the owner id the shipped MemoryCandidate
+#: review surface acts under, so a candidate refused here is approvable there.
+MEMORY_OWNER='local-owner'
+
+#: What the owner is told when a model write was held back, by reason.  A
+#: refusal is never silent: the reason also reaches the durable tool event
+#: (``evidence_summary``) and the candidate itself stays owner-inspectable.
+MEMORY_REFUSALS={
+ 'no-owner-memory-request':'소유자 확인이 필요해 기억 후보로 보관했습니다. 승인 후 저장할 수 있습니다.',
+ 'value-not-in-owner-request':'요청에 없는 내용이라 기억으로 저장하지 않고 기억 후보로 보관했습니다. 개인 공간에서 확인 후 승인할 수 있습니다.',
+ 'replaces-a-memory-the-request-did-not-name':'요청에 없던 기존 기억을 대체하는 값이라 저장하지 않고 기억 후보로 보관했습니다. 개인 공간에서 확인 후 승인할 수 있습니다.',
+}
+
+_MEMORY_WORD=re.compile(r'[^\W_]+')
+_MEMORY_CJK=re.compile(r'[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]')
+
+def memory_words(text):
+ """The significant words of one owner utterance or one proposed memory value."""
+ return _MEMORY_WORD.findall(str(text or '').casefold())
+
+def owner_said(word,owner_words):
+ """Is one proposed word present in the owner's own authenticated words?
+
+ Exact equality would be unusable: a model writes ``meetings`` where the
+ owner wrote ``meeting``, and Korean agglutinates, so the owner's ``회의``
+ comes back as ``회의를``.  A shared stem is therefore accepted - four
+ characters for alphanumeric text, two for CJK where two characters already
+ carry a whole morpheme - and only between words of near-equal length, so a
+ short proposed word cannot ride on a long unrelated one.  Anything shorter
+ than a stem, which includes every bare number, must match exactly: dates,
+ amounts and account numbers are never approximated.
+ """
+ for owner in owner_words:
+  if word==owner:return True
+  stem=2 if (_MEMORY_CJK.search(word) or _MEMORY_CJK.search(owner)) else 4
+  if len(word)<stem or len(owner)<stem or abs(len(word)-len(owner))>3:continue
+  if word[:stem]==owner[:stem]:return True
+ return False
+
+def owner_covers(value,owner_words,whole=True):
+ """Every word of ``value`` (or, with ``whole=False``, at least one) is the owner's."""
+ words=memory_words(value)
+ if not words:return False
+ return (all if whole else any)(owner_said(word,owner_words) for word in words)
+
 class Capabilities:
  def __init__(self,store,adapter,config,key,job_id,record,readonly=False,network=None,document_access=True,packages=None,allowed_tools=None,document_context=False,public_page_scope=None,memory_approval=None):
   self.store,self.adapter,self.config,self.key=store,adapter,config,key
@@ -94,6 +140,43 @@ class Capabilities:
       hits.append({'root_id':root['id'],'path':path,'kind':result['kind'],'location':location,'match':'filename' if query.casefold() in name.casefold() else 'content'})
      if len(hits)>=20:return {'files':hits,'truncated':True}
   return {'files':hits,'truncated':False}
+ def memory_write_refusal(self,memory_key,content):
+  """Why this exact key and value may not become canonical Memory in this turn.
+
+  ``verify_memory_approval`` only proves the owner asked for *a* memory in
+  *this* Work.  It is minted from the owner's message before the model runs,
+  so on its own it lets an approved turn write whatever key and value the
+  model chooses - the J6 defect #392 recorded on the live path and carried to
+  #393/#394.  This is the missing value half, and it is deliberately the same
+  binding the owner's own review path already uses rather than a second
+  scheme: the write still happens through ``issue_candidate_memory_approval``
+  /``accept_memory_candidate``, whose token names this owner, this Work, this
+  candidate, this key, this content digest and the state the key held when
+  the approval was issued.  AgentOS may stand in for the owner in issuing it
+  only when the owner's authenticated request actually covers the value.
+
+  Returns ``None`` when the write is covered, otherwise a short reason.  A
+  reason never raises: an uncovered write falls back to the pending candidate
+  the owner can inspect and approve, so a refusal is visible, not silent.
+  """
+  if not self.store.verify_memory_approval(self.memory_approval,self.job_id):
+   return 'no-owner-memory-request'
+  owner_words=memory_words((self.store.job(self.job_id) or {}).get('message'))
+  if not owner_words:return 'no-owner-memory-request'
+  if not owner_covers(content,owner_words):return 'value-not-in-owner-request'
+  # Choosing an existing key is a destructive act even with an owner-stated
+  # value, because it supersedes whatever that key already held.  Allow it
+  # only when the owner's request names the key or the value being replaced.
+  replaced=None;offset=0
+  while replaced is None:
+   page=self.store.memories(MEMORY_OWNER,limit=101,offset=offset)
+   replaced=next((row for row in page if row['memory_key']==memory_key),None)
+   if len(page)<101:break
+   offset+=101
+  if replaced and not (owner_covers(memory_key,owner_words,whole=False)
+                       or owner_covers(replaced['content'],owner_words,whole=False)):
+   return 'replaces-a-memory-the-request-did-not-name'
+  return None
  def execute(self,name,args):
   tool=self.tools.get(name)
   if not tool or name not in self.allowed_tools:raise ValueError('활성 패키지에 선언되지 않은 도구입니다.')
@@ -118,10 +201,17 @@ class Capabilities:
    with self.store.db() as db:db.execute('INSERT OR IGNORE INTO notes VALUES (?,?,?)',(note_id,content,time.time()))
    return {'saved':True,'id':note_id,'content':content}
   if name=='save_memory':
-   if not self.store.verify_memory_approval(self.memory_approval,self.job_id):
-    result=self.store.save_memory_candidate(self.job_id,args['memory_key'],args['content'])
-    self.evidence.append({'tool':name,'result':result}); return result
-   result=self.store.save_memory(args['memory_key'],args['content']); self.evidence.append({'tool':name,'result':result}); return result
+   # Every model-proposed write becomes a value-scoped MemoryCandidate first.
+   # Only a write the owner's own request covers is then accepted through the
+   # owner's exact-approval path; everything else stays pending for them.
+   candidate=self.store.save_memory_candidate(self.job_id,args['memory_key'],args['content'])
+   refusal=self.memory_write_refusal(candidate['memory_key'],candidate['content'])
+   if refusal is None:
+    approval=self.store.issue_candidate_memory_approval(MEMORY_OWNER,self.job_id,candidate['id'],candidate['content_digest'])
+    result=self.store.accept_memory_candidate(MEMORY_OWNER,self.job_id,candidate['id'],candidate['content_digest'],approval['approval_token'])
+   else:
+    result={**candidate,'requires_owner_approval':True,'refused_because':refusal}
+   self.evidence.append({'tool':name,'result':result}); return result
   if name=='list_memory':
    result={'memories':self.store.memories()}; self.evidence.append({'tool':name,'result':result}); return result
   if name=='list_agents':return {'agents':[{'id':role_id,'name':role['name'],'permissions':role['permissions'],'package_id':role['package_id']} for role_id,role in self.roles.items()]}
@@ -146,7 +236,7 @@ def evidence_summary(name,result):
  if name=='read_file':
   return {'root_id':result.get('root_id'),'path':result.get('path'),'kind':result.get('kind'),'locations':result.get('locations',[])[:12],'characters':len(result.get('content','')),'truncated':bool(result.get('truncated'))}
  if name=='save_note':return {'saved':bool(result.get('saved')),'id':result.get('id')}
- if name=='save_memory':return {'saved':bool(result.get('id')),'id':result.get('id'),'memory_key':result.get('memory_key'),'supersedes':result.get('supersedes')}
+ if name=='save_memory':return {'saved':result.get('state')=='current','id':result.get('id'),'memory_key':result.get('memory_key'),'supersedes':result.get('supersedes'),'state':result.get('state'),'refused_because':result.get('refused_because')}
  if name=='list_memory':return {'memory_count':len(result.get('memories',[]))}
  if name=='list_notes':return {'note_count':len(result.get('notes',[]))}
  if name=='delegate_agent':return {'agent_id':result.get('agent_id'),'model':result.get('model'),'report_characters':len(result.get('report',''))}
@@ -171,7 +261,7 @@ def fallback_response(executions, sources):
   return (result.get('content','')[:12000] + '\n\n출처: ' + result.get('url',''))
  if name=='save_note' and isinstance(result,dict) and result.get('saved'):return '메모를 저장했습니다.'
  if name=='save_memory' and isinstance(result,dict):
-  if result.get('state')=='pending':return '소유자 확인이 필요해 기억 후보로 보관했습니다. 승인 후 저장할 수 있습니다.'
+  if result.get('state')=='pending':return MEMORY_REFUSALS.get(result.get('refused_because'),'소유자 확인이 필요해 기억 후보로 보관했습니다. 승인 후 저장할 수 있습니다.')
   if result.get('id'):return '기억을 저장했습니다.'
  if name=='find_files' and isinstance(result,dict):
   files=result.get('files',[])

@@ -393,27 +393,74 @@ class Capabilities:
    # place anything reaches the wire.
    from .research import PublicResearch
    def search(query):return self.network.execute({'tool':'web_search','query':query})
+   attempted=[]
    class _Reader:
-    # `PublicResearch` reads URLs its own search returned, self-approving each
-    # one.  That is a *different* egress path from the `public_page_read`
-    # tool, which consults the owner-approved scope, and the difference is
-    # real: the containment here is the mode allowlist, the three-page cap,
-    # and every URL appearing in owner-visible evidence -- not an approval
-    # list.  J5 authorises exactly this ("bounded public search and page
-    # reading as needed"); a general-purpose URL read still requires the
-    # owner scope. SSRF is handled by the shared reader underneath.
+    # `PublicResearch` reads URLs its own search returned, self-approving
+    # each.  State the delta precisely, because an earlier version of this
+    # comment did not and independent review was right to reject it:
+    #
+    # * The mode allowlist and the three-page cap bound HOW MUCH is read.
+    #   Neither bounds WHICH page: the query is model-authored, goes to the
+    #   search provider verbatim, and the first three results are read in
+    #   provider order.  `mode` is a label on the output, not a filter on
+    #   the query.
+    # * The owner-approved `public_page_scope` is NOT preserved here.  And
+    #   `AgentService.public_page_boundary` returns an empty list unless the
+    #   owner has explicitly approved URLs for the current model
+    #   fingerprint, so on a default install `public_page_read` never
+    #   succeeds.  This branch therefore gives the model its FIRST
+    #   model-directed full-page read, enabled by default.  That is the real
+    #   permission delta; "one more public destination" understated it.
+    # * What does hold: SSRF and normalisation are the shared reader's
+    #   (private/metadata hosts denied, DNS pinned, no https->http
+    #   downgrade, charset and size bounded), exfiltration within a Work is
+    #   closed by the provenance refusal above in either order, and the
+    #   specialist roles do not get this tool.
+    #
+    # The residual risk is prompt injection steering non-egress behaviour
+    # from attacker-controlled page text.  Page content is already carried
+    # as untrusted evidence, and this does not change that.
     @staticmethod
     def read(url,approved_urls=None):
-     return self.network.execute({'tool':'public_page_read','url':url,'approved_urls':list(approved_urls or [url])})
+     attempted.append(url)
+     scope=list(approved_urls or [url])
+     try:
+      return self.network.execute({'tool':'public_page_read','url':url,'approved_urls':scope})
+     except ValueError as exc:
+      # The shared reader refuses a redirect that leaves the approved set,
+      # and here the approved set is the single search result. That refusal
+      # is the boundary working -- research must not follow a result to a
+      # host the search did not return -- but the reader's message names an
+      # owner-approved scope, and there is none on this path. An owner would
+      # go looking for an approval setting that has nothing to do with it.
+      if '승인한 공개 페이지 범위를 벗어난' in str(exc):
+       raise ValueError('검색 결과 주소가 다른 주소로 이동해 조사 대상에서 제외했습니다. 소유자 승인 범위와는 무관합니다.') from None
+      raise
    # `query_source` is a caller *guarantee*, not an observation:
    # `validate_public_query` cannot see where the text came from, and its own
    # docstring says so and forbids citing it as a private-egress control.
-   # What backs the guarantee here is the provenance refusal above -- this
-   # line is only reached when no private source has entered this context, so
-   # the model composed the query from public task input. If that refusal is
-   # ever weakened, this assertion becomes a lie, which is why the two sit in
-   # the same branch rather than in different layers.
-   return PublicResearch(search,_Reader()).run(args['mode'],args['query'],query_source='public_task_input')
+   #
+   # The guarantee this branch can honestly make is TURN-SCOPED. The
+   # provenance refusal above proves no private source entered *this* Work's
+   # context, so the model composed the query from this turn's public task
+   # input. It does not reach back through the conversation:
+   # `document_context` is driven by `file_workspace_document_jobs`, which is
+   # written for workspace-summary, Gmail and Drive turns and NOT for a
+   # model-driven `read_file` or `list_notes`. So a private read in an
+   # earlier turn leaves the secret in the visible history with no taint, and
+   # a later turn can put a query derived from it on the wire.
+   #
+   # That gap is pre-existing and identical for `web_search` -- review
+   # reproduced both through the real worker -- so it is not opened here, and
+   # it is not closed here either. It is the seam #448 covers. What matters
+   # for this line is that the claim above is scoped to what it can prove.
+   result=PublicResearch(search,_Reader()).run(args['mode'],args['query'],query_source='public_task_input')
+   # A URL that was contacted and then failed appears in `read_failures` but
+   # not in `sources`, so before this it reached the network and left no
+   # owner-visible record at all -- and if every read failed, the call raised
+   # and recorded nothing. Every address this Work actually contacted is
+   # carried out for the tool event.
+   return {**result,'attempted_urls':list(attempted)}
   if name=='weather':
    # `weather` sends `name=<city>` - an arbitrary 100-character string - to a
    # third-party geocoding host, so it is a public destination exactly like
@@ -500,7 +547,12 @@ def evidence_summary(name,result):
  """Persist useful proof without duplicating private tool payloads in traces."""
  if not isinstance(result,dict):return {'kind':'invalid-result'}
  if name in ('web_search','public_page_read','weather','bounded_public_research'):
-  return {'sources':result.get('sources',[])[:8],'result_count':len(result.get('results',[])),'retrieved_at':result.get('retrieved_at')}
+  summary={'sources':result.get('sources',[])[:8],'result_count':len(result.get('results',[])),'retrieved_at':result.get('retrieved_at')}
+  # Contacted-but-failed addresses are not sources, and omitting them hid
+  # every host a failed research read reached.
+  if result.get('attempted_urls'):summary['attempted_urls']=result['attempted_urls'][:8]
+  if result.get('read_failures'):summary['read_failures']=[row.get('url') for row in result['read_failures'][:8] if isinstance(row,dict)]
+  return summary
  if name=='find_files':
   return {'file_count':len(result.get('files',[])),'files':[{'root_id':f.get('root_id'),'path':f.get('path')} for f in result.get('files',[])[:12] if isinstance(f,dict)]}
  if name=='read_file':

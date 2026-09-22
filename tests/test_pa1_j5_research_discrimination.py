@@ -188,15 +188,119 @@ class ResearchDiscriminationTests(unittest.TestCase):
     def test_the_research_path_has_no_mutating_http_verb(self):
         """It cannot purchase, book, reserve or sign in, structurally.
 
-        `gmail.py` has the same assertion. Without it, "does not purchase"
-        is a sentence in a scope string rather than a property of the code.
+        The first version of this test scanned `research.py`, which contains
+        no HTTP at all -- it takes injected `search`/`page_reader` callables,
+        so `grep -c "http\\|urlopen\\|Request" research.py` is 0 and the
+        assertion could not fail. Review called that out. The HTTP on this
+        path is in `PublicPageReader`, and the adapter between them is
+        `_Reader` inside `agent_runtime`, so those are what get scanned.
+
+        `gmail.py` has the equivalent assertion against the module that does
+        its own HTTP, which is the shape this now follows.
         """
-        source = (Path(__file__).resolve().parents[1] / 'src' / 'personal_agent'
-                  / 'research.py').read_text(encoding='utf-8')
+        package = Path(__file__).resolve().parents[1] / 'src' / 'personal_agent'
+        reader = package / 'local_tools.py'
+        body = reader.read_text(encoding='utf-8')
+        # Precondition: we are scanning something that actually opens sockets.
+        self.assertIn('urlopen', body)
+        page_reader = body[body.index('class PublicPageReader'):]
         for verb in ('POST', 'PUT', 'PATCH', 'DELETE'):
-            with self.subTest(verb=verb):
-                self.assertNotIn(f"'{verb}'", source)
-                self.assertNotIn(f'"{verb}"', source)
+            with self.subTest(module='local_tools.PublicPageReader', verb=verb):
+                self.assertNotIn(verb, page_reader)
+        runtime = (package / 'agent_runtime.py').read_text(encoding='utf-8')
+        branch = runtime[runtime.index("if name=='bounded_public_research':"):
+                         runtime.index("if name=='weather':")]
+        self.assertIn('network.execute', branch)
+        for verb in ('POST', 'PUT', 'PATCH', 'DELETE', 'data='):
+            with self.subTest(module='agent_runtime._Reader', verb=verb):
+                self.assertNotIn(verb, branch)
+
+    def test_a_search_result_that_redirects_off_itself_is_not_followed(self):
+        """The single line that defines the new egress boundary.
+
+        `_Reader.read` passes `approved_urls=[url]`, so the shared reader
+        refuses a redirect that leaves the search result. Review mutated that
+        to `approved_urls=None` and the entire 1048-test suite stayed green:
+        research would silently follow up to three redirect hops to any host
+        that passes normalisation, and "reads only URLs its own search
+        returned" would become false with nothing to notice.
+        """
+        seen = {}
+
+        class Redirecting(Net):
+            def execute(self, plan):
+                self.plans.append(plan)
+                if plan['tool'] == 'web_search':
+                    return {'tool': 'web_search', 'retrieved_at': 1, 'results': [
+                        {'url': 'https://example.com/a', 'title': 'a', 'snippet': ''}]}
+                seen['approved_urls'] = plan.get('approved_urls')
+                # Stand in for the shared reader's own refusal.
+                if plan['url'] not in (plan.get('approved_urls') or []):
+                    raise ValueError('소유자가 승인한 공개 페이지 범위를 벗어난 주소입니다.')
+                raise ValueError('소유자가 승인한 공개 페이지 범위를 벗어난 주소입니다.')
+
+        net = Redirecting()
+        with self.assertRaises(ValueError):
+            self.research(net)
+        # The scope handed to the reader is exactly the one search result,
+        # which is what makes the redirect refusal happen at all.
+        self.assertEqual(seen['approved_urls'], ['https://example.com/a'])
+
+    def test_the_redirect_refusal_does_not_blame_an_owner_scope(self):
+        """There is no owner-approved scope on this path.
+
+        The shared reader's message names one, because it is shared with the
+        `public_page_read` tool where there is. A trailing-slash redirect --
+        the commonest on the web -- would have sent an owner looking for an
+        approval setting that has nothing to do with the failure.
+
+        The assertion has to read `read_failures`, not the raised exception:
+        when every read fails `PublicResearch` wraps them all in its own
+        "근거를 읽지 못했습니다", so a first version of this test asserting on
+        the exception passed whether or not the message was rewritten. One
+        result succeeds here so the per-URL reason survives to where an owner
+        would actually see it.
+        """
+        def page(url):
+            if url.endswith('/a'):
+                raise ValueError('소유자가 승인한 공개 페이지 범위를 벗어난 주소입니다.')
+            return OBSERVED_PAGE
+
+        net = Net(page=page, results=[
+            {'url': 'https://example.com/a', 'title': 'a', 'snippet': ''},
+            {'url': 'https://example.com/b', 'title': 'b', 'snippet': ''}])
+        result = self.research(net)
+        failures = {row['url']: row['error'] for row in result['read_failures']}
+        reason = failures['https://example.com/a']
+        self.assertNotIn('소유자가 승인한 공개 페이지 범위', reason,
+                         'the reason blames an owner scope that does not '
+                         'exist on this path')
+        self.assertIn('다른 주소로 이동', reason)
+
+    def test_every_contacted_address_reaches_the_tool_event(self):
+        """A URL that was contacted and then failed left no record at all.
+
+        It appears in `read_failures` but not in `sources`, and
+        `evidence_summary` carried only `sources`. Two hosts could be
+        resolved and connected to with neither URL on any owner-visible
+        surface.
+        """
+        from personal_agent.agent_runtime import evidence_summary
+
+        def page(url):
+            if url.endswith('/1'):
+                raise ValueError('공개 페이지가 정상 응답하지 않았습니다.')
+            return 'Model A. Shipping fee is 3,000 KRW. In stock: 12 units available today.'
+
+        net = Net(page=page, results=[
+            {'url': 'https://example.com/1', 'title': '1', 'snippet': ''},
+            {'url': 'https://example.com/2', 'title': '2', 'snippet': ''}])
+        result = self.research(net)
+        self.assertEqual(result['sources'], ['https://example.com/2'])
+        self.assertIn('https://example.com/1', result['attempted_urls'])
+        summary = evidence_summary('bounded_public_research', result)
+        self.assertIn('https://example.com/1', summary['attempted_urls'])
+        self.assertIn('https://example.com/1', summary['read_failures'])
 
     def test_the_declared_scope_names_what_it_will_not_do(self):
         scope = self.research(Net())['scope'].casefold()

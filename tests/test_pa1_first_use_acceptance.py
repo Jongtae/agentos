@@ -91,7 +91,17 @@ JOURNEY_EVIDENCE = {
           'recall risks reading a hedge as a commitment. Private provenance '
           'closes the destination; non-2xx pages are refused; robots.txt is '
           'not consulted and a 200-status soft wall would be read. No '
-          'network was touched.',
+          'network was touched. Permission delta, stated exactly: the mode '
+          'allowlist and three-page cap bound how MUCH is read, not WHICH '
+          'page - the query is model-authored and the first three search '
+          'results are read in provider order - and the owner-approved '
+          'public_page_scope is not preserved here. Because '
+          'public_page_boundary returns an empty list until the owner '
+          'approves URLs for the current model fingerprint, on a default '
+          'install public_page_read never succeeds, so this gives the model '
+          'its first model-directed full-page read. The inventory leg of '
+          'the discrimination is one recognised phrasing, not a general '
+          'classifier (#459).',
     'J6': 'covered: prose capture as canonical Memory, correction by '
           'supersession, owner review and durable delete through the shipped '
           'surfaces, an unauthorized model write held as a MemoryCandidate, a '

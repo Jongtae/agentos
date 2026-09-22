@@ -692,6 +692,21 @@ HANDOFF_GUIDANCE = {
 CONNECTOR_UNAVAILABLE = ('{label} 기능이 이 로컬 설치에 구성되어 있지 않습니다. '
                          '소유자가 로컬 설정을 마친 뒤 다시 요청해 주세요.')
 
+#: Appended to the guidance above only when the caller observed a start route
+#: this installation can actually offer.  Telling the owner a connection is
+#: required while shipping no way to reach it is the dead end J3/J7 name, so
+#: the one next action carries the one address that performs it.
+#:
+#: The URL is always this computer's own loopback start route.  That route
+#: still requires the owner session and refuses a tunnel host, so naming it in
+#: a message is not a Grant and does not widen who can start an authorization.
+CONNECT_LINK = ' 이 컴퓨터의 브라우저에서 {url} 주소를 열면 연결을 진행할 수 있습니다.'
+
+#: BLOCKED is deliberately absent.  Its single next action is reviewing the
+#: access that is blocked, and appending an authorization URL there would name
+#: a second action this guidance does not claim will help.
+LINKABLE_KINDS = (ConnectorResultKind.CONNECTION_REQUIRED, ConnectorResultKind.REAUTH_REQUIRED)
+
 #: Durable key for the one owner-safe pending-resume index.  It is written to
 #: the secret store rather than ``config`` so the opaque resume handle is not
 #: reachable from status, onboarding, progress or portable-state surfaces.
@@ -809,10 +824,21 @@ class ConnectorHandoff:
         return None
 
     @staticmethod
-    def guidance(result):
-        """The smallest next action, with no claim that anything ran."""
+    def guidance(result, connect_url=''):
+        """The smallest next action, with no claim that anything ran.
+
+        ``connect_url`` is supplied by the caller rather than derived here:
+        this module knows the connector contract, not which port the running
+        installation bound, and a guessed address would be an invented fact.
+        It is appended to the existing instruction rather than replacing it,
+        so an installation with no reachable start route still reads exactly
+        as it did before and still claims nothing about a connection.
+        """
         label = CONNECTOR_LABELS.get(result.connector_id, result.connector_id)
-        return HANDOFF_GUIDANCE[result.kind].format(label=label)
+        text = HANDOFF_GUIDANCE[result.kind].format(label=label)
+        if connect_url and result.kind in LINKABLE_KINDS:
+            text += CONNECT_LINK.format(url=connect_url)
+        return text
 
     @staticmethod
     def unavailable(connector_id):

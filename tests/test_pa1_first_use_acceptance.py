@@ -458,10 +458,17 @@ class FirstUseEndToEndAcceptance(unittest.TestCase):
             self.drain()
             job = self.store.job(research)
             self.assertEqual(job['status'], 'succeeded', job['error'])
-            # Observed facts and unknowns are distinguished, and the source
-            # the answer rests on is named to the owner.
+            # These two assert a ROUND TRIP, not discrimination: both strings
+            # are set in `self.model_text` above, so they would pass equally
+            # against a product that echoes whatever the model said.  J5's
+            # "distinguishes observed facts from unknown price/inventory/fees"
+            # is NOT evidenced here; `research.PublicResearch`, which
+            # implements it, is imported nowhere in `src/`.  Tracked as #449,
+            # which records why it is still unwired.  Do not read these as J5.
             self.assertIn('관찰됨', job['response'])
             self.assertIn('확인되지 않음', job['response'])
+            # This one is real product evidence: `model_text` contains no URL,
+            # so the citation was appended by the product.
             self.assertIn(PAGE_URL, job['response'])
             # The egress layer was asked for exactly the bounded plan, and
             # the page read carried the owner-approved scope with it.

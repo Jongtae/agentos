@@ -117,6 +117,63 @@ What this does **not** yet cover, stated exactly:
   restart, and an end-to-end Telegram result with no terminal open are owner operating
   validation that this repository has not performed.
 
+## Gmail (source checkout)
+
+AgentOS can read and search your Gmail so a request such as
+`메일에서 예산 관련 내용 찾아줘` is answered instead of refused. It is off unless you
+configure it, and configuring it connects nothing on its own.
+
+Create a Google Cloud OAuth **web** client, add
+`http://localhost:8787/oauth/gmail/callback` as an authorised redirect URI, download the
+client JSON, then write the owner-only credential file:
+
+```sh
+agentos gmail-config \
+  --oauth-client-json ~/Downloads/client_secret_XXXX.json \
+  --secret-file /Users/your-name/.agentos-secrets/gmail.json
+AGENTOS_GMAIL_LOCAL_ONLY=1 \
+AGENTOS_GMAIL_SECRET_FILE=/Users/your-name/.agentos-secrets/gmail.json \
+  agentos start
+```
+
+`gmail-config` is the Gmail counterpart of `drive-config`: it generates the token-store
+encryption key locally, writes a `0600` file owned by you, refuses a relative
+`--secret-file`, and refuses to overwrite an existing one. The client secret and the
+encryption key are never command-line arguments, environment values or log output. The
+file must stay outside `~/.local/share/agentos`; otherwise startup fails closed. If you
+prefer not to keep a file, the equivalent `AGENTOS_GMAIL_CLIENT_ID`,
+`AGENTOS_GMAIL_CLIENT_SECRET` and `AGENTOS_GMAIL_ENCRYPTION_KEY` environment values are
+still read, but the file is the supported boundary.
+
+Then connect, from this computer's browser: **설정 → 외부 연결 → Google 연결 → 연결하기**,
+or open `http://127.0.0.1:8787/google-gmail` in the same browser where you already
+use AgentOS. Google asks you to approve read-only Gmail
+access; AgentOS records the scope Google actually granted. If you asked for something over
+Telegram that needs Gmail, the reply names the connection you need and carries this same
+address, and the original request is resumed exactly once after you connect.
+
+What this does **not** claim, stated exactly:
+
+- **No live Google OAuth has been observed.** The automated evidence is a fixture token
+  endpoint and a fixture Gmail transport inside the repository suite. A real Google
+  consent screen, a real token exchange and a real message list are owner operating
+  validation this repository has not performed.
+- **Read-only.** The only scope requested is `gmail.readonly`, and the connection is
+  recorded only if Google grants exactly that. AgentOS cannot send, reply to, delete,
+  label or archive mail, and nothing here authorises a Calendar, Drive or send scope.
+- **Not in any released build.** The most recent release tag is `v1.0.4` (2026-09-07),
+  which predates these commands. `brew install` / `brew upgrade jongtae/agentos/agentos`
+  will not provide `agentos gmail-config` or the Gmail route until a later release; today
+  they are reachable only from a source checkout.
+- **Connecting is a separate decision from configuring.** Writing the credential file only
+  lets this installation *offer* Gmail. It issues no grant, and the connector stays
+  disconnected until you complete the authorisation yourself. The start route requires
+  your local AgentOS session and refuses a tunnel host, so Gmail cannot be connected from
+  a phone over the mobile pairing link.
+- **Local install is not local-only processing.** Gmail metadata read this way is handled
+  locally, but if you have connected an external model provider, answering a mail question
+  can send that content to the provider you chose.
+
 ## Remote host / source installation
 
 Python 3.12+ on macOS or Linux is required for source execution:

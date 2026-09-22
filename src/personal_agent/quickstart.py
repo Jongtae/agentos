@@ -20,7 +20,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlsplit
 from .quickstart_store import QuickStore
-from .quickstart_service import AgentService
+from .quickstart_service import AgentService, GMAIL_CONNECT_PATH, LOCAL_ADDRESS_HOST
 from .subscription_engines import SubscriptionEngines
 from .plugins import PluginRegistry
 from .providers import ProviderError
@@ -362,7 +362,7 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                     return self.reply(200,b'Google Drive connected. Return to Telegram.','text/plain; charset=utf-8')
                 except (AttributeError, DriveWebOAuthError, OSError, ValueError):
                     return self.reply(400,b'Google Drive connection could not be completed. Return to Telegram and request a new link.','text/plain; charset=utf-8')
-            if path=='/google-gmail':
+            if path==GMAIL_CONNECT_PATH:
                 # The owner-authenticated half.  Starting an authorization is
                 # a state change for this owner's connector row, so unlike the
                 # callback it is never anonymous, and a tunnel host is refused
@@ -569,6 +569,52 @@ def plugins_main(argv):
     print(json.dumps(result,ensure_ascii=False))
 
 
+def _local_oauth_secret_target(parser, path_value):
+    """Resolve the ``--secret-file`` destination, refusing a relative path.
+
+    A relative path is refused rather than resolved against the working
+    directory: the runtime later re-reads this file by the absolute value the
+    owner recorded, so a path that means one thing when the file is created
+    and another when the service starts must not be accepted at all.
+    """
+    target=Path(path_value).expanduser()
+    if not target.is_absolute():
+        parser.error('--secret-file must be an absolute path.')
+    return target
+
+
+def _local_oauth_client(parser, source):
+    """Read ``client_id``/``client_secret`` from a downloaded Google *web* client."""
+    try:
+        client=json.loads(source.read_text()).get('web',{})
+        return client['client_id'],client['client_secret']
+    except (OSError, ValueError, KeyError, TypeError):
+        parser.error('--oauth-client-json must be a Google web OAuth client download.')
+
+
+def _write_local_oauth_secret_file(parser, target, values, label):
+    """Create the owner-only 0600 file ``local_oauth_secret_values`` accepts.
+
+    One writer serves every local connector for the same reason one loader
+    reads them: the 0700 parent, the ``O_EXCL`` create, the 0600 mode and the
+    refusal to replace an existing file are properties of the secret-file
+    boundary rather than of the connector, and a second copy of those checks
+    is a second place for one of them to be dropped.  Nothing here prints a
+    credential, and the file never enters process arguments or environment.
+    """
+    try:
+        target.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
+        if target.exists():
+            parser.error(f'Refusing to replace an existing {label} secret file.')
+        descriptor=os.open(target,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+        with os.fdopen(descriptor,'w') as output:
+            json.dump(values,output,separators=(',',':'))
+        os.chmod(target,0o600)
+    except OSError as exc:
+        parser.error(f'Could not create the owner-only {label} secret file: '+str(exc))
+    print(f'Created owner-only local {label} credential file.',flush=True)
+
+
 def drive_config_main(argv):
     """Create a local-only Drive secret file without printing its contents."""
     parser=argparse.ArgumentParser(description='Create an owner-only local Google Drive credential file.')
@@ -577,30 +623,40 @@ def drive_config_main(argv):
     parser.add_argument('--picker-key-stdin',action='store_true',help='Read the restricted Picker API key from standard input.')
     args=parser.parse_args(argv)
     source=Path(args.oauth_client_json).expanduser().resolve(strict=True)
-    target=Path(args.secret_file).expanduser()
-    if not target.is_absolute():
-        parser.error('--secret-file must be an absolute path.')
-    try:
-        client=json.loads(source.read_text()).get('web',{})
-        client_id=client['client_id']; client_secret=client['client_secret']
-    except (OSError, ValueError, KeyError, TypeError):
-        parser.error('--oauth-client-json must be a Google web OAuth client download.')
+    target=_local_oauth_secret_target(parser,args.secret_file)
+    client_id,client_secret=_local_oauth_client(parser,source)
     picker_key=sys.stdin.read().strip() if args.picker_key_stdin else getpass.getpass('Restricted Google Picker API key: ').strip()
     if not picker_key:
         parser.error('A restricted Google Picker API key is required.')
     values={'client_id':client_id,'client_secret':client_secret,'picker_api_key':picker_key,
             'encryption_key':Fernet.generate_key().decode()}
-    try:
-        target.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
-        if target.exists():
-            parser.error('Refusing to replace an existing Drive secret file.')
-        descriptor=os.open(target,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
-        with os.fdopen(descriptor,'w') as output:
-            json.dump(values,output,separators=(',',':'))
-        os.chmod(target,0o600)
-    except OSError as exc:
-        parser.error('Could not create the owner-only Drive secret file: '+str(exc))
-    print('Created owner-only local Drive credential file.',flush=True)
+    _write_local_oauth_secret_file(parser,target,values,'Drive')
+
+
+def gmail_config_main(argv):
+    """Create a local-only Gmail secret file without printing its contents.
+
+    Deliberately the same shape as ``drive-config`` above: the same two
+    arguments, the same absolute-path refusal, the same locally generated
+    Fernet key, the same 0600 exclusive create, the same refusal to replace an
+    existing file.  The one difference is that Gmail has no browser-visible
+    Picker key to collect, so the file holds exactly the three values
+    ``local_gmail_secret_values`` requires and nothing more.
+
+    Writing this file is not a Grant and connects nothing.  It only lets the
+    installation *offer* Gmail; the connector row stays DISCONNECTED until the
+    owner completes an authorization through the ``/google-gmail`` route.
+    """
+    parser=argparse.ArgumentParser(description='Create an owner-only local Gmail credential file.')
+    parser.add_argument('--oauth-client-json',required=True)
+    parser.add_argument('--secret-file',required=True)
+    args=parser.parse_args(argv)
+    source=Path(args.oauth_client_json).expanduser().resolve(strict=True)
+    target=_local_oauth_secret_target(parser,args.secret_file)
+    client_id,client_secret=_local_oauth_client(parser,source)
+    values={'client_id':client_id,'client_secret':client_secret,
+            'encryption_key':Fernet.generate_key().decode()}
+    _write_local_oauth_secret_file(parser,target,values,'Gmail')
 
 
 def service_main(argv):
@@ -637,6 +693,8 @@ def main():
         return plugins_main(sys.argv[2:])
     if len(sys.argv)>1 and sys.argv[1]=='drive-config':
         return drive_config_main(sys.argv[2:])
+    if len(sys.argv)>1 and sys.argv[1]=='gmail-config':
+        return gmail_config_main(sys.argv[2:])
     if len(sys.argv)>1 and sys.argv[1]=='service':
         return service_main(sys.argv[2:])
     if len(sys.argv)>1 and sys.argv[1]=='guide':
@@ -683,10 +741,14 @@ def main():
     service.start()
     if handoff_server:
         threading.Thread(target=handoff_server.serve_forever,daemon=True).start()
-    url=f'http://127.0.0.1:{server.server_port}/'
+    # One source for the address AgentOS advertises, so the banner, the setup
+    # link, the browser AgentOS opens and any connector connect link that has
+    # to land on the owner's existing session can never name different hosts.
+    url=f'http://{LOCAL_ADDRESS_HOST}:{server.server_port}/'
+    home=url
     if not store.claimed():url+='#setup='+store.bootstrap.read_text()
     store.write_private(store.private/'setup-link.txt',url)
-    print(f'AgentOS: http://127.0.0.1:{server.server_port}/',flush=True)
+    print(f'AgentOS: {home}',flush=True)
     if public_hosts:
         print(f'Mobile pairing URL: https://{public_hosts[0]}/?access={public_token}',flush=True)
     if not store.claimed():print(f'초기 설정 링크: {store.private / "setup-link.txt"} (개인 파일)',flush=True)

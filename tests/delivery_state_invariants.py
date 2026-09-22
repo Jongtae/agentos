@@ -108,6 +108,19 @@ def executing_programs(plan):
 #: program cannot escape the closeout requirements by omitting its iteration.
 LEGACY_CLOSED_PROGRAMS = frozenset({"FILE-WORKSPACE-01"})
 
+#: Iterations recorded complete whose records still read ``goal-ready`` and
+#: cannot be corrected: ``tests/fixtures/governance/plan-before-gov-use.json``
+#: freezes them byte-for-byte, and
+#: ``test_old_delivery_contracts_are_semantically_unchanged`` enforces that.
+#: Editing them to the accurate value is the obvious fix and the repository
+#: deliberately forbids it, so the refusal lives in ``DeliveryPlan.select``
+#: instead -- which is why every name here is still asserted unselectable
+#: below. The exemption is for the stale *field*, never for the behaviour.
+FROZEN_ARMED_COMPLETED = frozenset({
+    "GOV-01", "TOP-00", "SCN-D-01", "DRIVE-TG-01",
+    "FILE-WS-A-01", "FILE-WS-B-01", "FILE-WS-C-01", "USE-01",
+})
+
 
 def closed_out_programs(plan):
     """Programs recorded complete that must carry a full closeout record."""
@@ -390,6 +403,13 @@ def assert_completion_survives_redeclaration(case, plan, name):
     entry = next(item for item in armed["iterations"] if item["id"] == name)
     entry["activation_status"] = GOAL_READY
     entry.setdefault("issue", 1)
+    # Both gates have to be opened for the control to mean anything. Review
+    # noted that removing the name from `documented_completed_iterations`
+    # was decorative, and it was -- `select` read that list only for a
+    # subject's dependencies. The fix for the hole review found put the
+    # subject itself behind that list too, so this line is now load-bearing:
+    # without it the control would refuse for the very reason under test and
+    # prove nothing.
     armed["history"]["documented_completed_iterations"] = [
         item for item in armed["history"]["documented_completed_iterations"] if item != name
     ]
@@ -414,18 +434,56 @@ def assert_completed_work_is_unselectable(case, plan=None, path=PLAN_PATH):
     items = {item["id"]: item for item in plan["iterations"]}
     completed = plan["history"]["documented_completed_iterations"]
 
-    subjects = set(closed_out_programs(plan))
+    # Every layer that records completion, not just the program one. An
+    # earlier form took closed-out programs plus program `completed_substeps`
+    # and called itself "completed work is unselectable". Independent review
+    # forced `next_goal` to each name in `documented_completed_iterations`
+    # and selected USE-01 and FILE-WS-C-01 - both complete, both with closed
+    # issues - and the heartbeat issued a live `gh` command. Eight finished
+    # iterations were still armed where selection reads, and the test that
+    # claimed to cover them did not look at that list at all.
+    subjects = set(closed_out_programs(plan)) | set(completed)
     for program in plan["programs"].values():
         subjects.update(program.get("completed_substeps") or [])
+
+    # A completed name with no iteration record cannot be selected, but
+    # dropping it silently is how the gap above stayed invisible. Substep
+    # names belonging to a program are legitimately record-free; anything
+    # else is a completion claim with nothing behind it.
+    substep_only = set()
+    for program in plan["programs"].values():
+        substep_only.update(program.get("ordered_substeps") or [])
+        # A split substep's declared children are legitimately record-free
+        # too: R1 has an iteration, R1a and R1b are its declared halves.
+        for children in (program.get("declared_substep_children") or {}).values():
+            substep_only.update(children)
+        for children in (program.get("substep_children") or {}).values():
+            substep_only.update(children)
+    orphans = sorted(name for name in subjects
+                     if name not in items and name not in substep_only)
+    case.assertEqual(orphans, [],
+                     f"completed work with no iteration record and no owning program: {orphans}")
+
     subjects = sorted(name for name in subjects if name in items)
     case.assertTrue(subjects, "no completed work to check")
+    # Pin the coverage, not only the outcome. `DeliveryPlan.select` now
+    # refuses anything in `documented_completed_iterations` outright, so the
+    # per-subject assertions below pass no matter how small this set is --
+    # narrowing it back to closed-out programs breaks nothing observable.
+    # That is exactly how the first version of this invariant claimed to
+    # cover completed work while missing eight selectable iterations.
+    recorded = sorted(name for name in completed if name in items)
+    missing = [name for name in recorded if name not in subjects]
+    case.assertEqual(missing, [],
+                     f"recorded complete but not checked for selectability: {missing}")
 
     for name in subjects:
         with case.subTest(completed=name):
             # Recorded complete in the layer selection reads, not only in the
             # program record.
-            case.assertNotEqual(items[name].get("activation_status"), GOAL_READY,
-                                f"{name} is complete but armed where selection reads")
+            if name not in FROZEN_ARMED_COMPLETED:
+                case.assertNotEqual(items[name].get("activation_status"), GOAL_READY,
+                                    f"{name} is complete but armed where selection reads")
             case.assertIn(name, completed, f"{name} is complete but not recorded so")
             case.assertNotEqual(plan["next_goal"].get("id"), name)
             assert_completion_survives_redeclaration(case, plan, name)

@@ -38,9 +38,27 @@ class DeliveryTests(unittest.TestCase):
     def controller(self, runner=None):
         return DeliveryController(self.root, self.state, runner or Runner(), now=lambda: self.clock[0])
 
+    @staticmethod
+    def _arm(plan, identifier):
+        """Make one iteration legitimately armed and not-yet-complete.
+
+        These fixtures used to borrow GOV-01's real `activation_status`,
+        which happened to read `owner-activated-goal-ready` long after GOV-01
+        had completed. GOV-PA1-07 retired that stale arming, so the fixture
+        now constructs the state it is testing instead of depending on a
+        record that was wrong. The rule under test - only an explicit owner
+        `active` transition selects - is unchanged.
+        """
+        completed = plan['history']['documented_completed_iterations']
+        if identifier in completed:
+            completed.remove(identifier)
+        for item in plan['iterations']:
+            if item['id'] == identifier:
+                item['activation_status'] = 'owner-activated-goal-ready'
+        return plan
+
     def activate_governance_goal(self):
-        plan=json.loads((self.root/'delivery-plan.yaml').read_text())
-        plan['history']['documented_completed_iterations'].remove('GOV-01')
+        plan=self._arm(json.loads((self.root/'delivery-plan.yaml').read_text()), 'GOV-01')
         plan['next_goal']={'id':'GOV-01','status':'active'}
         (self.root/'delivery-plan.yaml').write_text(json.dumps(plan))
 
@@ -50,8 +68,7 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(json.loads((root/'delivery-plan.yaml').read_text()), json.loads((root/'src/personal_agent/delivery-plan.yaml').read_text()))
 
     def test_only_explicit_owner_activated_goal_can_be_selected(self):
-        altered=json.loads((self.root/'delivery-plan.yaml').read_text())
-        altered['history']['documented_completed_iterations'].remove('GOV-01')
+        altered=self._arm(json.loads((self.root/'delivery-plan.yaml').read_text()), 'GOV-01')
         altered['next_goal']={'id':'GOV-01','status':'active'}
         (self.root/'delivery-plan.yaml').write_text(json.dumps(altered))
         plan=DeliveryPlan(self.root/'delivery-plan.yaml')

@@ -93,7 +93,16 @@ class DeliveryPlan:
         declared=self.next_goal()
         active=declared.get('id') if declared.get('status') == 'active' else None
         item=self.items.get(active)
-        if not item or active in completed:
+        # Finished work is never selectable, whichever list records it.
+        # `state['completed']` is runtime and empty on a fresh clone or after
+        # a state reset; the plan's own completed list is durable. Without
+        # this, eight iterations recorded complete - GOV-01, TOP-00, SCN-D-01,
+        # DRIVE-TG-01, FILE-WS-A/B/C-01 and USE-01 - were still armed and
+        # genuinely selectable, and independent review drove one of them far
+        # enough for the heartbeat to issue a live `gh` command. Their
+        # iteration records are frozen by the pre-GOV-USE preservation
+        # contract, so the refusal belongs here rather than in the plan.
+        if not item or active in completed or active in self.documented_completed():
             return None
         if item.get('activation_status') != 'owner-activated-goal-ready' or not item.get('issue'):
             return None

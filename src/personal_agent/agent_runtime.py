@@ -252,7 +252,7 @@ class EvidenceLog(list):
   for item in items:self.append(item)
 
 class Capabilities:
- def __init__(self,store,adapter,config,key,job_id,record,readonly=False,network=None,document_access=True,packages=None,allowed_tools=None,document_context=False,public_page_scope=None,memory_approval=None,inherited_provenance=(),calendar=None):
+ def __init__(self,store,adapter,config,key,job_id,record,readonly=False,network=None,document_access=True,packages=None,allowed_tools=None,document_context=False,public_page_scope=None,memory_approval=None,inherited_provenance=(),calendar=None,calendar_owner=None):
   self.store,self.adapter,self.config,self.key=store,adapter,config,key
   self.job_id,self.record,self.readonly=job_id,record,readonly
   self.network=network or LocalTools()
@@ -261,6 +261,12 @@ class Capabilities:
   self.public_page_scope=None if public_page_scope is None else frozenset(public_page_scope)
   self.memory_approval=memory_approval
   self.calendar=calendar
+  # Connector identity is the paired Telegram chat or the one local owner
+  # (`AgentService.connector_owner_id`), NOT the Memory owner. Using
+  # MEMORY_OWNER here meant a Telegram owner could complete the OAuth and
+  # still be told the calendar was disconnected, because the grant was
+  # written under `telegram:<chat>` and read back under `local-owner`.
+  self.calendar_owner=calendar_owner or MEMORY_OWNER
   self.packages=runtime_packages([]) if packages is None else packages
   self.tools={tool['id']:tool for package in self.packages for tool in package['tools']}
   self.roles={role['id']:{**role,'package_id':package['id']} for package in self.packages for role in package['roles']}
@@ -400,7 +406,7 @@ class Capabilities:
    # a real inconsistency; it is not resolved here, and the settings surface
    # still pauses the legacy one.
    if self.calendar is None:raise ValueError('Google Calendar가 로컬에 구성되어 있지 않습니다. 먼저 캘린더를 연결해 주세요.')
-   owner=MEMORY_OWNER
+   owner=self.calendar_owner
    if name=='calendar_query':
     # Calendar contents are owner-private and this is the read that makes
     # `event_id`/`event_version` available to the draft tools.

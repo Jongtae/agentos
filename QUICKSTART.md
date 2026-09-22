@@ -156,7 +156,9 @@ your owner session and refuse a tunnel host.
 create, update or cancel. It has no tool that applies one. A draft carries the exact
 payload that would be sent and its hash; applying it needs a one-time approval bound to
 you, that draft, that payload and the current write connection, and only you can issue
-that — through `/api/calendar/drafts`. Attendee invitation and recurring events are not
+that — through `/api/calendar/drafts`, on the local address only. That surface covers
+drafts from both your Telegram conversation and the web, because both are you; each
+still needs its own write grant. Attendee invitation and recurring events are not
 supported and are refused rather than quietly dropped.
 
 Reading your calendar puts event titles in the model's context, so for the rest of that

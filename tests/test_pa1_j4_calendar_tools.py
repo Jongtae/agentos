@@ -18,6 +18,7 @@ proposal carrying an exact preview.  Applying it needs a one-time approval
 token bound to this owner, this draft, this payload hash and the write
 connector's `connection_revision` -- and the model has no tool that mints one.
 """
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -227,6 +228,29 @@ class CalendarToolTests(unittest.TestCase):
                  'end': '2026-09-25T11:00:00+09:00', 'timezone': 'Asia/Seoul',
                  'attendees': ['someone@example.com']}, MEMORY_OWNER)
 
+    def test_an_unsupported_field_is_refused_on_the_tool_path(self):
+        """Filtering silently would let an owner approve a stripped event.
+
+        `test_attendees_and_recurrence_are_refused` pins `_validate_event`
+        through the direct API, which already refused attendees before this
+        work. The tool path used to filter the field out *before*
+        `_validate_event` ever saw it, so "invite alice" became an
+        attendee-less draft the owner then approved believing the invitation
+        was included. Review showed that refusal was untested: replacing it
+        with `pass` left 119 calendar tests green.
+        """
+        self.connect(write=True)
+        caps = self.caps()
+        for extra in ({'attendees': ['a@example.com']}, {'recurrence': 'WEEKLY'},
+                      {'conferenceData': {}}):
+            with self.subTest(field=next(iter(extra))):
+                with self.assertRaises(ValueError) as refused:
+                    caps.execute('calendar_draft_create',
+                                 {'summary': '회의', 'start': '2026-09-25T10:00:00+09:00',
+                                  'end': '2026-09-25T11:00:00+09:00',
+                                  'timezone': 'Asia/Seoul', **extra})
+                self.assertIn(next(iter(extra)), str(refused.exception))
+
     def test_the_specialist_roles_do_not_get_calendar(self):
         from personal_agent.manifests import BUILTIN_MANIFEST
         for role in BUILTIN_MANIFEST['roles']:
@@ -312,11 +336,176 @@ class OwnerApplyPathTests(unittest.TestCase):
                          'the provider was contacted twice for one approval')
         self.assertEqual(first['result']['id'], second['result']['id'])
 
+    def draft_as(self, owner):
+        """A draft owned by an arbitrary connector identity."""
+        return self.calendar.draft_create(
+            {'summary': '비밀 상담', 'start': '2026-09-26T10:00:00+09:00',
+             'end': '2026-09-26T11:00:00+09:00', 'timezone': 'Asia/Seoul'}, owner)
+
+    def test_listing_never_returns_another_identity_s_draft(self):
+        """`preview`/`approve`/`apply` enforce the owner; listing did not.
+
+        The first version read the raw state and filtered on `state` alone,
+        so a draft created under `telegram:4242` came back verbatim -- payload,
+        location, owner hash -- to a `local-owner` web session.
+        """
+        self.draft_as('telegram:9999')
+        mine = self.draft_as('local-owner')
+        listed = self.service.calendar_draft_request({'operation': 'list'},
+                                                     owner_id='local-owner')
+        ids = [row['id'] for row in listed['drafts']]
+        self.assertEqual(ids, [mine['id']])
+        self.assertNotIn('9999', json.dumps(listed, ensure_ascii=False))
+
+    def test_a_telegram_draft_is_approvable_by_the_owner_surface(self):
+        """The primary J4 journey.
+
+        `connector_owner_id` gives Telegram Work `telegram:<chat>`, so every
+        draft the model produces from a Telegram request is owned by it. The
+        surface hardcoded `local-owner`, listed the draft anyway, and then
+        refused to approve it with an opaque error -- on a paired install
+        nobody could apply anything, which is the hole this surface exists
+        to close.
+        """
+        self.store.put('telegram', {'enabled': True, 'user_id': 4242})
+        draft = self.draft_as('telegram:4242')
+        listed = self.service.calendar_draft_request({'operation': 'list'})
+        self.assertIn(draft['id'], [row['id'] for row in listed['drafts']])
+        # Each connector identity carries its own grant. Only `local-owner`
+        # is connected so far, so this identity is refused -- a listed draft
+        # is not an approvable one.
+        with self.assertRaises(ValueError):
+            self.service.calendar_draft_request(
+                {'operation': 'approve', 'draft_id': draft['id']})
+        self.registry.transition('telegram:4242',
+                                 CALENDAR_WRITE_SPEC.connector_id,
+                                 ConnectorState.CONNECTED,
+                                 granted_scopes=(CALENDAR_WRITE_SCOPE,))
+        approved = self.service.calendar_draft_request(
+            {'operation': 'approve', 'draft_id': draft['id']})
+        self.assertEqual(approved['owner'], 'telegram:4242')
+        applied = self.service.calendar_draft_request(
+            {'operation': 'apply', 'draft_id': draft['id'],
+             'approval_id': approved['approval']['approval_id']})
+        self.assertTrue(applied['applied'])
+        self.assertEqual([call[0] for call in self.provider.calls], ['create'])
+
+    def test_a_draft_owned_by_nobody_this_install_serves_is_refused(self):
+        draft = self.draft_as('telegram:9999')
+        with self.assertRaises(ValueError):
+            self.service.calendar_draft_request(
+                {'operation': 'approve', 'draft_id': draft['id']})
+        self.assertEqual(self.provider.calls, [])
+
+    def test_no_second_event_comes_from_the_completed_state_not_the_key(self):
+        """Name the mechanism correctly.
+
+        The commit and the test docstring said the deterministic idempotency
+        key is what prevents a duplicate. Review falsified that: making the
+        key fully random leaves the replay test green, while breaking the
+        completed-state short-circuit fails it immediately. The key is never
+        re-sent on any reachable path. The property is real; the explanation
+        was not, and an explanation nobody can rely on is worse than none.
+        """
+        draft = self.draft()
+        approved = self.service.calendar_draft_request(
+            {'operation': 'approve', 'draft_id': draft['draft_id']})
+        token = approved['approval']['approval_id']
+        self.service.calendar_draft_request(
+            {'operation': 'apply', 'draft_id': draft['draft_id'], 'approval_id': token})
+        # The row is terminal, and that is what the replay short-circuits on.
+        status = self.service.calendar_draft_request(
+            {'operation': 'status', 'draft_id': draft['draft_id']})
+        self.assertEqual(status['status']['state'], 'completed')
+        self.service.calendar_draft_request(
+            {'operation': 'apply', 'draft_id': draft['draft_id'], 'approval_id': token})
+        self.assertEqual([call[0] for call in self.provider.calls], ['create'])
+
     def test_the_surface_refuses_when_calendar_is_not_configured(self):
         from personal_agent.quickstart_service import AgentService
         bare = AgentService(self.store)
         with self.assertRaises(ValueError):
             bare.calendar_draft_request({'operation': 'list'})
+
+
+class DraftTableBoundTests(unittest.TestCase):
+    """The draft table is model-reachable, so its growth has to be bounded.
+
+    `_draft` takes no authority check by design -- a proposal is not an
+    action -- and before the cap nothing bounded how many rows the model
+    could persist, each carrying owner event content in the plaintext config
+    store. The cap itself then shipped untested and with a crash in it.
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(dir=str(Path(__file__).resolve().parent))
+        self.addCleanup(self.temp.cleanup)
+        self.store = QuickStore(Path(self.temp.name) / 'data')
+        self.registry = ConnectorRegistry(self.store, (CALENDAR_SPEC, CALENDAR_WRITE_SPEC))
+        self.calendar = CalendarConnector(self.store, Provider(), registry=self.registry)
+
+    def make(self, n):
+        for index in range(n):
+            self.calendar.draft_create(
+                {'summary': f'draft-{index}', 'start': '2026-09-25T10:00:00+09:00',
+                 'end': '2026-09-25T11:00:00+09:00', 'timezone': 'Asia/Seoul'},
+                MEMORY_OWNER)
+
+    def rows(self):
+        return self.store.config('calendar_create', {})
+
+    def test_the_table_is_bounded(self):
+        from personal_agent.calendar import _MAX_DRAFTS
+        self.make(_MAX_DRAFTS + 20)
+        self.assertLessEqual(len(self.rows()), _MAX_DRAFTS + 1)
+
+    def test_a_row_without_an_id_field_does_not_break_drafting(self):
+        """`_owned` tolerates restored rows that lack fields; eviction did not.
+
+        It popped `row["id"]` instead of the dict key, so one legacy row made
+        the next draft raise a bare `KeyError` -- outside the redacted policy
+        boundary, an HTTP 500, and drafting stayed broken until the store was
+        hand-edited.
+        """
+        from personal_agent.calendar import _MAX_DRAFTS
+        self.make(_MAX_DRAFTS)
+        rows = dict(self.rows())
+        rows['legacy'] = {'state': 'awaiting-approval', 'hash': 'abc',
+                          'owner': 'someone', 'payload': {}}
+        self.store.put('calendar_create', rows)
+        self.make(1)   # must not raise
+        self.assertLessEqual(len(self.rows()), _MAX_DRAFTS + 1)
+
+    def test_eviction_removes_the_row_it_selected(self):
+        """A row whose `id` disagreed with its key evicted the wrong one."""
+        from personal_agent.calendar import _MAX_DRAFTS
+        self.make(_MAX_DRAFTS)
+        rows = dict(self.rows())
+        # Point the stale row's `id` at the NEWEST real row, so the old
+        # eviction would have removed that one and kept the stale row --
+        # while the new one removes the stale row it actually selected.
+        newest = max(rows, key=lambda key: rows[key].get('created') or 0)
+        rows['stale-key'] = {**rows[newest], 'id': newest, 'created': 0}
+        self.store.put('calendar_create', rows)
+        self.make(1)
+        after = self.rows()
+        self.assertNotIn('stale-key', after,
+                         'the row selected for eviction must be the one removed')
+        self.assertIn(newest, after,
+                      'the newest real row must not be evicted in its place')
+
+    def test_an_approved_draft_is_never_evicted(self):
+        from personal_agent.calendar import _MAX_DRAFTS
+        self.registry.transition(MEMORY_OWNER, CALENDAR_WRITE_SPEC.connector_id,
+                                 ConnectorState.CONNECTED,
+                                 granted_scopes=(CALENDAR_WRITE_SCOPE,))
+        keep = self.calendar.draft_create(
+            {'summary': 'keep me', 'start': '2026-09-25T10:00:00+09:00',
+             'end': '2026-09-25T11:00:00+09:00', 'timezone': 'Asia/Seoul'}, MEMORY_OWNER)
+        self.calendar.approve(keep['id'], MEMORY_OWNER)
+        self.make(_MAX_DRAFTS + 20)
+        self.assertIn(keep['id'], self.rows(),
+                      'an approved draft is evidence, not a disposable proposal')
 
 
 class CalendarTransportGrantTests(unittest.TestCase):

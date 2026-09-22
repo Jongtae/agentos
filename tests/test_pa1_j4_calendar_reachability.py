@@ -65,6 +65,7 @@ class CalendarReachabilityTests(unittest.TestCase):
         self.store = QuickStore(Path(self.temp.name) / 'data')
         self.exchanges = []
         self.grant = 'read'
+        self.public_hosts = ()
 
     def exchange(self, payload):
         """Stand in for Google's token endpoint.
@@ -121,7 +122,7 @@ class CalendarReachabilityTests(unittest.TestCase):
         service = configured_service(self.store, env)
         if service.calendar_oauth is not None:
             service.calendar_token_exchange = self.exchange
-        server.RequestHandlerClass = make_handler(service, (), 'pairing-token')
+        server.RequestHandlerClass = make_handler(service, self.public_hosts, 'pairing-token')
         thread = threading.Thread(target=server.serve_forever)
         thread.start()
 
@@ -138,6 +139,32 @@ class CalendarReachabilityTests(unittest.TestCase):
                             data=json.dumps({'password': 'long-password-test'}).encode(),
                             headers={'Content-Type': 'application/json'}), timeout=3).read()
         return client
+
+    def test_the_apply_surface_refuses_a_tunnel_host(self):
+        """The first route in this server with a real third-party effect.
+
+        It was modelled on `/api/personal-space/memory-candidates`, which
+        admits the public tunnel host because it has no external effect.
+        This one creates, changes or cancels a real calendar event, and
+        every other Calendar route already refuses a tunnel host. Review
+        drove list -> approve -> apply over `Host: tunnel.example.test` and
+        the provider's `create` fired.
+        """
+        self.public_hosts = ('tunnel.example.test',)
+        _, base = self.serve()
+        self.store.claim(self.store.bootstrap.read_text(), 'long-password-test')
+        headers = {'Cookie': 'agentos_session=' + self.store.local_session(),
+                   'Host': 'tunnel.example.test'}
+        request = Request(base + '/api/calendar/drafts', headers=headers)
+        with self.assertRaises(HTTPError) as refused:
+            build_opener().open(request, timeout=3)
+        self.assertEqual(refused.exception.code, 400)
+        post = Request(base + '/api/calendar/drafts/request',
+                       data=json.dumps({'operation': 'list'}).encode(),
+                       headers={**headers, 'Content-Type': 'application/json'})
+        with self.assertRaises(HTTPError) as refused:
+            build_opener().open(post, timeout=3)
+        self.assertEqual(refused.exception.code, 400)
 
     # -- the offer ---------------------------------------------------------
 

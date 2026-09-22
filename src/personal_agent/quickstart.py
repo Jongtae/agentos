@@ -512,6 +512,15 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             if path=='/api/calendar/drafts':
                 # The owner's own surface. A draft the model proposed is
                 # inert until the owner approves and applies it here.
+                #
+                # Tunnel host refused, unlike the neighbouring
+                # memory-candidate surface it is modelled on. That one has no
+                # external effect; this one creates, changes or cancels a
+                # real calendar event, and it is the first route in this
+                # server that does. Every other Calendar route already
+                # refuses a tunnel host and this should not be the exception.
+                if self.public_host():
+                    return self.reply(400,{'error':'Open AgentOS on its local address to review calendar drafts.'})
                 try:return self.reply(200,service.calendar_draft_request({'operation':'list'}))
                 except ValueError as exc:return self.reply(400,{'error':str(exc)})
             if path=='/api/personal-space':return self.reply(200,store.personal_space())
@@ -621,6 +630,10 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 if path=='/api/personal-space/memory-candidates/request':
                     return self.reply(200,service.memory_candidate_request(body))
                 if path=='/api/calendar/drafts/request':
+                    # See the GET above: this one applies a real external
+                    # effect, so loopback only.
+                    if self.public_host():
+                        return self.reply(400,{'error':'Open AgentOS on its local address to approve a calendar change.'})
                     try:return self.reply(200,service.calendar_draft_request(body))
                     except ValueError as exc:return self.reply(400,{'error':str(exc)})
                 if path=='/api/context-inbox/telegram-policy':return self.reply(200,service.set_context_telegram_policy(body))

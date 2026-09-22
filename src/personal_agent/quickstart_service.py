@@ -1131,45 +1131,77 @@ class AgentService:
             raise ValueError(ConnectorHandoff.unavailable(GMAIL_CONNECTOR_ID))
         return self.gmail.begin_oauth(self.connector_callback_owner(GMAIL_CONNECTOR_ID))
 
-    def calendar_draft_request(self, body, owner_id='local-owner'):
+    def calendar_owner_candidates(self):
+        """The connector identities this install serves, same human, both.
+
+        `connector_owner_id` gives Telegram Work `telegram:<chat>` and
+        web/local Work `local-owner`, and `connector_callback_owner` already
+        treats the two as candidates for one owner. The first version of the
+        approve surface hardcoded `local-owner`, so every draft the model
+        produced from a Telegram request -- the primary J4 journey -- was
+        listed and then refused with an opaque error, and nobody could apply
+        it on a paired install.
+        """
+        candidates = []
+        telegram = self.store.config('telegram', {})
+        if isinstance(telegram, dict) and telegram.get('enabled') and telegram.get('user_id') is not None:
+            candidates.append(f"telegram:{telegram['user_id']}")
+        candidates.append('local-owner')
+        return candidates
+
+    def calendar_draft_request(self, body, owner_id=None):
         """The owner's approve/apply surface for a Calendar draft.
 
         Without this nobody could apply a draft at all: the model has no
         approve tool by design, and the older `PersonalAssistantOrchestrator`
         path is constructed with `calendar=None` and gates on a different
         capability identifier, so every `calendar-approve` returned
-        `blocked`. The model could draft and the owner could not act, which
-        made "wired end to end" untrue.
+        `blocked`.
 
         `approve` mints the one-time token bound to this owner, draft,
         payload hash and the write connector's `connection_revision`;
-        `apply` spends it exactly once. Neither is reachable from a tool.
+        `apply` spends it. Neither is reachable from a tool.
         """
-        connector=self.calendar_for({}) if self.calendar_factory or self.calendar else None
-        if connector is None:
+        if self.calendar is None and self.calendar_factory is None:
             raise ValueError(ConnectorHandoff.unavailable(CALENDAR_WRITE_CONNECTOR_ID))
-        operation=(body or {}).get('operation')
-        if operation=='list':
-            return {'drafts':connector.pending(owner_id) if hasattr(connector,'pending')
-                    else [row for row in (self.store.config('calendar_create',{}) or {}).values()
-                          if isinstance(row,dict) and row.get('state')=='awaiting-approval']}
-        draft_id=(body or {}).get('draft_id')
-        if not isinstance(draft_id,str) or not draft_id:
+        owners = [owner_id] if owner_id else self.calendar_owner_candidates()
+        operation = (body or {}).get('operation')
+        if operation == 'list':
+            drafts = []
+            for owner in owners:
+                connector = self.calendar_for({'chat_id': int(owner.split(':', 1)[1])}
+                                              if owner.startswith('telegram:') else {})
+                drafts.extend({**row, 'owner': owner} for row in connector.pending(owner))
+            return {'drafts': drafts}
+        draft_id = (body or {}).get('draft_id')
+        if not isinstance(draft_id, str) or not draft_id:
             raise ValueError('승인할 일정 초안을 선택하세요.')
-        if operation=='preview':
-            return {'preview':connector.preview(draft_id,owner_id)}
-        if operation=='approve':
-            return {'approval':connector.approve(draft_id,owner_id),
-                    'applied':False,
-                    'next_step':'승인만 기록했습니다. 적용하려면 apply를 호출하세요.'}
-        if operation=='apply':
-            approval=(body or {}).get('approval_id')
-            if not isinstance(approval,str) or not approval:
-                raise ValueError('승인 토큰이 필요합니다.')
-            return {'result':connector.execute(draft_id,approval,owner_id),'applied':True}
-        if operation=='status':
-            return {'status':connector.status(draft_id,owner_id)}
-        raise ValueError('지원하지 않는 일정 초안 요청입니다.')
+        # Act as whichever identity owns the draft. `preview`, `approve` and
+        # `execute` each enforce the owner themselves, so a draft belonging
+        # to neither candidate simply finds no owner and is refused.
+        for owner in owners:
+            connector = self.calendar_for({'chat_id': int(owner.split(':', 1)[1])}
+                                          if owner.startswith('telegram:') else {})
+            try:
+                connector.preview(draft_id, owner)
+            except ValueError:
+                continue
+            if operation == 'preview':
+                return {'preview': connector.preview(draft_id, owner), 'owner': owner}
+            if operation == 'approve':
+                return {'approval': connector.approve(draft_id, owner), 'owner': owner,
+                        'applied': False,
+                        'next_step': '승인만 기록했습니다. 적용하려면 apply를 호출하세요.'}
+            if operation == 'apply':
+                approval = (body or {}).get('approval_id')
+                if not isinstance(approval, str) or not approval:
+                    raise ValueError('승인 토큰이 필요합니다.')
+                return {'result': connector.execute(draft_id, approval, owner),
+                        'owner': owner, 'applied': True}
+            if operation == 'status':
+                return {'status': connector.status(draft_id, owner), 'owner': owner}
+            raise ValueError('지원하지 않는 일정 초안 요청입니다.')
+        raise ValueError('해당 일정 초안을 찾을 수 없습니다.')
 
     def calendar_for(self, job):
         """The Calendar connector bound to this Work's owner, or None."""

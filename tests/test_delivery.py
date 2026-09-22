@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from delivery_state_invariants import (
+    assert_completed_work_is_unselectable,
     assert_declared_goal_shape,
     assert_no_unauthorised_execution_authority,
     closed_out_programs,
@@ -147,6 +148,26 @@ class DeliveryTests(unittest.TestCase):
         ))
         self.assertNotIn('DRIVE-LOCAL-OP-01', controller.plan.documented_completed())
         self.assertNotIn('SCN-I-01', controller.plan.documented_completed())
+
+    def test_completed_work_is_unselectable_even_if_redeclared_active(self):
+        """The gate every other selection test stops short of.
+
+        `DeliveryPlan.select` needs two things: `next_goal.status == "active"`,
+        and the named iteration carrying `owner-activated-goal-ready`. Every
+        existing test here stops at the first, because the resting plan never
+        has it. So a completed program satisfying the *second* gate went
+        unnoticed for a whole cycle: EPIC-PA1 sat armed at the iterations
+        layer after all nine substeps had merged and their issues had closed,
+        with `next_goal.action` still instructing a worker to advance two
+        closed issues. Nothing was selectable, but only because one field
+        nobody had touched still read `goal-ready`.
+
+        This forces the first gate open for every closed-out program and
+        every completed substep, and requires the second to hold on its own.
+        Each subject carries a positive control, so a refusal cannot come
+        from a malformed fixture.
+        """
+        assert_completed_work_is_unselectable(self)
 
     def test_goal_ready_never_starts_heartbeat_or_external_commands(self):
         runner=Runner()

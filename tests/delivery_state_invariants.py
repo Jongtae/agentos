@@ -356,6 +356,81 @@ def assert_pause_survives_redeclaration(case, plan, name):
     case.assertEqual(selected["id"], name)
 
 
+def assert_completion_survives_redeclaration(case, plan, name):
+    """A completed iteration is not selectable even if redeclared active.
+
+    ``DeliveryPlan.select`` has two gates: ``next_goal.status == "active"``,
+    and the named iteration carrying ``activation_status`` ``GOAL_READY``. A
+    completed program used to satisfy the *second* one -- EPIC-PA1 sat at
+    ``owner-activated-goal-ready`` for a whole cycle after every substep had
+    merged and its issues had closed. Nothing was selectable, but only
+    because one field nobody had touched still read ``goal-ready``; a single
+    flip would have handed authority back to a finished program and told a
+    worker to advance two closed issues.
+
+    Every existing selection test stops at the first gate, so none of them
+    could see that. This forces the first gate open and asserts the second
+    one holds on its own -- the same shape as
+    ``assert_pause_survives_redeclaration``, including its positive control,
+    because a refusal from a malformed fixture would prove nothing.
+    """
+    from personal_agent.delivery import DeliveryPlan
+
+    altered = json.loads(json.dumps(plan))
+    altered["next_goal"] = {"id": name, "status": "active"}
+    with plan_file(altered) as path:
+        case.assertIsNone(
+            DeliveryPlan(path).select({}),
+            f"{name} is complete but was selected after being redeclared active",
+        )
+
+    # Positive control: the same record, armed where selection reads, IS
+    # selected. This is what makes the refusal above attributable.
+    armed = json.loads(json.dumps(altered))
+    entry = next(item for item in armed["iterations"] if item["id"] == name)
+    entry["activation_status"] = GOAL_READY
+    entry.setdefault("issue", 1)
+    armed["history"]["documented_completed_iterations"] = [
+        item for item in armed["history"]["documented_completed_iterations"] if item != name
+    ]
+    with plan_file(armed) as path:
+        selected = DeliveryPlan(path).select({})
+    case.assertIsNotNone(
+        selected,
+        f"{name} did not select even when armed and not recorded complete: "
+        "the refusal above proves nothing",
+    )
+    case.assertEqual(selected["id"], name)
+
+
+def assert_completed_work_is_unselectable(case, plan=None, path=PLAN_PATH):
+    """No closed-out program and no completed substep can be selected.
+
+    Covers both layers the plan records completion in, because they are
+    written by different hands and drifted apart before: a program can be
+    ``complete`` while the iteration selection actually reads is still armed.
+    """
+    plan = load_plan(path) if plan is None else plan
+    items = {item["id"]: item for item in plan["iterations"]}
+    completed = plan["history"]["documented_completed_iterations"]
+
+    subjects = set(closed_out_programs(plan))
+    for program in plan["programs"].values():
+        subjects.update(program.get("completed_substeps") or [])
+    subjects = sorted(name for name in subjects if name in items)
+    case.assertTrue(subjects, "no completed work to check")
+
+    for name in subjects:
+        with case.subTest(completed=name):
+            # Recorded complete in the layer selection reads, not only in the
+            # program record.
+            case.assertNotEqual(items[name].get("activation_status"), GOAL_READY,
+                                f"{name} is complete but armed where selection reads")
+            case.assertIn(name, completed, f"{name} is complete but not recorded so")
+            case.assertNotEqual(plan["next_goal"].get("id"), name)
+            assert_completion_survives_redeclaration(case, plan, name)
+
+
 def assert_closed_out_record(case, plan, name):
     """Full closeout requirements for one program recorded complete.
 

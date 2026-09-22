@@ -920,7 +920,12 @@ class FirstUseEndToEndAcceptance(unittest.TestCase):
         with self.subTest('the journey map names its own gaps'):
             self.assertEqual(sorted(JOURNEY_EVIDENCE), ['J1', 'J2', 'J3', 'J4',
                                                         'J5', 'J6', 'J7', 'J8'])
-            self.assertIn('not wired', JOURNEY_EVIDENCE['J4'])
+            # J4 said 'not wired' for the whole program and this pinned it.
+            # It is wired now, so the pin moves to what is still missing --
+            # a live Calendar OAuth and any real event mutation -- rather
+            # than being deleted. The guard's job is that the map keeps
+            # naming its own gaps, not that a particular gap stays open.
+            self.assertIn('owner_validation_pending', JOURNEY_EVIDENCE['J4'])
             self.assertIn('owner_validation_pending', JOURNEY_EVIDENCE['J1'])
             self.assertIn('owner_validation_pending', JOURNEY_EVIDENCE['J3'])
             # J6's value-scoped write binding and J8's two authority clauses

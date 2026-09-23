@@ -92,7 +92,7 @@ agentos start
 
 The browser opens at `http://127.0.0.1:8787`.
 
-**The Homebrew command installs the newest published release, `v1.0.4` (2026-09-07), which is behind `main`.** Recent development on `main` includes capabilities and first-user fixes that are not present in that release. Follow [QUICKSTART](QUICKSTART.md) for the exact supported path and the [release procedure](docs/release.en.md) for publication status.
+**The Homebrew command installs the newest published release, `v1.1.0` (2026-09-23).** Work merged to `main` after that release is not in it, so the Homebrew build can fall behind `main` until the next release. Follow [QUICKSTART](QUICKSTART.md) for the exact supported path and the [release procedure](docs/release.en.md) for publication status.
 
 <!-- readme-section:status -->
 

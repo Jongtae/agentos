@@ -15,18 +15,15 @@
       "state": "published",
       "carries": "Pre-EPIC-PA1. Contains no PA1 child: no Gmail connector, no `agentos service`, no PA1 connector contract, no memory service.",
       "observed": "Tapped and installed locally at the time of writing (`brew list --versions agentos` -> `agentos 1.0.4`). Local operating observation, not a clean-machine install."
-    }
-  ],
-  "unpublished": [
+    },
     {
       "version": "1.1.0",
-      "tag": null,
-      "commit": null,
-      "why_no_commit": "The commit that gets tagged is the squash-merge commit on main, which does not exist while this entry is unpublished. Recording any earlier SHA here is wrong the moment the PR merges.",
-      "archive_sha256": null,
-      "state": "unpublished",
-      "why_no_checksum": "The GitHub tag archive does not exist until the tag is pushed, and its gzip output is not byte-reproducible from a local `git archive`. A fabricated checksum would produce a formula that reviews as valid and installs nothing.",
-      "carries": "EPIC-PA1 #386 children: #387 connector seam, #388 install/background lifecycle, #389 Gmail read/search, #390 Calendar policy core, #391 public research, #392 memory candidates, #382 web management, #393 Telegram capability handoff, #394 integration.",
+      "tag": "v1.1.0",
+      "tag_date": "2026-09-23",
+      "commit": "4510ad6",
+      "archive_sha256": "35c82bd40725490b6bb2ea3637f618b8e8bef9afa9cb2ccb9b1fe2bf858f2971",
+      "state": "published",
+      "carries": "EPIC-PA1 #386 children: #387 connector seam, #388 install/background lifecycle, #389 Gmail read/search, #390 Calendar policy core, #391 public research, #392 memory candidates, #382 web management, #393 Telegram capability handoff, #394 integration. Also #476 failed/partial-turn honesty, #488 refused/deferred durable writes, #487 README rewrite, #495 AGPL-3.0-only licence and trademark notice.",
       "journeys": {
         "J1": "partial - install/reboot owner_validation_pending",
         "J2": "covered",
@@ -37,7 +34,20 @@
         "J7": "covered",
         "J8": "covered"
       },
-      "not_claimed": "No live Google, OpenRouter or Telegram operation has been observed for any journey."
+      "not_claimed": "No live Google, OpenRouter or Telegram operation has been observed for any journey.",
+      "observed": "Tap PR Jongtae/homebrew-agentos#17. On the owner's Mac: `brew upgrade` 1.0.4 -> 1.1.0, `brew test` passed, `scripts/quickstart_install_check.py --executable <Cellar>/1.1.0/bin/agentos` reported installed_foreground_smoke with every field true and background_service owner_validation_pending. Local operating observation, not a clean-machine install."
+    }
+  ],
+  "unpublished": [
+    {
+      "version": "1.1.1",
+      "tag": null,
+      "commit": null,
+      "why_no_commit": "The commit that gets tagged is the squash-merge commit on main, which does not exist while this entry is unpublished. Recording any earlier SHA here is wrong the moment the PR merges.",
+      "archive_sha256": null,
+      "state": "unpublished",
+      "why_no_checksum": "The GitHub tag archive does not exist until the tag is pushed, and its gzip output is not byte-reproducible from a local `git archive`. A fabricated checksum would produce a formula that reviews as valid and installs nothing.",
+      "carries": "Nothing beyond v1.1.0 yet."
     }
   ]
 }

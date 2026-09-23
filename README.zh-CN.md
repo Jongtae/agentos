@@ -92,7 +92,7 @@ agentos start
 
 浏览器会在 `http://127.0.0.1:8787` 打开。
 
-**这个 Homebrew 命令安装的最新公开版本是 `v1.0.4`（2026-09-07），它落后于当前 `main`。** `main` 已包含此版本之后的功能开发和 first-user 改进。准确支持路径请看 [QUICKSTART](QUICKSTART.md)，发布状态请看 [release procedure](docs/release.en.md)。
+**这个 Homebrew 命令安装的是最新公开版本 `v1.1.0`（2026-09-23）。** 此版本之后合并到 `main` 的工作不包含在内，因此在下一次发布前，Homebrew 构建会落后于 `main`。准确支持路径请看 [QUICKSTART](QUICKSTART.md)，发布状态请看 [release procedure](docs/release.en.md)。
 
 <!-- readme-section:status -->
 

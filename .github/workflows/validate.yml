@@ -11,12 +11,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: python -m pip install --upgrade pip pytest pypdf python-docx openpyxl
       - run: python -m pip install -e '.[schema-validation]'
       - run: python3 scripts/verify_master_plan_docs.py
+      - run: python3 scripts/verify_readme_localization.py --check-git-diff
       - run: python3 scripts/verify_src_layout.py
       - run: cmp -s delivery-plan.yaml src/personal_agent/delivery-plan.yaml
       - run: python3 -c "import json,pathlib; [json.loads(line) for line in pathlib.Path('docs/issue-branch-ledger.jsonl').read_text(encoding='utf-8').splitlines()]"

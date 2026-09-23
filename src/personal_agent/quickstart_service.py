@@ -92,6 +92,7 @@ TELEGRAM_RESULT_PREVIEW_CHARS = 3200
 #: bubble AgentOS can vouch for.
 TERMINAL_FAILED_HEADER = '이 요청은 완료하지 못했습니다.'
 TERMINAL_PARTIAL_HEADER = '일부 단계만 완료했습니다.'
+TERMINAL_INTERRUPTED_HEADER = '이 요청은 중단되었습니다. 자동으로 다시 실행하지 않았습니다.'
 TERMINAL_NEXT_ACTION = 'AgentOS 웹에서 실행 기록과 다음 단계를 확인하세요.'
 TERMINAL_UNVERIFIED_MARKER = ('완료한 단계까지의 내용은 AgentOS 웹 기록에서 확인할 수 있습니다. '
                               '확인된 결과가 아니므로 그대로 신뢰하지 마세요.')
@@ -455,9 +456,11 @@ class AgentService:
         Both are values ``task_progress`` already returns to this same
         owner-authenticated surface through ``_progress_event``, so no
         argument, document excerpt or result content reaches a surface that
-        did not already carry it.  ``deliver_one`` reads ``error`` only when
-        ``response`` is empty, which is exactly the case this does not
-        change, so no new text reaches Telegram either.
+        did not already carry it.  ``telegram_result_text`` now puts this
+        string in the terminal bubble of every failed or partial turn, not
+        only the ones with an empty ``response``, so it does reach Telegram -
+        a surface already gated to this same owner by generation and
+        ``user_id`` before any send.
         """
         reasons=[]
         for tool,reason in refusals:
@@ -1504,7 +1507,11 @@ class AgentService:
         # Cards are status controls, never a copy of user-provided content.
         if state=='queued':return '요청을 받았습니다. 곧 시작할게요.'
         if state=='running':return '요청을 처리하고 있어요.'
-        if state in ('succeeded','partial'):return '처리가 끝났습니다. 아래 결과를 확인하세요.'
+        if state=='succeeded':return '처리가 끝났습니다. 아래 결과를 확인하세요.'
+        # The card sits directly above the terminal bubble.  A partial turn
+        # must not be announced here as a finished result the bubble then
+        # refuses to show.
+        if state=='partial':return TERMINAL_PARTIAL_HEADER+' 아래 안내를 확인하세요.'
         if state=='interrupted':return '작업이 중단되었습니다. 자동으로 다시 실행하지 않았습니다.'
         if state=='awaiting_connection':return '필요한 연결을 기다리고 있습니다. 연결이 확인되면 이 요청을 한 번만 이어서 처리합니다.'
         return f'이 요청은 {labels.get(state,state)} 상태입니다.'
@@ -2160,9 +2167,13 @@ class AgentService:
             body.append(TERMINAL_NEXT_ACTION)
             text='\n\n'.join(body)
         elif outcome in ('partial','interrupted'):
-            body=[TERMINAL_PARTIAL_HEADER]
+            # 'interrupted' is set on any running job at restart, including one
+            # that ran no tool at all, so it cannot claim completed steps.  And
+            # ``task_progress`` offers the stored text for 'succeeded'/'partial'
+            # only, so point at the web record exactly where it is readable.
+            body=[TERMINAL_PARTIAL_HEADER if outcome=='partial' else TERMINAL_INTERRUPTED_HEADER]
             if cause:body.append(cause)
-            body.append(TERMINAL_UNVERIFIED_MARKER if (response or '').strip()
+            body.append(TERMINAL_UNVERIFIED_MARKER if (outcome=='partial' and (response or '').strip())
                         else TERMINAL_NEXT_ACTION)
             text='\n\n'.join(body)
         else:

@@ -16,11 +16,12 @@ the text that actually reached the owner.
 """
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
 from personal_agent.providers import ModelAdapter
-from personal_agent.quickstart_service import AgentService
+from personal_agent.quickstart_service import TELEGRAM_CARD_GRACE_SECONDS, AgentService
 from personal_agent.quickstart_store import QuickStore
 
 CHAT = 4242
@@ -35,6 +36,7 @@ class TerminalResultTestCase(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.store = QuickStore(Path(self.temp.name) / 'data')
         self.sent = []
+        self.cards = []         # every task-card text the owner saw, in order
         self.plan = []          # [(tool, arguments_mapping), ...] consumed in order
         self.text = '완료했습니다.'
         self.turn = 0
@@ -43,6 +45,9 @@ class TerminalResultTestCase(unittest.TestCase):
             if url.endswith('/sendMessage'):
                 self.sent.append(body['text'])
                 return {'ok': True, 'result': {'message_id': len(self.sent)}}
+            if url.endswith('/editMessageText'):
+                self.cards.append(body['text'])
+                return {'ok': True, 'result': {'message_id': body['message_id']}}
             if url.endswith('/getMe'):
                 return {'ok': True, 'result': {'username': 'owner_test_bot'}}
             if url.endswith('/getWebhookInfo'):
@@ -73,10 +78,17 @@ class TerminalResultTestCase(unittest.TestCase):
         self.store.put('telegram', {'enabled': True, 'user_id': CHAT,
                                     'generation': GENERATION})
 
-    def ask(self, message):
+    def ask(self, message, card=False):
         """Run one Telegram turn and return the job plus the terminal bubble."""
         job_id = self.store.enqueue(message, f'ask-{len(self.sent)}',
                                     channel=f'telegram:{GENERATION}', chat_id=CHAT)
+        if card:
+            # A carded job is held back for the cancel grace window; age it past
+            # that so this turn runs, without touching the window itself.
+            self.service.create_task_card(job_id, message, CHAT)
+            with self.store.db() as db:
+                db.execute('UPDATE jobs SET created=? WHERE id=?',
+                           (time.time() - TELEGRAM_CARD_GRACE_SECONDS - 1, job_id))
         self.service.run_one()
         before = len(self.sent)
         self.service.deliver_one()
@@ -238,6 +250,50 @@ class SurfaceConsistencyTests(TerminalResultTestCase):
         self.assertTrue(card['result_available'], 'the web must still offer the text')
         self.assertEqual(card['error'], job['error'])
         self.assertNotIn(self.text, bubble, 'Telegram must not push it as the answer')
+
+    def test_the_card_above_a_partial_bubble_does_not_announce_a_result(self):
+        """Independent review of #486 found the bubble alone was not enough.
+
+        The task card sits directly above it and `update_task_card` is called
+        with the same outcome, so a partial turn was edited to read
+        '처리가 끝났습니다. 아래 결과를 확인하세요.' -- the exact framing #476
+        is about -- above a bubble that then declines to show any result.
+        """
+        self.connect_folder()
+        self.plan = [('find_files', {'query': '급여'}),
+                     ('calendar_draft_cancel', {'event_id': 'ev1',
+                                                'event_version': '"etag1"'})]
+        self.text = '취소 초안을 만들었습니다.'
+        job, bubble = self.ask('내일 팀 회의 취소해줘', card=True)
+        self.assertEqual(job['status'], 'partial')
+        self.assertTrue(self.cards, 'the card was never updated')
+        self.assertNotIn('처리가 끝났습니다', self.cards[-1])
+        self.assertIn('일부 단계만 완료했습니다', self.cards[-1])
+        self.assertNotIn(self.text, bubble)
+
+    def test_the_card_above_a_succeeded_bubble_still_announces_the_result(self):
+        """The opposing pin for the card."""
+        self.connect_folder()
+        self.plan = [('find_files', {'query': '급여'})]
+        self.text = '급여 파일 한 건을 찾았습니다.'
+        job, bubble = self.ask('급여 파일 찾아줘', card=True)
+        self.assertEqual(job['status'], 'succeeded', job.get('error'))
+        self.assertIn('처리가 끝났습니다', self.cards[-1])
+        self.assertEqual(bubble, self.text)
+
+    def test_an_interrupted_turn_claims_no_completed_step_and_no_web_result(self):
+        """`interrupted` is set on any restarted running job, even a no-tool one.
+
+        `task_progress` offers the stored text for succeeded/partial only, so
+        the bubble must not point the owner at a web result that is not there,
+        and must not claim steps completed that may never have run.
+        """
+        text = AgentService.telegram_result_text('모두 처리했습니다.', '중단됨', 'interrupted')
+        self.assertNotIn('모두 처리했습니다', text)
+        self.assertNotIn('일부 단계만', text)
+        self.assertIn('중단되었습니다', text)
+        self.assertNotIn('확인할 수 있습니다', text)
+        self.assertIn('다음 단계를 확인하세요', text)
 
     def test_the_failure_bubble_offers_a_next_action(self):
         self.plan = [('calendar_query', {'start': '2026-09-24T00:00:00+09:00',

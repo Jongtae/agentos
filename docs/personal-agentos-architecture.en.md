@@ -161,7 +161,7 @@ Decision inference is not policy or authority. A decision result/confidence may 
 
 Implementations may include rules, the existing LLM path, local/small models, or optional specialist providers. Jev is currently only an optional/experimental adapter candidate; Jev-specific concepts such as `Choice`, `Score`, or `Noul` must be translated at the adapter boundary rather than becoming kernel vocabulary or a mandatory dependency.
 
-External decision providers remain subject to Work-scoped Context minimization, destination/Grant checks, budgets, cancellation, truthful provider/evidence reporting, and explicit fallback/safe-stop semantics. See [Provider-independent Decision Layer](decision-layer.en.md) and [#415](https://github.com/Jongtae/personal-agentos/issues/415).
+External decision providers remain subject to Work-scoped Context minimization, destination/Grant checks, budgets, cancellation, truthful provider/evidence reporting, and explicit fallback/safe-stop semantics. See [Provider-independent Decision Layer](decision-layer.en.md) and [#415](https://github.com/Jongtae/agentos/issues/415).
 
 ### Ruflo's place
 

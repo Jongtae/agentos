@@ -6,7 +6,7 @@ This document defines the intended **AgentOS-owned decision boundary** for bound
 
 It is an architecture contract, not a claim that the runtime interface is already implemented. Current support still depends on merged code and named acceptance evidence.
 
-The owner decision recorded in [#415](https://github.com/Jongtae/personal-agentos/issues/415) is:
+The owner decision recorded in [#415](https://github.com/Jongtae/agentos/issues/415) is:
 
 > **Absorb the decision-layer interface and engineering principle; do not make Jev a required dependency.**
 
@@ -36,7 +36,7 @@ Core contracts use provider-neutral names. The conceptual model includes:
 - **SelectionDecision<T>** — selection among declared candidates.
 - **ScoreDecision** — evaluation against a declared scale or rubric.
 - **BinaryDecision** — bounded yes/no judgment with confidence/probability.
-- **DecisionConfidence** — calibrated confidence/probability plus available provenance/telemetry.
+- **DecisionConfidence** — confidence/probability (calibration is measured per provider, not assumed) plus available provenance/telemetry.
 - **DecisionEngine** — provider-independent judgment interface.
 - **DecisionPolicy** — AgentOS-owned deterministic thresholds, escalation/fallback rules and authority checks.
 
@@ -250,8 +250,8 @@ This contract does not authorize:
 
 ## Related work
 
-- [#415 — ARCH-DECISION-01](https://github.com/Jongtae/personal-agentos/issues/415)
-- [#383 — scoped Attention / personal-assistant design](https://github.com/Jongtae/personal-agentos/issues/383)
-- [PR #384 — draft Attention design](https://github.com/Jongtae/personal-agentos/pull/384)
-- [#412 — reuse-first engineering governance](https://github.com/Jongtae/personal-agentos/issues/412)
-- [PR #414 — reuse-first engineering governance](https://github.com/Jongtae/personal-agentos/pull/414)
+- [#415 — ARCH-DECISION-01](https://github.com/Jongtae/agentos/issues/415)
+- [#383 — scoped Attention / personal-assistant design](https://github.com/Jongtae/agentos/issues/383)
+- [PR #384 — draft Attention design](https://github.com/Jongtae/agentos/pull/384)
+- [#412 — reuse-first engineering governance](https://github.com/Jongtae/agentos/issues/412)
+- [PR #414 — reuse-first engineering governance](https://github.com/Jongtae/agentos/pull/414)

@@ -10,6 +10,7 @@ replaced without changing what any previously supported utterance does; these
 tests are the evidence for what is new.
 """
 import itertools
+import re
 import tempfile
 import unittest
 
@@ -543,6 +544,79 @@ class ServiceRoutingTests(unittest.TestCase):
         self.assertEqual(decision.intent, INTENT_SETTINGS)
         self.assertTrue(decision.supersedes_previous)
 
+
+
+class RecommendationCueNarrowingTests(unittest.TestCase):
+    """FU1-474 / #474: "추천" is an ordinary word, not a capability request.
+
+    Reproduces TEST-FIRST-USER-01 / #472 scenario A turn 35, where a travel
+    request containing 추천 was claimed by the capability-recommendation rule
+    and answered with the three internal outcome tags.
+    """
+
+    TURN_35 = '10월에 제주 2박 3일 여행 가려는데 숙소랑 일정 추천해줘'
+    INTERNAL_TAGS = ('private-document-research', 'specialist-research', 'local-specialist-processing')
+
+    MODEL_ROUTE_ERROR = ServiceRoutingTests.MODEL_ROUTE_ERROR
+    run_one = ServiceRoutingTests.run_one
+    assertConversationRoute = ServiceRoutingTests.assertConversationRoute
+
+    def setUp(self):
+        ServiceRoutingTests.setUp(self)
+        self.classifier = classifier()
+
+    def assertNoInternalTag(self, text):
+        for tag in self.INTERNAL_TAGS:
+            self.assertNotIn(tag, text or '')
+
+    def test_travel_and_product_recommendations_stay_on_the_conversation_route(self):
+        for text in (self.TURN_35, '제주 맛집 추천해줘', '노이즈캔슬링 헤드폰 추천해줘',
+                     '블루투스 연결 잘 되는 헤드폰 추천해줘', '세무 전문가 추천해줘',
+                     'recommend a good hotel in jeju', 'any restaurant recommendation near gangnam?'):
+            with self.subTest(text=text):
+                decision = self.classifier.classify(text)
+                self.assertEqual(decision.intent, INTENT_CONVERSATION)
+                self.assertIsNone(decision.clarification)
+
+    def test_turn_35_reaches_the_same_route_as_the_scenario_b_itinerary_request(self):
+        # Scenario B turn 23 ("…일정 짜줘") reached research; turn 35 must too.
+        # No model is configured here, so reaching that route is observed as
+        # its distinct model-route failure rather than a recommendation reply.
+        for text in (self.TURN_35, '제주 2박 3일 여행 일정 짜줘'):
+            with self.subTest(text=text):
+                job = self.run_one(text, channel='telegram:fixture', chat_id=7)
+                self.assertConversationRoute(job)
+                self.assertNoInternalTag(job['response'])
+                self.assertNoInternalTag(job['error'])
+
+    def test_a_capability_recommendation_using_chuchen_still_routes_to_the_rule(self):
+        for text, outcome in (('전문가 조사를 도와줄 연결 추천해줘', 'specialist-research'),
+                              ('내 문서 조사에 쓸 만한 capability 추천 좀', 'private-document-research'),
+                              ('recommend a connector for document research', 'private-document-research'),
+                              ('capability 하나 추천해줘', None)):
+            with self.subTest(text=text):
+                decision = self.classifier.classify(text)
+                self.assertEqual(decision.intent, INTENT_RECOMMENDATION)
+                self.assertEqual(decision.argument, outcome)
+
+    def test_the_clarification_shows_no_internal_outcome_ids(self):
+        job = self.run_one('capability 하나 추천해줘', channel='telegram:fixture', chat_id=7)
+        self.assertEqual(job['status'], 'succeeded')
+        self.assertIn('어떤 일에 쓸 연결을 추천할지', job['response'])
+        self.assertNoInternalTag(job['response'])
+
+    def test_every_clarification_example_resolves_to_exactly_one_reviewed_outcome(self):
+        from personal_agent.conversation_handoff import RECOMMENDATION_CLARIFICATION
+        examples = re.findall(r'"([^"]+)"', RECOMMENDATION_CLARIFICATION)
+        self.assertEqual(len(examples), 3)
+        outcomes = set()
+        for text in examples:
+            with self.subTest(text=text):
+                decision = self.classifier.classify(text)
+                self.assertEqual(decision.intent, INTENT_RECOMMENDATION)
+                self.assertTrue(decision.executes)
+                outcomes.add(decision.argument)
+        self.assertEqual(outcomes, set(self.INTERNAL_TAGS))
 
 if __name__ == '__main__':  # pragma: no cover
     unittest.main()

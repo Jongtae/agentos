@@ -161,9 +161,20 @@ INTENT_LABELS = {
 # can audit.  Korean cues match as substrings; ASCII cues match on word
 # boundaries so that "note" does not fire inside "notebook".
 
-_RECOMMENDATION_CUES = ('추천', '연결할 만한', '뭘 연결', '무엇을 연결', '어떤 걸 붙이', '어떤 capability',
-                        'recommend', 'recommendation', 'what should i connect', 'which capability',
+_RECOMMENDATION_CUES = ('연결할 만한', '뭘 연결', '무엇을 연결', '어떤 걸 붙이', '어떤 capability',
+                        'what should i connect', 'which capability',
                         'suggest a capability', 'suggest capabilities')
+# "추천" and "recommend" alone are ordinary words: 숙소 추천, 맛집 추천,
+# recommend a hotel.  They claim a capability recommendation only when the
+# same utterance also names what is being recommended: a capability, a
+# connection scoped to a task ("…에 쓸 연결"), or one of the multi-word
+# outcome phrases below.  Everyday words such as 연결, connector, integration
+# or a lone 전문가 are deliberately not subjects: 공항 연결 추천, hdmi 커넥터
+# 추천, 세무 전문가 추천 are ordinary requests.
+_RECOMMENDATION_ASKS = ('추천', 'recommend', 'recommendation')
+_RECOMMENDATION_SUBJECTS = ('capability', 'capabilities', '쓸 연결', '쓸 만한 연결', '도와줄 연결',
+                            '문서 조사', '전문 조사', '전문가 조사', '심층 조사', '로컬 처리',
+                            'document research', 'expert research', 'deep research', 'local processing')
 # The recommendation orchestrator accepts only its three reviewed outcome
 # tags.  Mapping ordinary words onto a reviewed tag is AgentOS policy; the
 # orchestrator is never handed free prose.
@@ -350,8 +361,18 @@ _QUOTED = re.compile(r'["“]([^"”]{2,160})["”]')
 AMBIGUOUS_PREFIX = '이 요청이 '
 AMBIGUOUS_SUFFIX = (' 중 무엇인지 확실하지 않아 아무 작업도 실행하지 않았습니다. '
                     '하나만 골라 다시 말씀해 주세요.')
-RECOMMENDATION_CLARIFICATION = ('추천할 수 있는 결과 유형은 private-document-research, specialist-research, '
-                                'local-specialist-processing 입니다. 어떤 결과를 원하시는지 하나만 알려 주세요.')
+# Each example below is a complete utterance the recommendation rule resolves
+# to exactly one reviewed outcome, so the owner can repeat it as written.  The
+# outcome tags themselves are internal and never shown.
+RECOMMENDATION_CLARIFICATION = ('어떤 일에 쓸 연결을 추천할지 알려 주세요. 예: "내 문서 조사에 쓸 연결 추천해줘", '
+                                '"전문가 조사에 쓸 연결 추천해줘", "내 컴퓨터에서 로컬 처리에 쓸 연결 추천해줘".')
+#: Owner-facing names for the three reviewed outcome tags.  An executed
+#: recommendation names its outcome with these, never with the tag.
+RECOMMENDATION_OUTCOME_LABELS = {
+    'private-document-research': '내 문서 조사',
+    'specialist-research': '전문가 조사',
+    'local-specialist-processing': '내 컴퓨터에서 로컬 처리',
+}
 SETTINGS_READ_FORM = '/settings'
 KNOWLEDGE_CLARIFICATION = '개인 공간에서 무엇을 찾을지 두 글자 이상으로 알려 주세요.'
 NOTE_CLARIFICATION = '무엇을 기록할지 내용을 함께 적어 주세요.'
@@ -411,7 +432,11 @@ class IntentClassifier:
     def _rule_recommendation(self, text, lowered):
         cues = _cue_hits(text, lowered, _RECOMMENDATION_CUES)
         if not cues:
-            return None
+            asks = _cue_hits(text, lowered, _RECOMMENDATION_ASKS)
+            subjects = _cue_hits(text, lowered, _RECOMMENDATION_SUBJECTS)
+            if not (asks and subjects):
+                return None
+            cues = (*asks, *subjects)
         matched = [(tag, hits) for tag, words in _RECOMMENDATION_OUTCOMES
                    if (hits := _cue_hits(text, lowered, words))]
         if len(matched) != 1:

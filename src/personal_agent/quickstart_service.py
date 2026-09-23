@@ -25,7 +25,7 @@ from .connector_contract import ConnectorContractError, _owner_key
 from .gmail import GMAIL_CONNECTOR_ID, GmailError
 from .calendar import CALENDAR_CONNECTOR_ID, CALENDAR_WRITE_CONNECTOR_ID, CalendarError
 from .calendar_conversation import DROPPED_NOTICE as CALENDAR_DROPPED_NOTICE, CalendarConversation
-from .conversation_handoff import (CONNECTOR_LABELS, TelegramChannel, ConnectorHandoff,
+from .conversation_handoff import (CONNECTOR_LABELS, RECOMMENDATION_OUTCOME_LABELS, TelegramChannel, ConnectorHandoff,
                                    ConversationFocus,
                                    ConversationHandoffError, IntentClassifier,
                                    INTENT_AMBIGUOUS, INTENT_ASSISTANT, INTENT_CALENDAR_CREATE,
@@ -1897,7 +1897,10 @@ class AgentService:
                     response='개인 AgentOS에 연결되었습니다. 하고 싶은 일을 자연스럽게 적어 주세요. 웹과 Telegram은 같은 대화 기록을 사용합니다.'
                 elif decision.intent==INTENT_RECOMMENDATION:
                     result=self.capability_recommendation_request({'outcome':decision.argument},owner_id=owner,channel=job['channel'])
-                    response='\n'.join(f"{row['name']} · {row['reason']} · {row['approval_handoff']}" for row in result['recommendations']) or '검토된 추천이 없습니다.'
+                    # The read model keeps its declared-outcome reason; the owner reads
+                    # the outcome's Korean name, never the internal tag (#474).
+                    label=RECOMMENDATION_OUTCOME_LABELS.get(result['outcome'],'검토된 결과 유형')
+                    response='\n'.join(f"{row['name']} · {label}에 맞는 추천 · {row['approval_handoff']}" for row in result['recommendations']) or '검토된 추천이 없습니다.'
                 elif decision.intent==INTENT_KNOWLEDGE:
                     result=self.personal_knowledge_request({'query':decision.argument}, owner_id=owner, channel=job['channel'])
                     response='\n'.join(f"{row['source']} · {row['excerpt']}" for row in result.get('results',[])) or result['response']

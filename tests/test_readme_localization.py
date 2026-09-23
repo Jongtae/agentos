@@ -259,20 +259,105 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
                     target.write_text(body, encoding="utf-8")
 
                     errors = verifier.validate_readmes(root)
+                    if name == "README.md":
+                        expected = (
+                            "README.md: status section lost every synthetic "
+                            "pass-with-friction row"
+                        )
+                    else:
+                        expected = f"{name}: status evidence-class count differs"
                     self.assertTrue(
-                        any(
-                            (
-                                name in error
-                                and "status evidence-class count differs" in error
-                            )
-                            or (
-                                name == "README.md"
-                                and "lost every synthetic pass-with-friction row" in error
-                            )
-                            for error in errors
-                        ),
+                        any(error.startswith(expected) for error in errors),
                         errors,
                     )
+
+    def test_canonical_status_cannot_drop_every_synthetic_row(self):
+        """The zero-row guard is the fail-closed backstop for #472 evidence."""
+        tmp, root = self.temp_root()
+        with tmp:
+            target = root / "README.md"
+            body = target.read_text(encoding="utf-8")
+            body = body.replace(
+                verifier.STATUS_ROW_EVIDENCE_TOKEN, "**Live provider verified**"
+            )
+            target.write_text(body, encoding="utf-8")
+
+            errors = verifier.validate_readmes(root)
+            self.assertTrue(
+                any(
+                    error.startswith(
+                        "README.md: status section lost every synthetic "
+                        "pass-with-friction row"
+                    )
+                    for error in errors
+                ),
+                errors,
+            )
+
+    def test_heading_like_text_inside_a_fenced_block_is_not_a_section(self):
+        """Fenced samples may contain heading-like text without breaking parity.
+
+        A fence must also not silence the public H2 checks that follow it, so
+        both fence styles are opened and closed here.
+        """
+        fixtures = (
+            "```\nPricing\n---\n```",
+            "```text\nPricing\n---\n```",
+            "~~~\nPricing\n---\n~~~",
+            "```text\nfence styles:\n~~~\n```",
+        )
+        anchor = "<!-- readme-section:architecture -->"
+        for fence in fixtures:
+            with self.subTest(fence=fence.splitlines()[0]):
+                tmp, root = self.temp_root()
+                with tmp:
+                    target = root / "README.md"
+                    body = target.read_text(encoding="utf-8")
+                    self.assertIn(anchor, body)
+                    target.write_text(
+                        body.replace(anchor, fence + "\n\n" + anchor, 1),
+                        encoding="utf-8",
+                    )
+                    self.assertEqual([], verifier.validate_readmes(root))
+
+    def test_a_fenced_block_cannot_silence_later_public_headings(self):
+        """An unmatched fence style inside a sample must not disable parity."""
+        tmp, root = self.temp_root()
+        with tmp:
+            target = root / "README.md"
+            clean = target.read_text(encoding="utf-8")
+            hero = "## Delegate the work. Keep the control."
+            heading = "## Owner control by design"
+            self.assertIn(hero, clean)
+            self.assertIn(heading, clean)
+
+            fenced = clean.replace(
+                hero, hero + "\n\n```text\nfence styles:\n~~~\n```", 1
+            )
+            # The fenced sample itself is legitimate content.
+            self.assertEqual(
+                len(verifier.public_h2_indexes(clean)),
+                len(verifier.public_h2_indexes(fenced)),
+            )
+
+            smuggled = fenced.replace(
+                heading, "## Pricing\n\nUnannounced.\n\n" + heading, 1
+            )
+            self.assertEqual(
+                len(verifier.public_h2_indexes(clean)) + 1,
+                len(verifier.public_h2_indexes(smuggled)),
+            )
+
+            target.write_text(smuggled, encoding="utf-8")
+            errors = verifier.validate_readmes(root)
+            self.assertTrue(
+                any(
+                    error.startswith("README.md: H2 ")
+                    and "missing a readme-section marker" in error
+                    for error in errors
+                ),
+                errors,
+            )
 
     def test_shared_install_fact_drift_is_detected(self):
         tmp, root = self.temp_root()

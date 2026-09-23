@@ -50,9 +50,9 @@ CORE_SECTION_IDS = (
 SECTION_MARKER_RE = re.compile(
     r"<!-- readme-section:([a-z0-9][a-z0-9-]*) -->"
 )
-ATX_H2_RE = re.compile(r"^ {0,3}##(?!#)(?:[ \\t]+|$)")
-SETEXT_H2_RE = re.compile(r"^ {0,3}-+[ \\t]*$")
-FENCE_RE = re.compile(r"^ {0,3}(\\x60{3,}|~{3,})")
+ATX_H2_RE = re.compile(r"^ {0,3}##(?!#)(?:[ \t]+|$)")
+SETEXT_H2_RE = re.compile(r"^ {0,3}-+[ \t]*$")
+FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
 CAPABILITY_MARKERS = (
     "<!-- capability:illustrative-product-direction -->",
@@ -162,7 +162,7 @@ def public_h2_indexes(body: str) -> list[tuple[int, str]]:
 
         if (
             line.strip()
-            and not line.startswith(("    ", "\\t"))
+            and not line.startswith(("    ", "\t"))
             and index + 1 < len(lines)
             and SETEXT_H2_RE.match(lines[index + 1])
         ):

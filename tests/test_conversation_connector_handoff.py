@@ -24,8 +24,10 @@ from personal_agent.connector_contract import (PENDING_WORK_KEY, ConnectorContra
                                                ConnectorRegistry, ConnectorState, ConnectorStatus,
                                                ResumeState)
 from personal_agent.conversation_handoff import (CONVERSATION_RESUME_KEY, ConnectorHandoff,
-                                                 ConversationHandoffError, INTENT_MAIL_SEARCH,
-                                                 IntentClassifier, SUPERSEDED_WORK_ERROR)
+                                                 ConversationHandoffError, DecisionJudge,
+                                                 INTENT_MAIL_SEARCH, IntentClassifier,
+                                                 JUDGMENT_NO, JUDGMENT_YES, Judgment,
+                                                 SUPERSEDED_WORK_ERROR)
 from personal_agent.gmail import (GMAIL_CONNECTOR, GMAIL_CONNECTOR_ID, GMAIL_READONLY_SCOPE,
                                   EncryptedGmailSecretStore, GmailConnector)
 from personal_agent.providers import ModelAdapter
@@ -97,6 +99,25 @@ class HandoffTestCase(unittest.TestCase):
                                     'generation': GENERATION, 'cursor': 0, 'user_id': CHAT})
 
     # -- fixtures ----------------------------------------------------------
+    def judge_withdrawal(self, *withdrawing):
+        """Replace the #417 placeholder with a test double.
+
+        The double judges exactly ``withdrawing`` as withdrawals and records
+        every question it is asked, so a test can also prove when it is not
+        asked at all.  It stands in for a real DecisionEngine; the cancel,
+        card and notice that follow are AgentOS policy under test.
+        """
+        asked = []
+
+        class Double(DecisionJudge):
+            def parked_work_withdrawn(self, utterance, parked_connectors):
+                asked.append((utterance, tuple(parked_connectors)))
+                return Judgment(JUDGMENT_YES if utterance in withdrawing else JUDGMENT_NO,
+                                source='test-double')
+
+        self.service.decision_judge = Double()
+        return asked
+
     def enqueue(self, message, chat_id=CHAT):
         return self.store.enqueue(message, f'wu3-{next(self.keys)}',
                                   channel=f'telegram:{GENERATION}', chat_id=chat_id)
@@ -357,8 +378,10 @@ class SupersessionTests(HandoffTestCase):
 
     def test_a_changed_request_supersedes_the_pending_resume_path(self):
         job_id = self.park()
-        # The owner changes course while the handoff is still pending.  WU2
-        # sets `supersedes_previous`; this is where that becomes an effect.
+        # The owner changes course while the handoff is still pending.  Since
+        # FU1-DEC-01 / #521 "changed course" is a judgment; the double judges
+        # this turn a withdrawal and the supersession is what is under test.
+        self.judge_withdrawal('아니 그거 말고 오늘 일정 대신 메모 목록 보여줘')
         changed = self.enqueue('아니 그거 말고 오늘 일정 대신 메모 목록 보여줘')
         self.assertTrue(self.service.run_one())
         self.assertEqual(self.store.job(job_id)['status'], 'cancelled')
@@ -419,7 +442,7 @@ class SupersessionTests(HandoffTestCase):
 
 
 class ParkedRequestSurvivesConversationTests(HandoffTestCase):
-    """FU1-473 / #473: only an explicit correction cancels a parked request.
+    """FU1-473 / #473: only a judged withdrawal cancels a parked request.
 
     Reproduces TEST-FIRST-USER-01 / #472 scenario A turns 20-21 and scenario B
     turns 25-26: the owner acknowledges the connection guidance, connects, and
@@ -475,11 +498,24 @@ class ParkedRequestSurvivesConversationTests(HandoffTestCase):
         self.assertIsNotNone(self.handoff.record(GMAIL_CONNECTOR_ID))
         self.assertNotIn(SUPERSEDED_WORK_ERROR, [body.get('text') for body in self.sent])
 
-    def test_a_correction_cue_still_cancels_and_is_announced(self):
+    def test_with_the_placeholder_judge_correction_words_keep_the_request(self):
+        # FU1-DEC-01 / #521: the placeholder judges nothing, so policy takes
+        # its fallback and keeps the promise; no cue list decides instead.
+        job_id = self.park_with_card(MAIL_REQUEST)
+        for message in ('아니 그거 말고 메모 목록 보여줘', '취소해줘', '항공권 취소 규정 알려줘'):
+            with self.subTest(message=message):
+                self.say(message)
+                self.assertEqual(self.store.job(job_id)['status'], 'awaiting_connection')
+        self.assertNotIn(SUPERSEDED_WORK_ERROR, [body.get('text') for body in self.sent])
+
+    def test_a_judged_withdrawal_cancels_and_is_announced(self):
+        asked = self.judge_withdrawal('아니 그거 말고 메모 목록 보여줘')
         job_id = self.park_with_card(MAIL_REQUEST)
         card = self.store.task_card(job_id)
         before = len(self.sent)
         self.say('아니 그거 말고 메모 목록 보여줘')
+        # The judgment saw the utterance and which connector waits, nothing more.
+        self.assertIn(('아니 그거 말고 메모 목록 보여줘', (GMAIL_CONNECTOR_ID,)), asked)
         job = self.store.job(job_id)
         self.assertEqual(job['status'], 'cancelled')
         self.assertEqual(job['error'], SUPERSEDED_WORK_ERROR)
@@ -510,9 +546,10 @@ class ParkedRequestSurvivesConversationTests(HandoffTestCase):
                    if body.get('text') == SUPERSEDED_WORK_ERROR and 'message_id' not in body]
         self.assertEqual(len(notices), 1)
 
-    def test_a_resumed_work_does_not_reapply_its_own_correction_cue(self):
-        # The owner's correction was applied when this Work first ran; its
-        # resume must not cancel a request parked for another connector since.
+    def test_a_resumed_work_is_not_judged_again(self):
+        # This Work's words were judged when it first ran; its resume must not
+        # cancel a request parked for another connector since.
+        asked = self.judge_withdrawal('아니 그거 말고 메일에서 숙소 예약 확인 메일 찾아줘')
         mail = self.park('아니 그거 말고 메일에서 숙소 예약 확인 메일 찾아줘')
         calendar = self.park(CALENDAR_REQUEST)
         self.connect_gmail()
@@ -522,6 +559,7 @@ class ParkedRequestSurvivesConversationTests(HandoffTestCase):
         self.assertEqual(self.store.job(mail)['status'], 'succeeded')
         self.assertEqual(self.store.job(calendar)['status'], 'awaiting_connection')
         self.assertNotIn(SUPERSEDED_WORK_ERROR, [body.get('text') for body in self.sent[before:]])
+        self.assertEqual(len(asked), 1, 'only the calendar turn found something parked to ask about')
 
     def test_a_calendar_draft_edit_does_not_cancel_an_unrelated_parked_request(self):
         # A fixture provider makes the calendar draft flow reachable; nothing
@@ -531,6 +569,7 @@ class ParkedRequestSurvivesConversationTests(HandoffTestCase):
                                                   now=lambda: self.clock[0])
         self.service.calendar_conversation.now = lambda: self.clock[0]
         self.connect_calendar_write()
+        asked = self.judge_withdrawal('아니 4시로')
         mail = self.park(MAIL_REQUEST)
         self.say('내일 오후 3시에 치과 일정 잡아줘')
         self.assertTrue(self.service.calendar_conversation.has_pending(OWNER),
@@ -538,10 +577,12 @@ class ParkedRequestSurvivesConversationTests(HandoffTestCase):
         self.say('아니 4시로')
         self.assertTrue(self.service.calendar_conversation.has_pending(OWNER),
                         'the edit must have been claimed by the draft')
+        self.assertNotIn('아니 4시로', [utterance for utterance, _ in asked])
         self.assertEqual(self.store.job(mail)['status'], 'awaiting_connection')
         self.assertIsNotNone(self.handoff.record(GMAIL_CONNECTOR_ID))
 
-    def test_another_owner_identity_correction_does_not_cancel(self):
+    def test_another_owner_identity_withdrawal_does_not_cancel(self):
+        self.judge_withdrawal('아니 됐고 메모 목록 보여줘')
         job_id = self.park_with_card(MAIL_REQUEST)
         other = self.store.enqueue('아니 됐고 메모 목록 보여줘', 'wu3-web-correction', channel='web')
         self.assertTrue(self.service.run_one())

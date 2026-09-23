@@ -19,11 +19,12 @@ from personal_agent.conversation_handoff import (AUTHORITY_DEFAULT, AUTHORITY_OW
                                                  CONSEQUENTIAL_INTENTS, INTENT_AMBIGUOUS,
                                                  INTENT_ASSISTANT, INTENT_CALENDAR_CREATE,
                                                  INTENT_CONVERSATION, INTENT_GREETING,
-                                                 INTENT_KNOWLEDGE, INTENT_MAIL_SEARCH, INTENT_NOTE_CREATE,
+                                                 INTENT_KNOWLEDGE, INTENT_NOTE_CREATE,
                                                  INTENT_NOTE_LIST, INTENT_RECOMMENDATION,
                                                  INTENT_RESEARCH, INTENT_SETTINGS,
-                                                 INTENT_WORKSPACE_SEARCH, ConversationFocus,
-                                                 IntentClassifier)
+                                                 INTENT_WORKSPACE_SEARCH, JUDGMENT_UNAVAILABLE,
+                                                 JUDGMENT_YES, ConversationFocus, DecisionJudge,
+                                                 IntentClassifier, Judgment)
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService, workspace_search_request
 from personal_agent.quickstart_store import QuickStore
@@ -39,9 +40,9 @@ def classifier():
 #: paraphrases, so no intent is carried by a single phrasing.
 PARAPHRASES = {
     INTENT_RECOMMENDATION: (
-        ('전문가 조사를 도와줄 연결 추천해줘', 'specialist-research'),
-        ('내 문서 조사에 쓸 만한 capability 추천 좀', 'private-document-research'),
-        ('recommend a capability for document research', 'private-document-research'),
+        ('전문가 조사에 연결할 만한 걸 알려줘', 'specialist-research'),
+        ('내 문서 조사에 뭘 연결하면 좋을까', 'private-document-research'),
+        ('which capability fits document research?', 'private-document-research'),
         ('what should i connect for specialist research?', 'specialist-research'),
     ),
     INTENT_KNOWLEDGE: (
@@ -254,7 +255,7 @@ class ConsequentialEffectTests(unittest.TestCase):
     def test_a_recognised_intent_missing_its_subject_asks_instead_of_guessing(self):
         for text, intent in (('이거 메모해줘', INTENT_NOTE_CREATE),
                              ('개인 공간 보여줘', INTENT_KNOWLEDGE),
-                             ('capability 하나 추천해줘', INTENT_RECOMMENDATION)):
+                             ('어떤 capability 연결하면 좋아?', INTENT_RECOMMENDATION)):
             with self.subTest(text=text):
                 decision = self.classifier.classify(text)
                 self.assertEqual(decision.intent, intent)
@@ -345,17 +346,6 @@ class CorrectionAndTopicChangeTests(unittest.TestCase):
         self.assertEqual(second.intent, INTENT_SETTINGS)
         self.assertFalse(second.continuation)
         self.assertTrue(second.supersedes_previous)
-
-    def test_only_an_explicit_correction_is_marked_as_one(self):
-        # FU1-473 / #473: `correction`, not a topic change, is what may cancel
-        # a parked connector request.
-        focus = {'intent': INTENT_MAIL_SEARCH}
-        for text in ('알겠어, 지금 연결할게', '잠깐만, 연결하고 올게', '안녕', '/start', '메모 목록'):
-            with self.subTest(text=text):
-                self.assertFalse(self.classifier.classify(text, focus=focus).correction)
-        for text in ('아니 그거 말고 메모 목록 보여줘', '취소해줘', 'never mind, show my notes'):
-            with self.subTest(text=text):
-                self.assertTrue(self.classifier.classify(text, focus=focus).correction)
 
     def test_a_correction_marker_supersedes_even_when_the_intent_repeats(self):
         focus = {'intent': INTENT_NOTE_CREATE}
@@ -562,7 +552,9 @@ class RecommendationCueNarrowingTests(unittest.TestCase):
 
     Reproduces TEST-FIRST-USER-01 / #472 scenario A turn 35, where a travel
     request containing 추천 was claimed by the capability-recommendation rule
-    and answered with the three internal outcome tags.
+    and answered with the three internal outcome tags.  Whether a bare 추천
+    asks for a capability is a judgment (FU1-DEC-01 / #521): the placeholder
+    judges nothing, and a test double proves the seam is what decides.
     """
 
     TURN_35 = '10월에 제주 2박 3일 여행 가려는데 숙소랑 일정 추천해줘'
@@ -604,23 +596,44 @@ class RecommendationCueNarrowingTests(unittest.TestCase):
                 self.assertNoInternalTag(job['response'])
                 self.assertNoInternalTag(job['error'])
 
-    def test_a_capability_recommendation_using_chuchen_still_routes_to_the_rule(self):
-        for text, outcome in (('전문가 조사를 도와줄 연결 추천해줘', 'specialist-research'),
-                              ('내 문서 조사에 쓸 만한 capability 추천 좀', 'private-document-research'),
-                              ('recommend a connector for document research', 'private-document-research'),
-                              ('capability 하나 추천해줘', None),
-                              # A bare ask plus a multi-word outcome phrase still reaches the rule.
-                              ('전문가 조사 추천해줘', 'specialist-research'),
-                              ('로컬 처리 기능 추천해줘', 'local-specialist-processing'),
-                              ('내 문서 조사에 쓸 도구 추천해줘', 'private-document-research'),
-                              ('what would you recommend for deep research', 'specialist-research')):
+    BARE_CAPABILITY_ASKS = (('전문가 조사 추천해줘', 'specialist-research'),
+                            ('내 문서 조사에 쓸 도구 추천해줘', 'private-document-research'),
+                            ('what would you recommend for deep research', 'specialist-research'),
+                            ('capability 하나 추천해줘', None))
+
+    def test_the_placeholder_judges_no_bare_ask_so_the_conversation_route_answers(self):
+        self.assertEqual(DecisionJudge().capability_recommendation('전문가 조사 추천해줘').outcome,
+                         JUDGMENT_UNAVAILABLE)
+        for text, _outcome in self.BARE_CAPABILITY_ASKS:
+            with self.subTest(text=text):
+                # Research shares the conversation route.
+                decision = self.classifier.classify(text)
+                self.assertIn(decision.intent, (INTENT_CONVERSATION, INTENT_RESEARCH))
+                self.assertIsNone(decision.clarification)
+
+    def test_a_judged_capability_ask_reaches_the_rule_with_its_reviewed_outcome(self):
+        class Yes(DecisionJudge):
+            def capability_recommendation(self, utterance):
+                return Judgment(JUDGMENT_YES, source='test-double')
+
+        judged = IntentClassifier(workspace_search=workspace_search_request, judge=Yes())
+        for text, outcome in self.BARE_CAPABILITY_ASKS:
+            with self.subTest(text=text):
+                decision = judged.classify(text)
+                self.assertEqual(decision.intent, INTENT_RECOMMENDATION)
+                self.assertEqual(decision.argument, outcome)
+
+    def test_specific_capability_cues_still_route_to_the_rule(self):
+        for text, outcome in (('전문가 조사에 연결할 만한 걸 알려줘', 'specialist-research'),
+                              ('what should i connect for specialist research?', 'specialist-research'),
+                              ('어떤 capability 연결하면 좋아?', None)):
             with self.subTest(text=text):
                 decision = self.classifier.classify(text)
                 self.assertEqual(decision.intent, INTENT_RECOMMENDATION)
                 self.assertEqual(decision.argument, outcome)
 
     def test_the_clarification_shows_no_internal_outcome_ids(self):
-        job = self.run_one('capability 하나 추천해줘', channel='telegram:fixture', chat_id=7)
+        job = self.run_one('어떤 capability 연결하면 좋아?', channel='telegram:fixture', chat_id=7)
         self.assertEqual(job['status'], 'succeeded')
         self.assertIn('어떤 일에 쓸 연결을 추천할지', job['response'])
         self.assertNoInternalTag(job['response'])

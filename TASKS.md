@@ -8,6 +8,13 @@ Active work is executed only from a goal-ready issue and active delivery-plan en
 | --- | --- | --- |
 | GOV-EXEC-01: verification budget and stable-head review | [#408](https://github.com/Jongtae/agentos/issues/408) | Complete on merge after exact-head CI/review. Keeps required CI/review gates while using focused tests during implementation, coherent checkpoint pushes, batched review remediation, a soft two-broad-cycle expectation, and no duplicate review/polling. |
 
+## Active — FU1 first-use P1 remediation
+
+| Work unit | Issue | Current boundary |
+| --- | --- | --- |
+| GOV-FU1-01: record owner activation of EPIC-FU1 | [#502](https://github.com/Jongtae/agentos/issues/502) | Complete on merge after required CI. Records the owner's explicit 2026-09-23 activation of #501 in the delivery plan. Governance only; no product code, credentials, external operation or heartbeat creation. |
+| EPIC-FU1: remove the four P1 first-use dead ends found by TEST-FIRST-USER-01 | [#501](https://github.com/Jongtae/agentos/issues/501) | Owner-activated and goal-ready once #502 merges. Finite ordered substeps, one in flight at a time: FU1-474 [#474](https://github.com/Jongtae/agentos/issues/474) → FU1-473 [#473](https://github.com/Jongtae/agentos/issues/473) → FU1-475 [#475](https://github.com/Jongtae/agentos/issues/475) → FU1-482 [#482](https://github.com/Jongtae/agentos/issues/482). Independent review required for FU1-473, FU1-482 and program closeout. Evidence class: automated synthetic/fixture only; no live Telegram, Calendar or provider operation claimed. #477–#481, #483, #489, #490, #493 and #494 are not activated. Completion does not select a successor. |
+
 ## Completed — reuse-first infrastructure migration
 
 | Work unit | Issue | Current boundary |
@@ -65,7 +72,7 @@ Read [Owner Control](docs/owner-control-contract.en.md), [Default Agent Usefulne
 | --- | --- | --- |
 | DOGFOOD-01: owner-usable local browser, provider, file workspace, and restart path | [#351](https://github.com/Jongtae/agentos/issues/351) | Complete on merge of PR #354 with deterministic local HTTP/worker evidence and independent authority/convergence review; live-provider/browser operation remains owner-controlled and is not claimed by repository tests. |
 
-DOGFOOD-01 selected no successor at its historical closeout. EPIC-PA1 is now closed out and no top-level goal is declared, so **no product successor is selected or executing**; [#420](https://github.com/Jongtae/agentos/issues/420) stays dependency-registered rather than queued. Issues #335–#346 remain planned and require separate explicit owner activation.
+DOGFOOD-01 selected no successor at its historical closeout. EPIC-PA1 is now closed out and its closeout selected nothing, so **no product successor is selected or executing** on its account; the only declared top-level goal is EPIC-FU1 / [#501](https://github.com/Jongtae/agentos/issues/501), separately activated by explicit owner direction through GOV-FU1-01 / [#502](https://github.com/Jongtae/agentos/issues/502); [#420](https://github.com/Jongtae/agentos/issues/420) stays dependency-registered rather than queued. Issues #335–#346 remain planned and require separate explicit owner activation.
 
 ## Deferred — Product information and policy site
 

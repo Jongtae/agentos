@@ -5,7 +5,7 @@ This is the evidence and boundary page behind the [README](../README.md). The RE
 <!-- readme-section:status -->
 ## What works, what still has friction
 
-The latest synthetic first-user audit is [#472](https://github.com/Jongtae/personal-agentos/issues/472). It drove the shipped construction with injected transports; **live provider operation was not run**, so fixture success is not live-service proof.
+The latest synthetic first-user audit is [#472](https://github.com/Jongtae/agentos/issues/472). It drove the shipped construction with injected transports; **live provider operation was not run**, so fixture success is not live-service proof.
 
 | Area | Current evidence |
 | --- | --- |

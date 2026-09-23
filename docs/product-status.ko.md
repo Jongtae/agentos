@@ -5,7 +5,7 @@
 <!-- readme-section:status -->
 ## 지금 되는 것과 아직 마찰이 있는 것
 
-가장 최근의 synthetic first-user audit은 [#472](https://github.com/Jongtae/personal-agentos/issues/472)입니다. 실제 제품 구성에 injected transport를 사용해 검증했으며, **실제 외부 제공자 운영은 실행하지 않았습니다.** fixture 성공은 live service 성공의 증거가 아닙니다.
+가장 최근의 synthetic first-user audit은 [#472](https://github.com/Jongtae/agentos/issues/472)입니다. 실제 제품 구성에 injected transport를 사용해 검증했으며, **실제 외부 제공자 운영은 실행하지 않았습니다.** fixture 성공은 live service 성공의 증거가 아닙니다.
 
 | 영역 | 현재 근거 |
 | --- | --- |

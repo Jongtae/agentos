@@ -488,7 +488,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             target = root / "README.zh-CN.md"
             body = target.read_text(encoding="utf-8")
             body = body.replace(
-                "git clone https://github.com/Jongtae/personal-agentos.git",
+                "git clone https://github.com/Jongtae/agentos.git",
                 "git clone https://example.com/some/fork.git",
                 1,
             )
@@ -498,7 +498,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     "README.zh-CN.md" in error
-                    and "git clone https://github.com/Jongtae/personal-agentos.git" in error
+                    and "git clone https://github.com/Jongtae/agentos.git" in error
                     for error in errors
                 ),
                 errors,

@@ -389,6 +389,44 @@ class ResearchDiscriminationTests(unittest.TestCase):
             [facts[name]['status'] for name in ('fee', 'inventory', 'payable_total')],
             ['unknown', 'unknown', 'unknown'])
 
+    def test_no_comment_claims_the_research_path_is_unwired(self):
+        """The module must not describe itself as the opposite of what it is.
+
+        `agent_runtime.py` carried, for a whole cycle after #458 wired it, a
+        recorded decision reading "`research.PublicResearch` is still NOT
+        wired" and "the J5 discrimination therefore stays unreachable from a
+        production path" -- about 250 lines above the branch that routes it
+        (#469). No behavioural effect, but that block is the provenance and
+        egress reasoning a reader consults to work out what may reach a
+        public destination, and it stated the opposite of what the module
+        does.
+
+        The superseded wording is deliberately still present as a *quotation*
+        inside a history paragraph, because two versions of that comment were
+        wrong and hiding that would repeat the mistake. So this asserts the
+        assertive forms are gone and the supersession marker is there, rather
+        than banning the words.
+        """
+        source = (Path(__file__).resolve().parents[1] / 'src' / 'personal_agent'
+                  / 'agent_runtime.py').read_text(encoding='utf-8')
+
+        for asserted in ('`research.PublicResearch` is still NOT\n# wired',
+                         'unreachable from a production path until it is made'):
+            with self.subTest(claim=asserted[:40]):
+                self.assertNotIn(asserted, source)
+
+        # The history is kept, and marked as history.
+        self.assertIn('two versions of this comment were wrong', source)
+        self.assertIn('The second version then said', source)
+
+        # And the thing the comment now claims is true is true.
+        from personal_agent.agent_runtime import DEFINITIONS
+        from personal_agent.manifests import HOST_ACTIONS
+        self.assertIn('bounded_public_research', HOST_ACTIONS)
+        self.assertIn('bounded_public_research',
+                      {tool['function']['name'] for tool in DEFINITIONS})
+        self.assertIn("if name=='bounded_public_research':", source)
+
     # -- recorded limitation ----------------------------------------------
 
     def test_robots_txt_is_not_consulted_and_that_is_recorded(self):

@@ -1,0 +1,19 @@
+Personal AgentOS
+Copyright (C) 2025-2026 Jongtae Lee
+
+SPDX-License-Identifier: AGPL-3.0-only
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, version 3 of the License only.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU Affero General Public License in LICENSE for
+more details.
+
+The "Personal AgentOS" name and logo are not covered by the AGPL grant.
+See TRADEMARKS.md.
+
+Third-party dependencies keep their own licences; see pyproject.toml for the
+declared runtime dependencies and their upstream licence notes.

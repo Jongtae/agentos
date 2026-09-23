@@ -138,6 +138,10 @@ Internal development standards, designs and execution guidance use English as th
 
 The four public README files are one user-facing product surface: `README.md` is canonical for factual claims, while `README.ko.md`, `README.ja.md` and `README.zh-CN.md` must preserve semantic/structural parity. A canonical README change must update all public locales in the same PR. Prefer language-neutral visuals; if essential copy is embedded in an image, provide localized variants. Never let an illustrative product-direction scene read as current shipped capability.
 
+## Licensing and marks
+
+Personal AgentOS is licensed under `AGPL-3.0-only` ([LICENSE](LICENSE), [NOTICE](NOTICE)). Contributions are accepted under that same licence (inbound = outbound); there is no CLA. A contribution must not add code whose licence is incompatible with AGPL-3.0 or that obliges redistribution under different terms; record the licence of every new dependency in its reuse review. The "Personal AgentOS" name and logo are governed by [TRADEMARKS.md](TRADEMARKS.md), not by the code licence.
+
 ## AgentPackage / runtime issue requirements
 
 A package/runtime/distribution issue must explicitly state where applicable:

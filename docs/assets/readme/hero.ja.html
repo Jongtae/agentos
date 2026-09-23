@@ -1,0 +1,26 @@
+<!doctype html><html><head><meta charset="utf-8"><title>実際の会話2つ: 承認を待つ予定の下書きと、再起動後に見つけ直した保存メモ</title><style>
+:root{--wall:#efeae2;--sent:#d9fdd3;--recv:#fff;--ink:#111b21;--meta:#667781;--green:#1f8a5b;--amber:#b8791a;--blue:#53bdeb}
+*{box-sizing:border-box}
+body{margin:0;background:#f6f4ef;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Apple SD Gothic Neo","Noto Sans KR","Hiragino Sans","Noto Sans JP","PingFang SC","Noto Sans SC",sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+.msg{max-width:84%;padding:8px 11px 7px;border-radius:14px;font-size:14px;line-height:1.38;position:relative;box-shadow:0 1px 1px rgba(0,0,0,.08);white-space:pre-wrap}
+.me{align-self:flex-end;background:var(--sent);border-bottom-right-radius:4px}
+.ai{align-self:flex-start;background:var(--recv);border-bottom-left-radius:4px}
+.t{display:block;text-align:right;font-size:10.5px;color:var(--meta);margin-top:3px}
+.me .t:after{content:" ✓✓";color:var(--blue);letter-spacing:-2px}
+.card{display:flex;align-items:center;gap:10px;background:#f7f5f0;border:1px solid #e3ded4;border-radius:10px;padding:8px 10px;margin:-2px 0 8px;font-weight:600;font-size:13.5px}
+.card i{width:30px;height:30px;border-radius:7px;display:grid;place-items:center;font-style:normal;font-size:17px}
+.card i.doc{background:#e7effa}.card i.cal{background:#fbe9e3}
+.pill{align-self:center;background:#e1dbd0;color:#5c5650;font-size:11.5px;font-weight:600;padding:4px 11px;border-radius:12px}
+.chip{align-self:flex-start;background:#fff;border:1.5px solid var(--green);color:var(--green);font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:12px;margin-top:-3px}
+.chip.amber{border-color:var(--amber);color:var(--amber)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:26px;padding:34px}
+.tile{background:var(--wall);border-radius:24px;padding:16px 14px;display:flex;flex-direction:column;gap:9px;min-height:180px;
+ }.tile.col{padding:20px 18px;gap:10px;
+ background-image:radial-gradient(rgba(0,0,0,.035) 1px,transparent 1.2px);background-size:22px 22px}
+body{width:1000px}</style></head><body><div class="grid"><div class="tile col"><div class="msg me">Schedule a dentist appointment tomorrow at 3.<span class="t">9:41</span></div><div class="msg ai">予定の下書きです。まだカレンダーには作成していません。
+件名: 歯医者の予約
+日時: 明日 15:00 – 16:00
+「approve」で作成、「make it 4pm」で変更、「cancel」で中止。<span class="t">9:41</span></div><div class="msg me">make it 4pm<span class="t">9:42</span></div><div class="msg ai">予定の下書きです。まだカレンダーには作成していません。
+件名: 歯医者の予約
+日時: 明日 16:00 – 17:00
+「approve」と答えればこの内容のまま作成します。<span class="t">9:42</span></div><div class="msg me">approve<span class="t">9:42</span></div><div class="msg ai"><div class="card"><i class="cal">📅</i>歯医者の予約 · 明日 16:00</div>カレンダーに予定を作成しました。<span class="t">9:42</span></div><div class="chip amber">実行前に確認</div></div><div class="tile col"><div class="msg me">Summarize “Launch review” and save it as “Launch notes”.<span class="t">10:03</span></div><div class="msg ai"><div class="card"><i class="doc">📄</i>Launch notes.md</div>“Launch notes” を作業スペースのフォルダに保存しました。元のファイルはそのままです。<span class="t">10:03</span></div><div class="chip">許可したフォルダだけ</div><div class="pill">再起動後</div><div class="msg me">Find “Launch notes” in my saved results.<span class="t">14:20</span></div><div class="msg ai"><div class="card"><i class="doc">📄</i>Launch notes.md</div>保存結果: Launch notes.md<span class="t">14:20</span></div><div class="chip">再起動しても自分のもの</div></div></div></body></html>

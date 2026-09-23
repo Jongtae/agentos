@@ -33,19 +33,26 @@ LOCALIZED_READMES = READMES[1:]
 # README.md and must then appear in every public locale in the same order.
 CORE_SECTION_IDS = (
     "hero",
-    "everyday-scene",
-    "delegation-flow",
-    "chatbot-difference",
     "try-today",
-    "status",
-    "why-agentos",
-    "owner-control",
-    "architecture",
-    "bdi",
-    "ecosystem",
-    "portability",
-    "development",
+    "scenes-today",
+    "settings",
+    "more",
 )
+
+# The evidence/boundary page behind the README. English is canonical and
+# carries the product-direction scene, the status table and the release
+# note; the Korean page mirrors it for the owner. Japanese and Chinese
+# READMEs link to the English page.
+STATUS_DOCS = {
+    "docs/product-status.en.md": "README.md",
+    "docs/product-status.ko.md": "README.ko.md",
+}
+STATUS_DOC_LINKS = {
+    "README.md": "docs/product-status.en.md",
+    "README.ko.md": "docs/product-status.ko.md",
+    "README.ja.md": "docs/product-status.en.md",
+    "README.zh-CN.md": "docs/product-status.en.md",
+}
 
 SECTION_MARKER_RE = re.compile(
     r"<!-- readme-section:([a-z0-9][a-z0-9-]*) -->"
@@ -94,6 +101,48 @@ PRODUCT_DIRECTION_DISCLAIMERS = {
 
 STATUS_ROW_EVIDENCE_TOKEN = "Synthetic **pass-with-friction**"
 
+# The scenes shown as available today must say, visibly and in the same
+# section, which evidence class backs them: stand-ins, not live accounts.
+SCENES_EVIDENCE_LABELS = {
+    "README.md": "stand-in mail, calendar and web services rather than live accounts",
+    "README.ko.md": "실제 계정 대신 로컬 폴더와 모의 메일·일정·웹 서비스로",
+    "README.ja.md": "実際のアカウントではなく、ローカルフォルダと模擬のメール・予定・Web サービスで",
+    "README.zh-CN.md": "用本地文件夹和模拟的邮件、日程、网页服务，而不是真实账户",
+}
+
+IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
+
+
+def visible_prose(section: str) -> str:
+    """Drop image alt text and HTML comments so a required sentence must be
+    readable on the page, not hidden in markup."""
+    return COMMENT_RE.sub("", IMAGE_RE.sub("", section))
+
+# The hero may not promise local-only processing; every locale keeps the
+# local-first != local-only sentence within the first screen.
+HERO_LOCAL_FIRST_LABELS = {
+    "README.md": "Local-first is not local-only",
+    "README.ko.md": "로컬 우선(local-first)은 로컬 전용(local-only)이 아닙니다",
+    "README.ja.md": "ローカルファースト（local-first）はローカル限定（local-only）ではありません",
+    "README.zh-CN.md": "本地优先（local-first）不等于只在本地（local-only）",
+}
+
+# The hero and scene panels carry copy, so each README references exactly
+# its own locale's pair and no other locale's.
+LOCALE_HERO_VISUALS = {
+    "README.md": "docs/assets/readme/hero.en.png",
+    "README.ko.md": "docs/assets/readme/hero.ko.png",
+    "README.ja.md": "docs/assets/readme/hero.ja.png",
+    "README.zh-CN.md": "docs/assets/readme/hero.zh-CN.png",
+}
+LOCALE_SCENE_VISUALS = {
+    "README.md": "docs/assets/readme/scenes.en.png",
+    "README.ko.md": "docs/assets/readme/scenes.ko.png",
+    "README.ja.md": "docs/assets/readme/scenes.ja.png",
+    "README.zh-CN.md": "docs/assets/readme/scenes.zh-CN.png",
+}
+
 STATUS_EVIDENCE_BOUNDARIES = {
     "README.md": "**live provider operation was not run**",
     "README.ko.md": "**실제 외부 제공자 운영은 실행하지 않았습니다.**",
@@ -104,9 +153,21 @@ STATUS_EVIDENCE_BOUNDARIES = {
 STATIC_SHARED_FACTS = (
     "<!-- readme-parity:v1 -->",
     "brew install jongtae/agentos/agentos",
+    "git clone https://github.com/Jongtae/personal-agentos.git",
+    "AgentOS: http://127.0.0.1:8787/",
+    "AGPL-3.0-only",
+    "TRADEMARKS.md",
+    "[QUICKSTART](QUICKSTART.md)",
+)
+
+# Facts the status page must carry so the README can stay short without
+# the boundaries disappearing from the repository's public surface.
+STATUS_DOC_FACTS = (
+    "brew install jongtae/agentos/agentos",
     "https://github.com/Jongtae/personal-agentos/issues/472",
     "Owner · Context · Memory · Artifact · Capability · Runtime · Grant · Work · Event · Evidence",
     "downloaded != installed != enabled != connected != authorized-for-action",
+    "AGPL-3.0-only",
 )
 
 
@@ -187,6 +248,13 @@ def validate_heading_marker_discipline(name: str, body: str) -> list[str]:
     return errors
 
 
+def next_section_id(sections: tuple[str, ...], section_id: str) -> str | None:
+    if section_id not in sections:
+        return None
+    index = sections.index(section_id)
+    return sections[index + 1] if index + 1 < len(sections) else None
+
+
 def section_slice(body: str, section_id: str, next_section_id: str | None) -> str:
     start_marker = f"<!-- readme-section:{section_id} -->"
     start = body.find(start_marker)
@@ -204,16 +272,37 @@ def validate_body(
     body: str,
     canonical_sections: tuple[str, ...],
     release_version: str,
-    canonical_status_synthetic_rows: int,
 ) -> list[str]:
     errors: list[str] = []
 
-    for token in NAV_LINKS + STATIC_SHARED_FACTS + CAPABILITY_MARKERS + (
-        f"v{release_version}",
+    for token in NAV_LINKS + STATIC_SHARED_FACTS + (
+        CAPABILITY_MARKERS[1],
+        LOCALE_HERO_VISUALS[name],
+        LOCALE_SCENE_VISUALS[name],
+        STATUS_DOC_LINKS[name],
     ):
         count = body.count(token)
-        if count != 1:
-            errors.append(f"{name}: expected exactly one {token!r}, found {count}")
+        if count < 1:
+            errors.append(f"{name}: expected {token!r}, found none")
+    for token in (CAPABILITY_MARKERS[1], LOCALE_HERO_VISUALS[name], LOCALE_SCENE_VISUALS[name]):
+        if body.count(token) != 1:
+            errors.append(f"{name}: expected exactly one {token!r}, found {body.count(token)}")
+    if CAPABILITY_MARKERS[0] in body:
+        errors.append(
+            f"{name}: the illustrative product-direction scene belongs on the status page, not the README"
+        )
+    if body.count(f"v{release_version}") != 1:
+        errors.append(
+            f"{name}: expected exactly one 'v{release_version}' next to the brew command, "
+            f"found {body.count(f'v{release_version}')}"
+        )
+
+    for table in (LOCALE_HERO_VISUALS, LOCALE_SCENE_VISUALS):
+        for other_name, visual in table.items():
+            if other_name != name and visual in body:
+                errors.append(
+                    f"{name}: references another locale's scene panel {visual!r}"
+                )
 
     errors.extend(validate_heading_marker_discipline(name, body))
 
@@ -226,50 +315,65 @@ def validate_body(
             f"expected {canonical_sections!r}, found {actual_sections!r}"
         )
 
-    product_direction = body.find(CAPABILITY_MARKERS[0])
-    current_slice = body.find(CAPABILITY_MARKERS[1])
-    if product_direction >= 0 and current_slice >= 0 and product_direction >= current_slice:
+    hero = section_slice(body, "hero", next_section_id(canonical_sections, "hero"))
+    if HERO_LOCAL_FIRST_LABELS[name] not in visible_prose(hero):
         errors.append(
-            f"{name}: illustrative product direction must be identified before the current supported slice"
+            f"{name}: hero is missing the visible local-first != local-only sentence"
         )
 
-    everyday = section_slice(body, "everyday-scene", "delegation-flow")
+    scenes = section_slice(
+        body, "scenes-today", next_section_id(canonical_sections, "scenes-today")
+    )
+    scenes_marker = body.find("<!-- readme-section:scenes-today -->")
+    if scenes_marker >= 0 and CAPABILITY_MARKERS[1] not in body[:scenes_marker]:
+        errors.append(
+            f"{name}: the current-supported-slice marker must precede the scenes-today section"
+        )
+    if SCENES_EVIDENCE_LABELS[name] not in visible_prose(scenes):
+        errors.append(
+            f"{name}: scenes-today is missing its visible evidence-class sentence "
+            f"({SCENES_EVIDENCE_LABELS[name]!r})"
+        )
+
+    return errors
+
+
+def validate_status_doc(path: str, name: str, body: str, release_version: str) -> list[str]:
+    """The status page keeps the boundaries the README no longer spells out."""
+    errors: list[str] = []
+    for token in STATUS_DOC_FACTS + (CAPABILITY_MARKERS[0], f"v{release_version}"):
+        count = body.count(token)
+        if count != 1:
+            errors.append(f"{path}: expected exactly one {token!r}, found {count}")
+
+    sections = section_markers(body)
+    everyday = section_slice(body, "everyday-scene", next_section_id(sections, "everyday-scene"))
     label = PRODUCT_DIRECTION_LABELS[name]
     disclaimer = PRODUCT_DIRECTION_DISCLAIMERS[name]
     if label not in everyday:
-        errors.append(f"{name}: everyday scene is missing its visible product-direction label")
+        errors.append(f"{path}: everyday scene is missing its visible product-direction label")
     if disclaimer not in everyday:
         errors.append(
-            f"{name}: everyday scene is missing the visible not-shipped capability disclaimer"
+            f"{path}: everyday scene is missing the visible not-shipped capability disclaimer"
         )
     if label in everyday:
         first_quote = everyday.find("> **")
         if first_quote >= 0 and everyday.find(label) > first_quote:
             errors.append(
-                f"{name}: product-direction label must appear before the illustrative scene"
+                f"{path}: product-direction label must appear before the illustrative scene"
             )
 
-    status = section_slice(body, "status", "why-agentos")
+    status = section_slice(body, "status", next_section_id(sections, "status"))
     if STATUS_EVIDENCE_BOUNDARIES[name] not in status:
         errors.append(
-            f"{name}: status section is missing its visible synthetic-vs-live evidence boundary"
+            f"{path}: status section is missing its visible synthetic-vs-live evidence boundary"
         )
-
-    synthetic_rows = status.count(STATUS_ROW_EVIDENCE_TOKEN)
-    if synthetic_rows != canonical_status_synthetic_rows:
+    if status.count(STATUS_ROW_EVIDENCE_TOKEN) == 0:
         errors.append(
-            f"{name}: status evidence-class count differs from canonical README.md; "
-            f"expected {canonical_status_synthetic_rows} occurrences of "
-            f"{STATUS_ROW_EVIDENCE_TOKEN!r}, found {synthetic_rows}"
+            f"{path}: status section lost every synthetic pass-with-friction row while #472 "
+            "remains the shared audit source; an evidence-class promotion requires deliberate "
+            "verifier review"
         )
-
-    install = body.find("brew install jongtae/agentos/agentos")
-    status_marker = body.find("<!-- readme-section:status -->")
-    if install >= 0 and status_marker >= 0 and install >= status_marker:
-        errors.append(
-            f"{name}: install/current supported slice must appear before detailed status"
-        )
-
     return errors
 
 
@@ -307,17 +411,6 @@ def validate_readmes(root: Path = ROOT) -> list[str]:
             + ", ".join(missing_core)
         )
 
-    canonical_status = section_slice(canonical, "status", "why-agentos")
-    canonical_status_synthetic_rows = canonical_status.count(
-        STATUS_ROW_EVIDENCE_TOKEN
-    )
-    if canonical_status_synthetic_rows == 0:
-        errors.append(
-            "README.md: status section lost every synthetic pass-with-friction "
-            "row while #472 remains the shared audit source; an evidence-class "
-            "promotion requires deliberate verifier review"
-        )
-
     try:
         release_version = newest_published_version(root)
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
@@ -325,29 +418,45 @@ def validate_readmes(root: Path = ROOT) -> list[str]:
         return errors
 
     for name, body in bodies.items():
-        errors.extend(
-            validate_body(
-                name,
-                body,
-                canonical_sections,
-                release_version,
-                canonical_status_synthetic_rows,
-            )
+        errors.extend(validate_body(name, body, canonical_sections, release_version))
+
+    canonical_rows = None
+    for path, name in STATUS_DOCS.items():
+        file = root / path
+        if not file.is_file():
+            errors.append(f"{path}: missing status page")
+            continue
+        body = file.read_text(encoding="utf-8")
+        errors.extend(validate_status_doc(path, name, body, release_version))
+        rows = section_slice(body, "status", next_section_id(section_markers(body), "status")).count(
+            STATUS_ROW_EVIDENCE_TOKEN
         )
+        if canonical_rows is None:
+            canonical_rows = rows
+        elif rows != canonical_rows:
+            errors.append(
+                f"{path}: status evidence-class count differs from docs/product-status.en.md; "
+                f"expected {canonical_rows} occurrences of {STATUS_ROW_EVIDENCE_TOKEN!r}, found {rows}"
+            )
     return errors
 
 
 def validate_changed_paths(changed_paths: set[str]) -> list[str]:
-    """Canonical README changes must update every public locale in the same PR."""
-    if "README.md" not in changed_paths:
-        return []
-    missing = [name for name in LOCALIZED_READMES if name not in changed_paths]
-    if not missing:
-        return []
-    return [
-        "README.md changed without all public locales in the same change: "
-        + ", ".join(missing)
-    ]
+    """Canonical README changes must update every public locale in the same
+    PR; the English status page likewise carries its Korean mirror."""
+    errors: list[str] = []
+    if "README.md" in changed_paths:
+        missing = [name for name in LOCALIZED_READMES if name not in changed_paths]
+        if missing:
+            errors.append(
+                "README.md changed without all public locales in the same change: "
+                + ", ".join(missing)
+            )
+    if "docs/product-status.en.md" in changed_paths and "docs/product-status.ko.md" not in changed_paths:
+        errors.append(
+            "docs/product-status.en.md changed without docs/product-status.ko.md in the same change"
+        )
+    return errors
 
 
 def git_changed_paths(base_ref: str, root: Path = ROOT) -> set[str]:

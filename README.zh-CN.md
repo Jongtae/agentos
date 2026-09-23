@@ -15,6 +15,8 @@
 
 > **Personal AgentOS = 可以委托真实任务的个人 AI + 以所有者权限为准的 AI 环境**
 
+![Personal AgentOS 委派流程：委派、在权限内执行、批准关键操作、保留结果](docs/assets/readme/delegation-flow.svg)
+
 <!-- readme-section:everyday-scene -->
 
 ## 先从一个生活场景理解
@@ -62,12 +64,16 @@
 
 目标不是让所有事情都自动执行。目标是 **在不放弃数据、权限、决定和长期状态控制权的前提下，把真实任务交给 AI。**
 
+个人生产力工作区可以为 AI 整理目标、任务和知识。**Personal AgentOS 关注的是更底层的执行层：**一个受控环境，用来决定 AI 可以访问什么、可以做什么、实际发生了什么，以及更换 worker 后哪些 owner state 仍然保留。
+
 <!-- capability:current-supported-slice -->
 <!-- readme-section:try-today -->
 
 ## 今天可以先试已验证的范围
 
 目前最清晰的第一项任务仍然是 file-workspace journey，因为保存结果、保护原件和重启后复用都有具体 repository evidence。
+
+![当前支持的文件工作区流程：获准源文件夹、受管理结果、重启后复用](docs/assets/readme/file-workspace-flow.svg)
 
 1. 在专用参考文件夹中放一个小型 Markdown/text 文件。
 2. 给该文件夹 read access，并给另一个 managed workspace 结果写入权限。

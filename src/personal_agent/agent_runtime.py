@@ -653,6 +653,13 @@ def withheld_effect(name,result):
  if result.get('outcome') in ('failed','partial'):
   # `delegate_agent` already marked the turn before #488 while still
   # counting the call, and the specialist's report is usable work.
+  #
+  # `advanced` is True for ``outcome='failed'`` too, so a delegation where
+  # the specialist accomplished nothing still reports `partial`.  That is
+  # the label this path had before #488 and #488 is not the issue that
+  # should change it: re-labelling it `failed` would also flip
+  # `result_available` and take the specialist's report off the card.
+  # Recorded rather than fixed here (#493).
   return Withheld(DELEGATE_INCOMPLETE,advanced=True)
  return None
 
@@ -772,7 +779,7 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
     if cache_key not in capabilities.memo:capabilities.memo[cache_key]=capabilities.execute(name,args)
     result=capabilities.memo[cache_key]
     executions.append((name,result))
-    if name in ('find_files','read_file','list_notes','list_memory','save_memory','calendar_query','calendar_draft_create','calendar_draft_update','calendar_draft_cancel'):capabilities.evidence.append({'tool':name,'result':result})
+    if name in ('find_files','read_file','list_notes','list_memory','save_memory','calendar_query')+CALENDAR_DRAFT_TOOLS:capabilities.evidence.append({'tool':name,'result':result})
     invalid_calls.discard(name)
     sources.extend(result.get('sources',[]))
     # A tool that declined or deferred returned normally, so this loop used to

@@ -1,11 +1,13 @@
 import tempfile
 import threading
+import base64
+import hashlib
 import unittest
 from urllib.parse import parse_qs, urlparse
 
 from cryptography.fernet import Fernet
 
-from personal_agent.drive_web_oauth import DRIVE_FILE, EncryptedDriveSecretStore, DriveScopeError, DriveWebOAuthError, DriveWebOAuthHandoff
+from personal_agent.drive_web_oauth import DRIVE_FILE, PENDING_KEY, TOKEN_KEY, EncryptedDriveSecretStore, DriveScopeError, DriveWebOAuthError, DriveWebOAuthHandoff
 from personal_agent.quickstart_store import QuickStore
 from personal_agent.quickstart_service import AgentService
 from personal_agent.providers import ProviderError
@@ -28,7 +30,12 @@ class DriveWebOAuthTests(unittest.TestCase):
 
     def connect(self):
         _offer, state = self.begin()
-        return self.flow.complete({"state": state, "code": "short-code"}, 42, lambda request: {"access_token": "access-secret", "refresh_token": "refresh-secret", "scope": DRIVE_FILE, "expires_in": 60})
+        # The scope is deliberately whitespace-padded: with a verbatim value,
+        # storing the provider's text and storing the validated constant are
+        # indistinguishable, and the assertion in
+        # test_the_validated_scope_is_stored_rather_than_the_providers_text
+        # would pass either way.
+        return self.flow.complete({"state": state, "code": "short-code"}, 42, lambda request: {"access_token": "access-secret", "refresh_token": "refresh-secret", "scope": "  %s  " % DRIVE_FILE, "expires_in": 60})
 
     def test_telegram_offer_is_https_and_oauth_uses_pkce_and_drive_file_only(self):
         offer, state = self.begin()
@@ -40,6 +47,88 @@ class DriveWebOAuthTests(unittest.TestCase):
         self.assertEqual(query["scope"], [DRIVE_FILE])
         self.assertEqual(query["code_challenge_method"], ["S256"])
         self.assertNotIn("code_verifier", query)
+        # Asserting the advertised method alone is not enough. oauthlib's
+        # create_code_challenge silently returns the verifier unchanged - a
+        # plain challenge - when the method argument is omitted, so a URL can
+        # advertise S256 while carrying no transform at all. The hand-rolled
+        # sha256 this replaced could not fail that way, so adoption
+        # introduced the mode; pin the derivation itself.
+        verifier = self.encrypted_store.secret(PENDING_KEY)["verifier"]
+        expected = base64.urlsafe_b64encode(
+            hashlib.sha256(verifier.encode()).digest()
+        ).rstrip(b"=").decode()
+        self.assertEqual(query["code_challenge"], [expected])
+        self.assertNotEqual(query["code_challenge"], [verifier])
+        # begin() and authorization_url() derive the challenge separately
+        # from the same verifier and nothing tied them together, so a change
+        # to one could silently disagree with the other.
+        self.assertEqual(offer["code_challenge"], expected)
+
+    def test_authorization_request_does_not_widen_the_grant(self):
+        """SEC-DRIVE-SCOPE-01 / #432 item 6, the deferral #427 left here.
+
+        Without this, Google may fold scopes the owner granted elsewhere into
+        the grant, and ``complete``'s exact-set check then hard-fails a
+        connection that previously succeeded. That Google honours it is a live
+        observation this repository has not made.
+        """
+        _offer, state = self.begin()
+        query = parse_qs(urlparse(self.flow.authorization_url(state, 42)).query)
+        self.assertEqual(query["include_granted_scopes"], ["false"])
+        self.assertEqual(query["scope"], [DRIVE_FILE])
+
+    def test_a_stored_credential_with_the_wrong_scope_is_refused_on_every_use(self):
+        """The exchange check alone leaves an already-stored credential usable.
+
+        This is the module that is actually wired into production
+        (``quickstart.py:185``), and ``read_selected`` did not even go through
+        the expiry gate -- it read ``tokens["access_token"]`` directly.
+        """
+        self.connect()
+        self.flow.select_files(42, [{"id": "f1", "name": "doc", "mime_type": "text/plain"}])
+        self.assertTrue(self.flow.assert_selected(42, "f1"))
+        for bad in ("", DRIVE_FILE + " https://www.googleapis.com/auth/drive", "https://www.googleapis.com/auth/drive", None):
+            with self.subTest(scope=bad):
+                tokens = dict(self.encrypted_store.secret(TOKEN_KEY))
+                if bad is None:
+                    tokens.pop("scope", None)
+                else:
+                    tokens["scope"] = bad
+                self.encrypted_store.secret(TOKEN_KEY, tokens)
+                with self.assertRaises(DriveScopeError):
+                    self.flow.read_selected(42, "f1", lambda *args: "body")
+                # The transition is what the reconnect prompt depends on:
+                # quickstart_service only offers reconnection once the state
+                # stops being "connected". Without it the owner repeats the
+                # same failure with no prompt.
+                self.assertEqual(self.flow.status()["state"], "scope-rejected")
+
+    def test_read_selected_checks_the_credential_even_without_the_selection_gate(self):
+        """Pins the redundant check in ``read_selected``.
+
+        ``assert_selected`` reaches the credential gate through ``_connected``,
+        so removing ``read_selected``'s own check passes the rest of this
+        suite.  That makes it untested redundancy unless the selection gate is
+        stubbed out, which is exactly the refactor the redundancy guards
+        against: this is the one place a raw access token reaches an outbound
+        transport.
+        """
+        self.connect()
+        self.flow.select_files(42, [{"id": "f1", "name": "doc", "mime_type": "text/plain"}])
+        self.flow.assert_selected = lambda *args: True
+        self.assertEqual(self.flow.read_selected(42, "f1", lambda *args: "body"), "body")
+        tokens = dict(self.encrypted_store.secret(TOKEN_KEY))
+        tokens["scope"] = DRIVE_FILE + " https://www.googleapis.com/auth/drive"
+        self.encrypted_store.secret(TOKEN_KEY, tokens)
+        with self.assertRaises(DriveScopeError):
+            self.flow.read_selected(42, "f1", lambda *args: "body")
+
+    def test_the_validated_scope_is_stored_rather_than_the_providers_text(self):
+        self.connect()
+        self.assertEqual(self.encrypted_store.secret(TOKEN_KEY)["scope"], DRIVE_FILE)
+        # Positive control: an untampered credential still reads.
+        self.flow.select_files(42, [{"id": "f1", "name": "doc", "mime_type": "text/plain"}])
+        self.assertEqual(self.flow.read_selected(42, "f1", lambda *args: "body"), "body")
 
     def test_local_only_mode_requires_explicit_opt_in_and_uses_loopback(self):
         with self.assertRaises(ValueError):
@@ -184,6 +273,78 @@ class DriveWebOAuthTests(unittest.TestCase):
         self.flow.mark_reauthentication_required()
         with self.assertRaises(DriveWebOAuthError):
             self.flow.read_selected(42,"picked",lambda *_: "must not run")
+
+    def test_callback_without_the_requested_scope_is_rejected_and_stores_no_token(self):
+        """A grant that omits drive.file must fail closed, leaving no usable credential."""
+        _offer, state = self.begin()
+        with self.assertRaises(DriveScopeError):
+            self.flow.complete(
+                {"state": state, "code": "short-code"}, 42,
+                lambda _: {"access_token": "access-secret", "scope": "https://www.googleapis.com/auth/userinfo.email", "expires_in": 60},
+            )
+        self.assertEqual(self.flow.status()["state"], "scope-rejected")
+        self.assertEqual(self.encrypted_store.secret("drive_web_oauth_tokens"), "")
+        self.assertNotIn("access-secret", str(self.store.secret("encrypted:drive_web_oauth_tokens")))
+        # The pending state is consumed, so the same callback cannot be replayed.
+        with self.assertRaises(DriveWebOAuthError):
+            self.flow.complete({"state": state, "code": "short-code"}, 42, lambda _: {"access_token": "a", "scope": DRIVE_FILE, "expires_in": 60})
+
+    def test_callback_granting_more_than_drive_file_is_rejected_and_stores_no_token(self):
+        """An over-granted response must fail closed, not silently store wider authority.
+
+        Google may return additional scopes (for example when the owner's
+        account already granted them and ``include_granted_scopes`` is not
+        disabled).  A subset test would accept that token and this connector
+        would then hold authority the owner never approved for it.
+        """
+        _offer, state = self.begin()
+        over_granted = DRIVE_FILE + " https://www.googleapis.com/auth/gmail.readonly"
+        with self.assertRaises(DriveScopeError):
+            self.flow.complete(
+                {"state": state, "code": "short-code"}, 42,
+                lambda _: {"access_token": "access-secret", "scope": over_granted, "expires_in": 60},
+            )
+        self.assertEqual(self.flow.status()["state"], "scope-rejected")
+        self.assertEqual(self.encrypted_store.secret("drive_web_oauth_tokens"), "")
+        self.assertNotIn("access-secret", str(self.store.secret("encrypted:drive_web_oauth_tokens")))
+
+    def test_callback_granting_exactly_drive_file_is_accepted(self):
+        """The tightened check must not reject the only scope this connector requests.
+
+        Also pins the exchange leg. The authorization-URL assertion binds the
+        advertised challenge to the *stored* verifier; without this, the
+        verifier actually presented at the token endpoint is unbound, and a
+        divergent or omitted code_verifier survives the whole suite. Gmail
+        pins this leg, so Drive does too - Google would answer
+        ``invalid_grant`` rather than accept a broken proof, but a fail-closed
+        bug is still a bug worth catching here rather than live.
+        """
+        _offer, state = self.begin()
+        stored = self.encrypted_store.secret(PENDING_KEY)["verifier"]
+        seen = []
+
+        def exchange(request):
+            seen.append(request)
+            return {"access_token": "access-secret", "scope": DRIVE_FILE, "expires_in": 60}
+
+        self.flow.complete({"state": state, "code": "short-code"}, 42, exchange)
+        self.assertEqual(self.flow.status()["state"], "connected")
+        self.assertEqual(seen[0]["code_verifier"], stored)
+
+    def test_corrupted_encrypted_secret_fails_closed_without_disclosing_plaintext(self):
+        """Unreadable ciphertext must raise the redacted error, never a partial credential."""
+        self.connect()
+        self.store.secret("encrypted:drive_web_oauth_tokens", "not-a-valid-fernet-token")
+        with self.assertRaises(DriveWebOAuthError) as caught:
+            self.encrypted_store.secret("drive_web_oauth_tokens")
+        self.assertNotIn("access-secret", str(caught.exception))
+        with self.assertRaises(DriveWebOAuthError):
+            self.flow.read_selected(42, "picked", lambda *_: "must not run")
+        # A wrong local key is equally unreadable: the key is not recoverable from storage.
+        rekeyed = EncryptedDriveSecretStore(self.store, Fernet.generate_key())
+        self.store.secret("encrypted:drive_web_oauth_tokens", "gAAAAA" + "B" * 40)
+        with self.assertRaises(DriveWebOAuthError):
+            rekeyed.secret("drive_web_oauth_tokens")
 
 
 if __name__ == "__main__":

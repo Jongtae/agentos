@@ -2,82 +2,67 @@
 
 [English](README.md) | [한국어](README.ko.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-**由你安装、拥有和掌控，并能真正完成有用工作的个人 AI 环境。**
+<!-- readme-parity:v1 -->
+<!-- readme-section:hero -->
 
-Personal AgentOS 是面向单一所有者的本地优先个人 AI 运行环境。你提出目标，选择模型和获准资料，完成工作并保留有用结果。长期目标是像安装应用一样安装和替换 Agent，同时让个人 Memory、权限、Work、Artifact 和 Evidence 始终属于你。
+## 运行在你自己电脑上的、属于你的 AI 助手。
 
-> **Personal AgentOS = Personal AI Kernel + Open Agent Distribution Platform**
+**模型由你选。你的文件、邮件、日程和记忆归你。规则由你定。**
 
-只有控制而没有用途的管理工具不是目标；只有流畅回答而无法核实执行结果也不是目标。初期可以只有少量内置 Agent，但不能把基本功能质量低当成合理的产品策略。
+![两段真实对话：等待批准的日程草稿，以及重启后再次找到的已保存笔记](docs/assets/readme/hero.zh-CN.png)
 
-## 当前实现与后续计划
+上面两段对话都是产品的真实行为，回复经过精简并译自韩语。请求保留英文原文（今天还不理解中文请求）。在你说 approve 之前什么都不会创建，保存的笔记重启后仍在原处。它运行在你自己的电脑上（macOS 或 Linux，Python 3.12 或更新），模型由你自己提供：本地 Ollama 模型、OpenAI 兼容端点或 Anthropic。本地优先（local-first）不等于只在本地（local-only）：使用托管模型时，你批准的上下文会发送给该提供商。
 
-| 状态 | 范围与证据 |
-| --- | --- |
-| 现有代码 | 本地浏览器设置和聊天、模型适配器、受限工具、笔记、获准文件夹和工作空间结果。具体支持路径见 [QUICKSTART](QUICKSTART.md)。 |
-| 文件工作空间开发完成 | #314、PR #320/#324：原件保留、受限读取、保存结果、重启后复用；证据来自自动测试与临时本地文件。 |
-| v0.1 契约完成 | #334、PR #350：核心对象和 AgentPackage 的 schema、静态/语义验证及 fixtures；不是包执行或安装实现。 |
-| DOGFOOD-01 开发完成 | #351、PR #354–#356：模拟提供者的 HTTP/文件/重启验收与操作说明；真实模型和浏览器使用观察单独记录。 |
-| 计划中的产品工作 | #358 基本任务质量，#359 真实执行记录与控制界面，#360 安装、使用、撤销、卸载及复用体验，以及 #333 未完成子任务。 |
+<!-- readme-section:try-today -->
 
-没有声称已经支持任意第三方代码、公开 Registry/Marketplace、通用兼容或自动购买。现有声明型插件不等于计划中的可执行 AgentPackage。历史真实测试仅证明其记录的任务、版本与提供者条件。
-
-## 首先做好三类工作
-
-**研究到决策。** 根据公开来源比较选项，区分来源时间、价格条件、已确认事实和未知内容，形成有用的决策摘要。当前网页搜索只是搜索结果片段，不等于读取完整页面、确认库存或核对结账总额。
-
-**个人文件到成果。** 读取明确允许的文档，整理关键事实、分歧和下一步行动，保存为普通文件。不仅检查文件存在，也检查内容质量；不得修改原件。
-
-**跟进、纠正和重启复用。** 接受条件变更并继续相关工作，重启后找回结果，而不是反复要求用户重建上下文。不会默默把全部聊天都变成永久 Memory。
-
-[基本功能质量计划](docs/default-agent-usefulness.en.md) 包含24个合成测试案例。这只是评估规格，不是已运行的模型评测成绩。必须在真实支持路径上测量成功率、依据、延迟、费用和用户干预。
-
-## 所有者应能行使的六项控制权
-
-[Owner Control Contract](docs/owner-control-contract.en.md) 定义待实现并验证的权利：
-
-1. 查看包来源、发布者、精确版本、执行位置和请求权限。
-2. 选择各 Agent 可用的资料、记忆和账户。
-3. 知道哪些信息会发送到哪些服务。
-4. 将安装和连接与具体行为授权分开。
-5. 停止工作、撤销权限，并了解进行中外部操作的不确定性。
-6. 卸载或替换 Agent 后仍保留自己的成果和已接受记忆。
-
-控制必须由执行边界落实，而不仅是要求模型遵守规则。进度来自真实 Work/工具事件；详细记录应显示必要的脱敏输入、目的地、授权与结果。隐藏推理、系统提示词和秘密值不是这些记录的必要内容。
-
-本地安装不等于本地处理。本地包可能调用外部模型并发送获准 Context。安装远程 Agent 的连接器，并不意味着控制该远程服务器。断开连接、撤销权限、卸载 Agent 与删除保留数据是不同操作。停止按钮不能保证收回已经发送的信息或撤销已完成的外部行为。
-
-## 架构和应用模型
-
-Kernel 保持 Agent-independent，产品体验可以 Agent-centric。
-
-`Owner · Context · Memory · Artifact · Capability · Runtime · Grant · Work · Event · Evidence`
-
-其上是 `AgentPackage · Package Manager · Registry · Marketplace/Discovery · Trust/Verification`。模型、Codex、Claude Code、MCP 和可选 Ruflo 只是可替换 worker，不是个人状态的权威。
-
-`downloaded != installed != enabled != connected != authorized-for-action`
-
-默认以禁用状态安装；安装不创建 Grant。扩大权限、数据范围、目的地、Memory 或后台行为的更新需要重新授权。第三方持久记忆更改默认是 MemoryCandidate，由所有者策略决定是否接受。卸载撤销包权限，但保留所有者成果和适当证据。
-
-Registry 管理精确身份、版本、摘要、兼容性和撤销信息；Marketplace 管理搜索、排序、评论和未来商业分发。流行度不授予权限，签名也不保证行为安全。个人 Context 不是商店搜索数据。
-
-先验证一个真正有用的 Files 参考包与公开 SDK 路径。同捆与第三方 Agent 使用同一公开契约，没有隐藏特权。只有格式、许可和权限可以明确对应时才引入 MCP/skill/plugin 兼容。大型商店、付款和 Ruflo 不是第一阶段用途的前提。
-
-## 使用当前预览版
+## 安装
 
 ```sh
 brew install jongtae/agentos/agentos
 agentos start
 ```
 
-Homebrew 面向开发者和自托管用户，可能不同于最新 main。请遵循 [QUICKSTART](QUICKSTART.md) 的专用测试文件夹流程。该文件工作空间测试使用受支持的直接模型连接，不使用订阅引擎。计划中的包功能不能写成已经可用的命令。
+你会看到：
 
-支持的持久状态可通过 `scripts/agentos-backup.py DATA ARCHIVE` 与 `scripts/agentos-restore.py ARCHIVE EMPTY_DATA` 导出恢复。迁移归档不包含提供者凭据、会话、本地文件夹权限、模型选择或 Telegram pairing；新环境必须重新声明并连接。这不同于可能含秘密的整个数据目录备份。
+```text
+AgentOS: http://127.0.0.1:8787/
+초기 설정 링크: /Users/you/.local/share/agentos/private/setup-link.txt (개인 파일)
+```
 
-## 开发治理
+浏览器会在该地址打开。按 **바로 시작하기**（立即开始），连接一个模型，就可以对话了。界面目前是韩语；请求可以用韩语或英语。
 
-参阅[架构](docs/personal-agentos-architecture.en.md)、[PRD](PRD.md)、[AGENTS.md](AGENTS.md)、[Development Constitution](docs/development-constitution.en.md)、[Goal Execution Contract](docs/goal-execution-contract.en.md)和[路线图](docs/roadmap.md)。
+**Homebrew 安装的是最新公开发布版 `v1.1.0`（2026-09-23），本页的全部内容都包含在其中。** 之后合并到 `main` 的工作不在该构建里，所以在下一次发布之前 Homebrew 构建会落后于 `main`；要用最新代码，请从源码检出运行（`git clone https://github.com/Jongtae/agentos.git`，然后在 Python 3.12 或更新上执行 `python3 -m pip install -e .`）。每一步都在 [QUICKSTART](QUICKSTART.md) 里。
 
-本项目不是 coding harness、swarm 框架或 macOS/Linux 替代内核。GitHub/Codex 自动化是开发基础设施。#357 只对齐文档、评估规格与计划；#358–#360 及未完成的平台任务在单独明确激活前保持未执行。
+<!-- capability:current-supported-slice -->
+<!-- readme-section:scenes-today -->
 
-完成标准不只是 schema、文件数和 CI：**必须同时证明成果有用，以及不允许的行为确实被阻止。**
+## 接下来还能这样
+
+![今天就能完成的五个日常请求，以及重启后的继续](docs/assets/readme/scenes.zh-CN.png)
+
+下面这些请求背后的流程都由本项目的自动化首次用户检查端到端跑通，用本地文件夹和模拟的邮件、日程、网页服务，而不是真实账户。措辞就是今天实际会被路由的措辞。
+
+- **文件。** *Summarize “Launch review” and save it as “Launch notes”.* 它读取你允许的文件夹，在你选定的工作区文件夹里写入一条新笔记，原文件保持不动。
+- **邮件。** *Find anything about the budget in my mail.* 它只搜索你连接的邮箱，并展示找到的内容。
+- **日程。** *Schedule a dentist appointment tomorrow at 3.* 它展示精确的草稿，只有你说 approve 之后才创建事件。“make it 4pm”和“cancel”在同一份草稿上都有效。
+- **记忆。** *Remember that I have a peanut allergy.* 它把这条记忆放在你能在对话里查看、修改，并在网页端删除的地方。模型自行提出的记忆在你接受之前保持待审核。
+- **调研。** *Look up these two products and compare them.* 它先搜索，再读取其中最多三个公开页面，返回页面所说的内容、仍未确认的内容，以及链接。
+
+然后重启应用，这样说：*Find “Launch notes” in my saved results.* 保存的结果、你允许的文件夹、记忆和 Telegram 配对在重启后都还在。
+
+<!-- readme-section:settings -->
+
+## 你需要的设置
+
+- **一个模型。** 本地 Ollama 服务器、OpenAI 兼容端点或 Anthropic，用你自己的访问权限连接。文件场景需要其中一种直接连接。
+- **两个文件夹。** 在 **내 에이전트 관리 → 내 자료**（我的代理管理 → 我的资料）里：一个它可以读取的参考文件夹，一个它可以写入的工作区文件夹。此外一律不碰。使用托管模型时，文件场景之前先批准一次文档共享。
+- **邮件和日程，可选。** 通过你自己创建的 Google Cloud OAuth 客户端连接你的 Google 账户，各运行一次设置命令（`agentos gmail-config`、`agentos calendar-config`），然后分别连接读取和写入。精确步骤见 QUICKSTART。
+- **Telegram，可选。** 把 BotFather 生成的机器人令牌粘贴到设置里，然后打开配对链接。只有你配对的账户能和它对话。
+
+就这些。
+
+<!-- readme-section:more -->
+
+## 更多
+
+[现在能做什么，哪里还有摩擦](docs/product-status.en.md)（英文） · [这是要去的方向](docs/product-status.en.md#where-this-is-going) · [为什么不一样](docs/product-status.en.md#why-this-is-different) · [内部结构](docs/product-status.en.md#under-the-hood-briefly) · 许可证 [AGPL-3.0-only](LICENSE) 与[商标声明](TRADEMARKS.md) · [它是怎么构建的](AGENTS.md)

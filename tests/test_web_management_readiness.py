@@ -9,6 +9,10 @@ from urllib import error as urlerror
 from urllib import request as urlrequest
 from urllib.parse import parse_qs, urlsplit
 
+from delivery_state_invariants import (
+    assert_declared_goal_shape,
+    assert_no_unauthorised_execution_authority,
+)
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
 
@@ -16,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class WebManagementReadinessTests(unittest.TestCase):
-    def test_mirrored_contract_is_ready_but_not_selected_or_completed(self):
+    def test_mirrored_contract_is_a_parent_controlled_substep_that_never_self_selects(self):
         source = (ROOT / 'delivery-plan.yaml').read_bytes()
         self.assertEqual(source, (ROOT / 'src/personal_agent/delivery-plan.yaml').read_bytes())
         plan = json.loads(source)
@@ -31,11 +35,41 @@ class WebManagementReadinessTests(unittest.TestCase):
         self.assertEqual(entry['parallel_group'], 'pa1-wave-1')
         completed = plan['history']['documented_completed_iterations']
         self.assertTrue({'GOV-USE-01', 'DOGFOOD-01'}.issubset(completed))
-        self.assertNotIn('PA1-FDN-01', completed)
-        self.assertNotIn('WEB-ADMIN-01', completed)
+        # The original form asserted PA1-FDN-01 and WEB-ADMIN-01 were *not*
+        # documented complete. That was a snapshot of the delivery order, not
+        # an invariant, and PA1-INT-01's tracker reconciliation makes it false.
+        # The rule underneath it survives and is stronger: a substep may not be
+        # recorded complete before the dependencies it declares.
+        # Applied to every declared dependency, not just this entry's own, so
+        # the PA1-FDN-01 half of the pair this replaced is covered too rather
+        # than silently dropped.
+        for name in sorted({'WEB-ADMIN-01', *entry['depends_on']}):
+            if name not in completed:
+                continue
+            declared = next((item.get('depends_on', []) for item in plan['iterations']
+                             if item['id'] == name), [])
+            missing = [dep for dep in declared if dep not in completed]
+            self.assertEqual(missing, [],
+                             f'{name} is documented complete before {missing}')
         self.assertNotEqual(plan['next_goal']['status'], 'active')
-        self.assertEqual(plan['next_goal']['id'], 'EPIC-PA1')
+        # WEB-ADMIN-01 is a parent-controlled substep and can never be the
+        # declared top-level goal, whichever program currently holds
+        # authority -- and it is not a program, so it cannot become one.
         self.assertNotEqual(plan['next_goal']['id'], 'WEB-ADMIN-01')
+        self.assertNotIn('WEB-ADMIN-01', plan['programs'])
+        # A declared goal is always a program. After closeout there is no
+        # declared goal, which has to be a fully quiesced state rather than
+        # simply an unchecked one.
+        shape = assert_declared_goal_shape(self, plan)
+        if shape == 'goal-ready':
+            self.assertIn(plan['next_goal']['id'], plan['programs'])
+        else:
+            self.assertIsNone(plan['next_goal']['id'])
+        # `EPIC-PA1 is owner-paused` used to stand in the terminal branch.
+        # It was a cast pin and it only ran in one shape; the rule behind it
+        # -- a closeout never hands authority to a successor -- is asserted
+        # for every program in both shapes instead.
+        assert_no_unauthorised_execution_authority(self, plan)
         self.assertTrue((ROOT / 'docs' / entry['contract']).is_file())
 
     def test_historical_top02_validation_is_not_weakened(self):
@@ -66,6 +100,12 @@ class WebManagementReadinessTests(unittest.TestCase):
         self.assertIn('data-settings="files"', html)
         self.assertIn('data-settings="external"', html)
         self.assertIn('data-settings="privacy"', html)
+        # The J6 MemoryCandidate control is a management control inside the
+        # existing records view: it adds no top-level view and no second
+        # conversation surface.
+        self.assertEqual(html.count('id="memory-candidates"'), 1)
+        self.assertGreater(html.index('id="memory-candidates"'), html.index('id="view-records"'))
+        self.assertLess(html.index('id="memory-candidates"'), html.index('id="view-settings"'))
 
     def test_source_derived_task_record_and_model_regressions(self):
         node = shutil.which('node')

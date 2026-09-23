@@ -32,6 +32,8 @@ from .google_calendar import (
 CALENDAR_CONNECTOR_ID = "google-calendar"
 CALENDAR_WRITE_CONNECTOR_ID = "google-calendar-write"
 CALENDAR_STATE_KEY = "calendar_create"
+#: Upper bound on persisted drafts. See the note in ``_draft``.
+_MAX_DRAFTS = 100
 CALENDAR_SPEC = ConnectorSpec(
     CALENDAR_CONNECTOR_ID,
     (CALENDAR_READ_SCOPE,),
@@ -334,7 +336,31 @@ class CalendarConnector:
                 "hash": _canonical(bound),
                 "state": "awaiting-approval",
                 "effect": "none",
+                "created": self.now(),
             }
+            # Cap the table. `_draft` takes no authority check by design -- a
+            # proposal is not an action -- but once the model can reach it,
+            # nothing bounded how many rows it could persist, and each row
+            # carries owner event content (summary, location, description) in
+            # the plaintext config store. Oldest awaiting-approval rows go
+            # first; anything approved or applied is kept, because that is
+            # evidence rather than a proposal.
+            if len(rows) > _MAX_DRAFTS:
+                # Iterate the dict KEY, not `row["id"]`. `_owned` deliberately
+                # tolerates restored or migrated rows that do not carry the
+                # full field set, so a row without `id` made this raise a bare
+                # KeyError -- outside the redacted policy boundary, an HTTP
+                # 500, and drafting stayed broken until the store was
+                # hand-edited. A row whose `id` disagreed with its key evicted
+                # the wrong row and kept the stale one.
+                disposable = sorted(
+                    ((key, row) for key, row in rows.items()
+                     if isinstance(row, dict) and row.get("state") == "awaiting-approval"
+                     and key != ident),
+                    key=lambda item: (item[1].get("created") or 0, item[0]),
+                )
+                for key, _row in disposable[: len(rows) - _MAX_DRAFTS]:
+                    rows.pop(key, None)
             self._put(rows)
         return self.preview(ident, owner)
 
@@ -514,6 +540,36 @@ class CalendarConnector:
             "payload_hash": row["hash"],
             "state": row["state"],
         }
+
+    def pending(self, owner: str) -> list:
+        """Every draft this owner may act on, in the same shape as ``preview``.
+
+        The service surface used to list by reading the raw state and
+        filtering on ``state`` alone, with no owner filter at all -- so a
+        draft created under one connector identity was returned verbatim,
+        payload and owner hash included, to the other. ``preview``,
+        ``approve`` and ``execute`` all enforce ``_owner_key``; listing was
+        the one hole in that boundary.
+        """
+        owner_key = _owner_key(owner)
+        out = []
+        for ident, row in self._rows().items():
+            if not isinstance(row, dict) or row.get("owner") != owner_key:
+                continue
+            if row.get("state") != "awaiting-approval":
+                continue
+            out.append({
+                "id": ident,
+                "action": row.get("action"),
+                "calendar": "primary",
+                "event_id": row.get("event_id", ""),
+                "event_version": row.get("event_version", ""),
+                "payload": dict(row.get("payload", {})),
+                "payload_hash": row.get("hash"),
+                "state": row.get("state"),
+                "created": row.get("created"),
+            })
+        return sorted(out, key=lambda row: (row.get("created") or 0, row["id"]))
 
     def _visible_row(self, ident: str, owner: str, *, expire_approval: bool = False) -> dict:
         """Return an owner-visible snapshot without blocking active provider I/O.

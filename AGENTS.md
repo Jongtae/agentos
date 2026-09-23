@@ -57,6 +57,36 @@ The repository adapts useful ideas from spec-driven development and explicit aut
 
 This process borrows the Constitution/Specify/Plan/Tasks/Implement/Converge discipline associated with GitHub Spec Kit, relevant standards/context injection ideas associated with BuilderMethods Agent OS, and explicit role/state/authority/receipt patterns seen in Open AgentOS-style governance. Those are development patterns only. Ruflo remains a possible product Runtime Adapter, not the repository governance system or AgentOS kernel.
 
+## Reuse-first engineering
+
+The Development Constitution's **Reuse first: Adopt → Adapt → Build** principle applies to every contributor, including Claude Code, Codex, GitHub Copilot, Gemini, Cursor, Windsurf, other coding assistants, future tools, and humans. Tool-specific instruction files are compatibility entrypoints only. If a tool does not recognize one, that does not relax this repository contract.
+
+Before materially implementing or replacing commodity infrastructure, perform an **Existing Solutions Review**. This applies especially to protocols, SDK/client behavior, OAuth/auth flows, provider adapters, MCP/A2A or other protocol plumbing, HTTP/transports, parsers, schema validators, schedulers, storage/migration utilities, connector mechanics, sandbox helpers, and other general-purpose infrastructure.
+
+The issue or implementation plan must record:
+
+- the exact problem/boundary that needs implementation;
+- official SDKs/reference implementations/standards considered;
+- mature maintained open-source candidates considered;
+- maintenance status and release activity relevant to the required path;
+- security and supply-chain implications;
+- licence compatibility;
+- runtime/deployment/platform compatibility;
+- the decision: **Adopt**, **Adapt**, or **Build**;
+- why rejected candidates cannot satisfy the contract.
+
+Decision order:
+
+1. **Adopt** the official or established implementation when it fits.
+2. **Adapt** a mature implementation behind a narrow AgentOS adapter when kernel policy must remain decoupled.
+3. **Build** only when the issue documents a concrete unsatisfied requirement.
+
+"Fewer dependencies", "simpler to write ourselves", implementation familiarity, or a coding agent's preference are not sufficient Build reasons. Conversely, reuse-first is not permission to add dependencies casually: every new dependency still needs licence/provenance/security/maintenance/compatibility review, and must not silently expand runtime authority, egress, secrets, or durable-state ownership.
+
+Keep custom AgentOS code concentrated on owner sovereignty: canonical Owner/Context/Memory state, Grants/approvals, Capability/Runtime mediation, data/egress policy, Work/Event/Evidence semantics, Artifact provenance, recovery/revocation, and the adapters that enforce those boundaries. External implementations remain replaceable and subordinate.
+
+Do not opportunistically rewrite already-stable custom code merely because an OSS alternative exists. Replacement of existing code needs a bounded issue with migration, regression, security and evidence criteria; classify candidates through the repository reuse audit rather than mixing unrelated refactors into feature work.
+
 ## Product and package invariants
 
 ### Owner state
@@ -105,6 +135,12 @@ The active delivery order is `delivery-plan.yaml`. Historical v1/P7/Master Plan 
 Every active iteration must satisfy the English canonical [Goal Execution Contract](docs/goal-execution-contract.en.md): establish its goal-ready record before activation, preserve declared authority and non-goals, and close only with current evidence. Vision, roadmap order, issue creation and reserved proposals never activate implementation by themselves.
 
 Internal development standards, designs and execution guidance use English as the single canonical source. Korean is used for owner-facing progress/completion and user-facing companion docs where useful; translations do not silently create new authority.
+
+The four public README files are one user-facing product surface: `README.md` is canonical for factual claims, while `README.ko.md`, `README.ja.md` and `README.zh-CN.md` must preserve semantic/structural parity. A canonical README change must update all public locales in the same PR. Prefer language-neutral visuals; if essential copy is embedded in an image, provide localized variants. Never let an illustrative product-direction scene read as current shipped capability.
+
+## Licensing and marks
+
+Personal AgentOS is licensed under `AGPL-3.0-only` ([LICENSE](LICENSE), [NOTICE](NOTICE)). Contributions are accepted under that same licence (inbound = outbound); there is no CLA. A contribution must not add code whose licence is incompatible with AGPL-3.0 or that obliges redistribution under different terms; record the licence of every new dependency in its reuse review. The "Personal AgentOS" name and logo are governed by [TRADEMARKS.md](TRADEMARKS.md), not by the code licence.
 
 ## AgentPackage / runtime issue requirements
 

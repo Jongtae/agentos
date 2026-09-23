@@ -28,7 +28,12 @@ class GovUsePreservationTests(unittest.TestCase):
             with self.subTest(iteration=identifier):
                 self.assertEqual(new_items[identifier], original_item)
         self.assertTrue({"GOV-USE-01", "USE-01"}.issubset(new_items))
-        for field in ("repository", "retry", "completion_claims"):
+        # The repository was renamed from Jongtae/personal-agentos to
+        # Jongtae/agentos. Preserve the historical fixture byte-for-byte while
+        # allowing only this canonical repository-identity migration.
+        self.assertEqual(baseline["repository"], "Jongtae/personal-agentos")
+        self.assertEqual(current["repository"], "Jongtae/agentos")
+        for field in ("retry", "completion_claims"):
             with self.subTest(field=field):
                 self.assertEqual(current[field], baseline[field])
         for name, value in baseline["programs"].items():

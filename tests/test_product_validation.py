@@ -1,9 +1,28 @@
+"""Product-validation gate, relocated to scripts/ by REUSE-R8 / #435.
+
+The module is a development-only repository-introspection tool: it imports no
+product code and reads the package as text, so it does not belong in the
+installed runtime. It is loaded by path here, the same way the repository
+already tests other scripts/ modules.
+"""
+import importlib.util
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from personal_agent.product_validation import ProductValidator, markdown
+_NAME = "scripts_product_validation"
+_spec = importlib.util.spec_from_file_location(
+    _NAME, Path(__file__).resolve().parents[1] / "scripts" / "product_validation.py"
+)
+_module = importlib.util.module_from_spec(_spec)
+# Registered before exec_module because the module defines a @dataclass under
+# `from __future__ import annotations`; dataclasses resolves the owning module
+# through sys.modules and fails with AttributeError if it is absent.
+sys.modules[_NAME] = _module
+_spec.loader.exec_module(_module)
+ProductValidator, markdown = _module.ProductValidator, _module.markdown
 
 
 class ProductValidationTests(unittest.TestCase):

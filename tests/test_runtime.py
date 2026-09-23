@@ -1,12 +1,33 @@
+"""Retired Kubernetes owner-runtime cluster (REUSE-R8 / #435).
+
+The runtime and provisioning CLI were relocated out of the product package to
+scripts/legacy/kubernetes/ because nothing in the shipped runtime imports them
+and no Dockerfile builds the `personal-agent:dev` image the CLI targets. The
+behaviour is preserved and still exercised here, loaded by path the same way the
+repository already tests other scripts/ modules.
+"""
+import importlib.util
 import json
+from pathlib import Path
 import tempfile
 import threading
 import unittest
 import urllib.request
 import urllib.error
 from http.server import ThreadingHTTPServer
-from personal_agent.runtime import Store, handler
-from personal_agent.cli import manifests
+
+LEGACY = Path(__file__).resolve().parents[1] / "scripts" / "legacy" / "kubernetes"
+
+
+def _load(name):
+    spec = importlib.util.spec_from_file_location(f"legacy_kubernetes_{name}", LEGACY / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_runtime, _cli = _load("runtime"), _load("cli")
+Store, handler, manifests = _runtime.Store, _runtime.handler, _cli.manifests
 
 
 class RuntimeTests(unittest.TestCase):

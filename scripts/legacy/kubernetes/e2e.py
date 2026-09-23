@@ -11,7 +11,7 @@ import urllib.error
 import urllib.request
 import uuid
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
 KUBE = str(ROOT / '.tools/kubeconfig')
 BASE = ['kubectl', '--kubeconfig', KUBE]
 
@@ -21,7 +21,7 @@ def kube(*args):
 
 
 def cli(action, owner):
-    subprocess.run([sys.executable, '-m', 'personal_agent.cli', '--kubeconfig', KUBE, action, owner], cwd=ROOT, check=True)
+    subprocess.run([sys.executable, str(Path(__file__).resolve().parent / 'cli.py'), '--kubeconfig', KUBE, action, owner], cwd=ROOT, check=True)
 
 
 def credential(owner):

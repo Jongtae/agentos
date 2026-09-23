@@ -4,6 +4,7 @@ import unittest
 from collections import Counter
 from pathlib import Path
 
+from delivery_state_invariants import assert_declared_goal_shape, closed_out_programs
 from personal_agent.delivery import DeliveryPlan
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -57,18 +58,48 @@ class OwnerUsefulnessSpecificationTests(unittest.TestCase):
         self.assertNotIn("actual_success_ratio", gates)
 
     def test_selected_goal_readiness_does_not_enable_execution(self):
-        # USE-01 remains preserved historical usefulness work, while PA1 is the
-        # newly prepared next top-level program. Goal-ready still means no execution.
+        # USE-01 remains preserved historical usefulness work. The top-level
+        # goal itself moves over time and is absent after a closeout, so this
+        # checks the rule in both shapes: goal-readiness never executes, and
+        # a closeout never executes either.
         plan = json.loads((ROOT / "delivery-plan.yaml").read_text(encoding="utf-8"))
-        self.assertEqual(plan["next_goal"]["id"], "EPIC-PA1")
-        self.assertEqual(plan["next_goal"]["status"], "owner-activated-goal-ready")
-        selected = next(item for item in plan["iterations"] if item["id"] == "EPIC-PA1")
-        self.assertEqual(selected["issue"], 386)
-        self.assertEqual(selected["depends_on"], ["GOV-PA1-01"])
-        self.assertEqual(selected["activation_status"], "owner-activated-goal-ready")
+        shape = assert_declared_goal_shape(self, plan)
+        declared = plan["next_goal"]["id"]
+        documented = plan["history"]["documented_completed_iterations"]
+        # The activation-governance dependency rule is a governance rule, not
+        # a transient fact: without it a program can be flipped to active with
+        # no governance merged. Generalised from the original
+        # `== ["GOV-PA1-01"]`, which pinned the rule to whichever program
+        # happened to be declared, and applied to the closed-out program too
+        # so a closeout cannot erase the requirement.
+        # Subjects are keyed on each program's own role, not on the plan
+        # shape. Keying on the shape meant a program that closed out while a
+        # *different* program held the declared goal was checked by nothing:
+        # the closed-out branch only ran in the terminal shape.
+        closed = closed_out_programs(plan)
+        subjects = {name: "complete" for name in closed}
+        if shape == "goal-ready":
+            subjects[declared] = "goal-ready"
+            self.assertNotIn(declared, documented)
+        else:
+            self.assertIsNone(declared)
+            self.assertTrue(closed)
+        self.assertTrue(subjects)
+        for name in closed:
+            self.assertIn(name, documented)
+        for name, role in sorted(subjects.items()):
+            selected = next(item for item in plan["iterations"] if item["id"] == name)
+            self.assertIsInstance(selected["issue"], int)
+            expected = ("owner-activated-goal-ready" if role == "goal-ready"
+                        else "complete-on-merge")
+            self.assertEqual(selected["activation_status"], expected, name)
+            self.assertTrue(selected.get("depends_on"), selected)
+            for dependency in selected["depends_on"]:
+                self.assertIn(dependency, documented)
+        # Goal-readiness must not execute, whichever program is declared.
+        self.assertNotEqual(plan["next_goal"]["status"], "active")
         self.assertIn("GOV-PA1-01", plan["history"]["documented_completed_iterations"])
         self.assertIn("USE-01", plan["history"]["documented_completed_iterations"])
-        self.assertNotIn("EPIC-PA1", plan["history"]["documented_completed_iterations"])
         use01 = next(item for item in plan["iterations"] if item["id"] == "USE-01")
         self.assertEqual(use01["issue"], 358)
         controller_plan = DeliveryPlan(ROOT / "delivery-plan.yaml")

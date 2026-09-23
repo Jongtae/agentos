@@ -6,7 +6,7 @@ AgentOS is a self-hosted personal agent preview. One local process serves a Kore
 
 The current owner test remains the small file-workspace journey below: configure a supported direct provider, explicitly grant a reference folder and output workspace, save a result, restart and find it again. DOGFOOD-01's repository evidence uses simulated providers and temporary files; actual owner browser/provider operation is a separate test. Check the installed revision when comparing a released Homebrew build with current source; a merged documentation PR is not a new application release.
 
-[USE-01 / #358](https://github.com/Jongtae/personal-agentos/issues/358) is prepared to improve ordinary research, substantive file results and follow-up continuity. It does not run merely because its issue exists. Public full-page reading, measured 24-case model quality, the expanded receipt/control UX and v0.1 agent installation are **not delivered by the preparation**. Current public search returns snippets, not full-page/inventory/checkout proof. The [usefulness specification](docs/default-agent-usefulness.en.md) separates deterministic development tests from live-quality promotion; an unrun live gate is pending, not passed.
+[USE-01 / #358](https://github.com/Jongtae/agentos/issues/358) is prepared to improve ordinary research, substantive file results and follow-up continuity. It does not run merely because its issue exists. Public full-page reading, measured 24-case model quality, the expanded receipt/control UX and v0.1 agent installation are **not delivered by the preparation**. Current public search returns snippets, not full-page/inventory/checkout proof. The [usefulness specification](docs/default-agent-usefulness.en.md) separates deterministic development tests from live-quality promotion; an unrun live gate is pending, not passed.
 
 [Owner control requirements](docs/owner-control-contract.en.md) describe implemented versus planned boundaries. A local install can use an external model; approve only the data/destinations you intend. No ticket/cart/booking/payment, account creation or new external action is part of the recommended test. Do not publish private documents, credentials or full tool payloads as repository evidence.
 
@@ -54,7 +54,7 @@ all natural-language requests work. Share redacted observations, not private doc
 
 Create your own bot using Telegram's BotFather, paste its token into Settings, and open the generated pairing link in your own Telegram account. Only the paired private account can submit work. The web interface and Telegram share conversation history and notes. AgentOS uses outbound polling, so no public inbound port is needed for Telegram. Use a dedicated bot without an existing webhook.
 
-The computer must remain running and awake for remote requests to be processed. This preview does not install a background login service. Keep the terminal open; Ctrl-C stops AgentOS.
+The computer must remain running and awake for remote requests to be processed. From a source checkout you can register a background login service instead of holding a terminal open; see [Background service (macOS)](#background-service-macos) for exactly what that does and does not cover. Without that service, keep the terminal open; Ctrl-C stops AgentOS.
 
 ## Restart and update
 
@@ -68,9 +68,169 @@ agentos start
 agentos guide
 ```
 
+If you registered the background login service from a source checkout, run `agentos service upgrade` after replacing the executable rather than relying on the foreground command.
+
 Data persists in `~/.local/share/agentos`; uninstalling the formula does not delete it. Back up the entire data directory while AgentOS is stopped. This directory contains your private conversations and credentials; credentials have filesystem permissions, not application-level encryption.
 
 If the browser does not open, use the link in `~/.local/share/agentos/private/setup-link.txt` locally. Do not share that file before setup. After setup, open `http://127.0.0.1:8787`; log in only if you chose a password. An occupied port can be changed using `agentos start --port 8788`. After an unexpected stop, AgentOS marks in-progress work as interrupted and an in-flight Telegram send as unknown; it never silently repeats either. Review the web record and submit a new request if needed. `agentos guide` shows counts and next steps only, never task text or credentials.
+
+## Background service (macOS)
+
+`agentos start` runs in the foreground. On macOS the same executable can instead be
+registered as a per-user launchd login service, so Telegram and web requests are handled
+without an interactive terminal session:
+
+```sh
+agentos service install    # register and start the login service
+agentos service status     # report the observed launchd state and health
+agentos service restart
+agentos service stop       # stop and persistently disable it
+agentos service uninstall  # remove the registration; owner data is retained
+agentos service upgrade    # replace an existing definition, rolling back on failure
+```
+
+From a source checkout the same actions are available as
+`python3 -m personal_agent.quickstart service <action>`. `install` and `upgrade` must record
+an absolute path to the executable launchd will run; they resolve `agentos` from `PATH` and
+then from the Homebrew prefix, so from a source checkout either install the console script
+(`pip install -e .`) or pass `--cli-path /full/path/to/agentos` explicitly. Use `--data` only
+to override the data directory: with no `--data`, the other actions report the directory
+recorded in the installed service definition.
+
+Each action prints the receipt it actually observed and exits non-zero when the operation
+did not succeed. A refused, unhealthy or unreadable service is reported as a failure with a
+`next_action`, never as a success: `background_available` is reported only when a running
+process also passed the loopback health check. `uninstall` removes only the service
+registration and never deletes `~/.local/share/agentos`. The service definition is bound to
+loopback and sets `RunAtLoad`/`KeepAlive`, so it is designed to start again at login.
+
+What this does **not** yet cover, stated exactly:
+
+- **macOS only.** The lifecycle is launchd-specific. There is no systemd equivalent here.
+- **Released from `v1.1.0` (2026-09-23).** The published formula lives in the separate tap
+  `Jongtae/homebrew-agentos` — it is not in this repository by design, so its absence from
+  `git ls-files` here does not mean no artifact exists. `brew install` / `brew upgrade
+  jongtae/agentos/agentos` at `v1.1.0` or later provides `agentos service`; `v1.0.4` and
+  earlier do not. See [the release procedure](docs/release.en.md).
+- **Not covered by automated tests of real launchd.** Repository CI runs on Linux and cannot
+  execute launchd. The automated evidence for these commands is injected-runner tests that
+  substitute `launchctl`. A real Homebrew install, a real login service surviving a machine
+  restart, and an end-to-end Telegram result with no terminal open are owner operating
+  validation that this repository has not performed.
+
+## Google Calendar (source checkout)
+
+AgentOS can read your calendar and draft changes to it, so `내일 일정 뭐 있어?` is
+answered and `내일 3시에 회의 잡아줘` produces an exact preview for you to approve. It is
+off unless you configure it, and configuring it connects nothing on its own.
+
+**Read and write are two separate connections.** A read grant never becomes a write
+grant: they are separate Google authorizations, separate credentials and separate
+connector records, and you authorize each one deliberately.
+
+Create a Google Cloud OAuth **web** client, add
+`http://localhost:8787/oauth/calendar/callback` as an authorised redirect URI, download
+the client JSON, then write the owner-only credential file:
+
+```sh
+agentos calendar-config \
+  --oauth-client-json ~/Downloads/client_secret_XXXX.json \
+  --secret-file /Users/your-name/.agentos-secrets/calendar.json
+AGENTOS_CALENDAR_LOCAL_ONLY=1 \
+AGENTOS_CALENDAR_SECRET_FILE=/Users/your-name/.agentos-secrets/calendar.json \
+  agentos start
+```
+
+`calendar-config` behaves exactly like `gmail-config`: the encryption key is generated
+locally, the file is `0600` and owned by you, a relative `--secret-file` is refused, and
+an existing file is never overwritten. The client secret never becomes a command-line
+argument, an environment value or log output.
+
+Then open AgentOS on its local address and connect each grant from the settings page —
+`/google-calendar?grant=read` and `/google-calendar?grant=write`. Both routes require
+your owner session and refuse a tunnel host.
+
+**What the model can and cannot do.** The model may read your calendar and may draft a
+create, update or cancel. It has no tool that applies one. A draft carries the exact
+payload that would be sent and its hash; applying it needs a one-time approval bound to
+you, that draft, that payload and the current write connection, and only you can issue
+that — through `/api/calendar/drafts`, on the local address only. That surface covers
+drafts from both your Telegram conversation and the web, because both are you; each
+still needs its own write grant. Attendee invitation and recurring events are not
+supported and are refused rather than quietly dropped.
+
+Reading your calendar puts event titles in the model's context, so for the rest of that
+turn AgentOS refuses public destinations — web search, public page reads, weather —
+exactly as it does after reading a connected document.
+
+What this does **not** yet cover, stated exactly:
+
+- **No live Google Calendar operation has been observed.** Every test uses an injected
+  transport and a fixture token endpoint. A real OAuth consent, a real event created in
+  a real calendar, and the behaviour of a revoked grant are owner validation this
+  repository has not performed.
+- **Released from `v1.1.0` (2026-09-23).** `v1.0.4` and earlier Homebrew builds do not
+  include it; see [the release procedure](docs/release.en.md).
+- **The natural-language create path still asks a question.** `내일 3시에 회의 잡아줘`
+  parks for a connection and then asks for the missing detail rather than producing a
+  draft on its own; ask for the calendar explicitly, or read first and draft from what
+  you see.
+
+## Gmail (source checkout)
+
+AgentOS can read and search your Gmail so a request such as
+`메일에서 예산 관련 내용 찾아줘` is answered instead of refused. It is off unless you
+configure it, and configuring it connects nothing on its own.
+
+Create a Google Cloud OAuth **web** client, add
+`http://localhost:8787/oauth/gmail/callback` as an authorised redirect URI, download the
+client JSON, then write the owner-only credential file:
+
+```sh
+agentos gmail-config \
+  --oauth-client-json ~/Downloads/client_secret_XXXX.json \
+  --secret-file /Users/your-name/.agentos-secrets/gmail.json
+AGENTOS_GMAIL_LOCAL_ONLY=1 \
+AGENTOS_GMAIL_SECRET_FILE=/Users/your-name/.agentos-secrets/gmail.json \
+  agentos start
+```
+
+`gmail-config` is the Gmail counterpart of `drive-config`: it generates the token-store
+encryption key locally, writes a `0600` file owned by you, refuses a relative
+`--secret-file`, and refuses to overwrite an existing one. The client secret and the
+encryption key are never command-line arguments, environment values or log output. The
+file must stay outside `~/.local/share/agentos`; otherwise startup fails closed. If you
+prefer not to keep a file, the equivalent `AGENTOS_GMAIL_CLIENT_ID`,
+`AGENTOS_GMAIL_CLIENT_SECRET` and `AGENTOS_GMAIL_ENCRYPTION_KEY` environment values are
+still read, but the file is the supported boundary.
+
+Then connect, from this computer's browser: **설정 → 외부 연결 → Google 연결 → 연결하기**,
+or open `http://127.0.0.1:8787/google-gmail` in the same browser where you already
+use AgentOS. Google asks you to approve read-only Gmail
+access; AgentOS records the scope Google actually granted. If you asked for something over
+Telegram that needs Gmail, the reply names the connection you need and carries this same
+address, and the original request is resumed exactly once after you connect.
+
+What this does **not** claim, stated exactly:
+
+- **No live Google OAuth has been observed.** The automated evidence is a fixture token
+  endpoint and a fixture Gmail transport inside the repository suite. A real Google
+  consent screen, a real token exchange and a real message list are owner operating
+  validation this repository has not performed.
+- **Read-only.** The only scope requested is `gmail.readonly`, and the connection is
+  recorded only if Google grants exactly that. AgentOS cannot send, reply to, delete,
+  label or archive mail, and nothing here authorises a Calendar, Drive or send scope.
+- **Released from `v1.1.0` (2026-09-23).** `brew install` / `brew upgrade
+  jongtae/agentos/agentos` at `v1.1.0` or later provides `agentos gmail-config` and the
+  Gmail route; `v1.0.4` and earlier do not.
+- **Connecting is a separate decision from configuring.** Writing the credential file only
+  lets this installation *offer* Gmail. It issues no grant, and the connector stays
+  disconnected until you complete the authorisation yourself. The start route requires
+  your local AgentOS session and refuses a tunnel host, so Gmail cannot be connected from
+  a phone over the mobile pairing link.
+- **Local install is not local-only processing.** Gmail metadata read this way is handled
+  locally, but if you have connected an external model provider, answering a mail question
+  can send that content to the provider you chose.
 
 ## Remote host / source installation
 

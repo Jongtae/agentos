@@ -5,6 +5,12 @@ from unittest.mock import patch
 from pathlib import Path
 from types import SimpleNamespace
 
+from delivery_state_invariants import (
+    assert_completed_work_is_unselectable,
+    assert_declared_goal_shape,
+    assert_no_unauthorised_execution_authority,
+    closed_out_programs,
+)
 from personal_agent.delivery import DeliveryController, DeliveryError, DeliveryPlan, StateStore
 from personal_agent.handoff import Candidate, Issue
 
@@ -32,9 +38,27 @@ class DeliveryTests(unittest.TestCase):
     def controller(self, runner=None):
         return DeliveryController(self.root, self.state, runner or Runner(), now=lambda: self.clock[0])
 
+    @staticmethod
+    def _arm(plan, identifier):
+        """Make one iteration legitimately armed and not-yet-complete.
+
+        These fixtures used to borrow GOV-01's real `activation_status`,
+        which happened to read `owner-activated-goal-ready` long after GOV-01
+        had completed. GOV-PA1-07 retired that stale arming, so the fixture
+        now constructs the state it is testing instead of depending on a
+        record that was wrong. The rule under test - only an explicit owner
+        `active` transition selects - is unchanged.
+        """
+        completed = plan['history']['documented_completed_iterations']
+        if identifier in completed:
+            completed.remove(identifier)
+        for item in plan['iterations']:
+            if item['id'] == identifier:
+                item['activation_status'] = 'owner-activated-goal-ready'
+        return plan
+
     def activate_governance_goal(self):
-        plan=json.loads((self.root/'delivery-plan.yaml').read_text())
-        plan['history']['documented_completed_iterations'].remove('GOV-01')
+        plan=self._arm(json.loads((self.root/'delivery-plan.yaml').read_text()), 'GOV-01')
         plan['next_goal']={'id':'GOV-01','status':'active'}
         (self.root/'delivery-plan.yaml').write_text(json.dumps(plan))
 
@@ -44,8 +68,7 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(json.loads((root/'delivery-plan.yaml').read_text()), json.loads((root/'src/personal_agent/delivery-plan.yaml').read_text()))
 
     def test_only_explicit_owner_activated_goal_can_be_selected(self):
-        altered=json.loads((self.root/'delivery-plan.yaml').read_text())
-        altered['history']['documented_completed_iterations'].remove('GOV-01')
+        altered=self._arm(json.loads((self.root/'delivery-plan.yaml').read_text()), 'GOV-01')
         altered['next_goal']={'id':'GOV-01','status':'active'}
         (self.root/'delivery-plan.yaml').write_text(json.dumps(altered))
         plan=DeliveryPlan(self.root/'delivery-plan.yaml')
@@ -58,6 +81,35 @@ class DeliveryTests(unittest.TestCase):
         plan=json.loads((self.root/'delivery-plan.yaml').read_text())
         plan['next_goal']={'id':'TOP','status':'active'}
         (self.root/'delivery-plan.yaml').write_text(json.dumps(plan))
+
+    def declare_goal_ready_fixture(self, identifier='FIXTURE-TOP-01',
+                                   dependencies=('GOV-01','GOV-PA1-01')):
+        """Construct a goal-ready top-level goal instead of borrowing one.
+
+        The rule under test is that a declared-but-not-active goal never
+        selects and never runs anything. Tests used to read that goal out of
+        the repository plan's `next_goal`, which made them depend on the
+        repository happening to have one; they went StopIteration the moment
+        EPIC-REUSE-01 / #418 closed out and left `next_goal.id` null. The
+        subject is built here so the rule is exercised in every plan state.
+
+        Returns the identifier and the written plan, so a caller can keep
+        mutating the same scenario.
+        """
+        plan=json.loads((self.root/'delivery-plan.yaml').read_text())
+        documented=plan['history']['documented_completed_iterations']
+        for dependency in dependencies:
+            self.assertIn(dependency, documented)
+        self.assertNotIn(identifier, {item['id'] for item in plan['iterations']})
+        plan['iterations'].append({
+            'id':identifier,'issue':999_001,'milestone':'Fixture milestone',
+            'contract':'fixture-contract.en.md',
+            'activation_status':'owner-activated-goal-ready',
+            'depends_on':list(dependencies),
+        })
+        plan['next_goal']={'id':identifier,'status':'owner-activated-goal-ready'}
+        (self.root/'delivery-plan.yaml').write_text(json.dumps(plan))
+        return identifier, plan
 
     def test_historical_dogfood_closeout_and_goal_ready_heartbeat_boundary(self):
         # Explicit historical fixture: DOGFOOD closeout selected no successor.
@@ -114,19 +166,61 @@ class DeliveryTests(unittest.TestCase):
         self.assertNotIn('DRIVE-LOCAL-OP-01', controller.plan.documented_completed())
         self.assertNotIn('SCN-I-01', controller.plan.documented_completed())
 
-    def test_pa1_goal_ready_never_starts_heartbeat_or_external_commands(self):
+    def test_completed_work_is_unselectable_even_if_redeclared_active(self):
+        """The gate every other selection test stops short of.
+
+        `DeliveryPlan.select` needs two things: `next_goal.status == "active"`,
+        and the named iteration carrying `owner-activated-goal-ready`. Every
+        existing test here stops at the first, because the resting plan never
+        has it. So a completed program satisfying the *second* gate went
+        unnoticed for a whole cycle: EPIC-PA1 sat armed at the iterations
+        layer after all nine substeps had merged and their issues had closed,
+        with `next_goal.action` still instructing a worker to advance two
+        closed issues. Nothing was selectable, but only because one field
+        nobody had touched still read `goal-ready`.
+
+        This forces the first gate open for every closed-out program and
+        every completed substep, and requires the second to hold on its own.
+        Each subject carries a positive control, so a refusal cannot come
+        from a malformed fixture.
+        """
+        assert_completed_work_is_unselectable(self)
+
+    def test_goal_ready_never_starts_heartbeat_or_external_commands(self):
         runner=Runner()
         controller=self.controller(runner)
         plan=controller.plan
-        self.assertEqual(plan.next_goal()['id'], 'EPIC-PA1')
-        self.assertEqual(plan.next_goal()['status'], 'owner-activated-goal-ready')
-        self.assertEqual(plan.items['EPIC-PA1']['issue'], 386)
-        self.assertEqual(plan.items['EPIC-PA1']['depends_on'], ['GOV-PA1-01'])
-        self.assertEqual(plan.items['EPIC-PA1']['activation_status'], 'owner-activated-goal-ready')
-        self.assertEqual(plan.items['EPIC-PA1']['contract'], 'pa1-parallel-delivery.en.md')
-        self.assertIn('GOV-PA1-01', plan.documented_completed())
-        self.assertNotIn('EPIC-PA1', plan.documented_completed())
+        live=json.loads((self.root/'delivery-plan.yaml').read_text())
+        # The repository plan is in one of two resting shapes. Both are
+        # checked in full; neither may execute.
+        shape=assert_declared_goal_shape(self, live)
+        declared=plan.next_goal()['id']
+        if shape == 'goal-ready':
+            self.assertIsInstance(plan.items[declared]['issue'], int)
+            self.assertEqual(plan.items[declared]['activation_status'], 'owner-activated-goal-ready')
+            self.assertIn('contract', plan.items[declared])
+            self.assertNotIn(declared, plan.documented_completed())
+            self.assertIsNone(plan.select({'active':declared,'status':'running'}))
+        else:
+            # Closed out: no program is declared or armed, so the heartbeat
+            # has nothing to pick up even with a stale running state. The
+            # stale id is derived rather than named, so this covers whichever
+            # program closed out.
+            self.assertIsNone(declared)
+            closed=closed_out_programs(live)
+            self.assertTrue(closed)
+            for name in closed:
+                self.assertIsNone(plan.select({'active':name,'status':'running'}))
         self.assertIsNone(plan.select({}))
+        # EPIC-PA1 keeps its enumerated substeps in either role, and neither
+        # it nor any substep may be selected without an explicit `active`
+        # transition. `assertNotEqual(declared, 'EPIC-PA1')` used to stand
+        # here; it pinned which program was next rather than the rule, so it
+        # is replaced by the generic bar on any program that a completion or
+        # pause record says must stay quiet.
+        self.assertEqual(plan.items['EPIC-PA1']['issue'], 386)
+        self.assertEqual(plan.items['EPIC-PA1']['contract'], 'pa1-parallel-delivery.en.md')
+        assert_no_unauthorised_execution_authority(self, live)
         self.assertIsNone(plan.select({'active':'EPIC-PA1','status':'running'}))
         self.assertEqual(controller.run_once(dry_run=False)['status'], 'awaiting-owner-activated-goal')
         self.assertEqual(runner.calls, [])
@@ -140,14 +234,105 @@ class DeliveryTests(unittest.TestCase):
         ))
         self.assertEqual(plan.items['SITE-01']['activation_status'], 'owner-deferred')
 
-    def test_pa1_requires_explicit_active_transition_and_stops_after_completion(self):
-        altered=json.loads((self.root/'delivery-plan.yaml').read_text())
+        # The scenario this test is named for must run in both shapes, so the
+        # goal-ready declaration is constructed rather than borrowed.
+        identifier,_=self.declare_goal_ready_fixture()
+        ready=DeliveryPlan(self.root/'delivery-plan.yaml')
+        self.assertEqual(ready.next_goal()['id'], identifier)
+        self.assertEqual(ready.next_goal()['status'], 'owner-activated-goal-ready')
+        self.assertEqual(ready.items[identifier]['activation_status'], 'owner-activated-goal-ready')
+        self.assertIsNone(ready.select({}))
+        self.assertIsNone(ready.select({'active':identifier,'status':'running'}))
+        second=Runner()
+        self.assertEqual(self.controller(second).run_once(dry_run=False)['status'],
+                         'awaiting-owner-activated-goal')
+        self.assertEqual(second.calls, [])
+        # Positive control: the identical record with the explicit owner
+        # `active` transition IS selectable. Without this the refusals above
+        # could pass on a malformed fixture instead of on the status gate.
+        activated=json.loads((self.root/'delivery-plan.yaml').read_text())
+        activated['next_goal']['status']='active'
+        (self.root/'delivery-plan.yaml').write_text(json.dumps(activated))
+        self.assertEqual(DeliveryPlan(self.root/'delivery-plan.yaml').select({})['id'], identifier)
+
+    def test_declared_goal_requires_explicit_active_transition_and_satisfied_dependencies(self):
+        """Selection needs an active transition AND documented dependencies.
+
+        The earlier form hardcoded EPIC-PA1 as the declared goal. That pinned
+        which program was next rather than the rule, so it broke as soon as
+        authority legitimately moved. It also never exercised the dependency
+        gate, which is the half that actually protects against executing a
+        program whose activation governance has not merged.
+
+        Its replacement then derived the subject from the live plan's
+        `next_goal`, which raised StopIteration the moment #418 closed out
+        and left no declared goal. The subject is now constructed here, so
+        the selection rule runs in every plan state, and the live plan's own
+        governance shape is asserted separately below -- including for the
+        closed-out program, so a closeout cannot erase the dependency rule.
+        """
+        live=json.loads((self.root/'delivery-plan.yaml').read_text())
+        assert_declared_goal_shape(self, live)
+        live_documented=live['history']['documented_completed_iterations']
+        program_entries=[entry for entry in live['iterations'] if entry['id'] in live['programs']]
+        self.assertTrue(program_entries)
+        for entry in program_entries:
+            # Unconditional on purpose: every top-level program declares its
+            # activation-governance dependency, declared goal or not.
+            self.assertTrue(entry.get('depends_on'),
+                            f"{entry['id']} must declare a governance dependency")
+            for dependency in entry['depends_on']:
+                self.assertIn(dependency, live_documented)
+
+        declared,altered=self.declare_goal_ready_fixture()
+        item=next(entry for entry in altered['iterations'] if entry['id']==declared)
+        dependencies=item.get('depends_on', [])
+
         altered['next_goal']['status']='active'  # Test fixture only, never repository activation.
+        documented=altered['history']['documented_completed_iterations']
+        self.assertTrue(dependencies, 'the declared goal must declare a governance dependency')
+
+        # Active transition alone is not enough. Withhold each dependency in
+        # turn and require selection to refuse. Unconditional on purpose: an
+        # earlier form ran this only `if missing`, so emptying depends_on in
+        # the plan silently disarmed the only test guarding the gate.
+        for dependency in dependencies:
+            withheld=[name for name in documented if name != dependency]
+            altered['history']['documented_completed_iterations']=withheld
+            (self.root/'delivery-plan.yaml').write_text(json.dumps(altered))
+            self.assertIsNone(DeliveryPlan(self.root/'delivery-plan.yaml').select({}), dependency)
+        altered['history']['documented_completed_iterations']=documented
+
+        # With every dependency documented, the declared goal becomes selectable.
+        # This positive control matters: without it every refusal above could
+        # pass on a malformed fixture rather than on the gate under test.
         (self.root/'delivery-plan.yaml').write_text(json.dumps(altered))
-        plan=DeliveryPlan(self.root/'delivery-plan.yaml')
-        self.assertEqual(plan.select({})['id'], 'EPIC-PA1')
-        altered['history']['documented_completed_iterations'].append('EPIC-PA1')
+        self.assertEqual(DeliveryPlan(self.root/'delivery-plan.yaml').select({})['id'], declared)
+
+        # An active transition over a record that is not itself goal-ready
+        # must still refuse, or a parent-controlled substep could be executed
+        # directly by redeclaring it.
+        item['activation_status']='parent-controlled'
+        (self.root/'delivery-plan.yaml').write_text(json.dumps(altered))
+        self.assertIsNone(DeliveryPlan(self.root/'delivery-plan.yaml').select({}))
+        item['activation_status']='owner-activated-goal-ready'
+
+        # An issue-less record is not executable either.
+        issue=item.pop('issue')
+        (self.root/'delivery-plan.yaml').write_text(json.dumps(altered))
+        self.assertIsNone(DeliveryPlan(self.root/'delivery-plan.yaml').select({}))
+        item['issue']=issue
+        (self.root/'delivery-plan.yaml').write_text(json.dumps(altered))
+        self.assertEqual(DeliveryPlan(self.root/'delivery-plan.yaml').select({})['id'], declared)
+
+        # Goal-ready without the active transition never selects.
+        altered['next_goal']['status']='owner-activated-goal-ready'
+        (self.root/'delivery-plan.yaml').write_text(json.dumps(altered))
+        self.assertIsNone(DeliveryPlan(self.root/'delivery-plan.yaml').select({}))
+
+        # Completion stops selection.
         altered['next_goal']={'id':None,'status':'complete'}
+        documented.append(declared)
         (self.root/'delivery-plan.yaml').write_text(json.dumps(altered))
         self.assertIsNone(DeliveryPlan(self.root/'delivery-plan.yaml').select({}))
         runner=Runner()

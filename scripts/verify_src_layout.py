@@ -41,7 +41,6 @@ def main():
         "agentos-backup.py",
         "agentos-restore.py",
         "operating_preflight.py",
-        "product_validate.py",
         "verify_continuity_acceptance.py",
         "verify_document_acceptance.py",
         "verify_document_boundary.py",

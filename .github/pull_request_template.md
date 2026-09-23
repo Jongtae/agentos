@@ -12,6 +12,11 @@ Relevant [Development Constitution](../docs/development-constitution.en.md) prin
 
 ## What changed
 
+
+## Existing solutions review (Adopt / Adapt / Build)
+
+For material commodity infrastructure introduced/replaced by this PR, record official/reference and mature OSS candidates, maintenance/security/licence/compatibility fit, the `Adopt / Adapt / Build` decision, and why rejected candidates are insufficient. Otherwise write `N/A`.
+
 ## Authority / threat model
 
 What owner data, Grants, packages/runtimes, filesystem scopes, network destinations, secrets, external recipients/actions, or human gates are involved?
@@ -39,6 +44,16 @@ Publisher identity, signature/integrity, provenance/SBOM, static verification, b
 ## Lifecycle / recovery impact
 
 Install, staged health check, enable/disable, update, rollback, quarantine, uninstall, restart/recovery, and owner Artifact/Evidence preservation impact:
+
+## README / localization impact
+
+Complete when any public README or README visual changes; otherwise write `N/A`.
+
+- canonical `README.md` changed:
+- `README.ko.md`, `README.ja.md`, `README.zh-CN.md` updated for semantic/structural parity:
+- illustrative product direction vs current supported slice remains explicit:
+- embedded-text visuals are language-neutral or localized:
+- `python3 scripts/verify_readme_localization.py`:
 
 ## Validation
 

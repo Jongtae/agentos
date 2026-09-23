@@ -21,6 +21,7 @@ from personal_agent.gmail import (
     GmailError,
     GmailReauthenticationRequired,
     _assert_renderable_charset,
+    _parsed_mime_header,
 )
 from personal_agent.quickstart_store import QuickStore
 
@@ -69,6 +70,9 @@ class GmailConnectorTests(unittest.TestCase):
 
     def connect(self, owner="owner-a", access_token="access-secret", refresh_token="refresh-secret"):
         _offer, state = self.begin(owner)
+        self.challenge = parse_qs(
+            urlparse(_offer["authorization_url"]).query
+        )["code_challenge"][0]
         seen = []
 
         def exchange(request):
@@ -137,6 +141,19 @@ class GmailConnectorTests(unittest.TestCase):
         )
         self.assertEqual(request["grant_type"], "authorization_code")
         self.assertNotEqual(request["code_verifier"], "oauth-code")
+        # The advertised method is not the guarantee. oauthlib's
+        # create_code_challenge silently returns the verifier unchanged - a
+        # plain challenge - when the method argument is omitted, so a URL can
+        # carry code_challenge_method=S256 over no transform at all. The
+        # hand-rolled sha256 this replaced could not fail that way, so
+        # adoption introduced the mode. Tie the advertised challenge to the
+        # verifier actually presented at exchange.
+        verifier = request["code_verifier"]
+        expected = base64.urlsafe_b64encode(
+            hashlib.sha256(verifier.encode()).digest()
+        ).rstrip(b"=").decode()
+        self.assertEqual(self.challenge, expected)
+        self.assertNotEqual(self.challenge, verifier)
         self.assertEqual(result["granted_scopes"], [GMAIL_READONLY_SCOPE])
         self.assertNotIn("drive", str(result).lower())
         self.assertNotIn("calendar", str(result).lower())
@@ -1081,6 +1098,21 @@ class GmailConnectorTests(unittest.TestCase):
         self.assertNotIn("must not be body", str(dropped.exception))
 
     def test_empty_content_disposition_is_not_treated_as_an_absent_header(self):
+        """A blank disposition is malformed, not an unrecognised disposition.
+
+        RFC 2183 section 2 requires a ``disposition-type`` token, so an empty
+        or whitespace-only value is a header that does not parse rather than a
+        well-formed header naming a role this parser does not know. The stdlib
+        parse records ``HeaderMissingRequiredValue``/``InvalidHeaderDefect``
+        for both spellings, and the defect rule refuses the read.
+
+        This previously reported ``body_not_attributable``, which asserts the
+        stronger and here untrue claim that the message parsed cleanly but no
+        part could be attributed as its body. Both reasons withhold the body;
+        ``invalid_provider_response`` names the actual cause. The
+        unrecognised-but-well-formed case keeps the old reason and is covered
+        by ``test_unknown_content_disposition_is_not_admitted_as_message_body``.
+        """
         self.connect()
         encoded = base64.urlsafe_b64encode(b"must not be body").decode()
         for disposition in ("", "   "):
@@ -1096,7 +1128,7 @@ class GmailConnectorTests(unittest.TestCase):
                 })
                 with self.assertRaises(GmailError) as dropped:
                     self.read()
-                self.assertEqual(dropped.exception.reason, "body_not_attributable")
+                self.assertEqual(dropped.exception.reason, "invalid_provider_response")
                 self.assertNotIn("must not be body", str(dropped.exception))
 
     def test_cfws_comment_in_content_disposition_keeps_an_inline_body(self):
@@ -1638,6 +1670,412 @@ class GmailConnectorTests(unittest.TestCase):
         with self.assertRaises(GmailError) as bounded:
             self.read()
         self.assertEqual(bounded.exception.reason, "message_too_complex")
+
+    def test_stdlib_header_defects_are_a_general_fail_closed_signal(self):
+        """Any defect the stdlib header parse records refuses the read.
+
+        This replaces an enumeration of the malformations this module happened
+        to think of - a hand-written CFWS/comment scanner, a quoted-string
+        aware parameter splitter, an explicit HTAB/control-character sweep and
+        a bespoke duplicate-name check - with the parser's own defect list. A
+        malformation nobody enumerated is now refused for the same reason as
+        one that was.
+
+        The legal constructs this must NOT reject (HTAB folding, nested
+        comments, parentheses inside quoted values, a single leading comment)
+        are asserted by ``test_present_content_type_can_omit_optional_charset``
+        and ``test_cfws_comment_in_content_disposition_keeps_an_inline_body``.
+        """
+        self.connect()
+        encoded = base64.urlsafe_b64encode(b"private body").decode()
+        cases = (
+            # Duplicate conflicting parameter, as the sender spelled it.
+            ("Content-Type", "text/plain; charset=utf-8; charset=iso-8859-1"),
+            # The same duplicate spelled in two cases, optionally hidden behind
+            # a comment. RFC 2045 parameter names are case-insensitive, so
+            # these are one parameter given twice.
+            ("Content-Type", "text/plain; charset=utf-8; CHARSET=iso-8859-1"),
+            ("Content-Type", "text/plain; charset=us-ascii; (x) CHARSET=utf-8"),
+            # Unterminated comment and unterminated quoted string.
+            ("Content-Type", "text/plain; charset=utf-8; (unterminated"),
+            ("Content-Type", "text/plain; charset=(unterminated utf-8"),
+            ("Content-Type", 'text/plain; charset="utf-8'),
+            # Embedded control characters. HTAB is legal and excluded here.
+            ("Content-Type", "text/plain; charset=utf-8\r"),
+            ("Content-Type", "text/plain; charset=utf-8\n"),
+            ("Content-Type", "text/plain; charset=utf-8\x00"),
+            ("Content-Type", "text/plain; charset=utf-8\x01"),
+            ("Content-Type", "text/plain; charset=utf-8\x7f"),
+            # No media type at all.
+            ("Content-Type", ""),
+            ("Content-Type", "   "),
+            ("Content-Type", "notatype"),
+            # A doubled interior semicolon IS a defect, unlike a trailing
+            # one: CPython records InvalidHeaderDefect for the empty
+            # segment between two parameters but not for one at the end.
+            ("Content-Type", "text/plain;; charset=utf-8"),
+            # The same rule applies to the disposition header, which decides
+            # whether the part may become the body at all.
+            ("Content-Disposition", "inline\r"),
+            ("Content-Disposition", "inline\n"),
+            ("Content-Disposition", "inline\x00"),
+            ("Content-Disposition", 'attachment; filename="unterminated'),
+            ("Content-Disposition", "inline; filename=a; FILENAME=b"),
+        )
+        for header_name, value in cases:
+            with self.subTest(header=header_name, value=repr(value)):
+                self.responses.clear()
+                self.responses.append({
+                    "id": "m_1",
+                    "threadId": "t_1",
+                    "payload": {
+                        "mimeType": "text/plain",
+                        "headers": [{"name": header_name, "value": value}],
+                        "body": {"data": encoded},
+                    },
+                })
+                with self.assertRaises(GmailError) as malformed:
+                    self.read()
+                self.assertEqual(malformed.exception.reason, "invalid_provider_response")
+                self.assertNotIn("private body", str(malformed.exception))
+
+    def test_a_case_varied_duplicate_is_always_refused(self):
+        """The other half of the invariant.
+
+        The sibling property test states that a legal header must not be
+        refused. On its own that is one-directional: an implementation that
+        refuses nothing satisfies it. This states the dual - a parameter name
+        repeated under a different spelling must be refused - so the pair
+        pins both directions of the check rather than only the side that
+        happened to break last.
+
+        Generated pairs, not chosen ones, for the same reason as the sibling.
+        """
+        registry_names = ("charset", "name", "start", "boundary", "format")
+        spellings = (str.upper, str.capitalize, lambda text: text.swapcase())
+        values = ("utf-8", '"a.txt"', '"<root>"', "B", "flowed")
+        refused_count = 0
+        for parameter, value in zip(registry_names, values):
+            for respell in spellings:
+                variant = respell(parameter)
+                if variant == parameter:
+                    continue
+                for first, second in (
+                    (parameter, variant),
+                    (variant, parameter),
+                ):
+                    header = f"text/plain; {first}={value}; {second}={value}"
+                    with self.subTest(header=header):
+                        with self.assertRaises(GmailError) as duplicated:
+                            _parsed_mime_header("Content-Type", header)
+                        self.assertEqual(
+                            duplicated.exception.reason, "invalid_provider_response"
+                        )
+                        refused_count += 1
+                    # The same repeat with a comment hiding one occurrence.
+                    hidden = f"text/plain; {first}={value}; (c) {second}={value}"
+                    with self.subTest(header=hidden):
+                        with self.assertRaises(GmailError):
+                            _parsed_mime_header("Content-Type", hidden)
+                        refused_count += 1
+        self.assertGreater(refused_count, 20, "generator produced too few pairs")
+
+    def test_mixed_rfc2231_forms_are_judged_on_the_resolved_value(self):
+        """Where these are refused moved, but they are still refused.
+
+        Mixing an RFC 2231 extended parameter with a sectioned continuation
+        (``charset*=utf-8''x; charset*1=y``) was refused at the header gate by
+        the hand-written scanner. The stdlib parser reads it without recording
+        a defect, so the header now parses and the value it resolves to -
+        the sections concatenated - reaches the charset allowlist instead.
+
+        The outcome is unchanged: every form below still fails closed. Pinned
+        because the refusal point moved, which is the kind of change that
+        looks like a widening in a diff and needs to be stated rather than
+        discovered.
+        """
+        self.connect()
+        encoded = base64.urlsafe_b64encode(b"private body").decode()
+        for header_name, value in (
+            ("Content-Type", "text/plain; charset*=utf-8''x; charset*1=y"),
+            ("Content-Type", "text/plain; charset*1=y; charset*=utf-8''x"),
+            ("Content-Type", "text/plain; charset*=us-ascii''utf-7; charset*1=z"),
+            ("Content-Type", "text/plain; charset*=us-ascii''utf-8; charset*1=z"),
+            ("Content-Disposition", "inline; filename*=utf-8''a.txt; filename*1=b"),
+        ):
+            with self.subTest(header=header_name, value=value):
+                self.responses.clear()
+                self.responses.append({
+                    "id": "m_1",
+                    "threadId": "t_1",
+                    "payload": {
+                        "mimeType": "text/plain",
+                        "headers": [{"name": header_name, "value": value}],
+                        "body": {"data": encoded},
+                    },
+                })
+                if header_name == "Content-Type":
+                    with self.assertRaises(GmailError) as refused:
+                        self.read()
+                    self.assertIn(
+                        refused.exception.reason,
+                        {"unsupported_charset", "invalid_provider_response"},
+                    )
+                    self.assertNotIn("private body", str(refused.exception))
+                else:
+                    # A disposition parameter is not decoded, so this one is
+                    # simply read as an inline body rather than refused.
+                    self.assertEqual(self.read().body, "private body")
+
+    def test_no_defect_and_no_duplicate_is_never_refused(self):
+        """The invariant the duplicate check must not violate.
+
+        Two hand-enumerated tables guard this function: one listing
+        malformations that must be refused, one listing legal shapes that must
+        be accepted. Both are lists, and the function's failure mode is
+        precisely "the case nobody listed" - the previous cycle's table missed
+        a trailing semicolon, and the commit that fixed it introduced a crash
+        on an RFC 2231 form that was also not listed.
+
+        So state the rule instead of extending the list: if the stdlib parse
+        records no defect and no parameter name repeats once case and comments
+        are folded, the header is legal as far as this module can tell and
+        must not be refused. Generated inputs, not chosen ones - a future
+        member of the class fails here without anyone having thought of it.
+        """
+        import itertools
+        import re
+        from email.headerregistry import HeaderRegistry
+
+        registry = HeaderRegistry()
+        comment = re.compile(r"\([^()]*\)")
+
+        def folded_names(value):
+            """Parameter names as a sender wrote them, comments stripped."""
+            names = []
+            for segment in value.split(";")[1:]:
+                bare = comment.sub("", segment).split("=", 1)[0].strip().casefold()
+                # An RFC 2231 continuation or extended form is one parameter.
+                bare = re.sub(r"\*\d*\*?$", "", bare)
+                if bare:
+                    names.append(bare)
+            return names
+
+        fragments = (
+            "charset=utf-8", "charset=us-ascii", 'name="a.txt"', "name=a.txt",
+            "format=flowed", "boundary=B", 'start="<root>"',
+            "charset*0=utf-", "charset*1=8", "charset*=us-ascii''utf-8",
+            "name*0=a", "name*1=.txt", "(c)", "", " ", "\t",
+            # Upper-case parameter names are what the duplicate check is made
+            # of: it case-folds the value and reparses. Without these the
+            # generator short-circuits on ``folded == value`` for two thirds
+            # of its cases and never exercises the reparse at all - a guard
+            # that does not touch the implementation it guards.
+            "CHARSET=UTF-8", 'Name="A.TXT"', "NAME*0=x", 'Start="<ROOT>"',
+        )
+        refused = []
+        for count in (1, 2, 3):
+            for combination in itertools.product(fragments, repeat=count):
+                value = "text/plain; " + "; ".join(combination)
+                names = folded_names(value)
+                if len(names) != len(set(names)):
+                    continue  # a genuine duplicate; refusal is correct
+                try:
+                    parsed = registry("Content-Type", value)
+                except Exception:
+                    continue  # stdlib itself cannot read it; refusal is correct
+                if parsed.defects:
+                    continue  # the defect gate owns this; refusal is correct
+                try:
+                    _parsed_mime_header("Content-Type", value)
+                except GmailError:
+                    refused.append(value)
+                except Exception as unexpected:
+                    self.fail(
+                        "non-GmailError escaped the connector for "
+                        f"{value!r}: {type(unexpected).__name__}"
+                    )
+        self.assertEqual(refused, [], f"{len(refused)} legal headers refused")
+
+    def test_empty_parameter_segments_do_not_refuse_ordinary_mail(self):
+        """A trailing semicolon must not make a message unreadable.
+
+        The duplicate-name check compares how many parameters were written
+        against how many survived folding. ``get_params`` emits a nameless
+        ``('', '')`` entry for an empty segment, so counting those refused a
+        header that CPython records no defect for - an ordinary trailing
+        semicolon, which any sender can append.
+
+        The harm was not a rejected header. The refusal happens inside
+        ``_body``, so ``read_message`` returns nothing and the owner loses
+        subject, sender and date as well. A previous review cycle fixed
+        exactly that harm class; the count heuristic reopened it, and the
+        defect table added alongside it did not contain a single trailing
+        semicolon - another enumeration.
+        """
+        self.connect()
+        encoded = base64.urlsafe_b64encode(b"readable body").decode()
+        for header_name, value in (
+            ("Content-Type", "text/plain;"),
+            ("Content-Type", "text/plain ;"),
+            ("Content-Type", "text/plain;\t"),
+            ("Content-Type", "text/plain; charset=utf-8;"),
+            ("Content-Type", "text/plain; charset=utf-8; "),
+            ("Content-Disposition", "inline;"),
+            ("Content-Disposition", "inline ;"),
+            ("Content-Disposition", 'inline; filename="a.txt";'),
+        ):
+            with self.subTest(header=header_name, value=repr(value)):
+                self.responses.clear()
+                self.responses.append({
+                    "id": "m_1",
+                    "threadId": "t_1",
+                    "payload": {
+                        "mimeType": "text/plain",
+                        "headers": [{"name": header_name, "value": value}],
+                        "body": {"data": encoded},
+                    },
+                })
+                self.assertEqual(self.read().body, "readable body")
+
+        # The same shape on an explicitly declared attachment must still give
+        # the truthful empty body rather than an error.
+        self.responses.clear()
+        self.responses.append({
+            "id": "m_1",
+            "threadId": "t_1",
+            "payload": {
+                "mimeType": "multipart/mixed",
+                "parts": [{
+                    "mimeType": "application/pdf",
+                    "filename": "invoice.pdf",
+                    "headers": [{
+                        "name": "Content-Disposition",
+                        "value": 'attachment; filename="invoice.pdf";',
+                    }],
+                    "body": {"attachmentId": "a1"},
+                }],
+            },
+        })
+        self.assertEqual(self.read().body, "")
+
+    def test_media_type_grammar_is_delegated_but_still_agreement_bound(self):
+        """Record what removing the hand-written media-type regex widened.
+
+        The regex rejected any type outside its own character class. The
+        parsed type is now compared for equality against Gmail's ``mimeType``
+        instead, which constrains agreement rather than grammar, so
+        spec-conformant CFWS around the solidus and token characters the old
+        class omitted are accepted where they previously were not.
+
+        This is a deliberate widening and is pinned here so it cannot drift
+        further unnoticed. It crosses no boundary: the charset allowlist is
+        unchanged, and only ``text/plain`` and ``text/html`` are ever decoded
+        as a body, so a type outside that pair still yields a truthful empty
+        body rather than rendered content.
+        """
+        self.connect()
+        encoded = base64.urlsafe_b64encode(b"cfws body").decode()
+        # CFWS around the solidus is legal and now yields the body.
+        for value in ("text /plain", "text/ plain", "text / plain"):
+            with self.subTest(accepted=value):
+                self.responses.clear()
+                self.responses.append({
+                    "id": "m_1",
+                    "threadId": "t_1",
+                    "payload": {
+                        "mimeType": "text/plain",
+                        "headers": [{"name": "Content-Type", "value": value}],
+                        "body": {"data": encoded},
+                    },
+                })
+                self.assertEqual(self.read().body, "cfws body")
+
+        # A type the old regex rejected is accepted by the grammar but is not
+        # text/plain or text/html, so it is never decoded as a body.
+        for value in ("text/plain%", "text/plain*", "text/plain|"):
+            with self.subTest(not_decoded=value):
+                self.responses.clear()
+                self.responses.append({
+                    "id": "m_1",
+                    "threadId": "t_1",
+                    "payload": {
+                        "mimeType": value,
+                        "headers": [{"name": "Content-Type", "value": value}],
+                        "body": {"data": encoded},
+                    },
+                })
+                self.assertEqual(self.read().body, "")
+
+        # Disagreement between the parsed type and Gmail's own mimeType is
+        # still refused - that is the check the regex was replaced by.
+        self.responses.clear()
+        self.responses.append({
+            "id": "m_1",
+            "threadId": "t_1",
+            "payload": {
+                "mimeType": "text/plain",
+                "headers": [{"name": "Content-Type", "value": "text/html"}],
+                "body": {"data": encoded},
+            },
+        })
+        with self.assertRaises(GmailError) as mismatch:
+            self.read()
+        self.assertEqual(mismatch.exception.reason, "invalid_provider_response")
+
+    def test_rfc2231_extended_parameter_cannot_smuggle_a_blocked_charset(self):
+        """An RFC 2231 charset reaches the allowlist like any other.
+
+        ``charset*=us-ascii\'\'utf-7`` parses cleanly - no defect - and the
+        stdlib resolves it to ``utf-7``. The defect rule therefore cannot be
+        the thing that stops it; the curated allowlist has to, and it must see
+        the resolved value rather than the literal parameter text.
+        """
+        self.connect()
+        for encoding, refused_charset in (
+            ("us-ascii''utf-7", "utf-7"),
+            ("us-ascii''unicode_escape", "unicode_escape"),
+        ):
+            with self.subTest(charset=refused_charset):
+                markup = "<script>alert(1)</script>"
+                raw = (
+                    markup.encode("utf-7")
+                    if refused_charset == "utf-7"
+                    else b"\\u003cscript\\u003e"
+                )
+                self.responses.clear()
+                self.responses.append({
+                    "id": "m_1",
+                    "threadId": "t_1",
+                    "payload": {
+                        "mimeType": "text/plain",
+                        "headers": [
+                            {"name": "Content-Type", "value": "text/plain; charset*=" + encoding}
+                        ],
+                        "body": {"data": base64.urlsafe_b64encode(raw).decode()},
+                    },
+                })
+                with self.assertRaises(GmailError) as refused:
+                    self.read()
+                self.assertEqual(refused.exception.reason, "unsupported_charset")
+                self.assertNotIn("script", str(refused.exception))
+
+        # A sectioned continuation naming an allowed charset still decodes, so
+        # the gate reads the reassembled value and does not simply distrust
+        # every RFC 2231 parameter.
+        self.responses.clear()
+        self.responses.append({
+            "id": "m_1",
+            "threadId": "t_1",
+            "payload": {
+                "mimeType": "text/plain",
+                "headers": [
+                    {"name": "Content-Type", "value": "text/plain; charset*0=utf-; charset*1=8"}
+                ],
+                "body": {"data": base64.urlsafe_b64encode("café".encode()).decode()},
+            },
+        })
+        self.assertEqual(self.read().body, "café")
 
     def test_search_result_exposes_symmetric_redacted_evidence(self):
         self.connect()

@@ -44,6 +44,21 @@ What may persist locally to this adapter/package, how it is isolated/exported/re
 
 Timeout, cancellation, crash/restart, duplicate/retry, partial external effect, quarantine/disable and runtime replacement behavior:
 
+
+## Existing solutions review (Adopt / Adapt / Build)
+
+Required when this work materially implements or replaces commodity infrastructure. Otherwise write `N/A`.
+
+- problem/boundary:
+- official SDK/reference/standard candidates:
+- mature open-source candidates:
+- maintenance/security/supply-chain fit:
+- licence fit:
+- runtime/deployment/compatibility fit:
+- decision: `Adopt / Adapt / Build`
+- why rejected candidates are insufficient:
+- AgentOS-owned policy/authority boundary kept outside the dependency:
+
 ## Acceptance criteria
 
 - [ ]

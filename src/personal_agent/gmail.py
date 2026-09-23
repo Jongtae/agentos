@@ -13,10 +13,9 @@ import base64
 import codecs
 from contextlib import contextmanager
 from dataclasses import dataclass
-from email import policy
 from email.errors import HeaderParseError
 from email.header import decode_header
-from email.parser import HeaderParser
+from email.headerregistry import HeaderRegistry
 import hashlib
 import hmac
 import json
@@ -26,9 +25,10 @@ import secrets
 import threading
 import time
 from typing import Callable
-from urllib.parse import quote, urlencode, urlsplit
+from urllib.parse import quote, urlsplit
 
 from cryptography.fernet import Fernet, InvalidToken
+from oauthlib.oauth2 import WebApplicationClient
 
 from .connector_contract import (
     ConnectorContractError,
@@ -93,6 +93,14 @@ _ALLOWED_CHARSETS = frozenset({
     "shift_jis_2004", "shift_jisx0213", "tis-620", "utf-16", "utf-16-be", "utf-16-le",
     "utf-32", "utf-32-be", "utf-32-le", "utf-8", "utf-8-sig",
 })
+# One registry, and one cached header class per structured header this module
+# reads. ``HeaderRegistry.__getitem__`` builds a fresh class on every lookup, so
+# caching keeps the bounded per-part header walk from rebuilding two types for
+# every part of every message.
+_HEADER_REGISTRY = HeaderRegistry()
+_MIME_HEADER_CLASSES = {
+    name: _HEADER_REGISTRY[name] for name in ("Content-Type", "Content-Disposition")
+}
 _MESSAGE_ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 _ATTACHMENT_ID = re.compile(r"[A-Za-z0-9_-]{1,4096}\Z")
 _OAUTH_LOCK = threading.RLock()
@@ -246,10 +254,17 @@ def _finite_now(now: Callable[[], float]) -> float:
     return float(value)
 
 
+# See the REUSE-R1b (#427) Existing Solutions Review in ``drive_web_oauth`` for
+# why ``google-auth``/``google-auth-oauthlib`` are rejected, why ``oauthlib`` is
+# adopted for authorization-request construction only, and in particular why
+# ``prepare_request_body``/``parse_request_body_response`` must NOT be adopted
+# for the token exchange or for scope enforcement in ``_validated_tokens``.
 def _pkce_pair() -> tuple[str, str]:
-    verifier = secrets.token_urlsafe(64)
-    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
-    return verifier, challenge
+    # "S256" is passed explicitly: ``create_code_challenge`` silently falls back
+    # to the unprotected ``plain`` transform when the method is omitted.
+    client = WebApplicationClient("")
+    verifier = client.create_code_verifier(96)
+    return verifier, client.create_code_challenge(verifier, "S256")
 
 
 def _bounded_text(value: object, maximum: int) -> str:
@@ -307,79 +322,69 @@ def _decoded_header(value: object, maximum: int) -> str:
     return _bounded_text("".join(parts), maximum)
 
 
-def _strip_mime_comments(value: str) -> str:
-    """Replace RFC 5322 CFWS comments with a single space.
+def _assert_unique_mime_parameters(name: str, value: str) -> None:
+    """Refuse a parameter name that repeats once case is folded.
 
-    Python's header parser removes comments before exposing parameters, so a
-    raw scanner that does not understand them can miss a duplicate such as
-    ``charset=us-ascii; (x) CHARSET=utf-8`` and leave the effective value
-    ambiguous. Comments nest, quoted strings hide them, and a quoted pair
-    escapes the next character in either context. An unterminated comment or
-    quoted string is a malformed provider response.
+    RFC 2045 parameter names are case-insensitive, but CPython keys duplicate
+    detection on the raw spelling, so ``charset=us-ascii; (x) CHARSET=utf-8``
+    records no defect and is silently resolved last-wins. The parsed header
+    only exposes the folded mapping, so the repeat is invisible there.
+
+    Rather than count parameters or strip comments by hand, hand the same
+    parser a case-folded copy. A name that differed only in case becomes a
+    literal duplicate, and the parser's own duplicate detection - the signal
+    this module already trusts - reports it. Case folding cannot change the
+    grammar, so a header that parses cleanly and repeats nothing still parses
+    cleanly.
+
+    Three earlier attempts at this check were hand-written and each failed in
+    a way its tests did not list: a private parse-tree attribute, then a
+    parameter count that refused an ordinary trailing semicolon, then the same
+    count crashing on an RFC 2231 extended parameter mixed with a sectioned
+    continuation. Reusing the parser removes the surface those shared.
     """
-    out: list[str] = []
-    quoted = False
-    depth = 0
-    index = 0
-    length = len(value)
-    while index < length:
-        character = value[index]
-        if character == "\\" and (quoted or depth):
-            if index + 1 >= length:
-                raise GmailError("invalid_provider_response")
-            if quoted:
-                out.append(character)
-                out.append(value[index + 1])
-            index += 2
-            continue
-        if quoted:
-            out.append(character)
-            if character == '"':
-                quoted = False
-        elif depth:
-            if character == "(":
-                depth += 1
-            elif character == ")":
-                depth -= 1
-                if depth == 0:
-                    out.append(" ")
-        elif character == '"':
-            quoted = True
-            out.append(character)
-        elif character == "(":
-            depth += 1
-        else:
-            out.append(character)
-        index += 1
-    if depth or quoted:
+    folded = value.casefold()
+    if folded == value:
+        return
+    if _MIME_HEADER_CLASSES[name](name, folded).defects:
         raise GmailError("invalid_provider_response")
-    return "".join(out)
 
 
-def _mime_parameter_names(value: str) -> list[str]:
-    """Return raw parameter names without collapsing case-insensitive duplicates."""
-    value = _strip_mime_comments(value)
-    segments = []
-    start = 0
-    quoted = False
-    escaped = False
-    for index, character in enumerate(value):
-        if escaped:
-            escaped = False
-        elif quoted and character == "\\":
-            escaped = True
-        elif character == '"':
-            quoted = not quoted
-        elif character == ";" and not quoted:
-            segments.append(value[start:index])
-            start = index + 1
-    segments.append(value[start:])
-    names = []
-    for segment in segments[1:]:
-        match = re.match(r"\s*([!#$%&'*+.^_`|~0-9A-Za-z-]+)\s*=", segment)
-        if match is not None:
-            names.append(match.group(1).casefold())
-    return names
+def _parsed_mime_header(name: str, value: str):
+    """Parse one Gmail-supplied structured header value with the stdlib parser.
+
+    Gmail's ``format=full`` hands each header over already split into name and
+    value, which is exactly the shape :class:`email.headerregistry.HeaderRegistry`
+    parses. Delegating to it removes this module's hand-written CFWS/comment,
+    quoted-string, control-character and parameter scanners, and with them the
+    standing risk that this module's view of a header disagrees with the
+    parser's.
+
+    Any defect the stdlib parse records is a refusal. That one general signal
+    replaces an enumeration of the malformations we happened to think of: it
+    covers a missing media type or disposition, duplicate parameters, an
+    unterminated comment or quoted string, and embedded control characters
+    such as CR, LF, NUL and DEL, while still accepting the legal constructs
+    real mail uses - HTAB folding, nested comments, parentheses inside quoted
+    values and RFC 2231 continuations.
+    """
+    try:
+        parsed = _MIME_HEADER_CLASSES[name](name, value)
+        if parsed.defects:
+            raise GmailError("invalid_provider_response")
+        _assert_unique_mime_parameters(name, value)
+    except GmailError:
+        raise
+    except (HeaderParseError, IndexError, LookupError, TypeError, ValueError, UnicodeError):
+        # The duplicate check re-reads the header through a second stdlib
+        # accessor, which has its own failure modes: mixing an RFC 2231
+        # extended parameter with a sectioned continuation makes
+        # ``decode_params`` sort ``int`` against ``None`` and raise
+        # ``TypeError``. Any such raise is provider data this module cannot
+        # interpret, so it refuses like every other malformation rather than
+        # escaping the GmailError contract and leaving the connector.
+        raise GmailError("invalid_provider_response") from None
+    return parsed
 
 
 class GmailConnector:
@@ -504,21 +509,21 @@ class GmailConnector:
                     "connection_revision": current.connection_revision,
                 }
                 self.store.secret(f"{PENDING_SECRET_KEY}:{owner}", pending)
-        query = {
-            "client_id": self.client_id,
-            "redirect_uri": self.redirect_uri,
-            "response_type": "code",
-            "scope": GMAIL_READONLY_SCOPE,
-            "access_type": "offline",
-            "include_granted_scopes": "false",
-            "code_challenge": challenge,
-            "code_challenge_method": "S256",
-            "state": state,
-        }
+        authorization_url = WebApplicationClient(self.client_id).prepare_request_uri(
+            AUTHORIZATION_ENDPOINT,
+            redirect_uri=self.redirect_uri,
+            scope=[GMAIL_READONLY_SCOPE],
+            state=state,
+            code_challenge=challenge,
+            code_challenge_method="S256",
+            access_type="offline",
+            # Never widen the grant to scopes this owner approved elsewhere.
+            include_granted_scopes="false",
+        )
         required = self.connection_required(owner_id)
         return {
             **required,
-            "authorization_url": AUTHORIZATION_ENDPOINT + "?" + urlencode(query),
+            "authorization_url": authorization_url,
             "expires_at": pending["expires_at"],
         }
 
@@ -998,47 +1003,35 @@ class GmailConnector:
                         content_type = value
             # A comment is legal CFWS in Content-Disposition too, so
             # ``inline (rendered)`` must stay inline rather than silently
-            # becoming an attachment and dropping the body.
-            disposition_kind = (
-                _strip_mime_comments(disposition).split(";", 1)[0].strip().lower()
-                if disposition_present
-                else ""
-            )
+            # becoming an attachment and dropping the body. The stdlib parse
+            # resolves the comment; a disposition that does not parse is a
+            # malformed provider response rather than an unknown token, so it
+            # is refused here instead of being demoted to a heuristic drop.
+            disposition_kind = ""
+            if disposition_present:
+                disposition_kind = (
+                    _parsed_mime_header("Content-Disposition", disposition).content_disposition
+                    or ""
+                ).lower()
             normalized_mime = mime_type.lower() if isinstance(mime_type, str) else ""
             parsed_content_type = None
             charset = None
             content_type_names = False
             if "content-type" in security_headers:
-                # Derive the main type from the same comment-stripped text the
-                # parameter scanner uses, so a leading comment cannot make the
-                # two views disagree and hard-fail an otherwise valid part.
-                normalized_content_type = _strip_mime_comments(content_type)
-                main_type = normalized_content_type.split(";", 1)[0].strip().lower()
-                if (
-                    not content_type.strip()
-                    # HTAB is legal WSP inside a header value. Only the other C0
-                    # controls and DEL indicate a malformed provider response.
-                    or any(
-                        (ord(character) < 32 and character != "\t") or ord(character) == 127
-                        for character in content_type
-                    )
-                    or re.fullmatch(r"[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+", main_type) is None
-                    or main_type != normalized_mime
-                ):
-                    raise GmailError("invalid_provider_response")
-                parsed_content_type = HeaderParser(policy=policy.default).parsestr(
-                    "Content-Type: " + content_type + "\n\n"
-                )["Content-Type"]
-                parameter_names = _mime_parameter_names(content_type)
-                if (
-                    parsed_content_type is None
-                    or parsed_content_type.defects
-                    or parsed_content_type.content_type.lower() != normalized_mime
-                    or len(parameter_names) != len(set(parameter_names))
-                ):
+                parsed_content_type = _parsed_mime_header("Content-Type", content_type)
+                # Gmail's decomposed ``mimeType`` and the part's own
+                # Content-Type must agree. A part that is selected as one media
+                # type and decoded as another is not something to guess about,
+                # and this equality also rejects a media type the header
+                # grammar accepted but Gmail never declared.
+                if parsed_content_type.content_type.lower() != normalized_mime:
                     raise GmailError("invalid_provider_response")
                 if normalized_mime in {"text/plain", "text/html"}:
                     charset_value = parsed_content_type.params.get("charset")
+                    # ``charset=""`` and ``charset=" "`` parse without a defect
+                    # and yield a blank value. That must be refused rather than
+                    # fall through to the RFC 2045 default below, which would
+                    # let an explicitly blank declaration decode as us-ascii.
                     if charset_value is not None and (
                         not isinstance(charset_value, str) or not charset_value.strip()
                     ):

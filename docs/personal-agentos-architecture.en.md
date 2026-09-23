@@ -52,7 +52,7 @@ Everything above the worker boundary remains authoritative when a worker changes
 
 ## Kernel primitives
 
-D-AP-01 / [#334](https://github.com/Jongtae/personal-agentos/issues/334) supplies the v0.1 schema/specification foundation. This architecture retains ten responsibility boundaries:
+D-AP-01 / [#334](https://github.com/Jongtae/agentos/issues/334) supplies the v0.1 schema/specification foundation. This architecture retains ten responsibility boundaries:
 
 ### Owner
 The human principal whose state is protected: identity, policies, devices/runtime claims, preferences and trust settings. Authority is not delegated to a package or marketplace.
@@ -191,7 +191,7 @@ Start with a capable default assistant and shared research/file/result/continuit
 
 A first useful Files package proves the same public Package/Runtime/Grant boundary external authors use. General/Research/Coding references remain subsequent SDK work, not hidden privilege. The first integrated app must do useful work, then survive revoke/remove/restart and replacement with owner results intact; denying every task is not success.
 
-[USE-01 #358](https://github.com/Jongtae/personal-agentos/issues/358) improves current defaults without waiting for the whole platform. [OBS-01 #359](https://github.com/Jongtae/personal-agentos/issues/359) projects actual progress and controls. [AGENT-UX-01 #360](https://github.com/Jongtae/personal-agentos/issues/360) consumes the existing #335/#337/#338/#340/#341/#342 contracts/implementations for install/run/revoke/remove/replacement. Preserve all unfinished update/rollback/event/SDK scope; downstream consumers are not reverse prerequisites of foundation tasks.
+[USE-01 #358](https://github.com/Jongtae/agentos/issues/358) improves current defaults without waiting for the whole platform. [OBS-01 #359](https://github.com/Jongtae/agentos/issues/359) projects actual progress and controls. [AGENT-UX-01 #360](https://github.com/Jongtae/agentos/issues/360) consumes the existing #335/#337/#338/#340/#341/#342 contracts/implementations for install/run/revoke/remove/replacement. Preserve all unfinished update/rollback/event/SDK scope; downstream consumers are not reverse prerequisites of foundation tasks.
 
 ## Autonomous acquisition
 

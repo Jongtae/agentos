@@ -21,6 +21,8 @@ The mental model is simple: **less “chat with an AI,” more “hand a task to
 
 <!-- capability:illustrative-product-direction -->
 
+> **Product direction — not a current capability claim.**
+
 > **You:** “We’re almost out of detergent and paper towels. Find the usual products or good alternatives, compare price and delivery cost, and prepare the purchase. Ask me before placing the order.”
 >
 > **Personal AgentOS:** gathers the allowed context, researches the options, separates what is known from what still needs verification, prepares the next step, and stops at the approval boundary.

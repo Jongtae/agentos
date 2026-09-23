@@ -1,5 +1,17 @@
 # Personal AgentOS — useful personal AI under owner control
 
+## Canonical owner-facing experience refinement
+
+For conversation, recovery, Settings, contextual capability handoff and model/runtime continuity, follow the [Presence Experience Contract](docs/presence-experience-contract.en.md). Its evidence and reasoning are preserved in the [2026-09-23 Presence and Settings UX research](docs/research/presence-and-settings-ux.ko.md).
+
+The contract refines how existing kernel truth and authority are **projected** to the owner; it does not create a second state store, weaken approval/Evidence rules, or claim that all target behaviors are currently shipped.
+
+## Product North Star
+
+> **Personal AgentOS is not a chatbot that sounds more human. It is an owner-controlled kernel whose machinery recedes behind one continuous, truthful personal-assistant relationship.**
+
+This is the top-level filter for owner-facing product decisions. Models, tools, connectors, Work and Evidence remain explicit and inspectable underneath, but the ordinary experience should preserve one continuous Personal AgentOS relationship rather than expose the machinery as the product.
+
 ## Product identity
 
 Personal AgentOS is a local-first, owner-installed personal AI operating environment for one person: **a personal AI environment you install, own, and control, built to do useful work**.

@@ -305,11 +305,11 @@ class IntentDecision:
 
     __slots__ = ('intent', 'authority', 'argument', 'cues', 'alternatives',
                  'clarification', 'consequential', 'supersedes_previous',
-                 'continuation', 'model_suggestion')
+                 'continuation', 'model_suggestion', 'correction')
 
     def __init__(self, intent, authority, *, argument=None, cues=(), alternatives=(),
                  clarification=None, supersedes_previous=False, continuation=False,
-                 model_suggestion=None):
+                 model_suggestion=None, correction=False):
         self.intent = intent
         self.authority = authority
         self.argument = argument
@@ -320,6 +320,11 @@ class IntentDecision:
         self.supersedes_previous = supersedes_previous
         self.continuation = continuation
         self.model_suggestion = model_suggestion
+        # True only when the owner used an explicit correction cue.  A parked
+        # connector request is cancelled by this, never by a mere change of
+        # topic: "알겠어, 지금 연결할게" differs from the parked intent but is
+        # the owner going to make the very connection it waits for (#473).
+        self.correction = correction
 
     @property
     def executes(self):
@@ -579,6 +584,7 @@ class IntentClassifier:
 
         if focus_intent and (correction or focus_intent != decision.intent) and decision.intent != INTENT_AMBIGUOUS:
             decision.supersedes_previous = True
+        decision.correction = bool(correction)
         return self._with_suggestion(decision, candidates, model_suggestion)
 
     @staticmethod
@@ -653,6 +659,7 @@ class IntentClassifier:
             return IntentDecision(chosen.intent, AUTHORITY_RULE, argument=chosen.argument,
                                   cues=chosen.cues, alternatives=decision.alternatives,
                                   supersedes_previous=decision.supersedes_previous,
+                                  correction=decision.correction,
                                   model_suggestion={'received': proposed, 'state': 'accepted',
                                                     'reason': 'narrowed-an-agentos-candidate'})
         decision.model_suggestion = record
@@ -932,8 +939,11 @@ class ConnectorHandoff:
             self.store.secret(CONVERSATION_RESUME_KEY, rows)
             return current.get('work_id')
 
-    def supersede(self, connector_id=None):
+    def supersede(self, connector_id=None, owner_id=None):
         """Destroy resume paths so a changed request cannot execute later.
+
+        ``owner_id`` limits this to the owner who changed course: one owner's
+        correction never cancels a request another owner identity parked.
 
         Supersession is enforced by destroying the only copy of the resume
         handle.  Without it nothing can claim the handoff, so the contract row
@@ -944,7 +954,11 @@ class ConnectorHandoff:
         """
         with _RESUME_LOCK:
             rows = self._rows()
-            targets = [key for key in rows if connector_id is None or key == connector_id]
+            owner = _owner_key(owner_id) if owner_id is not None else None
+            targets = [key for key in rows
+                       if (connector_id is None or key == connector_id)
+                       and (owner is None or (isinstance(rows[key], dict)
+                                              and _secrets.compare_digest(str(rows[key].get('owner', '')), owner)))]
             dropped = [rows[key]['work_id'] for key in targets
                        if isinstance(rows.get(key), dict) and rows[key].get('work_id')]
             if not targets:

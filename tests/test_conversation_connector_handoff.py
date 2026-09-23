@@ -25,7 +25,7 @@ from personal_agent.connector_contract import (PENDING_WORK_KEY, ConnectorContra
                                                ResumeState)
 from personal_agent.conversation_handoff import (CONVERSATION_RESUME_KEY, ConnectorHandoff,
                                                  ConversationHandoffError, INTENT_MAIL_SEARCH,
-                                                 IntentClassifier)
+                                                 IntentClassifier, SUPERSEDED_WORK_ERROR)
 from personal_agent.gmail import (GMAIL_CONNECTOR, GMAIL_CONNECTOR_ID, GMAIL_READONLY_SCOPE,
                                   EncryptedGmailSecretStore, GmailConnector)
 from personal_agent.providers import ModelAdapter
@@ -416,6 +416,138 @@ class SupersessionTests(HandoffTestCase):
         self.assertEqual(self.service.cancel_superseded_work([job_id]), [])
         self.assertEqual(self.store.job(job_id)['status'], 'succeeded')
 
+
+
+class ParkedRequestSurvivesConversationTests(HandoffTestCase):
+    """FU1-473 / #473: only an explicit correction cancels a parked request.
+
+    Reproduces TEST-FIRST-USER-01 / #472 scenario A turns 20-21 and scenario B
+    turns 25-26: the owner acknowledges the connection guidance, connects, and
+    the parked request must then run exactly once as it promised.
+    """
+
+    def park_with_card(self, message):
+        """Park a request whose Telegram card already shows the waiting state.
+
+        The card is recorded directly because the worker deliberately skips a
+        freshly carded Work for a grace period; what is under test is what
+        happens to an existing card later.
+        """
+        job_id = self.park(message)
+        self.store.save_task_card(job_id, CHAT, 500 + len(self.sent), 'awaiting_connection')
+        return job_id
+
+    def say(self, message, chat_id=CHAT):
+        job_id = self.enqueue(message, chat_id=chat_id)
+        self.assertTrue(self.service.run_one())
+        return job_id
+
+    def test_scenario_a_acknowledgement_then_gmail_connection_resumes_once(self):
+        job_id = self.park('메일에서 숙소 예약 확인 메일 찾아줘')
+        self.say('알겠어, 지금 연결할게')
+        self.assertEqual(self.store.job(job_id)['status'], 'awaiting_connection')
+        self.connect_gmail()
+        resumed = self.service.resume_connector_work(GMAIL_CONNECTOR_ID, OWNER, GMAIL_SCOPES)
+        self.assertEqual(resumed['work_id'], job_id)
+        self.assertEqual(self.drain(), 1)
+        self.assertEqual(self.searches(), 1)
+        self.assertEqual(self.store.job(job_id)['status'], 'succeeded')
+
+    def test_scenario_b_acknowledgement_then_calendar_connection_resumes_once(self):
+        job_id = self.park('내일 오후 3시에 치과 일정 잡아줘')
+        self.say('잠깐만, 연결하고 올게')
+        self.assertEqual(self.store.job(job_id)['status'], 'awaiting_connection')
+        self.connect_calendar_write()
+        resumed = self.service.resume_connector_work(CALENDAR_WRITE_CONNECTOR_ID, OWNER,
+                                                     (CALENDAR_WRITE_SCOPE,))
+        self.assertEqual(resumed['work_id'], job_id)
+        self.assertEqual(self.drain(), 1)
+        self.assertNotEqual(self.store.job(job_id)['status'], 'awaiting_connection')
+        # Resuming reaches at most a draft; no calendar effect was produced.
+        self.assertEqual(self.store.config('calendar_create', {}), {})
+
+    def test_ordinary_conversation_and_other_requests_do_not_cancel(self):
+        job_id = self.park_with_card(MAIL_REQUEST)
+        for message in ('/start', '안녕', '오늘 기분이 어때', '메모 목록', CALENDAR_REQUEST):
+            with self.subTest(message=message):
+                self.say(message)
+                self.assertEqual(self.store.job(job_id)['status'], 'awaiting_connection')
+        self.assertIsNotNone(self.handoff.record(GMAIL_CONNECTOR_ID))
+        self.assertNotIn(SUPERSEDED_WORK_ERROR, [body.get('text') for body in self.sent])
+
+    def test_a_correction_cue_still_cancels_and_is_announced(self):
+        job_id = self.park_with_card(MAIL_REQUEST)
+        card = self.store.task_card(job_id)
+        before = len(self.sent)
+        self.say('아니 그거 말고 메모 목록 보여줘')
+        job = self.store.job(job_id)
+        self.assertEqual(job['status'], 'cancelled')
+        self.assertEqual(job['error'], SUPERSEDED_WORK_ERROR)
+        # The parked request's own card changes...
+        self.assertEqual(self.store.task_card(job_id)['state'], 'superseded')
+        edits = [body for body in self.sent[before:]
+                 if body.get('message_id') == card['message_id'] and body.get('chat_id') == CHAT]
+        self.assertEqual([body['text'] for body in edits], [SUPERSEDED_WORK_ERROR])
+        # ...and the paired chat is told once, without request content.
+        notices = [body for body in self.sent[before:]
+                   if body.get('text') == SUPERSEDED_WORK_ERROR and 'message_id' not in body]
+        self.assertEqual(len(notices), 1)
+        self.assertEqual(notices[0]['chat_id'], CHAT)
+        self.connect_gmail()
+        with self.assertRaises(ConversationHandoffError):
+            self.service.resume_connector_work(GMAIL_CONNECTOR_ID, OWNER, GMAIL_SCOPES)
+        self.assertEqual(self.drain(), 0)
+        self.assertEqual(self.searches(), 0)
+
+    def test_a_same_connector_replacement_is_announced_on_the_old_card(self):
+        first = self.park_with_card(MAIL_REQUEST)
+        before = len(self.sent)
+        second = self.park_with_card('메일에서 계약서 관련 내용 찾아줘')
+        self.assertEqual(self.store.job(first)['status'], 'cancelled')
+        self.assertEqual(self.store.task_card(first)['state'], 'superseded')
+        self.assertEqual(self.store.job(second)['status'], 'awaiting_connection')
+        notices = [body for body in self.sent[before:]
+                   if body.get('text') == SUPERSEDED_WORK_ERROR and 'message_id' not in body]
+        self.assertEqual(len(notices), 1)
+
+    def test_a_resumed_work_does_not_reapply_its_own_correction_cue(self):
+        # The owner's correction was applied when this Work first ran; its
+        # resume must not cancel a request parked for another connector since.
+        mail = self.park('아니 그거 말고 메일에서 숙소 예약 확인 메일 찾아줘')
+        calendar = self.park(CALENDAR_REQUEST)
+        self.connect_gmail()
+        self.service.resume_connector_work(GMAIL_CONNECTOR_ID, OWNER, GMAIL_SCOPES)
+        before = len(self.sent)
+        self.assertEqual(self.drain(), 1)
+        self.assertEqual(self.store.job(mail)['status'], 'succeeded')
+        self.assertEqual(self.store.job(calendar)['status'], 'awaiting_connection')
+        self.assertNotIn(SUPERSEDED_WORK_ERROR, [body.get('text') for body in self.sent[before:]])
+
+    def test_a_calendar_draft_edit_does_not_cancel_an_unrelated_parked_request(self):
+        # A fixture provider makes the calendar draft flow reachable; nothing
+        # here is approved, so no calendar effect is ever attempted.
+        from test_calendar_conversation import Provider
+        self.service.calendar = CalendarConnector(self.store, Provider(), registry=self.registry,
+                                                  now=lambda: self.clock[0])
+        self.service.calendar_conversation.now = lambda: self.clock[0]
+        self.connect_calendar_write()
+        mail = self.park(MAIL_REQUEST)
+        self.say('내일 오후 3시에 치과 일정 잡아줘')
+        self.assertTrue(self.service.calendar_conversation.has_pending(OWNER),
+                        'fixture must leave a calendar draft pending')
+        self.say('아니 4시로')
+        self.assertTrue(self.service.calendar_conversation.has_pending(OWNER),
+                        'the edit must have been claimed by the draft')
+        self.assertEqual(self.store.job(mail)['status'], 'awaiting_connection')
+        self.assertIsNotNone(self.handoff.record(GMAIL_CONNECTOR_ID))
+
+    def test_another_owner_identity_correction_does_not_cancel(self):
+        job_id = self.park_with_card(MAIL_REQUEST)
+        other = self.store.enqueue('아니 됐고 메모 목록 보여줘', 'wu3-web-correction', channel='web')
+        self.assertTrue(self.service.run_one())
+        self.assertNotEqual(other, job_id)
+        self.assertEqual(self.store.job(job_id)['status'], 'awaiting_connection')
+        self.assertIsNotNone(self.handoff.record(GMAIL_CONNECTOR_ID))
 
 class PairingBoundaryTests(HandoffTestCase):
     """Refusal notices must honour the same pairing gate as every other send."""

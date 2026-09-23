@@ -19,7 +19,7 @@ from personal_agent.conversation_handoff import (AUTHORITY_DEFAULT, AUTHORITY_OW
                                                  CONSEQUENTIAL_INTENTS, INTENT_AMBIGUOUS,
                                                  INTENT_ASSISTANT, INTENT_CALENDAR_CREATE,
                                                  INTENT_CONVERSATION, INTENT_GREETING,
-                                                 INTENT_KNOWLEDGE, INTENT_NOTE_CREATE,
+                                                 INTENT_KNOWLEDGE, INTENT_MAIL_SEARCH, INTENT_NOTE_CREATE,
                                                  INTENT_NOTE_LIST, INTENT_RECOMMENDATION,
                                                  INTENT_RESEARCH, INTENT_SETTINGS,
                                                  INTENT_WORKSPACE_SEARCH, ConversationFocus,
@@ -345,6 +345,17 @@ class CorrectionAndTopicChangeTests(unittest.TestCase):
         self.assertEqual(second.intent, INTENT_SETTINGS)
         self.assertFalse(second.continuation)
         self.assertTrue(second.supersedes_previous)
+
+    def test_only_an_explicit_correction_is_marked_as_one(self):
+        # FU1-473 / #473: `correction`, not a topic change, is what may cancel
+        # a parked connector request.
+        focus = {'intent': INTENT_MAIL_SEARCH}
+        for text in ('알겠어, 지금 연결할게', '잠깐만, 연결하고 올게', '안녕', '/start', '메모 목록'):
+            with self.subTest(text=text):
+                self.assertFalse(self.classifier.classify(text, focus=focus).correction)
+        for text in ('아니 그거 말고 메모 목록 보여줘', '취소해줘', 'never mind, show my notes'):
+            with self.subTest(text=text):
+                self.assertTrue(self.classifier.classify(text, focus=focus).correction)
 
     def test_a_correction_marker_supersedes_even_when_the_intent_repeats(self):
         focus = {'intent': INTENT_NOTE_CREATE}

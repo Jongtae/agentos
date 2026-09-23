@@ -976,12 +976,31 @@ class AgentService:
                 db.execute("UPDATE jobs SET delivery='cancelled' WHERE id=? AND status='awaiting_connection' AND delivery='pending'",(work_id,))
                 if db.execute("UPDATE jobs SET status='cancelled',error=? WHERE id=? AND status='awaiting_connection'",(SUPERSEDED_WORK_ERROR,work_id)).rowcount==1:
                     cancelled.append(work_id)
+        # The owner was promised this request would run after the connection,
+        # so withdrawing that promise is said out loud (#473): the parked
+        # request's own card changes, and the paired chat gets one notice.
+        # Neither copies request content; both are best-effort and never
+        # change the durable state recorded above.
+        jobs=[job for job in (self.store.job(work_id) for work_id in cancelled) if job]
+        for job in jobs:
+            self.update_task_card(job,'superseded')
+        if jobs:
+            self._notify_owner(self.connector_owner_id(jobs[0]),SUPERSEDED_WORK_ERROR)
         return cancelled
 
-    def supersede_pending_handoffs(self, except_work_id=None):
-        """Drop every pending resume path because the owner changed course."""
+    def _answered_before(self, job_id):
+        """True when this Work already spoke to the owner in an earlier run.
+
+        A parked Work leaves its connection guidance as an assistant message;
+        when it resumes, `run_one` classifies the same words again.
+        """
+        with self.store.db() as db:
+            return db.execute("SELECT 1 FROM messages WHERE job_id=? AND role='assistant' LIMIT 1",(job_id,)).fetchone() is not None
+
+    def supersede_pending_handoffs(self, except_work_id=None, owner_id=None):
+        """Drop this owner's pending resume paths because the owner corrected course."""
         if not self.connector_handoff:return []
-        dropped=[work_id for work_id in self.connector_handoff.supersede() if work_id!=except_work_id]
+        dropped=[work_id for work_id in self.connector_handoff.supersede(owner_id=owner_id) if work_id!=except_work_id]
         return self.cancel_superseded_work(dropped)
 
     def _schedule_resumed_work(self, work_id):
@@ -1514,6 +1533,7 @@ class AgentService:
         if state=='partial':return TERMINAL_PARTIAL_HEADER+' 아래 안내를 확인하세요.'
         if state=='interrupted':return '작업이 중단되었습니다. 자동으로 다시 실행하지 않았습니다.'
         if state=='awaiting_connection':return '필요한 연결을 기다리고 있습니다. 연결이 확인되면 이 요청을 한 번만 이어서 처리합니다.'
+        if state=='superseded':return SUPERSEDED_WORK_ERROR
         return f'이 요청은 {labels.get(state,state)} 상태입니다.'
 
     @staticmethod
@@ -1870,12 +1890,20 @@ class AgentService:
                     if self.calendar_conversation.clear(connector_owner):calendar_notice=CALENDAR_DROPPED_NOTICE+'\n\n'
                 self.conversation_focus.record(decision)
                 owner=f"channel:{job['channel']}:{job.get('chat_id') or 'local'}"
-                # WU2 computed `supersedes_previous` and wired it to nothing.
-                # This is where it becomes an effect: the owner changed their
-                # mind, so any resume path still waiting for a connection must
-                # not execute its stale intent when that connection succeeds.
-                if decision.supersedes_previous:
-                    self.supersede_pending_handoffs(job['id'])
+                # An explicit correction ("아니, 그거 말고…", "취소") is the owner
+                # changing their mind, so this owner's resume paths still
+                # waiting for a connection must not execute their stale intent
+                # later.  A mere topic change is not: "알겠어, 지금 연결할게"
+                # or a greeting leaves the parked request to run once after
+                # the connection, as promised (#473).  A new request needing
+                # the same connector replaces the old one in `park` instead.
+                # Two turns carry a cue without correcting a parked request: a
+                # follow-up the pending calendar draft claimed ("아니 4시로"),
+                # and a resumed Work re-reading its own original words, whose
+                # correction was already applied the first time it ran.
+                draft_edit=decision.intent==INTENT_CALENDAR_CREATE and decision.continuation
+                if decision.correction and not draft_edit and not self._answered_before(job['id']):
+                    self.supersede_pending_handoffs(job['id'],owner_id=connector_owner)
                 # Prerequisite detection runs before `decision.executes` is
                 # consulted.  When the capability is missing, "connect it" is
                 # a smaller and truer next action than asking the owner for

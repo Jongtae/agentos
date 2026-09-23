@@ -31,7 +31,7 @@ AgentOS: http://127.0.0.1:8787/
 
 浏览器会在该地址打开。按 **바로 시작하기**（立即开始），连接一个模型，就可以对话了。界面目前是韩语；请求可以用韩语或英语。
 
-**Homebrew 安装的是最新公开发布版 `v1.1.0`（2026-09-23），本页的全部内容都包含在其中。** 之后合并到 `main` 的工作不在该构建里，所以在下一次发布之前 Homebrew 构建会落后于 `main`；要用最新代码，请从源码检出运行（`git clone https://github.com/Jongtae/personal-agentos.git`，然后在 Python 3.12 或更新上执行 `python3 -m pip install -e .`）。每一步都在 [QUICKSTART](QUICKSTART.md) 里。
+**Homebrew 安装的是最新公开发布版 `v1.1.0`（2026-09-23），本页的全部内容都包含在其中。** 之后合并到 `main` 的工作不在该构建里，所以在下一次发布之前 Homebrew 构建会落后于 `main`；要用最新代码，请从源码检出运行（`git clone https://github.com/Jongtae/agentos.git`，然后在 Python 3.12 或更新上执行 `python3 -m pip install -e .`）。每一步都在 [QUICKSTART](QUICKSTART.md) 里。
 
 <!-- capability:current-supported-slice -->
 <!-- readme-section:scenes-today -->

@@ -31,7 +31,7 @@ A development increment is implementation-verified when its issue and pull reque
 - required repository checks passing in CI; and
 - known limitations and the exact distinction between mock evidence and operating evidence.
 
-Full iteration completion additionally requires relevant independent review, normal merge, current main validation and the active contract's tracker/ledger closeout. An integration-pending session handoff is not full iteration completion. No person is required to perform a routine manual acceptance test, log in to a third-party provider, or create a provider token to complete a development iteration. Human review remains a product and security design activity, not a recurring test gate.
+Full iteration completion additionally requires relevant independent review, normal merge, the required exact-PR-head validation, and the active contract's tracker/ledger closeout. A successful merge does not require re-running the same heavy suite on `main`; `main` receives a fast merged-tree integrity pass, while scheduled/manual full validation is the repository-wide backstop. An integration-pending session handoff is not full iteration completion. No person is required to perform a routine manual acceptance test, log in to a third-party provider, or create a provider token to complete a development iteration. Human review remains a product and security design activity, not a recurring test gate.
 
 ## External integrations and agents
 
@@ -48,7 +48,7 @@ The deployed runtime must use automated startup and health checks, fail closed o
 ## Governance controls
 
 - One GitHub issue, `codex/` branch, focused commits, and a PR are required for every iteration.
-- CI blocks merge on failed automated gates; it does not wait for a person to carry out a routine live test.
+- CI blocks merge on failed automated gates; it does not wait for a person to carry out a routine live test. The always-required `validate` check may use path-sensitive depth: Markdown/assets-only changes use fast structural/governance checks, while any runtime, test, schema, build, workflow, executable governance-data, or otherwise non-document-only change must pass the full suite before merge.
 - A contract change requires its fixture and mock suite to change in the same PR.
 - New scopes, external writes, credentials, data classes, or recovery semantics require a contract and threat-model update before implementation.
 - Tests must be deterministic, hermetic where possible, and safe to run without personal data or external credentials.

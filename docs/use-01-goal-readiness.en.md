@@ -2,7 +2,7 @@
 
 ## State and authority
 
-[USE-01 / #358](https://github.com/Jongtae/personal-agentos/issues/358) is the owner's selected next product goal. This preparation belongs to GOV-USE-01 / #357 and becomes authoritative only after PR #361 merges with required validation and independent review. It does not start implementation. The delivery-plan entry and `next_goal.status` are `owner-activated-goal-ready`, never `active`; the existing heartbeat must return no work. A later explicit owner Goal-mode invocation is the execution delegation. Do not create a second automation or race it with Goal mode.
+[USE-01 / #358](https://github.com/Jongtae/agentos/issues/358) is the owner's selected next product goal. This preparation belongs to GOV-USE-01 / #357 and becomes authoritative only after PR #361 merges with required validation and independent review. It does not start implementation. The delivery-plan entry and `next_goal.status` are `owner-activated-goal-ready`, never `active`; the existing heartbeat must return no work. A later explicit owner Goal-mode invocation is the execution delegation. Do not create a second automation or race it with Goal mode.
 
 Predecessors: completed DOGFOOD-01 #351 and merged GOV-USE-01 #357. D-AP-01 #334 remains schema/fixture evidence. USE-01 does not depend on a public Marketplace, Ruflo, OBS-01 #359 or completing the entire distribution epic. #335–#346, #359 and #360 remain inactive.
 

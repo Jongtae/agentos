@@ -1,7 +1,7 @@
 # 사용자 승인 컨텍스트 캡처 인박스 — 후속 설계 아이디어
 
-추적 이슈: [#100](https://github.com/Jongtae/personal-agentos/issues/100)  
-연결 Epic: [#48 — Native companion continuity](https://github.com/Jongtae/personal-agentos/issues/48)
+추적 이슈: [#100](https://github.com/Jongtae/agentos/issues/100)  
+연결 Epic: [#48 — Native companion continuity](https://github.com/Jongtae/agentos/issues/48)
 
 ## 결정
 
@@ -10,7 +10,7 @@
 인박스**로 다룬다. 이 방향은 이후 네이티브 앱, 브라우저 확장, 역할/도구 플러그인에
 공통으로 적용한다.
 
-이 방향은 Hub v2 M4 [#107](https://github.com/Jongtae/personal-agentos/issues/107)로 승격됐다. 이 문서는
+이 방향은 Hub v2 M4 [#107](https://github.com/Jongtae/agentos/issues/107)로 승격됐다. 이 문서는
 초기 안전 설계 기록으로 보존하며, 실제 구현·수용 기준은 #107을 기준으로 한다.
 
 ## 데이터 흐름과 신뢰 경계

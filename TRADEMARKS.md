@@ -40,5 +40,5 @@ only governs the names and logo. Nothing here limits fair use or nominative use
 under applicable law.
 
 Questions and permission requests: open an issue in the official repository
-at <https://github.com/Jongtae/personal-agentos> or contact the copyright
+at <https://github.com/Jongtae/agentos> or contact the copyright
 holder listed in [NOTICE](NOTICE).

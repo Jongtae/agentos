@@ -21,7 +21,7 @@ exists". It does exist. What the formula points at is a **GitHub tag source
 archive**, not a wheel:
 
 ```ruby
-url "https://github.com/Jongtae/personal-agentos/archive/refs/tags/vX.Y.Z.tar.gz"
+url "https://github.com/Jongtae/agentos/archive/refs/tags/vX.Y.Z.tar.gz"
 sha256 "<64 hex>"
 ```
 
@@ -58,7 +58,7 @@ authorized by EPIC-PA1 / #386, which explicitly excludes public deployment.
 
 5. **Tag and push** `vX.Y.Z` at the merge commit, and create the GitHub release.
 6. **Compute the archive checksum** of
-   `https://github.com/Jongtae/personal-agentos/archive/refs/tags/vX.Y.Z.tar.gz`.
+   `https://github.com/Jongtae/agentos/archive/refs/tags/vX.Y.Z.tar.gz`.
    `delivery.py` `_archive_sha256` is the reference implementation.
 7. **Update the tap formula in place.** Clone `Jongtae/homebrew-agentos`, and
    rewrite the two lines of the existing `Formula/agentos.rb` — the `url` tag

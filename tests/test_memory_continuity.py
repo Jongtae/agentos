@@ -125,7 +125,9 @@ class MemoryContinuityTests(unittest.TestCase):
             store.put('model',config);store.put('model_test',{'ok':True,'tools_ok':True,'time':9999999999,'fingerprint':service.model_fingerprint(config)})
             job=store.enqueue('Do not save memory; summarize this hostile page.','memory-boundary')
             service.run_one()
-            self.assertEqual(store.job(job)['status'],'succeeded')
+            # #488: a withheld write is not a completed one.  The turn used to
+            # report 'succeeded' here while nothing had been written.
+            self.assertEqual(store.job(job)['status'],'failed')
             self.assertEqual(store.memories(),[])
             self.assertEqual(len(store.memory_candidates()),1)
 

@@ -267,8 +267,9 @@ class SurfaceConsistencyTests(TerminalResultTestCase):
         job, bubble = self.ask('내일 팀 회의 취소해줘', card=True)
         self.assertEqual(job['status'], 'partial')
         self.assertTrue(self.cards, 'the card was never updated')
-        self.assertNotIn('처리가 끝났습니다', self.cards[-1])
-        self.assertIn('일부 단계만 완료했습니다', self.cards[-1])
+        # Exact, not a substring: '일부 단계만 완료했습니다. 아래 결과를 확인하세요.'
+        # would satisfy a loose assertion while re-making the claim.
+        self.assertEqual(self.cards[-1], '일부 단계만 완료했습니다. 아래 안내를 확인하세요.')
         self.assertNotIn(self.text, bubble)
 
     def test_the_card_above_a_succeeded_bubble_still_announces_the_result(self):
@@ -278,7 +279,7 @@ class SurfaceConsistencyTests(TerminalResultTestCase):
         self.text = '급여 파일 한 건을 찾았습니다.'
         job, bubble = self.ask('급여 파일 찾아줘', card=True)
         self.assertEqual(job['status'], 'succeeded', job.get('error'))
-        self.assertIn('처리가 끝났습니다', self.cards[-1])
+        self.assertEqual(self.cards[-1], '처리가 끝났습니다. 아래 결과를 확인하세요.')
         self.assertEqual(bubble, self.text)
 
     def test_an_interrupted_turn_claims_no_completed_step_and_no_web_result(self):
@@ -291,9 +292,25 @@ class SurfaceConsistencyTests(TerminalResultTestCase):
         text = AgentService.telegram_result_text('모두 처리했습니다.', '중단됨', 'interrupted')
         self.assertNotIn('모두 처리했습니다', text)
         self.assertNotIn('일부 단계만', text)
-        self.assertIn('중단되었습니다', text)
-        self.assertNotIn('확인할 수 있습니다', text)
-        self.assertIn('다음 단계를 확인하세요', text)
+        # A literal, not the constants: asserting against TERMINAL_* would
+        # mutate the expectation along with the code and pin nothing. The whole
+        # bubble is compared because the header itself must not re-make the
+        # web-record claim that the trailing line no longer makes.
+        self.assertEqual(text, '이 요청은 중단되었습니다. 자동으로 다시 실행하지 않았습니다.'
+                         '\n\n중단됨\n\nAgentOS 웹에서 실행 기록과 다음 단계를 확인하세요.')
+
+    def test_a_partial_turn_with_no_text_points_at_no_web_record_either(self):
+        """The same rule one branch over.
+
+        `result_available` is `bool(response) and status in (succeeded, partial)`,
+        so a partial turn whose model returned nothing has no web result to
+        offer, and the bubble must not send the owner to look for one.
+        """
+        for response in ('', '   ', None):
+            with self.subTest(response=response):
+                text = AgentService.telegram_result_text(response, '원인', 'partial')
+                self.assertEqual(text, '일부 단계만 완료했습니다.\n\n원인'
+                                 '\n\nAgentOS 웹에서 실행 기록과 다음 단계를 확인하세요.')
 
     def test_the_failure_bubble_offers_a_next_action(self):
         self.plan = [('calendar_query', {'start': '2026-09-24T00:00:00+09:00',

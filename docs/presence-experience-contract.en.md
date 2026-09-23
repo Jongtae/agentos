@@ -120,7 +120,9 @@ Presence may change projection, never the underlying truth boundary:
 - silent provider/paid-route fallback is not allowed;
 - MemoryCandidate is not described as remembered until canonical Memory actually changes;
 - owner-visible claims must be supported by observed Evidence;
-- secrets/raw payloads/hidden reasoning do not become “transparency” requirements.
+- secrets/raw payloads/hidden reasoning do not become “transparency” requirements;
+- projection never moves approval requests, data-destination/provider/route changes, consequential-effect outcomes, blockers or failed/unknown state into on-demand-only detail;
+- this contract does not change which surface may authorize a consequential effect: conversational and local approval remain governed by the existing approval contracts and the [Owner Control Contract](owner-control-contract.en.md), including its messenger privacy boundary.
 
 ## Observable acceptance matrix
 

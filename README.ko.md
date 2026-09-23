@@ -92,7 +92,7 @@ agentos start
 
 브라우저는 `http://127.0.0.1:8787`에서 열립니다.
 
-**이 Homebrew 명령은 최신 공개 배포본 `v1.0.4`(2026-09-07)를 설치하며, 이 버전은 현재 `main`보다 뒤입니다.** `main`에는 이 배포본 이후의 기능 개발과 first-user 개선이 더 포함되어 있습니다. 정확한 지원 경로는 [QUICKSTART](QUICKSTART.md), 공개 상태는 [release procedure](docs/release.en.md)를 따르세요.
+**이 Homebrew 명령은 최신 공개 배포본 `v1.1.0`(2026-09-23)을 설치합니다.** 이 배포본 이후 `main`에 병합된 작업은 포함되지 않으므로, 다음 배포 전까지 Homebrew 빌드는 `main`보다 뒤입니다. 정확한 지원 경로는 [QUICKSTART](QUICKSTART.md), 공개 상태는 [release procedure](docs/release.en.md)를 따르세요.
 
 <!-- readme-section:status -->
 

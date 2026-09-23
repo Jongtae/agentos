@@ -107,13 +107,11 @@ loopback and sets `RunAtLoad`/`KeepAlive`, so it is designed to start again at l
 What this does **not** yet cover, stated exactly:
 
 - **macOS only.** The lifecycle is launchd-specific. There is no systemd equivalent here.
-- **Not in any released build.** The most recent release tag is `v1.0.4` (2026-09-07), which
-  predates this command. The published formula lives in the separate tap
+- **Released from `v1.1.0` (2026-09-23).** The published formula lives in the separate tap
   `Jongtae/homebrew-agentos` — it is not in this repository by design, so its absence from
-  `git ls-files` here does not mean no artifact exists — and that formula still pins
-  `v1.0.4`. `brew install` / `brew upgrade jongtae/agentos/agentos` will not provide
-  `agentos service` until a later release; today it is reachable only from a source
-  checkout. See [the release procedure](docs/release.en.md).
+  `git ls-files` here does not mean no artifact exists. `brew install` / `brew upgrade
+  jongtae/agentos/agentos` at `v1.1.0` or later provides `agentos service`; `v1.0.4` and
+  earlier do not. See [the release procedure](docs/release.en.md).
 - **Not covered by automated tests of real launchd.** Repository CI runs on Linux and cannot
   execute launchd. The automated evidence for these commands is injected-runner tests that
   substitute `launchctl`. A real Homebrew install, a real login service surviving a machine
@@ -171,8 +169,8 @@ What this does **not** yet cover, stated exactly:
   transport and a fixture token endpoint. A real OAuth consent, a real event created in
   a real calendar, and the behaviour of a revoked grant are owner validation this
   repository has not performed.
-- **Not in any released build.** The most recent release tag predates this command; see
-  [the release procedure](docs/release.en.md).
+- **Released from `v1.1.0` (2026-09-23).** `v1.0.4` and earlier Homebrew builds do not
+  include it; see [the release procedure](docs/release.en.md).
 - **The natural-language create path still asks a question.** `내일 3시에 회의 잡아줘`
   parks for a connection and then asks for the missing detail rather than producing a
   draft on its own; ask for the calendar explicitly, or read first and draft from what
@@ -222,10 +220,9 @@ What this does **not** claim, stated exactly:
 - **Read-only.** The only scope requested is `gmail.readonly`, and the connection is
   recorded only if Google grants exactly that. AgentOS cannot send, reply to, delete,
   label or archive mail, and nothing here authorises a Calendar, Drive or send scope.
-- **Not in any released build.** The most recent release tag is `v1.0.4` (2026-09-07),
-  which predates these commands. `brew install` / `brew upgrade jongtae/agentos/agentos`
-  will not provide `agentos gmail-config` or the Gmail route until a later release; today
-  they are reachable only from a source checkout.
+- **Released from `v1.1.0` (2026-09-23).** `brew install` / `brew upgrade
+  jongtae/agentos/agentos` at `v1.1.0` or later provides `agentos gmail-config` and the
+  Gmail route; `v1.0.4` and earlier do not.
 - **Connecting is a separate decision from configuring.** Writing the credential file only
   lets this installation *offer* Gmail. It issues no grant, and the connector stays
   disconnected until you complete the authorisation yourself. The start route requires

@@ -572,7 +572,11 @@ class RecommendationCueNarrowingTests(unittest.TestCase):
     def test_travel_and_product_recommendations_stay_on_the_conversation_route(self):
         for text in (self.TURN_35, '제주 맛집 추천해줘', '노이즈캔슬링 헤드폰 추천해줘',
                      '블루투스 연결 잘 되는 헤드폰 추천해줘', '세무 전문가 추천해줘',
-                     'recommend a good hotel in jeju', 'any restaurant recommendation near gangnam?'):
+                     'recommend a good hotel in jeju', 'any restaurant recommendation near gangnam?',
+                     # Everyday 연결/connector/integration/전문가 are not capability subjects.
+                     '공항 연결 추천해줘', '제주 공항에서 숙소까지 연결 추천해줘', '블루투스 연결 하나 추천해줘',
+                     'hdmi 커넥터 추천해줘', '세무 전문가 연결 하나 추천해줘', '전문가 연결 추천해줘',
+                     'recommend a usb-c connector cable', 'recommend a good integration test framework'):
             with self.subTest(text=text):
                 decision = self.classifier.classify(text)
                 self.assertEqual(decision.intent, INTENT_CONVERSATION)
@@ -593,7 +597,12 @@ class RecommendationCueNarrowingTests(unittest.TestCase):
         for text, outcome in (('전문가 조사를 도와줄 연결 추천해줘', 'specialist-research'),
                               ('내 문서 조사에 쓸 만한 capability 추천 좀', 'private-document-research'),
                               ('recommend a connector for document research', 'private-document-research'),
-                              ('capability 하나 추천해줘', None)):
+                              ('capability 하나 추천해줘', None),
+                              # A bare ask plus a multi-word outcome phrase still reaches the rule.
+                              ('전문가 조사 추천해줘', 'specialist-research'),
+                              ('로컬 처리 기능 추천해줘', 'local-specialist-processing'),
+                              ('내 문서 조사에 쓸 도구 추천해줘', 'private-document-research'),
+                              ('what would you recommend for deep research', 'specialist-research')):
             with self.subTest(text=text):
                 decision = self.classifier.classify(text)
                 self.assertEqual(decision.intent, INTENT_RECOMMENDATION)
@@ -604,6 +613,18 @@ class RecommendationCueNarrowingTests(unittest.TestCase):
         self.assertEqual(job['status'], 'succeeded')
         self.assertIn('어떤 일에 쓸 연결을 추천할지', job['response'])
         self.assertNoInternalTag(job['response'])
+
+    def test_an_executed_recommendation_names_its_outcome_without_the_internal_tag(self):
+        # The clarification's own examples, and the explicit /recommend form,
+        # execute; the reply the owner reads must not carry the tag either.
+        from personal_agent.conversation_handoff import RECOMMENDATION_CLARIFICATION
+        examples = re.findall(r'"([^"]+)"', RECOMMENDATION_CLARIFICATION)
+        for text in (*examples, '/recommend specialist-research'):
+            with self.subTest(text=text):
+                job = self.run_one(text, channel='telegram:fixture', chat_id=7)
+                self.assertEqual(job['status'], 'succeeded')
+                self.assertIn('에 맞는 추천', job['response'])
+                self.assertNoInternalTag(job['response'])
 
     def test_every_clarification_example_resolves_to_exactly_one_reviewed_outcome(self):
         from personal_agent.conversation_handoff import RECOMMENDATION_CLARIFICATION

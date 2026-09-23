@@ -43,8 +43,8 @@ BEHIND_WORDS = ('behind', 'predates', '뒤입니다', '遅れて', '落后')
 #: this too, deliberately, in the same commit.
 EXPECTED_FORMULA = '''class Agentos < Formula
   desc "Self-hosted personal agent with browser setup and Telegram"
-  homepage "https://github.com/Jongtae/personal-agentos"
-  url "https://github.com/Jongtae/personal-agentos/archive/refs/tags/v__VERSION__.tar.gz"
+  homepage "https://github.com/Jongtae/agentos"
+  url "https://github.com/Jongtae/agentos/archive/refs/tags/v__VERSION__.tar.gz"
   sha256 "__SHA256__"
   depends_on "python@3.13"
 
@@ -150,8 +150,8 @@ class ReleaseTraceabilityTests(unittest.TestCase):
     def test_the_template_has_the_shape_the_tap_formula_has(self):
         body = TEMPLATE.read_text(encoding='utf-8')
         self.assertIn('class Agentos < Formula', body)
-        self.assertIn('homepage "https://github.com/Jongtae/personal-agentos"', body)
-        self.assertIn('url "https://github.com/Jongtae/personal-agentos/archive/'
+        self.assertIn('homepage "https://github.com/Jongtae/agentos"', body)
+        self.assertIn('url "https://github.com/Jongtae/agentos/archive/'
                       'refs/tags/v__VERSION__.tar.gz"', body)
         for block in ('def install', 'def caveats', 'test do'):
             self.assertIn(block, body)

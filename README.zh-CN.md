@@ -21,6 +21,8 @@
 
 <!-- capability:illustrative-product-direction -->
 
+> **Product direction — 不代表当前已支持。**
+
 > **你：**“洗衣液和纸巾快没了。找我平时买的商品或合适替代品，比较价格和运费，把购买准备好。下单前先问我。”
 >
 > **Personal AgentOS：**收集被允许的上下文，调查选项，把已确认的信息和仍需核实的内容分开，准备下一步，并在需要批准的边界停下。

@@ -86,6 +86,16 @@ TOOL_PROBE = {
 
 TELEGRAM_CARD_GRACE_SECONDS = 3
 TELEGRAM_RESULT_PREVIEW_CHARS = 3200
+#: The terminal Telegram bubble for a turn that did not fully succeed.  Kept
+#: beside the preview limit because they are read together, and separate from
+#: the model's own text on purpose: these are the only sentences in that
+#: bubble AgentOS can vouch for.
+TERMINAL_FAILED_HEADER = '이 요청은 완료하지 못했습니다.'
+TERMINAL_PARTIAL_HEADER = '일부 단계만 완료했습니다.'
+TERMINAL_INTERRUPTED_HEADER = '이 요청은 중단되었습니다. 자동으로 다시 실행하지 않았습니다.'
+TERMINAL_NEXT_ACTION = 'AgentOS 웹에서 실행 기록과 다음 단계를 확인하세요.'
+TERMINAL_UNVERIFIED_MARKER = ('완료한 단계까지의 내용은 AgentOS 웹 기록에서 확인할 수 있습니다. '
+                              '확인된 결과가 아니므로 그대로 신뢰하지 마세요.')
 TELEGRAM_VERIFICATION_QUERY = '/search AgentOS personal assistant verification'
 _WORKSPACE_QUOTED = re.compile(r'["“]([^"”]{2,160})["”]')
 
@@ -446,9 +456,11 @@ class AgentService:
         Both are values ``task_progress`` already returns to this same
         owner-authenticated surface through ``_progress_event``, so no
         argument, document excerpt or result content reaches a surface that
-        did not already carry it.  ``deliver_one`` reads ``error`` only when
-        ``response`` is empty, which is exactly the case this does not
-        change, so no new text reaches Telegram either.
+        did not already carry it.  ``telegram_result_text`` now puts this
+        string in the terminal bubble of every failed or partial turn, not
+        only the ones with an empty ``response``, so it does reach Telegram -
+        a surface already gated to this same owner by generation and
+        ``user_id`` before any send.
         """
         reasons=[]
         for tool,reason in refusals:
@@ -1495,7 +1507,11 @@ class AgentService:
         # Cards are status controls, never a copy of user-provided content.
         if state=='queued':return '요청을 받았습니다. 곧 시작할게요.'
         if state=='running':return '요청을 처리하고 있어요.'
-        if state in ('succeeded','partial'):return '처리가 끝났습니다. 아래 결과를 확인하세요.'
+        if state=='succeeded':return '처리가 끝났습니다. 아래 결과를 확인하세요.'
+        # The card sits directly above the terminal bubble.  A partial turn
+        # must not be announced here as a finished result the bubble then
+        # refuses to show.
+        if state=='partial':return TERMINAL_PARTIAL_HEADER+' 아래 안내를 확인하세요.'
         if state=='interrupted':return '작업이 중단되었습니다. 자동으로 다시 실행하지 않았습니다.'
         if state=='awaiting_connection':return '필요한 연결을 기다리고 있습니다. 연결이 확인되면 이 요청을 한 번만 이어서 처리합니다.'
         return f'이 요청은 {labels.get(state,state)} 상태입니다.'
@@ -2109,9 +2125,59 @@ class AgentService:
             return True
 
     @staticmethod
-    def telegram_result_text(response, error=None):
-        """Return the one readable terminal bubble for a paired owner."""
-        text=response or ('요청을 완료하지 못했습니다. '+(error or 'AgentOS 웹에서 자세한 내용을 확인하세요.'))
+    def telegram_result_text(response, error=None, outcome=None):
+        """Return the one readable terminal bubble for a paired owner.
+
+        The bubble is the last thing the owner reads, so it has to carry the
+        observed outcome and not the model's account of it.  `run_agent` can
+        return a model answer *and* a failed outcome -- a tool was refused or
+        errored and the model wrote text anyway -- and this used to fall back
+        to `error` only when `response` was empty.  It never saw `outcome` at
+        all, so a refused `calendar_query` was delivered as "내일 일정은 팀
+        회의 하나입니다." and a refused research request as an observed
+        comparison (#476, found by the synthetic first-user audit #472).
+
+        The rule matches what the web card already does, so the two surfaces
+        agree:
+
+        * `failed` -- no tool produced anything, so no model sentence is
+          attributable to an observed result.  The failure and the next step
+          go out; the model text does not.  `task_progress` sets
+          `result_available` False for the same status, so the web does not
+          offer it either.
+        * `partial` / `interrupted` -- something did complete, but which
+          sentence rests on it cannot be decided here, and the failed tool is
+          usually the one the answer depended on: a refused research call
+          after a successful `find_files` leaves a product comparison
+          supported by nothing at all.  So the bubble reports what completed
+          and what did not and points at the record.  The text is not
+          deleted -- it stays in `response` and the web card still offers it
+          under 확인 필요 -- it is simply not pushed at the owner as the
+          answer.
+        * `succeeded` and any unrecognised status -- unchanged.
+
+        A caller that passes no `outcome` keeps the old behaviour, so this
+        cannot silently change a surface that has not been taught about it.
+        """
+        cause=(error or '').strip()
+        if outcome=='failed':
+            # Never the model's text: nothing it might describe was observed.
+            body=[TERMINAL_FAILED_HEADER]
+            if cause:body.append(cause)
+            body.append(TERMINAL_NEXT_ACTION)
+            text='\n\n'.join(body)
+        elif outcome in ('partial','interrupted'):
+            # 'interrupted' is set on any running job at restart, including one
+            # that ran no tool at all, so it cannot claim completed steps.  And
+            # ``task_progress`` offers the stored text for 'succeeded'/'partial'
+            # only, so point at the web record exactly where it is readable.
+            body=[TERMINAL_PARTIAL_HEADER if outcome=='partial' else TERMINAL_INTERRUPTED_HEADER]
+            if cause:body.append(cause)
+            body.append(TERMINAL_UNVERIFIED_MARKER if (outcome=='partial' and (response or '').strip())
+                        else TERMINAL_NEXT_ACTION)
+            text='\n\n'.join(body)
+        else:
+            text=response or (TERMINAL_FAILED_HEADER+' '+(cause or TERMINAL_NEXT_ACTION))
         if len(text)>TELEGRAM_RESULT_PREVIEW_CHARS:
             return text[:TELEGRAM_RESULT_PREVIEW_CHARS]+'\n\n전체 결과는 AgentOS 웹에서 확인하세요.'
         return text
@@ -2128,7 +2194,7 @@ class AgentService:
                 allowed=cfg.get('enabled') and job['channel']==f"telegram:{cfg.get('generation')}" and job['chat_id']==cfg.get('user_id')
                 db.execute('UPDATE jobs SET delivery=? WHERE id=?',('sending' if allowed else 'cancelled',job['id']))
             if not allowed:return
-            text=self.telegram_result_text(job['response'],job['error'])
+            text=self.telegram_result_text(job['response'],job['error'],job.get('status'))
             try:
                 self.telegram.send_message(job['chat_id'],text)
                 status='sent'

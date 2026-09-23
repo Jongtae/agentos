@@ -85,8 +85,8 @@ A third or later full-suite/re-review cycle is permitted when correctness requir
 - Do not request duplicate review while the current review is running.
 - Do not repeatedly poll CI/review when no decision depends on a new state transition.
 - Do not run the full suite after every narrow mechanical edit solely for reassurance; run focused tests and batch compatible changes. If those edits occur after independent review, the consolidated final head must still receive the applicable independent re-review before merge.
-- Automatic CI triggered by a push is still authoritative evidence; reduce avoidable trigger frequency by pushing coherent checkpoints, not by disabling required workflows.
-- Never skip, weaken, relabel, or bypass tests, branch protection, exact-head validation, or independent review to save context/compute.
+- The required PR-head `validate` check is authoritative merge evidence. Its depth is path-sensitive: documentation/assets-only changes may stop after fast integrity checks, while any non-document-only change must run the full suite. Pushes to `main` need not repeat that same heavy suite; a fast merged-tree pass plus scheduled/manual full validation provides the integration backstop.
+- Never skip, weaken, relabel, or bypass the tests applicable to the changed surface, branch protection, exact-head validation, or independent review to save context/compute. Path-sensitive CI is a declared evidence policy, not a per-PR discretionary bypass.
 
 Broader validation may be run earlier whenever security, authentication/OAuth, privacy, external effects, shared contracts, replay/idempotency/recovery, or uncertain root cause makes narrow testing insufficient.
 

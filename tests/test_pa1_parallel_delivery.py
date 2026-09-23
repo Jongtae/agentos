@@ -79,7 +79,21 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
             # holding nothing. `assert_closed_out_record` below carries the
             # rest -- closeout text, per-substep evidence, no active substeps.
             self.assertIn("EPIC-PA1", completed)
-            self.assertIsNone(self.plan["next_goal"]["id"])
+            # A closed-out EPIC-PA1 is never the declared goal. The earlier
+            # form asserted `next_goal.id is None`, which pinned the cast
+            # again: it broke the moment the owner explicitly activated a
+            # different program (GOV-FU1-01 / #502). The rule is that PA1's
+            # closeout selects nothing; any later declared goal must be a
+            # different, not-completed, goal-ready program carrying its own
+            # auditable owner activation record.
+            declared = self.plan["next_goal"]["id"]
+            self.assertNotEqual(declared, "EPIC-PA1")
+            if declared is not None:
+                self.assertNotIn(declared, completed)
+                self.assertIn(declared, self.plan["programs"])
+                self.assertEqual(self.plan["programs"][declared]["status"], GOAL_READY)
+                assert_activation_record(self, f"{declared} activated_by",
+                                         self.plan["programs"][declared].get("activated_by"))
             self.assertEqual(epic["activation_status"], CLOSED_ON_MERGE)
             self.assertNotIn("EPIC-PA1", executing_programs(self.plan))
             self.assertEqual(self.program.get("remaining_substeps", []), [])
@@ -108,7 +122,10 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         if status == GOAL_READY:
             self.assertEqual(shape, "goal-ready")
         elif status == CLOSED_OUT:
-            self.assertEqual(shape, "terminal")
+            # Terminal when nothing is declared; goal-ready when the owner has
+            # explicitly activated a different program since PA1 closed out.
+            expected = "terminal" if self.plan["next_goal"]["id"] is None else "goal-ready"
+            self.assertEqual(shape, expected)
         assert_no_unauthorised_execution_authority(self, self.plan)
 
         # The tracker has to name whichever role actually holds, and must

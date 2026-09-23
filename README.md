@@ -31,7 +31,7 @@ AgentOS: http://127.0.0.1:8787/
 
 The browser opens on that address. Press **바로 시작하기** (Start now), connect a model, and you are talking to it. The interface is in Korean today; it understands requests in Korean or English.
 
-**Homebrew installs the newest published release, `v1.1.0` (2026-09-23), which carries everything on this page.** Work merged to `main` after it is not in that build, so Homebrew can be behind `main` until the next release; for the newest code run from a source checkout (`git clone https://github.com/Jongtae/personal-agentos.git`, then `python3 -m pip install -e .` on Python 3.12 or newer). [QUICKSTART](QUICKSTART.md) has every step.
+**Homebrew installs the newest published release, `v1.1.0` (2026-09-23), which carries everything on this page.** Work merged to `main` after it is not in that build, so Homebrew can be behind `main` until the next release; for the newest code run from a source checkout (`git clone https://github.com/Jongtae/agentos.git`, then `python3 -m pip install -e .` on Python 3.12 or newer). [QUICKSTART](QUICKSTART.md) has every step.
 
 <!-- capability:current-supported-slice -->
 <!-- readme-section:scenes-today -->

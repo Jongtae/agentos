@@ -1,12 +1,12 @@
 # AgentOS 1차 개발 정리 보고서
 
-기준일: 2026-09-08. 정리 이슈: [#282](https://github.com/Jongtae/personal-agentos/issues/282). 1차 마일스톤: [AgentOS 1차 개발 정리](https://github.com/Jongtae/personal-agentos/milestone/6).
+기준일: 2026-09-08. 정리 이슈: [#282](https://github.com/Jongtae/agentos/issues/282). 1차 마일스톤: [AgentOS 1차 개발 정리](https://github.com/Jongtae/agentos/milestone/6).
 
 ## 판단
 
 승인된 MP1·MP2·TOP의 **개발 기준선은 완료**했다. 현재 실행 가능한 후속 목표는 활성화하지 않는다. 실제 구독 로그인, 외부 서비스 연결, Telegram/OAuth 설정, 운영 배포 및 실사용 성공은 이번 완료 판정에 포함하지 않는다. 추가 운영 진단 도구 OP-03은 PR #281에 미완료 상태로 보존한다.
 
-검증된 불변 배포 후보는 `53912eeb1357ced37031234b1e5376f024dd0a96`이다. 해당 SHA의 [main validate 34204797899](https://github.com/Jongtae/personal-agentos/actions/runs/34204797899)가 성공했다. `v1.0.4` 태그의 과거 지원 주장은 이미 철회되었으며, 이번 정리는 새 버전 릴리스가 아니다.
+검증된 불변 배포 후보는 `53912eeb1357ced37031234b1e5376f024dd0a96`이다. 해당 SHA의 [main validate 34204797899](https://github.com/Jongtae/agentos/actions/runs/34204797899)가 성공했다. `v1.0.4` 태그의 과거 지원 주장은 이미 철회되었으며, 이번 정리는 새 버전 릴리스가 아니다.
 
 ## 지금까지 진행한 작업
 
@@ -27,7 +27,7 @@
 
 ## 마일스톤과 이슈 정리
 
-정리 PR [#283](https://github.com/Jongtae/personal-agentos/pull/283)이 `0025148e7ab30bd27c4b1ca761b3ba9702b0e0f8`로 병합되었다. 기존 마일스톤 #1–#5 및 이슈 #1/#36/#94/#102/#149/#265/#279의 마감은 실제 적용했다. 신규 마일스톤 #6과 #282는 마지막 증거 PR의 필수 CI·병합 후 마감한다.
+정리 PR [#283](https://github.com/Jongtae/agentos/pull/283)이 `0025148e7ab30bd27c4b1ca761b3ba9702b0e0f8`로 병합되었다. 기존 마일스톤 #1–#5 및 이슈 #1/#36/#94/#102/#149/#265/#279의 마감은 실제 적용했다. 신규 마일스톤 #6과 #282는 마지막 증거 PR의 필수 CI·병합 후 마감한다.
 
 | 대상 | 마감 방식 |
 | --- | --- |
@@ -68,7 +68,7 @@
 
 ## 1차 정리 검증 결과
 
-- 정리 PR #283의 [필수 validate 34213401518](https://github.com/Jongtae/personal-agentos/actions/runs/34213401518)이 성공했다. 요구사항별 개발 근거는 불변 후보의 main CI에 계속 연결된다.
+- 정리 PR #283의 [필수 validate 34213401518](https://github.com/Jongtae/agentos/actions/runs/34213401518)이 성공했다. 요구사항별 개발 근거는 불변 후보의 main CI에 계속 연결된다.
 - 로컬 pytest: **241 passed, 46 subtests passed**. unittest 첫 전체 실행은 preflight fixture HTTP400 오류 1건으로 실패했으며, 해당 파일 13개 집중 재검증과 전체 **219개 재검증은 통과**했다. 첫 실패 기록은 지우지 않는다.
 - 독립 검토의 한/영 상태 불일치와 미병합 PR 가상 merge SHA 문제는 수정·재검토 완료했다. OP-03 세 발견사항은 미해결 상태로 해당 PR에 남긴다.
 - 기존 delivery heartbeat는 PAUSED임을 읽기 확인했다. 새 자동화를 만들거나 후속 기능을 활성화하지 않았다.

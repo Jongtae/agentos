@@ -111,7 +111,7 @@ def classify(snapshot: dict[str, Any], expected_head: str | None = None) -> dict
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", default="Jongtae/personal-agentos")
+    parser.add_argument("--repo", default="Jongtae/agentos")
     parser.add_argument("--pr", type=int)
     parser.add_argument("--snapshot", type=Path, help="Read a captured/test JSON snapshot without calling GitHub.")
     parser.add_argument("--expected-head")

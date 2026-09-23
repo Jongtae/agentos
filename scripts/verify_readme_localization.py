@@ -153,7 +153,7 @@ STATUS_EVIDENCE_BOUNDARIES = {
 STATIC_SHARED_FACTS = (
     "<!-- readme-parity:v1 -->",
     "brew install jongtae/agentos/agentos",
-    "git clone https://github.com/Jongtae/personal-agentos.git",
+    "git clone https://github.com/Jongtae/agentos.git",
     "AgentOS: http://127.0.0.1:8787/",
     "AGPL-3.0-only",
     "TRADEMARKS.md",
@@ -164,7 +164,7 @@ STATIC_SHARED_FACTS = (
 # the boundaries disappearing from the repository's public surface.
 STATUS_DOC_FACTS = (
     "brew install jongtae/agentos/agentos",
-    "https://github.com/Jongtae/personal-agentos/issues/472",
+    "https://github.com/Jongtae/agentos/issues/472",
     "Owner · Context · Memory · Artifact · Capability · Runtime · Grant · Work · Event · Evidence",
     "downloaded != installed != enabled != connected != authorized-for-action",
     "AGPL-3.0-only",

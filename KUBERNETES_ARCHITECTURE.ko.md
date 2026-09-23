@@ -11,7 +11,7 @@
 초기 구현은 개인별 Namespace + 단일 runtime Deployment + 개인 PVC/SQLite + Secret이다.
 공용 PostgreSQL/dispatcher, 실행 Job 분리, LLM 연결, 자동 깨우기는 후속 단계이며 아래 원안의 목표 구성과 현재 구현을 구분한다.
 실행 계획과 구현 범위의 최신 정보는 `PLAN.md`, `README.md`, 실제 수용 테스트 결과는 `E2E_RESULT.json`을 기준으로 한다.
-분석 기준: Jongtae/agentos의 main 커밋 `bf136746e2e623b95e6058bc11e966622389d0b2`.
+분석 기준: Jongtae/agentos-os-prototype(당시 이름 Jongtae/agentos)의 main 커밋 `bf136746e2e623b95e6058bc11e966622389d0b2`.
 원본을 `agentos/`에 복제해 주요 런타임·저장소·API·제품 요구사항을 확인했다. 전체 모듈의 동작 검증이나 전수 기능 감사는 아직 수행하지 않았다.
 
 ## 1. 제품 정의와 전환 완료 기준
@@ -161,7 +161,7 @@ MVP는 표준 Deployment/Job/PVC/Secret을 사용한다. 운영자가 AgentOS �
 
 ## 참고 자료
 
-- [원본 저장소](https://github.com/Jongtae/agentos)
+- [원본 저장소](https://github.com/Jongtae/agentos-os-prototype) (분석 당시 이름 `Jongtae/agentos`; 이후 `Jongtae/agentos`는 현재 주력 제품 저장소로 재사용됨)
 - [Kubernetes Jobs](https://kubernetes.io/docs/concepts/workloads/controllers/job/) — 작업 수명주기와 재시도 특성
 - [Kubernetes Operator pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/) — 선언적 애플리케이션 운영
 - [Kubernetes Multi-tenancy](https://kubernetes.io/docs/concepts/security/multi-tenancy/) — namespace·권한·격리 설계

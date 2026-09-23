@@ -31,7 +31,7 @@ AgentOS: http://127.0.0.1:8787/
 
 브라우저가 그 주소로 열립니다. **바로 시작하기**를 누르고 모델을 연결하면 바로 대화가 됩니다. 화면은 현재 한국어이고, 요청은 한국어나 영어로 이해합니다.
 
-**Homebrew는 최신 공개 배포본 `v1.1.0`(2026-09-23)을 설치하며, 이 페이지의 내용은 모두 그 안에 들어 있습니다.** 그 이후 `main`에 병합된 작업은 그 빌드에 없으므로, 다음 배포 전까지 Homebrew 빌드는 `main`보다 뒤입니다. 최신 코드를 쓰려면 소스 체크아웃으로 실행하세요(`git clone https://github.com/Jongtae/personal-agentos.git` 후 Python 3.12 이상에서 `python3 -m pip install -e .`). 모든 단계는 [QUICKSTART](QUICKSTART.md)에 있습니다.
+**Homebrew는 최신 공개 배포본 `v1.1.0`(2026-09-23)을 설치하며, 이 페이지의 내용은 모두 그 안에 들어 있습니다.** 그 이후 `main`에 병합된 작업은 그 빌드에 없으므로, 다음 배포 전까지 Homebrew 빌드는 `main`보다 뒤입니다. 최신 코드를 쓰려면 소스 체크아웃으로 실행하세요(`git clone https://github.com/Jongtae/agentos.git` 후 Python 3.12 이상에서 `python3 -m pip install -e .`). 모든 단계는 [QUICKSTART](QUICKSTART.md)에 있습니다.
 
 <!-- capability:current-supported-slice -->
 <!-- readme-section:scenes-today -->

@@ -4,7 +4,7 @@
 
 This is the canonical product-architecture definition: intended product boundary, meaning of **OS**, and authority between the personal AI kernel, installable AgentPackages, distribution and replaceable runtimes. It is not a claim that every described layer is shipped. Current support depends on merged implementation, the [roadmap](roadmap.md) and named acceptance evidence.
 
-The [Owner Control Contract](owner-control-contract.en.md) maps this architecture to six observable owner rights and enforcement/acceptance. [Default Agent Usefulness](default-agent-usefulness.en.md) defines useful task outcomes and separate development/live-quality gates. These documents refine product acceptance; they do not replace the v0.1 schema authority or add another state store. [USE-01 readiness](use-01-goal-readiness.en.md) prepares the next narrow product goal without activating the heartbeat.
+The [Owner Control Contract](owner-control-contract.en.md) maps this architecture to six observable owner rights and enforcement/acceptance. [Default Agent Usefulness](default-agent-usefulness.en.md) defines useful task outcomes and separate development/live-quality gates. The [Presence Experience Contract](presence-experience-contract.en.md) defines how this authoritative state is projected into one continuous owner-facing assistant across conversation, recovery, Settings and contextual handoffs; its research basis is preserved in the [2026-09-23 Presence study](research/presence-and-settings-ux.ko.md). These documents refine product acceptance; they do not replace the v0.1 schema authority or add another state store. [USE-01 readiness](use-01-goal-readiness.en.md) prepares the next narrow product goal without activating the heartbeat.
 
 ## Product identity
 
@@ -48,7 +48,7 @@ Separate owner-authoritative state/policy, non-authorizing package/distribution 
                               nested workers
 ```
 
-Everything above the worker boundary remains authoritative when a worker changes. No model, agent, Registry, Marketplace or framework becomes canonical Memory, Grant, approval, Work transition/recovery or Evidence authority. A receipt UI is a projection of these records, not another lifecycle database.
+Everything above the worker boundary remains authoritative when a worker changes. No model, agent, Registry, Marketplace or framework becomes canonical Memory, Grant, approval, Work transition/recovery or Evidence authority. A receipt UI is a projection of these records, not another lifecycle database. Owner-facing conversation is likewise a projection: worker/runtime identities remain inspectable technical facts, but Personal AgentOS owns the conversational identity and must project truth-qualified kernel state according to the [Presence Experience Contract](presence-experience-contract.en.md).
 
 ## Kernel primitives
 

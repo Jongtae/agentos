@@ -114,10 +114,34 @@ def evidence_summary(name,result):
  if name=='list_agents':return {'agent_count':len(result.get('agents',[]))}
  return {'keys':sorted(result)[:10]}
 
+def fallback_response(executions, sources):
+ """Return a useful safe result when a tool-capable model stops after tools."""
+ name,result=executions[-1]
+ if name=='weather' and isinstance(result,dict):
+  try:
+   from .local_tools import weather_answer
+   return weather_answer(result)
+  except (KeyError,TypeError):pass
+ if name=='web_search' and isinstance(result,dict):
+  rows=result.get('results',[])
+  lines=['검색 결과를 가져왔습니다.']
+  for row in rows[:5]:
+   if isinstance(row,dict) and row.get('title') and row.get('url'):lines.append(f"- {row['title']}: {row['url']}")
+  return '\n'.join(lines)+(('\n\n조회 출처:\n'+'\n'.join(dict.fromkeys(sources))) if sources else '')
+ if name=='save_note' and isinstance(result,dict) and result.get('saved'):return '메모를 저장했습니다.'
+ if name=='find_files' and isinstance(result,dict):
+  files=result.get('files',[])
+  return '찾은 파일:\n'+('\n'.join('- '+str(f.get('path')) for f in files[:12] if isinstance(f,dict)) or '일치하는 파일이 없습니다.')
+ if name=='read_file' and isinstance(result,dict):return f"{result.get('path','요청한 파일')}을 읽었습니다. 이어서 필요한 내용을 질문해 주세요."
+ if name=='list_notes':return f"저장된 메모 {len(result.get('notes',[]))}개를 확인했습니다."
+ if name=='list_agents':return '사용 가능한 전문 에이전트를 확인했습니다.'
+ if name=='delegate_agent' and isinstance(result,dict):return str(result.get('report') or '전문 에이전트 검토를 완료했습니다.')
+ return '요청한 작업을 완료했습니다.'
+
 def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'):
  messages=[{'role':'system','content':POLICY+'\n'+system},*history]
  definitions=capabilities.definitions();specs={d['function']['name']:d['function']['parameters'] for d in definitions}
- sources=[];failed=False;count=0;successful=0;invalid_calls=set()
+ sources=[];executions=[];failed=False;count=0;successful=0;invalid_calls=set()
  active_config=dict(config);rerouted=False;checked_direct=False;attempts={}
  for turn in range(9):
   try:
@@ -138,7 +162,9 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
    continue
   if not calls:
    content=message.get('content')
-   if not isinstance(content,str) or not content.strip():raise ProviderError('모델이 답변을 반환하지 않았습니다.')
+   if not isinstance(content,str) or not content.strip():
+    if successful:content=fallback_response(executions,sources)
+    else:raise ProviderError('모델이 답변을 반환하지 않았습니다.')
    if sources:content+='\n\n조회 출처:\n'+'\n'.join(dict.fromkeys(sources))
    result=ModelResult(content[:24000],config['provider'],actual)
    result.outcome=('partial' if successful else 'failed') if (failed or invalid_calls) else 'succeeded'
@@ -164,6 +190,7 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
     record(name,'running',json.dumps({'scope':scope,'call_id':call['id'],'attempt':attempt,'arguments':args},ensure_ascii=False))
     if cache_key not in capabilities.memo:capabilities.memo[cache_key]=capabilities.execute(name,args)
     result=capabilities.memo[cache_key]
+    executions.append((name,result))
     if name in ('find_files','read_file','list_notes'):capabilities.evidence.append({'tool':name,'result':result})
     if result.get('outcome') in ('failed','partial'):failed=True
     invalid_calls.discard(name)

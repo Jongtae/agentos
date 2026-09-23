@@ -49,6 +49,18 @@ class GeneralRuntimeTests(unittest.TestCase):
    return {'choices':[{'message':{'tool_calls':[{'id':str(count),'function':{'name':name,'arguments':json.dumps(args)}}]}}]}
   result=run_agent(ModelAdapter(transport),CFG,'',[{'role':'user','content':'Aurora 출시일을 파일에서 찾아줘'}],'',self.caps,lambda *a:None)
   self.assertEqual(result.content,'October 12')
+ def test_weather_falls_back_to_tool_result_when_model_returns_no_final_text(self):
+  calls=[0]
+  def transport(u,b,h):
+   calls[0]+=1
+   if calls[0]==1:return {'choices':[{'message':{'tool_calls':[{'id':'weather','function':{'name':'weather','arguments':'{"city":"Seongnam-si","country":"KR"}'}}]}}]}
+   return {'choices':[{'message':{'content':''}}]}
+  class Weather:
+   def execute(self,plan):return {'location':{'name':'Seongnam-si','admin1':'Gyeonggi-do','country':'South Korea'},'forecast':{'current':{'time':'2026-09-07T12:00','temperature_2m':24,'apparent_temperature':25,'precipitation':0,'wind_speed_10m':3},'current_units':{'temperature_2m':'°C','apparent_temperature':'°C','precipitation':'mm','wind_speed_10m':'km/h'},'timezone':'Asia/Seoul'},'sources':['https://open-meteo.example']}
+  caps=Capabilities(self.store,ModelAdapter(transport),CFG,'','job',lambda *a:None,network=Weather())
+  result=run_agent(caps.adapter,CFG,'',[{'role':'user','content':'성남시 날씨'}],'',caps,lambda *a:None)
+  self.assertIn('Seongnam-si',result.content)
+  self.assertIn('24 °C',result.content)
 if __name__=='__main__':unittest.main()
 
 class ProviderToolProtocolTests(unittest.TestCase):

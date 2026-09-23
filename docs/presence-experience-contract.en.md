@@ -2,7 +2,7 @@
 
 ## Status and purpose
 
-This is the canonical owner-facing experience refinement for conversation, Settings, contextual capability handoff and recovery. It distills the 2026-09-23 focused [Presence and Settings UX research](research/presence-and-settings-ux.ko.md) into implementation and review rules. Experience convergence is tracked by [PRESENCE-01 #508](https://github.com/Jongtae/personal-agentos/issues/508); that issue is planning/implementation-ready scope and is not activated merely by this document.
+This is the canonical owner-facing experience refinement for conversation, Settings, contextual capability handoff and recovery. It distills the 2026-09-23 focused [Presence and Settings UX research](research/presence-and-settings-ux.ko.md) into implementation and review rules. Experience convergence is tracked by [PRESENCE-01 #508](https://github.com/Jongtae/agentos/issues/508); that issue is planning/implementation-ready scope and is not activated merely by this document.
 
 It does **not** replace the kernel authority model, the Owner Control Contract, Work/Event/Evidence semantics, Grants/approvals, or the Goal Execution Contract. It does not claim every target behavior is shipped. Current capability claims still require merged implementation and named evidence.
 

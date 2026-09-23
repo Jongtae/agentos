@@ -15,6 +15,8 @@ The mental model is simple: **less “chat with an AI,” more “hand a task to
 
 > **Personal AgentOS = a personal AI you delegate to, backed by an owner-authoritative AI environment.**
 
+![Personal AgentOS delegation flow: delegate, work within permission, approve consequential actions, keep durable results](docs/assets/readme/delegation-flow.svg)
+
 <!-- readme-section:everyday-scene -->
 
 ## Start with an everyday scene
@@ -62,12 +64,16 @@ Other scenes follow the same pattern:
 
 Personal AgentOS is not trying to make every action autonomous. It is trying to make delegation useful **without giving up control of data, authority and durable state**.
 
+A personal productivity workspace can organize goals, tasks and knowledge for an AI. **Personal AgentOS focuses on the layer underneath:** the controlled execution environment that decides what an AI may access, what it may do, what actually happened, and what owner state survives when the worker changes.
+
 <!-- capability:current-supported-slice -->
 <!-- readme-section:try-today -->
 
 ## Try the supported slice today
 
 The best bounded first task is still a file-workspace journey because it has concrete repository evidence:
+
+![Supported file-workspace journey: approved source folder, managed result, restart and reuse](docs/assets/readme/file-workspace-flow.svg)
 
 1. Put a small Markdown/text note in a dedicated reference folder.
 2. Grant that folder read access and a separate managed workspace for results.

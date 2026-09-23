@@ -177,26 +177,36 @@ def owner_covers(value,owner_words,whole=True):
 # tripwire, because a paraphrase, translation or model-written summary of a
 # private document leaves no surface form to match.  Provenance survives
 # paraphrase precisely because it never reads the text.
-# Recorded decision (#449, step 2): `research.PublicResearch` is still NOT
-# wired, and there are now two independent reasons.  The first version of
-# this comment claimed the #391 taint precondition was met; independent
-# review falsified that in the same function, and the two holes it found --
+# History, because two versions of this comment were wrong and the reader
+# should be able to see how (#469 corrects the second).
+#
+# The first version claimed the #391 taint precondition was met.  Independent
+# review falsified that in this same function and found two holes --
 # delegation laundering material back to a clean parent, and `weather` as an
-# unguarded public destination -- are closed above.  The taint precondition
-# is met as far as this module's own destinations go; that is a narrower
-# claim than the one made here before, and the second reason is unaffected
-# by it.  Executed against the module: its
-# URL selection reads up to three search-discovered URLs and self-approves
-# each one (`page_reader.read(url, approved_urls=[url])`), so the owner's
-# approved-page scope -- exact normalized URLs, fingerprinted to the model
-# config, see AgentService.public_page_boundary -- is never consulted.  Wiring
-# it as-is would widen the egress destination from "URLs the owner approved"
-# to "URLs a search returned".  The only non-widening wiring, forcing the
-# owner scope onto the reader, yields no evidence at all unless an approved
-# URL happens to appear in the search results, so it works only where a test
-# controls both.  Choosing between those is an owner authority decision and is
-# explicitly a #449 non-goal; the J5 discrimination therefore stays
-# unreachable from a production path until it is made.
+# unguarded public destination.  Both are closed above.
+#
+# The second version then said `research.PublicResearch` was "still NOT
+# wired" and that the J5 discrimination stayed unreachable from a production
+# path.  That stopped being true when PA1-J5-01 / #458 (PR #460) wired it:
+# `bounded_public_research` is in `manifests.HOST_ACTIONS`, declared in
+# `DEFINITIONS`, and routed in `execute` below.  It also rested on a
+# conflation, corrected when #449 closed -- the owner-approved
+# `public_page_scope` governs the model-driven `public_page_read` tool, while
+# a bounded owner-initiated research workflow is what #386's J5 grants in
+# terms ("bounded public search and page reading as needed").  The Epic was
+# the authority and it granted the second.
+#
+# What was accurate then and still is: research reads up to three
+# search-discovered URLs and self-approves each one
+# (`page_reader.read(url, approved_urls=[url])`), so the owner's approved-page
+# scope -- exact normalized URLs, fingerprinted to the model config, see
+# AgentService.public_page_boundary -- is never consulted on that path.  The
+# mode allowlist and the page cap bound how MUCH is read, not WHICH page.
+# That delta is real and is disclosed at the routing branch itself rather
+# than only here.
+#
+# What remains open is recall, not reachability: measured fee 7/10,
+# inventory 1/10, payable_total 0/10 (#459).
 PRIVATE_PROVENANCE={'find_files':'connected-document','read_file':'connected-document',
                     'list_notes':'personal-space','list_memory':'owner-memory',
                     'save_memory':'owner-memory','list_roots':'owner-folder-names',

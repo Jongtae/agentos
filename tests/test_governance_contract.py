@@ -138,3 +138,69 @@ def test_verification_budget_requires_stable_heads_and_batched_remediation() -> 
         "any post-review pa1 commit",
         "consolidated final head",
     )
+
+
+def test_claude_bootstrap_points_at_no_completed_program() -> None:
+    """The first file a Claude session reads must not name finished work.
+
+    It used to. `CLAUDE.md` told every session to read the EPIC-PA1 / #386
+    execution cursor first and to update that cursor after any state
+    transition -- long after #386 closed, its execution authority was retired
+    (GOV-PA1-07 / #467) and `next_goal.id` became `null`. No runtime effect,
+    because `DeliveryPlan.select` refuses completed work outright, but it
+    pointed a fresh session at a completed program as the place to look for
+    the next action. That is the re-selection risk arriving through
+    documentation instead of through the controller.
+    """
+    claude = _read("CLAUDE.md")
+
+    # No program identity is hardcoded here. A program that wants a resume
+    # source defines its own; this file must not name one, and must not
+    # outlive the program it named.
+    for stale in ("#386", "EPIC-PA1", "agentos-execution-cursor"):
+        assert _normalize(stale) not in _normalize(claude), (
+            f"CLAUDE.md still names {stale}; a bootstrap must not point at a "
+            "specific program, least of all a closed one"
+        )
+
+    # Fail closed, stated rather than implied.
+    _assert_all(
+        claude,
+        "next_goal",
+        "no work is selected",
+        "do not infer one from open issues",
+    )
+    _assert_any(
+        claude,
+        "only an explicit owner `active` transition authorises execution",
+        "only an explicit owner `active` transition authorizes execution",
+    )
+
+
+def test_following_the_bootstrap_selects_nothing_while_no_goal_is_active() -> None:
+    """The behavioural half: do what CLAUDE.md says and get nothing.
+
+    The document assertions above would pass against a file that said the
+    right words over a plan that still handed out work. This walks the
+    bootstrap's own stated route -- read `next_goal`, and select only on an
+    explicit `active` transition -- against the real plan and the real
+    controller.
+    """
+    import json
+
+    from personal_agent.delivery import DeliveryPlan
+
+    plan_path = ROOT / "delivery-plan.yaml"
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+
+    # Step 3 of the bootstrap.
+    assert plan["next_goal"]["id"] is None
+    assert plan["next_goal"]["status"] != "active"
+
+    # Step 4: nothing is selected, and nothing in the backlog substitutes.
+    assert DeliveryPlan(plan_path).select({}) is None
+
+    # And not merely because the runtime state happens to be empty: a
+    # populated or corrupt state must not change the answer either.
+    for state in ({}, {"completed": []}, {"active": "EPIC-PA1", "status": "running"}):
+        assert DeliveryPlan(plan_path).select(state) is None, state

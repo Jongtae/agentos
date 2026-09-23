@@ -106,6 +106,30 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
                 errors,
             )
 
+    def test_new_unmarked_setext_h2_is_rejected(self):
+        tmp, root = self.temp_root()
+        with tmp:
+            target = root / "README.md"
+            body = target.read_text(encoding="utf-8")
+            body = body.replace(
+                "Personal AgentOS is not trying to make every action autonomous.",
+                "Pricing\n-------\n\nPro tier includes autonomous checkout.\n\n"
+                "Personal AgentOS is not trying to make every action autonomous.",
+                1,
+            )
+            target.write_text(body, encoding="utf-8")
+
+            errors = verifier.validate_readmes(root)
+            self.assertTrue(
+                any(
+                    "README.md" in error
+                    and "H2 'Pricing'" in error
+                    and "missing a readme-section marker" in error
+                    for error in errors
+                ),
+                errors,
+            )
+
     def test_product_direction_disclaimer_deletion_is_detected(self):
         tmp, root = self.temp_root()
         with tmp:
@@ -145,6 +169,28 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
                 any(
                     "README.ko.md" in error
                     and "not-shipped capability disclaimer" in error
+                    for error in errors
+                ),
+                errors,
+            )
+
+    def test_product_direction_label_deletion_is_detected(self):
+        tmp, root = self.temp_root()
+        with tmp:
+            target = root / "README.ko.md"
+            body = target.read_text(encoding="utf-8")
+            body = body.replace(
+                verifier.PRODUCT_DIRECTION_LABELS["README.ko.md"],
+                "",
+                1,
+            )
+            target.write_text(body, encoding="utf-8")
+
+            errors = verifier.validate_readmes(root)
+            self.assertTrue(
+                any(
+                    "README.ko.md" in error
+                    and "missing its visible product-direction label" in error
                     for error in errors
                 ),
                 errors,
@@ -195,6 +241,38 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
                 ),
                 errors,
             )
+
+    def test_status_row_evidence_class_inversion_is_detected(self):
+        for name, replacement in (
+            ("README.md", "**Live provider verified**"),
+            ("README.ko.md", "**실제 제공자 검증 완료**"),
+        ):
+            with self.subTest(readme=name):
+                tmp, root = self.temp_root()
+                with tmp:
+                    target = root / name
+                    body = target.read_text(encoding="utf-8")
+                    body = body.replace(
+                        verifier.STATUS_ROW_EVIDENCE_TOKEN,
+                        replacement,
+                    )
+                    target.write_text(body, encoding="utf-8")
+
+                    errors = verifier.validate_readmes(root)
+                    self.assertTrue(
+                        any(
+                            (
+                                name in error
+                                and "status evidence-class count differs" in error
+                            )
+                            or (
+                                name == "README.md"
+                                and "lost every synthetic pass-with-friction row" in error
+                            )
+                            for error in errors
+                        ),
+                        errors,
+                    )
 
     def test_shared_install_fact_drift_is_detected(self):
         tmp, root = self.temp_root()

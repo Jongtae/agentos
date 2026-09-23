@@ -15,6 +15,8 @@
 
 > **Personal AgentOS = 実際の仕事を委任するパーソナル AI + owner-authoritative な AI 環境**
 
+![Personal AgentOS の委任フロー: 任せる、許可範囲で実行、重要操作を承認、結果を保持](docs/assets/readme/delegation-flow.svg)
+
 <!-- readme-section:everyday-scene -->
 
 ## まず、日常の一場面で考える
@@ -62,12 +64,16 @@
 
 すべてを自動実行することが目的ではありません。**データ、権限、決定、永続状態のコントロールを手放さずに、実際の仕事を任せられるようにすること**が目的です。
 
+個人向けの生産性ワークスペースは、AI のために目標・タスク・知識を整理できます。**Personal AgentOS が重視するのはその下の実行レイヤーです。** AI が何にアクセスできるか、何を実行できるか、実際に何が起きたか、worker を変えてもどの owner state が残るかを制御する環境です。
+
 <!-- capability:current-supported-slice -->
 <!-- readme-section:try-today -->
 
 ## 今、検証済みの範囲を試す
 
 現時点で最も明確な最初のタスクは file-workspace journey です。保存結果、原本保持、再起動後の再利用に具体的な repository evidence があります。
+
+![現在サポートされるファイル作業フロー: 承認済み参照フォルダ、管理された結果、再起動と再利用](docs/assets/readme/file-workspace-flow.svg)
 
 1. 専用の参照フォルダに小さな Markdown/text ファイルを置きます。
 2. そのフォルダには read access、別の managed workspace には結果保存権限を与えます。

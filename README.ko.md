@@ -15,6 +15,8 @@
 
 > **Personal AgentOS = 실제 일을 위임하는 개인 AI + 소유자 권한을 기준으로 동작하는 AI 환경**
 
+![Personal AgentOS 위임 흐름: 맡기기, 허용 범위에서 실행, 중요한 행동 승인, 결과 보존](docs/assets/readme/delegation-flow.svg)
+
 <!-- readme-section:everyday-scene -->
 
 ## 먼저 생활의 한 장면으로 이해하기
@@ -62,12 +64,16 @@
 
 목표는 모든 것을 자동으로 실행하는 것이 아닙니다. **데이터, 권한, 결정과 장기 상태의 통제권을 넘기지 않으면서 실제 일을 맡길 수 있게 하는 것**이 목표입니다.
 
+개인 생산성 워크스페이스가 AI를 위해 목표·할 일·지식을 정리할 수 있다면, **Personal AgentOS는 그 아래 실행 계층에 초점을 둡니다.** AI가 무엇에 접근할 수 있는지, 무엇을 할 수 있는지, 실제로 무슨 일이 일어났는지, worker를 바꿔도 어떤 owner state가 남는지를 통제하는 환경입니다.
+
 <!-- capability:current-supported-slice -->
 <!-- readme-section:try-today -->
 
 ## 지금 검증된 범위를 직접 써보기
 
 현재 가장 분명한 첫 작업은 파일 작업공간 흐름입니다. 저장 결과와 원본 보존, 재시작 후 재사용에 대한 구체적인 저장소 근거가 있습니다.
+
+![현재 지원되는 파일 작업공간 흐름: 승인된 원본 폴더, 관리 결과 파일, 재시작과 재사용](docs/assets/readme/file-workspace-flow.svg)
 
 1. 전용 참고 폴더에 작은 Markdown/text 파일을 둡니다.
 2. 그 폴더에는 읽기 권한을, 별도의 관리 작업공간에는 결과 저장 권한을 부여합니다.

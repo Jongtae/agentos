@@ -4,7 +4,7 @@
 
 This is the canonical **foundation and migration plan** for the Agent Distribution Platform program. It translates the architecture into staged design and implementation work. It is not a shipped-capability claim and does not activate child issues. The selector remains the Goal Execution Contract and an explicitly delegated goal-ready delivery-plan entry.
 
-Parent epic: [EPIC-ADP-01 / #333](https://github.com/Jongtae/personal-agentos/issues/333).
+Parent epic: [EPIC-ADP-01 / #333](https://github.com/Jongtae/agentos/issues/333).
 
 D-AP-01 / #334 is development-complete through PR #350: v0.1 contracts, schemas and deterministic fixtures, not package execution. DOGFOOD-01 / #351 is development-complete through PRs #354–#356: simulated-provider/local-file/HTTP/restart evidence; real owner browser/provider acceptance remains separate. Other distribution children remain planned.
 
@@ -108,11 +108,11 @@ Existing-ecosystem wrappers may reduce cold start where official formats/licence
 
 ## Outcome-first priority overlay
 
-1. [USE-01 / #358](https://github.com/Jongtae/personal-agentos/issues/358): evaluator first, baseline next, then bounded public-page research, useful file artifacts and follow-up/restart. It need not wait for the platform epic.
-2. [OBS-01 / #359](https://github.com/Jongtae/personal-agentos/issues/359): actual progress/parameters/effects, minimal redacted receipts and supported cancellation on existing Work. Coordinate without circular dependencies.
+1. [USE-01 / #358](https://github.com/Jongtae/agentos/issues/358): evaluator first, baseline next, then bounded public-page research, useful file artifacts and follow-up/restart. It need not wait for the platform epic.
+2. [OBS-01 / #359](https://github.com/Jongtae/agentos/issues/359): actual progress/parameters/effects, minimal redacted receipts and supported cancellation on existing Work. Coordinate without circular dependencies.
 3. #335/#337/#338 define compatible minimum lifecycle/security/runtime boundaries; #336 governs Memory where used.
 4. #340/#341/#342 implement lifecycle, manual package Work first, then event/SDK coverage and one useful Files package. Downstream consumers are not reverse prerequisites of foundation tasks. Preserve all unfinished update/rollback/event/reference scope.
-5. [AGENT-UX-01 / #360](https://github.com/Jongtae/personal-agentos/issues/360): install → grant → useful result → inspect → revoke → denied retry → remove → restart → separately authorized replacement/reuse.
+5. [AGENT-UX-01 / #360](https://github.com/Jongtae/agentos/issues/360): install → grant → useful result → inspect → revoke → denied retry → remove → restart → separately authorized replacement/reuse.
 6. Broader Registry/import/commerce/autonomy follows demonstrated utility and lifecycle control, not the reverse.
 
 This overlay does not erase the phases or activate a top-level automatic program. Each issue's actual dependencies, current evidence and separate activation govern execution.
@@ -121,37 +121,37 @@ This overlay does not erase the phases or activate a top-level automatic program
 
 ### Phase A — Foundation contracts
 
-- [#334](https://github.com/Jongtae/personal-agentos/issues/334) D-AP-01: complete contracts/schemas/fixtures, not execution.
-- [#335](https://github.com/Jongtae/personal-agentos/issues/335) D-AP-02: trust/permission/lifecycle.
-- [#336](https://github.com/Jongtae/personal-agentos/issues/336) D-MEM-01: third-party Context/Memory.
-- [#337](https://github.com/Jongtae/personal-agentos/issues/337) D-SBX-01: isolation/supply-chain/broker.
-- [#338](https://github.com/Jongtae/personal-agentos/issues/338) D-RT-01: common Runtime Adapter.
-- [#339](https://github.com/Jongtae/personal-agentos/issues/339) D-REG-01: Registry/Marketplace separation.
+- [#334](https://github.com/Jongtae/agentos/issues/334) D-AP-01: complete contracts/schemas/fixtures, not execution.
+- [#335](https://github.com/Jongtae/agentos/issues/335) D-AP-02: trust/permission/lifecycle.
+- [#336](https://github.com/Jongtae/agentos/issues/336) D-MEM-01: third-party Context/Memory.
+- [#337](https://github.com/Jongtae/agentos/issues/337) D-SBX-01: isolation/supply-chain/broker.
+- [#338](https://github.com/Jongtae/agentos/issues/338) D-RT-01: common Runtime Adapter.
+- [#339](https://github.com/Jongtae/agentos/issues/339) D-REG-01: Registry/Marketplace separation.
 
 Exit: independently reviewable contracts and negative cases. Design completion requires no package execution and proves no implemented isolation.
 
 ### Phase B — Local package platform
 
-- [#340](https://github.com/Jongtae/personal-agentos/issues/340) I-AP-01: validator/Package Manager.
-- [#341](https://github.com/Jongtae/personal-agentos/issues/341) I-EVT-01: Work/Event integration.
-- [#342](https://github.com/Jongtae/personal-agentos/issues/342) I-SDK-01: SDK/CLI/reference packages.
+- [#340](https://github.com/Jongtae/agentos/issues/340) I-AP-01: validator/Package Manager.
+- [#341](https://github.com/Jongtae/agentos/issues/341) I-EVT-01: Work/Event integration.
+- [#342](https://github.com/Jongtae/agentos/issues/342) I-SDK-01: SDK/CLI/reference packages.
 
 Exit: a signed fixture package validates/stages/installs-disabled, is explicitly granted, performs useful bounded Work, updates/rolls back/removes and survives restart correctly. #360 adds owner-visible integration and replacement evidence. Arbitrary executable support requires actual independent isolation/egress enforcement evidence.
 
 ### Phase C — Ecosystem ready
 
-- [#343](https://github.com/Jongtae/personal-agentos/issues/343) I-ECO-01: compatible foreign formats.
-- [#344](https://github.com/Jongtae/personal-agentos/issues/344) I-RT-RUFLO-01: optional bounded runtime.
+- [#343](https://github.com/Jongtae/agentos/issues/343) I-ECO-01: compatible foreign formats.
+- [#344](https://github.com/Jongtae/agentos/issues/344) I-RT-RUFLO-01: optional bounded runtime.
 
 The full phase's existing scope includes a foreign representation and a sophisticated delegated runtime through common authority/evidence contracts in deterministic/local validation. Useful defaults and the first app do not depend on finishing this optional expansion.
 
 ### Phase D — Registry ready
 
-[#345](https://github.com/Jongtae/personal-agentos/issues/345) I-REG-01 resolves exact releases/trust/advisories without private owner data or implicit installation/enablement.
+[#345](https://github.com/Jongtae/agentos/issues/345) I-REG-01 resolves exact releases/trust/advisories without private owner data or implicit installation/enablement.
 
 ### Phase E — Acquisition autonomy design
 
-[#346](https://github.com/Jongtae/personal-agentos/issues/346) defines L1–L5. L4/L5 is not first-MVP scope. Safe visible installation precedes autonomy.
+[#346](https://github.com/Jongtae/agentos/issues/346) defines L1–L5. L4/L5 is not first-MVP scope. Safe visible installation precedes autonomy.
 
 ## Historical migration rule
 

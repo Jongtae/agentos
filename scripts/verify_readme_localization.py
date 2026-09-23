@@ -50,7 +50,9 @@ CORE_SECTION_IDS = (
 SECTION_MARKER_RE = re.compile(
     r"<!-- readme-section:([a-z0-9][a-z0-9-]*) -->"
 )
-H2_RE = re.compile(r"^## (?!#)", re.MULTILINE)
+ATX_H2_RE = re.compile(r"^ {0,3}##(?!#)(?:[ \\t]+|$)")
+SETEXT_H2_RE = re.compile(r"^ {0,3}-+[ \\t]*$")
+FENCE_RE = re.compile(r"^ {0,3}(\\x60{3,}|~{3,})")
 
 CAPABILITY_MARKERS = (
     "<!-- capability:illustrative-product-direction -->",
@@ -90,6 +92,8 @@ PRODUCT_DIRECTION_DISCLAIMERS = {
     ),
 }
 
+STATUS_ROW_EVIDENCE_TOKEN = "Synthetic **pass-with-friction**"
+
 STATUS_EVIDENCE_BOUNDARIES = {
     "README.md": "**live provider operation was not run**",
     "README.ko.md": "**실제 외부 제공자 운영은 실행하지 않았습니다.**",
@@ -124,24 +128,61 @@ def section_markers(body: str) -> tuple[str, ...]:
     return tuple(match.group(1) for match in SECTION_MARKER_RE.finditer(body))
 
 
-def validate_heading_marker_discipline(name: str, body: str) -> list[str]:
-    """Every public H2 needs a semantic marker immediately above it.
+def public_h2_indexes(body: str) -> list[tuple[int, str]]:
+    """Return public Markdown H2 headings outside fenced code blocks.
 
-    Blank lines are ignored. This prevents a new user-facing canonical section
-    from bypassing parity merely by omitting the marker.
+    Detect both ATX H2 headings and setext H2 headings so a new user-facing
+    section cannot bypass parity by changing Markdown syntax.
     """
+    lines = body.splitlines()
+    headings: list[tuple[int, str]] = []
+    fence_char: str | None = None
+    fence_len = 0
+
+    for index, line in enumerate(lines):
+        fence = FENCE_RE.match(line)
+        if fence:
+            token = fence.group(1)
+            char = token[0]
+            rest = line[fence.end():].strip()
+            if fence_char is None:
+                fence_char = char
+                fence_len = len(token)
+            elif char == fence_char and len(token) >= fence_len and not rest:
+                fence_char = None
+                fence_len = 0
+            continue
+
+        if fence_char is not None:
+            continue
+
+        if ATX_H2_RE.match(line):
+            headings.append((index, line.strip()))
+            continue
+
+        if (
+            line.strip()
+            and not line.startswith(("    ", "\\t"))
+            and index + 1 < len(lines)
+            and SETEXT_H2_RE.match(lines[index + 1])
+        ):
+            headings.append((index, line.strip()))
+
+    return headings
+
+
+def validate_heading_marker_discipline(name: str, body: str) -> list[str]:
+    """Every public H2 needs a semantic marker immediately above it."""
     errors: list[str] = []
     lines = body.splitlines()
-    for index, line in enumerate(lines):
-        if not line.startswith("## "):
-            continue
+    for index, heading in public_h2_indexes(body):
         cursor = index - 1
         while cursor >= 0 and not lines[cursor].strip():
             cursor -= 1
         previous = lines[cursor].strip() if cursor >= 0 else ""
         if not SECTION_MARKER_RE.fullmatch(previous):
             errors.append(
-                f"{name}: H2 {line!r} is missing a readme-section marker immediately above it"
+                f"{name}: H2 {heading!r} is missing a readme-section marker immediately above it"
             )
     return errors
 
@@ -163,6 +204,7 @@ def validate_body(
     body: str,
     canonical_sections: tuple[str, ...],
     release_version: str,
+    canonical_status_synthetic_rows: int,
 ) -> list[str]:
     errors: list[str] = []
 
@@ -213,6 +255,14 @@ def validate_body(
             f"{name}: status section is missing its visible synthetic-vs-live evidence boundary"
         )
 
+    synthetic_rows = status.count(STATUS_ROW_EVIDENCE_TOKEN)
+    if synthetic_rows != canonical_status_synthetic_rows:
+        errors.append(
+            f"{name}: status evidence-class count differs from canonical README.md; "
+            f"expected {canonical_status_synthetic_rows} occurrences of "
+            f"{STATUS_ROW_EVIDENCE_TOKEN!r}, found {synthetic_rows}"
+        )
+
     install = body.find("brew install jongtae/agentos/agentos")
     status_marker = body.find("<!-- readme-section:status -->")
     if install >= 0 and status_marker >= 0 and install >= status_marker:
@@ -257,6 +307,17 @@ def validate_readmes(root: Path = ROOT) -> list[str]:
             + ", ".join(missing_core)
         )
 
+    canonical_status = section_slice(canonical, "status", "why-agentos")
+    canonical_status_synthetic_rows = canonical_status.count(
+        STATUS_ROW_EVIDENCE_TOKEN
+    )
+    if canonical_status_synthetic_rows == 0:
+        errors.append(
+            "README.md: status section lost every synthetic pass-with-friction "
+            "row while #472 remains the shared audit source; an evidence-class "
+            "promotion requires deliberate verifier review"
+        )
+
     try:
         release_version = newest_published_version(root)
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
@@ -265,7 +326,13 @@ def validate_readmes(root: Path = ROOT) -> list[str]:
 
     for name, body in bodies.items():
         errors.extend(
-            validate_body(name, body, canonical_sections, release_version)
+            validate_body(
+                name,
+                body,
+                canonical_sections,
+                release_version,
+                canonical_status_synthetic_rows,
+            )
         )
     return errors
 

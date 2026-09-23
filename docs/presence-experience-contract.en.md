@@ -6,6 +6,12 @@ This is the canonical owner-facing experience refinement for conversation, Setti
 
 It does **not** replace the kernel authority model, the Owner Control Contract, Work/Event/Evidence semantics, Grants/approvals, or the Goal Execution Contract. It does not claim every target behavior is shipped. Current capability claims still require merged implementation and named evidence.
 
+## North Star
+
+> **Personal AgentOS is not a chatbot that sounds more human. It is an owner-controlled kernel whose machinery recedes behind one continuous, truthful personal-assistant relationship.**
+
+Use this as a product decision filter for owner-facing work: keep the kernel strict and inspectable, while moving internal execution machinery behind a continuous assistant relationship unless the owner explicitly asks to inspect it.
+
 ## Product definition of Presence
 
 **Presence is the experience of one continuous, context-aware personal assistant across turns, tools, workers, failures, restarts and capability handoffs, while AgentOS continues to enforce truthful Evidence, explicit owner authority and inspectable technical state underneath.**

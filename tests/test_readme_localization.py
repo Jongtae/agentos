@@ -16,10 +16,8 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
     def copy_public_readmes(self, root):
         for name in verifier.READMES:
             shutil.copyfile(ROOT / name, root / name)
-        shutil.copyfile(
-            ROOT / "docs" / "release-manifest.json",
-            root / "docs" / "release-manifest.json",
-        )
+        for rel in ("docs/release-manifest.json", *verifier.STATUS_DOCS):
+            shutil.copyfile(ROOT / rel, root / rel)
 
     def temp_root(self):
         tmp = tempfile.TemporaryDirectory()
@@ -37,7 +35,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             target = root / "README.ja.md"
             body = target.read_text(encoding="utf-8")
             body = body.replace(
-                "<!-- readme-section:everyday-scene -->", "", 1
+                "<!-- readme-section:scenes-today -->", "", 1
             )
             target.write_text(body, encoding="utf-8")
 
@@ -65,8 +63,8 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
                 "Includes autonomous checkout.\n\n"
             )
             body = body.replace(
-                "<!-- readme-section:development -->",
-                insertion + "<!-- readme-section:development -->",
+                "<!-- readme-section:more -->",
+                insertion + "<!-- readme-section:more -->",
                 1,
             )
             target.write_text(body, encoding="utf-8")
@@ -88,9 +86,9 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             target = root / "README.md"
             body = target.read_text(encoding="utf-8")
             body = body.replace(
-                "<!-- readme-section:development -->",
+                "<!-- readme-section:more -->",
                 "## Pricing\n\nA new user-facing section.\n\n"
-                "<!-- readme-section:development -->",
+                "<!-- readme-section:more -->",
                 1,
             )
             target.write_text(body, encoding="utf-8")
@@ -112,7 +110,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             target = root / "README.md"
             body = target.read_text(encoding="utf-8")
             body = body.replace(
-                "Personal AgentOS is not trying to make every action autonomous.",
+                "That is all of it.",
                 "Pricing\n-------\n\nPro tier includes autonomous checkout.\n\n"
                 "Personal AgentOS is not trying to make every action autonomous.",
                 1,
@@ -133,7 +131,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
     def test_product_direction_disclaimer_deletion_is_detected(self):
         tmp, root = self.temp_root()
         with tmp:
-            target = root / "README.ko.md"
+            target = root / "docs" / "product-status.ko.md"
             body = target.read_text(encoding="utf-8")
             body = body.replace(
                 verifier.PRODUCT_DIRECTION_DISCLAIMERS["README.ko.md"],
@@ -145,7 +143,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             errors = verifier.validate_readmes(root)
             self.assertTrue(
                 any(
-                    "README.ko.md" in error
+                    "product-status.ko.md" in error
                     and "not-shipped capability disclaimer" in error
                     for error in errors
                 ),
@@ -155,7 +153,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
     def test_product_direction_disclaimer_inversion_is_detected(self):
         tmp, root = self.temp_root()
         with tmp:
-            target = root / "README.ko.md"
+            target = root / "docs" / "product-status.ko.md"
             body = target.read_text(encoding="utf-8")
             body = body.replace(
                 verifier.PRODUCT_DIRECTION_DISCLAIMERS["README.ko.md"],
@@ -167,7 +165,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             errors = verifier.validate_readmes(root)
             self.assertTrue(
                 any(
-                    "README.ko.md" in error
+                    "product-status.ko.md" in error
                     and "not-shipped capability disclaimer" in error
                     for error in errors
                 ),
@@ -177,7 +175,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
     def test_product_direction_label_deletion_is_detected(self):
         tmp, root = self.temp_root()
         with tmp:
-            target = root / "README.ko.md"
+            target = root / "docs" / "product-status.ko.md"
             body = target.read_text(encoding="utf-8")
             body = body.replace(
                 verifier.PRODUCT_DIRECTION_LABELS["README.ko.md"],
@@ -189,7 +187,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             errors = verifier.validate_readmes(root)
             self.assertTrue(
                 any(
-                    "README.ko.md" in error
+                    "product-status.ko.md" in error
                     and "missing its visible product-direction label" in error
                     for error in errors
                 ),
@@ -199,21 +197,23 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
     def test_product_direction_label_must_stay_before_scene(self):
         tmp, root = self.temp_root()
         with tmp:
-            target = root / "README.zh-CN.md"
+            target = root / "docs" / "product-status.en.md"
             body = target.read_text(encoding="utf-8")
-            label = verifier.PRODUCT_DIRECTION_LABELS["README.zh-CN.md"]
+            label = verifier.PRODUCT_DIRECTION_LABELS["README.md"]
             body = body.replace(label + "\n\n", "", 1)
             scene_end = (
-                "> **Personal AgentOS：**收集被允许的上下文，调查选项，"
-                "把已确认的信息和仍需核实的内容分开，准备下一步，并在需要批准的边界停下。"
+                "> **Personal AgentOS:** gathers the allowed context, researches the options, "
+                "separates what is known from what still needs verification, prepares the next "
+                "step, and stops at the approval boundary."
             )
+            self.assertIn(scene_end, body)
             body = body.replace(scene_end, scene_end + "\n\n" + label, 1)
             target.write_text(body, encoding="utf-8")
 
             errors = verifier.validate_readmes(root)
             self.assertTrue(
                 any(
-                    "README.zh-CN.md" in error
+                    "product-status.en.md" in error
                     and "label must appear before" in error
                     for error in errors
                 ),
@@ -223,7 +223,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
     def test_status_live_evidence_inversion_is_detected(self):
         tmp, root = self.temp_root()
         with tmp:
-            target = root / "README.md"
+            target = root / "docs" / "product-status.en.md"
             body = target.read_text(encoding="utf-8")
             body = body.replace(
                 verifier.STATUS_EVIDENCE_BOUNDARIES["README.md"],
@@ -235,7 +235,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             errors = verifier.validate_readmes(root)
             self.assertTrue(
                 any(
-                    "README.md" in error
+                    "product-status.en.md" in error
                     and "synthetic-vs-live evidence boundary" in error
                     for error in errors
                 ),
@@ -243,56 +243,25 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             )
 
     def test_status_row_evidence_class_inversion_is_detected(self):
-        for name, replacement in (
-            ("README.md", "**Live provider verified**"),
-            ("README.ko.md", "**실제 제공자 검증 완료**"),
+        for rel, replacement, expected in (
+            ("docs/product-status.en.md", "**Live provider verified**",
+             "docs/product-status.en.md: status section lost every synthetic pass-with-friction row"),
+            ("docs/product-status.ko.md", "**실제 제공자 검증 완료**",
+             "docs/product-status.ko.md: status evidence-class count differs"),
         ):
-            with self.subTest(readme=name):
+            with self.subTest(doc=rel):
                 tmp, root = self.temp_root()
                 with tmp:
-                    target = root / name
+                    target = root / rel
                     body = target.read_text(encoding="utf-8")
-                    body = body.replace(
-                        verifier.STATUS_ROW_EVIDENCE_TOKEN,
-                        replacement,
+                    target.write_text(
+                        body.replace(verifier.STATUS_ROW_EVIDENCE_TOKEN, replacement),
+                        encoding="utf-8",
                     )
-                    target.write_text(body, encoding="utf-8")
-
                     errors = verifier.validate_readmes(root)
-                    if name == "README.md":
-                        expected = (
-                            "README.md: status section lost every synthetic "
-                            "pass-with-friction row"
-                        )
-                    else:
-                        expected = f"{name}: status evidence-class count differs"
                     self.assertTrue(
-                        any(error.startswith(expected) for error in errors),
-                        errors,
+                        any(error.startswith(expected) for error in errors), errors
                     )
-
-    def test_canonical_status_cannot_drop_every_synthetic_row(self):
-        """The zero-row guard is the fail-closed backstop for #472 evidence."""
-        tmp, root = self.temp_root()
-        with tmp:
-            target = root / "README.md"
-            body = target.read_text(encoding="utf-8")
-            body = body.replace(
-                verifier.STATUS_ROW_EVIDENCE_TOKEN, "**Live provider verified**"
-            )
-            target.write_text(body, encoding="utf-8")
-
-            errors = verifier.validate_readmes(root)
-            self.assertTrue(
-                any(
-                    error.startswith(
-                        "README.md: status section lost every synthetic "
-                        "pass-with-friction row"
-                    )
-                    for error in errors
-                ),
-                errors,
-            )
 
     def test_heading_like_text_inside_a_fenced_block_is_not_a_section(self):
         """Fenced samples may contain heading-like text without breaking parity.
@@ -306,7 +275,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             "~~~\nPricing\n---\n~~~",
             "```text\nfence styles:\n~~~\n```",
         )
-        anchor = "<!-- readme-section:architecture -->"
+        anchor = "<!-- readme-section:more -->"
         for fence in fixtures:
             with self.subTest(fence=fence.splitlines()[0]):
                 tmp, root = self.temp_root()
@@ -326,8 +295,8 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
         with tmp:
             target = root / "README.md"
             clean = target.read_text(encoding="utf-8")
-            hero = "## Delegate the work. Keep the control."
-            heading = "## Owner control by design"
+            hero = "## Your own AI assistant, on your own machine."
+            heading = "## The settings you will need"
             self.assertIn(hero, clean)
             self.assertIn(heading, clean)
 
@@ -359,14 +328,168 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
                 errors,
             )
 
+    def test_scenes_evidence_sentence_deletion_is_detected(self):
+        tmp, root = self.temp_root()
+        with tmp:
+            target = root / "README.md"
+            body = target.read_text(encoding="utf-8")
+            scenes = verifier.section_slice(body, "scenes-today", "settings")
+            token = verifier.SCENES_EVIDENCE_LABELS["README.md"]
+            self.assertIn(token, scenes)
+            # Moving the sentence into image alt text must not satisfy the check.
+            body = body.replace(
+                scenes,
+                scenes.replace(token, "live accounts", 1).replace(
+                    "![", f"![{token} ", 1
+                ),
+                1,
+            )
+            target.write_text(body, encoding="utf-8")
+
+            errors = verifier.validate_readmes(root)
+            self.assertTrue(
+                any(
+                    "README.md" in error
+                    and "scenes-today is missing its visible evidence-class sentence" in error
+                    for error in errors
+                ),
+                errors,
+            )
+
+    def test_hero_local_first_sentence_deletion_is_detected(self):
+        tmp, root = self.temp_root()
+        with tmp:
+            target = root / "README.ko.md"
+            body = target.read_text(encoding="utf-8")
+            body = body.replace(
+                verifier.HERO_LOCAL_FIRST_LABELS["README.ko.md"], "완전히 로컬에서만 처리됩니다", 1
+            )
+            target.write_text(body, encoding="utf-8")
+
+            errors = verifier.validate_readmes(root)
+            self.assertTrue(
+                any(
+                    "README.ko.md" in error
+                    and "local-first != local-only" in error
+                    for error in errors
+                ),
+                errors,
+            )
+
+    def test_locale_scene_panel_mismatch_is_detected(self):
+        tmp, root = self.temp_root()
+        with tmp:
+            target = root / "README.ja.md"
+            body = target.read_text(encoding="utf-8")
+            body = body.replace(
+                verifier.LOCALE_SCENE_VISUALS["README.ja.md"],
+                verifier.LOCALE_SCENE_VISUALS["README.md"],
+                1,
+            )
+            target.write_text(body, encoding="utf-8")
+
+            errors = verifier.validate_readmes(root)
+            self.assertTrue(
+                any(
+                    "README.ja.md" in error and "another locale's scene panel" in error
+                    for error in errors
+                ),
+                errors,
+            )
+            self.assertTrue(
+                any(
+                    "README.ja.md" in error and "scenes.ja.png" in error
+                    for error in errors
+                ),
+                errors,
+            )
+
+    def test_license_fact_drift_is_detected(self):
+        tmp, root = self.temp_root()
+        with tmp:
+            target = root / "README.zh-CN.md"
+            body = target.read_text(encoding="utf-8")
+            body = body.replace("AGPL-3.0-only", "MIT", 1)
+            target.write_text(body, encoding="utf-8")
+
+            errors = verifier.validate_readmes(root)
+            self.assertTrue(
+                any(
+                    "README.zh-CN.md" in error and "'AGPL-3.0-only'" in error
+                    for error in errors
+                ),
+                errors,
+            )
+
+    def test_committed_visuals_match_generator(self):
+        """docs/assets/readme/*.html are the generated sources of the PNG
+        panels; a hand edit or a stale regeneration would let the four
+        locales' panels drift apart. PNGs are rendered from them by Chrome
+        (not reproducible in CI), so only their presence is checked."""
+        import build_readme_visuals as visuals
+
+        expected = {}
+        for locale in visuals.SCENES:
+            expected[f"hero.{locale}.html"] = visuals.build_hero(locale)
+            expected[f"scenes.{locale}.html"] = visuals.build_scenes(locale)
+        for name, content in expected.items():
+            with self.subTest(asset=name):
+                self.assertEqual(
+                    content, (visuals.OUT / name).read_text(encoding="utf-8")
+                )
+                self.assertTrue((visuals.OUT / name.replace(".html", ".png")).is_file(), name)
+        committed = sorted(path.name for path in visuals.OUT.glob("*.html"))
+        self.assertEqual(sorted(expected), committed)
+
+    def test_scene_panel_requests_appear_in_their_readme(self):
+        """The request wording in each locale's panel is the wording the
+        README quotes, so the picture and the prose cannot disagree."""
+        import build_readme_visuals as visuals
+
+        for name, visual in verifier.LOCALE_SCENE_VISUALS.items():
+            locale = visual.split("scenes.")[1].removesuffix(".png")
+            body = (ROOT / name).read_text(encoding="utf-8")
+            scenes = verifier.section_slice(body, "scenes-today", "settings")
+            for ask, _reply, _chip in visuals.SCENES[locale]:
+                with self.subTest(readme=name, ask=ask):
+                    self.assertIn(ask.replace("\n", " "), scenes)
+
+    def test_scene_panel_requests_route_deterministically(self):
+        """Every request shown as running today must be routed by AgentOS's
+        own deterministic rules, not by hoping a model guesses the tool."""
+        import build_readme_visuals as visuals
+
+        src = ROOT / "src"
+        if str(src) not in sys.path:
+            sys.path.insert(0, str(src))
+        from personal_agent import conversation_handoff as handoff
+        from personal_agent import quickstart_service as service
+
+        classifier = handoff.IntentClassifier(
+            workspace_search=service.workspace_search_request
+        )
+        expected = ("workspace-summary", "mail-search", "calendar-create",
+                    "memory", "research", "workspace-search")
+        for locale in ("en", "ko"):
+            for index, (ask, _reply, _chip) in enumerate(visuals.SCENES[locale]):
+                text = ask.replace("\n", " ")
+                with self.subTest(locale=locale, ask=text):
+                    want = expected[index]
+                    if want == "workspace-summary":
+                        self.assertIsNotNone(service.workspace_summary_request(text))
+                    elif want == "memory":
+                        self.assertTrue(service.AgentService.explicit_memory_request(text))
+                    else:
+                        self.assertEqual(want, classifier.classify(text).intent)
+
     def test_shared_install_fact_drift_is_detected(self):
         tmp, root = self.temp_root()
         with tmp:
             target = root / "README.zh-CN.md"
             body = target.read_text(encoding="utf-8")
             body = body.replace(
-                "brew install jongtae/agentos/agentos",
-                "brew install some/stale/formula",
+                "git clone https://github.com/Jongtae/personal-agentos.git",
+                "git clone https://example.com/some/fork.git",
                 1,
             )
             target.write_text(body, encoding="utf-8")
@@ -375,7 +498,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     "README.zh-CN.md" in error
-                    and "brew install jongtae/agentos/agentos" in error
+                    and "git clone https://github.com/Jongtae/personal-agentos.git" in error
                     for error in errors
                 ),
                 errors,
@@ -386,7 +509,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
         with tmp:
             manifest = root / "docs" / "release-manifest.json"
             body = manifest.read_text(encoding="utf-8")
-            body = body.replace('"version": "1.0.4"', '"version": "9.9.9"', 1)
+            body = body.replace('"version": "1.1.0"', '"version": "9.9.9"', 1)
             manifest.write_text(body, encoding="utf-8")
 
             errors = verifier.validate_readmes(root)
@@ -394,6 +517,21 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
                 any("expected exactly one 'v9.9.9'" in error for error in errors),
                 errors,
             )
+
+    def test_product_direction_scene_may_not_return_to_the_readme(self):
+        tmp, root = self.temp_root()
+        with tmp:
+            target = root / "README.md"
+            body = target.read_text(encoding="utf-8")
+            body = body.replace("<!-- readme-section:more -->", verifier.CAPABILITY_MARKERS[0] + "\n\n<!-- readme-section:more -->", 1)
+            target.write_text(body, encoding="utf-8")
+            errors = verifier.validate_readmes(root)
+            self.assertTrue(any("belongs on the status page" in e for e in errors), errors)
+
+    def test_status_page_change_requires_korean_mirror(self):
+        errors = verifier.validate_changed_paths({"docs/product-status.en.md"})
+        self.assertEqual(1, len(errors))
+        self.assertIn("product-status.ko.md", errors[0])
 
     def test_canonical_readme_change_requires_all_locales(self):
         errors = verifier.validate_changed_paths({"README.md", "README.ko.md"})

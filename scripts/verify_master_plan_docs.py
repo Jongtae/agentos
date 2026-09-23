@@ -37,6 +37,7 @@ KOREAN_REFERENCE_EXCLUSIONS = {
     "agentos-hub-v2.ko.md", "b3os-design-reference.ko.md", "context-capture-idea.ko.md",
     "first-milestone-report.ko.md", "ux-06-telegram-conversation.ko.md",
     "ux-v1.1-personal-agent-dm.ko.md",
+    "product-status.ko.md",
 }
 PHASE_IDS = ("D-01", "I-01", "D-02", "I-02", "D-03", "I-03", "D-04", "I-04", "D-05", "I-05", "D-06", "I-06")
 

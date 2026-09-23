@@ -587,3 +587,40 @@ class ModelAuthorityTests(unittest.TestCase):
 
 if __name__ == '__main__':  # pragma: no cover
     unittest.main()
+
+
+class ReadmeHeroTurnsTests(ConversationTestCase):
+    """The README hero shows a calendar conversation. Every owner turn in it
+    must drive the real flow to the times the picture shows, in both the
+    Korean product wording and the English wording the other locales use."""
+
+    def _run(self, turns, title):
+        import sys
+        from pathlib import Path as _P
+        sys.path.insert(0, str(_P(__file__).resolve().parents[1] / 'scripts'))
+        job = self.say(turns[0])
+        self.assertIn('15:00 – 16:00', job['response'])
+        self.assertIn(title, job['response'])
+        job = self.say(turns[1])
+        self.assertIn('16:00 – 17:00', job['response'])
+        self.assertIn(title, job['response'], 'a time correction must not become the title')
+        self.say(turns[2])
+        self.assertEqual(self.provider.calls[0]['start'], '2026-09-23T16:00:00+09:00')
+        self.assertEqual(self.provider.calls[0]['summary'], title)
+
+    def _hero_turns(self, locale):
+        import sys
+        from pathlib import Path as _P
+        sys.path.insert(0, str(_P(__file__).resolve().parents[1] / 'scripts'))
+        import build_readme_visuals as visuals
+        return [m[1] for m in visuals.HERO_CAL[locale] if m[0] == 'me']
+
+    def test_korean_hero_turns_drive_the_real_flow(self):
+        self._run(self._hero_turns('ko'), '치과 약속')
+
+    def test_english_hero_turns_drive_the_real_flow(self):
+        for locale in ('en', 'ja', 'zh-CN'):
+            with self.subTest(locale=locale):
+                self.setUp()
+                self._run(self._hero_turns(locale), 'dentist appointment')
+

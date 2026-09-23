@@ -193,14 +193,30 @@ def test_following_the_bootstrap_selects_nothing_while_no_goal_is_active() -> No
     plan_path = ROOT / "delivery-plan.yaml"
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
 
-    # Step 3 of the bootstrap.
-    assert plan["next_goal"]["id"] is None
+    # Step 3 of the bootstrap. Step 4 covers both "no top-level goal is
+    # active" forms: `next_goal.id` is null, OR its status is not `active`.
+    # An earlier form pinned `id is None`, i.e. the first form only, and so
+    # broke as soon as the owner declared a goal-ready program (GOV-FU1-01 /
+    # #502). Each form is now asserted in full for whichever one holds.
+    declared = plan["next_goal"]["id"]
     assert plan["next_goal"]["status"] != "active"
+    if declared is None:
+        assert plan["next_goal"]["status"] == "complete"
+    else:
+        # A declared goal is goal-ready only: a real program, not recorded
+        # complete, awaiting the explicit owner `active` transition.
+        assert plan["next_goal"]["status"] == "owner-activated-goal-ready"
+        assert declared in plan["programs"]
+        assert declared not in plan["history"]["documented_completed_iterations"]
 
     # Step 4: nothing is selected, and nothing in the backlog substitutes.
     assert DeliveryPlan(plan_path).select({}) is None
 
     # And not merely because the runtime state happens to be empty: a
-    # populated or corrupt state must not change the answer either.
-    for state in ({}, {"completed": []}, {"active": "EPIC-PA1", "status": "running"}):
+    # populated or corrupt state must not change the answer either --
+    # including a runtime state that claims the declared goal is running.
+    states = [{}, {"completed": []}, {"active": "EPIC-PA1", "status": "running"}]
+    if declared is not None:
+        states.append({"active": declared, "status": "running"})
+    for state in states:
         assert DeliveryPlan(plan_path).select(state) is None, state

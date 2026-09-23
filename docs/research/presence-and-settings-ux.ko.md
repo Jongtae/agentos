@@ -4,6 +4,7 @@
 - **Evidence class:** focused Deep Research informed by live owner dogfooding, repository contracts, external HCI/design sources and product patterns
 - **Role:** durable product-design research reference
 - **Canonical implementation contract:** [Presence Experience Contract](../presence-experience-contract.en.md)
+- **Experience convergence issue:** [PRESENCE-01 #508](https://github.com/Jongtae/personal-agentos/issues/508)
 - **Capability claim:** none. This document does not claim that the described target experience is shipped.
 - **Authority:** this research does not create runtime authority, activate a delivery goal, weaken owner approval, or supersede Work/Event/Evidence truth semantics.
 

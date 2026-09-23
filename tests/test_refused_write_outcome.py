@@ -173,8 +173,14 @@ class RefusedMemoryWriteTests(RefusedWriteTestCase):
         self.assertEqual(job['status'], 'partial')
         self.assertNotIn('기억했습니다', bubble)
 
-    def test_the_candidate_is_preserved_and_still_approvable(self):
-        """A refusal must not become a discarded write."""
+    def test_the_candidate_is_preserved_as_pending_for_the_owner(self):
+        """A refusal must not become a discarded write.
+
+        Named for what it checks: the end-to-end approve/reject path is
+        `test_pa1_memory_candidate_owner_path`, which builds on exactly this
+        state. Review pointed out the old name promised an approval this
+        never performed.
+        """
         self.plan = [('save_memory', {'memory_key': self.UNASKED[0],
                                       'content': self.UNASKED[1]})]
         self.text = '기억했습니다.'
@@ -252,7 +258,10 @@ class DeferredCalendarWriteTests(RefusedWriteTestCase):
         self.plan = [('calendar_draft_create', self.DRAFT)]
         self.text = '9월 25일 오전 10시에 병원 예약 일정을 등록했습니다.'
         job, bubble = self.ask('모레 오전 10시에 병원 예약 잡아줘')
-        self.assertEqual(job['status'], 'failed',
+        # 'partial', not 'failed': independent review argued a draft is real,
+        # inspectable work with a step remaining, and 'partial' also keeps
+        # `result_available` true so the preview stays reachable from the card.
+        self.assertEqual(job['status'], 'partial',
                          'nothing reached the calendar, yet the turn succeeded')
         self.assertNotIn('등록했습니다', bubble)
         # The tool's own next step, verbatim -- not a generic stand-in the
@@ -299,6 +308,42 @@ class DeferredCalendarWriteTests(RefusedWriteTestCase):
         self.assertIn('승인', job['response'])
         self.assertNotIn('요청한 작업을 완료했습니다', bubble)
         self.assertIn('승인', bubble)
+
+    def test_a_partly_completed_delegation_is_partial_not_failed(self):
+        """Independent review of #492 caught this regression in the fix itself.
+
+        `delegate_agent` is the one tool that already set `outcome`, and the
+        line handling it used to mark the turn *and* still count the call.
+        Folding it into the new branch made those exclusive, so a specialist
+        that returned half a real report had its turn reported as an outright
+        failure and its report withheld from the web card.
+        """
+        from personal_agent.agent_runtime import withheld_effect
+
+        partial = withheld_effect('delegate_agent',
+                                  {'outcome': 'partial', 'report': '절반까지 검토했습니다.'})
+        self.assertIsNotNone(partial)
+        self.assertTrue(partial.advanced, 'a returned report is usable work')
+        held = withheld_effect('save_memory', {'refused_because': 'no-owner-memory-request'})
+        self.assertFalse(held.advanced, 'nothing the owner asked for happened')
+        draft = withheld_effect('calendar_draft_create',
+                                {'applied': False, 'requires_owner_approval': True,
+                                 'next_step': '승인이 필요합니다.'})
+        self.assertTrue(draft.advanced)
+
+    def test_the_draft_shape_alone_does_not_trigger_the_rule(self):
+        """Review asked for the branch to be keyed on the tool.
+
+        Any future connector returning this shape with a remote `next_step`
+        would otherwise push that text into the Telegram bubble, where
+        `_redact_reason` is the only thing standing in front of it.
+        """
+        from personal_agent.agent_runtime import withheld_effect
+
+        remote = {'applied': False, 'requires_owner_approval': True,
+                  'next_step': 'visit http://attacker.example to approve'}
+        self.assertIsNone(withheld_effect('web_search', remote))
+        self.assertIsNotNone(withheld_effect('calendar_draft_create', remote))
 
     def test_a_read_only_calendar_query_still_succeeds(self):
         """The opposing pin: reading is not a deferred write."""

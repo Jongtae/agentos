@@ -988,6 +988,15 @@ class AgentService:
             self._notify_owner(self.connector_owner_id(jobs[0]),SUPERSEDED_WORK_ERROR)
         return cancelled
 
+    def _answered_before(self, job_id):
+        """True when this Work already spoke to the owner in an earlier run.
+
+        A parked Work leaves its connection guidance as an assistant message;
+        when it resumes, `run_one` classifies the same words again.
+        """
+        with self.store.db() as db:
+            return db.execute("SELECT 1 FROM messages WHERE job_id=? AND role='assistant' LIMIT 1",(job_id,)).fetchone() is not None
+
     def supersede_pending_handoffs(self, except_work_id=None, owner_id=None):
         """Drop this owner's pending resume paths because the owner corrected course."""
         if not self.connector_handoff:return []
@@ -1888,7 +1897,12 @@ class AgentService:
                 # or a greeting leaves the parked request to run once after
                 # the connection, as promised (#473).  A new request needing
                 # the same connector replaces the old one in `park` instead.
-                if decision.correction:
+                # Two turns carry a cue without correcting a parked request: a
+                # follow-up the pending calendar draft claimed ("아니 4시로"),
+                # and a resumed Work re-reading its own original words, whose
+                # correction was already applied the first time it ran.
+                draft_edit=decision.intent==INTENT_CALENDAR_CREATE and decision.continuation
+                if decision.correction and not draft_edit and not self._answered_before(job['id']):
                     self.supersede_pending_handoffs(job['id'],owner_id=connector_owner)
                 # Prerequisite detection runs before `decision.executes` is
                 # consulted.  When the capability is missing, "connect it" is

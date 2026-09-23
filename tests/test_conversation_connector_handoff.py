@@ -463,6 +463,8 @@ class ParkedRequestSurvivesConversationTests(HandoffTestCase):
         self.assertEqual(resumed['work_id'], job_id)
         self.assertEqual(self.drain(), 1)
         self.assertNotEqual(self.store.job(job_id)['status'], 'awaiting_connection')
+        # Resuming reaches at most a draft; no calendar effect was produced.
+        self.assertEqual(self.store.config('calendar_create', {}), {})
 
     def test_ordinary_conversation_and_other_requests_do_not_cancel(self):
         job_id = self.park_with_card(MAIL_REQUEST)
@@ -499,10 +501,45 @@ class ParkedRequestSurvivesConversationTests(HandoffTestCase):
 
     def test_a_same_connector_replacement_is_announced_on_the_old_card(self):
         first = self.park_with_card(MAIL_REQUEST)
+        before = len(self.sent)
         second = self.park_with_card('메일에서 계약서 관련 내용 찾아줘')
         self.assertEqual(self.store.job(first)['status'], 'cancelled')
         self.assertEqual(self.store.task_card(first)['state'], 'superseded')
         self.assertEqual(self.store.job(second)['status'], 'awaiting_connection')
+        notices = [body for body in self.sent[before:]
+                   if body.get('text') == SUPERSEDED_WORK_ERROR and 'message_id' not in body]
+        self.assertEqual(len(notices), 1)
+
+    def test_a_resumed_work_does_not_reapply_its_own_correction_cue(self):
+        # The owner's correction was applied when this Work first ran; its
+        # resume must not cancel a request parked for another connector since.
+        mail = self.park('아니 그거 말고 메일에서 숙소 예약 확인 메일 찾아줘')
+        calendar = self.park(CALENDAR_REQUEST)
+        self.connect_gmail()
+        self.service.resume_connector_work(GMAIL_CONNECTOR_ID, OWNER, GMAIL_SCOPES)
+        before = len(self.sent)
+        self.assertEqual(self.drain(), 1)
+        self.assertEqual(self.store.job(mail)['status'], 'succeeded')
+        self.assertEqual(self.store.job(calendar)['status'], 'awaiting_connection')
+        self.assertNotIn(SUPERSEDED_WORK_ERROR, [body.get('text') for body in self.sent[before:]])
+
+    def test_a_calendar_draft_edit_does_not_cancel_an_unrelated_parked_request(self):
+        # A fixture provider makes the calendar draft flow reachable; nothing
+        # here is approved, so no calendar effect is ever attempted.
+        from test_calendar_conversation import Provider
+        self.service.calendar = CalendarConnector(self.store, Provider(), registry=self.registry,
+                                                  now=lambda: self.clock[0])
+        self.service.calendar_conversation.now = lambda: self.clock[0]
+        self.connect_calendar_write()
+        mail = self.park(MAIL_REQUEST)
+        self.say('내일 오후 3시에 치과 일정 잡아줘')
+        self.assertTrue(self.service.calendar_conversation.has_pending(OWNER),
+                        'fixture must leave a calendar draft pending')
+        self.say('아니 4시로')
+        self.assertTrue(self.service.calendar_conversation.has_pending(OWNER),
+                        'the edit must have been claimed by the draft')
+        self.assertEqual(self.store.job(mail)['status'], 'awaiting_connection')
+        self.assertIsNotNone(self.handoff.record(GMAIL_CONNECTOR_ID))
 
     def test_another_owner_identity_correction_does_not_cancel(self):
         job_id = self.park_with_card(MAIL_REQUEST)

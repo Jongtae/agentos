@@ -2,98 +2,202 @@
 
 [English](README.md) | [한국어](README.ko.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-**내가 설치하고, 내가 통제하며, 실제로 유용한 일을 맡기는 개인 AI 환경.**
+<!-- readme-parity:v1 -->
+<!-- readme-section:hero -->
 
-Personal AgentOS는 한 사람이 자신의 환경에 설치해 소유하는 로컬 우선 개인 AI 운영 환경입니다. 원하는 결과를 말하고, 선택한 모델과 허용한 자료로 일을 끝내고, 유용한 결과를 보관합니다. 장기적으로 에이전트를 앱처럼 설치·교체해도 내 기억, 권한, 작업과 결과는 나에게 남아야 합니다.
+## 일은 맡기고, 통제는 내가.
 
-> **Personal AgentOS = 개인 AI 커널 + 열린 Agent 유통 플랫폼**
+**생활부터 업무까지, 실제 일을 맡길 수 있는 개인 AI.**
 
-통제만 잘하고 쓸모가 없는 관리 도구도, 일을 하지만 무엇을 했는지 확인할 수 없는 비서도 목표가 아닙니다. **초기 번들 수는 적어도 되지만 기본 기능의 품질이 낮아도 된다는 뜻은 아닙니다.**
+원하는 결과를 말하세요. Personal AgentOS는 내가 허용한 파일, 도구, 계정과 모델을 사용하고, 그 범위 안에서 일을 진행하며, 중요한 외부 행동 전에는 승인을 요청하고, 유용한 결과를 owner-controlled state에 남기도록 설계됩니다.
 
-## 지금 있는 것과 아직 계획인 것
+핵심 mental model은 단순합니다. **“AI와 대화한다”보다 “내 개인 AI에게 일을 맡긴다”에 가깝습니다.**
 
-| 상태 | 범위와 근거 |
+> **Personal AgentOS = 실제 일을 위임하는 개인 AI + 소유자 권한을 기준으로 동작하는 AI 환경**
+
+![Personal AgentOS 위임 흐름: 맡기기, 허용 범위에서 실행, 중요한 행동 승인, 결과 보존](docs/assets/readme/delegation-flow.svg)
+
+<!-- readme-section:everyday-scene -->
+
+## 먼저 생활의 한 장면으로 이해하기
+
+<!-- capability:illustrative-product-direction -->
+
+> **Product direction — 현재 지원 기능을 뜻하지 않습니다.**
+
+> **나:** “세제랑 휴지가 거의 떨어졌어. 평소 쓰던 제품이나 괜찮은 대안을 찾아서 가격과 배송비를 비교하고 구매 준비해줘. 주문하기 전에는 나한테 물어봐.”
+>
+> **Personal AgentOS:** 허용된 맥락을 모으고, 선택지를 조사하고, 확인된 정보와 아직 확인이 필요한 정보를 나누고, 다음 행동을 준비한 뒤 승인 경계에서 멈춥니다.
+
+이것이 제품이 지향하는 경험입니다. **귀찮은 일은 맡기되, 결정은 내가 합니다.**
+
+**이 장면은 product direction을 설명하기 위한 예시이며, 현재 자율 구매나 결제가 제공된다는 뜻이 아닙니다.** 현재 지원 범위와 근거는 아래에 별도로 적습니다. 예약 확정, 결제, 외부 메시지 전송 같은 중요한 외부 행동은 실제 구현과 증거가 있을 때만 지원한다고 표현합니다.
+
+같은 패턴은 다른 생활 장면에도 적용됩니다.
+
+- “토요일 오후 일정에 맞는 미용실을 찾아 예약 준비해줘. 확정하기 전에는 물어봐.”
+- “이번 주말에 집을 비워. 허용한 일정과 정보를 보고 준비물과 살 것을 정리해서 다음에 이어서 볼 수 있게 남겨줘.”
+- “이 자료들을 읽고 쓸 만한 결과로 정리해서 저장해줘. 재시작한 뒤에도 다시 찾게 해줘.”
+
+<!-- readme-section:delegation-flow -->
+
+## 이렇게 생각하면 됩니다
+
+**🗣️ 맡기기 → 🔎 허용된 범위에서 일하기 → ✋ 필요할 때 승인받기 → 📦 결과 남기기**
+
+1. **결과를 맡깁니다.** 통합 절차를 직접 조립하기보다 원하는 결과를 말합니다.
+2. **허용 범위 안에서 일합니다.** AgentOS가 승인된 Context, Capability, 목적지와 Runtime/Model 사용을 중재합니다.
+3. **중요한 결정은 소유자에게 남깁니다.** 새 권한이나 의미 있는 외부 효과는 그에 맞는 승인을 요구합니다.
+4. **유용한 상태를 남깁니다.** Artifact, 승인된 Memory, Work/Event 기록과 Evidence는 교체 가능한 worker와 분리되어 남습니다.
+
+<!-- readme-section:chatbot-difference -->
+
+## 일반 챗봇과 무엇이 다른가
+
+| 일반적인 챗봇 | Personal AgentOS가 지향하는 방식 |
 | --- | --- |
-| 기존 제품 코드 | 로컬 브라우저 설정·대화, 모델 연결, 제한된 도구와 메모, 허용된 폴더·파일 결과. 실제 지원 경로는 [QUICKSTART](QUICKSTART.md)를 따릅니다. |
-| 파일 작업공간 개발 완료 | #314 / PR #320·#324: 원본 보존, 제한된 파일 사용, 결과 저장, 재시작 후 재사용. 자동·임시 로컬 파일 검증 범위입니다. |
-| v0.1 계약 완료 | #334 / PR #350: 핵심 객체와 AgentPackage 스키마·규칙·fixture. 패키지 실행이나 설치 구현을 의미하지 않습니다. |
-| DOGFOOD-01 개발 완료 | #351 / PR #354–#356: 모의 모델을 사용한 HTTP·파일·재시작 통합 검증과 사용 안내. 실제 모델·브라우저 사용 관찰은 별도입니다. |
-| 다음 기능 후보 | [#358](https://github.com/Jongtae/personal-agentos/issues/358): 조사·비교, 파일 결과 생성, 후속 대화·재사용의 실제 품질 개선과 측정. |
-| 계획된 통제·앱 경험 | [#359](https://github.com/Jongtae/personal-agentos/issues/359) 실행 기록·통제 화면, [#360](https://github.com/Jongtae/personal-agentos/issues/360) 설치·사용·회수·제거 통합 경험과 #333의 미완료 하위 작업. |
+| 질문에 답함 | 제한된 권한 안에서 일을 맡아 결과까지 진행 |
+| 주로 현재 대화가 Context | 소유자가 허용한 파일, Memory, Connector와 작업 Context를 사용 |
+| 결과가 대화창에 머무르기 쉬움 | 재사용 가능한 Artifact와 작업 기록을 남김 |
+| Tool 권한이 암묵적이거나 서비스 중심일 수 있음 | Owner policy와 Grant가 무엇을 어디까지 쓸지 결정 |
+| 특정 모델이 제품의 중심 | 모델과 Agent는 소유자 권한 아래의 교체 가능한 worker |
 
-현재 임의의 제3자 AgentPackage 실행, 공개 Registry/Marketplace, 모든 에이전트와의 호환, 자동 구매를 지원한다고 주장하지 않습니다. 기존 선언형 플러그인과 앞으로의 실행형 AgentPackage는 다릅니다. 과거 실제 모델 검증 기록도 당시 질문·버전·제공자 조건에 한정됩니다.
+목표는 모든 것을 자동으로 실행하는 것이 아닙니다. **데이터, 권한, 결정과 장기 상태의 통제권을 넘기지 않으면서 실제 일을 맡길 수 있게 하는 것**이 목표입니다.
 
-## 먼저 잘해야 하는 세 가지 일
+개인 생산성 워크스페이스가 AI를 위해 목표·할 일·지식을 정리할 수 있다면, **Personal AgentOS는 그 아래 실행 계층에 초점을 둡니다.** AI가 무엇에 접근할 수 있는지, 무엇을 할 수 있는지, 실제로 무슨 일이 일어났는지, worker를 바꿔도 어떤 owner state가 남는지를 통제하는 환경입니다.
 
-**조사해서 결정에 도움을 줍니다.** 공개 자료로 선택지를 비교하고, 출처·조회 시점·가격 조건·불확실한 점을 분리해 실제로 결정할 수 있는 요약을 제공합니다. 링크를 나열하는 것만으로 끝내지 않습니다. 현재 웹 검색은 검색 결과 발췌 수준이므로 전체 페이지·재고·결제 총액을 확인했다고 표현해서는 안 됩니다.
+<!-- capability:current-supported-slice -->
+<!-- readme-section:try-today -->
 
-**내 자료로 쓸 만한 결과를 만듭니다.** 허용한 문서를 읽고 핵심 쟁점·결정·다음 행동을 정리해 일반 파일로 저장합니다. 파일이 생기는 것뿐 아니라 내용이 정확하고 유용해야 하며 원본은 보존합니다.
+## 지금 검증된 범위를 직접 써보기
 
-**다시 설명하지 않아도 일을 이어갑니다.** 조건 변경과 정정을 반영하고, 재시작 후에도 이전 결과를 찾아 재사용합니다. 모든 대화를 몰래 장기 기억으로 저장하는 방식은 쓰지 않습니다.
+현재 가장 분명한 첫 작업은 파일 작업공간 흐름입니다. 저장 결과와 원본 보존, 재시작 후 재사용에 대한 구체적인 저장소 근거가 있습니다.
 
-[기본 기능 품질 계획](docs/default-agent-usefulness.en.md)은 이를 24개 합성 평가 사례로 정의합니다. 사례와 정적 검증을 추가한 것은 실제 모델 평가에 통과했다는 뜻이 아닙니다. 성공률·응답 시간·비용·사용자 개입을 실제 지원 경로에서 측정해야 합니다.
+![현재 지원되는 파일 작업공간 흐름: 승인된 원본 폴더, 관리 결과 파일, 재시작과 재사용](docs/assets/readme/file-workspace-flow.svg)
 
-## 내가 행사할 수 있어야 하는 통제권
+1. 전용 참고 폴더에 작은 Markdown/text 파일을 둡니다.
+2. 그 폴더에는 읽기 권한을, 별도의 관리 작업공간에는 결과 저장 권한을 부여합니다.
+3. **“‘Launch review’를 요약해서 ‘Launch notes’로 저장해줘.”**라고 요청합니다.
+4. 관리 작업공간에 새 Markdown 결과가 생기고 원본은 바뀌지 않았는지 확인합니다.
+5. AgentOS를 재시작한 뒤 저장한 결과를 다시 찾아달라고 요청합니다.
 
-[Owner Control Contract](docs/owner-control-contract.en.md)는 앞으로 구현·검증할 여섯 권리를 정의합니다.
+문서화된 파일 작업 경로에서는 지원되는 직접 모델 제공자 연결을 사용하고, 참고 폴더와 관리 작업공간을 명시적으로 허용하며, 외부 제공자에게 승인된 문서 맥락을 보내기 전 필요한 공유 승인을 거칩니다.
 
-1. 설치할 에이전트의 출처·제작자·버전·실행 위치·요청 권한을 봅니다.
-2. 에이전트가 사용할 자료·기억·계정을 선택합니다.
-3. 어떤 정보가 어느 모델·서비스로 나가는지 확인합니다.
-4. 설치·연결과 읽기·쓰기·전송·결제 같은 행동 권한을 구분합니다.
-5. 작업을 멈추고 권한을 회수하며, 이미 진행 중인 외부 행동의 불확실성도 확인합니다.
-6. 에이전트를 제거·교체해도 내 결과·기억·필요한 기록을 유지합니다.
-
-이것은 모델에게 “규칙을 지켜라”라고 지시하는 것만으로 충족되지 않습니다. 실제 실행 경계에서 접근을 거부할 수 있어야 합니다. 진행 상황은 실제 Work·도구 이벤트에서 만들고, 필요하면 도구명·가려진 입력값·목적지·승인·결과를 확인할 수 있어야 합니다. 숨은 추론, 시스템 프롬프트, 비밀키 공개가 목적은 아닙니다.
-
-로컬 설치와 로컬 처리는 다릅니다. 외부 모델을 사용하는 로컬 에이전트는 승인한 내용을 그 제공자에게 보냅니다. 외부 에이전트의 연결 패키지를 설치했다고 그 서버까지 내 통제 아래가 되는 것도 아닙니다. 연결 해제·권한 회수·에이전트 제거·저장 정보 삭제를 구분하고, 이미 전달된 정보나 완료된 외부 행동을 중지 버튼으로 되돌렸다고 약속하지 않습니다.
-
-## 구조와 에이전트 생태계
-
-커널은 **Agent 독립적**, 제품 경험은 **Agent 중심**일 수 있습니다.
-
-`Owner · Context · Memory · Artifact · Capability · Runtime · Grant · Work · Event · Evidence`
-
-이 개인 상태 계층 위에 `AgentPackage · Package Manager · Registry · Marketplace/Discovery · Trust/Verification`을 둡니다. 모델, Codex, Claude Code, 로컬 실행자, MCP, 선택적 Ruflo 런타임은 교체 가능한 작업자이지 사용자 상태의 주인이 아닙니다.
-
-`다운로드 ≠ 설치 ≠ 활성화 ≠ 연결 ≠ 특정 행동 허가`
-
-설치는 비활성이 기본이며 권한을 자동 발급하지 않습니다. 업데이트가 자료·행동·외부 목적지·기억·백그라운드 범위를 넓히면 다시 허가받아야 합니다. 외부 에이전트의 장기 기억 변경은 기본적으로 MemoryCandidate 제안이고 AgentOS 정책·사용자가 반영 여부를 결정합니다.
-
-Registry는 정확한 패키지 식별·버전·무결성·호환성·폐기 정보를, Marketplace는 검색·추천·리뷰·향후 유통을 담당합니다. 별점과 다운로드 수는 권한이 아니며 서명도 행동의 안전성을 보장하지 않습니다. 개인 자료를 마켓 검색 데이터로 보내지 않습니다.
-
-[영문 아키텍처](docs/personal-agentos-architecture.en.md), [PRD](PRD.md), [유통 플랫폼 기반](docs/agent-distribution-platform-foundation.en.md), [로드맵](docs/roadmap.md)을 함께 참고하세요.
-
-## 초기 번들과 개발자 경험
-
-처음에는 유용한 Files 참조 패키지 하나와 공개 작성 경로부터 입증합니다. 번들과 제3자 에이전트는 같은 계약을 사용하고 숨은 특권을 갖지 않습니다. MCP·기존 skill/plugin 호환은 형식·라이선스·권한을 실제로 대응시킬 수 있을 때만 추가합니다. Ruflo와 공개 마켓은 첫 사용 경험의 필수 조건이 아닙니다.
-
-입증할 흐름은 `검토 → 비활성 설치 → 권한 부여 → 유용한 작업 → 기록 확인 → 권한 회수 → 재접근 차단 → 제거 → 재시작 → 별도 승인한 다른 에이전트로 결과 재사용`입니다. 아직 구현된 전체 흐름으로 표시하지 않습니다.
-
-## 현재 버전 사용
+### 설치
 
 ```sh
 brew install jongtae/agentos/agentos
 agentos start
 ```
 
-**이 명령은 가장 최근 배포본 `v1.0.4`(2026-09-07)를 설치하며, 이는 `main`보다 한참 뒤입니다** — Gmail 커넥터, `agentos service`, PA1 커넥터 계약, 메모리 서비스가 모두 들어 있지 않습니다. Homebrew는 macOS 자체 호스팅 경로이고, 최근 기능은 소스 체크아웃을 사용하세요. 배포 절차는 [release procedure](docs/release.en.md)에 있습니다. [QUICKSTART](QUICKSTART.md)의 전용 테스트 폴더 시나리오를 따르세요. 문서화된 파일 작업공간 테스트에는 구독형 실행 엔진이 아니라 지원되는 직접 모델 연결을 사용합니다. 계획된 패키지 기능을 이미 사용할 수 있는 명령처럼 안내하지 않습니다.
+브라우저는 `http://127.0.0.1:8787`에서 열립니다.
 
-## 상태 이동과 한계
+**이 Homebrew 명령은 최신 공개 배포본 `v1.0.4`(2026-09-07)를 설치하며, 이 버전은 현재 `main`보다 뒤입니다.** `main`에는 이 배포본 이후의 기능 개발과 first-user 개선이 더 포함되어 있습니다. 정확한 지원 경로는 [QUICKSTART](QUICKSTART.md), 공개 상태는 [release procedure](docs/release.en.md)를 따르세요.
+
+<!-- readme-section:status -->
+
+## 지금 되는 것과 아직 마찰이 있는 부분
+
+가장 최근의 synthetic first-user audit은 [#472](https://github.com/Jongtae/personal-agentos/issues/472)입니다. 실제 제품 구성에 injected transport를 사용해 검증했으며, **실제 외부 제공자 운영은 실행하지 않았습니다.** fixture 성공을 live service 성공으로 해석하면 안 됩니다.
+
+| 영역 | 현재 근거 |
+| --- | --- |
+| 설치/시작/재시작 | #472에서 local deterministic first-use 경로 통과. 실제 새 Mac의 Homebrew/launchd 검증은 별도 운영 gate입니다. |
+| 파일 | Synthetic **pass-with-friction**. 승인 폴더 요약, 관리 결과 저장, 재시작 후 재사용은 동작하지만 자연스러운 “그걸 파일로 저장해줘” 표현에는 아직 gap이 있습니다(#481). |
+| Gmail | Synthetic **pass-with-friction**. 연결·재인증·검색·재개 경로가 있으나 contextual resume과 읽기/답장 UX defect가 남아 있습니다(#473, #478). |
+| Calendar | Synthetic **pass-with-friction**. 제한된 create/preview/correct/cancel/approve 흐름은 근거가 있으나 조회와 승인 UX gap이 남아 있습니다(#475, #482, #483). |
+| 조사 | Synthetic **pass-with-friction**. 공개 자료 조사에서 출처와 known/unknown을 나누는 결과를 만들 수 있으나 routing/context defect가 남아 있습니다(#448, #474). |
+| Memory | Synthetic **pass-with-friction**. 기억·조회·수정과 owner-visible candidate는 있으나 삭제/receipt UX 마찰이 남아 있습니다(#479). |
+| Agent 유통 | v0.1 schema/contract는 있지만 임의의 제3자 AgentPackage 실행이나 공개 Marketplace를 현재 지원한다고 주장하지 않습니다. |
+
+현재 **자율 구매, 임의 컴퓨터 조작, 모든 웹 페이지 검증, 실시간 재고/결제 총액 확인, 임의 제3자 패키지 실행, 공개 Agent Marketplace**를 지원한다고 주장하지 않습니다.
+
+<!-- readme-section:why-agentos -->
+
+## 왜 이름이 “AgentOS”인가
+
+내 개인 AI가 특정 모델 하나, 특정 회사 하나, 특정 Agent 하나와 같아져서는 안 되기 때문입니다.
+
+Personal AgentOS는 소유자에게 귀속되는 계층과 교체 가능한 worker를 분리합니다.
+
+`Owner · Context · Memory · Artifact · Capability · Runtime · Grant · Work · Event · Evidence`
+
+모델, 코딩 Agent, Connector와 위임 Runtime은 바뀔 수 있습니다. 이들은 Capability를 요청하고, AgentOS policy와 소유자가 실제 권한을 결정합니다. Worker를 바꾸더라도 유용한 개인 상태가 함께 사라지지 않는 것이 핵심입니다.
+
+<!-- readme-section:owner-control -->
+
+## 통제권은 소유자에게
+
+[Owner Control Contract](docs/owner-control-contract.en.md)는 여섯 가지 관찰 가능한 권리를 정의합니다.
+
+1. **검토하기** — package/source, 제작자, 버전, 실행 방식과 요청 권한을 확인합니다.
+2. **자료 선택하기** — 어떤 문서, Memory, 계정을 쓸 수 있는지 정합니다.
+3. **목적지 보기** — 작업 정보가 어디로 가는지 확인합니다.
+4. **행동 제한하기** — 설치/연결과 실제 행동 권한을 분리합니다.
+5. **중지·회수하기** — 권한을 회수하고 진행 중 외부 효과의 불확실성을 솔직하게 표시합니다.
+6. **상태 유지·이동하기** — worker를 제거하거나 교체해도 owner state를 보존합니다.
+
+로컬 설치와 로컬 전용 처리는 같은 말이 아닙니다. 외부 모델을 쓰는 로컬 package는 승인된 Context를 그 제공자에게 보냅니다. 연결 해제, 권한 회수, worker 제거와 원격에 보관된 데이터 삭제는 서로 다른 작업입니다.
+
+<!-- readme-section:architecture -->
+
+## 제품을 이해한 다음 보는 구조
+
+| 계층 | 책임 |
+| --- | --- |
+| **Owner plane** | Owner identity/policy, Context/Memory 권한, data/workspace, Grants/approvals, Work/Event, Artifacts, Evidence와 recovery |
+| **Capability plane** | Typed tools/connectors와 제한된 runtime interface |
+| **Distribution plane** | AgentPackage, Package Manager, Registry, trust metadata, 향후 Marketplace/discovery |
+| **Worker plane** | 교체 가능한 model, Codex/Claude Code, local/API worker와 선택적 delegated runtime |
+| **Experience plane** | Conversation, 유용한 결과, 관찰 가능한 progress, approval/control, 향후 agent discovery |
+
+Kernel은 **agent-independent**일 수 있고 제품 경험은 **agent-centric**가 될 수 있습니다.
+
+<!-- readme-section:bdi -->
+
+## BDI-inspired attention lens
+
+BDI는 **개념적 설계 렌즈**입니다. 이미 canonical BDI state machine이 구현되었다는 뜻도 아니고 hidden chain-of-thought를 노출하자는 뜻도 아닙니다.
+
+- **Belief view:** 허용된 task context, 승인된 Memory, 관련 Evidence/Artifact, 현재 Capability/Grant 사실.
+- **Desire:** 소유자가 원하는 결과와 성공 기준.
+- **Attention:** 지금 중요한 것, 허용된 것, 관련 목적지/효과, 승인 필요 여부.
+- **Intention:** 현재의 제한된 계획과 다음 실행 단계.
+- **Execution:** Capability/Runtime 중재를 통해 관찰된 Work/Event, Artifact와 Evidence를 만듭니다.
+
+결과가 다음 작업 Context에 도움을 줄 수는 있지만 모든 결과가 자동으로 durable Memory가 되는 것은 아닙니다. 제3자는 `MemoryCandidate`를 제안하고 policy/owner가 canonical Memory 반영 여부를 결정합니다.
+
+<!-- readme-section:ecosystem -->
+
+## Agent 생태계 방향
+
+AgentPackage lifecycle은 다음 상태를 의도적으로 구분합니다.
+
+`downloaded != installed != enabled != connected != authorized-for-action`
+
+설치는 Grant를 자동 생성하지 않아야 합니다. Data, action, destination, Memory 또는 background behavior를 확대하는 update는 새 권한을 요구합니다. 제거는 package 권한을 회수하되 owner-owned output과 필요한 Evidence는 policy에 따라 보존합니다.
+
+먼저 유용하고 제한된 Agent와 공개 authoring path를 입증하는 것이 우선이며, 큰 store나 결제 시스템이 첫 단계의 전제는 아닙니다. 자세한 내용은 [architecture](docs/personal-agentos-architecture.en.md), [PRD](PRD.md), [platform foundation](docs/agent-distribution-platform-foundation.en.md), [product vision](PRODUCT_VISION.ko.md), [roadmap](docs/roadmap.md)을 참고하세요.
+
+<!-- readme-section:portability -->
+
+## 이동성과 한계
 
 ```sh
 scripts/agentos-backup.py DATA ARCHIVE
 scripts/agentos-restore.py ARCHIVE EMPTY_DATA
 ```
 
-지원되는 사용자 상태와 검토된 선언을 무결성 검증과 함께 이동합니다. 이 이동용 아카이브에는 제공자 자격 증명, 세션, 로컬 폴더 권한, 모델·엔진 선택, Telegram 연결이 포함되지 않으므로 대상 환경에서 다시 승인·연결해야 합니다. 비밀정보가 포함될 수 있는 전체 데이터 폴더 백업과 구분하세요.
+지원되는 owner state와 검토된 선언은 무결성 검증과 함께 export/restore할 수 있습니다. Provider credential, session, local-folder Grant, engine/model 선택, Telegram pairing은 이 이동용 archive에 포함되지 않으며 다시 연결하거나 승인해야 합니다.
 
-로컬 우선이라고 자동으로 안전하거나 아무 정보도 외부로 나가지 않는 것은 아닙니다. 호스트 보안, 격리 구현, 외부로 이미 전달된 정보와 원격 서비스의 보관 정책에는 한계가 있습니다.
+Local-first는 local-only나 자동 안전을 뜻하지 않습니다. Host security, package isolation, 이미 전송된 data와 remote provider retention은 여전히 실제 경계입니다.
 
-## 개발 원칙
+<!-- readme-section:development -->
 
-Personal AgentOS는 코딩 하네스, swarm 프레임워크, macOS/Linux 대체 커널이 아닙니다. GitHub/Codex 거버넌스는 제품을 만드는 개발 인프라입니다.
+## 개발 거버넌스
 
-[AGENTS.md](AGENTS.md), [Development Constitution](docs/development-constitution.en.md), [Goal Execution Contract](docs/goal-execution-contract.en.md)에 따라 제한된 이슈·브랜치·PR·검증·독립 리뷰·종료를 수행합니다. 계획된 이슈는 자동 실행 큐가 아닙니다. 이번 #357은 문서·평가 명세·backlog 정렬이고 #358–#360과 미완료 플랫폼 작업은 별도 활성화 전까지 비활성입니다.
+이 프로젝트는 **coding harness, swarm framework, host kernel 또는 macOS/Linux 대체품이 아닙니다.** GitHub/Codex delivery automation은 Personal AgentOS를 만드는 개발 인프라이지 최종 사용자 제품이 아닙니다.
 
-제품 완료는 스키마·파일 개수·CI만으로 판단하지 않습니다. **쓸 만한 결과를 실제로 만들었는지, 허용하지 않은 행동은 실제로 막혔는지 함께 확인합니다.**
+[AGENTS.md](AGENTS.md), [Development Constitution](docs/development-constitution.en.md), [Goal Execution Contract](docs/goal-execution-contract.en.md)에 따라 issue → bounded branch → implementation → validation → 필요한 independent review → merge/closeout 순서로 진행합니다.
+
+제품 완료는 green CI, schema, 파일 수만으로 판단하지 않습니다. **유용한 결과 근거와 필요한 거부/recovery 근거가 함께 있어야 합니다.**

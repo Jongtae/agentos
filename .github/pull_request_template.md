@@ -45,6 +45,16 @@ Publisher identity, signature/integrity, provenance/SBOM, static verification, b
 
 Install, staged health check, enable/disable, update, rollback, quarantine, uninstall, restart/recovery, and owner Artifact/Evidence preservation impact:
 
+## README / localization impact
+
+Complete when any public README or README visual changes; otherwise write `N/A`.
+
+- canonical `README.md` changed:
+- `README.ko.md`, `README.ja.md`, `README.zh-CN.md` updated for semantic/structural parity:
+- illustrative product direction vs current supported slice remains explicit:
+- embedded-text visuals are language-neutral or localized:
+- `python3 scripts/verify_readme_localization.py`:
+
 ## Validation
 
 Positive tests, negative authority/security tests, schema/conformance tests, recovery/idempotency tests, and repository-required validation:

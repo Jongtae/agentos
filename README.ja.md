@@ -2,80 +2,202 @@
 
 [English](README.md) | [한국어](README.ko.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-**自分でインストールし、所有し、管理する、実際に役立つ仕事のためのパーソナル AI 環境。**
+<!-- readme-parity:v1 -->
+<!-- readme-section:hero -->
 
-Personal AgentOS は、一人の所有者が管理するホスト上で動作するローカルファーストの AI オペレーティング環境です。目標を伝え、選んだモデルと許可した資料で仕事を進め、有用な結果を残します。将来は Agent をアプリのようにインストール・交換しても、個人の Memory、権限、Work、Artifact と Evidence が所有者のもとに残ることを目指します。
+## 仕事を任せる。主導権は自分に残す。
 
-> **Personal AgentOS = Personal AI Kernel + Open Agent Distribution Platform**
+**日常から仕事まで、実際の用事を任せられるパーソナル AI。**
 
-制御できるだけで役に立たない製品も、実行の根拠を確認できない製品も目標ではありません。初期の同梱 Agent は少数で構いませんが、基本機能の品質を意図的に低くしてよいという意味ではありません。
+欲しい結果を伝えてください。Personal AgentOS は、あなたが許可したファイル、ツール、アカウント、モデルを使い、その範囲内で作業し、重要な外部操作の前には承認を求め、有用な結果を owner-controlled state に残すことを目指します。
 
-## 現在と計画を区別する
+メンタルモデルは単純です。**「AI と会話する」より「自分の AI に仕事を任せる」**に近い製品です。
 
-| 状態 | 範囲 |
+> **Personal AgentOS = 実際の仕事を委任するパーソナル AI + owner-authoritative な AI 環境**
+
+![Personal AgentOS の委任フロー: 任せる、許可範囲で実行、重要操作を承認、結果を保持](docs/assets/readme/delegation-flow.svg)
+
+<!-- readme-section:everyday-scene -->
+
+## まず、日常の一場面で考える
+
+<!-- capability:illustrative-product-direction -->
+
+> **Product direction — 現在の対応機能を意味しません。**
+
+> **あなた:** 「洗剤とキッチンペーパーがもうすぐ切れそう。いつもの商品か良い代替品を探して、価格と送料を比べ、購入の準備までして。注文する前には確認して。」
+>
+> **Personal AgentOS:** 許可されたコンテキストを集め、候補を調べ、確認済みの事実と未確認事項を分け、次の操作を準備し、承認境界で止まります。
+
+これが目指す体験です。**面倒な部分は任せ、決定は自分で行う。**
+
+**この場面は product direction を説明する例であり、現在 autonomous shopping や checkout が提供されているという意味ではありません。** 現在の対応範囲と証拠は下に分けて記載します。予約確定、決済、外部メッセージ送信などの consequential effect は、実装と証拠がある場合にのみ対応済みと表現します。
+
+同じパターンは他の日常場面にも使えます。
+
+- 「土曜の午後の予定に合う美容院を探して予約準備して。確定前に聞いて。」
+- 「今週末は外出する。許可した予定や情報を見て、持ち物と買う物をまとめ、後で続けられるよう残して。」
+- 「この許可済み資料を読んで、役立つ成果物にして保存し、再起動後にも見つけられるようにして。」
+
+<!-- readme-section:delegation-flow -->
+
+## こう考えると分かりやすい
+
+**🗣️ 任せる → 🔎 許可の範囲で作業 → ✋ 必要な時に承認 → 📦 結果を残す**
+
+1. **結果を委任する。** 統合手順を組み立てるのではなく、欲しい結果を伝えます。
+2. **許可の範囲で働く。** AgentOS が承認済み Context、Capability、送信先、Runtime/Model を仲介します。
+3. **重要な決定は owner に残す。** 新しい権限や意味のある外部効果には対応する承認が必要です。
+4. **有用な状態を残す。** Artifact、受け入れ済み Memory、Work/Event 履歴、Evidence は交換可能な worker と分離して保持します。
+
+<!-- readme-section:chatbot-difference -->
+
+## 普通のチャットボットと何が違うのか
+
+| 一般的なチャットボット | Personal AgentOS の方向性 |
 | --- | --- |
-| 既存コード | ローカルブラウザ設定・会話、モデル接続、制限されたツール、メモ、承認済みフォルダ、管理ワークスペースの結果。対応経路は [QUICKSTART](QUICKSTART.md) を参照。 |
-| ファイル作業の開発完了 | #314、PR #320/#324。原本保持、限定アクセス、結果保存と再起動後の再利用を自動・一時ファイルで検証。 |
-| v0.1 契約完了 | #334、PR #350。Core Primitive/AgentPackage のスキーマと静的・意味的検証。パッケージ実行の実装ではありません。 |
-| DOGFOOD-01 開発完了 | #351、PR #354–#356。模擬モデルによる HTTP/ファイル/再起動テストと操作案内。実モデル・実ブラウザの利用観察は別記録。 |
-| 計画中 | #358 基本機能の品質、#359 実行記録・制御 UI、#360 インストールから削除・再利用までの体験、および #333 の未完了項目。 |
+| プロンプトに答える | 制限された権限の中でタスクを結果へ進める |
+| 主な Context は現在の会話 | owner が許可したファイル、Memory、Connector、task context を使う |
+| 結果が会話内で終わりやすい | 再利用できる Artifact と作業履歴を残す |
+| Tool 権限が暗黙的またはサービス側中心になり得る | Owner policy と Grant が何をどこまで使うかを決める |
+| モデルが製品の中心 | Model/Agent は owner authority の下にある交換可能な worker |
 
-任意の第三者コード実行、公開 Registry/Marketplace、万能な互換性、自動購入は提供済みとは主張しません。既存の宣言型プラグインは将来の実行型 AgentPackage と別です。過去の実測結果は当時のタスク、モデル、バージョンの範囲に限定します。
+すべてを自動実行することが目的ではありません。**データ、権限、決定、永続状態のコントロールを手放さずに、実際の仕事を任せられるようにすること**が目的です。
 
-## 最初に役立つ三つの仕事
+個人向けの生産性ワークスペースは、AI のために目標・タスク・知識を整理できます。**Personal AgentOS が重視するのはその下の実行レイヤーです。** AI が何にアクセスできるか、何を実行できるか、実際に何が起きたか、worker を変えてもどの owner state が残るかを制御する環境です。
 
-**調査から判断へ。** 公開資料で選択肢を比較し、出典・時刻・価格条件・不明点を分けた判断材料を作ります。現在の検索結果は抜粋であり、ページ全文、在庫、決済総額の確認とは異なります。
+<!-- capability:current-supported-slice -->
+<!-- readme-section:try-today -->
 
-**自分の資料から成果物へ。** 許可した文書を読み、重要事項と次の行動をまとめ、通常のファイルとして保存します。ファイルの存在だけでなく内容の品質も評価し、原本は変更しません。
+## 今、検証済みの範囲を試す
 
-**続きの依頼と再起動後の再利用。** 条件の訂正を反映し、前の成果物を再利用します。すべての会話を黙って永続 Memory にすることはしません。
+現時点で最も明確な最初のタスクは file-workspace journey です。保存結果、原本保持、再起動後の再利用に具体的な repository evidence があります。
 
-[品質計画](docs/default-agent-usefulness.en.md) の24件の合成評価ケースは評価仕様であって、実行済みモデル評価ではありません。実際の経路で成功率、根拠、待ち時間、費用、所有者の手間を測定します。
+![現在サポートされるファイル作業フロー: 承認済み参照フォルダ、管理された結果、再起動と再利用](docs/assets/readme/file-workspace-flow.svg)
 
-## 所有者が行使する六つの権利
+1. 専用の参照フォルダに小さな Markdown/text ファイルを置きます。
+2. そのフォルダには read access、別の managed workspace には結果保存権限を与えます。
+3. **“Summarize ‘Launch review’ and save it as ‘Launch notes’.”** と依頼します。
+4. managed workspace に新しい Markdown 結果が現れ、原本が変更されていないことを確認します。
+5. AgentOS を再起動し、保存結果をもう一度探すよう依頼します。
 
-[Owner Control Contract](docs/owner-control-contract.en.md) は、実装・検証すべき権利を定義します。
+文書化された file-workspace path では、対応する direct model-provider connection を使い、reference folder と managed workspace を明示的に許可し、外部 provider に承認済み文書 Context を送る前に必要な共有承認を行います。
 
-1. パッケージの出典、作成者、バージョン、実行場所、要求権限を確認する。
-2. Agent が使える資料、Memory、アカウントを選ぶ。
-3. どの情報をどのサービスへ送るか知る。
-4. インストール・接続と個々の行動の権限を分ける。
-5. 作業を止め、権限を取り消し、進行中の外部処理の不確実性も確認する。
-6. Agent を削除・交換しても自分の成果物と承認済み Memory を保持する。
-
-モデルへの指示だけでなく、実行境界がアクセスを拒否できる必要があります。進捗は実際の Work/ツールイベントから作成し、詳細には必要なマスク済み入力、送信先、承認と結果を表示します。隠れた推論、システムプロンプト、秘密情報の公開は必要ありません。
-
-ローカルインストールとローカル処理は別です。外部モデルには許可済み Context が送られます。リモート Agent のコネクタを入れても、そのサーバーを所有することにはなりません。切断、権限取消、Agent 削除、保存情報の消去を区別し、すでに送信された情報や完了した外部操作を停止ボタンで取り消せるとは約束しません。
-
-## アーキテクチャと Agent アプリ
-
-Kernel は Agent-independent、体験は Agent-centric です。
-
-`Owner · Context · Memory · Artifact · Capability · Runtime · Grant · Work · Event · Evidence`
-
-その上に `AgentPackage · Package Manager · Registry · Marketplace/Discovery · Trust/Verification` を置きます。Codex、Claude Code、モデル、MCP、任意の Ruflo などは交換可能な worker であり、所有者の状態の権威にはなりません。
-
-`downloaded != installed != enabled != connected != authorized-for-action`
-
-インストールは無効状態が既定で Grant を作りません。権限・送信先・Memory・背景動作の拡張には再承認が必要です。第三者の永続 Memory 変更は基本的に MemoryCandidate として提出します。削除は Agent の権限を取り消しますが、所有者の結果は保持します。
-
-Registry は正確な identity/version/digest/互換性/失効を、Marketplace は検索・ランキング・レビューと将来の流通を扱います。人気や署名は行動の安全性を保証しません。個人 Context は Marketplace の検索データではありません。
-
-最初は有用な Files 参照パッケージと公開 SDK 経路を実証します。同梱 Agent と第三者 Agent は同じ契約を使い、隠れた特権を持ちません。MCP/skill/plugin の互換性は形式・ライセンス・権限を実際に対応付けられる場合のみ追加します。公開ストアや Ruflo は最初の体験の必須条件ではありません。
-
-## 現在のプレビューを試す
+### インストール
 
 ```sh
 brew install jongtae/agentos/agentos
 agentos start
 ```
 
-**このコマンドは最新の公開リリース `v1.0.4`(2026-09-07)をインストールします。これは `main` より大きく遅れており**、Gmail コネクタ、`agentos service`、PA1 コネクタ契約、メモリサービスのいずれも含みません。Homebrew は macOS のセルフホスト経路です。最近の機能にはソースチェックアウトを使用してください。リリース手順は [release procedure](docs/release.en.md) にあります。[QUICKSTART](QUICKSTART.md) の専用テストフォルダ手順を使用してください。記載されたファイルワークスペースのテストには直接のモデル接続を使います。計画中の機能を実装済みのコマンドとして扱わないでください。
+ブラウザは `http://127.0.0.1:8787` で開きます。
 
-対応する永続状態は `scripts/agentos-backup.py DATA ARCHIVE` と `scripts/agentos-restore.py ARCHIVE EMPTY_DATA` で移動できます。接続秘密、セッション、フォルダ Grant、モデル選択、Telegram pairing は移行用アーカイブに含めず、新しい環境で再承認します。全データディレクトリのバックアップとは異なります。
+**この Homebrew コマンドがインストールする最新公開リリースは `v1.0.4` (2026-09-07) で、現在の `main` より遅れています。** `main` にはこのリリース以降の機能開発と first-user 改善が含まれます。正確な対応経路は [QUICKSTART](QUICKSTART.md)、公開状態は [release procedure](docs/release.en.md) を参照してください。
 
-## 開発
+<!-- readme-section:status -->
 
-[アーキテクチャ](docs/personal-agentos-architecture.en.md)、[PRD](PRD.md)、[AGENTS.md](AGENTS.md)、[Development Constitution](docs/development-constitution.en.md)、[Goal Execution Contract](docs/goal-execution-contract.en.md)、[ロードマップ](docs/roadmap.md) に従います。
+## 現在できることと、まだ摩擦がある部分
 
-これはコーディングハーネスや macOS/Linux の代替ではありません。GitHub/Codex 自動化は開発インフラです。#357 は文書・評価仕様・計画の整合であり、#358–#360 や未完了のプラットフォーム項目は別途明示的に有効化されるまで実行しません。完了には、有用な結果と適切な拒否・復旧の両方の根拠が必要です。
+最新の synthetic first-user audit は [#472](https://github.com/Jongtae/personal-agentos/issues/472) です。実際の製品構成に injected transports を使って検証しましたが、**live provider operation は実行していません。** fixture の成功は live service の証明ではありません。
+
+| 領域 | 現在の証拠 |
+| --- | --- |
+| Install/start/restart | #472 で local deterministic first-use path は通過。新しい Mac での Homebrew/launchd 検証は別の operating gate です。 |
+| Files | Synthetic **pass-with-friction**。承認フォルダ要約、managed save、restart/reuse は動作しますが、自然な「それをファイルに保存して」にはまだ gap があります (#481)。 |
+| Gmail | Synthetic **pass-with-friction**。connect/re-auth/search/resume path はありますが、contextual resume と read/reply UX に未解決 defect があります (#473, #478)。 |
+| Calendar | Synthetic **pass-with-friction**。bounded create/preview/correct/cancel/approve の evidence はありますが、query/approval UX gap が残ります (#475, #482, #483)。 |
+| Research | Synthetic **pass-with-friction**。公開情報から source と known/unknown を分けた結果を作れますが、routing/context defect が残ります (#448, #474)。 |
+| Memory | Synthetic **pass-with-friction**。remember/inspect/correct と owner-visible candidate はありますが、delete/receipt UX に摩擦があります (#479)。 |
+| Agent distribution | v0.1 schema/contract はありますが、任意の第三者 AgentPackage 実行や公開 Marketplace は現在の product claim ではありません。 |
+
+現在 **自動購入、任意の computer use、すべての Web ページ検証、live inventory/checkout total の確認、任意の第三者 package 実行、公開 Agent Marketplace** を対応済みとは主張しません。
+
+<!-- readme-section:why-agentos -->
+
+## なぜ “AgentOS” なのか
+
+自分の personal AI が、特定のモデル、特定の会社、特定の Agent と同一であるべきではないからです。
+
+Personal AgentOS は owner-authoritative な層と交換可能な worker を分離します。
+
+`Owner · Context · Memory · Artifact · Capability · Runtime · Grant · Work · Event · Evidence`
+
+Model、coding agent、Connector、delegated Runtime は交換できます。それらは Capability を要求し、AgentOS policy と owner が実際の authority を決めます。Worker を交換しても有用な personal state が一緒に消えないことが重要です。
+
+<!-- readme-section:owner-control -->
+
+## コントロールは owner に
+
+[Owner Control Contract](docs/owner-control-contract.en.md) は六つの観察可能な権利を定義します。
+
+1. **Inspect** — package/source、publisher、version、execution mode、requested authority を確認する。
+2. **Choose data** — 使ってよい document、Memory、account を選ぶ。
+3. **See destinations** — task 情報がどこへ送られるか確認する。
+4. **Bound actions** — install/connect と実際の action authority を分ける。
+5. **Stop and revoke** — authority を取り消し、in-flight uncertainty を正直に示す。
+6. **Keep and move owner state** — worker を削除・交換しても owner state を保つ。
+
+ローカルインストールと local-only processing は同じではありません。外部モデルを使う local package は承認済み Context をその provider に送ります。Disconnect、authority revoke、worker removal、remote retained data deletion は別の操作です。
+
+<!-- readme-section:architecture -->
+
+## 製品を理解した後に見るアーキテクチャ
+
+| Layer | Responsibility |
+| --- | --- |
+| **Owner plane** | Owner identity/policy、Context/Memory authority、data/workspace、Grants/approvals、Work/Event、Artifacts、Evidence、recovery |
+| **Capability plane** | Typed tools/connectors と bounded runtime interfaces |
+| **Distribution plane** | AgentPackage、Package Manager、Registry、trust metadata、将来の Marketplace/discovery |
+| **Worker plane** | 交換可能な model、Codex/Claude Code、local/API worker、optional delegated runtime |
+| **Experience plane** | Conversation、useful result、inspectable progress、approval/control、将来の agent discovery |
+
+Kernel は **agent-independent** に保ちつつ、製品体験は **agent-centric** にできます。
+
+<!-- readme-section:bdi -->
+
+## BDI-inspired attention lens
+
+BDI は **概念的な設計レンズ**です。canonical BDI state machine が既に shipped しているという主張でも、hidden chain-of-thought を公開する要求でもありません。
+
+- **Belief view:** 許可された task context、accepted Memory、関連 Evidence/Artifact、現在の Capability/Grant facts。
+- **Desire:** owner が欲しい outcome と success criteria。
+- **Attention:** 今重要なこと、許可されたこと、関係する destination/effect、approval が必要かどうか。
+- **Intention:** 現在の bounded plan と次の executable step。
+- **Execution:** Capability/Runtime mediation により observed Work/Event、Artifact、Evidence を作ります。
+
+結果は次の task context に役立つ場合がありますが、すべてが自動で durable Memory になるわけではありません。第三者は `MemoryCandidate` を提案し、policy/owner が canonical Memory に採用するか決めます。
+
+<!-- readme-section:ecosystem -->
+
+## Agent ecosystem の方向性
+
+AgentPackage lifecycle は次を意図的に区別します。
+
+`downloaded != installed != enabled != connected != authorized-for-action`
+
+Installation は Grant を自動生成してはいけません。Data、action、destination、Memory、background behavior を広げる update には新しい authority が必要です。Removal は package authority を revoke しつつ、owner-owned output と必要な Evidence は policy に従って保持します。
+
+まず useful で bounded な Agent と public authoring path を証明することが先で、大規模 store や payment は最初の前提ではありません。詳しくは [architecture](docs/personal-agentos-architecture.en.md)、[PRD](PRD.md)、[platform foundation](docs/agent-distribution-platform-foundation.en.md)、[product vision](PRODUCT_VISION.ko.md)、[roadmap](docs/roadmap.md) を参照してください。
+
+<!-- readme-section:portability -->
+
+## Portability と限界
+
+```sh
+scripts/agentos-backup.py DATA ARCHIVE
+scripts/agentos-restore.py ARCHIVE EMPTY_DATA
+```
+
+対応する owner state と reviewed declarations は integrity check と共に export/restore できます。Provider credential、session、local-folder Grant、engine/model selection、Telegram pairing は portable archive には含まれず、再接続または再承認が必要です。
+
+Local-first は local-only や自動的な安全性を意味しません。Host security、package isolation、既に送信された data、remote provider retention は現実の境界です。
+
+<!-- readme-section:development -->
+
+## 開発ガバナンス
+
+このプロジェクトは **coding harness、swarm framework、host kernel、macOS/Linux の代替ではありません。** GitHub/Codex delivery automation は Personal AgentOS を作る開発インフラであり、end-user product ではありません。
+
+[AGENTS.md](AGENTS.md)、[Development Constitution](docs/development-constitution.en.md)、[Goal Execution Contract](docs/goal-execution-contract.en.md) に従い、issue → bounded branch → implementation → validation → 必要な independent review → merge/closeout の順で進めます。
+
+Product completion は green CI、schema、file count だけでは判断しません。**useful outcome evidence と必要な denial/recovery evidence の両方が必要です。**

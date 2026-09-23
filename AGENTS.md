@@ -136,6 +136,8 @@ Every active iteration must satisfy the English canonical [Goal Execution Contra
 
 Internal development standards, designs and execution guidance use English as the single canonical source. Korean is used for owner-facing progress/completion and user-facing companion docs where useful; translations do not silently create new authority.
 
+The four public README files are one user-facing product surface: `README.md` is canonical for factual claims, while `README.ko.md`, `README.ja.md` and `README.zh-CN.md` must preserve semantic/structural parity. A canonical README change must update all public locales in the same PR. Prefer language-neutral visuals; if essential copy is embedded in an image, provide localized variants. Never let an illustrative product-direction scene read as current shipped capability.
+
 ## AgentPackage / runtime issue requirements
 
 A package/runtime/distribution issue must explicitly state where applicable:

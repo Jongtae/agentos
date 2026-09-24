@@ -10,6 +10,12 @@ Follow [Incremental Delivery and Merge Handoff](incremental-delivery.en.md). Shi
 
 Implementation verification, GitHub integration and actual owner operation have separate states. External review/check/permission waits produce a bounded `integration_pending` receipt when safe work is exhausted, not an invented implementation failure, repeated preparation cycle, or false completion. Required checks still apply; independent review applies only when the Development Constitution's material security/authority escalation criteria are met. Native auto-merge is optional and disabled auto-merge does not rule out normal merge. Neither this document nor the helper changes native repository settings.
 
+## Execution status ownership
+
+GitHub Issues, Pull Requests, merge state, and required Checks are authoritative for execution status. Planning and governance artifacts such as `delivery-plan.yaml`, `TASKS.md`, `docs/roadmap.md`, and ledgers express selected goals, sequencing, dependencies, authority, acceptance, durable decisions, and historical evidence; they are not a second database of GitHub status.
+
+Do not create a follow-up commit or pull request solely to mirror an Issue/PR transition, merge SHA, or Check result into those files. Update them when their own plan or decision content changes—for example scope, ordering, dependency, authority, acceptance, milestone, activation, re-scope, blocker/disposition, or next-goal selection—or when an active contract explicitly requires substantive evidence that GitHub-native state cannot represent. Existing historical closeout rows remain valid historical evidence and need not be normalized.
+
 ## Method
 
 The governance combines four complementary practices:
@@ -32,7 +38,7 @@ A development increment is implementation-verified when its issue and pull reque
 - required repository checks passing in CI; and
 - known limitations and the exact distinction between mock evidence and operating evidence.
 
-Full iteration completion additionally requires normal merge, the required exact-PR-head validation, the active contract's tracker/ledger closeout, and an independent review artifact only when the change crosses the Development Constitution's material security/authority escalation boundary. Final completion alone is not a review trigger. A successful merge does not require re-running the same heavy suite on `main`; `main` receives a fast merged-tree integrity pass, while scheduled/manual full validation is the repository-wide backstop. An integration-pending session handoff is not full iteration completion. No person is required to perform a routine manual acceptance test, log in to a third-party provider, or create a provider token to complete a development iteration. Human review remains an escalation for material product/security boundary changes, not a recurring test gate.
+Full iteration completion additionally requires normal merge, the required exact-PR-head validation, any substantive plan/governance update required because the plan itself changed, and an independent review artifact only when the change crosses the Development Constitution's material security/authority escalation boundary. GitHub-native execution status does not require tracker/roadmap/ledger mirroring. Final completion alone is not a review trigger. A successful merge does not require re-running the same heavy suite on `main`; `main` receives a fast merged-tree integrity pass, while scheduled/manual full validation is the repository-wide backstop. An integration-pending session handoff is not full iteration completion. No person is required to perform a routine manual acceptance test, log in to a third-party provider, or create a provider token to complete a development iteration. Human review remains an escalation for material product/security boundary changes, not a recurring test gate.
 
 ## External integrations and agents
 
@@ -54,7 +60,7 @@ The deployed runtime must use automated startup and health checks, fail closed o
 - A contract change requires its fixture and mock suite to change in the same PR.
 - New scopes, external writes, credentials, data classes, or recovery semantics require a contract and threat-model update before implementation.
 - Tests must be deterministic, hermetic where possible, and safe to run without personal data or external credentials.
-- A capability is described as *development-complete* only after its full declared development contract, merge and closeout. It is described as *operating-configured* only after the relevant automated health check succeeds. Use narrower implementation-verified or experimental-checkpoint labels where appropriate.
+- A capability is described as *development-complete* only after its full declared development contract, merge, required CI, and requirement-to-evidence audit. Planning documents are updated only for substantive plan/decision changes, not to duplicate GitHub execution status. It is described as *operating-configured* only after the relevant automated health check succeeds. Use narrower implementation-verified or experimental-checkpoint labels where appropriate.
 
 ## Non-goals
 

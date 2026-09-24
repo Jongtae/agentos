@@ -130,7 +130,13 @@ Every milestone and iteration uses:
 3. small intentional commits;
 4. a pull request with current automated validation evidence;
 5. independent review only when the change materially alters a security/authority boundary or weakens a declared safety invariant; ordinary recovery, historical reconciliation and final completion do not trigger review by themselves;
-6. merge, issue closeout and tracker/ledger reconciliation.
+6. merge and issue closeout; reconcile planning/governance documents only when the plan itself changed or the active contract requires a substantive record that GitHub-native state does not represent.
+
+### Execution status source of truth
+
+GitHub Issues, Pull Requests, merge state, and required Checks are authoritative for execution status. `delivery-plan.yaml` is authoritative for active goal selection, ordering, declared scope, dependencies, and execution authority; it is **not** a duplicate database of whether a PR is open, merged, or closed. `TASKS.md`, `docs/roadmap.md`, ledgers, and other planning/governance documents record plans, durable decisions, and historical evidence rather than mirroring GitHub state after every transition.
+
+Do not create a follow-up commit or pull request solely to change a work item from `open`/`in progress` to `merged`/`closed`, copy a merge SHA already available from GitHub, or mirror a Check result. After a normal merge, the GitHub PR/Issue/Checks are sufficient execution-status evidence. Update a planning/governance document only when its own meaning changes: scope, sequencing, dependency, authority, acceptance criteria, milestone, activation, re-scope, blocker/disposition, next-goal selection, or another substantive decision/evidence record explicitly required by the active contract and not represented by GitHub-native state. Preserve existing historical closeout records as historical evidence; do not churn them merely to normalize old status mirrors.
 
 Before making an implementation or documentation change, create the issue and switch to its matching branch. Enable the repository hooks once per clone with `git config core.hooksPath .githooks`; they reject commits and pushes directly to `main` or `master`.
 
@@ -177,7 +183,7 @@ Use role-appropriate delegation only for independent bounded work. Record the re
 
 Independent review is required only for a material security/authority boundary change. Triggers include widening filesystem/network/secret/connector/runtime authority; OAuth or credential-boundary changes; consequential-action approval changes; sandbox/isolation/privilege changes; private-data egress or recipient-boundary changes; package/dependency supply-chain trust or install/update authority changes; canonical owner-state/authority ownership changes; or weakening/removing a declared safety invariant. Recovery work requires independent review only when it changes one of those semantics. Final completion, ordinary UI/conversation/Settings work, non-authority bug fixes/refactors/docs, and tracker/ledger reconciliation do not trigger review by themselves. When review is required, an implementer's self-review or a label transition alone is not independent review.
 
-Completion is rejected unless a current requirement-to-evidence audit maps every acceptance criterion to merged artifacts, required CI, and relevant tracker/roadmap/ledger closeout. A local command, fixture, signature, package manifest, closed issue, branch or PR alone never proves live capability completion.
+Completion is rejected unless a current requirement-to-evidence audit maps every acceptance criterion to merged artifacts and required CI, plus any substantive planning/governance update required because the plan itself changed. GitHub-native execution status must not be duplicated into tracker/roadmap/ledger files merely to prove a merge. A local command, fixture, signature, package manifest, closed issue, branch or PR alone never proves live capability completion.
 
 
 ## Verification budget and stable-head review

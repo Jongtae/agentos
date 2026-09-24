@@ -21,7 +21,7 @@ Before activating a goal, its issue and source plan must identify all of the fol
 | Field | Required meaning |
 | --- | --- |
 | Objective | One user-visible outcome, including the scope that must be true at completion. A top-level objective may name finite, ordered substeps. |
-| Source of truth | The issue, active `delivery-plan.yaml` iteration, and governing contract documents. The active delivery plan decides order. |
+| Source of truth | The issue and governing contract define promised behavior; GitHub Issues, Pull Requests, merge state, and required Checks are authoritative for execution status. The active `delivery-plan.yaml` entry decides goal selection/order, scope, dependencies, and execution authority; it does not mirror GitHub PR/Issue status. |
 | State and predecessors | `active` work has satisfied dependencies. `reserved`, `proposed`, archived, and blocked work is not silently activated. |
 | Allowed authority | Files, runtime boundaries, repositories, and external systems the goal may change. Read-only inspection is allowed; new credentials, external actions, or scope expansion require an explicit contract. |
 | Non-goals | Adjacent work deliberately excluded so the agent cannot substitute an easier or broader result. |
@@ -29,7 +29,7 @@ Before activating a goal, its issue and source plan must identify all of the fol
 | Evidence | Exact automated checks, fixtures, risk-triggered review artifacts when applicable, and—only for operating mode—deployment health evidence. Mock and operating evidence are named separately. |
 | Delegation record | For each delegated work unit: exclusive file ownership, requested model/reasoning, tool-accepted setting when available, observed result, and the reason the delegation is independent. |
 | Independent review | A review artifact only when the goal materially changes a security/authority boundary under the Development Constitution. Recovery and final completion do not trigger review by themselves. |
-| Completion rule | A current requirement-to-evidence audit proving every promised artifact, state transition, and check, including merged artifacts, required CI, and tracker/roadmap/ledger closeout. |
+| Completion rule | A current requirement-to-evidence audit proving every promised artifact, state transition, merged artifact, and required CI result. Update tracker/roadmap/ledger or other planning documents only when their plan/decision content changed, or when the active contract requires a substantive evidence record not represented by GitHub-native state. |
 | Blocked rule | The concrete external condition that prevents progress, recovery attempts already made, and the next authority or state change required. Integration-only waits use the bounded handoff above. |
 
 ## Execution lifecycle
@@ -38,8 +38,8 @@ Before activating a goal, its issue and source plan must identify all of the fol
 2. Derive a checklist from the goal-ready record. Preserve every explicit requirement and dependency.
 3. Create the required issue and `codex/` branch before changing implementation or documentation. Keep commits intentional and scoped.
 4. Complete the ordered work units. After each material change, test the relevant contract before moving on. Use delegation only with the recorded model, ownership, and review boundaries.
-5. Run the declared complete validation set, including plan/doc parity, local-link, ledger, and full-suite checks when the source plan requires them.
-6. Create a PR that distinguishes automated evidence from operating evidence, merge it, close the issue, and update `TASKS.md`, `docs/roadmap.md`, and the ledger together. If only external integration is pending, preserve a resumable handoff instead; do not falsely close the issue.
+5. Run the declared complete validation set, including plan/doc parity, local-link, and full-suite checks when the source plan requires them. Do not invent a ledger/status-parity gate merely because GitHub execution state changed.
+6. Create a PR that distinguishes automated evidence from operating evidence, merge it, and close genuinely completed issue scope. Update `delivery-plan.yaml`, `TASKS.md`, `docs/roadmap.md`, ledgers, or other planning/governance documents only when the plan itself changed or the active contract requires a substantive record that GitHub-native state does not represent. Never create a follow-up commit or PR whose sole purpose is to mirror `merged`, `closed`, a merge SHA, or a Check result. If only external integration is pending, preserve a resumable handoff instead; do not falsely close the issue.
 7. Perform the completion audit. Only then report the full goal complete.
 
 ## Autonomous delivery-cycle delegation
@@ -92,7 +92,7 @@ Broader validation may be run earlier whenever security, authentication/OAuth, p
 
 ## Terminal-state discipline
 
-- A goal is **complete** only when a current requirement-to-evidence audit proves every completion item, merged artifact, required CI result, and tracker/roadmap/ledger closeout. A top-level goal additionally proves every enumerated substep and requirement is complete, owner-setting-only, or separately decision-required. Intent, a partial fixture, a closed issue, an unmerged branch, or a narrow test cannot prove a broader claim.
+- A goal is **complete** only when a current requirement-to-evidence audit proves every completion item, merged artifact, and required CI result, plus any substantive planning/governance update required because scope, order, dependency, authority, acceptance, milestone, activation, re-scope, blocker/disposition, or next-goal selection changed. GitHub-native merge/Issue/Check status does not require tracker/roadmap/ledger mirroring. A top-level goal additionally proves every enumerated substep and requirement is complete, owner-setting-only, or separately decision-required. Intent, a partial fixture, a closed issue, an unmerged branch, or a narrow test cannot prove a broader claim.
 - A goal remains **active** while a safe next action exists, even if work is difficult or incomplete.
 - A goal is **blocked** only after the same concrete external blocker has recurred across three goal turns and no meaningful safe progress remains. The report must name the blocker, evidence, and the smallest required next input. Integration-only waits instead end the current session with the exact `integration_pending` receipt; they do not require repeated identical turns.
 - A goal never treats a routine owner manual test, real credential, or live provider as a development blocker. Those belong to the separately documented operating-mode deployment unless the active goal explicitly authorizes it.
@@ -109,7 +109,7 @@ The delivery-plan verifier rejects a design without this mapping. It also reject
 | --- | --- |
 | Vision | Supplies direction and non-goals; never activates work by itself. |
 | Master Plan | Supplies phases, completion criteria, and design/implementation ordering. Its active iteration must still be selected in the delivery plan. |
-| Active delivery plan | Selects the next executable iteration and its declared validation commands. |
+| Active delivery plan | Selects the next executable iteration/order and its declared scope, dependencies, authority, and validation commands. It is planning/execution-authority state, not a mirror of GitHub PR/Issue/Check status. |
 | Design contract | Becomes a design goal only when its predecessor is complete; it must define the dependent implementation's contracts and fixtures. |
 | Issue | Carries the goal-ready record and PR closeout evidence. |
 | Reserved/proposed proposal | Records a candidate and missing promotion evidence; it cannot create implementation work until promoted explicitly. |
@@ -124,7 +124,7 @@ Execute <iteration ID and user outcome> from <authoritative issue and delivery-p
 
 Preserve the stated predecessors, non-goals, data/permission boundaries, and operating-mode separation. Work only within the documented authority. Implement the ordered work units, then run every declared validation and perform a requirement-by-requirement completion audit against current repository and PR state.
 
-Do not mark the full goal complete until the issue, branch, PR merge, required CI, requirement-to-evidence audit, tracker/roadmap/ledger closeout, and all stated evidence are current. Continue only this active goal; do not select a successor. Treat live credentials, real providers, and manual owner validation as out of scope unless this specific goal explicitly authorizes operating-mode work. For integration-only waits, follow incremental-delivery.en.md: diagnose once, finish safe work, and preserve an integration_pending receipt and one resume action without bypass or repeated unchanged polling. Other external implementation blockers use the three-turn blocked rule.
+Do not mark the full goal complete until the issue, branch, PR merge, required CI, requirement-to-evidence audit, all stated evidence, and any substantive plan change required by the active contract are current. Do not require or create a tracker/roadmap/ledger update solely to mirror GitHub execution status. Continue only this active goal; do not select a successor. Treat live credentials, real providers, and manual owner validation as out of scope unless this specific goal explicitly authorizes operating-mode work. For integration-only waits, follow incremental-delivery.en.md: diagnose once, finish safe work, and preserve an integration_pending receipt and one resume action without bypass or repeated unchanged polling. Other external implementation blockers use the three-turn blocked rule.
 ```
 
 ## Required final report

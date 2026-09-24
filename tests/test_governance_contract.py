@@ -69,6 +69,58 @@ def test_english_goal_contract_is_canonical_and_korean_reference_links_to_it() -
     _assert_all(korean, "과거 참고용 한국어 번역본", "](" + "goal-execution-contract.en.md" + ")")
 
 
+def test_github_is_authoritative_for_execution_status_and_plans_are_not_status_mirrors() -> None:
+    agents = _read("AGENTS.md")
+    goal = _read("docs/goal-execution-contract.en.md")
+    governance = _read("docs/development-governance.en.md")
+    incremental = _read("docs/incremental-delivery.en.md")
+
+    for text in (agents, governance, incremental):
+        _assert_all(
+            text,
+            "GitHub Issues, Pull Requests",
+            "authoritative for execution status",
+        )
+
+    _assert_all(
+        agents,
+        "`delivery-plan.yaml` is authoritative for active goal selection",
+        "duplicate database",
+        "Do not create a follow-up commit or pull request solely",
+        "scope, sequencing, dependency, authority, acceptance criteria, milestone, activation, re-scope, blocker/disposition, next-goal selection",
+    )
+    _assert_all(
+        goal,
+        "does not mirror GitHub PR/Issue status",
+        "Never create a follow-up commit or PR whose sole purpose is to mirror",
+        "GitHub-native merge/Issue/Check status does not require tracker/roadmap/ledger mirroring",
+        "Do not require or create a tracker/roadmap/ledger update solely to mirror GitHub execution status",
+    )
+    _assert_all(
+        governance,
+        "they are not a second database of GitHub status",
+        "Do not create a follow-up commit or pull request solely",
+    )
+    _assert_all(
+        incremental,
+        "do not create a follow-up commit or PR solely",
+        "`delivery-plan.yaml`",
+        "`TASKS.md`",
+        "`docs/roadmap.md`",
+        "a ledger",
+    )
+
+    stale_goal_rules = (
+        "tracker/roadmap/ledger closeout",
+        "update `TASKS.md`, `docs/roadmap.md`, and the ledger together",
+    )
+    normalized_goal = _normalize(goal)
+    for stale in stale_goal_rules:
+        assert _normalize(stale) not in normalized_goal, (
+            f"goal execution contract still requires redundant status mirroring: {stale}"
+        )
+
+
 def test_iteration_issue_template_collects_the_execution_contract() -> None:
     template = _read(".github/ISSUE_TEMPLATE/iteration.md")
 

@@ -33,8 +33,10 @@ These are issue/PR handoff fields, not new runtime Work states or heartbeat acti
 A work session can end with a useful handoff while integration is pending. It must NOT
 mark the full goal complete, close its issue, label a predecessor complete, activate a
 successor, or advertise operating capability on that basis. Full goal completion still
-requires the active issue's agreed scope, merged evidence, required CI and closeout.
-Keep a checkpoint parent open when remaining criteria or explicit owner acceptance remain.
+requires the active issue's agreed scope, merged evidence, required CI and a current
+requirement-to-evidence audit. Planning/governance documents need updates only when their
+own plan or decision content changed; they do not need a second status transition merely
+to mirror GitHub. Keep a checkpoint parent open when remaining criteria or explicit owner acceptance remain.
 
 ## Preflight once, then use the ordinary route
 
@@ -78,7 +80,13 @@ exact unavailable gate/permission; next responsible actor and one resume action;
 deferred issue links; smoke/run instructions; actual operating evidence or not_run.
 No credentials, raw personal payloads, promises to monitor, or unsupported success claims.
 After normal merge, verify main at the returned merge SHA. Close only genuinely completed
-scope. If policy access is denied, state that limitation rather than changing credentials.
+scope. GitHub Issues, Pull Requests, merge state, and required Checks are authoritative for
+execution status: do not create a follow-up commit or PR solely to copy `merged`, `closed`,
+a merge SHA, or a Check result into `delivery-plan.yaml`, `TASKS.md`, `docs/roadmap.md`, or
+a ledger. Update those artifacts only when scope, order, dependencies, authority,
+acceptance, milestone, activation, re-scope, blocker/disposition, next-goal selection, or
+another substantive plan/evidence decision changed. If policy access is denied, state that
+limitation rather than changing credentials.
 
 ## Repository setting note
 

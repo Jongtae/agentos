@@ -25,4 +25,4 @@ where = ["src"]
 include = ["personal_agent*"]
 
 [tool.setuptools.package-data]
-personal_agent = ["web/*.html", "web/*.css", "web/*.js", "delivery-plan.yaml"]
+personal_agent = ["web/*.html", "web/*.css", "web/*.js"]

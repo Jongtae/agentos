@@ -25,6 +25,7 @@ from .settings_orchestrator import SettingsOrchestrator, SettingsError
 from .personal_knowledge import PersonalKnowledgeOrchestrator
 from .memory_service import MemoryService
 from .file_workspace import FileWorkspace
+from . import folder_grants
 from .connector_contract import ConnectorContractError, _owner_key
 from .gmail import GMAIL_CONNECTOR_ID, GmailError
 from .calendar import CALENDAR_CONNECTOR_ID, CALENDAR_WRITE_CONNECTOR_ID, CalendarError
@@ -551,7 +552,7 @@ class AgentService:
                     'subscription_engines':self.subscription_engine_status(),
                     'subscription_execution':{'mode':'isolated-agentos-mcp','tools':['list_notes']} if self.isolated_engine_adapter else {'mode':'bounded-agentos-mcp','tools':['list_notes','save_note','web_search']},
                     'telegram':{'enabled':tg.get('enabled',False),'mode':tg.get('mode','owner-token'),'username':tg.get('username',''),'paired':bool(tg.get('user_id')),'user_id':tg.get('user_id')},
-                    'file_roots':self.store.config('file_roots',[]), 'file_workspace':FileWorkspace(self.store).status(), 'document_boundary':boundary, 'context_inbox':__import__('personal_agent.context_inbox',fromlist=['ContextInbox']).ContextInbox(self.store).status(), 'agents':[{'id':role['id'],'name':role['name'],'permissions':role['permissions'],'package_id':package['id']} for package in active_packages for role in package['roles']], 'packages':packages, 'tool_run':self.store.config('tool_run'), 'model_test':model_test, 'model_ready':self.model_ready(model,model_test), 'telegram_status':self.store.config('telegram_status'),'connectors':self.connector_connections()}
+                    'file_roots':[{**root,'blocked':folder_grants.blocked(root.get('path',''),self.store)} for root in self.store.config('file_roots',[])], 'file_workspace':FileWorkspace(self.store).projection(), 'document_boundary':boundary, 'context_inbox':__import__('personal_agent.context_inbox',fromlist=['ContextInbox']).ContextInbox(self.store).status(), 'agents':[{'id':role['id'],'name':role['name'],'permissions':role['permissions'],'package_id':package['id']} for package in active_packages for role in package['roles']], 'packages':packages, 'tool_run':self.store.config('tool_run'), 'model_test':model_test, 'model_ready':self.model_ready(model,model_test), 'telegram_status':self.store.config('telegram_status'),'connectors':self.connector_connections()}
 
     def home(self):
         """Return the minimal, credential-free read model for the owner home."""
@@ -929,20 +930,26 @@ class AgentService:
         from pathlib import Path
         paths=body.get('paths')
         if not isinstance(paths,list) or len(paths)>8 or any(not isinstance(p,str) for p in paths):raise ValueError('폴더는 최대 8개까지 연결할 수 있습니다.')
-        roots=[]
+        roots=[];stored={root.get('path'):root for root in self.store.config('file_roots',[])}
         for value in paths:
-            p=Path(value).expanduser().resolve()
-            if not p.is_dir() or p==Path('/') or p==Path.home() or p.is_relative_to(self.store.private):raise ValueError('전체 홈이나 시스템 루트 대신 작업용 하위 폴더를 선택하세요.')
+            if value in stored and folder_grants.blocked(value,self.store):
+                # Keep an already-stored grant the rules now forbid as-is (still blocked at use)
+                # so the owner can change other folders without first clearing every blocked one.
+                if all(root['path']!=value for root in roots):roots.append(stored[value])
+                continue
+            p=folder_grants.validate(value,self.store)
+            if any(root['path']==str(p) for root in roots):continue
             roots.append({'id':__import__('hashlib').sha256(str(p).encode()).hexdigest()[:12],'path':str(p)})
         self.store.put('file_roots',roots)
         self.store.put('document_sharing',{})
-        return {'roots':roots}
+        return {'roots':[{**root,'blocked':folder_grants.blocked(root['path'],self.store)} for root in roots]}
 
     def configure_file_workspace(self, body):
         if not isinstance(body,dict): raise ValueError('파일 작업공간 정보를 확인하세요.')
-        result=FileWorkspace(self.store).configure(body.get('references',[]),body.get('workspace',''))
+        files=FileWorkspace(self.store)
+        files.configure(body.get('references',[]),body.get('workspace',''))
         self.store.put('document_sharing',{})
-        return result
+        return files.projection()
 
     def record_file_workspace_document_job(self, job_id):
         rows=self.store.config('file_workspace_document_jobs',[])

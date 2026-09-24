@@ -31,7 +31,7 @@ const source=part('function capabilityActions(', 'function clearMobileDetailWhen
  part('const CONNECTOR_STATES=', 'async function requestCapabilityDraft(')+
  part('function renderTelegram(', 'function renderCapabilityPreview(');
 const calls=[];let refreshes=0,failRoute=false;
-const ctx={document,$,telegramDraftOpen:false,requestCapabilityDraft:async()=>{},console,api:async(path,body)=>{calls.push({path,body});if(failRoute)throw new Error('switch refused');return {};},refresh:async()=>{refreshes++;},busy:async(button,fn)=>fn(),setError:(id,error)=>{$(id).textContent=error.message;}};
+const ctx={document,$,telegramDraftOpen:false,requestCapabilityDraft:async()=>{},console,api:async(path,body)=>{calls.push({path,body});if(failRoute)throw new Error('switch refused');return {};},refresh:async()=>{refreshes++;},busy:async(button,fn)=>fn(),setError:(id,error)=>{$(id).textContent=error?.message||String(error||'');}};
 vm.createContext(ctx);vm.runInContext(source,ctx);
 const buttonIn=id=>descendants($(id)).find(node=>node.tag==='button');
 const settings={model:{provider:'ollama',endpoint:'http://127.0.0.1:11434',model:'stored-api-model'},model_ready:true,subscription_engines:{selected:'codex',engines:[{id:'codex',name:'Codex',installed:true,connected:true}]}};
@@ -50,6 +50,7 @@ assert(!$('active-ai').textContent.includes('직접 API를 설정하거나 테�
  failRoute=true;await useApi.onclick({currentTarget:useApi});
  assert.equal(refreshes,1,'a refused switch does not claim a new route');
  assert.equal($('active-ai-feedback').textContent,'switch refused');
+ failRoute=false;await useApi.onclick({currentTarget:useApi});assert.equal($('active-ai-feedback').textContent,'','a new attempt clears the stale refusal');
  ctx.renderExecutionConnection({...settings,model_ready:false});
  assert(!buttonsIn('active-ai').some(node=>node.textContent==='이 연결 사용'),'an unverified API cannot be selected');
  assert(buttonsIn('active-ai').some(node=>node.textContent==='연결 확인'));

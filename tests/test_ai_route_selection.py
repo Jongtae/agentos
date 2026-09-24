@@ -1,10 +1,17 @@
 """#504: the owner explicitly selects the effective AI route; no silent switch or fallback."""
+import json
 import tempfile
+import threading
 import unittest
+from http.cookiejar import CookieJar
+from http.server import ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import HTTPError
+from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 from personal_agent.bounded_execution import ExecutionResult
 from personal_agent.providers import ModelAdapter
+from personal_agent.quickstart import make_handler
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
 from personal_agent.subscription_engines import SubscriptionEngines
@@ -62,7 +69,7 @@ class AiRouteSelectionTests(unittest.TestCase):
         self.assertGreaterEqual(self.model_calls, 2)
         for job in (web, telegram):
             self.assertEqual(job['status'], 'succeeded')
-            self.assertNotEqual(job['provider'], 'subscription')
+            self.assertEqual((job['provider'], job['model']), ('compatible', 'fixture'))
 
     def test_direct_api_back_to_cli(self):
         self._ready_model()
@@ -90,6 +97,18 @@ class AiRouteSelectionTests(unittest.TestCase):
         self._run('hello', 'still-cli')
         self.assertEqual((self.engine.calls, self.model_calls), (1, 0))
 
+    def test_expired_or_changed_verification_is_refused(self):
+        self._ready_model()
+        stale = dict(self.store.config('model_test'), time=1)
+        self.store.put('model_test', stale)
+        with self.assertRaisesRegex(ValueError, '연결 확인'):
+            self.service.select_ai_route({'route': 'direct-api'})
+        self._ready_model()
+        self.store.put('model', dict(self.CONFIG, model='other-model'))  # changed after the test
+        with self.assertRaisesRegex(ValueError, '연결 확인'):
+            self.service.select_ai_route({'route': 'direct-api'})
+        self.assertEqual(self.service.subscription_engine_status()['selected'], 'codex')
+
     def test_selection_survives_restart(self):
         self._ready_model()
         self.service.select_ai_route({'route': 'direct-api'})
@@ -104,10 +123,26 @@ class AiRouteSelectionTests(unittest.TestCase):
                 self.service.select_ai_route(body)
         self.assertEqual(self.service.subscription_engine_status()['selected'], 'codex')
 
-    def test_route_endpoint_is_authenticated_post(self):
-        source = (Path(__file__).parents[1] / 'src/personal_agent/quickstart.py').read_text(encoding='utf-8')
-        auth = source.index("if not self.auth():return")
-        self.assertGreater(source.index("path=='/api/ai-route'"), auth)
+    def test_route_endpoint_requires_session_and_same_origin(self):
+        self._ready_model()
+        self.store.claim(self.store.bootstrap.read_text(), 'long-password-test')
+        server = ThreadingHTTPServer(('127.0.0.1', 0), make_handler(self.service))
+        thread = threading.Thread(target=server.serve_forever); thread.start()
+        client = build_opener(HTTPCookieProcessor(CookieJar())); url = 'http://127.0.0.1:' + str(server.server_port)
+        def request(path, body, **headers):
+            req = Request(url + path, data=json.dumps(body).encode(), headers={'Content-Type': 'application/json', **headers})
+            with client.open(req, timeout=3) as response: return json.load(response)
+        try:
+            with self.assertRaises(HTTPError) as error: request('/api/ai-route', {'route': 'direct-api'})
+            self.assertEqual(error.exception.code, 401)
+            request('/api/login', {'password': 'long-password-test'})
+            with self.assertRaises(HTTPError) as error:
+                request('/api/ai-route', {'route': 'direct-api'}, Origin='https://attacker.invalid')
+            self.assertEqual(error.exception.code, 403)
+            self.assertEqual(self.service.subscription_engine_status()['selected'], 'codex')
+            self.assertEqual(request('/api/ai-route', {'route': 'direct-api'})['selected'], '')
+        finally:
+            server.shutdown(); thread.join(); server.server_close()
 
 
 if __name__ == '__main__':

@@ -277,6 +277,19 @@ class IsolatedEngineSidecarBoundaryTests(unittest.TestCase):
             self._sidecar(body).execute(dict(self.PAYLOAD))
         self.assertIn("status 3", str(caught.exception))
 
+    def test_runtime_error_prefix_is_not_misreported_as_cli_invocation_failure(self):
+        body = (
+            "import sys\n"
+            "sys.stderr.write('error: provider authentication failed')\n"
+            "sys.exit(7)\n"
+        )
+        with self.assertRaises(SidecarError) as caught:
+            self._sidecar(body).execute(dict(self.PAYLOAD))
+        message = str(caught.exception)
+        self.assertIn("status 7", message)
+        self.assertNotIn("command-line invocation", message)
+        self.assertNotIn("provider authentication failed", message)
+
     def test_missing_engine_binary_fails_closed(self):
         sidecar = IsolatedEngineSidecar(
             "http://127.0.0.1:1/internal/isolated-engine/mcp",

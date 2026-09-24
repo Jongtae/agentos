@@ -42,6 +42,30 @@ class Fixture:
     file_roots = []
     file_workspace = {"references": [], "workspace": ""}
     workspace_updated = {"workspace-382": 1, "workspace-other": 2}
+    rich_tasks = False
+
+    RICH_RESULT = ("**서울–도쿄 항공권 비교**\n\n- 대한항공 KE703 · 왕복 412,000원 · [예약 페이지](https://example.invalid/ke703)\n- 아시아나 OZ102 · 왕복 398,000원\n\n"
+                   "가장 저렴한 조건은 `OZ102`이며, 출발 시각은 08:30입니다.\n<script>alert('x')</script> <b>raw html</b>")
+
+    @classmethod
+    def rich_task_rows(cls, detail=False):
+        """Fixture-only finished/failed/repeated tasks for presentation checks (#558)."""
+        now = time.time()
+        done = {"id": "task-done", "title": "서울 도쿄 항공권 비교", "status": "succeeded", "status_kind": "finished", "started_at": now - 3600, "observed_at": now - 3300, "events_count": 3, "waits": [], "artifacts": [], "configured": {}, "observed": {}, "response": cls.RICH_RESULT, "route": {"kind": "subscription", "engine": "codex", "status": "succeeded"}}
+        repeat = {**done, "id": "task-done-again", "started_at": now - 1800, "observed_at": now - 1700, "response": cls.RICH_RESULT, "route": {"kind": "direct-api", "model": "gpt-4o-mini", "status": "succeeded"}}
+        failed = {"id": "task-failed", "title": "회의록 폴더 요약", "status": "failed", "status_kind": "finished", "started_at": now - 86400 * 2, "observed_at": now - 86400 * 2 + 40, "events_count": 2, "waits": [], "artifacts": [], "configured": {}, "observed": {}, "error": "결과 저장 폴더가 설정되지 않아 파일을 남기지 못했습니다.", "route": {"kind": "subscription", "engine": "codex", "status": "failed"}}
+        if detail:
+            done["events"] = [{"id": 11, "tool": "subscription_engine", "status": "running", "created": now - 3600, "summary": "실행을 시작했습니다.", "details": {"engine": "codex", "mode": "bounded-agentos-mcp"}},
+                              {"id": 12, "tool": "web_search", "status": "succeeded", "created": now - 3500, "summary": "근거를 확인했습니다.", "details": {"scope": "public-web"}},
+                              {"id": 13, "tool": "subscription_engine", "status": "succeeded", "created": now - 3300, "summary": "실행을 완료했습니다.", "details": {"engine": "codex", "exit_code": 0}}]
+            done["source_references"] = ["https://example.invalid/ke703"]
+            done["conversation"] = {"job_id": "task-done"}
+            repeat["events"] = [{"id": 21, "tool": "model", "status": "succeeded", "created": now - 1700, "summary": "실행을 완료했습니다.", "details": {}}]
+            repeat["conversation"] = {"job_id": "task-done-again"}
+            failed["events"] = [{"id": 31, "tool": "subscription_engine", "status": "running", "created": now - 86400 * 2, "summary": "실행을 시작했습니다.", "details": {"engine": "codex", "mode": "bounded-agentos-mcp"}},
+                                {"id": 32, "tool": "subscription_engine", "status": "failed", "created": now - 86400 * 2 + 40, "summary": "결과 저장 폴더가 설정되지 않아 파일을 남기지 못했습니다.", "details": {"engine": "codex", "exit_code": 1, "attempt": 1}}]
+            failed["conversation"] = {"job_id": "task-failed"}
+        return {"task-done": done, "task-done-again": repeat, "task-failed": failed}
 
     @classmethod
     def task(cls, detail=False):
@@ -94,7 +118,13 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/status": self.send_json({"claimed": True, "authenticated": True, "local_access": True})
         elif path == "/api/tasks":
             Fixture.task_polls += 1
-            self.send_json({"tasks": [] if Fixture.tasks_empty else [Fixture.task()], "unknown_detail_message": "fixture"})
+            rows = [] if Fixture.tasks_empty else [Fixture.task()]
+            if Fixture.rich_tasks and not Fixture.tasks_empty:
+                rows += list(Fixture.rich_task_rows().values())
+            self.send_json({"tasks": rows, "unknown_detail_message": "fixture"})
+        elif path.startswith("/api/tasks/task-") and Fixture.rich_tasks and path.rsplit("/", 1)[-1] in Fixture.rich_task_rows():
+            selected = Fixture.rich_task_rows(True)[path.rsplit("/", 1)[-1]]
+            self.send_json({"tasks": [selected], "selected": selected, "unknown_detail_message": "fixture"})
         elif path == "/api/tasks/task-382":
             selected = Fixture.task(True)
             if Fixture.delay_task_detail:
@@ -111,7 +141,7 @@ class Handler(BaseHTTPRequestHandler):
                 Fixture.state_inflight = True
                 time.sleep(1.5)
                 Fixture.state_inflight = False
-            self.send_json({"settings": {"model": model, "model_ready": False, "subscription_engines": {"engines": []}, "file_roots": [{"path": path} for path in file_roots], "file_workspace": file_workspace, "context_inbox": {"sources": {}, "items": []}, "telegram": {"enabled": True, "paired": True, "username": "fixture_bot"}, "conversation_settings": {"state": "read", "capabilities": [{"id": "google-drive-read", "kind": "connector", "state": Fixture.capability_state, "recovery": "Owner can resume after review."}]}, "document_boundary": {}}, "jobs": [{"id": "task-382", "status": "running", "response": None, "message": "fixture Telegram request", "channel": "telegram:fixture-owner"}, {"id": "project-job", "status": "succeeded", "response": "fixture project result", "message": "fixture project request", "channel": "telegram:fixture-owner"}], "tool_events": [], "healthy": True})
+            self.send_json({"settings": {"model": model, "model_ready": False, "subscription_engines": {"engines": []}, "file_roots": [{"path": path} for path in file_roots], "file_workspace": file_workspace, "context_inbox": {"sources": {}, "items": []}, "telegram": {"enabled": True, "paired": True, "username": "fixture_bot"}, "conversation_settings": {"state": "read", "capabilities": [{"id": "google-drive-read", "kind": "connector", "state": Fixture.capability_state, "recovery": "Owner can resume after review."}]}, "document_boundary": {}}, "jobs": [{"id": "task-382", "status": "running", "response": None, "message": "fixture Telegram request", "channel": "telegram:fixture-owner"}] + ([{"id": "task-done", "status": "succeeded", "response": Fixture.RICH_RESULT, "message": "서울 도쿄 항공권 비교해줘", "channel": "telegram:fixture-owner", "delivery": "sent"}, {"id": "task-done-again", "status": "succeeded", "response": Fixture.RICH_RESULT, "message": "서울 도쿄 항공권 비교해줘", "channel": "telegram:fixture-owner", "delivery": "sent"}, {"id": "task-failed", "status": "failed", "error": "결과 저장 폴더가 설정되지 않아 파일을 남기지 못했습니다.", "message": "회의록 폴더 요약해서 저장해줘", "channel": "telegram:fixture-owner"}] if Fixture.rich_tasks else []) + [{"id": "project-job", "status": "succeeded", "response": "fixture project result", "message": "fixture project request", "channel": "telegram:fixture-owner"}], "tool_events": [], "healthy": True})
         elif path == "/api/personal-space": self.send_json({"memories": Fixture.memories, "context": [], "results": (Fixture.results + Fixture.other_results)[-50:]})
         elif path == "/api/personal-records":
             if Fixture.fail_records_once:
@@ -173,6 +203,9 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/control/append-event":
             Fixture.events.append({"id": len(Fixture.events) + 1, "tool": "fixture", "status": "succeeded", "created": Fixture.events[-1]["created"] + 1, "summary": "폴링으로 추가된 이벤트", "details": {}})
             self.send_json({"events": len(Fixture.events)})
+        elif path == "/control/rich-tasks":
+            Fixture.rich_tasks = True
+            self.send_json({"rich_tasks": True})
         elif path == "/control/empty-tasks":
             Fixture.tasks_empty = True
             self.send_json({"tasks_empty": True})

@@ -90,9 +90,18 @@ def _safe_worker_error(raw: bytes, content_type: str) -> str:
     if not isinstance(value, dict) or set(value) != {"error"} or not isinstance(value["error"], str):
         return ""
     detail = " ".join(value["error"].split())[:300]
-    detail = re.sub(r"(?i)(bearer\s+|--token=)[^\s]+", r"\1[redacted]", detail)
-    detail = re.sub(r"(?<!\w)/(?:Users|home|state|engine-profile)/[^\s]+", "[path redacted]", detail)
-    return detail
+    fixed = {
+        "engine execution failed",
+        "engine execution failed: MCP bridge argument parsing failed",
+        "engine execution failed: engine command-line invocation failed",
+        "engine returned invalid JSON",
+        "engine returned no final result",
+    }
+    if detail in fixed:
+        return detail
+    if re.fullmatch(r"engine execution failed: engine process exited with status [0-9]{1,3}", detail):
+        return detail
+    return ""
 
 
 class IsolatedEngineGateway:

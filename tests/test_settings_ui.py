@@ -55,6 +55,27 @@ def test_guidance_preserves_observed_progress_and_ai_state_boundaries():
     assert "실제 실행은 작업에서 확인" in APP
 
 
+def test_settings_uses_one_accessible_preferences_navigation():
+    assert 'id="settings-nav" class="settings-nav" role="tablist"' in HTML
+    for key, panel in (("ai", "settings-ai"), ("files", "settings-files"),
+                       ("external", "settings-external"), ("privacy", "settings-privacy")):
+        assert f'data-settings="{key}"' in HTML
+        assert f'aria-controls="{panel}"' in HTML
+        assert f'id="{panel}" class="settings-pane" role="tabpanel"' in HTML
+    assert ".settings-layout{" in CSS
+    assert "@media(max-width:620px)" in CSS
+
+
+def test_setting_rows_translate_internal_connection_ids_and_keep_details_disclosed():
+    assert "function settingsRow(" in APP
+    assert "CONNECTOR_NAMES" in APP
+    assert "CAPABILITY_NAMES" in APP
+    assert "settingsDisclosure('세부 정보',lines)" in APP
+    assert "element('strong',capability.id)" not in APP
+    assert "(connector.required_scopes||[]).join(', ')" in APP
+    assert ".settings-row-action.destructive" in CSS
+
+
 def test_records_surface_each_owner_record_type():
     for label in ("메모", "기억", "임시 자료", "저장된 결과"):
         assert label in APP

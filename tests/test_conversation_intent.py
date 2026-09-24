@@ -17,7 +17,7 @@ import unittest
 from personal_agent.capabilities import CapabilityRegistry
 from personal_agent.conversation_handoff import (AUTHORITY_DEFAULT, AUTHORITY_OWNER, AUTHORITY_RULE,
                                                  CONSEQUENTIAL_INTENTS, INTENT_AMBIGUOUS,
-                                                 INTENT_ASSISTANT, INTENT_CALENDAR_CREATE,
+                                                 INTENT_CALENDAR_CREATE,
                                                  INTENT_CONVERSATION, INTENT_GREETING,
                                                  INTENT_KNOWLEDGE, INTENT_NOTE_CREATE,
                                                  INTENT_NOTE_LIST, INTENT_RECOMMENDATION,
@@ -140,7 +140,6 @@ class ExplicitFormTests(unittest.TestCase):
             ('/settings Drive pause', INTENT_SETTINGS, 'Drive pause'),
             ('/settings', INTENT_SETTINGS, '/settings'),
             ('무엇이 연결되어 있어?', INTENT_SETTINGS, '무엇이 연결되어 있어?'),
-            ('/assistant Drive 검색: 예산', INTENT_ASSISTANT, 'Drive 검색: 예산'),
             ('/note 회의: 금요일 출시 검토', INTENT_NOTE_CREATE, '회의: 금요일 출시 검토'),
             ('메모: 오로라 예산', INTENT_NOTE_CREATE, '오로라 예산'),
             ('기록: 오로라 예산', INTENT_NOTE_CREATE, '오로라 예산'),
@@ -156,7 +155,7 @@ class ExplicitFormTests(unittest.TestCase):
 
     def test_an_unrecognised_slash_command_falls_through_instead_of_guessing(self):
         for text in ('/summarize', '/workspace-summary Aurora :: Launch notes',
-                     '/search AgentOS personal assistant verification'):
+                     '/search AgentOS personal assistant verification', '/assistant Drive 검색: 예산'):
             with self.subTest(text=text):
                 decision = self.classifier.classify(text)
                 self.assertIn(decision.intent, (INTENT_CONVERSATION, INTENT_RESEARCH,
@@ -178,24 +177,19 @@ class SafeFallbackTests(unittest.TestCase):
                 self.assertEqual(decision.intent, INTENT_CONVERSATION)
                 self.assertEqual(decision.authority, AUTHORITY_DEFAULT)
 
-    def test_delegation_to_an_external_peer_is_never_inferred_from_prose(self):
-        # PersonalAssistantOrchestrator documents that only the explicit
-        # Korean delegation form may invoke an A2A peer.  Natural routing must
-        # not quietly widen that.
+    def test_external_peer_prose_stays_non_consequential(self):
         for text in ('이 작업을 외부 에이전트에게 맡겨줘', '다른 agent에게 위임해줘',
                      'delegate this task to the external agent',
                      'hand this off to the research peer'):
             with self.subTest(text=text):
-                self.assertNotEqual(self.classifier.classify(text).intent, INTENT_ASSISTANT)
+                decision = self.classifier.classify(text)
+                self.assertNotIn(decision.intent, CONSEQUENTIAL_INTENTS)
 
-    def test_drive_prose_stays_on_the_shipped_picker_path(self):
-        # The orchestrator's `Drive 검색:` vocabulary and the shipped Picker
-        # path are two different designs; reconciling them is WU4.  Until then
-        # ordinary Drive prose must keep reaching the Picker path through the
-        # conversation route, not the unwired orchestrator seam.
+    def test_drive_prose_stays_on_a_safe_non_consequential_route(self):
         for text in ('구글 드라이브 파일을 요약해줘', '드라이브에서 자료 읽어줘'):
             with self.subTest(text=text):
-                self.assertNotEqual(self.classifier.classify(text).intent, INTENT_ASSISTANT)
+                decision = self.classifier.classify(text)
+                self.assertNotIn(decision.intent, CONSEQUENTIAL_INTENTS)
 
 
 class ConsequentialEffectTests(unittest.TestCase):
@@ -440,8 +434,6 @@ class ServiceRoutingTests(unittest.TestCase):
         self.assertIn('오로라 예산', [row['content'] for row in self.store.notes()])
         self.assertIn('Reviewed research peer',
                       self.run_one('/recommend specialist-research')['response'])
-        self.assertIn('개인 공간의 기억과 저장 결과를 확인했습니다.',
-                      self.run_one('/assistant 내 메모 확인')['response'])
 
     def test_the_explicit_settings_command_still_drafts_a_change(self):
         self.registry.transition('google-drive-read', 'enabled', ('read',))

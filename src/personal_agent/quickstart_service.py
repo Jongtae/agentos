@@ -649,6 +649,8 @@ class AgentService:
                     waits.append('승인 대기')
             artifacts=[{'id':item['id'],'kind':'저장된 결과' if 'path' not in item else '파일 결과','path':item.get('path'),'workspace_id':item.get('workspace_id'),'created':item.get('created'),'state':item.get('state','current')} for item in self.store.task_artifacts(job['id'])]
             task={'id':job['id'],'title':self._progress_title(job.get('message'),job['id']),'status':job.get('status'),'status_kind':kind,'status_label':label,'started_at':job.get('created'),'observed_at':last,'result_available':bool(job.get('response')) and job.get('status') in ('succeeded','partial'),'workspace_id':job.get('workspace_id'),'events_count':len(events),'waits':waits,'configured':{'provider':configured.get('provider'),'model':configured.get('model'),'runtime':selected_subscription or (configured.get('provider') if configured else None)},'observed':{'provider':job.get('provider'),'model':job.get('model'),'runtime':job.get('provider') or None},'route':self._observed_route(job,events,model_events),'artifacts':artifacts}
+            if job.get('relation_kind') and job.get('related_job_id'):
+                task['relation']={'kind':job['relation_kind'],'work_id':job['related_job_id']}
             if job_id==job['id']:
                 task['events']=[self._progress_event(event) for event in events]
                 task['source_references']=self.store.evidence_summary(job['id'])
@@ -2225,6 +2227,13 @@ class AgentService:
                     document_jobs=set(self.store.config('file_workspace_document_jobs',[]))
                     document_history=any(message.get('job_id') in document_jobs for message in stored_history)
                     history=[{'role':m['role'],'content':m['content']} for m in stored_history]
+                    if continuity and continuity['relation']==FOLLOWUP_RETRY and history:
+                        # The owner-visible transcript keeps the actual
+                        # follow-up ("retry that"). The worker gets the
+                        # canonical earlier request as this Work's effective
+                        # latest prompt; no private result/tool payload is
+                        # copied through ConversationFocus.
+                        history[-1]={'role':'user','content':prompt}
                     # Provenance for material this turn splices straight into
                     # the prompt.  None of the four branches below leaves a
                     # `Capabilities.evidence` entry or sets `document_context`

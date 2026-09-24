@@ -2,7 +2,7 @@
 
 ## Status and purpose
 
-This is the canonical owner-facing experience refinement for conversation, Settings, contextual capability handoff and recovery. It distills the 2026-09-23 focused [Presence and Settings UX research](research/presence-and-settings-ux.ko.md) into implementation and review rules. Experience convergence is tracked by [PRESENCE-01 #508](https://github.com/Jongtae/agentos/issues/508); that issue is planning/implementation-ready scope and is not activated merely by this document.
+This is the canonical owner-facing experience refinement for conversation, Settings, contextual capability handoff and recovery. It distills the 2026-09-23 focused [Presence and Settings UX research](research/presence-and-settings-ux.ko.md) into implementation and review rules. Experience convergence is tracked by [PRESENCE-01 #508](https://github.com/Jongtae/agentos/issues/508). On 2026-09-24 the owner selected Presence as the next product goal; governance migration is tracked by #523. This document still does not itself authorize runtime execution outside the delivery-plan contract.
 
 It does **not** replace the kernel authority model, the Owner Control Contract, Work/Event/Evidence semantics, Grants/approvals, or the Goal Execution Contract. It does not claim every target behavior is shipped. Current capability claims still require merged implementation and named evidence.
 
@@ -36,6 +36,24 @@ The owner-facing projection should instead read as:
 6. **Ask at the moment of need; manage afterward.** Capability, folder and account authority should be requested contextually when needed. Settings is primarily for inspect/change/revoke/manage.
 7. **Memory is useful, scoped and correctable.** Short-horizon conversational focus and durable Memory are distinct. Durable memory remains inspectable, correctable and revocable.
 8. **Proactivity must earn the interruption.** Attention/heartbeat can amplify Presence later, but reactive Presence must work without it and unsolicited contact requires relevance, authority and timing.
+9. **Model-first semantics; rules only where exactness is unavoidable.** Ordinary language/intent/reference/routing/recovery/projection decisions should use the provider-neutral DecisionEngine rather than keyword lists, regexes or capability-specific branches. Deterministic code remains authoritative for security, owner authority, approval, idempotency, effect/Evidence truth and protocol/state invariants.
+
+## Model-first semantic interpretation
+
+Presence must not become a larger hand-authored conversation rule engine.
+
+Use the AgentOS-owned `DecisionEngine` boundary from [the decision-layer contract](decision-layer.en.md) for ordinary semantic judgment over bounded conversation/Work context. The initial production default is OpenAI `gpt-4o-mini`; the provider is configuration behind the neutral interface and may later be replaced by an owner-selected AI, a local model, Jev or another adapter.
+
+Typical semantic decisions include:
+- intent/focus and whether a turn is a new request, clarification, correction, continuation or reference;
+- selecting among declared capabilities/workers that are already eligible under policy;
+- resolving “that / try again / change it to 4pm” against relevant recent Work;
+- choosing direct reply vs contextual handoff vs approval/recovery/long-running acknowledgement;
+- selecting an owner-facing projection strategy for a truth-qualified outcome.
+
+A deterministic/mock DecisionEngine is appropriate for CI and fixture-backed acceptance. It is not the normal production fallback for arbitrary language understanding. Provider failure should result in an explicit unavailable/unknown/clarification or safe-stop state, not silently re-enter a keyword/regex rule tree.
+
+The model never owns truth or authority. Grants, approvals, effect classification, idempotency, cancellation/revocation, Evidence qualification and final success/partial/failed/unknown state remain deterministic AgentOS/kernel responsibilities.
 
 ## Surface responsibility
 
@@ -176,11 +194,11 @@ canonical configuration → preference projection → Settings
 The research recommends Presence as an **experience-convergence** program, not a new kernel architecture.
 
 - #381 is the planning/research predecessor.
-- #480 belongs under conversational projection rather than a copy-only fix.
+- retired #480/#477/#478 requirements are consolidated into #510 conversational projection instead of narrow phrase/capability fixes.
 - #476 and #488 are truthfulness invariants/regressions, not Presence reimplementations.
-- #494 remains a distinct truth-qualified history defect.
+- #494 is the consolidated Presence truth-integrity child for outcome/Evidence/history qualification (absorbing retired #489/#490/#493 requirements).
 - #504 remains the effective AI-route owner-control issue.
-- #505 remains the contextual local-folder authority handoff issue.
+- #505 is the contextual capability/local-authority handoff child; Calendar-read #475 is retained only as a fixture/example, not a dedicated intent rule.
 - #506 remains the Settings grammar/state/action issue.
 - #383 Attention/proactivity is later amplification, not a prerequisite for basic reactive Presence.
 - completed #386/#393 mechanisms should be reused rather than reopened.
@@ -193,6 +211,7 @@ This contract does not:
 - require heartbeat or proactive monitoring;
 - require a new UI framework;
 - hide technical Evidence from the owner;
+- grow a phrase/regex/rule-based production conversation engine;
 - silently activate any GitHub issue or delivery-plan goal;
 - turn the local web management utility into a second conversation client.
 

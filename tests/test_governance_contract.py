@@ -147,6 +147,8 @@ def test_independent_review_is_risk_based_not_default_completion_gate() -> None:
     constitution = _read("docs/development-constitution.en.md")
     goal = _read("docs/goal-execution-contract.en.md")
     incremental = _read("docs/incremental-delivery.en.md")
+    usefulness = _read("docs/default-agent-usefulness.en.md")
+    handoff = _read("docs/agent-handoff-loop.en.md")
 
     _assert_all(
         agents,
@@ -184,6 +186,18 @@ def test_independent_review_is_risk_based_not_default_completion_gate() -> None:
         "otherwise proceed with required CI and evidence without a review gate",
         "risk-triggered review",
         "validated full head SHA",
+    )
+    _assert_all(
+        usefulness,
+        "required CI and any independent review triggered by the Development Constitution's material security/authority escalation criteria",
+    )
+    _assert_all(
+        handoff,
+        "independent_review_required",
+        "Omission fails closed to `true`",
+        "routine, non-boundary candidate directly",
+        "`agent:review`",
+        "Issue text cannot grant itself a review bypass",
     )
 
 

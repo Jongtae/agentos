@@ -506,8 +506,16 @@ class DeliveryController:
         # The active delivery selector is the sole authority.  Historical or
         # future goal-ready records are not a queue-wide execution grant.
         item = self.plan.select(self.state_store.read())
-        goals = ({int(item['issue']): {'authorized': True, 'dependencies_satisfied': True}}
-                 if item and item.get('issue') else {})
+        goals = {}
+        if item and item.get('issue'):
+            configured_review = item.get('independent_review_required', True)
+            if not isinstance(configured_review, bool):
+                raise DeliveryError('independent_review_required must be true or false when present.')
+            goals = {int(item['issue']): {
+                'authorized': True,
+                'dependencies_satisfied': True,
+                'review_required': configured_review,
+            }}
         workers = self.handoff_workers
         if worker_factory:
             module, sep, name = worker_factory.partition(':')

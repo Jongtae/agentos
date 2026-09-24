@@ -31,6 +31,7 @@ class Issue:
     state: str = "OPEN"
     authorized: bool = False
     dependencies_satisfied: bool = False
+    review_required: bool = True
 
     def queue_state(self):
         found = self.labels & STATES
@@ -140,7 +141,7 @@ class StateHandoffLoop:
         # reviewed.  A timeout may leave a comment durable while the PR moves;
         # discard that stale pending disposition rather than replaying it.
         candidate_key = pending.get("candidate_key")
-        if candidate_key and pending["old"] == "agent:review":
+        if candidate_key and (pending["old"] == "agent:review" or pending["new"] == "agent:approved"):
             current = self.github.candidate(pending["issue"])
             if not current or current.key() != candidate_key:
                 state.pop("pending", None)
@@ -218,9 +219,18 @@ class StateHandoffLoop:
         state["candidate"] = asdict(candidate); self.state.write(state)
         if candidate.ci != "success":
             return {"action": "awaiting-ci", "issue": issue.number, "ci": candidate.ci}
+        if not issue.review_required and (candidate.draft or not candidate.required_checks_known):
+            return {"action": "candidate-not-approvable", "issue": issue.number}
         state.pop("lease", None); self.state.write(state)
-        return self._receipt(issue.number, "agent:working", "agent:review", "implementation", candidate.key(),
-                             f"Implementation receipt: PR #{candidate.pr}, head `{candidate.head}`, CI `{candidate.ci}`.", state, candidate)
+        if issue.review_required:
+            return self._receipt(issue.number, "agent:working", "agent:review", "implementation", candidate.key(),
+                                 f"Implementation receipt: PR #{candidate.pr}, head `{candidate.head}`, CI `{candidate.ci}`.", state, candidate)
+        return self._receipt(
+            issue.number, "agent:working", "agent:approved", "implementation", candidate.key(),
+            f"Implementation receipt: PR #{candidate.pr}, head `{candidate.head}`, CI `{candidate.ci}`. "
+            "Independent review is not required by the owner-maintained risk classification; owner merge decision remains.",
+            state, candidate,
+        )
 
     def _review(self, issue, state):
         raw = state.get("candidate")
@@ -323,8 +333,9 @@ class GithubCliBoundary:
             # requires an externally supplied exact goal/dependency record.
             authorized = bool(authority.get("authorized")) and (not self.owner_login or author == self.owner_login)
             dependencies = bool(authority.get("dependencies_satisfied"))
+            review_required = authority.get("review_required") is not False
             result.append(Issue(int(row["number"]), {x["name"] for x in row.get("labels", [])}, body,
-                                row.get("state", "OPEN"), authorized, dependencies))
+                                row.get("state", "OPEN"), authorized, dependencies, review_required))
         return result
 
     def transition(self, number, old, new):

@@ -28,8 +28,11 @@ class FakeGithub:
     def execution_active(self, number, lease): return number in self.active
 
 
-def goal(number, state="agent:ready", ok=True):
-    return Issue(number, {state}, "## Executable goal\n## Allowed authority", authorized=ok, dependencies_satisfied=ok)
+def goal(number, state="agent:ready", ok=True, review_required=True):
+    return Issue(
+        number, {state}, "## Executable goal\n## Allowed authority",
+        authorized=ok, dependencies_satisfied=ok, review_required=review_required,
+    )
 
 
 class HandoffTests(unittest.TestCase):
@@ -106,6 +109,32 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(second.tick("implementer")["action"], "awaiting-ci")
         self.assertEqual(failed_runs, [203])
 
+    def test_explicit_routine_risk_classification_skips_independent_review(self):
+        row = goal(204, review_required=False); gh = FakeGithub([row])
+        def executor(issue, feedback):
+            candidate = Candidate(issue.number, 4, "u" * 40, "main", "success")
+            gh.candidates[issue.number] = candidate
+            return candidate
+        loop = StateHandoffLoop(gh, self.state, executor, reviewer=lambda *_: self.fail("reviewer should not run"))
+        result = loop.tick("implementer")
+        self.assertEqual(result["state"], "agent:approved")
+        self.assertEqual(row.queue_state(), "agent:approved")
+        self.assertNotIn((204, "agent:working", "agent:review"), gh.transitions)
+        self.assertIn((204, "agent:working", "agent:approved"), gh.transitions)
+
+    def test_no_review_path_still_requires_non_draft_known_checks(self):
+        for number, draft, checks_known in ((205, True, True), (206, False, False)):
+            with self.subTest(number=number):
+                row = goal(number, review_required=False); gh = FakeGithub([row])
+                def executor(issue, feedback, *, _draft=draft, _known=checks_known):
+                    candidate = Candidate(issue.number, 4, "v" * 40, "main", "success",
+                                          draft=_draft, required_checks_known=_known)
+                    gh.candidates[issue.number] = candidate
+                    return candidate
+                loop = StateHandoffLoop(gh, Path(self.temp.name) / f"{number}.json", executor)
+                self.assertEqual(loop.tick("implementer")["action"], "candidate-not-approvable")
+                self.assertEqual(row.queue_state(), "agent:working")
+
     def test_dispatch_only_tick_never_claims_or_strands_ready_issue(self):
         row = goal(250); gh = FakeGithub([row])
         result = StateHandoffLoop(gh, self.state).tick("implementer")
@@ -121,12 +150,15 @@ class HandoffTests(unittest.TestCase):
         ]
         def runner(_): return SimpleNamespace(returncode=0, stdout=json.dumps(rows), stderr="")
         found = GithubCliBoundary("example/repo", runner, owner_login="owner", authorized_goals={
-            702: {"authorized": True, "dependencies_satisfied": True},
+            702: {"authorized": True, "dependencies_satisfied": True, "review_required": False},
             703: {"authorized": True, "dependencies_satisfied": False},
         }).issues()
         self.assertFalse(found[0].authorized); self.assertFalse(found[0].dependencies_satisfied)
+        self.assertTrue(found[0].review_required)
         self.assertTrue(found[1].authorized); self.assertTrue(found[1].dependencies_satisfied)
+        self.assertFalse(found[1].review_required)
         self.assertTrue(found[2].authorized); self.assertFalse(found[2].dependencies_satisfied)
+        self.assertTrue(found[2].review_required)
 
     def test_independent_reviewer_uses_remote_candidate_and_rework_worker_uses_remote_feedback(self):
         row = goal(704, "agent:review"); gh = FakeGithub([row])

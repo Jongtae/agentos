@@ -90,8 +90,8 @@ def _safe_worker_error(raw: bytes, content_type: str) -> str:
     if not isinstance(value, dict) or set(value) != {"error"} or not isinstance(value["error"], str):
         return ""
     detail = " ".join(value["error"].split())[:300]
-    detail = re.sub(r"(?i)(bearer\\s+|--token=)[^\\s]+", r"\\1[redacted]", detail)
-    detail = re.sub(r"(?<!\\w)/(?:Users|home|state|engine-profile)/[^\\s]+", "[path redacted]", detail)
+    detail = re.sub(r"(?i)(bearer\s+|--token=)[^\s]+", r"\1[redacted]", detail)
+    detail = re.sub(r"(?<!\w)/(?:Users|home|state|engine-profile)/[^\s]+", "[path redacted]", detail)
     return detail
 
 

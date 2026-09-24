@@ -16,6 +16,8 @@ Read the root AGENTS.md and [Local Web Management Contract](../../../docs/web-ma
 
 Reuse current vanilla frontend and real backend contracts. #382 W0 reconciles the goal-ready delivery entry before implementation; this instruction file itself activates nothing. Coordinate the overlapping #372 / PR #373 settings branch. Do not run #381 or unrelated backlog items.
 
+For component, form, accessibility and copy review of changed UI, apply the pinned checklists in [`.claude/skills/web-interface-guidelines/`](../../../.claude/skills/web-interface-guidelines/SKILL.md) and [`.claude/skills/frontend-design/`](../../../.claude/skills/frontend-design/SKILL.md) (any tool; provenance in [`.claude/skills/README.md`](../../../.claude/skills/README.md)). They are development aids subordinate to this file and the Presence Experience Contract.
+
 Use browser-task evidence plus existing backend/channel regressions. Replace obsolete chat-presentation assertions only with coverage preserving history/API/Telegram semantics. Prototype images and canned status data are not working behavior. Keep owner screenshots, credentials and private payloads out of public evidence.
 
 Ship small verified increments under existing repository checks. Review changed UX and actual authority deltas, not the entire security roadmap. Use the existing integration_pending handoff for external merge waits; never bypass protection, invent approval, poll unchanged state repeatedly or claim an unmerged implementation is complete.

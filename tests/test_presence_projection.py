@@ -280,6 +280,7 @@ class BlockedTurnTests(ProjectionTestCase):
         self.assertIn('메모', first)
         self.assertIn('AgentOS 설정', first)
         self.assertNotIn('구독 엔진', first)
+        self.assertIn('Gmail 연결과 판단 기능 설정이 모두 필요', first)
         self.assertNotIn('/note', first)
         self.assertNotIn(TERMINAL_FAILED_HEADER, first, 'the projected reply is the whole bubble')
         self.assertNotIn('AgentOS 웹에서 실행 기록', first, 'the web console is not the default next action')
@@ -356,6 +357,18 @@ class UnsupportedCapabilityTests(ProjectionTestCase):
         self.assertNotIn('HIV', facts['owner_message'])
         self.assertNotIn('검사', facts['owner_message'])
 
+    def test_mail_action_followup_uses_content_free_recent_mail_focus(self):
+        engine = self.judged({'최근 메일 검색 reply': 'mail-send'})
+        first = self.service.classify_intent('메일에서 숙소 예약 확인 메일 찾아줘')
+        self.assertEqual(first.intent, 'mail-search')
+        self.service.conversation_focus.record(first)
+        followup = self.service.classify_intent('reply to it')
+        self.assertEqual(followup.intent, INTENT_UNSUPPORTED)
+        self.assertEqual(followup.argument, 'mail-send')
+        context = engine.asked[-1][1]
+        self.assertEqual(context.facts['owner_message'], '최근 메일 검색 reply')
+
+
     def test_a_none_of_these_judgment_leaves_the_cues_to_decide(self):
         self.judged({})
         decision = self.service.classify_intent('메일에서 예산 관련 내용 찾아줘')
@@ -381,6 +394,29 @@ class UnsupportedCapabilityTests(ProjectionTestCase):
         with self.store.db() as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM tool_events WHERE job_id=?',
                                         (job['id'],)).fetchone()[0], 0)
+
+
+class AcknowledgementSchedulingTests(ProjectionTestCase):
+    def test_acknowledgement_deadline_runs_independently_of_telegram_long_poll(self):
+        polling = threading.Event()
+        release_poll = threading.Event()
+        acknowledged = threading.Event()
+
+        def blocked_poll():
+            polling.set()
+            release_poll.wait(timeout=3)
+
+        self.service.poll_telegram = blocked_poll
+        self.service.acknowledge_long_work = acknowledged.set
+        self.service.start()
+        try:
+            self.assertTrue(polling.wait(timeout=1))
+            self.assertTrue(acknowledged.wait(timeout=1))
+        finally:
+            self.service.stop.set()
+            release_poll.set()
+            for thread in self.service.threads:
+                thread.join(timeout=1)
 
 
 class TerminalTextTests(unittest.TestCase):

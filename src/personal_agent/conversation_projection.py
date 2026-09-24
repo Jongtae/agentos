@@ -134,7 +134,8 @@ class ConversationProjection:
             return 'AI가 아직 연결되지 않아 이 요청은 처리하지 못했습니다. ' + self._where_to_connect()
         return ('아직 AI가 연결되지 않아 이 요청은 처리하지 못했습니다.\n\n'
                 '지금 바로 되는 일: 메모 남기기와 메모 목록 보기, 저장한 파일 찾기. '
-                '메일과 캘린더는 연결하면 쓸 수 있습니다.\n\n' + self._where_to_connect())
+                '캘린더는 연결하면 쓸 수 있습니다. 메일 검색에는 Gmail 연결과 판단 기능 설정이 모두 필요합니다.\n\n'
+                + self._where_to_connect())
 
     def _model_unverified(self, repeat):
         if repeat:

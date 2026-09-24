@@ -1955,7 +1955,7 @@ class AgentService:
             cfg=self.store.config('telegram',{})
             token=self.store.secret('telegram_token')
         if not cfg.get('enabled') or not token: return
-        updates=self.telegram.get_updates(cfg.get('cursor',0))
+        updates=self.telegram.get_updates(cfg.get('cursor',0), timeout=1)
         for update in sorted(updates,key=lambda u:u.get('update_id',0)):
             if isinstance(update.get('callback_query'),dict):
                 self.ingest_callback(update['callback_query'],cfg['generation'])
@@ -2338,12 +2338,21 @@ class AgentService:
             while not self.stop.is_set():
                 try:
                     self.poll_telegram()
-                    self.acknowledge_long_work()
                     self.mark_telegram_connected()
                 except (ProviderError,ValueError):
                     self.store.put('telegram_status',{'state':'error','message':'Telegram 연결을 확인하세요. 수신을 다시 시도합니다.'})
-                self.stop.wait(2)
-        self.threads=[threading.Thread(target=work,daemon=True),threading.Thread(target=poll,daemon=True)]
+                self.stop.wait(.5)
+        def acknowledge():
+            # Keep the four-second owner acknowledgement deadline independent
+            # of Telegram's long poll and any network delay in receiving updates.
+            while not self.stop.is_set():
+                try:
+                    self.acknowledge_long_work()
+                except (ProviderError,ValueError):
+                    self.store.put('telegram_status',{'state':'error','message':'Telegram 연결을 확인하세요. 수신을 다시 시도합니다.'})
+                self.stop.wait(.25)
+        self.threads=[threading.Thread(target=work,daemon=True),threading.Thread(target=poll,daemon=True),
+                      threading.Thread(target=acknowledge,daemon=True)]
         for thread in self.threads:thread.start()
 
     def healthy(self):

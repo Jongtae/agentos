@@ -690,10 +690,14 @@ class IntentClassifier:
         mail_objects = _cue_hits(text, lowered, _MAIL_OBJECTS)
         mail_verbs = _cue_hits(text, lowered, _MAIL_VERBS)
         mail_action = _cue_hits(text, lowered, ('답장', '회신', '보내', '전송', 'reply', 'send'))
-        cue_summary = ' '.join(dict.fromkeys((*mail_objects, *mail_verbs, *mail_action)))
+        has_mail_focus = focus_intent == INTENT_MAIL_SEARCH
+        cue_summary = ' '.join(dict.fromkeys((*(('최근 메일 검색',) if has_mail_focus and not mail_objects else ()),
+                                               *mail_objects, *mail_verbs, *mail_action)))
         local_only = bool(candidates) and all(candidate.intent != INTENT_MAIL_SEARCH for candidate in candidates)
+        mail_boundary_eligible = ((mail_objects and (mail_verbs or mail_action))
+                                  or (has_mail_focus and mail_action))
         unsupported = (self._judge.unsupported_capability(cue_summary)
-                       if mail_objects and (mail_verbs or mail_action) and not local_only
+                       if mail_boundary_eligible and not local_only
                        else Judgment(JUDGMENT_NO, source='local-prefilter'))
         if unsupported.outcome == JUDGMENT_YES:
             return self._with_suggestion(
@@ -705,8 +709,8 @@ class IntentClassifier:
         # Mail search reads private metadata. If the semantic boundary check
         # could not distinguish a search from an unsupported read/send request,
         # fail closed instead of letting lexical cues trigger the connector.
-        if (unsupported.outcome == JUDGMENT_UNAVAILABLE
-                and any(candidate.intent == INTENT_MAIL_SEARCH for candidate in candidates)):
+        if (unsupported.outcome == JUDGMENT_UNAVAILABLE and mail_boundary_eligible
+                and (has_mail_focus or any(candidate.intent == INTENT_MAIL_SEARCH for candidate in candidates))):
             return self._with_suggestion(
                 IntentDecision(INTENT_AMBIGUOUS, AUTHORITY_RULE,
                                cues=('judgment:unsupported-capability-unavailable',),

@@ -244,6 +244,7 @@ const press=async(id,label)=>{const button=buttons(id).find(node=>node.textConte
  $('root-path-input').value='/tmp/d/Other';await $('roots-form').onsubmit({preventDefault(){},submitter:new Element('button')});
  const rootPosts=calls.filter(call=>call.path==='/api/files/roots');
  assert.equal(JSON.stringify(rootPosts[rootPosts.length-1].body),JSON.stringify({paths:['/tmp/c/New']}),'second save is refused while one is in flight');
+ assert($('roots-feedback').textContent.includes('저장하는 중'),'blocked add explains why');
  gate=null;release();await pendingSave;
  assert.equal(calls.filter(call=>call.path==='/api/files/roots').length,rootPosts.length,'no stale second POST after the first lands');
  ctx.renderRootList(['/tmp/c/New']);await press('root-list','제거');ctx.renderRootList([]);ctx.renderRootList(['/tmp/c/New']);

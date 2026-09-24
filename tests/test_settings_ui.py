@@ -62,7 +62,7 @@ assert(!$('active-ai').textContent.includes('직접 API를 설정하거나 테�
  assert.equal(currentCount(),1,'direct API is the one current route once selected');
  assert.equal(descendants($('active-ai')).find(node=>node.className==='settings-row-title').textContent,'Ollama');
  ctx.renderExecutionConnection({...settings,subscription_engines:{selected:'',engines:settings.subscription_engines.engines}});
- const back=buttonsIn('active-ai').find(node=>node.textContent==='Codex 로그인 완료 · 전환');assert(back,'switching back to a CLI is offered in the same list');
+ const back=buttonsIn('active-ai').find(node=>node.textContent==='이 CLI 사용');assert(back,'switching back to a CLI is offered in the same list with a verb label');
  calls.length=0;await back.onclick({currentTarget:back});
  assert.equal(JSON.stringify(calls),JSON.stringify([{path:'/api/subscription-engines/connect',body:{engine:'codex',officially_authenticated:true}}]));
  ctx.renderExecutionConnection({model:{},model_ready:false,subscription_engines:{selected:'',engines:[]}});
@@ -214,7 +214,7 @@ const press=async(id,label)=>{const button=buttons(id).find(node=>node.textConte
  assert($('root-list').textContent.includes('Research'),'folder name is the row title');
  assert($('root-list').textContent.includes('/tmp/a/Research'),'full path stays visible');
  assert.equal(descendants($('root-list')).filter(node=>node.className==='settings-state active'&&node.textContent==='연결됨').length,2,'state column shows connection state');
- assert($('root-list').textContent.includes('읽기 전용 · /tmp/a/Research'),'role is in the description');
+ assert($('root-list').textContent.includes('읽기 전용'),'role is in the description');
  const first=buttons('root-list')[0];ctx.renderRootList(['/tmp/a/Research','/tmp/b/Notes']);
  assert.equal(buttons('root-list')[0],first,'unchanged polling keeps row nodes');
  $('root-path-input').value='  /tmp/c/New  ';

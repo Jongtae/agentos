@@ -44,6 +44,8 @@ a{color:var(--accent)}
 small{font-size:var(--fs-2)}
 .technical{color:var(--muted);font-size:var(--fs-2)}
 .error{color:var(--danger)}
+.banner:empty{display:none}
+.banner{margin:0 0 var(--sp-4);padding:10px 14px;border:1px solid var(--danger-line);border-radius:var(--r-1);background:var(--danger-soft);font-size:var(--fs-2)}
 .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
 time,.num{font-variant-numeric:tabular-nums}
 [translate="no"]{overflow-wrap:anywhere}
@@ -146,7 +148,7 @@ details>summary:hover{color:var(--ink)}
 .rail-foot p{margin:0;line-height:1.5}
 #logout{justify-self:start}
 .content{min-width:0;padding:var(--sp-6) var(--sp-7) var(--sp-7)}
-.content>section{max-width:960px}
+.content>section,.content>.banner{max-width:960px}
 .view-heading{display:flex;justify-content:space-between;align-items:flex-end;gap:var(--sp-4);margin-bottom:var(--sp-5)}
 .view-heading p{margin-top:4px;color:var(--muted)}
 #task-refresh-state{font-size:var(--fs-1);color:var(--faint);white-space:nowrap}

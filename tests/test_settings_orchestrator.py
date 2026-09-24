@@ -50,6 +50,21 @@ class SettingsOrchestratorTests(unittest.TestCase):
         self.assertTrue(self.settings.cancel('owner','http',third['id'])['idempotent'])
         with self.assertRaises(SettingsError): self.settings.confirm('owner','http',third['id'],third['digest'])
 
+    def test_retired_a2a_confirmation_fails_terminally_instead_of_500(self):
+        change={'target':'compatibility-a2a-peer','action':'pause','before':'enabled','after':'paused',
+                'effect':'compatibility-a2a-peer 상태를 paused로 변경','recovery':'현재 상태 확인'}
+        row={'id':'legacy-a2a-draft','owner':'owner','channel':'http',**change,
+             'digest':self.settings._digest(change),'created_at':900,'expires_at':1600,
+             'state':'awaiting-confirmation'}
+        self.store.put('settings_change_drafts',{row['id']:row})
+        with self.assertRaisesRegex(SettingsError,'더 이상 제공되지'):
+            self.settings.confirm('owner','http',row['id'],row['digest'])
+        stored=self.store.config('settings_change_drafts')[row['id']]
+        self.assertEqual(stored['state'],'failed')
+        audit=self.store.config('settings_audit')
+        self.assertEqual(audit[-1]['terminal'],'failed')
+        self.assertEqual(audit[-1]['error_class'],'retired-target')
+
     def test_text_and_service_channels_share_semantics_but_not_drafts(self):
         service=AgentService(self.store)
         http=service.conversation_settings_request({'operation':'text','text':'Drive pause'},'same-owner','http')

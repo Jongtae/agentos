@@ -21,7 +21,6 @@ from .subscription_engines import SubscriptionEngines
 from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult
 from .isolated_engine_gateway import EngineGatewayError
 from .isolated_mcp_proxy import IsolatedMcpProxy, TaskCapabilityRegistry
-from .personal_assistant import PersonalAssistantOrchestrator
 from .settings_orchestrator import SettingsOrchestrator, SettingsError
 from .capability_recommendations import CapabilityRecommendationOrchestrator
 from .personal_knowledge import PersonalKnowledgeOrchestrator
@@ -35,7 +34,7 @@ from .conversation_handoff import (CONNECTOR_LABELS, JUDGMENT_YES, RECOMMENDATIO
                                    ConversationJudgments, TelegramChannel, ConnectorHandoff,
                                    ConversationFocus,
                                    ConversationHandoffError, IntentClassifier,
-                                   INTENT_AMBIGUOUS, INTENT_ASSISTANT, INTENT_CALENDAR_CREATE,
+                                   INTENT_AMBIGUOUS, INTENT_CALENDAR_CREATE,
                                    INTENT_GREETING, INTENT_KNOWLEDGE,
                                    INTENT_MAIL_SEARCH, INTENT_NOTE_CREATE, INTENT_NOTE_LIST,
                                    INTENT_RECOMMENDATION, INTENT_SETTINGS,
@@ -178,7 +177,7 @@ def subscription_public_evidence(result):
 
 class AgentService:
     def __init__(self, store, adapter=None, telegram_transport=None, subscription_engines=None, execution_adapter=None,
-                 assistant_orchestrator=None, isolated_engine_adapter=None, isolated_mcp_registry=None,
+                 isolated_engine_adapter=None, isolated_mcp_registry=None,
                  drive_web_oauth=None, connector_registry=None, gmail=None, calendar=None, calendar_oauth=None, calendar_factory=None):
         self.store=store
         self.adapter=adapter or ModelAdapter()
@@ -193,20 +192,6 @@ class AgentService:
         self.isolated_engine_adapter=isolated_engine_adapter
         self.isolated_mcp_registry=isolated_mcp_registry or TaskCapabilityRegistry()
         self.isolated_mcp_proxy=IsolatedMcpProxy(self.isolated_mcp_registry)
-        # Capability adapters never receive an HTTP or Telegram endpoint.  A
-        # caller may supply reviewed adapters only through this policy owner.
-        #
-        # `drive=` is left unpopulated on purpose, which PA1-CONV-01 / #393
-        # decided rather than inherited.  The shipped Drive connector gates
-        # every read on a Google Picker selection keyed by an integer Telegram
-        # chat id, and an orchestrator request carries a string owner instead,
-        # so nothing can be handed in here that satisfies
-        # `PersonalAssistantOrchestrator._drive_adapter('read')` without
-        # bypassing that gate.  The owner-reachable Drive path is
-        # `selected_drive_context` below, which holds the chat id.  The full
-        # reasoning and the condition that turns this into a defect are
-        # recorded at `_drive_adapter`; do not wire `drive=` without it.
-        self.assistant_orchestrator=assistant_orchestrator or PersonalAssistantOrchestrator(store)
         self.settings_orchestrator=SettingsOrchestrator(store)
         self.recommendation_orchestrator=CapabilityRecommendationOrchestrator(store)
         self.personal_knowledge_orchestrator=PersonalKnowledgeOrchestrator(store)
@@ -233,10 +218,7 @@ class AgentService:
         self.connector_registry=connector_registry
         self.connector_handoff=ConnectorHandoff(store,connector_registry) if connector_registry else None
         self.gmail=gmail
-        # A `CalendarConnector`, not the legacy `CalendarCreate` facade. The
-        # facade hardcodes `_LegacyCreateProvider` and `authority=lambda: True`,
-        # so it can never reach the real provider and grants itself authority;
-        # it stays available for the older orchestrator path only.
+        # Calendar mutations use the current owner-bound connector path.
         self.calendar=calendar
         # The OAuth half is separate from the policy connector: `calendar`
         # answers tool calls, `calendar_oauth` answers the two routes.
@@ -266,23 +248,6 @@ class AgentService:
         self.stop=threading.Event()
         self.threads=[]
         self.local_server_port=None
-
-    def personal_assistant_request(self, body, owner_id='local-owner'):
-        """One owner-authenticated entry point for MP1 capability requests."""
-        if not isinstance(body, dict):
-            raise ValueError('개인 비서 요청을 확인하세요.')
-        request = dict(body)
-        request['owner_id'] = owner_id
-        action = request.get('action')
-        if action == 'drive-excerpt-draft':
-            return self.assistant_orchestrator.draft_drive_excerpt(request)
-        if action == 'drive-excerpt-approve':
-            return self.assistant_orchestrator.approve_drive_excerpt(request)
-        if action == 'calendar-approve':
-            return self.assistant_orchestrator.approve_calendar(request)
-        if action == 'calendar-create':
-            return self.assistant_orchestrator.create_calendar(request)
-        return self.assistant_orchestrator.handle(request)
 
     def conversation_settings_request(self, body, owner_id='local-owner', channel='http'):
         """The only settings policy entry point for every local channel."""
@@ -1349,11 +1314,8 @@ class AgentService:
     def calendar_draft_request(self, body, owner_id=None):
         """The owner's approve/apply surface for a Calendar draft.
 
-        Without this nobody could apply a draft at all: the model has no
-        approve tool by design, and the older `PersonalAssistantOrchestrator`
-        path is constructed with `calendar=None` and gates on a different
-        capability identifier, so every `calendar-approve` returned
-        `blocked`.
+        The model has no approve tool by design, so this owner-local surface
+        is the only place that may spend a Calendar draft approval.
 
         `approve` mints the one-time token bound to this owner, draft,
         payload hash and the write connector's `connection_revision`;
@@ -2116,14 +2078,6 @@ class AgentService:
                     result=self.conversation_settings_request({'operation':'text','text':decision.argument},
                                                               owner_id=owner, channel=job['channel'])
                     response=self.settings_response(result)
-                elif decision.intent==INTENT_ASSISTANT:
-                    # Web and paired Telegram jobs share this exact policy
-                    # path.  Only the owner-explicit `/assistant` form reaches
-                    # it: the orchestrator's delegation and Drive vocabulary
-                    # is deliberately not inferable from ordinary prose.
-                    result=self.personal_assistant_request({'message':decision.argument}, owner_id=owner)
-                    response=result['response']
-                    outcome='succeeded' if result['state'] in ('completed','requested','awaiting-approval','fallback') else 'failed'
                 elif decision.intent==INTENT_CALENDAR_CREATE:
                     if self.calendar_for_owner(connector_owner) is None:
                         raise ValueError(ConnectorHandoff.unavailable(CALENDAR_WRITE_CONNECTOR_ID))

@@ -720,7 +720,6 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 if path=='/api/context-inbox/delete':return self.reply(200,service.context_inbox().delete(body.get('id')))
                 if path=='/api/context-inbox/share-policy':return self.reply(200,service.context_inbox().set_policy(body))
                 if path=='/api/context-inbox/share':return self.reply(200,service.context_inbox().share(body))
-                if path=='/api/assistant/request':return self.reply(200,service.personal_assistant_request(body))
                 if path=='/api/settings/request':return self.reply(200,service.conversation_settings_request(body))
                 if path=='/api/capability-recommendations':return self.reply(200,service.capability_recommendation_request(body))
                 if path=='/api/personal-knowledge':return self.reply(200,service.personal_knowledge_request(body, channel='local-companion'))

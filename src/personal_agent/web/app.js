@@ -15,7 +15,7 @@ function routeOutcome(status){return {failed:' · 실행했지만 실패',runnin
 function requestSource(task){return String(task?.channel||'').startsWith('telegram:')?'Telegram':task?.channel?'로컬 또는 연결된 채널':'요청 경로 알 수 없음';}
 function workspaceSaveCandidates(jobs,workspaceId,savedJobIds){const saved=new Set(savedJobIds||[]);return (jobs||[]).filter(job=>['succeeded','partial'].includes(job.status)&&(!job.workspace_id||job.workspace_id===workspaceId)&&!saved.has(job.id));}
 function modelPresetDraft(preset){return {provider:preset.provider,endpoint:normalizeEndpoint(preset.endpoint),model:String(preset.model||'').trim(),api_key:''};}
-function capabilityActions(capability){if(!['google-drive-read','compatibility-a2a-peer','google-calendar-create','builtin-mcp-read'].includes(capability?.id))return [];if(capability.state==='enabled')return ['pause','disconnect'];if(capability.state==='paused')return ['resume'];return [];}
+function capabilityActions(capability){if(!['google-drive-read','google-calendar-create','builtin-mcp-read'].includes(capability?.id))return [];if(capability.state==='enabled')return ['pause','disconnect'];if(capability.state==='paused')return ['resume'];return [];}
 function clearMobileDetailWhenEmpty(detail,rows){if(!rows.length)detail.classList.remove('mobile-detail');return !rows.length;}
 function contextSharingWarning(inbox){return inbox?.sharing_requires_policy_and_per_request_approval?'이 정책을 허용해도 각 Telegram 작업마다 공유 승인이 필요합니다.':'';}
 function settingsFeedbackId(area){return area==='subscription'?'active-ai-feedback':'model-feedback';}
@@ -259,10 +259,10 @@ function renderCapabilityPreview(row,preview){let review=row.querySelector('.cap
 // here would tell the owner an authorization exists that does not.
 const CONNECTOR_STATES={disconnected:'연결 안 됨',connected:'연결됨',reauth_required:'다시 인증 필요',blocked:'차단됨'};
 const CONNECTOR_NAMES={'google-gmail-read':'Google Gmail','google-calendar':'Google Calendar','google-calendar-write':'Google Calendar','google-drive-read':'Google Drive'};
-const CAPABILITY_NAMES={'google-drive-read':'Google Drive 파일 읽기','compatibility-a2a-peer':'외부 에이전트 연결','google-calendar-create':'Google Calendar 일정 만들기','builtin-mcp-read':'내 컴퓨터 파일 읽기'};
+const CAPABILITY_NAMES={'google-drive-read':'Google Drive 파일 읽기','google-calendar-create':'Google Calendar 일정 만들기','builtin-mcp-read':'내 컴퓨터 파일 읽기'};
 const CAPABILITY_STATES={available:'사용 가능','connected-disabled':'연결됨 · 사용 안 함',enabled:'사용 설정됨',paused:'일시 정지','auth-required':'다시 인증 필요',error:'오류',disconnected:'연결 안 됨'};
 const CAPABILITY_STATE_KINDS={available:'neutral','connected-disabled':'neutral',enabled:'active',paused:'neutral','auth-required':'attention',error:'attention',disconnected:'neutral'};
-const CAPABILITY_DESTINATIONS={'google-drive-read':'Google','google-calendar-create':'Google','compatibility-a2a-peer':'외부 에이전트'};
+const CAPABILITY_DESTINATIONS={'google-drive-read':'Google','google-calendar-create':'Google'};
 function directRouteName(model){const provider=displayProvider(model),name=providerNames[provider]||provider;return provider==='openai'?'OpenAI Developer API':name;}
 function capabilityBoundary(capability){const destination=CAPABILITY_DESTINATIONS[capability?.id];if(destination)return `외부 연결 권한 · ${destination}`;if(capability?.id==='builtin-mcp-read')return '로컬 기능 권한';if(capability?.kind==='runtime')return '런타임 권한';return '기능 권한';}
 // The connect action is a plain same-origin navigation, not an api() call:

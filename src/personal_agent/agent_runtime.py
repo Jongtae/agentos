@@ -408,14 +408,9 @@ class Capabilities:
    # one -- the owner does, through their own surface. So a draft is a
    # proposal with an exact preview attached, which is what J4 asks for.
    #
-   # Authority note (integration finding, recorded rather than papered over):
-   # this path uses ConnectorRegistry's `google-calendar`/
-   # `google-calendar-write`, which is the canonical PA1 connector contract
-   # and does scope-exact, revision-bound checks. The older
-   # PersonalAssistantOrchestrator path gates on CapabilityRegistry's
-   # `google-calendar-create` instead. Two identifiers for one capability is
-   # a real inconsistency; it is not resolved here, and the settings surface
-   # still pauses the legacy one.
+   # Authority note: this path uses ConnectorRegistry's `google-calendar`/
+   # `google-calendar-write`, the canonical owner-bound connector contract
+   # with scope-exact, revision-bound checks.
    if self.calendar is None:raise ValueError('Google Calendar가 로컬에 구성되어 있지 않습니다. 먼저 캘린더를 연결해 주세요.')
    owner=self.calendar_owner
    if name=='calendar_query':

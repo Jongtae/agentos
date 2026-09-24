@@ -108,7 +108,7 @@ class QuickstartTests(unittest.TestCase):
         finally:
             server.shutdown();thread.join();server.server_close()
 
-    def test_personal_assistant_http_surface_uses_policy_owned_fallback(self):
+    def test_retired_personal_assistant_http_surface_is_not_exposed(self):
         self.store.claim(self.store.bootstrap.read_text(),'long-password-test')
         server=ThreadingHTTPServer(('127.0.0.1',0),make_handler(self.service))
         thread=threading.Thread(target=server.serve_forever);thread.start()
@@ -120,9 +120,10 @@ class QuickstartTests(unittest.TestCase):
             with self.assertRaises(HTTPError) as error:request('/api/assistant/request',{'message':'개인 공간을 보여줘'})
             self.assertEqual(error.exception.code,401)
             request('/api/login',{'password':'long-password-test'})
-            result=request('/api/assistant/request',{'message':'알 수 없는 요청'})
-            self.assertEqual(result['state'],'fallback')
-            self.assertNotIn('알 수 없는 요청',json.dumps(self.store.config('personal_assistant_evidence')))
+            with self.assertRaises(HTTPError) as error:
+                request('/api/assistant/request',{'message':'알 수 없는 요청'})
+            self.assertEqual(error.exception.code,404)
+            self.assertIsNone(self.store.config('personal_assistant_evidence'))
         finally:
             server.shutdown();thread.join();server.server_close()
 
@@ -1420,11 +1421,10 @@ class GmailConnectorWiringTests(unittest.TestCase):
     def test_calendar_stays_unregistered_so_its_request_still_refuses_cleanly(self):
         """Records the integration finding, and holds the behaviour it protects.
 
-        No shipped code can obtain a Calendar credential: `CalendarCreate`
-        injects `_LegacyCreateProvider`, which POSTs to a relative path with
-        no API root, and `GoogleCalendar` is constructed only in its own test
-        module.  `AgentService` has no `calendar=` parameter either.  So both
-        Calendar connectors would be permanently DISCONNECTED here.
+        This fixture intentionally supplies no Calendar OAuth credentials or
+        connector factory, so both Calendar connectors remain unavailable here.
+        The supported Calendar path is tested separately through the current
+        CalendarConnector/OAuth/conversation integration.
 
         Registering their specs anyway is not free, because
         `CONNECTOR_BY_INTENT` maps `calendar-create` to the write connector:

@@ -114,7 +114,6 @@ INTENT_GREETING = 'greeting'
 INTENT_RECOMMENDATION = 'capability-recommendation'
 INTENT_KNOWLEDGE = 'personal-knowledge'
 INTENT_SETTINGS = 'settings'
-INTENT_ASSISTANT = 'assistant-capability'
 INTENT_WORKSPACE_SEARCH = 'workspace-search'
 INTENT_NOTE_CREATE = 'note-create'
 INTENT_NOTE_LIST = 'note-list'
@@ -221,7 +220,7 @@ _SETTINGS_READ_CUES = ('무엇이 연결되어 있어', '무엇을 바꿀 수 �
 # Mirrors SettingsOrchestrator._intent: an action alone or a target alone is
 # never a settings change request.
 _SETTINGS_ACTIONS = ('pause', 'disconnect', 'resume', '일시 정지', '연결 해제', '다시 시작', '재개')
-_SETTINGS_TARGETS = ('drive', '드라이브', 'calendar', '캘린더', '일정', 'a2a', 'peer', '피어', 'mcp')
+_SETTINGS_TARGETS = ('drive', '드라이브', 'calendar', '캘린더', '일정', 'mcp')
 
 _WORKSPACE_CUES = ('작업공간', '워크스페이스', '저장한 결과', '저장된 결과', '저장한 파일', '저장된 파일',
                    '저장해 둔 파일', '내가 저장한',
@@ -537,8 +536,6 @@ class IntentClassifier:
             return IntentDecision(INTENT_SETTINGS, AUTHORITY_OWNER, argument=text[len('/settings '):])
         if text in ('/settings', '무엇이 연결되어 있어?', '무엇을 바꿀 수 있어?'):
             return IntentDecision(INTENT_SETTINGS, AUTHORITY_OWNER, argument=text)
-        if text.startswith('/assistant '):
-            return IntentDecision(INTENT_ASSISTANT, AUTHORITY_OWNER, argument=text[len('/assistant '):])
         if text in ('/notes', '메모 목록'):
             return IntentDecision(INTENT_NOTE_LIST, AUTHORITY_OWNER)
         if text.startswith('/note '):

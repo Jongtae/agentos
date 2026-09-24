@@ -8,7 +8,6 @@ import time
 CATALOGUE = (
     {"id": "builtin-mcp-read", "kind": "mcp", "version": "1", "tools": ["read_only"], "scopes": ["read"]},
     {"id": "google-drive-read", "kind": "mcp", "version": "1", "tools": ["search", "read_selected"], "scopes": ["read"]},
-    {"id": "compatibility-a2a-peer", "kind": "a2a", "version": "1", "tools": ["delegate"], "scopes": ["delegate"]},
     {"id": "google-calendar-create", "kind": "mcp", "version": "1", "tools": ["draft_event"], "scopes": ["calendar.events"]},
     {"id": "isolated-runtime-placeholder", "kind": "runtime", "version": "1", "tools": [], "scopes": []},
 )
@@ -22,6 +21,17 @@ STATES = {
     "disconnected",
 }
 _ACTIVE_GRANT_STATES = {"enabled", "paused"}
+_RETIRED_CAPABILITIES = {
+    "compatibility-a2a-peer": {
+        "id": "compatibility-a2a-peer",
+        "kind": "a2a",
+        "version": "1",
+        "tools": ["delegate"],
+        "scopes": ["delegate"],
+    },
+}
+_RETIRED_CAPABILITY_IDS = frozenset(_RETIRED_CAPABILITIES)
+_RETIRED_EVIDENCE_KEY = "retired_capability_evidence"
 _MISSING_CAPABILITY_STATE = object()
 _INVALID_CAPABILITY_STATE = "저장된 capability 상태를 확인하세요."
 _CAPABILITY_STATE_LOCK = threading.RLock()
@@ -130,11 +140,31 @@ class CapabilityRegistry:
             saved = self.store.config("capability_registry", _MISSING_CAPABILITY_STATE)
             if saved is _MISSING_CAPABILITY_STATE:
                 return {}
-            if not isinstance(saved, dict) or any(key not in self._catalogue for key in saved):
+            if not isinstance(saved, dict):
                 self._reject()
-            migrated = dict(saved)
-            changed = False
-            for capability_id, row in saved.items():
+            unknown = [key for key in saved if key not in self._catalogue and key not in _RETIRED_CAPABILITY_IDS]
+            if unknown:
+                self._reject()
+            retired = self.store.config(_RETIRED_EVIDENCE_KEY, {})
+            if not isinstance(retired, dict):
+                self._reject()
+            retired = dict(retired)
+            migrated = {key: value for key, value in saved.items() if key not in _RETIRED_CAPABILITY_IDS}
+            changed = len(migrated) != len(saved)
+            for capability_id in _RETIRED_CAPABILITY_IDS & saved.keys():
+                item = _RETIRED_CAPABILITIES[capability_id]
+                row = saved[capability_id]
+                legacy = self._migrate_legacy_inactive_grant(item, row)
+                validated = legacy if legacy is not None else self._validate_row(item, row)
+                if capability_id not in retired:
+                    retired[capability_id] = {
+                        "id": capability_id,
+                        "last_state": validated["state"],
+                        "changed_at": validated["changed_at"],
+                        "audit": [dict(event) for event in validated["audit"]],
+                    }
+                    self.store.put(_RETIRED_EVIDENCE_KEY, retired)
+            for capability_id, row in list(migrated.items()):
                 item = self._catalogue[capability_id]
                 legacy = self._migrate_legacy_inactive_grant(item, row)
                 if legacy is not None and legacy != row:

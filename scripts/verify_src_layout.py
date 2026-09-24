@@ -20,8 +20,15 @@ def main():
 
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     _require('where = ["src"]' in pyproject, "setuptools src discovery is not configured", failures)
-    _require('personal_agent = ["web/*.html", "web/*.css", "web/*.js", "delivery-plan.yaml"]' in pyproject,
-             "personal_agent package data is not configured", failures)
+    _require('personal_agent = ["web/*.html", "web/*.css", "web/*.js"]' in pyproject,
+             "personal_agent web package data is not configured", failures)
+    for retired in ("delivery.py", "handoff.py", "delivery-plan.yaml"):
+        _require(not (PACKAGE / retired).exists(),
+                 f"repository-only {retired} is still shipped in personal_agent", failures)
+    _require((ROOT / "scripts" / "dev" / "delivery.py").is_file(),
+             "repository delivery controller is missing from scripts/dev", failures)
+    _require((ROOT / "scripts" / "dev" / "handoff.py").is_file(),
+             "repository handoff loop is missing from scripts/dev", failures)
 
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     engine_dockerfile = (ROOT / "Dockerfile.engine").read_text(encoding="utf-8")

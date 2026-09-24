@@ -109,7 +109,10 @@ def validate(value, store):
     if not isinstance(value, str) or not value.strip():
         raise ValueError('폴더 경로를 입력하세요.')
     text = value.strip()
-    supplied = Path(text).expanduser()
+    try:
+        supplied = Path(text).expanduser()
+    except (RuntimeError, OSError):
+        raise ValueError(f'폴더 경로를 확인할 수 없습니다: {text}') from None
     if not supplied.is_absolute():
         raise ValueError(f'/로 시작하는 전체 경로를 입력하세요: {text}')
     if supplied.is_symlink():

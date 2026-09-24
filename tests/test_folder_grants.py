@@ -166,6 +166,22 @@ class FolderGrantTests(unittest.TestCase):
             folder_grants.validate(str(self.docs),self.store)
         self.assertEqual(probe.call_count,1)
 
+    def test_unknown_user_tilde_is_a_validation_error(self):
+        with mock.patch.object(Path,'expanduser',side_effect=RuntimeError('unknown user')):
+            with self.assertRaisesRegex(ValueError,'폴더 경로를 확인할 수 없습니다'):
+                folder_grants.validate('~missing-user/Documents',self.store)
+
+    def test_reference_read_revalidates_only_the_selected_reference(self):
+        second=self.home/'Documents'/'Second'; second.mkdir()
+        (self.docs/'note.txt').write_text('note')
+        files=FileWorkspace(self.store)
+        files.configure([str(self.docs),str(second)],str(self.out))
+        reference_id=files.status()['references'][0]['id']
+        with mock.patch.object(folder_grants,'blocked',wraps=folder_grants.blocked) as check:
+            result=files.read(reference_id,'note.txt')
+        self.assertEqual(result['content'],'note')
+        self.assertEqual(check.call_count,1)
+
     def test_blocked_stored_roots_do_not_prevent_other_changes(self):
         ssh, aws = self.home / '.ssh', self.home / '.aws'
         ssh.mkdir(); aws.mkdir()

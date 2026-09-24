@@ -59,8 +59,10 @@ class FileWorkspace:
         return path
 
     def _reference(self, ref_id, relative):
-        root=next((item for item in self.active()['references'] if item['id']==ref_id),None)
-        if not root: raise ValueError('허용된 참고 폴더가 아닙니다.')
+        # Scans may read many candidate files; revalidate only the selected grant
+        # for each read rather than rechecking every configured reference.
+        root=next((item for item in self.status().get('references',[]) if item.get('id')==ref_id),None)
+        if not root or folder_grants.blocked(root.get('path',''),self.store): raise ValueError('허용된 참고 폴더가 아닙니다.')
         base=Path(root['path']); path=self._safe_relative(relative); candidate=base/path
         if any(part.is_symlink() for part in (base, *candidate.parents) if part.exists()): raise ValueError('심볼릭 링크를 통한 참고 자료 접근은 허용하지 않습니다.')
         resolved=candidate.resolve()

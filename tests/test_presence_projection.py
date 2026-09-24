@@ -582,6 +582,69 @@ class ConversationContinuityTests(ProjectionTestCase):
                  if e['tool'] == 'conversation_continuity'][-1]
         self.assertFalse(event['trace']['executed'])
 
+    def test_local_note_correction_never_reaches_the_remote_followup_judge(self):
+        first, _ = self.turn('이전 요청')
+        self.assertEqual(first['status'], 'failed')
+        engine = self.relation_engine({'아니, sk-live-secret을 메모해줘': FOLLOWUP_REFERENCE})
+        self.service.use_decision_engine(engine)
+
+        note, _ = self.turn('아니, sk-live-secret을 메모해줘')
+        self.assertEqual(note['status'], 'succeeded')
+        self.assertIn('sk-live-secret', [row['content'] for row in self.store.notes()])
+        self.assertFalse(any(
+            item[0] == 'choose' and item[1].purpose == 'conversation-followup'
+            for item in engine.asked
+        ))
+
+    def test_package_write_alias_blocks_retry_by_recorded_host_action(self):
+        first, _ = self.turn('원래 요청')
+        self.assertEqual(first['status'], 'failed')
+        with self.store.db() as db:
+            db.execute(
+                'INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                (first['id'], 'remember', 'succeeded',
+                 '{"host_action":"save_note","evidence":{"state":"saved"}}', time.time()),
+            )
+        allowed, reason = self.service.safe_retry(self.store.job(first['id']))
+        self.assertFalse(allowed)
+        self.assertIn('상태를 바꾸는 작업', reason)
+
+    def test_requeued_focused_work_does_not_create_a_self_continuity_link(self):
+        first, _ = self.turn('원래 요청')
+        engine = self.relation_engine({'다시 해줘': FOLLOWUP_RETRY})
+        self.service.use_decision_engine(engine)
+        self.assertIsNone(self.service.continuity_relation(
+            '다시 해줘', current_work_id=first['id']))
+        self.assertFalse(any(
+            item[0] == 'choose' and item[1].purpose == 'conversation-followup'
+            for item in engine.asked
+        ))
+
+    def test_retry_prompt_survives_private_document_history_filtering(self):
+        private_turn, _ = self.turn('/note private document marker')
+        self.store.put('file_workspace_document_jobs', [private_turn['id']])
+        first, _ = self.turn('원래 요청')
+        self.assertEqual(first['status'], 'failed')
+
+        self.connect_model()
+        self.service.use_decision_engine(self.relation_engine({'다시 해줘': FOLLOWUP_RETRY}))
+        self.service.document_boundary = lambda _config=None: {'requires_approval': True}
+        seen = []
+        original = self.service.adapter.transport
+
+        def capture(url, body, headers=None, timeout=60):
+            if url.endswith('/api/chat') and not any(
+                    (tool.get('function', {}).get('name') or tool.get('name')) == 'agentos_connection_probe'
+                    for tool in body.get('tools', [])):
+                seen.append([m['content'] for m in body.get('messages', []) if m.get('role') == 'user'][-1])
+                return {'message': {'content': '성공'}}
+            return original(url, body, headers, timeout)
+
+        self.service.adapter.transport = capture
+        second, _ = self.turn('다시 해줘')
+        self.assertEqual(second['status'], 'succeeded')
+        self.assertEqual(seen[-1], '원래 요청')
+
     def test_reference_relation_is_attributable_without_replaying_the_old_work(self):
         self.connect_model()
         first, _ = self.turn('오로라 결과를 설명해줘')

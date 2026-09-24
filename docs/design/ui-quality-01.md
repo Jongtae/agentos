@@ -1,193 +1,217 @@
 # UI-QUALITY-01 design direction (#558)
 
-Status: direction approved by the owner on 2026-09-24 after the 작업 현황 prototype; implemented across all destinations in PR for #558. Presentation only:
-no API, payload, validation, Grant, connector or runtime change. Vanilla HTML/CSS/JS,
-no build step, no runtime dependency. The pinned review aids
-`.claude/skills/frontend-design/` and `.claude/skills/web-interface-guidelines/` were
-applied to reach this direction; `src/personal_agent/web/AGENTS.md` and the
-[Presence Experience Contract](../presence-experience-contract.en.md) win over both.
+Status: the owner approved the first direction on 2026-09-24 after a 작업 현황
+prototype. The owner then set two product directions the same day. #559 makes
+작업 현황 a chronological conversation trace. #562 removes the generic 내 기록
+destination. This document records the direction as implemented in the #558
+pull request.
+
+The pass is presentation only. It makes no API, payload, validation, Grant,
+connector or runtime change. It uses vanilla HTML/CSS/JS with no build step and no
+runtime dependency. The pinned review aids `.claude/skills/frontend-design/` and
+`.claude/skills/web-interface-guidelines/` shaped it. `src/personal_agent/web/AGENTS.md`
+and the [Presence Experience Contract](../presence-experience-contract.en.md) win
+over both.
 
 ## 1. Subject, audience, job
 
-- Subject: the owner-local management utility of one person's AgentOS. It is a
-  record book of what the assistant did, what it may touch, and what needs the
-  owner's decision. It is not a chat client, a dashboard or a marketplace.
-- Audience: one owner on a Mac, Korean copy, mostly checking results after a
+- Subject: the owner-local management utility of one person's AgentOS. It shows
+  what the owner asked, what AgentOS answered, what it may touch, and what needs
+  the owner's decision. It is not a chat client, a dashboard or a storage browser.
+- Audience: one owner on a Mac, reading Korean, usually checking a result after a
   Telegram request or inspecting a connection.
-- Primary job: answer three questions at a glance: what happened, is anything
-  wrong or waiting on me, and which connection is actually in use.
+- Primary job: answer three questions at a glance. What happened, in order. Is
+  anything wrong or waiting on me. Which connection is actually in use.
 
-## 2. Concept: a ledger, not a dashboard
+## 2. Concept: conversation order first
 
-The one memorable element is the **status language**. Every owner-visible state
-(진행 중 · 완료 · 실패 · 일부 완료 · 전달 여부 알 수 없음 · 현재 사용 중 · 확인 필요 ·
-사용 가능 · 연결 안 됨 …) is a badge with exactly one tone, and that same badge is
-used in the task list, task detail, timeline, records, Settings rows and the
-navigation rail. The result of a task is a "receipt" block whose left rule takes
-the state tone. Everything else stays quiet: one neutral canvas, white surfaces,
-one accent for the single primary action and selection, no decoration.
+The memorable element is the **conversation trace** in 작업 현황 (#559):
+
+> Conversation order first. Relationships second. Execution trace on demand.
+> Raw Work/Tool/Evidence only one level deeper.
+
+- Each Work is shown as the owner's turn (나) followed by AgentOS's turn, oldest
+  at the top. A thin spine with one node per turn carries the order. The node's
+  colour is the outcome tone.
+- A relation is drawn only when the task API reports one. Since #557 the API
+  returns `relation: {kind, work_id}` for retry, reference, cancel and correction.
+  The turn then shows "다시 시도한 요청" or "이전 요청을 정정" and a link that
+  jumps to the earlier turn. Nothing is inferred from wording. A request whose
+  text equals the previous one with no recorded relation says only
+  "바로 앞과 같은 내용", which is a fact about the text, not a relation.
+- A plain successful answer carries no badge. Failed, partial, cancelled,
+  running and unknown-delivery answers keep a badge, a titled outcome and a
+  toned body. Prose never makes an unsuccessful turn look successful.
+- Under each answer, **어떻게 처리했는지** lists observed steps with clock times.
+  A tool's start reads "시작". Consecutive start→finish transitions of one tool
+  collapse into one line. The closing line is the observed Work outcome, and a
+  running Work gets none. **기술 정보** holds Work id, status, route, relation
+  ids, raw events and Evidence references.
+
+The status badge language from the first direction stays as the secondary
+system. It is used in Settings rows, the nav rail and non-success turns.
 
 Reviewed against the generic defaults the frontend-design skill warns about:
 
 | Default tell | Decision |
 | --- | --- |
 | ALL-CAPS eyebrow above headings (`WORK`, `RECORDS`, `SETTINGS`, `OWNER-LOCAL`) | Removed. The rail already names the destination. |
-| Middle-dot meta strings (`완료 · 1970. 1. 1. 오전 9:00 · 사용한 AI: …`) | Replaced by a `.meta` row: badge, `<time>`, labelled value. Dots remain only inside owner data (folder role, model name) where they are content, not chrome. |
-| Identical rounded cards with one radius and one shadow | Lists are one bordered surface with row separators; only the detail pane is a card. Two radii: 6px controls, 10px surfaces. No shadows. |
-| Warm cream + terracotta, or near-black + acid accent | Cool neutral canvas `#f3f4f6`, ink `#161a20`, ledger blue accent `#1f3d6d`. State tones are the only saturated colour. |
-| Monospace for data labels, `→` on buttons | Not used. Monospace only for inline `code` inside a result. |
-| Marketing hero, mascot, tips | Excluded by `web/AGENTS.md`; the sign-in view is one heading and one form. |
+| Middle-dot meta strings | Replaced by labelled `.meta` rows, badges and `<time>`. Dots remain only inside owner content such as folder names. |
+| Identical rounded cards with one shadow | One trace spine. Answer bodies are the only surfaces. Two radii, no shadows. |
+| Dashboard or task board | Removed from 작업 현황. It is one linear trace on desktop and mobile. |
+| Warm cream + terracotta, or near-black + acid accent | Cool neutral canvas `#f3f4f6`, ink `#161a20`, one ledger-blue accent `#1f3d6d`. State tones are the only other saturated colours. |
+| Monospace data labels, `→` on buttons | Not used. Monospace only for inline `code` inside a result. |
 
 ## 3. Tokens (`style.css` `:root`)
-
-Colour
 
 | Token | Value | Use |
 | --- | --- | --- |
 | `--canvas` / `--rail` | `#f3f4f6` / `#e9ebef` | page and navigation rail |
-| `--surface` / `--surface-2` / `--surface-3` | `#fff` / `#f7f8fa` / `#eef0f3` | cards, result block, neutral badge |
+| `--surface` / `--surface-2` / `--surface-3` | `#fff` / `#f7f8fa` / `#eef0f3` | answer bodies, panels, neutral badge |
 | `--ink` / `--ink-2` / `--muted` / `--faint` | `#161a20` / `#3b424c` / `#5f6772` / `#8a919b` | text hierarchy |
-| `--line` / `--line-strong` | `#e0e4e9` / `#c7cdd5` | separators, control borders |
-| `--accent` / `--accent-soft` / `--focus` | `#1f3d6d` / `#e6ecf6` / `#2f6bd6` | primary button, selected row, focus ring |
-| `--ok` / `--ok-soft` | `#1a7a4a` / `#e3f3ea` | 완료, 연결됨, 현재 사용 중 |
-| `--attn` / `--attn-soft` | `#8a5a00` / `#fbf0d9` | 확인 필요, 일부 완료, 승인 필요 |
-| `--danger` / `--danger-soft` / `--danger-line` | `#b3261e` / `#fbe7e5` / `#e5b4b0` | 실패, destructive actions |
-| `--run` / `--run-soft` | `#2456b3` / `#e6edfa` | 진행 중, 실행 중 |
-| `--unknown` / `--unknown-soft` | `#5b5f8a` / `#ebebf4` | 전달 여부 알 수 없음 |
+| `--line` / `--line-strong` | `#e0e4e9` / `#c7cdd5` | separators, trace spine, control borders |
+| `--accent` / `--accent-soft` / `--focus` | `#1f3d6d` / `#e6ecf6` / `#2f6bd6` | primary button, selection, AgentOS node, focus ring |
+| `--ok` | `#1a7a4a` on `#e3f3ea` | 완료, 연결됨, 현재 사용 중 |
+| `--attn` | `#8a5a00` on `#fbf0d9` | 확인 필요, 일부 완료, 승인 필요 |
+| `--danger` | `#b3261e` on `#fbe7e5` | 실패, destructive actions, errors |
+| `--run` | `#2456b3` on `#e6edfa` | 진행 중, 실행 중 |
+| `--unknown` | `#5b5f8a` on `#ebebf4` | 전달 여부 알 수 없음, 연결 끊김, 허용 여부 표시 안 됨 |
 
-All text tones meet 4.5:1 on their soft backgrounds; the faint tone is used only
-for 12px labels beside stronger text.
+Type: system Korean sans (`-apple-system, "Apple SD Gothic Neo", Pretendard,
+"Noto Sans KR"`). There is no web font, so page entry makes no network request.
+Scale 12 / 13 / 14 (base) / 16 / 19 / 23. Line height 1.55. Result text is
+capped at 70ch. Times use `tabular-nums`.
 
-Type: system Korean sans (`-apple-system, "Apple SD Gothic Neo", Pretendard, "Noto Sans KR"`),
-no web font (local-first, no network on page entry). Scale: 12 / 13 / 14 (base) /
-16 / 19 / 23. Weights 400 body, 500 controls, 600 row titles, 650 h2/h3, 700 h1.
-Line height 1.55; result text is capped at 70ch. Numbers and times use
-`tabular-nums`. Headings use `text-wrap: balance`.
-
-Spacing: 4 / 8 / 12 / 16 / 24 / 32 / 48. Radius: 6 (controls), 10 (surfaces),
-pill (badges). Control heights: 36 (default), 30 (row action).
+Spacing 4 / 8 / 12 / 16 / 24 / 32 / 48. Radius 6 for controls, 10 for surfaces,
+pill for badges. Control height 36, row action 30.
 
 ## 4. Layout
 
-Desktop: a 212px rail (brand, three destinations, runtime state, one-line
-boundary note) and a content column of at most 960px, left-aligned. Settings keep
-the same rail and add a segmented tab bar above the pane; the pane is 760px wide.
-Mobile (≤620px): the rail becomes a top bar with a horizontally scrolling nav, the
-detail pane opens full-screen with a "목록으로" button (existing behaviour).
+Desktop has a 212px rail and a left-aligned content column of at most 960px. The
+rail holds the brand, destinations, runtime state and a one-line boundary note.
+The trace column is at most 760px. Settings add a segmented tab bar above a
+760px pane. On mobile (≤620px) the rail becomes a top bar and the trace stays one
+column with the same order.
 
 ```
-┌ rail ───────┐┌ content ───────────────────────────────────────┐
-│ AgentOS     ││ 작업 현황                              방금 확인 │
-│ ▸ 작업 현황 1││ subtitle                                        │
-│   내 기록   ││ ┌ list ─────────┐ ┌ detail ────────────────────┐ │
-│   설정    ● ││ │ title         │ │ h2 title                   │ │
-│             ││ │ [badge] time  │ │ [badge] time  사용한 AI  … │ │
-│             ││ │ ───────────── │ │ ▌결과 (receipt block)      │ │
-│ [작업 중]   ││ │ …             │ │ 관찰된 과정 (timeline)     │ │
-│ boundary    ││ └───────────────┘ │ ┈ 실행 상세 (technical)    │ │
-└─────────────┘└────────────────────────────────────────────────┘
+┌ rail ───────┐┌ content ─────────────────────────────────────┐
+│ AgentOS     ││ 작업 현황                            방금 확인 │
+│ ▸ 작업 현황 2││ ○ 나  그저께                                 │
+│   내 기록   ││ │ 회의록 폴더 요약해서 저장해줘                │
+│   설정    ● ││ ● AgentOS 그저께 [실패]                      │
+│             ││ │ ┌ 완료하지 못함 ─────────────────────┐     │
+│             ││ │ └────────────────────────────────────┘     │
+│             ││ │ › 어떻게 처리했는지   › 기술 정보           │
+│             ││ ○ 나  그저께                                 │
+│ [작업 중]   ││ │ 다시 시도한 요청 <회의록 폴더 요약…>        │
+│ boundary    ││ │ 자 다시 해봐                                 │
+└─────────────┘└──────────────────────────────────────────────┘
 ```
 
-The rail shows live state derived only from data the page already fetched: the
-count of running tasks next to 작업 현황, and a dot next to 설정 when any
-Settings row is in an attention state.
+The rail shows only state the page already fetched. That is the count of running
+tasks and a dot when a Settings row needs attention. When the server is
+unreachable, the runtime badge says 연결 끊김 and the count clears.
 
 ## 5. Component rules
 
-- Buttons. Three kinds, never mixed on one row without hierarchy: primary (solid
-  accent, one per surface), secondary (white, border), destructive (white with red
-  text/border; becomes solid red only in the confirm step). Quiet text buttons are
-  for 로그아웃 and 목록으로 only. Labels are verbs that name the effect
-  ("이 연결 사용", "연결 해제", "삭제 확인"). No compound labels such as
-  "Claude Code 로그인 완료 · 전환".
-- Inputs and selects. 36px, 1px border, 2px focus ring in `--focus`. Selects draw
-  their own chevron and background so they match in dark-mode Windows too. Every
-  field has a visible or sr-only label, a `name`, and `autocomplete="off"` unless
-  it is a credential. Placeholders show an example and end with `…`.
-- Toggle vs checkbox. A switch is a preference that applies as soon as it is
-  changed (임시 자료 수집 허용). A checkbox stays inside a form that is submitted
-  later. A state is never shown as a button: "Telegram 작업에 공유 허용" becomes a
-  row with a state badge and a "허용" action.
-- Rows. One grammar everywhere: title, description, state badge in a fixed
-  150px column, one action. Internal ids (connector id, capability id, request
-  id, scopes) live only under a "기술 세부 정보" / "실행 상세" disclosure.
-- Badges. Dot + word, tone from the table above. `neutral` is the default; an
-  unknown or unmapped state is shown as unknown, never guessed as connected.
-- Dates. `Intl.RelativeTimeFormat('ko')` for the last 7 days ("방금", "3분 전",
-  "어제"), otherwise `Intl.DateTimeFormat` date; the absolute date-time is always
-  in the `<time title>` for hover and in `datetime`.
-- Results. Result text is parsed into paragraphs, lists, headings, inline bold,
-  inline code and http(s) links, and rendered with DOM nodes only. Raw HTML in a
-  result stays visible as text. Bare markdown symbols never reach the owner.
-- Empty, loading, error. Empty is one sentence inside the list surface plus, when
-  there is one, the next action; it is never an expandable section. Loading ends
-  with "…". Errors are inline next to the control, red, and say what to do next.
-- Destructive confirmation. Two steps in place: the button becomes "삭제 확인"
-  (solid red) beside a "취소" button and a one-line question; the request is sent
-  only on the second click. Existing folder removal already follows this.
-- Disclosure. One 6px chevron, 13px/500 summary everywhere; nested disclosures
-  are lighter. `<details>` is used only when there is something to reveal.
+- **Buttons.** Primary is solid accent, one per surface. Secondary is white with
+  a border. Destructive is white with red text and turns solid red only in its
+  confirm step. Quiet text buttons are for 로그아웃, 목록으로 and 닫기. Labels
+  are verbs, and one action keeps its name through a flow (제거 → 제거 확인).
+- **Inputs and selects.** 36px with a 2px focus ring. Every field has a label and
+  a `name`. Non-credential fields use `autocomplete="off"`. Placeholders show an
+  example and end with `…`.
+- **Toggle vs checkbox.** A switch (`role="switch"`) saves on change and reports
+  that it saved. A checkbox stays inside a form that is submitted later. A state
+  is never drawn as a button.
+- **Rows.** Title, description, state badge in a fixed column, one action.
+  Internal ids stay under 기술 세부 정보 or 기술 정보.
+- **Badges.** One state per badge. An unknown or unmapped state shows as
+  unknown, never guessed as connected or allowed.
+- **Dates.** `Intl.RelativeTimeFormat('ko')` for the last 7 days, otherwise an
+  `Intl.DateTimeFormat` date. Trace steps use a 24-hour clock. The absolute time
+  is in `<time title>` and `datetime`.
+- **Results.** Parsed into paragraphs, lists, headings, bold, inline code and
+  http(s) links, and built from DOM nodes only. Raw HTML in a result stays
+  visible as text.
+- **Empty, loading, error.** Empty is one sentence with the next action. Loading
+  ends with `…`. `setError` marks the node red and `setFeedback` clears it, so
+  errors and successes never share a colour. Network failure is one owner
+  sentence in a top banner, never the browser's `TypeError` text.
+- **Destructive confirmation.** Two steps in place, with a cancel and a one-line
+  consequence. Nothing is sent before the second press.
+- **Disclosure.** One chevron size everywhere. A trace answer's two disclosures
+  share one line and each takes the full width when opened.
+- **Polling.** Server text is rewritten only when it changes. Owner-started
+  prompts, errors and fresh pair links live in their own nodes, so the 2-second
+  poll cannot erase them. Open disclosures and keyboard focus survive re-renders.
 
-## 6. Screen-by-screen plan (after approval)
+## 6. Scope boundaries with #559 and #562
 
-- 작업 현황 (prototype in this branch): badges, relative times, formatted safe
-  results, friendly event names with ids under technical details, repeated
-  requests listed quieter, receipt block toned by state.
-- 내 기록: counts move into the type select's options, the "찾기" button goes
-  (search is live), the detail gets a type badge and a real title, destructive
-  delete with confirm/cancel, empty candidate section becomes one line.
-- 설정 · AI 연결: same row grammar, verb-only actions, aligned state column.
-- 설정 · 파일 · 저장: role and path on two lines instead of one dot-joined line.
-- 설정 · 외부 연결: Telegram as a section with a state row; disconnect gets a
-  confirm step; capability preview styled as an attention block.
-- 설정 · 개인정보 · 진단: switches that save on change, sharing policy as a state
-  row, saved temporary material as rows, manual capture behind a disclosure.
+- **#559 (trace).** This pass projects fields the task API already returns:
+  order, status, outcome text, events, route, and the #557 `relation`. It does
+  not add read models, turn ids, supersession edges or Evidence mapping. Those
+  belong to #559, and #559 is not completed by this pass.
+- **#562 (no generic records destination).** Removing 내 기록 from navigation
+  and adding exact-item deep links belongs to #562. That change also updates the
+  Local Web Management Contract and adds browser tests for data preservation.
+  This pass stops designing the records browser. It keeps only shared components
+  and correctness fixes there (delete confirm, focus, error colour, no empty
+  sections), because those carry over to exact-item views.
 
 ## 7. Before / after (fixture-only evidence)
 
-Fixture data from `tests/web_management_browser_fixture.py` with the new
-`/control/rich-tasks` control. Not live AgentOS operation.
+The data comes from `tests/web_management_browser_fixture.py` with the
+`/control/rich-tasks` control. It is not live AgentOS operation.
 
-| | Desktop 1280×900 | Mobile 390×844 |
+| | Before | After |
 | --- | --- | --- |
-| Before | ![before desktop](ui-quality-01/before-tasks.desktop.png) | ![before mobile](ui-quality-01/before-tasks.mobile.png) |
-| After | ![after desktop](ui-quality-01/after-tasks.desktop.png) | ![after mobile](ui-quality-01/after-tasks.mobile.png) |
-
-Failed state after: ![after failed](ui-quality-01/after-tasks-failed.desktop.png)
+| 작업 현황 | ![before](ui-quality-01/before-tasks.desktop.png) | ![failed then retry](ui-quality-01/after-trace-retry.desktop.png) |
+| One answer, both disclosures open | | ![disclosures](ui-quality-01/after-trace-disclosures.desktop.png) |
+| Mobile: partial, unknown delivery, correction | ![before mobile](ui-quality-01/before-tasks.mobile.png) | ![states mobile](ui-quality-01/after-trace-states.mobile.png) |
+| 설정 · AI 연결 | ![before settings](ui-quality-01/before-settings-ai.desktop.png) | ![after settings](ui-quality-01/after-settings-ai.desktop.png) |
 
 ## 8. Not changed
 
-Task/record/settings API calls and payloads, the exact-draft test/apply guard,
-the single current AI route rule, revision-guarded and serialized folder saves,
-draft/focus/search/selection preservation across polling, distinct record types
-and actions, and the absence of provider calls on page entry.
+Task, record and settings API calls and payloads stay the same, and so do these
+rules:
 
-## 9. Functional review: what the owner asked and what the code does
+- the exact-draft test/apply guard;
+- exactly one current AI route;
+- revision-guarded, serialized folder saves;
+- draft, focus, search and selection preservation across polling;
+- distinct record types and actions;
+- no provider call on page entry.
 
-The owner's rule for this pass is "기능이 곧 UX": what a screen does is the
-experience. These are the owner's questions from the first review, answered
-from the code, with what changed and what stays a backend follow-up.
+## 9. Functional review: the owner's questions
 
-| Owner question | Cause in code | Presentation fix in this pass | Backend follow-up |
+The owner's rule for this pass is "기능이 곧 UX". What a screen does is the
+experience.
+
+| Owner question | Cause in code | Presentation fix | Backend follow-up |
 | --- | --- | --- | --- |
-| Why does "Failed to fetch" appear? | `api()` rethrew the browser's `TypeError` text into `#global-error` when the local server was unreachable or restarting; it stayed until the next successful poll. | Network failures now render one owner sentence ("AgentOS에 연결할 수 없습니다 …") in a banner at the top of the content column; the 2-second poll clears it when the server answers again. | none |
-| Why are Codex / Claude Code missing from AI 연결? | Rows come from `subscription_engines.available()`; the screenshot fixture returns no engines. `renderExecutionConnection` was not changed. | Row copy uses verbs ("이 CLI 사용", "이 연결 사용"); an uninstalled CLI now says what to do next. | none (if missing on the real server, report it) |
-| Why does "추가" not open a folder picker? | #551 chose text path entry with inline validation. A browser cannot hand a page the real path of a picked folder; a native picker needs a local helper behind the backend. | Field hint keeps the Finder shortcut; role and path are on two lines. | Native folder picker (already listed in #551's completion boundary) |
-| Why is there no Google button in 외부 연결? | Rows and the "연결" link come from `connector_connections()`, which is empty when the install declares no connector registry. | The empty state says why the list is empty and when rows appear; existing connector rows keep state badge + one link action. | Connector registry availability per install |
+| Why does "Failed to fetch" appear? | `api()` rethrew the browser's `TypeError` text when the local server was unreachable. | One owner sentence in a top banner with the last successful check time. The runtime badge shows 연결 끊김. A boot failure shows the sign-in surface with the reason and retries, instead of a blank page. | none |
+| Why are Codex / Claude Code missing? | Rows come from `subscription_engines.available()`. The screenshot fixture returned none. | Verb actions ("이 CLI 사용"). An uninstalled CLI says it appears once installed. The rich fixture now shows both engines. | none |
+| Why does "추가" not open a folder picker? | #551 chose text path entry. A browser cannot give a page the real path of a picked folder. | Hint keeps the Finder shortcut. Role and path sit on two lines. | Native folder picker |
+| Why is there no Google button? | Rows and the connect link come from `connector_connections()`, which is empty without a connector registry. | The empty state says why and when rows appear. | Connector registry per install |
 
-Other function-level changes made in this pass because they change what the
-owner can do or misread:
+## 10. Independent UX review and what changed
 
-- Records: search is live (the "찾기" button was a second way to do the same
-  thing); counts sit inside the type filter so they cannot disagree with it;
-  delete asks in place with a cancel; the empty memory-candidate section is a
-  sentence, not a disclosure that opens to nothing.
-- Settings: switches for capture preferences save on change and report
-  "저장했습니다" (before, a full-width "수집 설정 저장" button was required); the
-  Telegram sharing policy is a state row with one action instead of a button
-  that looked like a state; temporary-material rows and Telegram disconnect
-  confirm before acting.
-- 작업 현황: the result is formatted text (bold, lists, links to http(s) only)
-  built from DOM nodes, so raw markdown and raw HTML never reach the owner as
-  markup; a request repeated right after an identical one is listed quieter;
-  "관찰된 과정" names tools in owner words and keeps ids under 기술 세부 정보.
+A separate reviewer walked every flow in code and in fixture screenshots. It
+found no blockers and 13 majors. All presentation majors are fixed:
+
+- A blank page on boot failure. The sign-in surface now shows the reason and retries.
+- Poll chatter, meaning live regions on whole panes and a status line announced
+  twice per cycle. Those regions were removed.
+- Focus was dropped on re-render. It is now restored by key.
+- Error text shared the success colour. It is now red with a next step.
+- Model shortcuts changed a collapsed form invisibly. They now open it and focus 테스트.
+- The Telegram prompt, errors and pair link were erased by polling. They now live in their own nodes.
+- A stale "작업 중" showed while offline. The badge now says 연결 끊김.
+- The same-request marker was on the wrong row. The trace now marks rows by
+  conversation order.
+
+One major needs a backend field. The Telegram sharing-policy row cannot show
+whether a standing policy exists, because `ContextInbox.status()` does not
+report it. The row now says "허용 여부 표시 안 됨" instead of guessing, and it
+shows "허용함 (이번 접속)" only after a success it observed itself.

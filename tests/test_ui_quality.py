@@ -75,7 +75,7 @@ class TokensAndChrome(unittest.TestCase):
         self.assertIn("const TOOL_NAMES=", APP)
         self.assertIn("toolName(event.tool)", APP)
         self.assertIn("'기술 세부 정보'", APP)
-        self.assertIn("fact('요청 ID',task.id)", APP)
+        self.assertIn("fact('Work ID',task.id)", APP)
         self.assertNotIn("`요청 ID ${task.id}", APP)
 
 
@@ -109,7 +109,7 @@ class Element{constructor(tag){this.tag=tag;this.children=[];this.dataset={};thi
  set textContent(v){this._text=String(v);this.children=[];}get textContent(){return this._text+this.children.map(n=>typeof n==='string'?n:n.textContent).join('');}
  append(...n){this.children.push(...n);}setAttribute(k,v){this.attrs[k]=v;}}
 const part=(a,b)=>app.slice(app.indexOf(a),app.indexOf(b));
-const source=part('const TIME_ABSOLUTE=','const TOOL_NAMES=')+part('function element(','function focusSettingsTarget(');
+const source=part('const TIME_CLOCK=','const TOOL_NAMES=')+part('function element(','function focusSettingsTarget(');
 const ctx={document:{createElement:t=>new Element(t)},console};vm.createContext(ctx);vm.runInContext(source,ctx);
 const box=ctx.renderRichText('<script>alert(1)</script> [x](https://e.invalid/p) [y](javascript:x)');
 const all=n=>n.children.flatMap(c=>typeof c==='string'?[c]:[c,...all(c)]);
@@ -151,6 +151,48 @@ assert.match(ui.taskOutcome({waits:['첫째','둘째']}).text,/첫째\n둘째/);
 console.log(JSON.stringify({ok:true}));
 """)
         self.assertEqual(json.loads(out.strip().splitlines()[-1]), {"ok": True})
+
+
+class ConversationTrace(unittest.TestCase):
+    def test_tasks_view_is_a_chronological_turn_trace(self):
+        tasks = HTML[HTML.index('id="view-tasks"'):HTML.index('id="view-records"')]
+        self.assertIn('<ol id="task-list" class="trace"', tasks)
+        self.assertNotIn('id="task-detail"', tasks)
+        self.assertNotIn("master-detail", tasks)
+        self.assertIn("(a.started_at||0)-(b.started_at||0)", APP)
+        self.assertIn("'어떻게 처리했는지'", APP)
+        self.assertIn("'기술 정보'", APP)
+
+    def test_trace_is_derived_from_observed_state_only(self):
+        out = node_run(r"""
+const assert=require('node:assert/strict');const ui=require(process.argv[1]);
+const events=[{id:1,tool:'subscription_engine',status:'running',created:10,summary:'s'},{id:2,tool:'web_search',status:'succeeded',created:11,summary:'s'},{id:3,tool:'subscription_engine',status:'succeeded',created:12,summary:'s'}];
+const done=ui.semanticTrace({status:'succeeded',status_kind:'finished',observed_at:13,events:[events[0],{...events[0],id:4,status:'succeeded',created:12}]});
+assert.deepEqual(done.map(r=>r.text),['구독 CLI 실행 완료','답변'],'running->succeeded of one tool collapses to one line');
+assert.deepEqual(done[0].eventIds,[1,4]);
+const mixed=ui.semanticTrace({status:'succeeded',status_kind:'finished',observed_at:13,events});
+assert.equal(mixed.length,4,'different tools are not merged');
+const failed=ui.semanticTrace({status:'failed',status_kind:'finished',observed_at:5,events:[{id:9,tool:'subscription_engine',status:'running',created:1,summary:'a'},{id:10,tool:'subscription_engine',status:'failed',created:4,summary:'폴더 없음'}]});
+assert.deepEqual(failed.map(r=>[r.text,r.tone]),[['구독 CLI 실행 실패','danger'],['실패','danger']]);
+assert.equal(failed[0].note,'폴더 없음');
+const running=ui.semanticTrace({status:'running',status_kind:'active',events:[events[0]]});
+assert.deepEqual(running.map(r=>r.text),['구독 CLI 실행 시작'],'an active Work gets no invented closing line');
+const unknown=ui.semanticTrace({status:'succeeded',status_kind:'finished',delivery:'unknown',observed_at:3,events:[]});
+assert.deepEqual(unknown.map(r=>[r.text,r.tone]),[['전달 여부 알 수 없음','unknown']],'unknown delivery is not shown as an answer');
+const partial=ui.semanticTrace({status:'partial',status_kind:'finished',observed_at:3,events:[]});
+assert.deepEqual(partial.map(r=>r.tone),['attention']);
+assert.equal(ui.relationText('retry'),'다시 시도한 요청');assert.equal(ui.relationText('correction'),'이전 요청을 정정');
+assert.equal(ui.relationText('something-new'),'이전 요청과 연결됨');
+console.log(JSON.stringify({ok:true}));
+""")
+        self.assertEqual(json.loads(out.strip().splitlines()[-1]), {"ok": True})
+
+    def test_relations_are_never_inferred_in_the_renderer(self):
+        render = APP[APP.index("function renderTasks(){"):APP.index("function recordKey(item){")]
+        self.assertIn("if(task.relation){", render)
+        self.assertIn("sameAsPrevious=!task.relation&&", render)
+        self.assertIn("'바로 앞과 같은 내용'", render)
+        self.assertNotIn("relation:{", render)
 
 
 if __name__ == "__main__":

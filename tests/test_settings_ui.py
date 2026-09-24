@@ -21,7 +21,7 @@ class Element {
  querySelector(selector){return descendants(this).find(node=>selector[0]==='.'?node.className.split(' ').includes(selector.slice(1)):node.tag===selector)||null;}
 }
 function descendants(node){return node.children.flatMap(child=>typeof child==='string'?[]:[child,...descendants(child)]);}
-for(const id of ['active-ai','telegram-current','telegram-change','telegram-form','telegram-status','disconnect','new-pair','telegram-pair','capability-controls','connector-controls'])new Element('div').id=id;
+for(const id of ['active-ai','telegram-current','telegram-change','telegram-form','telegram-status','telegram-feedback','telegram-submit','disconnect','new-pair','telegram-pair','capability-controls','connector-controls'])new Element('div').id=id;
 const $=id=>ids.get(id),document={getElementById:$,createElement:tag=>new Element(tag)};
 const part=(start,end)=>app.slice(app.indexOf(start),app.indexOf(end));
 const source=part('function capabilityActions(', 'function clearMobileDetailWhenEmpty(')+
@@ -31,7 +31,7 @@ const source=part('function capabilityActions(', 'function clearMobileDetailWhen
  part('const CONNECTOR_STATES=', 'async function requestCapabilityDraft(')+
  part('function renderTelegram(', 'function renderCapabilityPreview(');
 const calls=[];let refreshes=0,failRoute=false;
-const ctx={document,$,telegramDraftOpen:false,requestCapabilityDraft:async()=>{},console,api:async(path,body)=>{calls.push({path,body});if(failRoute)throw new Error('switch refused');return {};},refresh:async()=>{refreshes++;},busy:async(button,fn)=>fn(),setError:(id,error)=>{$(id).textContent=error?.message||String(error||'');}};
+const ctx={document,$,telegramDraftOpen:false,requestCapabilityDraft:async()=>{},console,api:async(path,body)=>{calls.push({path,body});if(failRoute)throw new Error('switch refused');return {};},refresh:async()=>{refreshes++;},busy:async(button,fn)=>fn(),setError:(id,error)=>{$(id).textContent=error?.message||String(error||'');},setFeedback:(id,text)=>{$(id).textContent=text||'';}};
 vm.createContext(ctx);vm.runInContext(source,ctx);
 const buttonIn=id=>descendants($(id)).find(node=>node.tag==='button');
 const settings={model:{provider:'ollama',endpoint:'http://127.0.0.1:11434',model:'stored-api-model'},model_ready:true,subscription_engines:{selected:'codex',engines:[{id:'codex',name:'Codex',installed:true,connected:true}]}};
@@ -57,7 +57,7 @@ assert(!$('active-ai').textContent.includes('직접 API를 설정하거나 테�
  ctx.renderExecutionConnection({...settings,model_ready:false});
  assert(!buttonsIn('active-ai').some(node=>node.textContent==='이 연결 사용'),'an unverified API cannot be selected');
  assert(buttonsIn('active-ai').some(node=>node.textContent==='연결 확인'));
- assert($('active-ai').textContent.includes('설정됨 · 확인 필요'));
+ assert($('active-ai').textContent.includes('확인 필요'),'unverified saved API shows the attention state');assert($('active-ai').textContent.includes('저장돼 있지만 확인되지 않았습니다'),'configured is stated separately from verified');
  ctx.renderExecutionConnection({...settings,subscription_engines:{selected:'',engines:settings.subscription_engines.engines.map(e=>({...e,connected:false}))}});
  assert.equal(currentCount(),1,'direct API is the one current route once selected');
  assert.equal(descendants($('active-ai')).find(node=>node.className==='settings-row-title').textContent,'Ollama');
@@ -77,7 +77,7 @@ assert(!$('active-ai').textContent.includes('직접 API를 설정하거나 테�
 ctx.renderTelegram({telegram:{enabled:true,paired:true,username:'fixture'},telegram_status:{message:'ok'}});
 const telegramButton=buttonIn('telegram-current');ctx.renderTelegram({telegram:{enabled:true,paired:true,username:'fixture'},telegram_status:{message:'ok'}});
 assert.equal(buttonIn('telegram-current'),telegramButton,'unchanged Telegram polling preserves its action node');
-const states={available:['사용 가능','neutral'],'connected-disabled':['연결됨 · 사용 안 함','neutral'],enabled:['사용 설정됨','active'],paused:['일시 정지','neutral'],'auth-required':['다시 인증 필요','attention'],error:['오류','attention'],disconnected:['연결 안 됨','neutral']};
+const states={available:['사용 가능','neutral'],'connected-disabled':['사용 안 함','neutral'],enabled:['사용 설정됨','active'],paused:['일시 정지','neutral'],'auth-required':['다시 인증 필요','attention'],error:['오류','attention'],disconnected:['연결 안 됨','neutral']};
 for(const [state,[label,kind]] of Object.entries(states)){ctx.renderCapabilities({capabilities:[{id:'google-drive-read',kind:'mcp',state}]});const row=$('capability-controls').children[0],stateNode=descendants(row).find(node=>node.className.startsWith('settings-state'));assert(row.textContent.includes(label),`${state} keeps its lifecycle label`);assert(stateNode.className.endsWith(kind),`${state} uses the correct status tone`);assert(row.textContent.includes(`상태: ${state}`),`${state} remains in technical disclosure`);assert(!row.textContent.includes('로컬 기능 권한'),'Google capability must never be described as local');}
 ctx.renderCapabilities({capabilities:[{id:'google-drive-read',kind:'mcp',state:'disconnected'}]});
 assert($('capability-controls').textContent.includes('외부 연결 권한 · Google'));
@@ -134,7 +134,8 @@ def test_owner_flow_has_three_management_destinations_and_optional_projects():
 
 
 def test_guidance_preserves_observed_progress_and_ai_state_boundaries():
-    assert "관찰된 과정" in APP
+    assert "어떻게 처리했는지" in APP
+    assert "관찰된 실행 이벤트가 없습니다" in APP
     assert "결과 정보 없음" in APP
     assert "모델 정보 미제공" in APP
     assert "실제 실행은 작업에서 확인" in APP
@@ -202,7 +203,7 @@ const source=part('function element(', 'function focusSettingsTarget(')+part('le
 const calls=[];let refreshes=0,refuse=null,revisions=0,gate=null;
 const ctx={document,$,console,invalidateRootsLoad:()=>revisions++,invalidateFileWorkspaceLoad:()=>revisions++,
  api:async(path,body)=>{calls.push({path,body});if(gate)await gate;if(refuse)throw new Error(refuse);if(path==='/api/files/roots')return {roots:body.paths.map(path=>({path}))};if(path==='/api/file-workspace')return {references:body.references.map(path=>({path})),workspace:body.workspace};return {};},
- refresh:async()=>{refreshes++;},busy:async(button,fn)=>fn(),setError:(id,error)=>{$(id).textContent=error?.message||String(error||'');}};
+ refresh:async()=>{refreshes++;},busy:async(button,fn)=>fn(),setError:(id,error)=>{$(id).textContent=error?.message||String(error||'');},setFeedback:(id,text)=>{$(id).textContent=text||'';}};
 vm.createContext(ctx);vm.runInContext(source,ctx);
 const same=(actual,expected,message)=>assert.equal(JSON.stringify(actual),JSON.stringify(expected),message);
 const buttons=id=>descendants($(id)).filter(node=>node.tag==='button');
@@ -230,22 +231,22 @@ const press=async(id,label)=>{const button=buttons(id).find(node=>node.textConte
  refuse=null;const before=calls.length;
  await press('root-list','제거');
  assert.equal(calls.length,before,'remove asks before saving');
- assert.equal(focused?.textContent,'연결 해제','confirm button receives focus');
- assert($('root-list').textContent.includes('연결을 해제할까요?'));
- await press('root-list','취소');assert(!$('root-list').textContent.includes('연결을 해제할까요?'));
- await press('root-list','제거');await press('root-list','연결 해제');
+ assert.equal(focused?.textContent,'제거 확인','confirm button receives focus');
+ assert($('root-list').textContent.includes('제거할까요?'));
+ await press('root-list','취소');assert(!$('root-list').textContent.includes('제거할까요?'));
+ await press('root-list','제거');await press('root-list','제거 확인');
  same(calls.pop().body,{paths:['/tmp/b/Notes','/tmp/c/New']},'remove drops exactly one folder');
  assert($('roots-feedback').textContent.includes('파일은 그대로'),'removal says files are untouched');
  const blockedReason='인증 정보나 시스템 설정이 있는 폴더는 연결할 수 없습니다';
  ctx.renderRootList([{path:'/tmp/blocked-a',blocked:blockedReason},{path:'/tmp/blocked-b',blocked:blockedReason},{path:'/tmp/ordinary'}]);
- await press('root-list','제거');await press('root-list','연결 해제');
+ await press('root-list','제거');await press('root-list','제거 확인');
  same(calls.pop().body,{paths:['/tmp/blocked-b','/tmp/ordinary']},'removing one blocked root keeps the other blocked root in the request');
  ctx.renderRootList(['/tmp/b/Notes','/tmp/c/New']);
  $('root-path-input').value='/tmp/b/Notes/';const count=calls.length;
  await $('roots-form').onsubmit({preventDefault(){},submitter:new Element('button')});
  assert.equal(calls.length,count,'duplicate with trailing slash is not posted');
  let release;gate=new Promise(resolve=>release=resolve);
- await press('root-list','제거');const inflight=descendants($('root-list')).find(node=>node.textContent==='연결 해제');const pendingSave=inflight.onclick({currentTarget:inflight});
+ await press('root-list','제거');const inflight=descendants($('root-list')).find(node=>node.textContent==='제거 확인');const pendingSave=inflight.onclick({currentTarget:inflight});
  $('root-path-input').value='/tmp/d/Other';await $('roots-form').onsubmit({preventDefault(){},submitter:new Element('button')});
  const rootPosts=calls.filter(call=>call.path==='/api/files/roots');
  assert.equal(JSON.stringify(rootPosts[rootPosts.length-1].body),JSON.stringify({paths:['/tmp/c/New']}),'second save is refused while one is in flight');
@@ -253,7 +254,7 @@ const press=async(id,label)=>{const button=buttons(id).find(node=>node.textConte
  gate=null;release();await pendingSave;
  assert.equal(calls.filter(call=>call.path==='/api/files/roots').length,rootPosts.length,'no stale second POST after the first lands');
  ctx.renderRootList(['/tmp/c/New']);await press('root-list','제거');ctx.renderRootList([]);ctx.renderRootList(['/tmp/c/New']);
- assert(!$('root-list').textContent.includes('연결을 해제할까요?'),'stale pending removal is cleared when the folder disappears');
+ assert(!$('root-list').textContent.includes('제거할까요?'),'stale pending removal is cleared when the folder disappears');
 
  ctx.renderRootList([{path:'/tmp/ok'},{path:'/Users/me/.ssh',blocked:'인증 정보나 시스템 설정이 있는 폴더는 연결할 수 없습니다'}]);
  assert.equal(descendants($('root-list')).filter(node=>node.className==='settings-state attention'&&node.textContent==='사용 중지됨').length,1,'a stored folder the rules now forbid is disclosed, not hidden');

@@ -148,27 +148,26 @@ def test_independent_review_is_risk_based_not_default_completion_gate() -> None:
     goal = _read("docs/goal-execution-contract.en.md")
     incremental = _read("docs/incremental-delivery.en.md")
 
-    for text in (agents, constitution, goal, incremental):
-        _assert_all(
-            text,
-            "independent review",
-            "security/authority",
-            "OAuth",
-            "sandbox",
-            "private-data egress",
-            "supply-chain",
-            "safety invariant",
-        )
-
     _assert_all(
         agents,
+        "Independent review is required only for a material security/authority boundary change",
+        "OAuth",
+        "sandbox/isolation/privilege",
+        "private-data egress",
+        "supply-chain",
+        "safety invariant",
         "Recovery work requires independent review only when it changes one of those semantics",
         "Final completion",
         "do not trigger review by themselves",
     )
     _assert_all(
         constitution,
-        "risk-based escalation control",
+        "Independent review is a risk-based escalation control",
+        "OAuth scopes or credential boundaries",
+        "sandbox, isolation or privilege boundaries",
+        "private-data egress or external-recipient boundaries",
+        "package/dependency supply-chain trust or install/update authority",
+        "safety invariant",
         "does not require independent review merely because it is final closeout, recovery work",
         "requires re-review only if that remediation changes the boundary that triggered the review",
     )

@@ -10,7 +10,7 @@ Before planning or changing code, read and follow:
 - docs/development-constitution.en.md
 - the activated GitHub issue/spec/goal contract.
 
-The constitutional Reuse first: Adopt → Adapt → Build rule is mandatory. Perform and record the Existing Solutions Review before materially implementing or replacing commodity infrastructure. Prefer official/established implementations, then mature OSS behind a narrow AgentOS adapter, and Build only with documented justification.
+The constitutional Reuse first: Adopt → Adapt → Build rule is mandatory. Before non-trivial implementation that introduces or replaces a component, abstraction, integration, dependency, or framework, perform and record the Existing Solutions Review. Start with reusable repository components/adapters/utilities, then standard-library/platform facilities and official/reference implementations, then mature maintained OSS behind a narrow AgentOS adapter. Build only with documented evidence that those candidates cannot satisfy the contract.
 
 Never outsource AgentOS-owned owner state, Context/Memory authority, Grants/approvals, capability mediation, data/egress policy, Work/Event/Evidence, Artifact provenance, recovery, or revocation to a dependency.
 

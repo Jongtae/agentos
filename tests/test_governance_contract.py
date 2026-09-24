@@ -188,7 +188,7 @@ def test_following_the_bootstrap_selects_nothing_while_no_goal_is_active() -> No
     """
     import json
 
-    from personal_agent.delivery import DeliveryPlan
+    from scripts.dev.delivery import DeliveryPlan
 
     plan_path = ROOT / "delivery-plan.yaml"
     plan = json.loads(plan_path.read_text(encoding="utf-8"))

@@ -710,6 +710,7 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                     return self.reply(200,{'ok':True},cookie='agentos_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')
                 if path=='/api/openrouter/connect':return self.reply(200,service.connect_openrouter(body))
                 if path=='/api/subscription-engines/connect':return self.reply(200,service.connect_subscription_engine(body))
+                if path=='/api/ai-route':return self.reply(200,service.select_ai_route(body))
                 if path=='/api/openrouter/models':return self.reply(200,service.free_models())
                 if path=='/api/ollama/models':return self.reply(200,service.local_models())
                 if path=='/api/files/roots':return self.reply(200,service.save_roots(body))

@@ -686,6 +686,27 @@ class AgentService:
         return {'steps':steps, 'subscription_engine':selected, 'model_ready':model_ready,
                 'recovery':recovery}
 
+    def select_ai_route(self, body):
+        """Make one already-configured route the effective route for new Work.
+
+        Selecting is an explicit owner action: saving or testing a key never
+        switches routes, and a route that is not ready is refused while the
+        previous route stays active.  There is no automatic fallback.
+        """
+        if not isinstance(body,dict):raise ValueError('사용할 AI 연결을 선택하세요.')
+        route=body.get('route')
+        if route=='direct-api':
+            with self.lock:
+                if not self.store.config('model',{}).get('model'):
+                    raise ValueError('직접 API가 아직 설정되지 않았습니다. 현재 경로는 그대로 유지됩니다.')
+                if not self.model_ready():
+                    raise ValueError('직접 API 연결 확인을 먼저 통과해야 전환할 수 있습니다. 현재 경로는 그대로 유지됩니다.')
+                self.store.put('subscription_engine',{})
+            return self.subscription_engine_status()
+        if route in {engine['id'] for engine in self.subscription_engines.available()}:
+            return self.connect_subscription_engine({'engine':route,'officially_authenticated':body.get('officially_authenticated')})
+        raise ValueError('지원하는 AI 연결을 선택하세요.')
+
     def connect_subscription_engine(self, body):
         if not isinstance(body,dict):raise ValueError('연결 정보를 확인하세요.')
         record=self.subscription_engines.connect(body.get('engine',''),body.get('officially_authenticated'))
@@ -2121,9 +2142,12 @@ class AgentService:
                 elif decision.intent==INTENT_NOTE_LIST:
                     response='\n\n'.join(n['content'] for n in self.store.notes()) or '저장된 메모가 없습니다. /note 내용으로 기록해 보세요.'
                 else:
+                    # One route snapshot per Work: a later owner switch applies
+                    # to new Work and never redirects this request mid-turn.
                     with self.lock:
                         config=self.store.config('model',{})
                         key=self.store.secret('model_key')
+                        route_snapshot=self.store.config('subscription_engine',{})
                     stored_history=self.store.history()[-16:]
                     document_jobs=set(self.store.config('file_workspace_document_jobs',[]))
                     document_history=any(message.get('job_id') in document_jobs for message in stored_history)
@@ -2192,7 +2216,7 @@ class AgentService:
                             db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',(job['id'],tool,status,detail,time.time()))
                         if tool!='model':self.store.put('tool_run',{'job_id':job['id'],'tool':tool,'status':status,'detail':detail,'time':time.time()})
                     boundary=self.document_boundary(config)
-                    subscription=self.store.config('subscription_engine',{})
+                    subscription=route_snapshot
                     if document_history and (boundary['requires_approval'] or subscription.get('id')):
                         history=[{'role':message['role'],'content':message['content']} for message in stored_history if message.get('job_id') not in document_jobs]
                     original_record=record

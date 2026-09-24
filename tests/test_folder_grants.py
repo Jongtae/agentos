@@ -161,6 +161,33 @@ class FolderGrantTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, folder_grants.SENSITIVE):
             self.service.save_roots({'paths': [str(ssh)]})
 
+    def test_file_workspace_can_remove_blocked_references_incrementally(self):
+        ssh, aws = self.home / '.ssh', self.home / '.aws'
+        ssh.mkdir(); aws.mkdir()
+        files=FileWorkspace(self.store)
+        files.configure([str(self.docs)], str(self.out))
+        original=files.status()
+        blocked=[{'id':'ssh-ref','path':str(ssh)},{'id':'aws-ref','path':str(aws)}]
+        self.store.put('file_workspace',{**original,'references':original['references']+blocked})
+        other=self.home/'Documents'/'OtherResults'; other.mkdir()
+
+        state=files.configure([str(self.docs),str(aws)],str(other))
+        self.assertEqual([ref['path'] for ref in state['references']],[str(self.docs),str(aws)])
+        state=files.configure([str(self.docs)],str(other))
+        self.assertEqual([ref['path'] for ref in state['references']],[str(self.docs)])
+        self.assertEqual(state['workspace'],str(other))
+
+    def test_capabilities_rechecks_filesystem_after_roots_was_read(self):
+        moved=self.home/'Documents'/'Moved'; target=self.home/'Documents'/'Other'
+        moved.mkdir(); target.mkdir()
+        self.service.save_roots({'paths':[str(moved)]})
+        caps=Capabilities(self.store,None,{},'','job',lambda *args:None)
+        self.assertEqual([root['path'] for root in caps.roots()],[str(moved)])
+        moved.rmdir(); moved.symlink_to(target,target_is_directory=True)
+        self.assertEqual(caps.roots(),[])
+        with self.assertRaisesRegex(ValueError,'먼저 연결 설정'):
+            caps.resolve_file(self.store.config('file_roots')[0]['id'],'anything.txt')
+
     def test_searches_skip_blocked_folders_and_blocked_output_refuses_saves(self):
         ssh = self.home / '.ssh'
         ssh.mkdir()

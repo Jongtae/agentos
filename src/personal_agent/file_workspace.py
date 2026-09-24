@@ -12,13 +12,22 @@ class FileWorkspace:
 
     def configure(self, references, workspace):
         if not isinstance(references,list) or not references: raise ValueError('하나 이상의 참고 폴더를 연결하세요.')
-        refs=[]
+        refs=[]; usable=[]
+        previous={ref.get('path'):ref for ref in self.status().get('references',[]) if isinstance(ref,dict)}
         for value in references:
+            # Keep a previously stored blocked entry only when the owner leaves it
+            # unchanged. This lets the settings editor remove blocked entries one
+            # at a time while still validating every newly added folder.
+            old=previous.get(value) if isinstance(value,str) else None
+            if old and folder_grants.blocked(old.get('path',''),self.store):
+                if all(ref.get('path')!=old.get('path') for ref in refs): refs.append(old)
+                continue
             path=folder_grants.validate(value,self.store)
             if any(ref['path']==str(path) for ref in refs): continue
-            stat=path.stat(); refs.append({'id':hashlib.sha256(f'{stat.st_dev}:{stat.st_ino}'.encode()).hexdigest()[:24],'path':str(path)})
+            stat=path.stat(); ref={'id':hashlib.sha256(f'{stat.st_dev}:{stat.st_ino}'.encode()).hexdigest()[:24],'path':str(path)}
+            refs.append(ref); usable.append(ref)
         target=folder_grants.validate(workspace,self.store)
-        if any(target==Path(ref['path']) or target.is_relative_to(ref['path']) or Path(ref['path']).is_relative_to(target) for ref in refs): raise ValueError('참고 폴더와 관리 작업공간은 겹치지 않게 연결하세요.')
+        if any(target==Path(ref['path']) or target.is_relative_to(ref['path']) or Path(ref['path']).is_relative_to(target) for ref in usable): raise ValueError('참고 폴더와 관리 작업공간은 겹치지 않게 연결하세요.')
         target_stat=target.stat(); workspace_id=hashlib.sha256(f'{target_stat.st_dev}:{target_stat.st_ino}'.encode()).hexdigest()[:24]
         self.store.put('file_workspace',{'references':refs,'workspace':str(target),'workspace_id':workspace_id})
         self.store.put('document_sharing',{})

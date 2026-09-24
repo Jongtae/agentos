@@ -61,13 +61,15 @@ This process borrows the Constitution/Specify/Plan/Tasks/Implement/Converge disc
 
 The Development Constitution's **Reuse first: Adopt → Adapt → Build** principle applies to every contributor, including Claude Code, Codex, GitHub Copilot, Gemini, Cursor, Windsurf, other coding assistants, future tools, and humans. Tool-specific instruction files are compatibility entrypoints only. If a tool does not recognize one, that does not relax this repository contract.
 
-Before materially implementing or replacing commodity infrastructure, perform an **Existing Solutions Review**. This applies especially to protocols, SDK/client behavior, OAuth/auth flows, provider adapters, MCP/A2A or other protocol plumbing, HTTP/transports, parsers, schema validators, schedulers, storage/migration utilities, connector mechanics, sandbox helpers, and other general-purpose infrastructure.
+Before writing non-trivial implementation code that introduces or replaces a component, abstraction, integration, dependency, framework, or commodity infrastructure, perform an **Existing Solutions Review**. The review starts inside this repository: search for an existing AgentOS component, adapter, utility, seam, fixture, or pattern that can be reused or extended without violating its contract. Then check standard-library/platform facilities, relevant standards and official SDK/reference implementations, and mature maintained open-source frameworks/libraries. This applies especially to protocols, SDK/client behavior, OAuth/auth flows, provider adapters, MCP/A2A or other protocol plumbing, HTTP/transports, parsers, schema validators, schedulers, storage/migration utilities, connector mechanics, sandbox helpers, and other general-purpose infrastructure.
 
 The issue or implementation plan must record:
 
 - the exact problem/boundary that needs implementation;
+- existing internal repository components/adapters/utilities/patterns considered, with search evidence;
+- standard-library/platform facilities considered;
 - official SDKs/reference implementations/standards considered;
-- mature maintained open-source candidates considered;
+- mature maintained open-source/framework candidates considered;
 - maintenance status and release activity relevant to the required path;
 - security and supply-chain implications;
 - licence compatibility;
@@ -77,9 +79,11 @@ The issue or implementation plan must record:
 
 Decision order:
 
-1. **Adopt** the official or established implementation when it fits.
-2. **Adapt** a mature implementation behind a narrow AgentOS adapter when kernel policy must remain decoupled.
-3. **Build** only when the issue documents a concrete unsatisfied requirement.
+1. **Adopt** an existing AgentOS component, standard-library/platform facility, official SDK/reference implementation, or established implementation when it fits.
+2. **Adapt** a mature maintained external implementation behind a narrow AgentOS adapter when direct adoption would couple external semantics to kernel policy.
+3. **Build** only when the issue documents a concrete unsatisfied requirement after the internal and external search above.
+
+A pure bug fix or data/content change that introduces no new component, abstraction, integration, dependency, or framework may record the review as `N/A`, but it must state that concrete reason. Do not use `N/A` merely to skip the search.
 
 "Fewer dependencies", "simpler to write ourselves", implementation familiarity, or a coding agent's preference are not sufficient Build reasons. Conversely, reuse-first is not permission to add dependencies casually: every new dependency still needs licence/provenance/security/maintenance/compatibility review, and must not silently expand runtime authority, egress, secrets, or durable-state ownership.
 

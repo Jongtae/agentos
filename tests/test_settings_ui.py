@@ -95,8 +95,10 @@ def test_settings_uses_goal_oriented_owner_language():
     assert "파일 · 저장" in HTML
     assert "외부 연결" in HTML
     assert "내 기록" in HTML
-    assert "참고 폴더" in HTML
+    assert "AI가 찾아볼 폴더" in HTML
+    assert "정리 결과 만들기" in HTML
     assert "결과 저장 폴더" in HTML
+    assert "<textarea id=\"root-paths\"" not in HTML
     assert "프로젝트는 대화와 결과" in HTML
     assert "현재 상태를 먼저 확인" in HTML
 
@@ -173,6 +175,111 @@ def test_settings_renderers_preserve_polling_controls_and_truthful_route_state()
         return
     subprocess.run(
         [node, "-e", DOM_CHECKS, str(ROOT / "app.js")],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+
+FOLDER_CHECKS = r"""
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const app=fs.readFileSync(process.argv[1],'utf8'),ids=new Map();
+class Element {
+ constructor(tag){this.tag=tag;this.children=[];this.dataset={};this.attrs={};this.className='';this.hidden=false;this.value='';this._text='';this.listeners={};}
+ set id(value){this._id=value;ids.set(value,this);} get id(){return this._id;}
+ set textContent(value){this._text=String(value);this.children=[];} get textContent(){return this._text+this.children.map(node=>typeof node==='string'?node:node.textContent).join('');}
+ append(...nodes){this.children.push(...nodes);} replaceChildren(...nodes){this._text='';this.children=[];this.append(...nodes);}
+ setAttribute(key,value){this.attrs[key]=value;} addEventListener(type,fn){this.listeners[type]=fn;} focus(){focused=this.id;}
+ querySelector(selector){return descendants(this).find(node=>selector[0]==='.'?node.className.split(' ').includes(selector.slice(1)):node.tag===selector.split('[')[0])||null;}
+}
+let focused='';
+function descendants(node){return node.children.flatMap(child=>typeof child==='string'?[]:[child,...descendants(child)]);}
+for(const id of ['root-list','roots-feedback','root-path-input','roots-form','file-workspace-list','file-workspace-form','workspace-reference-list','workspace-reference-input','workspace-reference-add','file-workspace-path','file-workspace-feedback','file-workspace-cancel','document-boundary','document-boundary-feedback'])new Element('div').id=id;
+const $=id=>ids.get(id),document={getElementById:$,createElement:tag=>new Element(tag)};
+const part=(start,end)=>app.slice(app.indexOf(start),app.indexOf(end));
+const source=part('function element(', 'function focusSettingsTarget(')+part('let savedRoots=', 'function renderTelegram(');
+const calls=[];let refreshes=0,refuse=null,revisions=0;
+const ctx={document,$,console,invalidateRootsLoad:()=>revisions++,invalidateFileWorkspaceLoad:()=>revisions++,
+ api:async(path,body)=>{calls.push({path,body});if(refuse)throw new Error(refuse);if(path==='/api/files/roots')return {roots:body.paths.map(path=>({path}))};if(path==='/api/file-workspace')return {references:body.references.map(path=>({path})),workspace:body.workspace};return {};},
+ refresh:async()=>{refreshes++;},busy:async(button,fn)=>fn(),setError:(id,error)=>{$(id).textContent=error?.message||String(error||'');}};
+vm.createContext(ctx);vm.runInContext(source,ctx);
+const same=(actual,expected,message)=>assert.equal(JSON.stringify(actual),JSON.stringify(expected),message);
+const buttons=id=>descendants($(id)).filter(node=>node.tag==='button');
+const press=async(id,label)=>{const button=buttons(id).find(node=>node.textContent===label);assert(button,`${label} in ${id}`);await button.onclick({currentTarget:button});};
+(async()=>{
+ ctx.renderRootList([]);
+ assert($('root-list').textContent.includes('아직 연결한 폴더가 없습니다'),'empty AI folder list is explicit');
+ ctx.renderRootList(['/tmp/a/Research','/tmp/b/Notes']);
+ assert($('root-list').textContent.includes('Research'),'folder name is the row title');
+ assert($('root-list').textContent.includes('/tmp/a/Research'),'full path stays visible');
+ assert.equal(descendants($('root-list')).filter(node=>node.className==='settings-state neutral'&&node.textContent==='읽기 전용').length,2);
+ const first=buttons('root-list')[0];ctx.renderRootList(['/tmp/a/Research','/tmp/b/Notes']);
+ assert.equal(buttons('root-list')[0],first,'unchanged polling keeps row nodes');
+ $('root-path-input').value='  /tmp/c/New  ';
+ await $('roots-form').onsubmit({preventDefault(){},submitter:new Element('button')});
+ same(calls.pop(),{path:'/api/files/roots',body:{paths:['/tmp/a/Research','/tmp/b/Notes','/tmp/c/New']}},'add posts the full resulting list');
+ assert.equal($('root-path-input').value,'','accepted draft is cleared');
+ refuse='전체 홈이나 시스템 루트 대신 작업용 하위 폴더를 선택하세요.';
+ $('root-path-input').value='/Users/me';
+ await $('roots-form').onsubmit({preventDefault(){},submitter:new Element('button')});
+ assert.equal($('roots-feedback').textContent,refuse,'refusal shown next to the input');
+ assert.equal($('root-path-input').value,'/Users/me','refused draft is kept');
+ assert.equal(focused,'root-path-input');
+ refuse=null;const before=calls.length;
+ await press('root-list','제거');
+ assert.equal(calls.length,before,'remove asks before saving');
+ assert($('root-list').textContent.includes('연결을 해제할까요?'));
+ await press('root-list','취소');assert(!$('root-list').textContent.includes('연결을 해제할까요?'));
+ await press('root-list','제거');await press('root-list','연결 해제');
+ same(calls.pop().body,{paths:['/tmp/b/Notes','/tmp/c/New']},'remove drops exactly one folder');
+ assert($('roots-feedback').textContent.includes('파일은 그대로'),'removal says files are untouched');
+ $('root-path-input').value='/tmp/b/Notes';const count=calls.length;
+ await $('roots-form').onsubmit({preventDefault(){},submitter:new Element('button')});
+ assert.equal(calls.length,count,'duplicate is not posted');
+
+ ctx.renderFileWorkspace({references:[],workspace:null});
+ assert($('file-workspace-list').textContent.includes('설정하지 않음'));
+ assert.equal($('file-workspace-form').hidden,true,'edit form closed by default');
+ await press('file-workspace-list','설정');
+ assert.equal($('file-workspace-form').hidden,false);assert.equal($('file-workspace-list').hidden,true);
+ $('workspace-reference-input').value='/tmp/src/Meetings';ctx.addWorkspaceReference();
+ ctx.renderFileWorkspace({references:[{path:'/tmp/other'}],workspace:'/tmp/other-out'});
+ assert.equal($('file-workspace-form').hidden,false,'polling does not close an open edit');
+ assert($('workspace-reference-list').textContent.includes('Meetings'),'polling keeps the draft references');
+ assert($('workspace-reference-list').textContent.includes('저장 전'),'unsaved source is marked as not yet saved');
+ $('file-workspace-path').value='';
+ await $('file-workspace-form').onsubmit({preventDefault(){},submitter:new Element('button')});
+ assert.equal($('file-workspace-feedback').textContent,'결과 저장 폴더를 입력하세요.');
+ $('workspace-reference-input').value='/tmp/src/Typed';$('file-workspace-path').value='/tmp/out/Results';
+ await $('file-workspace-form').onsubmit({preventDefault(){},submitter:new Element('button')});
+ same(calls.pop(),{path:'/api/file-workspace',body:{references:['/tmp/src/Meetings','/tmp/src/Typed'],workspace:'/tmp/out/Results'}},'paired save includes a typed but unadded source');
+ assert.equal($('file-workspace-form').hidden,true);
+ assert($('file-workspace-list').textContent.includes('결과 저장 · 새 파일'));
+ assert($('file-workspace-list').textContent.includes('원본 · 읽기 전용'));
+ await press('file-workspace-list','폴더 변경');
+ refuse='참고 폴더와 관리 작업공간은 겹치지 않게 연결하세요.';$('file-workspace-path').value='/tmp/src/Meetings';
+ await $('file-workspace-form').onsubmit({preventDefault(){},submitter:new Element('button')});
+ assert.equal($('file-workspace-feedback').textContent,refuse);assert.equal($('file-workspace-form').hidden,false,'refused edit stays open');
+ refuse=null;$('file-workspace-cancel').onclick();assert.equal($('file-workspace-form').hidden,true);
+
+ ctx.renderDocumentBoundary({external_model:true,approved:false});
+ assert($('document-boundary').textContent.includes('승인 필요'));
+ await press('document-boundary','전송 승인');
+ same(calls.pop(),{path:'/api/documents/approval',body:{approved:true}});
+ ctx.renderDocumentBoundary({external_model:true,approved:true});assert($('document-boundary').textContent.includes('승인됨'));
+ ctx.renderDocumentBoundary({external_model:false});assert($('document-boundary').textContent.includes('보내지 않음'));
+ console.log('folder settings DOM checks passed');
+})().catch(error=>{console.error(error);process.exit(1);});
+"""
+
+
+def test_folder_settings_render_rows_and_preserve_drafts():
+    node = shutil.which("node")
+    if node is None:
+        return
+    subprocess.run(
+        [node, "-e", FOLDER_CHECKS, str(ROOT / "app.js")],
         check=True,
         capture_output=True,
         text=True,

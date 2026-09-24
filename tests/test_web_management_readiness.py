@@ -238,10 +238,10 @@ console.log(JSON.stringify({checks:40}));
         self.assertIn('if(refreshQueued){refreshQueued=false;void refresh();}', app)
         self.assertGreaterEqual(app.count('invalidateModelLoad()'), 4)
         hydration = app[app.index('if(!modelLoaded){if(requestedModelRevision'):app.index("$('task-refresh-state').textContent='방금 확인'")]
-        self.assertNotIn("$('root-paths').value", hydration.split('if(!rootsLoaded&&')[0])
-        self.assertIn("$('root-paths').value", hydration.split('if(!rootsLoaded&&')[1])
-        self.assertIn('rootsLoaded=false', app)
-        self.assertIn('fileWorkspaceLoaded=false', app)
+        for draft in ('root-path-input', 'workspace-reference-input', 'file-workspace-path'):
+            self.assertNotIn(f"$('{draft}').value", hydration)
+        self.assertIn('if(requestedRootsRevision===rootsLoadRevision)renderRootList(', hydration)
+        self.assertIn('if(requestedFileWorkspaceRevision===fileWorkspaceLoadRevision)renderFileWorkspace(', hydration)
         self.assertIn('requestedRootsRevision===rootsLoadRevision', app)
         self.assertIn('requestedFileWorkspaceRevision===fileWorkspaceLoadRevision', app)
         self.assertIn('shouldInvalidateWorkspaceDetailForDeletion(item,selectedWorkspaceId)', app)

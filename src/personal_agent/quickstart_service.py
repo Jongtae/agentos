@@ -438,9 +438,39 @@ class AgentService:
                 return False,'이전 요청의 외부 결과가 불확실해 자동으로 다시 실행하지 않았습니다. 먼저 실제 결과를 확인해 주세요.'
         return True,None
 
-    def record_continuity(self, job_id, previous_id, relation, *, executed=False, reason=None):
+    def canonical_retry_source(self, previous):
+        """Return the original Work request behind a retry chain.
+
+        The semantic DecisionEngine decides *that* the latest owner turn is a
+        retry. From there, following already-recorded Work relations is a
+        deterministic integrity operation, not another semantic judgment.
+        Each retry still links to the immediately previous Work for
+        attribution, while execution reuses the oldest canonical request so a
+        second "retry that" can never replay the first follow-up phrase.
+        """
+        current=previous
+        seen=set()
+        for _ in range(32):
+            work_id=current.get('id')
+            if not isinstance(work_id,str) or work_id in seen:
+                return None
+            seen.add(work_id)
+            if current.get('relation_kind')!='retry':
+                return current
+            parent_id=current.get('related_job_id')
+            if not isinstance(parent_id,str):
+                return None
+            parent=self.store.job(parent_id)
+            if not parent:
+                return None
+            current=parent
+        return None
+
+    def record_continuity(self, job_id, previous_id, relation, *, executed=False, reason=None, source_work_id=None):
         self.store.link_work_relation(job_id,previous_id,relation)
         detail={'relation':relation,'related_work_id':previous_id,'executed':bool(executed)}
+        if source_work_id and source_work_id!=previous_id:
+            detail['source_work_id']=source_work_id
         if reason:detail['reason']=reason
         with self.store.db() as db:
             db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
@@ -2096,11 +2126,16 @@ class AgentService:
                     relation,previous=continuity['relation'],continuity['previous']
                     if relation==FOLLOWUP_RETRY:
                         allowed,reason=self.safe_retry(previous)
+                        source=self.canonical_retry_source(previous) if allowed else None
+                        if allowed and not source:
+                            allowed=False
+                            reason='이전 요청의 재시도 연결 기록을 확인할 수 없어 자동으로 다시 실행하지 않았습니다.'
                         self.record_continuity(job['id'],previous['id'],relation,
-                                               executed=allowed,reason=reason)
+                                               executed=allowed,reason=reason,
+                                               source_work_id=source['id'] if source else None)
                         if not allowed:
                             return self.complete_continuity_turn(job,reason)
-                        prompt=previous['message'].strip()
+                        prompt=source['message'].strip()
                     elif relation==FOLLOWUP_CANCEL:
                         cancelled,response=self.cancel_focused_work(previous,connector_owner)
                         self.record_continuity(job['id'],previous['id'],relation,

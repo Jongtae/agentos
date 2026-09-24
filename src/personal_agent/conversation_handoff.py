@@ -252,6 +252,11 @@ _CORRECTION_CUES = ('아니', '아니라', '그게 아니라', '말고', '대신
 _CONTINUATION_CUES = ('계속', '이어서', '계속해', '더 해줘', '그대로',
                       'continue', 'go on', 'keep going', 'same thing', 'carry on')
 
+# Privacy/latency prefilter only: these cues decide only whether AgentOS asks
+# the semantic continuity question. They never select or authorize a relation.
+_FOLLOWUP_HINTS = ('다시', '그거', '그걸', '그건', '그 요청', '방금', '아까', '취소',
+                   'retry', 'again', 'that', 'it', 'cancel', 'previous', 'last request')
+
 
 def _cue_hits(text, lowered, cues):
     """Return the literal cues present in one utterance, in table order."""
@@ -263,6 +268,17 @@ def _cue_hits(text, lowered, cues):
         elif cue in text:
             hits.append(cue)
     return hits
+
+
+def looks_like_followup(text):
+    """Whether a short utterance is worth a bounded continuity judgment."""
+    if not isinstance(text, str):
+        return False
+    value = text.strip()
+    if not value or len(value) > 240:
+        return False
+    lowered = value.casefold()
+    return bool(_cue_hits(value, lowered, (*_FOLLOWUP_HINTS, *_CORRECTION_CUES, *_CONTINUATION_CUES)))
 
 
 def _trim_particle(token):
@@ -304,6 +320,20 @@ JUDGMENT_UNAVAILABLE = 'unavailable'
 JUDGMENT_YES = 'yes'
 JUDGMENT_NO = 'no'
 
+FOLLOWUP_RETRY = 'retry'
+FOLLOWUP_REFERENCE = 'reference'
+FOLLOWUP_CANCEL = 'cancel'
+FOLLOWUP_CORRECTION = 'correction'
+FOLLOWUP_RELATIONS = (FOLLOWUP_RETRY, FOLLOWUP_REFERENCE, FOLLOWUP_CANCEL, FOLLOWUP_CORRECTION)
+FOLLOWUP_QUESTION = (
+    'Classify only how the owner latest message relates to the immediately previous Work. '
+    'Choose retry only when they ask to run that previous request again; reference when they '
+    'refer to its result/context without repeating it; cancel when they ask to stop or withdraw '
+    'that previous Work; correction when they replace or correct its parameters. Choose '
+    'none-of-these for a new topic, an unrelated request, or when the relation is unclear. '
+    'This judgment does not authorize any action.'
+)
+
 WITHDRAWAL_PROPOSITION = ('The owner\'s latest message withdraws or cancels the request that is waiting for '
                           'the listed connection (rather than acknowledging it, changing topic, or asking '
                           'something unrelated).')
@@ -330,11 +360,10 @@ class Judgment:
 
 
 class ConversationJudgments:
-    """The conversation's two semantic questions, asked over minimal context.
+    """The conversation's bounded semantic questions, asked over minimal context.
 
-    Builds a ``DecisionContext`` from the current utterance and non-content
-    facts only, asks the engine, and applies ``DecisionPolicy``.  Swapping
-    the engine (model, fixture, unavailable) changes nothing here.
+    Builds a ``DecisionContext``, asks the engine, and applies
+    ``DecisionPolicy``. Swapping the engine changes no authority semantics.
     """
 
     def __init__(self, engine=None, policy=None):
@@ -362,6 +391,27 @@ class ConversationJudgments:
         choice = self.policy.selection(decision)
         if choice is not None:
             return Judgment(JUDGMENT_YES, value=choice, source=decision.confidence.provider or decision.outcome)
+        if self.policy.confident_selection(decision):
+            return Judgment(JUDGMENT_NO, source=decision.confidence.provider or decision.outcome)
+        return Judgment(JUDGMENT_UNAVAILABLE, source=decision.outcome)
+
+    def followup_relation(self, utterance, previous_intent, previous_status):
+        """Classify one short anaphoric turn against one focused Work.
+
+        Previous request/result content is deliberately absent. The engine
+        sees only the current short utterance plus prior intent/status; the
+        selected relation still passes deterministic execution gates later.
+        """
+        context = DecisionContext('conversation-followup', {
+            'owner_message': utterance,
+            'previous_intent': previous_intent or '',
+            'previous_status': previous_status or '',
+        })
+        decision = self.engine.choose(context, FOLLOWUP_RELATIONS, FOLLOWUP_QUESTION)
+        choice = self.policy.selection(decision)
+        if choice is not None:
+            return Judgment(JUDGMENT_YES, value=choice,
+                            source=decision.confidence.provider or decision.outcome)
         if self.policy.confident_selection(decision):
             return Judgment(JUDGMENT_NO, source=decision.confidence.provider or decision.outcome)
         return Judgment(JUDGMENT_UNAVAILABLE, source=decision.outcome)
@@ -404,26 +454,37 @@ class IntentDecision:
 
 
 class ConversationFocus:
-    """Content-free record of what the one conversation is currently about.
+    """Content-free short-horizon pointer to the current conversation Work.
 
-    Only the decided intent and a timestamp are persisted.  The utterance,
-    its subject and any extracted argument stay out of durable state, so a
-    pasted secret or document excerpt is never written here.
+    The utterance, subject, result text and tool payloads never live here. A
+    Work id only points at the canonical Work that already owns the request.
     """
 
     KEY = 'conversation_focus'
+    TTL_SECONDS = 60 * 60
 
     def __init__(self, store, now=time.time):
         self.store, self.now = store, now
 
     def current(self):
         row = self.store.config(self.KEY, {})
-        return row if isinstance(row, dict) else {}
+        if not isinstance(row, dict):
+            return {}
+        at = row.get('at')
+        if not isinstance(at, (int, float)) or isinstance(at, bool) or self.now() - at > self.TTL_SECONDS:
+            return {}
+        work_id = row.get('work_id')
+        if work_id is not None and (not isinstance(work_id, str) or not self.store.job(work_id)):
+            return {key: row[key] for key in ('intent', 'at') if key in row}
+        return row
 
-    def record(self, decision):
+    def record(self, decision, work_id=None):
         if decision.intent == INTENT_AMBIGUOUS:
             return
-        self.store.put(self.KEY, {'intent': decision.intent, 'at': self.now()})
+        row = {'intent': decision.intent, 'at': self.now()}
+        if isinstance(work_id, str) and work_id:
+            row['work_id'] = work_id
+        self.store.put(self.KEY, row)
 
     def clear(self):
         self.store.put(self.KEY, {})

@@ -376,6 +376,8 @@ class ConversationJudgments:
     def unsupported_capability(self, utterance):
         """Does ``utterance`` ask for a declared-but-unavailable capability?
         ``value`` is its key on yes; a confident none-of-these is no."""
+        # `utterance` is a minimized cue summary assembled by IntentClassifier,
+        # never the owner's raw mail query or surrounding private text.
         context = DecisionContext('unsupported-capability', {'owner_message': utterance})
         decision = self.engine.choose(context, tuple(UNSUPPORTED_CAPABILITIES), UNSUPPORTED_QUESTION)
         choice = self.policy.selection(decision)
@@ -671,23 +673,6 @@ class IntentClassifier:
             explicit.supersedes_previous = bool(focus_intent) and focus_intent != explicit.intent
             return self._with_suggestion(explicit, (), model_suggestion)
 
-        # Restrict semantic boundary judgment to mail-shaped requests. The
-        # DecisionEngine may be remote, so local-only turns (notes, settings,
-        # ordinary conversation) must never be sent to it. A reply/send verb
-        # still qualifies even when it is not a supported mailbox-read cue.
-        mail_objects = _cue_hits(text, lowered, _MAIL_OBJECTS)
-        mail_verbs = _cue_hits(text, lowered, _MAIL_VERBS)
-        mail_action = _cue_hits(text, lowered, ('답장', '회신', '보내', '전송', 'reply', 'send'))
-        unsupported = (self._judge.unsupported_capability(text)
-                       if mail_objects and (mail_verbs or mail_action)
-                       else Judgment(JUDGMENT_NO, source='local-prefilter'))
-        if unsupported.outcome == JUDGMENT_YES:
-            return self._with_suggestion(
-                IntentDecision(INTENT_UNSUPPORTED, AUTHORITY_RULE, argument=unsupported.value,
-                               cues=('judgment:unsupported-capability',),
-                               clarification=UNSUPPORTED_CAPABILITY_TEXT[unsupported.value]),
-                (), model_suggestion)
-
         correction = _cue_hits(text, lowered, _CORRECTION_CUES)
         candidates = []
         for rule in (self._rule_recommendation, self._rule_knowledge, self._rule_settings,
@@ -696,6 +681,26 @@ class IntentClassifier:
             found = rule(text, lowered)
             if found is not None:
                 candidates.append(found)
+
+        # Restrict semantic boundary judgment to mail-shaped requests that
+        # are not already recognized as local work. The DecisionEngine may be
+        # remote, so local-only turns (notes, settings, ordinary conversation)
+        # must never be sent to it. A reply/send verb still qualifies even
+        # when it is not a supported mailbox-read cue.
+        mail_objects = _cue_hits(text, lowered, _MAIL_OBJECTS)
+        mail_verbs = _cue_hits(text, lowered, _MAIL_VERBS)
+        mail_action = _cue_hits(text, lowered, ('답장', '회신', '보내', '전송', 'reply', 'send'))
+        cue_summary = ' '.join(dict.fromkeys((*mail_objects, *mail_verbs, *mail_action)))
+        local_only = bool(candidates) and all(candidate.intent != INTENT_MAIL_SEARCH for candidate in candidates)
+        unsupported = (self._judge.unsupported_capability(cue_summary)
+                       if mail_objects and (mail_verbs or mail_action) and not local_only
+                       else Judgment(JUDGMENT_NO, source='local-prefilter'))
+        if unsupported.outcome == JUDGMENT_YES:
+            return self._with_suggestion(
+                IntentDecision(INTENT_UNSUPPORTED, AUTHORITY_RULE, argument=unsupported.value,
+                               cues=('judgment:unsupported-capability',),
+                               clarification=UNSUPPORTED_CAPABILITY_TEXT[unsupported.value]),
+                (), model_suggestion)
 
         # Mail search reads private metadata. If the semantic boundary check
         # could not distinguish a search from an unsupported read/send request,

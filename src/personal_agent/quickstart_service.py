@@ -1195,10 +1195,10 @@ class AgentService:
                 if not current or current['status'] not in ('queued','running'):
                     continue
                 self.create_task_card(row['id'],row['message'],row['chat_id'],state=current['status'])
-                if self.store.task_card(row['id']):
+                card=self.store.task_card(row['id'])
+                if card and card['message_id']>0:
                     acknowledged.append(row['id'])
                     current=self.store.job(row['id'])
-                    card=self.store.task_card(row['id'])
                     if current and card and current['status']!=card['state']:
                         self.update_task_card(current,current['status'])
         return acknowledged
@@ -1739,22 +1739,27 @@ class AgentService:
         # unknown Telegram response could create a second card for one request.
         reserved_state=self.store.reserve_task_card(job_id,chat_id)
         if not reserved_state:return
-        saved=False
         try:
             result=self.telegram.send_message(chat_id,self.task_card_text(message,reserved_state),
                                               self.task_card_markup(job_id,reserved_state))
             message_id=result.get('message_id') if isinstance(result,dict) else None
             if isinstance(message_id,int):
                 self.store.save_task_card(job_id,chat_id,message_id,reserved_state)
-                saved=True
         except ProviderError:
-            pass
-        finally:
-            if not saved:self.store.release_task_card_reservation(job_id)
+            # A timeout or lost response does not prove Telegram rejected the
+            # message. Keep the reservation as unknown so polling cannot send
+            # a duplicate acknowledgement; queued work may still proceed.
+            self.store.mark_task_card_delivery_unknown(job_id)
+        except Exception:
+            self.store.mark_task_card_delivery_unknown(job_id)
+            raise
+        else:
+            if not isinstance(message_id,int):
+                self.store.mark_task_card_delivery_unknown(job_id)
 
     def update_task_card(self, job, state):
         card=self.store.task_card(job['id'])
-        if not card or card['state']==state:return
+        if not card or card['message_id']<1 or card['state']==state:return
         markup=self.task_card_markup(job['id'],state)
         try:
             self.telegram.edit_message_text(card['chat_id'],card['message_id'],
@@ -1968,7 +1973,7 @@ class AgentService:
         with self.worker_lock:
             with self.store.db() as db:
                 db.execute('BEGIN IMMEDIATE')
-                row=db.execute("SELECT j.* FROM jobs j WHERE j.status='queued' AND (NOT EXISTS (SELECT 1 FROM telegram_task_cards c WHERE c.job_id=j.id) OR EXISTS (SELECT 1 FROM telegram_task_cards c WHERE c.job_id=j.id AND c.created<=?)) ORDER BY j.created LIMIT 1",(time.time()-TELEGRAM_CARD_GRACE_SECONDS,)).fetchone()
+                row=db.execute("SELECT j.* FROM jobs j WHERE j.status='queued' AND (NOT EXISTS (SELECT 1 FROM telegram_task_cards c WHERE c.job_id=j.id) OR EXISTS (SELECT 1 FROM telegram_task_cards c WHERE c.job_id=j.id AND c.message_id!=-1 AND (c.message_id=-2 OR c.created<=?))) ORDER BY j.created LIMIT 1",(time.time()-TELEGRAM_CARD_GRACE_SECONDS,)).fetchone()
                 if not row:return False
                 job=dict(row)
                 db.execute("UPDATE jobs SET status='running' WHERE id=?",(job['id'],))

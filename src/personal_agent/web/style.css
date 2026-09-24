@@ -436,3 +436,4 @@ details.technical details>summary{color:var(--muted)}
 .language-picker select{min-height:30px;padding:2px 28px 2px 8px;font-size:var(--fs-1);background-color:transparent;border-color:var(--line-strong);width:auto}
 .auth-panel .language-picker{justify-self:end}
 @media(max-width:620px){.rail-foot .language-picker select{max-width:110px}}
+.offline .turn .badge.run,.offline .turn.agent.run .turn-body{opacity:.6}

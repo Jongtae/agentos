@@ -246,3 +246,19 @@ choice of Korean, Simplified Chinese and Japanese.
 - **Guards.** `tests/test_ui_quality.py` fails if any UI string lacks an
   English, Chinese or Japanese entry, if a translation drops a `{placeholder}`,
   or if English output contains Korean.
+
+## 12. Second independent review (PR #563) and what changed
+
+A second reviewer, independent of the implementation, reviewed the full PR head.
+It confirmed the hard boundaries and invariants held and requested changes for
+one merge conflict and four majors. All are fixed, and each fix has a
+regression test in `tests/test_ui_quality.py` (`ReviewRegressions`).
+
+| Finding | Fix |
+| --- | --- |
+| `delivery-plan.yaml` conflicted with GOV-REVIEW-01 on main | Rebased; main's concurrency rule is kept and only the #558 entry is re-added |
+| The runtime badge said "Ready" (green) with no AI connected | "Ready" only when `home.model_connected`; otherwise "AI not connected". An unknown state is shown as unknown, never green |
+| "Allowed (this session)" was not tied to the model the policy covers | The row shows "Allowed" only while the current model (provider, endpoint, model) equals the one approved, matching the backend's model-scoped policy |
+| An open disclosure rebuilt the trace every poll and dropped text selection | Open state is no longer part of the render fingerprint, and a toggle fills its own content. A browser probe measured 0 rebuilds in 6.5 s with disclosures open (27 before), and the selection survived |
+| The Japanese removal confirm read "confirm deletion" | 「外すことを確定」, the same verb as the first step |
+| Minor: "Answered" without an answer; closing line on waiting Works; cancelled badge and body in two tones; Korean artifact kind in English; settings dot during an in-place confirm; trailing punctuation inside bare links; running badges while offline | All fixed; running badges are dimmed while offline |

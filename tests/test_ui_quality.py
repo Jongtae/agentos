@@ -167,7 +167,7 @@ class ConversationTrace(unittest.TestCase):
         out = node_run(r"""
 const assert=require('node:assert/strict');const ui=require(process.argv[1]);ui.setLanguage('ko');
 const events=[{id:1,tool:'subscription_engine',status:'running',created:10,summary:'s'},{id:2,tool:'web_search',status:'succeeded',created:11,summary:'s'},{id:3,tool:'subscription_engine',status:'succeeded',created:12,summary:'s'}];
-const done=ui.semanticTrace({status:'succeeded',status_kind:'finished',observed_at:13,events:[events[0],{...events[0],id:4,status:'succeeded',created:12}]});
+const done=ui.semanticTrace({status:'succeeded',status_kind:'finished',response:'answer',observed_at:13,events:[events[0],{...events[0],id:4,status:'succeeded',created:12}]});
 assert.deepEqual(done.map(r=>r.text),['구독 CLI 실행 완료','답변'],'running->succeeded of one tool collapses to one line');
 assert.deepEqual(done[0].eventIds,[1,4]);
 const mixed=ui.semanticTrace({status:'succeeded',status_kind:'finished',observed_at:13,events});
@@ -257,6 +257,43 @@ assert.equal(ui.setLanguage('xx'),'en','an unknown choice falls back to English'
 console.log(JSON.stringify({ok:true}));
 """)
         self.assertEqual(json.loads(out.strip().splitlines()[-1]), {"ok": True})
+
+
+class ReviewRegressions(unittest.TestCase):
+    """Findings from the independent review of PR #563."""
+
+    def test_ready_badge_requires_a_connected_ai_and_unknown_state_is_not_green(self):
+        self.assertIn("home.state==='ready'?(home.model_connected?['준비됨','ok']:['AI 연결 안 됨','attention']):['상태 알 수 없음','unknown']", APP)
+
+    def test_sharing_policy_allowed_only_for_the_model_it_was_approved_for(self):
+        self.assertIn("contextPolicyApprovedFor===contextPolicyModelKey()", APP)
+        self.assertIn("contextPolicyApprovedFor=contextPolicyModelKey()", APP)
+        self.assertNotIn("contextPolicyApprovedThisSession", APP)
+
+    def test_closing_line_never_claims_an_answer_that_was_not_given(self):
+        out = node_run(r"""
+const assert=require('node:assert/strict');const ui=require(process.argv[1]);
+assert.deepEqual(ui.semanticTrace({status:'succeeded',status_kind:'finished',observed_at:2,events:[]}).map(r=>r.text),['Done'],'no response means Done, not Answered');
+assert.deepEqual(ui.semanticTrace({status:'succeeded',status_kind:'finished',response:'x',observed_at:2,events:[]}).map(r=>r.text),['Answered']);
+assert.deepEqual(ui.semanticTrace({status:'awaiting_connection',status_kind:'attention',waits:['연결 대기'],observed_at:2,events:[]}),[],'a waiting Work gets no closing line');
+assert.equal(ui.outcomeTone({status:'cancelled'},ui.taskOutcome({status:'cancelled'})),ui.taskTone({status:'cancelled',status_kind:'finished'}),'badge and body share one tone');
+const blocks=ui.parseRichText('see https://example.invalid/x.');
+assert.deepEqual(blocks[0].lines[0].map(p=>[p.type,p.text]),[['text','see '],['link','https://example.invalid/x'],['text','.']]);
+console.log(JSON.stringify({ok:true}));
+""")
+        self.assertEqual(json.loads(out.strip().splitlines()[-1]), {"ok": True})
+
+    def test_japanese_removal_confirm_does_not_say_delete(self):
+        catalog = json.loads(node_run("process.stdout.write(JSON.stringify(require(process.argv[1]).I18N))"))
+        self.assertNotIn("削除", catalog["ja"]["제거 확인"])
+        self.assertIn("外す", catalog["ja"]["제거 확인"])
+
+    def test_open_disclosures_do_not_rebuild_the_trace(self):
+        render = APP[APP.index("function renderTasks(){"):APP.index("function recordKey(item){")]
+        self.assertIn("const fingerprint=JSON.stringify([ordered]);", render)
+        disclosure = APP[APP.index("function traceDisclosure("):APP.index("function renderTasks(){")]
+        self.assertIn("if(box.open===openSet.has(task.id))return;", disclosure)
+        self.assertNotIn("taskRenderFingerprint=''", disclosure)
 
 
 if __name__ == "__main__":

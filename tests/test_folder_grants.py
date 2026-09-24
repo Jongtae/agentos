@@ -57,6 +57,13 @@ class FolderGrantTests(unittest.TestCase):
         link.symlink_to(target,target_is_directory=True)
         self.refuse_both(str(self.home/'Documents'),folder_grants.SENSITIVE)
 
+    def test_sensitive_symlink_loop_does_not_break_other_grant_checks(self):
+        loop=self.home/'.aws'
+        loop.symlink_to(loop)
+        self.assertIsNone(folder_grants.blocked(str(self.docs),self.store))
+        self.assertEqual(folder_grants.blocked(str(loop),self.store),folder_grants.SYMLINK_CHANGED)
+        self.assertEqual(folder_grants.validate(str(self.docs),self.store),self.docs)
+
     def test_system_configuration_folder_is_refused(self):
         etc = Path('/etc').resolve()
         if not etc.is_dir():

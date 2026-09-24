@@ -346,6 +346,65 @@ class BlockedTurnTests(ProjectionTestCase):
         self.assertIn('모델 또는 구독 엔진', self.store.job(job_id)['error'])
 
 
+
+class ContinuityTests(ProjectionTestCase):
+    """#511: semantic follow-up judgment + deterministic replay safety."""
+
+    def retry_engine(self):
+        engine = FixtureDecisionEngine(choose=lambda context, candidates, question: SelectionDecision(
+            OUTCOME_DECIDED, FOLLOWUP_RETRY, candidates, fixture_confidence())
+            if context.purpose == 'conversation-followup' else None)
+        self.service.use_decision_engine(engine)
+        return engine
+
+    def test_decision_engine_retry_replays_the_failed_work_once(self):
+        first, first_bubbles = self.turn('원래 요청을 처리해줘')
+        self.assertEqual(first['status'], 'failed')
+        self.connect_model()
+        engine = self.retry_engine()
+        self.text = '원래 요청을 다시 처리한 결과입니다.'
+
+        retried, bubbles = self.turn('자 다시 되니?')
+
+        self.assertEqual(retried['status'], 'succeeded', retried.get('error'))
+        self.assertEqual(retried['relation_kind'], 'retry')
+        self.assertEqual(retried['related_job_id'], first['id'])
+        self.assertEqual(bubbles, [('send', self.text)])
+        followup = [asked for asked in engine.asked if asked[1].purpose == 'conversation-followup']
+        self.assertEqual(len(followup), 1)
+        self.assertEqual(followup[0][1].facts['owner_message'], '자 다시 되니?')
+        self.assertNotIn('원래 요청을 처리해줘', repr(followup[0][1].facts))
+        event = next(item for item in self.store.task_events(retried['id'])
+                     if item['tool'] == 'conversation_continuity')
+        self.assertTrue(event['trace']['executed'])
+        self.assertEqual(event['trace']['relation'], 'retry')
+        self.assertOneVoice(first_bubbles + bubbles)
+
+    def test_retry_judgment_cannot_replay_unknown_external_effect(self):
+        first, _ = self.turn('원래 요청을 처리해줘')
+        self.assertEqual(first['status'], 'failed')
+        with self.store.db() as db:
+            db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                       (first['id'], 'calendar_draft_create', 'failed',
+                        json.dumps({'effect':'unknown','state':'outcome-unknown'}), time.time()))
+        self.connect_model()
+        self.retry_engine()
+        self.text = '이 문장은 실행되면 안 됩니다.'
+
+        retried, bubbles = self.turn('그거 다시 해줘')
+
+        self.assertEqual(retried['status'], 'succeeded')
+        self.assertEqual(retried['relation_kind'], 'retry')
+        self.assertEqual(retried['related_job_id'], first['id'])
+        self.assertEqual(len(bubbles), 1)
+        self.assertIn('외부 결과가 불확실', bubbles[0][1])
+        self.assertNotIn(self.text, bubbles[0][1])
+        event = next(item for item in self.store.task_events(retried['id'])
+                     if item['tool'] == 'conversation_continuity')
+        self.assertFalse(event['trace']['executed'])
+        self.assertIn('외부 결과가 불확실', event['trace']['reason'])
+
+
 class UnsupportedCapabilityTests(ProjectionTestCase):
     """#478: a request for something not offered is understood, not searched."""
 

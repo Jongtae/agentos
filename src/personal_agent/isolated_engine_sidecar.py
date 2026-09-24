@@ -105,8 +105,7 @@ class IsolatedEngineSidecar:
                 "personal_agent.isolated_engine_mcp_bridge",
                 "--callback",
                 self.callback_url,
-                "--token",
-                token,
+                f"--token={token}",
                 "--task-id",
                 task_id,
             ]
@@ -151,7 +150,18 @@ class IsolatedEngineSidecar:
             except (OSError, subprocess.TimeoutExpired) as exc:
                 raise SidecarError("engine execution failed") from exc
             if completed.returncode != 0:
-                raise SidecarError("engine execution failed")
+                diagnostic = " ".join((completed.stderr or "").split()).lower()
+                if "--token" in diagnostic and "expected one argument" in diagnostic:
+                    reason = "MCP bridge argument parsing failed"
+                elif diagnostic.startswith("usage:") and any(marker in diagnostic for marker in (
+                    "unrecognized arguments:",
+                    "expected one argument",
+                    "the following arguments are required:",
+                )):
+                    reason = "engine command-line invocation failed"
+                else:
+                    reason = f"engine process exited with status {completed.returncode}"
+                raise SidecarError(f"engine execution failed: {reason}")
             return self._result(completed.stdout)
 
 

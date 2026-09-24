@@ -29,8 +29,12 @@ class _FixtureHandler(BaseHTTPRequestHandler):
         if prompt == "timeout":
             time.sleep(0.15)
         if prompt == "bad-status":
-            self.send_response(502)
+            raw = json.dumps({"error": "engine execution failed: engine process exited with status 3"}).encode()
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
             self.end_headers()
+            self.wfile.write(raw)
             return
         if prompt == "bad-contract":
             response = {"result": "ignored", "store_path": "/state/data"}
@@ -128,14 +132,46 @@ class IsolatedEngineGatewayTests(unittest.TestCase):
             gateway.execute(prompt="retry", engine_id="codex", token=bad_contract)
 
         bad_status = gateway.issue_task_token(prompt="bad-status", engine_id="codex")
-        with self.assertRaises(InvalidEngineResponse):
+        with self.assertRaises(InvalidEngineResponse) as caught:
             gateway.execute(prompt="bad-status", engine_id="codex", token=bad_status)
+        self.assertIn("status 3", str(caught.exception))
 
         timed_out = gateway.issue_task_token(prompt="timeout", engine_id="codex")
         with self.assertRaises(EngineGatewayError):
             gateway.execute(prompt="timeout", engine_id="codex", token=timed_out)
         with self.assertRaises(InvalidCapability):
             gateway.execute(prompt="retry", engine_id="codex", token=timed_out)
+
+    def test_worker_error_detail_is_redacted_before_surface(self):
+        class SecretHandler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers["Content-Length"])
+                self.rfile.read(length)
+                raw = json.dumps({"error": "engine failed --token=SECRET /Users/alice/private"}).encode()
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+            def log_message(self, _format, *_args):
+                pass
+
+        server = _FixtureServer(("127.0.0.1", 0), SecretHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            host, port = server.server_address
+            gateway = IsolatedEngineGateway(f"http://{host}:{port}/execute")
+            token = gateway.issue_task_token(prompt="task", engine_id="codex")
+            with self.assertRaises(InvalidEngineResponse) as caught:
+                gateway.execute(prompt="task", engine_id="codex", token=token)
+            message = str(caught.exception)
+            self.assertNotIn("SECRET", message)
+            self.assertNotIn("/Users/alice", message)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=1)
 
 
 if __name__ == "__main__":

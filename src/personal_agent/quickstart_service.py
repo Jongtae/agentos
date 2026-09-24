@@ -545,33 +545,51 @@ class AgentService:
         if trace.get('evidence'):summary='근거를 확인했습니다.'
         return {'id':event['id'],'job_id':event['job_id'],'tool':event['tool'],'status':status,'created':event['created'],'summary':summary,'details':safe}
 
-    def _observed_route(self, job, events):
+    def _observed_route(self, job, events, model_events):
         """The route this Work actually attempted, from its own recorded events.
 
         Current settings are never substituted: a later route switch must not
-        rewrite which AI an earlier request used.
+        rewrite which AI an earlier request used.  A route event left at
+        ``running`` by an interrupted Work reports the Work's terminal state.
         """
+        def outcome(status):
+            if status!='running' or job.get('status') in ('queued','running'):return status
+            return job.get('status') if job.get('status') in ('failed','interrupted','cancelled') else 'unknown'
         engine=[event for event in events if event['tool']=='subscription_engine']
         if engine:
             name=next((event['trace'].get('engine') for event in engine if isinstance(event['trace'].get('engine'),str)),None)
-            return {'kind':'subscription','engine':name,'status':engine[-1]['status']}
-        with self.store.db() as db:
-            row=db.execute("SELECT detail FROM tool_events WHERE job_id=? AND tool='model' AND status='responded' ORDER BY id DESC LIMIT 1",(job['id'],)).fetchone()
-        if row:
-            try:model=json.loads(row['detail']).get('model')
-            except (TypeError,ValueError,AttributeError):model=None
-            return {'kind':'direct-api','model':model if isinstance(model,str) else job.get('model'),'status':job.get('status')}
+            return {'kind':'subscription','engine':name,'status':outcome(engine[-1]['status'])}
+        attempt=model_events.get(job['id'])
+        if attempt:
+            model=attempt.get('model')
+            return {'kind':'direct-api','model':model if isinstance(model,str) else job.get('model'),
+                    'status':outcome('running' if job.get('status') in ('queued','running') else job.get('status'))}
         # 'builtin' marks turns AgentOS answered itself (e.g. notes): no AI ran.
         if job.get('provider') and job['provider']!='builtin':
             subscription=job['provider']=='subscription'
             return {'kind':'subscription' if subscription else 'direct-api','engine' if subscription else 'model':job.get('model'),'status':job.get('status')}
         return None
 
+    def _model_attempts(self, job_ids):
+        """Latest direct-model event per Work, in one query per poll."""
+        attempts={}
+        ids=list(job_ids)
+        for offset in range(0,len(ids),500):
+            chunk=ids[offset:offset+500]
+            with self.store.db() as db:
+                rows=db.execute(f"SELECT job_id,detail FROM tool_events WHERE tool='model' AND job_id IN ({','.join('?'*len(chunk))}) ORDER BY id",chunk).fetchall()
+            for row in rows:
+                try:detail=json.loads(row['detail'])
+                except (TypeError,ValueError):detail={}
+                attempts[row['job_id']]=detail if isinstance(detail,dict) else {}
+        return attempts
+
     def task_progress(self, job_id=None):
         jobs=self.store.jobs()
         configured=self.store.config('model',{})
         selected_subscription=self.subscription_engine_status().get('selected')
         observed=[]
+        model_events=self._model_attempts(job['id'] for job in jobs)
         for job in jobs:
             kind,label=self._progress_status(job)
             events=self.store.task_events(job['id'])
@@ -584,7 +602,7 @@ class AgentService:
                 if notification['kind'] in ('approval_needed','context_approval_needed') and notification['state'] in ('queued','sent'):
                     waits.append('승인 대기')
             artifacts=[{'id':item['id'],'kind':'저장된 결과' if 'path' not in item else '파일 결과','path':item.get('path'),'workspace_id':item.get('workspace_id'),'created':item.get('created'),'state':item.get('state','current')} for item in self.store.task_artifacts(job['id'])]
-            task={'id':job['id'],'title':self._progress_title(job.get('message'),job['id']),'status':job.get('status'),'status_kind':kind,'status_label':label,'started_at':job.get('created'),'observed_at':last,'result_available':bool(job.get('response')) and job.get('status') in ('succeeded','partial'),'workspace_id':job.get('workspace_id'),'events_count':len(events),'waits':waits,'configured':{'provider':configured.get('provider'),'model':configured.get('model'),'runtime':selected_subscription or (configured.get('provider') if configured else None)},'observed':{'provider':job.get('provider'),'model':job.get('model'),'runtime':job.get('provider') or None},'route':self._observed_route(job,events),'artifacts':artifacts}
+            task={'id':job['id'],'title':self._progress_title(job.get('message'),job['id']),'status':job.get('status'),'status_kind':kind,'status_label':label,'started_at':job.get('created'),'observed_at':last,'result_available':bool(job.get('response')) and job.get('status') in ('succeeded','partial'),'workspace_id':job.get('workspace_id'),'events_count':len(events),'waits':waits,'configured':{'provider':configured.get('provider'),'model':configured.get('model'),'runtime':selected_subscription or (configured.get('provider') if configured else None)},'observed':{'provider':job.get('provider'),'model':job.get('model'),'runtime':job.get('provider') or None},'route':self._observed_route(job,events,model_events),'artifacts':artifacts}
             if job_id==job['id']:
                 task['events']=[self._progress_event(event) for event in events]
                 task['source_references']=self.store.evidence_summary(job['id'])
@@ -2311,6 +2329,9 @@ class AgentService:
                         if checked.get('runtime_model'):
                             runtime_config['model']=checked['runtime_model']
                         capabilities=Capabilities(self.store,self.adapter,runtime_config,key,job['id'],record,network=self.local_tools,document_access=not boundary['requires_approval'],packages=self.runtime_packages(),document_context=document_history and not boundary['requires_approval'],public_page_scope=self.public_page_boundary(config)['urls'],memory_approval=owner_memory_approval,inherited_provenance=turn_provenance,calendar=self.calendar_for(job),calendar_owner=self.connector_owner_id(job))
+                        # Evidence that the direct route was attempted, even if the
+                        # provider fails before any response event.
+                        record('model','requested',json.dumps({'provider':runtime_config.get('provider'),'model':runtime_config.get('model')},ensure_ascii=False))
                         result=run_agent(self.adapter,runtime_config,key,history,'',capabilities,record)
                         outcome=getattr(result,'outcome','succeeded')
                         response,provider,model=result.content,result.provider,result.model

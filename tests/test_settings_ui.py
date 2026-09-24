@@ -67,6 +67,12 @@ assert(!$('active-ai').textContent.includes('직접 API를 설정하거나 테�
  assert.equal(JSON.stringify(calls),JSON.stringify([{path:'/api/subscription-engines/connect',body:{engine:'codex',officially_authenticated:true}}]));
  ctx.renderExecutionConnection({model:{},model_ready:false,subscription_engines:{selected:'',engines:[]}});
  assert.equal(currentCount(),0);assert($('active-ai').textContent.includes('사용할 AI 연결이 설정되지 않았습니다'));
+ ctx.renderExecutionConnection({...settings,subscription_engines:{selected:'codex',engines:[{id:'codex',name:'Codex',installed:false,connected:true}]}});
+ assert($('active-ai').textContent.includes('선택한 CLI를 찾지 못했습니다'));assert.equal(currentCount(),0,'a missing CLI is not presented as in use');
+ ctx.renderExecutionConnection({...settings,model_ready:false,subscription_engines:{selected:'',engines:[]}});
+ assert($('active-ai').textContent.includes('연결 확인이 필요합니다'));assert.equal(currentCount(),0,'an unverified current API is not presented as in use');
+ ctx.renderExecutionConnection({...settings,subscription_engines:{selected:'retired-engine',engines:settings.subscription_engines.engines}});
+ assert($('active-ai').textContent.includes('선택된 연결을 이 컴퓨터에서 확인할 수 없습니다'),'an unknown selection is surfaced');
 })().catch(error=>{console.error(error);process.exit(1);});
 ctx.renderTelegram({telegram:{enabled:true,paired:true,username:'fixture'},telegram_status:{message:'ok'}});
 const telegramButton=buttonIn('telegram-current');ctx.renderTelegram({telegram:{enabled:true,paired:true,username:'fixture'},telegram_status:{message:'ok'}});

@@ -158,6 +158,8 @@ assert.equal(ui.settingsFeedbackId('subscription'),'active-ai-feedback');
 assert.equal(ui.routeText({kind:'subscription',engine:'codex',status:'failed'}),'Codex 구독 CLI · 실행했지만 실패');
 assert.equal(ui.routeText({kind:'direct-api',model:'gpt-4o-mini',status:'succeeded'}),'직접 API · gpt-4o-mini');
 assert.match(ui.routeText(null),/기록 없음/);
+assert.equal(ui.routeText({kind:'subscription',engine:'codex',status:'interrupted'}),'Codex 구독 CLI · 중단됨');
+assert.equal(ui.routeText({kind:'direct-api',model:'m',status:'failed'}),'직접 API · m · 실행했지만 실패');
 const disclosureStore=new Map(),nested={open:true},technical={open:true,querySelector:selector=>selector==='details'?nested:null};
 ui.rememberTaskDisclosures(disclosureStore,'task',technical);technical.open=false;nested.open=false;ui.restoreTaskDisclosures(disclosureStore,'task',technical,nested);assert.equal(technical.open,true);assert.equal(nested.open,true);
 assert.equal(ui.isOpenRouterCompletion({origin:'http://owner.local',data:{type:'agentos-openrouter-connected'}},'http://owner.local'),true);

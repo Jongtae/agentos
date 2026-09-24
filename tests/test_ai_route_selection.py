@@ -147,6 +147,24 @@ class AiRouteSelectionTests(unittest.TestCase):
         route = self._route(direct['id'])
         self.assertEqual((route['kind'], route['status']), ('direct-api', 'succeeded'))
 
+    def test_interrupted_work_does_not_claim_the_engine_is_still_running(self):
+        job = self.store.enqueue('hello', 'interrupted-1')
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='interrupted' WHERE id=?", (job,))
+            db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                       (job, 'subscription_engine', 'running', '{"engine":"codex","mode":"bounded-agentos-mcp"}', 1))
+        self.assertEqual(self._route(job), {'kind': 'subscription', 'engine': 'codex', 'status': 'interrupted'})
+
+    def test_failed_direct_api_attempt_is_reported(self):
+        from personal_agent.providers import ProviderError
+        def failing(url, body, headers): raise ProviderError('provider unavailable')
+        self._ready_model()
+        self.service.select_ai_route({'route': 'direct-api'})
+        self.service.adapter = ModelAdapter(failing)
+        job = self._run('hello', 'direct-fail')
+        self.assertEqual(job['status'], 'failed')
+        self.assertEqual(self._route(job['id']), {'kind': 'direct-api', 'model': 'fixture', 'status': 'failed'})
+
     def test_task_without_ai_execution_reports_no_route(self):
         job = self.store.enqueue('/note remember milk', 'note-only')
         self.service.run_one()

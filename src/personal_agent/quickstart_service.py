@@ -1904,11 +1904,11 @@ class AgentService:
                 # draft claimed ("아니 4시로" is addressed to the draft), and a
                 # resumed Work re-reading its own words, which were judged
                 # the first time it ran.
-                if self.connector_handoff and not (decision.intent==INTENT_CALENDAR_CREATE and decision.continuation) \
-                        and not self._answered_before(job['id']):
-                    parked=self.connector_handoff.parked_for(connector_owner)
-                    if parked and self.decision_judge.parked_work_withdrawn(prompt,parked).outcome==JUDGMENT_YES:
-                        self.supersede_pending_handoffs(job['id'],owner_id=connector_owner)
+                parked=self.connector_handoff.parked_for(connector_owner) if self.connector_handoff else ()
+                if parked and not (decision.intent==INTENT_CALENDAR_CREATE and decision.continuation) \
+                        and not self._answered_before(job['id']) \
+                        and self.decision_judge.parked_work_withdrawn(prompt,parked).outcome==JUDGMENT_YES:
+                    self.supersede_pending_handoffs(job['id'],owner_id=connector_owner)
                 # Prerequisite detection runs before `decision.executes` is
                 # consulted.  When the capability is missing, "connect it" is
                 # a smaller and truer next action than asking the owner for

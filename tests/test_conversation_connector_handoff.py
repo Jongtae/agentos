@@ -582,13 +582,16 @@ class ParkedRequestSurvivesConversationTests(HandoffTestCase):
         self.assertIsNotNone(self.handoff.record(GMAIL_CONNECTOR_ID))
 
     def test_another_owner_identity_withdrawal_does_not_cancel(self):
-        self.judge_withdrawal('아니 됐고 메모 목록 보여줘')
+        asked = self.judge_withdrawal('아니 됐고 메모 목록 보여줘')
         job_id = self.park_with_card(MAIL_REQUEST)
         other = self.store.enqueue('아니 됐고 메모 목록 보여줘', 'wu3-web-correction', channel='web')
         self.assertTrue(self.service.run_one())
         self.assertNotEqual(other, job_id)
         self.assertEqual(self.store.job(job_id)['status'], 'awaiting_connection')
         self.assertIsNotNone(self.handoff.record(GMAIL_CONNECTOR_ID))
+        # The web owner has nothing parked, so no judgment is asked and the
+        # Telegram owner's parked connector ids never reach a judge.
+        self.assertEqual(asked, [])
 
 class PairingBoundaryTests(HandoffTestCase):
     """Refusal notices must honour the same pairing gate as every other send."""

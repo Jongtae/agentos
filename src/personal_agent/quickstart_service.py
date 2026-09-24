@@ -2086,17 +2086,37 @@ class AgentService:
             refusals=[]
             calendar_notice=''
             try:
-                prompt=job['message'].strip()
+                owner_prompt=job['message'].strip()
+                prompt=owner_prompt
+                connector_owner=self.connector_owner_id(job)
+                continuity=self.continuity_relation(owner_prompt,connector_owner)
+                if continuity:
+                    relation,previous=continuity['relation'],continuity['previous']
+                    if relation==FOLLOWUP_RETRY:
+                        allowed,reason=self.safe_retry(previous)
+                        self.record_continuity(job['id'],previous['id'],relation,
+                                               executed=allowed,reason=reason)
+                        if not allowed:
+                            return self.complete_continuity_turn(job,reason)
+                        prompt=previous['message'].strip()
+                    elif relation==FOLLOWUP_CANCEL:
+                        cancelled,response=self.cancel_focused_work(previous,connector_owner)
+                        self.record_continuity(job['id'],previous['id'],relation,
+                                               executed=cancelled,
+                                               reason=None if cancelled else response)
+                        return self.complete_continuity_turn(job,response)
+                    else:
+                        # Reference/correction changes how this Work relates to
+                        # the previous one but does not replay it. Existing
+                        # Calendar, Memory and connector state machines remain
+                        # the authority for any actual change.
+                        self.record_continuity(job['id'],previous['id'],relation,executed=False)
                 owner_memory_approval=self.store.issue_memory_approval(job['id'],prompt) if self.explicit_memory_request(prompt) else None
                 # Routing decision, made by AgentOS before any capability is
                 # touched.  `decision.authority` records whether the owner
                 # said it literally or an AgentOS rule derived it; a
                 # DecisionEngine answer can only pick among AgentOS-declared
                 # candidates (#417) and reaches no other branch here.
-                # The owner is resolved first: a pending draft belongs to one
-                # connector identity, so whether one is pending is a question
-                # about this Work's owner and not about the install.
-                connector_owner=self.connector_owner_id(job)
                 decision=self.classify_intent(prompt,owner_id=connector_owner)
                 # A pending calendar draft claims cue-free follow-ups ("치과",
                 # "오후 4시", "승인").  Anything it does not recognise as its
@@ -2110,7 +2130,7 @@ class AgentService:
                     decision=self.classify_intent(prompt,calendar_pending=False,owner_id=connector_owner)
                 elif decision.intent not in (INTENT_CALENDAR_CREATE,INTENT_AMBIGUOUS) and self.calendar_conversation.has_pending(connector_owner):
                     if self.calendar_conversation.clear(connector_owner):calendar_notice=CALENDAR_DROPPED_NOTICE+'\n\n'
-                self.conversation_focus.record(decision)
+                self.conversation_focus.record(decision,job['id'])
                 owner=f"channel:{job['channel']}:{job.get('chat_id') or 'local'}"
                 # A parked request was promised to run once after its
                 # connection, so it is kept unless the owner withdraws it

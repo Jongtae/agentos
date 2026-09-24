@@ -151,6 +151,25 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(row.queue_state(), "agent:working")
         self.assertEqual(loop.state.read()["lease"]["issue"], 207)
 
+    def test_direct_approval_rechecks_review_escalation_before_transition(self):
+        row = goal(209, review_required=False); gh = FakeGithub([row])
+        def executor(issue, feedback):
+            candidate = Candidate(issue.number, 4, "z" * 40, "main", "success")
+            gh.candidates[issue.number] = candidate
+            return candidate
+        original_comment = gh.comment
+        def escalate_after_receipt(number, marker, text):
+            original_comment(number, marker, text)
+            gh.rows[number].review_required = True
+        gh.comment = escalate_after_receipt
+        loop = StateHandoffLoop(gh, Path(self.temp.name) / "escalated-direct.json", executor)
+        self.assertEqual(loop.tick("implementer")["action"], "review-escalation-required")
+        self.assertEqual(row.queue_state(), "agent:working")
+        self.assertEqual(loop.state.read()["lease"]["issue"], 209)
+        gh.comment = original_comment
+        self.assertEqual(loop.tick("implementer")["state"], "agent:review")
+        self.assertEqual(row.queue_state(), "agent:review")
+
     def test_stale_direct_approval_keeps_lease_and_recovers_on_next_tick(self):
         row = goal(208, review_required=False); gh = FakeGithub([row]); runs = []
         def executor(issue, feedback):

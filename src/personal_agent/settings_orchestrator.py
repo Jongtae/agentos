@@ -149,7 +149,10 @@ class SettingsOrchestrator:
         if self.now() > row["expires_at"]:
             row["state"] = "expired"; rows = self._drafts(); rows[draft_id] = row; self._put_drafts(rows); self._audit(row, "expired", "expired")
             raise SettingsError("설정 초안이 만료되었습니다. 새 초안을 만드세요.")
-        current = next(item for item in self.registry.list() if item["id"] == row["target"])
+        current = next((item for item in self.registry.list() if item["id"] == row["target"]), None)
+        if current is None:
+            row["state"] = "failed"; rows = self._drafts(); rows[draft_id] = row; self._put_drafts(rows); self._audit(row, "failed", "retired-target")
+            raise SettingsError("이 설정 대상은 더 이상 제공되지 않습니다. 새 설정 상태를 확인하세요.")
         if current["state"] != row["before"]:
             row["state"] = "failed"; rows = self._drafts(); rows[draft_id] = row; self._put_drafts(rows); self._audit(row, "failed", "stale-state")
             raise SettingsError("설정 상태가 바뀌었습니다. 새 초안을 확인하세요.")

@@ -2,8 +2,8 @@
 
 Relocated by PRESENCE-CONT-01 / #511 after owner-requested code cleanup.
 
-This directory preserves the historical MP1 `PersonalAssistantOrchestrator` and
-its focused test as evidence. It is intentionally outside the installed
+This directory preserves the historical MP1 `PersonalAssistantOrchestrator`,
+its focused unit test, and the old integrated MP1 release acceptance as evidence. It is intentionally outside the installed
 `personal_agent` package and is not part of the supported runtime.
 
 ## Why it was retired

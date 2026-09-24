@@ -12,6 +12,10 @@ from .agent_runtime import Capabilities, run_agent, AGENTS, evidence_summary
 from .plugins import PluginRegistry
 from .providers import ModelAdapter, ProviderError, request_json, validate_model
 from .decision import DEFAULT_DECISION_PROVIDER, ModelDecisionEngine
+from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_UNVERIFIED, BLOCKER_NO_AI_ROUTE,
+                                      TELEGRAM_RESULT_PREVIEW_CHARS, TERMINAL_FAILED_HEADER,
+                                      TERMINAL_INTERRUPTED_HEADER, TERMINAL_NEXT_ACTION, TERMINAL_PARTIAL_HEADER,
+                                      TERMINAL_UNVERIFIED_MARKER, BlockedTurn, ConversationProjection, terminal_text)
 from .subscription_engines import SubscriptionEngines
 from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult
 from .isolated_engine_gateway import EngineGatewayError
@@ -87,17 +91,13 @@ TOOL_PROBE = {
 
 
 TELEGRAM_CARD_GRACE_SECONDS = 3
-TELEGRAM_RESULT_PREVIEW_CHARS = 3200
+#: A Telegram request still queued/running after this long gets its one
+#: acknowledgement card; a shorter one answers in a single bubble (#510).
+TELEGRAM_ACK_AFTER_SECONDS = 4
 #: The terminal Telegram bubble for a turn that did not fully succeed.  Kept
 #: beside the preview limit because they are read together, and separate from
 #: the model's own text on purpose: these are the only sentences in that
 #: bubble AgentOS can vouch for.
-TERMINAL_FAILED_HEADER = '이 요청은 완료하지 못했습니다.'
-TERMINAL_PARTIAL_HEADER = '일부 단계만 완료했습니다.'
-TERMINAL_INTERRUPTED_HEADER = '이 요청은 중단되었습니다. 자동으로 다시 실행하지 않았습니다.'
-TERMINAL_NEXT_ACTION = 'AgentOS 웹에서 실행 기록과 다음 단계를 확인하세요.'
-TERMINAL_UNVERIFIED_MARKER = ('완료한 단계까지의 내용은 AgentOS 웹 기록에서 확인할 수 있습니다. '
-                              '확인된 결과가 아니므로 그대로 신뢰하지 마세요.')
 TELEGRAM_VERIFICATION_QUERY = '/search AgentOS personal assistant verification'
 _WORKSPACE_QUOTED = re.compile(r'["“]([^"”]{2,160})["”]')
 
@@ -216,6 +216,11 @@ class AgentService:
         self.decision_engine=ModelDecisionEngine(self.adapter,self.decision_route,audit=self.record_decision)
         self.decision_judge=ConversationJudgments(self.decision_engine)
         self.intent_classifier=IntentClassifier(workspace_search=workspace_search_request,judge=self.decision_judge)
+        # Owner-facing projection of blocked turns (#510).  Replies projected
+        # here are delivered as-is; the map is process-local, so after a
+        # restart a pending delivery falls back to the generic truthful text.
+        self.projection=ConversationProjection(store,self.local_settings_url)
+        self.projected_replies={}
         self.conversation_focus=ConversationFocus(store)
         # This is injected only by an owner-local deployment which supplies an
         # encrypted secret store and its local key.  It is never auto-enabled.
@@ -1148,6 +1153,42 @@ class AgentService:
                     return candidate
         return candidates[0]
 
+    def local_settings_url(self):
+        """This installation's own address, or '' when it cannot name one.
+
+        Derived the same way as `connector_connect_url`: from the port a
+        configured connector's redirect URI is bound to.  An install with no
+        connector configured advertises nothing rather than a guessed port.
+        """
+        for holder in (self.gmail,self.calendar_oauth):
+            parts=urlsplit(getattr(holder,'redirect_uri','') or '')
+            if parts.scheme=='http' and parts.port:
+                return f'http://{LOCAL_ADDRESS_HOST}:{parts.port}/'
+        return ''
+
+    def acknowledge_long_work(self, now=None):
+        """Send the one acknowledgement card for Work that is taking long.
+
+        Short Work answers in a single bubble, so no card is created when a
+        request arrives.  A paired owner's natural-language Work that is still
+        queued or running after TELEGRAM_ACK_AFTER_SECONDS gets its task card
+        once (진행 보기; 작업 취소 while it is still queued).  Later edits of
+        that card happen only on owner-relevant transitions.  Runs on the
+        poll thread, so a blocking model call cannot suppress it.
+        """
+        cfg=self.store.config('telegram',{})
+        if not (cfg.get('enabled') and isinstance(cfg.get('user_id'),int)):return []
+        cutoff=(time.time() if now is None else now)-TELEGRAM_ACK_AFTER_SECONDS
+        with self.store.db() as db:
+            rows=db.execute("SELECT j.id,j.message,j.chat_id,j.status FROM jobs j WHERE j.channel=? AND j.chat_id=? AND j.status IN ('queued','running') AND j.created<=? AND NOT EXISTS (SELECT 1 FROM telegram_task_cards c WHERE c.job_id=j.id) ORDER BY j.created",
+                            (f"telegram:{cfg.get('generation')}",cfg['user_id'],cutoff)).fetchall()
+        acknowledged=[]
+        for row in rows:
+            if not self.is_natural_language(row['message']):continue
+            self.create_task_card(row['id'],row['message'],row['chat_id'],state=row['status'])
+            if self.store.task_card(row['id']):acknowledged.append(row['id'])
+        return acknowledged
+
     def connector_connect_url(self, connector_id):
         """The absolute local address that starts this connector's OAuth, or ''.
 
@@ -1679,15 +1720,15 @@ class AgentService:
             lines.append('Telegram 전달은 취소되었습니다.')
         return '\n'.join(lines)
 
-    def create_task_card(self, job_id, message, chat_id):
+    def create_task_card(self, job_id, message, chat_id, state='queued'):
         # This is deliberately a single best-effort send.  Retrying after an
         # unknown Telegram response could create a second card for one request.
         if self.store.task_card(job_id): return
         try:
-            result=self.telegram.send_message(chat_id,self.task_card_text(message,'queued'),
-                                              self.task_card_markup(job_id,'queued'))
+            result=self.telegram.send_message(chat_id,self.task_card_text(message,state),
+                                              self.task_card_markup(job_id,state))
             message_id=result.get('message_id') if isinstance(result,dict) else None
-            if isinstance(message_id,int): self.store.save_task_card(job_id,chat_id,message_id,'queued')
+            if isinstance(message_id,int): self.store.save_task_card(job_id,chat_id,message_id,state)
         except ProviderError:
             pass
 
@@ -1880,8 +1921,9 @@ class AgentService:
             if authorized and self.is_natural_language(text) and task_id:
                 if guided_context:
                     self.offer_telegram_context_choices(task_id,sender,generation)
-                else:
-                    self.create_task_card(task_id,text,sender)
+                # An ordinary request gets no card here: short Work answers in
+                # one bubble, and `acknowledge_long_work` sends the card only
+                # for Work still running after TELEGRAM_ACK_AFTER_SECONDS (#510).
 
     def poll_telegram(self):
         with self.lock:
@@ -2175,12 +2217,12 @@ class AgentService:
                         record('subscription_engine','succeeded',json.dumps({'engine':result.engine,'exit_code':result.exit_code}))
                         response,provider,model=result.content,'subscription',result.engine
                     else:
-                        if not config:raise ValueError('설정에서 모델 또는 구독 엔진을 먼저 연결하세요. 모델 없이도 /note와 /notes는 사용할 수 있습니다.')
+                        if not config:raise BlockedTurn(BLOCKER_NO_AI_ROUTE,'설정에서 모델 또는 구독 엔진을 먼저 연결하세요. 모델 없이도 /note와 /notes는 사용할 수 있습니다.')
                         if workspace_request and boundary['requires_approval']:
                             approval_needed[0]=True
-                            raise ValueError('승인된 참고 자료를 외부 모델에 전달하려면 문서 공유 승인이 필요합니다.')
+                            raise BlockedTurn(BLOCKER_DOCUMENT_APPROVAL,'승인된 참고 자료를 외부 모델에 전달하려면 문서 공유 승인이 필요합니다.')
                         if not self.model_ready(config):
-                            raise ValueError('모델의 도구 호출 연결을 아직 확인하지 못했습니다. 설정에서 “모델 연결 확인”을 실행한 뒤 다시 요청하세요.')
+                            raise BlockedTurn(BLOCKER_MODEL_UNVERIFIED,'모델의 도구 호출 연결을 아직 확인하지 못했습니다. 설정에서 “모델 연결 확인”을 실행한 뒤 다시 요청하세요.')
                         runtime_config=dict(config)
                         checked=self.store.config('model_test',{})
                         if checked.get('runtime_model'):
@@ -2200,10 +2242,20 @@ class AgentService:
                     db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('assistant',response,job['channel'],time.time(),job.get('workspace_id'),job['id']))
                     cause=self._failure_cause(refusals) if outcome in ('failed','partial') else None
                     db.execute("UPDATE jobs SET status=?,response=?,error=?,provider=?,model=?,delivery=? WHERE id=?",(outcome,response,cause,provider,model,'pending' if job['chat_id'] else 'none',job['id']))
+                if outcome=='succeeded':self.projection.clear(self.connector_owner_id(job))
             except (ValueError,ProviderError,ExecutionError,OSError) as exc:
                 response=str(exc)
+                if isinstance(exc,BlockedTurn):
+                    # The owner can resolve this blocker; say how, once, in
+                    # conversation.  The projected text is the whole bubble
+                    # and the transcript line; the job row keeps the plain
+                    # cause as the technical detail the Task surface shows.
+                    transcript=calendar_notice+self.projection.blocked_reply(self.connector_owner_id(job),exc.kind,response)
+                    self.projected_replies[job['id']]=transcript
+                else:
+                    transcript=calendar_notice+'이 요청은 완료하지 못했습니다: '+response
                 with self.store.db() as db:
-                    db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('assistant',calendar_notice+'이 요청은 완료하지 못했습니다: '+response,job['channel'],time.time(),job.get('workspace_id'),job['id']))
+                    db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('assistant',transcript,job['channel'],time.time(),job.get('workspace_id'),job['id']))
                     db.execute("UPDATE jobs SET status='failed',error=?,delivery=? WHERE id=?",(response,'pending' if job['chat_id'] else 'none',job['id']))
                 outcome='failed'
             self.update_task_card(job,outcome)
@@ -2215,61 +2267,8 @@ class AgentService:
 
     @staticmethod
     def telegram_result_text(response, error=None, outcome=None):
-        """Return the one readable terminal bubble for a paired owner.
-
-        The bubble is the last thing the owner reads, so it has to carry the
-        observed outcome and not the model's account of it.  `run_agent` can
-        return a model answer *and* a failed outcome -- a tool was refused or
-        errored and the model wrote text anyway -- and this used to fall back
-        to `error` only when `response` was empty.  It never saw `outcome` at
-        all, so a refused `calendar_query` was delivered as "내일 일정은 팀
-        회의 하나입니다." and a refused research request as an observed
-        comparison (#476, found by the synthetic first-user audit #472).
-
-        The rule matches what the web card already does, so the two surfaces
-        agree:
-
-        * `failed` -- no tool produced anything, so no model sentence is
-          attributable to an observed result.  The failure and the next step
-          go out; the model text does not.  `task_progress` sets
-          `result_available` False for the same status, so the web does not
-          offer it either.
-        * `partial` / `interrupted` -- something did complete, but which
-          sentence rests on it cannot be decided here, and the failed tool is
-          usually the one the answer depended on: a refused research call
-          after a successful `find_files` leaves a product comparison
-          supported by nothing at all.  So the bubble reports what completed
-          and what did not and points at the record.  The text is not
-          deleted -- it stays in `response` and the web card still offers it
-          under 확인 필요 -- it is simply not pushed at the owner as the
-          answer.
-        * `succeeded` and any unrecognised status -- unchanged.
-
-        A caller that passes no `outcome` keeps the old behaviour, so this
-        cannot silently change a surface that has not been taught about it.
-        """
-        cause=(error or '').strip()
-        if outcome=='failed':
-            # Never the model's text: nothing it might describe was observed.
-            body=[TERMINAL_FAILED_HEADER]
-            if cause:body.append(cause)
-            body.append(TERMINAL_NEXT_ACTION)
-            text='\n\n'.join(body)
-        elif outcome in ('partial','interrupted'):
-            # 'interrupted' is set on any running job at restart, including one
-            # that ran no tool at all, so it cannot claim completed steps.  And
-            # ``task_progress`` offers the stored text for 'succeeded'/'partial'
-            # only, so point at the web record exactly where it is readable.
-            body=[TERMINAL_PARTIAL_HEADER if outcome=='partial' else TERMINAL_INTERRUPTED_HEADER]
-            if cause:body.append(cause)
-            body.append(TERMINAL_UNVERIFIED_MARKER if (outcome=='partial' and (response or '').strip())
-                        else TERMINAL_NEXT_ACTION)
-            text='\n\n'.join(body)
-        else:
-            text=response or (TERMINAL_FAILED_HEADER+' '+(cause or TERMINAL_NEXT_ACTION))
-        if len(text)>TELEGRAM_RESULT_PREVIEW_CHARS:
-            return text[:TELEGRAM_RESULT_PREVIEW_CHARS]+'\n\n전체 결과는 AgentOS 웹에서 확인하세요.'
-        return text
+        """The one terminal bubble; the truth rules live in conversation_projection (#476/#488/#510)."""
+        return terminal_text(response,error,outcome)
 
     def deliver_one(self):
         # Mark before send. A lost response may mean delivered; never auto-resend.
@@ -2283,7 +2282,7 @@ class AgentService:
                 allowed=cfg.get('enabled') and job['channel']==f"telegram:{cfg.get('generation')}" and job['chat_id']==cfg.get('user_id')
                 db.execute('UPDATE jobs SET delivery=? WHERE id=?',('sending' if allowed else 'cancelled',job['id']))
             if not allowed:return
-            text=self.telegram_result_text(job['response'],job['error'],job.get('status'))
+            text=self.projected_replies.pop(job['id'],None) or self.telegram_result_text(job['response'],job['error'],job.get('status'))
             try:
                 self.telegram.send_message(job['chat_id'],text)
                 status='sent'
@@ -2309,6 +2308,7 @@ class AgentService:
             while not self.stop.is_set():
                 try:
                     self.poll_telegram()
+                    self.acknowledge_long_work()
                     self.mark_telegram_connected()
                 except (ProviderError,ValueError):
                     self.store.put('telegram_status',{'state':'error','message':'Telegram 연결을 확인하세요. 수신을 다시 시도합니다.'})

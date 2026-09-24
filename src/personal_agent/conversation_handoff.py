@@ -123,6 +123,9 @@ INTENT_MAIL_SEARCH = 'mail-search'
 INTENT_RESEARCH = 'research'
 INTENT_CONVERSATION = 'conversation'
 INTENT_AMBIGUOUS = 'ambiguous'
+#: A request for something this conversation does not offer; answered
+#: truthfully, nothing invoked (#478 via #510).
+INTENT_UNSUPPORTED = 'unsupported-capability'
 
 AUTHORITY_OWNER = 'owner-explicit'
 AUTHORITY_RULE = 'agentos-rule'
@@ -155,6 +158,21 @@ INTENT_LABELS = {
     INTENT_MAIL_SEARCH: '메일 찾기',
     INTENT_RESEARCH: '웹 조사',
     INTENT_CONVERSATION: '대화로 답하기',
+    INTENT_UNSUPPORTED: '제공하지 않는 기능',
+}
+
+#: Capabilities an owner may reasonably ask for that this conversation does
+#: not offer.  They are declared so the DecisionEngine can *choose* one and
+#: the reply can state the actual boundary instead of running the nearest
+#: search.  Adding an offered capability is product work, not a new entry.
+UNSUPPORTED_CAPABILITIES = {
+    'mail-read-body': 'read the body/contents of a found mail',
+    'mail-send': 'send a mail or reply to one',
+}
+UNSUPPORTED_CAPABILITY_TEXT = {
+    'mail-read-body': ('찾은 메일의 본문을 읽는 기능은 아직 제공하지 않습니다. 제목, 보낸 사람, 날짜로 찾는 것까지만 '
+                       '할 수 있어요.'),
+    'mail-send': '메일 보내기나 답장은 제공하지 않습니다. 아무것도 보내지 않았습니다. 메일 찾기는 도울 수 있어요.',
 }
 
 
@@ -307,6 +325,11 @@ JUDGMENT_NO = 'no'
 WITHDRAWAL_PROPOSITION = ('The owner\'s latest message withdraws or cancels the request that is waiting for '
                           'the listed connection (rather than acknowledging it, changing topic, or asking '
                           'something unrelated).')
+UNSUPPORTED_QUESTION = ('Is the owner asking the assistant to do one of these things it does not offer: '
+                        + '; '.join(f'{key} = {label}' for key, label in UNSUPPORTED_CAPABILITIES.items())
+                        + '? Choose that capability. If the request is anything else (searching mail by '
+                        'subject/sender/date, notes, calendar, files, research, ordinary conversation), '
+                        'choose none-of-these.')
 RECOMMENDATION_QUESTION = ('Is the owner asking this assistant to recommend an assistant capability or '
                            'connection to add? If so, which reviewed outcome fits; otherwise choose '
                            'none-of-these (an ordinary product, place, person or travel recommendation '
@@ -347,6 +370,18 @@ class ConversationJudgments:
         verdict = self.policy.binary(decision)
         return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
                         source=decision.confidence.provider or decision.outcome)
+
+    def unsupported_capability(self, utterance):
+        """Does ``utterance`` ask for a declared-but-unavailable capability?
+        ``value`` is its key on yes; a confident none-of-these is no."""
+        context = DecisionContext('unsupported-capability', {'owner_message': utterance})
+        decision = self.engine.choose(context, tuple(UNSUPPORTED_CAPABILITIES), UNSUPPORTED_QUESTION)
+        choice = self.policy.selection(decision)
+        if choice is not None:
+            return Judgment(JUDGMENT_YES, value=choice, source=decision.confidence.provider or decision.outcome)
+        if self.policy.confident_selection(decision):
+            return Judgment(JUDGMENT_NO, source=decision.confidence.provider or decision.outcome)
+        return Judgment(JUDGMENT_UNAVAILABLE, source=decision.outcome)
 
     def capability_recommendation(self, utterance):
         """Does ``utterance`` ask for a capability recommendation, and for
@@ -633,6 +668,18 @@ class IntentClassifier:
         if explicit is not None:
             explicit.supersedes_previous = bool(focus_intent) and focus_intent != explicit.intent
             return self._with_suggestion(explicit, (), model_suggestion)
+
+        # Before any cue can claim the turn: a request for something this
+        # conversation does not offer ("답장 보내줘", "그 메일 내용 보여줘") is
+        # answered with the actual boundary rather than the nearest search
+        # (#478).  Unavailable judgment: the cues decide as before.
+        unsupported = self._judge.unsupported_capability(text)
+        if unsupported.outcome == JUDGMENT_YES:
+            return self._with_suggestion(
+                IntentDecision(INTENT_UNSUPPORTED, AUTHORITY_RULE, argument=unsupported.value,
+                               cues=('judgment:unsupported-capability',),
+                               clarification=UNSUPPORTED_CAPABILITY_TEXT[unsupported.value]),
+                (), model_suggestion)
 
         correction = _cue_hits(text, lowered, _CORRECTION_CUES)
         candidates = []

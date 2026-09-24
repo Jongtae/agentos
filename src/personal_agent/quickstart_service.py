@@ -1,6 +1,7 @@
 """One personal conversation shared by web and an explicitly paired Telegram user."""
 import hmac
 import json
+import logging
 import re
 import secrets
 import threading
@@ -17,7 +18,7 @@ from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_U
                                       TERMINAL_INTERRUPTED_HEADER, TERMINAL_NEXT_ACTION, TERMINAL_PARTIAL_HEADER,
                                       TERMINAL_UNVERIFIED_MARKER, BlockedTurn, ConversationProjection, terminal_text)
 from .subscription_engines import SubscriptionEngines
-from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult
+from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult, redact_reason
 from .isolated_engine_gateway import EngineGatewayError
 from .isolated_mcp_proxy import IsolatedMcpProxy, TaskCapabilityRegistry
 from .personal_assistant import PersonalAssistantOrchestrator
@@ -39,6 +40,8 @@ from .conversation_handoff import (CONNECTOR_LABELS, JUDGMENT_YES, RECOMMENDATIO
                                    INTENT_MAIL_SEARCH, INTENT_NOTE_CREATE, INTENT_NOTE_LIST,
                                    INTENT_RECOMMENDATION, INTENT_SETTINGS,
                                    INTENT_WORKSPACE_SEARCH, SUPERSEDED_WORK_ERROR)
+
+LOG=logging.getLogger('personal_agent.service')
 
 #: The one owner-authenticated address that starts a Gmail authorization.
 #: It is defined here rather than only inside the HTTP layer so the link the
@@ -2244,7 +2247,8 @@ class AgentService:
                             else:
                                 result=self.execution_adapter.execute(subscription['id'],engine_prompt,AgentOSMcpTools(capabilities))
                         except (ExecutionError,EngineGatewayError) as exc:
-                            record('subscription_engine','failed',json.dumps({'engine':subscription['id'],'error':str(exc)}))
+                            diagnostics=exc.diagnostics() if isinstance(exc,ExecutionError) else {}
+                            record('subscription_engine','failed',json.dumps({'engine':subscription['id'],'error':str(exc),**diagnostics},ensure_ascii=False))
                             raise
                         record('subscription_engine','succeeded',json.dumps({'engine':result.engine,'exit_code':result.exit_code}))
                         response,provider,model=result.content,'subscription',result.engine
@@ -2279,6 +2283,7 @@ class AgentService:
             except (ValueError,ProviderError,ExecutionError,OSError) as exc:
                 resolved_blocker=False
                 response=str(exc)
+                LOG.warning('work failed job=%s kind=%s error=%s',job['id'],type(exc).__name__,redact_reason(response))
                 if isinstance(exc,BlockedTurn):
                     # The owner can resolve this blocker; say how, once, in
                     # conversation.  The projected text is the whole bubble

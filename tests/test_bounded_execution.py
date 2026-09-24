@@ -117,6 +117,92 @@ class BoundedExecutionTests(unittest.TestCase):
             with self.assertRaises(ExecutionError): adapter.execute('codex','hello',AgentOSMcpTools(_Capabilities()))
 
 
+class EngineFailureDiagnosticsTests(unittest.TestCase):
+    CODEX_MODEL_REJECTED = '\n'.join([
+        json.dumps({'type': 'thread.started'}),
+        json.dumps({'type': 'turn.started'}),
+        json.dumps({'type': 'turn.failed', 'error': {'message': json.dumps({'type': 'error', 'status': 400, 'error': {
+            'type': 'invalid_request_error', 'message': "The 'x-model' model is not supported when using Codex with a ChatGPT account."}})}}),
+    ])
+
+    def _run(self, stdout, stderr='', returncode=1, prompt='hello there friend', engine='codex'):
+        class Failed: pass
+        Failed.returncode, Failed.stdout, Failed.stderr = returncode, stdout, stderr
+        with tempfile.TemporaryDirectory() as folder:
+            profile = Path(folder) / 'profile'; profile.mkdir()
+            adapter = BoundedExecutionAdapter(finder=lambda _: '/runtime/x', runner=lambda *a, **k: Failed(),
+                                              runtime_root=Path(folder) / 'turns', codex_home=profile)
+            with self.assertLogs('personal_agent.engine', 'INFO') as logs, self.assertRaises(ExecutionError) as caught:
+                adapter.execute(engine, prompt, AgentOSMcpTools(_Capabilities()))
+        return caught.exception, '\n'.join(logs.output)
+
+    def test_codex_turn_failure_names_status_hint_and_provider_reason(self):
+        error, logs = self._run(self.CODEX_MODEL_REJECTED)
+        self.assertEqual(error.failure_class, 'request-rejected')
+        self.assertEqual(error.exit_code, 1)
+        self.assertIn("'x-model' model is not supported", str(error))
+        self.assertIn('종료 코드 1', str(error))
+        self.assertIn('모델·계정 설정', str(error))
+        self.assertIn('class=request-rejected', logs)
+
+    def test_status_selects_auth_and_usage_hints(self):
+        for status, expected in ((401, 'auth'), (429, 'usage-limit'), (503, 'provider-error')):
+            out = json.dumps({'type': 'error', 'message': json.dumps({'status': status, 'error': {'message': 'nope'}})})
+            self.assertEqual(self._run(out)[0].failure_class, expected)
+
+    def test_claude_code_is_error_result_is_reported(self):
+        error, _ = self._run(json.dumps({'is_error': True, 'result': 'Credit balance is too low'}), engine='claude-code')
+        self.assertIn('Credit balance is too low', str(error))
+        self.assertEqual(error.failure_class, 'engine-failed')
+
+    def test_unstructured_output_falls_back_to_last_stderr_line(self):
+        error, _ = self._run('not json', stderr='warning\nfatal: login required\n')
+        self.assertIn('fatal: login required', str(error))
+
+    def test_no_evidence_still_fails_with_exit_code(self):
+        error, _ = self._run('', stderr='', returncode=2)
+        self.assertIn('종료 코드 2', str(error))
+        self.assertEqual(error.diagnostics(), {'failure_class': 'engine-failed', 'exit_code': 2})
+
+    def test_secrets_and_prompt_text_never_reach_error_or_logs(self):
+        prompt = 'my private diary entry about tuesday'
+        leak = json.dumps({'type': 'error', 'message': f'bad key sk-abcdefghijklmnop Bearer eyJhbGciOi and {prompt} \x1b[31m'})
+        error, logs = self._run(leak, prompt=prompt)
+        for text in (str(error), error.reason, logs):
+            self.assertNotIn('sk-abcdefghijklmnop', text)
+            self.assertNotIn('eyJhbGciOi', text)
+            self.assertNotIn(prompt, text)
+            self.assertNotIn('\x1b', text)
+        self.assertLessEqual(len(error.reason), bounded_execution.MAX_REASON_CHARS)
+
+    def test_timeout_is_distinct_from_engine_failure(self):
+        def runner(*a, **k): raise subprocess.TimeoutExpired('codex', 1)
+        with tempfile.TemporaryDirectory() as folder:
+            profile = Path(folder) / 'profile'; profile.mkdir()
+            adapter = BoundedExecutionAdapter(finder=lambda _: '/runtime/codex', runner=runner,
+                                              runtime_root=Path(folder) / 'turns', codex_home=profile)
+            with self.assertRaises(ExecutionError) as caught:
+                adapter.execute('codex', 'hello', AgentOSMcpTools(_Capabilities()))
+        self.assertEqual(caught.exception.failure_class, 'timeout')
+
+    def test_codex_ignores_owner_user_config_but_keeps_agentos_bridge(self):
+        seen = {}
+        def runner(argv, **kwargs):
+            seen['argv'] = argv
+            class Done: returncode = 0; stdout = json.dumps({'item': {'type': 'agent_message', 'text': 'ok'}})
+            return Done()
+        with tempfile.TemporaryDirectory() as folder:
+            profile = Path(folder) / 'profile'; profile.mkdir()
+            BoundedExecutionAdapter(finder=lambda _: '/bin/codex', runner=runner, runtime_root=Path(folder) / 'turns',
+                                    codex_home=profile).execute('codex', 'hello', AgentOSMcpTools(_Capabilities()))
+        argv = seen['argv']
+        self.assertIn('--ignore-user-config', argv)
+        self.assertIn('--ephemeral', argv)
+        self.assertEqual(argv[argv.index('--sandbox') + 1], 'read-only')
+        self.assertTrue(any(a.startswith('mcp_servers.agentos.command=') for a in argv))
+        self.assertEqual(argv[-1], 'hello')
+
+
 class SubscriptionServiceTests(unittest.TestCase):
     def test_selected_subscription_engine_runs_through_bounded_adapter(self):
         class Adapter:
@@ -175,6 +261,28 @@ class SubscriptionServiceTests(unittest.TestCase):
                 self.assertFalse(service.run_one())
                 with store.db() as db: events=[dict(row) for row in db.execute('SELECT tool,status FROM tool_events WHERE job_id=?',(ident,))]
                 self.assertIn({'tool':'subscription_engine','status':'failed'},events)
+
+    def test_engine_failure_diagnostics_reach_work_event_job_error_and_log(self):
+        class Adapter:
+            def execute(self, *args):
+                raise ExecutionError('Codex 엔진이 작업을 완료하지 못했습니다(종료 코드 1). 엔진 응답: model unsupported',
+                                     failure_class='request-rejected', exit_code=1, reason='model unsupported')
+        with tempfile.TemporaryDirectory() as folder:
+            store=QuickStore(Path(folder)/'data')
+            engines=SubscriptionEngines(finder=lambda _: '/runtime/codex', clock=lambda:1)
+            service=AgentService(store, subscription_engines=engines, execution_adapter=Adapter())
+            service.connect_subscription_engine({'engine':'codex','officially_authenticated':True})
+            ident=store.enqueue('지금 이야기 가능?','diag-1',channel='telegram:fixture',chat_id=7)
+            with self.assertLogs('personal_agent.service','WARNING') as logs:
+                self.assertTrue(service.run_one())
+            job=store.job(ident)
+            self.assertEqual(job['status'],'failed')
+            self.assertIn('model unsupported',job['error'])
+            with store.db() as db:
+                detail=[json.loads(row['detail']) for row in db.execute("SELECT detail FROM tool_events WHERE job_id=? AND tool='subscription_engine' AND status='failed'",(ident,))][0]
+            self.assertEqual((detail['failure_class'],detail['exit_code'],detail['reason']),('request-rejected',1,'model unsupported'))
+            self.assertIn('model unsupported','\n'.join(logs.output))
+            self.assertNotIn('지금 이야기 가능?','\n'.join(logs.output))
 
     def test_duplicate_summary_request_key_reuses_one_terminal_job_after_restart(self):
         class Adapter:
@@ -517,3 +625,26 @@ class BoundedExecutionPreservedBoundaryTests(unittest.TestCase):
             with self.subTest(arguments=type(arguments).__name__):
                 with self.assertRaises(ExecutionError):
                     tools.call('save_note', arguments)
+
+
+class ServiceLoggingTests(unittest.TestCase):
+    def test_start_logging_writes_bounded_private_file(self):
+        import logging
+        from personal_agent.quickstart import configure_logging
+        logger = logging.getLogger('personal_agent')
+        saved = logger.handlers[:]
+        logger.handlers = []
+        try:
+            with tempfile.TemporaryDirectory() as folder:
+                store = QuickStore(Path(folder) / 'data')
+                configure_logging(store)
+                configure_logging(store)  # idempotent: no duplicate handlers
+                self.assertEqual(len(logger.handlers), 2)
+                logging.getLogger('personal_agent.engine').warning('engine turn failed engine=codex')
+                for handler in logger.handlers: handler.flush()
+                path = store.private / 'logs' / 'agentos.log'
+                self.assertIn('engine turn failed', path.read_text())
+                self.assertEqual(path.parent.stat().st_mode & 0o077, 0)
+                for handler in logger.handlers: handler.close()
+        finally:
+            logger.handlers = saved

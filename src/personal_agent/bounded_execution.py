@@ -6,16 +6,33 @@ it never receives the owner store, a host path, or arbitrary shell access.
 """
 from dataclasses import dataclass
 import json
+import logging
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
+import time
 
 
 MAX_PROMPT_BYTES = 48_000
 MAX_OUTPUT_BYTES = 96_000
 MAX_TIMEOUT_SECONDS = 120
+MAX_REASON_CHARS = 300
+
+LOG = logging.getLogger('personal_agent.engine')
+ENGINE_NAMES = {'codex': 'Codex', 'claude-code': 'Claude Code'}
+_SECRET = re.compile(r'(?i)\bbearer\s+\S+|\b(?:sk|pk|rk)-[A-Za-z0-9_-]{8,}|\b(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]{10,}|\b(?:api[_-]?key|token|secret)\s*[=:]\s*\S+')
+_CONTROL = re.compile(r'[\x00-\x1f\x7f]+')
+# Hints are keyed by the provider's structured HTTP status, never by guessing
+# from free text.  An unknown status keeps only the observed reason.
+_STATUS_HINTS = (
+    (lambda s: s in (401, 403), 'auth', '엔진 로그인이 만료되었거나 권한이 없습니다. 해당 CLI에서 다시 로그인하세요.'),
+    (lambda s: s == 429, 'usage-limit', '사용량 한도에 도달했습니다. 잠시 후 다시 시도하거나 다른 AI 연결을 사용하세요.'),
+    (lambda s: 400 <= s < 500, 'request-rejected', '제공자가 요청을 거부했습니다. 엔진의 모델·계정 설정을 확인하세요.'),
+    (lambda s: s >= 500, 'provider-error', '제공자 쪽 오류입니다. 잠시 후 다시 시도하세요.'),
+)
 
 
 MCP_TOOLS = (
@@ -28,7 +45,78 @@ MCP_TOOLS = (
 
 
 class ExecutionError(ValueError):
-    """A safe, user-visible execution-boundary failure."""
+    """A safe, user-visible execution-boundary failure.
+
+    ``failure_class``, ``exit_code`` and ``reason`` are bounded, redacted
+    diagnostics for Work events and logs; they never contain the prompt.
+    """
+    def __init__(self, message, *, failure_class='', exit_code=None, reason=''):
+        super().__init__(message)
+        self.failure_class, self.exit_code, self.reason = failure_class, exit_code, reason
+
+    def diagnostics(self):
+        return {key: value for key, value in (('failure_class', self.failure_class),
+                ('exit_code', self.exit_code), ('reason', self.reason)) if value not in ('', None)}
+
+
+def redact_reason(text):
+    """Bound provider/CLI text before it is persisted, logged or shown."""
+    if not isinstance(text, str):
+        return ''
+    text = _SECRET.sub('[redacted]', _CONTROL.sub(' ', text))
+    text = ' '.join(text.split())
+    return text if len(text) <= MAX_REASON_CHARS else text[:MAX_REASON_CHARS - 1] + '…'
+
+
+def _provider_error(message):
+    """Return (status, message) from a provider error that may be JSON text."""
+    status = None
+    for _ in range(3):
+        if not isinstance(message, str):
+            break
+        try:
+            data = json.loads(message)
+        except ValueError:
+            break
+        if not isinstance(data, dict):
+            break
+        if isinstance(data.get('status'), int):
+            status = data['status']
+        error = data.get('error')
+        message = error.get('message') if isinstance(error, dict) else error if isinstance(error, str) else data.get('message')
+    return status, message if isinstance(message, str) else ''
+
+
+def failure_details(engine_id, stdout, stderr):
+    """Summarise a failed CLI turn from its official machine output.
+
+    Codex ``exec --json`` reports failures as ``turn.failed``/``error``
+    events; Claude Code ``--output-format json`` sets ``is_error``.  When
+    neither is observable, the last stderr line is the only evidence.
+    """
+    status, message = None, ''
+    lines = (stdout or '')[-MAX_OUTPUT_BYTES:].splitlines()
+    for line in reversed(lines):
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(record, dict):
+            continue
+        raw = None
+        if engine_id == 'codex' and record.get('type') == 'turn.failed' and isinstance(record.get('error'), dict):
+            raw = record['error'].get('message')
+        elif engine_id == 'codex' and record.get('type') == 'error':
+            raw = record.get('message')
+        elif engine_id == 'claude-code' and record.get('is_error') is True:
+            raw = record.get('result') or record.get('error')
+        if raw:
+            status, message = _provider_error(raw)
+            break
+    if not message:
+        tail = [line for line in (stderr or '')[-8000:].splitlines() if line.strip()]
+        message = tail[-1] if tail else ''
+    return status, redact_reason(message)
 
 
 @dataclass(frozen=True)
@@ -117,7 +205,11 @@ class BoundedExecutionAdapter:
             # `exec` is non-interactive and JSON output is required so prose
             # around an answer cannot be mistaken for execution evidence.
             bridge = json.loads(Path(mcp_config).read_text())['mcpServers']['agentos']
+            # --ignore-user-config keeps the owner's own Codex defaults (model,
+            # MCP servers, plugins) out of this bounded turn; login still
+            # comes from CODEX_HOME.  --ephemeral keeps no session files.
             return [binary, 'exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check',
+                    '--ignore-user-config', '--ephemeral',
                     '-c', f'mcp_servers.agentos.command={json.dumps(sys.executable)}',
                     '-c', f'mcp_servers.agentos.args={json.dumps(bridge["args"])}', prompt]
         if engine_id == 'claude-code':
@@ -183,12 +275,39 @@ class BoundedExecutionAdapter:
                 'args': ['-m', 'personal_agent.mcp_bridge', '--data', str(tools.capabilities.store.root), '--job', tools.capabilities.job_id],
             }}}, ensure_ascii=False), encoding='utf-8')
             env = self.environment(engine_id, binary, run_dir)
+            started = time.monotonic()
+            LOG.info('engine turn started engine=%s', engine_id)
             try:
                 completed = self.runner(self.command(engine_id, binary, prompt, config), cwd=run_dir,
                                         env=env, stdin=subprocess.DEVNULL, capture_output=True,
                                         text=True, timeout=MAX_TIMEOUT_SECONDS, shell=False)
-            except (OSError, subprocess.TimeoutExpired) as exc:
-                raise ExecutionError('구독 엔진을 안전한 시간 안에 실행하지 못했습니다.') from exc
+            except subprocess.TimeoutExpired as exc:
+                LOG.warning('engine turn timed out engine=%s after=%ss', engine_id, MAX_TIMEOUT_SECONDS)
+                raise ExecutionError(f'구독 엔진이 {MAX_TIMEOUT_SECONDS}초 안에 응답하지 않았습니다.',
+                                     failure_class='timeout') from exc
+            except OSError as exc:
+                LOG.warning('engine turn could not start engine=%s error=%s', engine_id, type(exc).__name__)
+                raise ExecutionError('구독 엔진 CLI를 실행하지 못했습니다.', failure_class='start-failed') from exc
+            elapsed = time.monotonic() - started
             if completed.returncode != 0:
-                raise ExecutionError('구독 엔진이 작업을 완료하지 못했습니다.')
+                status, reason = failure_details(engine_id, completed.stdout, getattr(completed, 'stderr', ''))
+                # A provider may echo the request; the prompt never leaves here.
+                for fragment in {prompt.strip(), prompt.strip()[:40]}:
+                    if len(fragment) >= 8 and fragment in reason:
+                        reason = reason.replace(fragment, '[request]')
+                failure_class, hint = 'engine-failed', ''
+                for match, name, text in _STATUS_HINTS:
+                    if status is not None and match(status):
+                        failure_class, hint = name, text
+                        break
+                LOG.warning('engine turn failed engine=%s exit_code=%s class=%s status=%s duration=%.1fs reason=%s',
+                            engine_id, completed.returncode, failure_class, status, elapsed, reason or '-')
+                message = f'{ENGINE_NAMES[engine_id]} 엔진이 작업을 완료하지 못했습니다(종료 코드 {completed.returncode}).'
+                if hint:
+                    message += ' ' + hint
+                if reason:
+                    message += f' 엔진 응답: {reason}'
+                raise ExecutionError(message, failure_class=failure_class,
+                                     exit_code=completed.returncode, reason=reason)
+            LOG.info('engine turn succeeded engine=%s duration=%.1fs', engine_id, elapsed)
             return ExecutionResult(self._content(engine_id, completed.stdout), engine_id, completed.returncode)

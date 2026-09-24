@@ -1651,8 +1651,14 @@ class AgentService:
             cfg=self.store.config('telegram',{})
             subscription=self.store.config('subscription_engine',{})
             generation=cfg.get('generation','')
-            if not (cfg.get('enabled') and isinstance(cfg.get('user_id'),int) and generation and subscription.get('id')=='codex'):
+            if not (cfg.get('enabled') and isinstance(cfg.get('user_id'),int) and generation):
                 return {'queued':False,'reason':'paired Codex Telegram connection is required'}
+            if subscription.get('id')!='codex':
+                # #132 keeps the automatic search proof Codex-only; other
+                # routes must not incur an unrequested provider call, so say so.
+                message='개인 계정이 연결되었습니다. 자동 연결 확인은 Codex 경로에서만 실행됩니다. Telegram에서 메시지를 보내 직접 확인하세요.'
+                self.store.put('telegram_status',{'state':'connected','message':message})
+                return {'queued':False,'reason':'automatic verification runs only on the Codex route','message':message}
             request_key=f'telegram-verify:{generation}'
             job_id=self.store.enqueue(TELEGRAM_VERIFICATION_QUERY,request_key,f'telegram:{generation}',cfg['user_id'])
             self.store.put('telegram_status',{'state':'verifying','message':'AgentOS가 연결과 공개 검색을 자동으로 확인하고 있습니다.'})

@@ -19,6 +19,7 @@ from personal_agent.quickstart import make_handler, configured_service, local_dr
 from personal_agent.drive_web_oauth import DriveWebOAuthHandoff, EncryptedDriveSecretStore
 from personal_agent.connector_contract import CONNECTOR_STATE_KEY, PENDING_WORK_KEY, ConnectorState
 from personal_agent.conversation_handoff import CONVERSATION_RESUME_KEY
+from personal_agent.decision import OUTCOME_DECIDED, FixtureDecisionEngine, SelectionDecision, fixture_confidence
 from personal_agent.gmail import GMAIL_CONNECTOR_ID, GMAIL_READONLY_SCOPE, GmailError
 from cryptography.fernet import Fernet
 from personal_agent.providers import ModelAdapter, ProviderError
@@ -1246,6 +1247,11 @@ class GmailConnectorWiringTests(unittest.TestCase):
     def configured(self,env=None):
         """One service built exactly the way the shipped entry point builds it."""
         service=configured_service(self.store,self.env if env is None else env)
+        # These connector wiring cases exercise an intentionally recognized
+        # mail search. Model the semantic boundary judgment as a confident
+        # none-of-these fixture instead of relying on an unavailable provider.
+        service.use_decision_engine(FixtureDecisionEngine(choose=lambda context,candidates,question:
+            SelectionDecision(OUTCOME_DECIDED,'none-of-these',candidates,fixture_confidence())))
         service.telegram_transport=self.telegram
         service.adapter=ModelAdapter(self.telegram)
         if service.gmail is not None:
@@ -1524,6 +1530,8 @@ class GmailConnectorWiringTests(unittest.TestCase):
     # -- the unconfigured installation ------------------------------------
     def test_an_installation_without_gmail_configuration_is_unchanged(self):
         service=configured_service(self.store,{})
+        service.use_decision_engine(FixtureDecisionEngine(choose=lambda context,candidates,question:
+            SelectionDecision(OUTCOME_DECIDED,'none-of-these',candidates,fixture_confidence())))
         service.telegram_transport=self.telegram
         self.assertIsNone(service.gmail)
         self.assertIsNone(service.connector_registry)

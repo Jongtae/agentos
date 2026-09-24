@@ -16,7 +16,7 @@ from personal_agent.conversation_handoff import INTENT_UNSUPPORTED, UNSUPPORTED_
 from personal_agent.conversation_projection import (BLOCKER_NO_AI_ROUTE, TERMINAL_FAILED_HEADER,
                                                     TERMINAL_PARTIAL_HEADER, terminal_text)
 from personal_agent.decision import (OUTCOME_DECIDED, FixtureDecisionEngine, SelectionDecision,
-                                     fixture_confidence)
+                                     UnavailableDecisionEngine, fixture_confidence)
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import TELEGRAM_ACK_AFTER_SECONDS, AgentService
 from personal_agent.quickstart_store import QuickStore
@@ -175,6 +175,33 @@ class LongWorkTests(ProjectionTestCase):
         self.assertEqual(self.service.acknowledge_long_work(), [])
         self.assertEqual(self.outbound, [])
 
+    def test_card_is_reconciled_if_work_finishes_while_telegram_accepts_it(self):
+        self.connect_model()
+        job_id = self.receive('긴 요청을 처리해 줘')
+        self.age(job_id, TELEGRAM_ACK_AFTER_SECONDS + 1)
+        original = self.service.telegram_transport
+        raced = False
+
+        def transport(url, body=None, headers=None, timeout=60):
+            nonlocal raced
+            if (not raced and url.endswith('/sendMessage')
+                    and body.get('text') == '요청을 받았습니다. 곧 시작할게요.'):
+                raced = True
+                # Model the worker completing and delivering between the poll
+                # thread's selection and Telegram accepting the card.
+                self.service.run_one()
+                self.service.deliver_one()
+            return original(url, body, headers, timeout)
+
+        self.service.telegram_transport = transport
+        self.assertEqual(self.service.acknowledge_long_work(), [job_id])
+        self.assertEqual(self.store.job(job_id)['status'], 'succeeded')
+        self.assertEqual(self.store.task_card(job_id)['state'], 'succeeded', self.outbound)
+        self.assertEqual([kind for kind, _text in self.outbound], ['send', 'send', 'edit'])
+        self.assertTrue(self.outbound[0][1].startswith(self.text))
+        self.assertEqual(self.outbound[1][1], '요청을 받았습니다. 곧 시작할게요.')
+        self.assertIn('처리가 끝났습니다', self.outbound[2][1])
+
 
 class BlockedTurnTests(ProjectionTestCase):
     """Matrix row B and #477: a truthful failure with a next action, said once."""
@@ -213,16 +240,20 @@ class BlockedTurnTests(ProjectionTestCase):
         self.assertIn('모델 또는 구독 엔진', job['error'])
         self.assertNotIn('구독 엔진', bubbles[0][1])
 
-    def test_a_pending_delivery_after_restart_falls_back_to_the_generic_truthful_text(self):
+    def test_a_pending_blocked_reply_survives_restart_with_its_projection(self):
         job_id = self.receive('도와줘')
         self.service.run_one()
+        projected = self.assistant_messages(job_id)[0]
+        self.assertEqual(self.store.blocked_delivery_reply(job_id), projected)
+        self.assertNotIn('delivery_projection', self.store.history()[0])
         restarted = AgentService(QuickStore(Path(self.temp.name) / 'data'), ModelAdapter(self.model_transport), self.transport)
         before = len(self.outbound)
         restarted.deliver_one()
         text = self.outbound[before][1]
-        # The process-local projection is gone; the generic truthful bubble goes out instead.
-        self.assertTrue(text.startswith(TERMINAL_FAILED_HEADER))
-        self.assertIn('모델 또는 구독 엔진', text)
+        self.assertEqual(text, projected)
+        self.assertNotIn(TERMINAL_FAILED_HEADER, text)
+        self.assertIn('지금 바로 되는 일', text)
+        self.assertIn('모델 또는 구독 엔진', self.store.job(job_id)['error'])
 
 
 class UnsupportedCapabilityTests(ProjectionTestCase):
@@ -252,10 +283,20 @@ class UnsupportedCapabilityTests(ProjectionTestCase):
         decision = self.service.classify_intent('메일에서 예산 관련 내용 찾아줘')
         self.assertEqual(decision.intent, 'mail-search')
 
-    def test_without_a_provider_the_cues_decide_as_before(self):
-        # Unavailable judgment: the pre-existing rule still claims the search.
-        decision = self.service.classify_intent('예약 확인 메일에 답장 보내줘')
-        self.assertEqual(decision.intent, 'mail-search')
+    def test_unavailable_judgment_does_not_fall_through_to_mail_search_cues(self):
+        self.service.use_decision_engine(UnavailableDecisionEngine())
+        request = '예약 확인 메일에 답장 보내줘'
+        decision = self.service.classify_intent(request)
+        self.assertEqual(decision.intent, 'ambiguous')
+        self.assertFalse(decision.executes)
+        self.assertIn('판단 기능을 사용할 수 없어', decision.clarification)
+        self.assertIn('메일을 검색하거나 다른 처리를 하지 않았습니다', decision.clarification)
+        job, bubbles = self.turn(request)
+        self.assertEqual(job['status'], 'succeeded')
+        self.assertEqual(bubbles, [('send', decision.clarification)])
+        with self.store.db() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM tool_events WHERE job_id=?',
+                                        (job['id'],)).fetchone()[0], 0)
 
 
 class TerminalTextTests(unittest.TestCase):

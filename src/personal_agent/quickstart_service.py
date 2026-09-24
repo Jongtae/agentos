@@ -216,11 +216,9 @@ class AgentService:
         self.decision_engine=ModelDecisionEngine(self.adapter,self.decision_route,audit=self.record_decision)
         self.decision_judge=ConversationJudgments(self.decision_engine)
         self.intent_classifier=IntentClassifier(workspace_search=workspace_search_request,judge=self.decision_judge)
-        # Owner-facing projection of blocked turns (#510).  Replies projected
-        # here are delivered as-is; the map is process-local, so after a
-        # restart a pending delivery falls back to the generic truthful text.
+        # Owner-facing projection of blocked turns (#510). The projected
+        # transcript row is also the durable Telegram delivery source.
         self.projection=ConversationProjection(store,self.local_settings_url)
-        self.projected_replies={}
         self.conversation_focus=ConversationFocus(store)
         # This is injected only by an owner-local deployment which supplies an
         # encrypted secret store and its local key.  It is never auto-enabled.
@@ -1186,7 +1184,14 @@ class AgentService:
         for row in rows:
             if not self.is_natural_language(row['message']):continue
             self.create_task_card(row['id'],row['message'],row['chat_id'],state=row['status'])
-            if self.store.task_card(row['id']):acknowledged.append(row['id'])
+            if self.store.task_card(row['id']):
+                acknowledged.append(row['id'])
+                # The Work may have completed while Telegram was accepting the
+                # card. Reconcile the persisted card to the current state so a
+                # stale queued/running card cannot remain after its answer.
+                current=self.store.job(row['id'])
+                if current and current['status'] not in ('queued','running'):
+                    self.update_task_card(current,current['status'])
         return acknowledged
 
     def connector_connect_url(self, connector_id):
@@ -2251,11 +2256,10 @@ class AgentService:
                     # and the transcript line; the job row keeps the plain
                     # cause as the technical detail the Task surface shows.
                     transcript=calendar_notice+self.projection.blocked_reply(self.connector_owner_id(job),exc.kind,response)
-                    self.projected_replies[job['id']]=transcript
                 else:
                     transcript=calendar_notice+'이 요청은 완료하지 못했습니다: '+response
                 with self.store.db() as db:
-                    db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('assistant',transcript,job['channel'],time.time(),job.get('workspace_id'),job['id']))
+                    db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id,delivery_projection) VALUES (?,?,?,?,?,?,?)',('assistant',transcript,job['channel'],time.time(),job.get('workspace_id'),job['id'],'blocked-turn' if isinstance(exc,BlockedTurn) else None))
                     db.execute("UPDATE jobs SET status='failed',error=?,delivery=? WHERE id=?",(response,'pending' if job['chat_id'] else 'none',job['id']))
                 outcome='failed'
             self.update_task_card(job,outcome)
@@ -2282,7 +2286,8 @@ class AgentService:
                 allowed=cfg.get('enabled') and job['channel']==f"telegram:{cfg.get('generation')}" and job['chat_id']==cfg.get('user_id')
                 db.execute('UPDATE jobs SET delivery=? WHERE id=?',('sending' if allowed else 'cancelled',job['id']))
             if not allowed:return
-            text=self.projected_replies.pop(job['id'],None) or self.telegram_result_text(job['response'],job['error'],job.get('status'))
+            text=(self.store.blocked_delivery_reply(job['id'])
+                  or self.telegram_result_text(job['response'],job['error'],job.get('status')))
             try:
                 self.telegram.send_message(job['chat_id'],text)
                 status='sent'

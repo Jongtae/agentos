@@ -330,6 +330,8 @@ UNSUPPORTED_QUESTION = ('Is the owner asking the assistant to do one of these th
                         + '? Choose that capability. If the request is anything else (searching mail by '
                         'subject/sender/date, notes, calendar, files, research, ordinary conversation), '
                         'choose none-of-these.')
+UNSUPPORTED_JUDGMENT_UNAVAILABLE = ('요청을 안전하게 구분할 판단 기능을 사용할 수 없어 메일을 검색하거나 다른 처리를 하지 않았습니다. '
+                                   '메일을 찾으려는 요청이라면 검색할 내용을 다시 구체적으로 적어 주세요.')
 RECOMMENDATION_QUESTION = ('Is the owner asking this assistant to recommend an assistant capability or '
                            'connection to add? If so, which reviewed outcome fits; otherwise choose '
                            'none-of-these (an ordinary product, place, person or travel recommendation '
@@ -672,7 +674,7 @@ class IntentClassifier:
         # Before any cue can claim the turn: a request for something this
         # conversation does not offer ("답장 보내줘", "그 메일 내용 보여줘") is
         # answered with the actual boundary rather than the nearest search
-        # (#478).  Unavailable judgment: the cues decide as before.
+        # (#478).
         unsupported = self._judge.unsupported_capability(text)
         if unsupported.outcome == JUDGMENT_YES:
             return self._with_suggestion(
@@ -689,6 +691,17 @@ class IntentClassifier:
             found = rule(text, lowered)
             if found is not None:
                 candidates.append(found)
+
+        # Mail search reads private metadata. If the semantic boundary check
+        # could not distinguish a search from an unsupported read/send request,
+        # fail closed instead of letting lexical cues trigger the connector.
+        if (unsupported.outcome == JUDGMENT_UNAVAILABLE
+                and any(candidate.intent == INTENT_MAIL_SEARCH for candidate in candidates)):
+            return self._with_suggestion(
+                IntentDecision(INTENT_AMBIGUOUS, AUTHORITY_RULE,
+                               cues=('judgment:unsupported-capability-unavailable',),
+                               clarification=UNSUPPORTED_JUDGMENT_UNAVAILABLE),
+                candidates, model_suggestion)
 
         if len(candidates) == 1:
             decision = self._single(candidates[0])

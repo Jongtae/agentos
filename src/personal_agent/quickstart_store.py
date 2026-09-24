@@ -56,6 +56,7 @@ class QuickStore:
             columns={row['name'] for row in db.execute('PRAGMA table_info(messages)')}
             if 'workspace_id' not in columns: db.execute('ALTER TABLE messages ADD COLUMN workspace_id TEXT')
             if 'job_id' not in columns: db.execute('ALTER TABLE messages ADD COLUMN job_id TEXT')
+            if 'delivery_projection' not in columns: db.execute('ALTER TABLE messages ADD COLUMN delivery_projection TEXT')
             columns={row['name'] for row in db.execute('PRAGMA table_info(jobs)')}
             if 'workspace_id' not in columns: db.execute('ALTER TABLE jobs ADD COLUMN workspace_id TEXT')
             memory_columns={row['name'] for row in db.execute('PRAGMA table_info(memories)')}
@@ -204,7 +205,15 @@ class QuickStore:
 
     def history(self):
         with self.db() as db:
-            return [dict(r) for r in db.execute('SELECT * FROM (SELECT * FROM messages ORDER BY id DESC LIMIT 100) ORDER BY id')]
+            return [dict(r) for r in db.execute(
+                'SELECT id,role,content,channel,created,workspace_id,job_id '
+                'FROM (SELECT * FROM messages ORDER BY id DESC LIMIT 100) ORDER BY id')]
+
+    def blocked_delivery_reply(self, job_id):
+        """Recover the owner-facing blocked-turn projection from its transcript row."""
+        with self.db() as db:
+            row=db.execute("SELECT content FROM messages WHERE job_id=? AND role='assistant' AND delivery_projection='blocked-turn' ORDER BY id DESC LIMIT 1",(job_id,)).fetchone()
+            return row['content'] if row else None
 
     def jobs(self):
         with self.db() as db:

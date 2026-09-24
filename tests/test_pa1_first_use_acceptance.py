@@ -30,9 +30,12 @@ So the rule this file holds itself to is narrow and mechanical:
   were sent, the task card, ``GET /api/tasks/<id>``, ``GET /api/home``,
   ``GET /api/state``, and files on disk - in preference to internal state.
 
-**Evidence class: local, offline, fixture-transport integration.**  Every
+**Evidence class: local, offline, fixture-backed integration.** Every
 outbound transport is injected: Telegram, the model provider, the Gmail REST
 surface and the OAuth token endpoint are all Python callables in this file.
+The unsupported-capability DecisionEngine question is answered by a fixture
+with ``none-of-these`` for ordinary mail searches; an unavailable judgment is
+covered separately and starts no mail read.
 No live Google or Telegram call is made and nothing here is evidence that a
 live connection works.  Live Gmail, live Telegram and live Calendar remain
 ``owner_validation_pending``.
@@ -55,6 +58,7 @@ from urllib.request import Request, build_opener, HTTPCookieProcessor, HTTPRedir
 from cryptography.fernet import Fernet
 
 from personal_agent.connector_contract import CONNECTOR_STATE_KEY, ConnectorState
+from personal_agent.decision import OUTCOME_DECIDED, FixtureDecisionEngine, SelectionDecision, fixture_confidence
 from personal_agent.gmail import GMAIL_CONNECTOR_ID, GMAIL_READONLY_SCOPE
 from personal_agent.providers import ModelAdapter, ProviderError
 from personal_agent.quickstart import configured_service, make_handler
@@ -313,6 +317,13 @@ class FirstUseEndToEndAcceptance(unittest.TestCase):
         the deployment would not have.
         """
         service = configured_service(self.store if store is None else store, self.env)
+        # A bounded fixture provider answers the unsupported-capability
+        # judgment with none-of-these for ordinary mail searches. This keeps
+        # the acceptance's focus on shipped boundaries and connector recovery
+        # while ensuring an unavailable semantic judgment never starts a read.
+        service.use_decision_engine(FixtureDecisionEngine(choose=lambda context,candidates,question:
+            SelectionDecision(OUTCOME_DECIDED,'none-of-these',candidates,fixture_confidence())
+            if context.purpose == 'unsupported-capability' else None))
         service.telegram_transport = self.transport
         service.adapter = ModelAdapter(self.transport)
         # Guarded rather than assumed, so that a deployment which stopped

@@ -24,10 +24,11 @@ from personal_agent.connector_contract import (PENDING_WORK_KEY, ConnectorContra
                                                ConnectorRegistry, ConnectorState, ConnectorStatus,
                                                ResumeState)
 from personal_agent.conversation_handoff import (CONVERSATION_RESUME_KEY, ConnectorHandoff,
-                                                 ConversationHandoffError, INTENT_MAIL_SEARCH,
+                                                 ConversationHandoffError, ConversationJudgments,
+                                                 INTENT_MAIL_SEARCH,
                                                  IntentClassifier, SUPERSEDED_WORK_ERROR)
 from personal_agent.decision import (OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine,
-                                     fixture_confidence)
+                                     SelectionDecision, fixture_confidence)
 from personal_agent.gmail import (GMAIL_CONNECTOR, GMAIL_CONNECTOR_ID, GMAIL_READONLY_SCOPE,
                                   EncryptedGmailSecretStore, GmailConnector)
 from personal_agent.providers import ModelAdapter
@@ -90,6 +91,7 @@ class HandoffTestCase(unittest.TestCase):
                                     now=lambda: self.clock[0])
         self.service = AgentService(self.store, ModelAdapter(telegram), telegram,
                                     connector_registry=self.registry, gmail=self.gmail)
+        self.service.use_decision_engine(FixtureDecisionEngine(choose=self.none_unsupported))
         # Replace the default-clock handoff the service builds so expiry can be
         # driven deterministically.  The store and registry are the same ones.
         self.service.connector_handoff = ConnectorHandoff(self.store, self.registry,
@@ -99,6 +101,12 @@ class HandoffTestCase(unittest.TestCase):
                                     'generation': GENERATION, 'cursor': 0, 'user_id': CHAT})
 
     # -- fixtures ----------------------------------------------------------
+    @staticmethod
+    def none_unsupported(context, candidates, question):
+        if context.purpose == 'unsupported-capability':
+            return SelectionDecision(OUTCOME_DECIDED, 'none-of-these', candidates,
+                                     fixture_confidence())
+
     def judge_withdrawal(self, *withdrawing):
         """Put a fixture DecisionEngine behind the service.
 
@@ -116,7 +124,8 @@ class HandoffTestCase(unittest.TestCase):
             return BinaryDecision(OUTCOME_DECIDED, context.facts.get('owner_message') in withdrawing,
                                  fixture_confidence())
 
-        self.service.use_decision_engine(FixtureDecisionEngine(judge=judge))
+        self.service.use_decision_engine(FixtureDecisionEngine(judge=judge,
+                                                               choose=self.none_unsupported))
         return asked
 
     def enqueue(self, message, chat_id=CHAT):
@@ -696,6 +705,9 @@ class ShippedPathGuardTests(HandoffTestCase):
         """
         store = QuickStore(tempfile.mkdtemp(dir=self.temp.name))
         bare = AgentService(store)  # exactly how the shipped deployment builds it
+        bare.use_decision_engine(FixtureDecisionEngine(choose=lambda context,candidates,question:
+            SelectionDecision(OUTCOME_DECIDED,'none-of-these',candidates,fixture_confidence())
+            if context.purpose == 'unsupported-capability' else None))
         job_id = store.enqueue(MAIL_REQUEST, 'k-bare', 'web', None)
         self.assertTrue(bare.run_one())
         job = store.job(job_id)
@@ -908,7 +920,10 @@ class MailIntentTests(unittest.TestCase):
     """The mail route is a read, and it is not reachable from a send request."""
 
     def setUp(self):
-        self.classifier = IntentClassifier(workspace_search=workspace_search_request)
+        judge = ConversationJudgments(FixtureDecisionEngine(choose=lambda context,candidates,question:
+            SelectionDecision(OUTCOME_DECIDED,'none-of-these',candidates,fixture_confidence())
+            if context.purpose == 'unsupported-capability' else None))
+        self.classifier = IntentClassifier(workspace_search=workspace_search_request, judge=judge)
 
     def test_ordinary_mail_requests_reach_the_mail_route_in_both_languages(self):
         for text, query in (('메일에서 예산 관련 내용 찾아줘', '예산'),

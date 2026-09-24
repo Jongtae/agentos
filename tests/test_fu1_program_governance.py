@@ -15,6 +15,7 @@ from delivery_state_invariants import (
     CLOSED_ON_MERGE,
     CLOSED_OUT,
     GOAL_READY,
+    PAUSED,
     assert_activation_record,
     assert_active_substeps_are_legitimate,
     assert_declared_goal_shape,
@@ -61,7 +62,7 @@ class Fu1ProgramGovernanceTests(unittest.TestCase):
 
     def test_program_role_is_backed_by_an_owner_activation_record(self):
         status = self.program["status"]
-        self.assertIn(status, {GOAL_READY, CLOSED_OUT})
+        self.assertIn(status, {GOAL_READY, CLOSED_OUT, PAUSED})
         record = self.program.get("activated_by")
         assert_activation_record(self, f"{PROGRAM} activated_by", record)
         self.assertEqual(record["issue"], 502)
@@ -80,9 +81,15 @@ class Fu1ProgramGovernanceTests(unittest.TestCase):
             self.assertIn("one substep at a time", action)
             self.assertIn("Do not select any unlisted successor", action)
             self.assertIn("live credentials", action)
-        else:
+        elif status == CLOSED_OUT:
             self.assertNotEqual(self.plan["next_goal"]["id"], PROGRAM)
             self.assertIn(PROGRAM, completed)
+        else:
+            self.assertEqual(status, PAUSED)
+            self.assertNotEqual(self.plan["next_goal"]["id"], PROGRAM)
+            self.assertNotIn(PROGRAM, completed)
+            self.assertEqual(self.program["paused_by"]["issue"], 523)
+            self.assertTrue(self.program["resume_condition"])
 
     def test_selection_requires_active_transition_and_governance_dependency(self):
         if self.program["status"] != GOAL_READY:

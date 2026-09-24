@@ -161,3 +161,33 @@ Task/record/settings API calls and payloads, the exact-draft test/apply guard,
 the single current AI route rule, revision-guarded and serialized folder saves,
 draft/focus/search/selection preservation across polling, distinct record types
 and actions, and the absence of provider calls on page entry.
+
+## 9. Functional review: what the owner asked and what the code does
+
+The owner's rule for this pass is "기능이 곧 UX": what a screen does is the
+experience. These are the owner's questions from the first review, answered
+from the code, with what changed and what stays a backend follow-up.
+
+| Owner question | Cause in code | Presentation fix in this pass | Backend follow-up |
+| --- | --- | --- | --- |
+| Why does "Failed to fetch" appear? | `api()` rethrew the browser's `TypeError` text into `#global-error` when the local server was unreachable or restarting; it stayed until the next successful poll. | Network failures now render one owner sentence ("AgentOS에 연결할 수 없습니다 …") in a banner at the top of the content column; the 2-second poll clears it when the server answers again. | none |
+| Why are Codex / Claude Code missing from AI 연결? | Rows come from `subscription_engines.available()`; the screenshot fixture returns no engines. `renderExecutionConnection` was not changed. | Row copy uses verbs ("이 CLI 사용", "이 연결 사용"); an uninstalled CLI now says what to do next. | none (if missing on the real server, report it) |
+| Why does "추가" not open a folder picker? | #551 chose text path entry with inline validation. A browser cannot hand a page the real path of a picked folder; a native picker needs a local helper behind the backend. | Field hint keeps the Finder shortcut; role and path are on two lines. | Native folder picker (already listed in #551's completion boundary) |
+| Why is there no Google button in 외부 연결? | Rows and the "연결" link come from `connector_connections()`, which is empty when the install declares no connector registry. | The empty state says why the list is empty and when rows appear; existing connector rows keep state badge + one link action. | Connector registry availability per install |
+
+Other function-level changes made in this pass because they change what the
+owner can do or misread:
+
+- Records: search is live (the "찾기" button was a second way to do the same
+  thing); counts sit inside the type filter so they cannot disagree with it;
+  delete asks in place with a cancel; the empty memory-candidate section is a
+  sentence, not a disclosure that opens to nothing.
+- Settings: switches for capture preferences save on change and report
+  "저장했습니다" (before, a full-width "수집 설정 저장" button was required); the
+  Telegram sharing policy is a state row with one action instead of a button
+  that looked like a state; temporary-material rows and Telegram disconnect
+  confirm before acting.
+- 작업 현황: the result is formatted text (bold, lists, links to http(s) only)
+  built from DOM nodes, so raw markdown and raw HTML never reach the owner as
+  markup; a request repeated right after an identical one is listed quieter;
+  "관찰된 과정" names tools in owner words and keeps ids under 기술 세부 정보.

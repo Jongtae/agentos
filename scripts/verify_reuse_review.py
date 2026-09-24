@@ -41,7 +41,9 @@ def _section(body: str) -> str:
 
 def _field(section: str, label: str) -> str:
     match = re.search(
-        rf"(?im)^-\s*{re.escape(label)}\s*:\s*(.*?)\s*$",
+        # Keep whitespace horizontal here: ``\s*`` can cross a newline and
+        # make an empty field borrow the value from the following bullet.
+        rf"(?im)^-[ \t]*{re.escape(label)}[ \t]*:[ \t]*(.*?)[ \t]*$",
         section,
     )
     return match.group(1).strip() if match else ""

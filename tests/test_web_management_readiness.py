@@ -112,7 +112,7 @@ class WebManagementReadinessTests(unittest.TestCase):
             self.skipTest('Node is needed for JavaScript behavior checks')
         script = r"""
 const assert=require('node:assert/strict');
-const ui=require(process.argv[1]);
+const ui=require(process.argv[1]);ui.setLanguage('ko');
 (async()=>{
 const old={tasks:[{id:'one',status:'running',status_kind:'active',events:[{id:1}],response:null},{id:'two',events:[{id:2}]}]};
 const fresh={tasks:[{id:'one',status:'succeeded',status_kind:'finished',result_available:true},{id:'two',status:'failed'}]};
@@ -218,7 +218,7 @@ console.log(JSON.stringify({checks:40}));
         self.assertIn('recordPageMatches(lastRecords', app)
         self.assertIn("if(activeView==='records')void refreshLoadedRecords()", app)
         self.assertIn('if(taskDetailInflight.has(id))return taskDetailInflight.get(id)', app)
-        self.assertEqual(app.count("invalidateModelDraft('연결 결과가 바뀌었습니다. 적용 전에 다시 테스트하세요.')"), 2)
+        self.assertEqual(app.count("invalidateModelDraft(t('연결 결과가 바뀌었습니다. 적용 전에 다시 테스트하세요.'))"), 2)
 
     def test_project_detail_and_result_save_actions_remain_available(self):
         app = (ROOT / 'src/personal_agent/web/app.js').read_text()
@@ -237,7 +237,7 @@ console.log(JSON.stringify({checks:40}));
         self.assertIn('requestedModelRevision===modelLoadRevision', app)
         self.assertIn('if(refreshQueued){refreshQueued=false;void refresh();}', app)
         self.assertGreaterEqual(app.count('invalidateModelLoad()'), 4)
-        hydration = app[app.index('if(!modelLoaded){if(requestedModelRevision'):app.index("$('task-refresh-state').textContent='방금 확인'")]
+        hydration = app[app.index('if(!modelLoaded){if(requestedModelRevision'):app.index("$('task-refresh-state').textContent=t('방금 확인')")]
         for draft in ('root-path-input', 'workspace-reference-input', 'file-workspace-path'):
             self.assertNotIn(f"$('{draft}').value", hydration)
         self.assertIn('if(requestedRootsRevision===rootsLoadRevision)renderRootList(', hydration)

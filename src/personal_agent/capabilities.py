@@ -8,7 +8,6 @@ import time
 CATALOGUE = (
     {"id": "builtin-mcp-read", "kind": "mcp", "version": "1", "tools": ["read_only"], "scopes": ["read"]},
     {"id": "google-drive-read", "kind": "mcp", "version": "1", "tools": ["search", "read_selected"], "scopes": ["read"]},
-    {"id": "compatibility-a2a-peer", "kind": "a2a", "version": "1", "tools": ["delegate"], "scopes": ["delegate"]},
     {"id": "google-calendar-create", "kind": "mcp", "version": "1", "tools": ["draft_event"], "scopes": ["calendar.events"]},
     {"id": "isolated-runtime-placeholder", "kind": "runtime", "version": "1", "tools": [], "scopes": []},
 )
@@ -22,6 +21,7 @@ STATES = {
     "disconnected",
 }
 _ACTIVE_GRANT_STATES = {"enabled", "paused"}
+_RETIRED_CAPABILITY_IDS = frozenset({"compatibility-a2a-peer"})
 _MISSING_CAPABILITY_STATE = object()
 _INVALID_CAPABILITY_STATE = "저장된 capability 상태를 확인하세요."
 _CAPABILITY_STATE_LOCK = threading.RLock()
@@ -130,11 +130,14 @@ class CapabilityRegistry:
             saved = self.store.config("capability_registry", _MISSING_CAPABILITY_STATE)
             if saved is _MISSING_CAPABILITY_STATE:
                 return {}
-            if not isinstance(saved, dict) or any(key not in self._catalogue for key in saved):
+            if not isinstance(saved, dict):
                 self._reject()
-            migrated = dict(saved)
-            changed = False
-            for capability_id, row in saved.items():
+            unknown = [key for key in saved if key not in self._catalogue and key not in _RETIRED_CAPABILITY_IDS]
+            if unknown:
+                self._reject()
+            migrated = {key: value for key, value in saved.items() if key not in _RETIRED_CAPABILITY_IDS}
+            changed = len(migrated) != len(saved)
+            for capability_id, row in list(migrated.items()):
                 item = self._catalogue[capability_id]
                 legacy = self._migrate_legacy_inactive_grant(item, row)
                 if legacy is not None and legacy != row:

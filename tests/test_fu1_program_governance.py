@@ -23,8 +23,8 @@ from delivery_state_invariants import (
 )
 
 PROGRAM = "EPIC-FU1"
-ORDER = ["FU1-474", "FU1-473", "FU1-475", "FU1-482"]
-ISSUES = {"FU1-474": 474, "FU1-473": 473, "FU1-475": 475, "FU1-482": 482}
+ORDER = ["FU1-474", "FU1-473", "FU1-DEC-01", "FU1-475", "FU1-482"]
+ISSUES = {"FU1-474": 474, "FU1-473": 473, "FU1-DEC-01": 521, "FU1-475": 475, "FU1-482": 482}
 
 
 class Fu1ProgramGovernanceTests(unittest.TestCase):
@@ -111,7 +111,7 @@ class Fu1ProgramGovernanceTests(unittest.TestCase):
         self.assertTrue(self.program["evidence_classes"])
         self.assertIn("No live", self.program["completion_claim"])
         review = self.program["independent_review"]["required_for"]
-        self.assertEqual(sorted(review), sorted(["FU1-473", "FU1-482", "program-closeout"]))
+        self.assertEqual(sorted(review), sorted(["FU1-473", "FU1-DEC-01", "FU1-482", "program-closeout"]))
         self.assertIn("does not select a successor", self.program["completion_rule"])
 
 

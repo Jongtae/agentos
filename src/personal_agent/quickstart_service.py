@@ -25,7 +25,8 @@ from .connector_contract import ConnectorContractError, _owner_key
 from .gmail import GMAIL_CONNECTOR_ID, GmailError
 from .calendar import CALENDAR_CONNECTOR_ID, CALENDAR_WRITE_CONNECTOR_ID, CalendarError
 from .calendar_conversation import DROPPED_NOTICE as CALENDAR_DROPPED_NOTICE, CalendarConversation
-from .conversation_handoff import (CONNECTOR_LABELS, RECOMMENDATION_OUTCOME_LABELS, TelegramChannel, ConnectorHandoff,
+from .conversation_handoff import (CONNECTOR_LABELS, JUDGMENT_YES, RECOMMENDATION_OUTCOME_LABELS, DecisionJudge,
+                                   TelegramChannel, ConnectorHandoff,
                                    ConversationFocus,
                                    ConversationHandoffError, IntentClassifier,
                                    INTENT_AMBIGUOUS, INTENT_ASSISTANT, INTENT_CALENDAR_CREATE,
@@ -207,7 +208,10 @@ class AgentService:
         self.personal_knowledge_orchestrator=PersonalKnowledgeOrchestrator(store)
         # Routing authority.  The classifier reads literal cue tables, never a
         # model, and the focus record it feeds is content free.
-        self.intent_classifier=IntentClassifier(workspace_search=workspace_search_request)
+        # Semantic judgments go through one seam.  Today it is the #417
+        # placeholder, which judges nothing and lets policy take its fallback.
+        self.decision_judge=DecisionJudge()
+        self.intent_classifier=IntentClassifier(workspace_search=workspace_search_request,judge=self.decision_judge)
         self.conversation_focus=ConversationFocus(store)
         # This is injected only by an owner-local deployment which supplies an
         # encrypted secret store and its local key.  It is never auto-enabled.
@@ -1890,19 +1894,20 @@ class AgentService:
                     if self.calendar_conversation.clear(connector_owner):calendar_notice=CALENDAR_DROPPED_NOTICE+'\n\n'
                 self.conversation_focus.record(decision)
                 owner=f"channel:{job['channel']}:{job.get('chat_id') or 'local'}"
-                # An explicit correction ("아니, 그거 말고…", "취소") is the owner
-                # changing their mind, so this owner's resume paths still
-                # waiting for a connection must not execute their stale intent
-                # later.  A mere topic change is not: "알겠어, 지금 연결할게"
-                # or a greeting leaves the parked request to run once after
-                # the connection, as promised (#473).  A new request needing
+                # A parked request was promised to run once after its
+                # connection, so it is kept unless the owner withdraws it
+                # (#473).  Whether a turn withdraws it is a semantic judgment
+                # (#521 → #417); policy acts only on a judged "yes" and keeps
+                # the request on "no" or "unavailable".  A new request needing
                 # the same connector replaces the old one in `park` instead.
-                # Two turns carry a cue without correcting a parked request: a
-                # follow-up the pending calendar draft claimed ("아니 4시로"),
-                # and a resumed Work re-reading its own original words, whose
-                # correction was already applied the first time it ran.
-                draft_edit=decision.intent==INTENT_CALENDAR_CREATE and decision.continuation
-                if decision.correction and not draft_edit and not self._answered_before(job['id']):
+                # Two turns are never asked: a follow-up the pending calendar
+                # draft claimed ("아니 4시로" is addressed to the draft), and a
+                # resumed Work re-reading its own words, which were judged
+                # the first time it ran.
+                parked=self.connector_handoff.parked_for(connector_owner) if self.connector_handoff else ()
+                if parked and not (decision.intent==INTENT_CALENDAR_CREATE and decision.continuation) \
+                        and not self._answered_before(job['id']) \
+                        and self.decision_judge.parked_work_withdrawn(prompt,parked).outcome==JUDGMENT_YES:
                     self.supersede_pending_handoffs(job['id'],owner_id=connector_owner)
                 # Prerequisite detection runs before `decision.executes` is
                 # consulted.  When the capability is missing, "connect it" is

@@ -164,17 +164,10 @@ INTENT_LABELS = {
 _RECOMMENDATION_CUES = ('연결할 만한', '뭘 연결', '무엇을 연결', '어떤 걸 붙이', '어떤 capability',
                         'what should i connect', 'which capability',
                         'suggest a capability', 'suggest capabilities')
-# "추천" and "recommend" alone are ordinary words: 숙소 추천, 맛집 추천,
-# recommend a hotel.  They claim a capability recommendation only when the
-# same utterance also names what is being recommended: a capability, a
-# connection scoped to a task ("…에 쓸 연결"), or one of the multi-word
-# outcome phrases below.  Everyday words such as 연결, connector, integration
-# or a lone 전문가 are deliberately not subjects: 공항 연결 추천, hdmi 커넥터
-# 추천, 세무 전문가 추천 are ordinary requests.
-_RECOMMENDATION_ASKS = ('추천', 'recommend', 'recommendation')
-_RECOMMENDATION_SUBJECTS = ('capability', 'capabilities', '쓸 연결', '쓸 만한 연결', '도와줄 연결',
-                            '문서 조사', '전문 조사', '전문가 조사', '심층 조사', '로컬 처리',
-                            'document research', 'expert research', 'deep research', 'local processing')
+# The bare words 추천 / recommend are deliberately not cues: 숙소 추천, 맛집
+# 추천 and recommend a hotel are ordinary requests (#474).  Whether a bare
+# "…추천해줘" asks for a capability is a semantic judgment, so it is asked of
+# ``DecisionJudge.capability_recommendation`` rather than of a cue list.
 # The recommendation orchestrator accepts only its three reviewed outcome
 # tags.  Mapping ordinary words onto a reviewed tag is AgentOS policy; the
 # orchestrator is never handed free prose.
@@ -296,6 +289,46 @@ def _strip_noise(value):
     return re.sub(r'\s+', ' ', value.strip(' \t?!.,;:·"“”‘’')).strip()
 
 
+# --- Placeholder judgment seams (FU1-DEC-01 / #521) -------------------------
+# Some routing questions are semantic, not lexical: "does this turn withdraw
+# the request that is waiting for a connection?", "is this bare 추천 asking
+# for a capability?".  They belong to the provider-independent decision layer
+# (docs/decision-layer.en.md), implemented by IMPL-DECISION-01 / #417.  Until
+# then each seam returns an *unavailable* judgment and AgentOS policy takes
+# its declared fallback.  Do not grow cue lists or other rules in here: that
+# is exactly the code #417 would have to remove.  #417 replaces this class.
+
+JUDGMENT_UNAVAILABLE = 'unavailable'
+JUDGMENT_YES = 'yes'
+JUDGMENT_NO = 'no'
+
+
+class Judgment:
+    """One bounded judgment.  It informs AgentOS policy; it never authorizes."""
+
+    __slots__ = ('outcome', 'value', 'source')
+
+    def __init__(self, outcome, value=None, source='placeholder'):
+        self.outcome, self.value, self.source = outcome, value, source
+
+    def __repr__(self):  # pragma: no cover - diagnostic only
+        return f'<Judgment {self.outcome} from {self.source}>'
+
+
+class DecisionJudge:
+    """Placeholder for the #417 DecisionEngine: every judgment is unavailable."""
+
+    def parked_work_withdrawn(self, utterance, parked_connectors):
+        """Does ``utterance`` withdraw the owner's request(s) parked for
+        ``parked_connectors``?  Policy on unavailable: keep them parked."""
+        return Judgment(JUDGMENT_UNAVAILABLE)
+
+    def capability_recommendation(self, utterance):
+        """Does ``utterance`` ask for a capability recommendation?  Policy on
+        unavailable: no recommendation claim; the conversation route answers."""
+        return Judgment(JUDGMENT_UNAVAILABLE)
+
+
 class IntentDecision:
     """One routing decision AgentOS made, with the evidence it used.
 
@@ -305,11 +338,11 @@ class IntentDecision:
 
     __slots__ = ('intent', 'authority', 'argument', 'cues', 'alternatives',
                  'clarification', 'consequential', 'supersedes_previous',
-                 'continuation', 'model_suggestion', 'correction')
+                 'continuation', 'model_suggestion')
 
     def __init__(self, intent, authority, *, argument=None, cues=(), alternatives=(),
                  clarification=None, supersedes_previous=False, continuation=False,
-                 model_suggestion=None, correction=False):
+                 model_suggestion=None):
         self.intent = intent
         self.authority = authority
         self.argument = argument
@@ -320,11 +353,6 @@ class IntentDecision:
         self.supersedes_previous = supersedes_previous
         self.continuation = continuation
         self.model_suggestion = model_suggestion
-        # True only when the owner used an explicit correction cue.  A parked
-        # connector request is cancelled by this, never by a mere change of
-        # topic: "알겠어, 지금 연결할게" differs from the parked intent but is
-        # the owner going to make the very connection it waits for (#473).
-        self.correction = correction
 
     @property
     def executes(self):
@@ -369,8 +397,8 @@ AMBIGUOUS_SUFFIX = (' 중 무엇인지 확실하지 않아 아무 작업도 실�
 # Each example below is a complete utterance the recommendation rule resolves
 # to exactly one reviewed outcome, so the owner can repeat it as written.  The
 # outcome tags themselves are internal and never shown.
-RECOMMENDATION_CLARIFICATION = ('어떤 일에 쓸 연결을 추천할지 알려 주세요. 예: "내 문서 조사에 쓸 연결 추천해줘", '
-                                '"전문가 조사에 쓸 연결 추천해줘", "내 컴퓨터에서 로컬 처리에 쓸 연결 추천해줘".')
+RECOMMENDATION_CLARIFICATION = ('어떤 일에 쓸 연결을 추천할지 알려 주세요. 예: "내 문서 조사에 연결할 만한 걸 알려줘", '
+                                '"전문가 조사에 연결할 만한 걸 알려줘", "내 컴퓨터에서 로컬 처리에 연결할 만한 걸 알려줘".')
 #: Owner-facing names for the three reviewed outcome tags.  An executed
 #: recommendation names its outcome with these, never with the tag.
 RECOMMENDATION_OUTCOME_LABELS = {
@@ -405,8 +433,9 @@ class IntentClassifier:
     stays free of any dependency on the service that uses it.
     """
 
-    def __init__(self, workspace_search=None):
+    def __init__(self, workspace_search=None, judge=None):
         self._workspace_search = workspace_search
+        self._judge = judge or DecisionJudge()
 
     # -- owner-explicit forms ------------------------------------------------
     # Slash commands and the legacy Korean colon forms are no longer the
@@ -437,11 +466,9 @@ class IntentClassifier:
     def _rule_recommendation(self, text, lowered):
         cues = _cue_hits(text, lowered, _RECOMMENDATION_CUES)
         if not cues:
-            asks = _cue_hits(text, lowered, _RECOMMENDATION_ASKS)
-            subjects = _cue_hits(text, lowered, _RECOMMENDATION_SUBJECTS)
-            if not (asks and subjects):
+            if self._judge.capability_recommendation(text).outcome != JUDGMENT_YES:
                 return None
-            cues = (*asks, *subjects)
+            cues = ('judgment:capability-recommendation',)
         matched = [(tag, hits) for tag, words in _RECOMMENDATION_OUTCOMES
                    if (hits := _cue_hits(text, lowered, words))]
         if len(matched) != 1:
@@ -584,7 +611,6 @@ class IntentClassifier:
 
         if focus_intent and (correction or focus_intent != decision.intent) and decision.intent != INTENT_AMBIGUOUS:
             decision.supersedes_previous = True
-        decision.correction = bool(correction)
         return self._with_suggestion(decision, candidates, model_suggestion)
 
     @staticmethod
@@ -659,7 +685,6 @@ class IntentClassifier:
             return IntentDecision(chosen.intent, AUTHORITY_RULE, argument=chosen.argument,
                                   cues=chosen.cues, alternatives=decision.alternatives,
                                   supersedes_previous=decision.supersedes_previous,
-                                  correction=decision.correction,
                                   model_suggestion={'received': proposed, 'state': 'accepted',
                                                     'reason': 'narrowed-an-agentos-candidate'})
         decision.model_suggestion = record
@@ -938,6 +963,12 @@ class ConnectorHandoff:
             rows.pop(connector_id, None)
             self.store.secret(CONVERSATION_RESUME_KEY, rows)
             return current.get('work_id')
+
+    def parked_for(self, owner_id):
+        """Connector ids this owner has a request parked for; no content."""
+        owner = _owner_key(owner_id)
+        return tuple(key for key, row in self._rows().items()
+                     if isinstance(row, dict) and _secrets.compare_digest(str(row.get('owner', '')), owner))
 
     def supersede(self, connector_id=None, owner_id=None):
         """Destroy resume paths so a changed request cannot execute later.

@@ -20,7 +20,7 @@ class SettingsError(ValueError):
 class SettingsOrchestrator:
     TTL_SECONDS = 10 * 60
     _CATEGORY = {
-        "connections": {"google-drive-read", "compatibility-a2a-peer", "google-calendar-create"},
+        "connections": {"google-drive-read", "google-calendar-create"},
         "runtime": {"isolated-runtime-placeholder"},
         "assistant": {"builtin-mcp-read"},
     }
@@ -94,7 +94,6 @@ class SettingsOrchestrator:
         capability = None
         for ident, words in {
             "google-drive-read": ("drive", "드라이브"),
-            "compatibility-a2a-peer": ("a2a", "peer", "피어"),
             "google-calendar-create": ("calendar", "캘린더", "일정"),
             "builtin-mcp-read": ("mcp",),
         }.items():

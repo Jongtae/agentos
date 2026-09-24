@@ -398,7 +398,12 @@ class AgentService:
         # Never send a locally/deterministically handled capability request
         # (especially notes or private searches) to a remote decision model
         # merely because it also contains a follow-up word.
-        if self.intent_classifier.has_local_candidate(prompt) or self.explicit_memory_request(prompt):
+        artifact_save=bool(re.search(
+            r'(?:파일|file|document|artifact).{0,20}(?:저장|save|write)|'
+            r'(?:저장|save|write).{0,20}(?:파일|file|document|artifact)',
+            prompt,re.I))
+        if self.intent_classifier.has_local_candidate(prompt) \
+                or (self.explicit_memory_request(prompt) and not artifact_save):
             return None
         if connector_owner and self.calendar_conversation.has_pending(connector_owner):
             return None

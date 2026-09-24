@@ -455,8 +455,8 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
                     self.assertIn(ask.replace("\n", " "), scenes)
 
     def test_scene_panel_requests_route_deterministically(self):
-        """Every request shown as running today must be routed by AgentOS's
-        own deterministic rules, not by hoping a model guesses the tool."""
+        """Every mail scene routes only after the fixture clears its declared
+        unsupported-capability boundary; no model guess supplies an intent."""
         import build_readme_visuals as visuals
 
         src = ROOT / "src"
@@ -464,9 +464,13 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             sys.path.insert(0, str(src))
         from personal_agent import conversation_handoff as handoff
         from personal_agent import quickstart_service as service
+        from personal_agent.decision import OUTCOME_DECIDED, FixtureDecisionEngine, SelectionDecision, fixture_confidence
 
         classifier = handoff.IntentClassifier(
-            workspace_search=service.workspace_search_request
+            workspace_search=service.workspace_search_request,
+            judge=handoff.ConversationJudgments(FixtureDecisionEngine(choose=lambda context,candidates,question:
+                SelectionDecision(OUTCOME_DECIDED,'none-of-these',candidates,fixture_confidence())
+                if context.purpose == 'unsupported-capability' else None)),
         )
         expected = ("workspace-summary", "mail-search", "calendar-create",
                     "memory", "research", "workspace-search")

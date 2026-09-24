@@ -37,6 +37,7 @@ from urllib.request import Request, build_opener, HTTPCookieProcessor, HTTPRedir
 from cryptography.fernet import Fernet
 
 from personal_agent.connector_contract import CONNECTOR_STATE_KEY, ConnectorState
+from personal_agent.decision import OUTCOME_DECIDED, FixtureDecisionEngine, SelectionDecision, fixture_confidence
 from personal_agent.gmail import GMAIL_CONNECTOR_ID, GMAIL_READONLY_SCOPE
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart import (configured_service, drive_config_main, gmail_config_main,
@@ -317,6 +318,9 @@ class GmailRouteReachabilityTest(unittest.TestCase):
                    'AGENTOS_GMAIL_LOCAL_PORT': str(port),
                    'AGENTOS_GMAIL_ENCRYPTION_KEY': Fernet.generate_key().decode()}
         service = configured_service(self.store, env)
+        service.use_decision_engine(FixtureDecisionEngine(choose=lambda context,candidates,question:
+            SelectionDecision(OUTCOME_DECIDED,'none-of-these',candidates,fixture_confidence())
+            if context.purpose == 'unsupported-capability' else None))
         service.telegram_transport = self.telegram
         service.adapter = ModelAdapter(self.telegram)
         if service.gmail is not None:

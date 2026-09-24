@@ -61,12 +61,16 @@ class ExecutionError(ValueError):
 
 
 def _echoes(text, prompt):
-    """True when ``text`` repeats any 24-character run of the prompt."""
+    """True when ``text`` repeats any run of 24+ characters from the prompt.
+
+    Every window of the (already bounded) text is checked, so an echo of the
+    prompt's start, middle or end is caught regardless of alignment.
+    """
     prompt = ' '.join(prompt.split())
     if len(prompt) < _ECHO_WINDOW:
         return len(prompt) >= 8 and prompt in text
-    return any(prompt[start:start + _ECHO_WINDOW] in text
-               for start in range(0, len(prompt) - _ECHO_WINDOW + 1, _ECHO_WINDOW // 2))
+    return any(text[start:start + _ECHO_WINDOW] in prompt
+               for start in range(0, len(text) - _ECHO_WINDOW + 1))
 
 
 def redact_reason(text, prompt=None):
@@ -78,6 +82,8 @@ def redact_reason(text, prompt=None):
     if not isinstance(text, str):
         return ''
     text = ' '.join(_CONTROL.sub(' ', text).split())
+    # Check only what could be shown, before redaction can split an echo.
+    text = text[:MAX_REASON_CHARS * 2]
     if isinstance(prompt, str) and _echoes(text, prompt):
         return '[요청 내용이 포함된 응답이라 표시하지 않습니다]'
     text = _SECRET.sub('[redacted]', text)
@@ -322,5 +328,10 @@ class BoundedExecutionAdapter:
                     message += f' 엔진 응답: {reason}'
                 raise ExecutionError(message, failure_class=failure_class,
                                      exit_code=completed.returncode, reason=reason)
+            try:
+                content = self._content(engine_id, completed.stdout)
+            except ExecutionError as exc:
+                LOG.warning('engine turn returned no usable result engine=%s duration=%.1fs', engine_id, elapsed)
+                raise ExecutionError(str(exc), failure_class='invalid-output', exit_code=0) from None
             LOG.info('engine turn succeeded engine=%s duration=%.1fs', engine_id, elapsed)
-            return ExecutionResult(self._content(engine_id, completed.stdout), engine_id, completed.returncode)
+            return ExecutionResult(content, engine_id, completed.returncode)

@@ -183,6 +183,26 @@ class EngineFailureDiagnosticsTests(unittest.TestCase):
             self.assertNotIn('diary', text)
         self.assertIn('요청 내용이 포함된 응답', error.reason)
 
+    def test_suffix_or_unaligned_prompt_echo_is_withheld(self):
+        prompt = 'x' * 50 + ' the confidential salary figure is 91234 for alice'
+        for echo in ('confidential salary figure is 91', 'figure is 91234 for alice',
+                     'E' * 280 + ' the confidential salary figure is 91234'):
+            with self.subTest(echo=echo[-30:]):
+                out = bounded_execution.redact_reason('error: ' + echo, prompt)
+                self.assertNotIn('salary', out)
+                self.assertNotIn('91234', out)
+
+    def test_success_is_not_logged_for_unusable_output(self):
+        class Done: returncode = 0; stdout = json.dumps({'type': 'turn.completed'}); stderr = ''
+        with tempfile.TemporaryDirectory() as folder:
+            profile = Path(folder) / 'profile'; profile.mkdir()
+            adapter = BoundedExecutionAdapter(finder=lambda _: '/runtime/codex', runner=lambda *a, **k: Done(),
+                                              runtime_root=Path(folder) / 'turns', codex_home=profile)
+            with self.assertLogs('personal_agent.engine', 'INFO') as logs, self.assertRaises(ExecutionError) as caught:
+                adapter.execute('codex', 'hello', AgentOSMcpTools(_Capabilities()))
+        self.assertEqual(caught.exception.failure_class, 'invalid-output')
+        self.assertFalse(any('succeeded' in line for line in logs.output))
+
     def test_redaction_covers_common_credential_shapes(self):
         samples = ['{"api_key": "abc123secretvalue"}', 'Authorization: Basic dXNlcjpwYXNz',
                    'key AIzaSyA1234567890abcdefghijklmnopqrstu', 'bot 123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawq',

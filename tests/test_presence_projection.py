@@ -403,6 +403,14 @@ class UnsupportedCapabilityTests(ProjectionTestCase):
         self.assertIn('mail-body', engine.asked[-2][1].facts['owner_message'])
         self.assertIn('mail-metadata', engine.asked[-1][1].facts['owner_message'])
 
+    def test_mixed_calendar_and_unsupported_mail_action_executes_neither(self):
+        engine = self.judged({})
+        decision = self.service.classify_intent('내일 오후 3시 회의를 예약하고 참석자에게 이메일 보내줘')
+        self.assertEqual(decision.intent, 'ambiguous')
+        self.assertFalse(decision.executes)
+        self.assertIn('메일은 보내지 않으며', decision.clarification)
+        self.assertEqual(engine.asked, [])
+
 
     def test_a_none_of_these_judgment_leaves_the_cues_to_decide(self):
         self.judged({})

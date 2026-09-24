@@ -337,6 +337,8 @@ UNSUPPORTED_QUESTION = ('Is the owner asking the assistant to do one of these th
                         'choose none-of-these.')
 UNSUPPORTED_JUDGMENT_UNAVAILABLE = ('요청을 안전하게 구분할 판단 기능을 사용할 수 없어 메일을 검색하거나 다른 처리를 하지 않았습니다. '
                                    '메일을 찾으려는 요청이라면 검색할 내용을 다시 구체적으로 적어 주세요.')
+MIXED_MAIL_ACTION_CLARIFICATION = ('지원하지 않는 메일 발송 요청과 다른 작업이 함께 있어 아무 작업도 실행하지 않았습니다. '
+                                   '메일은 보내지 않으며, 나머지 작업만 따로 요청해 주세요.')
 RECOMMENDATION_QUESTION = ('Is the owner asking this assistant to recommend an assistant capability or '
                            'connection to add? If so, which reviewed outcome fits; otherwise choose '
                            'none-of-these (an ordinary product, place, person or travel recommendation '
@@ -708,6 +710,15 @@ class IntentClassifier:
         cue_summary = ' '.join(dict.fromkeys((*(('최근 메일 검색',) if has_mail_focus and not mail_objects else ()),
                                                *mail_objects, *mail_verbs, *mail_action, *content_kind)))
         local_only = bool(candidates) and all(candidate.intent != INTENT_MAIL_SEARCH for candidate in candidates)
+        mixed_mail_action = (bool(mail_objects and mail_action)
+                             and any(candidate.intent not in (INTENT_MAIL_SEARCH, INTENT_NOTE_CREATE,
+                                                              INTENT_SETTINGS, INTENT_WORKSPACE_SEARCH)
+                                     for candidate in candidates))
+        if mixed_mail_action:
+            return self._with_suggestion(
+                IntentDecision(INTENT_AMBIGUOUS, AUTHORITY_RULE,
+                               cues=('mixed-mail-action',), clarification=MIXED_MAIL_ACTION_CLARIFICATION),
+                candidates, model_suggestion)
         mail_boundary_eligible = ((mail_objects and (mail_verbs or mail_action))
                                   or (has_mail_focus and mail_action))
         unsupported = (self._judge.unsupported_capability(cue_summary)

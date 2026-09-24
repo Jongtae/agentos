@@ -30,7 +30,8 @@ const source=part('function capabilityActions(', 'function clearMobileDetailWhen
  part('function renderExecutionConnection(', 'function renderSubscriptionEngines(')+
  part('const CONNECTOR_STATES=', 'async function requestCapabilityDraft(')+
  part('function renderTelegram(', 'function renderCapabilityPreview(');
-const ctx={document,$,telegramDraftOpen:false,requestCapabilityDraft:async()=>{},console};
+const calls=[];let refreshes=0,failRoute=false;
+const ctx={document,$,telegramDraftOpen:false,requestCapabilityDraft:async()=>{},console,api:async(path,body)=>{calls.push({path,body});if(failRoute)throw new Error('switch refused');return {};},refresh:async()=>{refreshes++;},busy:async(button,fn)=>fn(),setError:(id,error)=>{$(id).textContent=error.message;}};
 vm.createContext(ctx);vm.runInContext(source,ctx);
 const buttonIn=id=>descendants($(id)).find(node=>node.tag==='button');
 const settings={model:{provider:'ollama',endpoint:'http://127.0.0.1:11434',model:'stored-api-model'},model_ready:true,subscription_engines:{selected:'codex',engines:[{id:'codex',name:'Codex',installed:true,connected:true}]}};
@@ -38,6 +39,25 @@ ctx.renderExecutionConnection(settings);const routeButton=buttonIn('active-ai');
 assert.equal(buttonIn('active-ai'),routeButton,'unchanged AI polling preserves the focused action node');
 assert($( 'active-ai').textContent.includes('모델 정보 미제공'),'active CLI does not inherit the inactive API model identity');
 assert($('active-ai').textContent.includes('Ollama'),'provider title remains provider-specific');
+const buttonsIn=id=>descendants($(id)).filter(node=>node.tag==='button');
+const useApi=buttonsIn('active-ai').find(node=>node.textContent==='이 연결 사용');
+assert(useApi,'a verified direct API offers an explicit switch');
+assert($('active-ai').textContent.includes('사용 가능 · 현재 사용 안 함'));
+assert(!$('active-ai').textContent.includes('직접 API를 설정하거나 테스트해도'),'dense precedence prose is gone');
+(async()=>{
+ await useApi.onclick({currentTarget:useApi});
+ assert.equal(JSON.stringify(calls),JSON.stringify([{path:'/api/ai-route',body:{route:'direct-api'}}]));assert.equal(refreshes,1);
+ failRoute=true;await useApi.onclick({currentTarget:useApi});
+ assert.equal(refreshes,1,'a refused switch does not claim a new route');
+ assert.equal($('active-ai-feedback').textContent,'switch refused');
+ ctx.renderExecutionConnection({...settings,model_ready:false});
+ assert(!buttonsIn('active-ai').some(node=>node.textContent==='이 연결 사용'),'an unverified API cannot be selected');
+ assert(buttonsIn('active-ai').some(node=>node.textContent==='연결 확인'));
+ assert($('active-ai').textContent.includes('설정됨 · 확인 필요'));
+ ctx.renderExecutionConnection({...settings,subscription_engines:{selected:'',engines:settings.subscription_engines.engines.map(e=>({...e,connected:false}))}});
+ assert($('active-ai').textContent.includes('현재 요청 경로'),'direct API is shown as the current route once selected');
+ assert(!$('active-ai').textContent.includes('현재 사용 안 함'));
+})().catch(error=>{console.error(error);process.exit(1);});
 ctx.renderTelegram({telegram:{enabled:true,paired:true,username:'fixture'},telegram_status:{message:'ok'}});
 const telegramButton=buttonIn('telegram-current');ctx.renderTelegram({telegram:{enabled:true,paired:true,username:'fixture'},telegram_status:{message:'ok'}});
 assert.equal(buttonIn('telegram-current'),telegramButton,'unchanged Telegram polling preserves its action node');

@@ -719,6 +719,39 @@ finally:
         self.assertEqual(first['job_id'],second['job_id'])
 
 
+    def test_pairing_on_non_codex_route_explains_skipped_verification(self):
+        for route in (None,'claude-code'):
+            with self.subTest(route=route):
+                self.store.put('subscription_engine',{'id':route} if route else {})
+                self.store.put('telegram',{'enabled':True,'mode':'owner-token','username':'owner_test_bot','generation':'gen-'+str(route),'user_id':42})
+                before=len(self.store.jobs())
+                result=self.service.queue_telegram_connection_verification()
+                self.assertFalse(result['queued'])
+                self.assertIn('Codex 경로에서만',result['message'])
+                self.assertEqual(len(self.store.jobs()),before,'no verification Work or provider call is created')
+                status=self.store.config('telegram_status')
+                self.assertEqual(status['state'],'connected')
+                self.assertIn('직접 확인하세요',status['message'])
+
+    def test_real_pairing_flow_on_direct_route_reports_skip(self):
+        self.pair()
+        self.assertFalse([job for job in self.store.jobs() if job['request_key'].startswith('telegram-verify:')])
+        self.assertIn('Codex 경로에서만',self.store.config('telegram_status')['message'])
+
+    def test_poll_loop_does_not_overwrite_skip_explanation_while_it_is_true(self):
+        self.pair()
+        for _ in range(3):self.service.mark_telegram_connected()
+        self.assertIn('Codex 경로에서만',self.store.config('telegram_status')['message'])
+        self.store.put('subscription_engine',{'id':'codex'})
+        self.service.mark_telegram_connected()
+        self.assertEqual(self.store.config('telegram_status')['message'],'개인 Telegram 계정이 연결되어 있습니다.')
+
+    def test_unpaired_verification_request_does_not_touch_status(self):
+        self.store.put('telegram_status',{'state':'connected','message':'unchanged'})
+        self.store.put('telegram',{'enabled':True,'generation':'g'})
+        self.assertFalse(self.service.queue_telegram_connection_verification()['queued'])
+        self.assertEqual(self.store.config('telegram_status')['message'],'unchanged')
+
     def test_botfather_connection_rejects_invalid_account_and_webhook(self):
         def invalid_account(url,body,headers=None,timeout=60):
             if url.endswith('/getMe'):return {'ok':True,'result':{'username':''}}

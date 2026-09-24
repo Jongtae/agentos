@@ -470,9 +470,9 @@ class IntentClassifier:
         self._judge = judge or ConversationJudgments()
 
     # -- owner-explicit forms ------------------------------------------------
-    # Slash commands and the legacy Korean colon forms are no longer the
-    # *required* entry path, but they remain exactly as authoritative as they
-    # were.  An owner who learned them keeps them.
+    # Supported slash commands and the legacy Korean colon forms are no longer
+    # the *required* entry path, but they remain owner-authoritative. Retired
+    # compatibility commands deliberately fall through to ordinary routing.
     def explicit(self, text):
         if text in ('/start', '/help'):
             return IntentDecision(INTENT_GREETING, AUTHORITY_OWNER)

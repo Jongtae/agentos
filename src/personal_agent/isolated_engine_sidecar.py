@@ -153,7 +153,11 @@ class IsolatedEngineSidecar:
                 diagnostic = " ".join((completed.stderr or "").split()).lower()
                 if "--token" in diagnostic and "expected one argument" in diagnostic:
                     reason = "MCP bridge argument parsing failed"
-                elif "usage:" in diagnostic or "error:" in diagnostic:
+                elif diagnostic.startswith("usage:") and any(marker in diagnostic for marker in (
+                    "unrecognized arguments:",
+                    "expected one argument",
+                    "the following arguments are required:",
+                )):
                     reason = "engine command-line invocation failed"
                 else:
                     reason = f"engine process exited with status {completed.returncode}"

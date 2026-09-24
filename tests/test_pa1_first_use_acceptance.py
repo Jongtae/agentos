@@ -19,8 +19,7 @@ So the rule this file holds itself to is narrow and mechanical:
   the handler returned by ``make_handler``, or ``AgentService.poll_telegram``
   /``run_one``/``deliver_one``, which is the exact loop ``AgentService.start``
   runs;
-* nothing below constructs ``PersonalAssistantOrchestrator``,
-  ``GmailConnector``, ``ConnectorRegistry``, ``FileWorkspace``,
+* nothing below constructs ``GmailConnector``, ``ConnectorRegistry``, ``FileWorkspace``,
   ``IntentClassifier`` or any other child directly, and nothing calls
   ``resume_connector_work``/``deny_connector_work``/``complete_oauth`` by
   hand.  A test that reached in like that would be one more child fixture

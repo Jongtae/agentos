@@ -50,8 +50,7 @@ authorized by EPIC-PA1 / #386, which explicitly excludes public deployment.
    `docs/release-manifest.json` so a reader can map a version to the work in it.
 3. **Run the full suite and the verifier gates** on the exact commit:
    `pytest tests`, `python3 -m unittest discover -s tests -t tests`,
-   `scripts/verify_master_plan_docs.py`, `scripts/verify_src_layout.py`, and
-   `cmp -s delivery-plan.yaml src/personal_agent/delivery-plan.yaml`.
+   `scripts/verify_master_plan_docs.py`, and `scripts/verify_src_layout.py`.
 4. **Merge to `main`** through the normal issue/branch/PR/CI/review path.
 
 --- everything below publishes ---
@@ -59,11 +58,11 @@ authorized by EPIC-PA1 / #386, which explicitly excludes public deployment.
 5. **Tag and push** `vX.Y.Z` at the merge commit, and create the GitHub release.
 6. **Compute the archive checksum** of
    `https://github.com/Jongtae/agentos/archive/refs/tags/vX.Y.Z.tar.gz`.
-   `delivery.py` `_archive_sha256` is the reference implementation.
+   `scripts/dev/delivery.py` `_archive_sha256` is the repository-only reference implementation.
 7. **Update the tap formula in place.** Clone `Jongtae/homebrew-agentos`, and
    rewrite the two lines of the existing `Formula/agentos.rb` — the `url` tag
-   and the `sha256` — then open a PR. `delivery.py:406-408` is the reference
-   implementation and does exactly this, with two `re.sub` calls.
+   and the `sha256` — then open a PR. The release helper in
+   `scripts/dev/delivery.py` is the repository-only reference implementation.
 
    **Do not paste `deploy/homebrew/agentos.rb.template` into the tap.** That
    file is a reference copy for traceability from this repository, not a

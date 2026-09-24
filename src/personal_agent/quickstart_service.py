@@ -30,6 +30,8 @@ from .gmail import GMAIL_CONNECTOR_ID, GmailError
 from .calendar import CALENDAR_CONNECTOR_ID, CALENDAR_WRITE_CONNECTOR_ID, CalendarError
 from .calendar_conversation import DROPPED_NOTICE as CALENDAR_DROPPED_NOTICE, CalendarConversation
 from .conversation_handoff import (CONNECTOR_LABELS, JUDGMENT_YES,
+                                   FOLLOWUP_CANCEL, FOLLOWUP_CORRECTION, FOLLOWUP_REFERENCE,
+                                   FOLLOWUP_RETRY, looks_like_followup,
                                    ConversationJudgments, TelegramChannel, ConnectorHandoff,
                                    ConversationFocus,
                                    ConversationHandoffError, IntentClassifier,
@@ -382,6 +384,95 @@ class AgentService:
                               if owner_id else self.calendar_conversation.has_pending())
         focus={**self.conversation_focus.current(),'calendar_pending':bool(calendar_pending)}
         return self.intent_classifier.classify(prompt, model_suggestion=model_suggestion, focus=focus)
+
+    def continuity_relation(self, prompt, connector_owner=None):
+        """Resolve a short follow-up against the one focused Work, if any.
+
+        The semantic judge sees the short current utterance plus prior
+        intent/status, never the previous request/result. Explicit commands and
+        pending Calendar drafts keep their own dedicated state machines.
+        """
+        if self.intent_classifier.explicit(prompt) is not None or not looks_like_followup(prompt):
+            return None
+        if connector_owner and self.calendar_conversation.has_pending(connector_owner):
+            return None
+        focus=self.conversation_focus.current()
+        previous_id=focus.get('work_id')
+        previous=self.store.job(previous_id) if isinstance(previous_id,str) else None
+        if not previous:
+            return None
+        judged=self.decision_judge.followup_relation(prompt,focus.get('intent'),previous.get('status'))
+        if judged.outcome!=JUDGMENT_YES or judged.value not in {
+            FOLLOWUP_RETRY,FOLLOWUP_REFERENCE,FOLLOWUP_CANCEL,FOLLOWUP_CORRECTION,
+        }:
+            return None
+        return {'relation':judged.value,'previous':previous,'source':judged.source}
+
+    @staticmethod
+    def _unknown_effect(value):
+        if isinstance(value,dict):
+            if value.get('effect')=='unknown' or value.get('state')=='outcome-unknown':
+                return True
+            return any(AgentService._unknown_effect(item) for item in value.values())
+        if isinstance(value,list):
+            return any(AgentService._unknown_effect(item) for item in value)
+        return False
+
+    def safe_retry(self, previous):
+        """Whether replaying this Work's original request is demonstrably safe."""
+        if previous.get('status') not in ('failed','interrupted'):
+            return False,'이전 요청이 실패 또는 중단 상태가 아니어서 자동으로 다시 실행하지 않았습니다.'
+        if previous.get('delivery')=='unknown':
+            return False,'이전 Telegram 전달 여부를 확인할 수 없어 자동으로 다시 실행하지 않았습니다.'
+        if self.store.context_attachment(previous['id']):
+            return False,'이전 요청에 일회성 개인 컨텍스트가 연결되어 있어 자동으로 다시 실행하지 않았습니다.'
+        if previous['id'] in set(self.store.config('file_workspace_document_jobs',[])):
+            return False,'이전 요청이 개인 문서 내용을 사용해 자동으로 다시 실행하지 않았습니다.'
+        if self.store.task_artifacts(previous['id']):
+            return False,'이전 요청에 이미 저장된 결과가 있어 자동으로 다시 실행하지 않았습니다.'
+        effectful={'save_note','save_memory','calendar_draft_create','calendar_draft_update','calendar_draft_cancel'}
+        for event in self.store.task_events(previous['id']):
+            if event.get('tool') in effectful:
+                return False,'이전 요청이 상태를 바꾸는 작업을 시도해 자동으로 다시 실행하지 않았습니다.'
+            if self._unknown_effect(event.get('trace')):
+                return False,'이전 요청의 외부 결과가 불확실해 자동으로 다시 실행하지 않았습니다. 먼저 실제 결과를 확인해 주세요.'
+        return True,None
+
+    def record_continuity(self, job_id, previous_id, relation, *, executed=False, reason=None):
+        self.store.link_work_relation(job_id,previous_id,relation)
+        detail={'relation':relation,'related_work_id':previous_id,'executed':bool(executed)}
+        if reason:detail['reason']=reason
+        with self.store.db() as db:
+            db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                       (job_id,'conversation_continuity','succeeded',json.dumps(detail,ensure_ascii=False),time.time()))
+
+    def cancel_focused_work(self, previous, connector_owner):
+        """Cancel only the focused Work through an existing safe boundary."""
+        work_id=previous['id']
+        if previous.get('status')=='awaiting_connection' and self.connector_handoff:
+            for connector_id in self.connector_handoff.parked_for(connector_owner):
+                record=self.connector_handoff.record(connector_id)
+                if record and record.get('work_id')==work_id:
+                    dropped=self.connector_handoff.supersede(connector_id=connector_id,owner_id=connector_owner)
+                    cancelled=self.cancel_superseded_work(dropped,notify=False)
+                    return bool(cancelled),'이전 요청을 취소했습니다. 연결이 끝나도 실행하지 않습니다.'
+        if previous.get('status')=='queued':
+            with self.store.db() as db:
+                changed=db.execute("UPDATE jobs SET status='cancelled',error=?,delivery='cancelled' WHERE id=? AND status='queued'",
+                                   ('소유자가 후속 대화에서 취소했습니다.',work_id)).rowcount
+            if changed:
+                self.update_task_card(self.store.job(work_id),'cancelled')
+                return True,'이전 요청을 취소했습니다.'
+        return False,'이전 요청은 이미 실행 중이거나 끝난 상태라 여기서 취소하지 않았습니다.'
+
+    def complete_continuity_turn(self, job, response):
+        with self.store.db() as db:
+            db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',
+                       ('assistant',response,job['channel'],time.time(),job.get('workspace_id'),job['id']))
+            db.execute("UPDATE jobs SET status='succeeded',response=?,error=NULL,provider='builtin',model='continuity',delivery=? WHERE id=?",
+                       (response,'pending' if job['chat_id'] else 'none',job['id']))
+        self.update_task_card(job,'succeeded')
+        return True
 
     @staticmethod
     def settings_response(result):
@@ -1019,7 +1110,7 @@ class AgentService:
         # never invented and never names a port this process did not bind.
         return self.connector_handoff.guidance(result,self.connector_connect_url(connector_id))
 
-    def cancel_superseded_work(self, work_ids):
+    def cancel_superseded_work(self, work_ids, notify=True):
         """Cancel parked Work whose resume path a newer request replaced.
 
         Both statements are guarded on `awaiting_connection`, so a Work that
@@ -1041,7 +1132,7 @@ class AgentService:
         jobs=[job for job in (self.store.job(work_id) for work_id in cancelled) if job]
         for job in jobs:
             self.update_task_card(job,'superseded')
-        if jobs:
+        if jobs and notify:
             self._notify_owner(self.connector_owner_id(jobs[0]),SUPERSEDED_WORK_ERROR)
         return cancelled
 

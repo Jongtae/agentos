@@ -738,6 +738,14 @@ finally:
         self.assertFalse([job for job in self.store.jobs() if job['request_key'].startswith('telegram-verify:')])
         self.assertIn('Codex 경로에서만',self.store.config('telegram_status')['message'])
 
+    def test_poll_loop_does_not_overwrite_skip_explanation_while_it_is_true(self):
+        self.pair()
+        for _ in range(3):self.service.mark_telegram_connected()
+        self.assertIn('Codex 경로에서만',self.store.config('telegram_status')['message'])
+        self.store.put('subscription_engine',{'id':'codex'})
+        self.service.mark_telegram_connected()
+        self.assertEqual(self.store.config('telegram_status')['message'],'개인 Telegram 계정이 연결되어 있습니다.')
+
     def test_unpaired_verification_request_does_not_touch_status(self):
         self.store.put('telegram_status',{'state':'connected','message':'unchanged'})
         self.store.put('telegram',{'enabled':True,'generation':'g'})

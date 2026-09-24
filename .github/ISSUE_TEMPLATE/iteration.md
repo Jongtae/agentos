@@ -23,17 +23,21 @@ Files, runtime boundaries, repositories, and external systems this goal may chan
 
 ## Existing solutions review (Adopt / Adapt / Build)
 
-Required when this work materially implements or replaces commodity infrastructure. Otherwise write `N/A`.
+Required before non-trivial implementation that introduces or replaces a component, abstraction, integration, dependency, framework, or commodity infrastructure. Start with internal repository reuse. For a pure bug fix/data/content change that introduces none of those, set the decision to `N/A` and give a concrete reason.
 
 - problem/boundary:
+- internal repository candidates:
+- search evidence (paths/symbols/docs checked):
+- standard-library/platform candidates:
 - official SDK/reference/standard candidates:
-- mature open-source candidates:
+- mature open-source/framework candidates:
 - maintenance/security/supply-chain fit:
 - licence fit:
 - runtime/deployment/compatibility fit:
-- decision: `Adopt / Adapt / Build`
+- decision: `Adopt / Adapt / Build / N/A`
 - why rejected candidates are insufficient:
 - AgentOS-owned policy/authority boundary kept outside the dependency:
+- N/A reason:
 
 ## Acceptance criteria
 

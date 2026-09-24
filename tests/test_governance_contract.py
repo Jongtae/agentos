@@ -146,8 +146,9 @@ def test_independent_review_is_risk_based_not_default_completion_gate() -> None:
     agents = _read("AGENTS.md")
     constitution = _read("docs/development-constitution.en.md")
     goal = _read("docs/goal-execution-contract.en.md")
+    incremental = _read("docs/incremental-delivery.en.md")
 
-    for text in (agents, constitution, goal):
+    for text in (agents, constitution, goal, incremental):
         _assert_all(
             text,
             "independent review",
@@ -177,6 +178,13 @@ def test_independent_review_is_risk_based_not_default_completion_gate() -> None:
         "do not trigger review by themselves",
         "Re-review only when the remediation changes the boundary that triggered review",
         "mechanical or non-boundary remediation does not automatically reopen independent review",
+    )
+    _assert_all(
+        incremental,
+        "only when the Development Constitution's material security/authority escalation criteria apply",
+        "otherwise proceed with required CI and evidence without a review gate",
+        "risk-triggered review",
+        "validated full head SHA",
     )
 
 

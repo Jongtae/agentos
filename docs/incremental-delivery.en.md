@@ -46,18 +46,20 @@ Keep a checkpoint parent open when remaining criteria or explicit owner acceptan
    Exit zero means a diagnostic was produced, NOT a passing CI gate or approval.
    It does not evaluate code, enumerate every protection rule, resolve conversations,
    poll, merge, or mutate repository settings. Unknown and skipped results need inspection.
-3. Fix actual failures/conflicts; request a relevant independent review once for a stable
-   head and scope. Resolve only addressed or explicitly triaged threads with evidence.
-   Never impersonate another reviewer or treat self-review as independence.
-4. When scope review and GitHub requirements are satisfied, attempt one normal merge pinned
-   to the reviewed full head SHA. No `--admin`, force push, false check, approval dismissal,
+3. Fix actual failures/conflicts. Request an independent review once for a stable head and
+   scope only when the Development Constitution's material security/authority escalation
+   criteria apply; otherwise proceed with required CI and evidence without a review gate.
+   Resolve only addressed or explicitly triaged threads with evidence. Never impersonate
+   another reviewer or treat self-review as independence.
+4. When any risk-triggered review and GitHub requirements are satisfied, attempt one normal
+   merge pinned to the validated full head SHA. No `--admin`, force push, false check, approval dismissal,
    protection removal, or settings mutation to work around refusal.
 5. Native auto-merge is optional. When already enabled and this exact PR is authorized,
    it may be used under all normal gates. When disabled, skip it: ordinary merge still
    exists. Do not repeatedly request disabled auto-merge or install a replacement bot.
 6. If an attempt fails, retain the exact error/category, refresh once, and choose a
    recovery specific to the state. A changed head requires new validation; a missing
-   approval needs a reviewer; a permission failure needs an authorized actor. Do not
+   risk-triggered approval needs a reviewer; a permission failure needs an authorized actor. Do not
    call all three 'repository policy' without evidence.
 
 If no safe in-scope work remains and the rest is external, write an `integration_pending`
@@ -71,7 +73,7 @@ continue only if the already-approved program allows it and its dependencies are
 ## Required handoff receipt
 
 Record: goal/issue/PR; exact head and base; supported increment; implementation state;
-validation command/run links; review findings and disposition; integration state;
+validation command/run links; review findings and disposition when review occurred; integration state;
 exact unavailable gate/permission; next responsible actor and one resume action;
 deferred issue links; smoke/run instructions; actual operating evidence or not_run.
 No credentials, raw personal payloads, promises to monitor, or unsupported success claims.
@@ -84,7 +86,7 @@ At inspection for #365: main metadata named `validate` as required, native auto-
 false, and detailed protection reads returned 403 for the connected integration. These
 are observations, not a complete policy audit. This change does not edit native settings.
 The owner may separately enable Settings -> General -> Pull Requests -> Allow auto-merge;
-that enables a convenience, not permission to bypass reviews/checks and is not necessary
+that enables a convenience, not permission to bypass required reviews/checks and is not necessary
 for the ordinary merge path. Recheck current settings instead of assuming this snapshot.
 
 Primary references: [GitHub required checks](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks)

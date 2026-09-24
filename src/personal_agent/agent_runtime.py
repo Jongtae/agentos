@@ -305,8 +305,10 @@ class Capabilities:
   # allowlist.
   return [root for root in self.store.config('file_roots',[]) if not folder_grants.blocked(root.get('path',''),self.store)]
  def resolve_file(self,root_id,path):
-  root=next((r for r in self.roots() if r['id']==root_id),None)
-  if not root:raise ValueError('먼저 연결 설정에서 파일 폴더를 연결해 주세요.')
+  # Search/list operations may inspect many files under a root. Revalidate only
+  # the selected stored grant on each read instead of rescanning every root.
+  root=next((r for r in self.store.config('file_roots',[]) if r.get('id')==root_id),None)
+  if not root or folder_grants.blocked(root.get('path',''),self.store):raise ValueError('먼저 연결 설정에서 파일 폴더를 연결해 주세요.')
   base=Path(root['path']).resolve();relative=Path(path)
   if relative.is_absolute() or '..' in relative.parts or any(p.startswith('.') for p in relative.parts):raise ValueError('허용하지 않은 파일 경로입니다.')
   resolved=(base/relative).resolve()

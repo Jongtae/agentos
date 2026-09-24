@@ -198,6 +198,14 @@ class FolderGrantTests(unittest.TestCase):
         self.assertEqual([ref['path'] for ref in state['references']],[str(self.docs)])
         self.assertEqual(state['workspace'],str(other))
 
+    def test_file_workspace_save_response_keeps_blocked_disclosure(self):
+        aws=self.home/'.aws'; aws.mkdir()
+        self.service.configure_file_workspace({'references':[str(self.docs)],'workspace':str(self.out)})
+        current=FileWorkspace(self.store).status()
+        self.store.put('file_workspace',{**current,'references':current['references']+[{'id':'legacy','path':str(aws)}]})
+        result=self.service.configure_file_workspace({'references':[str(self.docs),str(aws)],'workspace':str(self.out)})
+        self.assertEqual({ref['path']:ref.get('blocked') for ref in result['references']}[str(aws)],folder_grants.SENSITIVE)
+
     def test_retained_unavailable_reference_still_prevents_workspace_overlap(self):
         reference=self.home/'Documents'/'OwnerFiles'/'Research'
         reference.parent.mkdir(); reference.mkdir()
@@ -218,6 +226,15 @@ class FolderGrantTests(unittest.TestCase):
         self.assertEqual(caps.roots(),[])
         with self.assertRaisesRegex(ValueError,'먼저 연결 설정'):
             caps.resolve_file(self.store.config('file_roots')[0]['id'],'anything.txt')
+
+    def test_resolve_file_revalidates_only_the_selected_root(self):
+        second=self.home/'Documents'/'Second'; second.mkdir()
+        (self.docs/'note.txt').write_text('note')
+        roots=self.service.save_roots({'paths':[str(self.docs),str(second)]})['roots']
+        with mock.patch.object(folder_grants,'blocked',wraps=folder_grants.blocked) as check:
+            resolved=Capabilities(self.store,None,{},'','job',lambda *args:None).resolve_file(roots[0]['id'],'note.txt')
+        self.assertEqual(resolved,self.docs/'note.txt')
+        self.assertEqual(check.call_count,1)
 
     def test_searches_skip_blocked_folders_and_blocked_output_refuses_saves(self):
         ssh = self.home / '.ssh'

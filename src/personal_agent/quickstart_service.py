@@ -802,9 +802,10 @@ class AgentService:
 
     def configure_file_workspace(self, body):
         if not isinstance(body,dict): raise ValueError('파일 작업공간 정보를 확인하세요.')
-        result=FileWorkspace(self.store).configure(body.get('references',[]),body.get('workspace',''))
+        files=FileWorkspace(self.store)
+        files.configure(body.get('references',[]),body.get('workspace',''))
         self.store.put('document_sharing',{})
-        return result
+        return files.projection()
 
     def record_file_workspace_document_job(self, job_id):
         rows=self.store.config('file_workspace_document_jobs',[])

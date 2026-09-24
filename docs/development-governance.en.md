@@ -18,6 +18,7 @@ The governance combines four complementary practices:
 2. **Consumer-driven contract testing.** An AgentOS adapter is tested against versioned fixtures and test doubles that represent the precise external request/response contract it consumes.
 3. **Test-pyramid automation.** Most coverage is focused unit and component testing; a smaller set verifies local integration and end-to-end product flows. UI or manual broad-stack testing is never the default release gate.
 4. **Continuous-integration quality gates.** Every pull request runs deterministic formatting, canonical-document existence, local-link, contract-fixture, and relevant automated tests before it can merge. Historical translations must link to their English canonical source; translation parity is not a merge gate.
+5. **Reuse-first implementation selection.** Before non-trivial implementation introduces or replaces a component, abstraction, integration, dependency, or framework, the Existing Solutions Review starts with reusable AgentOS code already in the repository, then standard/platform facilities, official/reference implementations, and mature maintained OSS. Custom Build is the final option and requires a documented contract mismatch.
 
 ## Development completion rule
 
@@ -49,6 +50,7 @@ The deployed runtime must use automated startup and health checks, fail closed o
 
 - One GitHub issue, `codex/` branch, focused commits, and a PR are required for every iteration.
 - CI blocks merge on failed automated gates; it does not wait for a person to carry out a routine live test. The always-required `validate` check may use path-sensitive depth: Markdown/assets-only changes use fast structural/governance checks, while any runtime, test, schema, build, workflow, executable governance-data, or otherwise non-document-only change must pass the full suite before merge.
+- Every PR must carry a structured Existing Solutions Review. For non-trivial implementation this records internal repository candidates and search evidence before external candidates and the final Adopt / Adapt / Build decision. `N/A` is allowed only with a concrete reason that no new component, abstraction, integration, dependency, or framework is introduced. The required `validate` check rejects a missing or incomplete record.
 - A contract change requires its fixture and mock suite to change in the same PR.
 - New scopes, external writes, credentials, data classes, or recovery semantics require a contract and threat-model update before implementation.
 - Tests must be deterministic, hermetic where possible, and safe to run without personal data or external credentials.

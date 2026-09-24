@@ -40,6 +40,32 @@ KOREAN_REFERENCE_EXCLUSIONS = {
     "product-status.ko.md",
 }
 PHASE_IDS = ("D-01", "I-01", "D-02", "I-02", "D-03", "I-03", "D-04", "I-04", "D-05", "I-05", "D-06", "I-06")
+REUSE_POLICY_REQUIREMENTS = {
+    ROOT / "AGENTS.md": (
+        "internal repository components/adapters/utilities/patterns considered",
+        "standard-library/platform facilities considered",
+        "A pure bug fix or data/content change",
+    ),
+    DOCS / "development-constitution.en.md": (
+        "internal repository candidates and search evidence",
+        "standard/platform candidates",
+        "`N/A` is not a substitute for the search",
+    ),
+    ROOT / ".github" / "pull_request_template.md": (
+        "- internal repository candidates:",
+        "- search evidence (paths/symbols/docs checked):",
+        "- decision: `Adopt / Adapt / Build / N/A`",
+        "- N/A reason:",
+    ),
+}
+REUSE_COMPATIBILITY_ENTRYPOINTS = (
+    ROOT / "CODEX.md",
+    ROOT / "GEMINI.md",
+    ROOT / ".github" / "copilot-instructions.md",
+    ROOT / ".cursor" / "rules" / "agentos-governance.mdc",
+    ROOT / ".windsurf" / "rules" / "agentos-governance.md",
+    ROOT / ".windsurfrules",
+)
 
 
 def links(text):
@@ -149,8 +175,21 @@ def verify_reference_registry(documents=DOCS, references=TRANSLATION_REFERENCES,
         raise SystemExit("Korean reference registry does not cover every eligible internal pair")
 
 
+def verify_reuse_policy_contract():
+    for path, required in REUSE_POLICY_REQUIREMENTS.items():
+        text = path.read_text(encoding="utf-8")
+        missing = [needle for needle in required if needle not in text]
+        if missing:
+            raise SystemExit(f"reuse governance missing from {path.relative_to(ROOT)}: {missing}")
+    for path in REUSE_COMPATIBILITY_ENTRYPOINTS:
+        text = path.read_text(encoding="utf-8")
+        if "repository" not in text or "Existing Solutions Review" not in text or "Build" not in text:
+            raise SystemExit(f"reuse governance compatibility entrypoint drift: {path.relative_to(ROOT)}")
+
+
 def main():
     verify_reference_registry()
+    verify_reuse_policy_contract()
     verify_document_references()
     mp1_en = (DOCS / TRANSLATION_REFERENCES[1][1]).read_text(encoding="utf-8")
     if phase_table_ids(mp1_en) != PHASE_IDS:

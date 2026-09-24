@@ -3,6 +3,7 @@ name: validate
 on:
   pull_request:
     branches: [main]
+    types: [opened, edited, reopened, synchronize]
   push:
     branches: [main]
 
@@ -56,6 +57,24 @@ jobs:
 
       - name: Verify canonical documents and plan integrity
         run: python3 scripts/verify_master_plan_docs.py
+
+      - name: Verify PR reuse review
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          trusted_validator="$RUNNER_TEMP/verify_reuse_review.py"
+          if git cat-file -e "$BASE_SHA:scripts/verify_reuse_review.py" 2>/dev/null; then
+            git show "$BASE_SHA:scripts/verify_reuse_review.py" > "$trusted_validator"
+          else
+            # Bootstrap this gate on the PR that first introduces it. Future
+            # PRs use the protected base revision above.
+            cp scripts/verify_reuse_review.py "$trusted_validator"
+          fi
+          python3 "$trusted_validator"
 
       - name: Verify public README parity
         run: python3 scripts/verify_readme_localization.py --check-git-diff

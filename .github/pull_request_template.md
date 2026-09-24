@@ -81,6 +81,10 @@ Explicitly distinguish design, schema/static validation, mock/fixture, local det
 
 Map each acceptance criterion to merged artifacts, required CI, any risk-triggered review artifacts, and tracker/roadmap/ledger closeout. Do not treat a local test, signature, package manifest, closed issue, branch, or PR alone as completion.
 
+## Delegation
+
+Requested / accepted / observed model settings and exclusive file ownership when delegation was used; otherwise write `N/A`.
+
 ## Independent review escalation
 
 - material security/authority boundary changed: `yes / no`

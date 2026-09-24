@@ -393,7 +393,7 @@ class AgentService:
         intent/status, never the previous request/result. Explicit commands and
         pending Calendar drafts keep their own dedicated state machines.
         """
-        if not looks_like_followup(prompt):
+        if not eligible_for_followup_judgment(prompt):
             return None
         # Never send a locally/deterministically handled capability request
         # (especially notes or private searches) to a remote decision model

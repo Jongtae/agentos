@@ -1,7 +1,7 @@
 # Release procedure
 
 Canonical English source. This writes down a procedure that previously existed
-only as unreachable code in `src/personal_agent/delivery.py`, where
+only as repository-only code in `scripts/dev/delivery.py`, where
 `_run_release` returns unconditionally at its first statement, so the body
 below it never executes. That guard stays; this document is not a request to
 re-enable it, and `tests/test_delivery.py` continues to assert the helper fails

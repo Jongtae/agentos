@@ -79,7 +79,7 @@ List deterministic attacks/violations that must fail closed and the observable e
 
 ## Evidence / independent review
 
-Required static/schema/fixture/local/live evidence classes, independent reviewer role, and claims explicitly not proven by this work:
+Required static/schema/fixture/local/live evidence classes and claims explicitly not proven by this work. State whether the implementation materially changes a security/authority boundary under the Development Constitution; when it does, record the independent reviewer role and reviewed head:
 
 ## Branch
 

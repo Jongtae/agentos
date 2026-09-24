@@ -12,7 +12,7 @@ Follow [Incremental Delivery and Merge Handoff](incremental-delivery.en.md) for 
 
 A pending review/check, repository merge permission, or disabled native auto-merge is not by itself failed implementation. Refresh actual gates, attempt the ordinary SHA-pinned merge only when appropriate, and use the read-only `scripts/pr_preflight.py` helper for diagnosis. Never bypass protection or invent approval. Disabled auto-merge does not prevent ordinary merge.
 
-When only an external integration step remains, finish safe in-scope work, record the exact gate, reviewed head, tests, unresolved findings, next actor and resume command, and end the session with `integration_pending`. Do not wait for three identical Goal turns, start another preparation cycle, poll indefinitely, or claim full completion. This narrow integration-wait rule takes precedence over the generic blocked rule below. Required review, actual findings, merged evidence and truthful full-goal closeout remain mandatory. An owner-approved experimental checkpoint must preserve and explicitly transfer deferred criteria; it is not a production or private-data approval.
+When only an external integration step remains, finish safe in-scope work, record the exact gate, reviewed head when review was risk-triggered, tests, unresolved findings, next actor and resume command, and end the session with `integration_pending`. Do not wait for three identical Goal turns, start another preparation cycle, poll indefinitely, or claim full completion. This narrow integration-wait rule takes precedence over the generic blocked rule below. Any risk-triggered required review, actual findings, merged evidence and truthful full-goal closeout remain mandatory. An owner-approved experimental checkpoint must preserve and explicitly transfer deferred criteria; it is not a production or private-data approval.
 
 ## Goal-ready record
 
@@ -26,9 +26,9 @@ Before activating a goal, its issue and source plan must identify all of the fol
 | Allowed authority | Files, runtime boundaries, repositories, and external systems the goal may change. Read-only inspection is allowed; new credentials, external actions, or scope expansion require an explicit contract. |
 | Non-goals | Adjacent work deliberately excluded so the agent cannot substitute an easier or broader result. |
 | Work units | Small ordered deliverables, each with its own observable result. Design work fixes contracts before dependent implementation begins. |
-| Evidence | Exact automated checks, fixtures, review artifacts, and—only for operating mode—deployment health evidence. Mock and operating evidence are named separately. |
+| Evidence | Exact automated checks, fixtures, risk-triggered review artifacts when applicable, and—only for operating mode—deployment health evidence. Mock and operating evidence are named separately. |
 | Delegation record | For each delegated work unit: exclusive file ownership, requested model/reasoning, tool-accepted setting when available, observed result, and the reason the delegation is independent. |
-| Independent review | A required review artifact for relevant security, recovery, external-boundary, and final-completion work. It is not a routine owner manual-test gate. |
+| Independent review | A review artifact only when the goal materially changes a security/authority boundary under the Development Constitution. Recovery and final completion do not trigger review by themselves. |
 | Completion rule | A current requirement-to-evidence audit proving every promised artifact, state transition, and check, including merged artifacts, required CI, and tracker/roadmap/ledger closeout. |
 | Blocked rule | The concrete external condition that prevents progress, recovery attempts already made, and the next authority or state change required. Integration-only waits use the bounded handoff above. |
 
@@ -50,9 +50,9 @@ This delegation is not authority for automatic installation, permission escalati
 
 ## Delegation and independent review
 
-The active issue records model-routed delegation only where it makes work independently reviewable. The default requested roles are Astra medium for the primary worker, Terra low or medium for independent exploration/document inspection, Sol medium for bounded implementation, and Astra high for security/recovery/final-completion review. These are role labels, not claims that a requested model was available. The record distinguishes requested, accepted, and observed settings and assigns files so two implementers do not edit the same file concurrently.
+The active issue records model-routed delegation only where it makes work independently reviewable. The default requested roles are Astra medium for the primary worker, Terra low or medium for independent exploration/document inspection, Sol medium for bounded implementation, and Astra high when a material security/authority boundary actually triggers independent review. These are role labels, not claims that a requested model was available. The record distinguishes requested, accepted, and observed settings and assigns files so two implementers do not edit the same file concurrently.
 
-An independent review artifact is required before completion when a goal changes security, recovery, an external boundary, automation/authority controls, or its completion claim. The reviewer checks the current diff and evidence, names unresolved findings, and does not substitute a fake product success or routine owner manual test.
+Independent review is an escalation mechanism, not a default completion gate. It is required only when a goal materially changes filesystem/network/secret/connector/runtime authority, OAuth or credential boundaries, consequential-action approval semantics, sandbox/isolation/privilege boundaries, private-data egress or external-recipient boundaries, package/dependency supply-chain trust or install/update authority, canonical owner-state/authority ownership, or weakens/removes a declared safety invariant. Ordinary recovery, final completion, UI/conversation/Settings work, non-authority bug fixes/refactors/docs, and tracker/ledger reconciliation do not trigger review by themselves. When review is triggered, the reviewer checks the current diff and evidence, names unresolved findings, and does not substitute a fake product success or routine owner manual test.
 
 The single existing delivery automation reads this contract and may resume only the named active goal after checking issue, branch, plan, contract, and task state. It may advance only to an already enumerated substep, must not create another automation, and must not run concurrently with an already active task. It remains paused when there is no active top-level goal and after top-level closeout; retries require a meaningful changed condition.
 
@@ -66,16 +66,16 @@ The goal lifecycle preserves required evidence while avoiding validation churn t
 1. During implementation, run the smallest focused tests that exercise the changed contract.
 2. Keep related edits/remediation local to the worktree until they form a coherent checkpoint; do not push every micro-fix merely to ask CI or a reviewer the same question again.
 3. When the work is review-ready, push a stable head and run the declared complete validation set required by the source plan.
-4. Request independent review only on that stable head.
-5. Collect all known compatible findings from the review pass and remediate them together. Use focused tests while fixing them.
-6. If review findings require any remediation commit, keep using focused tests while fixing them, then run the required exact-head full validation and applicable independent re-review once on the consolidated final remediation head before merge. No post-review commit may be merged with only an independent review artifact for an earlier head.
+4. If the work meets the material security/authority escalation criteria above, request independent review only on that stable head. Otherwise continue without an independent-review gate.
+5. If review occurred, collect all known compatible findings from the review pass and remediate them together. Use focused tests while fixing them.
+6. If review findings require remediation, keep using focused tests while fixing them, then run the required exact-head validation on the consolidated final remediation head. Re-review only when the remediation changes the boundary that triggered review or introduces another review-triggering boundary change; mechanical or non-boundary remediation does not automatically reopen independent review.
 
 ### Soft verification budget
 
 For a normal review-ready work unit, the expected broad cycle budget is:
 
-- **cycle 1:** stable-head full validation + required independent review;
-- **cycle 2:** one consolidated full validation + re-review after review findings require changes to the reviewed head.
+- **cycle 1:** stable-head full validation, plus one independent review only when the security/authority escalation criteria apply;
+- **cycle 2:** one consolidated full validation when findings require changes; add re-review only if that remediation changes the triggering boundary or introduces a new review-triggering change.
 
 A third or later full-suite/re-review cycle is permitted when correctness requires it; it is not a bypassable hard limit. Before triggering that cycle, record why another broad pass is necessary, such as a newly discovered security/authority defect, changed shared contract, flaky or unknown root cause, or material cross-worktree conflict. Repeated broad cycles without a new reason are a signal to stop micro-fixing, establish the root cause, and batch remediation.
 
@@ -84,9 +84,9 @@ A third or later full-suite/re-review cycle is permitted when correctness requir
 - Do not request review again for an unchanged head.
 - Do not request duplicate review while the current review is running.
 - Do not repeatedly poll CI/review when no decision depends on a new state transition.
-- Do not run the full suite after every narrow mechanical edit solely for reassurance; run focused tests and batch compatible changes. If those edits occur after independent review, the consolidated final head must still receive the applicable independent re-review before merge.
+- Do not run the full suite after every narrow mechanical edit solely for reassurance; run focused tests and batch compatible changes. If those edits occur after independent review, re-review the consolidated final head only when the edits changed the triggering security/authority boundary or introduced a new review-triggering change.
 - The required PR-head `validate` check is authoritative merge evidence. Its depth is path-sensitive: documentation/assets-only changes may stop after fast integrity checks, while any non-document-only change must run the full suite. Pushes to `main` need not repeat that same heavy suite; a fast merged-tree pass plus scheduled/manual full validation provides the integration backstop.
-- Never skip, weaken, relabel, or bypass the tests applicable to the changed surface, branch protection, exact-head validation, or independent review to save context/compute. Path-sensitive CI is a declared evidence policy, not a per-PR discretionary bypass.
+- Never skip, weaken, relabel, or bypass the tests applicable to the changed surface, branch protection, exact-head validation, or a genuinely risk-triggered independent review to save context/compute. Path-sensitive CI is a declared evidence policy, not a per-PR discretionary bypass.
 
 Broader validation may be run earlier whenever security, authentication/OAuth, privacy, external effects, shared contracts, replay/idempotency/recovery, or uncertain root cause makes narrow testing insufficient.
 

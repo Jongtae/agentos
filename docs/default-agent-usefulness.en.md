@@ -82,7 +82,7 @@ Run three independent clean-state trials of each case with pinned code/model/con
 
 ### Development completion versus live-quality promotion
 
-Development closes only after all in-scope functionality, deterministic useful-positive and authority-negative cases, evaluator execution, affected browser acceptance, required CI and independent review are evidenced. Static seed validation is insufficient. No acceptance may be silently weakened to reach a score.
+Development closes only after all in-scope functionality, deterministic useful-positive and authority-negative cases, evaluator execution, affected browser acceptance, required CI and any independent review triggered by the Development Constitution's material security/authority escalation criteria are evidenced. Static seed validation is insufficient. No acceptance may be silently weakened to reach a score.
 
 The following are **proposed live-quality promotion gates**, not measured values and not gates that simulated responses can satisfy:
 

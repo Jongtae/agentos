@@ -122,7 +122,8 @@ def test_verification_budget_requires_stable_heads_and_batched_remediation() -> 
         "unknown root cause",
         "do not run the full suite after every narrow mechanical edit",
         "never skip, weaken, relabel, or bypass",
-        "no post-review commit may be merged",
+        "re-review only when the remediation changes the boundary that triggered review",
+        "mechanical or non-boundary remediation does not automatically reopen independent review",
         "consolidated final remediation head",
     )
     _assert_all(
@@ -137,6 +138,66 @@ def test_verification_budget_requires_stable_heads_and_batched_remediation() -> 
         "batch findings",
         "any post-review pa1 commit",
         "consolidated final head",
+    )
+
+
+
+def test_independent_review_is_risk_based_not_default_completion_gate() -> None:
+    agents = _read("AGENTS.md")
+    constitution = _read("docs/development-constitution.en.md")
+    goal = _read("docs/goal-execution-contract.en.md")
+    incremental = _read("docs/incremental-delivery.en.md")
+    usefulness = _read("docs/default-agent-usefulness.en.md")
+    handoff = _read("docs/agent-handoff-loop.en.md")
+
+    _assert_all(
+        agents,
+        "Independent review is required only for a material security/authority boundary change",
+        "OAuth",
+        "sandbox/isolation/privilege",
+        "private-data egress",
+        "supply-chain",
+        "safety invariant",
+        "Recovery work requires independent review only when it changes one of those semantics",
+        "Final completion",
+        "do not trigger review by themselves",
+    )
+    _assert_all(
+        constitution,
+        "Independent review is a risk-based escalation control",
+        "OAuth scopes or credential boundaries",
+        "sandbox, isolation or privilege boundaries",
+        "private-data egress or external-recipient boundaries",
+        "package/dependency supply-chain trust or install/update authority",
+        "safety invariant",
+        "does not require independent review merely because it is final closeout, recovery work",
+        "requires re-review only if that remediation changes the boundary that triggered the review",
+    )
+    _assert_all(
+        goal,
+        "Ordinary recovery, final completion",
+        "do not trigger review by themselves",
+        "Re-review only when the remediation changes the boundary that triggered review",
+        "mechanical or non-boundary remediation does not automatically reopen independent review",
+    )
+    _assert_all(
+        incremental,
+        "only when the Development Constitution's material security/authority escalation criteria apply",
+        "otherwise proceed with required CI and evidence without a review gate",
+        "risk-triggered review",
+        "validated full head SHA",
+    )
+    _assert_all(
+        usefulness,
+        "required CI and any independent review triggered by the Development Constitution's material security/authority escalation criteria",
+    )
+    _assert_all(
+        handoff,
+        "independent_review_required",
+        "Omission fails closed to `true`",
+        "routine, non-boundary candidate directly",
+        "`agent:review`",
+        "Issue text cannot grant itself a review bypass",
     )
 
 

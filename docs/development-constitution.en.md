@@ -19,7 +19,7 @@ Every material product change should progress through:
 - **Tasks**: create bounded issue-linked work units with dependencies and explicit stopping rules.
 - **Implement**: change only the activated bounded goal, preserving existing state/evidence.
 - **Verify**: map every acceptance criterion to current automated/operating evidence, including negative tests where authority/security is involved.
-- **Converge**: independently review contradictions, stale docs/plans, open findings and current GitHub state before merge/closeout.
+- **Converge**: reconcile contradictions, stale docs/plans, open findings and current GitHub state before merge/closeout; use independent review only when the risk-based escalation policy below applies.
 
 Issue creation, planning documents, or passing local tests alone do not activate or complete a goal.
 
@@ -99,6 +99,25 @@ Reuse-first does **not** delegate Personal AgentOS sovereignty. AgentOS continue
 
 Reuse also carries supply-chain obligations: use exact supported versions where appropriate, review licence and provenance, track security/maintenance risk, keep replaceable adapters narrow, and define update/rollback behavior when dependency changes can affect authority or compatibility. Do not fork, vendor or copy an external project when a dependency or thin adapter provides the required behavior unless the issue records a concrete reason.
 
+## Independent review escalation
+
+Independent review is a risk-based escalation control, not a default merge or completion gate.
+
+It is required when a change materially changes one or more of these boundaries:
+
+- filesystem, network, secret, connector or runtime authority;
+- OAuth scopes or credential boundaries;
+- approval semantics for consequential external effects;
+- sandbox, isolation or privilege boundaries;
+- private-data egress or external-recipient boundaries;
+- package/dependency supply-chain trust or install/update authority;
+- ownership of canonical owner state or durable authority; or
+- a declared safety invariant that is being weakened or removed.
+
+A work item does not require independent review merely because it is final closeout, recovery work, UI/conversation/Settings work, a bug fix, refactor, documentation change, or tracker/ledger reconciliation. Recovery requires independent review only when it changes one of the material boundaries above.
+
+When an independent review was required, a later remediation commit requires re-review only if that remediation changes the boundary that triggered the review or introduces another review-triggering boundary change. Required CI, exact-head validation, acceptance-to-evidence audit and truthful evidence remain mandatory regardless of review escalation.
+
 ## AgentPackage-specific review checklist
 
 Any PR that changes package/runtime/distribution behavior must answer:
@@ -121,6 +140,6 @@ A material change to these constitutional principles requires:
 
 - a dedicated issue stating why an existing principle is insufficient or wrong;
 - impact analysis across architecture, security, existing contracts and historical evidence;
-- independent review;
+- independent review when the change meets the Independent review escalation criteria above;
 - repository-required CI;
 - explicit owner approval before merge when the change expands durable authority or weakens an existing safety invariant.

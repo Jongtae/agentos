@@ -79,11 +79,22 @@ Explicitly distinguish design, schema/static validation, mock/fixture, local det
 
 ## Evidence and completion audit
 
-Map each acceptance criterion to merged artifacts, required CI, review artifacts, and tracker/roadmap/ledger closeout. Do not treat a local test, signature, package manifest, closed issue, branch, or PR alone as completion.
+Map each acceptance criterion to merged artifacts, required CI, any risk-triggered review artifacts, and tracker/roadmap/ledger closeout. Do not treat a local test, signature, package manifest, closed issue, branch, or PR alone as completion.
 
-## Delegation and independent review
+## Delegation
 
-Requested / accepted / observed model settings, exclusive file ownership, and independent-review findings. State whether the reviewer was independent of the implementation role.
+Requested / accepted / observed model settings and exclusive file ownership when delegation was used; otherwise write `N/A`.
+
+## Independent review escalation
+
+- material security/authority boundary changed: `yes / no`
+- trigger, if yes: filesystem/network/secret/connector/runtime authority; OAuth/credential boundary; consequential-action approval; sandbox/isolation/privilege; private-data egress/recipient; package/supply-chain trust or install/update authority; canonical owner-state/authority ownership; weakened/removed safety invariant
+- independent review required: `yes / no`
+- review head / findings, if required:
+- post-review remediation changed the triggering boundary or introduced a new trigger: `yes / no / N/A`
+- re-review required: `yes / no / N/A`
+
+Do not mark review required solely for final closeout, ordinary recovery that preserves authority semantics, UI/conversation/Settings work, non-authority bug fixes/refactors/docs, or tracker/ledger reconciliation. When review is required, state whether the reviewer was independent of the implementation role.
 
 ## Data and security impact
 

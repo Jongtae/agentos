@@ -74,7 +74,7 @@ Required before non-trivial implementation that introduces or replaces a compone
 
 ## Validation / evidence plan
 
-Positive cases, fail-closed negative cases, restart/recovery/idempotency, current CI, independent review and exact evidence class expected at completion:
+Positive cases, fail-closed negative cases, restart/recovery/idempotency, current CI, exact evidence class, and independent review only when the Development Constitution's material security/authority escalation criteria apply:
 
 ## Historical authority / migration
 

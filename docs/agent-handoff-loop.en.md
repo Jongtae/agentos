@@ -17,6 +17,14 @@ do not start while another writer has a live claim. Review accepts only the
 candidate PR explicitly named in the implementation receipt, with a current
 head, non-draft status, known required checks, and success evidence.
 
+The owner-maintained delivery-plan item supplies `independent_review_required`.
+Omission fails closed to `true`. After successful CI, an explicit `false`
+may route a routine, non-boundary candidate directly from `agent:working` to
+`agent:approved`; `true` routes it to `agent:review`. The direct path still
+requires a non-draft candidate, known required checks, exact-head reconciliation,
+and leaves the owner merge decision untouched. Issue text cannot grant itself a
+review bypass.
+
 Receipts are owner-authored GitHub comments marked `agentos-handoff:*`:
 one implementation receipt records PR/head/CI, and one review receipt records
 either bounded findings or `agent:approved`. The local state file holds only

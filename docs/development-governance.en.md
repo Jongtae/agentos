@@ -8,7 +8,7 @@ AgentOS uses contract-first delivery with automated quality gates. It is designe
 
 Follow [Incremental Delivery and Merge Handoff](incremental-delivery.en.md). Ship small useful increments; fix concrete defects in enabled behavior without turning each PR into an unbounded hardening program. Explicitly transfer deferred criteria to linked follow-ups; never relabel a known defect fixed or a partial checkpoint as the whole goal.
 
-Implementation verification, GitHub integration and actual owner operation have separate states. External review/check/permission waits produce a bounded `integration_pending` receipt when safe work is exhausted, not an invented implementation failure, repeated preparation cycle, or false completion. Required checks and relevant independent review still apply. Native auto-merge is optional and disabled auto-merge does not rule out normal merge. Neither this document nor the helper changes native repository settings.
+Implementation verification, GitHub integration and actual owner operation have separate states. External review/check/permission waits produce a bounded `integration_pending` receipt when safe work is exhausted, not an invented implementation failure, repeated preparation cycle, or false completion. Required checks still apply; independent review applies only when the Development Constitution's material security/authority escalation criteria are met. Native auto-merge is optional and disabled auto-merge does not rule out normal merge. Neither this document nor the helper changes native repository settings.
 
 ## Method
 
@@ -32,7 +32,7 @@ A development increment is implementation-verified when its issue and pull reque
 - required repository checks passing in CI; and
 - known limitations and the exact distinction between mock evidence and operating evidence.
 
-Full iteration completion additionally requires relevant independent review, normal merge, the required exact-PR-head validation, and the active contract's tracker/ledger closeout. A successful merge does not require re-running the same heavy suite on `main`; `main` receives a fast merged-tree integrity pass, while scheduled/manual full validation is the repository-wide backstop. An integration-pending session handoff is not full iteration completion. No person is required to perform a routine manual acceptance test, log in to a third-party provider, or create a provider token to complete a development iteration. Human review remains a product and security design activity, not a recurring test gate.
+Full iteration completion additionally requires normal merge, the required exact-PR-head validation, the active contract's tracker/ledger closeout, and an independent review artifact only when the change crosses the Development Constitution's material security/authority escalation boundary. Final completion alone is not a review trigger. A successful merge does not require re-running the same heavy suite on `main`; `main` receives a fast merged-tree integrity pass, while scheduled/manual full validation is the repository-wide backstop. An integration-pending session handoff is not full iteration completion. No person is required to perform a routine manual acceptance test, log in to a third-party provider, or create a provider token to complete a development iteration. Human review remains an escalation for material product/security boundary changes, not a recurring test gate.
 
 ## External integrations and agents
 

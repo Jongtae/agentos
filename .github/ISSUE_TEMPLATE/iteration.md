@@ -49,11 +49,11 @@ Required before non-trivial implementation that introduces or replaces a compone
 
 ## Evidence and completion audit
 
-Map each acceptance criterion to automated fixtures/checks, review artifacts, required CI, and the merged PR/closeout evidence. A closed issue or local test alone is insufficient.
+Map each acceptance criterion to automated fixtures/checks, any risk-triggered review artifacts, required CI, and the merged PR/closeout evidence. A closed issue or local test alone is insufficient.
 
 ## Delegation and independent review
 
-Record exclusive files, requested/accepted/observed model and reasoning settings, and the independent-review plan where applicable.
+Record exclusive files and requested/accepted/observed model and reasoning settings when delegation is used. Then state whether the work materially changes a security/authority boundary under the Development Constitution. If yes, name the trigger and independent-review plan. Final closeout or ordinary recovery alone is not a review trigger.
 
 ## Blocked / restart rule
 

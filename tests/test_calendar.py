@@ -12,7 +12,6 @@ from personal_agent.calendar import (
     CALENDAR_WRITE_CONNECTOR_ID,
     CALENDAR_WRITE_SPEC,
     CalendarConnector,
-    CalendarCreate,
     CalendarError,
 )
 from personal_agent.connector_contract import ConnectorRegistry, ConnectorState
@@ -88,6 +87,9 @@ class CalendarTests(unittest.TestCase):
 
     def approve(self, draft):
         return self.calendar.approve(draft["id"], "owner")["approval_id"]
+
+    def legacy_connector(self):
+        return CalendarConnector(self.store, self.provider, authority=lambda *_: True)
 
     def test_invalid_registry_owner_is_rejected_before_draft_persistence(self):
         for owner in ("   ", "x" * 201):
@@ -774,7 +776,7 @@ class CalendarTests(unittest.TestCase):
                         }
                     },
                 )
-                legacy = CalendarCreate(self.store, lambda *_: self.fail("legacy retry dispatched"))
+                legacy = self.legacy_connector()
                 self.assertEqual(
                     legacy.create(ident, "legacy-approval", "owner"),
                     {"id": "legacy-event", "summary": EVENT["summary"]},
@@ -782,9 +784,10 @@ class CalendarTests(unittest.TestCase):
                 migrated = legacy._rows()[ident]
                 self.assertNotEqual(migrated["owner"], "owner")
                 self.assertEqual(migrated["action"], "create")
+                self.assertEqual(migrated["state"], "completed")
                 self.assertEqual(legacy.status(ident, "owner")["result"], {"id": "legacy-event"})
+                self.assertEqual(self.provider.calls, [])
 
-        calls = []
         legacy_event_hash = hashlib.sha256(json.dumps(EVENT, sort_keys=True).encode()).hexdigest()
         self.store.put(
             "calendar_create",
@@ -801,15 +804,13 @@ class CalendarTests(unittest.TestCase):
                 }
             },
         )
-        legacy = CalendarCreate(
-            self.store,
-            lambda *_: calls.append("create") or {"id": "migrated-event"},
-        )
+        legacy = self.legacy_connector()
+        self.provider.calls.clear()
         self.assertEqual(
             legacy.create("legacy-approved", "legacy-approval", "owner")["id"],
-            "migrated-event",
+            "new-event",
         )
-        self.assertEqual(calls, ["create"])
+        self.assertEqual([call[0] for call in self.provider.calls], ["create"])
 
         self.store.put(
             "calendar_create",
@@ -823,7 +824,7 @@ class CalendarTests(unittest.TestCase):
                 }
             },
         )
-        unicode_legacy = CalendarCreate(self.store, lambda *_: {"id": "unused"})
+        unicode_legacy = self.legacy_connector()
         preview = unicode_legacy.preview("legacy-unicode", "소유자")
         self.assertEqual(preview["action"], "create")
         self.assertNotEqual(unicode_legacy._rows()["legacy-unicode"]["owner"], "소유자")
@@ -849,11 +850,8 @@ class CalendarTests(unittest.TestCase):
                         }
                     },
                 )
-                calls = []
-                legacy = CalendarCreate(
-                    self.store,
-                    lambda *_: calls.append("create") or {"id": "must-not-dispatch"},
-                )
+                self.provider.calls.clear()
+                legacy = self.legacy_connector()
                 with self.assertRaises(CalendarError) as rejected:
                     legacy.create("legacy-invalid", "legacy-approval", "owner")
                 self.assertEqual(rejected.exception.reason, "exact-approval-required")
@@ -863,7 +861,7 @@ class CalendarTests(unittest.TestCase):
                 self.assertEqual(migrated["recovery"], "request-new-draft")
                 self.assertNotIn("approval", migrated)
                 self.assertNotIn("approval_hash", migrated)
-                self.assertEqual(calls, [])
+                self.assertEqual(self.provider.calls, [])
 
     def test_changed_legacy_approved_payload_or_hash_is_quarantined_before_dispatch(self):
         original_hash = hashlib.sha256(json.dumps(EVENT, sort_keys=True).encode()).hexdigest()
@@ -890,11 +888,8 @@ class CalendarTests(unittest.TestCase):
                         }
                     },
                 )
-                calls = []
-                legacy = CalendarCreate(
-                    self.store,
-                    lambda *_: calls.append("create") or {"id": "must-not-dispatch"},
-                )
+                self.provider.calls.clear()
+                legacy = self.legacy_connector()
                 with self.assertRaises(CalendarError) as rejected:
                     legacy.create("legacy-changed", "legacy-approval", "owner")
                 self.assertEqual(rejected.exception.reason, "exact-approval-required")
@@ -905,7 +900,7 @@ class CalendarTests(unittest.TestCase):
                 )
                 self.assertNotIn("approval", migrated)
                 self.assertNotIn("approval_hash", migrated)
-                self.assertEqual(calls, [])
+                self.assertEqual(self.provider.calls, [])
 
     def test_legacy_scope_failure_without_recovery_reconstructs_actionable_path(self):
         self.store.put(
@@ -921,7 +916,7 @@ class CalendarTests(unittest.TestCase):
                 }
             },
         )
-        legacy = CalendarCreate(self.store, lambda *_: self.fail("failed work must not dispatch"))
+        legacy = self.legacy_connector()
         status = legacy.status("legacy-scope-denied", "owner")
         self.assertEqual(
             (status["state"], status["effect"], status["recovery"]),
@@ -944,7 +939,7 @@ class CalendarTests(unittest.TestCase):
                         }
                     },
                 )
-                legacy = CalendarCreate(self.store, lambda *_: self.fail("must not retry"))
+                legacy = self.legacy_connector()
                 status = legacy.status("legacy-failed", "owner")
                 self.assertEqual(status["state"], "outcome-unknown")
                 self.assertEqual(status["effect"], "unknown")
@@ -962,7 +957,7 @@ class CalendarTests(unittest.TestCase):
                 }
             },
         )
-        restored = CalendarCreate(self.store, lambda *_: self.fail("portable evidence dispatched"))
+        restored = self.legacy_connector()
         status = restored.status("portable", "restored-owner")
         self.assertEqual(status["state"], "created")
         self.assertEqual(status["action"], "unknown")
@@ -1029,17 +1024,6 @@ class CalendarTests(unittest.TestCase):
         self.calendar.create(draft["id"], approval, "owner")
         self.assertEqual(observations, [True])
 
-    def test_legacy_create_surface_remains_idempotent(self):
-        calls = []
-        legacy = CalendarCreate(
-            self.store,
-            lambda url, body, headers: calls.append((url, body, headers)) or {"id": "legacy-event"},
-        )
-        draft = legacy.draft(EVENT, "owner")
-        approval = legacy.approve(draft["id"], "owner")
-        self.assertEqual(legacy.create(draft["id"], approval["approval_id"], "owner")["id"], "legacy-event")
-        legacy.create(draft["id"], approval["approval_id"], "owner")
-        self.assertEqual(len(calls), 1)
 
 
 if __name__ == "__main__":

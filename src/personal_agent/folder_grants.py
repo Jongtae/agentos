@@ -53,13 +53,33 @@ def _folded(path):
     return Path(os.path.normcase(str(path)).casefold())
 
 
+def _case_insensitive(path):
+    """Whether an existing path's volume aliases a component with changed case."""
+    for candidate in (path, *path.parents):
+        if not candidate.exists():
+            continue
+        for index, character in enumerate(candidate.name):
+            if not character.isalpha():
+                continue
+            alternate_name = (candidate.name[:index] + character.swapcase() + candidate.name[index + 1:])
+            alternate = candidate.with_name(alternate_name)
+            try:
+                if alternate.exists() and os.path.samefile(candidate, alternate):
+                    return True
+            except OSError:
+                continue
+    return False
+
+
 def _related(path, path_chain, other):
     """True when path is other, lies inside it, or contains it (identity or case-folded name)."""
     other_id = _identity(other)
     if other_id and (other_id in path_chain or _identity(path) in _chain(other)):
         return True
-    mine = _folded(path)
-    return any(mine.is_relative_to(form) or form.is_relative_to(mine) for form in {_folded(other), _folded(other.resolve())})
+    if _case_insensitive(path):
+        mine = _folded(path)
+        return any(mine.is_relative_to(form) or form.is_relative_to(mine) for form in {_folded(other), _folded(other.resolve())})
+    return False
 
 
 def _sensitive_paths():

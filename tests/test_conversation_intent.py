@@ -23,8 +23,10 @@ from personal_agent.conversation_handoff import (AUTHORITY_DEFAULT, AUTHORITY_OW
                                                  INTENT_NOTE_LIST, INTENT_RECOMMENDATION,
                                                  INTENT_RESEARCH, INTENT_SETTINGS,
                                                  INTENT_WORKSPACE_SEARCH, JUDGMENT_UNAVAILABLE,
-                                                 JUDGMENT_YES, ConversationFocus, DecisionJudge,
-                                                 IntentClassifier, Judgment)
+                                                 ConversationFocus, ConversationJudgments,
+                                                 IntentClassifier)
+from personal_agent.decision import (OUTCOME_DECIDED, FixtureDecisionEngine, SelectionDecision,
+                                     fixture_confidence)
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService, workspace_search_request
 from personal_agent.quickstart_store import QuickStore
@@ -601,8 +603,8 @@ class RecommendationCueNarrowingTests(unittest.TestCase):
                             ('what would you recommend for deep research', 'specialist-research'),
                             ('capability 하나 추천해줘', None))
 
-    def test_the_placeholder_judges_no_bare_ask_so_the_conversation_route_answers(self):
-        self.assertEqual(DecisionJudge().capability_recommendation('전문가 조사 추천해줘').outcome,
+    def test_without_a_provider_no_bare_ask_is_judged_so_the_conversation_route_answers(self):
+        self.assertEqual(ConversationJudgments().capability_recommendation('전문가 조사 추천해줘').outcome,
                          JUDGMENT_UNAVAILABLE)
         for text, _outcome in self.BARE_CAPABILITY_ASKS:
             with self.subTest(text=text):
@@ -611,17 +613,25 @@ class RecommendationCueNarrowingTests(unittest.TestCase):
                 self.assertIn(decision.intent, (INTENT_CONVERSATION, INTENT_RESEARCH))
                 self.assertIsNone(decision.clarification)
 
-    def test_a_judged_capability_ask_reaches_the_rule_with_its_reviewed_outcome(self):
-        class Yes(DecisionJudge):
-            def capability_recommendation(self, utterance):
-                return Judgment(JUDGMENT_YES, source='test-double')
-
-        judged = IntentClassifier(workspace_search=workspace_search_request, judge=Yes())
+    def test_a_judged_capability_ask_reaches_the_rule_with_the_chosen_outcome(self):
+        # A fixture provider chooses the outcome; the classifier only checks
+        # it is one of the reviewed candidates.  No cue decides anything.
+        scripted = {text: outcome for text, outcome in self.BARE_CAPABILITY_ASKS if outcome}
+        engine = FixtureDecisionEngine(choose=lambda context, candidates, question: SelectionDecision(
+            OUTCOME_DECIDED, scripted.get(context.facts['owner_message'], 'none-of-these'),
+            candidates, fixture_confidence()))
+        judged = IntentClassifier(workspace_search=workspace_search_request,
+                                  judge=ConversationJudgments(engine))
         for text, outcome in self.BARE_CAPABILITY_ASKS:
             with self.subTest(text=text):
                 decision = judged.classify(text)
-                self.assertEqual(decision.intent, INTENT_RECOMMENDATION)
-                self.assertEqual(decision.argument, outcome)
+                if outcome is None:
+                    # Chosen none-of-these: an ordinary answer, no clarification.
+                    self.assertIn(decision.intent, (INTENT_CONVERSATION, INTENT_RESEARCH))
+                else:
+                    self.assertEqual(decision.intent, INTENT_RECOMMENDATION)
+                    self.assertEqual(decision.argument, outcome)
+        self.assertEqual({item[0] for item in engine.asked}, {'choose'})
 
     def test_specific_capability_cues_still_route_to_the_rule(self):
         for text, outcome in (('전문가 조사에 연결할 만한 걸 알려줘', 'specialist-research'),

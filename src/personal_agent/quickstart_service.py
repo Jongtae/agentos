@@ -11,6 +11,7 @@ from .local_tools import LocalTools, normalize_public_url
 from .agent_runtime import Capabilities, run_agent, AGENTS, evidence_summary
 from .plugins import PluginRegistry
 from .providers import ModelAdapter, ProviderError, request_json, validate_model
+from .decision import DEFAULT_DECISION_PROVIDER, ModelDecisionEngine
 from .subscription_engines import SubscriptionEngines
 from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult
 from .isolated_engine_gateway import EngineGatewayError
@@ -25,8 +26,8 @@ from .connector_contract import ConnectorContractError, _owner_key
 from .gmail import GMAIL_CONNECTOR_ID, GmailError
 from .calendar import CALENDAR_CONNECTOR_ID, CALENDAR_WRITE_CONNECTOR_ID, CalendarError
 from .calendar_conversation import DROPPED_NOTICE as CALENDAR_DROPPED_NOTICE, CalendarConversation
-from .conversation_handoff import (CONNECTOR_LABELS, JUDGMENT_YES, RECOMMENDATION_OUTCOME_LABELS, DecisionJudge,
-                                   TelegramChannel, ConnectorHandoff,
+from .conversation_handoff import (CONNECTOR_LABELS, JUDGMENT_YES, RECOMMENDATION_OUTCOME_LABELS,
+                                   ConversationJudgments, TelegramChannel, ConnectorHandoff,
                                    ConversationFocus,
                                    ConversationHandoffError, IntentClassifier,
                                    INTENT_AMBIGUOUS, INTENT_ASSISTANT, INTENT_CALENDAR_CREATE,
@@ -208,9 +209,12 @@ class AgentService:
         self.personal_knowledge_orchestrator=PersonalKnowledgeOrchestrator(store)
         # Routing authority.  The classifier reads literal cue tables, never a
         # model, and the focus record it feeds is content free.
-        # Semantic judgments go through one seam.  Today it is the #417
-        # placeholder, which judges nothing and lets policy take its fallback.
-        self.decision_judge=DecisionJudge()
+        # Semantic judgments go through the provider-neutral DecisionEngine
+        # (#417).  The production engine calls the configured decision
+        # provider through the same ModelAdapter as the conversation; with no
+        # provider configured it makes no call and answers unavailable.
+        self.decision_engine=ModelDecisionEngine(self.adapter,self.decision_route,audit=self.record_decision)
+        self.decision_judge=ConversationJudgments(self.decision_engine)
         self.intent_classifier=IntentClassifier(workspace_search=workspace_search_request,judge=self.decision_judge)
         self.conversation_focus=ConversationFocus(store)
         # This is injected only by an owner-local deployment which supplies an
@@ -347,15 +351,62 @@ class AgentService:
             return memory.reject_candidate(owner_id,work_ref,candidate_id,digest)
         raise ValueError('검토된 기억 후보 요청을 확인하세요.')
 
+    # -- decision provider (PRESENCE-DEC-01 / #417) --------------------------
+    def decision_route(self):
+        """The configured decision provider as ``(config, key)``, or None.
+
+        Deterministic configuration policy, not a judgment: an explicit
+        ``decision_model`` setting wins; otherwise the initial default is
+        ``gpt-4o-mini`` on the OpenAI endpoint, used only when the owner's
+        configured model provider is OpenAI so its key is already the
+        owner's choice for that destination.  Anything else is unavailable -
+        routing decisions through another owner route is PRESENCE-AI-01 /
+        #504, not a silent fallback here.
+        """
+        explicit=self.store.config('decision_model',{})
+        if isinstance(explicit,dict) and explicit.get('provider'):
+            try:config=validate_model(explicit)
+            except ValueError:return None
+            # A local provider gets no key: a key left over from an earlier
+            # explicit provider must not travel to a different host.
+            if config['provider']=='ollama':return config,''
+            key=self.store.secret('decision_model_key') or ''
+            return (config,key) if key else None
+        main=self.store.config('model',{})
+        key=self.store.secret('model_key') if isinstance(main,dict) and main.get('provider')=='openai' else ''
+        return (dict(DEFAULT_DECISION_PROVIDER),key) if key else None
+
+    def decision_route_status(self):
+        """Owner-inspectable summary of where decisions go; no key material."""
+        resolved=self.decision_route()
+        if not resolved:return {'provider':'','model':'','source':'unavailable'}
+        config,_key=resolved
+        explicit=self.store.config('decision_model',{})
+        return {'provider':config['provider'],'model':config['model'],
+                'source':'explicit' if isinstance(explicit,dict) and explicit.get('provider') else 'default-openai'}
+
+    def record_decision(self, record):
+        with self.lock:  # read-modify-write of one config row
+            rows=self.store.config('decision_audit',[]);rows=rows if isinstance(rows,list) else []
+            self.store.put('decision_audit',[*rows,record][-100:])
+
+    def use_decision_engine(self, engine):
+        """Replace the engine behind both consumers (tests, later providers)."""
+        self.decision_engine=engine
+        self.decision_judge=ConversationJudgments(engine)
+        self.intent_classifier=IntentClassifier(workspace_search=workspace_search_request,judge=self.decision_judge)
+
     def classify_intent(self, prompt, model_suggestion=None, calendar_pending=None, owner_id=None):
         """Decide where one owner utterance goes, before anything is invoked.
 
-        The decision is AgentOS's.  No model is consulted to produce it, and
-        the conversation never routes on a model's opinion of what the owner
-        meant.  ``model_suggestion`` exists so that if a later unit ever does
-        obtain one, there is exactly one constrained way in - it may narrow an
-        ambiguity AgentOS already found and nothing else.  No call site in
-        this service supplies one.
+        The decision is AgentOS's.  Since PRESENCE-DEC-01 / #417 two semantic
+        questions are asked of the configured DecisionEngine (bare-추천
+        capability requests; parked-request withdrawal in `run_one`), and a
+        provider's answer can only select among candidates AgentOS declared,
+        under AgentOS thresholds; it never mints an intent, argument or
+        authority.  ``model_suggestion`` remains the one constrained way a
+        free-form model opinion could narrow an ambiguity AgentOS already
+        found.  No call site in this service supplies one.
 
         ``calendar_pending`` is content free: only *that* a calendar draft is
         waiting reaches the classifier, never what it says.
@@ -390,6 +441,7 @@ class AgentService:
             packages=PluginRegistry(self.store.root).declared_packages()
             from .telegram_task_card_acceptance import report as task_card_report
             return {'model':model,'has_api_key':bool(self.store.secret('model_key')),
+                    'decision_model':self.decision_route_status(),
                     'conversation_settings':self.settings_orchestrator.read('local-owner'),
                     'capability_recommendations':self.store.config('capability_recommendation_audit',[])[-20:],
                     'subscription_engines':self.subscription_engine_status(),
@@ -1873,8 +1925,9 @@ class AgentService:
                 owner_memory_approval=self.store.issue_memory_approval(job['id'],prompt) if self.explicit_memory_request(prompt) else None
                 # Routing decision, made by AgentOS before any capability is
                 # touched.  `decision.authority` records whether the owner
-                # said it literally or an AgentOS cue rule derived it; there
-                # is no branch here that a model can reach.
+                # said it literally or an AgentOS rule derived it; a
+                # DecisionEngine answer can only pick among AgentOS-declared
+                # candidates (#417) and reaches no other branch here.
                 # The owner is resolved first: a pending draft belongs to one
                 # connector identity, so whether one is pending is a question
                 # about this Work's owner and not about the install.

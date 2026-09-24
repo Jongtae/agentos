@@ -32,8 +32,13 @@ def request_json(url, body, headers=None, timeout=60):
             return json.loads(raw)
     except HTTPError as exc:
         raise ProviderError('무료 모델의 호출 한도에 도달했습니다. 잠시 후 다시 시도하거나 다른 모델을 선택하세요.' if exc.code==429 else f'연결 대상이 HTTP {exc.code} 오류를 반환했습니다. 주소·모델·인증 설정을 확인하세요.', status=exc.code) from None
-    except (URLError, TimeoutError, OSError):
-        raise ProviderError('연결할 수 없거나 응답 시간이 초과되었습니다. 서버와 네트워크를 확인하세요.') from None
+    except (URLError, TimeoutError, OSError) as exc:
+        # A timeout is reported distinctly so a caller with its own time
+        # budget (the decision layer) can name it; the owner-facing text is
+        # unchanged.
+        timed_out = isinstance(exc, TimeoutError) or isinstance(getattr(exc, 'reason', None), TimeoutError)
+        raise ProviderError('연결할 수 없거나 응답 시간이 초과되었습니다. 서버와 네트워크를 확인하세요.',
+                            status='timeout' if timed_out else None) from None
     except (ValueError, TypeError):
         raise ProviderError('연결 대상이 올바른 JSON 응답을 반환하지 않았습니다.') from None
 
@@ -67,14 +72,19 @@ class ModelAdapter:
     def __init__(self, transport=request_json):
         self.transport = transport
 
-    def tool_turn(self, config, key, messages, tools, tool_choice="auto"):
+    def _send(self, url, body, headers, timeout):
+        # Existing transports (including test doubles) take three positional
+        # arguments; the timeout is passed only when a caller sets its own.
+        return self.transport(url,body,headers) if timeout==60 else self.transport(url,body,headers,timeout)
+
+    def tool_turn(self, config, key, messages, tools, tool_choice="auto", timeout=60):
         import uuid
         cfg=validate_model(config);provider=cfg['provider']
         try:
             if provider in ('compatible','openai'):
                 body={'model':cfg['model'],'messages':messages,'tools':tools,'tool_choice':tool_choice,'stream':False}
                 if cfg['endpoint']=='https://openrouter.ai/api/v1':body['provider']={'require_parameters':True}
-                data=self.transport(cfg['endpoint']+'/chat/completions',body,{'Authorization':'Bearer '+key} if key else {})
+                data=self._send(cfg['endpoint']+'/chat/completions',body,{'Authorization':'Bearer '+key} if key else {},timeout)
                 message=data['choices'][0]['message']
             elif provider=='ollama':
                 converted=[];names={}
@@ -87,7 +97,7 @@ class ModelAdapter:
                             entry['tool_calls'].append({'function':{'name':c['function']['name'],'arguments':json.loads(c['function']['arguments'])}})
                     if m['role']=='tool':entry={'role':'tool','tool_name':names.get(m['tool_call_id'],''),'content':m['content']}
                     converted.append(entry)
-                data=self.transport(cfg['endpoint']+'/api/chat',{'model':cfg['model'],'messages':converted,'tools':tools,'stream':False},{'Authorization':'Bearer '+key} if key else {})
+                data=self._send(cfg['endpoint']+'/api/chat',{'model':cfg['model'],'messages':converted,'tools':tools,'stream':False},{'Authorization':'Bearer '+key} if key else {},timeout)
                 message=data['message']
                 if message.get('tool_calls'):
                     message['tool_calls']=[{'id':'call_'+uuid.uuid4().hex,'type':'function','function':{'name':c['function']['name'],'arguments':json.dumps(c['function']['arguments'])}} for c in message['tool_calls']]
@@ -105,7 +115,7 @@ class ModelAdapter:
                     if converted and converted[-1]['role']==entry['role']:converted[-1]['content']+=entry['content']
                     else:converted.append(entry)
                 choice={'type':'any'} if tool_choice=='required' else {'type':'auto'}
-                data=self.transport(cfg['endpoint']+'/v1/messages',{'model':cfg['model'],'system':'\n'.join(m['content'] for m in messages if m['role']=='system'),'messages':converted,'tools':[{'name':t['function']['name'],'description':t['function']['description'],'input_schema':t['function']['parameters']} for t in tools],'max_tokens':4096,'tool_choice':choice},{'x-api-key':key,'anthropic-version':'2023-06-01'})
+                data=self._send(cfg['endpoint']+'/v1/messages',{'model':cfg['model'],'system':'\n'.join(m['content'] for m in messages if m['role']=='system'),'messages':converted,'tools':[{'name':t['function']['name'],'description':t['function']['description'],'input_schema':t['function']['parameters']} for t in tools],'max_tokens':4096,'tool_choice':choice},{'x-api-key':key,'anthropic-version':'2023-06-01'},timeout)
                 message={'role':'assistant','content':'\n'.join(c['text'] for c in data['content'] if c['type']=='text')}
                 calls=[{'id':c['id'],'type':'function','function':{'name':c['name'],'arguments':json.dumps(c['input'])}} for c in data['content'] if c['type']=='tool_use']
                 if calls:message['tool_calls']=calls

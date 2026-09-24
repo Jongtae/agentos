@@ -24,10 +24,10 @@ from personal_agent.connector_contract import (PENDING_WORK_KEY, ConnectorContra
                                                ConnectorRegistry, ConnectorState, ConnectorStatus,
                                                ResumeState)
 from personal_agent.conversation_handoff import (CONVERSATION_RESUME_KEY, ConnectorHandoff,
-                                                 ConversationHandoffError, DecisionJudge,
-                                                 INTENT_MAIL_SEARCH, IntentClassifier,
-                                                 JUDGMENT_NO, JUDGMENT_YES, Judgment,
-                                                 SUPERSEDED_WORK_ERROR)
+                                                 ConversationHandoffError, INTENT_MAIL_SEARCH,
+                                                 IntentClassifier, SUPERSEDED_WORK_ERROR)
+from personal_agent.decision import (OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine,
+                                     fixture_confidence)
 from personal_agent.gmail import (GMAIL_CONNECTOR, GMAIL_CONNECTOR_ID, GMAIL_READONLY_SCOPE,
                                   EncryptedGmailSecretStore, GmailConnector)
 from personal_agent.providers import ModelAdapter
@@ -100,22 +100,23 @@ class HandoffTestCase(unittest.TestCase):
 
     # -- fixtures ----------------------------------------------------------
     def judge_withdrawal(self, *withdrawing):
-        """Replace the #417 placeholder with a test double.
+        """Put a fixture DecisionEngine behind the service.
 
-        The double judges exactly ``withdrawing`` as withdrawals and records
-        every question it is asked, so a test can also prove when it is not
-        asked at all.  It stands in for a real DecisionEngine; the cancel,
-        card and notice that follow are AgentOS policy under test.
+        The fixture judges exactly ``withdrawing`` as withdrawals (with full
+        confidence) and every other turn as not; it records every question
+        so a test can also prove when nothing was asked.  It stands in for a
+        provider; the cancel, card and notice that follow are AgentOS policy
+        under test, and that policy code is not touched by the swap.
         """
         asked = []
 
-        class Double(DecisionJudge):
-            def parked_work_withdrawn(self, utterance, parked_connectors):
-                asked.append((utterance, tuple(parked_connectors)))
-                return Judgment(JUDGMENT_YES if utterance in withdrawing else JUDGMENT_NO,
-                                source='test-double')
+        def judge(context, proposition):
+            # (utterance, parked connector ids) is what the tests read.
+            asked.append((context.facts.get('owner_message'), self.handoff.parked_for(OWNER)))
+            return BinaryDecision(OUTCOME_DECIDED, context.facts.get('owner_message') in withdrawing,
+                                 fixture_confidence())
 
-        self.service.decision_judge = Double()
+        self.service.use_decision_engine(FixtureDecisionEngine(judge=judge))
         return asked
 
     def enqueue(self, message, chat_id=CHAT):

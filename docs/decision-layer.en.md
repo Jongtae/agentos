@@ -4,11 +4,13 @@
 
 This document defines the intended **AgentOS-owned decision boundary** for bounded judgment such as Attention relevance, capability/runtime selection, result scoring, and “do we need another reasoning/evidence step?” routing.
 
-It is an architecture contract, not a claim that the runtime interface is already implemented. Current support still depends on merged code and named acceptance evidence.
+It is an architecture contract, not a claim that the runtime interface is already implemented. On 2026-09-24 the owner selected this boundary as the semantic foundation for PRESENCE-01: production semantic decisions should be model-backed by default, initially through OpenAI `gpt-4o-mini`, while the interface remains provider-neutral. Current support still depends on merged code and named acceptance evidence.
 
-The owner decision recorded in [#415](https://github.com/Jongtae/agentos/issues/415) is:
+The owner decisions recorded in [#415](https://github.com/Jongtae/agentos/issues/415) are:
 
 > **Absorb the decision-layer interface and engineering principle; do not make Jev a required dependency.**
+>
+> **Minimize rule-based product logic. Use a model-backed DecisionEngine for ordinary semantic judgment, initially `gpt-4o-mini`, while keeping exact security/authority/truth/protocol invariants deterministic.**
 
 The durable rule is:
 
@@ -16,7 +18,7 @@ The durable rule is:
 
 ## Why this boundary exists
 
-Many agent loops use a general LLM for both generative reasoning and small repeated judgments: relevance, routing, confidence, completion checks, or candidate selection. Some of those decisions may be served by deterministic rules, a small/local model, a fast LLM, a specialized decision model, or a future provider.
+Many agent loops use a general LLM for both generative reasoning and small repeated judgments: relevance, routing, confidence, completion checks, reference resolution or candidate selection. Personal AgentOS should not replace those semantic judgments with an accumulating rule engine merely because a keyword/regex branch is easy to add. Ordinary semantic product behavior is model-backed by default; deterministic logic is reserved for exact invariants and test fixtures.
 
 Personal AgentOS must be able to change that implementation without changing owner authority, canonical state, or the meaning of Work.
 
@@ -94,7 +96,7 @@ A model or decision provider must never:
 - self-certify final Work completion;
 - turn an Attention candidate into accepted Work without the normal boundary.
 
-For known deterministic rules, code remains preferred. Learned judgment is used where uncertainty/relevance/selection is genuinely semantic.
+Deterministic code is reserved for distinctions that must be exact and mechanically enforced: Grants/authority, approval binding, idempotency, effect/Evidence qualification, cancellation/revocation, schema/protocol validation and similarly strict invariants. Language, intent, relevance, reference, routing, recovery choice and conversational projection should normally remain behind the model-backed decision boundary. A new natural phrasing should not normally require a new code branch.
 
 ## Replaceable implementations
 
@@ -105,14 +107,15 @@ Personal AgentOS Core
         |
         +-- DecisionEngine contract
               |
-              +-- deterministic/rule implementation
-              +-- existing LLM-backed implementation
+              +-- default OpenAI adapter: gpt-4o-mini
+              +-- owner-selected AI adapter
               +-- local/small-model implementation
               +-- Jev adapter (optional / experimental)
+              +-- deterministic/mock fixture implementation
               +-- future provider adapters
 ```
 
-A normal AgentOS installation must not require any one optional decision provider to exist. Failure or removal of one provider must have an explicit fallback or safe-stop path.
+`gpt-4o-mini` is the initial production default, not part of the kernel contract. A later owner-selected AI, local model, Jev or another adapter may replace it without changing callers. Provider failure/removal must produce an explicit unavailable/unknown/clarification or other safe-stop outcome; it must not silently fall back to a growing phrase/regex rule tree.
 
 ## Candidate uses
 
@@ -125,7 +128,7 @@ The contract is intended to be introduced incrementally at bounded judgment poin
 5. **Completion/quality confidence** — contribute to validation, never replace actual requirement-to-evidence checks.
 6. **Risk/ambiguity classification** — inform deterministic policy, never act as the sole authorization gate.
 
-The interface is not a requirement to route every choice through a learned model.
+The interface is not a requirement to route exact protocol or authority invariants through a learned model. For ordinary semantic product judgment, however, model-backed inference is the default and rule-based branching is the exception.
 
 ## Relationship to Attention and BDI-inspired design
 
@@ -174,7 +177,7 @@ Jev/TypeSafe-specific request types, SDK objects and terminology must remain out
 Jev is currently:
 
 - **not** a mandatory dependency;
-- **not** a default provider;
+- **not** the current default provider (`gpt-4o-mini` is the initial default behind the neutral interface);
 - **not** required for AgentOS startup or normal operation;
 - **not** evidence that a System-One architecture is already implemented;
 - **not** exempt from normal data/egress/Grant controls.
@@ -211,7 +214,7 @@ This architecture follows the repository's **Adopt → Adapt → Build** directi
 An implementation Existing Solutions Review should consider at least:
 
 - the repository's existing LLM/provider paths;
-- deterministic rule/scoring approaches;
+- deterministic/mock fixtures and exact-invariant checks (not a general production semantic rule engine);
 - suitable local/small-model options;
 - Jev/System-One-style decision providers;
 - maintained libraries that solve commodity classification/routing mechanics.
@@ -226,7 +229,7 @@ Define neutral types, errors, confidence/provenance fields, fallback semantics a
 
 ### Stage B — narrow integration
 
-Choose one existing judgment point with low authority risk and measurable behavior. Preserve current behavior through a deterministic or existing-LLM-backed adapter, then prove the interface is genuinely replaceable.
+Choose one existing semantic judgment point with low authority risk and measurable behavior. Integrate the model-backed adapter (initial default `gpt-4o-mini`) through the neutral interface, keep a deterministic/mock adapter for tests, and prove provider replacement does not change caller policy/authority code.
 
 ### Stage C — provider experiments
 
@@ -241,7 +244,7 @@ Promoting a provider to a recommended/default implementation is a separate decis
 This contract does not authorize:
 
 - Jev installation or dependency changes;
-- broad routing/refactoring work;
+- a broad hand-authored semantic rule engine or phrase/regex fallback;
 - replacement of current Grant/approval checks;
 - hidden autonomous action based on confidence;
 - a mandatory System-One model;

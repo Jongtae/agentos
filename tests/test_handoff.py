@@ -135,6 +135,45 @@ class HandoffTests(unittest.TestCase):
                 self.assertEqual(loop.tick("implementer")["action"], "candidate-not-approvable")
                 self.assertEqual(row.queue_state(), "agent:working")
 
+    def test_direct_approval_rechecks_live_ci_and_keeps_recovery_lease(self):
+        row = goal(207, review_required=False); gh = FakeGithub([row])
+        def executor(issue, feedback):
+            candidate = Candidate(issue.number, 4, "w" * 40, "main", "success")
+            gh.candidates[issue.number] = candidate
+            return candidate
+        original_comment = gh.comment
+        def regress_after_receipt(number, marker, text):
+            original_comment(number, marker, text)
+            gh.candidates[number] = Candidate(number, 4, "w" * 40, "main", "failure")
+        gh.comment = regress_after_receipt
+        loop = StateHandoffLoop(gh, self.state, executor)
+        self.assertEqual(loop.tick("implementer")["action"], "candidate-not-approvable")
+        self.assertEqual(row.queue_state(), "agent:working")
+        self.assertEqual(loop.state.read()["lease"]["issue"], 207)
+
+    def test_stale_direct_approval_keeps_lease_and_recovers_on_next_tick(self):
+        row = goal(208, review_required=False); gh = FakeGithub([row]); runs = []
+        def executor(issue, feedback):
+            runs.append(issue.number)
+            candidate = Candidate(issue.number, 4, "x" * 40, "main", "success")
+            gh.candidates[issue.number] = candidate
+            return candidate
+        original_comment = gh.comment
+        changed = {"done": False}
+        def move_head_after_first_receipt(number, marker, text):
+            original_comment(number, marker, text)
+            if not changed["done"] and ":implementation:" in marker:
+                changed["done"] = True
+                gh.candidates[number] = Candidate(number, 4, "y" * 40, "main", "success")
+        gh.comment = move_head_after_first_receipt
+        loop = StateHandoffLoop(gh, Path(self.temp.name) / "stale-direct.json", executor)
+        self.assertEqual(loop.tick("implementer")["action"], "receipt-candidate-stale")
+        self.assertEqual(row.queue_state(), "agent:working")
+        self.assertEqual(loop.state.read()["lease"]["issue"], 208)
+        self.assertEqual(loop.tick("implementer")["state"], "agent:approved")
+        self.assertEqual(row.queue_state(), "agent:approved")
+        self.assertEqual(runs, [208])
+
     def test_dispatch_only_tick_never_claims_or_strands_ready_issue(self):
         row = goal(250); gh = FakeGithub([row])
         result = StateHandoffLoop(gh, self.state).tick("implementer")

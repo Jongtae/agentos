@@ -149,6 +149,12 @@ class StateHandoffLoop:
                     state["candidate"] = asdict(current)
                 self.state.write(state)
                 return {"action": "receipt-candidate-stale", "issue": pending["issue"]}
+            if pending["new"] == "agent:approved":
+                state["candidate"] = asdict(current)
+                if current.ci != "success" or current.draft or not current.required_checks_known:
+                    state.pop("pending", None)
+                    self.state.write(state)
+                    return {"action": "candidate-not-approvable", "issue": pending["issue"]}
         if not self.github.transition(pending["issue"], pending["old"], pending["new"]):
             # A transition can have succeeded remotely before its response was
             # lost.  Reconcile the authoritative queue before retrying.
@@ -156,6 +162,8 @@ class StateHandoffLoop:
             if not now or now.queue_state() != pending["new"]:
                 return {"action": "transition-needs-recheck", "issue": pending["issue"]}
         state.setdefault("receipts", []).append(marker)
+        if pending["old"] == "agent:working" and pending["new"] == "agent:approved":
+            state.pop("lease", None)
         state.pop("pending", None); self.state.write(state)
         return {"action": "transitioned", "issue": pending["issue"], "state": pending["new"]}
 
@@ -221,8 +229,8 @@ class StateHandoffLoop:
             return {"action": "awaiting-ci", "issue": issue.number, "ci": candidate.ci}
         if not issue.review_required and (candidate.draft or not candidate.required_checks_known):
             return {"action": "candidate-not-approvable", "issue": issue.number}
-        state.pop("lease", None); self.state.write(state)
         if issue.review_required:
+            state.pop("lease", None); self.state.write(state)
             return self._receipt(issue.number, "agent:working", "agent:review", "implementation", candidate.key(),
                                  f"Implementation receipt: PR #{candidate.pr}, head `{candidate.head}`, CI `{candidate.ci}`.", state, candidate)
         return self._receipt(

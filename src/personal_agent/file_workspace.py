@@ -114,8 +114,9 @@ class FileWorkspace:
         return {key:source[key] for key in ('reference_id','source_id','path','version') if key in source}
 
     def _result_path(self, relative):
-        root=Path(self.active().get('workspace') or '')
-        if not root.is_dir() or root.is_symlink(): raise ValueError('관리 작업공간을 먼저 연결하세요.')
+        workspace=self.active().get('workspace')
+        root=Path(workspace) if workspace else None
+        if root is None or not root.is_absolute() or not root.is_dir() or root.is_symlink(): raise ValueError('관리 작업공간을 먼저 연결하세요.')
         candidate=root/self._safe_relative(relative)
         if candidate.is_symlink() or not candidate.resolve().is_relative_to(root): raise ValueError('관리 작업공간 밖의 결과에는 접근할 수 없습니다.')
         return candidate

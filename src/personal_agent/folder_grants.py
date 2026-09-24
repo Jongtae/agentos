@@ -3,40 +3,79 @@
 One rule set for both entry points, so a folder refused in one place is refused in
 the other, and stored grants that later fall outside the rules are blocked at use
 time instead of silently widening access.
+
+Folders are compared by filesystem identity (device and inode of the folder and its
+ancestors) as well as by case-folded path, so case-insensitive volumes, firmlinks and
+alternative spellings cannot reach a protected folder. The sensitive list is
+best-effort: it covers common credential, key, browser and system locations, and the
+read-time guards (no dot-files, no symlinks, no escaping the root) remain the second
+layer.
 """
+import os
 from pathlib import Path
 
-# Credential and key stores under the owner's home. A grant may not be one of these,
-# live inside one, or contain one.
+# Credential, key and app-data stores under the owner's home. A grant may not be one
+# of these, live inside one, or contain one.
 _HOME_SENSITIVE = (
-    '.ssh', '.gnupg', '.aws', '.azure', '.kube', '.docker', '.password-store',
-    '.config/gcloud', '.config/gh', '.local/share/keyrings',
-    'Library/Keychains', 'Library/Cookies', 'Library/Mail', 'Library/Messages',
-    'Library/Application Support',
+    '.ssh', '.gnupg', '.aws', '.azure', '.kube', '.docker', '.password-store', '.gnome-keyring',
+    '.terraform.d', '.mozilla', '.config/gcloud', '.config/gh', '.config/google-chrome',
+    '.config/chromium', '.local/share/keyrings',
+    'Library/Keychains', 'Library/Cookies', 'Library/Mail', 'Library/Messages', 'Library/Safari',
+    'Library/Containers', 'Library/Group Containers', 'Library/Application Support',
 )
 # System configuration and binaries. Temporary folders stay allowed.
 _SYSTEM_SENSITIVE = (
     '/etc', '/private/etc', '/System', '/usr', '/bin', '/sbin', '/dev', '/proc', '/sys',
-    '/boot', '/root', '/Library/Keychains', '/var/db', '/private/var/db', '/var/lib',
+    '/boot', '/root', '/var/root', '/private/var/root', '/Library/Keychains', '/var/db',
+    '/private/var/db', '/var/lib',
 )
 
 BROAD = '전체 홈이나 시스템 루트 대신 작업용 하위 폴더를 선택하세요'
 SENSITIVE = '인증 정보나 시스템 설정이 있는 폴더는 연결할 수 없습니다'
 
 
+def _identity(path):
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return (stat.st_dev, stat.st_ino)
+
+
+def _chain(path):
+    """Identities of an existing path and every ancestor."""
+    return {identity for identity in map(_identity, (path, *path.parents)) if identity}
+
+
+def _folded(path):
+    return Path(os.path.normcase(str(path)).casefold())
+
+
+def _related(path, path_chain, other):
+    """True when path is other, lies inside it, or contains it (identity or case-folded name)."""
+    other_id = _identity(other)
+    if other_id and (other_id in path_chain or _identity(path) in _chain(other)):
+        return True
+    mine = _folded(path)
+    return any(mine.is_relative_to(form) or form.is_relative_to(mine) for form in {_folded(other), _folded(other.resolve())})
+
+
 def _sensitive_paths():
     home = Path.home()
-    candidates = [home / item for item in _HOME_SENSITIVE] + [Path(item) for item in _SYSTEM_SENSITIVE]
-    return {form for path in candidates for form in (path, path.resolve())}
+    return [home / item for item in _HOME_SENSITIVE] + [Path(item) for item in _SYSTEM_SENSITIVE]
 
 
 def refusal(path, store):
     """Why an existing, resolved directory may not be granted, or None."""
+    chain = _chain(path)
+    own = _identity(path)
     home = Path.home().resolve()
-    if (path in (Path('/'), home, store.root.resolve()) or home.is_relative_to(path)
-            or path.is_relative_to(store.private.resolve()) or store.private.resolve().is_relative_to(path)):
+    if own is None:
+        return None
+    if (own == _identity(Path('/')) or own == _identity(store.root) or own in _chain(home)
+            or _folded(home).is_relative_to(_folded(path)) or _related(path, chain, store.private)):
         return BROAD
-    if any(path == item or path.is_relative_to(item) or item.is_relative_to(path) for item in _sensitive_paths()):
+    if any(_related(path, chain, item) for item in _sensitive_paths()):
         return SENSITIVE
     return None
 

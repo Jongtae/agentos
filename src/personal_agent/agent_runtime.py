@@ -299,7 +299,10 @@ class Capabilities:
    source=next(d for d in DEFINITIONS if d['function']['name']==tool['host_action'])
    definitions.append({**source,'function':{**source['function'],'name':tool_id}})
   return definitions
- def roots(self):return [root for root in self.store.config('file_roots',[]) if not folder_grants.blocked(root.get('path',''),self.store)]
+ def roots(self):
+  stored=self.store.config('file_roots',[]);key=json.dumps(stored,sort_keys=True)
+  if getattr(self,'_roots_key',None)!=key:self._roots_key,self._roots=key,[root for root in stored if not folder_grants.blocked(root.get('path',''),self.store)]
+  return self._roots
  def resolve_file(self,root_id,path):
   root=next((r for r in self.roots() if r['id']==root_id),None)
   if not root:raise ValueError('먼저 연결 설정에서 파일 폴더를 연결해 주세요.')

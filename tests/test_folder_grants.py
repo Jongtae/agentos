@@ -126,5 +126,75 @@ class FolderGrantTests(unittest.TestCase):
         self.assertEqual(FileWorkspace(self.store).configure([str(self.docs)], str(self.out))['workspace'], str(self.out))
 
 
+    def case_insensitive(self):
+        probe = self.home / 'CaseProbe'
+        probe.mkdir()
+        try:
+            return (self.home / 'caseprobe').exists()
+        finally:
+            probe.rmdir()
+
+    def test_mixed_case_spellings_cannot_reach_a_sensitive_folder(self):
+        if not self.case_insensitive():
+            self.skipTest('case-sensitive filesystem')
+        (self.home / '.ssh').mkdir()
+        (self.home / 'Library' / 'Keychains').mkdir(parents=True)
+        for value in ('~/.SSH', '~/library/keychains', '~/Library/KEYCHAINS', '~/LIBRARY'):
+            with self.subTest(value=value):
+                self.refuse_both(value, folder_grants.SENSITIVE)
+        self.assertEqual(folder_grants.blocked(str(self.home / '.SSH'), self.store), folder_grants.SENSITIVE)
+        self.refuse_both(str(self.home).upper() if str(self.home).upper() != str(self.home) else str(self.home), folder_grants.BROAD)
+
+    def test_blocked_stored_roots_do_not_prevent_other_changes(self):
+        ssh, aws = self.home / '.ssh', self.home / '.aws'
+        ssh.mkdir(); aws.mkdir()
+        self.store.put('file_roots', [{'id': 'a', 'path': str(ssh)}, {'id': 'b', 'path': str(aws)}, {'id': 'c', 'path': str(self.docs)}])
+        roots = self.service.save_roots({'paths': [str(aws), str(self.docs)]})['roots']
+        self.assertEqual([root['path'] for root in roots], [str(aws), str(self.docs)], 'removing one blocked folder keeps the rest')
+        self.assertEqual({root['path']: root['blocked'] for root in roots}[str(aws)], folder_grants.SENSITIVE, 'response discloses the block')
+        roots = self.service.save_roots({'paths': [str(aws), str(self.docs), str(self.out)]})['roots']
+        self.assertEqual(len(roots), 3, 'adding a folder works while a blocked one is still stored')
+        with self.assertRaisesRegex(ValueError, folder_grants.SENSITIVE):
+            self.service.save_roots({'paths': [str(ssh)]})
+
+    def test_searches_skip_blocked_folders_and_blocked_output_refuses_saves(self):
+        ssh = self.home / '.ssh'
+        ssh.mkdir()
+        (ssh / 'aurora.txt').write_text('Aurora secret')
+        (self.docs / 'aurora.txt').write_text('Aurora launch plan')
+        self.service.save_roots({'paths': [str(self.docs)]})
+        self.store.put('file_roots', self.store.config('file_roots') + [{'id': 'legacy', 'path': str(ssh)}])
+        hits = Capabilities(self.store, None, {}, '', 'job', lambda *args: None).find_files('Aurora')['files']
+        self.assertEqual({hit['root_id'] for hit in hits}, {self.store.config('file_roots')[0]['id']})
+        workspace = FileWorkspace(self.store)
+        workspace.configure([str(self.docs)], str(self.out))
+        status = workspace.status()
+        self.store.put('file_workspace', {**status, 'references': status['references'] + [{'id': 'legacy-ref', 'path': str(ssh)}]})
+        sources = workspace.find_references('Aurora')
+        self.assertEqual([source['reference_id'] for source in sources], [status['references'][0]['id']])
+        self.store.put('file_workspace', {**status, 'workspace': str(ssh)})
+        with self.assertRaisesRegex(ValueError, '관리 작업공간을 먼저'):
+            workspace.save('job-1', 'Notes', 'body', sources)
+        self.assertEqual(list(ssh.iterdir()), [ssh / 'aurora.txt'], 'nothing written into the blocked folder')
+
+    def test_stored_folder_later_replaced_by_symlink_into_a_sensitive_folder_is_blocked(self):
+        (self.home / '.ssh').mkdir()
+        moved = self.home / 'Documents' / 'Moved'
+        moved.mkdir()
+        self.service.save_roots({'paths': [str(moved)]})
+        moved.rmdir()
+        moved.symlink_to(self.home / '.ssh', target_is_directory=True)
+        self.assertEqual(Capabilities(self.store, None, {}, '', 'job', lambda *args: None).roots(), [])
+
+    def test_store_subfolder_and_icloud_drive_stay_allowed(self):
+        acceptance = self.store.root / 'acceptance-documents'
+        acceptance.mkdir()
+        icloud = self.home / 'Library' / 'Mobile Documents' / 'com~apple~CloudDocs'
+        icloud.mkdir(parents=True)
+        (self.home / 'Library' / 'Keychains').mkdir()
+        roots = self.service.save_roots({'paths': [str(acceptance), str(icloud)]})['roots']
+        self.assertEqual([root['blocked'] for root in roots], [None, None])
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -786,14 +786,19 @@ class AgentService:
         from pathlib import Path
         paths=body.get('paths')
         if not isinstance(paths,list) or len(paths)>8 or any(not isinstance(p,str) for p in paths):raise ValueError('폴더는 최대 8개까지 연결할 수 있습니다.')
-        roots=[]
+        roots=[];stored={root.get('path'):root for root in self.store.config('file_roots',[])}
         for value in paths:
+            if value in stored and folder_grants.blocked(value,self.store):
+                # Keep an already-stored grant the rules now forbid as-is (still blocked at use)
+                # so the owner can change other folders without first clearing every blocked one.
+                if all(root['path']!=value for root in roots):roots.append(stored[value])
+                continue
             p=folder_grants.validate(value,self.store)
             if any(root['path']==str(p) for root in roots):continue
             roots.append({'id':__import__('hashlib').sha256(str(p).encode()).hexdigest()[:12],'path':str(p)})
         self.store.put('file_roots',roots)
         self.store.put('document_sharing',{})
-        return {'roots':roots}
+        return {'roots':[{**root,'blocked':folder_grants.blocked(root['path'],self.store)} for root in roots]}
 
     def configure_file_workspace(self, body):
         if not isinstance(body,dict): raise ValueError('파일 작업공간 정보를 확인하세요.')

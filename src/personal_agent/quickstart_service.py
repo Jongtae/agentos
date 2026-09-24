@@ -432,10 +432,12 @@ class AgentService:
             return False,'이전 요청에 이미 저장된 결과가 있어 자동으로 다시 실행하지 않았습니다.'
         effectful={'save_note','save_memory','calendar_draft_create','calendar_draft_update','calendar_draft_cancel'}
         for event in self.store.task_events(previous['id']):
-            if event.get('tool') in effectful:
-                return False,'이전 요청이 상태를 바꾸는 작업을 시도해 자동으로 다시 실행하지 않았습니다.'
+            # Unknown external effect is the strongest reason to refuse:
+            # never collapse it into the weaker "a mutation was attempted".
             if self._unknown_effect(event.get('trace')):
                 return False,'이전 요청의 외부 결과가 불확실해 자동으로 다시 실행하지 않았습니다. 먼저 실제 결과를 확인해 주세요.'
+            if event.get('tool') in effectful:
+                return False,'이전 요청이 상태를 바꾸는 작업을 시도해 자동으로 다시 실행하지 않았습니다.'
         return True,None
 
     def canonical_retry_source(self, previous):

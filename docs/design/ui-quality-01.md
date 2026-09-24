@@ -1,6 +1,6 @@
 # UI-QUALITY-01 design direction (#558)
 
-Status: direction for owner review before broad implementation. Presentation only:
+Status: direction approved by the owner on 2026-09-24 after the 작업 현황 prototype; implemented across all destinations in PR for #558. Presentation only:
 no API, payload, validation, Grant, connector or runtime change. Vanilla HTML/CSS/JS,
 no build step, no runtime dependency. The pinned review aids
 `.claude/skills/frontend-design/` and `.claude/skills/web-interface-guidelines/` were

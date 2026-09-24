@@ -8,6 +8,7 @@ from pathlib import Path
 from .providers import ModelResult, ProviderError
 from .local_tools import LocalTools
 from .document_reader import read as read_document, supported as supported_document, MAX_FILE_BYTES
+from . import folder_grants
 from .manifests import BUILTIN_MANIFEST, runtime_packages
 
 AGENTS={role['id']:{key:value for key,value in role.items() if key!='id'} for role in BUILTIN_MANIFEST['roles']}
@@ -298,7 +299,7 @@ class Capabilities:
    source=next(d for d in DEFINITIONS if d['function']['name']==tool['host_action'])
    definitions.append({**source,'function':{**source['function'],'name':tool_id}})
   return definitions
- def roots(self):return self.store.config('file_roots',[])
+ def roots(self):return [root for root in self.store.config('file_roots',[]) if not folder_grants.blocked(root.get('path',''),self.store)]
  def resolve_file(self,root_id,path):
   root=next((r for r in self.roots() if r['id']==root_id),None)
   if not root:raise ValueError('먼저 연결 설정에서 파일 폴더를 연결해 주세요.')

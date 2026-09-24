@@ -250,6 +250,11 @@ const press=async(id,label)=>{const button=buttons(id).find(node=>node.textConte
  ctx.renderRootList(['/tmp/c/New']);await press('root-list','제거');ctx.renderRootList([]);ctx.renderRootList(['/tmp/c/New']);
  assert(!$('root-list').textContent.includes('연결을 해제할까요?'),'stale pending removal is cleared when the folder disappears');
 
+ ctx.renderRootList([{path:'/tmp/ok'},{path:'/Users/me/.ssh',blocked:'인증 정보나 시스템 설정이 있는 폴더는 연결할 수 없습니다'}]);
+ assert.equal(descendants($('root-list')).filter(node=>node.className==='settings-state attention'&&node.textContent==='사용 중지됨').length,1,'a stored folder the rules now forbid is disclosed, not hidden');
+ assert($('root-list').textContent.includes('인증 정보나 시스템 설정'),'the block reason is shown');
+ ctx.renderFileWorkspace({references:[{path:'/Users/me/.aws',blocked:'인증 정보나 시스템 설정이 있는 폴더는 연결할 수 없습니다'}],workspace:'/tmp/out',workspace_blocked:null});
+ assert($('file-workspace-list').textContent.includes('사용 중지됨'));
  ctx.renderFileWorkspace({references:[],workspace:null});
  assert($('file-workspace-list').textContent.includes('설정하지 않음'));
  assert.equal($('file-workspace-form').hidden,true,'edit form closed by default');

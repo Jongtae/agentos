@@ -42,7 +42,10 @@ assert($('active-ai').textContent.includes('Ollama'),'provider title remains pro
 const buttonsIn=id=>descendants($(id)).filter(node=>node.tag==='button');
 const useApi=buttonsIn('active-ai').find(node=>node.textContent==='이 연결 사용');
 assert(useApi,'a verified direct API offers an explicit switch');
-assert($('active-ai').textContent.includes('사용 가능 · 현재 사용 안 함'));
+assert($('active-ai').textContent.includes('사용 가능'));
+const currentCount=()=>descendants($('active-ai')).filter(node=>node.className==='settings-state active'&&node.textContent==='현재 사용 중').length;
+assert.equal(currentCount(),1,'exactly one current route');
+assert.equal(descendants($('active-ai')).find(node=>node.className==='settings-row-title').textContent,'Codex','the current route is listed first');
 assert(!$('active-ai').textContent.includes('직접 API를 설정하거나 테스트해도'),'dense precedence prose is gone');
 (async()=>{
  await useApi.onclick({currentTarget:useApi});
@@ -56,8 +59,14 @@ assert(!$('active-ai').textContent.includes('직접 API를 설정하거나 테�
  assert(buttonsIn('active-ai').some(node=>node.textContent==='연결 확인'));
  assert($('active-ai').textContent.includes('설정됨 · 확인 필요'));
  ctx.renderExecutionConnection({...settings,subscription_engines:{selected:'',engines:settings.subscription_engines.engines.map(e=>({...e,connected:false}))}});
- assert($('active-ai').textContent.includes('현재 요청 경로'),'direct API is shown as the current route once selected');
- assert(!$('active-ai').textContent.includes('현재 사용 안 함'));
+ assert.equal(currentCount(),1,'direct API is the one current route once selected');
+ assert.equal(descendants($('active-ai')).find(node=>node.className==='settings-row-title').textContent,'Ollama');
+ ctx.renderExecutionConnection({...settings,subscription_engines:{selected:'',engines:settings.subscription_engines.engines}});
+ const back=buttonsIn('active-ai').find(node=>node.textContent==='Codex 로그인 완료 · 전환');assert(back,'switching back to a CLI is offered in the same list');
+ calls.length=0;await back.onclick({currentTarget:back});
+ assert.equal(JSON.stringify(calls),JSON.stringify([{path:'/api/subscription-engines/connect',body:{engine:'codex',officially_authenticated:true}}]));
+ ctx.renderExecutionConnection({model:{},model_ready:false,subscription_engines:{selected:'',engines:[]}});
+ assert.equal(currentCount(),0);assert($('active-ai').textContent.includes('사용할 AI 연결이 설정되지 않았습니다'));
 })().catch(error=>{console.error(error);process.exit(1);});
 ctx.renderTelegram({telegram:{enabled:true,paired:true,username:'fixture'},telegram_status:{message:'ok'}});
 const telegramButton=buttonIn('telegram-current');ctx.renderTelegram({telegram:{enabled:true,paired:true,username:'fixture'},telegram_status:{message:'ok'}});

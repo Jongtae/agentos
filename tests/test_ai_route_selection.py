@@ -131,6 +131,27 @@ class AiRouteSelectionTests(unittest.TestCase):
         self._run('after restart', 'restart-1')
         self.assertEqual(self.engine.calls, 0)
 
+    def _route(self, job_id):
+        return next(task for task in self.service.task_progress()['tasks'] if task['id'] == job_id)['route']
+
+    def test_task_reports_the_route_it_used_even_after_a_later_switch(self):
+        from personal_agent.bounded_execution import ExecutionError
+        class Failing:
+            def execute(self, *args): raise ExecutionError('engine failed', failure_class='request-rejected', exit_code=1)
+        self.service.execution_adapter = Failing()
+        failed = self._run('hello', 'route-failed')
+        self._ready_model()
+        self.service.select_ai_route({'route': 'direct-api'})
+        direct = self._run('hello again', 'route-direct')
+        self.assertEqual(self._route(failed['id']), {'kind': 'subscription', 'engine': 'codex', 'status': 'failed'})
+        route = self._route(direct['id'])
+        self.assertEqual((route['kind'], route['status']), ('direct-api', 'succeeded'))
+
+    def test_task_without_ai_execution_reports_no_route(self):
+        job = self.store.enqueue('/note remember milk', 'note-only')
+        self.service.run_one()
+        self.assertIsNone(self._route(job))
+
     def test_unknown_route_is_rejected(self):
         for body in ({'route': 'gpt-anything'}, {}, None):
             with self.subTest(body=body), self.assertRaises(ValueError):

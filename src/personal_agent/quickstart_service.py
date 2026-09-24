@@ -545,6 +545,28 @@ class AgentService:
         if trace.get('evidence'):summary='근거를 확인했습니다.'
         return {'id':event['id'],'job_id':event['job_id'],'tool':event['tool'],'status':status,'created':event['created'],'summary':summary,'details':safe}
 
+    def _observed_route(self, job, events):
+        """The route this Work actually attempted, from its own recorded events.
+
+        Current settings are never substituted: a later route switch must not
+        rewrite which AI an earlier request used.
+        """
+        engine=[event for event in events if event['tool']=='subscription_engine']
+        if engine:
+            name=next((event['trace'].get('engine') for event in engine if isinstance(event['trace'].get('engine'),str)),None)
+            return {'kind':'subscription','engine':name,'status':engine[-1]['status']}
+        with self.store.db() as db:
+            row=db.execute("SELECT detail FROM tool_events WHERE job_id=? AND tool='model' AND status='responded' ORDER BY id DESC LIMIT 1",(job['id'],)).fetchone()
+        if row:
+            try:model=json.loads(row['detail']).get('model')
+            except (TypeError,ValueError,AttributeError):model=None
+            return {'kind':'direct-api','model':model if isinstance(model,str) else job.get('model'),'status':job.get('status')}
+        # 'builtin' marks turns AgentOS answered itself (e.g. notes): no AI ran.
+        if job.get('provider') and job['provider']!='builtin':
+            subscription=job['provider']=='subscription'
+            return {'kind':'subscription' if subscription else 'direct-api','engine' if subscription else 'model':job.get('model'),'status':job.get('status')}
+        return None
+
     def task_progress(self, job_id=None):
         jobs=self.store.jobs()
         configured=self.store.config('model',{})
@@ -562,7 +584,7 @@ class AgentService:
                 if notification['kind'] in ('approval_needed','context_approval_needed') and notification['state'] in ('queued','sent'):
                     waits.append('승인 대기')
             artifacts=[{'id':item['id'],'kind':'저장된 결과' if 'path' not in item else '파일 결과','path':item.get('path'),'workspace_id':item.get('workspace_id'),'created':item.get('created'),'state':item.get('state','current')} for item in self.store.task_artifacts(job['id'])]
-            task={'id':job['id'],'title':self._progress_title(job.get('message'),job['id']),'status':job.get('status'),'status_kind':kind,'status_label':label,'started_at':job.get('created'),'observed_at':last,'result_available':bool(job.get('response')) and job.get('status') in ('succeeded','partial'),'workspace_id':job.get('workspace_id'),'events_count':len(events),'waits':waits,'configured':{'provider':configured.get('provider'),'model':configured.get('model'),'runtime':selected_subscription or (configured.get('provider') if configured else None)},'observed':{'provider':job.get('provider'),'model':job.get('model'),'runtime':job.get('provider') or None},'artifacts':artifacts}
+            task={'id':job['id'],'title':self._progress_title(job.get('message'),job['id']),'status':job.get('status'),'status_kind':kind,'status_label':label,'started_at':job.get('created'),'observed_at':last,'result_available':bool(job.get('response')) and job.get('status') in ('succeeded','partial'),'workspace_id':job.get('workspace_id'),'events_count':len(events),'waits':waits,'configured':{'provider':configured.get('provider'),'model':configured.get('model'),'runtime':selected_subscription or (configured.get('provider') if configured else None)},'observed':{'provider':job.get('provider'),'model':job.get('model'),'runtime':job.get('provider') or None},'route':self._observed_route(job,events),'artifacts':artifacts}
             if job_id==job['id']:
                 task['events']=[self._progress_event(event) for event in events]
                 task['source_references']=self.store.evidence_summary(job['id'])

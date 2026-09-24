@@ -154,7 +154,10 @@ assert.deepEqual(ui.capabilityActions({id:'google-drive-read',state:'paused'}),[
 assert.deepEqual(ui.capabilityActions({id:'google-drive-read',state:'disconnected'}),[]);
 assert.deepEqual(ui.capabilityActions({id:'isolated-runtime-placeholder',state:'enabled'}),[]);
 assert.match(ui.contextSharingWarning({sharing_requires_policy_and_per_request_approval:true}),/각 Telegram 작업마다/);
-assert.equal(ui.settingsFeedbackId('subscription'),'subscription-feedback');
+assert.equal(ui.settingsFeedbackId('subscription'),'active-ai-feedback');
+assert.equal(ui.routeText({kind:'subscription',engine:'codex',status:'failed'}),'Codex 구독 CLI · 실행했지만 실패');
+assert.equal(ui.routeText({kind:'direct-api',model:'gpt-4o-mini',status:'succeeded'}),'직접 API · gpt-4o-mini');
+assert.match(ui.routeText(null),/기록 없음/);
 const disclosureStore=new Map(),nested={open:true},technical={open:true,querySelector:selector=>selector==='details'?nested:null};
 ui.rememberTaskDisclosures(disclosureStore,'task',technical);technical.open=false;nested.open=false;ui.restoreTaskDisclosures(disclosureStore,'task',technical,nested);assert.equal(technical.open,true);assert.equal(nested.open,true);
 assert.equal(ui.isOpenRouterCompletion({origin:'http://owner.local',data:{type:'agentos-openrouter-connected'}},'http://owner.local'),true);
@@ -316,7 +319,7 @@ console.log(JSON.stringify({checks:40}));
         self.assertIn("api('/api/settings/request',{operation:'confirm'", app)
         self.assertIn("api('/api/settings/request',{operation:'cancel'", app)
         self.assertIn("$('brand-home').onclick", app)
-        self.assertIn("setError('subscription-feedback',error)", app)
+        self.assertIn("setError('active-ai-feedback',error)", app)
         self.assertIn('각 Telegram 작업마다 공유 승인이 필요합니다.', app)
 
     def test_browser_fixture_and_exact_runner_transcript_are_checked_in(self):

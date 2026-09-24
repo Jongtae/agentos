@@ -1186,16 +1186,21 @@ class AgentService:
         acknowledged=[]
         for row in rows:
             if not self.is_natural_language(row['message']):continue
-            self.create_task_card(row['id'],row['message'],row['chat_id'],state=row['status'])
-            if self.store.task_card(row['id']):
-                acknowledged.append(row['id'])
-                # The Work may have completed while Telegram was accepting the
-                # card. Reconcile it to any changed current state so a stale
-                # queued/running card cannot keep an obsolete action.
+            # Serialize card creation/reconciliation with terminal delivery.
+            # Otherwise a concurrent worker can send the answer while this
+            # Telegram acknowledgement is still in flight, reversing the
+            # owner's message order.
+            with self.lock:
                 current=self.store.job(row['id'])
-                card=self.store.task_card(row['id'])
-                if current and card and current['status']!=card['state']:
-                    self.update_task_card(current,current['status'])
+                if not current or current['status'] not in ('queued','running'):
+                    continue
+                self.create_task_card(row['id'],row['message'],row['chat_id'],state=current['status'])
+                if self.store.task_card(row['id']):
+                    acknowledged.append(row['id'])
+                    current=self.store.job(row['id'])
+                    card=self.store.task_card(row['id'])
+                    if current and card and current['status']!=card['state']:
+                        self.update_task_card(current,current['status'])
         return acknowledged
 
     def connector_connect_url(self, connector_id):
@@ -2232,6 +2237,7 @@ class AgentService:
                             raise
                         record('subscription_engine','succeeded',json.dumps({'engine':result.engine,'exit_code':result.exit_code}))
                         response,provider,model=result.content,'subscription',result.engine
+                        resolved_blocker=result.exit_code==0
                     else:
                         if not config:raise BlockedTurn(BLOCKER_NO_AI_ROUTE,'설정에서 모델 또는 구독 엔진을 먼저 연결하세요. 모델 없이도 /note와 /notes는 사용할 수 있습니다.')
                         if workspace_request and boundary['requires_approval']:

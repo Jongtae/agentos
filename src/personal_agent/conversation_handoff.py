@@ -671,11 +671,16 @@ class IntentClassifier:
             explicit.supersedes_previous = bool(focus_intent) and focus_intent != explicit.intent
             return self._with_suggestion(explicit, (), model_suggestion)
 
-        # Before any cue can claim the turn: a request for something this
-        # conversation does not offer ("답장 보내줘", "그 메일 내용 보여줘") is
-        # answered with the actual boundary rather than the nearest search
-        # (#478).
-        unsupported = self._judge.unsupported_capability(text)
+        # Restrict semantic boundary judgment to mail-shaped requests. The
+        # DecisionEngine may be remote, so local-only turns (notes, settings,
+        # ordinary conversation) must never be sent to it. A reply/send verb
+        # still qualifies even when it is not a supported mailbox-read cue.
+        mail_objects = _cue_hits(text, lowered, _MAIL_OBJECTS)
+        mail_verbs = _cue_hits(text, lowered, _MAIL_VERBS)
+        mail_action = _cue_hits(text, lowered, ('답장', '회신', '보내', '전송', 'reply', 'send'))
+        unsupported = (self._judge.unsupported_capability(text)
+                       if mail_objects and (mail_verbs or mail_action)
+                       else Judgment(JUDGMENT_NO, source='local-prefilter'))
         if unsupported.outcome == JUDGMENT_YES:
             return self._with_suggestion(
                 IntentDecision(INTENT_UNSUPPORTED, AUTHORITY_RULE, argument=unsupported.value,

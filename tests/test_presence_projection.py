@@ -8,6 +8,7 @@ scripted model and fixture DecisionEngine stand in for providers; nothing
 here claims live behavior.
 """
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -191,9 +192,10 @@ class LongWorkTests(ProjectionTestCase):
             db.execute("UPDATE jobs SET status='running' WHERE id=?",(job_id,))
         original = self.service.telegram_transport
         raced = False
+        delivery_thread = None
 
         def transport(url, body=None, headers=None, timeout=60):
-            nonlocal raced
+            nonlocal raced, delivery_thread
             if url.endswith('/editMessageText') and body.get('message_id') == -1:
                 raise ProviderError('card reservation has no remote message id yet')
             if (not raced and url.endswith('/sendMessage')
@@ -204,17 +206,22 @@ class LongWorkTests(ProjectionTestCase):
                     db.execute("UPDATE jobs SET status='succeeded',response=?,delivery='pending' WHERE id=?",
                                (self.text,job_id))
                 self.service.update_task_card(self.store.job(job_id),'succeeded')
-                self.service.deliver_one()
+                delivery_thread = threading.Thread(target=self.service.deliver_one)
+                delivery_thread.start()
+                delivery_thread.join(timeout=0.05)
+                self.assertTrue(delivery_thread.is_alive(), 'terminal delivery waits for card reconciliation')
             return original(url, body, headers, timeout)
 
         self.service.telegram_transport = transport
         self.assertEqual(self.service.acknowledge_long_work(), [job_id])
+        delivery_thread.join(timeout=2)
+        self.assertFalse(delivery_thread.is_alive())
         self.assertEqual(self.store.job(job_id)['status'], 'succeeded')
         self.assertEqual(self.store.task_card(job_id)['state'], 'succeeded', self.outbound)
-        self.assertEqual([kind for kind, _text in self.outbound], ['send', 'send', 'edit'])
-        self.assertTrue(self.outbound[0][1].startswith(self.text))
-        self.assertEqual(self.outbound[1][1], '요청을 처리하고 있어요.')
-        self.assertIn('처리가 끝났습니다', self.outbound[2][1])
+        self.assertEqual([kind for kind, _text in self.outbound], ['send', 'edit', 'send'])
+        self.assertEqual(self.outbound[0][1], '요청을 처리하고 있어요.')
+        self.assertIn('처리가 끝났습니다', self.outbound[1][1])
+        self.assertTrue(self.outbound[2][1].startswith(self.text))
 
 
 class BlockedTurnTests(ProjectionTestCase):
@@ -300,6 +307,12 @@ class UnsupportedCapabilityTests(ProjectionTestCase):
         self.judged({})
         decision = self.service.classify_intent('메일에서 예산 관련 내용 찾아줘')
         self.assertEqual(decision.intent, 'mail-search')
+
+    def test_local_note_turn_is_not_sent_to_decision_engine(self):
+        engine = self.judged({})
+        decision = self.service.classify_intent('/note 커피는 따뜻하게')
+        self.assertEqual(decision.intent, 'note-create')
+        self.assertEqual(engine.asked, [])
 
     def test_unavailable_judgment_does_not_fall_through_to_mail_search_cues(self):
         self.service.use_decision_engine(UnavailableDecisionEngine())

@@ -122,7 +122,7 @@ class IsolatedEngineSidecarTests(unittest.TestCase):
         return response.status, value
 
     def test_fake_codex_uses_read_only_bridge_end_to_end(self):
-        token = "execution-secret"
+        token = "-execution-secret"
         status, response = self._post(
             {"prompt": "list the notes", "engine_id": "codex", "token": token, "task_id": "job-7"}
         )
@@ -273,8 +273,9 @@ class IsolatedEngineSidecarBoundaryTests(unittest.TestCase):
 
     def test_non_zero_exit_is_refused_even_with_a_well_formed_answer(self):
         body = self._emit("'looks fine'") + "sys.exit(3)\n"
-        with self.assertRaises(SidecarError):
+        with self.assertRaises(SidecarError) as caught:
             self._sidecar(body).execute(dict(self.PAYLOAD))
+        self.assertIn("status 3", str(caught.exception))
 
     def test_missing_engine_binary_fails_closed(self):
         sidecar = IsolatedEngineSidecar(

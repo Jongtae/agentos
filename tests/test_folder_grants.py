@@ -177,6 +177,16 @@ class FolderGrantTests(unittest.TestCase):
         self.assertEqual([ref['path'] for ref in state['references']],[str(self.docs)])
         self.assertEqual(state['workspace'],str(other))
 
+    def test_retained_unavailable_reference_still_prevents_workspace_overlap(self):
+        reference=self.home/'Documents'/'OwnerFiles'/'Research'
+        reference.parent.mkdir(); reference.mkdir()
+        initial=FileWorkspace(self.store)
+        initial.configure([str(reference)],str(self.out))
+        reference.rmdir()
+        parent=reference.parent
+        with self.assertRaisesRegex(ValueError,'겹치지 않게 연결'):
+            initial.configure([str(reference)],str(parent))
+
     def test_capabilities_rechecks_filesystem_after_roots_was_read(self):
         moved=self.home/'Documents'/'Moved'; target=self.home/'Documents'/'Other'
         moved.mkdir(); target.mkdir()

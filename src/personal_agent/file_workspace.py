@@ -27,7 +27,9 @@ class FileWorkspace:
             stat=path.stat(); ref={'id':hashlib.sha256(f'{stat.st_dev}:{stat.st_ino}'.encode()).hexdigest()[:24],'path':str(path)}
             refs.append(ref); usable.append(ref)
         target=folder_grants.validate(workspace,self.store)
-        if any(target==Path(ref['path']) or target.is_relative_to(ref['path']) or Path(ref['path']).is_relative_to(target) for ref in usable): raise ValueError('참고 폴더와 관리 작업공간은 겹치지 않게 연결하세요.')
+        # Retained blocked references still count for overlap: if one later
+        # becomes available again, active() will expose it without another edit.
+        if any(target==Path(ref['path']) or target.is_relative_to(ref['path']) or Path(ref['path']).is_relative_to(target) for ref in refs): raise ValueError('참고 폴더와 관리 작업공간은 겹치지 않게 연결하세요.')
         target_stat=target.stat(); workspace_id=hashlib.sha256(f'{target_stat.st_dev}:{target_stat.st_ino}'.encode()).hexdigest()[:24]
         self.store.put('file_workspace',{'references':refs,'workspace':str(target),'workspace_id':workspace_id})
         self.store.put('document_sharing',{})

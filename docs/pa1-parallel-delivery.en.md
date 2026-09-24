@@ -77,7 +77,6 @@ Wave 1 integration-owned shared files are:
 - `src/personal_agent/web/app.js`
 - `src/personal_agent/web/style.css`
 - `delivery-plan.yaml`
-- `src/personal_agent/delivery-plan.yaml`
 - `TASKS.md`
 - `docs/roadmap.md`
 - `docs/issue-branch-ledger.jsonl`

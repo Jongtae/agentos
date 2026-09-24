@@ -8,7 +8,7 @@ A connected Codex, Claude Code, model provider, local model, MCP server, AgentPa
 
 The repository's issue/branch/PR workflow, Goal Execution Contract, CI, delivery heartbeat, and state-driven implementer/reviewer handoff are **development infrastructure used to build Personal AgentOS**. Do not treat those repository mechanics as an end-user AgentOS feature, an OS runtime dependency, or evidence of live autonomous product operation. A coding harness may be a service or development aid; it is not the product identity.
 
-The current first usable product slice remains owner files and folders as the material foundation with conversation/work as the experience. D-AP-01 #334 is contract/schema-complete and DOGFOOD-01 #351 is development-complete in their named evidence classes. Uncompleted Agent Distribution Platform #333 children and useful-default-agent issues #358–#360 are planned; their existence does not activate them.
+The current first usable product slice remains owner files and folders as the material foundation with conversation/work as the experience. D-AP-01 #334 is contract/schema-complete and DOGFOOD-01 #351 is development-complete in their named evidence classes. The remaining Agent Distribution Platform #333 children and the useful-default-agent issues #358–#360 were closed as not planned on 2026-09-24 (GOV-PRESENCE-ACT-01 #523); their historical records do not activate anything. The active top-level goal is recorded only in `delivery-plan.yaml` `next_goal`.
 
 Every active task must advance one or more durable outcomes:
 
@@ -167,7 +167,7 @@ An owner may explicitly activate one goal-ready iteration or one goal-ready top-
 
 There is one existing delivery heartbeat. It may resume only the explicitly active goal after inspecting current repository and GitHub state; it must not create another automation or concurrent execution. It stays paused when no top-level goal is active or after top-level closeout, not after an in-scope substep closeout. A changed external condition is required before retrying a recorded authentication, permission, environment or usage failure.
 
-Uncompleted Agent Distribution Platform issues and #358–#360 are not an autonomous queue. D-AP-01 #334 and DOGFOOD-01 #351 completion does not activate a successor. Each execution unit still requires explicit owner activation and a goal-ready delivery-plan state. GOV-USE-01 #357 authorizes only its bounded documentation/governance alignment, not product execution.
+Retired Agent Distribution Platform issues and #358–#360 are historical evidence, not an autonomous queue. D-AP-01 #334 and DOGFOOD-01 #351 completion does not activate a successor. Each execution unit still requires explicit owner activation and a goal-ready delivery-plan state. GOV-USE-01 #357 authorizes only its bounded documentation/governance alignment, not product execution.
 
 Use role-appropriate delegation only for independent bounded work. Record the requested model/reasoning setting when material, the tool-accepted setting when observable, the observed execution result, and exclusive file ownership. Do not claim a model/runtime change that was not accepted or observed.
 

@@ -114,7 +114,6 @@ INTENT_GREETING = 'greeting'
 INTENT_RECOMMENDATION = 'capability-recommendation'
 INTENT_KNOWLEDGE = 'personal-knowledge'
 INTENT_SETTINGS = 'settings'
-INTENT_ASSISTANT = 'assistant-capability'
 INTENT_WORKSPACE_SEARCH = 'workspace-search'
 INTENT_NOTE_CREATE = 'note-create'
 INTENT_NOTE_LIST = 'note-list'
@@ -537,8 +536,6 @@ class IntentClassifier:
             return IntentDecision(INTENT_SETTINGS, AUTHORITY_OWNER, argument=text[len('/settings '):])
         if text in ('/settings', '무엇이 연결되어 있어?', '무엇을 바꿀 수 있어?'):
             return IntentDecision(INTENT_SETTINGS, AUTHORITY_OWNER, argument=text)
-        if text.startswith('/assistant '):
-            return IntentDecision(INTENT_ASSISTANT, AUTHORITY_OWNER, argument=text[len('/assistant '):])
         if text in ('/notes', '메모 목록'):
             return IntentDecision(INTENT_NOTE_LIST, AUTHORITY_OWNER)
         if text.startswith('/note '):

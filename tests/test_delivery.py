@@ -11,8 +11,8 @@ from delivery_state_invariants import (
     assert_no_unauthorised_execution_authority,
     closed_out_programs,
 )
-from personal_agent.delivery import DeliveryController, DeliveryError, DeliveryPlan, StateStore
-from personal_agent.handoff import Candidate, Issue
+from scripts.dev.delivery import DeliveryController, DeliveryError, DeliveryPlan, StateStore
+from scripts.dev.handoff import Candidate, Issue
 
 
 class Runner:
@@ -62,10 +62,21 @@ class DeliveryTests(unittest.TestCase):
         plan['next_goal']={'id':'GOV-01','status':'active'}
         (self.root/'delivery-plan.yaml').write_text(json.dumps(plan))
 
-    def test_packaged_delivery_plan_matches_repository_plan(self):
-        root=Path(__file__).parents[1]
-        self.assertEqual((root/'delivery-plan.yaml').read_bytes(), (root/'src/personal_agent/delivery-plan.yaml').read_bytes())
-        self.assertEqual(json.loads((root/'delivery-plan.yaml').read_text()), json.loads((root/'src/personal_agent/delivery-plan.yaml').read_text()))
+
+    def test_active_presence_validations_do_not_require_removed_packaged_plan(self):
+        plan=json.loads((self.root/'delivery-plan.yaml').read_text())
+        retired_mirror='src/personal_agent/delivery-plan.yaml'
+        remaining={
+            'PRESENCE-01','PRESENCE-CONT-01','PRESENCE-INTEGRITY-01',
+            'PRESENCE-CAP-01','PRESENCE-SETTINGS-01',
+            'PRESENCE-EVAL-01','PRESENCE-README-01',
+        }
+        for item in plan['iterations']:
+            if item['id'] in remaining:
+                with self.subTest(iteration=item['id']):
+                    commands=[*(item.get('tests') or []),*(item.get('release_validation') or []),
+                              *(item.get('automated_evidence') or [])]
+                    self.assertFalse(any(retired_mirror in command for command in commands))
 
     def test_only_explicit_owner_activated_goal_can_be_selected(self):
         altered=self._arm(json.loads((self.root/'delivery-plan.yaml').read_text()), 'GOV-01')
@@ -447,7 +458,7 @@ class DeliveryTests(unittest.TestCase):
             def issues(self): return []
         controller=DeliveryController(self.root,self.state,Runner(),now=lambda:self.clock[0],
             handoff_github_factory=lambda *_args,**_kwargs: Empty())
-        with patch('personal_agent.delivery.importlib.import_module',return_value=Module):
+        with patch('scripts.dev.delivery.importlib.import_module',return_value=Module):
             self.assertEqual(controller.handoff_tick('implementer',self.root/'factory.json','personal_agent.worker:build')['action'],'idle')
         self.assertEqual(calls,[('implementer',self.root.resolve())])
         with self.assertRaisesRegex(DeliveryError,'personal_agent'):

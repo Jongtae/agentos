@@ -331,7 +331,7 @@ def assert_pause_survives_redeclaration(case, plan, name):
     ``programs[*]["status"]`` paused, IS selectable. That is what makes the
     two-layer consistency assertion below load-bearing rather than decorative.
     """
-    from personal_agent.delivery import DeliveryPlan
+    from scripts.dev.delivery import DeliveryPlan
 
     program = plan["programs"][name]
     case.assertEqual(program.get("status"), PAUSED, name)
@@ -387,7 +387,7 @@ def assert_completion_survives_redeclaration(case, plan, name):
     ``assert_pause_survives_redeclaration``, including its positive control,
     because a refusal from a malformed fixture would prove nothing.
     """
-    from personal_agent.delivery import DeliveryPlan
+    from scripts.dev.delivery import DeliveryPlan
 
     altered = json.loads(json.dumps(plan))
     altered["next_goal"] = {"id": name, "status": "active"}
@@ -546,7 +546,7 @@ def assert_heartbeat_is_paused(case, plan=None, path=PLAN_PATH):
     so this asserts the selection code's behaviour rather than restating the
     plan's own fields back at it.
     """
-    from personal_agent.delivery import DeliveryController
+    from scripts.dev.delivery import DeliveryController
 
     with tempfile.TemporaryDirectory() as folder:
         root = Path(folder) / "repo"

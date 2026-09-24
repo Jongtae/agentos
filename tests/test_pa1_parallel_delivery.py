@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import unittest
 
-from personal_agent.delivery import DeliveryPlan
+from scripts.dev.delivery import DeliveryPlan
 
 from delivery_state_invariants import (
     CLOSED_ON_MERGE,
@@ -34,7 +34,6 @@ ROOT = Path(__file__).resolve().parents[1]
 class Pa1ParallelDeliveryTests(unittest.TestCase):
     def setUp(self):
         root = (ROOT / "delivery-plan.yaml").read_bytes()
-        self.assertEqual(root, (ROOT / "src/personal_agent/delivery-plan.yaml").read_bytes())
         self.plan = json.loads(root)
         self.items = {item["id"]: item for item in self.plan["iterations"]}
         self.program = self.plan["programs"]["EPIC-PA1"]

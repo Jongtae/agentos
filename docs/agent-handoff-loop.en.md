@@ -1,6 +1,6 @@
 # State-driven GitHub handoff loop
 
-`python3 -m personal_agent.delivery handoff --role implementer` and the
+`python3 -m scripts.dev.delivery handoff --role implementer` and the
 reviewer equivalent are one-shot, dispatch-only checks for the existing
 delivery heartbeat. They never create a schedule, model session, branch, PR,
 merge, or issue. A configured role worker uses `StateHandoffLoop` with its

@@ -1,4 +1,4 @@
-"""Evidence-driven local delivery controller for the Personal AgentOS repository."""
+"""Repository-only delivery controller; not part of the installed AgentOS runtime."""
 import argparse
 import importlib
 import hashlib
@@ -150,8 +150,9 @@ class DeliveryController:
         self.handoff_workers=handoff_workers or {}
         self.handoff_github_factory=handoff_github_factory or GithubCliBoundary
         configured_plan=self.root/'delivery-plan.yaml'
-        packaged_plan=Path(__file__).with_name('delivery-plan.yaml')
-        self.plan=DeliveryPlan(configured_plan if configured_plan.exists() else packaged_plan)
+        if not configured_plan.is_file():
+            raise DeliveryError('delivery-plan.yaml was not found at the repository root.')
+        self.plan=DeliveryPlan(configured_plan)
         self.state_store=StateStore(state_path)
         self.runner=runner or CommandRunner()
         self.now=now or time.time

@@ -1093,6 +1093,7 @@ finally:
         settings=self.service.settings()
         self.assertNotIn('telegram_task_card_acceptance',settings)
         self.assertNotIn('telegram_first_work_acceptance',settings)
+        self.assertNotIn('delivery',settings)
 
     def test_p7_live_acceptance_report_is_redacted_and_requires_observations(self):
         generation=self.pair()

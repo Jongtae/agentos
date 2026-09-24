@@ -5,7 +5,7 @@ from collections import Counter
 from pathlib import Path
 
 from delivery_state_invariants import assert_declared_goal_shape, closed_out_programs
-from personal_agent.delivery import DeliveryPlan
+from scripts.dev.delivery import DeliveryPlan
 
 ROOT = Path(__file__).resolve().parents[1]
 

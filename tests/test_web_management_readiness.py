@@ -22,7 +22,6 @@ ROOT = Path(__file__).resolve().parents[1]
 class WebManagementReadinessTests(unittest.TestCase):
     def test_mirrored_contract_is_a_parent_controlled_substep_that_never_self_selects(self):
         source = (ROOT / 'delivery-plan.yaml').read_bytes()
-        self.assertEqual(source, (ROOT / 'src/personal_agent/delivery-plan.yaml').read_bytes())
         plan = json.loads(source)
         entries = [item for item in plan['iterations'] if item['id'] == 'WEB-ADMIN-01']
         self.assertEqual(len(entries), 1)

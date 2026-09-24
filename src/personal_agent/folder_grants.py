@@ -32,6 +32,8 @@ _SYSTEM_SENSITIVE = (
 
 BROAD = '전체 홈이나 시스템 루트 대신 작업용 하위 폴더를 선택하세요'
 SENSITIVE = '인증 정보나 시스템 설정이 있는 폴더는 연결할 수 없습니다'
+SYMLINK_CHANGED = '연결한 폴더가 심볼릭 링크로 바뀌어 다시 연결해야 합니다'
+UNAVAILABLE = '연결한 폴더를 현재 사용할 수 없습니다'
 
 
 def _identity(path):
@@ -102,9 +104,19 @@ def validate(value, store):
 
 
 def blocked(stored_path, store):
-    """Reason a previously stored grant must not be used now, or None."""
+    """Reason a previously stored grant must not be used now, or None.
+
+    Re-check the *stored path* before resolving it. A directory that was
+    originally granted and later replaced by a symlink must not inherit the
+    old grant for its new target, even when that target is otherwise allowed.
+    """
     try:
-        path = Path(stored_path).resolve()
+        supplied = Path(stored_path).expanduser()
+        if supplied.is_symlink():
+            return SYMLINK_CHANGED
+        if not supplied.exists() or not supplied.is_dir():
+            return UNAVAILABLE
+        path = supplied.resolve()
     except (OSError, RuntimeError, TypeError):
-        return BROAD
+        return UNAVAILABLE
     return refusal(path, store)

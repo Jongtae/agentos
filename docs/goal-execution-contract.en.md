@@ -48,7 +48,7 @@ For a cycle explicitly delegated by the owner, the Agent does not wait for owner
 
 This delegation is not authority for automatic installation, permission escalation, or an operating-mode transition. The Agent may create an issue and `codex/` branch only for an already enumerated, dependency-satisfied substep of the active top-level goal. It must not select an unlisted successor, start a new feature, or reactivate a reserved proposal. It must stop before credential or OAuth configuration, a new external connection/endpoint, permission or scope expansion, a consequential external action, expansion of a personal-data boundary, a security/governance boundary change, or Master Plan cycle completion unless that exact action is explicitly authorized in the active goal-ready record. If a next selection would be needed, it reports candidates and evidence instead of starting implementation.
 
-## Delegation and independent-review escalation
+## Delegation and independent review
 
 The active issue records model-routed delegation only where it makes work independently reviewable. The default requested roles are Astra medium for the primary worker, Terra low or medium for independent exploration/document inspection, Sol medium for bounded implementation, and Astra high when a material security/authority boundary actually triggers independent review. These are role labels, not claims that a requested model was available. The record distinguishes requested, accepted, and observed settings and assigns files so two implementers do not edit the same file concurrently.
 

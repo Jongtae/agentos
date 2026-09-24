@@ -1795,6 +1795,12 @@ class AgentService:
                     db.execute('BEGIN IMMEDIATE')
                     job=db.execute('SELECT * FROM jobs WHERE id=?',(job_id,)).fetchone()
                     card=db.execute('SELECT * FROM telegram_task_cards WHERE job_id=?',(job_id,)).fetchone()
+                    if (job and card and card['message_id']==-2 and isinstance(message.get('message_id'),int)
+                            and card['chat_id']==sender and job['channel']==f"telegram:{generation}"
+                            and job['chat_id']==sender and job['status']=='queued'):
+                        db.execute("UPDATE telegram_task_cards SET message_id=?,state='queued',created=? WHERE job_id=? AND message_id=-2",
+                                   (message['message_id'],time.time(),job_id))
+                        card=db.execute('SELECT * FROM telegram_task_cards WHERE job_id=?',(job_id,)).fetchone()
                     if (job and card and card['chat_id']==sender and card['message_id']==message.get('message_id')
                             and job['channel']==f"telegram:{generation}" and job['chat_id']==sender and job['status']=='queued'):
                         db.execute("UPDATE jobs SET status='cancelled',error='소유자가 작업 카드를 통해 취소했습니다.',delivery='cancelled' WHERE id=? AND status='queued'",(job_id,))
@@ -1973,7 +1979,7 @@ class AgentService:
         with self.worker_lock:
             with self.store.db() as db:
                 db.execute('BEGIN IMMEDIATE')
-                row=db.execute("SELECT j.* FROM jobs j WHERE j.status='queued' AND (NOT EXISTS (SELECT 1 FROM telegram_task_cards c WHERE c.job_id=j.id) OR EXISTS (SELECT 1 FROM telegram_task_cards c WHERE c.job_id=j.id AND c.message_id!=-1 AND (c.message_id=-2 OR c.created<=?))) ORDER BY j.created LIMIT 1",(time.time()-TELEGRAM_CARD_GRACE_SECONDS,)).fetchone()
+                row=db.execute("SELECT j.* FROM jobs j WHERE j.status='queued' AND (NOT EXISTS (SELECT 1 FROM telegram_task_cards c WHERE c.job_id=j.id) OR EXISTS (SELECT 1 FROM telegram_task_cards c WHERE c.job_id=j.id AND c.message_id!=-1 AND c.created<=?)) ORDER BY j.created LIMIT 1",(time.time()-TELEGRAM_CARD_GRACE_SECONDS,)).fetchone()
                 if not row:return False
                 job=dict(row)
                 db.execute("UPDATE jobs SET status='running' WHERE id=?",(job['id'],))

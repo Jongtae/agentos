@@ -616,7 +616,8 @@ class RecommendationCueNarrowingTests(unittest.TestCase):
     def test_a_judged_capability_ask_reaches_the_rule_with_the_chosen_outcome(self):
         # A fixture provider chooses the outcome; the classifier only checks
         # it is one of the reviewed candidates.  No cue decides anything.
-        scripted = {text: outcome for text, outcome in self.BARE_CAPABILITY_ASKS if outcome}
+        scripted = {'recommendation request specialist-research': 'specialist-research',
+                    'recommendation request private-document-research': 'private-document-research'}
         engine = FixtureDecisionEngine(choose=lambda context, candidates, question: SelectionDecision(
             OUTCOME_DECIDED, scripted.get(context.facts['owner_message'], 'none-of-these'),
             candidates, fixture_confidence()))

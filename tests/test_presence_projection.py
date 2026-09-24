@@ -265,7 +265,26 @@ class LongWorkTests(ProjectionTestCase):
         self.assertEqual(card['message_id'], -2)
         self.assertEqual(self.service.acknowledge_long_work(), [])
         self.assertEqual(len(sends), 1)
+        self.age_card(job_id, TELEGRAM_CARD_GRACE_SECONDS + 1)
         self.assertTrue(self.service.run_one(), 'unknown acknowledgement must not block the queued Work')
+
+    def test_uncertain_card_can_be_adopted_from_owner_cancel_callback(self):
+        job_id = self.receive('오래 걸릴 요청')
+        self.age(job_id, TELEGRAM_ACK_AFTER_SECONDS + 1)
+
+        def uncertain(url, body=None, headers=None, timeout=60):
+            if url.endswith('/sendMessage'):
+                raise ProviderError('response lost')
+            return self.transport(url, body, headers, timeout)
+
+        self.service.telegram_transport = uncertain
+        self.assertEqual(self.service.acknowledge_long_work(), [])
+        self.assertFalse(self.service.run_one(), 'keep a short cancellation window while delivery is uncertain')
+        self.service.ingest_callback({'id': 'cb-1', 'from': {'id': CHAT}, 'data': f'p7c:{job_id}',
+                                      'message': {'message_id': 909, 'chat': {'id': CHAT, 'type': 'private'}}},
+                                     GENERATION)
+        self.assertEqual(self.store.job(job_id)['status'], 'cancelled')
+        self.assertEqual(self.store.task_card(job_id)['message_id'], 909)
 
 
 class BlockedTurnTests(ProjectionTestCase):
@@ -337,7 +356,7 @@ class UnsupportedCapabilityTests(ProjectionTestCase):
         return engine
 
     def test_reply_and_read_body_requests_get_the_truthful_boundary_and_run_nothing(self):
-        engine = self.judged({'메일 확인 답장 보내': 'mail-send', '메일 보여': 'mail-read-body'})
+        engine = self.judged({'메일 확인 답장 보내': 'mail-send', '메일 보여 mail-body': 'mail-read-body'})
         for text, key in (('예약 확인 메일에 답장 보내줘', 'mail-send'), ('그 메일 내용 좀 보여줘', 'mail-read-body')):
             with self.subTest(text=text):
                 decision = self.service.classify_intent(text)
@@ -357,6 +376,12 @@ class UnsupportedCapabilityTests(ProjectionTestCase):
         self.assertNotIn('HIV', facts['owner_message'])
         self.assertNotIn('검사', facts['owner_message'])
 
+    def test_local_note_with_mail_words_never_sends_its_private_text_to_judgment(self):
+        engine = self.judged({})
+        request = '내 메일로 보낼 PIN 4832를 메모해 둬'
+        self.service.classify_intent(request)
+        self.assertEqual(engine.asked, [], 'local note with mail/action words must not reach any judgment')
+
     def test_mail_action_followup_uses_content_free_recent_mail_focus(self):
         engine = self.judged({'최근 메일 검색 reply': 'mail-send'})
         first = self.service.classify_intent('메일에서 숙소 예약 확인 메일 찾아줘')
@@ -367,6 +392,16 @@ class UnsupportedCapabilityTests(ProjectionTestCase):
         self.assertEqual(followup.argument, 'mail-send')
         context = engine.asked[-1][1]
         self.assertEqual(context.facts['owner_message'], '최근 메일 검색 reply')
+
+    def test_minimized_judgment_preserves_body_vs_metadata_request_kind(self):
+        engine = self.judged({'메일 읽어 mail-body': 'mail-read-body',
+                              '메일 읽어 mail-metadata': 'none-of-these'})
+        body = self.service.classify_intent('메일 본문 읽어줘')
+        metadata = self.service.classify_intent('메일 제목 읽어줘')
+        self.assertEqual(body.intent, INTENT_UNSUPPORTED)
+        self.assertEqual(metadata.intent, 'mail-search')
+        self.assertIn('mail-body', engine.asked[-2][1].facts['owner_message'])
+        self.assertIn('mail-metadata', engine.asked[-1][1].facts['owner_message'])
 
 
     def test_a_none_of_these_judgment_leaves_the_cues_to_decide(self):

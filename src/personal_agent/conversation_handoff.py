@@ -184,6 +184,7 @@ UNSUPPORTED_CAPABILITY_TEXT = {
 _RECOMMENDATION_CUES = ('연결할 만한', '뭘 연결', '무엇을 연결', '어떤 걸 붙이', '어떤 capability',
                         'what should i connect', 'which capability',
                         'suggest a capability', 'suggest capabilities')
+_RECOMMENDATION_JUDGMENT_CUES = ('추천', 'recommend', 'suggest')
 # The bare words 추천 / recommend are deliberately not cues: 숙소 추천, 맛집
 # 추천 and recommend a hotel are ordinary requests (#474).  Whether a bare
 # "…추천해줘" asks for a capability is a semantic judgment, so it is asked of
@@ -242,8 +243,12 @@ _MAIL_OBJECTS = ('메일', '이메일', '받은편지함', '메일함', 'email',
 # stripped afterwards: ``_without_cues`` removes the longest match first, so
 # listing them keeps "확인해줘" from leaving "해줘" behind in the query.
 _MAIL_VERBS = ('찾아', '찾을', '찾아줘', '검색해줘', '검색해', '검색', '읽어', '확인해줘', '확인해',
-               '확인', '보여', '알려', '왔',
-               'search', 'find', 'look', 'check', 'show', 'read', 'any')
+               '확인', '보여', '알려', '왔', '열어', '열어줘',
+               'search', 'find', 'look', 'check', 'show', 'read', 'open', 'any')
+_MAIL_CONTENT_KINDS = {
+    'body': ('본문', '내용', '전체 내용', '원문', 'body', 'content', 'full message'),
+    'metadata': ('제목', '보낸 사람', '발신자', '날짜', 'subject', 'sender', 'date'),
+}
 
 _RESEARCH_CUES = ('웹에서', '웹 검색', '인터넷', '온라인', '검색해', '찾아봐', '조사해', '알아봐', '최신 정보',
                   'web search', 'search the web', 'look up', 'research', 'find out', 'online',
@@ -544,7 +549,14 @@ class IntentClassifier:
     def _rule_recommendation(self, text, lowered):
         cues = _cue_hits(text, lowered, _RECOMMENDATION_CUES)
         if not cues:
-            judgment = self._judge.capability_recommendation(text)
+            if not _cue_hits(text, lowered, _RECOMMENDATION_JUDGMENT_CUES):
+                return None
+            # Only taxonomy labels leave the process. The free-form owner
+            # utterance may contain private context unrelated to the request.
+            outcomes = tuple(tag for tag, words in _RECOMMENDATION_OUTCOMES
+                             if _cue_hits(text, lowered, words))
+            summary = 'recommendation request ' + (' '.join(outcomes) if outcomes else 'ordinary-or-unspecified')
+            judgment = self._judge.capability_recommendation(summary)
             if judgment.outcome != JUDGMENT_YES:
                 return None
             # The engine chose among the reviewed outcomes; policy already
@@ -690,9 +702,11 @@ class IntentClassifier:
         mail_objects = _cue_hits(text, lowered, _MAIL_OBJECTS)
         mail_verbs = _cue_hits(text, lowered, _MAIL_VERBS)
         mail_action = _cue_hits(text, lowered, ('답장', '회신', '보내', '전송', 'reply', 'send'))
+        content_kind = tuple(f'mail-{kind}' for kind, cues in _MAIL_CONTENT_KINDS.items()
+                             if _cue_hits(text, lowered, cues))
         has_mail_focus = focus_intent == INTENT_MAIL_SEARCH
         cue_summary = ' '.join(dict.fromkeys((*(('최근 메일 검색',) if has_mail_focus and not mail_objects else ()),
-                                               *mail_objects, *mail_verbs, *mail_action)))
+                                               *mail_objects, *mail_verbs, *mail_action, *content_kind)))
         local_only = bool(candidates) and all(candidate.intent != INTENT_MAIL_SEARCH for candidate in candidates)
         mail_boundary_eligible = ((mail_objects and (mail_verbs or mail_action))
                                   or (has_mail_focus and mail_action))

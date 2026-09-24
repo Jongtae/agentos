@@ -886,8 +886,8 @@ class QuickStore:
     def mark_task_card_delivery_unknown(self, job_id):
         """Keep the one-card slot when Telegram may have accepted the send."""
         with self.db() as db:
-            db.execute("UPDATE telegram_task_cards SET message_id=-2,state='unknown' WHERE job_id=? AND message_id=-1",
-                       (job_id,))
+            db.execute("UPDATE telegram_task_cards SET message_id=-2,state='unknown',created=? WHERE job_id=? AND message_id=-1",
+                       (time.time(),job_id))
 
     def save_task_card(self, job_id, chat_id, message_id, state):
         with self.db() as db:
@@ -924,7 +924,7 @@ class QuickStore:
             db.execute("UPDATE jobs SET status='interrupted',error='실행 중 재시작되었습니다. 자동으로 재호출하지 않습니다.' WHERE status='running'")
             db.execute("UPDATE jobs SET delivery='unknown' WHERE delivery='sending'")
             db.execute("UPDATE telegram_notifications SET state='unknown' WHERE state='sending'")
-            db.execute("UPDATE telegram_task_cards SET message_id=-2,state='unknown' WHERE message_id=-1")
+            db.execute("UPDATE telegram_task_cards SET message_id=-2,state='unknown',created=? WHERE message_id=-1",(time.time(),))
 
     def recovery_summary(self):
         """Return counts only; recovery guidance must never reveal task content."""

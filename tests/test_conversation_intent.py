@@ -1,7 +1,7 @@
 """Natural intent classification for the one personal conversation.
 
 These tests cover WU2 of PA1-CONV-01: ordinary Korean and English utterances
-reach the right capability without a magic command prefix, slash commands keep
+reach the right capability without a magic command prefix, supported slash commands keep
 working, an ambiguous utterance never triggers a consequential effect, and a
 model's opinion cannot by itself authorise anything.
 
@@ -117,7 +117,7 @@ class ParaphraseTests(unittest.TestCase):
 
 
 class ExplicitFormTests(unittest.TestCase):
-    """Slash commands stop being required; they do not stop working."""
+    """Supported slash commands remain authoritative; retired ones fall through."""
 
     def setUp(self):
         self.classifier = classifier()
@@ -414,7 +414,7 @@ class ServiceRoutingTests(unittest.TestCase):
         self.assertEqual(job['status'], 'failed')
         self.assertIn(self.MODEL_ROUTE_ERROR, job['error'])
 
-    # -- slash commands still work ------------------------------------------
+    # -- supported slash commands still work --------------------------------
     def test_slash_commands_still_route_after_the_prefix_chain_is_replaced(self):
         self.assertIn('개인 AgentOS에 연결되었습니다', self.run_one('/start')['response'])
         self.assertIn('메모를 저장했습니다', self.run_one('/note 금요일 출시 검토')['response'])

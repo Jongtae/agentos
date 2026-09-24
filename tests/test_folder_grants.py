@@ -153,6 +153,14 @@ class FolderGrantTests(unittest.TestCase):
         self.assertIsNone(folder_grants.blocked(str(alternate),self.store))
         self.assertEqual(self.service.save_roots({'paths':[str(alternate)]})['roots'][0]['path'],str(alternate))
 
+    def test_case_sensitive_volume_allows_directory_with_home_case_variant(self):
+        if self.case_insensitive():
+            self.skipTest('case-insensitive filesystem')
+        alternate=self.home.with_name(self.home.name.swapcase())
+        alternate.mkdir()
+        self.assertIsNone(folder_grants.blocked(str(alternate),self.store))
+        self.assertEqual(self.service.save_roots({'paths':[str(alternate)]})['roots'][0]['path'],str(alternate))
+
     def test_blocked_stored_roots_do_not_prevent_other_changes(self):
         ssh, aws = self.home / '.ssh', self.home / '.aws'
         ssh.mkdir(); aws.mkdir()

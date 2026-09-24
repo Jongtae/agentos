@@ -95,7 +95,8 @@ def refusal(path, store):
     if own is None:
         return None
     if (own == _identity(Path('/')) or own == _identity(store.root) or own in _chain(home)
-            or _folded(home).is_relative_to(_folded(path)) or _related(path, chain, store.private)):
+            or (_case_insensitive(path) and _folded(home).is_relative_to(_folded(path)))
+            or _related(path, chain, store.private)):
         return BROAD
     if any(_related(path, chain, item) for item in _sensitive_paths()):
         return SENSITIVE

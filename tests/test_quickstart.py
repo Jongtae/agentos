@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import os
 import subprocess
@@ -24,6 +25,19 @@ from personal_agent.gmail import GMAIL_CONNECTOR_ID, GMAIL_READONLY_SCOPE, Gmail
 from cryptography.fernet import Fernet
 from personal_agent.providers import ModelAdapter, ProviderError
 from personal_agent.file_workspace import FileWorkspace
+
+
+VALIDATION = Path(__file__).resolve().parents[1] / 'scripts' / 'validation'
+
+def _validation_report(name):
+    spec = importlib.util.spec_from_file_location(f'validation_{name}', VALIDATION / f'{name}.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.report
+
+
+first_work_report = _validation_report('telegram_first_work_acceptance')
+task_card_report = _validation_report('telegram_task_card_acceptance')
 
 
 class QuickstartTests(unittest.TestCase):
@@ -689,8 +703,7 @@ finally:
         with self.store.db() as db:
             db.execute("INSERT INTO jobs(id,request_key,message,channel,chat_id,status,response,error,delivery,provider,model,created,workspace_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",('job','telegram-verify:safe','/search AgentOS personal assistant verification','telegram:safe',42,'succeeded','done',None,'sent','subscription','codex',time.time(),None))
             db.execute("INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)",('job','web_search','succeeded','{}',time.time()))
-        from personal_agent.telegram_first_work_acceptance import report
-        result=report(self.store)
+        result=first_work_report(self.store)
         self.assertTrue(result['passed'])
         self.assertTrue(result['checks']['paired_delivery_confirmed'])
         self.assertNotIn('123456:TEST_TOKEN',json.dumps(result))
@@ -722,8 +735,7 @@ finally:
 
     def test_legacy_personal_bot_config_is_recognized_as_botfather_setup(self):
         self.store.put('telegram',{'enabled':True,'username':'legacy_personal_bot','generation':'legacy','user_id':42})
-        from personal_agent.telegram_first_work_acceptance import report
-        self.assertTrue(report(self.store)['checks']['owner_botfather_bot'])
+        self.assertTrue(first_work_report(self.store)['checks']['owner_botfather_bot'])
 
     def test_successful_telegram_poll_clears_stale_connection_error(self):
         self.pair()
@@ -1023,28 +1035,12 @@ finally:
         self.assertEqual(restarted.store.job(job['id'])['delivery'],'unknown')
         self.assertEqual([call for call in self.calls if call[0].endswith('/sendMessage')],sent)
 
-    def test_owner_can_record_live_task_card_attestation_only_after_durable_evidence(self):
-        generation=self.pair()
-        with self.assertRaises(ValueError):
-            self.service.attest_telegram_task_card_acceptance({'web_confirmed':True,'restart_confirmed':True})
-        self.service.run_one();self.service.deliver_one()
-        self.service.ingest_update({'update_id':11,'message':{'from':{'id':42},'chat':{'id':42,'type':'private'},'text':'safe request'}},generation)
-        self.service.acknowledge_long_work(now=time.time()+10)  # the card is the long-work acknowledgement (#510)
-        job=self.store.jobs()[0];card=self.store.task_card(job['id'])
-        callback_message={'chat':{'id':42,'type':'private'},'message_id':card['message_id']}
-        self.service.ingest_callback({'id':'cancel','from':{'id':42},'message':callback_message,'data':f"p7c:{job['id']}"},generation)
-        approval=self.store.queue_notification(job['id'],42,generation,'approval_needed',self.service.document_fingerprint())
-        self.store.update_notification(approval['id'],'approved')
-        completed=self.store.queue_notification('other-job',42,generation,'completed')
-        self.store.update_notification(completed['id'],'sent',123)
-        self.store.enqueue('web evidence','web-evidence');self.service.run_one()
-        result=self.service.attest_telegram_task_card_acceptance({'web_confirmed':True,'restart_confirmed':True})
-        self.assertTrue(result['passed'])
+    def test_runtime_settings_omit_historical_acceptance_projections(self):
         settings=self.service.settings()
-        self.assertTrue(settings['telegram_task_card_acceptance']['passed'])
+        self.assertNotIn('telegram_task_card_acceptance',settings)
+        self.assertNotIn('telegram_first_work_acceptance',settings)
 
     def test_p7_live_acceptance_report_is_redacted_and_requires_observations(self):
-        from personal_agent.telegram_task_card_acceptance import report
         generation=self.pair()
         self.service.run_one();self.service.deliver_one()
         self.service.ingest_update({'update_id':11,'message':{'from':{'id':42},'chat':{'id':42,'type':'private'},'text':'secret request'}},generation)
@@ -1057,7 +1053,7 @@ finally:
         self.store.update_notification(completed['id'],'sent',123)
         self.store.enqueue('web evidence','web-evidence')
         self.service.run_one()
-        result=report(self.store,web_confirmed=True,restart_confirmed=True)
+        result=task_card_report(self.store,web_confirmed=True,restart_confirmed=True)
         self.assertTrue(result['passed'])
         encoded=json.dumps(result)
         self.assertNotIn('secret request',encoded)

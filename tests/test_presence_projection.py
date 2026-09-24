@@ -596,6 +596,17 @@ class ConversationContinuityTests(ProjectionTestCase):
             for item in engine.asked
         ))
 
+    def test_generic_memory_save_followup_stays_out_of_remote_judgment(self):
+        first, _ = self.turn('이전 요청')
+        engine = self.relation_engine({'아니 이걸 저장해줘': FOLLOWUP_REFERENCE})
+        self.service.use_decision_engine(engine)
+        self.assertIsNone(self.service.continuity_relation(
+            '아니 이걸 저장해줘', current_work_id='different-work'))
+        self.assertFalse(any(
+            item[0] == 'choose' and item[1].purpose == 'conversation-followup'
+            for item in engine.asked
+        ))
+
     def test_package_write_alias_blocks_retry_by_recorded_host_action(self):
         first, _ = self.turn('원래 요청')
         self.assertEqual(first['status'], 'failed')

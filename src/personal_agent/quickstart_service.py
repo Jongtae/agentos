@@ -2139,9 +2139,12 @@ class AgentService:
                 elif decision.intent==INTENT_NOTE_LIST:
                     response='\n\n'.join(n['content'] for n in self.store.notes()) or '저장된 메모가 없습니다. /note 내용으로 기록해 보세요.'
                 else:
+                    # One route snapshot per Work: a later owner switch applies
+                    # to new Work and never redirects this request mid-turn.
                     with self.lock:
                         config=self.store.config('model',{})
                         key=self.store.secret('model_key')
+                        route_snapshot=self.store.config('subscription_engine',{})
                     stored_history=self.store.history()[-16:]
                     document_jobs=set(self.store.config('file_workspace_document_jobs',[]))
                     document_history=any(message.get('job_id') in document_jobs for message in stored_history)
@@ -2210,7 +2213,7 @@ class AgentService:
                             db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',(job['id'],tool,status,detail,time.time()))
                         if tool!='model':self.store.put('tool_run',{'job_id':job['id'],'tool':tool,'status':status,'detail':detail,'time':time.time()})
                     boundary=self.document_boundary(config)
-                    subscription=self.store.config('subscription_engine',{})
+                    subscription=route_snapshot
                     if document_history and (boundary['requires_approval'] or subscription.get('id')):
                         history=[{'role':message['role'],'content':message['content']} for message in stored_history if message.get('job_id') not in document_jobs]
                     original_record=record

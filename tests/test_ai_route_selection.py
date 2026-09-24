@@ -109,6 +109,20 @@ class AiRouteSelectionTests(unittest.TestCase):
             self.service.select_ai_route({'route': 'direct-api'})
         self.assertEqual(self.service.subscription_engine_status()['selected'], 'codex')
 
+    def test_switch_during_running_work_does_not_redirect_it(self):
+        self._ready_model()
+        original = self.store.history
+        def history_then_switch():
+            # The owner switches after this Work took its route snapshot.
+            self.service.select_ai_route({'route': 'direct-api'})
+            return original()
+        self.store.history = history_then_switch
+        job = self._run('hello', 'mid-switch')
+        self.store.history = original
+        self.assertEqual((self.engine.calls, self.model_calls, job['provider']), (1, 0, 'subscription'))
+        self._run('next', 'after-switch')
+        self.assertEqual((self.engine.calls, self.model_calls >= 1), (1, True))
+
     def test_selection_survives_restart(self):
         self._ready_model()
         self.service.select_ai_route({'route': 'direct-api'})

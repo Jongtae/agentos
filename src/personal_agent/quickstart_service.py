@@ -400,8 +400,6 @@ class AgentService:
             model=self.store.config('model',{})
             tg=self.store.config('telegram',{})
             model_test=self.store.config('model_test')
-            from .delivery import DeliveryController
-            delivery=DeliveryController(state_path=None).status()
             boundary=self.document_boundary(model)
             active_packages=self.runtime_packages()
             packages=PluginRegistry(self.store.root).declared_packages()

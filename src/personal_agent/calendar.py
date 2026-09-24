@@ -480,8 +480,9 @@ class CalendarConnector:
                 event_version="",
                 owner=owner_key,
                 hash=digest,
-                state="outcome-unknown" if legacy_unknown_effect else row.get("state"),
-                effect=("observed" if row.get("state") == "created" else
+                state=("outcome-unknown" if legacy_unknown_effect else
+                       "completed" if legacy_state == "created" else legacy_state),
+                effect=("observed" if legacy_state == "created" else
                         "unknown" if legacy_unknown_effect else "none"),
             )
             if legacy_unknown_effect:
@@ -504,7 +505,7 @@ class CalendarConnector:
                 )
                 row.pop("approval", None)
                 row.pop("approval_hash", None)
-            elif row.get("state") in {"approved", "created"}:
+            elif row.get("state") in {"approved", "completed"}:
                 row["approval_hash"] = digest
             rows[ident] = row
             self._put(rows)
@@ -843,55 +844,3 @@ class CalendarConnector:
         if row.get("action") != "cancel":
             raise CalendarError("action-mismatch")
         return self.execute(ident, approval, owner)
-
-
-class _LegacyCreateProvider:
-    """Keep the established three-argument create transport/API compatible."""
-
-    def __init__(self, transport):
-        self.transport = transport
-
-    def create(self, payload: dict, idempotency_key: str) -> dict:
-        try:
-            response = self.transport(
-                "/calendars/primary/events",
-                payload,
-                {"Idempotency-Key": idempotency_key},
-            )
-        except (TimeoutError, OSError):
-            raise GoogleCalendarError("provider-timeout", "unknown") from None
-        except Exception:
-            raise GoogleCalendarError("transport-error", "unknown") from None
-        if not isinstance(response, dict) or not isinstance(response.get("id"), str) or not response["id"]:
-            raise GoogleCalendarError("malformed-response", "unknown")
-        return response
-
-
-class CalendarCreate(CalendarConnector):
-    """Compatibility facade for the original create-only orchestrator API."""
-
-    def __init__(self, store, transport, now=time.time, scope_granted=lambda: True):
-        super().__init__(
-            store,
-            _LegacyCreateProvider(transport),
-            authority=lambda _owner, _scope: bool(scope_granted()),
-            now=now,
-        )
-
-    def draft(self, value: dict, owner: str | None = None) -> dict:
-        if owner is None:
-            raise CalendarError("invalid-owner")
-        return self.draft_create(value, owner)
-
-    def create(self, ident: str, approval: str, owner: str) -> dict:
-        row = self._owned(self._rows(), ident, owner)
-        if row.get("state") == "created" and _constant_text_equal(row.get("approval"), approval):
-            return dict(row["result"])
-        result = super().create(ident, approval, owner)
-        with _LOCK:
-            rows = self._rows()
-            row = self._owned(rows, ident, owner)
-            row["state"] = "created"
-            rows[ident] = row
-            self._put(rows)
-        return result

@@ -137,6 +137,12 @@ class LongWorkTests(ProjectionTestCase):
 
     def test_long_work_gets_one_card_then_the_answer_and_no_per_event_edits(self):
         self.connect_model()
+        # This test asserts conversation/card projection, not live search
+        # availability. Keep its three tool Events deterministic and offline.
+        self.service.local_tools = SimpleNamespace(execute=lambda plan: {
+            'results': [{'title': 'fixture', 'url': 'https://example.test/result', 'snippet': 'fixture result'}],
+            'sources': ['https://example.test/result'], 'retrieved_at': time.time(),
+        })
         # Three tool events in one turn; the owner must not see three updates.
         self.plan = [('web_search', {'query': '제주 항공권'}), ('web_search', {'query': '제주 숙소'}),
                      ('web_search', {'query': '제주 렌터카'})]

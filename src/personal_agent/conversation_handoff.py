@@ -108,6 +108,8 @@ class TelegramChannel:
 import re
 import time
 
+from .decision import DecisionContext, DecisionPolicy, UnavailableDecisionEngine
+
 INTENT_GREETING = 'greeting'
 INTENT_RECOMMENDATION = 'capability-recommendation'
 INTENT_KNOWLEDGE = 'personal-knowledge'
@@ -289,44 +291,75 @@ def _strip_noise(value):
     return re.sub(r'\s+', ' ', value.strip(' \t?!.,;:·"“”‘’')).strip()
 
 
-# --- Placeholder judgment seams (FU1-DEC-01 / #521) -------------------------
+# --- Semantic judgments (PRESENCE-DEC-01 / #417) ----------------------------
 # Some routing questions are semantic, not lexical: "does this turn withdraw
 # the request that is waiting for a connection?", "is this bare 추천 asking
-# for a capability?".  They belong to the provider-independent decision layer
-# (docs/decision-layer.en.md), implemented by IMPL-DECISION-01 / #417.  Until
-# then each seam returns an *unavailable* judgment and AgentOS policy takes
-# its declared fallback.  Do not grow cue lists or other rules in here: that
-# is exactly the code #417 would have to remove.  #417 replaces this class.
+# for a capability?".  They are asked of the provider-neutral DecisionEngine
+# (decision.py, docs/decision-layer.en.md) and reduced to a three-valued
+# result by AgentOS policy.  Anything the engine cannot answer stays
+# ``unavailable`` and policy takes its declared fallback; no cue list or
+# regex decides in its place.
 
 JUDGMENT_UNAVAILABLE = 'unavailable'
 JUDGMENT_YES = 'yes'
 JUDGMENT_NO = 'no'
 
+WITHDRAWAL_PROPOSITION = ('The owner\'s latest message withdraws or cancels the request that is waiting for '
+                          'the listed connection (rather than acknowledging it, changing topic, or asking '
+                          'something unrelated).')
+RECOMMENDATION_QUESTION = ('Is the owner asking this assistant to recommend an assistant capability or '
+                           'connection to add? If so, which reviewed outcome fits; otherwise choose '
+                           'none-of-these (an ordinary product, place, person or travel recommendation '
+                           'is none-of-these).')
+
 
 class Judgment:
-    """One bounded judgment.  It informs AgentOS policy; it never authorizes."""
+    """One bounded judgment reduced by policy.  It informs routing; it never authorizes."""
 
     __slots__ = ('outcome', 'value', 'source')
 
-    def __init__(self, outcome, value=None, source='placeholder'):
+    def __init__(self, outcome, value=None, source='policy'):
         self.outcome, self.value, self.source = outcome, value, source
 
     def __repr__(self):  # pragma: no cover - diagnostic only
         return f'<Judgment {self.outcome} from {self.source}>'
 
 
-class DecisionJudge:
-    """Placeholder for the #417 DecisionEngine: every judgment is unavailable."""
+class ConversationJudgments:
+    """The conversation's two semantic questions, asked over minimal context.
+
+    Builds a ``DecisionContext`` from the current utterance and non-content
+    facts only, asks the engine, and applies ``DecisionPolicy``.  Swapping
+    the engine (model, fixture, unavailable) changes nothing here.
+    """
+
+    def __init__(self, engine=None, policy=None):
+        self.engine = engine or UnavailableDecisionEngine()
+        self.policy = policy or DecisionPolicy()
 
     def parked_work_withdrawn(self, utterance, parked_connectors):
         """Does ``utterance`` withdraw the owner's request(s) parked for
-        ``parked_connectors``?  Policy on unavailable: keep them parked."""
-        return Judgment(JUDGMENT_UNAVAILABLE)
+        ``parked_connectors``?  Unavailable/unknown keeps them parked."""
+        labels = ', '.join(CONNECTOR_LABELS.get(c, c) for c in parked_connectors)
+        context = DecisionContext('parked-work-withdrawal',
+                                  {'waiting_connection': labels, 'owner_message': utterance})
+        decision = self.engine.judge(context, WITHDRAWAL_PROPOSITION)
+        verdict = self.policy.binary(decision)
+        return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
+                        source=decision.confidence.provider or decision.outcome)
 
     def capability_recommendation(self, utterance):
-        """Does ``utterance`` ask for a capability recommendation?  Policy on
-        unavailable: no recommendation claim; the conversation route answers."""
-        return Judgment(JUDGMENT_UNAVAILABLE)
+        """Does ``utterance`` ask for a capability recommendation, and for
+        which reviewed outcome?  ``value`` is the outcome tag on yes."""
+        context = DecisionContext('capability-recommendation', {'owner_message': utterance})
+        candidates = tuple(tag for tag, _words in _RECOMMENDATION_OUTCOMES)
+        decision = self.engine.choose(context, candidates, RECOMMENDATION_QUESTION)
+        choice = self.policy.selection(decision)
+        if choice is not None:
+            return Judgment(JUDGMENT_YES, value=choice, source=decision.confidence.provider or decision.outcome)
+        if decision.decided:
+            return Judgment(JUDGMENT_NO, source=decision.confidence.provider or decision.outcome)
+        return Judgment(JUDGMENT_UNAVAILABLE, source=decision.outcome)
 
 
 class IntentDecision:
@@ -435,7 +468,7 @@ class IntentClassifier:
 
     def __init__(self, workspace_search=None, judge=None):
         self._workspace_search = workspace_search
-        self._judge = judge or DecisionJudge()
+        self._judge = judge or ConversationJudgments()
 
     # -- owner-explicit forms ------------------------------------------------
     # Slash commands and the legacy Korean colon forms are no longer the
@@ -466,9 +499,12 @@ class IntentClassifier:
     def _rule_recommendation(self, text, lowered):
         cues = _cue_hits(text, lowered, _RECOMMENDATION_CUES)
         if not cues:
-            if self._judge.capability_recommendation(text).outcome != JUDGMENT_YES:
+            judgment = self._judge.capability_recommendation(text)
+            if judgment.outcome != JUDGMENT_YES:
                 return None
-            cues = ('judgment:capability-recommendation',)
+            # The engine chose among the reviewed outcomes; policy already
+            # checked the choice is one of them.
+            return _Candidate(INTENT_RECOMMENDATION, judgment.value, ('judgment:capability-recommendation',))
         matched = [(tag, hits) for tag, words in _RECOMMENDATION_OUTCOMES
                    if (hits := _cue_hits(text, lowered, words))]
         if len(matched) != 1:

@@ -221,13 +221,17 @@ An implementation Existing Solutions Review should consider at least:
 
 The review must preserve AgentOS sovereignty over Grants, approvals, canonical Context/Memory, Work/Event/Evidence, Artifact provenance, egress policy, recovery and revocation.
 
+## Implementation status
+
+PRESENCE-DEC-01 / [#417](https://github.com/Jongtae/agentos/issues/417) introduced the first code boundary in `src/personal_agent/decision.py`: `DecisionContext`, `DecisionConfidence`, `BinaryDecision` / `SelectionDecision` / `ScoreDecision` with explicit non-answer outcomes (`provider_unavailable`, `timeout`, `malformed`, `context_rejected`, `cancelled`, `low_confidence`), the `DecisionEngine` interface, `UnavailableDecisionEngine` and `FixtureDecisionEngine` for tests, `DecisionPolicy` thresholds, and `ModelDecisionEngine`, which adapts the repository's existing `ModelAdapter` tool-call shape so one `decide` tool call yields a typed answer on every supported provider. The first integration point is the conversation's parked-request withdrawal and bare-추천 capability-recommendation judgments (`conversation_handoff.ConversationJudgments`). Provider selection is service configuration (`decision_model` / `decision_model_key`; otherwise `gpt-4o-mini` on the OpenAI endpoint when the owner's configured model provider is OpenAI); with nothing configured no call is made and the judgment is unavailable. Evidence class: deterministic tests and recorded provider response shapes only; no live-provider calibration or availability is claimed.
+
 ## Staged implementation
 
-### Stage A — contract
+### Stage A — contract (done in #417)
 
 Define neutral types, errors, confidence/provenance fields, fallback semantics and test doubles. No Jev dependency is required.
 
-### Stage B — narrow integration
+### Stage B — narrow integration (first point done in #417)
 
 Choose one existing semantic judgment point with low authority risk and measurable behavior. Integrate the model-backed adapter (initial default `gpt-4o-mini`) through the neutral interface, keep a deterministic/mock adapter for tests, and prove provider replacement does not change caller policy/authority code.
 

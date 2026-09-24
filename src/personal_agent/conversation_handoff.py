@@ -123,6 +123,9 @@ INTENT_MAIL_SEARCH = 'mail-search'
 INTENT_RESEARCH = 'research'
 INTENT_CONVERSATION = 'conversation'
 INTENT_AMBIGUOUS = 'ambiguous'
+#: A request for something this conversation does not offer; answered
+#: truthfully, nothing invoked (#478 via #510).
+INTENT_UNSUPPORTED = 'unsupported-capability'
 
 AUTHORITY_OWNER = 'owner-explicit'
 AUTHORITY_RULE = 'agentos-rule'
@@ -155,6 +158,21 @@ INTENT_LABELS = {
     INTENT_MAIL_SEARCH: '메일 찾기',
     INTENT_RESEARCH: '웹 조사',
     INTENT_CONVERSATION: '대화로 답하기',
+    INTENT_UNSUPPORTED: '제공하지 않는 기능',
+}
+
+#: Capabilities an owner may reasonably ask for that this conversation does
+#: not offer.  They are declared so the DecisionEngine can *choose* one and
+#: the reply can state the actual boundary instead of running the nearest
+#: search.  Adding an offered capability is product work, not a new entry.
+UNSUPPORTED_CAPABILITIES = {
+    'mail-read-body': 'read the body/contents of a found mail',
+    'mail-send': 'send a mail or reply to one',
+}
+UNSUPPORTED_CAPABILITY_TEXT = {
+    'mail-read-body': ('찾은 메일의 본문을 읽는 기능은 아직 제공하지 않습니다. 제목, 보낸 사람, 날짜로 찾는 것까지만 '
+                       '할 수 있어요.'),
+    'mail-send': '메일 보내기나 답장은 제공하지 않습니다. 아무것도 보내지 않았습니다. 메일 찾기는 도울 수 있어요.',
 }
 
 
@@ -166,6 +184,7 @@ INTENT_LABELS = {
 _RECOMMENDATION_CUES = ('연결할 만한', '뭘 연결', '무엇을 연결', '어떤 걸 붙이', '어떤 capability',
                         'what should i connect', 'which capability',
                         'suggest a capability', 'suggest capabilities')
+_RECOMMENDATION_JUDGMENT_CUES = ('추천', 'recommend', 'suggest')
 # The bare words 추천 / recommend are deliberately not cues: 숙소 추천, 맛집
 # 추천 and recommend a hotel are ordinary requests (#474).  Whether a bare
 # "…추천해줘" asks for a capability is a semantic judgment, so it is asked of
@@ -224,8 +243,12 @@ _MAIL_OBJECTS = ('메일', '이메일', '받은편지함', '메일함', 'email',
 # stripped afterwards: ``_without_cues`` removes the longest match first, so
 # listing them keeps "확인해줘" from leaving "해줘" behind in the query.
 _MAIL_VERBS = ('찾아', '찾을', '찾아줘', '검색해줘', '검색해', '검색', '읽어', '확인해줘', '확인해',
-               '확인', '보여', '알려', '왔',
-               'search', 'find', 'look', 'check', 'show', 'read', 'any')
+               '확인', '보여', '알려', '왔', '열어', '열어줘',
+               'search', 'find', 'look', 'check', 'show', 'read', 'open', 'any')
+_MAIL_CONTENT_KINDS = {
+    'body': ('본문', '내용', '전체 내용', '원문', 'body', 'content', 'full message'),
+    'metadata': ('제목', '보낸 사람', '발신자', '날짜', 'subject', 'sender', 'date'),
+}
 
 _RESEARCH_CUES = ('웹에서', '웹 검색', '인터넷', '온라인', '검색해', '찾아봐', '조사해', '알아봐', '최신 정보',
                   'web search', 'search the web', 'look up', 'research', 'find out', 'online',
@@ -307,6 +330,15 @@ JUDGMENT_NO = 'no'
 WITHDRAWAL_PROPOSITION = ('The owner\'s latest message withdraws or cancels the request that is waiting for '
                           'the listed connection (rather than acknowledging it, changing topic, or asking '
                           'something unrelated).')
+UNSUPPORTED_QUESTION = ('Is the owner asking the assistant to do one of these things it does not offer: '
+                        + '; '.join(f'{key} = {label}' for key, label in UNSUPPORTED_CAPABILITIES.items())
+                        + '? Choose that capability. If the request is anything else (searching mail by '
+                        'subject/sender/date, notes, calendar, files, research, ordinary conversation), '
+                        'choose none-of-these.')
+UNSUPPORTED_JUDGMENT_UNAVAILABLE = ('요청을 안전하게 구분할 판단 기능을 사용할 수 없어 메일을 검색하거나 다른 처리를 하지 않았습니다. '
+                                   '메일을 찾으려는 요청이라면 검색할 내용을 다시 구체적으로 적어 주세요.')
+MIXED_MAIL_ACTION_CLARIFICATION = ('지원하지 않는 메일 발송 요청과 다른 작업이 함께 있어 아무 작업도 실행하지 않았습니다. '
+                                   '메일은 보내지 않으며, 나머지 작업만 따로 요청해 주세요.')
 RECOMMENDATION_QUESTION = ('Is the owner asking this assistant to recommend an assistant capability or '
                            'connection to add? If so, which reviewed outcome fits; otherwise choose '
                            'none-of-these (an ordinary product, place, person or travel recommendation '
@@ -347,6 +379,20 @@ class ConversationJudgments:
         verdict = self.policy.binary(decision)
         return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
                         source=decision.confidence.provider or decision.outcome)
+
+    def unsupported_capability(self, utterance):
+        """Does ``utterance`` ask for a declared-but-unavailable capability?
+        ``value`` is its key on yes; a confident none-of-these is no."""
+        # `utterance` is a minimized cue summary assembled by IntentClassifier,
+        # never the owner's raw mail query or surrounding private text.
+        context = DecisionContext('unsupported-capability', {'owner_message': utterance})
+        decision = self.engine.choose(context, tuple(UNSUPPORTED_CAPABILITIES), UNSUPPORTED_QUESTION)
+        choice = self.policy.selection(decision)
+        if choice is not None:
+            return Judgment(JUDGMENT_YES, value=choice, source=decision.confidence.provider or decision.outcome)
+        if self.policy.confident_selection(decision):
+            return Judgment(JUDGMENT_NO, source=decision.confidence.provider or decision.outcome)
+        return Judgment(JUDGMENT_UNAVAILABLE, source=decision.outcome)
 
     def capability_recommendation(self, utterance):
         """Does ``utterance`` ask for a capability recommendation, and for
@@ -505,7 +551,14 @@ class IntentClassifier:
     def _rule_recommendation(self, text, lowered):
         cues = _cue_hits(text, lowered, _RECOMMENDATION_CUES)
         if not cues:
-            judgment = self._judge.capability_recommendation(text)
+            if not _cue_hits(text, lowered, _RECOMMENDATION_JUDGMENT_CUES):
+                return None
+            # Only taxonomy labels leave the process. The free-form owner
+            # utterance may contain private context unrelated to the request.
+            outcomes = tuple(tag for tag, words in _RECOMMENDATION_OUTCOMES
+                             if _cue_hits(text, lowered, words))
+            summary = 'recommendation request ' + (' '.join(outcomes) if outcomes else 'ordinary-or-unspecified')
+            judgment = self._judge.capability_recommendation(summary)
             if judgment.outcome != JUDGMENT_YES:
                 return None
             # The engine chose among the reviewed outcomes; policy already
@@ -642,6 +695,52 @@ class IntentClassifier:
             found = rule(text, lowered)
             if found is not None:
                 candidates.append(found)
+
+        # Restrict semantic boundary judgment to mail-shaped requests that
+        # are not already recognized as local work. The DecisionEngine may be
+        # remote, so local-only turns (notes, settings, ordinary conversation)
+        # must never be sent to it. A reply/send verb still qualifies even
+        # when it is not a supported mailbox-read cue.
+        mail_objects = _cue_hits(text, lowered, _MAIL_OBJECTS)
+        mail_verbs = _cue_hits(text, lowered, _MAIL_VERBS)
+        mail_action = _cue_hits(text, lowered, ('답장', '회신', '보내', '전송', 'reply', 'send'))
+        content_kind = tuple(f'mail-{kind}' for kind, cues in _MAIL_CONTENT_KINDS.items()
+                             if _cue_hits(text, lowered, cues))
+        has_mail_focus = focus_intent == INTENT_MAIL_SEARCH
+        cue_summary = ' '.join(dict.fromkeys((*(('최근 메일 검색',) if has_mail_focus and not mail_objects else ()),
+                                               *mail_objects, *mail_verbs, *mail_action, *content_kind)))
+        local_only = bool(candidates) and all(candidate.intent != INTENT_MAIL_SEARCH for candidate in candidates)
+        mixed_mail_action = (bool(mail_objects and mail_action)
+                             and any(candidate.intent not in (INTENT_MAIL_SEARCH, INTENT_NOTE_CREATE,
+                                                              INTENT_SETTINGS, INTENT_WORKSPACE_SEARCH)
+                                     for candidate in candidates))
+        if mixed_mail_action:
+            return self._with_suggestion(
+                IntentDecision(INTENT_AMBIGUOUS, AUTHORITY_RULE,
+                               cues=('mixed-mail-action',), clarification=MIXED_MAIL_ACTION_CLARIFICATION),
+                candidates, model_suggestion)
+        mail_boundary_eligible = ((mail_objects and (mail_verbs or mail_action))
+                                  or (has_mail_focus and mail_action))
+        unsupported = (self._judge.unsupported_capability(cue_summary)
+                       if mail_boundary_eligible and not local_only
+                       else Judgment(JUDGMENT_NO, source='local-prefilter'))
+        if unsupported.outcome == JUDGMENT_YES:
+            return self._with_suggestion(
+                IntentDecision(INTENT_UNSUPPORTED, AUTHORITY_RULE, argument=unsupported.value,
+                               cues=('judgment:unsupported-capability',),
+                               clarification=UNSUPPORTED_CAPABILITY_TEXT[unsupported.value]),
+                (), model_suggestion)
+
+        # Mail search reads private metadata. If the semantic boundary check
+        # could not distinguish a search from an unsupported read/send request,
+        # fail closed instead of letting lexical cues trigger the connector.
+        if (unsupported.outcome == JUDGMENT_UNAVAILABLE and mail_boundary_eligible
+                and (has_mail_focus or any(candidate.intent == INTENT_MAIL_SEARCH for candidate in candidates))):
+            return self._with_suggestion(
+                IntentDecision(INTENT_AMBIGUOUS, AUTHORITY_RULE,
+                               cues=('judgment:unsupported-capability-unavailable',),
+                               clarification=UNSUPPORTED_JUDGMENT_UNAVAILABLE),
+                candidates, model_suggestion)
 
         if len(candidates) == 1:
             decision = self._single(candidates[0])

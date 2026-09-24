@@ -961,6 +961,7 @@ def main():
     if public_hosts and not public_token:public_token=secrets.token_urlsafe(24)
     try:server=ThreadingHTTPServer((args.host,args.port),make_handler(service,public_hosts,public_token))
     except OSError as exc:parser.exit(1,f'시작할 수 없습니다: {exc}\n다른 포트는 --port로 지정하세요.\n')
+    service.local_server_port=server.server_port
     handoff_server=None
     if service.drive_web_oauth:
         try:

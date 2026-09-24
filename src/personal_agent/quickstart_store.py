@@ -56,6 +56,7 @@ class QuickStore:
             columns={row['name'] for row in db.execute('PRAGMA table_info(messages)')}
             if 'workspace_id' not in columns: db.execute('ALTER TABLE messages ADD COLUMN workspace_id TEXT')
             if 'job_id' not in columns: db.execute('ALTER TABLE messages ADD COLUMN job_id TEXT')
+            if 'delivery_projection' not in columns: db.execute('ALTER TABLE messages ADD COLUMN delivery_projection TEXT')
             columns={row['name'] for row in db.execute('PRAGMA table_info(jobs)')}
             if 'workspace_id' not in columns: db.execute('ALTER TABLE jobs ADD COLUMN workspace_id TEXT')
             memory_columns={row['name'] for row in db.execute('PRAGMA table_info(memories)')}
@@ -204,7 +205,15 @@ class QuickStore:
 
     def history(self):
         with self.db() as db:
-            return [dict(r) for r in db.execute('SELECT * FROM (SELECT * FROM messages ORDER BY id DESC LIMIT 100) ORDER BY id')]
+            return [dict(r) for r in db.execute(
+                'SELECT id,role,content,channel,created,workspace_id,job_id '
+                'FROM (SELECT * FROM messages ORDER BY id DESC LIMIT 100) ORDER BY id')]
+
+    def blocked_delivery_reply(self, job_id):
+        """Recover the owner-facing blocked-turn projection from its transcript row."""
+        with self.db() as db:
+            row=db.execute("SELECT content FROM messages WHERE job_id=? AND role='assistant' AND delivery_projection='blocked-turn' ORDER BY id DESC LIMIT 1",(job_id,)).fetchone()
+            return row['content'] if row else None
 
     def jobs(self):
         with self.db() as db:
@@ -859,9 +868,30 @@ class QuickStore:
             row=db.execute('SELECT * FROM telegram_task_cards WHERE job_id=?',(job_id,)).fetchone()
             return dict(row) if row else None
 
+    def reserve_task_card(self, job_id, chat_id):
+        """Claim the one card slot before the Telegram send can race the worker."""
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            job=db.execute('SELECT status FROM jobs WHERE id=?',(job_id,)).fetchone()
+            if not job or job['status'] not in ('queued','running'):
+                return None
+            inserted=db.execute('INSERT OR IGNORE INTO telegram_task_cards VALUES (?,?,?,?,?)',
+                                (job_id,chat_id,-1,job['status'],time.time())).rowcount
+            return job['status'] if inserted else None
+
+    def release_task_card_reservation(self, job_id):
+        with self.db() as db:
+            db.execute('DELETE FROM telegram_task_cards WHERE job_id=? AND message_id=-1',(job_id,))
+
+    def mark_task_card_delivery_unknown(self, job_id):
+        """Keep the one-card slot when Telegram may have accepted the send."""
+        with self.db() as db:
+            db.execute("UPDATE telegram_task_cards SET message_id=-2,state='unknown',created=? WHERE job_id=? AND message_id=-1",
+                       (time.time(),job_id))
+
     def save_task_card(self, job_id, chat_id, message_id, state):
         with self.db() as db:
-            db.execute('INSERT INTO telegram_task_cards VALUES (?,?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET state=excluded.state',
+            db.execute('INSERT INTO telegram_task_cards VALUES (?,?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET chat_id=excluded.chat_id,message_id=excluded.message_id,state=excluded.state,created=CASE WHEN telegram_task_cards.message_id=-1 THEN excluded.created ELSE telegram_task_cards.created END',
                        (job_id,chat_id,message_id,state,time.time()))
 
     def notification(self, notification_id):
@@ -894,6 +924,7 @@ class QuickStore:
             db.execute("UPDATE jobs SET status='interrupted',error='실행 중 재시작되었습니다. 자동으로 재호출하지 않습니다.' WHERE status='running'")
             db.execute("UPDATE jobs SET delivery='unknown' WHERE delivery='sending'")
             db.execute("UPDATE telegram_notifications SET state='unknown' WHERE state='sending'")
+            db.execute("UPDATE telegram_task_cards SET message_id=-2,state='unknown',created=? WHERE message_id=-1",(time.time(),))
 
     def recovery_summary(self):
         """Return counts only; recovery guidance must never reveal task content."""

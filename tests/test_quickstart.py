@@ -19,6 +19,7 @@ from personal_agent.quickstart import make_handler, configured_service, local_dr
 from personal_agent.drive_web_oauth import DriveWebOAuthHandoff, EncryptedDriveSecretStore
 from personal_agent.connector_contract import CONNECTOR_STATE_KEY, PENDING_WORK_KEY, ConnectorState
 from personal_agent.conversation_handoff import CONVERSATION_RESUME_KEY
+from personal_agent.decision import OUTCOME_DECIDED, FixtureDecisionEngine, SelectionDecision, fixture_confidence
 from personal_agent.gmail import GMAIL_CONNECTOR_ID, GMAIL_READONLY_SCOPE, GmailError
 from cryptography.fernet import Fernet
 from personal_agent.providers import ModelAdapter, ProviderError
@@ -58,8 +59,10 @@ class QuickstartTests(unittest.TestCase):
         self.service.save_model({'provider':provider,'endpoint':endpoint,'model':'test-model','api_key':key})
 
     def make_due(self, job_id):
+        created=time.time()-4
         with self.store.db() as db:
-            db.execute("UPDATE jobs SET created=? WHERE id=?", (time.time()-4, job_id))
+            db.execute("UPDATE jobs SET created=? WHERE id=?", (created, job_id))
+            db.execute("UPDATE telegram_task_cards SET created=? WHERE job_id=?", (created, job_id))
 
     def test_claim_session_restart_and_redaction(self):
         self.store.claim(self.store.bootstrap.read_text(),'a-long-test-password')
@@ -783,6 +786,7 @@ finally:
         self.service.run_one();self.service.deliver_one()
         request={'update_id':11,'message':{'from':{'id':42},'chat':{'id':42,'type':'private'},'text':'내일 회의 준비를 정리해 줘'}}
         self.service.ingest_update(request,generation)
+        self.service.acknowledge_long_work(now=time.time()+10)  # the card is the long-work acknowledgement (#510)
         job=self.store.jobs()[0]
         card=self.store.task_card(job['id'])
         self.assertIsNotNone(card)
@@ -801,17 +805,21 @@ finally:
         generation=self.pair()
         self.service.run_one();self.service.deliver_one()
         self.service.ingest_update({'update_id':11,'message':{'from':{'id':42},'chat':{'id':42,'type':'private'},'text':'잠시 뒤 실행할 요청'}},generation)
-        job=self.store.jobs()[0]
+        queued=self.store.jobs()[0]
+        self.make_due(queued['id'])  # waited behind earlier Work before its card exists
+        self.service.acknowledge_long_work(now=time.time()+10)  # the card is the long-work acknowledgement (#510)
+        job=self.store.job(queued['id'])
         self.assertFalse(self.service.run_one())
-        self.assertEqual(self.store.jobs()[0]['status'],'queued')
+        self.assertEqual(self.store.job(queued['id'])['status'],'queued')
         card=self.store.task_card(job['id'])
         self.service.ingest_callback({'id':'cancel','from':{'id':42},'message':{'chat':{'id':42,'type':'private'},'message_id':card['message_id']},'data':f"p7c:{job['id']}"},generation)
-        self.assertEqual(self.store.jobs()[0]['status'],'cancelled')
+        self.assertEqual(self.store.job(queued['id'])['status'],'cancelled')
 
     def test_task_callbacks_require_owner_and_cannot_cancel_running_work(self):
         generation=self.pair()
         self.service.run_one();self.service.deliver_one()
         self.service.ingest_update({'update_id':11,'message':{'from':{'id':42},'chat':{'id':42,'type':'private'},'text':'작업 시작해 줘'}},generation)
+        self.service.acknowledge_long_work(now=time.time()+10)  # the card is the long-work acknowledgement (#510)
         job=self.store.jobs()[0]
         callback={'id':'foreign','from':{'id':99},'message':{'chat':{'id':99,'type':'private'},'message_id':999},'data':f"p7c:{job['id']}"}
         self.service.ingest_callback(callback,generation)
@@ -838,6 +846,7 @@ finally:
         self.model('compatible','https://example.test/v1','private-api-key')
         self.assertTrue(self.service.test_model()['ok'])
         self.service.ingest_update({'update_id':11,'message':{'from':{'id':42},'chat':{'id':42,'type':'private'},'text':'문서를 찾아 줘'}},generation)
+        self.service.acknowledge_long_work(now=time.time()+10)  # the card is the long-work acknowledgement (#510)
         card=[c for c in self.calls if c[0].endswith('/sendMessage') and c[1]['text'].startswith('요청을 받았습니다.')][-1]
         self.assertNotIn('문서를 찾아',card[1]['text'])
         self.make_due(self.store.jobs()[0]['id'])
@@ -909,6 +918,7 @@ finally:
         generation=self.pair()
         self.service.run_one();self.service.deliver_one()
         self.service.ingest_update({'update_id':11,'message':{'from':{'id':42},'chat':{'id':42,'type':'private'},'text':'private request secret'}},generation)
+        self.service.acknowledge_long_work(now=time.time()+10)  # the card is the long-work acknowledgement (#510)
         job=self.store.jobs()[0]
         card=self.store.task_card(job['id'])
         initial=[c for c in self.calls if c[0].endswith('/sendMessage') and c[1].get('text','').startswith('요청을 받았습니다.')][-1]
@@ -935,7 +945,9 @@ finally:
         job=self.store.jobs()[0];self.make_due(job['id'])
         self.service.run_one();self.service.deliver_one()
         outbound=[call[1]['text'] for call in self.calls[baseline:] if call[0].endswith('/sendMessage')]
-        self.assertEqual(outbound,['요청을 받았습니다. 곧 시작할게요.','Ollama response'])
+        # One bubble: the answer.  No received/running/completed card (#510).
+        self.assertEqual(outbound,['Ollama response'])
+        self.assertIsNone(self.store.task_card(job['id']))
         self.assertFalse(self.service.deliver_notification())
         self.assertEqual(self.store.job(job['id'])['delivery'],'sent')
 
@@ -960,9 +972,10 @@ finally:
         job=self.store.jobs()[0];self.make_due(job['id'])
         self.service.run_one();self.service.deliver_one()
         outbound=[call[1]['text'] for call in self.calls[baseline:] if call[0].endswith('/sendMessage')]
-        self.assertEqual(outbound[0],'요청을 받았습니다. 곧 시작할게요.')
-        self.assertEqual(len(outbound),2)
-        self.assertIn('모델 또는 구독 엔진을 먼저 연결하세요.',outbound[1])
+        # One truthful bubble: what is blocked, what works now, where to connect (#510, #477).
+        self.assertEqual(len(outbound),1)
+        self.assertIn('아직 AI가 연결되지 않아',outbound[0])
+        self.assertNotIn('구독 엔진',outbound[0])
         self.assertFalse(self.service.deliver_notification())
         self.assertEqual(self.store.job(job['id'])['delivery'],'sent')
 
@@ -970,6 +983,7 @@ finally:
         generation=self.pair()
         self.service.run_one();self.service.deliver_one()
         self.service.ingest_update({'update_id':11,'message':{'from':{'id':42},'chat':{'id':42,'type':'private'},'text':'private recovery request'}},generation)
+        self.service.acknowledge_long_work(now=time.time()+10)  # the card is the long-work acknowledgement (#510)
         job=self.store.jobs()[0]
         card=self.store.task_card(job['id'])
         with self.store.db() as db:
@@ -1015,6 +1029,7 @@ finally:
             self.service.attest_telegram_task_card_acceptance({'web_confirmed':True,'restart_confirmed':True})
         self.service.run_one();self.service.deliver_one()
         self.service.ingest_update({'update_id':11,'message':{'from':{'id':42},'chat':{'id':42,'type':'private'},'text':'safe request'}},generation)
+        self.service.acknowledge_long_work(now=time.time()+10)  # the card is the long-work acknowledgement (#510)
         job=self.store.jobs()[0];card=self.store.task_card(job['id'])
         callback_message={'chat':{'id':42,'type':'private'},'message_id':card['message_id']}
         self.service.ingest_callback({'id':'cancel','from':{'id':42},'message':callback_message,'data':f"p7c:{job['id']}"},generation)
@@ -1033,6 +1048,7 @@ finally:
         generation=self.pair()
         self.service.run_one();self.service.deliver_one()
         self.service.ingest_update({'update_id':11,'message':{'from':{'id':42},'chat':{'id':42,'type':'private'},'text':'secret request'}},generation)
+        self.service.acknowledge_long_work(now=time.time()+10)  # the card is the long-work acknowledgement (#510)
         job=self.store.jobs()[0];card=self.store.task_card(job['id'])
         self.service.ingest_callback({'id':'cancel','from':{'id':42},'message':{'chat':{'id':42,'type':'private'},'message_id':card['message_id']},'data':f"p7c:{job['id']}"},generation)
         approval=self.store.queue_notification(job['id'],42,generation,'approval_needed',self.service.document_fingerprint())
@@ -1235,6 +1251,11 @@ class GmailConnectorWiringTests(unittest.TestCase):
     def configured(self,env=None):
         """One service built exactly the way the shipped entry point builds it."""
         service=configured_service(self.store,self.env if env is None else env)
+        # These connector wiring cases exercise an intentionally recognized
+        # mail search. Model the semantic boundary judgment as a confident
+        # none-of-these fixture instead of relying on an unavailable provider.
+        service.use_decision_engine(FixtureDecisionEngine(choose=lambda context,candidates,question:
+            SelectionDecision(OUTCOME_DECIDED,'none-of-these',candidates,fixture_confidence())))
         service.telegram_transport=self.telegram
         service.adapter=ModelAdapter(self.telegram)
         if service.gmail is not None:
@@ -1513,6 +1534,8 @@ class GmailConnectorWiringTests(unittest.TestCase):
     # -- the unconfigured installation ------------------------------------
     def test_an_installation_without_gmail_configuration_is_unchanged(self):
         service=configured_service(self.store,{})
+        service.use_decision_engine(FixtureDecisionEngine(choose=lambda context,candidates,question:
+            SelectionDecision(OUTCOME_DECIDED,'none-of-these',candidates,fixture_confidence())))
         service.telegram_transport=self.telegram
         self.assertIsNone(service.gmail)
         self.assertIsNone(service.connector_registry)

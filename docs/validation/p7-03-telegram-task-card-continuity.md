@@ -4,6 +4,15 @@ Status: awaiting an owner-run live acceptance. This file is a procedure, not
 evidence that a Telegram account has been exercised. The release loop stays
 blocked until the authenticated owner records the completed observations.
 
+Successor note (PRESENCE-CONV-01 / #510, 2026-09-24): the task card is now the
+acknowledgement for *long-running* Work only. A request that finishes within
+`TELEGRAM_ACK_AFTER_SECONDS` answers in a single bubble and shows no card; a
+request still queued or running after that delay gets the card described
+below once, with the same cancel-while-queued and 진행 보기 behavior. Step 1
+therefore observes the card only when the Work takes long enough (for example
+while another request is still running). The original procedure is preserved
+unchanged as historical scope.
+
 Run this only with the already paired private Telegram account and an existing
 verified model. Do not paste bot tokens, pairing links, task text, document
 contents, API keys, message IDs, screenshots containing them, or database

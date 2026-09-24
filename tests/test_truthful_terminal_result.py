@@ -87,8 +87,9 @@ class TerminalResultTestCase(unittest.TestCase):
             # that so this turn runs, without touching the window itself.
             self.service.create_task_card(job_id, message, CHAT)
             with self.store.db() as db:
-                db.execute('UPDATE jobs SET created=? WHERE id=?',
-                           (time.time() - TELEGRAM_CARD_GRACE_SECONDS - 1, job_id))
+                created=time.time() - TELEGRAM_CARD_GRACE_SECONDS - 1
+                db.execute('UPDATE jobs SET created=? WHERE id=?',(created, job_id))
+                db.execute('UPDATE telegram_task_cards SET created=? WHERE job_id=?',(created, job_id))
         self.service.run_one()
         before = len(self.sent)
         self.service.deliver_one()

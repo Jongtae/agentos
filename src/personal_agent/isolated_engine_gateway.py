@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import re
 import secrets
 import socket
 import threading
@@ -76,6 +77,22 @@ def _validated_endpoint(endpoint: str, internal_hosts: frozenset[str]):
     ):
         raise InvalidGatewayEndpoint("engine gateway host is not local or private")
     return parsed, host, port
+
+
+def _safe_worker_error(raw: bytes, content_type: str) -> str:
+    """Return one bounded, redacted sidecar error detail when available."""
+    if content_type.split(";", 1)[0].strip().lower() != "application/json":
+        return ""
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return ""
+    if not isinstance(value, dict) or set(value) != {"error"} or not isinstance(value["error"], str):
+        return ""
+    detail = " ".join(value["error"].split())[:300]
+    detail = re.sub(r"(?i)(bearer\\s+|--token=)[^\\s]+", r"\\1[redacted]", detail)
+    detail = re.sub(r"(?<!\\w)/(?:Users|home|state|engine-profile)/[^\\s]+", "[path redacted]", detail)
+    return detail
 
 
 class IsolatedEngineGateway:
@@ -178,7 +195,9 @@ class IsolatedEngineGateway:
             connection.close()
 
         if response.status != 200:
-            raise InvalidEngineResponse(f"isolated engine returned HTTP {response.status}")
+            detail = _safe_worker_error(raw, response.getheader("Content-Type", ""))
+            suffix = f": {detail}" if detail else ""
+            raise InvalidEngineResponse(f"isolated engine returned HTTP {response.status}{suffix}")
         if len(raw) > self._max_response_bytes:
             raise InvalidEngineResponse("isolated engine response exceeded the byte limit")
         if response.getheader("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json":

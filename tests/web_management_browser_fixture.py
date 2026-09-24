@@ -66,7 +66,7 @@ class Fixture:
         rows = {
             "task-failed": row("task-failed", "회의록 폴더 요약해서 저장해줘", 86400 * 2, "failed", "finished", error="결과 저장 폴더가 설정되지 않아 파일을 남기지 못했습니다.", route={**cli, "status": "failed"}),
             "task-retry": row("task-retry", "자 다시 해봐", 86400 * 2 - 600, "succeeded", "finished", response="회의록 3개를 요약해 **결과 폴더**에 새 파일로 저장했어요.\n\n- 9월 첫째 주 회의\n- 9월 둘째 주 회의\n- 9월 셋째 주 회의", route=cli, relation={"kind": "retry", "work_id": "task-failed"}),
-            "task-done": row("task-done", "서울 도쿄 항공권 비교해줘", 3600, "succeeded", "finished", response=cls.RICH_RESULT, route=cli, events_count=3),
+            "task-done": row("task-done", "서울 도쿄 항공권 비교해줘", 3600, "succeeded", "finished", response=cls.RICH_RESULT, route=cli, events_count=3, observed_at=now - 3430),
             "task-done-again": row("task-done-again", "서울 도쿄 항공권 비교해줘", 1800, "succeeded", "finished", response=cls.RICH_RESULT, route={"kind": "direct-api", "model": "gpt-4o-mini", "status": "succeeded"}),
             "task-partial": row("task-partial", "지난달 영수증 모아줘", 900, "partial", "finished", response="영수증 2개를 찾았어요.\n\n- 9월 3일 카페 12,000원\n- 9월 9일 서점 18,500원", error="Gmail 두 번째 페이지를 읽지 못했습니다.", route=cli),
             "task-unknown": row("task-unknown", "팀에 회의 일정 보내줘", 600, "succeeded", "finished", response="회의 일정 메시지를 보냈어요.", route=cli),

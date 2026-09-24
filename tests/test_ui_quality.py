@@ -5,7 +5,7 @@ Static checks read the shipped files; behaviour checks execute the real
 ``tests/test_settings_ui.py`` does.  Nothing here contacts a server.
 """
 import json
-
+import re
 import shutil
 import subprocess
 import unittest
@@ -82,7 +82,7 @@ class TokensAndChrome(unittest.TestCase):
 class RenderingBehaviour(unittest.TestCase):
     def test_rich_text_is_safe_and_formatted(self):
         out = node_run(r"""
-const assert=require('node:assert/strict');const ui=require(process.argv[1]);
+const assert=require('node:assert/strict');const ui=require(process.argv[1]);ui.setLanguage('ko');
 const text='# 제목\n\n**굵게** 와 `code` 그리고 [링크](https://example.invalid/a) [나쁜](javascript:alert(1)) <b>raw</b>\n\n- 항목 1\n- 항목 2\n\n1. 첫째\n2. 둘째\n\n```\nx<y\n```\nhttps://example.invalid/bare';
 const blocks=ui.parseRichText(text);
 assert.deepEqual(blocks.map(b=>b.type),['heading','paragraph','list','list','pre','paragraph']);
@@ -109,8 +109,8 @@ class Element{constructor(tag){this.tag=tag;this.children=[];this.dataset={};thi
  set textContent(v){this._text=String(v);this.children=[];}get textContent(){return this._text+this.children.map(n=>typeof n==='string'?n:n.textContent).join('');}
  append(...n){this.children.push(...n);}setAttribute(k,v){this.attrs[k]=v;}}
 const part=(a,b)=>app.slice(app.indexOf(a),app.indexOf(b));
-const source=part('const TIME_CLOCK=','const TOOL_NAMES=')+part('function element(','function focusSettingsTarget(');
-const ctx={document:{createElement:t=>new Element(t)},console};vm.createContext(ctx);vm.runInContext(source,ctx);
+const source=part('const LANGUAGES=','function normalizeEndpoint(')+part('function formatTimeParts(','const TOOL_NAMES=')+part('function element(','function focusSettingsTarget(');
+const ctx={document:{createElement:tag=>new Element(tag)},console};vm.createContext(ctx);vm.runInContext(source,ctx);vm.runInContext("setLanguage('ko')",ctx);
 const box=ctx.renderRichText('<script>alert(1)</script> [x](https://e.invalid/p) [y](javascript:x)');
 const all=n=>n.children.flatMap(c=>typeof c==='string'?[c]:[c,...all(c)]);
 const nodes=all(box);
@@ -129,7 +129,7 @@ console.log(JSON.stringify({ok:true}));
 
     def test_time_and_tone_helpers(self):
         out = node_run(r"""
-const assert=require('node:assert/strict');const ui=require(process.argv[1]);
+const assert=require('node:assert/strict');const ui=require(process.argv[1]);ui.setLanguage('ko');
 const now=Date.UTC(2026,8,24,12,0,0);
 const at=seconds=>ui.formatTimeParts(now/1000-seconds,now).relative;
 assert.equal(at(10),'방금');assert.equal(at(300),'5분 전');assert.equal(at(7200),'2시간 전');assert.equal(at(86400),'어제');assert.equal(at(86400*3),'3일 전');
@@ -165,7 +165,7 @@ class ConversationTrace(unittest.TestCase):
 
     def test_trace_is_derived_from_observed_state_only(self):
         out = node_run(r"""
-const assert=require('node:assert/strict');const ui=require(process.argv[1]);
+const assert=require('node:assert/strict');const ui=require(process.argv[1]);ui.setLanguage('ko');
 const events=[{id:1,tool:'subscription_engine',status:'running',created:10,summary:'s'},{id:2,tool:'web_search',status:'succeeded',created:11,summary:'s'},{id:3,tool:'subscription_engine',status:'succeeded',created:12,summary:'s'}];
 const done=ui.semanticTrace({status:'succeeded',status_kind:'finished',observed_at:13,events:[events[0],{...events[0],id:4,status:'succeeded',created:12}]});
 assert.deepEqual(done.map(r=>r.text),['구독 CLI 실행 완료','답변'],'running->succeeded of one tool collapses to one line');
@@ -193,6 +193,70 @@ console.log(JSON.stringify({ok:true}));
         self.assertIn("sameAsPrevious=!task.relation&&", render)
         self.assertIn("'바로 앞과 같은 내용'", render)
         self.assertNotIn("relation:{", render)
+
+
+HANGUL = re.compile("[가-힣]")
+
+
+def ui_source_keys():
+    """Korean source strings the UI can show, collected from the shipped files."""
+    body = APP[:APP.index("// I18N-CATALOG-START")] + APP[APP.index("// I18N-CATALOG-END"):]
+    keys = set(m.group(1) for m in re.finditer(r"\bt\('((?:[^'\\]|\\.)*)'", body) if HANGUL.search(m.group(1)))
+    for table in ("TOOL_NAMES", "RELATION_TEXT", "OFFLINE_MESSAGE", "providers", "providerNames",
+                  "CONNECTOR_STATES", "CAPABILITY_NAMES", "CAPABILITY_STATES", "CAPABILITY_ACTION_TEXT"):
+        line = body[body.index("const " + table + "="):]
+        line = line[:line.index("\n")]
+        keys |= {v for v in re.findall(r"'([^']*)'", line) if HANGUL.search(v)}
+    records = body[body.index("function recordItems("):body.index("function filterLocalRecords(")]
+    keys |= {v for v in re.findall(r"label:[^,]*?'([^']*[가-힣][^']*)'", records)}
+    for text in re.findall(r">([^<>]*)<", HTML):
+        if HANGUL.search(text.strip()):
+            keys.add(text.strip())
+    keys |= {v for v in re.findall(r'(?:placeholder|aria-label|title)="([^"]*)"', HTML) if HANGUL.search(v)}
+    keys.discard("한국어")
+    return sorted(keys)
+
+
+class Languages(unittest.TestCase):
+    def catalog(self):
+        return json.loads(node_run("process.stdout.write(JSON.stringify(require(process.argv[1]).I18N))"))
+
+    def test_every_ui_string_has_english_chinese_and_japanese(self):
+        catalog = self.catalog()
+        keys = ui_source_keys()
+        self.assertGreater(len(keys), 400)
+        for language in ("en", "zh-CN", "ja"):
+            missing = [key for key in keys if not str(catalog[language].get(key, "")).strip() and key != "개"]
+            self.assertEqual(missing, [], language)
+
+    def test_translations_keep_placeholders_and_english_has_no_korean(self):
+        catalog = self.catalog()
+        for key in catalog["en"]:
+            wanted = sorted(re.findall(r"\{(\w+)\}", key))
+            for language in ("en", "zh-CN", "ja"):
+                self.assertEqual(sorted(re.findall(r"\{(\w+)\}", catalog[language][key])), wanted, (language, key))
+            if key != "한국어":
+                self.assertIsNone(HANGUL.search(catalog["en"][key]), key)
+
+    def test_english_is_the_default_and_the_owner_can_choose(self):
+        self.assertEqual(HTML.count("data-language-select"), 2)
+        self.assertIn("localStorage.setItem('agentos-language'", APP)
+        self.assertIn("setLanguage(storedLanguage()||'en')", APP)
+        out = node_run(r"""
+const assert=require('node:assert/strict');const ui=require(process.argv[1]);
+assert.deepEqual(Object.keys(ui.LANGUAGES),['en','ko','zh-CN','ja']);
+assert.equal(ui.statusText({status_kind:'active'}),'In progress');
+assert.equal(ui.relationText('retry'),'Retry of');
+assert.equal(ui.routeText({kind:'subscription',engine:'codex',status:'failed'}),'Codex subscription CLI · ran but failed');
+assert.equal(ui.t('{count}개 일치',{count:3}),'3 matches');
+assert.equal(ui.t('server text the catalog does not know'),'server text the catalog does not know','unknown text is shown as sent');
+ui.setLanguage('ja');assert.equal(ui.statusText({status_kind:'active'}),'進行中');
+ui.setLanguage('zh-CN');assert.equal(ui.statusText({status_kind:'active'}),'进行中');
+ui.setLanguage('ko');assert.equal(ui.statusText({status_kind:'active'}),'진행 중');
+assert.equal(ui.setLanguage('xx'),'en','an unknown choice falls back to English');
+console.log(JSON.stringify({ok:true}));
+""")
+        self.assertEqual(json.loads(out.strip().splitlines()[-1]), {"ok": True})
 
 
 if __name__ == "__main__":

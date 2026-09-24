@@ -24,7 +24,7 @@ function descendants(node){return node.children.flatMap(child=>typeof child==='s
 for(const id of ['active-ai','telegram-current','telegram-change','telegram-form','telegram-status','telegram-feedback','telegram-submit','disconnect','new-pair','telegram-pair','capability-controls','connector-controls'])new Element('div').id=id;
 const $=id=>ids.get(id),document={getElementById:$,createElement:tag=>new Element(tag)};
 const part=(start,end)=>app.slice(app.indexOf(start),app.indexOf(end));
-const source=part('function capabilityActions(', 'function clearMobileDetailWhenEmpty(')+
+const source=part('const LANGUAGES=','function normalizeEndpoint(')+part('function capabilityActions(', 'function clearMobileDetailWhenEmpty(')+
  part('function element(', 'function setError(')+
  part('const providers=', 'let claimed=')+
  part('function renderExecutionConnection(', 'function renderSubscriptionEngines(')+
@@ -32,7 +32,7 @@ const source=part('function capabilityActions(', 'function clearMobileDetailWhen
  part('function renderTelegram(', 'function renderCapabilityPreview(');
 const calls=[];let refreshes=0,failRoute=false;
 const ctx={document,$,telegramDraftOpen:false,requestCapabilityDraft:async()=>{},console,api:async(path,body)=>{calls.push({path,body});if(failRoute)throw new Error('switch refused');return {};},refresh:async()=>{refreshes++;},busy:async(button,fn)=>fn(),setError:(id,error)=>{$(id).textContent=error?.message||String(error||'');},setFeedback:(id,text)=>{$(id).textContent=text||'';}};
-vm.createContext(ctx);vm.runInContext(source,ctx);
+vm.createContext(ctx);vm.runInContext(source,ctx);vm.runInContext("setLanguage('ko')",ctx);
 const buttonIn=id=>descendants($(id)).find(node=>node.tag==='button');
 const settings={model:{provider:'ollama',endpoint:'http://127.0.0.1:11434',model:'stored-api-model'},model_ready:true,subscription_engines:{selected:'codex',engines:[{id:'codex',name:'Codex',installed:true,connected:true}]}};
 ctx.renderExecutionConnection(settings);const routeButton=buttonIn('active-ai');ctx.renderExecutionConnection(JSON.parse(JSON.stringify(settings)));
@@ -156,7 +156,7 @@ def test_setting_rows_translate_internal_connection_ids_and_keep_details_disclos
     assert "function settingsRow(" in APP
     assert "CONNECTOR_NAMES" in APP
     assert "CAPABILITY_NAMES" in APP
-    assert "settingsDisclosure('세부 정보',lines)" in APP
+    assert "settingsDisclosure(t('세부 정보'),lines)" in APP
     assert "element('strong',capability.id)" not in APP
     assert "(connector.required_scopes||[]).join(', ')" in APP
     assert ".settings-row-action.destructive" in CSS
@@ -199,12 +199,12 @@ function descendants(node){return node.children.flatMap(child=>typeof child==='s
 for(const id of ['root-list','roots-feedback','root-path-input','roots-form','file-workspace-list','file-workspace-form','workspace-reference-list','workspace-reference-input','workspace-reference-add','file-workspace-path','file-workspace-feedback','file-workspace-cancel','document-boundary','document-boundary-feedback'])new Element('div').id=id;
 const $=id=>ids.get(id),document={getElementById:$,createElement:tag=>new Element(tag)};
 const part=(start,end)=>app.slice(app.indexOf(start),app.indexOf(end));
-const source=part('function element(', 'function focusSettingsTarget(')+part('let savedRoots=', 'function renderTelegram(');
+const source=part('const LANGUAGES=','function normalizeEndpoint(')+part('function element(', 'function focusSettingsTarget(')+part('let savedRoots=', 'function renderTelegram(');
 const calls=[];let refreshes=0,refuse=null,revisions=0,gate=null;
 const ctx={document,$,console,invalidateRootsLoad:()=>revisions++,invalidateFileWorkspaceLoad:()=>revisions++,
  api:async(path,body)=>{calls.push({path,body});if(gate)await gate;if(refuse)throw new Error(refuse);if(path==='/api/files/roots')return {roots:body.paths.map(path=>({path}))};if(path==='/api/file-workspace')return {references:body.references.map(path=>({path})),workspace:body.workspace};return {};},
  refresh:async()=>{refreshes++;},busy:async(button,fn)=>fn(),setError:(id,error)=>{$(id).textContent=error?.message||String(error||'');},setFeedback:(id,text)=>{$(id).textContent=text||'';}};
-vm.createContext(ctx);vm.runInContext(source,ctx);
+vm.createContext(ctx);vm.runInContext(source,ctx);vm.runInContext("setLanguage('ko')",ctx);
 const same=(actual,expected,message)=>assert.equal(JSON.stringify(actual),JSON.stringify(expected),message);
 const buttons=id=>descendants($(id)).filter(node=>node.tag==='button');
 const press=async(id,label)=>{const button=buttons(id).find(node=>node.textContent===label);assert(button,`${label} in ${id}`);await button.onclick({currentTarget:button});};

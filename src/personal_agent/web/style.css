@@ -3,7 +3,7 @@
 
 /* ---------- 1. Tokens ---------- */
 :root{
- --font:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard Variable",Pretendard,"Noto Sans KR","Segoe UI",sans-serif;
+ --font:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Pretendard Variable",Pretendard,"Noto Sans KR","PingFang SC","Hiragino Sans","Noto Sans SC","Noto Sans JP","Microsoft YaHei","Yu Gothic",sans-serif;
  /* surfaces */
  --canvas:#f3f4f6;--rail:#e9ebef;--surface:#fff;--surface-2:#f7f8fa;--surface-3:#eef0f3;
  /* ink */
@@ -431,3 +431,8 @@ details.technical details>summary{color:var(--muted)}
 .turn-technical dt{color:var(--faint);white-space:nowrap}
 .turn-technical dd{margin:0;overflow-wrap:anywhere;white-space:pre-line;font-variant-numeric:tabular-nums}
 @media(max-width:620px){.turn{padding-left:24px}.turn::before{left:1px}.turn::after{left:6px}.trace-step{grid-template-columns:58px 10px minmax(0,1fr)}.turn-technical dl{grid-template-columns:1fr}}
+
+.language-picker{display:block}
+.language-picker select{min-height:30px;padding:2px 28px 2px 8px;font-size:var(--fs-1);background-color:transparent;border-color:var(--line-strong);width:auto}
+.auth-panel .language-picker{justify-self:end}
+@media(max-width:620px){.rail-foot .language-picker select{max-width:110px}}

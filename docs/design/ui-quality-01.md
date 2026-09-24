@@ -18,8 +18,9 @@ over both.
 - Subject: the owner-local management utility of one person's AgentOS. It shows
   what the owner asked, what AgentOS answered, what it may touch, and what needs
   the owner's decision. It is not a chat client, a dashboard or a storage browser.
-- Audience: one owner on a Mac, reading Korean, usually checking a result after a
-  Telegram request or inspecting a connection.
+- Audience: one owner on a Mac, reading English by default or Korean, Chinese or
+  Japanese by choice, usually checking a result after a Telegram request or
+  inspecting a connection.
 - Primary job: answer three questions at a glance. What happened, in order. Is
   anything wrong or waiting on me. Which connection is actually in use.
 
@@ -77,8 +78,8 @@ Reviewed against the generic defaults the frontend-design skill warns about:
 | `--run` | `#2456b3` on `#e6edfa` | 진행 중, 실행 중 |
 | `--unknown` | `#5b5f8a` on `#ebebf4` | 전달 여부 알 수 없음, 연결 끊김, 허용 여부 표시 안 됨 |
 
-Type: system Korean sans (`-apple-system, "Apple SD Gothic Neo", Pretendard,
-"Noto Sans KR"`). There is no web font, so page entry makes no network request.
+Type: the system sans with Korean, Chinese and Japanese fallbacks (`-apple-system`,
+`"Apple SD Gothic Neo"`, `"PingFang SC"`, `"Hiragino Sans"`, Noto Sans KR/SC/JP). There is no web font, so page entry makes no network request.
 Scale 12 / 13 / 14 (base) / 16 / 19 / 23. Line height 1.55. Result text is
 capped at 70ch. Times use `tabular-nums`.
 
@@ -128,7 +129,7 @@ unreachable, the runtime badge says 연결 끊김 and the count clears.
   Internal ids stay under 기술 세부 정보 or 기술 정보.
 - **Badges.** One state per badge. An unknown or unmapped state shows as
   unknown, never guessed as connected or allowed.
-- **Dates.** `Intl.RelativeTimeFormat('ko')` for the last 7 days, otherwise an
+- **Dates.** `Intl.RelativeTimeFormat` in the chosen language for the last 7 days, otherwise an
   `Intl.DateTimeFormat` date. Trace steps use a 24-hour clock. The absolute time
   is in `<time title>` and `datetime`.
 - **Results.** Parsed into paragraphs, lists, headings, bold, inline code and
@@ -162,7 +163,9 @@ unreachable, the runtime badge says 연결 끊김 and the count clears.
 ## 7. Before / after (fixture-only evidence)
 
 The data comes from `tests/web_management_browser_fixture.py` with the
-`/control/rich-tasks` control. It is not live AgentOS operation.
+`/control/rich-tasks` control. It is not live AgentOS operation. After images are
+in the English default unless noted. Request and answer text stays in its
+original language, because it is owner content, not UI.
 
 | | Before | After |
 | --- | --- | --- |
@@ -170,6 +173,7 @@ The data comes from `tests/web_management_browser_fixture.py` with the
 | One answer, both disclosures open | | ![disclosures](ui-quality-01/after-trace-disclosures.desktop.png) |
 | Mobile: partial, unknown delivery, correction | ![before mobile](ui-quality-01/before-tasks.mobile.png) | ![states mobile](ui-quality-01/after-trace-states.mobile.png) |
 | 설정 · AI 연결 | ![before settings](ui-quality-01/before-settings-ai.desktop.png) | ![after settings](ui-quality-01/after-settings-ai.desktop.png) |
+| Other languages (Japanese trace, Chinese mobile privacy, Korean AI settings) | | ![ja](ui-quality-01/after-language-ja.desktop.png) ![zh-CN](ui-quality-01/after-language-zh-CN.mobile.png) ![ko](ui-quality-01/after-language-ko.desktop.png) |
 
 ## 8. Not changed
 
@@ -215,3 +219,30 @@ One major needs a backend field. The Telegram sharing-policy row cannot show
 whether a standing policy exists, because `ContextInbox.status()` does not
 report it. The row now says "허용 여부 표시 안 됨" instead of guessing, and it
 shows "허용함 (이번 접속)" only after a success it observed itself.
+
+## 11. Languages
+
+On 2026-09-24 the owner asked for English as the default UI language, with a
+choice of Korean, Simplified Chinese and Japanese.
+
+- **How it works.** `app.js` holds one catalog keyed by the Korean source
+  string, and `t()` translates at render time. Static markup is translated in
+  place on load, before either surface is shown. The choice is stored in
+  `localStorage` (`agentos-language`) and applied by reloading the page, so text
+  and `Intl` dates, relative times and clocks switch together. With no stored
+  choice the UI is English. The selector sits in the rail and on the sign-in
+  screen, and each option is written in its own language.
+- **Why inside `app.js`.** The local server serves only `index.html`, `app.js`
+  and `style.css`. A separate catalog file would need a backend route, which is
+  out of scope.
+- **What is not translated.** Text written by the server is shown as sent unless
+  it is a known fixed phrase: errors, task titles, answers, folder-validation
+  messages and connector descriptions. Those strings come from the backend in
+  Korean. Translating them needs a backend follow-up.
+- **English style.** English copy uses sentence case, following the
+  frontend-design skill and the existing Korean style. It does not use the Title
+  Case rule in the pinned web-interface-guidelines, which the skill's wrapper
+  lists as English-only.
+- **Guards.** `tests/test_ui_quality.py` fails if any UI string lacks an
+  English, Chinese or Japanese entry, if a translation drops a `{placeholder}`,
+  or if English output contains Korean.

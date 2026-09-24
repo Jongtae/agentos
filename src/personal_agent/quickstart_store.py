@@ -868,9 +868,24 @@ class QuickStore:
             row=db.execute('SELECT * FROM telegram_task_cards WHERE job_id=?',(job_id,)).fetchone()
             return dict(row) if row else None
 
+    def reserve_task_card(self, job_id, chat_id):
+        """Claim the one card slot before the Telegram send can race the worker."""
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            job=db.execute('SELECT status FROM jobs WHERE id=?',(job_id,)).fetchone()
+            if not job or job['status'] not in ('queued','running'):
+                return None
+            inserted=db.execute('INSERT OR IGNORE INTO telegram_task_cards VALUES (?,?,?,?,?)',
+                                (job_id,chat_id,-1,job['status'],time.time())).rowcount
+            return job['status'] if inserted else None
+
+    def release_task_card_reservation(self, job_id):
+        with self.db() as db:
+            db.execute('DELETE FROM telegram_task_cards WHERE job_id=? AND message_id=-1',(job_id,))
+
     def save_task_card(self, job_id, chat_id, message_id, state):
         with self.db() as db:
-            db.execute('INSERT INTO telegram_task_cards VALUES (?,?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET state=excluded.state',
+            db.execute('INSERT INTO telegram_task_cards VALUES (?,?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET chat_id=excluded.chat_id,message_id=excluded.message_id,state=excluded.state,created=CASE WHEN telegram_task_cards.message_id=-1 THEN excluded.created ELSE telegram_task_cards.created END',
                        (job_id,chat_id,message_id,state,time.time()))
 
     def notification(self, notification_id):

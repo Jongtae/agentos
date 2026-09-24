@@ -188,15 +188,16 @@ class TelegramPolicyRoutingTests(unittest.TestCase):
         self.store.put('telegram', {'enabled': True, 'generation': 'g', 'user_id': 42, 'cursor': 11})
 
     def test_task_card_lifecycle_routes_through_named_channel_methods(self):
-        self.service.create_task_card('job-1', '자료를 요약해 줘', 42)
-        self.service.update_task_card({'id': 'job-1', 'message': '자료를 요약해 줘'}, 'running')
+        job_id=self.store.enqueue('자료를 요약해 줘','card-lifecycle')
+        self.service.create_task_card(job_id, '자료를 요약해 줘', 42)
+        self.service.update_task_card({'id': job_id, 'message': '자료를 요약해 줘'}, 'running')
         self.assertEqual(self.channel.names, ['send_message', 'edit_message_text'])
         sent = self.channel.calls[0][1]
         self.assertEqual(sent['chat_id'], 42)
-        self.assertEqual(sent['reply_markup'], self.service.task_card_markup('job-1', 'queued'))
+        self.assertEqual(sent['reply_markup'], self.service.task_card_markup(job_id, 'queued'))
         edited = self.channel.calls[1][1]
         self.assertEqual((edited['chat_id'], edited['message_id']), (42, 7))
-        self.assertEqual(edited['reply_markup'], self.service.task_card_markup('job-1', 'running'))
+        self.assertEqual(edited['reply_markup'], self.service.task_card_markup(job_id, 'running'))
 
     def test_polling_routes_through_get_updates_with_the_durable_cursor(self):
         self.pair()

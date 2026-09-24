@@ -11,14 +11,16 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from personal_agent.conversation_handoff import INTENT_UNSUPPORTED, UNSUPPORTED_CAPABILITY_TEXT
 from personal_agent.conversation_projection import (BLOCKER_NO_AI_ROUTE, TERMINAL_FAILED_HEADER,
                                                     TERMINAL_PARTIAL_HEADER, terminal_text)
 from personal_agent.decision import (OUTCOME_DECIDED, FixtureDecisionEngine, SelectionDecision,
                                      UnavailableDecisionEngine, fixture_confidence)
-from personal_agent.providers import ModelAdapter
-from personal_agent.quickstart_service import TELEGRAM_ACK_AFTER_SECONDS, AgentService
+from personal_agent.providers import ModelAdapter, ProviderError
+from personal_agent.quickstart_service import (TELEGRAM_ACK_AFTER_SECONDS, TELEGRAM_CARD_GRACE_SECONDS,
+                                               AgentService)
 from personal_agent.quickstart_store import QuickStore
 
 CHAT = 4242
@@ -90,6 +92,11 @@ class ProjectionTestCase(unittest.TestCase):
         with self.store.db() as db:
             db.execute('UPDATE jobs SET created=? WHERE id=?', (time.time() - seconds, job_id))
 
+    def age_card(self, job_id, seconds):
+        with self.store.db() as db:
+            db.execute('UPDATE telegram_task_cards SET created=? WHERE job_id=?',
+                       (time.time() - seconds, job_id))
+
     def assistant_messages(self, job_id):
         with self.store.db() as db:
             return [row['content'] for row in db.execute(
@@ -140,6 +147,7 @@ class LongWorkTests(ProjectionTestCase):
         self.assertEqual(self.service.acknowledge_long_work(), [job_id])
         self.assertEqual(self.outbound, [('send', '요청을 받았습니다. 곧 시작할게요.')])
         self.assertEqual(self.service.acknowledge_long_work(), [], 'acknowledged once')
+        self.age_card(job_id, TELEGRAM_CARD_GRACE_SECONDS + 1)
         self.service.run_one()
         self.service.deliver_one()
         job = self.store.job(job_id)
@@ -179,17 +187,23 @@ class LongWorkTests(ProjectionTestCase):
         self.connect_model()
         job_id = self.receive('긴 요청을 처리해 줘')
         self.age(job_id, TELEGRAM_ACK_AFTER_SECONDS + 1)
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='running' WHERE id=?",(job_id,))
         original = self.service.telegram_transport
         raced = False
 
         def transport(url, body=None, headers=None, timeout=60):
             nonlocal raced
+            if url.endswith('/editMessageText') and body.get('message_id') == -1:
+                raise ProviderError('card reservation has no remote message id yet')
             if (not raced and url.endswith('/sendMessage')
-                    and body.get('text') == '요청을 받았습니다. 곧 시작할게요.'):
+                    and body.get('text') == '요청을 처리하고 있어요.'):
                 raced = True
-                # Model the worker completing and delivering between the poll
-                # thread's selection and Telegram accepting the card.
-                self.service.run_one()
+                # Model a running worker finishing during Telegram's send.
+                with self.store.db() as db:
+                    db.execute("UPDATE jobs SET status='succeeded',response=?,delivery='pending' WHERE id=?",
+                               (self.text,job_id))
+                self.service.update_task_card(self.store.job(job_id),'succeeded')
                 self.service.deliver_one()
             return original(url, body, headers, timeout)
 
@@ -199,7 +213,7 @@ class LongWorkTests(ProjectionTestCase):
         self.assertEqual(self.store.task_card(job_id)['state'], 'succeeded', self.outbound)
         self.assertEqual([kind for kind, _text in self.outbound], ['send', 'send', 'edit'])
         self.assertTrue(self.outbound[0][1].startswith(self.text))
-        self.assertEqual(self.outbound[1][1], '요청을 받았습니다. 곧 시작할게요.')
+        self.assertEqual(self.outbound[1][1], '요청을 처리하고 있어요.')
         self.assertIn('처리가 끝났습니다', self.outbound[2][1])
 
 
@@ -218,6 +232,10 @@ class BlockedTurnTests(ProjectionTestCase):
         self.assertNotIn('/note', first)
         self.assertNotIn(TERMINAL_FAILED_HEADER, first, 'the projected reply is the whole bubble')
         self.assertNotIn('AgentOS 웹에서 실행 기록', first, 'the web console is not the default next action')
+        note, note_bubbles = self.turn('/note 커피는 따뜻하게')
+        self.assertEqual(note['status'], 'succeeded')
+        self.assertEqual(len(note_bubbles), 1)
+        self.assertEqual(self.store.config('conversation_blocker')[f'telegram:{CHAT}']['kind'], BLOCKER_NO_AI_ROUTE)
         # The same blocker again: one short reminder, not the same failure again.
         job2, bubbles2 = self.turn('그럼 내일 일정은?')
         self.assertEqual(job2['status'], 'failed')
@@ -231,7 +249,7 @@ class BlockedTurnTests(ProjectionTestCase):
         self.assertEqual(job3['status'], 'succeeded')
         self.assertEqual(bubbles3, [('send', self.text)])
         self.assertNotIn(f'telegram:{CHAT}', self.store.config('conversation_blocker', {}))
-        self.assertOneVoice(bubbles + bubbles2 + bubbles3)
+        self.assertOneVoice(bubbles + note_bubbles + bubbles2 + bubbles3)
 
     def test_the_transcript_shows_the_projected_reply_and_the_task_keeps_the_plain_cause(self):
         job, bubbles = self.turn('도와줘')
@@ -312,6 +330,15 @@ class TerminalTextTests(unittest.TestCase):
     def test_a_specific_next_action_replaces_only_the_web_pointer(self):
         text = terminal_text(None, '연결이 끊어졌습니다', 'failed', next_action='다시 연결한 뒤 같은 요청을 보내 주세요.')
         self.assertEqual(text, TERMINAL_FAILED_HEADER + '\n\n연결이 끊어졌습니다\n\n다시 연결한 뒤 같은 요청을 보내 주세요.')
+
+
+class SettingsRecoveryAddressTests(ProjectionTestCase):
+    def test_recovery_address_uses_the_bound_server_port_before_connector_redirects(self):
+        self.service.calendar_oauth = SimpleNamespace(redirect_uri='http://localhost:8787/oauth/calendar/callback')
+        self.service.local_server_port = 9041
+        expected = 'http://127.0.0.1:9041/'
+        self.assertEqual(self.service.local_settings_url(), expected)
+        self.assertEqual(self.service.projection.settings_url(), expected)
 
 
 if __name__ == '__main__':  # pragma: no cover

@@ -59,8 +59,10 @@ class QuickstartTests(unittest.TestCase):
         self.service.save_model({'provider':provider,'endpoint':endpoint,'model':'test-model','api_key':key})
 
     def make_due(self, job_id):
+        created=time.time()-4
         with self.store.db() as db:
-            db.execute("UPDATE jobs SET created=? WHERE id=?", (time.time()-4, job_id))
+            db.execute("UPDATE jobs SET created=? WHERE id=?", (created, job_id))
+            db.execute("UPDATE telegram_task_cards SET created=? WHERE job_id=?", (created, job_id))
 
     def test_claim_session_restart_and_redaction(self):
         self.store.claim(self.store.bootstrap.read_text(),'a-long-test-password')
@@ -803,13 +805,15 @@ finally:
         generation=self.pair()
         self.service.run_one();self.service.deliver_one()
         self.service.ingest_update({'update_id':11,'message':{'from':{'id':42},'chat':{'id':42,'type':'private'},'text':'잠시 뒤 실행할 요청'}},generation)
+        queued=self.store.jobs()[0]
+        self.make_due(queued['id'])  # waited behind earlier Work before its card exists
         self.service.acknowledge_long_work(now=time.time()+10)  # the card is the long-work acknowledgement (#510)
-        job=self.store.jobs()[0]
+        job=self.store.job(queued['id'])
         self.assertFalse(self.service.run_one())
-        self.assertEqual(self.store.jobs()[0]['status'],'queued')
+        self.assertEqual(self.store.job(queued['id'])['status'],'queued')
         card=self.store.task_card(job['id'])
         self.service.ingest_callback({'id':'cancel','from':{'id':42},'message':{'chat':{'id':42,'type':'private'},'message_id':card['message_id']},'data':f"p7c:{job['id']}"},generation)
-        self.assertEqual(self.store.jobs()[0]['status'],'cancelled')
+        self.assertEqual(self.store.job(queued['id'])['status'],'cancelled')
 
     def test_task_callbacks_require_owner_and_cannot_cancel_running_work(self):
         generation=self.pair()

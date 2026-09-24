@@ -21,7 +21,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from cryptography.fernet import Fernet
+
 from personal_agent import quickstart, service_control
+from personal_agent.quickstart_service import AgentService
 from personal_agent.service_control import CommandResult, LABEL
 
 
@@ -252,6 +255,54 @@ class ServiceCliProcessExitTests(unittest.TestCase):
         receipt = json.loads(completed.stdout)
         self.assertFalse(receipt["ok"])
         self.assertEqual(completed.returncode, 1)
+
+
+class ForegroundRecoveryAddressTests(unittest.TestCase):
+    def test_calendar_only_recovery_uses_the_bound_listener_port(self):
+        class StopServing(Exception):
+            pass
+
+        class Server:
+            server_port=9143
+
+            def __init__(self,*_args,**_kwargs):
+                self.closed=False
+
+            def serve_forever(self):
+                raise StopServing()
+
+            def server_close(self):
+                self.closed=True
+
+        with tempfile.TemporaryDirectory() as temp:
+            environment={
+                'AGENTOS_CALENDAR_LOCAL_ONLY':'1',
+                'AGENTOS_CALENDAR_CLIENT_ID':'calendar-client',
+                'AGENTOS_CALENDAR_CLIENT_SECRET':'calendar-secret',
+                'AGENTOS_CALENDAR_ENCRYPTION_KEY':Fernet.generate_key().decode(),
+            }
+            services=[]
+            configured=quickstart.configured_service
+
+            def build_service(store,env):
+                service=configured(store,env)
+                services.append(service)
+                return service
+
+            with patch.dict(os.environ,environment,clear=True), \
+                 patch.object(sys,'argv',['agentos','--port','9800','--data',temp,'--no-browser']), \
+                 patch.object(quickstart,'configured_service',side_effect=build_service), \
+                 patch.object(quickstart,'ThreadingHTTPServer',Server), \
+                 patch.object(AgentService,'start'), \
+                 patch.object(quickstart.signal,'signal'), \
+                 patch('sys.stdout',io.StringIO()):
+                with self.assertRaises(StopServing):
+                    quickstart.main()
+
+            self.assertEqual(len(services),1)
+            self.assertEqual(services[0].calendar_oauth.redirect_uri,
+                             'http://localhost:8787/oauth/calendar/callback')
+            self.assertEqual(services[0].local_settings_url(),'http://127.0.0.1:9143/')
 
 
 if __name__ == "__main__":

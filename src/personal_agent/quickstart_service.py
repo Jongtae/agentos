@@ -262,6 +262,7 @@ class AgentService:
         self.local_tools=LocalTools()
         self.stop=threading.Event()
         self.threads=[]
+        self.local_server_port=None
 
     def personal_assistant_request(self, body, owner_id='local-owner'):
         """One owner-authenticated entry point for MP1 capability requests."""
@@ -1158,6 +1159,8 @@ class AgentService:
         configured connector's redirect URI is bound to.  An install with no
         connector configured advertises nothing rather than a guessed port.
         """
+        if isinstance(self.local_server_port,int) and 1<=self.local_server_port<=65535:
+            return f'http://{LOCAL_ADDRESS_HOST}:{self.local_server_port}/'
         for holder in (self.gmail,self.calendar_oauth):
             parts=urlsplit(getattr(holder,'redirect_uri','') or '')
             if parts.scheme=='http' and parts.port:
@@ -1187,10 +1190,11 @@ class AgentService:
             if self.store.task_card(row['id']):
                 acknowledged.append(row['id'])
                 # The Work may have completed while Telegram was accepting the
-                # card. Reconcile the persisted card to the current state so a
-                # stale queued/running card cannot remain after its answer.
+                # card. Reconcile it to any changed current state so a stale
+                # queued/running card cannot keep an obsolete action.
                 current=self.store.job(row['id'])
-                if current and current['status'] not in ('queued','running'):
+                card=self.store.task_card(row['id'])
+                if current and card and current['status']!=card['state']:
                     self.update_task_card(current,current['status'])
         return acknowledged
 
@@ -1728,14 +1732,20 @@ class AgentService:
     def create_task_card(self, job_id, message, chat_id, state='queued'):
         # This is deliberately a single best-effort send.  Retrying after an
         # unknown Telegram response could create a second card for one request.
-        if self.store.task_card(job_id): return
+        reserved_state=self.store.reserve_task_card(job_id,chat_id)
+        if not reserved_state:return
+        saved=False
         try:
-            result=self.telegram.send_message(chat_id,self.task_card_text(message,state),
-                                              self.task_card_markup(job_id,state))
+            result=self.telegram.send_message(chat_id,self.task_card_text(message,reserved_state),
+                                              self.task_card_markup(job_id,reserved_state))
             message_id=result.get('message_id') if isinstance(result,dict) else None
-            if isinstance(message_id,int): self.store.save_task_card(job_id,chat_id,message_id,state)
+            if isinstance(message_id,int):
+                self.store.save_task_card(job_id,chat_id,message_id,reserved_state)
+                saved=True
         except ProviderError:
             pass
+        finally:
+            if not saved:self.store.release_task_card_reservation(job_id)
 
     def update_task_card(self, job, state):
         card=self.store.task_card(job['id'])
@@ -1953,7 +1963,7 @@ class AgentService:
         with self.worker_lock:
             with self.store.db() as db:
                 db.execute('BEGIN IMMEDIATE')
-                row=db.execute("SELECT j.* FROM jobs j WHERE j.status='queued' AND (NOT EXISTS (SELECT 1 FROM telegram_task_cards c WHERE c.job_id=j.id) OR j.created<=?) ORDER BY j.created LIMIT 1",(time.time()-TELEGRAM_CARD_GRACE_SECONDS,)).fetchone()
+                row=db.execute("SELECT j.* FROM jobs j WHERE j.status='queued' AND (NOT EXISTS (SELECT 1 FROM telegram_task_cards c WHERE c.job_id=j.id) OR EXISTS (SELECT 1 FROM telegram_task_cards c WHERE c.job_id=j.id AND c.created<=?)) ORDER BY j.created LIMIT 1",(time.time()-TELEGRAM_CARD_GRACE_SECONDS,)).fetchone()
                 if not row:return False
                 job=dict(row)
                 db.execute("UPDATE jobs SET status='running' WHERE id=?",(job['id'],))
@@ -1963,6 +1973,7 @@ class AgentService:
             provider='builtin'
             model='notes'
             outcome='succeeded'
+            resolved_blocker=False
             approval_needed=[False]
             context_approval_needed=[False]
             refusals=[]
@@ -2236,6 +2247,7 @@ class AgentService:
                         result=run_agent(self.adapter,runtime_config,key,history,'',capabilities,record)
                         outcome=getattr(result,'outcome','succeeded')
                         response,provider,model=result.content,result.provider,result.model
+                        resolved_blocker=outcome=='succeeded'
                     if workspace_request:
                         saved=FileWorkspace(self.store).save(job['id'],workspace_request['title'],response,workspace_request['sources'])
                         response+=f"\n\n저장됨: {saved['path']} · {saved['id']}"
@@ -2247,8 +2259,8 @@ class AgentService:
                     db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('assistant',response,job['channel'],time.time(),job.get('workspace_id'),job['id']))
                     cause=self._failure_cause(refusals) if outcome in ('failed','partial') else None
                     db.execute("UPDATE jobs SET status=?,response=?,error=?,provider=?,model=?,delivery=? WHERE id=?",(outcome,response,cause,provider,model,'pending' if job['chat_id'] else 'none',job['id']))
-                if outcome=='succeeded':self.projection.clear(self.connector_owner_id(job))
             except (ValueError,ProviderError,ExecutionError,OSError) as exc:
+                resolved_blocker=False
                 response=str(exc)
                 if isinstance(exc,BlockedTurn):
                     # The owner can resolve this blocker; say how, once, in
@@ -2263,6 +2275,8 @@ class AgentService:
                     db.execute("UPDATE jobs SET status='failed',error=?,delivery=? WHERE id=?",(response,'pending' if job['chat_id'] else 'none',job['id']))
                 outcome='failed'
             self.update_task_card(job,outcome)
+            if resolved_blocker:
+                self.projection.clear(self.connector_owner_id(job))
             if approval_needed[0]:self.queue_notification(job,'approval_needed')
             if context_approval_needed[0]:self.queue_notification(job,'context_approval_needed')
             # The result delivery below is the one terminal Telegram bubble.

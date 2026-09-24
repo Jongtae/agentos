@@ -59,6 +59,8 @@ class QuickStore:
             if 'delivery_projection' not in columns: db.execute('ALTER TABLE messages ADD COLUMN delivery_projection TEXT')
             columns={row['name'] for row in db.execute('PRAGMA table_info(jobs)')}
             if 'workspace_id' not in columns: db.execute('ALTER TABLE jobs ADD COLUMN workspace_id TEXT')
+            if 'relation_kind' not in columns: db.execute('ALTER TABLE jobs ADD COLUMN relation_kind TEXT')
+            if 'related_job_id' not in columns: db.execute('ALTER TABLE jobs ADD COLUMN related_job_id TEXT')
             memory_columns={row['name'] for row in db.execute('PRAGMA table_info(memories)')}
             for name,kind in (('owner_key','TEXT'),('work_key','TEXT'),('content_digest','TEXT'),('candidate_id','TEXT')):
                 if name not in memory_columns: db.execute(f'ALTER TABLE memories ADD COLUMN {name} {kind}')
@@ -223,6 +225,21 @@ class QuickStore:
         with self.db() as db:
             row=db.execute('SELECT * FROM jobs WHERE id=?',(job_id,)).fetchone()
             return dict(row) if row else None
+
+    def link_work_relation(self, job_id, related_job_id, relation_kind):
+        """Bind one Work to an earlier Work without copying either request."""
+        if relation_kind not in {'retry','reference','cancel','correction'}:
+            raise ValueError('작업 관계를 확인하세요.')
+        if not isinstance(job_id,str) or not isinstance(related_job_id,str) or job_id==related_job_id:
+            raise ValueError('연결할 작업을 확인하세요.')
+        with self.db() as db:
+            current=db.execute('SELECT id FROM jobs WHERE id=?',(job_id,)).fetchone()
+            related=db.execute('SELECT id FROM jobs WHERE id=?',(related_job_id,)).fetchone()
+            if not current or not related:
+                raise ValueError('연결할 작업을 찾을 수 없습니다.')
+            db.execute('UPDATE jobs SET relation_kind=?,related_job_id=? WHERE id=?',
+                       (relation_kind,related_job_id,job_id))
+        return {'relation_kind':relation_kind,'related_job_id':related_job_id}
 
     def notes(self):
         with self.db() as db:

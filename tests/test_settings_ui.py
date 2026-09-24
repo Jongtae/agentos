@@ -236,6 +236,11 @@ const press=async(id,label)=>{const button=buttons(id).find(node=>node.textConte
  await press('root-list','제거');await press('root-list','연결 해제');
  same(calls.pop().body,{paths:['/tmp/b/Notes','/tmp/c/New']},'remove drops exactly one folder');
  assert($('roots-feedback').textContent.includes('파일은 그대로'),'removal says files are untouched');
+ const blockedReason='인증 정보나 시스템 설정이 있는 폴더는 연결할 수 없습니다';
+ ctx.renderRootList([{path:'/tmp/blocked-a',blocked:blockedReason},{path:'/tmp/blocked-b',blocked:blockedReason},{path:'/tmp/ordinary'}]);
+ await press('root-list','제거');await press('root-list','연결 해제');
+ same(calls.pop().body,{paths:['/tmp/blocked-b','/tmp/ordinary']},'removing one blocked root keeps the other blocked root in the request');
+ ctx.renderRootList(['/tmp/b/Notes','/tmp/c/New']);
  $('root-path-input').value='/tmp/b/Notes/';const count=calls.length;
  await $('roots-form').onsubmit({preventDefault(){},submitter:new Element('button')});
  assert.equal(calls.length,count,'duplicate with trailing slash is not posted');

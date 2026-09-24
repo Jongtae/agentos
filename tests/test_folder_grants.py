@@ -149,8 +149,12 @@ class FolderGrantTests(unittest.TestCase):
         ssh, aws = self.home / '.ssh', self.home / '.aws'
         ssh.mkdir(); aws.mkdir()
         self.store.put('file_roots', [{'id': 'a', 'path': str(ssh)}, {'id': 'b', 'path': str(aws)}, {'id': 'c', 'path': str(self.docs)}])
+        roots = self.service.save_roots({'paths': [str(ssh), str(aws)]})['roots']
+        self.assertEqual([root['path'] for root in roots], [str(ssh), str(aws)], 'an ordinary folder can be removed while blocked roots remain')
+        roots = self.service.save_roots({'paths': [str(aws)]})['roots']
+        self.assertEqual([root['path'] for root in roots], [str(aws)], 'one blocked folder can be removed while another remains')
         roots = self.service.save_roots({'paths': [str(aws), str(self.docs)]})['roots']
-        self.assertEqual([root['path'] for root in roots], [str(aws), str(self.docs)], 'removing one blocked folder keeps the rest')
+        self.assertEqual([root['path'] for root in roots], [str(aws), str(self.docs)], 'the remaining blocked folder and an ordinary folder can be saved')
         self.assertEqual({root['path']: root['blocked'] for root in roots}[str(aws)], folder_grants.SENSITIVE, 'response discloses the block')
         roots = self.service.save_roots({'paths': [str(aws), str(self.docs), str(self.out)]})['roots']
         self.assertEqual(len(roots), 3, 'adding a folder works while a blocked one is still stored')
@@ -185,6 +189,20 @@ class FolderGrantTests(unittest.TestCase):
         moved.rmdir()
         moved.symlink_to(self.home / '.ssh', target_is_directory=True)
         self.assertEqual(Capabilities(self.store, None, {}, '', 'job', lambda *args: None).roots(), [])
+
+    def test_stored_folder_later_replaced_by_symlink_to_an_ordinary_folder_is_blocked(self):
+        moved = self.home / 'Documents' / 'Moved'
+        target = self.home / 'Documents' / 'Other'
+        moved.mkdir()
+        target.mkdir()
+        self.service.save_roots({'paths': [str(moved)]})
+        FileWorkspace(self.store).configure([str(moved)], str(self.out))
+        moved.rmdir()
+        moved.symlink_to(target, target_is_directory=True)
+
+        self.assertEqual(folder_grants.blocked(str(moved), self.store), folder_grants.SYMLINK_CHANGED)
+        self.assertEqual(Capabilities(self.store, None, {}, '', 'job', lambda *args: None).roots(), [])
+        self.assertEqual(FileWorkspace(self.store).active()['references'], [])
 
     def test_store_subfolder_and_icloud_drive_stay_allowed(self):
         acceptance = self.store.root / 'acceptance-documents'

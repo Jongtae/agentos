@@ -112,11 +112,13 @@ def blocked(stored_path, store):
     """
     try:
         supplied = Path(stored_path).expanduser()
-        if supplied.is_symlink():
+        if not supplied.is_absolute():
+            return UNAVAILABLE
+        if any(part.is_symlink() for part in (supplied, *supplied.parents)):
             return SYMLINK_CHANGED
         if not supplied.exists() or not supplied.is_dir():
             return UNAVAILABLE
-        path = supplied.resolve()
-    except (OSError, RuntimeError, TypeError):
+        path = supplied.resolve(strict=True)
+    except (OSError, RuntimeError, TypeError, ValueError):
         return UNAVAILABLE
     return refusal(path, store)

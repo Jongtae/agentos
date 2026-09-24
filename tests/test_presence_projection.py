@@ -7,6 +7,7 @@ underneath.  Evidence class: automated synthetic/fixture only.  The
 scripted model and fixture DecisionEngine stand in for providers; nothing
 here claims live behavior.
 """
+import json
 import tempfile
 import threading
 import time

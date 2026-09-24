@@ -160,7 +160,8 @@ class HandoffTests(unittest.TestCase):
         original_comment = gh.comment
         def escalate_after_receipt(number, marker, text):
             original_comment(number, marker, text)
-            gh.rows[number].review_required = True
+            if ":implementation:" in marker:
+                gh.rows[number].review_required = True
         gh.comment = escalate_after_receipt
         loop = StateHandoffLoop(gh, Path(self.temp.name) / "escalated-direct.json", executor)
         self.assertEqual(loop.tick("implementer")["action"], "review-escalation-required")

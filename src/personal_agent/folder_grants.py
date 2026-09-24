@@ -71,12 +71,12 @@ def _case_insensitive(path):
     return False
 
 
-def _related(path, path_chain, other):
+def _related(path, path_chain, other, case_insensitive):
     """True when path is other, lies inside it, or contains it (identity or case-folded name)."""
     other_id = _identity(other)
     if other_id and (other_id in path_chain or _identity(path) in _chain(other)):
         return True
-    if _case_insensitive(path):
+    if case_insensitive:
         mine = _folded(path)
         return any(mine.is_relative_to(form) or form.is_relative_to(mine) for form in {_folded(other), _folded(other.resolve())})
     return False
@@ -94,11 +94,12 @@ def refusal(path, store):
     home = Path.home().resolve()
     if own is None:
         return None
+    case_insensitive = _case_insensitive(path)
     if (own == _identity(Path('/')) or own == _identity(store.root) or own in _chain(home)
-            or (_case_insensitive(path) and _folded(home).is_relative_to(_folded(path)))
-            or _related(path, chain, store.private)):
+            or (case_insensitive and _folded(home).is_relative_to(_folded(path)))
+            or _related(path, chain, store.private, case_insensitive)):
         return BROAD
-    if any(_related(path, chain, item) for item in _sensitive_paths()):
+    if any(_related(path, chain, item, case_insensitive) for item in _sensitive_paths()):
         return SENSITIVE
     return None
 

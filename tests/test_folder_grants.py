@@ -161,6 +161,11 @@ class FolderGrantTests(unittest.TestCase):
         self.assertIsNone(folder_grants.blocked(str(alternate),self.store))
         self.assertEqual(self.service.save_roots({'paths':[str(alternate)]})['roots'][0]['path'],str(alternate))
 
+    def test_case_sensitivity_is_probed_once_per_validation(self):
+        with mock.patch.object(folder_grants,'_case_insensitive',wraps=folder_grants._case_insensitive) as probe:
+            folder_grants.validate(str(self.docs),self.store)
+        self.assertEqual(probe.call_count,1)
+
     def test_blocked_stored_roots_do_not_prevent_other_changes(self):
         ssh, aws = self.home / '.ssh', self.home / '.aws'
         ssh.mkdir(); aws.mkdir()

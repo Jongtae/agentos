@@ -10,7 +10,6 @@ replaced without changing what any previously supported utterance does; these
 tests are the evidence for what is new.
 """
 import itertools
-import re
 import tempfile
 import unittest
 
@@ -20,13 +19,11 @@ from personal_agent.conversation_handoff import (AUTHORITY_DEFAULT, AUTHORITY_OW
                                                  INTENT_CALENDAR_CREATE,
                                                  INTENT_CONVERSATION, INTENT_GREETING,
                                                  INTENT_KNOWLEDGE, INTENT_NOTE_CREATE,
-                                                 INTENT_NOTE_LIST, INTENT_RECOMMENDATION,
+                                                 INTENT_NOTE_LIST,
                                                  INTENT_RESEARCH, INTENT_SETTINGS,
-                                                 INTENT_WORKSPACE_SEARCH, JUDGMENT_UNAVAILABLE,
-                                                 ConversationFocus, ConversationJudgments,
+                                                 INTENT_WORKSPACE_SEARCH,
+                                                 ConversationFocus,
                                                  IntentClassifier)
-from personal_agent.decision import (OUTCOME_DECIDED, FixtureDecisionEngine, SelectionDecision,
-                                     fixture_confidence)
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService, workspace_search_request
 from personal_agent.quickstart_store import QuickStore
@@ -41,12 +38,6 @@ def classifier():
 #: utterance is allowed to reach.  The criterion asks for *representative*
 #: paraphrases, so no intent is carried by a single phrasing.
 PARAPHRASES = {
-    INTENT_RECOMMENDATION: (
-        ('전문가 조사에 연결할 만한 걸 알려줘', 'specialist-research'),
-        ('내 문서 조사에 뭘 연결하면 좋을까', 'private-document-research'),
-        ('which capability fits document research?', 'private-document-research'),
-        ('what should i connect for specialist research?', 'specialist-research'),
-    ),
     INTENT_KNOWLEDGE: (
         ('개인 공간에서 오로라 관련 자료 찾아줘', '오로라'),
         ('내 지식에서 예산 검토 알려줘', '예산 검토'),
@@ -135,7 +126,6 @@ class ExplicitFormTests(unittest.TestCase):
         cases = (
             ('/start', INTENT_GREETING, None),
             ('/help', INTENT_GREETING, None),
-            ('/recommend specialist-research', INTENT_RECOMMENDATION, 'specialist-research'),
             ('/knowledge aurora', INTENT_KNOWLEDGE, 'aurora'),
             ('/settings Drive pause', INTENT_SETTINGS, 'Drive pause'),
             ('/settings', INTENT_SETTINGS, '/settings'),
@@ -155,7 +145,8 @@ class ExplicitFormTests(unittest.TestCase):
 
     def test_an_unrecognised_slash_command_falls_through_instead_of_guessing(self):
         for text in ('/summarize', '/workspace-summary Aurora :: Launch notes',
-                     '/search AgentOS personal assistant verification', '/assistant Drive 검색: 예산'):
+                     '/search AgentOS personal assistant verification', '/assistant Drive 검색: 예산',
+                     '/recommend specialist-research'):
             with self.subTest(text=text):
                 decision = self.classifier.classify(text)
                 self.assertIn(decision.intent, (INTENT_CONVERSATION, INTENT_RESEARCH,
@@ -250,8 +241,7 @@ class ConsequentialEffectTests(unittest.TestCase):
 
     def test_a_recognised_intent_missing_its_subject_asks_instead_of_guessing(self):
         for text, intent in (('이거 메모해줘', INTENT_NOTE_CREATE),
-                             ('개인 공간 보여줘', INTENT_KNOWLEDGE),
-                             ('어떤 capability 연결하면 좋아?', INTENT_RECOMMENDATION)):
+                             ('개인 공간 보여줘', INTENT_KNOWLEDGE)):
             with self.subTest(text=text):
                 decision = self.classifier.classify(text)
                 self.assertEqual(decision.intent, intent)
@@ -432,23 +422,12 @@ class ServiceRoutingTests(unittest.TestCase):
         self.assertIn('금요일 출시 검토', self.run_one('메모 목록')['response'])
         self.assertIn('메모를 저장했습니다', self.run_one('기록: 오로라 예산')['response'])
         self.assertIn('오로라 예산', [row['content'] for row in self.store.notes()])
-        self.assertIn('Reviewed research peer',
-                      self.run_one('/recommend specialist-research')['response'])
 
     def test_the_explicit_settings_command_still_drafts_a_change(self):
         self.registry.transition('google-drive-read', 'enabled', ('read',))
         self.assertIn('Confirm ', self.run_one('/settings Drive pause')['response'])
 
     # -- the same capabilities, reached naturally ---------------------------
-    def test_recommendation_paraphrases_reach_the_reviewed_catalogue(self):
-        expected = {'specialist-research': 'Reviewed research peer',
-                    'private-document-research': 'Reviewed Drive search'}
-        for text, outcome in PARAPHRASES[INTENT_RECOMMENDATION]:
-            with self.subTest(text=text):
-                job = self.run_one(text)
-                self.assertEqual(job['status'], 'succeeded')
-                self.assertIn(expected[outcome], job['response'])
-
     def test_knowledge_paraphrases_reach_the_personal_space_orchestrator(self):
         for text, _query in PARAPHRASES[INTENT_KNOWLEDGE]:
             with self.subTest(text=text):
@@ -541,18 +520,20 @@ class ServiceRoutingTests(unittest.TestCase):
 
 
 
-class RecommendationCueNarrowingTests(unittest.TestCase):
-    """FU1-474 / #474: "추천" is an ordinary word, not a capability request.
-
-    Reproduces TEST-FIRST-USER-01 / #472 scenario A turn 35, where a travel
-    request containing 추천 was claimed by the capability-recommendation rule
-    and answered with the three internal outcome tags.  Whether a bare 추천
-    asks for a capability is a judgment (FU1-DEC-01 / #521): the placeholder
-    judges nothing, and a test double proves the seam is what decides.
-    """
+class RecommendationRoutingTests(unittest.TestCase):
+    """Retired mock capability recommendations never claim owner-usable availability."""
 
     TURN_35 = '10월에 제주 2박 3일 여행 가려는데 숙소랑 일정 추천해줘'
     INTERNAL_TAGS = ('private-document-research', 'specialist-research', 'local-specialist-processing')
+    LEGACY_CAPABILITY_ASKS = (
+        '전문가 조사에 연결할 만한 걸 알려줘',
+        '내 문서 조사에 뭘 연결하면 좋을까',
+        'which capability fits document research?',
+        'what should i connect for specialist research?',
+        '전문가 조사 추천해줘',
+        'capability 하나 추천해줘',
+        '/recommend specialist-research',
+    )
 
     MODEL_ROUTE_ERROR = ServiceRoutingTests.MODEL_ROUTE_ERROR
     run_one = ServiceRoutingTests.run_one
@@ -570,7 +551,6 @@ class RecommendationCueNarrowingTests(unittest.TestCase):
         for text in (self.TURN_35, '제주 맛집 추천해줘', '노이즈캔슬링 헤드폰 추천해줘',
                      '블루투스 연결 잘 되는 헤드폰 추천해줘', '세무 전문가 추천해줘',
                      'recommend a good hotel in jeju', 'any restaurant recommendation near gangnam?',
-                     # Everyday 연결/connector/integration/전문가 are not capability subjects.
                      '공항 연결 추천해줘', '제주 공항에서 숙소까지 연결 추천해줘', '블루투스 연결 하나 추천해줘',
                      'hdmi 커넥터 추천해줘', '세무 전문가 연결 하나 추천해줘', '전문가 연결 추천해줘',
                      'recommend a usb-c connector cable', 'recommend a good integration test framework'):
@@ -579,92 +559,27 @@ class RecommendationCueNarrowingTests(unittest.TestCase):
                 self.assertEqual(decision.intent, INTENT_CONVERSATION)
                 self.assertIsNone(decision.clarification)
 
-    def test_turn_35_reaches_the_same_route_as_the_scenario_b_itinerary_request(self):
-        # Scenario B turn 23 ("…일정 짜줘") reached research; turn 35 must too.
-        # No model is configured here, so reaching that route is observed as
-        # its distinct model-route failure rather than a recommendation reply.
+    def test_retired_capability_catalogue_asks_use_only_the_ordinary_model_route(self):
+        for text in self.LEGACY_CAPABILITY_ASKS:
+            with self.subTest(text=text):
+                decision = self.classifier.classify(text)
+                self.assertIn(decision.intent, (INTENT_CONVERSATION, INTENT_RESEARCH))
+                self.assertIsNone(decision.clarification)
+                self.assertNotIn(decision.intent, CONSEQUENTIAL_INTENTS)
+                job = self.run_one(text, channel='telegram:fixture', chat_id=7)
+                self.assertConversationRoute(job)
+                self.assertNoInternalTag(job.get('response'))
+                self.assertNoInternalTag(job.get('error'))
+        self.assertIsNone(self.store.config('capability_recommendation_audit'))
+
+    def test_turn_35_reaches_the_same_route_as_the_itinerary_request(self):
         for text in (self.TURN_35, '제주 2박 3일 여행 일정 짜줘'):
             with self.subTest(text=text):
                 job = self.run_one(text, channel='telegram:fixture', chat_id=7)
                 self.assertConversationRoute(job)
-                self.assertNoInternalTag(job['response'])
-                self.assertNoInternalTag(job['error'])
+                self.assertNoInternalTag(job.get('response'))
+                self.assertNoInternalTag(job.get('error'))
 
-    BARE_CAPABILITY_ASKS = (('전문가 조사 추천해줘', 'specialist-research'),
-                            ('내 문서 조사에 쓸 도구 추천해줘', 'private-document-research'),
-                            ('what would you recommend for deep research', 'specialist-research'),
-                            ('capability 하나 추천해줘', None))
-
-    def test_without_a_provider_no_bare_ask_is_judged_so_the_conversation_route_answers(self):
-        self.assertEqual(ConversationJudgments().capability_recommendation('전문가 조사 추천해줘').outcome,
-                         JUDGMENT_UNAVAILABLE)
-        for text, _outcome in self.BARE_CAPABILITY_ASKS:
-            with self.subTest(text=text):
-                # Research shares the conversation route.
-                decision = self.classifier.classify(text)
-                self.assertIn(decision.intent, (INTENT_CONVERSATION, INTENT_RESEARCH))
-                self.assertIsNone(decision.clarification)
-
-    def test_a_judged_capability_ask_reaches_the_rule_with_the_chosen_outcome(self):
-        # A fixture provider chooses the outcome; the classifier only checks
-        # it is one of the reviewed candidates.  No cue decides anything.
-        scripted = {'recommendation request specialist-research': 'specialist-research',
-                    'recommendation request private-document-research': 'private-document-research'}
-        engine = FixtureDecisionEngine(choose=lambda context, candidates, question: SelectionDecision(
-            OUTCOME_DECIDED, scripted.get(context.facts['owner_message'], 'none-of-these'),
-            candidates, fixture_confidence()))
-        judged = IntentClassifier(workspace_search=workspace_search_request,
-                                  judge=ConversationJudgments(engine))
-        for text, outcome in self.BARE_CAPABILITY_ASKS:
-            with self.subTest(text=text):
-                decision = judged.classify(text)
-                if outcome is None:
-                    # Chosen none-of-these: an ordinary answer, no clarification.
-                    self.assertIn(decision.intent, (INTENT_CONVERSATION, INTENT_RESEARCH))
-                else:
-                    self.assertEqual(decision.intent, INTENT_RECOMMENDATION)
-                    self.assertEqual(decision.argument, outcome)
-        self.assertEqual({item[0] for item in engine.asked}, {'choose'})
-
-    def test_specific_capability_cues_still_route_to_the_rule(self):
-        for text, outcome in (('전문가 조사에 연결할 만한 걸 알려줘', 'specialist-research'),
-                              ('what should i connect for specialist research?', 'specialist-research'),
-                              ('어떤 capability 연결하면 좋아?', None)):
-            with self.subTest(text=text):
-                decision = self.classifier.classify(text)
-                self.assertEqual(decision.intent, INTENT_RECOMMENDATION)
-                self.assertEqual(decision.argument, outcome)
-
-    def test_the_clarification_shows_no_internal_outcome_ids(self):
-        job = self.run_one('어떤 capability 연결하면 좋아?', channel='telegram:fixture', chat_id=7)
-        self.assertEqual(job['status'], 'succeeded')
-        self.assertIn('어떤 일에 쓸 연결을 추천할지', job['response'])
-        self.assertNoInternalTag(job['response'])
-
-    def test_an_executed_recommendation_names_its_outcome_without_the_internal_tag(self):
-        # The clarification's own examples, and the explicit /recommend form,
-        # execute; the reply the owner reads must not carry the tag either.
-        from personal_agent.conversation_handoff import RECOMMENDATION_CLARIFICATION
-        examples = re.findall(r'"([^"]+)"', RECOMMENDATION_CLARIFICATION)
-        for text in (*examples, '/recommend specialist-research'):
-            with self.subTest(text=text):
-                job = self.run_one(text, channel='telegram:fixture', chat_id=7)
-                self.assertEqual(job['status'], 'succeeded')
-                self.assertIn('에 맞는 추천', job['response'])
-                self.assertNoInternalTag(job['response'])
-
-    def test_every_clarification_example_resolves_to_exactly_one_reviewed_outcome(self):
-        from personal_agent.conversation_handoff import RECOMMENDATION_CLARIFICATION
-        examples = re.findall(r'"([^"]+)"', RECOMMENDATION_CLARIFICATION)
-        self.assertEqual(len(examples), 3)
-        outcomes = set()
-        for text in examples:
-            with self.subTest(text=text):
-                decision = self.classifier.classify(text)
-                self.assertEqual(decision.intent, INTENT_RECOMMENDATION)
-                self.assertTrue(decision.executes)
-                outcomes.add(decision.argument)
-        self.assertEqual(outcomes, set(self.INTERNAL_TAGS))
 
 if __name__ == '__main__':  # pragma: no cover
     unittest.main()

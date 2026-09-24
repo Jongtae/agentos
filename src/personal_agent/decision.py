@@ -24,15 +24,16 @@ from .providers import ProviderError, validate_model
 
 # --- outcomes ----------------------------------------------------------------
 OUTCOME_DECIDED = 'decided'
-OUTCOME_LOW_CONFIDENCE = 'low_confidence'
 OUTCOME_UNAVAILABLE = 'provider_unavailable'
 OUTCOME_TIMEOUT = 'timeout'
 OUTCOME_MALFORMED = 'malformed'
 OUTCOME_REJECTED = 'context_rejected'
 OUTCOME_CANCELLED = 'cancelled'
 
-NON_ANSWERS = frozenset({OUTCOME_LOW_CONFIDENCE, OUTCOME_UNAVAILABLE, OUTCOME_TIMEOUT,
-                         OUTCOME_MALFORMED, OUTCOME_REJECTED, OUTCOME_CANCELLED})
+#: Low confidence is not an engine outcome: a provider answers and reports
+#: its probability, and `DecisionPolicy` decides that the answer is unknown.
+NON_ANSWERS = frozenset({OUTCOME_UNAVAILABLE, OUTCOME_TIMEOUT, OUTCOME_MALFORMED,
+                         OUTCOME_REJECTED, OUTCOME_CANCELLED})
 
 #: A DecisionContext larger than this is rejected before any provider call.
 #: Decisions are bounded questions over a few attributable facts, not a
@@ -201,7 +202,12 @@ class DecisionPolicy:
     @staticmethod
     def _confident(decision, threshold):
         probability = decision.confidence.probability
-        return isinstance(probability, (int, float)) and probability >= threshold
+        return (isinstance(probability, (int, float)) and not isinstance(probability, bool)
+                and probability >= threshold)
+
+    def confident_selection(self, decision):
+        """True when a decided selection met the threshold (whatever was chosen)."""
+        return decision.decided and self._confident(decision, self.selection_threshold)
 
     def binary(self, decision):
         """'yes' / 'no' when decided with enough confidence, else 'unknown'."""
@@ -336,10 +342,16 @@ class ModelDecisionEngine(DecisionEngine):
         except (KeyError, TypeError, ValueError):
             return None
 
+    _ANSWER_FIELD = {'judge': 'answer', 'choose': 'choice', 'score': 'score'}
+
     def _done(self, context, kind, outcome, data, confidence, started):
         confidence.elapsed_seconds = round(self.now() - started, 3)
         if self.audit:
+            # The decided value is a bool, a declared candidate name or a
+            # number - never owner content.
+            answer = data.get(self._ANSWER_FIELD[kind]) if outcome == OUTCOME_DECIDED and isinstance(data, dict) else None
             self.audit({'at': self.now(), 'kind': kind, 'purpose': context.purpose, 'outcome': outcome,
+                        'answer': answer,
                         'confidence': confidence.probability, 'provider': confidence.provider,
                         'model': confidence.model, 'observed_model': confidence.observed_model,
                         'elapsed_seconds': confidence.elapsed_seconds})

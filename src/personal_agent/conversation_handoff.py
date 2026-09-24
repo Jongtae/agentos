@@ -357,8 +357,10 @@ class ConversationJudgments:
         choice = self.policy.selection(decision)
         if choice is not None:
             return Judgment(JUDGMENT_YES, value=choice, source=decision.confidence.provider or decision.outcome)
-        if decision.decided:
+        if self.policy.confident_selection(decision):
+            # A confident none-of-these: an ordinary request, answered as one.
             return Judgment(JUDGMENT_NO, source=decision.confidence.provider or decision.outcome)
+        # Undecided or not confident enough: unknown, like the withdrawal seam.
         return Judgment(JUDGMENT_UNAVAILABLE, source=decision.outcome)
 
 
@@ -455,12 +457,16 @@ class _Candidate:
 
 
 class IntentClassifier:
-    """Deterministic, AgentOS-owned routing for one owner utterance.
+    """AgentOS-owned routing for one owner utterance.
 
-    The class consults no model.  It reads the utterance against literal cue
-    tables declared above, and returns an :class:`IntentDecision` recording
-    which cues fired.  A capability is therefore never selected by anything
-    that cannot be re-derived and justified from the utterance alone.
+    Explicit forms and the literal cue tables above are read by AgentOS
+    code; the two semantic questions (bare-추천 capability requests here,
+    parked-request withdrawal in the service) are asked of the DecisionEngine
+    through ``judge`` and reduced by AgentOS policy (PRESENCE-DEC-01 / #417,
+    superseding PA1-CONV-01's "consults no model").  Every decision records
+    which cue or judgment produced it, and a model's answer can only select
+    among candidates AgentOS declared; it never mints an intent, argument or
+    authority of its own.
 
     ``workspace_search`` is injected rather than imported so that this module
     stays free of any dependency on the service that uses it.

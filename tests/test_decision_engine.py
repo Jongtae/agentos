@@ -11,8 +11,7 @@ import unittest
 from personal_agent.conversation_handoff import (JUDGMENT_NO, JUDGMENT_UNAVAILABLE, JUDGMENT_YES,
                                                  ConversationJudgments)
 from personal_agent.decision import (DEFAULT_DECISION_MODEL, MAX_CONTEXT_CHARS, NO_CANDIDATE,
-                                     OUTCOME_CANCELLED, OUTCOME_DECIDED, OUTCOME_LOW_CONFIDENCE,
-                                     OUTCOME_MALFORMED, OUTCOME_REJECTED, OUTCOME_TIMEOUT,
+                                     OUTCOME_CANCELLED, OUTCOME_DECIDED, OUTCOME_MALFORMED, OUTCOME_REJECTED, OUTCOME_TIMEOUT,
                                      OUTCOME_UNAVAILABLE, BinaryDecision, DecisionContext,
                                      DecisionPolicy, FixtureDecisionEngine, ModelDecisionEngine,
                                      ScoreDecision, SelectionDecision, UnavailableDecisionEngine,
@@ -92,8 +91,10 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(policy.binary(BinaryDecision(OUTCOME_DECIDED, True, fixture_confidence(0.6))), 'unknown')
         self.assertEqual(policy.binary(BinaryDecision(OUTCOME_DECIDED, True)), 'unknown', 'no probability is not confident')
         for outcome in (OUTCOME_UNAVAILABLE, OUTCOME_TIMEOUT, OUTCOME_MALFORMED, OUTCOME_REJECTED,
-                        OUTCOME_CANCELLED, OUTCOME_LOW_CONFIDENCE):
+                        OUTCOME_CANCELLED):
             self.assertEqual(policy.binary(BinaryDecision(outcome, True, fixture_confidence())), 'unknown', outcome)
+        self.assertEqual(policy.binary(BinaryDecision(OUTCOME_DECIDED, True, fixture_confidence(True))), 'unknown',
+                         'a boolean is not a probability')
 
     def test_selection_admits_only_a_declared_candidate(self):
         policy = DecisionPolicy(selection_threshold=0.6)
@@ -132,9 +133,10 @@ class ModelEngineTests(unittest.TestCase):
         self.assertIn('waiting_connection: Gmail', prompt)
         # The audit names outcome and identity, never reasoning text.
         self.assertEqual(audit[0]['outcome'], OUTCOME_DECIDED)
+        self.assertIs(audit[0]['answer'], True)
         self.assertEqual(audit[0]['observed_model'], 'gpt-4o-mini-2024-07-18')
-        self.assertEqual(set(audit[0]), {'at', 'kind', 'purpose', 'outcome', 'confidence', 'provider', 'model',
-                                         'observed_model', 'elapsed_seconds'})
+        self.assertEqual(set(audit[0]), {'at', 'kind', 'purpose', 'outcome', 'answer', 'confidence', 'provider',
+                                         'model', 'observed_model', 'elapsed_seconds'})
 
     def test_choose_and_score_validate_the_provider_answer_against_the_declared_range(self):
         transport = ScriptedTransport(openai_tool_reply({'choice': 'b', 'confidence': 0.7}),
@@ -175,6 +177,7 @@ class ModelEngineTests(unittest.TestCase):
                 self.assertIsNone(decision.answer)
                 self.assertEqual(policy.binary(decision), 'unknown')
                 self.assertEqual(audit[0]['outcome'], expected)
+                self.assertIsNone(audit[0]['answer'])
 
     def test_low_confidence_is_decided_by_the_provider_but_unknown_to_policy(self):
         engine, _audit = engine_for(ScriptedTransport(openai_tool_reply({'answer': True, 'confidence': 0.4})))
@@ -234,6 +237,9 @@ class ConversationJudgmentTests(unittest.TestCase):
         judged = ConversationJudgments(pick).capability_recommendation('전문가 조사 추천해줘')
         self.assertEqual((judged.outcome, judged.value), (JUDGMENT_YES, 'specialist-research'))
         self.assertEqual(ConversationJudgments(none).capability_recommendation('맛집 추천해줘').outcome, JUDGMENT_NO)
+        unsure = FixtureDecisionEngine(choose=lambda c, cands, q: SelectionDecision(OUTCOME_DECIDED, 'specialist-research', cands, fixture_confidence(0.2)))
+        self.assertEqual(ConversationJudgments(unsure).capability_recommendation('전문가 조사 추천해줘').outcome,
+                         JUDGMENT_UNAVAILABLE, 'not confident enough is unknown, not a confident no')
         self.assertEqual(ConversationJudgments().capability_recommendation('맛집 추천해줘').outcome, JUDGMENT_UNAVAILABLE)
         self.assertEqual(pick.asked[0][2], ('private-document-research', 'specialist-research', 'local-specialist-processing'))
 
@@ -276,7 +282,8 @@ class ServiceRouteTests(unittest.TestCase):
         self.assertEqual((config['model'], key), ('small', 'rk-1'))
         self.assertEqual(self.service.decision_route_status()['source'], 'explicit')
         self.store.put('decision_model', {'provider': 'ollama', 'endpoint': 'http://127.0.0.1:11434', 'model': 'local'})
-        self.assertEqual(self.service.decision_route()[0]['provider'], 'ollama', 'a local provider needs no key')
+        self.assertEqual(self.service.decision_route(), ({'provider': 'ollama', 'endpoint': 'http://127.0.0.1:11434', 'model': 'local'}, ''),
+                         'a local provider needs no key, and the earlier explicit key must not travel to it')
         self.store.put('decision_model', {'provider': 'openai', 'endpoint': 'https://elsewhere.test', 'model': 'x'})
         self.assertIsNone(self.service.decision_route(), 'an invalid configuration is unavailable, not guessed')
 

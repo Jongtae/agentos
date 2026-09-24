@@ -367,9 +367,11 @@ class AgentService:
         if isinstance(explicit,dict) and explicit.get('provider'):
             try:config=validate_model(explicit)
             except ValueError:return None
+            # A local provider gets no key: a key left over from an earlier
+            # explicit provider must not travel to a different host.
+            if config['provider']=='ollama':return config,''
             key=self.store.secret('decision_model_key') or ''
-            if config['provider']!='ollama' and not key:return None
-            return config,key
+            return (config,key) if key else None
         main=self.store.config('model',{})
         key=self.store.secret('model_key') if isinstance(main,dict) and main.get('provider')=='openai' else ''
         return (dict(DEFAULT_DECISION_PROVIDER),key) if key else None
@@ -384,8 +386,9 @@ class AgentService:
                 'source':'explicit' if isinstance(explicit,dict) and explicit.get('provider') else 'default-openai'}
 
     def record_decision(self, record):
-        rows=self.store.config('decision_audit',[]);rows=rows if isinstance(rows,list) else []
-        self.store.put('decision_audit',[*rows,record][-100:])
+        with self.lock:  # read-modify-write of one config row
+            rows=self.store.config('decision_audit',[]);rows=rows if isinstance(rows,list) else []
+            self.store.put('decision_audit',[*rows,record][-100:])
 
     def use_decision_engine(self, engine):
         """Replace the engine behind both consumers (tests, later providers)."""
@@ -396,12 +399,14 @@ class AgentService:
     def classify_intent(self, prompt, model_suggestion=None, calendar_pending=None, owner_id=None):
         """Decide where one owner utterance goes, before anything is invoked.
 
-        The decision is AgentOS's.  No model is consulted to produce it, and
-        the conversation never routes on a model's opinion of what the owner
-        meant.  ``model_suggestion`` exists so that if a later unit ever does
-        obtain one, there is exactly one constrained way in - it may narrow an
-        ambiguity AgentOS already found and nothing else.  No call site in
-        this service supplies one.
+        The decision is AgentOS's.  Since PRESENCE-DEC-01 / #417 two semantic
+        questions are asked of the configured DecisionEngine (bare-추천
+        capability requests; parked-request withdrawal in `run_one`), and a
+        provider's answer can only select among candidates AgentOS declared,
+        under AgentOS thresholds; it never mints an intent, argument or
+        authority.  ``model_suggestion`` remains the one constrained way a
+        free-form model opinion could narrow an ambiguity AgentOS already
+        found.  No call site in this service supplies one.
 
         ``calendar_pending`` is content free: only *that* a calendar draft is
         waiting reaches the classifier, never what it says.
@@ -1920,8 +1925,9 @@ class AgentService:
                 owner_memory_approval=self.store.issue_memory_approval(job['id'],prompt) if self.explicit_memory_request(prompt) else None
                 # Routing decision, made by AgentOS before any capability is
                 # touched.  `decision.authority` records whether the owner
-                # said it literally or an AgentOS cue rule derived it; there
-                # is no branch here that a model can reach.
+                # said it literally or an AgentOS rule derived it; a
+                # DecisionEngine answer can only pick among AgentOS-declared
+                # candidates (#417) and reaches no other branch here.
                 # The owner is resolved first: a pending draft belongs to one
                 # connector identity, so whether one is pending is a question
                 # about this Work's owner and not about the install.

@@ -9,10 +9,10 @@
 #
 # This template exists so the relationship is traceable FROM this repository.
 # Before it, the only links were a prose URL in QUICKSTART.md and a Python
-# default in src/personal_agent/delivery.py.
+# default in scripts/dev/delivery.py.
 #
 # THIS FILE IS A REFERENCE COPY, NOT A RENDER SOURCE. Nothing reads it.
-# The release path (`delivery.py:406-408`) clones the tap and rewrites the two
+# The release path (`scripts/dev/delivery.py`) clones the tap and rewrites the two
 # lines of the *existing* Formula/agentos.rb with two `re.sub` calls. Do not
 # paste this file into the tap: this header describes in-repo test invariants
 # that are false and meaningless once published.

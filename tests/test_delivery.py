@@ -63,6 +63,21 @@ class DeliveryTests(unittest.TestCase):
         (self.root/'delivery-plan.yaml').write_text(json.dumps(plan))
 
 
+    def test_active_presence_validations_do_not_require_removed_packaged_plan(self):
+        plan=json.loads((self.root/'delivery-plan.yaml').read_text())
+        retired_mirror='src/personal_agent/delivery-plan.yaml'
+        remaining={
+            'PRESENCE-01','PRESENCE-CONT-01','PRESENCE-INTEGRITY-01',
+            'PRESENCE-CAP-01','PRESENCE-SETTINGS-01',
+            'PRESENCE-EVAL-01','PRESENCE-README-01',
+        }
+        for item in plan['iterations']:
+            if item['id'] in remaining:
+                with self.subTest(iteration=item['id']):
+                    commands=[*(item.get('tests') or []),*(item.get('release_validation') or []),
+                              *(item.get('automated_evidence') or [])]
+                    self.assertFalse(any(retired_mirror in command for command in commands))
+
     def test_only_explicit_owner_activated_goal_can_be_selected(self):
         altered=self._arm(json.loads((self.root/'delivery-plan.yaml').read_text()), 'GOV-01')
         altered['next_goal']={'id':'GOV-01','status':'active'}

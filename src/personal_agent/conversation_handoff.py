@@ -252,12 +252,6 @@ _CORRECTION_CUES = ('아니', '아니라', '그게 아니라', '말고', '대신
 _CONTINUATION_CUES = ('계속', '이어서', '계속해', '더 해줘', '그대로',
                       'continue', 'go on', 'keep going', 'same thing', 'carry on')
 
-# Privacy/latency prefilter only: these cues decide only whether AgentOS asks
-# the semantic continuity question. They never select or authorize a relation.
-_FOLLOWUP_HINTS = ('다시', '그거', '그걸', '그건', '그 요청', '방금', '아까', '취소',
-                   'retry', 'again', 'that', 'it', 'cancel', 'previous', 'last request')
-
-
 def _cue_hits(text, lowered, cues):
     """Return the literal cues present in one utterance, in table order."""
     hits = []
@@ -270,15 +264,14 @@ def _cue_hits(text, lowered, cues):
     return hits
 
 
-def looks_like_followup(text):
-    """Whether a short utterance is worth a bounded continuity judgment."""
-    if not isinstance(text, str):
-        return False
-    value = text.strip()
-    if not value or len(value) > 240:
-        return False
-    lowered = value.casefold()
-    return bool(_cue_hits(value, lowered, (*_FOLLOWUP_HINTS, *_CORRECTION_CUES, *_CONTINUATION_CUES)))
+def eligible_for_followup_judgment(text):
+    """Structural gate for asking the semantic continuity question.
+
+    This does not inspect retry/cancel/reference words. It only bounds the
+    extra decision-model call to a non-empty, short follow-up-sized utterance;
+    the provider-neutral DecisionEngine decides whether any relation exists.
+    """
+    return isinstance(text, str) and 0 < len(text.strip()) <= 240
 
 
 def _trim_particle(token):

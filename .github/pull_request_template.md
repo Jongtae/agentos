@@ -15,7 +15,21 @@ Relevant [Development Constitution](../docs/development-constitution.en.md) prin
 
 ## Existing solutions review (Adopt / Adapt / Build)
 
-For material commodity infrastructure introduced/replaced by this PR, record official/reference and mature OSS candidates, maintenance/security/licence/compatibility fit, the `Adopt / Adapt / Build` decision, and why rejected candidates are insufficient. Otherwise write `N/A`.
+Required before non-trivial implementation that introduces or replaces a component, abstraction, integration, dependency, framework, or commodity infrastructure. Start with internal repository reuse. For a pure bug fix/data/content change that introduces none of those, set the decision to `N/A` and give a concrete reason.
+
+- problem/boundary:
+- internal repository candidates:
+- search evidence (paths/symbols/docs checked):
+- standard-library/platform candidates:
+- official SDK/reference/standard candidates:
+- mature open-source/framework candidates:
+- maintenance/security/supply-chain fit:
+- licence fit:
+- runtime/deployment/compatibility fit:
+- decision: `Adopt / Adapt / Build / N/A`
+- why rejected candidates are insufficient:
+- AgentOS-owned policy/authority boundary kept outside the dependency:
+- N/A reason:
 
 ## Authority / threat model
 

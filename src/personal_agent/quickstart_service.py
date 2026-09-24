@@ -22,7 +22,6 @@ from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, Bounded
 from .isolated_engine_gateway import EngineGatewayError
 from .isolated_mcp_proxy import IsolatedMcpProxy, TaskCapabilityRegistry
 from .settings_orchestrator import SettingsOrchestrator, SettingsError
-from .capability_recommendations import CapabilityRecommendationOrchestrator
 from .personal_knowledge import PersonalKnowledgeOrchestrator
 from .memory_service import MemoryService
 from .file_workspace import FileWorkspace
@@ -30,14 +29,14 @@ from .connector_contract import ConnectorContractError, _owner_key
 from .gmail import GMAIL_CONNECTOR_ID, GmailError
 from .calendar import CALENDAR_CONNECTOR_ID, CALENDAR_WRITE_CONNECTOR_ID, CalendarError
 from .calendar_conversation import DROPPED_NOTICE as CALENDAR_DROPPED_NOTICE, CalendarConversation
-from .conversation_handoff import (CONNECTOR_LABELS, JUDGMENT_YES, RECOMMENDATION_OUTCOME_LABELS,
+from .conversation_handoff import (CONNECTOR_LABELS, JUDGMENT_YES,
                                    ConversationJudgments, TelegramChannel, ConnectorHandoff,
                                    ConversationFocus,
                                    ConversationHandoffError, IntentClassifier,
                                    INTENT_AMBIGUOUS, INTENT_CALENDAR_CREATE,
                                    INTENT_GREETING, INTENT_KNOWLEDGE,
                                    INTENT_MAIL_SEARCH, INTENT_NOTE_CREATE, INTENT_NOTE_LIST,
-                                   INTENT_RECOMMENDATION, INTENT_SETTINGS,
+                                   INTENT_SETTINGS,
                                    INTENT_WORKSPACE_SEARCH, SUPERSEDED_WORK_ERROR)
 
 LOG=logging.getLogger('personal_agent.service')
@@ -193,7 +192,6 @@ class AgentService:
         self.isolated_mcp_registry=isolated_mcp_registry or TaskCapabilityRegistry()
         self.isolated_mcp_proxy=IsolatedMcpProxy(self.isolated_mcp_registry)
         self.settings_orchestrator=SettingsOrchestrator(store)
-        self.recommendation_orchestrator=CapabilityRecommendationOrchestrator(store)
         self.personal_knowledge_orchestrator=PersonalKnowledgeOrchestrator(store)
         # Routing authority.  The classifier reads literal cue tables, never a
         # model, and the focus record it feeds is content free.
@@ -267,10 +265,6 @@ class AgentService:
         if operation == 'text':
             return self.settings_orchestrator.handle_text(owner_id, channel, body.get('text'))
         raise ValueError('검토된 설정 요청을 확인하세요.')
-
-    def capability_recommendation_request(self, body, owner_id='local-owner', channel='http'):
-        if not isinstance(body,dict) or body.get('operation','recommend')!='recommend': raise ValueError('검토된 capability 추천 요청을 확인하세요.')
-        return self.recommendation_orchestrator.recommend(owner_id,body.get('outcome'))
 
     def personal_knowledge_request(self, body, owner_id='local-owner', channel='http'):
         if not isinstance(body,dict) or body.get('operation','retrieve')!='retrieve':
@@ -414,7 +408,6 @@ class AgentService:
             return {'model':model,'has_api_key':bool(self.store.secret('model_key')),
                     'decision_model':self.decision_route_status(),
                     'conversation_settings':self.settings_orchestrator.read('local-owner'),
-                    'capability_recommendations':self.store.config('capability_recommendation_audit',[])[-20:],
                     'subscription_engines':self.subscription_engine_status(),
                     'subscription_execution':{'mode':'isolated-agentos-mcp','tools':['list_notes']} if self.isolated_engine_adapter else {'mode':'bounded-agentos-mcp','tools':['list_notes','save_note','web_search']},
                     'telegram':{'enabled':tg.get('enabled',False),'mode':tg.get('mode','owner-token'),'username':tg.get('username',''),'paired':bool(tg.get('user_id')),'user_id':tg.get('user_id')},
@@ -2064,12 +2057,6 @@ class AgentService:
                     response=decision.clarification
                 elif decision.intent==INTENT_GREETING:
                     response='개인 AgentOS에 연결되었습니다. 하고 싶은 일을 자연스럽게 적어 주세요. 웹과 Telegram은 같은 대화 기록을 사용합니다.'
-                elif decision.intent==INTENT_RECOMMENDATION:
-                    result=self.capability_recommendation_request({'outcome':decision.argument},owner_id=owner,channel=job['channel'])
-                    # The read model keeps its declared-outcome reason; the owner reads
-                    # the outcome's Korean name, never the internal tag (#474).
-                    label=RECOMMENDATION_OUTCOME_LABELS.get(result['outcome'],'검토된 결과 유형')
-                    response='\n'.join(f"{row['name']} · {label}에 맞는 추천 · {row['approval_handoff']}" for row in result['recommendations']) or '검토된 추천이 없습니다.'
                 elif decision.intent==INTENT_KNOWLEDGE:
                     result=self.personal_knowledge_request({'query':decision.argument}, owner_id=owner, channel=job['channel'])
                     response='\n'.join(f"{row['source']} · {row['excerpt']}" for row in result.get('results',[])) or result['response']

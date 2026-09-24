@@ -111,7 +111,6 @@ import time
 from .decision import DecisionContext, DecisionPolicy, UnavailableDecisionEngine
 
 INTENT_GREETING = 'greeting'
-INTENT_RECOMMENDATION = 'capability-recommendation'
 INTENT_KNOWLEDGE = 'personal-knowledge'
 INTENT_SETTINGS = 'settings'
 INTENT_WORKSPACE_SEARCH = 'workspace-search'
@@ -147,7 +146,6 @@ DEFAULT_ROUTE_INTENTS = frozenset({INTENT_CONVERSATION, INTENT_RESEARCH})
 CONTINUABLE_INTENTS = frozenset({INTENT_CONVERSATION, INTENT_RESEARCH})
 
 INTENT_LABELS = {
-    INTENT_RECOMMENDATION: '검토된 capability 추천',
     INTENT_KNOWLEDGE: '개인 공간 검색',
     INTENT_SETTINGS: '연결 설정 확인/변경',
     INTENT_WORKSPACE_SEARCH: '저장한 작업공간 결과 찾기',
@@ -179,26 +177,6 @@ UNSUPPORTED_CAPABILITY_TEXT = {
 # Every cue below is a literal an owner can read and an independent reviewer
 # can audit.  Korean cues match as substrings; ASCII cues match on word
 # boundaries so that "note" does not fire inside "notebook".
-
-_RECOMMENDATION_CUES = ('연결할 만한', '뭘 연결', '무엇을 연결', '어떤 걸 붙이', '어떤 capability',
-                        'what should i connect', 'which capability',
-                        'suggest a capability', 'suggest capabilities')
-_RECOMMENDATION_JUDGMENT_CUES = ('추천', 'recommend', 'suggest')
-# The bare words 추천 / recommend are deliberately not cues: 숙소 추천, 맛집
-# 추천 and recommend a hotel are ordinary requests (#474).  Whether a bare
-# "…추천해줘" asks for a capability is a semantic judgment, so it is asked of
-# ``DecisionJudge.capability_recommendation`` rather than of a cue list.
-# The recommendation orchestrator accepts only its three reviewed outcome
-# tags.  Mapping ordinary words onto a reviewed tag is AgentOS policy; the
-# orchestrator is never handed free prose.
-_RECOMMENDATION_OUTCOMES = (
-    ('private-document-research', ('문서 조사', '자료 조사', '문서 연구', '내 문서', '내 자료',
-                                   'document research', 'research my documents', 'my documents')),
-    ('specialist-research', ('전문가', '전문 조사', '리서치 전문', '심층 조사',
-                             'specialist', 'expert research', 'deep research')),
-    ('local-specialist-processing', ('로컬 처리', '내 컴퓨터에서', '기기 안에서',
-                                     'local processing', 'on-device', 'run locally')),
-)
 
 _KNOWLEDGE_CUES = ('개인 공간', '내 지식', '내가 저장해 둔', '내가 적어둔', '내 기록에서',
                    'personal space', 'my knowledge', 'knowledge base', 'what do i know about')
@@ -315,8 +293,8 @@ def _strip_noise(value):
 
 # --- Semantic judgments (PRESENCE-DEC-01 / #417) ----------------------------
 # Some routing questions are semantic, not lexical: "does this turn withdraw
-# the request that is waiting for a connection?", "is this bare 추천 asking
-# for a capability?".  They are asked of the provider-neutral DecisionEngine
+# the request that is waiting for a connection?" and "does this mail-shaped
+# request ask for an unsupported action?". They are asked of the provider-neutral DecisionEngine
 # (decision.py, docs/decision-layer.en.md) and reduced to a three-valued
 # result by AgentOS policy.  Anything the engine cannot answer stays
 # ``unavailable`` and policy takes its declared fallback; no cue list or
@@ -338,11 +316,6 @@ UNSUPPORTED_JUDGMENT_UNAVAILABLE = ('요청을 안전하게 구분할 판단 기
                                    '메일을 찾으려는 요청이라면 검색할 내용을 다시 구체적으로 적어 주세요.')
 MIXED_MAIL_ACTION_CLARIFICATION = ('지원하지 않는 메일 발송 요청과 다른 작업이 함께 있어 아무 작업도 실행하지 않았습니다. '
                                    '메일은 보내지 않으며, 나머지 작업만 따로 요청해 주세요.')
-RECOMMENDATION_QUESTION = ('Is the owner asking this assistant to recommend an assistant capability or '
-                           'connection to add? If so, which reviewed outcome fits; otherwise choose '
-                           'none-of-these (an ordinary product, place, person or travel recommendation '
-                           'is none-of-these).')
-
 
 class Judgment:
     """One bounded judgment reduced by policy.  It informs routing; it never authorizes."""
@@ -393,20 +366,7 @@ class ConversationJudgments:
             return Judgment(JUDGMENT_NO, source=decision.confidence.provider or decision.outcome)
         return Judgment(JUDGMENT_UNAVAILABLE, source=decision.outcome)
 
-    def capability_recommendation(self, utterance):
-        """Does ``utterance`` ask for a capability recommendation, and for
-        which reviewed outcome?  ``value`` is the outcome tag on yes."""
-        context = DecisionContext('capability-recommendation', {'owner_message': utterance})
-        candidates = tuple(tag for tag, _words in _RECOMMENDATION_OUTCOMES)
-        decision = self.engine.choose(context, candidates, RECOMMENDATION_QUESTION)
-        choice = self.policy.selection(decision)
-        if choice is not None:
-            return Judgment(JUDGMENT_YES, value=choice, source=decision.confidence.provider or decision.outcome)
-        if self.policy.confident_selection(decision):
-            # A confident none-of-these: an ordinary request, answered as one.
-            return Judgment(JUDGMENT_NO, source=decision.confidence.provider or decision.outcome)
-        # Undecided or not confident enough: unknown, like the withdrawal seam.
-        return Judgment(JUDGMENT_UNAVAILABLE, source=decision.outcome)
+
 
 
 class IntentDecision:
@@ -474,18 +434,6 @@ _QUOTED = re.compile(r'["“]([^"”]{2,160})["”]')
 AMBIGUOUS_PREFIX = '이 요청이 '
 AMBIGUOUS_SUFFIX = (' 중 무엇인지 확실하지 않아 아무 작업도 실행하지 않았습니다. '
                     '하나만 골라 다시 말씀해 주세요.')
-# Each example below is a complete utterance the recommendation rule resolves
-# to exactly one reviewed outcome, so the owner can repeat it as written.  The
-# outcome tags themselves are internal and never shown.
-RECOMMENDATION_CLARIFICATION = ('어떤 일에 쓸 연결을 추천할지 알려 주세요. 예: "내 문서 조사에 연결할 만한 걸 알려줘", '
-                                '"전문가 조사에 연결할 만한 걸 알려줘", "내 컴퓨터에서 로컬 처리에 연결할 만한 걸 알려줘".')
-#: Owner-facing names for the three reviewed outcome tags.  An executed
-#: recommendation names its outcome with these, never with the tag.
-RECOMMENDATION_OUTCOME_LABELS = {
-    'private-document-research': '내 문서 조사',
-    'specialist-research': '전문가 조사',
-    'local-specialist-processing': '내 컴퓨터에서 로컬 처리',
-}
 SETTINGS_READ_FORM = '/settings'
 KNOWLEDGE_CLARIFICATION = '개인 공간에서 무엇을 찾을지 두 글자 이상으로 알려 주세요.'
 NOTE_CLARIFICATION = '무엇을 기록할지 내용을 함께 적어 주세요.'
@@ -505,8 +453,8 @@ class IntentClassifier:
     """AgentOS-owned routing for one owner utterance.
 
     Explicit forms and the literal cue tables above are read by AgentOS
-    code; the two semantic questions (bare-추천 capability requests here,
-    parked-request withdrawal in the service) are asked of the DecisionEngine
+    code; semantic boundary questions such as parked-request withdrawal and
+    unsupported mail actions are asked of the DecisionEngine
     through ``judge`` and reduced by AgentOS policy (PRESENCE-DEC-01 / #417,
     superseding PA1-CONV-01's "consults no model").  Every decision records
     which cue or judgment produced it, and a model's answer can only select
@@ -522,14 +470,12 @@ class IntentClassifier:
         self._judge = judge or ConversationJudgments()
 
     # -- owner-explicit forms ------------------------------------------------
-    # Slash commands and the legacy Korean colon forms are no longer the
-    # *required* entry path, but they remain exactly as authoritative as they
-    # were.  An owner who learned them keeps them.
+    # Supported slash commands and the legacy Korean colon forms are no longer
+    # the *required* entry path, but they remain owner-authoritative. Retired
+    # compatibility commands deliberately fall through to ordinary routing.
     def explicit(self, text):
         if text in ('/start', '/help'):
             return IntentDecision(INTENT_GREETING, AUTHORITY_OWNER)
-        if text.startswith('/recommend '):
-            return IntentDecision(INTENT_RECOMMENDATION, AUTHORITY_OWNER, argument=text[len('/recommend '):].strip())
         if text.startswith('/knowledge '):
             return IntentDecision(INTENT_KNOWLEDGE, AUTHORITY_OWNER, argument=text[len('/knowledge '):].strip())
         if text.startswith('/settings '):
@@ -545,28 +491,6 @@ class IntentClassifier:
         return None
 
     # -- natural-language rules ---------------------------------------------
-    def _rule_recommendation(self, text, lowered):
-        cues = _cue_hits(text, lowered, _RECOMMENDATION_CUES)
-        if not cues:
-            if not _cue_hits(text, lowered, _RECOMMENDATION_JUDGMENT_CUES):
-                return None
-            # Only taxonomy labels leave the process. The free-form owner
-            # utterance may contain private context unrelated to the request.
-            outcomes = tuple(tag for tag, words in _RECOMMENDATION_OUTCOMES
-                             if _cue_hits(text, lowered, words))
-            summary = 'recommendation request ' + (' '.join(outcomes) if outcomes else 'ordinary-or-unspecified')
-            judgment = self._judge.capability_recommendation(summary)
-            if judgment.outcome != JUDGMENT_YES:
-                return None
-            # The engine chose among the reviewed outcomes; policy already
-            # checked the choice is one of them.
-            return _Candidate(INTENT_RECOMMENDATION, judgment.value, ('judgment:capability-recommendation',))
-        matched = [(tag, hits) for tag, words in _RECOMMENDATION_OUTCOMES
-                   if (hits := _cue_hits(text, lowered, words))]
-        if len(matched) != 1:
-            return _Candidate(INTENT_RECOMMENDATION, None, cues, RECOMMENDATION_CLARIFICATION)
-        return _Candidate(INTENT_RECOMMENDATION, matched[0][0], (*cues, *matched[0][1]))
-
     def _rule_knowledge(self, text, lowered):
         cues = _cue_hits(text, lowered, _KNOWLEDGE_CUES)
         if not cues:
@@ -686,7 +610,7 @@ class IntentClassifier:
 
         correction = _cue_hits(text, lowered, _CORRECTION_CUES)
         candidates = []
-        for rule in (self._rule_recommendation, self._rule_knowledge, self._rule_settings,
+        for rule in (self._rule_knowledge, self._rule_settings,
                      self._rule_workspace, self._rule_note, self._rule_calendar,
                      self._rule_mail):
             found = rule(text, lowered)

@@ -231,17 +231,21 @@ class ConversationJudgmentTests(unittest.TestCase):
         self.assertEqual(set(context.facts), {'waiting_connection', 'owner_message'})
         self.assertEqual(context.facts['owner_message'], '취소')
 
-    def test_recommendation_yields_a_reviewed_outcome_or_no(self):
-        pick = FixtureDecisionEngine(choose=lambda c, cands, q: SelectionDecision(OUTCOME_DECIDED, 'specialist-research', cands, fixture_confidence()))
-        none = FixtureDecisionEngine(choose=lambda c, cands, q: SelectionDecision(OUTCOME_DECIDED, NO_CANDIDATE, cands, fixture_confidence()))
-        judged = ConversationJudgments(pick).capability_recommendation('전문가 조사 추천해줘')
-        self.assertEqual((judged.outcome, judged.value), (JUDGMENT_YES, 'specialist-research'))
-        self.assertEqual(ConversationJudgments(none).capability_recommendation('맛집 추천해줘').outcome, JUDGMENT_NO)
-        unsure = FixtureDecisionEngine(choose=lambda c, cands, q: SelectionDecision(OUTCOME_DECIDED, 'specialist-research', cands, fixture_confidence(0.2)))
-        self.assertEqual(ConversationJudgments(unsure).capability_recommendation('전문가 조사 추천해줘').outcome,
+    def test_unsupported_capability_yields_a_declared_boundary_or_no(self):
+        pick = FixtureDecisionEngine(choose=lambda c, cands, q: SelectionDecision(
+            OUTCOME_DECIDED, 'mail-send', cands, fixture_confidence()))
+        none = FixtureDecisionEngine(choose=lambda c, cands, q: SelectionDecision(
+            OUTCOME_DECIDED, NO_CANDIDATE, cands, fixture_confidence()))
+        judged = ConversationJudgments(pick).unsupported_capability('메일 보내기')
+        self.assertEqual((judged.outcome, judged.value), (JUDGMENT_YES, 'mail-send'))
+        self.assertEqual(ConversationJudgments(none).unsupported_capability('최근 메일 검색').outcome, JUDGMENT_NO)
+        unsure = FixtureDecisionEngine(choose=lambda c, cands, q: SelectionDecision(
+            OUTCOME_DECIDED, 'mail-send', cands, fixture_confidence(0.2)))
+        self.assertEqual(ConversationJudgments(unsure).unsupported_capability('메일 보내기').outcome,
                          JUDGMENT_UNAVAILABLE, 'not confident enough is unknown, not a confident no')
-        self.assertEqual(ConversationJudgments().capability_recommendation('맛집 추천해줘').outcome, JUDGMENT_UNAVAILABLE)
-        self.assertEqual(pick.asked[0][2], ('private-document-research', 'specialist-research', 'local-specialist-processing'))
+        self.assertEqual(ConversationJudgments().unsupported_capability('메일 보내기').outcome,
+                         JUDGMENT_UNAVAILABLE)
+        self.assertEqual(pick.asked[0][2], ('mail-read-body', 'mail-send'))
 
 
 class ServiceRouteTests(unittest.TestCase):
@@ -291,7 +295,7 @@ class ServiceRouteTests(unittest.TestCase):
         fixture = FixtureDecisionEngine()
         self.service.use_decision_engine(fixture)
         self.assertIs(self.service.decision_judge.engine, fixture)
-        self.service.classify_intent('전문가 조사 추천해줘')
+        self.service.classify_intent('메일 보내줘')
         self.assertEqual(fixture.asked[0][0], 'choose')
 
 

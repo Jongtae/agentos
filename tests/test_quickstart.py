@@ -127,6 +127,26 @@ class QuickstartTests(unittest.TestCase):
         finally:
             server.shutdown();thread.join();server.server_close()
 
+    def test_retired_capability_recommendation_http_surface_is_not_exposed(self):
+        self.store.claim(self.store.bootstrap.read_text(),'long-password-test')
+        server=ThreadingHTTPServer(('127.0.0.1',0),make_handler(self.service))
+        thread=threading.Thread(target=server.serve_forever);thread.start()
+        client=build_opener(HTTPCookieProcessor(CookieJar()));url='http://127.0.0.1:'+str(server.server_port)
+        def request(path,body):
+            req=Request(url+path,data=json.dumps(body).encode(),headers={'Content-Type':'application/json'})
+            with client.open(req,timeout=3) as response:return json.load(response)
+        try:
+            with self.assertRaises(HTTPError) as error:
+                request('/api/capability-recommendations',{'outcome':'specialist-research'})
+            self.assertEqual(error.exception.code,401)
+            request('/api/login',{'password':'long-password-test'})
+            with self.assertRaises(HTTPError) as error:
+                request('/api/capability-recommendations',{'outcome':'specialist-research'})
+            self.assertEqual(error.exception.code,404)
+            self.assertIsNone(self.store.config('capability_recommendation_audit'))
+        finally:
+            server.shutdown();thread.join();server.server_close()
+
     def test_authenticated_local_companion_knowledge_route_uses_owner_local_policy(self):
         self.store.claim(self.store.bootstrap.read_text(),'long-password-test')
         with self.store.db() as db:

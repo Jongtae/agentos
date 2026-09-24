@@ -601,7 +601,6 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 return self.reply(200,service.task_progress(path.rsplit('/',1)[-1]))
             if path=='/api/capabilities':return self.reply(200,{'capabilities':CapabilityRegistry(store).list()})
             if path=='/api/settings':return self.reply(200,service.conversation_settings_request({'operation':'read'}))
-            if path=='/api/capability-recommendations':return self.reply(200,service.capability_recommendation_request({'outcome':parse_qs(parts.query).get('outcome',[''])[0]}))
             if path=='/api/personal-knowledge':return self.reply(200,service.personal_knowledge_request({'query':parse_qs(parts.query).get('query',[''])[0]}, channel='local-companion'))
             if path=='/api/personal-space/memory-candidates':
                 return self.reply(200,service.memory_candidate_request({'operation':'list'}))
@@ -721,7 +720,6 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 if path=='/api/context-inbox/share-policy':return self.reply(200,service.context_inbox().set_policy(body))
                 if path=='/api/context-inbox/share':return self.reply(200,service.context_inbox().share(body))
                 if path=='/api/settings/request':return self.reply(200,service.conversation_settings_request(body))
-                if path=='/api/capability-recommendations':return self.reply(200,service.capability_recommendation_request(body))
                 if path=='/api/personal-knowledge':return self.reply(200,service.personal_knowledge_request(body, channel='local-companion'))
                 if path=='/api/personal-space/memory-candidates/request':
                     return self.reply(200,service.memory_candidate_request(body))

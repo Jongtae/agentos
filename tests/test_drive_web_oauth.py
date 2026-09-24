@@ -224,7 +224,7 @@ class DriveWebOAuthTests(unittest.TestCase):
         with self.assertRaises(DriveScopeError): self.flow.assert_selected(42, "unselected")
         selected = self.flow.select_files(42, [{"id": "picked", "name": "meeting plan"}])
         self.assertEqual(selected["files"], [{"id": "picked", "name": "meeting plan", "mime_type": ""}])
-        with self.assertRaises(DriveScopeError):
+        with self.assertRaises(DriveWebOAuthError):
             self.flow.assert_selected(43, "picked")
         self.assertTrue(self.flow.assert_selected(42, "picked"))
         calls = []

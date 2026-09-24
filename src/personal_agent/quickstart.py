@@ -931,11 +931,6 @@ def configure_logging(store):
 
 
 def main():
-    # Keep the normal server parser small while exposing delivery as a nested
-    # command: `agentos delivery status`.
-    if len(sys.argv)>1 and sys.argv[1]=='delivery':
-        from .delivery import main as delivery_main
-        return delivery_main(sys.argv[2:])
     if len(sys.argv)>1 and sys.argv[1]=='plugins':
         return plugins_main(sys.argv[2:])
     if len(sys.argv)>1 and sys.argv[1]=='drive-config':

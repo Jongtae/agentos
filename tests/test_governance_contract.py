@@ -85,7 +85,7 @@ def test_github_is_authoritative_for_execution_status_and_plans_are_not_status_m
     _assert_all(
         agents,
         "`delivery-plan.yaml` is authoritative for active goal selection",
-        "not a duplicate database",
+        "duplicate database",
         "Do not create a follow-up commit or pull request solely",
         "scope, sequencing, dependency, authority, acceptance criteria, milestone, activation, re-scope, blocker/disposition, next-goal selection",
     )

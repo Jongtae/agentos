@@ -654,6 +654,26 @@ class IntentClassifier:
         cues = _cue_hits(text, lowered, _RESEARCH_CUES)
         return _Candidate(INTENT_RESEARCH, None, cues) if cues else None
 
+    def has_local_candidate(self, text):
+        """Whether deterministic capability routing already owns this utterance.
+
+        Continuity may use a remote DecisionEngine, so a turn that already
+        matches one of AgentOS's concrete local/private capability rules must
+        never be sent there merely because it also contains "again", "no",
+        or another follow-up hint.  This method performs only the same literal
+        candidate checks as :meth:`classify`; it makes no semantic judgment
+        and authorizes nothing.
+        """
+        if not isinstance(text,str) or not text.strip():
+            return False
+        value=text.strip();lowered=value.casefold()
+        if self.explicit(value) is not None:
+            return True
+        return any(rule(value,lowered) is not None for rule in (
+            self._rule_knowledge,self._rule_settings,self._rule_workspace,
+            self._rule_note,self._rule_calendar,self._rule_mail,
+        ))
+
     # -- decision assembly ---------------------------------------------------
     def classify(self, text, model_suggestion=None, focus=None):
         """Return the one routing decision AgentOS is prepared to justify."""

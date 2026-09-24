@@ -155,6 +155,15 @@ class StateHandoffLoop:
                     state.pop("pending", None)
                     self.state.write(state)
                     return {"action": "candidate-not-approvable", "issue": pending["issue"]}
+                # A cached direct-approval receipt must not outrun a later owner
+                # escalation. Re-read the authoritative goal classification
+                # immediately before applying agent:approved.
+                if pending["old"] == "agent:working":
+                    issue = next((row for row in self.github.issues() if row.number == pending["issue"]), None)
+                    if not issue or issue.review_required:
+                        state.pop("pending", None)
+                        self.state.write(state)
+                        return {"action": "review-escalation-required", "issue": pending["issue"]}
         if not self.github.transition(pending["issue"], pending["old"], pending["new"]):
             # A transition can have succeeded remotely before its response was
             # lost.  Reconcile the authoritative queue before retrying.

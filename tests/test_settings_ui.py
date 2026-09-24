@@ -128,6 +128,7 @@ def test_records_surface_each_owner_record_type():
         assert label in APP
     assert "recordItems" in APP
     assert "deleteKind:'results'" in APP
+    assert "function showRecords()" in APP
 
 
 def test_settings_renderers_preserve_polling_controls_and_truthful_route_state():

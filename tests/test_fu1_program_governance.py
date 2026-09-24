@@ -9,7 +9,7 @@ the program block does not ship without regression coverage.
 import json
 import unittest
 
-from personal_agent.delivery import DeliveryPlan
+from scripts.dev.delivery import DeliveryPlan
 
 from delivery_state_invariants import (
     CLOSED_ON_MERGE,

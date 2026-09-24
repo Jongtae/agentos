@@ -742,8 +742,6 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 if path=='/api/telegram/pair':return self.reply(200,service.pair_telegram())
                 if path=='/api/telegram/verify':return self.reply(202,service.queue_telegram_connection_verification())
                 if path=='/api/telegram/disconnect':return self.reply(200,service.disconnect_telegram())
-                if path=='/api/telegram/task-card-acceptance':return self.reply(200,service.attest_telegram_task_card_acceptance(body))
-                if path=='/api/telegram/first-work-acceptance':return self.reply(200,service.attest_telegram_first_work(body))
                 if path=='/api/workspaces':return self.reply(201,service.create_workspace(body))
                 if path.startswith('/api/workspaces/') and path.endswith('/save-result'):
                     return self.reply(200,service.save_workspace_result(path.split('/')[3],body))

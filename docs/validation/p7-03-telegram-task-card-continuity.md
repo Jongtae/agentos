@@ -34,19 +34,19 @@ copies into an issue, commit, or report.
    harmless paired Telegram request and confirm its card, completion, and web
    history continue after restart. If a send was interrupted, leave its state
    as unknown; do not retry it automatically.
-5. Return to the authenticated AgentOS web page. When its Telegram acceptance
-   panel offers **실제 Telegram 흐름 확인 기록**, click it only after completing
-   the observations above. It records no messages, tokens, IDs, document text,
-   or model output. The six-hour delivery loop then runs the local redacted
-   verifier; no shell command is required for the owner.
-
-   Developers can inspect the same read-only report manually:
+5. After completing the two owner observations above, run the local redacted
+   verifier and pass those observations explicitly. The verifier records
+   nothing and prints only aggregate state/count evidence:
 
    ```sh
-   python3 scripts/verify_telegram_task_card_acceptance.py
+   python3 scripts/verify_telegram_task_card_acceptance.py \
+     --web-confirmed \
+     --restart-confirmed
    ```
 
-   기본 경로는 `~/.local/share/agentos`이며, 다른 데이터 폴더를 검증할 때만 `--data-dir`를 지정합니다.
+   The default data directory is `~/.local/share/agentos`. Use `--data-dir`
+   only when validating another AgentOS data directory. The retired web
+   acceptance panel/API is not part of the current product surface.
 
 The report passes only when it sees a paired owner, a cancelled card, a
 resolved document-approval notification, a sent terminal notification, both

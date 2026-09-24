@@ -1,4 +1,9 @@
-"""Redacted evidence checks for the paired Telegram task-card acceptance."""
+"""Historical Telegram task-card acceptance evidence.
+
+Moved out of the installed personal_agent runtime by CLEANUP-LEGACY-01 / #532.
+The current product UI no longer consumes this acceptance read model; it remains
+available to repository validation scripts and tests.
+"""
 from collections import Counter
 
 
@@ -32,9 +37,6 @@ def report(store, web_confirmed=None, restart_confirmed=None):
         'task_card_cancellation': cancellation,
         'document_approval_callback': approval,
         'terminal_notification': terminal,
-        # The browser is authenticated and renders this same durable store.
-        # An operator must still observe it; database rows alone cannot prove a
-        # browser or a real Telegram account displayed them.
         'shared_web_evidence_observed': bool(web_confirmed and telegram_messages and web_messages),
         'restart_continuity_observed': bool(restart_confirmed),
     }

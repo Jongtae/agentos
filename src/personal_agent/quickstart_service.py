@@ -446,7 +446,6 @@ class AgentService:
             boundary=self.document_boundary(model)
             active_packages=self.runtime_packages()
             packages=PluginRegistry(self.store.root).declared_packages()
-            from .telegram_task_card_acceptance import report as task_card_report
             return {'model':model,'has_api_key':bool(self.store.secret('model_key')),
                     'decision_model':self.decision_route_status(),
                     'conversation_settings':self.settings_orchestrator.read('local-owner'),
@@ -454,7 +453,7 @@ class AgentService:
                     'subscription_engines':self.subscription_engine_status(),
                     'subscription_execution':{'mode':'isolated-agentos-mcp','tools':['list_notes']} if self.isolated_engine_adapter else {'mode':'bounded-agentos-mcp','tools':['list_notes','save_note','web_search']},
                     'telegram':{'enabled':tg.get('enabled',False),'mode':tg.get('mode','owner-token'),'username':tg.get('username',''),'paired':bool(tg.get('user_id')),'user_id':tg.get('user_id')},
-                    'file_roots':self.store.config('file_roots',[]), 'file_workspace':FileWorkspace(self.store).status(), 'document_boundary':boundary, 'context_inbox':__import__('personal_agent.context_inbox',fromlist=['ContextInbox']).ContextInbox(self.store).status(), 'agents':[{'id':role['id'],'name':role['name'],'permissions':role['permissions'],'package_id':package['id']} for package in active_packages for role in package['roles']], 'packages':packages, 'tool_run':self.store.config('tool_run'), 'model_test':model_test, 'model_ready':self.model_ready(model,model_test), 'telegram_status':self.store.config('telegram_status'),'delivery':delivery, 'telegram_task_card_acceptance':task_card_report(self.store), 'telegram_first_work_acceptance':__import__('personal_agent.telegram_first_work_acceptance',fromlist=['report']).report(self.store), 'connectors':self.connector_connections()}
+                    'file_roots':self.store.config('file_roots',[]), 'file_workspace':FileWorkspace(self.store).status(), 'document_boundary':boundary, 'context_inbox':__import__('personal_agent.context_inbox',fromlist=['ContextInbox']).ContextInbox(self.store).status(), 'agents':[{'id':role['id'],'name':role['name'],'permissions':role['permissions'],'package_id':package['id']} for package in active_packages for role in package['roles']], 'packages':packages, 'tool_run':self.store.config('tool_run'), 'model_test':model_test, 'model_ready':self.model_ready(model,model_test), 'telegram_status':self.store.config('telegram_status'),'delivery':delivery, 'connectors':self.connector_connections()}
 
     def home(self):
         """Return the minimal, credential-free read model for the owner home."""
@@ -752,28 +751,6 @@ class AgentService:
         record=self.subscription_engines.connect(body.get('engine',''),body.get('officially_authenticated'))
         with self.lock:self.store.put('subscription_engine',record)
         return self.subscription_engine_status()
-
-    def attest_telegram_task_card_acceptance(self, payload):
-        """Persist only an owner acknowledgement after durable evidence exists."""
-        if not isinstance(payload,dict) or payload.get('web_confirmed') is not True or payload.get('restart_confirmed') is not True:
-            raise ValueError('웹 기록과 재시작 후 Telegram 연속성을 모두 확인한 뒤에만 기록할 수 있습니다.')
-        from .telegram_task_card_acceptance import report as task_card_report
-        current=task_card_report(self.store,False,False)
-        required=('paired_private_owner','task_card_cancellation','document_approval_callback','terminal_notification')
-        if not all(current['checks'][key] for key in required) or not all(current['message_channels'].values()):
-            raise ValueError('먼저 Telegram 카드 취소, 문서 승인, 완료 알림과 웹 기록을 확인하세요.')
-        self.store.put('telegram_task_card_acceptance',{'web_confirmed':True,'restart_confirmed':True,'recorded_at':time.time()})
-        return task_card_report(self.store)
-
-    def attest_telegram_first_work(self, payload):
-        # Compatibility endpoint for earlier web clients.  The paired delivery
-        # itself is the acceptance proof; no additional owner acknowledgement
-        # is collected or persisted.
-        from .telegram_first_work_acceptance import report
-        current=report(self.store)
-        if not all(current['checks'].values()):
-            raise ValueError('자동 Telegram 연결 확인이 아직 완료되지 않았습니다.')
-        return current
 
     def runtime_packages(self):
         return PluginRegistry(self.store.root).runtime_packages()

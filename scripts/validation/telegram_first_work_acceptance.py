@@ -1,12 +1,14 @@
-"""Redacted H3 first-work acceptance evidence for an owner BotFather bot."""
+"""Historical Telegram first-work acceptance evidence.
+
+Moved out of the installed personal_agent runtime by CLEANUP-LEGACY-01 / #532.
+This module is validation tooling: it reads a supplied QuickStore and reports
+redacted acceptance evidence; no product runtime path imports it.
+"""
 import json
 
 
 def report(store, owner_confirmed=None):
     config = store.config('telegram', {})
-    # Delivery to the paired private chat is durable evidence.  Do not make
-    # the owner repeat a chat message or click an acknowledgement merely to
-    # establish that AgentOS can complete its own connection check.
     with store.db() as db:
         job = db.execute("""SELECT id FROM jobs
             WHERE request_key LIKE 'telegram-verify:%' AND channel LIKE 'telegram:%'

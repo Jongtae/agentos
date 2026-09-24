@@ -23,7 +23,8 @@ MAX_REASON_CHARS = 300
 
 LOG = logging.getLogger('personal_agent.engine')
 ENGINE_NAMES = {'codex': 'Codex', 'claude-code': 'Claude Code'}
-_SECRET = re.compile(r'(?i)\bbearer\s+\S+|\b(?:sk|pk|rk)-[A-Za-z0-9_-]{8,}|\b(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]{10,}|\b(?:api[_-]?key|token|secret)\s*[=:]\s*\S+')
+_SECRET = re.compile(r'(?i)\bauthorization["\']?\s*[=:]\s*["\']?(?:[a-z]+\s+)?[^\s"\',}]+|\b(?:bearer|basic)\s+\S+|\b(?:sk|pk|rk)-[A-Za-z0-9_-]{8,}|\b(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]{10,}|\bAIza[0-9A-Za-z_-]{30,}|\b\d{6,}:[A-Za-z0-9_-]{30,}|["\']?\b(?:api[_-]?key|access[_-]?token|token|secret|password)["\']?\s*[=:]\s*["\']?[^\s"\',}]+')
+_ECHO_WINDOW = 24
 _CONTROL = re.compile(r'[\x00-\x1f\x7f]+')
 # Hints are keyed by the provider's structured HTTP status, never by guessing
 # from free text.  An unknown status keeps only the observed reason.
@@ -59,12 +60,27 @@ class ExecutionError(ValueError):
                 ('exit_code', self.exit_code), ('reason', self.reason)) if value not in ('', None)}
 
 
-def redact_reason(text):
-    """Bound provider/CLI text before it is persisted, logged or shown."""
+def _echoes(text, prompt):
+    """True when ``text`` repeats any 24-character run of the prompt."""
+    prompt = ' '.join(prompt.split())
+    if len(prompt) < _ECHO_WINDOW:
+        return len(prompt) >= 8 and prompt in text
+    return any(prompt[start:start + _ECHO_WINDOW] in text
+               for start in range(0, len(prompt) - _ECHO_WINDOW + 1, _ECHO_WINDOW // 2))
+
+
+def redact_reason(text, prompt=None):
+    """Bound provider/CLI text before it is persisted, logged or shown.
+
+    A reason that echoes the request is withheld entirely: providers may
+    quote any part of it, so partial scrubbing is not trustworthy.
+    """
     if not isinstance(text, str):
         return ''
-    text = _SECRET.sub('[redacted]', _CONTROL.sub(' ', text))
-    text = ' '.join(text.split())
+    text = ' '.join(_CONTROL.sub(' ', text).split())
+    if isinstance(prompt, str) and _echoes(text, prompt):
+        return '[요청 내용이 포함된 응답이라 표시하지 않습니다]'
+    text = _SECRET.sub('[redacted]', text)
     return text if len(text) <= MAX_REASON_CHARS else text[:MAX_REASON_CHARS - 1] + '…'
 
 
@@ -87,7 +103,7 @@ def _provider_error(message):
     return status, message if isinstance(message, str) else ''
 
 
-def failure_details(engine_id, stdout, stderr):
+def failure_details(engine_id, stdout, stderr, prompt=None):
     """Summarise a failed CLI turn from its official machine output.
 
     Codex ``exec --json`` reports failures as ``turn.failed``/``error``
@@ -116,7 +132,7 @@ def failure_details(engine_id, stdout, stderr):
     if not message:
         tail = [line for line in (stderr or '')[-8000:].splitlines() if line.strip()]
         message = tail[-1] if tail else ''
-    return status, redact_reason(message)
+    return status, redact_reason(message, prompt)
 
 
 @dataclass(frozen=True)
@@ -290,11 +306,8 @@ class BoundedExecutionAdapter:
                 raise ExecutionError('구독 엔진 CLI를 실행하지 못했습니다.', failure_class='start-failed') from exc
             elapsed = time.monotonic() - started
             if completed.returncode != 0:
-                status, reason = failure_details(engine_id, completed.stdout, getattr(completed, 'stderr', ''))
-                # A provider may echo the request; the prompt never leaves here.
-                for fragment in {prompt.strip(), prompt.strip()[:40]}:
-                    if len(fragment) >= 8 and fragment in reason:
-                        reason = reason.replace(fragment, '[request]')
+                status, reason = failure_details(engine_id, completed.stdout,
+                                                 getattr(completed, 'stderr', ''), prompt)
                 failure_class, hint = 'engine-failed', ''
                 for match, name, text in _STATUS_HINTS:
                     if status is not None and match(status):

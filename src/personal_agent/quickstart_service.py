@@ -18,7 +18,7 @@ from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_U
                                       TERMINAL_INTERRUPTED_HEADER, TERMINAL_NEXT_ACTION, TERMINAL_PARTIAL_HEADER,
                                       TERMINAL_UNVERIFIED_MARKER, BlockedTurn, ConversationProjection, terminal_text)
 from .subscription_engines import SubscriptionEngines
-from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult, redact_reason
+from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult
 from .isolated_engine_gateway import EngineGatewayError
 from .isolated_mcp_proxy import IsolatedMcpProxy, TaskCapabilityRegistry
 from .personal_assistant import PersonalAssistantOrchestrator
@@ -2283,7 +2283,10 @@ class AgentService:
             except (ValueError,ProviderError,ExecutionError,OSError) as exc:
                 resolved_blocker=False
                 response=str(exc)
-                LOG.warning('work failed job=%s kind=%s error=%s',job['id'],type(exc).__name__,redact_reason(response))
+                # Only ids and structured diagnostics: generic error text may
+                # quote owner material, so it stays in the owner's Work record.
+                LOG.warning('work failed job=%s kind=%s %s',job['id'],type(exc).__name__,
+                            ' '.join(f'{k}={v}' for k,v in exc.diagnostics().items() if k!='reason') if isinstance(exc,ExecutionError) else '')
                 if isinstance(exc,BlockedTurn):
                     # The owner can resolve this blocker; say how, once, in
                     # conversation.  The projected text is the whole bubble

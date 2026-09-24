@@ -175,6 +175,38 @@ class EngineFailureDiagnosticsTests(unittest.TestCase):
             self.assertNotIn('\x1b', text)
         self.assertLessEqual(len(error.reason), bounded_execution.MAX_REASON_CHARS)
 
+    def test_multiline_prompt_echo_is_withheld_not_partially_scrubbed(self):
+        prompt = 'Owner request:\n  my private diary entry about tuesday and more\n\nAgentOS public search evidence: {}'
+        echoed = json.dumps({'type': 'error', 'message': 'rejected: Owner request: my private diary entry about tuesday'})
+        error, logs = self._run(echoed, prompt=prompt)
+        for text in (str(error), error.reason, logs):
+            self.assertNotIn('diary', text)
+        self.assertIn('요청 내용이 포함된 응답', error.reason)
+
+    def test_redaction_covers_common_credential_shapes(self):
+        samples = ['{"api_key": "abc123secretvalue"}', 'Authorization: Basic dXNlcjpwYXNz',
+                   'key AIzaSyA1234567890abcdefghijklmnopqrstu', 'bot 123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawq',
+                   'password=hunter2hunter2', 'Bearer abc.def.ghi', 'sk-proj-abcdefghijkl']
+        for sample in samples:
+            with self.subTest(sample=sample):
+                out = bounded_execution.redact_reason(sample)
+                self.assertIn('[redacted]', out)
+                for secret in ('abc123secretvalue', 'dXNlcjpwYXNz', 'AIzaSyA1234567890', 'AAHdqTcvCH1vGWJx', 'hunter2', 'abc.def.ghi', 'abcdefghijkl'):
+                    self.assertNotIn(secret, out)
+
+    def test_oversized_output_is_bounded(self):
+        noise = '\n'.join(json.dumps({'type': 'item.completed', 'n': i}) for i in range(8000))
+        failed = json.dumps({'type': 'turn.failed', 'error': {'message': json.dumps({'status': 429, 'error': {'message': 'slow down'}})}})
+        error, _ = self._run(noise + '\n' + failed + '\n' + 'x' * 200_000)
+        self.assertLessEqual(len(error.reason), bounded_execution.MAX_REASON_CHARS)
+
+    def test_unstructured_provider_prefix_keeps_reason_without_guessing_a_hint(self):
+        out = json.dumps({'type': 'turn.failed', 'error': {'message': 'unexpected status 400: model not available'}})
+        error, _ = self._run(out)
+        self.assertEqual(error.failure_class, 'engine-failed')
+        self.assertIn('unexpected status 400: model not available', str(error))
+        self.assertNotIn('모델·계정 설정', str(error))
+
     def test_timeout_is_distinct_from_engine_failure(self):
         def runner(*a, **k): raise subprocess.TimeoutExpired('codex', 1)
         with tempfile.TemporaryDirectory() as folder:
@@ -281,8 +313,9 @@ class SubscriptionServiceTests(unittest.TestCase):
             with store.db() as db:
                 detail=[json.loads(row['detail']) for row in db.execute("SELECT detail FROM tool_events WHERE job_id=? AND tool='subscription_engine' AND status='failed'",(ident,))][0]
             self.assertEqual((detail['failure_class'],detail['exit_code'],detail['reason']),('request-rejected',1,'model unsupported'))
-            self.assertIn('model unsupported','\n'.join(logs.output))
+            self.assertIn('failure_class=request-rejected','\n'.join(logs.output))
             self.assertNotIn('지금 이야기 가능?','\n'.join(logs.output))
+            self.assertNotIn('model unsupported','\n'.join(logs.output))
 
     def test_duplicate_summary_request_key_reuses_one_terminal_job_after_restart(self):
         class Adapter:
@@ -632,7 +665,7 @@ class ServiceLoggingTests(unittest.TestCase):
         import logging
         from personal_agent.quickstart import configure_logging
         logger = logging.getLogger('personal_agent')
-        saved = logger.handlers[:]
+        saved = logger.handlers[:], logger.propagate, logger.level
         logger.handlers = []
         try:
             with tempfile.TemporaryDirectory() as folder:
@@ -645,6 +678,7 @@ class ServiceLoggingTests(unittest.TestCase):
                 path = store.private / 'logs' / 'agentos.log'
                 self.assertIn('engine turn failed', path.read_text())
                 self.assertEqual(path.parent.stat().st_mode & 0o077, 0)
+                self.assertEqual(path.stat().st_mode & 0o077, 0)
                 for handler in logger.handlers: handler.close()
         finally:
-            logger.handlers = saved
+            logger.handlers, logger.propagate, logger.level = saved

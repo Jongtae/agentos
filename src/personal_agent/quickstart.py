@@ -922,10 +922,13 @@ def configure_logging(store):
     """
     logger=logging.getLogger('personal_agent')
     if logger.handlers:return
-    folder=store.private/'logs';folder.mkdir(mode=0o700,exist_ok=True)
+    folder=store.private/'logs';folder.mkdir(mode=0o700,exist_ok=True);folder.chmod(0o700)
+    path=folder/'agentos.log'
+    # Create the file owner-only before the handler opens it, independent of umask.
+    os.close(os.open(path,os.O_WRONLY|os.O_CREAT|os.O_APPEND,0o600));path.chmod(0o600)
     formatter=logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
     for handler in (logging.StreamHandler(sys.stderr),
-                    logging.handlers.RotatingFileHandler(folder/'agentos.log',maxBytes=1_000_000,backupCount=3,encoding='utf-8')):
+                    logging.handlers.RotatingFileHandler(path,maxBytes=1_000_000,backupCount=3,encoding='utf-8')):
         handler.setFormatter(formatter);logger.addHandler(handler)
     logger.setLevel(logging.INFO)
     logger.propagate=False
@@ -965,10 +968,10 @@ def main():
     args=parser.parse_args()
     os.umask(0o077)
     store=QuickStore(args.data)
-    configure_logging(store)
     instance_lock=(store.private/'instance.lock').open('a')
     try:fcntl.flock(instance_lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     except BlockingIOError:parser.exit(1,'이 데이터 폴더의 AgentOS가 이미 실행 중입니다.\n')
+    configure_logging(store)
     handoff_port=args.drive_handoff_port or args.port+1
     if handoff_port==args.port:parser.exit(2,'Drive handoff port must differ from the HTTP callback port.\n')
     env=dict(os.environ);env['AGENTOS_DRIVE_LOCAL_PORT']=str(args.port);env['AGENTOS_DRIVE_HANDOFF_PORT']=str(handoff_port)

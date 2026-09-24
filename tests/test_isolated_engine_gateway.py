@@ -147,7 +147,7 @@ class IsolatedEngineGatewayTests(unittest.TestCase):
             def do_POST(self):
                 length = int(self.headers["Content-Length"])
                 self.rfile.read(length)
-                raw = json.dumps({"error": "engine failed --token=SECRET /Users/alice/private"}).encode()
+                raw = json.dumps({"error": "OPENAI_API_KEY=sk-secret /root/.codex/auth.json --token=SECRET /Users/alice/private"}).encode()
                 self.send_response(400)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(raw)))
@@ -167,7 +167,10 @@ class IsolatedEngineGatewayTests(unittest.TestCase):
                 gateway.execute(prompt="task", engine_id="codex", token=token)
             message = str(caught.exception)
             self.assertNotIn("SECRET", message)
+            self.assertNotIn("sk-secret", message)
+            self.assertNotIn("OPENAI_API_KEY", message)
             self.assertNotIn("/Users/alice", message)
+            self.assertNotIn("/root/.codex", message)
         finally:
             server.shutdown()
             server.server_close()

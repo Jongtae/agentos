@@ -57,6 +57,12 @@ jobs:
       - name: Verify canonical documents and plan integrity
         run: python3 scripts/verify_master_plan_docs.py
 
+      - name: Verify PR reuse review
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: python3 scripts/verify_reuse_review.py
+
       - name: Verify public README parity
         run: python3 scripts/verify_readme_localization.py --check-git-diff
 

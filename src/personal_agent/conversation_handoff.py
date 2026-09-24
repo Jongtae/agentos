@@ -252,7 +252,6 @@ _CORRECTION_CUES = ('아니', '아니라', '그게 아니라', '말고', '대신
 _CONTINUATION_CUES = ('계속', '이어서', '계속해', '더 해줘', '그대로',
                       'continue', 'go on', 'keep going', 'same thing', 'carry on')
 
-
 def _cue_hits(text, lowered, cues):
     """Return the literal cues present in one utterance, in table order."""
     hits = []
@@ -263,6 +262,16 @@ def _cue_hits(text, lowered, cues):
         elif cue in text:
             hits.append(cue)
     return hits
+
+
+def eligible_for_followup_judgment(text):
+    """Structural gate for asking the semantic continuity question.
+
+    This does not inspect retry/cancel/reference words. It only bounds the
+    extra decision-model call to a non-empty, short follow-up-sized utterance;
+    the provider-neutral DecisionEngine decides whether any relation exists.
+    """
+    return isinstance(text, str) and 0 < len(text.strip()) <= 240
 
 
 def _trim_particle(token):
@@ -304,6 +313,20 @@ JUDGMENT_UNAVAILABLE = 'unavailable'
 JUDGMENT_YES = 'yes'
 JUDGMENT_NO = 'no'
 
+FOLLOWUP_RETRY = 'retry'
+FOLLOWUP_REFERENCE = 'reference'
+FOLLOWUP_CANCEL = 'cancel'
+FOLLOWUP_CORRECTION = 'correction'
+FOLLOWUP_RELATIONS = (FOLLOWUP_RETRY, FOLLOWUP_REFERENCE, FOLLOWUP_CANCEL, FOLLOWUP_CORRECTION)
+FOLLOWUP_QUESTION = (
+    'Classify only how the owner latest message relates to the immediately previous Work. '
+    'Choose retry only when they ask to run that previous request again; reference when they '
+    'refer to its result/context without repeating it; cancel when they ask to stop or withdraw '
+    'that previous Work; correction when they replace or correct its parameters. Choose '
+    'none-of-these for a new topic, an unrelated request, or when the relation is unclear. '
+    'This judgment does not authorize any action.'
+)
+
 WITHDRAWAL_PROPOSITION = ('The owner\'s latest message withdraws or cancels the request that is waiting for '
                           'the listed connection (rather than acknowledging it, changing topic, or asking '
                           'something unrelated).')
@@ -330,11 +353,10 @@ class Judgment:
 
 
 class ConversationJudgments:
-    """The conversation's two semantic questions, asked over minimal context.
+    """The conversation's bounded semantic questions, asked over minimal context.
 
-    Builds a ``DecisionContext`` from the current utterance and non-content
-    facts only, asks the engine, and applies ``DecisionPolicy``.  Swapping
-    the engine (model, fixture, unavailable) changes nothing here.
+    Builds a ``DecisionContext``, asks the engine, and applies
+    ``DecisionPolicy``. Swapping the engine changes no authority semantics.
     """
 
     def __init__(self, engine=None, policy=None):
@@ -362,6 +384,27 @@ class ConversationJudgments:
         choice = self.policy.selection(decision)
         if choice is not None:
             return Judgment(JUDGMENT_YES, value=choice, source=decision.confidence.provider or decision.outcome)
+        if self.policy.confident_selection(decision):
+            return Judgment(JUDGMENT_NO, source=decision.confidence.provider or decision.outcome)
+        return Judgment(JUDGMENT_UNAVAILABLE, source=decision.outcome)
+
+    def followup_relation(self, utterance, previous_intent, previous_status):
+        """Classify one short anaphoric turn against one focused Work.
+
+        Previous request/result content is deliberately absent. The engine
+        sees only the current short utterance plus prior intent/status; the
+        selected relation still passes deterministic execution gates later.
+        """
+        context = DecisionContext('conversation-followup', {
+            'owner_message': utterance,
+            'previous_intent': previous_intent or '',
+            'previous_status': previous_status or '',
+        })
+        decision = self.engine.choose(context, FOLLOWUP_RELATIONS, FOLLOWUP_QUESTION)
+        choice = self.policy.selection(decision)
+        if choice is not None:
+            return Judgment(JUDGMENT_YES, value=choice,
+                            source=decision.confidence.provider or decision.outcome)
         if self.policy.confident_selection(decision):
             return Judgment(JUDGMENT_NO, source=decision.confidence.provider or decision.outcome)
         return Judgment(JUDGMENT_UNAVAILABLE, source=decision.outcome)
@@ -404,26 +447,37 @@ class IntentDecision:
 
 
 class ConversationFocus:
-    """Content-free record of what the one conversation is currently about.
+    """Content-free short-horizon pointer to the current conversation Work.
 
-    Only the decided intent and a timestamp are persisted.  The utterance,
-    its subject and any extracted argument stay out of durable state, so a
-    pasted secret or document excerpt is never written here.
+    The utterance, subject, result text and tool payloads never live here. A
+    Work id only points at the canonical Work that already owns the request.
     """
 
     KEY = 'conversation_focus'
+    TTL_SECONDS = 60 * 60
 
     def __init__(self, store, now=time.time):
         self.store, self.now = store, now
 
     def current(self):
         row = self.store.config(self.KEY, {})
-        return row if isinstance(row, dict) else {}
+        if not isinstance(row, dict):
+            return {}
+        at = row.get('at')
+        if not isinstance(at, (int, float)) or isinstance(at, bool) or self.now() - at > self.TTL_SECONDS:
+            return {}
+        work_id = row.get('work_id')
+        if work_id is not None and (not isinstance(work_id, str) or not self.store.job(work_id)):
+            return {key: row[key] for key in ('intent', 'at') if key in row}
+        return row
 
-    def record(self, decision):
+    def record(self, decision, work_id=None):
         if decision.intent == INTENT_AMBIGUOUS:
             return
-        self.store.put(self.KEY, {'intent': decision.intent, 'at': self.now()})
+        row = {'intent': decision.intent, 'at': self.now()}
+        if isinstance(work_id, str) and work_id:
+            row['work_id'] = work_id
+        self.store.put(self.KEY, row)
 
     def clear(self):
         self.store.put(self.KEY, {})
@@ -592,6 +646,26 @@ class IntentClassifier:
     def _rule_research(self, text, lowered):
         cues = _cue_hits(text, lowered, _RESEARCH_CUES)
         return _Candidate(INTENT_RESEARCH, None, cues) if cues else None
+
+    def has_local_candidate(self, text):
+        """Whether deterministic capability routing already owns this utterance.
+
+        Continuity may use a remote DecisionEngine, so a turn that already
+        matches one of AgentOS's concrete local/private capability rules must
+        never be sent there merely because it also contains "again", "no",
+        or another follow-up hint.  This method performs only the same literal
+        candidate checks as :meth:`classify`; it makes no semantic judgment
+        and authorizes nothing.
+        """
+        if not isinstance(text,str) or not text.strip():
+            return False
+        value=text.strip();lowered=value.casefold()
+        if self.explicit(value) is not None:
+            return True
+        return any(rule(value,lowered) is not None for rule in (
+            self._rule_knowledge,self._rule_settings,self._rule_workspace,
+            self._rule_note,self._rule_calendar,self._rule_mail,
+        ))
 
     # -- decision assembly ---------------------------------------------------
     def classify(self, text, model_suggestion=None, focus=None):

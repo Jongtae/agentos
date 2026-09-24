@@ -786,9 +786,12 @@ class OwnerSafetyTests(HandoffTestCase):
         self.assertIn('sk-live-SHOULD-NEVER-PERSIST', self.store.job(job_id)['message'])
 
     def test_the_conversation_focus_record_is_still_content_free(self):
-        self.park(SECRET_MAIL_REQUEST)
-        self.assertEqual(set(self.service.conversation_focus.current()), {'intent', 'at'})
-        self.assertEqual(self.service.conversation_focus.current()['intent'], INTENT_MAIL_SEARCH)
+        job_id=self.park(SECRET_MAIL_REQUEST)
+        focus=self.service.conversation_focus.current()
+        self.assertEqual(set(focus), {'intent', 'at', 'work_id'})
+        self.assertEqual(focus['intent'], INTENT_MAIL_SEARCH)
+        self.assertEqual(focus['work_id'],job_id)
+        self.assertNotIn('sk-live-SHOULD-NEVER-PERSIST',repr(focus))
 
 
 class PrerequisiteAndGuidanceTests(HandoffTestCase):

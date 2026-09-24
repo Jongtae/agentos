@@ -7,6 +7,7 @@ underneath.  Evidence class: automated synthetic/fixture only.  The
 scripted model and fixture DecisionEngine stand in for providers; nothing
 here claims live behavior.
 """
+import json
 import tempfile
 import threading
 import time
@@ -14,7 +15,8 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from personal_agent.conversation_handoff import INTENT_UNSUPPORTED, UNSUPPORTED_CAPABILITY_TEXT
+from personal_agent.conversation_handoff import (FOLLOWUP_REFERENCE, FOLLOWUP_RETRY,
+                                                    INTENT_UNSUPPORTED, UNSUPPORTED_CAPABILITY_TEXT)
 from personal_agent.conversation_projection import (BLOCKER_NO_AI_ROUTE, TERMINAL_FAILED_HEADER,
                                                     TERMINAL_PARTIAL_HEADER, terminal_text)
 from personal_agent.decision import (OUTCOME_DECIDED, FixtureDecisionEngine, SelectionDecision,
@@ -345,6 +347,65 @@ class BlockedTurnTests(ProjectionTestCase):
         self.assertIn('모델 또는 구독 엔진', self.store.job(job_id)['error'])
 
 
+
+class ContinuityTests(ProjectionTestCase):
+    """#511: semantic follow-up judgment + deterministic replay safety."""
+
+    def retry_engine(self):
+        engine = FixtureDecisionEngine(choose=lambda context, candidates, question: SelectionDecision(
+            OUTCOME_DECIDED, FOLLOWUP_RETRY, candidates, fixture_confidence())
+            if context.purpose == 'conversation-followup' else None)
+        self.service.use_decision_engine(engine)
+        return engine
+
+    def test_decision_engine_retry_replays_the_failed_work_once(self):
+        first, first_bubbles = self.turn('원래 요청을 처리해줘')
+        self.assertEqual(first['status'], 'failed')
+        self.connect_model()
+        engine = self.retry_engine()
+        self.text = '원래 요청을 다시 처리한 결과입니다.'
+
+        retried, bubbles = self.turn('자 다시 되니?')
+
+        self.assertEqual(retried['status'], 'succeeded', retried.get('error'))
+        self.assertEqual(retried['relation_kind'], 'retry')
+        self.assertEqual(retried['related_job_id'], first['id'])
+        self.assertEqual(bubbles, [('send', self.text)])
+        followup = [asked for asked in engine.asked if asked[1].purpose == 'conversation-followup']
+        self.assertEqual(len(followup), 1)
+        self.assertEqual(followup[0][1].facts['owner_message'], '자 다시 되니?')
+        self.assertNotIn('원래 요청을 처리해줘', repr(followup[0][1].facts))
+        event = next(item for item in self.store.task_events(retried['id'])
+                     if item['tool'] == 'conversation_continuity')
+        self.assertTrue(event['trace']['executed'])
+        self.assertEqual(event['trace']['relation'], 'retry')
+        self.assertOneVoice(first_bubbles + bubbles)
+
+    def test_retry_judgment_cannot_replay_unknown_external_effect(self):
+        first, _ = self.turn('원래 요청을 처리해줘')
+        self.assertEqual(first['status'], 'failed')
+        with self.store.db() as db:
+            db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                       (first['id'], 'calendar_draft_create', 'failed',
+                        json.dumps({'effect':'unknown','state':'outcome-unknown'}), time.time()))
+        self.connect_model()
+        self.retry_engine()
+        self.text = '이 문장은 실행되면 안 됩니다.'
+
+        retried, bubbles = self.turn('그거 다시 해줘')
+
+        self.assertEqual(retried['status'], 'succeeded')
+        self.assertEqual(retried['relation_kind'], 'retry')
+        self.assertEqual(retried['related_job_id'], first['id'])
+        self.assertEqual(len(bubbles), 1)
+        self.assertIn('외부 결과가 불확실', bubbles[0][1])
+        self.assertNotIn(self.text, bubbles[0][1])
+        event = next(item for item in self.store.task_events(retried['id'])
+                     if item['tool'] == 'conversation_continuity')
+        self.assertFalse(event['trace']['executed'])
+        self.assertIn('외부 결과가 불확실', event['trace']['reason'])
+
+
 class UnsupportedCapabilityTests(ProjectionTestCase):
     """#478: a request for something not offered is understood, not searched."""
 
@@ -475,6 +536,209 @@ class TerminalTextTests(unittest.TestCase):
     def test_a_specific_next_action_replaces_only_the_web_pointer(self):
         text = terminal_text(None, '연결이 끊어졌습니다', 'failed', next_action='다시 연결한 뒤 같은 요청을 보내 주세요.')
         self.assertEqual(text, TERMINAL_FAILED_HEADER + '\n\n연결이 끊어졌습니다\n\n다시 연결한 뒤 같은 요청을 보내 주세요.')
+
+
+class ConversationContinuityTests(ProjectionTestCase):
+    """PRESENCE-CONT-01 / #511 continuity through the real Telegram worker."""
+
+    @staticmethod
+    def relation_engine(mapping):
+        def choose(context, candidates, question):
+            if context.purpose == 'conversation-followup':
+                return SelectionDecision(
+                    OUTCOME_DECIDED,
+                    mapping.get(context.facts.get('owner_message'), 'none-of-these'),
+                    candidates,
+                    fixture_confidence(),
+                )
+            return SelectionDecision(OUTCOME_DECIDED, 'none-of-these', candidates, fixture_confidence())
+        return FixtureDecisionEngine(choose=choose)
+
+    def test_failed_work_retry_is_decided_by_the_decision_engine_and_replays_the_original_request(self):
+        first, _ = self.turn('오늘 계획을 정리해줘')
+        self.assertEqual(first['status'], 'failed')
+
+        self.connect_model()
+        seen = []
+        original = self.service.adapter.transport
+
+        def capture(url, body, headers=None, timeout=60):
+            if url.endswith('/api/chat') and not any(
+                    (tool.get('function', {}).get('name') or tool.get('name')) == 'agentos_connection_probe'
+                    for tool in body.get('tools', [])):
+                seen.append([m['content'] for m in body.get('messages', []) if m.get('role') == 'user'][-1])
+                return {'message': {'content': '다시 처리했습니다.'}}
+            return original(url, body, headers, timeout)
+
+        self.service.adapter.transport = capture
+        engine = self.relation_engine({'자 다시 되니?': FOLLOWUP_RETRY})
+        self.service.use_decision_engine(engine)
+        second, bubbles = self.turn('자 다시 되니?')
+
+        self.assertEqual(second['status'], 'succeeded')
+        self.assertEqual(seen[-1], '오늘 계획을 정리해줘')
+        self.assertEqual(second['relation_kind'], FOLLOWUP_RETRY)
+        self.assertEqual(second['related_job_id'], first['id'])
+        self.assertTrue(any(
+            kind == 'send' and '다시 처리했습니다.' in text for kind, text in bubbles
+        ))
+        asked = [item for item in engine.asked if item[0] == 'choose']
+        self.assertEqual(asked[-1][1].purpose, 'conversation-followup')
+        self.assertEqual(asked[-1][1].facts['previous_status'], 'failed')
+
+    def test_retry_chain_always_replays_the_oldest_canonical_request(self):
+        first, _ = self.turn('원래 요청')
+        self.assertEqual(first['status'], 'failed')
+        self.connect_model()
+        self.service.use_decision_engine(self.relation_engine({'다시 해줘': FOLLOWUP_RETRY}))
+
+        def failing(url, body, headers=None, timeout=60):
+            if url.endswith('/api/chat'):
+                raise ProviderError('fixture provider failure')
+            return {'ok': True, 'result': {}}
+
+        self.service.adapter.transport = failing
+        second, _ = self.turn('다시 해줘')
+        self.assertEqual(second['status'], 'failed')
+        self.assertEqual(second['relation_kind'], FOLLOWUP_RETRY)
+        self.assertEqual(second['related_job_id'], first['id'])
+
+        seen = []
+        def succeeding(url, body, headers=None, timeout=60):
+            if url.endswith('/api/chat'):
+                seen.append([m['content'] for m in body.get('messages', []) if m.get('role') == 'user'][-1])
+                return {'message': {'content': '성공'}}
+            return {'ok': True, 'result': {}}
+
+        self.service.adapter.transport = succeeding
+        third, _ = self.turn('다시 해줘')
+        self.assertEqual(third['status'], 'succeeded')
+        self.assertEqual(seen[-1], '원래 요청')
+        self.assertEqual(third['relation_kind'], FOLLOWUP_RETRY)
+        self.assertEqual(third['related_job_id'], second['id'])
+        continuity = [e for e in self.store.task_events(third['id'])
+                      if e['tool'] == 'conversation_continuity']
+        self.assertEqual(continuity[-1]['trace']['source_work_id'], first['id'])
+
+    def test_unknown_external_effect_is_never_retried(self):
+        first, _ = self.turn('외부 작업을 해줘')
+        self.assertEqual(first['status'], 'failed')
+        with self.store.db() as db:
+            db.execute(
+                'INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                (first['id'], 'calendar_draft_create', 'failed',
+                 '{"effect":"unknown","state":"outcome-unknown"}', time.time()),
+            )
+        self.service.use_decision_engine(self.relation_engine({'그거 다시 해줘': FOLLOWUP_RETRY}))
+        second, bubbles = self.turn('그거 다시 해줘')
+
+        self.assertEqual(second['status'], 'succeeded')
+        self.assertEqual(second['relation_kind'], FOLLOWUP_RETRY)
+        self.assertEqual(second['related_job_id'], first['id'])
+        self.assertIn('외부 결과가 불확실', second['response'])
+        self.assertIn('실제 결과를 확인', second['response'])
+        self.assertTrue(any('외부 결과가 불확실' in text for _kind, text in bubbles))
+        event = [e for e in self.store.task_events(second['id'])
+                 if e['tool'] == 'conversation_continuity'][-1]
+        self.assertFalse(event['trace']['executed'])
+
+    def test_local_note_correction_never_reaches_the_remote_followup_judge(self):
+        first, _ = self.turn('이전 요청')
+        self.assertEqual(first['status'], 'failed')
+        engine = self.relation_engine({'아니, sk-live-secret을 메모해줘': FOLLOWUP_REFERENCE})
+        self.service.use_decision_engine(engine)
+
+        note, _ = self.turn('아니, sk-live-secret을 메모해줘')
+        self.assertEqual(note['status'], 'succeeded')
+        self.assertIn('sk-live-secret', [row['content'] for row in self.store.notes()])
+        self.assertFalse(any(
+            item[0] == 'choose' and item[1].purpose == 'conversation-followup'
+            for item in engine.asked
+        ))
+
+    def test_generic_memory_save_followup_stays_out_of_remote_judgment(self):
+        first, _ = self.turn('이전 요청')
+        engine = self.relation_engine({'아니 이걸 저장해줘': FOLLOWUP_REFERENCE})
+        self.service.use_decision_engine(engine)
+        self.assertIsNone(self.service.continuity_relation(
+            '아니 이걸 저장해줘', current_work_id='different-work'))
+        self.assertFalse(any(
+            item[0] == 'choose' and item[1].purpose == 'conversation-followup'
+            for item in engine.asked
+        ))
+
+    def test_package_write_alias_blocks_retry_by_recorded_host_action(self):
+        first, _ = self.turn('원래 요청')
+        self.assertEqual(first['status'], 'failed')
+        with self.store.db() as db:
+            db.execute(
+                'INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                (first['id'], 'remember', 'succeeded',
+                 '{"host_action":"save_note","evidence":{"state":"saved"}}', time.time()),
+            )
+        allowed, reason = self.service.safe_retry(self.store.job(first['id']))
+        self.assertFalse(allowed)
+        self.assertIn('상태를 바꾸는 작업', reason)
+
+    def test_requeued_focused_work_does_not_create_a_self_continuity_link(self):
+        first, _ = self.turn('원래 요청')
+        engine = self.relation_engine({'다시 해줘': FOLLOWUP_RETRY})
+        self.service.use_decision_engine(engine)
+        self.assertIsNone(self.service.continuity_relation(
+            '다시 해줘', current_work_id=first['id']))
+        self.assertFalse(any(
+            item[0] == 'choose' and item[1].purpose == 'conversation-followup'
+            for item in engine.asked
+        ))
+
+    def test_retry_prompt_survives_private_document_history_filtering(self):
+        private_turn, _ = self.turn('/note private document marker')
+        self.store.put('file_workspace_document_jobs', [private_turn['id']])
+        first, _ = self.turn('원래 요청')
+        self.assertEqual(first['status'], 'failed')
+
+        self.connect_model()
+        self.service.use_decision_engine(self.relation_engine({'다시 해줘': FOLLOWUP_RETRY}))
+        self.service.document_boundary = lambda _config=None: {'requires_approval': True}
+        seen = []
+        original = self.service.adapter.transport
+
+        def capture(url, body, headers=None, timeout=60):
+            if url.endswith('/api/chat') and not any(
+                    (tool.get('function', {}).get('name') or tool.get('name')) == 'agentos_connection_probe'
+                    for tool in body.get('tools', [])):
+                seen.append([m['content'] for m in body.get('messages', []) if m.get('role') == 'user'][-1])
+                return {'message': {'content': '성공'}}
+            return original(url, body, headers, timeout)
+
+        self.service.adapter.transport = capture
+        second, _ = self.turn('다시 해줘')
+        self.assertEqual(second['status'], 'succeeded')
+        self.assertEqual(seen[-1], '원래 요청')
+
+    def test_reference_relation_is_attributable_without_replaying_the_old_work(self):
+        self.connect_model()
+        first, _ = self.turn('오로라 결과를 설명해줘')
+        self.assertEqual(first['status'], 'succeeded')
+        self.service.use_decision_engine(self.relation_engine({'그걸 파일로 저장해줘': FOLLOWUP_REFERENCE}))
+        seen = []
+        original = self.service.adapter.transport
+
+        def capture(url, body, headers=None, timeout=60):
+            if url.endswith('/api/chat') and not any(
+                    (tool.get('function', {}).get('name') or tool.get('name')) == 'agentos_connection_probe'
+                    for tool in body.get('tools', [])):
+                seen.append([m['content'] for m in body.get('messages', []) if m.get('role') == 'user'][-1])
+            return original(url, body, headers, timeout)
+
+        self.service.adapter.transport = capture
+        second, _ = self.turn('그걸 파일로 저장해줘')
+        self.assertEqual(second['relation_kind'], FOLLOWUP_REFERENCE)
+        self.assertEqual(second['related_job_id'], first['id'])
+        self.assertEqual(seen[-1], '그걸 파일로 저장해줘')
+        detail = self.service.task_progress(second['id'])['selected']
+        self.assertEqual(detail['relation'], {'kind': FOLLOWUP_REFERENCE, 'work_id': first['id']})
+
 
 
 class SettingsRecoveryAddressTests(ProjectionTestCase):

@@ -262,3 +262,26 @@ regression test in `tests/test_ui_quality.py` (`ReviewRegressions`).
 | An open disclosure rebuilt the trace every poll and dropped text selection | Open state is no longer part of the render fingerprint, and a toggle fills its own content. A browser probe measured 0 rebuilds in 6.5 s with disclosures open (27 before), and the selection survived |
 | The Japanese removal confirm read "confirm deletion" | 「外すことを確定」, the same verb as the first step |
 | Minor: "Answered" without an answer; closing line on waiting Works; cancelled badge and body in two tones; Korean artifact kind in English; settings dot during an in-place confirm; trailing punctuation inside bare links; running badges while offline | All fixed; running badges are dimmed while offline |
+
+## 13. Task-scoped request context and consolidated re-review
+
+An automated review thread pointed out that the trace showed every full request by
+default. `web/AGENTS.md` requires original request context to be task-scoped and
+explicitly expanded. The raw request could also show keys or home paths that the
+backend title masks. Now:
+
+- The owner turn shows the backend's redacted 72-character title.
+- The raw request enters the page only when that turn's "원래 요청 보기" is opened.
+- Long answers are clamped with a per-turn "전체 답변 보기".
+
+A browser probe measured the full request text 0 times before opening and once after.
+
+The consolidated re-review approved the head with minor follow-ups. These are fixed:
+
+- whitespace-normalized comparisons for the original-request disclosure and the
+  "same as previous" check;
+- `aria-controls` on the expand button;
+- a retry note instead of endless loading when a trace fetch fails.
+
+One follow-up remains. Replace the substring-style regression tests with checks
+of the rendered output.

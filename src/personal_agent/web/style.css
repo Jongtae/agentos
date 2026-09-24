@@ -437,3 +437,8 @@ details.technical details>summary{color:var(--muted)}
 .auth-panel .language-picker{justify-self:end}
 @media(max-width:620px){.rail-foot .language-picker select{max-width:110px}}
 .offline .turn .badge.run,.offline .turn.agent.run .turn-body{opacity:.6}
+.turn-original{margin-top:4px}
+.turn-original>summary{font-size:var(--fs-1);color:var(--muted)}
+.turn-original>.turn-text{margin:4px 0 0 16px;color:var(--ink-2)}
+.turn-body.clamped .rich{max-height:10.5em;overflow:hidden;-webkit-mask-image:linear-gradient(to bottom,#000 65%,transparent);mask-image:linear-gradient(to bottom,#000 65%,transparent)}
+.turn-expand{margin-top:6px;font-size:var(--fs-2)}

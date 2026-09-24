@@ -296,5 +296,19 @@ console.log(JSON.stringify({ok:true}));
         self.assertNotIn("taskRenderFingerprint=''", disclosure)
 
 
+class TaskScopedContext(unittest.TestCase):
+    """web/AGENTS.md: original request context is task-scoped and explicitly expanded."""
+
+    def test_trace_defaults_to_the_redacted_title_and_expands_the_original_per_turn(self):
+        render = APP[APP.index("function renderTasks(){"):APP.index("function recordKey(item){")]
+        self.assertIn("const summary=String(task.title||'').trim()", render)
+        self.assertIn("user.append(element('p',summary||t('요청 내용 없음'),'turn-text'))", render)
+        self.assertNotIn("task.request||task.title", render)
+        self.assertNotIn("target.request", render)
+        # the raw request is added to the DOM only inside the opened disclosure
+        self.assertIn("if(box.open)box.append(element('p',original,'turn-text'))", render)
+        self.assertIn("box.open=openOriginals.has(task.id)", render)
+
+
 if __name__ == "__main__":
     unittest.main()

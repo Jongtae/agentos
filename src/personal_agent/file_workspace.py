@@ -2,6 +2,7 @@
 from pathlib import Path
 import hashlib, json, os, re, time, uuid
 from .document_reader import read as read_document, supported as supported_document
+from . import folder_grants
 
 
 class FileWorkspace:
@@ -11,13 +12,23 @@ class FileWorkspace:
 
     def configure(self, references, workspace):
         if not isinstance(references,list) or not references: raise ValueError('하나 이상의 참고 폴더를 연결하세요.')
-        refs=[]
+        refs=[]; usable=[]
+        previous={ref.get('path'):ref for ref in self.status().get('references',[]) if isinstance(ref,dict)}
         for value in references:
-            supplied=Path(value); path=supplied.resolve()
-            if not path.is_dir() or supplied.is_symlink() or self._broad_or_private(path): raise ValueError('전체 홈이나 시스템 루트 대신 작업용 하위 폴더를 선택하세요.')
-            stat=path.stat(); refs.append({'id':hashlib.sha256(f'{stat.st_dev}:{stat.st_ino}'.encode()).hexdigest()[:24],'path':str(path)})
-        supplied=Path(workspace); target=supplied.resolve()
-        if not target.is_dir() or supplied.is_symlink() or self._broad_or_private(target): raise ValueError('전체 홈이나 시스템 루트 대신 작업용 하위 폴더를 선택하세요.')
+            # Keep a previously stored blocked entry only when the owner leaves it
+            # unchanged. This lets the settings editor remove blocked entries one
+            # at a time while still validating every newly added folder.
+            old=previous.get(value) if isinstance(value,str) else None
+            if old and folder_grants.blocked(old.get('path',''),self.store):
+                if all(ref.get('path')!=old.get('path') for ref in refs): refs.append(old)
+                continue
+            path=folder_grants.validate(value,self.store)
+            if any(ref['path']==str(path) for ref in refs): continue
+            stat=path.stat(); ref={'id':hashlib.sha256(f'{stat.st_dev}:{stat.st_ino}'.encode()).hexdigest()[:24],'path':str(path)}
+            refs.append(ref); usable.append(ref)
+        target=folder_grants.validate(workspace,self.store)
+        # Retained blocked references still count for overlap: if one later
+        # becomes available again, active() will expose it without another edit.
         if any(target==Path(ref['path']) or target.is_relative_to(ref['path']) or Path(ref['path']).is_relative_to(target) for ref in refs): raise ValueError('참고 폴더와 관리 작업공간은 겹치지 않게 연결하세요.')
         target_stat=target.stat(); workspace_id=hashlib.sha256(f'{target_stat.st_dev}:{target_stat.st_ino}'.encode()).hexdigest()[:24]
         self.store.put('file_workspace',{'references':refs,'workspace':str(target),'workspace_id':workspace_id})
@@ -26,9 +37,20 @@ class FileWorkspace:
 
     def status(self): return self.store.config('file_workspace',{'references':[],'workspace':None})
 
-    def _broad_or_private(self, path):
-        return (path in (Path('/'),Path.home(),self.store.root)
-                or path.is_relative_to(self.store.private) or self.store.private.is_relative_to(path))
+    def active(self):
+        """Stored configuration minus any folder the current grant rules forbid."""
+        status=self.status()
+        workspace=status.get('workspace')
+        usable=workspace and not folder_grants.blocked(workspace,self.store)
+        return {**status,'references':[ref for ref in status.get('references',[]) if not folder_grants.blocked(ref['path'],self.store)],
+                'workspace':workspace if usable else None,'workspace_id':status.get('workspace_id') if usable else None}
+
+    def projection(self):
+        """Owner-facing status with the reason any stored folder is blocked."""
+        status=self.status()
+        workspace=status.get('workspace')
+        return {**status,'references':[{**ref,'blocked':folder_grants.blocked(ref['path'],self.store)} for ref in status.get('references',[])],
+                'workspace_blocked':folder_grants.blocked(workspace,self.store) if workspace else None}
 
     @staticmethod
     def _safe_relative(value):
@@ -37,8 +59,10 @@ class FileWorkspace:
         return path
 
     def _reference(self, ref_id, relative):
-        root=next((item for item in self.status()['references'] if item['id']==ref_id),None)
-        if not root: raise ValueError('허용된 참고 폴더가 아닙니다.')
+        # Scans may read many candidate files; revalidate only the selected grant
+        # for each read rather than rechecking every configured reference.
+        root=next((item for item in self.status().get('references',[]) if item.get('id')==ref_id),None)
+        if not root or folder_grants.blocked(root.get('path',''),self.store): raise ValueError('허용된 참고 폴더가 아닙니다.')
         base=Path(root['path']); path=self._safe_relative(relative); candidate=base/path
         if any(part.is_symlink() for part in (base, *candidate.parents) if part.exists()): raise ValueError('심볼릭 링크를 통한 참고 자료 접근은 허용하지 않습니다.')
         resolved=candidate.resolve()
@@ -64,7 +88,7 @@ class FileWorkspace:
         if not isinstance(query,str) or not 2<=len(query.strip())<=160: raise ValueError('두 글자 이상의 자료 검색어를 입력하세요.')
         phrase=query.casefold().strip(); alternatives=[item.strip() for item in phrase.split('||') if item.strip()]
         matches=[]
-        for root in self.status()['references']:
+        for root in self.active()['references']:
             base=Path(root['path'])
             for parent,dirs,names in os.walk(base,followlinks=False):
                 dirs[:]=[name for name in dirs if not name.startswith('.') and not (Path(parent)/name).is_symlink()]
@@ -94,7 +118,7 @@ class FileWorkspace:
         if 'workspace_id' not in columns: db.execute('ALTER TABLE file_workspace_results ADD COLUMN workspace_id TEXT')
 
     def _workspace_id(self):
-        value=self.status().get('workspace_id')
+        value=self.active().get('workspace_id')
         if not isinstance(value,str) or not value: raise ValueError('관리 작업공간을 먼저 연결하세요.')
         return value
 
@@ -103,8 +127,9 @@ class FileWorkspace:
         return {key:source[key] for key in ('reference_id','source_id','path','version') if key in source}
 
     def _result_path(self, relative):
-        root=Path(self.status().get('workspace') or '')
-        if not root.is_dir() or root.is_symlink(): raise ValueError('관리 작업공간을 먼저 연결하세요.')
+        workspace=self.active().get('workspace')
+        root=Path(workspace) if workspace else None
+        if root is None or not root.is_absolute() or not root.is_dir() or root.is_symlink(): raise ValueError('관리 작업공간을 먼저 연결하세요.')
         candidate=root/self._safe_relative(relative)
         if candidate.is_symlink() or not candidate.resolve().is_relative_to(root): raise ValueError('관리 작업공간 밖의 결과에는 접근할 수 없습니다.')
         return candidate

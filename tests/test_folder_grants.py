@@ -50,6 +50,13 @@ class FolderGrantTests(unittest.TestCase):
             with self.subTest(value=value):
                 self.refuse_both(str(value), folder_grants.SENSITIVE)
 
+    def test_sensitive_symlink_alias_refuses_its_containing_grant(self):
+        target=self.home/'Documents'/'dotfiles'/'aws'
+        target.mkdir(parents=True)
+        link=self.home/'.aws'
+        link.symlink_to(target,target_is_directory=True)
+        self.refuse_both(str(self.home/'Documents'),folder_grants.SENSITIVE)
+
     def test_system_configuration_folder_is_refused(self):
         etc = Path('/etc').resolve()
         if not etc.is_dir():

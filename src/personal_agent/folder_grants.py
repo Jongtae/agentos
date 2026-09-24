@@ -74,7 +74,8 @@ def _case_insensitive(path):
 def _related(path, path_chain, other, case_insensitive):
     """True when path is other, lies inside it, or contains it (identity or case-folded name)."""
     other_id = _identity(other)
-    if other_id and (other_id in path_chain or _identity(path) in _chain(other)):
+    other_chain = _chain(other) | _chain(other.resolve())
+    if other_id and (other_id in path_chain or _identity(path) in other_chain):
         return True
     if case_insensitive:
         mine = _folded(path)

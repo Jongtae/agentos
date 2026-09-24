@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from personal_agent.handoff import Candidate, GithubCliBoundary, HandoffError, Issue, StateHandoffLoop
+from scripts.dev.handoff import Candidate, GithubCliBoundary, HandoffError, Issue, StateHandoffLoop
 
 
 class FakeGithub:

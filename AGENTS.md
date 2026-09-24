@@ -36,7 +36,7 @@ Follow [Owner Control Contract](docs/owner-control-contract.en.md) and [Default 
 - A public read, cart/hold mutation, identity entry, reservation, send and payment are different effects. Default research does not authorize checkout/cart actions. Parameter or authority changes invalidate non-covering approval.
 - Preserve existing private-document transmission/search guards. Review precise data/egress semantics before combining public research and private context; utility is not authority to remove a safety boundary.
 - Local install is not local-only processing. Remote connectors do not place remote services under local control. Disconnect, revoke, remove and forget/delete have different scopes.
-- For product-facing changes, independent review includes task-result usefulness and affected UI behavior as well as security. Existing historical areas need re-audit only when a concrete dependency or contradiction requires it.
+- Independent review is a risk-based escalation mechanism, not a default product-change gate. Require it when a change materially alters owner authority, security/privacy boundaries, consequential-action approval semantics, sandbox/isolation, private-data egress, package/supply-chain trust, canonical owner-state ownership, or weakens a declared safety invariant. Routine product-facing changes use the normal acceptance/evidence audit and required CI. Existing historical areas need re-audit only when a concrete dependency or contradiction requires it.
 
 ## Development constitution
 
@@ -53,7 +53,7 @@ The repository adapts useful ideas from spec-driven development and explicit aut
 - **Tasks**: create bounded issue-linked work units and dependencies.
 - **Implement**: modify only the explicitly activated bounded goal.
 - **Verify**: map acceptance criteria to current positive and negative evidence.
-- **Converge**: independent review reconciles code, docs, trackers, findings and current GitHub state before closeout.
+- **Converge**: reconcile code, docs, trackers, findings and current GitHub state before closeout; add independent review only when the risk-based escalation criteria below apply.
 
 This process borrows the Constitution/Specify/Plan/Tasks/Implement/Converge discipline associated with GitHub Spec Kit, relevant standards/context injection ideas associated with BuilderMethods Agent OS, and explicit role/state/authority/receipt patterns seen in Open AgentOS-style governance. Those are development patterns only. Ruflo remains a possible product Runtime Adapter, not the repository governance system or AgentOS kernel.
 
@@ -129,7 +129,7 @@ Every milestone and iteration uses:
 2. a matching branch;
 3. small intentional commits;
 4. a pull request with current automated validation evidence;
-5. independent review when security, package authority, recovery, external-boundary, historical-authority or final-completion risk requires it;
+5. independent review only when the change materially alters a security/authority boundary or weakens a declared safety invariant; ordinary recovery, historical reconciliation and final completion do not trigger review by themselves;
 6. merge, issue closeout and tracker/ledger reconciliation.
 
 Before making an implementation or documentation change, create the issue and switch to its matching branch. Enable the repository hooks once per clone with `git config core.hooksPath .githooks`; they reject commits and pushes directly to `main` or `master`.
@@ -175,20 +175,20 @@ Retired Agent Distribution Platform issues and #358–#360 are historical eviden
 
 Use role-appropriate delegation only for independent bounded work. Record the requested model/reasoning setting when material, the tool-accepted setting when observable, the observed execution result, and exclusive file ownership. Do not claim a model/runtime change that was not accepted or observed.
 
-Relevant security, package authority, sandbox/supply-chain, recovery, external-boundary, historical-contract and final-completion work requires an independent review artifact. An implementer's self-review or a label transition alone is not independent review.
+Independent review is required only for a material security/authority boundary change. Triggers include widening filesystem/network/secret/connector/runtime authority; OAuth or credential-boundary changes; consequential-action approval changes; sandbox/isolation/privilege changes; private-data egress or recipient-boundary changes; package/dependency supply-chain trust or install/update authority changes; canonical owner-state/authority ownership changes; or weakening/removing a declared safety invariant. Recovery work requires independent review only when it changes one of those semantics. Final completion, ordinary UI/conversation/Settings work, non-authority bug fixes/refactors/docs, and tracker/ledger reconciliation do not trigger review by themselves. When review is required, an implementer's self-review or a label transition alone is not independent review.
 
 Completion is rejected unless a current requirement-to-evidence audit maps every acceptance criterion to merged artifacts, required CI, and relevant tracker/roadmap/ledger closeout. A local command, fixture, signature, package manifest, closed issue, branch or PR alone never proves live capability completion.
 
 
 ## Verification budget and stable-head review
 
-Required CI, branch protection, exact-head validation, independent review, and truthful evidence remain mandatory. Verification efficiency changes **when** broad validation/review is triggered, not whether required gates exist.
+Required CI, branch protection, exact-head validation and truthful evidence remain mandatory. Independent review is mandatory only when the risk-based escalation criteria above apply. Verification efficiency governs both when broad validation is triggered and whether an independent-review escalation is justified.
 
 - During implementation and review remediation, run focused tests for the contract being changed. Keep related fixes together and prefer coherent checkpoint pushes over pushing every micro-edit when a push triggers full CI or review.
-- Request full repository validation and independent review on a stable, review-ready head. After review, collect all known compatible findings and remediate them in one batch before requesting another full validation/re-review cycle.
-- Normal soft budget after review-ready is one stable-head full validation/review plus one consolidated post-review full validation/re-review when material findings require it. A third or later broad cycle is allowed when necessary, but the PR must record why another cycle is required (for example a new security finding, changed shared contract, flaky/unknown root cause, or material cross-worktree conflict).
+- Request full repository validation on a stable, review-ready head. If the change crosses a material security/authority boundary, request independent review on that same stable head. After any review, collect compatible findings and remediate them in one batch.
+- Normal soft budget after review-ready is one stable-head full validation. When independent review is risk-triggered, add one review pass. If review findings require remediation, run one consolidated post-remediation full validation; re-review only when the remediation itself changes the triggering security/authority boundary or introduces a new review-triggering boundary. A third or later broad cycle is allowed when necessary, but the PR must record why another cycle is required (for example a new security finding, changed shared contract, flaky/unknown root cause, or material cross-worktree conflict).
 - Never request re-review for an unchanged head, request duplicate review while one is already running, or repeatedly poll CI/review when no decision can be made from a new result. Inspect gates at meaningful transitions.
-- A narrow mechanical fix should use focused tests first and be batched before the eventual exact-head merge gate. If it changes a previously reviewed head, the final consolidated head still receives the applicable independent re-review before merge. Do not weaken, skip, or relabel required tests/review to save compute, time, or context.
+- A narrow mechanical fix should use focused tests first and be batched before the eventual exact-head merge gate. Changing a previously reviewed head does not automatically require re-review: re-review only when the remediation changes the boundary that triggered review or introduces another review-triggering change. Do not weaken, skip, or relabel required tests or a genuinely triggered review to save compute, time, or context.
 - Broaden validation/review earlier when security, authentication/OAuth, privacy, external effects, shared contracts, replay/idempotency/recovery, or an uncertain root cause is involved.
 
 A critical execution profile is not permission for unlimited validation churn. If broad cycles keep repeating, stop micro-fixing, establish the root cause, batch the remediation, and document the reason for any additional cycle.
@@ -221,4 +221,4 @@ Package/runtime/distribution PRs additionally state:
 - negative authority/security tests;
 - whether any live external operation was actually observed.
 
-Squash merge feature work into `main` after validation and required review pass. Record completed work in `TASKS.md`, `docs/roadmap.md`, and `docs/issue-branch-ledger.jsonl` together when the activated goal's contract requires those records.
+Squash merge feature work into `main` after validation and any risk-triggered required review pass. Record completed work in `TASKS.md`, `docs/roadmap.md`, and `docs/issue-branch-ledger.jsonl` together when the activated goal's contract requires those records.

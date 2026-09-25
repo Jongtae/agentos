@@ -248,13 +248,15 @@ class ServiceProvenance(unittest.TestCase):
 
     def test_turn_records_the_offered_tools_and_the_loaded_build(self):
         """AX-11 (#603): route exposure and running build identity, no paths."""
-        from personal_agent.bounded_execution import MCP_TOOLS
+        from personal_agent.bounded_execution import profile_mcp_tools
         from personal_agent.service_control import PACKAGE_DIR, build_identity, package_digest
         service = self._service(_Engine())
         self.store.enqueue('hello', 'k1')
         self.assertTrue(service.run_one())
         record = self._selected(service)['provenance']
-        self.assertEqual(record['exposed_tools'], [tool['name'] for tool in MCP_TOOLS])
+        self.assertEqual(record['exposed_tools'], [tool['name'] for tool in profile_mcp_tools('bounded-agentos-mcp')])
+        self.assertEqual(record['capability_profile'], 'bounded-agentos-mcp')
+        self.assertEqual(record['unavailable_tools']['public_page_read'], 'owner-page-approval-bound-to-direct-api-model')
         self.assertEqual(record['build'], build_identity())
         self.assertEqual(record['build']['package_digest'], package_digest(PACKAGE_DIR))
         self.assertEqual(record['build']['origin'], 'source-checkout')

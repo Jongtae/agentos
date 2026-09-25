@@ -18,15 +18,26 @@ from personal_agent.subscription_engines import SubscriptionEngines
 
 
 class _Capabilities:
-    def __init__(self):
+    """Records executions; its definitions are the real built-in action source (#604)."""
+    def __init__(self, allowed=None):
+        from personal_agent.manifests import runtime_packages
         self.calls=[]; self.store=type('Store',(),{'root':Path('/safe-owner-runtime')})(); self.job_id='fixture-job'
+        self.tools={tool['id']:tool for package in runtime_packages([]) for tool in package['tools']}
+        self.allowed=set(self.tools if allowed is None else allowed)
+    def definitions(self):
+        from personal_agent.agent_runtime import action_definitions
+        return action_definitions(self.tools, self.allowed)
     def execute(self, name, arguments): self.calls.append((name, arguments)); return {'ok': True}
+
+
+BOUNDED_NAMES = ['bounded_public_research', 'list_notes', 'save_note', 'weather', 'web_search']
 
 
 class BoundedExecutionTests(unittest.TestCase):
     def test_mcp_facade_exposes_only_agentos_allowlist(self):
         caps=_Capabilities(); tools=AgentOSMcpTools(caps)
-        self.assertEqual([tool['name'] for tool in tools.definitions()], ['list_notes','save_note','web_search'])
+        # Every built-in action is allowed here; the facade still offers only its profile.
+        self.assertEqual([tool['name'] for tool in tools.definitions()], BOUNDED_NAMES)
         self.assertEqual(tools.call('web_search', {'query':'public weather'}), {'ok':True})
         with self.assertRaises(ExecutionError): tools.call('read_file', {'path':'/etc/passwd'})
         with self.assertRaises(ExecutionError): tools.call('save_note', {'content':''})
@@ -89,7 +100,10 @@ class BoundedExecutionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             store=QuickStore(Path(folder)/'data')
             with store.db() as db: db.execute('INSERT INTO notes VALUES (?,?,?)',('n1','Bridge note',1))
-            process=subprocess.Popen([os.sys.executable,'-m','personal_agent.mcp_bridge','--data',str(store.root),'--job','bridge-job'],
+            # The bridge acts only for a running Work of this store (#604).
+            job=store.enqueue('bridge turn','bridge-key')
+            with store.db() as db: db.execute("UPDATE jobs SET status='running' WHERE id=?",(job,))
+            process=subprocess.Popen([os.sys.executable,'-m','personal_agent.mcp_bridge','--data',str(store.root),'--job',job],
                                      stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
             try:
                 process.stdin.write(json.dumps({'jsonrpc':'2.0','id':1,'method':'initialize'})+'\n')
@@ -100,7 +114,7 @@ class BoundedExecutionTests(unittest.TestCase):
                 process.terminate(); process.wait(timeout=3); process.stdin.close(); process.stdout.close()
             self.assertEqual(replies[-1]['result']['content'][0]['type'],'text')
             self.assertIn('Bridge note',replies[-1]['result']['content'][0]['text'])
-            with store.db() as db: self.assertEqual(db.execute("SELECT status FROM tool_events WHERE job_id='bridge-job' AND tool='list_notes'").fetchone()[0],'succeeded')
+            with store.db() as db: self.assertEqual(db.execute("SELECT status FROM tool_events WHERE job_id=? AND tool='list_notes'",(job,)).fetchone()[0],'succeeded')
 
     def test_default_engine_run_directory_is_owner_local_and_private(self):
         adapter=BoundedExecutionAdapter()
@@ -271,7 +285,7 @@ class SubscriptionServiceTests(unittest.TestCase):
             job=store.enqueue('do work','subscription-test')
             self.assertTrue(service.run_one())
             self.assertEqual(adapter.call[0], 'codex')
-            self.assertEqual(adapter.call[2], ['list_notes','save_note','web_search'])
+            self.assertEqual(adapter.call[2], BOUNDED_NAMES)
             self.assertEqual(store.job(job)['response'], 'engine answer')
 
     def test_summary_regression_sends_approved_notes_to_subscription_engine(self):
@@ -669,8 +683,7 @@ class BoundedExecutionPreservedBoundaryTests(unittest.TestCase):
         definitions = tools.definitions()
         definitions.append({'name': 'run_shell'})
         definitions[0]['name'] = 'tampered'
-        self.assertEqual([tool['name'] for tool in tools.definitions()],
-                         ['list_notes', 'save_note', 'web_search'])
+        self.assertEqual([tool['name'] for tool in tools.definitions()], BOUNDED_NAMES)
 
     def test_non_object_tool_arguments_are_refused(self):
         tools = AgentOSMcpTools(_Capabilities())

@@ -204,12 +204,26 @@ def test_deliberately_stale_build_is_identified_without_a_model(tmp_path):
 
 
 def test_deliberately_missing_binding_is_identified(tmp_path):
-    drop = "\nMCP_TOOLS = tuple(tool for tool in MCP_TOOLS if tool['name'] != 'web_search')\n"
+    drop = ("\nCLI_PROFILES['bounded-agentos-mcp']['actions'] = tuple(action for action in "
+            "CLI_PROFILES['bounded-agentos-mcp']['actions'] if action != 'web_search')\n")
     report = installation(fake_install(tmp_path, drop))
     assert "web_search" not in report["routes"]["bounded-cli-mcp"]
     missing = next(item for item in report["findings"]
                    if isinstance(item, dict) and item.get("missing-public-read-binding") == "bounded-cli-mcp")
-    assert "web_search" in missing["actions"]
+    assert missing["actions"] == ["web_search"], "only the undeclared omission is a missing binding"
+
+
+def test_declared_profile_limits_are_reported_as_limits_not_missing_bindings(tmp_path):
+    """#604: an approval bound to another provider is a route limit, not incapability."""
+    report = installation(fake_install(tmp_path))
+    routes = report["routes"]
+    assert {"weather", "web_search"} <= set(routes["bounded-cli-mcp"])
+    assert routes["declared_limits"]["bounded-cli-mcp"] == {
+        "public_page_read": "owner-page-approval-bound-to-direct-api-model"}
+    assert set(routes["declared_limits"]["isolated-cli-mcp"]) == {"weather", "web_search", "public_page_read"}
+    assert not [item for item in report["findings"]
+                if isinstance(item, dict) and "missing-public-read-binding" in item]
+    assert routes["mcp_wire_problems"] == {"bounded-cli-mcp": [], "isolated-cli-mcp": []}
 
 
 def test_wire_check_rejects_python_style_schema_and_accepts_mcp_form():

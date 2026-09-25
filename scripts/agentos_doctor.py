@@ -258,6 +258,14 @@ _NATIVE_PROBE = (
     "print(json.dumps(sorted(d['function']['name'] for d in DEFINITIONS)))"
 )
 
+#: Declared per-profile limits of the inspected build (#604).  A build older
+#: than #604 declares none, so every missing public read stays a finding.
+_PROFILE_PROBE = (
+    "import json; from personal_agent.bounded_execution import route_unavailable; "
+    "print(json.dumps({'bounded-cli-mcp': route_unavailable('bounded-agentos-mcp'), "
+    "'isolated-cli-mcp': route_unavailable('isolated-agentos-mcp')}))"
+)
+
 
 def _probe(argv, env, stdin_text=None, cwd=None):
     try:
@@ -430,6 +438,7 @@ def inspect_installation(root=ROOT, interpreter=None, data=None, port=None,
                                ["--callback", "http://127.0.0.1:9/doctor", "--token", "doctor", "--task-id", "doctor"],
                                exposure_env, str(temporary), probe)
         native = _json_or_none(probe([exposure_python, "-c", _NATIVE_PROBE], exposure_env, None, str(temporary)))
+        declared = _json_or_none(probe([exposure_python, "-c", _PROFILE_PROBE], exposure_env, None, str(temporary)))
 
     def names(tools):
         return sorted(tool.get("name") for tool in tools if isinstance(tool, dict)) if isinstance(tools, list) else "unknown"
@@ -440,14 +449,25 @@ def inspect_installation(root=ROOT, interpreter=None, data=None, port=None,
         "bounded-cli-mcp": names(bridge),
         "isolated-cli-mcp": names(isolated),
     }
+    declared = declared if isinstance(declared, dict) else {}
+    limits = {}
     for route in ("bounded-cli-mcp", "isolated-cli-mcp"):
         offered = routes[route]
         if offered == "unknown":
             unknown.append(route)
             continue
-        missing = [action for action in PUBLIC_READ_ACTIONS if action not in offered]
+        reasons = declared.get(route) if isinstance(declared.get(route), dict) else {}
+        # A declared profile limit (for example an approval bound to another
+        # provider) is a route limit, not a missing binding; an undeclared
+        # omission is the defect this check exists to find.
+        limited = {action: reasons[action] for action in PUBLIC_READ_ACTIONS
+                   if action not in offered and isinstance(reasons.get(action), str)}
+        if limited:
+            limits[route] = limited
+        missing = [action for action in PUBLIC_READ_ACTIONS if action not in offered and action not in limited]
         if missing:
             findings.append({"missing-public-read-binding": route, "actions": missing})
+    routes["declared_limits"] = limits
     wire = {}
     for route, tools in (("bounded-cli-mcp", bridge), ("isolated-cli-mcp", isolated)):
         if isinstance(tools, list):

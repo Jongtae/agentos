@@ -231,9 +231,23 @@ class BridgeProcessEgressGuard(unittest.TestCase):
             returncode = 0
             stdout = json.dumps({'item': {'type': 'agent_message', 'text': 'engine answer'}})
 
+        network_calls = []
+        requests = '\n'.join(json.dumps(r) for r in [
+            {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {}},
+            {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call', 'params': {'name': 'web_search', 'arguments': {'query': 'today news'}}},
+        ]) + '\n'
+
         def runner(argv, **kwargs):
+            # The scripted CLI calls the bridge during the Work, as a real one
+            # would: since #604 the bridge acts only for a running Work.
             config = json.loads((Path(kwargs['cwd']) / 'agentos-mcp.json').read_text())
-            captured['args'] = config['mcpServers']['agentos']['args']
+            args = captured['args'] = config['mcpServers']['agentos']['args']
+            provenance = [part.split('=', 1)[1] for part in args if part.startswith('--provenance=')]
+            out = io.StringIO()
+            with mock.patch.object(LocalTools, 'execute', lambda self, plan: network_calls.append(plan) or {'results': []}), \
+                 mock.patch.object(sys, 'stdin', io.StringIO(requests)), contextlib.redirect_stdout(out):
+                mcp_bridge.serve(str(store.root), args[args.index('--job') + 1], provenance)
+            captured['replies'] = [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
             return Done()
 
         profile = Path(tmp.name) / 'codex-home'; profile.mkdir()
@@ -244,22 +258,12 @@ class BridgeProcessEgressGuard(unittest.TestCase):
                                execution_adapter=adapter)
         service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
         for index, text in enumerate(turns):
+            network_calls.clear()
             store.enqueue(text, f'k{index}')
             self.assertTrue(service.run_one())
         args = captured['args']
         provenance = [part.split('=', 1)[1] for part in args if part.startswith('--provenance=')]
-        job_id = args[args.index('--job') + 1]
-        network_calls = []
-        requests = '\n'.join(json.dumps(r) for r in [
-            {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {}},
-            {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call', 'params': {'name': 'web_search', 'arguments': {'query': 'today news'}}},
-        ]) + '\n'
-        out = io.StringIO()
-        with mock.patch.object(LocalTools, 'execute', lambda self, plan: network_calls.append(plan) or {'results': []}), \
-             mock.patch.object(sys, 'stdin', io.StringIO(requests)), contextlib.redirect_stdout(out):
-            mcp_bridge.serve(str(store.root), job_id, provenance)
-        replies = [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
-        return provenance, replies[-1], network_calls
+        return provenance, captured['replies'][-1], network_calls
 
     def test_prior_private_answer_closes_web_search_in_the_real_bridge(self):
         provenance, reply, network_calls = self._service_turns(['/note PRIVATE-XYZ', '/notes', 'search the web for today news'])
@@ -347,7 +351,8 @@ class OversizeRequestKeepsWorking(DestinationScopedHistory):
 # ``test_finding_*`` tests are ``expectedFailure`` baselines of known defects
 # owned by later AGENCY children (#604 bindings, #605 context/egress).  They
 # are not repaired here; an unexpected pass fails the suite so the owning
-# change removes the marker.
+# change removes the marker.  #604 fixed and un-marked the CLI weather binding;
+# the #605 findings remain expected failures.
 
 class _PublicNetwork:
     """Stands in for LocalTools' public reads; records every outbound plan."""
@@ -451,15 +456,15 @@ class MissingWeatherBinding(_RouteFixture):
         self.assertIn('Daejeon', self.requests[-1]['messages'][-1]['content'])
         self.assertIn('weather', [tool['function']['name'] for tool in self.requests[-1]['tools']])
 
-    @unittest.expectedFailure
     def test_finding_cli_route_has_no_weather_binding(self):
-        """Owner #604 (AX-02).  Defect layers, both observed here:
+        """Fixed by #604 (AX-02); was an ``expectedFailure`` baseline from #603.
 
-        * ``bounded_execution.MCP_TOOLS`` offers the CLI only list_notes,
-          save_note and web_search -- no ``weather``;
-        * ``quickstart_service.subscription_public_lookup_query`` only
-          preflights a ``…시/군/구`` + ``날씨/기온`` phrase, so this turn gets
-          no AgentOS lookup either.
+        The CLI's tool list is now derived from ``Capabilities.definitions()``
+        through the bounded CLI profile, so ``weather`` is offered.  Still owned
+        elsewhere: the lexical ``subscription_public_lookup_query`` preflight
+        (#606), and the second turn's history taint that refuses this weather
+        call once any assistant answer is in context (#605) -- which is why the
+        offer, not the outbound request, is what this reproducer can require.
         """
         self._service(cli=True)
         self._turns(*WEATHER_TURNS)

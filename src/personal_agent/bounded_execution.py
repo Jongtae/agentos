@@ -61,6 +61,10 @@ class ExecutionError(ValueError):
                 ('exit_code', self.exit_code), ('reason', self.reason)) if value not in ('', None)}
 
 
+# Shared with the service for provenance redaction (#570).
+SECRET_PATTERN = _SECRET
+
+
 def _echoes(text, prompt):
     """True when ``text`` repeats any run of 24+ characters from the prompt.
 

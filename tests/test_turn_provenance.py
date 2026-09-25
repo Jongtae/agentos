@@ -110,7 +110,9 @@ class ServiceProvenance(unittest.TestCase):
         engine = _Engine(meta={'argv': ['codex', 'exec', '<prompt: 9 bytes>', '/Users/owner/.codex/x'], 'reported_model': None,
                                'usage': {'input_tokens': 7}, 'tool_calls': [], 'duration_ms': 1200})
         service = self._service(engine)
-        self.store.enqueue('my key is sk-live' + 'a' * 20 + ' and file /Users/owner/private/plan.md', 'k1')
+        self.store.secret('telegram_token', 'opaque-telegram-value-123')
+        self.store.enqueue('my key is sk-live' + 'a' * 20 + ' and ghp_' + 'b' * 20 + ' and opaque-telegram-value-123'
+                           ' and file /Users/owner/private/plan.md', 'k1')
         self.assertTrue(service.run_one())
         record = self._selected(service)['provenance']
         self.assertEqual((record['route'], record['engine'], record['status']), ('subscription', 'codex', 'answered'))
@@ -118,7 +120,10 @@ class ServiceProvenance(unittest.TestCase):
         stored = json.dumps(record, ensure_ascii=False)
         self.assertNotIn('sk-live' + 'a' * 20, stored)
         self.assertNotIn('/Users/owner', stored)
-        self.assertIn('[가림]', record['prompt_envelope'])
+        self.assertNotIn('ghp_' + 'b' * 20, stored)
+        self.assertNotIn('opaque-telegram-value-123', stored, 'stored secrets are removed by value, whatever their format')
+        self.assertIn('[redacted]', record['prompt_envelope'])
+        self.assertIn('[경로 가림]', record['prompt_envelope'])
         self.assertTrue(record['instructions_version'])
         self.assertEqual(len(record['instructions_digest']), 16)
         self.assertNotIn('reported_model', record, 'an unreported model is absent, not guessed')

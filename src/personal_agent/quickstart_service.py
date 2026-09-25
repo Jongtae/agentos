@@ -18,7 +18,7 @@ from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_U
                                       TERMINAL_INTERRUPTED_HEADER, TERMINAL_NEXT_ACTION, TERMINAL_PARTIAL_HEADER,
                                       TERMINAL_UNVERIFIED_MARKER, BlockedTurn, ConversationProjection, terminal_text)
 from .subscription_engines import SubscriptionEngines
-from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult, MAX_PROMPT_BYTES
+from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult, MAX_PROMPT_BYTES, SECRET_PATTERN
 from .isolated_engine_gateway import EngineGatewayError
 from .isolated_mcp_proxy import IsolatedMcpProxy, TaskCapabilityRegistry
 from .settings_orchestrator import SettingsOrchestrator, SettingsError
@@ -358,11 +358,15 @@ class AgentService:
                 'source':'explicit' if isinstance(explicit,dict) and explicit.get('provider') else 'default-openai'}
 
     # -- turn provenance (#570) ------------------------------------------------
-    @staticmethod
-    def _redact_provenance(text):
-        text=re.sub(r'(?:sk-|Bearer\s+)[A-Za-z0-9._-]+','[가림]',str(text or ''),flags=re.I)
-        text=re.sub(r'(?<!\w)/(?:Users|home)/[^\s"\']+','[경로 가림]',text)
-        return text[:60000]
+    def _redact_provenance(self, text):
+        # Adopt the existing redaction: the stored secrets' literal values, the
+        # adapter's credential patterns, then the owner-visible path mask.
+        text=str(text or '')
+        for name in ('model_key','decision_model_key','claude_code_token','telegram_token'):
+            value=self.store.secret(name)
+            if isinstance(value,str) and len(value)>=8:text=text.replace(value,'[redacted]')
+        text=SECRET_PATTERN.sub('[redacted]',text)
+        return (self._redact_reason(text) or '')[:60000]
 
     def record_turn_provenance(self, job_id, **fields):
         """Keep what this Work actually sent and what the worker reported.

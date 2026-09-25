@@ -204,7 +204,7 @@ class WorkerProvenanceDeclarationTests(unittest.TestCase):
                 self.refusal = None
                 self.searched = False
 
-            def execute(self, engine, prompt, tools):
+            def execute(self, engine, prompt, tools, **_kwargs):
                 self.prompt = prompt
                 try:
                     tools.call('web_search', {'query': LAUNDERED})

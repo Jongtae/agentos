@@ -259,7 +259,7 @@ class SubscriptionServiceTests(unittest.TestCase):
     def test_selected_subscription_engine_runs_through_bounded_adapter(self):
         class Adapter:
             def __init__(self): self.call=None
-            def execute(self, engine, prompt, tools):
+            def execute(self, engine, prompt, tools, **_kwargs):
                 self.call=(engine,prompt,[t['name'] for t in tools.definitions()])
                 from personal_agent.bounded_execution import ExecutionResult
                 return ExecutionResult('engine answer',engine,0)
@@ -277,7 +277,7 @@ class SubscriptionServiceTests(unittest.TestCase):
     def test_summary_regression_sends_approved_notes_to_subscription_engine(self):
         class Adapter:
             def __init__(self): self.prompt=''; self.tool_result=None
-            def execute(self, engine, prompt, tools):
+            def execute(self, engine, prompt, tools, **_kwargs):
                 self.prompt=prompt
                 self.tool_result=tools.call('list_notes',{})
                 from personal_agent.bounded_execution import ExecutionResult
@@ -300,7 +300,7 @@ class SubscriptionServiceTests(unittest.TestCase):
     def test_subscription_summary_rejection_timeout_and_malformed_output_are_failed_once(self):
         class Adapter:
             def __init__(self, error): self.error,self.calls=error,0
-            def execute(self, *args): self.calls+=1; raise self.error
+            def execute(self, *args, **_kwargs): self.calls+=1; raise self.error
         for error in (ExecutionError('engine rejected request'), ExecutionError('engine timed out'), ExecutionError('engine returned malformed output')):
             with self.subTest(error=str(error)), tempfile.TemporaryDirectory() as folder:
                 store=QuickStore(Path(folder)/'data')
@@ -316,7 +316,7 @@ class SubscriptionServiceTests(unittest.TestCase):
 
     def test_engine_failure_diagnostics_reach_work_event_job_error_and_log(self):
         class Adapter:
-            def execute(self, *args):
+            def execute(self, *args, **_kwargs):
                 raise ExecutionError('Codex 엔진이 작업을 완료하지 못했습니다(종료 코드 1). 엔진 응답: model unsupported',
                                      failure_class='request-rejected', exit_code=1, reason='model unsupported')
         with tempfile.TemporaryDirectory() as folder:
@@ -340,7 +340,7 @@ class SubscriptionServiceTests(unittest.TestCase):
     def test_duplicate_summary_request_key_reuses_one_terminal_job_after_restart(self):
         class Adapter:
             def __init__(self): self.calls=0
-            def execute(self, engine, prompt, tools):
+            def execute(self, engine, prompt, tools, **_kwargs):
                 self.calls+=1
                 from personal_agent.bounded_execution import ExecutionResult
                 return ExecutionResult('one result',engine,0)
@@ -367,7 +367,7 @@ class SubscriptionServiceTests(unittest.TestCase):
                         'sources':['https://example.test/result']}
         class Adapter:
             def __init__(self): self.prompt=''
-            def execute(self, engine, prompt, tools):
+            def execute(self, engine, prompt, tools, **_kwargs):
                 self.prompt=prompt
                 from personal_agent.bounded_execution import ExecutionResult
                 return ExecutionResult('source-backed answer',engine,0)

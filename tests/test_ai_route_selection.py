@@ -19,7 +19,7 @@ from personal_agent.subscription_engines import SubscriptionEngines
 
 class _Engine:
     def __init__(self): self.calls = 0
-    def execute(self, engine, prompt, tools):
+    def execute(self, engine, prompt, tools, **_kwargs):
         self.calls += 1
         return ExecutionResult('engine answer', engine, 0)
 
@@ -137,7 +137,7 @@ class AiRouteSelectionTests(unittest.TestCase):
     def test_task_reports_the_route_it_used_even_after_a_later_switch(self):
         from personal_agent.bounded_execution import ExecutionError
         class Failing:
-            def execute(self, *args): raise ExecutionError('engine failed', failure_class='request-rejected', exit_code=1)
+            def execute(self, *args, **_kwargs): raise ExecutionError('engine failed', failure_class='request-rejected', exit_code=1)
         self.service.execution_adapter = Failing()
         failed = self._run('hello', 'route-failed')
         self._ready_model()

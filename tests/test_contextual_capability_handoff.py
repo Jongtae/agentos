@@ -25,7 +25,8 @@ from personal_agent.conversation_handoff import (CONVERSATION_RESUME_KEY, LOCAL_
 from personal_agent.file_workspace import FileWorkspace
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart import make_handler
-from personal_agent.quickstart_service import AgentService
+from personal_agent.quickstart_service import (LOCAL_DOCUMENT_APPROVAL_TEXT, LOCAL_KEPT_WORKSPACE_TEXT,
+                                              AgentService)
 from personal_agent.quickstart_store import QuickStore
 
 CHAT = 505
@@ -175,7 +176,8 @@ class ReadHandoffTests(HandoffTestCase):
 
         before = len(self.sent)
         result = self.service.approve_local_folder({'handoff_id': requests[0]['handoff_id']})
-        self.assertEqual(result, {'state': 'approved', 'authority': 'read', 'scheduled': True, 'name': 'contracts'})
+        self.assertEqual(result, {'state': 'approved', 'authority': 'read', 'scheduled': True, 'name': 'contracts',
+                                  'kept_existing': False})
         self.assertEqual(self.roots(), [str(contracts.resolve())])
         # A read grant is never a result-write grant.
         self.assertIsNone(self.store.config('file_workspace', {}).get('workspace'))
@@ -317,6 +319,34 @@ class ReadHandoffTests(HandoffTestCase):
         self.assertEqual(self.job(job_id)['status'], 'awaiting_connection')
         self.assertIn('Mac에서 계속', bubbles[0])
 
+    def test_a_turn_whose_effect_call_raised_is_not_parked(self):
+        self.plan = [('delegate_agent', {'agent_id': 'no-such-agent', 'task': '계약서 검토'}),
+                     ('find_files', {'query': '계약서'})]
+        job_id, _ = self.ask('계약서 검토 맡기고 파일도 찾아줘')
+        self.assertNotEqual(self.job(job_id)['status'], 'awaiting_connection')
+        self.assertEqual(self.pending(), [])
+
+    def test_provenance_records_the_parked_state(self):
+        job_id, _ = self.park_read()
+        self.assertEqual(self.store.turn_provenance(job_id)['status'], 'setup-required')
+
+    def test_a_concurrent_second_approval_is_a_friendly_refusal(self):
+        job_id, _ = self.park_read()
+        self.picked = str(self.folder('contracts'))
+        request = self.pending()[0]
+        self.service.select_local_folder({'handoff_id': request['handoff_id']})
+        pending = self.service.local_handoff.pending
+
+        def lost_race(*args):
+            raise ConnectorContractError('unclaimed_resume')
+        pending.complete = lost_race
+        with self.assertRaises(ConversationHandoffError) as raced:
+            self.service.approve_local_folder({'handoff_id': request['handoff_id']})
+        self.assertEqual(raced.exception.reason, 'replayed_resume')
+        self.assertEqual(self.job(job_id)['status'], 'queued')
+        self.service.run_one()
+        self.assertFalse(self.service.run_one(), 'still scheduled exactly once')
+
     def test_a_turn_that_ran_an_effect_is_not_parked(self):
         self.plan = [('save_note', {'content': '계약서 확인'}), ('find_files', {'query': '계약서'})]
         job_id, _ = self.ask('계약서 메모하고 파일도 찾아줘')
@@ -388,6 +418,64 @@ class HostedModelDocumentApprovalTests(HandoffTestCase):
         self.assertFalse(self.service.resume_after_document_approval(job_id), 'continues once only')
         self.assertFalse(self.service.run_one())
 
+    def stop_at_sharing(self, clock=None, resumed_plan=None):
+        if clock is not None:
+            self.service.local_handoff = local_authority_handoff(self.store, now=clock)
+        job_id, _ = self.park_read()
+        self.approve_picked(self.folder('contracts', {'renewal.txt': '계약서 갱신일: 10월 1일'}))
+        self.plan = resumed_plan or [('find_files', {'query': '계약서'})]
+        self.service.run_one()
+        self.assertIn(self.job(job_id)['status'], ('failed', 'partial'))
+        before = len(self.sent)
+        self.assertTrue(self.service.deliver_notification())
+        with self.store.db() as db:
+            notification = dict(db.execute("SELECT * FROM telegram_notifications WHERE job_id=? AND kind='approval_needed'",
+                                           (job_id,)).fetchone())
+        return job_id, notification, self.sent[before:]
+
+    def test_the_sharing_notification_says_approval_continues_that_request(self):
+        _job_id, _notification, sent = self.stop_at_sharing()
+        self.assertEqual(sent, [LOCAL_DOCUMENT_APPROVAL_TEXT])
+
+    def test_a_newer_request_withdraws_the_continuation(self):
+        job_id, notification, _ = self.stop_at_sharing()
+        self.ask('아까 요청은 취소해 줘')
+        self.callback(notification, 'approve')
+        self.assertEqual(self.job(job_id)['status'], 'failed')
+        self.assertFalse(self.service.run_one())
+
+    def test_an_explicit_cancel_of_the_stopped_work_withdraws_the_continuation(self):
+        job_id, notification, _ = self.stop_at_sharing()
+        cancelled, text = self.service.cancel_focused_work(self.job(job_id), OWNER)
+        self.assertTrue(cancelled)
+        self.assertIn('문서 공유를 승인해도 이어서 처리하지 않습니다', text)
+        self.callback(notification, 'approve')
+        self.assertEqual(self.job(job_id)['status'], 'failed')
+
+    def test_supersede_withdraws_the_continuation(self):
+        job_id, notification, _ = self.stop_at_sharing()
+        self.service.supersede_pending_handoffs(owner_id=OWNER)
+        self.callback(notification, 'approve')
+        self.assertEqual(self.job(job_id)['status'], 'failed')
+
+    def test_the_continuation_expires(self):
+        clock = Clock()
+        job_id, notification, _ = self.stop_at_sharing(clock)
+        clock.now += 3601
+        self.callback(notification, 'approve')
+        self.assertFalse(self.service.document_boundary()['requires_approval'], 'sharing itself is still approved')
+        self.assertEqual(self.job(job_id)['status'], 'failed')
+        self.assertFalse(self.service.run_one())
+
+    def test_a_resumed_turn_that_attempted_an_effect_is_not_continued(self):
+        job_id, notification, sent = self.stop_at_sharing(
+            resumed_plan=[('save_note', {'content': '계약서'}), ('find_files', {'query': '계약서'})])
+        self.assertNotEqual(sent, [LOCAL_DOCUMENT_APPROVAL_TEXT])
+        status = self.job(job_id)['status']
+        self.callback(notification, 'approve')
+        self.assertEqual(self.job(job_id)['status'], status)
+        self.assertFalse(self.service.run_one(), 'the note is never saved twice')
+
     def test_an_ordinary_failed_work_is_not_requeued_by_document_approval(self):
         contracts = self.folder('contracts', {'renewal.txt': '계약서'})
         self.service.save_roots({'paths': [str(contracts)]})
@@ -440,6 +528,22 @@ class OutputFolderHandoffTests(HandoffTestCase):
         self.assertEqual(len(saved), 1)
         self.assertEqual((minutes / 'meeting.md').read_text(encoding='utf-8'), '회의 결정: 출시일 확정')
         self.assertFalse(self.service.run_one())
+
+    def test_a_result_folder_set_in_settings_meanwhile_is_not_silently_replaced(self):
+        minutes = self.folder('minutes', {'meeting.md': '회의 결정'})
+        FileWorkspace(self.store).plan_grant('reference', str(minutes))[1]()
+        job_id, _ = self.ask(self.REQUEST)
+        self.picked = str(self.folder('chosen'))
+        request = self.pending()[0]
+        self.service.select_local_folder({'handoff_id': request['handoff_id']})
+        settings_choice = self.folder('settings-choice')
+        FileWorkspace(self.store).plan_grant('workspace', str(settings_choice))[1]()
+        before = len(self.sent)
+        approved = self.service.approve_local_folder({'handoff_id': request['handoff_id']})
+        self.assertTrue(approved['kept_existing'])
+        self.assertEqual(self.store.config('file_workspace', {})['workspace'], str(settings_choice.resolve()))
+        self.assertEqual(self.sent[before:], [LOCAL_KEPT_WORKSPACE_TEXT])
+        self.assertEqual(self.job(job_id)['status'], 'queued')
 
     def test_read_then_write_are_two_distinct_approvals_for_one_request(self):
         minutes = self.folder('minutes', {'meeting.md': '회의 결정: 출시일 확정'})

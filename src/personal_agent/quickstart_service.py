@@ -47,10 +47,14 @@ from .conversation_handoff import (CONNECTOR_LABELS, JUDGMENT_YES,
 from .conversation_handoff import (LOCAL_AUTHORITY_KIND, LOCAL_AUTHORITY_LABELS, LOCAL_AUTHORITY_PREVIEWS,
                                    LOCAL_AUTHORITY_SCOPES, LOCAL_FOLDER_READ, LOCAL_REFERENCE_READ,
                                    LOCAL_RESULT_WRITE, LOCAL_RESUMED_NOTICE, local_authority_guidance,
-                                   local_authority_handoff, local_refusal_text)
+                                   local_authority_handoff, local_refusal_text, LOCAL_RESUME_TTL_SECONDS)
 from . import local_folder_picker
 LOCAL_RESUMED_KEY='local_authority_resumed_jobs'
 LOCAL_DOCUMENT_RESUME_KEY='local_authority_document_resume_jobs'
+LOCAL_DOCUMENT_APPROVAL_TEXT=('폴더를 허용한 방금 요청을 계속하려면 연결 문서 발췌문을 외부 모델에 보내는 승인이 필요합니다. '
+                              '승인하면 그 요청을 한 번만 이어서 처리합니다. 아직 문서 내용은 전송되지 않았습니다.')
+LOCAL_KEPT_WORKSPACE_TEXT=('설정에서 이미 결과 저장 폴더가 연결되어 있어 선택한 폴더로 바꾸지 않았습니다. '
+                           '기존 결과 저장 폴더로 방금 요청을 이어서 처리합니다.')
 LOCAL_DOCUMENT_RESUMED_TEXT='문서 공유를 승인했습니다. 폴더를 허용한 요청을 한 번만 이어서 처리합니다.'
 
 LOG=logging.getLogger('personal_agent.service')
@@ -271,6 +275,7 @@ class AgentService:
         self.local_handoff=local_authority_handoff(store)
         self.folder_picker=None
         self._local_selections={}
+        self._local_approve_lock=threading.Lock()
 
     def conversation_settings_request(self, body, owner_id='local-owner', channel='http'):
         """The only settings policy entry point for every local channel."""
@@ -608,6 +613,8 @@ class AgentService:
     def cancel_focused_work(self, previous, connector_owner):
         """Cancel only the focused Work through an existing safe boundary."""
         work_id=previous['id']
+        if previous.get('status')=='failed' and self.drop_document_resume(owner_id=connector_owner,work_id=work_id):
+            return True,'이전 요청을 취소했습니다. 문서 공유를 승인해도 이어서 처리하지 않습니다.'
         if previous.get('status')=='awaiting_connection' and self.resume_index:
             for connector_id in self.resume_index.parked_for(connector_owner):
                 record=self.resume_index.record(connector_id)
@@ -1379,6 +1386,7 @@ class AgentService:
     def supersede_pending_handoffs(self, except_work_id=None, owner_id=None):
         """Drop this owner's pending resume paths because the owner corrected course."""
         if not self.resume_index:return []
+        self.drop_document_resume(owner_id=owner_id,except_work_id=except_work_id)
         dropped=[work_id for work_id in self.resume_index.supersede(owner_id=owner_id) if work_id!=except_work_id]
         return self.cancel_superseded_work(dropped)
 
@@ -1464,21 +1472,41 @@ class AgentService:
         """The one pending-resume index; connector and local handoffs share its rows."""
         return self.connector_handoff or self.local_handoff
 
-    def local_authority_need(self, capabilities):
+    def local_authority_need(self, capabilities, job_id):
         """The declared local authority a read-only turn found missing, or None.
 
         Keyed on the typed tool result (``needs_setup`` + ``requires``), never
         on the owner's wording: the model chose the tool, AgentOS decides
         whether the grant exists.
         """
+        # Eligibility is decided from every *attempted* call, including one that
+        # raised, so a failed effect (a delegation, a note) is never re-run.
+        if not self.attempted_only_reads(job_id):return None
         need=None
-        for key,result in capabilities.memo.items():
-            try:name=json.loads(key)[0]
-            except (TypeError,ValueError,IndexError):return None
-            if capabilities.tools.get(name,{}).get('host_action') not in self.LOCAL_PARK_READ_ONLY:return None
+        for result in capabilities.memo.values():
             if isinstance(result,dict) and result.get('needs_setup') is True and result.get('requires') in LOCAL_AUTHORITY_SCOPES:
                 need=need or result['requires']
         return need
+
+    #: Records that are AgentOS's own bookkeeping, not tool attempts.
+    LOCAL_NON_TOOL_EVENTS=frozenset({'model','local_authority','conversation_continuity'})
+
+    def attempted_only_reads(self, job_id):
+        """True only when every tool this Work attempted is a declared read.
+
+        Fails closed: an event whose action cannot be read, or any action not
+        in the read-only set (including a call that raised), makes the Work
+        ineligible for parking or continuation.
+        """
+        with self.store.db() as db:
+            rows=db.execute('SELECT tool,detail FROM tool_events WHERE job_id=?',(job_id,)).fetchall()
+        for row in rows:
+            if row['tool'] in self.LOCAL_NON_TOOL_EVENTS:continue
+            try:detail=json.loads(row['detail'] or '{}')
+            except (TypeError,ValueError):return False
+            action=(detail.get('host_action') if isinstance(detail,dict) else None) or row['tool']
+            if action not in self.LOCAL_PARK_READ_ONLY:return False
+        return True
 
     def workspace_authority_need(self):
         """Which folder a save-a-result request still lacks: the read first, then the write."""
@@ -1574,6 +1602,10 @@ class AgentService:
 
     def approve_local_folder(self, body):
         """Grant exactly the selected folder for exactly one authority, then resume once."""
+        with self._local_approve_lock:
+            return self._approve_local_folder(body)
+
+    def _approve_local_folder(self, body):
         found=self._local_row(body.get('handoff_id') if isinstance(body,dict) else None)
         if not found:raise ConversationHandoffError('no_pending_work')
         key,row=found
@@ -1588,17 +1620,25 @@ class AgentService:
             self.resume_index.supersede(connector_id=key,owner_id=owner)
             self._local_selections.pop(row['handoff_id'],None)
             raise ConversationHandoffError('work_already_completed')
+        # A result folder set in Settings meanwhile is never silently replaced:
+        # the request continues with it and the owner is told so.
+        kept_existing=key==LOCAL_RESULT_WRITE and self.workspace_authority_need()!=LOCAL_RESULT_WRITE
         def schedule(work_id):
             # Reached only after a successful single-use claim: the grant is
             # written, then the parked Work is re-queued by compare-and-set.
-            commit()
+            if not kept_existing:commit()
             scheduled=self._schedule_resumed_work(work_id)
             if scheduled:self._remember_work(LOCAL_RESUMED_KEY,work_id)
             return scheduled
         try:
-            _work_id,scheduled=self.local_handoff.resume(owner,key,LOCAL_AUTHORITY_SCOPES[key],schedule,
-                                                         generation=self._owner_generation(owner),
-                                                         abandon=self._abandon_local_work)
+            try:
+                _work_id,scheduled=self.local_handoff.resume(owner,key,LOCAL_AUTHORITY_SCOPES[key],schedule,
+                                                             generation=self._owner_generation(owner),
+                                                             abandon=self._abandon_local_work)
+            except ConnectorContractError:
+                # Another approval of the same request completed first; the
+                # compare-and-set already refused a second schedule.
+                raise ConversationHandoffError('replayed_resume') from None
         except ConversationHandoffError as exc:
             self._notify_owner(owner,local_refusal_text(exc.reason))
             raise
@@ -1606,8 +1646,9 @@ class AgentService:
             current=self.resume_index.record(key)
             if not current or current.get('handoff_id')!=row['handoff_id']:
                 self._local_selections.pop(row['handoff_id'],None)
-        self._notify_owner(owner,LOCAL_RESUMED_NOTICE[LOCAL_AUTHORITY_KIND[key]])
-        return {'state':'approved','authority':LOCAL_AUTHORITY_KIND[key],'scheduled':scheduled,'name':Path(selected).name}
+        self._notify_owner(owner,LOCAL_KEPT_WORKSPACE_TEXT if kept_existing else LOCAL_RESUMED_NOTICE[LOCAL_AUTHORITY_KIND[key]])
+        return {'state':'approved','authority':LOCAL_AUTHORITY_KIND[key],'scheduled':scheduled,'name':Path(selected).name,
+                'kept_existing':kept_existing}
 
     def deny_local_folder(self, body):
         """The owner declined: nothing is granted and the parked Work fails explicitly."""
@@ -1642,18 +1683,38 @@ class AgentService:
         it after the owner approves sharing cannot repeat an effect.
         """
         if job['id'] not in set(self.store.config(LOCAL_RESUMED_KEY,[])):return False
-        with self.store.db() as db:
-            rows=db.execute("SELECT detail FROM tool_events WHERE job_id=? AND status='succeeded'",(job['id'],)).fetchall()
-        for row in rows:
-            try:action=json.loads(row['detail'] or '{}').get('host_action')
-            except (TypeError,ValueError,AttributeError):return False
-            if action is not None and action not in self.LOCAL_PARK_READ_ONLY:return False
-        self._remember_work(LOCAL_DOCUMENT_RESUME_KEY,job['id'])
+        if not self.attempted_only_reads(job['id']):return False
+        with self.lock:
+            rows=self._document_resume_rows()
+            rows[job['id']]={'owner':_owner_key(self.connector_owner_id(job)),
+                             'expires_at':self.local_handoff.now()+LOCAL_RESUME_TTL_SECONDS}
+            self.store.put(LOCAL_DOCUMENT_RESUME_KEY,rows)
         return True
 
+    def _document_resume_rows(self):
+        raw=self.store.config(LOCAL_DOCUMENT_RESUME_KEY,{})
+        now=self.local_handoff.now()
+        return {key:row for key,row in (raw.items() if isinstance(raw,dict) else ())
+                if isinstance(row,dict) and isinstance(row.get('expires_at'),(int,float)) and row['expires_at']>now}
+
+    def document_resume_eligible(self, work_id):
+        return isinstance(work_id,str) and work_id in self._document_resume_rows()
+
+    def drop_document_resume(self, owner_id=None, work_id=None, except_work_id=None):
+        """Withdraw continuation eligibility: a newer request, supersede or cancel."""
+        owner=_owner_key(owner_id) if owner_id is not None else None
+        with self.lock:
+            rows=self._document_resume_rows()
+            dropped=[key for key,row in rows.items() if key!=except_work_id
+                     and (work_id is None or key==work_id)
+                     and (owner is None or hmac.compare_digest(str(row.get('owner','')),owner))]
+            for key in dropped:rows.pop(key,None)
+            self.store.put(LOCAL_DOCUMENT_RESUME_KEY,rows)
+        return dropped
+
     def resume_after_document_approval(self, work_id):
-        """Re-queue exactly the eligible Work once, after the owner approved sharing."""
-        if not isinstance(work_id,str) or not self._forget_work(LOCAL_DOCUMENT_RESUME_KEY,work_id):return False
+        """Re-queue exactly the eligible, unexpired, unwithdrawn Work once, after sharing is approved."""
+        if not self.document_resume_eligible(work_id) or not self.drop_document_resume(work_id=work_id):return False
         self._forget_work(LOCAL_RESUMED_KEY,work_id)
         with self.store.db() as db:
             db.execute('BEGIN IMMEDIATE')
@@ -2301,8 +2362,10 @@ class AgentService:
                     {'text':'허용 안 함','callback_data':f"v1c:{notification['id']}:deny"},
                 ]]}
             try:
-                result=self.telegram.send_message(notification['chat_id'],
-                                                  self.notification_text(notification['kind']),reply_markup)
+                text=(LOCAL_DOCUMENT_APPROVAL_TEXT if notification['kind']=='approval_needed'
+                      and self.document_resume_eligible(notification.get('job_id'))
+                      else self.notification_text(notification['kind']))
+                result=self.telegram.send_message(notification['chat_id'],text,reply_markup)
                 message_id=result.get('message_id') if isinstance(result,dict) else None
                 self.store.update_notification(notification['id'],'sent',message_id if isinstance(message_id,int) else None)
             except ProviderError:
@@ -2477,7 +2540,7 @@ class AgentService:
                             result_kind='approved'
                         else:
                             self.store.put('document_sharing',{})
-                            self._forget_work(LOCAL_DOCUMENT_RESUME_KEY,notification.get('job_id'))
+                            self.drop_document_resume(work_id=notification.get('job_id'))
                             result_kind='denied'
                         self.store.update_notification(notification['id'],result_kind)
                         try:self.telegram.edit_message_text(sender,notification['message_id'],
@@ -2652,6 +2715,11 @@ class AgentService:
                         # Calendar, Memory and connector state machines remain
                         # the authority for any actual change.
                         self.record_continuity(job['id'],previous['id'],relation,executed=False)
+                # #505: a newer request withdraws any folder-resumed Work still
+                # waiting for document-sharing approval; approving sharing later
+                # never revives it.
+                if not self._answered_before(job['id']):
+                    self.drop_document_resume(owner_id=connector_owner,except_work_id=job['id'])
                 owner_memory_approval=self.store.issue_memory_approval(job['id'],prompt) if self.explicit_memory_request(prompt) else None
                 # Routing decision, made by AgentOS before any capability is
                 # touched.  `decision.authority` records whether the owner
@@ -3007,8 +3075,9 @@ class AgentService:
                         # #505: a read-only turn whose file tool found no covering
                         # folder grant is setup-required, not an answer.  The model
                         # chose the tool; AgentOS parks the Work for one local grant.
-                        local_need=self.local_authority_need(capabilities)
+                        local_need=self.local_authority_need(capabilities,job['id'])
                         if local_need:
+                            self.record_turn_provenance(job['id'],status='setup-required')
                             return self.park_for_local_authority(job,local_need,calendar_notice)
                     if workspace_request:
                         saved=FileWorkspace(self.store).save(job['id'],workspace_request['title'],response,workspace_request['sources'])

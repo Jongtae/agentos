@@ -15,7 +15,7 @@ Every material product change should progress through:
 - **Constitution**: confirm the change does not violate durable product/security principles.
 - **Spec**: state owner outcome, behavior, boundaries, non-goals and acceptance criteria without prematurely selecting an implementation.
 - **Authority/Threat Model**: state what data, permissions, runtimes, packages, networks, secrets and external effects are involved; identify abuse/failure paths.
-- **Plan**: perform the Existing Solutions Review, then choose architecture, compatibility/migration strategy, implementation sequence and evidence plan.
+- **Plan**: perform the Existing Solutions Review (already required before the proposal itself, see C15), then choose architecture, compatibility/migration strategy, implementation sequence and evidence plan.
 - **Tasks**: create bounded issue-linked work units with dependencies and explicit stopping rules.
 - **Implement**: change only the activated bounded goal, preserving existing state/evidence.
 - **Verify**: map every acceptance criterion to current automated/operating evidence, including negative tests where authority/security is involved.
@@ -86,6 +86,8 @@ Identity verification, MFA/CAPTCHA, legal/vendor agreement acceptance, payment, 
 ### C15. Reuse first: Adopt → Adapt → Build
 
 Unnecessary bespoke infrastructure is not a Personal AgentOS differentiator and must not be implemented by default. Before writing non-trivial implementation code that introduces or replaces a component, abstraction, integration, dependency, framework, protocol, SDK/client, authentication/OAuth flow, connector transport, parser, scheduler, storage/migration utility, schema validator, model-provider compatibility layer, agent-protocol bridge, or similar infrastructure, perform an **Existing Solutions Review**. Start with the repository itself: search for an existing AgentOS component, adapter, utility, seam, fixture, or established pattern that can satisfy the need without violating its contract. Then inspect standard-library/platform facilities, relevant standards and official SDK/reference implementations, and mature maintained open-source frameworks/libraries.
+
+**The review also applies at proposal time.** Before proposing, recommending or recording a new design, contract, architecture element or loop, or a new component, integration or framework adoption, run the same review first. This covers recommendations made in conversation, design documents, contracts, issues and plans. Search the repository's existing contracts and implementations, then standards and installed or official tools (their own `--help` or documentation is authoritative), then maintained external options. Present the proposal as **Adopt**, **Adapt** or **Build** with that evidence. A proposal made without this review is incomplete and must not be offered as the recommended next step.
 
 Use this decision order:
 

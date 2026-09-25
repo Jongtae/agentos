@@ -63,6 +63,8 @@ The Development Constitution's **Reuse first: Adopt → Adapt → Build** princi
 
 Before writing non-trivial implementation code that introduces or replaces a component, abstraction, integration, dependency, framework, or commodity infrastructure, perform an **Existing Solutions Review**. The review starts inside this repository: search for an existing AgentOS component, adapter, utility, seam, fixture, or pattern that can be reused or extended without violating its contract. Then check standard-library/platform facilities, relevant standards and official SDK/reference implementations, and mature maintained open-source frameworks/libraries. This applies especially to protocols, SDK/client behavior, OAuth/auth flows, provider adapters, MCP/A2A or other protocol plumbing, HTTP/transports, parsers, schema validators, schedulers, storage/migration utilities, connector mechanics, sandbox helpers, and other general-purpose infrastructure.
 
+**The review also applies at proposal time.** Before proposing, recommending or recording a new design, contract, architecture element or loop, or a new component, integration or framework adoption, run the same review first. This covers recommendations made in conversation, design documents, contracts, issues and plans. Search the repository's existing contracts and implementations, then standards and installed or official tools (their own `--help` or documentation is authoritative), then maintained external options. Present the proposal as **Adopt**, **Adapt** or **Build** with that evidence. A proposal made without this review is incomplete and must not be offered as the recommended next step.
+
 The issue or implementation plan must record:
 
 - the exact problem/boundary that needs implementation;

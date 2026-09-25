@@ -311,6 +311,12 @@ class ReadHandoffTests(HandoffTestCase):
         self.assertEqual(self.job(job_id)['status'], 'cancelled')
         self.assertEqual(self.pending(), [])
 
+    def test_listing_folders_first_is_still_a_read_only_turn(self):
+        self.plan = [('list_roots', {}), ('find_files', {'query': '계약서'})]
+        job_id, bubbles = self.ask('내 계약서 폴더에서 갱신 날짜 찾아줘')
+        self.assertEqual(self.job(job_id)['status'], 'awaiting_connection')
+        self.assertIn('Mac에서 계속', bubbles[0])
+
     def test_a_turn_that_ran_an_effect_is_not_parked(self):
         self.plan = [('save_note', {'content': '계약서 확인'}), ('find_files', {'query': '계약서'})]
         job_id, _ = self.ask('계약서 메모하고 파일도 찾아줘')
@@ -327,6 +333,69 @@ class ReadHandoffTests(HandoffTestCase):
         self.assertEqual(self.roots(), [])
         job_id, _ = self.park_read()
         self.assertEqual(len(self.pending()), 1)
+
+
+class HostedModelDocumentApprovalTests(HandoffTestCase):
+    """A hosted model still needs document sharing; the folder-resumed Work continues once after it."""
+
+    def make_service(self):
+        service = super().make_service()
+
+        def hosted(url, body, headers=None, timeout=60):
+            tools = [t.get('function', {}).get('name') for t in body.get('tools', [])]
+            if 'agentos_connection_probe' in tools:
+                return {'choices': [{'message': {'tool_calls': [
+                    {'id': 'probe', 'function': {'name': 'agentos_connection_probe', 'arguments': '{}'}}]}}]}
+            if self.plan and tools:
+                name, arguments = self.plan.pop(0)
+                self.turn += 1
+                return {'choices': [{'message': {'content': '', 'tool_calls': [
+                    {'id': f'call-{self.turn}', 'function': {'name': name, 'arguments': json.dumps(arguments)}}]}}]}
+            return {'choices': [{'message': {'content': self.text}}]}
+
+        service.adapter = ModelAdapter(hosted)
+        if self.store.config('model', {}).get('provider') != 'compatible':
+            service.save_model({'provider': 'compatible', 'endpoint': 'https://example.test/v1',
+                                'model': 'hosted', 'api_key': 'hosted-key'})
+            self.assertTrue(service.test_model()['ok'])
+        return service
+
+    def callback(self, notification, action, sender=CHAT):
+        self.service.ingest_callback({'id': f'cb-{action}-{sender}', 'from': {'id': sender},
+                                      'message': {'chat': {'id': sender, 'type': 'private'},
+                                                  'message_id': notification['message_id']},
+                                      'data': f"p7a:{notification['id']}:{action}"}, GENERATION)
+
+    def test_folder_then_document_approval_resume_the_same_work_once(self):
+        job_id, _ = self.park_read()
+        self.approve_picked(self.folder('contracts', {'renewal.txt': '계약서 갱신일: 10월 1일'}))
+        self.assertTrue(self.service.document_boundary()['requires_approval'], 'a grant never carries sharing')
+        self.plan = [('find_files', {'query': '계약서'})]
+        self.service.run_one()
+        self.assertEqual(self.job(job_id)['status'], 'failed')
+        self.assertTrue(self.service.deliver_notification())
+        with self.store.db() as db:
+            notification = dict(db.execute("SELECT * FROM telegram_notifications WHERE job_id=? AND kind='approval_needed'",
+                                           (job_id,)).fetchone())
+        self.callback(notification, 'approve', sender=999)  # not the paired owner
+        self.assertEqual(self.job(job_id)['status'], 'failed')
+        self.callback(notification, 'approve')
+        self.assertFalse(self.service.document_boundary()['requires_approval'])
+        self.assertEqual(self.job(job_id)['status'], 'queued')
+        self.plan = [('find_files', {'query': '계약서'})]
+        self.assertTrue(self.service.run_one())
+        self.assertEqual(self.job(job_id)['status'], 'succeeded', self.job(job_id).get('error'))
+        self.assertFalse(self.service.resume_after_document_approval(job_id), 'continues once only')
+        self.assertFalse(self.service.run_one())
+
+    def test_an_ordinary_failed_work_is_not_requeued_by_document_approval(self):
+        contracts = self.folder('contracts', {'renewal.txt': '계약서'})
+        self.service.save_roots({'paths': [str(contracts)]})
+        self.plan = [('find_files', {'query': '계약서'})]
+        job_id, _ = self.ask('계약서 찾아줘')
+        self.assertEqual(self.job(job_id)['status'], 'failed')
+        self.assertFalse(self.service.resume_after_document_approval(job_id))
+        self.assertEqual(self.job(job_id)['status'], 'failed')
 
 
 class OutputFolderHandoffTests(HandoffTestCase):

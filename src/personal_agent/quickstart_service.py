@@ -49,6 +49,9 @@ from .conversation_handoff import (LOCAL_AUTHORITY_KIND, LOCAL_AUTHORITY_LABELS,
                                    LOCAL_RESULT_WRITE, LOCAL_RESUMED_NOTICE, local_authority_guidance,
                                    local_authority_handoff, local_refusal_text)
 from . import local_folder_picker
+LOCAL_RESUMED_KEY='local_authority_resumed_jobs'
+LOCAL_DOCUMENT_RESUME_KEY='local_authority_document_resume_jobs'
+LOCAL_DOCUMENT_RESUMED_TEXT='문서 공유를 승인했습니다. 폴더를 허용한 요청을 한 번만 이어서 처리합니다.'
 
 LOG=logging.getLogger('personal_agent.service')
 
@@ -1449,7 +1452,7 @@ class AgentService:
 
     #: Host actions that only read.  A turn that ran anything else is never
     #: parked, because resuming it would repeat that effect.
-    LOCAL_PARK_READ_ONLY=frozenset({'find_files','read_file','list_notes','list_memory','calendar_query',
+    LOCAL_PARK_READ_ONLY=frozenset({'list_roots','find_files','read_file','list_notes','list_memory','calendar_query',
                                    'web_search','public_page_read','weather','list_agents',
                                    'bounded_public_research'})
     LOCAL_PICKER_PROMPTS={LOCAL_FOLDER_READ:'AgentOS가 읽기만 할 폴더를 선택하세요.',
@@ -1589,7 +1592,9 @@ class AgentService:
             # Reached only after a successful single-use claim: the grant is
             # written, then the parked Work is re-queued by compare-and-set.
             commit()
-            return self._schedule_resumed_work(work_id)
+            scheduled=self._schedule_resumed_work(work_id)
+            if scheduled:self._remember_work(LOCAL_RESUMED_KEY,work_id)
+            return scheduled
         try:
             _work_id,scheduled=self.local_handoff.resume(owner,key,LOCAL_AUTHORITY_SCOPES[key],schedule,
                                                          generation=self._owner_generation(owner),
@@ -1615,6 +1620,44 @@ class AgentService:
         owner=self._local_handoff_owner(row)
         if owner:self._notify_owner(owner,local_refusal_text('denied'))
         return {'state':'denied'}
+
+    def _remember_work(self, key, work_id):
+        rows=[row for row in self.store.config(key,[]) if isinstance(row,str) and row!=work_id]
+        self.store.put(key,[*rows,work_id][-100:])
+
+    def _forget_work(self, key, work_id):
+        """Remove one id; True only for the caller that actually removed it."""
+        with self.lock:
+            rows=[row for row in self.store.config(key,[]) if isinstance(row,str)]
+            if work_id not in rows:return False
+            self.store.put(key,[row for row in rows if row!=work_id])
+            return True
+
+    def mark_document_resume(self, job):
+        """A folder-resumed Work stopped only at document sharing may continue after approval.
+
+        A hosted model needs the separate document-sharing approval, and every
+        folder grant clears it on purpose.  Only a Work this handoff resumed,
+        whose recorded tool calls were all read-only, is eligible, so continuing
+        it after the owner approves sharing cannot repeat an effect.
+        """
+        if job['id'] not in set(self.store.config(LOCAL_RESUMED_KEY,[])):return False
+        with self.store.db() as db:
+            rows=db.execute("SELECT detail FROM tool_events WHERE job_id=? AND status='succeeded'",(job['id'],)).fetchall()
+        for row in rows:
+            try:action=json.loads(row['detail'] or '{}').get('host_action')
+            except (TypeError,ValueError,AttributeError):return False
+            if action is not None and action not in self.LOCAL_PARK_READ_ONLY:return False
+        self._remember_work(LOCAL_DOCUMENT_RESUME_KEY,job['id'])
+        return True
+
+    def resume_after_document_approval(self, work_id):
+        """Re-queue exactly the eligible Work once, after the owner approved sharing."""
+        if not isinstance(work_id,str) or not self._forget_work(LOCAL_DOCUMENT_RESUME_KEY,work_id):return False
+        self._forget_work(LOCAL_RESUMED_KEY,work_id)
+        with self.store.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            return db.execute("UPDATE jobs SET status='queued',error=NULL,delivery='none' WHERE id=? AND status='failed'",(work_id,)).rowcount==1
 
     def _abandon_local_work(self, work_id, reason):
         text=local_refusal_text(reason)
@@ -2426,15 +2469,19 @@ class AgentService:
                            and notification['fingerprint']==self.document_fingerprint()
                            and current['requires_approval'])
                     if exact:
+                        resumed=False
                         if parts[2]=='approve':
                             self.set_document_approval({'approved':True})
+                            # #505: the folder-resumed Work continues once.
+                            resumed=self.resume_after_document_approval(notification.get('job_id'))
                             result_kind='approved'
                         else:
                             self.store.put('document_sharing',{})
+                            self._forget_work(LOCAL_DOCUMENT_RESUME_KEY,notification.get('job_id'))
                             result_kind='denied'
                         self.store.update_notification(notification['id'],result_kind)
                         try:self.telegram.edit_message_text(sender,notification['message_id'],
-                            self.notification_text(result_kind),{'inline_keyboard':[]})
+                            LOCAL_DOCUMENT_RESUMED_TEXT if resumed else self.notification_text(result_kind),{'inline_keyboard':[]})
                         except ProviderError:pass
                         changed=True
             elif authorized and isinstance(data,str) and data.startswith('v1c:'):
@@ -3002,7 +3049,9 @@ class AgentService:
             self.update_task_card(job,outcome)
             if resolved_blocker:
                 self.projection.clear(self.connector_owner_id(job))
-            if approval_needed[0]:self.queue_notification(job,'approval_needed')
+            if approval_needed[0]:
+                self.mark_document_resume(job)
+                self.queue_notification(job,'approval_needed')
             if context_approval_needed[0]:self.queue_notification(job,'context_approval_needed')
             # The result delivery below is the one terminal Telegram bubble.
             # Do not append a second generic completion notification.

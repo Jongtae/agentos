@@ -2106,10 +2106,10 @@ class AgentService:
     def reply_controls(self, job, blocked):
         """Bounded recovery controls for a reply that did not simply succeed."""
         status=job.get('status')
-        if status=='failed' and not blocked:
+        if status in ('failed','interrupted') and not blocked:
             allowed,_reason=self.safe_retry(job)
             return (CONTROL_RETRY,CONTROL_DETAILS) if allowed else (CONTROL_DETAILS,)
-        if status in ('partial','interrupted'):
+        if status=='partial':
             return (CONTROL_DETAILS,)
         return ()
 
@@ -3557,8 +3557,29 @@ class AgentService:
                 return
             self.store.put('telegram_status',{'state':'connected','message':'개인 Telegram 계정이 연결되어 있습니다.'})
 
-    def start(self):
+    def recover_interrupted_work(self):
+        """Restart recovery that leaves running Telegram Work a durable surface.
+
+        Running Work has only ephemeral presence (typing/draft, #581), which
+        vanishes with the process.  `QuickStore.recover` marks it
+        `interrupted` but never delivered anything for it, so Telegram Work
+        that had no task card gets its one terminal reply queued here: the
+        truthful interrupted text with 상세 (and 다시 시도 only when
+        `safe_retry` allows).  Nothing is re-run and nothing already sent or
+        uncertain is re-sent - only `delivery='none'` rows are touched.
+        """
+        with self.store.db() as db:
+            running=[row['id'] for row in db.execute(
+                "SELECT j.id FROM jobs j WHERE j.status='running' AND j.channel LIKE 'telegram:%' AND j.delivery='none' "
+                "AND NOT EXISTS (SELECT 1 FROM telegram_task_cards c WHERE c.job_id=j.id)")]
         self.store.recover()
+        with self.store.db() as db:
+            for work_id in running:
+                db.execute("UPDATE jobs SET delivery='pending' WHERE id=? AND status='interrupted' AND delivery='none'",(work_id,))
+        return running
+
+    def start(self):
+        self.recover_interrupted_work()
         def work():
             while not self.stop.is_set():
                 self.run_one()

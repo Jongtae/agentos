@@ -447,6 +447,40 @@ class StopTests(NativePresenceTestCase):
         self.assertEqual(self.store.config('telegram')['cursor'], cursor + 1)
 
 
+class RestartRecoveryTests(NativePresenceTestCase):
+    def test_running_work_without_a_card_gets_one_truthful_interrupted_reply_after_restart(self):
+        running, source = self.receive('긴 요청')
+        carded, _ = self.receive('카드가 있던 요청')
+        web = self.store.enqueue('웹 요청', 'web-1', channel='web')
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='running' WHERE id IN (?,?,?)", (running, carded, web))
+            db.execute('INSERT INTO telegram_task_cards VALUES (?,?,?,?,?)', (carded, CHAT, 77, 'running', time.time()))
+        restarted = AgentService(self.store, self.service.adapter, self.service.telegram_transport)
+        self.assertEqual(restarted.recover_interrupted_work(), [running])
+        self.assertEqual(self.store.job(running)['status'], 'interrupted')
+        self.assertEqual(self.store.job(carded)['delivery'], 'none', 'the card remains its recovery surface')
+        self.assertEqual(self.store.job(web)['delivery'], 'none')
+        restarted.deliver_one()
+        restarted.deliver_one()
+        [reply] = self.sends()
+        self.assertEqual(reply['text'], '이 요청은 중단되었습니다. 자동으로 다시 실행하지 않았습니다.\n\n'
+                                        '실행 중 재시작되었습니다. 자동으로 재호출하지 않습니다.\n\n'
+                                        'AgentOS 웹에서 실행 기록과 다음 단계를 확인하세요.')
+        self.assertEqual(reply['reply_parameters']['message_id'], source)
+        labels = [button['text'] for button in reply['reply_markup']['inline_keyboard'][0]]
+        self.assertEqual(labels, ['다시 시도', '상세'])
+        self.assertFalse(restarted.run_one(), 'nothing is re-run automatically')
+
+    def test_uncertain_delivery_is_not_resent_by_restart_recovery(self):
+        job_id, _ = self.receive('보내는 중이던 요청')
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='succeeded',delivery='sending' WHERE id=?", (job_id,))
+        self.assertEqual(self.service.recover_interrupted_work(), [])
+        self.service.deliver_one()
+        self.assertEqual(self.store.job(job_id)['delivery'], 'unknown')
+        self.assertEqual(self.sends(), [])
+
+
 class AnchorTests(NativePresenceTestCase):
     def test_reply_is_anchored_when_a_newer_owner_turn_arrived_first(self):
         self.connect_model()

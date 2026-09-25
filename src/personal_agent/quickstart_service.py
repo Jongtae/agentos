@@ -776,7 +776,13 @@ class AgentService:
         for key in ('scope','engine','mode','exit_code','attempt','context_messages','context_bytes','context_mode','failure_class',
                     'relation','executed','authority'):
             if key in trace and isinstance(trace[key],(str,int,float,bool)):safe[key]=trace[key]
-        if trace.get('evidence'):summary='근거를 확인했습니다.';safe['evidence']=True
+        evidence=trace.get('evidence')
+        qualifiers=evidence.get('qualifiers') if isinstance(evidence,dict) else None
+        if isinstance(qualifiers,list) and 'setup-required' in qualifiers:
+            # Same rule as evidence_summary(): a setup-required read consulted
+            # nothing, so the receipt must not say a source was checked.
+            summary='필요한 연결이 설정되지 않아 확인하지 못했습니다.';safe['setup_required']=True
+        elif evidence:summary='근거를 확인했습니다.';safe['evidence']=True
         return {'id':event['id'],'job_id':event['job_id'],'tool':event['tool'],'status':status,'created':event['created'],'summary':summary,'details':safe}
 
     def _observed_route(self, job, events, model_events):

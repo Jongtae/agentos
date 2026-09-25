@@ -113,6 +113,8 @@ assert.equal(rows[0].note,'근거 확인');assert.deepEqual(rows[0].eventIds,[1,
 assert.deepEqual(rows.slice(1,4).map(r=>r.tone),['attention','danger','attention']);
 assert.deepEqual([rows[4].note,rows[5].note],['첫 실패','두 번째 실패'],'different failures are not merged');
 assert(!JSON.stringify(rows).includes('mystery_tool'),'unknown tool ids stay under technical detail');
+const parked=ui.semanticTrace({status:'succeeded',status_kind:'finished',response:'x',observed_at:9,events:[ev(1,'find_files','succeeded',{setup_required:true},'p')]});
+assert.equal(parked[0].note,'연결 설정이 필요해 확인하지 못함','a setup-required read never says a source was checked');
 console.log(JSON.stringify({ok:true}));
 """)
         self.assertEqual(ok(out), {"ok": True})
@@ -188,6 +190,11 @@ class TaskReadModel(unittest.TestCase):
                                                "trace": {"scope": "public-web", "evidence": {"urls": ["https://example.invalid/private-query"]}}})
         self.assertEqual(search["details"], {"scope": "public-web", "evidence": True}, "evidence is a flag, never its content")
         self.assertEqual(search["summary"], "근거를 확인했습니다.")
+        # Review finding (PR #590): a setup-required read consulted nothing, as in evidence_summary().
+        parked = AgentService._progress_event({"id": 3, "job_id": "w", "tool": "find_files", "status": "succeeded", "created": 3,
+                                               "trace": {"evidence": {"qualifiers": ["setup-required"], "count": 0}}})
+        self.assertEqual(parked["details"], {"setup_required": True})
+        self.assertNotEqual(parked["summary"], "근거를 확인했습니다.")
 
 
 if __name__ == "__main__":

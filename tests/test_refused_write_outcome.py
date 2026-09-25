@@ -162,7 +162,10 @@ class RefusedMemoryWriteTests(RefusedWriteTestCase):
         self.assertNotIn('no-owner-memory-request', bubble)
         self.assertIn('기억 후보로 보관', bubble)
         self.assertTrue(job['error'], 'the job carries no cause')
-        self.assertIn(job['error'], bubble)
+        # #598 X1: the same cause in owner words; the id stays in job['error'].
+        self.assertIn(job['owner_cause'], bubble)
+        self.assertIn('save_memory', job['error'])
+        self.assertNotIn('save_memory', bubble)
 
     def test_a_turn_that_did_other_work_is_partial_not_failed(self):
         """The distinction the outcome exists to carry must survive the fix."""

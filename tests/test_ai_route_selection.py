@@ -69,7 +69,10 @@ class AiRouteSelectionTests(unittest.TestCase):
         self.assertGreaterEqual(self.model_calls, 2)
         for job in (web, telegram):
             self.assertEqual(job['status'], 'succeeded')
-            self.assertEqual((job['provider'], job['model']), ('compatible', 'fixture'))
+            # #598 R1: the fixture response reports no model, so the observed
+            # model is "not reported"; the route still names the requested one.
+            self.assertEqual((job['provider'], job['model']), ('compatible', 'not reported'))
+            self.assertEqual(self.service.task_progress(job['id'])['selected']['route']['model'], 'fixture')
 
     def test_direct_api_back_to_cli(self):
         self._ready_model()

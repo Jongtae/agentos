@@ -98,10 +98,12 @@ class SettingsOrchestratorTests(unittest.TestCase):
         self.assertTrue(self.settings.cancel('owner', 'http', 'legacy-draft')['idempotent'])
 
     def test_recovery_answers_from_connection_state(self):
-        result = self.settings.handle_text('owner', 'http', 'Gmail 어떻게 복구해?')
+        result = self.settings.recovery('owner', 'google-gmail-read')
         self.assertEqual((result['state'], result['target']), ('recovery', 'google-gmail-read'))
         self.assertIn('다시 연결', result['action'])
-        self.assertEqual(self.settings.handle_text('owner', 'http', '어떻게 복구해?')['state'], 'read')
+        answer = self.settings.handle_text('owner', 'http', 'Gmail 어떻게 복구해?')
+        self.assertEqual(answer['state'], 'read')
+        self.assertIn('Google Gmail · 다시 인증 필요 · 설정 > 외부 연결에서 다시 연결하세요.', answer['response'])
         with self.assertRaises(SettingsError): self.settings.recovery('owner', 'builtin-mcp-read')
 
 

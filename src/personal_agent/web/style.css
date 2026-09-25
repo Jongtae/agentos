@@ -282,6 +282,8 @@ details.technical details>summary{color:var(--muted)}
 .settings-state{justify-self:start;white-space:normal;text-align:left}
 .settings-row-actions{display:flex;justify-content:flex-end;gap:var(--sp-2);flex-wrap:wrap;min-width:0}
 .settings-disclosure{margin-top:6px;font-size:var(--fs-1);color:var(--muted)}
+/* Technical detail sits under the whole row, after its state and action. */
+.settings-row>.settings-disclosure{grid-column:1/-1;margin-top:-6px}
 .settings-disclosure>summary{font-size:var(--fs-1);min-height:22px}
 .settings-technical-line{display:block;padding:3px 0 0 16px;overflow-wrap:anywhere}
 .settings-empty{margin:0;padding:14px 0;border-bottom:1px solid var(--line);color:var(--muted);font-size:var(--fs-2)}
@@ -361,6 +363,7 @@ details.technical details>summary{color:var(--muted)}
  .settings-row-main{grid-column:1;grid-row:1}
  .settings-state{grid-column:1;grid-row:2}
  .settings-row-actions{grid-column:2;grid-row:1 / span 2}
+ .settings-row>.settings-disclosure{grid-row:3}
  .folder-add-row{flex-wrap:wrap}
  .folder-add-row button{flex:1 1 auto}
  .folder-edit{padding:var(--sp-3)}

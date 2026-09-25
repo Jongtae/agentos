@@ -37,16 +37,6 @@ STATE_LABELS = {
 }
 UNKNOWN_STATE_LABEL = "확인 필요"
 
-# The words an owner may use for each service in a recovery question.  This is
-# a literal lookup over already-declared services, not an intent judgment.
-_SERVICE_WORDS = {
-    "telegram": ("telegram", "텔레그램"),
-    "google-gmail-read": ("gmail", "메일", "지메일"),
-    "google-calendar": ("calendar", "캘린더", "일정"),
-    "google-calendar-write": ("calendar", "캘린더", "일정"),
-    "google-drive-read": ("drive", "드라이브"),
-}
-
 RETIRED_CONTROL_MESSAGE = (
     "연결을 일시 정지하거나 해제하는 기능은 대화에서 제공하지 않습니다. "
     "설정 > 외부 연결에서 서비스별 현재 상태와 실제로 가능한 작업을 확인하세요."
@@ -122,7 +112,8 @@ class SettingsOrchestrator:
     def _summary(rows):
         if not rows:
             return "이 설치에 연결된 외부 서비스가 없습니다."
-        return "\n".join(f"{row['service']} · {row['state_label']}" for row in rows)
+        return "\n".join(f"{row['service']} · {row['state_label']}"
+                         + ("" if row["state"] == "connected" else f" · {row['next_action']}") for row in rows)
 
     def read(self, owner, category=None):
         if not isinstance(owner, str) or not owner:
@@ -182,14 +173,6 @@ class SettingsOrchestrator:
             raise SettingsError("복구할 연결을 선택하세요.")
         return {"state": "recovery", "target": subject, "action": next_action(row)}
 
-    def _service_in(self, text):
-        value = text.lower()
-        available = {str(row.get("id")) for row in self.connections() or [] if isinstance(row, dict)}
-        for ident, words in _SERVICE_WORDS.items():
-            if ident in available and any(word in value for word in words):
-                return ident
-        return None
-
     def handle_text(self, owner, channel, text):
         if not isinstance(text, str): raise SettingsError("설정 요청을 확인하세요.")
         value = text.strip()
@@ -202,8 +185,7 @@ class SettingsOrchestrator:
         if value.lower() in ("settings", "/settings", "무엇이 연결되어 있어?", "무엇을 바꿀 수 있어?") or "상태 보여" in value:
             return self.read(owner)
         if "어떻게 복구" in value:
-            target = self._service_in(value)
-            if target:
-                return self.recovery(owner, target)
+            # Every row already carries its one truthful next action; no
+            # keyword table guesses which service the owner meant.
             return self.read(owner)
         return self.draft(owner, channel, value)

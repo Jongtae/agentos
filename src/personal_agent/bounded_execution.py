@@ -222,7 +222,7 @@ class BoundedExecutionAdapter:
             env['PATH'] = str(binary_path.parent) + ':' + env['PATH']
         return env
 
-    def command(self, engine_id, binary, prompt, mcp_config):
+    def command(self, engine_id, binary, prompt, mcp_config, instructions=''):
         if engine_id == 'codex':
             # `exec` is non-interactive and JSON output is required so prose
             # around an answer cannot be mistaken for execution evidence.
@@ -235,7 +235,12 @@ class BoundedExecutionAdapter:
                     '-c', f'mcp_servers.agentos.command={json.dumps(sys.executable)}',
                     '-c', f'mcp_servers.agentos.args={json.dumps(bridge["args"])}', prompt]
         if engine_id == 'claude-code':
-            return [binary, '-p', prompt, '--output-format', 'json', '--strict-mcp-config', '--mcp-config', str(mcp_config)]
+            argv = [binary, '-p', prompt, '--output-format', 'json', '--strict-mcp-config', '--mcp-config', str(mcp_config)]
+            if instructions:
+                # #569: AgentOS instructions travel as a system-prompt addition,
+                # the conversation and request as the prompt.
+                argv += ['--append-system-prompt', instructions]
+            return argv
         raise ExecutionError('지원하는 구독 엔진을 선택하세요.')
 
     @staticmethod
@@ -273,7 +278,14 @@ class BoundedExecutionAdapter:
             raise ExecutionError('엔진 응답에 최종 텍스트 결과가 없습니다.')
         return content[:24_000]
 
-    def execute(self, engine_id, prompt, tools):
+    def execute(self, engine_id, prompt, tools, *, context=None):
+        instructions = ''
+        if context and engine_id == 'claude-code':
+            # Claude Code accepts a system-prompt addition; send the shared
+            # instructions there and only conversation + request as the prompt.
+            from .agent_runtime import render_turn_prompt
+            instructions = context['instructions']
+            prompt = render_turn_prompt(context, include_instructions=False)
         if not isinstance(prompt, str) or not prompt.strip() or len(prompt.encode()) > MAX_PROMPT_BYTES:
             raise ExecutionError('요청은 비어 있지 않은 48KB 이하의 텍스트여야 합니다.')
         binaries = {'codex': 'codex', 'claude-code': 'claude'}
@@ -294,13 +306,17 @@ class BoundedExecutionAdapter:
             # access to the AgentOS tool facade.
             config.write_text(json.dumps({'mcpServers': {'agentos': {
                 'command': sys.executable,
-                'args': ['-m', 'personal_agent.mcp_bridge', '--data', str(tools.capabilities.store.root), '--job', tools.capabilities.job_id],
+                'args': ['-m', 'personal_agent.mcp_bridge', '--data', str(tools.capabilities.store.root), '--job', tools.capabilities.job_id,
+                         # The bridge is a separate process: hand it this Work's
+                         # private-source provenance so its public egress closes
+                         # exactly as the in-process Capabilities would.
+                         *[f'--provenance={label}' for label in sorted(getattr(tools.capabilities, 'private_provenance', ()) or ())]],
             }}}, ensure_ascii=False), encoding='utf-8')
             env = self.environment(engine_id, binary, run_dir)
             started = time.monotonic()
             LOG.info('engine turn started engine=%s', engine_id)
             try:
-                completed = self.runner(self.command(engine_id, binary, prompt, config), cwd=run_dir,
+                completed = self.runner(self.command(engine_id, binary, prompt, config, instructions), cwd=run_dir,
                                         env=env, stdin=subprocess.DEVNULL, capture_output=True,
                                         text=True, timeout=MAX_TIMEOUT_SECONDS, shell=False)
             except subprocess.TimeoutExpired as exc:

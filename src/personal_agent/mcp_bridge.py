@@ -37,13 +37,25 @@ def _send(value):
     sys.stdout.write(json.dumps(value, ensure_ascii=False) + "\n"); sys.stdout.flush()
 
 
-def serve(data, job_id):
+def _provenance(labels):
+    """Egress-taint labels handed over by the AgentOS process for this Work.
+
+    The bridge runs as a separate process, so the Work's private-source
+    provenance (same-turn sources and conversation history) must be passed
+    in explicitly.  Any label -- known or not -- is kept: an unknown label
+    still closes public egress, never opens it.
+    """
+    return {str(label) for label in labels or () if str(label).strip()}
+
+
+def serve(data, job_id, provenance=()):
     store = QuickStore(data)
     def record(tool, status, detail):
         with store.db() as db:
             db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)', (job_id,tool,status,detail,time.time()))
     tools = AgentOSMcpTools(Capabilities(store, None, {}, '', job_id, record, network=LocalTools(), document_access=False,
-                                         allowed_tools={'list_notes','save_note','web_search'}))
+                                         allowed_tools={'list_notes','save_note','web_search'},
+                                         inherited_provenance=_provenance(provenance)))
     for line in sys.stdin:
         try:
             request = json.loads(line)
@@ -67,4 +79,5 @@ def serve(data, job_id):
 
 if __name__ == '__main__':
     parser=argparse.ArgumentParser(); parser.add_argument('--data',required=True); parser.add_argument('--job',required=True)
-    args=parser.parse_args(); serve(args.data, args.job)
+    parser.add_argument('--provenance',action='append',default=[])
+    args=parser.parse_args(); serve(args.data, args.job, args.provenance)

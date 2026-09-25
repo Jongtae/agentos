@@ -52,7 +52,7 @@ from personal_agent.conversation_handoff import FOLLOWUP_RETRY, LOCAL_AUTHORITY_
 from personal_agent.conversation_projection import (TERMINAL_FAILED_HEADER, TERMINAL_PARTIAL_HEADER,
                                                     TERMINAL_UNVERIFIED_MARKER)
 from personal_agent.decision import (OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine, SelectionDecision,
-                                     fixture_confidence)
+                                     UnavailableDecisionEngine, fixture_confidence)
 from personal_agent.gmail import (GMAIL_CONNECTOR, GMAIL_CONNECTOR_ID, GMAIL_READONLY_SCOPE,
                                   EncryptedGmailSecretStore, GmailConnector)
 from personal_agent.google_calendar import CALENDAR_WRITE_SCOPE, GoogleCalendar, GoogleCalendarHTTPError
@@ -140,6 +140,7 @@ class PresenceEval(unittest.TestCase):
         self.message_id = 7000
         self.relations = {}         # owner utterance -> follow-up relation the fixture engine judges
         self.withdrawals = set()    # owner utterances the fixture engine judges as withdrawing parked work
+        self.remember_requests = set()  # owner utterances the fixture engine judges as explicit remember requests
         self.picked = None          # what the fixture macOS folder dialog returns
         self.service = self.make_service()
         self.store.put('telegram', {'enabled': True, 'user_id': CHAT, 'generation': GENERATION, 'cursor': 0})
@@ -192,6 +193,9 @@ class PresenceEval(unittest.TestCase):
             return SelectionDecision(OUTCOME_DECIDED, 'none-of-these', candidates, fixture_confidence())
 
         def judge(context, proposition):
+            if context.purpose == 'explicit-memory-request':
+                return BinaryDecision(OUTCOME_DECIDED, context.facts.get('owner_message') in self.remember_requests,
+                                      fixture_confidence())
             return BinaryDecision(OUTCOME_DECIDED, context.facts.get('owner_message') in self.withdrawals,
                                   fixture_confidence())
         return FixtureDecisionEngine(judge=judge, choose=choose)
@@ -725,22 +729,88 @@ class D_MissingGmail(LocalHttp, PresenceEval):
         self.assertFalse(self.service.run_one(), 'a withdrawn request never runs after connecting')
         self.assertEqual(self.searches(), 0)
 
-    @unittest.expectedFailure
-    def test_finding_d1_a_mail_request_without_a_mail_cue_word_gets_no_gmail_handoff(self):
-        """FINDING D1: intent routing is a literal cue table (IntentClassifier).
+    def capability_engine(self, needs):
+        """The shared fixture engine plus a scripted capability-need answer (#597)."""
+        base = self.decision_engine()
 
-        "집주인한테 답장 왔어?" / "did the landlord write back to me?" is a
-        mailbox read by meaning but contains no mail cue word, so it goes to
-        the ordinary model route and no contextual Gmail handoff is offered.
-        The assertion states the contract's expected behaviour (model-first
-        semantics); the product does not meet it today.
+        def choose(context, candidates, question):
+            if context.purpose == 'capability-need':
+                return SelectionDecision(OUTCOME_DECIDED, needs.get(context.facts.get('owner_message'), 'none-of-these'),
+                                         candidates, fixture_confidence())
+            return base.choose(context, candidates, question)
+        return FixtureDecisionEngine(judge=base.judge, choose=choose)
+
+    def test_finding_d1_a_mail_request_without_a_mail_cue_word_gets_the_gmail_handoff(self):
+        """D1 remediated (#597): a mailbox read *by meaning* gets the contextual handoff.
+
+        No mail cue word appears in these phrasings.  The DecisionEngine's
+        capability-need judgment selects the declared ``mail-search``
+        capability; AgentOS then parks the Work for the missing Gmail
+        connection exactly as for a cue-bearing request.  Opposing cases: a
+        non-mail question about the same person, an engine that cannot
+        answer and a judged unsupported send all stay honest - no handoff is
+        invented and the mailbox is never called.
         """
+        mail = ('집주인한테 답장 왔어?', 'did the landlord write back to me?', '관리사무소에서 뭐 온 거 있나?',
+                'has the bank gotten back to me yet?')
+        engine = self.capability_engine({**{phrase: 'mail-search' for phrase in mail},
+                                         'tell the landlord I agree': 'mail-send'})
+        self.service.use_decision_engine(engine)
+        # Opposing: a question about the landlord that is not about mail.
+        for phrase in ('집주인이 월세를 올리면 어떻게 대응하지?', 'what does a landlord usually fix?'):
+            with self.subTest(phrase=phrase):
+                self.registry.transition(OWNER, GMAIL_CONNECTOR_ID, ConnectorState.DISCONNECTED)
+                start = len(self.wire)
+                job, _ = self.turn(phrase)
+                self.assertEqual(job['status'], 'succeeded')
+                self.assertEqual(self.texts(start), [self.text], 'the ordinary answer, no Gmail guidance')
+                self.assertEqual(self.searches(), 0)
+        # Opposing: a judged unsupported send is refused truthfully; nothing is sent or searched.
+        job, _ = self.turn('tell the landlord I agree')
+        self.assertIn('메일 보내기나 답장은 제공하지 않습니다', job['response'])
+        self.assertNotEqual(job['status'], 'awaiting_connection')
+        self.assertEqual(self.searches(), 0)
+        # Positive: every phrasing parks with one contextual next action.
         observed = {}
-        for phrase in ('집주인한테 답장 왔어?', 'did the landlord write back to me?'):
+        for phrase in mail:
             self.registry.transition(OWNER, GMAIL_CONNECTOR_ID, ConnectorState.DISCONNECTED)
-            observed[phrase] = self.turn(phrase)[0]['status']
-        # Both phrasings are ingested before asserting, so each gap is observed.
+            start = len(self.wire)
+            job, _ = self.turn(phrase)
+            observed[phrase] = job['status']
+            # A newer request for the same connection replaces the parked one
+            # (and says so); the guidance is always the turn's last bubble.
+            guidance = self.texts(start)[-1]
+            self.assertIn('Gmail', guidance)
+            self.assertIn('실행하지 않았습니다', guidance)
+        # Every phrasing is ingested before asserting, so each gap would be observed.
         self.assertEqual(observed, {phrase: 'awaiting_connection' for phrase in observed})
+        self.assertEqual(self.searches(), 0, 'no mailbox call before the connection')
+        asked = [item[1].facts for item in engine.asked if item[0] == 'choose' and item[1].purpose == 'capability-need']
+        self.assertEqual(set(mail) - {facts['owner_message'] for facts in asked}, set())
+        self.assertTrue(all(set(facts) == {'owner_message'} for facts in asked),
+                        'the judgment sees only the one utterance: no history, Memory or mail')
+        # The latest parked request resumes exactly once after the owner connects.
+        latest = self.store.jobs()[0]
+        self.assertEqual(latest['message'], mail[-1])
+        self.connect_through_the_browser()
+        self.assertTrue(self.service.run_one())
+        self.service.deliver_one()
+        self.assertFalse(self.service.run_one(), 'exactly once')
+        self.assertEqual(self.store.job(latest['id'])['status'], 'succeeded')
+        self.assertEqual(self.searches(), 1)
+
+    def test_finding_d1_an_unavailable_engine_invents_no_handoff(self):
+        """With no DecisionEngine answer a cue-free turn stays ordinary conversation."""
+        self.service.use_decision_engine(UnavailableDecisionEngine())
+        for phrase in ('집주인한테 답장 왔어?', 'did the landlord write back to me?'):
+            with self.subTest(phrase=phrase):
+                self.registry.transition(OWNER, GMAIL_CONNECTOR_ID, ConnectorState.DISCONNECTED)
+                start = len(self.wire)
+                job, _ = self.turn(phrase)
+                self.assertEqual(job['status'], 'succeeded')
+                [reply] = self.texts(start)
+                self.assertNotIn('Gmail', reply)
+                self.assertEqual(self.searches(), 0)
 
 
 # =============================================================================
@@ -1275,7 +1345,9 @@ class J_MemoryCorrection(LocalHttp, PresenceEval):
         self.connect_model()
         self.serve(self.service)
 
-    def remember(self, phrase, key, value, reply):
+    def remember(self, phrase, key, value, reply, judged=True):
+        if judged:
+            self.remember_requests.add(phrase)
         self.script = [('tool', 'save_memory', {'memory_key': key, 'content': value})]
         self.text = reply
         return self.turn(phrase)
@@ -1329,18 +1401,59 @@ class J_MemoryCorrection(LocalHttp, PresenceEval):
         self.assertEqual((status, result['deleted']), (200, True))
         self.assertEqual(self.canonical(), [])
 
-    @unittest.expectedFailure
-    def test_finding_j1_a_remember_request_without_a_memory_cue_word_is_not_authorized(self):
-        """FINDING J1: owner Memory authority keys on a literal cue regex.
+    def test_finding_j1_a_remember_request_without_a_memory_cue_word_is_honoured(self):
+        """J1 remediated (#597): an explicit remember instruction is judged, not pattern-matched.
 
-        ``AgentService.explicit_memory_request`` recognises 기억해/remember/
-        저장해/선호 but not an equivalent phrasing such as "잊지 마" or "keep
-        in mind".  The owner-stated value is then withheld as a pending
-        candidate and the turn fails.  Truthful (nothing is called
-        remembered), but the owner's explicit instruction is not honoured.
+        None of these phrasings contains the old cue words (기억해/remember/
+        저장해/선호).  The DecisionEngine's ``explicit_memory_request``
+        judgment lets AgentOS issue the owner-request approval; the
+        deterministic value-coverage check still decides the write.
         """
-        job, _ = self.remember('회의는 오후가 좋다는 거 잊지 마', 'meeting-time', '오후', '알겠어요.')
-        self.assertEqual(self.canonical(), [('meeting-time', '오후')])
+        cases = (('회의는 오후가 좋다는 거 잊지 마', 'meeting-time', '오후'),
+                 ('keep in mind that I am allergic to peanuts', 'allergy', 'peanuts'),
+                 ('출장 갈 때 창가 자리가 좋다는 거 꼭 알아둬', 'seat', '창가 자리'),
+                 ("don't forget my sister's name is Mina", 'sister-name', 'Mina'))
+        for phrase, key, value in cases:
+            with self.subTest(phrase=phrase):
+                job, _ = self.remember(phrase, key, value, '알겠어요.')
+                self.assertEqual(job['status'], 'succeeded', job.get('error'))
+                self.assertIn((key, value), self.canonical())
+        asked = [item for item in self.service.decision_engine.asked
+                 if item[0] == 'judge' and item[1].purpose == 'explicit-memory-request']
+        self.assertEqual([item[1].facts for item in asked], [{'owner_message': phrase} for phrase, _, _ in cases])
+
+    def test_finding_j1_casual_or_negated_phrasing_and_an_uncovered_value_write_nothing(self):
+        """Opposing cases: judged no, or a value the owner never stated, stays a candidate."""
+        for phrase, value in (('잊지 마! 오늘 진짜 피곤했어', '피곤함'),     # casual, nothing to keep
+                              ('이건 기억하지 마: 은행 비밀번호 힌트는 고양이', '고양이'),  # negated
+                              ('never mind, just chatting about the weather', 'weather')):
+            with self.subTest(phrase=phrase):
+                start = len(self.wire)
+                job, _ = self.remember(phrase, 'owner-detail', value, '기억했습니다.', judged=False)
+                self.assertEqual(job['status'], 'failed')
+                [bubble] = self.texts(start)
+                self.assertIn('기억 후보로 보관했습니다', bubble)
+                self.assertNotIn('기억했습니다', bubble)
+        # Judged an explicit request, but the model proposed a value the owner did not state.
+        job, _ = self.remember('회의는 오후가 좋다는 거 잊지 마', 'meeting-time', '오전', '기억했습니다.')
+        self.assertEqual(job['status'], 'failed')
+        self.assertEqual(self.canonical(), [])
+        self.assertEqual(len([row for row in self.store.memory_candidates() if row['state'] == 'pending']), 4)
+
+    def test_finding_j1_the_judgment_is_asked_only_for_a_proposed_write_and_fails_safe(self):
+        """No write proposed -> no judgment asked; an unavailable engine -> no silent write."""
+        self.script, self.text = [], '좋은 하루 보내세요.'
+        self.turn('회의는 오후가 좋다는 거 잊지 마')
+        self.assertFalse([item for item in self.service.decision_engine.asked
+                          if item[1].purpose == 'explicit-memory-request'])
+        self.service.use_decision_engine(UnavailableDecisionEngine())
+        start = len(self.wire)
+        job, _ = self.remember('회의는 오후가 좋다는 거 잊지 마', 'meeting-time', '오후', '기억했습니다.')
+        self.assertEqual(job['status'], 'failed')
+        self.assertEqual(self.canonical(), [])
+        [bubble] = self.texts(start)
+        self.assertIn('기억 후보로 보관했습니다', bubble)
+        self.assertNotIn('기억했습니다', bubble)
 
 
 # =============================================================================

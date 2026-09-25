@@ -36,7 +36,8 @@ from .calendar_conversation import DROPPED_NOTICE as CALENDAR_DROPPED_NOTICE, Ca
 from .conversation_handoff import (CONNECTOR_LABELS, JUDGMENT_YES,
                                    FOLLOWUP_CANCEL, FOLLOWUP_CORRECTION, FOLLOWUP_REFERENCE,
                                    FOLLOWUP_RETRY, eligible_for_followup_judgment,
-                                   ConversationJudgments, TelegramChannel, ConnectorHandoff,
+                                   ConversationJudgments, TelegramChannel, TelegramRejected, telegram_request_json,
+                                   ConnectorHandoff,
                                    ConversationFocus,
                                    ConversationHandoffError, IntentClassifier,
                                    INTENT_AMBIGUOUS, INTENT_CALENDAR_CREATE,
@@ -203,7 +204,7 @@ class AgentService:
                  drive_web_oauth=None, connector_registry=None, gmail=None, calendar=None, calendar_oauth=None, calendar_factory=None):
         self.store=store
         self.adapter=adapter or ModelAdapter()
-        self.telegram_transport=telegram_transport or request_json
+        self.telegram_transport=telegram_transport or telegram_request_json
         # Transport seam.  Both resolvers are late bound: `telegram_transport`
         # stays a live reassignable attribute and the bot token is read from
         # the secret store per call, never captured here.
@@ -572,10 +573,32 @@ class AgentService:
             return any(AgentService._unknown_effect(item) for item in value)
         return False
 
-    def safe_retry(self, previous):
+    def _already_retried(self, work_id, current_work_id=None):
+        """True when another Work already replayed this failed Work.
+
+        One failed Work is retried at most once, whichever path asks (the
+        #581 다시 시도 control or a conversational "다시 해줘", #511); a
+        refused retry does not count.  A second retry is still possible
+        from the retry's own failure, which is a different Work.
+        """
+        with self.store.db() as db:
+            rows=db.execute("SELECT j.id,e.detail FROM jobs j JOIN tool_events e ON e.job_id=j.id "
+                            "WHERE j.related_job_id=? AND j.relation_kind='retry' AND j.id!=? AND e.tool='conversation_continuity'",
+                            (work_id,current_work_id or '')).fetchall()
+        for row in rows:
+            try:detail=json.loads(row['detail'])
+            except (TypeError,ValueError):continue
+            if isinstance(detail,dict) and detail.get('relation')=='retry' and detail.get('executed') \
+                    and detail.get('related_work_id')==work_id:
+                return True
+        return False
+
+    def safe_retry(self, previous, current_work_id=None):
         """Whether replaying this Work's original request is demonstrably safe."""
         if previous.get('status') not in ('failed','interrupted'):
             return False,'이전 요청이 실패 또는 중단 상태가 아니어서 자동으로 다시 실행하지 않았습니다.'
+        if self._already_retried(previous['id'],current_work_id):
+            return False,'이 요청은 이미 한 번 다시 시도했습니다. 같은 요청을 중복으로 실행하지 않았습니다.'
         if previous.get('delivery')=='unknown':
             return False,'이전 Telegram 전달 여부를 확인할 수 없어 자동으로 다시 실행하지 않았습니다.'
         if self.store.context_attachment(previous['id']):
@@ -2006,7 +2029,15 @@ class AgentService:
         The surface is chosen from elapsed time only (`PresenceTiming`); no
         sleep is ever added.  The re-check and the send happen under
         `self.lock`, the lock terminal delivery holds while sending, so a
-        stale `typing…` or draft can never follow the final answer.
+        stale `typing…` or draft can never follow the final answer.  That is
+        deliberate: releasing the lock for the call would let a draft land
+        after the answer and show "Thinking…" for up to 30 s.  The cost is
+        bounded by TELEGRAM_PRESENCE_TIMEOUT (4 s) per call, and at most one
+        presence call is made per Work per tick.
+
+        No explicit draft clear is needed: per the Bot API `sendMessageDraft`
+        docs the draft disappears when the bot sends a message (and after a
+        short time), and the final answer is that message.
         """
         cfg=self.store.config('telegram',{})
         if not (cfg.get('enabled') and isinstance(cfg.get('user_id'),int)):return []
@@ -2069,7 +2100,10 @@ class AgentService:
                                 (f"telegram:{generation}",chat['id'])).fetchall()
             job=next((dict(row) for row in rows if draft_id_for(row['id'])==draft_id),None)
             if not job:return 'finished'
-            self.presence.setdefault(job['id'],WaitState()).stopped=True
+            state=self.presence.setdefault(job['id'],WaitState())
+            # A repeated Stop update (double tap, redelivery) says nothing twice.
+            if state.stopped:return 'duplicate'
+            state.stopped=True
             cancelled,_reason=self.cancel_focused_work(job,self.connector_owner_id(job))
             current=self.store.job(job['id'])
             if cancelled:
@@ -3068,7 +3102,7 @@ class AgentService:
                     relation,previous=continuity['relation'],continuity['previous']
                     self.present_turn(job,relation=relation)
                     if relation==FOLLOWUP_RETRY:
-                        allowed,reason=self.safe_retry(previous)
+                        allowed,reason=self.safe_retry(previous,current_work_id=job["id"])
                         source=self.canonical_retry_source(previous) if allowed else None
                         if allowed and not source:
                             allowed=False
@@ -3536,8 +3570,15 @@ class AgentService:
             markup=reply_controls_markup(job['id'],controls)
             message_id=None
             try:
-                result=self.telegram.send_message(job['chat_id'],render_telegram_html(text),markup,
-                                                  parse_mode='HTML',reply_to=anchor)
+                try:
+                    result=self.telegram.send_message(job['chat_id'],render_telegram_html(text),markup,
+                                                      parse_mode='HTML',reply_to=anchor)
+                except TelegramRejected as exc:
+                    # Telegram answered that it could not parse the entities:
+                    # a definite non-delivery, so one plain-text send cannot
+                    # duplicate anything.  Every other failure stays unknown.
+                    if not exc.entity_parse_error:raise
+                    result=self.telegram.send_message(job['chat_id'],text,markup,reply_to=anchor)
                 message_id=result.get('message_id') if isinstance(result,dict) else None
                 status='sent'
             except ProviderError:

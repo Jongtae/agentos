@@ -9,8 +9,13 @@ state underneath.  Time is a fake clock (the ``now=`` argument); nothing
 sleeps.  Evidence class: automated synthetic/fixture only - no live Telegram
 call is made and none is claimed.
 """
+import html
 import html.parser
+import io
 import json
+import re
+import urllib.error
+from unittest import mock
 import tempfile
 import time
 import unittest
@@ -19,7 +24,8 @@ from pathlib import Path
 from personal_agent.conversation_handoff import (FOLLOWUP_CANCEL, FOLLOWUP_CORRECTION, FOLLOWUP_REFERENCE,
                                                  FOLLOWUP_RETRY, INTENT_AMBIGUOUS, INTENT_CALENDAR_CREATE,
                                                  INTENT_CONVERSATION, INTENT_NOTE_CREATE, INTENT_SETTINGS,
-                                                 INTENT_UNSUPPORTED, TELEGRAM_POLL_UPDATE_KINDS, TelegramChannel)
+                                                 INTENT_UNSUPPORTED, TELEGRAM_POLL_UPDATE_KINDS, TelegramChannel,
+                                                 TelegramRejected, telegram_request_json)
 from personal_agent.conversation_projection import TERMINAL_FAILED_HEADER
 from personal_agent.decision import OUTCOME_DECIDED, FixtureDecisionEngine, SelectionDecision, fixture_confidence
 from personal_agent.providers import ModelAdapter, ProviderError
@@ -308,6 +314,39 @@ class FailedTurnTests(NativePresenceTestCase):
         self.assertEqual(answer['reply_parameters']['message_id'], source)
         self.assertFalse(self.service.run_one(), 'nothing else was queued')
 
+    def test_one_retry_per_failed_work_across_control_and_conversation(self):
+        """Review P3: the tap and a conversational "다시 해줘" cannot both replay the same failure."""
+        job, _ = self.failed_turn()
+        reply_id = self.service.telegram_turns.get(job['id'])['reply_message_id']
+        self.tap(f"p7r:{job['id']}", reply_id)
+        self.assertEqual(len(self.store.jobs()), 2)
+        # Before the tapped retry runs, the owner also types a retry of the same failure.
+        self.service.use_decision_engine(self.relation_engine({'다시 해줘': FOLLOWUP_RETRY}))
+        typed, _ = self.receive('다시 해줘')
+        with self.store.db() as db:   # run the typed turn first
+            db.execute('UPDATE jobs SET created=0 WHERE id=?', (typed,))
+        self.service.run_one()
+        self.service.deliver_one()
+        self.assertIn('이미 한 번 다시 시도했습니다', self.store.job(typed)['response'])
+        # The tapped retry itself still runs once.
+        self.model_error = None
+        self.service.run_one()
+        tapped = [j for j in self.store.jobs() if str(j.get('request_key') or '').startswith('tgr:')][0]
+        self.assertEqual(self.store.job(tapped['id'])['status'], 'succeeded')
+
+    def test_a_tap_after_a_conversational_retry_is_refused(self):
+        job, _ = self.failed_turn()
+        reply_id = self.service.telegram_turns.get(job['id'])['reply_message_id']
+        self.service.use_decision_engine(self.relation_engine({'다시 해줘': FOLLOWUP_RETRY}))
+        self.model_error = None
+        self.turn('다시 해줘')
+        self.assertEqual(self.store.jobs()[0]['relation_kind'], FOLLOWUP_RETRY)
+        count = len(self.store.jobs())
+        self.tap(f"p7r:{job['id']}", reply_id, callback_id='late')
+        self.assertEqual(len(self.store.jobs()), count)
+        answer = [body for method, body in self.calls if method == 'answerCallbackQuery'][-1]
+        self.assertIn('이미 한 번 다시 시도했습니다', answer['text'])
+
     def test_disabled_button_rejection_falls_back_to_removing_the_used_control(self):
         job, _ = self.failed_turn()
         reply_id = self.service.telegram_turns.get(job['id'])['reply_message_id']
@@ -406,6 +445,18 @@ class StopTests(NativePresenceTestCase):
         self.assertEqual(outcomes, ['running'])
         self.assertEqual(self.store.job(job['id'])['status'], 'succeeded')
         self.assertFalse(any('멈췄어요. 이 요청은 실행하지' in body['text'] for body in self.sends()))
+
+    def test_a_repeated_stop_update_sends_one_notice(self):
+        self.connect_model()
+        outcomes = []
+
+        def think(job):
+            self.service.acknowledge_long_work(now=job['created'] + 6)
+            outcomes.extend([self.stop(job['id']), self.stop(job['id'])])
+        self.during_model = think
+        self.turn('긴 조사 부탁해')
+        self.assertEqual(outcomes, ['running', 'duplicate'])
+        self.assertEqual([body['text'] for body in self.sends()].count(AgentService.STOP_RUNNING_TEXT), 1)
 
     def test_stop_on_queued_work_cancels_it_through_the_state_machine(self):
         job_id, _ = self.receive('아직 시작 전인 요청')
@@ -564,7 +615,7 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(checker.stack, [], text)
 
     def test_common_model_markdown(self):
-        self.assertEqual(render_telegram_html('# 제목\n- 하나\n* 둘\n*기울임* 과 __굵게__'),
+        self.assertEqual(render_telegram_html('# 제목\n- 하나\n* 둘\n*기울임* 과 **굵게**'),
                          '<b>제목</b>\n• 하나\n• 둘\n<i>기울임</i> 과 <b>굵게</b>')
         self.assertEqual(render_telegram_html('```python\nx = 1 < 2\n```'), '<pre>x = 1 &lt; 2</pre>')
         self.assertEqual(render_telegram_html('2 * 3 * 4'), '2 * 3 * 4')
@@ -576,6 +627,138 @@ class RenderTests(unittest.TestCase):
                 self.valid(text)
         self.assertNotIn('<a', render_telegram_html('[x](javascript:alert(1))'))
         self.assertEqual(render_telegram_html('<b>raw</b>'), '&lt;b&gt;raw&lt;/b&gt;')
+
+
+def visible(rendered):
+    """What the owner reads: tags removed, entities decoded."""
+    return html.unescape(re.sub(r'<[^>]+>', '', rendered))
+
+
+class RenderContentPreservationTests(unittest.TestCase):
+    """Independent review P2: rendering may only consume delimiters, never change content."""
+
+    def test_arithmetic_identifiers_and_unmatched_markers_are_unchanged(self):
+        for text in ('2**10 = 1024 이고 x**2 + y**2', 'a**b**c', 'x**2', '__init__ 호출', 'obj.__dict__',
+                     'snake_case_name 과 _private', '**unclosed', 'closed** only', '** **', 'a*b*c', '2 * 3 * 4',
+                     'x*y + z*w', 'foo__bar__baz'):
+            with self.subTest(text=text):
+                self.assertEqual(visible(render_telegram_html(text)), text)
+
+    def test_only_consumed_delimiters_disappear(self):
+        for text, expected in (('**갈비탕**을 추천', '갈비탕을 추천'), ('이건 **중요**해', '이건 중요해'),
+                               ('*기울임*을', '기울임을'), ('`2**10`', '2**10'), ('__a *b__ c*', '__a b__ c'),
+                               ('[링크](https://x.test/a_b__c)', '링크')):
+            with self.subTest(text=text):
+                self.assertEqual(visible(render_telegram_html(text)), expected)
+        self.assertEqual(render_telegram_html('**갈비탕**을'), '<b>갈비탕</b>을')
+
+    def test_same_type_entities_are_never_nested(self):
+        self.assertEqual(render_telegram_html('# **제목**'), '<b>제목</b>')
+        self.assertEqual(render_telegram_html('## 오늘 **꼭** 할 일'), '<b>오늘 꼭 할 일</b>')
+        for text in ('# **a** *b* `c`', '### **[x](https://x.test)**', '**a *b* c**'):
+            rendered = render_telegram_html(text)
+            self.assertNotRegex(rendered, r'<b>[^/]*<b>', text)
+            self.assertNotRegex(rendered, r'<i>[^/]*<i>', text)
+
+
+class EntityRejectionTests(NativePresenceTestCase):
+    """A definite Telegram refusal of the formatting gets one plain resend; nothing else does."""
+
+    def setUp(self):
+        super().setUp()
+        self._base_transport = self.service.telegram_transport
+
+    def reject(self, response):
+        original = self._base_transport
+
+        def transport(url, body=None, headers=None, timeout=60):
+            if url.endswith('/sendMessage') and body.get('parse_mode') == 'HTML':
+                self.calls.append(('sendMessage', body))
+                if isinstance(response, Exception):
+                    raise response
+                return response
+            return original(url, body, headers, timeout)
+        self.service.telegram_transport = transport
+
+    def test_cant_parse_entities_resends_once_as_plain_text(self):
+        self.connect_model()
+        self.text = '**굵게** 답변'
+        self.reject({'ok': False, 'error_code': 400,
+                     'description': "Bad Request: can't parse entities: unexpected end tag at byte offset 3"})
+        job, _ = self.turn('질문')
+        first, second = self.sends()
+        self.assertEqual(first['parse_mode'], 'HTML')
+        self.assertNotIn('parse_mode', second)
+        self.assertEqual(second['text'], self.text, 'the plain resend is the unchanged answer')
+        self.assertEqual(self.store.job(job['id'])['delivery'], 'sent')
+
+    def test_any_other_failure_keeps_unknown_and_is_not_resent(self):
+        for response in ({'ok': False, 'error_code': 400, 'description': 'Bad Request: chat not found'},
+                         {'ok': False, 'error_code': 403, 'description': "Forbidden: can't parse entities"},
+                         {'ok': False, 'error_code': 429, 'description': 'Too Many Requests'},
+                         ProviderError('response lost')):
+            with self.subTest(response=response):
+                self.calls.clear()
+                self.connect_model()
+                self.reject(response)
+                job, _ = self.turn('질문')
+                self.assertEqual(len(self.sends()), 1)
+                self.assertEqual(self.store.job(job['id'])['delivery'], 'unknown')
+
+
+class TelegramErrorEnvelopeTests(unittest.TestCase):
+    """`telegram_request_json` keeps Telegram's 4xx envelope and makes exactly one request."""
+
+    def opener(self, error=None, body=b'{"ok": true, "result": 1}'):
+        opened = []
+
+        class Response(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        class Opener:
+            def open(self, req, timeout=None):
+                opened.append(req.full_url)
+                if error is not None:
+                    raise error
+                return Response(body)
+        return Opener(), opened
+
+    def http_error(self, code, payload):
+        return urllib.error.HTTPError('https://api.telegram.org/botX/sendMessage', code, 'err', {},
+                                      io.BytesIO(payload))
+
+    def test_4xx_envelope_is_returned_as_data(self):
+        opener, opened = self.opener(self.http_error(
+            400, b'{"ok":false,"error_code":400,"description":"Bad Request: can\'t parse entities"}'))
+        with mock.patch('personal_agent.conversation_handoff._build_opener', return_value=opener):
+            result = telegram_request_json('https://api.telegram.org/botX/sendMessage', {'a': 1})
+        self.assertEqual(result, {'ok': False, 'error_code': 400, 'description': "Bad Request: can't parse entities"})
+        self.assertEqual(len(opened), 1)
+        channel = TelegramChannel(lambda: lambda *a, **k: result, lambda: 'X')
+        with self.assertRaises(TelegramRejected) as caught:
+            channel.send_message(1, 'x')
+        self.assertTrue(caught.exception.entity_parse_error)
+        self.assertNotIn('parse', str(caught.exception), 'the owner-facing text never carries Telegram detail')
+
+    def test_other_errors_raise_owner_safe_provider_errors_once(self):
+        for error in (self.http_error(500, b'{"ok":false}'), self.http_error(400, b'not json'),
+                      urllib.error.URLError(TimeoutError()), TimeoutError()):
+            with self.subTest(error=type(error).__name__):
+                opener, opened = self.opener(error)
+                with mock.patch('personal_agent.conversation_handoff._build_opener', return_value=opener):
+                    with self.assertRaises(ProviderError) as caught:
+                        telegram_request_json('https://api.telegram.org/botX/sendMessage', {'a': 1})
+                self.assertNotIsInstance(caught.exception, TelegramRejected)
+                self.assertEqual(len(opened), 1, 'never a second request')
+
+    def test_success_body_is_parsed(self):
+        opener, _ = self.opener()
+        with mock.patch('personal_agent.conversation_handoff._build_opener', return_value=opener):
+            self.assertEqual(telegram_request_json('https://api.telegram.org/botX/getMe', {}), {'ok': True, 'result': 1})
 
 
 class ChannelWireTests(unittest.TestCase):

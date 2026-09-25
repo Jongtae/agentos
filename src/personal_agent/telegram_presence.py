@@ -243,8 +243,12 @@ _HEADING = re.compile(r'^[ \t]{0,3}#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$')
 _BULLET = re.compile(r'^([ \t]*)[*+-][ \t]+(.*)$')
 _CODE = re.compile(r'`([^`\n]+)`')
 _LINK = re.compile(r'\[([^\]\n]+)\]\((https?://[^\s()"<>]+)\)')
-_BOLD = re.compile(r'\*\*(?=\S)(.+?)(?<=\S)\*\*|__(?=\S)(.+?)(?<=\S)__')
-_ITALIC = re.compile(r'(?<![\w*])\*(?=[^\s*])([^*\n]+?)(?<=[^\s*])\*(?![\w*])')
+#: ``**`` is a delimiter only where it cannot be arithmetic or an identifier:
+#: never next to an ASCII letter/digit/``*`` outside the span.  Korean
+#: particles directly after a closing ``**`` ("**갈비탕**을") stay allowed.
+#: ``__`` is never a delimiter: ``__init__`` and snake_case are content.
+_BOLD = re.compile(r'(?<![A-Za-z0-9*])\*\*(?=[^\s*])(.+?)(?<=[^\s*])\*\*(?![A-Za-z0-9*])')
+_ITALIC = re.compile(r'(?<![A-Za-z0-9*])\*(?=[^\s*])([^*\n]+?)(?<=[^\s*])\*(?![A-Za-z0-9*])')
 
 
 def _escape(text):
@@ -252,8 +256,9 @@ def _escape(text):
 
 
 def _leaf(text):
-    # An unmatched ``**`` is a leaked control marker, not content.
-    return _escape(text.replace('**', ''))
+    # An unmatched marker is left as written: a literal ``**`` is better
+    # than silently changing what the answer says.
+    return _escape(text)
 
 
 def _italic(text):
@@ -266,33 +271,36 @@ def _italic(text):
     return ''.join(out)
 
 
-def _bold(text):
+def _bold(text, in_bold=False):
     out, pos = [], 0
     for match in _BOLD.finditer(text):
         out.append(_italic(text[pos:match.start()]))
-        out.append('<b>' + _italic(match.group(1) or match.group(2)) + '</b>')
+        inner = _italic(match.group(1))
+        # Telegram entities of one type are not nested: inside an already
+        # bold span (a heading) the delimiters are consumed without a tag.
+        out.append(inner if in_bold else '<b>' + inner + '</b>')
         pos = match.end()
     out.append(_italic(text[pos:]))
     return ''.join(out)
 
 
-def _links(text):
+def _links(text, in_bold=False):
     out, pos = [], 0
     for match in _LINK.finditer(text):
-        out.append(_bold(text[pos:match.start()]))
+        out.append(_bold(text[pos:match.start()], in_bold))
         out.append('<a href="' + html.escape(match.group(2), quote=True) + '">' + _leaf(match.group(1)) + '</a>')
         pos = match.end()
-    out.append(_bold(text[pos:]))
+    out.append(_bold(text[pos:], in_bold))
     return ''.join(out)
 
 
-def _spans(text):
+def _spans(text, in_bold=False):
     out, pos = [], 0
     for match in _CODE.finditer(text):
-        out.append(_links(text[pos:match.start()]))
+        out.append(_links(text[pos:match.start()], in_bold))
         out.append('<code>' + _escape(match.group(1)) + '</code>')
         pos = match.end()
-    out.append(_links(text[pos:]))
+    out.append(_links(text[pos:], in_bold))
     return ''.join(out)
 
 
@@ -301,7 +309,7 @@ def _lines(text):
     for line in text.split('\n'):
         heading = _HEADING.match(line)
         if heading:
-            rendered.append('<b>' + _spans(heading.group(1)) + '</b>')
+            rendered.append('<b>' + _spans(heading.group(1), in_bold=True) + '</b>')
             continue
         bullet = _BULLET.match(line)
         if bullet:
@@ -313,7 +321,7 @@ def _lines(text):
 def render_telegram_html(text):
     """Render reply text for Telegram ``parse_mode='HTML'``.
 
-    Handles the Markdown a model commonly emits - bold, italic, inline code,
+    Handles the Markdown a model commonly emits - ``**bold**``, ``*italic*``, inline code,
     fenced code, headings, bullets and http(s) links.  Every text leaf is
     HTML-escaped and every tag is emitted as a balanced, properly nested
     pair, so the result is always valid Telegram HTML: a send rejected for

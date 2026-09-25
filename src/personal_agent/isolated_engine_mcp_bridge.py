@@ -22,15 +22,13 @@ from urllib.parse import urlsplit
 from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS, LATEST_HANDSHAKE_VERSION
 
 
-LIST_NOTES_TOOL = {
-    "name": "list_notes",
-    "description": "List saved AgentOS notes.",
-    "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "additionalProperties": False,
-    },
-}
+from .bounded_execution import ISOLATED_PROFILE, profile_mcp_tools
+
+# #604: derived from the one native action source for the restricted isolation
+# profile, not a bridge-local copy.  The profile's only action takes no
+# arguments, which is what the ``arguments == {}`` check below enforces.
+ISOLATED_TOOLS = profile_mcp_tools(ISOLATED_PROFILE)
+ISOLATED_TOOL_NAMES = frozenset(tool["name"] for tool in ISOLATED_TOOLS)
 
 
 def negotiated_protocol_version(offered):
@@ -149,14 +147,14 @@ def serve(callback_url: str, token: str, task_id: str, *, timeout: float = 10.0)
                 }
                 _send({"jsonrpc": "2.0", "id": ident, "result": result})
             elif method == "tools/list":
-                _send({"jsonrpc": "2.0", "id": ident, "result": {"tools": [LIST_NOTES_TOOL]}})
+                _send({"jsonrpc": "2.0", "id": ident, "result": {"tools": json.loads(json.dumps(ISOLATED_TOOLS))}})
             elif method == "tools/call":
                 params = request.get("params")
                 if (
                     set(request) != {"jsonrpc", "id", "method", "params"}
                     or not isinstance(params, dict)
                     or set(params) != {"name", "arguments"}
-                    or params.get("name") != "list_notes"
+                    or params.get("name") not in ISOLATED_TOOL_NAMES
                     or params.get("arguments") != {}
                 ):
                     _send(_request_error(ident, -32601))

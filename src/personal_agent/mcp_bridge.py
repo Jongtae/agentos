@@ -14,7 +14,7 @@ import time
 from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS, LATEST_HANDSHAKE_VERSION
 
 from .agent_runtime import Capabilities
-from .bounded_execution import AgentOSMcpTools, ExecutionError
+from .bounded_execution import AgentOSMcpTools, ExecutionError, profile_actions, redact_reason
 from .local_tools import LocalTools
 from .quickstart_store import QuickStore
 
@@ -48,13 +48,27 @@ def _provenance(labels):
     return {str(label) for label in labels or () if str(label).strip()}
 
 
+def _work_running(store, job_id):
+    """The bridge acts for exactly one Work, and only while it is running.
+
+    Discovery (``tools/list``) grants nothing; every call rechecks that the
+    Work named on the command line exists in this owner store and is still
+    ``running``.  A finished, interrupted or foreign Work id is refused, so a
+    bridge that outlives its turn cannot keep acting for it.
+    """
+    job = store.job(job_id) if isinstance(job_id, str) and job_id else None
+    return bool(job) and job.get('status') == 'running'
+
+
 def serve(data, job_id, provenance=()):
     store = QuickStore(data)
     def record(tool, status, detail):
         with store.db() as db:
             db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)', (job_id,tool,status,detail,time.time()))
+    # #604: the Work's allowed actions are the bounded CLI profile; names and
+    # schemas come from Capabilities.definitions(), never a bridge-local list.
     tools = AgentOSMcpTools(Capabilities(store, None, {}, '', job_id, record, network=LocalTools(), document_access=False,
-                                         allowed_tools={'list_notes','save_note','web_search'},
+                                         allowed_tools=set(profile_actions(AgentOSMcpTools.PROFILE)),
                                          inherited_provenance=_provenance(provenance)))
     for line in sys.stdin:
         try:
@@ -66,8 +80,17 @@ def serve(data, job_id, provenance=()):
                 result = {'protocolVersion':negotiated_protocol_version(offered),'capabilities':{'tools':{}},'serverInfo':{'name':'agentos','version':'1'}}
             elif method == 'tools/list': result = {'tools': tools.definitions()}
             elif method == 'tools/call':
-                params = request.get('params', {}); value = tools.call(params.get('name'), params.get('arguments', {}))
-                record(params.get('name'), 'succeeded', json.dumps({'scope':'subscription-mcp-bridge'}, ensure_ascii=False))
+                params = request.get('params', {}); name = params.get('name')
+                try:
+                    if not _work_running(store, job_id):
+                        raise ExecutionError('이 작업은 더 이상 실행 중이 아니어서 도구를 실행하지 않았습니다.')
+                    value = tools.call(name, params.get('arguments', {}))
+                except (ValueError, ExecutionError, TypeError) as exc:
+                    # Redacted recovery metadata: the reason, never the arguments.
+                    record(str(name)[:80] if isinstance(name, str) else 'unknown', 'failed',
+                           json.dumps({'scope':'subscription-mcp-bridge','error':redact_reason(str(exc))}, ensure_ascii=False))
+                    raise
+                record(name, 'succeeded', json.dumps({'scope':'subscription-mcp-bridge'}, ensure_ascii=False))
                 result = {'content':[{'type':'text','text':json.dumps(value, ensure_ascii=False)}]}
             elif method == 'notifications/initialized': continue
             else: raise ExecutionError('Unsupported MCP request.')

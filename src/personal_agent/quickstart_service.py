@@ -21,7 +21,7 @@ from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_U
                                       TERMINAL_UNVERIFIED_MARKER, BlockedTurn, ConversationProjection, context_message,
                                       owner_cause, terminal_text, turn_qualifier, verified_portion)
 from .subscription_engines import SubscriptionEngines
-from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult, MAX_PROMPT_BYTES, SECRET_PATTERN
+from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult, MAX_PROMPT_BYTES, SECRET_PATTERN, CLI_PROFILES, profile_actions, route_unavailable
 from .isolated_engine_gateway import EngineGatewayError
 from .service_control import build_identity
 from .isolated_mcp_proxy import IsolatedMcpProxy, TaskCapabilityRegistry
@@ -720,6 +720,12 @@ class AgentService:
         if result.get('state') == 'recovery': return result['action']
         return '설정 요청을 처리했습니다.'
 
+    def subscription_execution_profile(self):
+        """The CLI capability profile, read from its one declaration (#604)."""
+        profile=(ReadOnlyAgentOSMcpTools if self.isolated_engine_adapter else AgentOSMcpTools).PROFILE
+        return {'mode':profile,'tools':list(profile_actions(profile)),'unavailable':route_unavailable(profile),
+                'qualification':CLI_PROFILES[profile]['qualification']}
+
     def settings(self):
         with self.lock:
             model=self.store.config('model',{})
@@ -732,7 +738,7 @@ class AgentService:
                     'decision_model':self.decision_route_status(),
                     'decision_route':self.decision_routes.status(),
                     'subscription_engines':self.subscription_engine_status(),
-                    'subscription_execution':{'mode':'isolated-agentos-mcp','tools':['list_notes']} if self.isolated_engine_adapter else {'mode':'bounded-agentos-mcp','tools':['list_notes','save_note','web_search']},
+                    'subscription_execution':self.subscription_execution_profile(),
                     'telegram':{'enabled':tg.get('enabled',False),'mode':tg.get('mode','owner-token'),'username':tg.get('username',''),'paired':bool(tg.get('user_id')),'user_id':tg.get('user_id')},
                     'file_roots':[{**root,'blocked':folder_grants.blocked(root.get('path',''),self.store)} for root in self.store.config('file_roots',[])], 'file_workspace':FileWorkspace(self.store).projection(), 'document_boundary':boundary, 'context_inbox':__import__('personal_agent.context_inbox',fromlist=['ContextInbox']).ContextInbox(self.store).status(), 'agents':[{'id':role['id'],'name':role['name'],'permissions':role['permissions'],'package_id':package['id']} for package in active_packages for role in package['roles']], 'packages':packages, 'tool_run':self.store.config('tool_run'), 'model_test':model_test, 'model_ready':self.model_ready(model,model_test), 'telegram_status':self.store.config('telegram_status'),'connectors':self.google_connection_rows()}
 
@@ -3410,12 +3416,16 @@ class AgentService:
                         # facade; it never gets this store, model key, or roots.
                         isolated=bool(self.isolated_engine_adapter)
                         # Public lookup preflight remains AgentOS-owned.  The
-                        # isolated bearer facade below still exposes only
-                        # list_notes and rejects direct web_search calls.
-                        allowed_tools={'list_notes','web_search'} if isolated else {'list_notes','save_note','web_search'}
+                        # isolated bearer facade below still exposes only its
+                        # restricted profile and rejects direct web_search calls.
+                        # #604: the bounded route's actions are its declared
+                        # profile (bounded_execution.CLI_PROFILES).
+                        facade=ReadOnlyAgentOSMcpTools if isolated else AgentOSMcpTools
+                        allowed_tools=set(profile_actions(facade.PROFILE))|{'web_search'}
                         capabilities=Capabilities(self.store,None,{},'',job['id'],record,network=self.local_tools,
                                                   document_access=False,packages=self.runtime_packages(),
-                                                  allowed_tools=allowed_tools,inherited_provenance=turn_provenance)
+                                                  allowed_tools=allowed_tools,inherited_provenance=turn_provenance,
+                                                  current_packages=self.runtime_packages)
                         # Use the same owner-approved request payload prepared
                         # for the local model path.  In particular, /summarize
                         # must send notes, never only the command literal.
@@ -3462,9 +3472,10 @@ class AgentService:
                         separate=subscription['id']=='claude-code' and not isolated and adapter_context is not None
                         # AX-11 (#603): the tool names this route actually offers the
                         # CLI, from the same facade class that serves it below.
-                        offered=(ReadOnlyAgentOSMcpTools if isolated else AgentOSMcpTools)(capabilities).definitions()
+                        offered=facade(capabilities).definitions()
                         self.record_turn_sent(job['id'],sent=sent if separate else engine_prompt,
                             exposed_tools=[tool.get('name') for tool in offered],build=self.build,
+                            capability_profile=facade.PROFILE,unavailable_tools=route_unavailable(facade.PROFILE),
                             instructions=engine_context['instructions'] if adapter_context is not None else '',
                             instructions_channel='append-system-prompt' if separate else ('prompt' if adapter_context is not None else 'not sent (bare request)'),
                             private_sources=set(turn_provenance)|set(capabilities.private_provenance),
@@ -3519,7 +3530,7 @@ class AgentService:
                         checked=self.store.config('model_test',{})
                         if checked.get('runtime_model'):
                             runtime_config['model']=checked['runtime_model']
-                        capabilities=Capabilities(self.store,self.adapter,runtime_config,key,job['id'],record,network=self.local_tools,document_access=not boundary['requires_approval'],packages=self.runtime_packages(),document_context=document_history and not boundary['requires_approval'],public_page_scope=self.public_page_boundary(config)['urls'],memory_request=owner_memory_request,inherited_provenance=turn_provenance,calendar=self.calendar_for(job),calendar_owner=self.connector_owner_id(job))
+                        capabilities=Capabilities(self.store,self.adapter,runtime_config,key,job['id'],record,network=self.local_tools,document_access=not boundary['requires_approval'],packages=self.runtime_packages(),document_context=document_history and not boundary['requires_approval'],public_page_scope=self.public_page_boundary(config)['urls'],memory_request=owner_memory_request,inherited_provenance=turn_provenance,calendar=self.calendar_for(job),calendar_owner=self.connector_owner_id(job),current_packages=self.runtime_packages)
                         # Evidence that the direct route was attempted, even if the
                         # provider fails before any response event.
                         record('model','requested',json.dumps({'provider':runtime_config.get('provider'),'model':runtime_config.get('model')},ensure_ascii=False))

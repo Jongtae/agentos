@@ -263,8 +263,38 @@ class EvidenceLog(list):
  def extend(self,items):
   for item in items:self.append(item)
 
+READONLY_EXCLUDED=('save_note','save_memory','delegate_agent')
+
+def action_definitions(tools,allowed,readonly=False):
+ """Native function definitions for ``allowed`` tool ids of resolved package tools.
+
+ This is the single action source every route derives from (#604): the
+ direct-API tool list, the stdio MCP ``tools/list`` of the bounded CLI bridge
+ and the isolated bridge's list are all projections of ``DEFINITIONS`` through
+ the manifest ``tools`` (``manifests.runtime_packages``).  No route keeps its
+ own schema copy.
+ """
+ definitions=[]
+ for tool_id in sorted(allowed):
+  tool=tools.get(tool_id)
+  if not tool or (readonly and tool['host_action'] in READONLY_EXCLUDED):continue
+  source=next(d for d in DEFINITIONS if d['function']['name']==tool['host_action'])
+  definitions.append({**source,'function':{**source['function'],'name':tool_id}})
+ return definitions
+
+def check_arguments(parameters,args):
+ """The schema-level argument check shared by the native loop and the MCP facade.
+
+ ``parameters`` is a ``DEFINITIONS`` parameter schema: an object whose
+ declared properties are all strings, ``additionalProperties: false``.
+ Unknown and missing fields are refused rather than dropped.
+ """
+ if not isinstance(args,dict) or set(args)-set(parameters['properties']) or set(parameters['required'])-set(args):raise ValueError('허용하지 않은 도구 또는 인수입니다.')
+ if any(not isinstance(v,str) for v in args.values()):raise ValueError('도구 인수는 문자열이어야 합니다.')
+ return args
+
 class Capabilities:
- def __init__(self,store,adapter,config,key,job_id,record,readonly=False,network=None,document_access=True,packages=None,allowed_tools=None,document_context=False,public_page_scope=None,memory_approval=None,inherited_provenance=(),calendar=None,calendar_owner=None,memory_request=None):
+ def __init__(self,store,adapter,config,key,job_id,record,readonly=False,network=None,document_access=True,packages=None,allowed_tools=None,document_context=False,public_page_scope=None,memory_approval=None,inherited_provenance=(),calendar=None,calendar_owner=None,memory_request=None,current_packages=None):
   self.store,self.adapter,self.config,self.key=store,adapter,config,key
   self.job_id,self.record,self.readonly=job_id,record,readonly
   self.network=network or LocalTools()
@@ -287,6 +317,10 @@ class Capabilities:
   self.tools={tool['id']:tool for package in self.packages for tool in package['tools']}
   self.roles={role['id']:{**role,'package_id':package['id']} for package in self.packages for role in package['roles']}
   self.allowed_tools=set(self.tools if allowed_tools is None else allowed_tools)
+  # #604: a zero-argument resolver of the packages that are enabled *now*.
+  # Discovery happened when this Work was built; a package disabled, removed
+  # or re-declared since then must not keep its tool reachable.
+  self.current_packages=current_packages
   self.memo={}
   # One set, two writers: `document_context` is the history-window source and
   # `EvidenceLog` adds a label for every private tool result stored in this
@@ -296,13 +330,7 @@ class Capabilities:
   if document_context:self.private_provenance.add('conversation-history')
   self.evidence=EvidenceLog(self.private_provenance)
  def definitions(self):
-  definitions=[]
-  for tool_id in sorted(self.allowed_tools):
-   tool=self.tools.get(tool_id)
-   if not tool or (self.readonly and tool['host_action'] in ('save_note','save_memory','delegate_agent')):continue
-   source=next(d for d in DEFINITIONS if d['function']['name']==tool['host_action'])
-   definitions.append({**source,'function':{**source['function'],'name':tool_id}})
-  return definitions
+  return action_definitions(self.tools,self.allowed_tools,self.readonly)
  def roots(self):
   # Filesystem state can change while this Capabilities object is alive. Recheck
   # each use so replacing a granted directory with a symlink cannot reuse a stale
@@ -410,6 +438,10 @@ class Capabilities:
  def execute(self,name,args):
   tool=self.tools.get(name)
   if not tool or name not in self.allowed_tools:raise ValueError('활성 패키지에 선언되지 않은 도구입니다.')
+  if self.current_packages is not None:
+   current=next((item for package in self.current_packages() for item in package['tools'] if item['id']==name),None)
+   if current is None or current['host_action']!=tool['host_action']:
+    raise ValueError('이 도구는 작업 시작 후 비활성화되었거나 선언이 바뀌어 실행하지 않았습니다. 새 요청으로 다시 시도해 주세요.')
   name=tool['host_action']
   if name=='web_search':
    if self.private_egress_provenance():raise ValueError('연결 문서에서 읽은 내용은 웹 검색어로 전송할 수 없습니다. 문서와 무관한 공개 검색어로 새 요청을 보내 주세요.')
@@ -561,7 +593,7 @@ class Capabilities:
   # Provenance is taken here, on success, rather than left to `run_agent`'s
   # `capabilities.evidence.append`.  `AgentOSMcpTools`/`ReadOnlyAgentOSMcpTools`
   # call `execute` directly for a subscription engine whose `allowed_tools`
-  # are `{'list_notes','web_search'}`, so run_agent never sees those reads and
+  # are its route profile (`bounded_execution.CLI_PROFILES`), so run_agent never sees those reads and
   # the evidence list stays empty while the engine holds the owner's notes.
   # `list_memory`/`save_memory` below go through `self.evidence`, which labels
   # them in `EvidenceLog.append`; both layers write the same one set.
@@ -624,7 +656,7 @@ CORE_INSTRUCTIONS='''You are the owner's personal assistant inside Personal Agen
 # Tool guidance for the direct-API route (unchanged wording from the former POLICY).
 API_TOOL_GUIDANCE='''For each NEW request select the relevant available tools, or answer directly for ordinary conversation. Tools actually run on the user's host. Use weather for weather, public_page_read for a user-supplied anonymous public URL, web_search for snippets, find_files/read_file for local documents, list_notes/save_note for notes, save_memory/list_memory only for explicit owner-authorized memory requests or corrections, and list_agents/delegate_agent for explicit specialist tasks. Do not transmit file contents through web_search, public_page_read, bounded_public_research or weather. Use bounded_public_research for a product comparison or travel plan; it cannot purchase, book, reserve, create an account or sign in, and you must not claim it did. A specialist is a separate execution with its own context, not a human. No shell, external messages, arbitrary file writes or unlisted tools exist.'''
 # Tool guidance for a subscription CLI turn: the CLI sees only the AgentOS MCP bridge.
-CLI_TOOL_GUIDANCE='''For this turn use only the tools offered by the "agentos" MCP server; do not use built-in file, shell or web tools. Answer directly for ordinary conversation. Do not transmit note or document contents through web_search.'''
+CLI_TOOL_GUIDANCE='''For this turn use only the tools offered by the "agentos" MCP server; do not use built-in file, shell or web tools. Answer directly for ordinary conversation. Do not transmit note or document contents through web_search, weather or bounded_public_research.'''
 POLICY=CORE_INSTRUCTIONS+' '+API_TOOL_GUIDANCE
 # Bounded recent conversation shared by every route: the last 16 messages,
 # newest first until the byte budget is spent, never cutting the current request.
@@ -913,8 +945,8 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
      name='unknown';raise ValueError('도구 이름은 문자열이어야 합니다.')
     args=json.loads(function.get('arguments','{}'))
     spec=specs.get(name)
-    if not spec or not isinstance(args,dict) or set(args)-set(spec['properties']) or set(spec['required'])-set(args):raise ValueError('허용하지 않은 도구 또는 인수입니다.')
-    if any(not isinstance(v,str) for v in args.values()):raise ValueError('도구 인수는 문자열이어야 합니다.')
+    if not spec:raise ValueError('허용하지 않은 도구 또는 인수입니다.')
+    check_arguments(spec,args)
     validated=True
     cache_key=json.dumps([name,args],sort_keys=True)
     attempts[cache_key]=attempts.get(cache_key,0)+1;attempt=attempts[cache_key]

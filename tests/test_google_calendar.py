@@ -193,6 +193,89 @@ class GoogleCalendarTests(unittest.TestCase):
             calendar.query("2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", "UTC", 10)
         self.assertEqual((error.exception.reason, error.exception.effect), ("provider-rejected", "none"))
 
+    def test_conflict_on_mutation_is_unknown_effect_not_a_plain_rejection(self):
+        # #447: Google documents 409 as "The requested identifier already
+        # exists" (events.insert with an existing ID) or "Conflict". create()
+        # derives the event ID from the approved idempotency key, so a create
+        # 409 means the event plausibly exists already.
+        payload = {
+            "summary": "review",
+            "start": "2026-01-01T10:00:00Z",
+            "end": "2026-01-01T11:00:00Z",
+            "timezone": "UTC",
+        }
+        calendar = GoogleCalendar(lambda *_: (_ for _ in ()).throw(GoogleCalendarHTTPError(409)))
+        cases = (
+            (lambda: calendar.create(payload, "key"), "event-already-exists"),
+            (lambda: calendar.update("event", '"v1"', {"summary": "changed"}), "provider-conflict"),
+            (lambda: calendar.cancel("event", '"v1"'), "provider-conflict"),
+        )
+        for call, reason in cases:
+            with self.subTest(reason=reason):
+                with self.assertRaises(GoogleCalendarError) as error:
+                    call()
+                self.assertEqual((error.exception.reason, error.exception.effect), (reason, "unknown"))
+                self.assertNotEqual(error.exception.reason, "provider-rejected")
+        with self.assertRaises(GoogleCalendarError) as read:
+            calendar.query("2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", "UTC", 10)
+        self.assertEqual((read.exception.reason, read.exception.effect), ("provider-rejected", "none"))
+
+    def test_conflict_receipt_through_connector_never_claims_no_external_effect(self):
+        calendar = GoogleCalendar(lambda *_: (_ for _ in ()).throw(GoogleCalendarHTTPError(409)))
+        payload = {
+            "summary": "review",
+            "start": "2026-09-22T10:00:00+09:00",
+            "end": "2026-09-22T11:00:00+09:00",
+            "timezone": "Asia/Seoul",
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            connector = CalendarConnector(
+                QuickStore(folder), calendar, authority=lambda _owner, _scope: True
+            )
+            drafts = (
+                (connector.draft_create(payload, "owner"), connector.create, "event-already-exists"),
+                (connector.draft_update("event-1", '"v1"', {"summary": "new"}, "owner"),
+                 connector.update, "provider-conflict"),
+                (connector.draft_cancel("event-2", '"v1"', "owner"), connector.cancel, "provider-conflict"),
+            )
+            for draft, run, reason in drafts:
+                with self.subTest(action=draft["action"]):
+                    approval = connector.approve(draft["id"], "owner")["approval_id"]
+                    with self.assertRaises(CalendarError) as raised:
+                        run(draft["id"], approval, "owner")
+                    self.assertEqual(
+                        (raised.exception.reason, raised.exception.effect, raised.exception.recovery),
+                        (reason, "unknown", "inspect-calendar-before-retry"),
+                    )
+                    receipt = connector.status(draft["id"], "owner")
+                    self.assertEqual(
+                        (receipt["state"], receipt["error_class"], receipt["effect"], receipt["recovery"]),
+                        ("outcome-unknown", reason, "unknown", "inspect-calendar-before-retry"),
+                    )
+                    self.assertNotEqual(receipt["effect"], "none")
+                    # The replay barrier holds: no second provider attempt.
+                    with self.assertRaises(CalendarError) as replay:
+                        run(draft["id"], approval, "owner")
+                    self.assertEqual(replay.exception.reason, "unknown-external-outcome")
+
+    def test_existing_non_conflict_mutation_classifications_are_unchanged(self):
+        cases = (
+            (401, "scope-expired", "none"),
+            (403, "provider-rejected", "none"),
+            (412, "stale-event", "none"),
+            (400, "provider-rejected", "none"),
+            (500, "provider-error", "unknown"),
+            (503, "provider-error", "unknown"),
+        )
+        for status, reason, effect in cases:
+            with self.subTest(status=status):
+                calendar = GoogleCalendar(
+                    lambda *_, status=status: (_ for _ in ()).throw(GoogleCalendarHTTPError(status))
+                )
+                with self.assertRaises(GoogleCalendarError) as error:
+                    calendar.update("event", '"v1"', {"summary": "changed"})
+                self.assertEqual((error.exception.reason, error.exception.effect), (reason, effect))
+
 
 if __name__ == "__main__":
     unittest.main()

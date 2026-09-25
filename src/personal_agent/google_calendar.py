@@ -78,6 +78,15 @@ class GoogleCalendar:
                 raise GoogleCalendarError("provider-rejected") from None
             if error.status == 412:
                 raise GoogleCalendarError("stale-event") from None
+            if error.status == 409 and mutation:
+                # Google documents 409 as "The requested identifier already
+                # exists" (reason ``duplicate``) and as ``conflict``. create()
+                # sends an event ID derived from the approved idempotency key,
+                # so a create 409 means the event plausibly already exists; a
+                # PATCH/DELETE 409 does not establish that nothing changed.
+                # Neither may be reported as "no external effect".
+                reason = "event-already-exists" if method == "POST" else "provider-conflict"
+                raise GoogleCalendarError(reason, "unknown") from None
             if error.status >= 500:
                 raise GoogleCalendarError("provider-error", "unknown" if mutation else "none") from None
             raise GoogleCalendarError("provider-rejected") from None

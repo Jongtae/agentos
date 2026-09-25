@@ -184,6 +184,56 @@ Jev is currently:
 
 A future adapter or provider promotion requires separately authorized implementation and comparable AgentOS-side evidence.
 
+DECISION-ROUTE-01 / [#580](https://github.com/Jongtae/agentos/issues/580) authorized and added an optional Jev adapter (`decision_adapters.JevDecisionEngine`) over TypeSafe AI's documented HTTP API. It remains optional, off unless the owner saves a TypeSafe key **and** explicitly activates it, not a startup dependency and not the default. The mapping above is implemented at the adapter boundary only: `noul` → `BinaryDecision` (answer `noul ≥ 0.5`, probability of the chosen side), `choice` → `SelectionDecision` (criteria are the declared candidates plus `none-of-these`, Jev's `confidence` kept), `score` → `ScoreDecision` (five evenly spaced levels of the AgentOS scale, mapped back). TypeSafe documents English as its strongest language; Korean accuracy is an owner-visible caveat and is exactly what the qualification suite below measures.
+
+## DecisionEngine routes (#580)
+
+The DecisionEngine route is a **third role**, distinct from (1) the Personal AgentOS assistant identity and (2) the Work-execution route owned by [#504](https://github.com/Jongtae/agentos/issues/504). A provider or subscription may technically back more than one role; the roles stay separate in configuration, policy, telemetry and Evidence.
+
+### Routes
+
+| Route | Adapter | Destination | Credential | Model identity |
+| --- | --- | --- | --- | --- |
+| `direct_api` | `ModelDecisionEngine` over the existing `ModelAdapter` tool call | `api.openai.com` (initial default `gpt-4o-mini`; other `decision_model` providers as before) | a decision-only OpenAI key, or the Work OpenAI key when the owner's Work API is already OpenAI (#417 default) | requested = configured model; observed = the response `model`, else `not reported` |
+| `jev` | `JevDecisionEngine` over the existing bounded `request_json` transport | `api.typesafe.ai` (`POST /v1/systemone`) | owner's TypeSafe API key (`decision_jev_key` secret) | requested = `jev-latest` or an owner-entered pinned id; observed = the response's versioned `model` |
+| `subscription_cli` | `SubscriptionCliDecisionEngine` over `BoundedExecutionAdapter` isolation | the subscription account's provider (OpenAI for Codex, Anthropic for Claude Code) | the CLI's own official login (Codex `CODEX_HOME`; Claude Code `CLAUDE_CODE_OAUTH_TOKEN` from #571) | requested per model policy; observed only when the CLI reports it (Claude Code `modelUsage`), otherwise `not reported` (Codex `exec --json` reports none) |
+| `off` | `UnavailableDecisionEngine` | none | none | none |
+
+When no route has been chosen, the #417 default applies unchanged. Every route receives exactly the `DecisionContext` the caller built (bounded by `MAX_CONTEXT_CHARS`); no route adds conversation history, Memory, files or connector content, and callers never branch on the route (`RoutedDecisionEngine`).
+
+### Configuration and owner actions
+
+- `decision_route` (config row) is the **active** route. It is written only by an explicit owner activation that passed its check; it is never written by saving a key, by a login check, or by the Work-route switch. `select_ai_route` / `connect_subscription_engine` never write it, and route activation never writes `subscription_engine` or `model`.
+- Saving a key (`/api/decision-route/credential`) stores it and does **not** activate a route.
+- Activation (`/api/decision-route/activate`) sends one synthetic probe judgment (no owner content) through the candidate route; only a `decided` answer commits. Any failure raises, records a content-free check, and leaves the previous route unchanged.
+- Opening Settings reads configuration only: no subprocess, no model or HTTP call.
+- There is **no cross-route fallback**. An unavailable active route answers `provider_unavailable`; it never falls back to another provider, account, subscription engine or the engine default.
+
+### Subscription model policy
+
+- `engine_default` — no model flag; the isolated CLI answers with its own default. Because the owner's user configuration is ignored, this is not a user-configured default.
+- `explicit` — offered only when the installed CLI's own `--help` declares `--model` (checked on explicit owner action, recorded in `decision_cli_capabilities`). The owner-entered identifier is then verified by a probe on the owner's account; a refusal is recorded as `model-not-verified`, never emulated through owner configuration.
+- `lowest_qualified` — the owner declares 1–3 candidates, lightest first (neither CLI offers an account-verified model enumeration; `codex debug models` is a raw catalogue, not account support, and is not used). Each candidate in order runs the qualification suite; the first that passes is activated. If none passes the route is not changed and the failure is `no-qualified-candidate`; no stronger/different model or route is tried.
+- A verified `explicit`/`lowest_qualified` model is tied to the CLI binary fingerprint (resolved path, size, mtime) and version recorded at activation. A changed binary makes the route answer `provider_unavailable` with `requalification-needed` until the owner re-activates.
+
+### Qualification suite
+
+`decision_qualification.py`, `SUITE_VERSION = decision-qualification/1`, all cases must pass. Cases run through the production caller (`ConversationJudgments`) or `DecisionEngine.choose` + `DecisionPolicy`: retry after failed Work, correction, reference, a new topic is not a follow-up, an ambiguous referent abstains, declared-candidate selection, no invented candidate, parked-request withdrawal, and failed/partial/unknown projections that must not be upgraded. Contexts are synthetic. A provider failure is a failed case, never a pass. Changing any case requires a new suite version.
+
+### Authority and threat model
+
+- **Data sent.** Only the caller-built `DecisionContext` (short attributable facts such as the current short utterance plus prior intent/status) and the question/schema; the existing caller-side guards (for example, locally handled note/private-search requests are never sent) apply identically to every route. Probes and qualification send synthetic text only.
+- **Destinations.** Exactly the active route's destination above, shown in Settings before activation. Switching routes is the owner's explicit destination decision; nothing switches implicitly.
+- **Subscription isolation.** Each judgment runs in a fresh empty per-call directory that is also `HOME`, with `PATH=/usr/bin:/bin` (+ the CLI's own directory for Codex), no inherited environment, no shell. Codex: `exec --json --sandbox read-only --skip-git-repo-check --ignore-user-config --ephemeral --output-schema <file> --disable shell_tool --disable plugins --disable apps`, no MCP servers. Claude Code: `-p … --output-format json --json-schema … --tools "" --strict-mcp-config` (no `--mcp-config`) `--no-session-persistence --system-prompt …`. The AgentOS MCP bridge is **not** attached: a judgment has no AgentOS tools. Activation refuses a CLI whose `--help` lacks these isolation flags. Residual risk: the CLI still reads its own official login profile, and Codex's read-only sandbox policy is enforced by Codex itself.
+- **Credentials.** Keys are stored in the local secret store, never returned by the read model, and redacted from provenance (`decision_jev_key` added to the redaction list). Subscription logins are the CLI's own; AgentOS reads no credential file.
+- **Authority.** Decisions remain judgment only: no route can mint/widen a Grant, add a destination for Work, mark Work complete, change effect/Evidence truth, or change the Work route. `DecisionPolicy` thresholds are unchanged.
+- **Failure paths.** `timeout`, `provider_unavailable` (with `failure` = `auth`, `usage-limit`, `request-rejected`, `not-configured`, `cli-not-found`, `requalification-needed`, …), `malformed`, `context_rejected`, `cancelled` are explicit and tested; cancelled/oversized contexts make no call.
+- **Provenance.** Each audit row records `route`, `engine`, `model_policy`, `requested_model` and `observed_model` (`not reported` when absent); the developer trace shows them apart from the Work executor.
+
+### Verified capability sources
+
+Recorded from the installed tools' own help and the provider's documentation on 2026-09-25, not from live runs: Codex CLI 0.153.4 (`codex exec --help`, `codex features list`); Claude Code 2.1.280 (`claude --help`; the result record's `structured_output` field for `--json-schema`); TypeSafe HTTP API reference (`docs.typesafe.ai/api`, `/models`). Evidence class for #580: deterministic unit and DOM tests with fixture transports/runners shaped after those sources. In addition, one synthetic development-time local observation per CLI (outside AgentOS and outside the per-call isolated `HOME`, on the developer's own login) confirmed the argv shapes: Claude Code returned `structured_output` with `--tools ""` and reported `modelUsage`; Codex returned the schema answer as its last `agent_message` and reported no model; an unknown `--model` was refused by Codex with a structured `status: 400` and by Claude Code with `is_error` plus a `[claude-code:unrecognized_model]` stderr tag. **No AgentOS-mediated live Jev, OpenAI or subscription-CLI judgment was observed**, and no claim is made that a given account accepts a given model.
+
 ## Provider evaluation
 
 A provider should not become default because of vendor benchmark claims or novelty. Evaluate providers on a fixed AgentOS task set using the same contract and declared environment.
@@ -223,7 +273,7 @@ The review must preserve AgentOS sovereignty over Grants, approvals, canonical C
 
 ## Implementation status
 
-PRESENCE-DEC-01 / [#417](https://github.com/Jongtae/agentos/issues/417) introduced the first code boundary in `src/personal_agent/decision.py`: `DecisionContext`, `DecisionConfidence`, `BinaryDecision` / `SelectionDecision` / `ScoreDecision` with explicit non-answer outcomes (`provider_unavailable`, `timeout`, `malformed`, `context_rejected`, `cancelled`; a low-confidence answer is `decided` and reduced to unknown by policy), the `DecisionEngine` interface, `UnavailableDecisionEngine` and `FixtureDecisionEngine` for tests, `DecisionPolicy` thresholds, and `ModelDecisionEngine`, which adapts the repository's existing `ModelAdapter` tool-call shape so one `decide` tool call yields a typed answer on every supported provider. The first integration point is the conversation's parked-request withdrawal and bare-추천 capability-recommendation judgments (`conversation_handoff.ConversationJudgments`). Provider selection is service configuration (`decision_model` / `decision_model_key`; otherwise `gpt-4o-mini` on the OpenAI endpoint when the owner's configured model provider is OpenAI); with nothing configured no call is made and the judgment is unavailable. Evidence class: deterministic tests and recorded provider response shapes only; no live-provider calibration or availability is claimed.
+PRESENCE-DEC-01 / [#417](https://github.com/Jongtae/agentos/issues/417) introduced the first code boundary in `src/personal_agent/decision.py`: `DecisionContext`, `DecisionConfidence`, `BinaryDecision` / `SelectionDecision` / `ScoreDecision` with explicit non-answer outcomes (`provider_unavailable`, `timeout`, `malformed`, `context_rejected`, `cancelled`; a low-confidence answer is `decided` and reduced to unknown by policy), the `DecisionEngine` interface, `UnavailableDecisionEngine` and `FixtureDecisionEngine` for tests, `DecisionPolicy` thresholds, and `ModelDecisionEngine`, which adapts the repository's existing `ModelAdapter` tool-call shape so one `decide` tool call yields a typed answer on every supported provider. The first integration point is the conversation's parked-request withdrawal and bare-추천 capability-recommendation judgments (`conversation_handoff.ConversationJudgments`). Provider selection is service configuration (`decision_model` / `decision_model_key`; otherwise `gpt-4o-mini` on the OpenAI endpoint when the owner's configured model provider is OpenAI); with nothing configured no call is made and the judgment is unavailable. Evidence class: deterministic tests and recorded provider response shapes only; no live-provider calibration or availability is claimed. DECISION-ROUTE-01 / #580 makes the route owner-selectable among direct API, Jev and subscription AI; see "DecisionEngine routes (#580)" above.
 
 ## Staged implementation
 

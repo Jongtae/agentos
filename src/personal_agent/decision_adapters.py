@@ -173,7 +173,9 @@ class SubscriptionCliDecisionEngine(SchemaDecisionEngine):
                 failure = 'auth'
             elif status == 429:
                 failure = 'usage-limit'
-            elif isinstance(status, int) and 400 <= status < 500:
+            elif (isinstance(status, int) and 400 <= status < 500) or '[claude-code:unrecognized_model]' in stderr:
+                # Codex reports the provider's structured 4xx; Claude Code 2.1.x
+                # tags an unknown/inaccessible --model on stderr (observed locally).
                 # Includes a model this account/CLI refused.  Reported as a
                 # refusal, never retried with another model.
                 failure = 'request-rejected'

@@ -309,6 +309,9 @@ class SubscriptionCliTests(Temp):
             (lambda e, a: types.SimpleNamespace(returncode=1, stdout=json.dumps(
                 {'type': 'error', 'message': json.dumps({'status': 400, 'error': {'message': 'model not supported'}})}),
                 stderr=''), OUTCOME_UNAVAILABLE, 'request-rejected'),
+            (lambda e, a: types.SimpleNamespace(returncode=1, stdout=json.dumps(
+                {'type': 'result', 'is_error': True, 'result': 'There is an issue with the selected model', 'modelUsage': {}}),
+                stderr='[claude-code:unrecognized_model] {"model":"x"}'), OUTCOME_UNAVAILABLE, 'request-rejected'),
             (lambda e, a: types.SimpleNamespace(returncode=0, stdout='{"type":"turn.completed"}', stderr=''),
              OUTCOME_MALFORMED, 'invalid-output'),
             (lambda e, a: types.SimpleNamespace(returncode=0, stdout=json.dumps(

@@ -37,6 +37,23 @@ class Fixture:
         {"connector_id": "fixture-unknown", "label": "A very long synthetic connector label that must wrap inside the settings row without overflowing its column on narrow screens", "state": "surprising-new-state", "required_scopes": ["fixture.scope.with.a.very.long.identifier.that.has.no.natural.break.points.at.all"], "connect_path": "/fixture-connect/unknown"},
     ]
     tasks_empty = False
+    # Synthetic DecisionEngine route read model (#580): an owner-selected
+    # subscription route with a qualified model, plus inactive choices.
+    decision_route = {
+        "active": {"transport": "subscription_cli", "source": "owner", "engine": "codex", "model_policy": "lowest_qualified",
+                   "requested_model": "fixture-small-model", "available": True, "destination": "OpenAI (Codex 구독 계정)",
+                   "cli_version": "codex-cli 0.153.4",
+                   "qualification": {"suite_version": "decision-qualification/1", "model": "fixture-small-model"}},
+        "direct_api": {"configured": True, "model": "gpt-4o-mini", "destination": "api.openai.com"},
+        "jev": {"configured": False, "model": "jev-latest", "destination": "api.typesafe.ai",
+                "check": {"state": "failed", "failure": "auth", "checked_at": 1}},
+        "subscription_cli": [
+            {"id": "codex", "name": "Codex", "installed": True, "login": "signed-in", "model_selection": "supported",
+             "destination": "OpenAI (Codex 구독 계정)", "isolated_deployment": False,
+             "check": {"state": "active", "observed_model": "not reported", "checked_at": 1}},
+            {"id": "claude-code", "name": "Claude Code", "installed": True, "login": "signed-out", "model_selection": "unchecked",
+             "destination": "Anthropic (Claude Code 구독 계정)", "isolated_deployment": False}],
+        "suite_version": "decision-qualification/1"}
     model = {"provider": "openai", "endpoint": "https://example.invalid/v1", "model": "fixture-model"}
     other_results = [{"id": f"other-{index}", "job_id": f"other-job-{index}", "workspace_id": "workspace-other", "content": f"other result {index}", "created": 100 + index} for index in range(30)]
     delay_state = False
@@ -203,7 +220,7 @@ class Handler(BaseHTTPRequestHandler):
                 Fixture.state_inflight = True
                 time.sleep(1.5)
                 Fixture.state_inflight = False
-            self.send_json({"settings": {"model": model, "model_ready": False, "subscription_engines": ({"selected": "codex", "engines": [{"id": "codex", "name": "Codex", "installed": True, "connected": True, "login": {"state": "signed-in", "checked_at": Fixture.rich_now}}, {"id": "claude-code", "name": "Claude Code", "installed": True, "connected": False, "credential": False, "login": {"state": "signed-out", "checked_at": Fixture.rich_now}}]} if Fixture.rich_tasks else {"engines": []}), "file_roots": [{"path": path} for path in file_roots], "file_workspace": file_workspace, "context_inbox": {"sources": {}, "items": []}, "telegram": {"enabled": True, "paired": True, "username": "fixture_bot"}, "connectors": Fixture.connectors, "document_boundary": {}}, "jobs": [{"id": "task-382", "status": "running", "response": None, "message": "fixture Telegram request", "channel": "telegram:fixture-owner"}] + (Fixture.rich_jobs() if Fixture.rich_tasks else []) + [{"id": "project-job", "status": "succeeded", "response": "fixture project result", "message": "fixture project request", "channel": "telegram:fixture-owner"}], "tool_events": [], "healthy": True})
+            self.send_json({"settings": {"model": model, "model_ready": False, "subscription_engines": ({"selected": "codex", "engines": [{"id": "codex", "name": "Codex", "installed": True, "connected": True, "login": {"state": "signed-in", "checked_at": Fixture.rich_now}}, {"id": "claude-code", "name": "Claude Code", "installed": True, "connected": False, "credential": False, "login": {"state": "signed-out", "checked_at": Fixture.rich_now}}]} if Fixture.rich_tasks else {"engines": []}), "file_roots": [{"path": path} for path in file_roots], "file_workspace": file_workspace, "context_inbox": {"sources": {}, "items": []}, "telegram": {"enabled": True, "paired": True, "username": "fixture_bot"}, "connectors": Fixture.connectors, "document_boundary": {}, "decision_route": Fixture.decision_route}, "jobs": [{"id": "task-382", "status": "running", "response": None, "message": "fixture Telegram request", "channel": "telegram:fixture-owner"}] + (Fixture.rich_jobs() if Fixture.rich_tasks else []) + [{"id": "project-job", "status": "succeeded", "response": "fixture project result", "message": "fixture project request", "channel": "telegram:fixture-owner"}], "tool_events": [], "healthy": True})
         elif path == "/api/personal-space": self.send_json({"memories": Fixture.memories, "context": [], "results": (Fixture.results + Fixture.other_results)[-50:]})
         elif path == "/api/personal-records":
             if Fixture.fail_records_once:

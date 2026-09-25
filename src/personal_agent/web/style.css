@@ -472,3 +472,7 @@ details.technical details>summary{color:var(--muted)}
 .turn-provenance-text>summary{font-size:var(--fs-1);color:var(--muted)}
 .turn-provenance-text pre{margin:6px 0 0;padding:8px 10px;max-height:22rem;overflow:auto;border-radius:var(--r-1);background:var(--surface-3);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:var(--fs-1);white-space:pre-wrap;overflow-wrap:anywhere}
 .turn-provenance .field-hint{margin:8px 0 0;font-size:var(--fs-1);color:var(--faint)}
+/* #580 대화 해석: the DecisionEngine route rows reuse the settings row grammar. */
+.settings-subheading{margin:var(--sp-4) 0 0;padding-bottom:6px;font-size:var(--fs-2);font-weight:600;color:var(--muted);border-bottom:1px solid var(--line)}
+.decision-choice{display:flex;align-items:center;gap:8px;min-height:32px;font-size:var(--fs-2)}
+.decision-choice input{margin:0}

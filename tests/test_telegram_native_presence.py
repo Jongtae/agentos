@@ -352,6 +352,16 @@ class FailedTurnTests(NativePresenceTestCase):
         self.assertTrue(answer['text'].startswith('작업 상태: 완료하지 못함'))
         self.assertNotIn('다시 해봐', answer['text'])
 
+    def test_every_owner_tap_is_answered_even_when_stale_or_consumed(self):
+        """No spinner is left behind: consumed approval / retry / detail taps are acknowledged."""
+        for index, data in enumerate(('p7a:gone:approve', 'v1c:gone:deny', 'p7r:gone', 'p7d:gone', 'p7v:gone')):
+            self.tap(data, 1, callback_id=f'stale-{index}')
+        answers = [body for method, body in self.calls if method == 'answerCallbackQuery']
+        self.assertEqual([a['callback_query_id'] for a in answers], [f'stale-{i}' for i in range(5)])
+        self.assertTrue(all(a['text'] == '처리할 수 있는 요청이 아닙니다.' for a in answers))
+        self.assertEqual(self.sends(), [])
+        self.assertEqual(self.store.jobs(), [])
+
     def test_blocked_turn_has_no_retry_control(self):
         job, _ = self.turn('안녕, 뭐 할 수 있어?')   # no AI route connected
         self.assertEqual(job['status'], 'failed')

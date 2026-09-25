@@ -310,8 +310,7 @@ class BoundedExecutionAdapter:
                          # The bridge is a separate process: hand it this Work's
                          # private-source provenance so its public egress closes
                          # exactly as the in-process Capabilities would.
-                         *[part for label in sorted(getattr(tools.capabilities, 'private_provenance', ()) or ())
-                           for part in ('--provenance', label)]],
+                         *[f'--provenance={label}' for label in sorted(getattr(tools.capabilities, 'private_provenance', ()) or ())]],
             }}}, ensure_ascii=False), encoding='utf-8')
             env = self.environment(engine_id, binary, run_dir)
             started = time.monotonic()

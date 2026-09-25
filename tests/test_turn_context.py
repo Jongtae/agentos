@@ -247,7 +247,7 @@ class BridgeProcessEgressGuard(unittest.TestCase):
             store.enqueue(text, f'k{index}')
             self.assertTrue(service.run_one())
         args = captured['args']
-        provenance = [args[i + 1] for i, part in enumerate(args) if part == '--provenance']
+        provenance = [part.split('=', 1)[1] for part in args if part.startswith('--provenance=')]
         job_id = args[args.index('--job') + 1]
         network_calls = []
         requests = '\n'.join(json.dumps(r) for r in [
@@ -279,6 +279,63 @@ class BridgeProcessEgressGuard(unittest.TestCase):
         self.assertIn('result', reply)
         self.assertEqual(len(network_calls), 1)
 
+
+
+class _EchoEngine:
+    """Answers with a marker when Drive content was in its prompt, and records every call."""
+    def __init__(self):
+        self.calls = []
+
+    def execute(self, engine, prompt, tools, **kwargs):
+        self.calls.append({'prompt': prompt, 'context': kwargs.get('context')})
+        answer = 'derived from DRIVE-SECRET' if 'DRIVE-SECRET' in prompt else 'plain answer'
+        return ExecutionResult(answer, engine, 0)
+
+
+class DestinationScopedHistory(unittest.TestCase):
+    """Automated review on #574: Drive / context-inbox answers are approved for one destination only."""
+
+    def setUp(self):
+        from types import SimpleNamespace
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.store = QuickStore(Path(self.tmp.name) / 'state')
+        self.engine = _EchoEngine()
+        self.service = AgentService(self.store, adapter=ModelAdapter(lambda *a: {'choices': [{'message': {'content': 'x'}}]}),
+                                    subscription_engines=SubscriptionEngines(finder=lambda _: '/runtime/cli', clock=lambda: 1),
+                                    execution_adapter=self.engine,
+                                    drive_web_oauth=SimpleNamespace(status=lambda: {'state': 'connected'}))
+        self.service.requests_drive_access = lambda prompt: 'drive' in prompt
+        self.service.selected_drive_context = lambda chat_id: 'DRIVE-SECRET contents'
+        self.service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
+
+    def _run(self, text, key):
+        self.store.enqueue(text, key, channel='telegram:1', chat_id=1)
+        self.assertTrue(self.service.run_one())
+
+    def test_a_drive_answer_is_not_carried_into_a_later_cli_turn(self):
+        self._run('summarize my drive file', 'd1')
+        self.assertIn('DRIVE-SECRET', self.engine.calls[-1]['prompt'], 'the Drive turn itself used the content')
+        self._run('what should I do today', 'k2')
+        later = self.engine.calls[-1]
+        self.assertNotIn('DRIVE-SECRET', later['prompt'])
+        self.assertNotIn('derived from DRIVE-SECRET', json.dumps(later['context'], ensure_ascii=False))
+
+
+class OversizeRequestKeepsWorking(DestinationScopedHistory):
+    """Automated review on #574: a request that fit before must not start failing because of the envelope."""
+
+    def test_a_near_limit_prepared_request_is_sent_bare_to_codex(self):
+        # A Drive excerpt makes the prepared request ~47 KB: it fit before this
+        # change, but not together with the shared instructions envelope.
+        self.service.selected_drive_context = lambda chat_id: 'DRIVE-SECRET ' + 'd' * 46_600
+        self._run('summarize my drive file', 'big')
+        call = self.engine.calls[-1]
+        self.assertLessEqual(len(call['prompt'].encode()), 48_000)
+        self.assertNotIn('# AgentOS instructions', call['prompt'], 'falls back to the bare request, as before')
+        self.assertIsNone(call['context'])
+        job = self.store.jobs()[0]
+        self.assertEqual(job['status'], 'succeeded')
 
 if __name__ == '__main__':
     unittest.main()

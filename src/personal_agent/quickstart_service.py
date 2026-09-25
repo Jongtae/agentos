@@ -638,7 +638,7 @@ class AgentService:
         error=AgentService._redact_reason(trace.get('error'))
         summary={'running':'실행을 시작했습니다.','succeeded':'실행을 완료했습니다.','failed':error or '실행하지 못했습니다.'}.get(status,'관찰된 이벤트입니다.')
         safe={}
-        for key in ('scope','engine','mode','exit_code','attempt','context_messages','context_bytes'):
+        for key in ('scope','engine','mode','exit_code','attempt','context_messages','context_bytes','context_mode'):
             if key in trace and isinstance(trace[key],(str,int,float,bool)):safe[key]=trace[key]
         if trace.get('evidence'):summary='근거를 확인했습니다.'
         return {'id':event['id'],'job_id':event['job_id'],'tool':event['tool'],'status':status,'created':event['created'],'summary':summary,'details':safe}
@@ -2411,8 +2411,17 @@ class AgentService:
                         # same bounded recent conversation as the direct-API route.
                         engine_context=turn_context([*history[:-1],{'role':'user','content':current_request}],'cli')
                         engine_prompt=render_turn_prompt(engine_context)
-                        if len(engine_prompt.encode())>MAX_PROMPT_BYTES:
-                            raise ValueError('요청 내용이 너무 길어 구독 CLI로 보낼 수 없습니다. 내용을 줄이거나 직접 API 연결을 사용하세요.')
+                        adapter_context=engine_context
+                        # Bounded Claude Code gets the instructions as a separate
+                        # argv element, so only conversation + request count
+                        # against the prompt limit there.
+                        sent=render_turn_prompt(engine_context,include_instructions=not (subscription['id']=='claude-code' and not isolated))
+                        if len(sent.encode())>MAX_PROMPT_BYTES:
+                            # The shared envelope cannot fit next to a request this
+                            # large. Send the request exactly as before rather than
+                            # fail a previously valid turn; the event records it.
+                            engine_context={**engine_context,'conversation':[],'mode':'bare-request'}
+                            engine_prompt,adapter_context=current_request,None
                         # Earlier AgentOS answers can carry private material (note
                         # lists, summaries, knowledge excerpts, Drive or inbox
                         # answers) whose provenance is not persisted per turn.
@@ -2425,7 +2434,8 @@ class AgentService:
                             capabilities.private_provenance.add('conversation-history')
                         mode='isolated-agentos-mcp' if isolated else 'bounded-agentos-mcp'
                         record('subscription_engine','running',json.dumps({'engine':subscription['id'],'mode':mode,
-                            'context_messages':len(engine_context['conversation']),'context_bytes':len(engine_prompt.encode())}))
+                            'context_messages':len(engine_context['conversation']),'context_bytes':len(engine_prompt.encode()),
+                            'context_mode':engine_context.get('mode','shared-context')}))
                         try:
                             if isolated:
                                 tools=ReadOnlyAgentOSMcpTools(capabilities)
@@ -2439,7 +2449,7 @@ class AgentService:
                                     self.isolated_mcp_registry.revoke(token)
                                 result=ExecutionResult(content,subscription['id'],0)
                             else:
-                                result=self.execution_adapter.execute(subscription['id'],engine_prompt,AgentOSMcpTools(capabilities),context=engine_context)
+                                result=self.execution_adapter.execute(subscription['id'],engine_prompt,AgentOSMcpTools(capabilities),context=adapter_context)
                         except (ExecutionError,EngineGatewayError) as exc:
                             diagnostics=exc.diagnostics() if isinstance(exc,ExecutionError) else {}
                             record('subscription_engine','failed',json.dumps({'engine':subscription['id'],'error':str(exc),**diagnostics},ensure_ascii=False))
@@ -2470,6 +2480,12 @@ class AgentService:
                     if workspace_request:
                         saved=FileWorkspace(self.store).save(job['id'],workspace_request['title'],response,workspace_request['sources'])
                         response+=f"\n\n저장됨: {saved['path']} · {saved['id']}"
+                        self.record_file_workspace_document_job(job['id'])
+                    if turn_provenance&{'connected-drive-file','owner-context-inbox'}:
+                        # Drive and owner-selected context are approved for this
+                        # Work's destination only. Mark the Work like document
+                        # history so its answer is filtered from later turns
+                        # routed to a subscription CLI or needing approval (#574).
                         self.record_file_workspace_document_job(job['id'])
                     if context_sources and '컨텍스트:' not in response:
                         response+='\n\n컨텍스트 출처:\n'+'\n'.join(context_sources)

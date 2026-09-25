@@ -631,3 +631,80 @@ def service_action(action: str, **controller_options: object) -> dict[str, objec
             "Check the owner LaunchAgents and AgentOS data-directory permissions and free disk space, then retry; owner data was not deleted.",
         )
         return failure_receipt(bounded)
+
+
+# -- build identity (AX-11, #603) ---------------------------------------------
+#: Bumped only when the digest algorithm below changes, so two digests are
+#: compared only when they were computed the same way.
+PACKAGE_DIGEST_SCHEME = "agentos-package-sha256-v1"
+PACKAGE_DIR = Path(__file__).resolve().parent
+
+
+def package_digest(directory: str | Path) -> str | None:
+    """Content digest of one ``personal_agent`` package directory.
+
+    Covers every shipped file (sources, web assets) by relative path and
+    content; bytecode caches and dotfiles are excluded because they are
+    derived and change without a code change. ``None`` when the directory is
+    unreadable or empty, so an unknown build is never reported as a known one.
+    """
+    import hashlib
+
+    root = Path(directory)
+    digest = hashlib.sha256(PACKAGE_DIGEST_SCHEME.encode())
+    try:
+        files = sorted(
+            path for path in root.rglob("*")
+            if path.is_file() and "__pycache__" not in path.relative_to(root).parts
+            and not path.name.startswith(".") and path.suffix not in (".pyc", ".pyo")
+        )
+        if not files:
+            return None
+        for path in files:
+            digest.update(path.relative_to(root).as_posix().encode() + b"\0")
+            digest.update(hashlib.sha256(path.read_bytes()).digest())
+    except OSError:
+        return None
+    return digest.hexdigest()
+
+
+def package_origin(directory: str | Path) -> str:
+    """Classify where a package directory lives without exposing its path."""
+    root = Path(directory).resolve()
+    if root.parent.name == "src" and (root.parent.parent / "pyproject.toml").is_file():
+        return "source-checkout"
+    if any(part in ("site-packages", "dist-packages") for part in root.parts):
+        return "installed-package"
+    return "other"
+
+
+_BUILD_IDENTITY: dict[str, object] | None = None
+
+
+def build_identity() -> dict[str, object]:
+    """Identity of the code this process loaded, taken once per process.
+
+    The service takes it when it is constructed, close to import time, so a
+    later on-disk edit is not mistaken for the running code. Paths are never
+    included: only the digest and its scheme, an origin class, the
+    distribution version when packaging metadata reports one, and when the
+    identity was taken.
+    """
+    global _BUILD_IDENTITY
+    if _BUILD_IDENTITY is None:
+        try:
+            from importlib.metadata import PackageNotFoundError, version
+            try:
+                reported: str | None = version("personal-agentos")
+            except PackageNotFoundError:
+                reported = None
+        except Exception:
+            reported = None
+        _BUILD_IDENTITY = {
+            "package_digest": package_digest(PACKAGE_DIR),
+            "digest_scheme": PACKAGE_DIGEST_SCHEME,
+            "origin": package_origin(PACKAGE_DIR),
+            "distribution_version": reported,
+            "identity_taken_at": time.time(),
+        }
+    return dict(_BUILD_IDENTITY)

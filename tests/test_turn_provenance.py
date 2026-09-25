@@ -243,6 +243,41 @@ class ServiceProvenance(unittest.TestCase):
         self.assertIn('what is on today', record['prompt_envelope'])
         self.assertEqual(record['status'], 'answered')
         self.assertEqual(record['reported_model'], 'fixture-model-2026', 'a different name in the response is evidence')
+        self.assertIn('weather', record['exposed_tools'], 'the tools the model was actually offered')
+        self.assertEqual(record['build']['digest_scheme'], 'agentos-package-sha256-v1')
+
+    def test_turn_records_the_offered_tools_and_the_loaded_build(self):
+        """AX-11 (#603): route exposure and running build identity, no paths."""
+        from personal_agent.bounded_execution import MCP_TOOLS
+        from personal_agent.service_control import PACKAGE_DIR, build_identity, package_digest
+        service = self._service(_Engine())
+        self.store.enqueue('hello', 'k1')
+        self.assertTrue(service.run_one())
+        record = self._selected(service)['provenance']
+        self.assertEqual(record['exposed_tools'], [tool['name'] for tool in MCP_TOOLS])
+        self.assertEqual(record['build'], build_identity())
+        self.assertEqual(record['build']['package_digest'], package_digest(PACKAGE_DIR))
+        self.assertEqual(record['build']['origin'], 'source-checkout')
+        self.assertNotIn(str(PACKAGE_DIR), json.dumps(record), 'the package path is never recorded')
+
+    def test_isolated_turn_records_the_read_only_facade(self):
+        from personal_agent.isolated_mcp_proxy import TaskCapabilityRegistry
+
+        class Isolated:
+            def issue_task_token(self, **kwargs):
+                return 'isolated-token-value'
+
+            def execute(self, **kwargs):
+                return 'isolated answer'
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        self.store = QuickStore(Path(tmp.name) / 'state')
+        service = AgentService(self.store, subscription_engines=SubscriptionEngines(finder=lambda c: '/runtime/' + c, clock=lambda: 1),
+                               isolated_engine_adapter=Isolated(), isolated_mcp_registry=TaskCapabilityRegistry())
+        service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
+        self.store.enqueue('hello', 'k1')
+        self.assertTrue(service.run_one())
+        record = self._selected(service)['provenance']
+        self.assertEqual((record['mode'], record['exposed_tools']), ('isolated-agentos-mcp', ['list_notes']))
 
     def test_direct_api_failure_is_not_left_as_sent(self):
         tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)

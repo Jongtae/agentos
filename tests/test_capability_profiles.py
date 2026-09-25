@@ -219,6 +219,32 @@ class EffectiveAvailability(_Store):
         caps.execute('web_search', {'query': 'q'})  # allowed control: the built-in action still works
         self.assertEqual([plan['tool'] for plan in self.network.plans], ['web_search', 'web_search'])
 
+    def test_package_revocation_reaches_delegated_specialists(self):
+        """Review of #615: a delegated child rechecks the same live package state."""
+        from personal_agent.providers import ModelAdapter
+        registry = PluginRegistry(self.store.root)
+        role = {'id': 'scout', 'name': 'Scout', 'instructions': 'search', 'permissions': ['read_only'], 'tools': ['news_search']}
+        self.install({**self.NEWS, 'roles': [role]})
+        calls = []
+
+        def transport(url, body, headers):
+            calls.append(body)
+            if body['messages'][-1]['role'] == 'tool':
+                return {'choices': [{'message': {'content': 'report'}}]}
+            # Revoke mid-delegation, then the child asks for the package tool.
+            registry.set_enabled('news', False)
+            return {'choices': [{'message': {'content': None, 'tool_calls': [{'id': 'c1', 'type': 'function',
+                     'function': {'name': 'news_search', 'arguments': json.dumps({'query': 'q'})}}]}}]}
+
+        config = {'provider': 'compatible', 'endpoint': 'http://127.0.0.1:9', 'model': 'm'}
+        caps = Capabilities(self.store, ModelAdapter(transport), config, '', 'job', lambda *a: None, network=self.network,
+                            packages=registry.runtime_packages(), current_packages=registry.runtime_packages)
+        caps.execute('delegate_agent', {'agent_id': 'scout', 'task': 'find news'})
+        self.assertEqual(self.network.plans, [], 'the child could not use the revoked package tool')
+        with self.assertRaisesRegex(ValueError, '비활성화'):
+            caps.execute('delegate_agent', {'agent_id': 'scout', 'task': 'again'})
+        caps.execute('delegate_agent', {'agent_id': 'researcher', 'task': 'built-in control'})
+
     def test_an_owner_page_approval_for_the_api_model_is_not_carried_to_a_cli(self):
         """No silent destination change: the approval names the direct-API model."""
         caps = self.caps(public_page_scope=['https://example.com/a'])

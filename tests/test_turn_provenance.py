@@ -214,13 +214,16 @@ class ServiceProvenance(unittest.TestCase):
         real_run = service.execution_adapter.execute
 
         def execute(engine, prompt, tools, **kwargs):
-            service.record_decision({'kind': 'decision', 'purpose': 'presence', 'outcome': 'accepted', 'model': 'gpt-x', 'raw': 'hidden'})
+            service.record_decision({'kind': 'decision', 'purpose': 'presence', 'outcome': 'accepted', 'model': 'gpt-x', 'raw': 'hidden', 'answer': 'retry', 'confidence': 0.9})
             return real_run(engine, prompt, tools, **kwargs)
         service.execution_adapter.execute = execute
         service.run_one()
         selected = self._selected(service)
         self.assertEqual([row['purpose'] for row in selected['decisions']], ['presence'])
         self.assertNotIn('raw', selected['decisions'][0], 'only the summary fields are exposed')
+        # #559: the content-free declared answer is shown; the probability is not.
+        self.assertEqual(selected['decisions'][0]['answer'], 'retry')
+        self.assertNotIn('confidence', selected['decisions'][0])
         self.assertIsNone(service.current_work_id, 'the link ends with the Work')
 
     def test_direct_api_records_requested_and_reported_model(self):
@@ -286,7 +289,7 @@ const assert=require('node:assert/strict');
 assert.equal(ui.developerMode(),false);
 window.localStorage.setItem('agentos-developer-mode','1');assert.equal(ui.developerMode(),true);
 const view=ui.provenanceView({id:'w1',decisions:[],provenance:{route:'subscription',engine:'codex',status:'answered',instructions_version:'v1',instructions_digest:'abcd',prompt_envelope:'PROMPT BODY',argv:['codex','exec']}}).textContent;
-assert.match(view,/not specified \(CLI default\)/);assert.match(view,/Reported model not reported/);assert.match(view,/No linked decision recorded for this Work/);assert.match(view,/PROMPT BODY/);
+assert.match(view,/not specified \(CLI default\)/);assert.match(view,/Reported model not reported/);assert.doesNotMatch(view,/Auxiliary judgment/,'#559: DecisionEngine calls live in 기술 정보, not in the raw developer block');assert.match(view,/PROMPT BODY/);
 assert.match(ui.provenanceView({id:'w2'}).textContent,/No run record/);
 console.log('ok');""")
         self.assertIn('ok', out)

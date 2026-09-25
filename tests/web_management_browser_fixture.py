@@ -100,13 +100,20 @@ class Fixture:
             "task-partial": row("task-partial", "지난달 영수증 모아줘", 900, "partial", "finished", response="영수증 2개를 찾았어요.\n\n- 9월 3일 카페 12,000원\n- 9월 9일 서점 18,500원", error="Gmail 두 번째 페이지를 읽지 못했습니다.", route=cli),
             "task-unknown": row("task-unknown", "팀에 회의 일정 보내줘", 600, "succeeded", "finished", response="회의 일정 메시지를 보냈어요.", route=cli),
             "task-correction": row("task-correction", "아니, 지난달 것만", 120, "running", "active", route={**cli, "status": "running"}, relation={"kind": "correction", "work_id": "task-partial"}),
+            # #559: an ambiguous follow-up. The DecisionEngine chose none-of-these,
+            # so no relation was recorded and the trace must not draw one.
+            "task-ambiguous": row("task-ambiguous", "그거 어떻게 됐어?", 60, "succeeded", "finished", response="어떤 요청을 말씀하시는지 확실하지 않아요. 어느 요청인지 알려 주세요.", route=cli, observed_at=now - 50),
         }
         if detail:
             def ev(i, tool, status, ago, summary, **details):
                 return {"id": i, "tool": tool, "status": status, "created": now - ago, "summary": summary, "details": details}
             rows["task-failed"]["events"] = [ev(31, "subscription_engine", "running", 86400 * 2, "실행을 시작했습니다.", engine="codex", mode="bounded-agentos-mcp"), ev(32, "subscription_engine", "failed", 86400 * 2 - 40, "결과 저장 폴더가 설정되지 않아 파일을 남기지 못했습니다.", engine="codex", exit_code=1, attempt=1)]
-            rows["task-retry"]["events"] = [ev(41, "subscription_engine", "running", 86400 * 2 - 600, "실행을 시작했습니다.", engine="codex", mode="bounded-agentos-mcp"), ev(42, "subscription_engine", "succeeded", 86400 * 2 - 560, "실행을 완료했습니다.", engine="codex", exit_code=0)]
-            rows["task-done"]["events"] = [ev(11, "subscription_engine", "running", 3600, "실행을 시작했습니다.", engine="codex", mode="bounded-agentos-mcp"), ev(12, "web_search", "succeeded", 3500, "근거를 확인했습니다.", scope="public-web"), ev(13, "subscription_engine", "succeeded", 3440, "실행을 완료했습니다.", engine="codex", exit_code=0)]
+            # #559: Codex executes the retried Work while an auxiliary OpenAI
+            # gpt-4o-mini judgment resolved the follow-up (fixture values only).
+            rows["task-retry"]["events"] = [ev(40, "conversation_continuity", "succeeded", 86400 * 2 - 602, "실행을 완료했습니다.", relation="retry", executed=True), ev(41, "subscription_engine", "running", 86400 * 2 - 603, "실행을 시작했습니다.", engine="codex", mode="bounded-agentos-mcp"), ev(42, "subscription_engine", "succeeded", 86400 * 2 - 560, "실행을 완료했습니다.", engine="codex", exit_code=0)]
+            rows["task-retry"]["decisions"] = [{"kind": "choose", "purpose": "conversation-followup", "outcome": "decided", "answer": "retry", "provider": "openai", "model": "gpt-4o-mini", "requested_model": "gpt-4o-mini", "observed_model": "gpt-4o-mini-2024-07-18", "route": "direct_api", "elapsed_seconds": 1.67, "at": now - (86400 * 2 - 601)}]
+            rows["task-retry"]["provenance"] = {"route": "subscription", "engine": "codex", "status": "answered", "requested_model": None, "reported_model": None}
+            rows["task-done"]["events"] = [ev(11, "subscription_engine", "running", 3600, "실행을 시작했습니다.", engine="codex", mode="bounded-agentos-mcp"), ev(12, "web_search", "succeeded", 3500, "근거를 확인했습니다.", scope="public-web", evidence=True), ev(14, "web_search", "succeeded", 3480, "근거를 확인했습니다.", scope="public-web", evidence=True), ev(13, "subscription_engine", "succeeded", 3440, "실행을 완료했습니다.", engine="codex", exit_code=0)]
             rows["task-done"]["source_references"] = ["https://example.invalid/ke703"]
             # #570 developer-mode fixture: recorded, redacted provenance (fixture values only).
             rows["task-done"]["provenance"] = {"route": "subscription", "engine": "codex", "mode": "bounded-agentos-mcp", "status": "answered",
@@ -121,7 +128,12 @@ class Fixture:
             rows["task-done-again"]["events"] = [ev(21, "model", "succeeded", 1760, "실행을 완료했습니다.")]
             rows["task-partial"]["events"] = [ev(51, "subscription_engine", "running", 900, "실행을 시작했습니다.", engine="codex"), ev(52, "subscription_engine", "succeeded", 860, "실행을 완료했습니다.", engine="codex", exit_code=0)]
             rows["task-unknown"]["events"] = [ev(61, "subscription_engine", "running", 600, "실행을 시작했습니다.", engine="codex"), ev(62, "subscription_engine", "succeeded", 560, "실행을 완료했습니다.", engine="codex", exit_code=0)]
-            rows["task-correction"]["events"] = [ev(71, "subscription_engine", "running", 120, "실행을 시작했습니다.", engine="codex", mode="bounded-agentos-mcp")]
+            # The same trace structure with Jev as the semantic provider.
+            rows["task-correction"]["events"] = [ev(70, "conversation_continuity", "succeeded", 121, "실행을 완료했습니다.", relation="correction", executed=False), ev(71, "subscription_engine", "running", 120, "실행을 시작했습니다.", engine="codex", mode="bounded-agentos-mcp")]
+            rows["task-correction"]["decisions"] = [{"kind": "choose", "purpose": "conversation-followup", "outcome": "decided", "answer": "correction", "provider": "typesafe", "engine": "jev", "model": "jev-latest", "requested_model": "jev-latest", "observed_model": "not reported", "route": "jev", "elapsed_seconds": 0.92, "at": now - 122}]
+            # A subscription-CLI semantic route whose model is not reported.
+            rows["task-ambiguous"]["events"] = [ev(81, "subscription_engine", "running", 60, "실행을 시작했습니다.", engine="codex"), ev(82, "subscription_engine", "succeeded", 52, "실행을 완료했습니다.", engine="codex", exit_code=0)]
+            rows["task-ambiguous"]["decisions"] = [{"kind": "choose", "purpose": "conversation-followup", "outcome": "decided", "answer": "none-of-these", "provider": "codex", "engine": "codex", "model": "fixture-small-model", "requested_model": "fixture-small-model", "model_policy": "lowest_qualified", "observed_model": "not reported", "route": "subscription_cli", "elapsed_seconds": 2.4, "at": now - 61}]
             for value in rows.values():
                 value["conversation"] = {"job_id": value["id"]}
         return rows

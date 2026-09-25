@@ -289,7 +289,9 @@ class BoundedExecutionAdapter:
             return {'state': 'signed-in', 'detail': ''}
         # Only an explicit "not logged in" is a sign-out; any other failure
         # (older CLI, transient error) stays unknown.
-        if is_not_signed_in(out):
+        # Match the explicit phrase only: usage text of an older CLI mentions
+        # `codex login` and must not read as a sign-out.
+        if re.search(r'\bnot\s+(?:logged|signed)\s+in\b', out, re.I):
             return {'state': 'signed-out', 'detail': ''}
         return {'state': 'unknown', 'detail': 'unparsed status'}
 

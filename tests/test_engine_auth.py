@@ -79,6 +79,7 @@ class AdapterCredentialAndStatus(unittest.TestCase):
             ('codex', _Done(stdout='Logged in using ChatGPT'), 'signed-in'),
             ('codex', _Done(returncode=1, stdout='Not logged in'), 'signed-out'),
             ('codex', _Done(returncode=2, stderr="error: unrecognized subcommand 'login'"), 'unknown'),
+            ('codex', _Done(returncode=2, stderr="error: unrecognized subcommand 'status'\n\nUsage: codex login [OPTIONS]"), 'unknown'),
         ]
         for engine, done, expected in cases:
             with self.subTest(engine=engine, expected=expected):

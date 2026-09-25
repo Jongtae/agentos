@@ -63,6 +63,30 @@ class AdapterMetadata(unittest.TestCase):
         self.assertIn('<prompt: 15 bytes>', shown)
         self.assertIn('<AgentOS instructions: 5 bytes>', shown)
 
+    def test_claude_stream_reports_session_model_tool_use_and_denials(self):
+        # Record shapes follow `claude -p --output-format stream-json --verbose`
+        # (init, assistant, result), observed locally without a model call.
+        stream = '\n'.join(json.dumps(line) for line in (
+            {'type': 'system', 'subtype': 'init', 'model': 'claude-x', 'tools': ['Bash']},
+            {'type': 'assistant', 'message': {'model': 'claude-x', 'content': [{'type': 'tool_use', 'name': 'mcp__agentos__web_search'}]}},
+            {'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content': 'x' * 200_000}]}},
+            {'type': 'result', 'is_error': False, 'result': 'final answer', 'modelUsage': {}, 'num_turns': 2,
+             'permission_denials': [{'tool_name': 'Bash'}], 'usage': {'input_tokens': 9}}))
+        meta = cli_metadata('claude-code', stream)
+        self.assertEqual(meta['reported_model'], 'claude-x', 'the init record names the session model')
+        self.assertEqual(meta['tool_calls'], [{'type': 'tool_use', 'name': 'mcp__agentos__web_search', 'status': 'requested'},
+                                              {'type': 'tool_use', 'name': 'Bash', 'status': 'denied'}])
+        self.assertEqual(BoundedExecutionAdapter._content('claude-code', stream), 'final answer',
+                         'a large tool result earlier in the stream does not reject a small answer')
+        synthetic = json.dumps({'type': 'assistant', 'message': {'model': '<synthetic>'}})
+        self.assertIsNone(cli_metadata('claude-code', synthetic)['reported_model'])
+
+    def test_claude_runs_with_stream_json(self):
+        adapter = BoundedExecutionAdapter(finder=lambda name: '/runtime/' + name)
+        argv = adapter.command('claude-code', '/runtime/claude', 'hi', '/tmp/c.json')
+        self.assertEqual(argv[argv.index('--output-format') + 1], 'stream-json')
+        self.assertIn('--verbose', argv, 'stream-json with -p requires --verbose')
+
     def test_execute_attaches_metadata_on_success_and_failure(self):
         tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
         outputs = [_Done(stdout=json.dumps({'result': 'ok', 'modelUsage': {'m1': {}}})),
@@ -129,6 +153,43 @@ class ServiceProvenance(unittest.TestCase):
         self.assertNotIn('reported_model', record, 'an unreported model is absent, not guessed')
         self.assertEqual(record['usage'], {'input_tokens': 7})
 
+    def test_private_source_content_is_never_stored(self):
+        engine = _Engine()
+        service = self._service(engine)
+        self.store.enqueue('/note private-plan-XYZ for the merger', 'n1')
+        service.run_one()
+        self.store.enqueue('/summarize', 'k1')
+        service.run_one()
+        self.assertIn('private-plan-XYZ', engine.prompts[-1], 'the engine still receives the notes')
+        records = [service.task_progress(job['id'])['selected'].get('provenance') for job in self.store.jobs()]
+        stored = json.dumps([r for r in records if r], ensure_ascii=False)
+        self.assertNotIn('private-plan-XYZ', stored)
+        summary = [r for r in records if r and r.get('prompt_withheld')][0]
+        self.assertEqual(summary['prompt_withheld'], ['personal-space'])
+        self.assertTrue(summary['prompt_envelope'].startswith('[not stored: this turn included personal-space;'))
+        self.assertGreater(summary['prompt_bytes'], 0)
+
+    def test_provenance_is_not_exported(self):
+        from personal_agent.portable_state import _portable_db
+        import sqlite3
+        service = self._service(_Engine())
+        self.store.enqueue('hello', 'k1')
+        service.run_one()
+        target = Path(self.store.root) / 'export.db'
+        _portable_db(self.store.path, target)
+        with sqlite3.connect(target) as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM turn_provenance').fetchone()[0], 0)
+
+    def test_bare_request_fallback_records_no_instructions(self):
+        service = self._service(_Engine())
+        service.record_turn_sent('job-bare', sent='just the request', instructions='', instructions_channel='not sent (bare request)',
+                                 route='subscription', instructions_version='v1')
+        record = self.store.turn_provenance('job-bare')
+        self.assertEqual(record['instructions_channel'], 'not sent (bare request)')
+        self.assertNotIn('instructions', record)
+        self.assertNotIn('instructions_version', record, 'no version is claimed for instructions that were not sent')
+        self.assertEqual(record['prompt_envelope'], 'just the request')
+
     def test_failure_is_recorded_with_its_class(self):
         service = self._service(_Engine(fail=ExecutionError('x', failure_class='rate-limit', exit_code=1,
                                                             meta={'argv': ['codex'], 'duration_ms': 5})))
@@ -170,6 +231,21 @@ class ServiceProvenance(unittest.TestCase):
         self.assertEqual(record['status'], 'answered')
         self.assertEqual(record['reported_model'], 'fixture-model-2026', 'a different name in the response is evidence')
 
+    def test_direct_api_failure_is_not_left_as_sent(self):
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        store = QuickStore(Path(tmp.name) / 'state')
+        config = {'provider': 'compatible', 'endpoint': 'http://127.0.0.1:9999', 'model': 'fixture-model'}
+
+        def transport(url, body, headers):
+            raise OSError('connection refused')
+        service = AgentService(store, adapter=ModelAdapter(transport), subscription_engines=SubscriptionEngines(finder=lambda _: None, clock=lambda: 1))
+        store.put('model', config)
+        store.put('model_test', {'ok': True, 'tools_ok': True, 'time': 9999999999, 'fingerprint': service.model_fingerprint(config)})
+        store.enqueue('hello', 'k1')
+        service.run_one()
+        job_id = store.jobs()[0]['id']
+        self.assertEqual(store.turn_provenance(job_id)['status'], 'failed')
+
     def test_store_keeps_only_the_newest_records(self):
         tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
         store = QuickStore(Path(tmp.name) / 'state')
@@ -201,7 +277,7 @@ const assert=require('node:assert/strict');
 assert.equal(ui.developerMode(),false);
 window.localStorage.setItem('agentos-developer-mode','1');assert.equal(ui.developerMode(),true);
 const view=ui.provenanceView({id:'w1',decisions:[],provenance:{route:'subscription',engine:'codex',status:'answered',instructions_version:'v1',instructions_digest:'abcd',prompt_envelope:'PROMPT BODY',argv:['codex','exec']}}).textContent;
-assert.match(view,/not specified \(CLI default\)/);assert.match(view,/Reported model not reported/);assert.match(view,/Not called for this Work/);assert.match(view,/PROMPT BODY/);
+assert.match(view,/not specified \(CLI default\)/);assert.match(view,/Reported model not reported/);assert.match(view,/No linked decision recorded for this Work/);assert.match(view,/PROMPT BODY/);
 assert.match(ui.provenanceView({id:'w2'}).textContent,/No run record/);
 console.log('ok');""")
         self.assertIn('ok', out)

@@ -90,7 +90,7 @@ class Fixture:
                 "prompt_envelope": "[AgentOS instructions]\n…\n\n[Conversation]\nowner: 서울 도쿄 항공권 비교해줘",
                 "argv": ["codex", "exec", "--json", "-c", "mcp_servers.agentos.command=…", "<prompt: 1834 bytes>"],
                 "usage": {"input_tokens": 5120, "cached_input_tokens": 3072, "output_tokens": 412}, "exit_code": 0, "duration_ms": 58300,
-                "tool_calls": [{"type": "mcp_tool_call", "name": "web_search", "status": "completed"}]}
+                "tool_calls": [{"type": "mcp_tool_call", "name": "web_search", "status": "completed"}], "agentos_tool_calls": [{"name": "web_search", "status": "succeeded"}], "prompt_bytes": 1834}
             rows["task-done"]["decisions"] = [{"kind": "decision", "purpose": "presence", "outcome": "accepted", "model": "gpt-4o-mini", "observed_model": "gpt-4o-mini-2024-07-18", "elapsed_seconds": 0.84}]
             rows["task-done-again"]["events"] = [ev(21, "model", "succeeded", 1760, "실행을 완료했습니다.")]
             rows["task-partial"]["events"] = [ev(51, "subscription_engine", "running", 900, "실행을 시작했습니다.", engine="codex"), ev(52, "subscription_engine", "succeeded", 860, "실행을 완료했습니다.", engine="codex", exit_code=0)]

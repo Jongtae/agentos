@@ -133,7 +133,10 @@ def cli_metadata(engine_id, raw):
     absent: a missing model is "not reported", never guessed."""
     meta = {'reported_model': None, 'usage': None, 'tool_calls': [], 'num_turns': None, 'cost_usd': None}
     records = []
-    for line in (raw or '')[-MAX_OUTPUT_BYTES:].splitlines():
+    for line in (raw or '').splitlines()[:5000]:
+        # Tool results can be large and carry nothing this summary reads.
+        if len(line) > MAX_OUTPUT_BYTES:
+            continue
         try:
             value = json.loads(line)
         except ValueError:
@@ -144,7 +147,7 @@ def cli_metadata(engine_id, raw):
         models = record.get('modelUsage')
         if isinstance(models, dict) and models:
             meta['reported_model'] = ', '.join(str(name) for name in list(models)[:3])
-        elif isinstance(record.get('model'), str) and record['model']:
+        elif isinstance(record.get('model'), str) and record['model'] and not record['model'].startswith('<'):
             meta['reported_model'] = record['model'][:120]
         if isinstance(record.get('usage'), dict):
             meta['usage'] = {k: v for k, v in record['usage'].items() if isinstance(v, (int, float))}
@@ -152,6 +155,14 @@ def cli_metadata(engine_id, raw):
             meta['num_turns'] = record['num_turns']
         if isinstance(record.get('total_cost_usd'), (int, float)):
             meta['cost_usd'] = record['total_cost_usd']
+        message = record.get('message') if record.get('type') == 'assistant' else None
+        if isinstance(message, dict) and isinstance(message.get('content'), list):
+            for part in message['content']:
+                if isinstance(part, dict) and part.get('type') == 'tool_use':
+                    meta['tool_calls'].append({'type': 'tool_use', 'name': str(part.get('name') or '')[:80], 'status': 'requested'})
+        for denial in record.get('permission_denials') or []:
+            if isinstance(denial, dict):
+                meta['tool_calls'].append({'type': 'tool_use', 'name': str(denial.get('tool_name') or '')[:80], 'status': 'denied'})
         item = record.get('item')
         if isinstance(item, dict) and item.get('type') in ('mcp_tool_call', 'command_execution', 'web_search', 'file_change'):
             name = item.get('tool') or item.get('name') or item.get('type')
@@ -179,7 +190,7 @@ def failure_details(engine_id, stdout, stderr, prompt=None):
     """Summarise a failed CLI turn from its official machine output.
 
     Codex ``exec --json`` reports failures as ``turn.failed``/``error``
-    events; Claude Code ``--output-format json`` sets ``is_error``.  When
+    events; Claude Code's result record (``json`` or the last ``stream-json`` line) sets ``is_error``.  When
     neither is observable, the last stderr line is the only evidence.
     """
     status, message = None, ''
@@ -361,7 +372,11 @@ class BoundedExecutionAdapter:
                     '-c', f'mcp_servers.agentos.command={json.dumps(sys.executable)}',
                     '-c', f'mcp_servers.agentos.args={json.dumps(bridge["args"])}', prompt]
         if engine_id == 'claude-code':
-            argv = [binary, '-p', prompt, '--output-format', 'json', '--strict-mcp-config', '--mcp-config', str(mcp_config)]
+            # #570: stream-json (which requires --verbose with -p) reports the
+            # session model and each tool_use; its last line is the same result
+            # record that `json` prints, so answer parsing is unchanged.
+            argv = [binary, '-p', prompt, '--output-format', 'stream-json', '--verbose',
+                    '--strict-mcp-config', '--mcp-config', str(mcp_config)]
             if instructions:
                 # #569: AgentOS instructions travel as a system-prompt addition,
                 # the conversation and request as the prompt.
@@ -371,6 +386,11 @@ class BoundedExecutionAdapter:
 
     @staticmethod
     def _content(engine_id, raw):
+        if engine_id == 'claude-code':
+            # The stream carries tool results before the result record; bound
+            # the answer record itself rather than the whole event stream.
+            lines = [line for line in (raw or '').splitlines() if line.strip()]
+            raw = lines[-1] if lines else ''
         if len(raw.encode()) > MAX_OUTPUT_BYTES:
             raise ExecutionError('엔진 응답이 안전한 크기 제한을 초과했습니다.')
         try:

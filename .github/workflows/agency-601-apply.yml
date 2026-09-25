@@ -1,0 +1,54 @@
+name: agency-601-content-adoption
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agency-601-branch-edit
+  cancel-in-progress: false
+
+jobs:
+  apply-exact-content:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'codex/issue-601-assistant-execution-contract'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/issue-601-assistant-execution-contract
+          fetch-depth: 1
+      - name: Apply preimage-checked content only to the issue branch
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git branch --show-current)" == 'codex/issue-601-assistant-execution-contract' ]]
+          [[ "$(git rev-parse HEAD)" == "$EXPECTED_HEAD" ]]
+          [[ -f scripts/agency_601_apply_once.py ]] || exit 0
+          git config core.hooksPath .githooks
+          python3 scripts/agency_601_apply_once.py
+          python3 scripts/verify_assistant_execution.py --check-spec
+          python3 scripts/verify_master_plan_docs.py
+          python3 scripts/verify_src_layout.py
+          python3 -m unittest discover -s tests -p test_assistant_execution_gate.py -q
+          python3 - <<'PY'
+          import subprocess
+          allowed={'AGENTS.md','PRD.md','TASKS.md','delivery-plan.yaml',
+            'docs/default-agent-usefulness.en.md','docs/goal-execution-contract.en.md',
+            'docs/personal-agentos-architecture.en.md','docs/presence-experience-contract.en.md',
+            'docs/roadmap.md','docs/evals/assistant-execution-v1.json','scripts/agency_601_apply_once.py'}
+          changed=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())
+          untracked=set(subprocess.check_output(['git','ls-files','--others','--exclude-standard'],text=True).splitlines())
+          if not changed|untracked <= allowed: raise SystemExit('Undeclared file modification')
+          subprocess.run(['git','add','--',*sorted(changed|untracked)],check=True)
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'docs(agency): reconcile root plan and canonical guidance; add scenario manifest #601'
+          git push origin HEAD:refs/heads/codex/issue-601-assistant-execution-contract

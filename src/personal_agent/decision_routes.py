@@ -196,9 +196,15 @@ class DecisionRoutes:
                 active.update(destination=JEV_DESTINATION, available=jev['configured'])
             elif route['transport'] == ROUTE_SUBSCRIPTION_CLI:
                 engine = next((e for e in engines if e['id'] == route.get('engine')), None)
+                # Same check as the runtime guard (a local stat, no subprocess):
+                # a verified model describes the binary it was checked against.
+                requalify = (route.get('model_policy') != POLICY_ENGINE_DEFAULT and route.get('engine') in CLI_BINARIES
+                             and (route.get('fingerprint') or '') != cli_fingerprint(
+                                 self.service.execution_adapter.finder(CLI_BINARIES[route['engine']])))
                 active.update(destination=CLI_DESTINATIONS.get(route.get('engine'), ''),
+                              requalification_needed=requalify,
                               available=bool(engine and engine['installed'] and engine['login'] != 'signed-out'
-                                             and not engine['isolated_deployment']))
+                                             and not engine['isolated_deployment'] and not requalify))
         return {'active': active, 'direct_api': direct, 'jev': jev, 'subscription_cli': engines,
                 'suite_version': SUITE_VERSION}
 

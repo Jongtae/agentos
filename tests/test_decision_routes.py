@@ -458,6 +458,20 @@ class ServiceRouteSelectionTests(Temp):
         self.assertEqual(status['active']['transport'], 'direct_api')
         self.assertEqual((status['jev']['check']['state'], status['jev']['check']['failure']), ('failed', 'auth'))
 
+    def test_a_decision_key_can_be_rotated_and_removed_without_switching_routes(self):
+        service = self.service()
+        service.save_decision_route_credential({'transport': 'direct_api', 'key': OPENAI_KEY})
+        service.activate_decision_route({'transport': 'direct_api'})
+        route = self.store.config('decision_route')
+        service.save_decision_route_credential({'transport': 'direct_api', 'key': 'sk-fixture-rotated-0002'})
+        self.assertEqual(self.store.config('decision_route'), route, 'rotating a key does not re-activate or switch')
+        self.assertEqual(service.decision_route()[1], 'sk-fixture-rotated-0002')
+        service.save_decision_route_credential({'transport': 'direct_api', 'key': ''})
+        self.assertIsNone(service.decision_route())
+        status = service.settings()['decision_route']
+        self.assertEqual((status['active']['transport'], status['active']['available']), ('direct_api', False),
+                         'removal leaves the chosen route needing attention, never another route')
+
     def test_no_silent_cross_route_fallback(self):
         service = self.service()
         self.store.put('model', {'provider': 'openai', 'endpoint': 'https://api.openai.com/v1', 'model': 'gpt-5'})
@@ -567,7 +581,11 @@ class ServiceRouteSelectionTests(Temp):
         service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'codex',
                                          'model_policy': 'explicit', 'model': 'small'})
         self.assertEqual(self.judge(service).value, 'retry')
+        self.assertTrue(service.settings()['decision_route']['active']['available'])
         binary.write_text('version two, different size')
+        active = service.settings()['decision_route']['active']
+        self.assertEqual((active['available'], active['requalification_needed']), (False, True),
+                         'Settings shows the same requalification state the runtime guard enforces')
         calls = len(self.runner.calls)
         self.assertEqual(self.judge(service).outcome, 'unavailable')
         self.assertEqual(len(self.runner.calls), calls, 'no call against an unverified binary')

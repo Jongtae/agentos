@@ -128,7 +128,25 @@ const base=(active,extra={})=>({decision_route:{active,suite_version:'decision-q
   {route:{jev:{configured:true,model:'jev-latest',destination:'api.typesafe.ai',check:{state:'failed',failure:'auth',checked_at:1}}}}));
  assert(rowTitled('Jev (TypeSafe) · jev-latest').textContent.includes('마지막 확인: 실패 · 로그인 또는 인증 실패'));
  assert.equal(stateOf(rowTitled('Jev (TypeSafe) · jev-latest')).textContent,'선택 가능');
+ // An active direct route keeps its decision-only key manageable (rotate / remove).
+ box().dataset.state='';calls.length=0;
+ ctx.renderDecisionRoute(base({transport:'direct_api',source:'owner',destination:'api.openai.com',available:true},
+  {route:{direct_api:{configured:true,has_decision_key:true,model:'gpt-4o-mini',destination:'api.openai.com'}}}));
+ const methodRow=rowTitled('사용 방식'),changeKey=button(methodRow,'키 변경');assert(changeKey,'the active direct key can be changed');
+ await changeKey.onclick({currentTarget:changeKey});
+ const remove=descendants(rowTitled('사용 방식')).find(node=>node.tag==='button'&&node.textContent==='키 제거');assert(remove,'a saved key can be removed');
+ assert(remove.className.includes('destructive'));
+ await remove.onclick({currentTarget:remove});
+ assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))),{path:'/api/decision-route/credential',body:{transport:'direct_api',key:''}});
+ assert(!calls.some(call=>call.path==='/api/decision-route/activate'));
+ // A changed CLI binary is shown as needing a re-check, not as in use.
+ box().dataset.state='';ctx.openDecisionChooser('');
+ ctx.renderDecisionRoute(base({transport:'subscription_cli',source:'owner',engine:'codex',model_policy:'explicit',requested_model:'small',available:false,requalification_needed:true,destination:'OpenAI (Codex 구독 계정)'}));
+ assert.equal(stateOf(rowTitled('사용 방식')).textContent,'확인 필요');assert(rowTitled('사용 방식').textContent.includes('CLI가 바뀌어 다시 확인해야 합니다'));
  // Off is an explicit owner choice.
+ box().dataset.state='';
+ ctx.renderDecisionRoute(base({transport:'direct_api',source:'owner',destination:'api.openai.com',available:true},
+  {route:{jev:{configured:true,model:'jev-latest',destination:'api.typesafe.ai',check:{state:'failed',failure:'auth',checked_at:1}}}}));
  const off=button(rowTitled('사용 방식'),'끄기');await off.onclick({currentTarget:off});
  assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))),{path:'/api/decision-route/activate',body:{transport:'off'}});
  // Developer trace: route/policy/requested/observed are separate facts.

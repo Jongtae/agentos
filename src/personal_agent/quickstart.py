@@ -30,7 +30,6 @@ from .quickstart_service import AgentService, CALENDAR_CONNECT_PATH, GMAIL_CONNE
 from .subscription_engines import SubscriptionEngines
 from .plugins import PluginRegistry
 from .providers import ProviderError
-from .capabilities import CapabilityRegistry
 from .isolated_engine_gateway import IsolatedEngineGateway
 from .drive_web_oauth import DriveWebOAuthHandoff, EncryptedDriveSecretStore, DriveWebOAuthError
 from .connector_contract import ConnectorRegistry
@@ -599,7 +598,6 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             if path=='/api/tasks':return self.reply(200,service.task_progress())
             if path.startswith('/api/tasks/'):
                 return self.reply(200,service.task_progress(path.rsplit('/',1)[-1]))
-            if path=='/api/capabilities':return self.reply(200,{'capabilities':CapabilityRegistry(store).list()})
             if path=='/api/settings':return self.reply(200,service.conversation_settings_request({'operation':'read'}))
             if path=='/api/personal-knowledge':return self.reply(200,service.personal_knowledge_request({'query':parse_qs(parts.query).get('query',[''])[0]}, channel='local-companion'))
             if path=='/api/personal-space/memory-candidates':

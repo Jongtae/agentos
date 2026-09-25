@@ -233,8 +233,9 @@ class AgentService:
         # boundaries below (#506); the retired CapabilityRegistry is not read.
         self.settings_orchestrator=SettingsOrchestrator(store,connections=self.settings_connection_rows)
         self.personal_knowledge_orchestrator=PersonalKnowledgeOrchestrator(store)
-        # Routing authority.  The classifier reads literal cue tables, never a
-        # model, and the focus record it feeds is content free.
+        # Routing authority.  The classifier's local rules claim exact and
+        # local-only turns; anything else is a bounded capability-need
+        # judgment (#597).  The focus record it feeds is content free.
         # Semantic judgments go through the provider-neutral DecisionEngine
         # (#417).  The production engine calls the configured decision
         # provider through the same ModelAdapter as the conversation; with no
@@ -550,7 +551,7 @@ class AgentService:
             r'(?:저장|save|write).{0,20}(?:파일|file|document|artifact)',
             prompt,re.I))
         if self.intent_classifier.has_local_candidate(prompt) \
-                or (self.explicit_memory_request(prompt) and not artifact_save):
+                or (self.memory_followup_prefilter(prompt) and not artifact_save):
             return None
         if connector_owner and self.calendar_conversation.has_pending(connector_owner):
             return None
@@ -1272,10 +1273,37 @@ class AgentService:
         return self.public_page_boundary(model)
 
     @staticmethod
-    def explicit_memory_request(prompt):
+    def memory_followup_prefilter(prompt):
+        """Egress-minimizing lexical prefilter for the continuity judge only.
+
+        A turn that *looks* like a memory save is kept away from the remote
+        follow-up judge (#557).  It grants nothing: whether the owner asked
+        AgentOS to remember a value is the DecisionEngine's
+        ``explicit_memory_request`` judgment (#597), and a miss here only
+        means the follow-up judge is asked as for any other short turn.
+        """
         if not isinstance(prompt,str): return False
         if re.search(r'\b(?:do not|don\'t|never)\s+(?:save|remember)|기억하지\s*마|저장하지\s*마',prompt,re.I): return False
         return bool(re.search(r'\b(?:remember|save\s+(?:this|that|it)|memory|preference)\b|기억해|기억하|저장해|선호',prompt,re.I))
+
+    def owner_memory_approval(self, job, prompt):
+        """A lazy resolver for this Work's owner-request memory approval (#597).
+
+        Whether the owner explicitly asked AgentOS to remember something is a
+        semantic judgment asked of the DecisionEngine, and only when a
+        ``save_memory`` write is actually proposed in this Work.  A judged yes
+        issues the existing message-bound approval; no/unavailable issues
+        nothing, so the write stays a pending MemoryCandidate.  The approval
+        is bound to the Work's own stored message, so a replayed retry
+        request (whose prompt is the original Work's) never issues one.
+        """
+        def resolve():
+            if not isinstance(prompt,str) or prompt!=job.get('message'):
+                return None
+            if self.decision_judge.explicit_memory_request(prompt).outcome!=JUDGMENT_YES:
+                return None
+            return self.store.issue_memory_approval(job['id'],prompt)
+        return resolve
 
     @staticmethod
     def model_fingerprint(config):
@@ -3151,7 +3179,7 @@ class AgentService:
                 # never revives it.
                 if not self._answered_before(job['id']):
                     self.drop_document_resume(owner_id=connector_owner,except_work_id=job['id'])
-                owner_memory_approval=self.store.issue_memory_approval(job['id'],prompt) if self.explicit_memory_request(prompt) else None
+                owner_memory_request=self.owner_memory_approval(job,prompt)
                 # Routing decision, made by AgentOS before any capability is
                 # touched.  `decision.authority` records whether the owner
                 # said it literally or an AgentOS rule derived it; a
@@ -3482,7 +3510,7 @@ class AgentService:
                         checked=self.store.config('model_test',{})
                         if checked.get('runtime_model'):
                             runtime_config['model']=checked['runtime_model']
-                        capabilities=Capabilities(self.store,self.adapter,runtime_config,key,job['id'],record,network=self.local_tools,document_access=not boundary['requires_approval'],packages=self.runtime_packages(),document_context=document_history and not boundary['requires_approval'],public_page_scope=self.public_page_boundary(config)['urls'],memory_approval=owner_memory_approval,inherited_provenance=turn_provenance,calendar=self.calendar_for(job),calendar_owner=self.connector_owner_id(job))
+                        capabilities=Capabilities(self.store,self.adapter,runtime_config,key,job['id'],record,network=self.local_tools,document_access=not boundary['requires_approval'],packages=self.runtime_packages(),document_context=document_history and not boundary['requires_approval'],public_page_scope=self.public_page_boundary(config)['urls'],memory_request=owner_memory_request,inherited_provenance=turn_provenance,calendar=self.calendar_for(job),calendar_owner=self.connector_owner_id(job))
                         # Evidence that the direct route was attempted, even if the
                         # provider fails before any response event.
                         record('model','requested',json.dumps({'provider':runtime_config.get('provider'),'model':runtime_config.get('model')},ensure_ascii=False))

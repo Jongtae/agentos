@@ -22,8 +22,8 @@ from personal_agent.conversation_handoff import (AUTHORITY_DEFAULT, AUTHORITY_OW
                                                  INTENT_NOTE_LIST,
                                                  INTENT_RESEARCH, INTENT_SETTINGS,
                                                  INTENT_WORKSPACE_SEARCH,
-                                                 ConversationFocus,
-                                                 IntentClassifier)
+                                                 JUDGMENT_UNAVAILABLE, ConversationFocus,
+                                                 ConversationJudgments, IntentClassifier)
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService, workspace_search_request
 from personal_agent.quickstart_store import QuickStore
@@ -76,9 +76,10 @@ CALENDAR_PARAPHRASES = ('내일 오후 3시에 팀 회의 일정 잡아줘', '�
                         'schedule a meeting with the vendor tomorrow',
                         'add a calendar event for friday')
 
-#: Natural memory phrasing is owned by `explicit_memory_request`, which issues
-#: an approval and leaves the utterance on the conversation route.  It is a
-#: flag, never a capability selection.
+#: Natural memory phrasing is judged by the DecisionEngine's
+#: ``explicit_memory_request`` (#597), which may let AgentOS issue an approval
+#: and leaves the utterance on the conversation route.  It is a flag, never a
+#: capability selection.
 MEMORY_PARAPHRASES = ('이 선호를 기억해줘', '다음 내용을 저장해',
                       'remember this preference', 'save this for later')
 
@@ -107,13 +108,20 @@ class ParaphraseTests(unittest.TestCase):
     def test_memory_phrasing_stays_on_the_conversation_route_as_an_approval_flag(self):
         for text in MEMORY_PARAPHRASES:
             with self.subTest(text=text):
-                self.assertTrue(AgentService.explicit_memory_request(text))
                 self.assertIn(self.classifier.classify(text).intent,
                               (INTENT_CONVERSATION, INTENT_RESEARCH))
 
-    def test_a_negated_memory_request_is_still_not_an_approval(self):
-        self.assertFalse(AgentService.explicit_memory_request('기억하지 마세요'))
-        self.assertFalse(AgentService.explicit_memory_request('do not save this'))
+    def test_no_regex_decides_a_memory_request_any_more(self):
+        # #597: with no DecisionEngine answer nothing is judged a memory
+        # request, however literal the phrasing; the lexical prefilter only
+        # keeps such turns away from the remote follow-up judge.
+        judge = ConversationJudgments()
+        for text in (*MEMORY_PARAPHRASES, '기억하지 마세요', 'do not save this'):
+            with self.subTest(text=text):
+                self.assertEqual(judge.explicit_memory_request(text).outcome, JUDGMENT_UNAVAILABLE)
+        self.assertFalse(AgentService.memory_followup_prefilter('기억하지 마세요'))
+        self.assertFalse(AgentService.memory_followup_prefilter('do not save this'))
+        self.assertFalse(hasattr(AgentService, 'explicit_memory_request'))
 
 
 class ExplicitFormTests(unittest.TestCase):

@@ -190,6 +190,15 @@ class ServiceProvenance(unittest.TestCase):
         self.assertNotIn('instructions_version', record, 'no version is claimed for instructions that were not sent')
         self.assertEqual(record['prompt_envelope'], 'just the request')
 
+    def test_custom_data_and_turn_folders_are_masked(self):
+        service = self._service(_Engine())
+        root = str(self.store.root)
+        service.record_turn_provenance('job-paths', argv=['codex', '--data', root + '/state.db', '/srv/runs/turn-1'])
+        service.execution_adapter.runtime_root = Path('/srv/runs')
+        service.record_turn_provenance('job-paths2', argv=['--data', root, '/srv/runs/turn-1'])
+        self.assertNotIn(root, json.dumps(self.store.turn_provenance('job-paths')))
+        self.assertEqual(self.store.turn_provenance('job-paths2')['argv'], ['--data', '[AgentOS data]', '[turn folder]/turn-1'])
+
     def test_failure_is_recorded_with_its_class(self):
         service = self._service(_Engine(fail=ExecutionError('x', failure_class='rate-limit', exit_code=1,
                                                             meta={'argv': ['codex'], 'duration_ms': 5})))

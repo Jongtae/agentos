@@ -5,6 +5,7 @@ import logging
 import re
 import secrets
 import threading
+from pathlib import Path
 import time
 import hashlib
 from urllib.parse import urlsplit
@@ -366,6 +367,13 @@ class AgentService:
             value=self.store.secret(name)
             if isinstance(value,str) and len(value)>=8:text=text.replace(value,'[redacted]')
         text=SECRET_PATTERN.sub('[redacted]',text)
+        # The configured data and turn folders can live anywhere, not only
+        # under /Users or /home; mask them by their actual value.
+        for root,label in ((getattr(self.store,'root',None),'[AgentOS data]'),
+                           (getattr(self.execution_adapter,'runtime_root',None),'[turn folder]')):
+            if root:
+                for form in {str(root),str(Path(root).resolve())}:
+                    if len(form)>1:text=text.replace(form,label)
         return (self._redact_reason(text) or '')[:60000]
 
     def record_turn_provenance(self, job_id, **fields):
@@ -2624,6 +2632,9 @@ class AgentService:
                         record('subscription_engine','succeeded',json.dumps({'engine':result.engine,'exit_code':result.exit_code}))
                         self.record_turn_provenance(job['id'],status='answered',exit_code=result.exit_code,**(getattr(result,'meta',None) or {}))
                         self.record_observed_tools(job['id'])
+                        # Private reads during the run widen the egress guard;
+                        # record the final set, not only the pre-run snapshot.
+                        self.record_turn_provenance(job['id'],egress_taint=sorted(capabilities.private_provenance))
                         if not isolated and result.exit_code==0 and (self.store.config('engine_login',{}) or {}).get(subscription['id'],{}).get('state')!='signed-in':
                             self._remember_engine_login(subscription['id'],'signed-in','run')
                         response,provider,model=result.content,'subscription',result.engine
@@ -2656,6 +2667,9 @@ class AgentService:
                             self.record_turn_provenance(job['id'],status='failed',failure_class=type(exc).__name__)
                             raise
                         self.record_observed_tools(job['id'])
+                        # Private reads during the run widen the egress guard;
+                        # record the final set, not only the pre-run snapshot.
+                        self.record_turn_provenance(job['id'],egress_taint=sorted(capabilities.private_provenance))
                         outcome=getattr(result,'outcome','succeeded')
                         response,provider,model=result.content,result.provider,result.model
                         resolved_blocker=outcome=='succeeded'

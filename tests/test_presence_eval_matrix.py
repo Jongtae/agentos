@@ -665,7 +665,8 @@ class D_MissingGmail(LocalHttp, PresenceEval):
                 job, _ = self.turn(phrase)
                 # Owner-visible: one guidance bubble; nothing ran, nothing is claimed.
                 self.assertEqual(job['status'], 'awaiting_connection')
-                self.assertEqual(self.methods(start).count('sendMessage'), 1)
+                self.assertEqual(self.methods(start), ['setMessageReaction', 'sendMessage'],
+                                 'a received-reaction, then exactly one guidance bubble')
                 [guidance] = self.texts(start)
                 self.assertIn('Gmail', guidance)
                 self.assertIn('실행하지 않았습니다', guidance)
@@ -686,9 +687,9 @@ class D_MissingGmail(LocalHttp, PresenceEval):
                 resumed = self.store.job(job['id'])
                 self.assertEqual((resumed['status'], resumed['message']), ('succeeded', phrase))
                 self.assertEqual(self.searches(), searches + 1)
+                self.assertEqual(self.methods(resumed_at), ['sendMessage'], 'a resumed Work is not re-acknowledged')
                 [answer] = self.texts(resumed_at)
                 self.assertIn('예약 확인 안내', answer)
-                self.assertNotIn('setMessageReaction', self.methods(resumed_at), 'a resumed Work is not re-acknowledged')
 
     def test_a_replayed_callback_never_resumes_twice(self):
         self.turn(self.PHRASES[0])
@@ -734,9 +735,12 @@ class D_MissingGmail(LocalHttp, PresenceEval):
         The assertion states the contract's expected behaviour (model-first
         semantics); the product does not meet it today.
         """
+        observed = {}
         for phrase in ('집주인한테 답장 왔어?', 'did the landlord write back to me?'):
-            job, _ = self.turn(phrase)
-            self.assertEqual(job['status'], 'awaiting_connection', phrase)
+            self.registry.transition(OWNER, GMAIL_CONNECTOR_ID, ConnectorState.DISCONNECTED)
+            observed[phrase] = self.turn(phrase)[0]['status']
+        # Both phrasings are ingested before asserting, so each gap is observed.
+        self.assertEqual(observed, {phrase: 'awaiting_connection' for phrase in observed})
 
 
 # =============================================================================
@@ -768,6 +772,7 @@ class E_MissingFolder(LocalHttp, PresenceEval):
                 start = len(self.wire)
                 job, _ = self.park(phrase)
                 self.assertEqual(job['status'], 'awaiting_connection')
+                self.assertEqual(self.methods(start), ['setMessageReaction', 'sendMessage'])
                 [guidance] = self.texts(start)
                 self.assertIn('Mac에서 계속', guidance)
                 self.assertIn('읽기만', guidance)
@@ -794,6 +799,7 @@ class E_MissingFolder(LocalHttp, PresenceEval):
                 self.assertEqual((status, approved['state'], approved['authority']), (200, 'approved', 'read'))
                 self.assertEqual(self.roots(), [str(self.folder.resolve())])
                 self.assertIsNone(self.store.config('file_workspace', {}).get('workspace'), 'read is not write')
+                self.assertEqual(self.methods(notice_at), ['sendMessage'])
                 self.assertEqual(self.texts(notice_at), ['선택한 폴더를 읽기로 허용했습니다. 방금 요청을 이어서 처리합니다.'])
                 # Exactly-once resume of the ORIGINAL Work.
                 self.script = [('tool', 'find_files', {'query': '계약서'})]
@@ -802,6 +808,7 @@ class E_MissingFolder(LocalHttp, PresenceEval):
                 self.service.deliver_one()
                 self.assertFalse(self.service.run_one())
                 self.assertEqual(self.store.job(job['id'])['status'], 'succeeded')
+                self.assertEqual(self.methods(answer_at), ['sendMessage'])
                 self.assertEqual(self.texts(answer_at), [self.text])
                 replay = self.http('POST', '/api/folder-requests/approve', {'handoff_id': handoff})
                 self.assertEqual((replay[0], replay[1]['reason']), (409, 'no_pending_work'))
@@ -1028,8 +1035,11 @@ class I_UnknownExternalEffect(CalendarEval):
         failed/partial/unknown stay distinct in Work/Evidence, not only prose.
         """
         job, _message_id, _start = self.approve_into_unknown()
-        self.assertNotEqual(self.store.job(job['id'])['status'], 'succeeded')
-        self.assertIsNotNone(self.task(job['id'])['qualifier'])
+        qualifier = self.task(job['id'])['qualifier'] or {}
+        self.assertEqual(qualifier.get('outcome'), 'unknown', 'an explicit unknown outcome, not failed/partial')
+        self.relations = {'다시 해줘': FOLLOWUP_RETRY}
+        retry, _ = self.turn('다시 해줘')
+        self.assertIn('외부 결과가 불확실', retry['response'], 'the refusal names the unknown effect')
 
 
 # =============================================================================
@@ -1046,6 +1056,7 @@ class H_PartialResult(PresenceEval):
     def test_partial_research_is_never_collapsed_into_success(self):
         job, message_id = self.partial_research()
         self.assertEqual(job['status'], 'partial')
+        self.assertEqual(self.methods(), ['setMessageReaction', 'sendMessage'])
         [bubble] = self.bubbles()
         self.assertTrue(bubble['text'].startswith(TERMINAL_PARTIAL_HEADER))
         self.assertIn('일부 자료는 읽지 못했습니다', bubble['text'], 'the failed portion is named')
@@ -1073,6 +1084,7 @@ class H_PartialResult(PresenceEval):
         self.script = [('tool', 'bounded_public_research', {'mode': 'product_comparison', 'query': 'kettle'})]
         outcomes['partial'] = self.turn('전기포트 비교해줘')[0]
         bubbles = self.bubbles()
+        self.assertEqual(self.methods(), ['setMessageReaction', 'sendMessage'] * 3)
         self.assertEqual([job['status'] for job in outcomes.values()], ['succeeded', 'failed', 'partial'])
         heads = [body['text'].split('\n')[0] for body in bubbles]
         self.assertEqual(heads[1:], [TERMINAL_FAILED_HEADER, TERMINAL_PARTIAL_HEADER])
@@ -1092,7 +1104,9 @@ class H_PartialResult(PresenceEval):
         """
         self.partial_research()
         [bubble] = self.bubbles()
-        self.assertIn('example.com/a', bubble['text'])
+        self.assertIn('일부 자료는 읽지 못했습니다', bubble['text'], 'the failed portion')
+        self.assertIn('3,000', bubble['text'], 'the verified fact from the page that was read')
+        self.assertIn('example.com/a', bubble['text'], 'and its source')
 
 
 class Inspectability(LocalHttp, PresenceEval):

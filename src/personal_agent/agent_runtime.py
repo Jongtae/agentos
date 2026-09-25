@@ -664,6 +664,7 @@ Withheld=namedtuple('Withheld','reason advanced')
 #: What the owner is told when a durable write was drafted rather than applied.
 CALENDAR_PENDING='소유자 승인이 필요해 일정 초안만 만들었습니다. 실제 일정에는 아직 반영되지 않았습니다.'
 DELEGATE_INCOMPLETE='위임한 전문 에이전트가 요청을 끝까지 완료하지 못했습니다.'
+DELEGATE_FAILED='위임한 전문 에이전트가 요청을 완료하지 못했습니다. 완료된 단계가 없습니다.'
 
 def withheld_effect(name,result):
  """Why a tool that returned normally did not do the thing it was asked to do.
@@ -700,21 +701,53 @@ def withheld_effect(name,result):
  if name in CALENDAR_DRAFT_TOOLS and result.get('applied') is False and result.get('requires_owner_approval'):
   return Withheld(result.get('next_step') or CALENDAR_PENDING,advanced=True)
  if result.get('outcome') in ('failed','partial'):
-  # `delegate_agent` already marked the turn before #488 while still
-  # counting the call, and the specialist's report is usable work.
-  #
-  # `advanced` is True for ``outcome='failed'`` too, so a delegation where
-  # the specialist accomplished nothing still reports `partial`.  That is
-  # the label this path had before #488 and #488 is not the issue that
-  # should change it: re-labelling it `failed` would also flip
-  # `result_available` and take the specialist's report off the card.
-  # Recorded rather than fixed here (#493).
-  return Withheld(DELEGATE_INCOMPLETE,advanced=True)
+  # A nested run's own typed outcome.  A partly finished specialist report
+  # is real work with a step remaining (`partial`); a specialist that
+  # accomplished nothing advanced nothing, so a turn whose only call was
+  # that one is `failed` - claiming '일부 단계만 완료했습니다' there is the
+  # unobserved claim the memory case above already rejects (#493/#494).
+  # Its report is not discarded: the stored response stays inspectable
+  # behind the failed card without upgrading the outcome.
+  partial=result['outcome']=='partial'
+  return Withheld(DELEGATE_INCOMPLETE if partial else DELEGATE_FAILED,advanced=partial)
  return None
 
+#: Result-level flags any tool may return that change what its result means
+#: (#494).  A result carrying one is not a complete answer: "no files found"
+#: after a capped or unconfigured search is not "there are no such files".
+#: Keyed on the result shape, never on the tool, so a new tool that sets the
+#: flag is covered without a branch of its own.
+EVIDENCE_QUALIFIER_FLAGS=(('needs_setup','setup-required'),('truncated','truncated'))
+
+def evidence_qualifiers(result):
+ """The typed qualifiers a tool result carries; ``[]`` for a complete result."""
+ if not isinstance(result,dict):return []
+ found=[label for key,label in EVIDENCE_QUALIFIER_FLAGS if result.get(key) is True]
+ if isinstance(result.get('read_failures'),list) and result['read_failures']:found.append('partial')
+ if result.get('outcome') in ('failed','partial') and result['outcome'] not in found:found.append(result['outcome'])
+ return found
+
+#: What AgentOS says in its own voice about a qualified result it summarises.
+QUALIFIER_NOTES={
+ 'setup-required':'필요한 연결이 아직 설정되지 않아 확인하지 못했습니다. 설정에서 연결을 먼저 확인해 주세요.',
+ 'truncated':'검색이나 읽기가 한도에서 멈춰 일부만 확인했습니다. 확인하지 못한 부분이 남아 있습니다.',
+ 'partial':'일부 자료는 읽지 못했습니다.',
+ 'failed':'이 단계는 완료되지 않았습니다.',
+}
+
 def evidence_summary(name,result):
- """Persist useful proof without duplicating private tool payloads in traces."""
+ """Persist useful proof without duplicating private tool payloads in traces.
+
+ Every summary also keeps the result's typed qualifiers, so the durable
+ record of an unconfigured or capped read cannot read as a complete one.
+ """
  if not isinstance(result,dict):return {'kind':'invalid-result'}
+ summary=_evidence_detail(name,result)
+ qualifiers=evidence_qualifiers(result)
+ if qualifiers:summary['qualifiers']=qualifiers
+ return summary
+
+def _evidence_detail(name,result):
  if name in ('web_search','public_page_read','weather','bounded_public_research'):
   summary={'sources':result.get('sources',[])[:8],'result_count':len(result.get('results',[])),'retrieved_at':result.get('retrieved_at')}
   # Contacted-but-failed addresses are not sources, and omitting them hid
@@ -740,9 +773,25 @@ def evidence_summary(name,result):
  if name=='list_agents':return {'agent_count':len(result.get('agents',[]))}
  return {'keys':sorted(result)[:10]}
 
+#: AgentOS's own words when a tool ran and nothing describes its result.  It
+#: reports that a tool ran; it never characterises the request as done (#490).
+FALLBACK_UNDESCRIBED='도구 실행은 끝났지만 결과를 설명하는 답변을 받지 못했습니다. 요청이 완료됐는지는 확인되지 않았습니다. 실행 기록을 확인해 주세요.'
+
 def fallback_response(executions, sources):
- """Return a useful safe result when a tool-capable model stops after tools."""
+ """Return a useful safe result when a tool-capable model stops after tools.
+
+ A result carrying a typed qualifier is described with it: a setup-required
+ result is reported as not checked at all, a truncated or partial one keeps
+ that note after its summary.
+ """
  name,result=executions[-1]
+ qualifiers=evidence_qualifiers(result)
+ if 'setup-required' in qualifiers:return QUALIFIER_NOTES['setup-required']
+ text=_fallback_text(name,result,sources)
+ notes=[QUALIFIER_NOTES[label] for label in qualifiers if label in QUALIFIER_NOTES]
+ return '\n\n'.join([text,*notes]) if notes else text
+
+def _fallback_text(name, result, sources):
  if name=='weather' and isinstance(result,dict):
   try:
    from .local_tools import weather_answer
@@ -769,8 +818,8 @@ def fallback_response(executions, sources):
  if name=='read_file' and isinstance(result,dict):return f"{result.get('path','요청한 파일')}을 읽었습니다. 이어서 필요한 내용을 질문해 주세요."
  if name=='list_notes':return f"저장된 메모 {len(result.get('notes',[]))}개를 확인했습니다."
  if name=='list_agents':return '사용 가능한 전문 에이전트를 확인했습니다.'
- if name=='delegate_agent' and isinstance(result,dict):return str(result.get('report') or '전문 에이전트 검토를 완료했습니다.')
- return '요청한 작업을 완료했습니다.'
+ if name=='delegate_agent' and isinstance(result,dict):return str(result.get('report') or '전문 에이전트가 보고서를 반환하지 않았습니다.')
+ return FALLBACK_UNDESCRIBED
 
 def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'):
  messages=[{'role':'system','content':POLICY+'\n'+system},*history]

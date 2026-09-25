@@ -132,6 +132,11 @@ const partial=ui.mergeTaskProgress({tasks:[{id:'partial',status:'partial',status
 assert.equal(partial.error,'second half unavailable');
 assert.match(ui.taskOutcome(partial).text,/second half unavailable/);
 assert.deepEqual(ui.taskOutcome({status:'cancelled'}),{title:'취소됨',text:'이 작업은 취소되어 더 이상 실행되지 않습니다.',kind:'attention'});
+// #598 I1: an unknown external effect keeps its effect statement on the web too.
+const unknown=ui.mergeTaskProgress({tasks:[{id:'unknown',status:'unknown',status_kind:'attention',error:'일정을 만들었는지 확인할 수 없습니다.'}]},null,[{id:'unknown',response:'일정을 만들었는지 확인할 수 없습니다.'}]).tasks[0];
+assert.equal(unknown.error,'일정을 만들었는지 확인할 수 없습니다.');
+assert.deepEqual([ui.statusText(unknown),ui.taskOutcome(unknown)],['외부 결과 불확실',{title:'외부 결과 불확실',text:'일정을 만들었는지 확인할 수 없습니다.',kind:'attention'}]);
+assert.match(ui.taskOutcome({status:'unknown'}).text,/자동으로 다시 시도하지 않았습니다/);
 assert(ui.isDiagnosticTask({title:'/start abc'}));
 assert(!ui.isDiagnosticTask({title:'compare flights'}));
 const proofA=ui.modelDraftFingerprint({provider:'openai',endpoint:'https://api.example/v1/',model:'m',credential_revision:1});

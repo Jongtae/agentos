@@ -869,10 +869,12 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
    record('model','retrying',json.dumps({'scope':scope,'reason':'rate_limit','action':'free router retry; completed tool results retained'}))
    messages=[{k:v for k,v in m.items() if k!='reasoning_details'} for m in messages]
    message,actual=adapter.tool_turn(active_config,key,messages,definitions,report_observed=True)
+  # The model this call was sent with, before free-router pinning below.
+  requested=active_config.get('model')
   if actual and active_config.get('model')=='openrouter/free' and actual!='openrouter/free':active_config['model']=actual
   actual=actual or NOT_REPORTED
   calls=message.get('tool_calls') or []
-  record('model','responded',json.dumps({'scope':scope,'model':actual,'requested_model':active_config.get('model'),'tool_calls':calls,'has_text':bool(message.get('content'))},ensure_ascii=False))
+  record('model','responded',json.dumps({'scope':scope,'model':actual,'requested_model':requested,'tool_calls':calls,'has_text':bool(message.get('content'))},ensure_ascii=False))
   if not calls and not successful and not failed and not checked_direct:
    checked_direct=True
    messages.append(message)

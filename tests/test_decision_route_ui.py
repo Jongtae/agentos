@@ -28,7 +28,7 @@ function descendants(node){return node.children.flatMap(child=>typeof child==='s
 new Element('section').id='decision-route';
 const $=id=>ids.get(id),document={getElementById:$,createElement:tag=>new Element(tag)};
 const part=(start,end)=>app.slice(app.indexOf(start),app.indexOf(end));
-const source=part('const LANGUAGES=','function normalizeEndpoint(')+part('function decisionTraceLine(','function traceWindow(')+
+const source=part('const LANGUAGES=','function normalizeEndpoint(')+part('const DECISION_ROLE=','function traceWindow(')+
  part('function element(','function setError(')+part('const DECISION_TRANSPORT_LABEL=','function openMobileDetail(');
 const calls=[];let refreshes=0,failNext=null;
 const ctx={document,$,console,safeTime:()=>'T',
@@ -157,11 +157,13 @@ const base=(active,extra={})=>({decision_route:{active,suite_version:'decision-q
   {route:{jev:{configured:true,model:'jev-latest',destination:'api.typesafe.ai',check:{state:'failed',failure:'auth',checked_at:1}}}}));
  const off=button(rowTitled('사용 방식'),'끄기');await off.onclick({currentTarget:off});
  assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))),{path:'/api/decision-route/activate',body:{transport:'off'}});
- // Developer trace: route/policy/requested/observed are separate facts.
- const line=ctx.decisionTraceLine({purpose:'conversation-followup',outcome:'decided',route:'subscription_cli',engine:'codex',model_policy:'explicit',requested_model:'small',observed_model:'not reported',elapsed_seconds:1.5});
- for(const part of ['판단 경로 subscription_cli/codex','모델 정책 explicit','요청 모델 small','관측 모델 보고되지 않음'])assert(line.includes(part),part);
- const legacy=ctx.decisionTraceLine({purpose:'p',outcome:'decided',model:'gpt-4o-mini',observed_model:'gpt-4o-mini-2024-07-18'});
- assert(legacy.includes('요청 모델 gpt-4o-mini')&&legacy.includes('관측 모델 gpt-4o-mini-2024-07-18')&&legacy.includes('판단 경로 direct_api'));
+ // Technical provenance (#559): route/policy/requested/observed are separate facts.
+ const facts=Object.fromEntries(ctx.decisionFacts({purpose:'conversation-followup',outcome:'decided',route:'subscription_cli',engine:'codex',model_policy:'explicit',requested_model:'small',observed_model:'not reported',elapsed_seconds:1.5},{relation:{kind:'retry',work_id:'w0'}}));
+ assert.equal(facts['판단 경로'],'subscription_cli / codex');assert.equal(facts['모델 정책'],'explicit');assert.equal(facts['요청 모델'],'small');assert.equal(facts['관측 모델'],'보고되지 않음');
+ assert.equal(facts['역할'],'대화 해석');assert.equal(facts['기록된 관계'],'retry → w0');
+ const legacy=Object.fromEntries(ctx.decisionFacts({purpose:'p',outcome:'decided',model:'gpt-4o-mini',observed_model:'gpt-4o-mini-2024-07-18'},{}));
+ assert(legacy['요청 모델']==='gpt-4o-mini'&&legacy['관측 모델']==='gpt-4o-mini-2024-07-18'&&legacy['판단 경로']==='direct_api');
+ assert(!('기록된 관계' in legacy),'only a follow-up judgment has a recorded relation');
  console.log('decision route DOM checks passed');
 })().catch(error=>{console.error(error);process.exit(1);});
 """

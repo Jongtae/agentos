@@ -202,7 +202,7 @@ def ui_source_keys():
     """Korean source strings the UI can show, collected from the shipped files."""
     body = APP[:APP.index("// I18N-CATALOG-START")] + APP[APP.index("// I18N-CATALOG-END"):]
     keys = set(m.group(1) for m in re.finditer(r"\bt\('((?:[^'\\]|\\.)*)'", body) if HANGUL.search(m.group(1)))
-    for table in ("TOOL_NAMES", "RELATION_TEXT", "OFFLINE_MESSAGE", "providers", "providerNames",
+    for table in ("TOOL_NAMES", "RELATION_TEXT", "RELATION_LATER_TEXT", "DECISION_ROLE", "OFFLINE_MESSAGE", "providers", "providerNames",
                   "CONNECTOR_STATES", "CONNECTOR_NAMES", "CONNECTOR_PURPOSE", "ENGINE_IDLE_STATE"):
         line = body[body.index("const " + table + "="):]
         line = line[:line.index("\n")]

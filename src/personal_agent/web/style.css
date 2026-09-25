@@ -427,6 +427,10 @@ details.technical details>summary{color:var(--muted)}
 .turn-technical dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:6px 0 0 16px;font-size:var(--fs-1);color:var(--muted)}
 .turn-technical dt{color:var(--faint);white-space:nowrap}
 .turn-technical dd{margin:0;overflow-wrap:anywhere;white-space:pre-line;font-variant-numeric:tabular-nums}
+/* #559: 기술 정보 roles (실행 / 보조 판단) and a relation read from the earlier turn */
+.turn-technical .technical-group{margin:12px 0 0 16px;font-size:var(--fs-1);font-weight:600;color:var(--muted)}
+.turn-technical .decision-facts+.decision-facts{padding-top:6px;border-top:1px dashed var(--line)}
+.turn-relation.later{margin:2px 0 6px}
 @media(max-width:620px){.turn{padding-left:24px}.turn::before{left:1px}.turn::after{left:6px}.trace-step{grid-template-columns:58px 10px minmax(0,1fr)}.turn-technical dl{grid-template-columns:1fr}}
 
 .language-picker{display:block}

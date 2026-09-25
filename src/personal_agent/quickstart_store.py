@@ -13,6 +13,8 @@ import time
 import unicodedata
 import uuid
 
+from .conversation_projection import qualify_transcript, turn_qualifier
+
 
 _SECRET_STATE_LOCK = threading.RLock()
 
@@ -206,11 +208,18 @@ class QuickStore:
         db.execute('INSERT INTO jobs(id,request_key,message,channel,chat_id,status,response,error,delivery,provider,model,created,workspace_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',(task_id,request_key,message,channel,chat_id,'queued',None,None,'none',None,None,time.time(),workspace_id))
         return task_id
 
+    #: Stored turns joined with the outcome of the Work that produced them, so
+    #: every reader can qualify unverified text (#494).  Read-time only: the
+    #: stored message text and schema are unchanged.
+    TRANSCRIPT_COLUMNS=('m.id,m.role,m.content,m.channel,m.created,m.workspace_id,m.job_id,'
+                        'j.status AS work_outcome,j.error AS work_error')
+
     def history(self):
         with self.db() as db:
-            return [dict(r) for r in db.execute(
-                'SELECT id,role,content,channel,created,workspace_id,job_id '
-                'FROM (SELECT * FROM messages ORDER BY id DESC LIMIT 100) ORDER BY id')]
+            return qualify_transcript(db.execute(
+                f'SELECT {self.TRANSCRIPT_COLUMNS} '
+                'FROM (SELECT * FROM messages ORDER BY id DESC LIMIT 100) m '
+                'LEFT JOIN jobs j ON j.id=m.job_id ORDER BY m.id'))
 
     def blocked_delivery_reply(self, job_id):
         """Recover the owner-facing blocked-turn projection from its transcript row."""
@@ -774,10 +783,12 @@ class QuickStore:
         workspace=self.workspace(workspace_id)
         if not workspace:return None
         with self.db() as db:
-            workspace['results']=[dict(row) for row in db.execute('SELECT id,job_id,content,created FROM workspace_results WHERE workspace_id=? ORDER BY created DESC LIMIT 30',(workspace_id,))]
+            # A saved partial result keeps its Work outcome, like the transcript.
+            workspace['results']=[{key:row[key] for key in ('id','job_id','content','created')}|{'qualifier':turn_qualifier(row['work_outcome'],row['work_error'])}
+                                  for row in db.execute('SELECT r.id,r.job_id,r.content,r.created,j.status AS work_outcome,j.error AS work_error FROM workspace_results r LEFT JOIN jobs j ON j.id=r.job_id WHERE r.workspace_id=? ORDER BY r.created DESC LIMIT 30',(workspace_id,))]
             workspace['result_count']=db.execute('SELECT COUNT(*) FROM workspace_results WHERE workspace_id=?',(workspace_id,)).fetchone()[0]
             workspace['saved_job_ids']=[row['job_id'] for row in db.execute('SELECT job_id FROM workspace_results WHERE workspace_id=? AND job_id IN (SELECT id FROM jobs ORDER BY created DESC LIMIT 40)',(workspace_id,))]
-            workspace['messages']=[dict(row) for row in db.execute('SELECT id,role,content,channel,created,workspace_id,job_id FROM messages WHERE workspace_id=? ORDER BY id DESC LIMIT 100',(workspace_id,))][::-1]
+            workspace['messages']=qualify_transcript(db.execute(f'SELECT {self.TRANSCRIPT_COLUMNS} FROM messages m LEFT JOIN jobs j ON j.id=m.job_id WHERE m.workspace_id=? ORDER BY m.id DESC LIMIT 100',(workspace_id,)))[::-1]
         return workspace
 
     def attach_context(self, job_id, event_ids, assistant_id, db=None):
@@ -884,9 +895,21 @@ class QuickStore:
     def evidence_summary(self, job_id):
         """Return categories and counts only; never expose tool payloads."""
         with self.db() as db:
-            rows=db.execute("SELECT tool FROM tool_events WHERE job_id=? AND status='succeeded'",(job_id,)).fetchall()
+            rows=db.execute("SELECT tool,detail FROM tool_events WHERE job_id=? AND status='succeeded'",(job_id,)).fetchall()
         counts={}
-        for row in rows:counts[row['tool']]=counts.get(row['tool'],0)+1
+        qualifiers=[]
+        for row in rows:
+            # The typed Evidence qualifiers the runtime recorded (#494).  A
+            # setup-required read consulted nothing, so it is not counted as
+            # a source; a truncated or partial one is counted and says so.
+            try:detail=json.loads(row['detail'] or '{}')
+            except (TypeError,ValueError):detail={}
+            evidence=detail.get('evidence') if isinstance(detail,dict) else None
+            found=evidence.get('qualifiers') if isinstance(evidence,dict) else None
+            found=[label for label in found if isinstance(label,str)] if isinstance(found,list) else []
+            qualifiers.extend(label for label in found if label not in qualifiers)
+            if 'setup-required' in found:continue
+            counts[row['tool']]=counts.get(row['tool'],0)+1
         labels=[]
         if counts.get('web_search'):labels.append(f"공개 웹 {counts['web_search']}곳 참고")
         documents=counts.get('read_file',0)
@@ -894,7 +917,15 @@ class QuickStore:
         elif counts.get('find_files'):labels.append('내 컴퓨터의 자료 확인')
         notes=counts.get('list_notes',0)+counts.get('save_note',0)
         if notes:labels.append(f'내 기록 {notes}개 사용')
+        labels.extend(self.EVIDENCE_QUALIFIER_LABELS[label] for label in qualifiers if label in self.EVIDENCE_QUALIFIER_LABELS)
         return labels
+
+    #: Owner-facing words for a typed Evidence qualifier; one entry per type,
+    #: not per tool.
+    EVIDENCE_QUALIFIER_LABELS={'setup-required':'연결 설정이 필요해 확인하지 못한 자료 있음',
+                               'truncated':'한도에 걸려 일부만 확인함',
+                               'partial':'일부 자료를 읽지 못함',
+                               'failed':'완료되지 않은 단계 있음'}
 
     def task_card(self, job_id):
         with self.db() as db:

@@ -60,6 +60,17 @@ class ExactRetainedItems(_OwnerSurface):
                                             'created': opened['item']['created'], 'work_id': first}})
         self.assertNotIn('치과', json.dumps(opened, ensure_ascii=False))
 
+    def test_a_note_saved_by_the_save_note_tool_resolves_to_its_work(self):
+        self.model_plan = [('save_note', json.dumps({'content': '우유 사기'}, ensure_ascii=False))]
+        self.model_text = '저장했어요.'
+        job = self.ask('우유 사야 한다는 걸 저장해 줘')
+        self.model_plan = []
+        [link] = self.task(job)['retained']
+        self.assertEqual(link['kind'], 'note')
+        self.assertNotEqual(link['id'], job)
+        opened = self.item('note', link['id'])
+        self.assertEqual((opened['content'], opened['work_id']), ('우유 사기', job))
+
     def test_a_turn_that_asked_for_nothing_to_be_kept_links_nothing(self):
         job = self.ask('오늘 날씨 이야기만 해 줘')
         self.assertEqual(self.task(job)['retained'], [])

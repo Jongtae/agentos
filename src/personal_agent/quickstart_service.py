@@ -947,7 +947,18 @@ class AgentService:
         with self.store.db() as db:
             if kind=='note':
                 row=db.execute('SELECT id,content,created FROM notes WHERE id=?',(item_id,)).fetchone()
-                return {'kind':'note','id':row['id'],'content':row['content'],'created':row['created'],'work_id':row['id'] if row['id'] in recent else None} if row else None
+                if not row:return None
+                # A /note Work stores the note under its own id; a save_note
+                # tool call records the id it saved in its event evidence.
+                work_id=row['id'] if row['id'] in recent else None
+                if work_id is None and recent:
+                    marks=','.join('?'*len(recent))
+                    for event in db.execute(f"SELECT job_id,detail FROM tool_events WHERE status='succeeded' AND tool='save_note' AND job_id IN ({marks}) ORDER BY id DESC",list(recent)):
+                        try:detail=json.loads(event['detail'] or '{}')
+                        except (TypeError,ValueError):continue
+                        evidence=detail.get('evidence') if isinstance(detail,dict) else None
+                        if isinstance(evidence,dict) and evidence.get('id')==row['id']:work_id=event['job_id'];break
+                return {'kind':'note','id':row['id'],'content':row['content'],'created':row['created'],'work_id':work_id}
             if kind=='memory':
                 row=db.execute("SELECT id,memory_key,content,created,work_key FROM memories WHERE id=? AND state='current'",(item_id,)).fetchone()
                 if not row:return None

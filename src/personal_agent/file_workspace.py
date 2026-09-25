@@ -35,6 +35,35 @@ class FileWorkspace:
         self.store.put('document_sharing',{})
         return self.status()
 
+    def plan_grant(self, kind, value):
+        """Validate one contextual grant and return (resolved path, commit).
+
+        #505's local handoff adds exactly one folder of exactly one kind:
+        ``reference`` (read-only original) or ``workspace`` (new result files).
+        The shared ``folder_grants`` rules and the existing non-overlap rule
+        apply, and nothing is written until ``commit`` is called.  Like
+        ``configure``, a changed folder set clears document sharing, so the
+        grant never carries external-AI transmission with it.
+        """
+        if kind not in ('reference','workspace'): raise ValueError('허용하지 않은 폴더 권한입니다.')
+        path=folder_grants.validate(value,self.store)
+        status=self.status(); refs=[ref for ref in status.get('references',[]) if isinstance(ref,dict)]
+        workspace=status.get('workspace')
+        def overlaps(a,b): return a==b or a.is_relative_to(b) or b.is_relative_to(a)
+        if kind=='reference':
+            if workspace and overlaps(path,Path(workspace)): raise ValueError('참고 폴더와 관리 작업공간은 겹치지 않게 연결하세요.')
+        elif any(overlaps(path,Path(ref['path'])) for ref in refs): raise ValueError('참고 폴더와 관리 작업공간은 겹치지 않게 연결하세요.')
+        def commit():
+            current=self.status(); stat=path.stat(); identity=hashlib.sha256(f'{stat.st_dev}:{stat.st_ino}'.encode()).hexdigest()[:24]
+            refs=[ref for ref in current.get('references',[]) if isinstance(ref,dict)]
+            if kind=='reference':
+                if all(ref.get('path')!=str(path) for ref in refs): refs.append({'id':identity,'path':str(path)})
+                updated={**current,'references':refs}
+            else: updated={**current,'references':refs,'workspace':str(path),'workspace_id':identity}
+            self.store.put('file_workspace',updated)
+            self.store.put('document_sharing',{})
+        return path,commit
+
     def status(self): return self.store.config('file_workspace',{'references':[],'workspace':None})
 
     def active(self):

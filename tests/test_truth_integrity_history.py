@@ -22,7 +22,7 @@ import unittest
 from pathlib import Path
 
 from personal_agent.agent_runtime import (DELEGATE_FAILED, FALLBACK_UNDESCRIBED, QUALIFIER_NOTES,
-                                          evidence_qualifiers, evidence_summary, turn_context)
+                                          evidence_qualifiers, fallback_response, evidence_summary, turn_context)
 from personal_agent.calendar import CALENDAR_SPEC, CALENDAR_WRITE_SPEC, CalendarConnector
 from personal_agent.connector_contract import ConnectorRegistry, ConnectorState
 from personal_agent.conversation_projection import (CONTEXT_QUALIFIER, TERMINAL_PARTIAL_HEADER,
@@ -366,12 +366,14 @@ class IncompleteEvidenceOutcomeTests(TruthIntegrityTestCase):
         self.assertEqual(bubble, self.text)
         self.assertIsNone(self.assistant_row(job['id'])['qualifier'])
 
-    def test_setup_required_keeps_its_outcome(self):
-        """Owner decision pending (#489): not changed by this fix."""
+    def test_setup_required_is_its_own_parked_state(self):
+        """Owner decision 2026-09-25 (#505): setup-required is neither failed nor partial."""
         self.plan = [('find_files', {'query': '급여'})]
         self.text = '폴더를 먼저 연결해 주세요.'
-        job, _bubble = self.ask('급여 파일 찾아줘')
-        self.assertEqual(job['status'], 'succeeded', job.get('error'))
+        job, bubble = self.ask('급여 파일 찾아줘')
+        self.assertEqual(job['status'], 'awaiting_connection', job.get('error'))
+        self.assertIsNone(job['error'])
+        self.assertIn('Mac에서 계속', bubble)
 
 
 class FallbackTextTests(TruthIntegrityTestCase):
@@ -390,8 +392,12 @@ class FallbackTextTests(TruthIntegrityTestCase):
         self.plan = [('find_files', {'query': '급여'})]
         self.text = ''
         job, _bubble = self.ask('급여 파일 찾아줘')
-        self.assertEqual(job['response'], QUALIFIER_NOTES['setup-required'])
+        # #505 parks the Work with the folder handoff instead of a fallback.
+        self.assertIn('아직 파일을 찾지 않았습니다', job['response'])
         self.assertNotIn('일치하는 파일이 없습니다', job['response'])
+        # The fallback text itself still says "not checked" for any caller.
+        self.assertEqual(fallback_response([('find_files', {'files': [], 'needs_setup': True})], []),
+                         QUALIFIER_NOTES['setup-required'])
 
     def test_a_capped_search_says_it_is_incomplete(self):
         self.connect_folder({f'급여-{index}.txt': '급여 명세' for index in range(25)})

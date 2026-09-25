@@ -1,6 +1,6 @@
 # Assistant execution: delivery, ownership and completion
 
-Parent [#600](https://github.com/Jongtae/agentos/issues/600). Normative [execution contract](assistant-execution-contract.en.md). This is the 2026-09-25 owner-selected execution-integration refinement of PRESENCE-01, not a second coordinator. The two-child limit counts actively executing implementation worktrees, not backlog issue records.
+Parent [#600](https://github.com/Jongtae/agentos/issues/600). Normative [execution contract](assistant-execution-contract.en.md). Cost/reuse amendment [#612](https://github.com/Jongtae/agentos/issues/612) is authoritative for verification depth. This is the 2026-09-25 owner-selected execution-integration refinement of PRESENCE-01, not a second coordinator. The two-child limit counts actively executing implementation worktrees, not backlog issue records.
 
 ## Finite work breakdown
 
@@ -9,12 +9,12 @@ Parent [#600](https://github.com/Jongtae/agentos/issues/600). Normative [executi
 | G | #601 | Contract, plan/guidance convergence, manifest, executable evidence gate/tests; no product runtime edit | Owner request |
 | Existing | #597 | Capability-need and explicit-memory semantics at the existing DecisionEngine seam | Existing foundation; new closeout criteria do not discard prior work |
 | Existing | #598 | Partial/unknown/model truth and useful projection | #597 where shared files overlap; preserve original acceptance |
-| 1 | #603 | Baseline failures, real entrypoint/bridge evidence and installed-build diagnostics | G; shared instrumentation waits for #597/#598 |
+| 1 | #603 | Minimal known-defect reproductions and model-free build/route diagnostics | G; shared instrumentation waits for #597/#598 |
 | 2 | #604 | One broker contract and actual native/MCP/isolated capability bindings | #603 |
 | 3 | #605 | Reviewed source/destination-authorized public context composition | #604 |
 | 4 | #606 | Existing goal loop, observations, alternatives and completion obligations | #605/#597 |
 | 5 | #607 | Typed recovery, safe effects/retry/Stop/restart and transactional resume | #606/#598 |
-| 6 | #608 | Real runner, protocol/model/owner qualification and enforced promotion/rollback | #607 and relevant #581 |
+| 6 | #608 | Existing unit/integration harness, accidental-request guard and optional scoped smoke | #607 and relevant #581 |
 | Final | #512 | Rerun original A-J and cross-track integration on final candidate | #608/#598; fixture baselines may run earlier |
 | Claims | #513 | All public README locales describe only qualified scope | #512/#608 |
 
@@ -26,33 +26,32 @@ Parent [#600](https://github.com/Jongtae/agentos/issues/600). Normative [executi
 
 Before each child, inspect main, PRs, issue scope and required checks; use the existing delivery lock; select only a dependency-satisfied enumerated child. Historical completion snapshots are not current GitHub status. Do not add a scheduler or reactivate retired programs. Planning changes record scope/order/authority, not every merge.
 
-## Required closeout packet
+## Proportionate verification and concrete reuse
 
-Each behavioral child supplies requirement IDs and its actual production call path; baseline revision/configuration/profile; a baseline failing assertion and candidate result; opposing valid/denied cases; a meaningful mutation; content-addressed trace/JUnit artifacts; current CI and genuinely risk-triggered independent review; and explicit unmet criteria. Missing provider-reported model remains unknown.
+Default: changed-function unit tests with injected model/tool transports; a small model-free integration test only for a changed wire/broker/process/state boundary. Retain useful-positive and authority-negative cases. A fake model is valid for wiring tests, not proof of language competence. Do not mock away the boundary being tested.
 
-A test that passes after its claimed live binding is removed is insufficient. Diagnostic work can retain failing baselines without claiming repair. A child cannot `Closes #600`, transfer unmet criteria into an unlabeled backlog, or promote `skip`/`xfail` to product success. Implementer self-check is not independent review.
+Normal closeout is issue/changed behavior, focused tests, existing required CI and known limits. No per-child mandatory historical baseline run, mutation, content-addressed JUnit/trace packet, whole-project re-audit or live model trial. Mutations/counterexamples and independent review are reserved for actual risk, especially sole authority checks, idempotency and reachability. A relevant failing regression remains unresolved; optional unrun model checks are not development blockers.
+
+Model checks are opt-in for affected model/prompt/tool-description changes, unexplained model-dependent behavior or a scoped public claim, with explicit data/destination/provider and request/token/cost/time budget. No all-case/all-route three-trial quota, universal 90% threshold or production per-answer judge. Repetition follows observed uncertainty. Installation identity can be checked without a model. Preserve the specific #581 reported client discrepancy and critical release conditions without adding unrelated model runs.
+
+Reuse prior reviews such as #426. Name the internal symbol or SDK API, adapter glue and duplicate code removed/avoided. New contract nouns do not mandate new classes/stores. Before custom Build or wholesale replacement, use one bounded no-model compatibility test on the changed requirement/version. The execution contract contains the concrete internal/MCP/PydanticAI mapping; this amendment installs no framework.
+
+Success reporting: command summary and affected tests. Failure reporting: failing IDs, assertion and bounded relevant diagnostic. Do not repeatedly feed passing transcripts or unchanged full logs to a model. Focused local iteration precedes one required stable-head CI run.
 
 ## Executable checks
 
-Offline specification/ownership and gate tests:
-
 ```sh
 python3 scripts/verify_assistant_execution.py --check-spec
-python3 -m pytest -q tests/test_assistant_execution_gate.py
+python3 -m unittest discover -s tests -p test_assistant_execution_gate.py -q
 python3 scripts/verify_master_plan_docs.py
 python3 scripts/verify_src_layout.py
 ```
 
-Evidence consistency on eventual #608 runner outputs:
+The first command is an offline manifest/ownership check, not a task-quality grade. The previous unused `--evidence` certificate interface and exhaustive-trial report parser are removed; use existing pytest/unittest/GitHub results. #608 must not grow a replacement certification platform. No live model, owner data or credential is used by these checks.
 
-```sh
-python3 scripts/verify_assistant_execution.py \
-  --evidence /path/to/redacted-run/report.json \
-  --source-sha <independently-known-source-sha> \
-  --artifact-sha256 <independently-known-built-artifact-digest>
-```
+## Scope of the owner amendment
 
-The report uses content-addressed paths confined to its own artifact directory. JUnit results and matching trace assertions must agree; all required cells/trials are present. No all-green product report is committed. Absent/inconsistent evidence exits nonzero. This checker cannot authenticate arbitrary hand-authored files: #608 must bind trusted runner/CI provenance, reviews and owner attestation into the actual promotion command and demonstrate rejection.
+#612 changes verification/reuse, not the root plan's selected goal, finite task order, authority or runtime file ownership. The older root-plan model/installed-artifact qualification prose and historical numerical evaluation proposals are interpreted through this revised contract: scoped observed claims, not universal repeated trials or a live prerequisite for development closure. This explicit precedence avoids silently reactivating the retired #602 workload. Original security, useful outcomes and evidence honesty remain.
 
 ## Plan adoption and operating authority
 
@@ -60,7 +59,7 @@ Repository-root `delivery-plan.yaml` is the only current plan. Its packaged copy
 
 The root plan enumerates this finite track inside the existing Presence program. #600 is the integration/evidence parent, not a second active coordinator. Implementation proceeds through dependency-satisfied children after governance adoption, with independent security review for changed authority/egress/effect boundaries. It does not turn on new authority on an owner installation.
 
-Before real-model evaluation, record provider/account, synthetic or selected data, destinations, requests/tokens or monetary ceiling, duration and retention. Before deployment/account mutation, use explicit owner operating authorization. New paths start disabled/unqualified and receive per-profile qualification. No new scheduled automation is created or activated here.
+Before real-model evaluation, record provider/account, synthetic or selected data, destinations, requests/tokens or monetary ceiling, duration and retention. Before deployment/account mutation, use explicit owner operating authorization. New paths retain existing safe rollout controls; verify the changed profile with no-model tests and only the scoped authorized smoke that its claim needs. No new scheduled automation is created or activated here.
 
 ## Production risk disposition
 
@@ -75,10 +74,8 @@ Before real-model evaluation, record provider/account, synthetic or selected dat
 
 ## Completion stages
 
-**Specification/gate infrastructure:** #601 merges with required checks and adversarial gate tests. No runtime-repair claim.
+**Contract/infrastructure:** #601/#612 document the requirement and offline specification check; no runtime-repair claim.
 
-**Development integration:** runtime changes have useful-positive, authority-negative and actual transport evidence with current CI. Missing authorized live operation is pending, not fabricated.
+**Development integration:** each actual runtime task meets its focused unit and needed boundary tests, required CI and risk-triggered review. #608 summarizes coverage with existing tools and an optional smoke procedure; it does not require a new evaluator.
 
-**Product qualification:** #608 real-model and exact installed-owner gates pass, mandatory risk dispositions are resolved, #512 final regression covers the same integration and #513 states that measured scope. Only then may #600 close as productized.
-
-A paragraph, regex, tool declaration or expected-failure test alone cannot cross these boundaries. Report the precise stage achieved instead of saying the assistant is now fixed.
+**Operating claims:** only claim the specific model/client/build behavior actually observed. Missing live permission is recorded, not used to stop safe development or to invent success. #600 can close the agreed development integration once all runtime requirements pass; #512/#513 preserve any narrowly required operating condition and accurately label unobserved profiles. No blanket all-profile matrix is needed.

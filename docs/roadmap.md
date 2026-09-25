@@ -1,5 +1,9 @@
 # Personal AgentOS roadmap
 
+## Owner-selected execution integration — 2026-09-25
+
+[AGENCY #600](https://github.com/Jongtae/agentos/issues/600) refines the active Presence program with actual supported goal execution. Follow the [execution contract](assistant-execution-contract.en.md) and [finite delivery/ownership](assistant-execution-delivery.en.md), reusing #597/#598. Baseline, broker parity, reviewed context composition, goal loop, recovery and real-model/installed-build qualification precede final claims. Older useful-default/platform order below is historical direction, not reactivation authority. No mandatory new framework or automatic acquisition is selected.
+
 Use the [Goal Execution Contract](goal-execution-contract.en.md): the canonical delivery plan and a goal-ready issue select work; vision, list order and planned issues never activate execution themselves.
 
 **Personal AgentOS = Personal AI Kernel + Agent Distribution Platform.** It must do useful work before the marketplace is large, while preserving observable and revocable owner authority. See [architecture](personal-agentos-architecture.en.md), [Owner Control](owner-control-contract.en.md), [Default Agent Usefulness](default-agent-usefulness.en.md) and [platform foundation](agent-distribution-platform-foundation.en.md).

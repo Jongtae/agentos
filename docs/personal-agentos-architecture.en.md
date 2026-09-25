@@ -1,5 +1,9 @@
 # Personal AgentOS Architecture
 
+## Current execution refinement
+
+For #600, the [Assistant execution contract](assistant-execution-contract.en.md) specifies ordinary goals → existing run_agent/qualified CLI loops → AgentOS broker → authorized context → goal-level Evidence, without another state store. Its [delivery/ownership contract](assistant-execution-delivery.en.md) takes precedence over historical activation suggestions below. Capability parity means actual qualified invocations, not identical prompts/declarations. Shipped status remains evidence-bound.
+
 ## Status and purpose
 
 This is the canonical product-architecture definition: intended product boundary, meaning of **OS**, and authority between the personal AI kernel, installable AgentPackages, distribution and replaceable runtimes. It is not a claim that every described layer is shipped. Current support depends on merged implementation, the [roadmap](roadmap.md) and named acceptance evidence.

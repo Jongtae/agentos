@@ -1,5 +1,9 @@
 # Goal Execution Contract
 
+## Assistant execution closeout refinement
+
+For #600, follow the [execution contract](assistant-execution-contract.en.md) and [finite ownership plan](assistant-execution-delivery.en.md). Repaired journeys require baseline-red/fixed-green, opposing cases and a meaningful actual-entrypoint mutation. Child implementation, integrated runtime and product qualification are separate closeouts. Missing/skip/xfail, fixture-as-live, stale installed builds and mandatory risks cannot satisfy promotion. #601 checks evidence consistency; #608 must bind trusted artifacts/reviews and prove enforcement in the real promotion path. A standalone validator is not a release certificate.
+
 ## Purpose
 
 This contract makes an active AgentOS work item executable as an agent goal. A goal is not a restatement of a document title: it is a bounded commitment with an authoritative source, allowed authority, observable evidence, and a truthful terminal condition.

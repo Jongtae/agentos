@@ -1,5 +1,11 @@
 # AgentOS contribution workflow
 
+## Goal-directed execution and anti-false-completion
+
+The active plan is repository-root `delivery-plan.yaml` only. The runtime copy was retired; do not recreate `src/personal_agent/delivery-plan.yaml` to satisfy historical parity instructions. `scripts/verify_src_layout.py` enforces that boundary.
+
+For the owner-selected AGENCY track, follow [Assistant execution contract](docs/assistant-execution-contract.en.md) and [delivery/ownership](docs/assistant-execution-delivery.en.md). Use existing loop/broker/Work primitives, not copy-only fixes, growing phrase catalogues or privacy bypasses. Every behavioral fix needs baseline-red/fixed-green, opposing cases and a meaningful mutation at its actual entrypoint/transport. Specification, fixture, protocol, real-model and installed-owner evidence are separate. Required missing/skip/xfail or stale-artifact evidence blocks product claims, not unrelated safe development. #600 remains open until qualification; #601 supplies only contract/gate infrastructure; #608 owns trusted-runner and actual promotion integration.
+
 ## Product priority
 
 Personal AgentOS is a local-first, owner-installed personal AI operating environment for one person. Its long-term product contract is **Personal AI Kernel + Agent Distribution Platform**. The product owns durable personal state and policy across conversations, packages and engine changes: Context/Memory authority, owner material/workspace, Grants, approvals, Work/Event state, Artifacts, Evidence, recovery, and capability/runtime boundaries.

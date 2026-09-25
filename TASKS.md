@@ -1,5 +1,9 @@
 # Delivery tracks
 
+## Current scope refinement — AGENCY within PRESENCE-01
+
+Owner decision 2026-09-25: #600 adds execution integration, not a second coordinator or projection-only patch. The [finite delivery contract](docs/assistant-execution-delivery.en.md) and root plan enumerate #601 → existing #597/#598 → #603 → #604 → #605 → #606 → #607 → #608 → final #512 → #513, preserving #581. Use GitHub for actual completion, not historical sequences below. Real profile/model/installed-artifact qualification is mandatory before product claims. This changes scope/dependencies, not a duplicate execution-status database.
+
 Active work is executed only from a goal-ready issue and active delivery-plan entry under the [Goal Execution Contract](docs/goal-execution-contract.en.md). Status tables are trackers, not authority to activate reserved work.
 
 ## Execution governance

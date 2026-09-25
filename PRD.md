@@ -1,5 +1,9 @@
 # Personal AgentOS — useful personal AI under owner control
 
+## Goal-directed execution refinement — 2026-09-25
+
+The [Assistant execution contract](docs/assistant-execution-contract.en.md) makes actual useful action, not avoidance of negative wording, a product requirement under #600. Existing allowed capabilities must be discovered/invoked, observed and safely repaired across qualified routes. A declaration, semantic seam, mock transcript or zero CLI exit is not proof. [Delivery ownership](docs/assistant-execution-delivery.en.md) separates specification, implementation, integration and exact installed-build qualification. No product-ready claim follows from this specification; historical scope below remains historical.
+
 ## Canonical owner-facing experience refinement
 
 For conversation, recovery, Settings, contextual capability handoff and model/runtime continuity, follow the [Presence Experience Contract](docs/presence-experience-contract.en.md). Its evidence and reasoning are preserved in the [2026-09-23 Presence and Settings UX research](docs/research/presence-and-settings-ux.ko.md).

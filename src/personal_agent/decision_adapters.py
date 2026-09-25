@@ -41,6 +41,7 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
 import tempfile
 import time
@@ -64,10 +65,100 @@ CLI_BINARIES = {'codex': 'codex', 'claude-code': 'claude'}
 #: (never a shell), so this only bounds its shape.
 MODEL_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,99}$')
 
-# Codex features that could let a judgment act rather than answer.  The
-# names come from `codex features list` on the verified version; an unknown
-# name makes the CLI fail, which surfaces as an explicit unavailable outcome.
-CODEX_DISABLED_FEATURES = ('shell_tool', 'plugins', 'apps')
+# --- Codex tool surface (#580 review F2) ----------------------------------------
+# An allowlist, not a denylist: at capability-check time AgentOS reads the
+# CLI's own `codex features list` (a local listing, no model call) and every
+# feature that is enabled by default and not listed here is disabled for
+# decision calls.  After disabling, the listing is read again and activation
+# is refused unless only these remain enabled.  Unknown stages fail closed; an
+# unknown `--disable` name makes the CLI itself fail (observed on 0.153.4).
+CODEX_ALLOWED_ENABLED_FEATURES = frozenset({
+    # request/transport/rendering behaviour, not tools
+    'auth_elicitation', 'compaction_image_budget', 'content_item_kinds', 'enable_request_compression',
+    'remote_compaction_v2', 'unbounded_connection_retries', 'personality',
+})
+#: Disabled whenever the CLI lists them, even when off by default (memories,
+#: sub-agents and web search must never be switched on for a judgment).
+CODEX_ALWAYS_DISABLE = ('memories', 'multi_agent', 'multi_agent_v2', 'web_search_request', 'web_search_cached',
+                        'standalone_web_search', 'external_agent_memory_import', 'chronicle')
+CODEX_FEATURE_STAGES = ('stable', 'under development', 'experimental', 'deprecated', 'removed')
+#: Official `-c key=value` overrides for decision calls: no web search, no
+#: AGENTS.md/project docs, no skills/apps/permissions/environment/collaboration
+#: instructions in the model-visible input, no plan tool.  The prompt-input
+#: effect of these was checked locally with `codex debug prompt-input` (no
+#: model call); the resulting *tool* list is not observable locally.
+CODEX_DECISION_CONFIG = (
+    ('web_search', '"disabled"'), ('project_doc_max_bytes', '0'), ('skills.include_instructions', 'false'),
+    ('include_environment_context', 'false'), ('include_permissions_instructions', 'false'),
+    ('include_collaboration_mode_instructions', 'false'), ('include_apps_instructions', 'false'),
+    ('tools.update_plan.enabled', 'false'),
+)
+#: Claude Code: no user/project/local settings files, no CLAUDE.md discovery
+#: up from the working directory, no auto-memory.  The env names are the
+#: CLI's own (read from the 2.1.280 binary, not from docs); their effect was
+#: not run-verified.
+CLAUDE_DECISION_ENV = {'CLAUDE_CODE_DISABLE_CLAUDE_MDS': '1', 'CLAUDE_CODE_DISABLE_AUTO_MEMORY': '1'}
+
+_FEATURE_LINE = re.compile(r'^(\S+)\s+(stable|under development|experimental|deprecated|removed|\S.*?\S)\s+(true|false)\s*$')
+
+
+def parse_codex_features(text):
+    """``[(name, stage, enabled)]`` from ``codex features list``; ValueError on anything unexpected."""
+    rows = []
+    for line in (text or '').splitlines():
+        if not line.strip():
+            continue
+        match = _FEATURE_LINE.match(line.strip())
+        if not match or match.group(2) not in CODEX_FEATURE_STAGES:
+            raise ValueError(f'unrecognised feature line: {line.strip()[:80]}')
+        rows.append((match.group(1), match.group(2), match.group(3) == 'true'))
+    if not rows:
+        raise ValueError('empty feature list')
+    return rows
+
+
+def codex_disable_plan(rows):
+    """The ``--disable`` names for decision calls: every enabled, non-removed
+    feature outside the allowlist, plus the always-disabled ones the CLI lists."""
+    listed = {name for name, _stage, _enabled in rows}
+    plan = [name for name, stage, enabled in rows
+            if enabled and stage != 'removed' and name not in CODEX_ALLOWED_ENABLED_FEATURES]
+    plan += [name for name in CODEX_ALWAYS_DISABLE if name in listed and name not in plan]
+    return sorted(plan)
+
+
+def codex_still_enabled(rows):
+    """Enabled, non-removed features outside the allowlist (must be empty)."""
+    return sorted(name for name, stage, enabled in rows
+                  if enabled and stage != 'removed' and name not in CODEX_ALLOWED_ENABLED_FEATURES)
+
+
+def bounded_run(runner, argv, *, cwd, env, timeout):
+    """Run one CLI with no shell in its own process group.
+
+    With the real ``subprocess.run`` a timeout kills the whole group, so the
+    native binary behind a wrapper script (Codex's ``codex.js``) is not left
+    running.  An injected test runner receives ``start_new_session=True``.
+    """
+    if runner is not subprocess.run:
+        return runner(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                      timeout=timeout, shell=False, start_new_session=True)
+    process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True, shell=False, start_new_session=True)
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        kill_process_group(process)
+        process.communicate()
+        raise
+    return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+
+
+def kill_process_group(process):
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        process.kill()
 
 
 def valid_model_id(value):
@@ -89,7 +180,8 @@ class SubscriptionCliDecisionEngine(SchemaDecisionEngine):
     route_label = ROUTE_SUBSCRIPTION_CLI
 
     def __init__(self, execution, engine_id, *, model=None, model_policy='engine_default',
-                 timeout=CLI_DECISION_TIMEOUT_SECONDS, audit=None, now=time.time, guard=None):
+                 timeout=CLI_DECISION_TIMEOUT_SECONDS, audit=None, now=time.time, guard=None,
+                 codex_disabled_features=None):
         super().__init__(audit=audit, now=now)
         if engine_id not in CLI_BINARIES:
             raise ValueError('지원하는 구독 엔진을 선택하세요.')
@@ -97,19 +189,24 @@ class SubscriptionCliDecisionEngine(SchemaDecisionEngine):
             raise ValueError('모델 이름 형식을 확인하세요.')
         self.execution, self.engine_id, self.model = execution, engine_id, model
         self.model_policy, self.timeout, self.guard = model_policy, timeout, guard
+        # Codex fails closed without the disable plan from a capability check.
+        self.codex_disabled_features = (tuple(codex_disabled_features) if codex_disabled_features is not None
+                                        else None)
         self.last_failure = ''
 
     def argv(self, binary, prompt, schema_path, schema):
         if self.engine_id == 'codex':
             argv = [binary, 'exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check',
                     '--ignore-user-config', '--ephemeral', '--output-schema', str(schema_path)]
-            for feature in CODEX_DISABLED_FEATURES:
+            for key, value in CODEX_DECISION_CONFIG:
+                argv += ['-c', f'{key}={value}']
+            for feature in self.codex_disabled_features or ():
                 argv += ['--disable', feature]
             if self.model:
                 argv += ['--model', self.model]
             return argv + [prompt]
         argv = [binary, '-p', prompt, '--output-format', 'json', '--json-schema', json.dumps(schema),
-                '--tools', '', '--strict-mcp-config', '--no-session-persistence',
+                '--tools', '', '--strict-mcp-config', '--setting-sources', '', '--no-session-persistence',
                 '--system-prompt', DECISION_SYSTEM]
         if self.model:
             argv += ['--model', self.model]
@@ -138,6 +235,8 @@ class SubscriptionCliDecisionEngine(SchemaDecisionEngine):
         rendered = context.render()
         if len(rendered) > MAX_CONTEXT_CHARS:
             return done(OUTCOME_REJECTED)
+        if self.engine_id == 'codex' and self.codex_disabled_features is None:
+            return done(OUTCOME_UNAVAILABLE, failure='capability-unchecked')
         binary = self.execution.finder(CLI_BINARIES[self.engine_id])
         if not binary:
             return done(OUTCOME_UNAVAILABLE, failure='cli-not-found')
@@ -154,11 +253,11 @@ class SubscriptionCliDecisionEngine(SchemaDecisionEngine):
                 env = self.execution.environment(self.engine_id, binary, run_dir)
             except ExecutionError:
                 return done(OUTCOME_UNAVAILABLE, failure='auth')
+            if self.engine_id == 'claude-code':
+                env = {**env, **CLAUDE_DECISION_ENV}
             argv = self.argv(binary, prompt, schema_path, schema)
             try:
-                completed = self.execution.runner(argv, cwd=run_dir, env=env, stdin=subprocess.DEVNULL,
-                                                  capture_output=True, text=True, timeout=self.timeout,
-                                                  shell=False)
+                completed = bounded_run(self.execution.runner, argv, cwd=run_dir, env=env, timeout=self.timeout)
             except subprocess.TimeoutExpired:
                 return done(OUTCOME_TIMEOUT, failure='timeout')
             except OSError:

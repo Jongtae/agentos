@@ -20,7 +20,9 @@ from personal_agent.conversation_handoff import ConversationJudgments, JUDGMENT_
 from personal_agent.decision import (NO_CANDIDATE, OUTCOME_CANCELLED, OUTCOME_DECIDED, OUTCOME_MALFORMED,
                                      OUTCOME_REJECTED, OUTCOME_TIMEOUT, OUTCOME_UNAVAILABLE, DecisionContext,
                                      ModelDecisionEngine, UnavailableDecisionEngine)
-from personal_agent.decision_adapters import (JEV_ENDPOINT, JevDecisionEngine, SubscriptionCliDecisionEngine)
+from personal_agent.decision_adapters import (CODEX_DECISION_CONFIG, JEV_ENDPOINT, JevDecisionEngine,
+                                              SubscriptionCliDecisionEngine, bounded_run, codex_disable_plan,
+                                              parse_codex_features)
 from personal_agent.decision_qualification import CASE_IDS, SUITE_VERSION, qualify
 from personal_agent.decision_routes import DecisionRouteError
 from personal_agent.providers import ModelAdapter, ProviderError
@@ -125,10 +127,23 @@ class JevTransport:
         return {'model': 'jev-1.13.0', 'answers': {qid: answer}, 'usage': {'input_tokens': 10, 'output_tokens': 2}}
 
 
-CODEX_HELP = ('Usage: codex exec [OPTIONS] [PROMPT]\n --json\n --ignore-user-config\n --ephemeral\n'
-              ' --output-schema <FILE>\n -m, --model <MODEL>\n --disable <FEATURE>\n --sandbox <MODE>\n')
+CODEX_HELP = ('Usage: codex exec [OPTIONS] [PROMPT]\n -c, --config <key=value>\n --json\n --ignore-user-config\n'
+              ' --ephemeral\n --skip-git-repo-check\n --output-schema <FILE>\n -m, --model <MODEL>\n'
+              ' --disable <FEATURE>\n --sandbox <MODE>\n')
 CLAUDE_HELP = (' -p, --print\n --output-format <format>\n --json-schema <schema>\n --tools <tools...>\n'
-               ' --strict-mcp-config\n --no-session-persistence\n --system-prompt <prompt>\n --model <model>\n')
+               ' --strict-mcp-config\n --setting-sources <sources>\n --no-session-persistence\n'
+               ' --system-prompt <prompt>\n --model <model>\n')
+#: A `codex features list` shape (name, stage, enabled), as printed by 0.153.4.
+CODEX_FEATURES = (('apps', 'stable', True), ('auth_elicitation', 'stable', True), ('browser_use', 'stable', True),
+                  ('memories', 'stable', False), ('multi_agent', 'stable', True), ('personality', 'stable', True),
+                  ('shell_tool', 'stable', True), ('sqlite', 'removed', True), ('unified_exec', 'stable', True),
+                  ('view_image', 'stable', True), ('web_search_request', 'deprecated', False),
+                  ('artifact', 'under development', False))
+
+
+def features_listing(disabled=(), features=CODEX_FEATURES):
+    return '\n'.join(f'{name:<40} {stage:<18} {"false" if name in disabled else str(enabled).lower()}'
+                     for name, stage, enabled in features)
 
 
 class CliRunner:
@@ -138,14 +153,18 @@ class CliRunner:
     oracle, so tests can make one candidate model qualified and another not.
     """
 
-    def __init__(self, judges=None, *, help_text=None, fail=None, logged_in=True, claude_model='claude-fixture-small'):
+    def __init__(self, judges=None, *, help_text=None, fail=None, logged_in=True, claude_model='claude-fixture-small',
+                 features=CODEX_FEATURES, ignore_disable=()):
         self.judges = judges or {None: oracle}
         self.help_text, self.fail, self.logged_in, self.claude_model = help_text or {}, fail, logged_in, claude_model
+        self.features, self.ignore_disable = features, ignore_disable
         self.calls = []
 
-    def __call__(self, argv, cwd=None, env=None, stdin=None, capture_output=None, text=None, timeout=None, shell=None):
+    def __call__(self, argv, cwd=None, env=None, stdin=None, capture_output=None, text=None, timeout=None, shell=None,
+                 start_new_session=None):
         assert shell is False
-        self.calls.append({'argv': list(argv), 'cwd': cwd, 'env': dict(env or {}), 'timeout': timeout})
+        self.calls.append({'argv': list(argv), 'cwd': cwd, 'env': dict(env or {}), 'timeout': timeout,
+                           'start_new_session': start_new_session})
         binary = os.path.basename(argv[0])
         engine = 'codex' if binary == 'codex' else 'claude-code'
         done = lambda out='', code=0, err='': types.SimpleNamespace(returncode=code, stdout=out, stderr=err)
@@ -153,6 +172,9 @@ class CliRunner:
             return done(self.help_text.get(engine, CODEX_HELP if engine == 'codex' else CLAUDE_HELP))
         if '--version' in argv:
             return done('codex-cli 0.153.4' if engine == 'codex' else '2.1.280 (Claude Code)')
+        if argv[1:3] == ['features', 'list']:
+            disabled = {argv[i + 1] for i, part in enumerate(argv) if part == '--disable'} - set(self.ignore_disable)
+            return done(features_listing(disabled, self.features))
         if argv[1:3] == ['login', 'status']:
             return done('Logged in using ChatGPT' if self.logged_in else 'Not logged in', 0 if self.logged_in else 1)
         if argv[1:3] == ['auth', 'status']:
@@ -175,6 +197,9 @@ class CliRunner:
         return done(json.dumps({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': '',
                                 'structured_output': answer,
                                 'modelUsage': {self.claude_model: {'inputTokens': 5}}}))
+
+
+PLAN = codex_disable_plan(parse_codex_features(features_listing()))
 
 
 def cli_adapter(runner, root, finder=None):
@@ -205,7 +230,7 @@ class AdapterParityTests(Temp):
                                               lambda: ({'provider': 'openai', 'endpoint': 'https://api.openai.com/v1',
                                                         'model': 'gpt-4o-mini'}, OPENAI_KEY)),
             'jev': JevDecisionEngine(lambda: JEV_KEY, transport=JevTransport(judge)),
-            'codex': SubscriptionCliDecisionEngine(execution, 'codex'),
+            'codex': SubscriptionCliDecisionEngine(execution, 'codex', codex_disabled_features=PLAN),
             'claude-code': SubscriptionCliDecisionEngine(execution, 'claude-code'),
         }
 
@@ -245,6 +270,8 @@ class SubscriptionCliTests(Temp):
     def engine(self, engine_id='codex', runner=None, **kwargs):
         self.runner = runner or CliRunner()
         self.audit = []
+        if engine_id == 'codex':
+            kwargs.setdefault('codex_disabled_features', PLAN)
         return SubscriptionCliDecisionEngine(cli_adapter(self.runner, self.root), engine_id, audit=self.audit.append, **kwargs)
 
     def context(self, **facts):
@@ -261,7 +288,15 @@ class SubscriptionCliTests(Temp):
             self.assertIn(flag, argv)
         self.assertEqual(argv[argv.index('--sandbox') + 1], 'read-only')
         disabled = [argv[i + 1] for i, part in enumerate(argv) if part == '--disable']
-        self.assertEqual(sorted(disabled), ['apps', 'plugins', 'shell_tool'])
+        self.assertEqual(sorted(disabled), ['apps', 'browser_use', 'memories', 'multi_agent', 'shell_tool',
+                                            'unified_exec', 'view_image', 'web_search_request'],
+                         'every enabled tool-bearing feature plus the always-off ones; allowlisted ones stay')
+        self.assertNotIn('personality', disabled)
+        overrides = [argv[i + 1] for i, part in enumerate(argv) if part == '-c']
+        self.assertEqual(overrides, [f'{key}={value}' for key, value in CODEX_DECISION_CONFIG])
+        self.assertIn('web_search="disabled"', overrides)
+        self.assertIn('project_doc_max_bytes=0', overrides)
+        self.assertTrue(call['start_new_session'], 'the CLI runs in its own process group')
         self.assertFalse(any('mcp_servers' in part for part in argv), 'no AgentOS MCP bridge or tools for a judgment')
         self.assertNotIn('--model', argv, 'engine_default sends no model flag')
         self.assertNotIn('OPENAI_API_KEY_FIXTURE_LEAK', call['env'])
@@ -281,8 +316,12 @@ class SubscriptionCliTests(Temp):
         self.assertNotIn('--mcp-config', argv)
         self.assertIn('--no-session-persistence', argv)
         self.assertEqual(argv[argv.index('--model') + 1], 'claude-fixture-small')
+        self.assertEqual(argv[argv.index('--setting-sources') + 1], '', 'no user/project/local settings files')
         self.assertEqual(call['env'].get('CLAUDE_CODE_OAUTH_TOKEN'), 'cc-fixture-token-000000')
-        self.assertEqual(set(call['env']) - {'HOME', 'PATH', 'LANG', 'PYTHONPATH', 'CLAUDE_CODE_OAUTH_TOKEN'}, set())
+        self.assertEqual((call['env'].get('CLAUDE_CODE_DISABLE_CLAUDE_MDS'), call['env'].get('CLAUDE_CODE_DISABLE_AUTO_MEMORY')),
+                         ('1', '1'), 'no CLAUDE.md discovery or auto-memory')
+        self.assertEqual(set(call['env']) - {'HOME', 'PATH', 'LANG', 'PYTHONPATH', 'CLAUDE_CODE_OAUTH_TOKEN',
+                                             'CLAUDE_CODE_DISABLE_CLAUDE_MDS', 'CLAUDE_CODE_DISABLE_AUTO_MEMORY'}, set())
 
     def test_requested_and_observed_models_stay_separate(self):
         self.engine('claude-code', model='haiku', model_policy='explicit').judge(self.context(), 'p')
@@ -333,9 +372,38 @@ class SubscriptionCliTests(Temp):
         self.assertEqual(engine.judge(cancelled, 'p').outcome, OUTCOME_CANCELLED)
         self.assertEqual(engine.judge(DecisionContext('x', {'m': 'a' * 7000}), 'p').outcome, OUTCOME_REJECTED)
         self.assertEqual(self.runner.calls, [])
-        missing = SubscriptionCliDecisionEngine(cli_adapter(self.runner, self.root, finder=lambda name: None), 'codex')
+        missing = SubscriptionCliDecisionEngine(cli_adapter(self.runner, self.root, finder=lambda name: None), 'codex',
+                                                codex_disabled_features=PLAN)
         self.assertEqual(missing.judge(DecisionContext('x', {'m': 'a'}), 'p').outcome, OUTCOME_UNAVAILABLE)
         self.assertEqual(self.runner.calls, [])
+
+    def test_codex_without_a_checked_tool_surface_makes_no_call(self):
+        engine = SubscriptionCliDecisionEngine(cli_adapter(CliRunner(), self.root), 'codex', audit=[].append)
+        runner = engine.execution.runner
+        self.assertEqual(engine.judge(DecisionContext('x', {'m': 'a'}), 'p').outcome, OUTCOME_UNAVAILABLE)
+        self.assertEqual(engine.last_failure, 'capability-unchecked')
+        self.assertEqual(runner.calls, [])
+
+    def test_a_timeout_kills_the_whole_process_group(self):
+        import subprocess
+        import sys
+        import time as clock
+        marker = Path(self.root) / 'grandchild.pid'
+        script = ('import subprocess,sys,time;'
+                  f'p=subprocess.Popen([sys.executable,"-c","import time; time.sleep(60)"]);'
+                  f'open({str(marker)!r},"w").write(str(p.pid));time.sleep(60)')
+        with self.assertRaises(subprocess.TimeoutExpired):
+            bounded_run(subprocess.run, [sys.executable, '-c', script], cwd=self.root, env=dict(os.environ), timeout=2)
+        pid = int(marker.read_text())
+        for _ in range(50):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            clock.sleep(0.1)
+        else:
+            os.kill(pid, 9)
+            self.fail('the grandchild (the native CLI behind a wrapper) survived the timeout')
 
     def test_a_model_identifier_is_one_bounded_argument(self):
         for bad in ('--dangerously-bypass-approvals-and-sandbox', 'a b', '', 'x' * 200, 'm;rm'):
@@ -429,6 +497,68 @@ class ServiceRouteSelectionTests(Temp):
         self.assertEqual(self.jev.calls, [])
         self.assertEqual(self.judge(service).outcome, 'unavailable', 'a saved Jev key is not an active route')
         self.assertEqual(self.jev.calls, [])
+
+    def test_saving_a_direct_decision_key_starts_no_openai_egress(self):
+        service = self.service()
+        service.save_decision_route_credential({'transport': 'direct_api', 'key': OPENAI_KEY})
+        self.assertIsNone(self.store.config('decision_route'))
+        self.assertFalse(self.store.config('decision_model', {}), 'only activation writes decision_model')
+        self.assertEqual(self.judge(service).outcome, 'unavailable')
+        self.assertEqual(self.openai.calls, [], 'a saved key alone never contacts api.openai.com')
+        status = service.settings()['decision_route']
+        self.assertEqual(status['active']['transport'], 'none', 'the pre-#580 default is unchanged')
+        self.assertTrue(status['direct_api']['configured'], 'the saved key makes the route selectable')
+        service.activate_decision_route({'transport': 'direct_api'})
+        self.assertEqual(len(self.openai.calls), 1, 'the explicit activation sends one probe')
+        self.assertEqual(self.store.config('decision_model')['model'], 'gpt-4o-mini')
+        self.assertEqual(self.judge(service).value, 'retry')
+
+    def test_concurrent_activations_are_serialised(self):
+        service = self.service()
+        service.save_decision_route_credential({'transport': 'jev', 'key': JEV_KEY})
+        service.decision_routes._activating.acquire()
+        try:
+            with self.assertRaises(DecisionRouteError) as raised:
+                service.activate_decision_route({'transport': 'jev'})
+            self.assertIn('이미', str(raised.exception))
+        finally:
+            service.decision_routes._activating.release()
+        self.assertEqual(self.jev.calls, [])
+        self.assertEqual(service.activate_decision_route({'transport': 'jev'})['active']['transport'], 'jev')
+
+    def test_codex_tool_surface_is_an_allowlist_that_fails_closed(self):
+        cases = (
+            ('a feature that cannot be disabled', CliRunner(ignore_disable=('unified_exec',)), 'tool-features-enabled'),
+            ('an unknown stage', CliRunner(features=CODEX_FEATURES + (('mystery_tool', 'beta', True),)), 'unverified'),
+        )
+        for label, runner, surface in cases:
+            with self.subTest(label):
+                self.store = QuickStore(tempfile.mkdtemp(dir=self.root))
+                service = self.service(runner=runner)
+                with self.assertRaises(DecisionRouteError):
+                    service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'codex'})
+                self.assertIsNone(self.store.config('decision_route'))
+                self.assertEqual(self.store.config('decision_cli_capabilities')['codex']['tool_surface'], surface)
+                self.assertFalse(any('exec' in call['argv'] and '--help' not in call['argv'] for call in runner.calls),
+                                 'no judgment runs on an unverified tool surface')
+        self.store = QuickStore(tempfile.mkdtemp(dir=self.root))
+        service = self.service()
+        route = service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'codex'})['active']
+        self.assertEqual(route['codex_disabled_features'], PLAN)
+        listing = [call['argv'] for call in self.runner.calls if call['argv'][1:3] == ['features', 'list']]
+        self.assertEqual(len(listing), 2, 'listed, then re-listed with the disables to verify')
+        self.assertEqual(self.runner.calls[-1]['argv'].count('--disable'), len(PLAN))
+        self.assertTrue(all(call['env']['CODEX_HOME'] != str(Path(self.root) / 'codex-home')
+                            for call in self.runner.calls if call['argv'][1:3] == ['features', 'list']),
+                        'the listing uses an empty CODEX_HOME, i.e. the defaults --ignore-user-config runs with')
+
+    def test_help_flags_match_whole_words_only(self):
+        from personal_agent.decision_routes import has_flag
+        self.assertTrue(has_flag(' -m, --model <MODEL>', '--model'))
+        self.assertFalse(has_flag(' --model-provider <X>', '--model'))
+        self.assertFalse(has_flag(' --no-json', '--json'))
+        service = self.service(runner=CliRunner(help_text={'codex': CODEX_HELP.replace(' -m, --model <MODEL>\n', ' --model-provider <P>\n')}))
+        self.assertFalse(service.check_decision_cli_capabilities({'engine': 'codex'})['model_override'])
 
     def test_activation_probes_persists_and_survives_restart(self):
         service = self.service()
@@ -590,6 +720,20 @@ class ServiceRouteSelectionTests(Temp):
         self.assertEqual(self.judge(service).outcome, 'unavailable')
         self.assertEqual(len(self.runner.calls), calls, 'no call against an unverified binary')
         self.assertEqual(self.store.config('decision_audit')[-1]['failure'], 'requalification-needed')
+
+    def test_engine_default_is_also_bound_to_the_checked_binary(self):
+        binary = Path(self.root) / 'bin' / 'claude'
+        binary.parent.mkdir()
+        binary.write_text('v1')
+        finder = lambda name: str(binary) if name == 'claude' else None
+        service = self.service(finder=finder)
+        service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'claude-code'})
+        self.assertEqual(self.judge(service).value, 'retry')
+        binary.write_text('an updated CLI with a different size')
+        calls = len(self.runner.calls)
+        self.assertEqual(self.judge(service).outcome, 'unavailable')
+        self.assertEqual(len(self.runner.calls), calls)
+        self.assertTrue(service.settings()['decision_route']['active']['requalification_needed'])
 
     def test_a_signed_out_cli_is_refused_and_the_route_is_off_by_choice_only(self):
         service = self.service(runner=CliRunner(logged_in=False))

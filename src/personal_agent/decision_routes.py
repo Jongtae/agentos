@@ -37,8 +37,12 @@ from urllib.parse import urlsplit
 from .decision import (DEFAULT_DECISION_MODEL, DEFAULT_DECISION_PROVIDER, OUTCOME_DECIDED,
                        ROUTE_DIRECT_API, ROUTE_JEV, ROUTE_SUBSCRIPTION_CLI, DecisionContext,
                        ModelDecisionEngine, UnavailableDecisionEngine)
+import re
+import threading
+
 from .decision_adapters import (CLI_BINARIES, JEV_DEFAULT_MODEL, JEV_DESTINATION, JevDecisionEngine,
-                                SubscriptionCliDecisionEngine, cli_fingerprint, valid_model_id)
+                                SubscriptionCliDecisionEngine, bounded_run, cli_fingerprint, codex_disable_plan,
+                                codex_still_enabled, parse_codex_features, valid_model_id)
 from .decision_qualification import SUITE_VERSION, qualify
 
 ROUTE_OFF = 'off'
@@ -58,11 +62,17 @@ CLI_DESTINATIONS = {'codex': 'OpenAI (Codex 구독 계정)', 'claude-code': 'Ant
 #: through it: the isolation/no-tools flags are mandatory, the model flag
 #: decides whether ``explicit`` / ``lowest_qualified`` can be offered.
 REQUIRED_FLAGS = {
-    'codex': ('--json', '--ignore-user-config', '--ephemeral', '--output-schema', '--disable'),
+    'codex': ('--json', '--ignore-user-config', '--ephemeral', '--output-schema', '--disable', '--sandbox',
+              '--skip-git-repo-check', '--config'),
     'claude-code': ('--output-format', '--json-schema', '--tools', '--strict-mcp-config', '--no-session-persistence',
-                    '--system-prompt'),
+                    '--system-prompt', '--setting-sources'),
 }
 MODEL_FLAG = '--model'
+
+
+def has_flag(help_text, flag):
+    """Whole-flag match in help text (``--model`` is not ``--model-provider``)."""
+    return re.search(rf'(?<![\w-]){re.escape(flag)}(?![\w-])', help_text or '') is not None
 
 #: A synthetic judgment used to verify a route on explicit owner action.
 #: It carries no owner content.
@@ -86,6 +96,7 @@ class DecisionRoutes:
         self.service, self.clock = service, clock
         self.jev_transport = jev_transport
         self.store = service.store
+        self._activating = threading.Lock()
 
     # -- configuration rows -------------------------------------------------
     def active(self):
@@ -116,9 +127,10 @@ class DecisionRoutes:
         return JevDecisionEngine(lambda: self.store.secret('decision_jev_key') or '', model=model,
                                  audit=audit, **kwargs)
 
-    def _cli_engine(self, engine_id, model, policy, audit, guard=None):
+    def _cli_engine(self, engine_id, model, policy, audit, guard=None, codex_disabled_features=None):
         return SubscriptionCliDecisionEngine(self.service.execution_adapter, engine_id, model=model,
-                                             model_policy=policy, audit=audit, guard=guard)
+                                             model_policy=policy, audit=audit, guard=guard,
+                                             codex_disabled_features=codex_disabled_features)
 
     def engine(self):
         """The engine for the next judgment, from the active route only."""
@@ -137,16 +149,17 @@ class DecisionRoutes:
         fingerprint = route.get('fingerprint') or ''
 
         def guard():
-            # A verified model / qualification describes the CLI binary it
-            # was checked against; a changed binary needs a new check.
+            # The isolation-flag check, the Codex tool-surface plan and any
+            # verified model describe the CLI binary they were checked
+            # against; a changed binary needs a new check, for every policy.
             if self.service.isolated_engine_adapter:
                 return 'isolated-deployment'
-            if policy != POLICY_ENGINE_DEFAULT and fingerprint != cli_fingerprint(
-                    self.service.execution_adapter.finder(CLI_BINARIES[engine_id])):
+            if fingerprint != cli_fingerprint(self.service.execution_adapter.finder(CLI_BINARIES[engine_id])):
                 return 'requalification-needed'
             return ''
 
-        return self._cli_engine(engine_id, model, policy, audit, guard)
+        return self._cli_engine(engine_id, model, policy, audit, guard,
+                                route.get('codex_disabled_features') if engine_id == 'codex' else None)
 
     # -- read model (no subprocess, no model call) ---------------------------
     def status(self):
@@ -158,7 +171,8 @@ class DecisionRoutes:
         explicit = self.store.config('decision_model', {})
         key_source = ('decision' if isinstance(explicit, dict) and explicit.get('provider') and resolved
                       else 'work-api' if resolved else '')
-        direct = {'transport': ROUTE_DIRECT_API, 'configured': bool(resolved),
+        has_decision_key = bool(self.store.secret('decision_model_key'))
+        direct = {'transport': ROUTE_DIRECT_API, 'configured': bool(resolved) or has_decision_key,
                   'provider': direct_config['provider'] if direct_config else DEFAULT_DECISION_PROVIDER['provider'],
                   'model': direct_config['model'] if direct_config else DEFAULT_DECISION_MODEL,
                   'destination': urlsplit((direct_config or DEFAULT_DECISION_PROVIDER)['endpoint']).hostname,
@@ -196,9 +210,10 @@ class DecisionRoutes:
                 active.update(destination=JEV_DESTINATION, available=jev['configured'])
             elif route['transport'] == ROUTE_SUBSCRIPTION_CLI:
                 engine = next((e for e in engines if e['id'] == route.get('engine')), None)
-                # Same check as the runtime guard (a local stat, no subprocess):
-                # a verified model describes the binary it was checked against.
-                requalify = (route.get('model_policy') != POLICY_ENGINE_DEFAULT and route.get('engine') in CLI_BINARIES
+                # Same check as the runtime guard (a local stat, no subprocess),
+                # for every policy: the checked isolation/tool surface belongs
+                # to the binary it was checked against.
+                requalify = (route.get('engine') in CLI_BINARIES
                              and (route.get('fingerprint') or '') != cli_fingerprint(
                                  self.service.execution_adapter.finder(CLI_BINARIES[route['engine']])))
                 active.update(destination=CLI_DESTINATIONS.get(route.get('engine'), ''),
@@ -225,9 +240,11 @@ class DecisionRoutes:
                 self.store.secret('decision_jev_key', key)
                 self.store.put('decision_jev', {'model': model})
         elif transport == ROUTE_DIRECT_API:
+            # Only the key (#580 review F1).  `decision_model` - which the
+            # #417 resolver treats as a configured provider - is written only
+            # by a successful activation, so saving a key never starts egress.
             with self.service.lock:
                 self.store.secret('decision_model_key', key)
-                self.store.put('decision_model', dict(DEFAULT_DECISION_PROVIDER) if key else {})
         else:
             raise DecisionRouteError('키를 저장할 수 있는 대화 해석 경로가 아닙니다.')
         return self.status()
@@ -242,27 +259,63 @@ class DecisionRoutes:
         if not binary:
             raise DecisionRouteError(f'{ENGINE_NAMES[engine_id]} CLI를 찾지 못했습니다.')
         help_argv = [binary, 'exec', '--help'] if engine_id == 'codex' else [binary, '--help']
-        texts = []
+        name = ENGINE_NAMES[engine_id]
         execution.runtime_root.mkdir(parents=True, exist_ok=True, mode=0o700)
         with tempfile.TemporaryDirectory(dir=execution.runtime_root, prefix='capability-') as folder:
-            env = {'HOME': folder, 'PATH': f'{Path(binary).parent}:/usr/bin:/bin', 'LANG': 'C.UTF-8'}
-            for argv in (help_argv, [binary, '--version']):
+            # An empty HOME / CODEX_HOME: the listing shows the CLI's own
+            # defaults, which is what `--ignore-user-config` runs with.
+            env = {'HOME': folder, 'CODEX_HOME': folder, 'PATH': f'{Path(binary).parent}:/usr/bin:/bin',
+                   'LANG': 'C.UTF-8'}
+
+            def run(argv):
                 try:
-                    done = execution.runner(argv, cwd=folder, env=env, stdin=subprocess.DEVNULL, capture_output=True,
-                                            text=True, timeout=20, shell=False)
+                    done = bounded_run(execution.runner, argv, cwd=folder, env=env, timeout=20)
                 except (subprocess.TimeoutExpired, OSError) as exc:
-                    raise DecisionRouteError(f'{ENGINE_NAMES[engine_id]} CLI 기능을 확인하지 못했습니다 ({type(exc).__name__}).') from None
-                texts.append((done.stdout or '') + '\n' + (getattr(done, 'stderr', '') or ''))
-        help_text, version = texts[0], ' '.join(texts[1].split())[:80]
-        missing = [flag for flag in REQUIRED_FLAGS[engine_id] if flag not in help_text]
-        record = {'version': version, 'isolation_flags': not missing, 'missing_flags': missing,
-                  'model_override': MODEL_FLAG in help_text, 'fingerprint': cli_fingerprint(binary),
-                  'checked_at': self.clock(), 'source': 'cli --help'}
+                    raise DecisionRouteError(f'{name} CLI 기능을 확인하지 못했습니다 ({type(exc).__name__}).') from None
+                return done.returncode, (done.stdout or ''), (getattr(done, 'stderr', '') or '')
+
+            _code, help_out, help_err = run(help_argv)
+            _code, version_out, _err = run([binary, '--version'])
+            help_text = help_out + '\n' + help_err
+            missing = [flag for flag in REQUIRED_FLAGS[engine_id] if not has_flag(help_text, flag)]
+            record = {'version': ' '.join(version_out.split())[:80], 'isolation_flags': not missing,
+                      'missing_flags': missing, 'model_override': has_flag(help_text, MODEL_FLAG),
+                      'fingerprint': cli_fingerprint(binary), 'checked_at': self.clock(), 'source': 'cli --help'}
+            if engine_id == 'codex' and not missing:
+                record.update(self._codex_tool_surface(run, binary))
         with self.service.lock:
             rows = self._capabilities()
             rows[engine_id] = record
             self.store.put('decision_cli_capabilities', rows)
         return record
+
+    @staticmethod
+    def _codex_tool_surface(run, binary):
+        """Plan and verify the Codex feature set for decision calls (allowlist).
+
+        Reads ``codex features list`` (local, no model call), disables every
+        enabled feature outside the allowlist, reads the listing again with
+        those disables and records whether only allowlisted features remain.
+        Anything unparsable or still enabled fails closed.
+        """
+        code, out, err = run([binary, 'features', 'list'])
+        try:
+            if code != 0:
+                raise ValueError((err or out).strip()[:120] or f'exit {code}')
+            plan = codex_disable_plan(parse_codex_features(out))
+            argv = [binary, 'features', 'list']
+            for feature in plan:
+                argv += ['--disable', feature]
+            code, out, err = run(argv)
+            if code != 0:
+                raise ValueError((err or out).strip()[:120] or f'exit {code}')
+            remaining = codex_still_enabled(parse_codex_features(out))
+        except ValueError as exc:
+            return {'tool_surface': 'unverified', 'tool_surface_detail': str(exc)[:160], 'codex_disabled_features': None}
+        if remaining:
+            return {'tool_surface': 'tool-features-enabled', 'tool_surface_detail': ', '.join(remaining)[:160],
+                    'codex_disabled_features': None}
+        return {'tool_surface': 'allowlisted-features-only', 'codex_disabled_features': plan}
 
     def _probe(self, engine):
         """One synthetic judgment; ``(ok, decision)``."""
@@ -288,23 +341,43 @@ class DecisionRoutes:
         """Make one route the active DecisionEngine route after it proves it can answer.
 
         Explicit owner action only.  Any failure raises and leaves the
-        previous route exactly as it was.
+        previous route exactly as it was.  One activation runs at a time; a
+        concurrent request is refused rather than racing the route row.
         """
+        if not self._activating.acquire(blocking=False):
+            raise DecisionRouteError('이미 대화 해석 경로를 확인하고 있습니다. 끝난 뒤 다시 시도하세요.')
+        try:
+            return self._activate(body)
+        finally:
+            self._activating.release()
+
+    def _activate(self, body):
         if not isinstance(body, dict) or body.get('transport') not in TRANSPORTS:
             raise DecisionRouteError('대화 해석에 사용할 방식을 선택하세요.')
         transport = body['transport']
         if transport == ROUTE_OFF:
             return self._commit(ROUTE_OFF, {'transport': ROUTE_OFF}, {})
         if transport == ROUTE_DIRECT_API:
-            if not self.service.decision_route():
+            decision_key = self.store.secret('decision_model_key') or ''
+            if decision_key:
+                # A saved decision-only key: probe exactly that destination/key.
+                resolve = lambda: (dict(DEFAULT_DECISION_PROVIDER), decision_key)  # noqa: E731
+            elif self.service.decision_route():
+                resolve = self.service.decision_route
+            else:
                 self._fail(ROUTE_DIRECT_API, 'not-configured', 'OpenAI API 키가 없어 대화 해석에 사용할 수 없습니다.')
-            ok, decision = self._probe(self._direct_engine(None))
+            ok, decision = self._probe(ModelDecisionEngine(self.service.adapter, resolve))
             if not ok:
                 self._fail(ROUTE_DIRECT_API, decision.outcome, 'OpenAI API가 확인 판단에 답하지 않았습니다.',
                            observed_model=decision.confidence.observed_model or 'not reported')
-            config = self.service.decision_route()[0]
+            config = resolve()[0]
+            if decision_key:
+                # Written only here, after the probe passed (#580 review F1).
+                with self.service.lock:
+                    self.store.put('decision_model', dict(DEFAULT_DECISION_PROVIDER))
             return self._commit(ROUTE_DIRECT_API, {'transport': ROUTE_DIRECT_API, 'provider': config['provider'],
-                                                   'requested_model': config['model']},
+                                                   'requested_model': config['model'],
+                                                   'key_source': 'decision' if decision_key else 'existing'},
                                 {'observed_model': decision.confidence.observed_model or 'not reported'})
         if transport == ROUTE_JEV:
             if not self.store.secret('decision_jev_key'):
@@ -341,10 +414,18 @@ class DecisionRoutes:
             self._fail(option, 'isolation-flags-missing',
                        f'설치된 {name} CLI가 격리 실행에 필요한 옵션을 지원하지 않습니다.',
                        missing_flags=capability['missing_flags'])
+        disabled = capability.get('codex_disabled_features') if engine_id == 'codex' else None
+        if engine_id == 'codex' and capability.get('tool_surface') != 'allowlisted-features-only':
+            # Fail closed: the tool-bearing feature set could not be reduced to
+            # the allowlist on this CLI version (#580 review F2).
+            self._fail(option, 'tool-surface-unverified',
+                       f'설치된 {name} CLI에서 도구 기능을 모두 끌 수 있는지 확인하지 못했습니다.',
+                       detail=capability.get('tool_surface_detail') or capability.get('tool_surface') or '')
         base = {'transport': ROUTE_SUBSCRIPTION_CLI, 'engine': engine_id, 'model_policy': policy,
-                'fingerprint': capability['fingerprint'], 'cli_version': capability['version']}
+                'fingerprint': capability['fingerprint'], 'cli_version': capability['version'],
+                **({'codex_disabled_features': disabled} if engine_id == 'codex' else {})}
         if policy == POLICY_ENGINE_DEFAULT:
-            engine = self._cli_engine(engine_id, None, policy, None)
+            engine = self._cli_engine(engine_id, None, policy, None, codex_disabled_features=disabled)
             ok, decision = self._probe(engine)
             if not ok:
                 self._fail(option, engine.last_failure or decision.outcome, f'{name}이(가) 확인 판단에 답하지 않았습니다.')
@@ -358,7 +439,7 @@ class DecisionRoutes:
             model = body.get('model')
             if not valid_model_id(model):
                 raise DecisionRouteError('사용할 모델 이름을 입력하세요.')
-            engine = self._cli_engine(engine_id, model, policy, None)
+            engine = self._cli_engine(engine_id, model, policy, None, codex_disabled_features=disabled)
             ok, decision = self._probe(engine)
             if not ok:
                 unsupported = engine.last_failure == 'request-rejected'
@@ -377,9 +458,10 @@ class DecisionRoutes:
         tried = []
         for model in candidates:
             seen = []  # content-free records of the qualification calls, for observed identity only
-            engine = self._cli_engine(engine_id, model, policy, seen.append)
+            engine = self._cli_engine(engine_id, model, policy, seen.append, codex_disabled_features=disabled)
             result = qualify(engine)
-            observed = sorted({row.get('observed_model') for row in seen if row.get('observed_model')})
+            observed = sorted({row.get('observed_model') for row in seen
+                               if row.get('observed_model') and row.get('observed_model') != 'not reported'})
             tried.append({'model': model, 'qualified': result['qualified'], 'score': result['score'],
                           'ran': result['ran'], 'failure': engine.last_failure or '',
                           'observed_model': ', '.join(observed) or 'not reported'})

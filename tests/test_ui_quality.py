@@ -191,7 +191,7 @@ console.log(JSON.stringify({ok:true}));
         render = APP[APP.index("function renderTasks(){"):APP.index("function recordKey(item){")]
         self.assertIn("if(task.relation){", render)
         self.assertIn("sameAsPrevious=!task.relation&&", render)
-        self.assertIn("'바로 앞과 같은 내용'", render)
+        self.assertIn("'직전 요청과 같은 내용'", render)
         self.assertNotIn("relation:{", render)
 
 
@@ -317,7 +317,7 @@ class TaskScopedContext(unittest.TestCase):
 class TraceNavigation(unittest.TestCase):
     """#572: long traces open at the latest exchange with a bounded, day-grouped window."""
 
-    def test_window_keeps_the_latest_turns_grouped_by_day(self):
+    def test_window_keeps_the_latest_turns_newest_first_by_day(self):
         out = node_run(r"""
 const assert=require('node:assert/strict');const ui=require(process.argv[1]);ui.setLanguage('ko');
 const now=Date.UTC(2026,8,25,12,0,0),day=86400;
@@ -325,34 +325,39 @@ const tasks=[];for(let i=0;i<45;i++)tasks.push({id:'t'+i,started_at:now/1000-(44
 const view=ui.traceWindow(tasks,20,new Set(),now);
 assert.equal(view.hidden,25,'older turns are hidden, not dropped');
 const shown=view.groups.flatMap(g=>g.tasks.map(x=>x.id));
-assert.equal(shown.length,20);assert.equal(shown[shown.length-1],'t44','the latest turn is last');
-assert.deepEqual(shown,tasks.slice(25).map(x=>x.id),'chronological order is kept');
+assert.equal(shown.length,20);assert.equal(shown[0],'t44','#578: the latest turn is first');
+assert.deepEqual(shown,tasks.slice(25).map(x=>x.id).reverse(),'newest first');
 assert(view.groups.length>=2,'turns are split by day');
-assert.equal(view.groups[view.groups.length-1].label,'오늘');
+assert.equal(view.groups[0].label,'오늘','today comes first');
 const yesterday=view.groups.find(g=>g.label==='어제');assert(yesterday,'yesterday is labelled');
+assert(view.groups.indexOf(yesterday)>0,'past days come after today');
 const collapsed=ui.traceWindow(tasks,20,new Set([yesterday.key,ui.dayKey(now/1000)]),now);
 assert.equal(collapsed.groups.find(g=>g.key===yesterday.key).collapsed,true,'a past day can be collapsed');
-assert.equal(collapsed.groups[collapsed.groups.length-1].collapsed,false,'today is never collapsed');
+assert.equal(collapsed.groups[0].collapsed,false,'today is never collapsed');
 assert.equal(ui.traceWindow(tasks.slice(0,5),20,new Set(),now).hidden,0);
 ui.setLanguage('en');assert.equal(ui.dayLabel(now/1000,now),'today');
 console.log(JSON.stringify({ok:true}));
 """)
         self.assertEqual(json.loads(out.strip().splitlines()[-1]), {"ok": True})
 
-    def test_render_uses_the_window_pinning_and_jump_control(self):
+    def test_render_puts_older_at_the_end_and_keeps_the_reading_position(self):
         render = APP[APP.index("function renderTasks(){"):APP.index("let traceObserver=null;")]
         self.assertIn("traceWindow(ordered,traceLimit,collapsedDays)", render)
-        self.assertIn("'trace-earlier'", render)
-        self.assertIn("else if(grew&&wasNearEnd&&activeView==='tasks')", render)
+        self.assertLess(render.index("'trace-top'"), render.index("group.tasks.forEach"), "the top sentinel precedes the turns")
+        self.assertGreater(render.index("'trace-earlier'"), render.index("group.tasks.forEach"), "older turns load at the end")
+        self.assertIn("if(anchor&&!traceNearTop)keepTraceAnchor(list,anchor);", render)
+        self.assertIn("if(grew&&!traceNearTop){traceUnseen+=arrived;", render)
+        self.assertIn("window.scrollTo(0,0)", APP, "jump goes to the newest exchange at the top")
         self.assertIn('id="trace-jump-latest"', HTML)
         self.assertIn("IntersectionObserver", APP)
         self.assertIn("content-visibility:auto", CSS.replace(" ", ""))
         focus = APP[APP.index("function focusTurn("):APP.index("function turnHead(")]
         self.assertIn("traceLimit=Math.max(traceLimit,ordered.length-position)", focus, "a relation jump reveals an older turn")
         self.assertIn("grew=Boolean(previousNewest)&&newest.id!==previousNewest.id", render, "growth is detected by the newest turn, not the capped count")
-        self.assertIn("previous=ordered[view.hidden+index-1]", render, "repeat detection uses the full order")
+        self.assertIn("previous=ordered[index-1]", render, "repeat detection uses the full chronological order")
+        self.assertIn("user,agent", render, "inside one exchange the request still precedes the answer")
         self.assertNotIn(":last-of-type", APP)
-
+        self.assertNotIn("trace-end", APP + CSS)
 
 
 class EngineAuthUi(unittest.TestCase):
@@ -373,6 +378,35 @@ class EngineAuthUi(unittest.TestCase):
         self.assertIn("input.value=''", form)
         self.assertNotIn("engine.credential)input.value", form)
         self.assertNotIn("token:engine", form)
+
+    def test_token_save_reports_next_to_the_field(self):
+        """#578: success and failure appear beside the token field, and survive the re-render."""
+        out = node_run(r"""
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');const app=fs.readFileSync(process.argv[1],'utf8');
+class El{constructor(tag){this.tag=tag;this.children=[];this.dataset={};this.attrs={};this.className='';this._t='';this.value='';this.classList={toggle:(c,on)=>{this.cls=this.cls||new Set();on?this.cls.add(c):this.cls.delete(c);},contains:c=>Boolean(this.cls&&this.cls.has(c))};}
+ set textContent(v){this._t=String(v);this.children=[];} get textContent(){return this._t+this.children.map(c=>c.textContent).join(' ');}
+ append(...n){this.children.push(...n);} setAttribute(k,v){this.attrs[k]=v;} focus(){}}
+const all=n=>n.children.flatMap(c=>[c,...all(c)]);const active=new El('div');
+const document={createElement:t=>new El(t)};const part=(a,b)=>app.slice(app.indexOf(a),app.indexOf(b));
+const source=part('const LANGUAGES=','function normalizeEndpoint(')+part('function element(','function setError(')+part('const ENGINE_LOGIN_TEXT=','function renderSubscriptionEngines(');
+let fail=null,refreshed=0;const ctx={document,$:()=>active,console,busy:async(b,fn)=>fn(),refresh:async()=>{refreshed++;},
+ api:async(path,body)=>{if(fail)throw new Error(fail);return {engines:[{id:'claude-code',login:{state:'token-saved'}}]};}};
+vm.createContext(ctx);vm.runInContext(source,ctx);vm.runInContext("setLanguage('ko')",ctx);
+const statusOf=form=>all(form).find(n=>n.attrs.role==='status');
+let form=ctx.claudeTokenForm({credential:false});const input=all(form).find(n=>n.tag==='input');
+input.value='';form.onsubmit({preventDefault(){}});
+assert.match(statusOf(form).textContent,/붙여 넣은 뒤/,'an empty save explains itself');
+fail='경로를 찾을 수 없습니다.';input.value='tok-123456789012345678901';
+(async()=>{await form.onsubmit({preventDefault(){}});
+ assert.match(statusOf(form).textContent,/저장하지 못했습니다: 경로를 찾을 수 없습니다/,'a failed save is shown beside the field');
+ assert.equal(refreshed,0);
+ fail=null;await form.onsubmit({preventDefault(){}});assert.equal(refreshed,1);
+ form=ctx.claudeTokenForm({credential:true});
+ assert.match(statusOf(form).textContent,/토큰을 저장했습니다\. 토큰 저장됨/,'the saved notice survives the re-render with the login state');
+ assert.equal(statusOf(ctx.claudeTokenForm({credential:true})).textContent,'','the notice is shown once');
+ console.log(JSON.stringify({ok:true}));})().catch(e=>{console.error(e);process.exit(1);});
+""")
+        self.assertEqual(json.loads(out.strip().splitlines()[-1]), {"ok": True})
 
 
 if __name__ == "__main__":

@@ -408,7 +408,7 @@ class OwnerReachesTheCandidatePathFromTheManagementUI(_OwnerSurface):
     WU4 made the path exist over HTTP; nothing in the shipped management UI
     referenced it, so the only owner who could use it was one willing to
     write requests by hand.  The control added here lives in the existing
-    records view, and the tests below check the two things that make it an
+    Settings privacy pane and the exact-item view (#562), and the tests below check the two things that make it an
     owner control rather than a button: the request bodies it builds are
     accepted by the shipped route, and the digest it offers for approval is
     the one the owner inspected.
@@ -435,18 +435,18 @@ class OwnerReachesTheCandidatePathFromTheManagementUI(_OwnerSurface):
 
     def test_the_control_is_in_the_management_ui_and_adds_no_chat_surface(self):
         html = (ROOT / 'src/personal_agent/web/index.html').read_text()
-        records = html[html.index('id="view-records"'):html.index('id="view-settings"')]
-        # The control is inside the existing records view, reusing the
-        # master-detail idiom rather than introducing a surface of its own.
+        # #562: the pending list lives in Settings › 개인정보 · 진단 (the
+        # 내 기록 destination is gone) and each row opens that one candidate
+        # in the exact-item view, which has no navigation entry of its own.
+        privacy = html[html.index('id="settings-privacy"'):]
         for marker in ('id="memory-candidates"', 'id="memory-candidate-list"',
-                       'id="memory-candidate-detail"', 'id="memory-candidate-summary"',
                        'id="memory-candidate-feedback"'):
-            self.assertIn(marker, records)
-        self.assertIn('class="master-detail"', records)
-        # #394: no second default chat surface, and no fourth top-level view.
+            self.assertIn(marker, privacy)
+        self.assertIn('id="item-detail"', html)
+        # #394: no second default chat surface, and no third top-level view.
         self.assertNotIn('id="chat-form"', html)
         self.assertNotIn('id="messages"', html)
-        self.assertEqual(html.count('data-view='), 3)
+        self.assertEqual(html.count('data-view='), 2)
 
         app = self.APP.read_text()
         # Wired to the routes WU4 built, not to a stub.

@@ -25,6 +25,10 @@ class Fixture:
     results = []
     memories = [{"id": "memory-exact", "memory_key": "durable-key", "content": "exact durable memory", "created": 2}, {"id": "memory-long", "content": LONG_MEMORY, "created": 1}]
     extra_memories = []
+    # #562 fixture-only pending MemoryCandidate for the exact-item view.
+    candidates = [{"id": "candidate-1", "job_id": None, "memory_key": "weekday-lunch", "content": "평일 점심은 샐러드를 선호",
+                   "created": 5, "state": "pending", "content_digest": "d" * 64, "work_ref": "workref:" + "a" * 64}]
+    item_reads = []
     # Synthetic connector state matrix for the Settings grammar (#506).  Every
     # contract state plus an unknown value and a long backend label; no row is
     # backed by a real connector and no connect path leaves this fixture.
@@ -136,6 +140,12 @@ class Fixture:
             rows["task-ambiguous"]["decisions"] = [{"kind": "choose", "purpose": "conversation-followup", "outcome": "decided", "answer": "none-of-these", "provider": "codex", "engine": "codex", "model": "fixture-small-model", "requested_model": "fixture-small-model", "model_policy": "lowest_qualified", "observed_model": "not reported", "route": "subscription_cli", "elapsed_seconds": 2.4, "at": now - 61}]
             for value in rows.values():
                 value["conversation"] = {"job_id": value["id"]}
+        # #562: exact items each Work recorded (typed fixture data only).
+        rows["task-done"]["retained"] = [{"kind": "memory", "id": "memory-exact", "label": "durable-key", "available": any(item["id"] == "memory-exact" for item in cls.memories)}]
+        rows["task-retry"]["retained"] = [{"kind": "candidate", "id": item["id"], "label": item["memory_key"], "available": True} for item in cls.candidates]
+        rows["task-unknown"]["retained"] = [{"kind": "note", "id": "gone-note", "label": None, "available": False}]
+        if any(item["id"] == "other-0" for item in cls.other_results):
+            rows["task-done-again"]["artifacts"] = [{"id": "other-0", "kind": "저장된 결과", "path": None, "workspace_id": "workspace-other", "created": 100, "state": "current"}]
         return rows
 
     @classmethod
@@ -233,7 +243,24 @@ class Handler(BaseHTTPRequestHandler):
                 time.sleep(1.5)
                 Fixture.state_inflight = False
             self.send_json({"settings": {"model": model, "model_ready": False, "subscription_engines": ({"selected": "codex", "engines": [{"id": "codex", "name": "Codex", "installed": True, "connected": True, "login": {"state": "signed-in", "checked_at": Fixture.rich_now}}, {"id": "claude-code", "name": "Claude Code", "installed": True, "connected": False, "credential": False, "login": {"state": "signed-out", "checked_at": Fixture.rich_now}}]} if Fixture.rich_tasks else {"engines": []}), "file_roots": [{"path": path} for path in file_roots], "file_workspace": file_workspace, "context_inbox": {"sources": {}, "items": []}, "telegram": {"enabled": True, "paired": True, "username": "fixture_bot"}, "connectors": Fixture.connectors, "document_boundary": {}, "decision_route": Fixture.decision_route}, "jobs": [{"id": "task-382", "status": "running", "response": None, "message": "fixture Telegram request", "channel": "telegram:fixture-owner"}] + (Fixture.rich_jobs() if Fixture.rich_tasks else []) + [{"id": "project-job", "status": "succeeded", "response": "fixture project result", "message": "fixture project request", "channel": "telegram:fixture-owner"}], "tool_events": [], "healthy": True})
-        elif path == "/api/personal-space": self.send_json({"memories": Fixture.memories, "context": [], "results": (Fixture.results + Fixture.other_results)[-50:]})
+        elif path == "/api/personal-space": self.send_json({"memories": Fixture.memories, "context": [], "results": (Fixture.results + Fixture.other_results)[-50:], "memory_candidates": Fixture.candidates, "memory_candidate_count": len(Fixture.candidates)})
+        elif path == "/api/personal-space/memory-candidates": self.send_json({"state": "pending", "candidates": Fixture.candidates, "next_offset": None})
+        elif path.startswith("/api/personal-space/items/"):
+            parts = path.split("/")
+            kind, item_id = (parts[4], parts[5]) if len(parts) == 6 else ("", "")
+            Fixture.item_reads.append([kind, item_id])
+            item = None
+            if kind in ("memory", "note"):
+                row = next((row for row in Fixture.memories + Fixture.extra_memories if row["id"] == item_id and bool(row.get("memory_key")) == (kind == "memory")), None)
+                if row: item = {"kind": kind, **row, "work_id": "task-done" if item_id == "memory-exact" and Fixture.rich_tasks else None}
+            elif kind == "artifact":
+                row = next((row for row in Fixture.results + Fixture.other_results if row["id"] == item_id), None)
+                if row: item = {"kind": "artifact", **row, "workspace_title": {"workspace-382": "회귀 프로젝트", "workspace-other": "다른 프로젝트"}.get(row["workspace_id"]), "work_id": None, "qualifier": None}
+            elif kind == "candidate":
+                row = next((row for row in Fixture.candidates if row["id"] == item_id), None)
+                if row: item = {"kind": "candidate", **row, "work_id": "task-retry" if Fixture.rich_tasks else None}
+            if item: self.send_json({"item": item})
+            else: self.send_json({"error": "이 기록은 지금 저장돼 있지 않습니다. 이미 지웠거나 바뀌었을 수 있습니다."}, 404)
         elif path == "/api/personal-records":
             if Fixture.fail_records_once:
                 Fixture.fail_records_once = False
@@ -280,6 +307,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/control/state-inflight": self.send_json({"state_inflight": Fixture.state_inflight})
         elif path == "/control/workspace-detail-inflight": self.send_json({"workspace_detail_inflight": Fixture.workspace_detail_inflight})
         elif path == "/control/records-inflight": self.send_json({"records_inflight": Fixture.records_inflight})
+        elif path == "/control/item-reads": self.send_json({"item_reads": Fixture.item_reads, "memories": [row["id"] for row in Fixture.memories], "candidates": [row["id"] for row in Fixture.candidates]})
         else: self.send_json({"error": path}, 404)
 
     def do_POST(self):
@@ -336,6 +364,27 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/control/delay-workspace-detail":
             Fixture.delay_workspace_detail = True
             self.send_json({"delay_workspace_detail": True})
+        elif path == "/api/personal-space/memory-candidates/request":
+            # Fixture-only two-step decision: inspect, request approval, then
+            # accept or reject. It mirrors the shape, not the store's checks.
+            row = next((row for row in Fixture.candidates if row["id"] == body.get("id")), None)
+            operation = body.get("operation")
+            if not row:
+                self.send_json({"error": "memory candidate not found"}, 400)
+            elif operation == "inspect":
+                self.send_json(dict(row))
+            elif operation == "request-approval":
+                self.send_json({"approval_token": "t" * 43, "subject_id": row["id"], "source_digest": row["content_digest"], "expires_at": time.time() + 600})
+            elif operation == "accept" and body.get("approval_token") == "t" * 43:
+                Fixture.candidates[:] = [item for item in Fixture.candidates if item["id"] != row["id"]]
+                memory = {"id": "memory-from-candidate", "memory_key": row["memory_key"], "content": row["content"], "created": time.time()}
+                Fixture.memories.insert(0, memory)
+                self.send_json({**memory, "state": "current"})
+            elif operation == "reject":
+                Fixture.candidates[:] = [item for item in Fixture.candidates if item["id"] != row["id"]]
+                self.send_json({"id": row["id"], "state": "rejected"})
+            else:
+                self.send_json({"error": "fixture refused the decision"}, 400)
         elif path == "/api/model/test":
             Fixture.test_requests += 1
             time.sleep(0.8)

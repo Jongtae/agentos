@@ -163,7 +163,7 @@ class TechnicalProvenance(unittest.TestCase):
         view = APP[APP.index("function technicalView("):APP.index("function renderTasks(){")]
         for raw in ("argv", "prompt_envelope", "record.instructions"):
             self.assertNotIn(raw, view)
-        render = APP[APP.index("function renderTasks(){"):APP.index("function recordKey(item){")]
+        render = APP[APP.index("function renderTasks(){"):APP.index("function itemTitle(item){")]
         self.assertIn("technicalView(task,box);if(developerMode())box.append(provenanceView(task));", render)
         developer = APP[APP.index("function provenanceView("):APP.index("if(typeof module!=='undefined'")]
         self.assertNotIn("decisions", developer, "DecisionEngine calls are summarized once, in 기술 정보")
@@ -171,7 +171,7 @@ class TechnicalProvenance(unittest.TestCase):
 
 class RecordedRelationsOnly(unittest.TestCase):
     def test_the_earlier_turn_shows_only_recorded_relations(self):
-        render = APP[APP.index("function renderTasks(){"):APP.index("function recordKey(item){")]
+        render = APP[APP.index("function renderTasks(){"):APP.index("function itemTitle(item){")]
         index = render[render.index("const later=new Map()"):]
         index = index[:index.index("\n")]
         self.assertIn("if(item.relation?.work_id)", index)

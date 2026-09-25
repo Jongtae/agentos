@@ -49,12 +49,13 @@ class TokensAndChrome(unittest.TestCase):
         self.assertIn("Intl.RelativeTimeFormat", APP)
         self.assertIn("Intl.DateTimeFormat", APP)
 
-    def test_records_search_is_live_and_counts_live_in_the_filter(self):
-        search = HTML[HTML.index('id="record-search"'):HTML.index('id="record-search-feedback"')]
-        self.assertNotIn("<button", search)
-        self.assertIn('type="search"', search)
-        self.assertIn("recordCountLabels", APP)
-        self.assertIn("option.textContent=labels[option.value]", APP)
+    def test_there_is_no_generic_records_destination(self):
+        # #562 superseded the searchable 내 기록 browser (#382 W3).
+        for gone in ('data-view="records"', 'id="view-records"', 'id="record-search"', 'id="record-filter"',
+                     'id="record-list"', ">내 기록<"):
+            self.assertNotIn(gone, HTML)
+        for gone in ("recordCountLabels", "function renderRecords(", "function loadRecords(", "showRecords"):
+            self.assertNotIn(gone, APP)
 
     def test_status_and_destructive_grammar(self):
         self.assertIn("function badge(", APP)
@@ -155,7 +156,7 @@ console.log(JSON.stringify({ok:true}));
 
 class ConversationTrace(unittest.TestCase):
     def test_tasks_view_is_a_chronological_turn_trace(self):
-        tasks = HTML[HTML.index('id="view-tasks"'):HTML.index('id="view-records"')]
+        tasks = HTML[HTML.index('id="view-tasks"'):HTML.index('id="view-item"')]
         self.assertIn('<ol id="task-list" class="trace"', tasks)
         self.assertNotIn('id="task-detail"', tasks)
         self.assertNotIn("master-detail", tasks)
@@ -188,7 +189,7 @@ console.log(JSON.stringify({ok:true}));
         self.assertEqual(json.loads(out.strip().splitlines()[-1]), {"ok": True})
 
     def test_relations_are_never_inferred_in_the_renderer(self):
-        render = APP[APP.index("function renderTasks(){"):APP.index("function recordKey(item){")]
+        render = APP[APP.index("function renderTasks(){"):APP.index("function itemTitle(item){")]
         self.assertIn("if(task.relation){", render)
         self.assertIn("sameAsPrevious=!task.relation&&", render)
         self.assertIn("'직전 요청과 같은 내용'", render)
@@ -207,8 +208,6 @@ def ui_source_keys():
         line = body[body.index("const " + table + "="):]
         line = line[:line.index("\n")]
         keys |= {v for v in re.findall(r"'([^']*)'", line) if HANGUL.search(v)}
-    records = body[body.index("function recordItems("):body.index("function filterLocalRecords(")]
-    keys |= {v for v in re.findall(r"label:[^,]*?'([^']*[가-힣][^']*)'", records)}
     for text in re.findall(r">([^<>]*)<", HTML):
         if HANGUL.search(text.strip()):
             keys.add(text.strip())
@@ -289,7 +288,7 @@ console.log(JSON.stringify({ok:true}));
         self.assertIn("外す", catalog["ja"]["제거 확인"])
 
     def test_open_disclosures_do_not_rebuild_the_trace(self):
-        render = APP[APP.index("function renderTasks(){"):APP.index("function recordKey(item){")]
+        render = APP[APP.index("function renderTasks(){"):APP.index("function itemTitle(item){")]
         fingerprint = render[render.index("const fingerprint=JSON.stringify("):]
         fingerprint = fingerprint[:fingerprint.index(";")]
         self.assertNotIn("openTraces", fingerprint)
@@ -304,7 +303,7 @@ class TaskScopedContext(unittest.TestCase):
     """web/AGENTS.md: original request context is task-scoped and explicitly expanded."""
 
     def test_trace_defaults_to_the_redacted_title_and_expands_the_original_per_turn(self):
-        render = APP[APP.index("function renderTasks(){"):APP.index("function recordKey(item){")]
+        render = APP[APP.index("function renderTasks(){"):APP.index("function itemTitle(item){")]
         self.assertIn("const summary=String(task.title||'').trim()", render)
         self.assertIn("user.append(element('p',summary||t('요청 내용 없음'),'turn-text'))", render)
         self.assertNotIn("task.request||task.title", render)

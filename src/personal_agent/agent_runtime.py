@@ -727,6 +727,9 @@ def evidence_qualifiers(result):
  if result.get('outcome') in ('failed','partial') and result['outcome'] not in found:found.append(result['outcome'])
  return found
 
+#: Qualifiers that make a call that ran count as incomplete for the Work outcome.
+INCOMPLETE_QUALIFIERS=('truncated','partial')
+
 #: What AgentOS says in its own voice about a qualified result it summarises.
 QUALIFIER_NOTES={
  'setup-required':'필요한 연결이 아직 설정되지 않아 확인하지 못했습니다. 설정에서 연결을 먼저 확인해 주세요.',
@@ -825,6 +828,8 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
  messages=[{'role':'system','content':POLICY+'\n'+system},*history]
  definitions=capabilities.definitions();specs={d['function']['name']:d['function']['parameters'] for d in definitions}
  sources=[];executions=[];failed=False;count=0;successful=0;invalid_calls=set()
+ # (tool, note) for calls that ran but whose own Evidence says they are incomplete.
+ incomplete=[]
  active_config=dict(config);rerouted=False;checked_direct=False;attempts={}
  for turn in range(9):
   try:
@@ -854,6 +859,7 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
    if sources and '조회 출처:' not in content:content+='\n\n조회 출처:\n'+'\n'.join(dict.fromkeys(sources))
    result=ModelResult(content[:24000],config['provider'],actual)
    result.outcome=('partial' if successful else 'failed') if (failed or invalid_calls) else 'succeeded'
+   result.incomplete=incomplete
    return result
   if not isinstance(calls,list) or turn==8 or count+len(calls)>12:raise ProviderError('도구 호출 한도 또는 응답 형식 오류입니다.')
   ids=[c.get('id') for c in calls if isinstance(c,dict)]
@@ -892,6 +898,15 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
      record(name,'failed',json.dumps({**trace,'error':withheld.reason},ensure_ascii=False))
     else:
      successful+=1
+     # A call that ran but whose typed Evidence says it is incomplete (a
+     # capped search, unread research pages) advanced the Work without
+     # completing it.  That is `partial` whether or not the model then
+     # writes text, so the one qualifier projection applies to the reply
+     # too (#494).  Setup-required keeps its current outcome semantics.
+     gaps=[label for label in evidence_qualifiers(result) if label in INCOMPLETE_QUALIFIERS]
+     if gaps:
+      failed=True
+      incomplete.append((name,' '.join(QUALIFIER_NOTES[label] for label in gaps)))
      record(name,'succeeded',json.dumps(trace,ensure_ascii=False))
    except (ValueError,TypeError,AttributeError,OSError,ProviderError) as exc:
     if validated:failed=True

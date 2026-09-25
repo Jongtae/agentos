@@ -299,6 +299,81 @@ class EvidenceQualifierTests(TruthIntegrityTestCase):
         self.assertEqual(evidence_qualifiers(None), [])
 
 
+class ResearchNet:
+    """A public network whose second search result cannot be read."""
+
+    def execute(self, plan):
+        if plan['tool'] == 'web_search':
+            return {'tool': 'web_search', 'retrieved_at': 1, 'results': [
+                {'url': 'https://example.com/a', 'title': 'A', 'snippet': ''},
+                {'url': 'https://example.com/b', 'title': 'B', 'snippet': ''}]}
+        if plan['url'].endswith('/b'):
+            raise ValueError('공개 페이지가 정상 응답하지 않았습니다.')
+        return {'tool': 'public_page_read', 'url': plan['url'], 'retrieved_at': 2,
+                'content': 'Model A headphones. Shipping fee is 3,000 KRW for all domestic orders.'}
+
+
+class IncompleteEvidenceOutcomeTests(TruthIntegrityTestCase):
+    """Incomplete Evidence makes the Work `partial` even when the model writes text.
+
+    Review of this PR: the qualifier was consulted only by the fallback, so a
+    normal reply ("there are no such files") after a capped search made the
+    Work `succeeded`, went out unqualified and re-entered context as fact.
+    """
+
+    def assert_partial_and_qualified(self, job, bubble, claim):
+        self.assertEqual(job['status'], 'partial', job.get('error'))
+        self.assertNotIn(claim, bubble)
+        row = self.assistant_row(job['id'])
+        self.assertIn(claim, row['content'], 'the reply is preserved')
+        self.assertEqual(row['qualifier']['outcome'], 'partial')
+        self.assertEqual(self.card(job['id'])['qualifier']['outcome'], 'partial')
+        self.plan, self.text = [], '네.'
+        self.ask('그럼 없는 거지?')
+        earlier = [m for m in self.model_requests[-1]
+                   if m['role'] == 'assistant' and claim in (m.get('content') or '')]
+        self.assertEqual(len(earlier), 1)
+        self.assertTrue(earlier[0]['content'].startswith(CONTEXT_QUALIFIER.format(outcome='partial')))
+
+    def test_a_capped_search_with_no_hits_and_a_reply_is_partial(self):
+        # 501 non-matching files: the 500-file visit cap stops the search with no hits.
+        self.connect_folder({f'note-{index}.txt': '회의 메모' for index in range(501)})
+        self.plan = [('find_files', {'query': '급여'})]
+        self.text = '급여 파일은 없습니다.'
+        job, bubble = self.ask('급여 파일 찾아줘')
+        self.assertIn(QUALIFIER_NOTES['truncated'], job['error'])
+        self.assert_partial_and_qualified(job, bubble, self.text)
+
+    def test_research_with_unread_pages_and_a_reply_is_partial(self):
+        self.service.local_tools = ResearchNet()
+        self.plan = [('bounded_public_research', {'mode': 'product_comparison', 'query': 'headphones'})]
+        self.text = '두 제품을 모두 비교했습니다.'
+        job, bubble = self.ask('헤드폰 비교해줘')
+        event = [row for row in self.store.task_events(job['id'])
+                 if row['tool'] == 'bounded_public_research'][-1]
+        self.assertEqual(event['status'], 'succeeded', 'the call itself ran')
+        self.assertEqual(event['trace']['evidence']['qualifiers'], ['partial'])
+        self.assertIn(QUALIFIER_NOTES['partial'], job['error'])
+        self.assert_partial_and_qualified(job, bubble, self.text)
+
+    def test_a_complete_search_with_a_reply_stays_succeeded(self):
+        """Opposing pin."""
+        self.connect_folder({'pay.txt': '급여 명세'})
+        self.plan = [('find_files', {'query': '급여'})]
+        self.text = '급여 파일 한 건을 찾았습니다.'
+        job, bubble = self.ask('급여 파일 찾아줘')
+        self.assertEqual(job['status'], 'succeeded', job.get('error'))
+        self.assertEqual(bubble, self.text)
+        self.assertIsNone(self.assistant_row(job['id'])['qualifier'])
+
+    def test_setup_required_keeps_its_outcome(self):
+        """Owner decision pending (#489): not changed by this fix."""
+        self.plan = [('find_files', {'query': '급여'})]
+        self.text = '폴더를 먼저 연결해 주세요.'
+        job, _bubble = self.ask('급여 파일 찾아줘')
+        self.assertEqual(job['status'], 'succeeded', job.get('error'))
+
+
 class FallbackTextTests(TruthIntegrityTestCase):
     """AgentOS's own words when the model returns no text after a tool."""
 

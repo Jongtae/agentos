@@ -2677,6 +2677,8 @@ class AgentService:
                         # record the final set, not only the pre-run snapshot.
                         self.record_turn_provenance(job['id'],egress_taint=sorted(capabilities.private_provenance))
                         outcome=getattr(result,'outcome','succeeded')
+                        # Calls that ran incomplete name their cause like refusals do (#494).
+                        refusals.extend(getattr(result,'incomplete',()) or ())
                         response,provider,model=result.content,result.provider,result.model
                         resolved_blocker=outcome=='succeeded'
                         # The provider layer falls back to the configured model when the

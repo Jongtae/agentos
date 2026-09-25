@@ -17,7 +17,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, build_opener, HTTPCookieProcessor
 
 from personal_agent.capabilities import CapabilityRegistry
-from personal_agent.connector_contract import ConnectorRegistry
+from personal_agent.connector_contract import ConnectorRegistry, ConnectorState
 from personal_agent.gmail import GMAIL_CONNECTOR
 from personal_agent.portable_state import export_owner_state, restore_owner_state
 from personal_agent.quickstart_service import AgentService
@@ -32,6 +32,24 @@ class FakeDrive:
 
     def status(self):
         return {"state": self.state, "audit": []}
+
+    def effective_status(self):
+        return self.status()
+
+
+class FakeGoogle:
+    """Answers the pure local credential check and fails any network use."""
+
+    def __init__(self, current):
+        self.current, self.asked = current, []
+        self.redirect_uri = 'http://localhost:8765/oauth/gmail/callback'
+
+    def credential_current(self, owner_id, write=False):
+        self.asked.append((owner_id, write))
+        return self.current
+
+    def __getattr__(self, name):
+        raise AssertionError(f"Settings must not call {name}")
 
 
 def legacy_draft(owner='owner', channel='http'):
@@ -130,6 +148,36 @@ class ServiceSettingsProjectionTests(unittest.TestCase):
         for raw, state in (('connected', 'connected'), ('expired', 'disconnected'), ('denied', 'disconnected')):
             service.drive_web_oauth = FakeDrive(raw)
             self.assertEqual(service.drive_connection_row()['state'], state)
+
+    def connected_gmail_service(self, current):
+        registry = ConnectorRegistry(self.store, (GMAIL_CONNECTOR,))
+        service = AgentService(self.store, connector_registry=registry, gmail=FakeGoogle(current))
+        owner = service.connector_callback_owner('google-gmail-read')
+        registry.transition(owner, 'google-gmail-read', ConnectorState.CONNECTED,
+                            granted_scopes=GMAIL_CONNECTOR.required_scopes)
+        return service, registry, owner
+
+    def test_connected_row_with_expired_local_credential_is_not_reported_connected(self):
+        service, registry, owner = self.connected_gmail_service(False)
+        before = self.store.config('connector_contract_state')
+        row = service.settings()['connectors'][0]
+        self.assertEqual((row['state'], row['detail_state']), ('reauth_required', 'connected-credential-expired'))
+        self.assertIn('Google Gmail · 다시 인증 필요',
+                      service.conversation_settings_request({'operation': 'read'})['response'])
+        self.assertEqual(registry.status(owner, 'google-gmail-read').state, ConnectorState.CONNECTED)
+        self.assertEqual(self.store.config('connector_contract_state'), before, 'Settings records nothing')
+
+    def test_connected_row_with_current_local_credential_stays_connected(self):
+        service, _registry, _owner = self.connected_gmail_service(True)
+        self.assertEqual(service.settings()['connectors'][0]['state'], 'connected')
+        self.assertTrue(service.gmail.asked)
+
+    def test_connected_row_that_cannot_be_checked_is_unknown_not_connected(self):
+        registry = ConnectorRegistry(self.store, (GMAIL_CONNECTOR,))
+        service = AgentService(self.store, connector_registry=registry)
+        registry.transition(service.connector_callback_owner('google-gmail-read'), 'google-gmail-read',
+                            ConnectorState.CONNECTED, granted_scopes=GMAIL_CONNECTOR.required_scopes)
+        self.assertEqual(service.settings()['connectors'][0]['state'], 'unknown')
 
     def test_install_without_connectors_reports_only_telegram(self):
         service = AgentService(self.store)

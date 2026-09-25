@@ -349,5 +349,36 @@ class DriveWebOAuthTests(unittest.TestCase):
             rekeyed.secret("drive_web_oauth_tokens")
 
 
+
+class DriveEffectiveStatusTests(unittest.TestCase):
+    """#506 / PR #584: a read-only status must not report an expired token as connected."""
+
+    setUp, tearDown = DriveWebOAuthTests.setUp, DriveWebOAuthTests.tearDown
+    begin, connect = DriveWebOAuthTests.begin, DriveWebOAuthTests.connect
+
+    def snapshot(self):
+        return (self.store.config("drive_web_oauth_status"), self.encrypted_store.secret(TOKEN_KEY),
+                self.encrypted_store.secret(PENDING_KEY))
+
+    def test_unexpired_credential_reports_connected(self):
+        self.connect()
+        self.assertEqual(self.flow.effective_status()["state"], "connected")
+
+    def test_expired_credential_reports_reauth_without_recording_it(self):
+        self.connect()
+        self.clock[0] += 61
+        before = self.snapshot()
+        self.assertEqual(self.flow.status()["state"], "connected")
+        self.assertEqual(self.flow.effective_status()["state"], "reauth-required")
+        self.assertEqual(self.snapshot(), before, "a status read records nothing")
+
+    def test_scope_drift_and_missing_credential_are_not_connected(self):
+        self.connect()
+        tokens = dict(self.encrypted_store.secret(TOKEN_KEY)); tokens["scope"] = "other"
+        self.encrypted_store.secret(TOKEN_KEY, tokens)
+        self.assertEqual(self.flow.effective_status()["state"], "scope-rejected")
+        self.encrypted_store.secret(TOKEN_KEY, {"access_token": ""})
+        self.assertEqual(self.flow.effective_status()["state"], "disconnected")
+
 if __name__ == "__main__":
     unittest.main()

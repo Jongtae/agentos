@@ -1591,16 +1591,44 @@ class AgentService:
         """
         if not self.drive_web_oauth:
             return None
-        raw=self.drive_web_oauth.status().get('state','disconnected')
-        state={'connected':'connected','reauth-required':'reauth_required'}.get(raw,'disconnected')
+        # effective_status checks a recorded `connected` against the stored
+        # credential's local expiry/scope; it records, refreshes and sends nothing.
+        raw=self.drive_web_oauth.effective_status().get('state','disconnected')
+        state={'connected':'connected','reauth-required':'reauth_required','scope-rejected':'reauth_required'}.get(raw,'disconnected')
         return {'connector_id':'google-drive-read','label':'Google Drive','state':state,
                 'required_scopes':['https://www.googleapis.com/auth/drive.file'],'connect_path':'',
                 'connect_hint':'Telegram에서 Google Drive 파일을 요청하면 연결 링크를 보냅니다.',
                 'detail_state':raw}
 
+    def connector_credential_current(self, connector_id):
+        """Read-only: would the connector's next request accept its stored credential?
+
+        A CONNECTED registry row stays CONNECTED until a request finds the
+        token expired.  This asks the owning connector's pure local check (no
+        refresh, network request or state change).  None means this install
+        has no connector object that can answer.
+        """
+        owner=self.connector_callback_owner(connector_id)
+        if connector_id==GMAIL_CONNECTOR_ID:
+            return self.gmail.credential_current(owner) if self.gmail else None
+        if connector_id in (CALENDAR_CONNECTOR_ID,CALENDAR_WRITE_CONNECTOR_ID):
+            return (self.calendar_oauth.credential_current(owner,write=connector_id==CALENDAR_WRITE_CONNECTOR_ID)
+                    if self.calendar_oauth else None)
+        return None
+
     def google_connection_rows(self):
         """Every Google connection row Settings shows, each from its own authority."""
-        rows=list(self.connector_connections())
+        rows=[]
+        for row in self.connector_connections():
+            if row.get('state')=='connected':
+                current=self.connector_credential_current(row.get('connector_id'))
+                if current is False:
+                    # Expired or unusable locally: the next request would
+                    # refuse it and require a new authorization.
+                    row={**row,'state':'reauth_required','detail_state':'connected-credential-expired'}
+                elif current is None:
+                    row={**row,'state':'unknown','detail_state':'connected-credential-unverified'}
+            rows.append(row)
         drive=self.drive_connection_row()
         if drive:
             rows.append(drive)

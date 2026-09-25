@@ -394,15 +394,52 @@ class DriveWebOAuthHandoff:
         ``_authorization_context``.
         """
         tokens = self.store.secret(TOKEN_KEY)
-        if not isinstance(tokens, dict) or not tokens.get("access_token"):
+        problem = self._token_problem(tokens)
+        if problem == "disconnected":
             raise DriveWebOAuthError("Google Drive is not connected.")
-        if isinstance(tokens.get("expires_at"), (int, float)) and self.now() >= tokens["expires_at"]:
+        if problem == "reauth-required":
             self._finish("reauth-required")
             raise DriveWebOAuthError("Google Drive authorization expired; reconnect required.")
-        if set(str(tokens.get("scope", "")).split()) != {DRIVE_FILE}:
+        if problem == "scope-rejected":
             self._finish("scope-rejected")
             raise DriveScopeError("Google Drive file-selection scope was not granted; reconnect required.")
         return tokens
+
+    def _token_problem(self, tokens):
+        """The state a stored credential would be moved to on use, or None.
+
+        Pure: this reads only the locally stored expiry and scope and never
+        records, refreshes or contacts Google.  ``_authorized_tokens`` and
+        ``effective_status`` share it so what Settings reports and what a
+        Drive operation enforces cannot drift apart.
+        """
+        if not isinstance(tokens, dict) or not tokens.get("access_token"):
+            return "disconnected"
+        if isinstance(tokens.get("expires_at"), (int, float)) and self.now() >= tokens["expires_at"]:
+            return "reauth-required"
+        if set(str(tokens.get("scope", "")).split()) != {DRIVE_FILE}:
+            return "scope-rejected"
+        return None
+
+    def effective_status(self):
+        """``status()`` with a recorded ``connected`` checked against the stored credential.
+
+        A persisted ``connected`` stays in the store until an operation runs,
+        even after the access token's recorded expiry.  This reports the state
+        that operation would record, without recording it, refreshing, or making
+        any network request, so a read-only status surface never claims a
+        usable connection that the next Drive call would refuse.
+        """
+        status = self.status()
+        if status["state"] != "connected":
+            return status
+        try:
+            problem = self._token_problem(self.store.secret(TOKEN_KEY))
+        except DriveWebOAuthError:
+            problem = "reauth-required"
+        if problem:
+            status["state"] = problem
+        return status
 
     def _connected(self, owner):
         self._authorized_tokens()

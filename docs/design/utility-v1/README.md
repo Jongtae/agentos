@@ -4,7 +4,7 @@
 
 Read the [Local Web Management Contract](../../web-management-contract.en.md), [Korean summary](../../web-management-contract.ko.md), and implementation issue **#382 / WEB-ADMIN-01** before using any prototype in this folder. The design record remains #379 / PR #380.
 
-The owner no longer wants the local web to continue conversations or mirror Telegram. Default destinations are **작업 현황 / 내 기록 / 설정**. Projects are optional secondary grouping. Telegram is the current conversation channel, while AgentOS retains history, memory, work, results and authority. This is a product decision and implementation specification, not already-shipped behavior or automatic Codex activation.
+The owner no longer wants the local web to continue conversations or mirror Telegram. Default destinations were **작업 현황 / 내 기록 / 설정**; on 2026-09-24 the owner removed the generic **내 기록** destination (#562), so the current default is **작업 현황 / 설정** with exact-item deep links (see the contract's section 3). Projects are optional secondary grouping. Telegram is the current conversation channel, while AgentOS retains history, memory, work, results and authority. This is a product decision and implementation specification, not already-shipped behavior or automatic Codex activation.
 
 The new [CODEX_PROMPT.txt](CODEX_PROMPT.txt) replaces the earlier chat-first handoff. It directs a later owner-invoked coding session to the scoped issue, current main and the contract. Do not start a second preparation program, automatically activate #381 or silently merge overlapping settings PR #373.
 

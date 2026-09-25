@@ -214,5 +214,71 @@ class CrossTurnEgressGuard(unittest.TestCase):
         self.assertEqual(len(self.engine.web_search_error), 1, 'the CLI web_search call is refused')
 
 
+
+class BridgeProcessEgressGuard(unittest.TestCase):
+    """Re-review of #574: the taint must reach the separate MCP bridge process the CLI actually calls."""
+
+    def _service_turns(self, turns):
+        import io, contextlib, sys
+        from unittest import mock
+        from personal_agent import mcp_bridge
+        from personal_agent.local_tools import LocalTools
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        store = QuickStore(Path(tmp.name) / 'state')
+        captured = {}
+
+        class Done:
+            returncode = 0
+            stdout = json.dumps({'item': {'type': 'agent_message', 'text': 'engine answer'}})
+
+        def runner(argv, **kwargs):
+            config = json.loads((Path(kwargs['cwd']) / 'agentos-mcp.json').read_text())
+            captured['args'] = config['mcpServers']['agentos']['args']
+            return Done()
+
+        profile = Path(tmp.name) / 'codex-home'; profile.mkdir()
+        adapter = BoundedExecutionAdapter(finder=lambda name: '/runtime/' + name, runner=runner,
+                                          runtime_root=Path(tmp.name) / 'turns', codex_home=profile)
+        service = AgentService(store, adapter=ModelAdapter(lambda *a: {'choices': [{'message': {'content': 'x'}}]}),
+                               subscription_engines=SubscriptionEngines(finder=lambda _: '/runtime/codex', clock=lambda: 1),
+                               execution_adapter=adapter)
+        service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
+        for index, text in enumerate(turns):
+            store.enqueue(text, f'k{index}')
+            self.assertTrue(service.run_one())
+        args = captured['args']
+        provenance = [args[i + 1] for i, part in enumerate(args) if part == '--provenance']
+        job_id = args[args.index('--job') + 1]
+        network_calls = []
+        requests = '\n'.join(json.dumps(r) for r in [
+            {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {}},
+            {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call', 'params': {'name': 'web_search', 'arguments': {'query': 'today news'}}},
+        ]) + '\n'
+        out = io.StringIO()
+        with mock.patch.object(LocalTools, 'execute', lambda self, plan: network_calls.append(plan) or {'results': []}), \
+             mock.patch.object(sys, 'stdin', io.StringIO(requests)), contextlib.redirect_stdout(out):
+            mcp_bridge.serve(str(store.root), job_id, provenance)
+        replies = [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
+        return provenance, replies[-1], network_calls
+
+    def test_prior_private_answer_closes_web_search_in_the_real_bridge(self):
+        provenance, reply, network_calls = self._service_turns(['/note PRIVATE-XYZ', '/notes', 'search the web for today news'])
+        self.assertIn('conversation-history', provenance, 'the adapter forwards the taint to the bridge process')
+        self.assertIn('error', reply, 'the bridge refuses web_search')
+        self.assertEqual(network_calls, [], 'no public request left the machine')
+
+    def test_same_turn_note_summary_provenance_now_reaches_the_bridge(self):
+        provenance, reply, network_calls = self._service_turns(['/note PRIVATE-XYZ', '/summarize'])
+        self.assertIn('personal-space', provenance, 'same-turn provenance was never forwarded before this change')
+        self.assertIn('error', reply)
+        self.assertEqual(network_calls, [])
+
+    def test_positive_control_first_turn_reaches_the_network_stub(self):
+        provenance, reply, network_calls = self._service_turns(['hello there'])
+        self.assertEqual(provenance, [])
+        self.assertIn('result', reply)
+        self.assertEqual(len(network_calls), 1)
+
+
 if __name__ == '__main__':
     unittest.main()

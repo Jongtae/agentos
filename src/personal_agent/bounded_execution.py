@@ -306,7 +306,12 @@ class BoundedExecutionAdapter:
             # access to the AgentOS tool facade.
             config.write_text(json.dumps({'mcpServers': {'agentos': {
                 'command': sys.executable,
-                'args': ['-m', 'personal_agent.mcp_bridge', '--data', str(tools.capabilities.store.root), '--job', tools.capabilities.job_id],
+                'args': ['-m', 'personal_agent.mcp_bridge', '--data', str(tools.capabilities.store.root), '--job', tools.capabilities.job_id,
+                         # The bridge is a separate process: hand it this Work's
+                         # private-source provenance so its public egress closes
+                         # exactly as the in-process Capabilities would.
+                         *[part for label in sorted(getattr(tools.capabilities, 'private_provenance', ()) or ())
+                           for part in ('--provenance', label)]],
             }}}, ensure_ascii=False), encoding='utf-8')
             env = self.environment(engine_id, binary, run_dir)
             started = time.monotonic()

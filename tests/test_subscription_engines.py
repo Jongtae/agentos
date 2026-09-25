@@ -10,7 +10,11 @@ class SubscriptionEngineTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.store=QuickStore(self.temp.name)
         engines=SubscriptionEngines(finder=lambda command: '/bin/codex' if command=='codex' else None,clock=lambda:1234)
-        self.service=AgentService(self.store,subscription_engines=engines)
+        # The login check (#571) is covered in test_engine_auth; here it must
+        # not depend on whether this machine has a Codex profile.
+        class _UnknownLogin:
+            def login_status(self,engine_id,binary=None):return {'state':'unknown'}
+        self.service=AgentService(self.store,subscription_engines=engines,execution_adapter=_UnknownLogin())
 
     def tearDown(self):self.temp.cleanup()
 

@@ -23,6 +23,7 @@ from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_U
 from .subscription_engines import SubscriptionEngines
 from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult, MAX_PROMPT_BYTES, SECRET_PATTERN
 from .isolated_engine_gateway import EngineGatewayError
+from .service_control import build_identity
 from .isolated_mcp_proxy import IsolatedMcpProxy, TaskCapabilityRegistry
 from .settings_orchestrator import SettingsOrchestrator, SettingsError
 from .personal_knowledge import PersonalKnowledgeOrchestrator
@@ -208,6 +209,10 @@ class AgentService:
                  isolated_engine_adapter=None, isolated_mcp_registry=None,
                  drive_web_oauth=None, connector_registry=None, gmail=None, calendar=None, calendar_oauth=None, calendar_factory=None):
         self.store=store
+        # AX-11 (#603): identity of the code this process loaded, taken once
+        # near start-up and recorded with each turn's provenance, so a stale
+        # running build is distinguishable from a missing route binding.
+        self.build=build_identity()
         self.adapter=adapter or ModelAdapter()
         self.telegram_transport=telegram_transport or telegram_request_json
         # Transport seam.  Both resolvers are late bound: `telegram_transport`
@@ -3455,7 +3460,11 @@ class AgentService:
                         # gets the instructions as their own argv element, and the
                         # bare-request fallback sends no instructions at all.
                         separate=subscription['id']=='claude-code' and not isolated and adapter_context is not None
+                        # AX-11 (#603): the tool names this route actually offers the
+                        # CLI, from the same facade class that serves it below.
+                        offered=(ReadOnlyAgentOSMcpTools if isolated else AgentOSMcpTools)(capabilities).definitions()
                         self.record_turn_sent(job['id'],sent=sent if separate else engine_prompt,
+                            exposed_tools=[tool.get('name') for tool in offered],build=self.build,
                             instructions=engine_context['instructions'] if adapter_context is not None else '',
                             instructions_channel='append-system-prompt' if separate else ('prompt' if adapter_context is not None else 'not sent (bare request)'),
                             private_sources=set(turn_provenance)|set(capabilities.private_provenance),
@@ -3516,7 +3525,8 @@ class AgentService:
                         record('model','requested',json.dumps({'provider':runtime_config.get('provider'),'model':runtime_config.get('model')},ensure_ascii=False))
                         api_context=turn_context(history,'api')
                         self.record_turn_sent(job['id'],sent=render_turn_prompt(api_context),instructions=api_context['instructions'],
-                            instructions_channel='system-message',
+                            instructions_channel='system-message',build=self.build,
+                            exposed_tools=[tool['function']['name'] for tool in capabilities.definitions()],
                             private_sources=set(turn_provenance)|set(capabilities.private_provenance)|({'connected-document'} if workspace_request or document_history else set()),
                             route='direct-api',provider=runtime_config.get('provider'),status='sent',
                             requested_model=runtime_config.get('model'),instructions_version=api_context.get('version'),

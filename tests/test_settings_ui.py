@@ -21,17 +21,16 @@ class Element {
  querySelector(selector){return descendants(this).find(node=>selector[0]==='.'?node.className.split(' ').includes(selector.slice(1)):node.tag===selector)||null;}
 }
 function descendants(node){return node.children.flatMap(child=>typeof child==='string'?[]:[child,...descendants(child)]);}
-for(const id of ['active-ai','telegram-current','telegram-change','telegram-form','telegram-status','telegram-feedback','telegram-submit','disconnect','new-pair','telegram-pair','capability-controls','connector-controls'])new Element('div').id=id;
+for(const id of ['active-ai','telegram-current','telegram-change','telegram-form','telegram-status','telegram-feedback','telegram-submit','disconnect','new-pair','telegram-pair','connector-controls'])new Element('div').id=id;
 const $=id=>ids.get(id),document={getElementById:$,createElement:tag=>new Element(tag)};
 const part=(start,end)=>app.slice(app.indexOf(start),app.indexOf(end));
-const source=part('const LANGUAGES=','function normalizeEndpoint(')+part('function capabilityActions(', 'function clearMobileDetailWhenEmpty(')+
+const source=part('const LANGUAGES=','function normalizeEndpoint(')+
  part('function element(', 'function setError(')+
  part('const providers=', 'let claimed=')+
  part('function renderExecutionConnection(', 'function renderSubscriptionEngines(')+
- part('const CONNECTOR_STATES=', 'async function requestCapabilityDraft(')+
- part('function renderTelegram(', 'function renderCapabilityPreview(');
+ part('function renderTelegram(', "$('telegram-change').onclick");
 const calls=[];let refreshes=0,failRoute=false;
-const ctx={document,$,telegramDraftOpen:false,requestCapabilityDraft:async()=>{},console,api:async(path,body)=>{calls.push({path,body});if(failRoute)throw new Error('switch refused');return {};},refresh:async()=>{refreshes++;},busy:async(button,fn)=>fn(),setError:(id,error)=>{$(id).textContent=error?.message||String(error||'');},setFeedback:(id,text)=>{$(id).textContent=text||'';}};
+const ctx={document,$,telegramDraftOpen:false,console,api:async(path,body)=>{calls.push({path,body});if(failRoute)throw new Error('switch refused');return {};},refresh:async()=>{refreshes++;},busy:async(button,fn)=>fn(),setError:(id,error)=>{$(id).textContent=error?.message||String(error||'');},setFeedback:(id,text)=>{$(id).textContent=text||'';}};
 vm.createContext(ctx);vm.runInContext(source,ctx);vm.runInContext("setLanguage('ko')",ctx);
 const buttonIn=id=>descendants($(id)).find(node=>node.tag==='button');
 const settings={model:{provider:'ollama',endpoint:'http://127.0.0.1:11434',model:'stored-api-model'},model_ready:true,subscription_engines:{selected:'codex',engines:[{id:'codex',name:'Codex',installed:true,connected:true}]}};
@@ -42,7 +41,7 @@ assert($('active-ai').textContent.includes('Ollama'),'provider title remains pro
 const buttonsIn=id=>descendants($(id)).filter(node=>node.tag==='button');
 const useApi=buttonsIn('active-ai').find(node=>node.textContent==='이 연결 사용');
 assert(useApi,'a verified direct API offers an explicit switch');
-assert($('active-ai').textContent.includes('사용 가능'));
+assert($('active-ai').textContent.includes('설정됨 · 현재 사용 안 함'),'a configured, verified but inactive API is not called available or in use');
 const currentCount=()=>descendants($('active-ai')).filter(node=>node.className==='settings-state active'&&node.textContent==='현재 사용 중').length;
 assert.equal(currentCount(),1,'exactly one current route');
 assert.equal(descendants($('active-ai')).find(node=>node.className==='settings-row-title').textContent,'Codex','the current route is listed first');
@@ -77,14 +76,34 @@ assert(!$('active-ai').textContent.includes('직접 API를 설정하거나 테�
 ctx.renderTelegram({telegram:{enabled:true,paired:true,username:'fixture'},telegram_status:{message:'ok'}});
 const telegramButton=buttonIn('telegram-current');ctx.renderTelegram({telegram:{enabled:true,paired:true,username:'fixture'},telegram_status:{message:'ok'}});
 assert.equal(buttonIn('telegram-current'),telegramButton,'unchanged Telegram polling preserves its action node');
-const states={available:['사용 가능','neutral'],'connected-disabled':['사용 안 함','neutral'],enabled:['사용 설정됨','active'],paused:['일시 정지','neutral'],'auth-required':['다시 인증 필요','attention'],error:['오류','attention'],disconnected:['연결 안 됨','neutral']};
-for(const [state,[label,kind]] of Object.entries(states)){ctx.renderCapabilities({capabilities:[{id:'google-drive-read',kind:'mcp',state}]});const row=$('capability-controls').children[0],stateNode=descendants(row).find(node=>node.className.startsWith('settings-state'));assert(row.textContent.includes(label),`${state} keeps its lifecycle label`);assert(stateNode.className.endsWith(kind),`${state} uses the correct status tone`);assert(row.textContent.includes(`상태: ${state}`),`${state} remains in technical disclosure`);assert(!row.textContent.includes('로컬 기능 권한'),'Google capability must never be described as local');}
-ctx.renderCapabilities({capabilities:[{id:'google-drive-read',kind:'mcp',state:'disconnected'}]});
-assert($('capability-controls').textContent.includes('외부 연결 권한 · Google'));
-assert($('capability-controls').textContent.includes('연결 안 됨'));
-ctx.renderConnectors([{connector_id:'google-calendar',label:'google-calendar',state:'disconnected'}]);
-assert($('connector-controls').textContent.includes('Google Calendar'));
-assert(!descendants($('connector-controls')).find(node=>node.className==='settings-row-title').textContent.includes('google-calendar'));
+// Connection state matrix (#506): every contract state, an unknown value and a long label.
+const stateOf=row=>descendants(row).find(node=>node.className.startsWith('settings-state'));
+const actionOf=row=>descendants(row).find(node=>node.tag==='a'&&node.className.includes('settings-row-action'));
+const matrix=[
+ [{connector_id:'google-gmail-read',label:'Gmail',state:'connected',required_scopes:['gmail.readonly'],connect_path:'/google-gmail'},'Google Gmail','연결됨','active','다시 연결'],
+ [{connector_id:'google-calendar',label:'google-calendar',state:'disconnected',required_scopes:['calendar.readonly'],connect_path:'/google-calendar'},'Google Calendar','연결 안 됨','neutral','연결'],
+ [{connector_id:'google-calendar-write',label:'Google Calendar 일정 만들기',state:'reauth_required',required_scopes:['calendar.events'],connect_path:'/google-calendar'},'Google Calendar 일정 만들기','다시 인증 필요','attention','다시 연결'],
+ [{connector_id:'fixture-blocked',label:'Blocked',state:'blocked',required_scopes:[],connect_path:'/blocked'},'Blocked','차단됨','attention',null],
+ [{connector_id:'fixture-unknown',label:'Unknown',state:'surprising',required_scopes:[],connect_path:'/unknown'},'Unknown','확인 필요','attention',null],
+ [{connector_id:'google-drive-read',label:'Google Drive',state:'disconnected',required_scopes:['drive.file'],connect_path:'',connect_hint:'Telegram에서 Google Drive 파일을 요청하면 연결 링크를 보냅니다.',detail_state:'expired'},'Google Drive','연결 안 됨','neutral',null],
+];
+for(const [connector,name,label,kind,action] of matrix){
+ ctx.renderConnectors([connector]);const row=$('connector-controls').children[0],title=descendants(row).find(node=>node.className==='settings-row-title');
+ assert.equal(title.textContent,name,`${connector.connector_id} shows the owner service name`);
+ assert.equal(stateOf(row).textContent,label,`${connector.connector_id} state label`);assert(stateOf(row).className.endsWith(kind),`${connector.connector_id} tone`);
+ const link=actionOf(row);if(action){assert.equal(link?.textContent,action,`${connector.connector_id} offers one action`);assert.equal(link.href,connector.connect_path);}else assert.equal(link,undefined,`${connector.connector_id} offers no action it cannot complete`);
+ const details=descendants(row).find(node=>node.tag==='details');assert(details&&details.textContent.includes(`연결 ID: ${connector.connector_id}`),'connector ID only inside 세부 정보');
+ assert(!descendants(row).filter(node=>node.tag!=='details'&&!descendants(details).includes(node)&&node!==details).some(node=>node._text&&node._text.includes(connector.connector_id)&&connector.connector_id!==name),'no raw connector ID outside 세부 정보');
+}
+ctx.renderConnectors([matrix[5][0]]);assert($('connector-controls').textContent.includes('Telegram에서 Google Drive'),'Drive explains where a connection starts');assert($('connector-controls').textContent.includes('세부 상태: expired'),'the raw Drive handoff state stays inspectable');
+ctx.renderConnectors([]);assert($('connector-controls').textContent.includes('연결할 수 있는 Google 서비스가 없습니다'));
+// Subscription CLI idle states: "사용 가능" only after an observed login.
+for(const [login,label] of [['signed-in','사용 가능'],['unchecked','로그인 확인 전'],['token-saved','로그인 확인 전'],['unknown','확인 필요'],['signed-out','로그인 안 됨']]){
+ ctx.renderExecutionConnection({model:{},model_ready:false,subscription_engines:{selected:'',engines:[{id:'codex',name:'Codex',installed:true,connected:true,login:{state:login}}]}});
+ assert.equal(stateOf(descendants($('active-ai')).find(node=>node.className==='settings-row')).textContent,label,`CLI login ${login}`);}
+ctx.renderExecutionConnection({model:{provider:'openai',endpoint:'https://api.openai.com/v1',model:'m'},model_ready:true,subscription_engines:{selected:'codex',engines:[{id:'codex',name:'Codex',installed:true,connected:true,login:{state:'signed-in'}}]},decision_model:{provider:'openai',model:'gpt-4o-mini'}});
+assert($('active-ai').textContent.includes('대화 해석(판단 엔진) 역할: openai gpt-4o-mini'),'the decision engine is role-labelled in technical detail');
+assert.equal(descendants($('active-ai')).filter(node=>node.className==='settings-state active').length,1,'the decision engine is never a second current route');
 assert(app.includes("'ArrowLeft','ArrowRight'"),'settings tabs handle horizontal arrow keys');
 console.log('settings DOM regressions passed');
 """
@@ -155,10 +174,10 @@ def test_settings_uses_one_accessible_preferences_navigation():
 def test_setting_rows_translate_internal_connection_ids_and_keep_details_disclosed():
     assert "function settingsRow(" in APP
     assert "CONNECTOR_NAMES" in APP
-    assert "CAPABILITY_NAMES" in APP
-    assert "settingsDisclosure(t('세부 정보'),lines)" in APP
+    assert "CAPABILITY_NAMES" not in APP
+    assert "settingsDisclosure(t('세부 정보'),view.lines)" in APP
     assert "element('strong',capability.id)" not in APP
-    assert "(connector.required_scopes||[]).join(', ')" in APP
+    assert "(connector?.required_scopes||[]).join(', ')" in APP
     assert ".settings-row-action.destructive" in CSS
 
 

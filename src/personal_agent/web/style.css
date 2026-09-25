@@ -282,11 +282,10 @@ details.technical details>summary{color:var(--muted)}
 .settings-state{justify-self:start;white-space:normal;text-align:left}
 .settings-row-actions{display:flex;justify-content:flex-end;gap:var(--sp-2);flex-wrap:wrap;min-width:0}
 .settings-disclosure{margin-top:6px;font-size:var(--fs-1);color:var(--muted)}
+/* Technical detail sits under the whole row, after its state and action. */
+.settings-row>.settings-disclosure{grid-column:1/-1;margin-top:-6px}
 .settings-disclosure>summary{font-size:var(--fs-1);min-height:22px}
 .settings-technical-line{display:block;padding:3px 0 0 16px;overflow-wrap:anywhere}
-.settings-more-actions{margin-top:4px;font-size:var(--fs-1)}
-.settings-more-actions>summary{font-size:var(--fs-1);min-height:22px}
-.settings-more-actions .settings-row-action{margin:6px 0 0 16px}
 .settings-empty{margin:0;padding:14px 0;border-bottom:1px solid var(--line);color:var(--muted);font-size:var(--fs-2)}
 .settings-inline-confirm{display:flex;gap:var(--sp-2);flex-wrap:wrap;justify-content:flex-end}
 .settings-list-actions{display:flex;justify-content:flex-end;padding-top:var(--sp-3)}
@@ -306,11 +305,8 @@ details.technical details>summary{color:var(--muted)}
 #telegram-form{margin-top:var(--sp-3);padding:var(--sp-4);border:1px solid var(--line);border-radius:var(--r-2);background:var(--surface-2)}
 #telegram-pair{margin-top:var(--sp-3);display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap}
 #telegram-pair p{margin:0}
-.settings-pane #telegram-status,.settings-pane #capability-feedback{min-height:1.5em;margin:8px 0 0;font-size:var(--fs-2)}
+.settings-pane #telegram-status{min-height:1.5em;margin:8px 0 0;font-size:var(--fs-2)}
 .settings-pane .button-row{margin-top:var(--sp-3)}
-.capability-preview{grid-column:1/-1;margin-top:8px;padding:12px 14px;border:1px solid #ecd9a8;border-radius:var(--r-1);background:var(--attn-soft);display:grid;gap:8px}
-.capability-preview p{margin:0;font-size:var(--fs-2)}
-.capability-preview .button-row{margin:0}
 
 /* folder settings */
 .folder-add{display:grid;gap:6px;margin:0;padding-top:var(--sp-4)}
@@ -367,6 +363,7 @@ details.technical details>summary{color:var(--muted)}
  .settings-row-main{grid-column:1;grid-row:1}
  .settings-state{grid-column:1;grid-row:2}
  .settings-row-actions{grid-column:2;grid-row:1 / span 2}
+ .settings-row>.settings-disclosure{grid-row:3}
  .folder-add-row{flex-wrap:wrap}
  .folder-add-row button{flex:1 1 auto}
  .folder-edit{padding:var(--sp-3)}

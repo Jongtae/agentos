@@ -227,6 +227,29 @@ def _mark_reauthentication_required(
         return registry.status(owner_id, connector_id).as_dict()
 
 
+def _stored_credential_usable(tokens, owner_id: str, grant: str, now: Callable[[], float]) -> bool:
+    """Whether one stored grant credential passes every local request check.
+
+    Pure: local owner, grant, scope and expiry only.  No refresh, network
+    request or lifecycle transition, so read-only status surfaces can use it.
+    """
+    spec = _spec(grant)
+    access_token = tokens.get("access_token") if isinstance(tokens, dict) else None
+    expires_at = tokens.get("expires_at") if isinstance(tokens, dict) else None
+    return not (
+        not isinstance(tokens, dict)
+        or tokens.get("owner") != _owner_key(owner_id)
+        or tokens.get("grant") != grant
+        or sorted(tokens.get("scope") or ()) != sorted(spec.required_scopes)
+        or not isinstance(access_token, str)
+        or not access_token
+        or isinstance(expires_at, bool)
+        or not isinstance(expires_at, (int, float))
+        or not math.isfinite(expires_at)
+        or _finite_now(now) >= expires_at
+    )
+
+
 def _authorization_context(
     store,
     registry: ConnectorRegistry,
@@ -258,24 +281,13 @@ def _authorization_context(
             # connected metadata as usable authority.
             _mark_reauthentication_required(store, registry, owner_id, grant)
             raise CalendarReauthenticationRequired("reauth_required") from None
-        access_token = tokens.get("access_token") if isinstance(tokens, dict) else None
-        expires_at = tokens.get("expires_at") if isinstance(tokens, dict) else None
         if (
-            not isinstance(tokens, dict)
-            or tokens.get("owner") != _owner_key(owner_id)
-            or tokens.get("grant") != grant
-            or sorted(tokens.get("scope") or ()) != sorted(spec.required_scopes)
-            or not isinstance(access_token, str)
-            or not access_token
-            or isinstance(expires_at, bool)
-            or not isinstance(expires_at, (int, float))
-            or not math.isfinite(expires_at)
-            or _finite_now(now) >= expires_at
+            not _stored_credential_usable(tokens, owner_id, grant, now)
             or not isinstance(status.connection_revision, str)
         ):
             _mark_reauthentication_required(store, registry, owner_id, grant)
             raise CalendarReauthenticationRequired("reauth_required")
-        return access_token, status.connection_revision
+        return tokens["access_token"], status.connection_revision
 
 
 def _assert_current_request(
@@ -505,6 +517,20 @@ class CalendarOAuth:
             return self.registry.status(owner_id, _spec(grant).connector_id).as_dict()
         except ConnectorContractError as exc:
             raise _contract_error(exc) from None
+
+    def credential_current(self, owner_id: str, *, write: bool = False) -> bool:
+        """Read-only: would the next request for this grant accept its stored credential?
+
+        A CONNECTED row stays CONNECTED until a request finds the token
+        expired; status surfaces use this to report that truthfully without
+        recording the transition, refreshing, or contacting Google.
+        """
+        grant = _grant_label(write)
+        try:
+            tokens = self.store.secret(_secret_slot(TOKEN_SECRET_KEY, grant, owner_id))
+            return _stored_credential_usable(tokens, owner_id, grant, self.now)
+        except CalendarOAuthError:
+            return False
 
     def connection_required(self, owner_id: str, *, write: bool = False) -> dict:
         grant = _grant_label(write)

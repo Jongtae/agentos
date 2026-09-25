@@ -1,4 +1,14 @@
-"""Reviewed capability lifecycle; never installs or executes arbitrary code."""
+"""Historical reviewed-capability lifecycle records; never installs or executes code.
+
+Retired as a live control plane by PRESENCE-SETTINGS-01 #506.  No production
+execution path consults this registry: Google connection and use state is owned
+by ``ConnectorRegistry`` and the concrete connector/OAuth paths, local files by
+folder Grants, and isolated execution by ``TaskCapabilityRegistry``.  Settings,
+``/api/settings`` and the removed ``/api/capabilities`` route no longer read or
+mutate it.  The class is kept so stored ``capability_registry`` rows and
+``retired_capability_evidence`` stay strictly validated historical evidence; do
+not wire it back in as an authority gate without a successor contract.
+"""
 
 import math
 import threading
@@ -218,7 +228,7 @@ class CapabilityRegistry:
             return next(entry for entry in self.list() if entry["id"] == capability_id)
 
     def require_enabled(self, capability_id, scope):
-        """The sole lifecycle gate used before a reviewed capability is invoked."""
+        """Historical lifecycle check; not consulted by any current execution path."""
         with self._lock:
             item = next((entry for entry in self.list() if entry["id"] == capability_id), None)
             if not item or scope not in item["scopes"]:

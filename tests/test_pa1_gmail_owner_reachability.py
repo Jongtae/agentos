@@ -420,7 +420,8 @@ class GmailRouteReachabilityTest(unittest.TestCase):
         # The renderer is wired to the payload key the service actually emits.
         self.assertIn('renderConnectors(settings.connectors)', script)
         self.assertIn('connector.connect_path', script)
-        self.assertIn('link.href=connector.connect_path', script)
+        self.assertIn('link.href=view.href', script)
+        self.assertIn('href:connectable?connector.connect_path', script)
         # An <a> navigation, not api()/fetch: /google-gmail answers 303 to
         # Google, which a cross-origin fetch would follow and discard.
         renderer = script.split('function renderConnectors(')[1].split('\nfunction ')[0]

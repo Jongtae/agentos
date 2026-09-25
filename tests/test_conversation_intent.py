@@ -423,9 +423,12 @@ class ServiceRoutingTests(unittest.TestCase):
         self.assertIn('메모를 저장했습니다', self.run_one('기록: 오로라 예산')['response'])
         self.assertIn('오로라 예산', [row['content'] for row in self.store.notes()])
 
-    def test_the_explicit_settings_command_still_drafts_a_change(self):
+    def test_the_explicit_settings_command_reaches_settings_but_drafts_no_retired_change(self):
         self.registry.transition('google-drive-read', 'enabled', ('read',))
-        self.assertIn('Confirm ', self.run_one('/settings Drive pause')['response'])
+        before = self.store.config('capability_registry')
+        self.assertIn('대화에서 제공하지 않습니다', self.run_one('/settings Drive pause')['response'])
+        self.assertEqual(self.store.config('capability_registry'), before)
+        self.assertEqual(self.store.config('settings_change_drafts', {}), {})
 
     # -- the same capabilities, reached naturally ---------------------------
     def test_knowledge_paraphrases_reach_the_personal_space_orchestrator(self):
@@ -453,10 +456,13 @@ class ServiceRoutingTests(unittest.TestCase):
     def test_settings_paraphrases_reach_the_settings_orchestrator(self):
         self.registry.transition('google-drive-read', 'enabled', ('read',))
         self.registry.transition('google-calendar-create', 'enabled', ('calendar.events',))
-        self.assertIn('google-drive-read', self.run_one('연결 상태 알려줘')['response'])
-        self.assertIn('google-drive-read', self.run_one("what's connected?")['response'])
-        self.assertIn('Confirm ', self.run_one('드라이브 연결 해제해줘')['response'])
-        self.assertIn('Confirm ', self.run_one('pause the calendar connection')['response'])
+        # #506: reads report authoritative connection state by owner name;
+        # the retired registry lifecycle is refused rather than drafted.
+        self.assertIn('Telegram · 연결 안 됨', self.run_one('연결 상태 알려줘')['response'])
+        self.assertNotIn('google-drive-read', self.run_one("what's connected?")['response'])
+        self.assertIn('대화에서 제공하지 않습니다', self.run_one('드라이브 연결 해제해줘')['response'])
+        self.assertIn('대화에서 제공하지 않습니다', self.run_one('pause the calendar connection')['response'])
+        self.assertEqual(self.store.config('settings_change_drafts', {}), {})
 
     def test_research_paraphrases_stay_on_the_conversation_route(self):
         for text, _ in PARAPHRASES[INTENT_RESEARCH]:

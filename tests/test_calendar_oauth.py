@@ -725,5 +725,20 @@ class InertnessTests(CalendarOAuthTestCase):
         self.assertIsNone(getattr(calendar_oauth_module, "CalendarConnector", None))
 
 
+
+class CredentialCurrentTests(CalendarOAuthTestCase):
+    """#506 / PR #584: per-grant read-only expiry check with no transition."""
+
+    def test_each_grant_is_checked_locally_and_independently(self):
+        self.connect(expires_in=60)
+        self.connect(write=True, expires_in=3_600)
+        self.assertTrue(self.oauth.credential_current("owner-a"))
+        self.clock[0] += 61
+        before = self.raw_store.config("connector_contract_state")
+        self.assertFalse(self.oauth.credential_current("owner-a"))
+        self.assertTrue(self.oauth.credential_current("owner-a", write=True))
+        self.assertEqual(self.connector_state(CALENDAR_CONNECTOR_ID).value, "connected", "the check records nothing")
+        self.assertEqual(self.raw_store.config("connector_contract_state"), before)
+
 if __name__ == "__main__":
     unittest.main()

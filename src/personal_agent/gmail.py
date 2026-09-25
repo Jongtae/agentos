@@ -770,6 +770,39 @@ class GmailConnector:
             tokens["refresh_token"] = refresh_token
         return tokens
 
+    def _stored_credential_usable(self, tokens, owner_id: str) -> bool:
+        """Whether a stored credential passes every local check a request applies.
+
+        Pure: local expiry, owner and scope only.  No refresh, no network and
+        no lifecycle transition, so a read-only status surface can use it.
+        """
+        if not isinstance(tokens, dict) or tokens.get("owner") != _owner_key(owner_id):
+            return False
+        access_token = tokens.get("access_token")
+        expires_at = tokens.get("expires_at")
+        return not (
+            not isinstance(access_token, str)
+            or not access_token
+            or isinstance(expires_at, bool)
+            or not isinstance(expires_at, (int, float))
+            or not math.isfinite(expires_at)
+            or _finite_now(self.now) >= expires_at
+            or tokens.get("scope") != GMAIL_READONLY_SCOPE
+        )
+
+    def credential_current(self, owner_id: str) -> bool:
+        """Read-only: would the next Gmail request accept the stored credential?
+
+        A CONNECTED row stays CONNECTED until a request finds the token
+        expired.  Status surfaces call this to report that truthfully without
+        recording the transition or contacting Google.
+        """
+        try:
+            tokens = self.store.secret(_owner_secret_key(TOKEN_SECRET_KEY, owner_id))
+            return self._stored_credential_usable(tokens, owner_id)
+        except GmailError:
+            return False
+
     def _authorization_context(self, owner_id: str) -> tuple[dict, str, str]:
         with self._lifecycle_guard(owner_id):
             try:
@@ -787,23 +820,10 @@ class GmailConnector:
                 # structurally connected metadata as usable.
                 self.mark_reauthentication_required(owner_id)
                 raise GmailReauthenticationRequired("reauth_required") from None
-            if not isinstance(tokens, dict) or tokens.get("owner") != _owner_key(owner_id):
+            if not self._stored_credential_usable(tokens, owner_id) or not isinstance(status.connection_revision, str):
                 self.mark_reauthentication_required(owner_id)
                 raise GmailReauthenticationRequired("reauth_required")
-            access_token = tokens.get("access_token")
-            expires_at = tokens.get("expires_at")
-            if (
-                not isinstance(access_token, str)
-                or not access_token
-                or isinstance(expires_at, bool)
-                or not isinstance(expires_at, (int, float))
-                or not math.isfinite(expires_at)
-                or _finite_now(self.now) >= expires_at
-                or tokens.get("scope") != GMAIL_READONLY_SCOPE
-                or not isinstance(status.connection_revision, str)
-            ):
-                self.mark_reauthentication_required(owner_id)
-                raise GmailReauthenticationRequired("reauth_required")
+            access_token = tokens["access_token"]
             return (
                 {"Authorization": "Bearer " + access_token, "Accept": "application/json"},
                 status.connection_revision,

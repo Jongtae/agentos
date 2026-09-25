@@ -199,7 +199,9 @@ class AgentService:
         self.isolated_engine_adapter=isolated_engine_adapter
         self.isolated_mcp_registry=isolated_mcp_registry or TaskCapabilityRegistry()
         self.isolated_mcp_proxy=IsolatedMcpProxy(self.isolated_mcp_registry)
-        self.settings_orchestrator=SettingsOrchestrator(store)
+        # Settings reads connection state only from the authoritative
+        # boundaries below (#506); the retired CapabilityRegistry is not read.
+        self.settings_orchestrator=SettingsOrchestrator(store,connections=self.settings_connection_rows)
         self.personal_knowledge_orchestrator=PersonalKnowledgeOrchestrator(store)
         # Routing authority.  The classifier reads literal cue tables, never a
         # model, and the focus record it feeds is content free.
@@ -638,11 +640,10 @@ class AgentService:
             packages=PluginRegistry(self.store.root).declared_packages()
             return {'model':model,'has_api_key':bool(self.store.secret('model_key')),
                     'decision_model':self.decision_route_status(),
-                    'conversation_settings':self.settings_orchestrator.read('local-owner'),
                     'subscription_engines':self.subscription_engine_status(),
                     'subscription_execution':{'mode':'isolated-agentos-mcp','tools':['list_notes']} if self.isolated_engine_adapter else {'mode':'bounded-agentos-mcp','tools':['list_notes','save_note','web_search']},
                     'telegram':{'enabled':tg.get('enabled',False),'mode':tg.get('mode','owner-token'),'username':tg.get('username',''),'paired':bool(tg.get('user_id')),'user_id':tg.get('user_id')},
-                    'file_roots':[{**root,'blocked':folder_grants.blocked(root.get('path',''),self.store)} for root in self.store.config('file_roots',[])], 'file_workspace':FileWorkspace(self.store).projection(), 'document_boundary':boundary, 'context_inbox':__import__('personal_agent.context_inbox',fromlist=['ContextInbox']).ContextInbox(self.store).status(), 'agents':[{'id':role['id'],'name':role['name'],'permissions':role['permissions'],'package_id':package['id']} for package in active_packages for role in package['roles']], 'packages':packages, 'tool_run':self.store.config('tool_run'), 'model_test':model_test, 'model_ready':self.model_ready(model,model_test), 'telegram_status':self.store.config('telegram_status'),'connectors':self.connector_connections()}
+                    'file_roots':[{**root,'blocked':folder_grants.blocked(root.get('path',''),self.store)} for root in self.store.config('file_roots',[])], 'file_workspace':FileWorkspace(self.store).projection(), 'document_boundary':boundary, 'context_inbox':__import__('personal_agent.context_inbox',fromlist=['ContextInbox']).ContextInbox(self.store).status(), 'agents':[{'id':role['id'],'name':role['name'],'permissions':role['permissions'],'package_id':package['id']} for package in active_packages for role in package['roles']], 'packages':packages, 'tool_run':self.store.config('tool_run'), 'model_test':model_test, 'model_ready':self.model_ready(model,model_test), 'telegram_status':self.store.config('telegram_status'),'connectors':self.google_connection_rows()}
 
     def home(self):
         """Return the minimal, credential-free read model for the owner home."""
@@ -1577,6 +1578,76 @@ class AgentService:
                          'state':status.state.value,
                          'required_scopes':list(status.required_scopes),
                          'connect_path':(urlsplit(self.connector_connect_url(connector.connector_id)).path+(('?'+urlsplit(self.connector_connect_url(connector.connector_id)).query) if urlsplit(self.connector_connect_url(connector.connector_id)).query else '')) if self.connector_connect_url(connector.connector_id) else ''})
+        return rows
+
+    def drive_connection_row(self):
+        """Google Drive as Settings sees it, from the Drive OAuth handoff.
+
+        Drive is not a `ConnectorRegistry` connector: its credential and
+        state live in `drive_web_oauth`, and a connection is started from a
+        paired Telegram request, so Settings reports the state and offers no
+        connect link it could not complete.  An install without the handoff
+        reports no Drive row at all.
+        """
+        if not self.drive_web_oauth:
+            return None
+        # effective_status checks a recorded `connected` against the stored
+        # credential's local expiry/scope; it records, refreshes and sends nothing.
+        raw=self.drive_web_oauth.effective_status().get('state','disconnected')
+        state={'connected':'connected','reauth-required':'reauth_required','scope-rejected':'reauth_required'}.get(raw,'disconnected')
+        return {'connector_id':'google-drive-read','label':'Google Drive','state':state,
+                'required_scopes':['https://www.googleapis.com/auth/drive.file'],'connect_path':'',
+                'connect_hint':'Telegram에서 Google Drive 파일을 요청하면 연결 링크를 보냅니다.',
+                'detail_state':raw}
+
+    def connector_credential_current(self, connector_id):
+        """Read-only: would the connector's next request accept its stored credential?
+
+        A CONNECTED registry row stays CONNECTED until a request finds the
+        token expired.  This asks the owning connector's pure local check (no
+        refresh, network request or state change).  None means this install
+        has no connector object that can answer.
+        """
+        owner=self.connector_callback_owner(connector_id)
+        if connector_id==GMAIL_CONNECTOR_ID:
+            return self.gmail.credential_current(owner) if self.gmail else None
+        if connector_id in (CALENDAR_CONNECTOR_ID,CALENDAR_WRITE_CONNECTOR_ID):
+            return (self.calendar_oauth.credential_current(owner,write=connector_id==CALENDAR_WRITE_CONNECTOR_ID)
+                    if self.calendar_oauth else None)
+        return None
+
+    def google_connection_rows(self):
+        """Every Google connection row Settings shows, each from its own authority."""
+        rows=[]
+        for row in self.connector_connections():
+            if row.get('state')=='connected':
+                current=self.connector_credential_current(row.get('connector_id'))
+                if current is False:
+                    # Expired or unusable locally: the next request would
+                    # refuse it and require a new authorization.
+                    row={**row,'state':'reauth_required','detail_state':'connected-credential-expired'}
+                elif current is None:
+                    row={**row,'state':'unknown','detail_state':'connected-credential-unverified'}
+            rows.append(row)
+        drive=self.drive_connection_row()
+        if drive:
+            rows.append(drive)
+        return rows
+
+    def settings_connection_rows(self):
+        """Owner-visible connections for the conversation Settings read model."""
+        tg=self.store.config('telegram',{})
+        rows=[]
+        if tg.get('enabled'):
+            rows.append({'id':'telegram','service':'Telegram','state':'connected' if tg.get('user_id') else 'pending'})
+        else:
+            rows.append({'id':'telegram','service':'Telegram','state':'disconnected'})
+        names={'google-gmail-read':'Google Gmail','google-calendar':'Google Calendar',
+               'google-calendar-write':'Google Calendar 일정 만들기','google-drive-read':'Google Drive'}
+        for row in self.google_connection_rows():
+            ident=row.get('connector_id')
+            rows.append({'id':ident,'service':names.get(ident,row.get('label') or ident),'state':row.get('state'),
+                         'connectable':bool(row.get('connect_path')),'connect_hint':row.get('connect_hint','')})
         return rows
 
     def begin_gmail_connection(self):

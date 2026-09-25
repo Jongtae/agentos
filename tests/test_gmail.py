@@ -2309,5 +2309,23 @@ class GmailConnectorTests(unittest.TestCase):
         self.assertEqual(self.store.secret(self.secret_key("gmail_oauth_tokens")), {})
 
 
+
+class GmailCredentialCurrentTests(unittest.TestCase):
+    """#506 / PR #584: the read-only credential check never calls Google or transitions."""
+
+    setUp, tearDown = GmailConnectorTests.setUp, GmailConnectorTests.tearDown
+    begin, connect = GmailConnectorTests.begin, GmailConnectorTests.connect
+
+    def test_expiry_is_read_locally_without_transport_or_transition(self):
+        self.connect()
+        self.assertTrue(self.gmail.credential_current("owner-a"))
+        self.clock[0] += 61
+        before = self.raw_store.config("connector_contract_state")
+        self.assertFalse(self.gmail.credential_current("owner-a"))
+        self.assertEqual(self.gmail.status("owner-a")["state"], "connected", "the check records nothing")
+        self.assertEqual(self.raw_store.config("connector_contract_state"), before)
+        self.assertEqual(self.calls, [], "no Gmail request was made")
+        self.assertFalse(self.gmail.credential_current("never-connected"))
+
 if __name__ == "__main__":
     unittest.main()

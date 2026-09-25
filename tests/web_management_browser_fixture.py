@@ -82,6 +82,16 @@ class Fixture:
             rows["task-retry"]["events"] = [ev(41, "subscription_engine", "running", 86400 * 2 - 600, "실행을 시작했습니다.", engine="codex", mode="bounded-agentos-mcp"), ev(42, "subscription_engine", "succeeded", 86400 * 2 - 560, "실행을 완료했습니다.", engine="codex", exit_code=0)]
             rows["task-done"]["events"] = [ev(11, "subscription_engine", "running", 3600, "실행을 시작했습니다.", engine="codex", mode="bounded-agentos-mcp"), ev(12, "web_search", "succeeded", 3500, "근거를 확인했습니다.", scope="public-web"), ev(13, "subscription_engine", "succeeded", 3440, "실행을 완료했습니다.", engine="codex", exit_code=0)]
             rows["task-done"]["source_references"] = ["https://example.invalid/ke703"]
+            # #570 developer-mode fixture: recorded, redacted provenance (fixture values only).
+            rows["task-done"]["provenance"] = {"route": "subscription", "engine": "codex", "mode": "bounded-agentos-mcp", "status": "answered",
+                "requested_model": None, "reported_model": None, "context_mode": "shared-context", "context_messages": 4,
+                "instructions_version": "agentos-turn-v1", "instructions_digest": "3f9a1c0e7b2d4a61", "instructions_channel": "prompt",
+                "instructions": "You are AgentOS, the owner's personal assistant. …", "egress_taint": [],
+                "prompt_envelope": "[AgentOS instructions]\n…\n\n[Conversation]\nowner: 서울 도쿄 항공권 비교해줘",
+                "argv": ["codex", "exec", "--json", "-c", "mcp_servers.agentos.command=…", "<prompt: 1834 bytes>"],
+                "usage": {"input_tokens": 5120, "cached_input_tokens": 3072, "output_tokens": 412}, "exit_code": 0, "duration_ms": 58300,
+                "tool_calls": [{"type": "mcp_tool_call", "name": "web_search", "status": "completed"}], "agentos_tool_calls": [{"name": "web_search", "status": "succeeded"}], "prompt_bytes": 1834}
+            rows["task-done"]["decisions"] = [{"kind": "decision", "purpose": "presence", "outcome": "accepted", "model": "gpt-4o-mini", "observed_model": "gpt-4o-mini-2024-07-18", "elapsed_seconds": 0.84}]
             rows["task-done-again"]["events"] = [ev(21, "model", "succeeded", 1760, "실행을 완료했습니다.")]
             rows["task-partial"]["events"] = [ev(51, "subscription_engine", "running", 900, "실행을 시작했습니다.", engine="codex"), ev(52, "subscription_engine", "succeeded", 860, "실행을 완료했습니다.", engine="codex", exit_code=0)]
             rows["task-unknown"]["events"] = [ev(61, "subscription_engine", "running", 600, "실행을 시작했습니다.", engine="codex"), ev(62, "subscription_engine", "succeeded", 560, "실행을 완료했습니다.", engine="codex", exit_code=0)]

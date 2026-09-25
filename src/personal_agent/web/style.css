@@ -462,3 +462,11 @@ details.technical details>summary{color:var(--muted)}
 .engine-token input{min-height:32px}
 .turn-recovery{margin-top:10px;padding-top:10px;border-top:1px solid var(--danger-line);display:grid;gap:6px}
 .turn-recovery .button-row{margin-top:4px}
+/* #570 developer mode: recorded provenance inside a Work's technical info */
+.turn-provenance{margin:10px 0 0 16px;padding-top:8px;border-top:1px solid var(--line)}
+.turn-provenance h4{margin:0;font-size:var(--fs-1);font-weight:600;color:var(--muted)}
+.turn-provenance dl{margin-left:0}
+.turn-provenance-text{margin-top:6px}
+.turn-provenance-text>summary{font-size:var(--fs-1);color:var(--muted)}
+.turn-provenance-text pre{margin:6px 0 0;padding:8px 10px;max-height:22rem;overflow:auto;border-radius:var(--r-1);background:var(--surface-3);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:var(--fs-1);white-space:pre-wrap;overflow-wrap:anywhere}
+.turn-provenance .field-hint{margin:8px 0 0;font-size:var(--fs-1);color:var(--faint)}

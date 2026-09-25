@@ -28,6 +28,8 @@ def _portable_db(source, target):
         tables = {row[0] for row in copy.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if not {"auth", "sessions", "config"} <= tables: raise ValueError("AgentOS owner database has an unsupported schema.")
         copy.execute("DELETE FROM auth");copy.execute("DELETE FROM sessions")
+        # #570: developer-mode provenance is owner-local diagnostics, not portable state.
+        if 'turn_provenance' in tables:copy.execute("DELETE FROM turn_provenance")
         copy.executemany("DELETE FROM config WHERE key=?", ((key,) for key in _RESET_CONFIG))
         # Grants and result paths are valid only in the original runtime. Keep
         # durable result IDs/provenance as owner work evidence, but detach each

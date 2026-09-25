@@ -287,7 +287,9 @@ class BoundedExecutionAdapter:
             return {'state': 'signed-out' if is_not_signed_in(out) else 'unknown', 'detail': 'unparsed status'}
         if done.returncode == 0 and re.search(r'logged in', out, re.I) and not re.search(r'not logged in', out, re.I):
             return {'state': 'signed-in', 'detail': ''}
-        if done.returncode != 0 or is_not_signed_in(out):
+        # Only an explicit "not logged in" is a sign-out; any other failure
+        # (older CLI, transient error) stays unknown.
+        if is_not_signed_in(out):
             return {'state': 'signed-out', 'detail': ''}
         return {'state': 'unknown', 'detail': 'unparsed status'}
 

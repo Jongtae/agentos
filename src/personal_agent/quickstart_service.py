@@ -845,10 +845,9 @@ class AgentService:
         if token and (len(token)<20 or len(token)>1024 or any(ch.isspace() for ch in token)):
             raise ValueError('`claude setup-token`이 표시한 토큰 한 줄을 그대로 붙여 넣으세요.')
         self.store.secret('claude_code_token',token)
-        if token:self.check_engine_login('claude-code')
-        else:
-            with self.lock:
-                rows=dict(self.store.config('engine_login',{}) or {});rows.pop('claude-code',None);self.store.put('engine_login',rows)
+        # Re-check after saving or removing, so a selected route never keeps a
+        # login state that described the previous token.
+        self.check_engine_login('claude-code')
         return self.subscription_engine_status()
 
     def onboarding(self):

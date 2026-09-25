@@ -78,6 +78,7 @@ class AdapterCredentialAndStatus(unittest.TestCase):
             ('claude-code', _Done(stdout='garbled'), 'unknown'),
             ('codex', _Done(stdout='Logged in using ChatGPT'), 'signed-in'),
             ('codex', _Done(returncode=1, stdout='Not logged in'), 'signed-out'),
+            ('codex', _Done(returncode=2, stderr="error: unrecognized subcommand 'login'"), 'unknown'),
         ]
         for engine, done, expected in cases:
             with self.subTest(engine=engine, expected=expected):
@@ -250,8 +251,10 @@ class ServiceLoginFlow(unittest.TestCase):
             service.save_engine_credential({'engine': 'claude-code', 'token': 'has space in it but long enough'})
         with self.assertRaises(ValueError):
             service.save_engine_credential({'engine': 'codex', 'token': TOKEN})
+        service.execution_adapter.state = 'signed-out'
         service.save_engine_credential({'engine': 'claude-code', 'token': ''})
         self.assertEqual(self.store.secret('claude_code_token'), '')
+        self.assertEqual(self._login(service, 'claude-code')['state'], 'signed-out', 'removal re-checks instead of forgetting')
 
     def test_default_adapter_reads_the_token_for_claude_code_only(self):
         tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)

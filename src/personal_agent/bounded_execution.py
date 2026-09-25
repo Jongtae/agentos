@@ -51,9 +51,10 @@ class ExecutionError(ValueError):
     ``failure_class``, ``exit_code`` and ``reason`` are bounded, redacted
     diagnostics for Work events and logs; they never contain the prompt.
     """
-    def __init__(self, message, *, failure_class='', exit_code=None, reason=''):
+    def __init__(self, message, *, failure_class='', exit_code=None, reason='', meta=None):
         super().__init__(message)
         self.failure_class, self.exit_code, self.reason = failure_class, exit_code, reason
+        self.meta = meta or {}
 
     def diagnostics(self):
         return {key: value for key, value in (('failure_class', self.failure_class),
@@ -123,6 +124,53 @@ LOGIN_COMMANDS = {'claude-code': 'claude setup-token', 'codex': 'codex login'}
 AUTH_HINT = '엔진 로그인이 필요합니다. 설정 › AI 연결에서 로그인을 확인하세요.'
 
 
+def cli_metadata(engine_id, raw):
+    """What the CLI itself reported about the run (#570). Absent fields stay
+    absent: a missing model is "not reported", never guessed."""
+    meta = {'reported_model': None, 'usage': None, 'tool_calls': [], 'num_turns': None, 'cost_usd': None}
+    records = []
+    for line in (raw or '')[-MAX_OUTPUT_BYTES:].splitlines():
+        try:
+            value = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(value, dict):
+            records.append(value)
+    for record in records:
+        models = record.get('modelUsage')
+        if isinstance(models, dict) and models:
+            meta['reported_model'] = ', '.join(str(name) for name in list(models)[:3])
+        elif isinstance(record.get('model'), str) and record['model']:
+            meta['reported_model'] = record['model'][:120]
+        if isinstance(record.get('usage'), dict):
+            meta['usage'] = {k: v for k, v in record['usage'].items() if isinstance(v, (int, float))}
+        if isinstance(record.get('num_turns'), int):
+            meta['num_turns'] = record['num_turns']
+        if isinstance(record.get('total_cost_usd'), (int, float)):
+            meta['cost_usd'] = record['total_cost_usd']
+        item = record.get('item')
+        if isinstance(item, dict) and item.get('type') in ('mcp_tool_call', 'command_execution', 'web_search', 'file_change'):
+            name = item.get('tool') or item.get('name') or item.get('type')
+            meta['tool_calls'].append({'type': item.get('type'), 'name': str(name)[:80], 'status': str(item.get('status') or '')[:20]})
+    meta['tool_calls'] = meta['tool_calls'][:30]
+    return meta
+
+
+def display_argv(argv, prompt, instructions=''):
+    """The command line with the prompt and instructions replaced by labels."""
+    shown = []
+    for part in argv:
+        if prompt and part == prompt:
+            shown.append(f'<prompt: {len(prompt.encode())} bytes>')
+        elif instructions and part == instructions:
+            shown.append(f'<AgentOS instructions: {len(instructions.encode())} bytes>')
+        elif prompt and len(part) > 200:
+            shown.append(part[:200] + '…')
+        else:
+            shown.append(part)
+    return shown
+
+
 def failure_details(engine_id, stdout, stderr, prompt=None):
     """Summarise a failed CLI turn from its official machine output.
 
@@ -160,6 +208,7 @@ class ExecutionResult:
     content: str
     engine: str
     exit_code: int
+    meta: dict = None
 
 
 class AgentOSMcpTools:
@@ -390,14 +439,16 @@ class BoundedExecutionAdapter:
             env = self.environment(engine_id, binary, run_dir)
             started = time.monotonic()
             LOG.info('engine turn started engine=%s', engine_id)
+            argv = self.command(engine_id, binary, prompt, config, instructions)
+            run_meta = {'argv': display_argv(argv, prompt, instructions), 'requested_model': None}
             try:
-                completed = self.runner(self.command(engine_id, binary, prompt, config, instructions), cwd=run_dir,
+                completed = self.runner(argv, cwd=run_dir,
                                         env=env, stdin=subprocess.DEVNULL, capture_output=True,
                                         text=True, timeout=MAX_TIMEOUT_SECONDS, shell=False)
             except subprocess.TimeoutExpired as exc:
                 LOG.warning('engine turn timed out engine=%s after=%ss', engine_id, MAX_TIMEOUT_SECONDS)
                 raise ExecutionError(f'구독 엔진이 {MAX_TIMEOUT_SECONDS}초 안에 응답하지 않았습니다.',
-                                     failure_class='timeout') from exc
+                                     failure_class='timeout', meta={**run_meta, 'duration_ms': MAX_TIMEOUT_SECONDS * 1000}) from exc
             except OSError as exc:
                 LOG.warning('engine turn could not start engine=%s error=%s', engine_id, type(exc).__name__)
                 raise ExecutionError('구독 엔진 CLI를 실행하지 못했습니다.', failure_class='start-failed') from exc
@@ -426,11 +477,15 @@ class BoundedExecutionAdapter:
                 if reason:
                     message += f' 엔진 응답: {reason}'
                 raise ExecutionError(message, failure_class=failure_class,
-                                     exit_code=completed.returncode, reason=reason)
+                                     exit_code=completed.returncode, reason=reason,
+                                     meta={**run_meta, **cli_metadata(engine_id, stdout),
+                                           'duration_ms': int(elapsed * 1000)})
             try:
                 content = self._content(engine_id, completed.stdout)
             except ExecutionError as exc:
                 LOG.warning('engine turn returned no usable result engine=%s duration=%.1fs', engine_id, elapsed)
-                raise ExecutionError(str(exc), failure_class='invalid-output', exit_code=0) from None
+                raise ExecutionError(str(exc), failure_class='invalid-output', exit_code=0,
+                                     meta={**run_meta, **cli_metadata(engine_id, completed.stdout), 'duration_ms': int(elapsed * 1000)}) from None
             LOG.info('engine turn succeeded engine=%s duration=%.1fs', engine_id, elapsed)
-            return ExecutionResult(content, engine_id, completed.returncode)
+            return ExecutionResult(content, engine_id, completed.returncode,
+                                   {**run_meta, **cli_metadata(engine_id, completed.stdout), 'duration_ms': int(elapsed * 1000)})

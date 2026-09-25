@@ -37,6 +37,7 @@ class QuickStore:
             CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT, content TEXT, channel TEXT, created REAL);
             CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY, request_key TEXT UNIQUE, message TEXT, channel TEXT, chat_id INTEGER, status TEXT, response TEXT, error TEXT, delivery TEXT, provider TEXT, model TEXT, created REAL);
             CREATE TABLE IF NOT EXISTS tool_events(id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT, tool TEXT, status TEXT, detail TEXT, created REAL);
+            CREATE TABLE IF NOT EXISTS turn_provenance(job_id TEXT PRIMARY KEY, record TEXT NOT NULL, created REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS notes(id TEXT PRIMARY KEY, content TEXT, created REAL);
             CREATE TABLE IF NOT EXISTS memories(id TEXT PRIMARY KEY, memory_key TEXT NOT NULL, content TEXT NOT NULL, created REAL NOT NULL, supersedes TEXT, state TEXT NOT NULL DEFAULT 'current');
             CREATE INDEX IF NOT EXISTS memories_key_state ON memories(memory_key, state, created DESC);
@@ -842,6 +843,21 @@ class QuickStore:
             except (TypeError,ValueError):trace={'error':'실행 근거를 읽을 수 없습니다.'}
             events.append({**row,'trace':trace if isinstance(trace,dict) else {'error':'실행 근거 형식이 올바르지 않습니다.'}})
         return events
+
+    TURN_PROVENANCE_KEEP=50
+
+    def put_turn_provenance(self, job_id, record):
+        """Keep the redacted execution record of one Work (#570); newest 50 only."""
+        with self.db() as db:
+            db.execute('INSERT INTO turn_provenance VALUES (?,?,?) ON CONFLICT(job_id) DO UPDATE SET record=excluded.record,created=excluded.created',
+                       (job_id,json.dumps(record,ensure_ascii=False),time.time()))
+            db.execute('DELETE FROM turn_provenance WHERE job_id NOT IN (SELECT job_id FROM turn_provenance ORDER BY created DESC LIMIT ?)',
+                       (self.TURN_PROVENANCE_KEEP,))
+
+    def turn_provenance(self, job_id):
+        with self.db() as db:
+            row=db.execute('SELECT record FROM turn_provenance WHERE job_id=?',(job_id,)).fetchone()
+        return json.loads(row['record']) if row else None
 
     def task_events(self, job_id):
         with self.db() as db:

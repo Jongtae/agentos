@@ -357,7 +357,31 @@ class AgentService:
         return {'provider':config['provider'],'model':config['model'],
                 'source':'explicit' if isinstance(explicit,dict) and explicit.get('provider') else 'default-openai'}
 
+    # -- turn provenance (#570) ------------------------------------------------
+    @staticmethod
+    def _redact_provenance(text):
+        text=re.sub(r'(?:sk-|Bearer\s+)[A-Za-z0-9._-]+','[가림]',str(text or ''),flags=re.I)
+        text=re.sub(r'(?<!\w)/(?:Users|home)/[^\s"\']+','[경로 가림]',text)
+        return text[:60000]
+
+    def record_turn_provenance(self, job_id, **fields):
+        """Keep what this Work actually sent and what the worker reported.
+
+        Redacted before persistence, bounded, local only; shown in developer
+        mode. Never allowed to break the turn itself.
+        """
+        try:
+            current=self.store.turn_provenance(job_id) or {}
+            for key in ('prompt_envelope','instructions'):
+                if key in fields:fields[key]=self._redact_provenance(fields[key])
+            if isinstance(fields.get('argv'),list):fields['argv']=[self._redact_provenance(part)[:300] for part in fields['argv']]
+            self.store.put_turn_provenance(job_id,{**current,**{k:v for k,v in fields.items() if v is not None},'recorded_at':time.time()})
+        except Exception:
+            LOG.warning('turn provenance could not be recorded job=%s',job_id)
+
     def record_decision(self, record):
+        # Link a DecisionEngine call to the Work being processed (#570).
+        if getattr(self,'current_work_id',None):record={**record,'work_id':self.current_work_id}
         with self.lock:  # read-modify-write of one config row
             rows=self.store.config('decision_audit',[]);rows=rows if isinstance(rows,list) else []
             self.store.put('decision_audit',[*rows,record][-100:])
@@ -714,6 +738,10 @@ class AgentService:
             if job.get('relation_kind') and job.get('related_job_id'):
                 task['relation']={'kind':job['relation_kind'],'work_id':job['related_job_id']}
             if job_id==job['id']:
+                task['provenance']=self.store.turn_provenance(job['id'])
+                audit=self.store.config('decision_audit',[]);audit=audit if isinstance(audit,list) else []
+                task['decisions']=[{key:value for key,value in row.items() if key in ('kind','purpose','outcome','provider','model','observed_model','elapsed_seconds','at')}
+                                   for row in audit if isinstance(row,dict) and row.get('work_id')==job['id']][-10:]
                 task['events']=[self._progress_event(event) for event in events]
                 task['source_references']=self.store.evidence_summary(job['id'])
                 task['error']=job.get('error') if job.get('status') in ('failed','partial','interrupted') else None
@@ -2187,6 +2215,12 @@ class AgentService:
             else:self.ingest_update(update,cfg['generation'])
 
     def run_one(self):
+        try:
+            return self._run_one()
+        finally:
+            self.current_work_id=None
+
+    def _run_one(self):
         # One conversation worker: ordering is shared across all connected channels.
         with self.worker_lock:
             with self.store.db() as db:
@@ -2196,6 +2230,7 @@ class AgentService:
                 job=dict(row)
                 db.execute("UPDATE jobs SET status='running' WHERE id=?",(job['id'],))
                 db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('user',job['message'],job['channel'],time.time(),job.get('workspace_id'),job['id']))
+            self.current_work_id=job['id']
             self.update_task_card(job,'running')
             response=''
             provider='builtin'
@@ -2494,6 +2529,13 @@ class AgentService:
                         if any(message['role']=='assistant' for message in engine_context['conversation']):
                             capabilities.private_provenance.add('conversation-history')
                         mode='isolated-agentos-mcp' if isolated else 'bounded-agentos-mcp'
+                        self.record_turn_provenance(job['id'],route='subscription',engine=subscription['id'],mode=mode,status='sent',
+                            context_mode=engine_context.get('mode','shared-context'),instructions_version=engine_context.get('version'),
+                            instructions_digest=hashlib.sha256(engine_context['instructions'].encode()).hexdigest()[:16],
+                            instructions=engine_context['instructions'],
+                            instructions_channel='append-system-prompt' if subscription['id']=='claude-code' and not isolated and adapter_context else 'prompt',
+                            prompt_envelope=engine_prompt,context_messages=len(engine_context['conversation']),
+                            egress_taint=sorted(capabilities.private_provenance))
                         record('subscription_engine','running',json.dumps({'engine':subscription['id'],'mode':mode,
                             'context_messages':len(engine_context['conversation']),'context_bytes':len(engine_prompt.encode()),
                             'context_mode':engine_context.get('mode','shared-context')}))
@@ -2513,6 +2555,8 @@ class AgentService:
                                 result=self.execution_adapter.execute(subscription['id'],engine_prompt,AgentOSMcpTools(capabilities),context=adapter_context)
                         except (ExecutionError,EngineGatewayError) as exc:
                             diagnostics=exc.diagnostics() if isinstance(exc,ExecutionError) else {}
+                            self.record_turn_provenance(job['id'],status='failed',failure_class=diagnostics.get('failure_class'),
+                                                        exit_code=diagnostics.get('exit_code'),**(getattr(exc,'meta',None) or {}))
                             # A run that the CLI rejected as signed out is the
                             # strongest login evidence we have; show it (#571).
                             if not isolated and diagnostics.get('failure_class')=='auth':
@@ -2520,6 +2564,7 @@ class AgentService:
                             record('subscription_engine','failed',json.dumps({'engine':subscription['id'],'error':str(exc),**diagnostics},ensure_ascii=False))
                             raise
                         record('subscription_engine','succeeded',json.dumps({'engine':result.engine,'exit_code':result.exit_code}))
+                        self.record_turn_provenance(job['id'],status='answered',exit_code=result.exit_code,**(getattr(result,'meta',None) or {}))
                         if not isolated and result.exit_code==0 and (self.store.config('engine_login',{}) or {}).get(subscription['id'],{}).get('state')!='signed-in':
                             self._remember_engine_login(subscription['id'],'signed-in','run')
                         response,provider,model=result.content,'subscription',result.engine
@@ -2540,10 +2585,20 @@ class AgentService:
                         # provider fails before any response event.
                         record('model','requested',json.dumps({'provider':runtime_config.get('provider'),'model':runtime_config.get('model')},ensure_ascii=False))
                         api_context=turn_context(history,'api')
+                        self.record_turn_provenance(job['id'],route='direct-api',provider=runtime_config.get('provider'),status='sent',
+                            requested_model=runtime_config.get('model'),instructions_version=api_context.get('version'),
+                            instructions_digest=hashlib.sha256(api_context['instructions'].encode()).hexdigest()[:16],
+                            instructions=api_context['instructions'],instructions_channel='system-message',
+                            prompt_envelope=render_turn_prompt(api_context),context_messages=len(api_context['conversation']),
+                            egress_taint=sorted(capabilities.private_provenance))
                         result=run_agent(self.adapter,runtime_config,key,[*api_context['conversation'],{'role':'user','content':api_context['request']}],'',capabilities,record)
                         outcome=getattr(result,'outcome','succeeded')
                         response,provider,model=result.content,result.provider,result.model
                         resolved_blocker=outcome=='succeeded'
+                        # The provider layer falls back to the configured model when the
+                        # response names none, so only a different name is evidence.
+                        self.record_turn_provenance(job['id'],status='answered' if outcome=='succeeded' else outcome,
+                                                    reported_model=model if isinstance(model,str) and model!=runtime_config.get('model') else None)
                     if workspace_request:
                         saved=FileWorkspace(self.store).save(job['id'],workspace_request['title'],response,workspace_request['sources'])
                         response+=f"\n\n저장됨: {saved['path']} · {saved['id']}"

@@ -25,8 +25,17 @@ class Fixture:
     results = []
     memories = [{"id": "memory-exact", "memory_key": "durable-key", "content": "exact durable memory", "created": 2}, {"id": "memory-long", "content": LONG_MEMORY, "created": 1}]
     extra_memories = []
-    capability_state = "enabled"
-    drafts = {}
+    # Synthetic connector state matrix for the Settings grammar (#506).  Every
+    # contract state plus an unknown value and a long backend label; no row is
+    # backed by a real connector and no connect path leaves this fixture.
+    connectors = [
+        {"connector_id": "google-gmail-read", "label": "Gmail", "state": "connected", "required_scopes": ["https://www.googleapis.com/auth/gmail.readonly"], "connect_path": "/fixture-connect/gmail"},
+        {"connector_id": "google-calendar", "label": "google-calendar", "state": "disconnected", "required_scopes": ["https://www.googleapis.com/auth/calendar.readonly"], "connect_path": "/fixture-connect/calendar"},
+        {"connector_id": "google-calendar-write", "label": "Google Calendar 일정 만들기", "state": "reauth_required", "required_scopes": ["https://www.googleapis.com/auth/calendar.events"], "connect_path": "/fixture-connect/calendar"},
+        {"connector_id": "google-drive-read", "label": "Google Drive", "state": "disconnected", "required_scopes": ["https://www.googleapis.com/auth/drive.file"], "connect_path": "", "connect_hint": "Telegram에서 Google Drive 파일을 요청하면 연결 링크를 보냅니다.", "detail_state": "expired"},
+        {"connector_id": "fixture-blocked", "label": "Blocked fixture service", "state": "blocked", "required_scopes": [], "connect_path": "/fixture-connect/blocked"},
+        {"connector_id": "fixture-unknown", "label": "A very long synthetic connector label that must wrap inside the settings row without overflowing its column on narrow screens", "state": "surprising-new-state", "required_scopes": ["fixture.scope.with.a.very.long.identifier.that.has.no.natural.break.points.at.all"], "connect_path": "/fixture-connect/unknown"},
+    ]
     tasks_empty = False
     model = {"provider": "openai", "endpoint": "https://example.invalid/v1", "model": "fixture-model"}
     other_results = [{"id": f"other-{index}", "job_id": f"other-job-{index}", "workspace_id": "workspace-other", "content": f"other result {index}", "created": 100 + index} for index in range(30)]
@@ -194,7 +203,7 @@ class Handler(BaseHTTPRequestHandler):
                 Fixture.state_inflight = True
                 time.sleep(1.5)
                 Fixture.state_inflight = False
-            self.send_json({"settings": {"model": model, "model_ready": False, "subscription_engines": ({"selected": "codex", "engines": [{"id": "codex", "name": "Codex", "installed": True, "connected": True, "login": {"state": "signed-in", "checked_at": Fixture.rich_now}}, {"id": "claude-code", "name": "Claude Code", "installed": True, "connected": False, "credential": False, "login": {"state": "signed-out", "checked_at": Fixture.rich_now}}]} if Fixture.rich_tasks else {"engines": []}), "file_roots": [{"path": path} for path in file_roots], "file_workspace": file_workspace, "context_inbox": {"sources": {}, "items": []}, "telegram": {"enabled": True, "paired": True, "username": "fixture_bot"}, "conversation_settings": {"state": "read", "capabilities": [{"id": "google-drive-read", "kind": "connector", "state": Fixture.capability_state, "recovery": "Owner can resume after review."}]}, "document_boundary": {}}, "jobs": [{"id": "task-382", "status": "running", "response": None, "message": "fixture Telegram request", "channel": "telegram:fixture-owner"}] + (Fixture.rich_jobs() if Fixture.rich_tasks else []) + [{"id": "project-job", "status": "succeeded", "response": "fixture project result", "message": "fixture project request", "channel": "telegram:fixture-owner"}], "tool_events": [], "healthy": True})
+            self.send_json({"settings": {"model": model, "model_ready": False, "subscription_engines": ({"selected": "codex", "engines": [{"id": "codex", "name": "Codex", "installed": True, "connected": True, "login": {"state": "signed-in", "checked_at": Fixture.rich_now}}, {"id": "claude-code", "name": "Claude Code", "installed": True, "connected": False, "credential": False, "login": {"state": "signed-out", "checked_at": Fixture.rich_now}}]} if Fixture.rich_tasks else {"engines": []}), "file_roots": [{"path": path} for path in file_roots], "file_workspace": file_workspace, "context_inbox": {"sources": {}, "items": []}, "telegram": {"enabled": True, "paired": True, "username": "fixture_bot"}, "connectors": Fixture.connectors, "document_boundary": {}}, "jobs": [{"id": "task-382", "status": "running", "response": None, "message": "fixture Telegram request", "channel": "telegram:fixture-owner"}] + (Fixture.rich_jobs() if Fixture.rich_tasks else []) + [{"id": "project-job", "status": "succeeded", "response": "fixture project result", "message": "fixture project request", "channel": "telegram:fixture-owner"}], "tool_events": [], "healthy": True})
         elif path == "/api/personal-space": self.send_json({"memories": Fixture.memories, "context": [], "results": (Fixture.results + Fixture.other_results)[-50:]})
         elif path == "/api/personal-records":
             if Fixture.fail_records_once:
@@ -316,25 +325,6 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/file-workspace":
             Fixture.file_workspace = {"references": [{"path": value} for value in body.get("references", [])], "workspace": body.get("workspace", "")}
             self.send_json(Fixture.file_workspace)
-        elif path == "/api/settings/request":
-            operation = body.get("operation")
-            if operation == "draft":
-                action = body.get("intent", "").split()[-1]
-                preview = {"id": "fixture-draft", "target": "google-drive-read", "action": action, "effect": f"google-drive-read {action}", "digest": f"fixture-{action}"}
-                Fixture.drafts[preview["id"]] = preview
-                self.send_json({"state": "awaiting-confirmation", "preview": preview})
-            elif operation == "confirm":
-                preview = Fixture.drafts.pop(body.get("draft_id"), None)
-                if not preview or body.get("digest") != preview["digest"]:
-                    self.send_json({"error": "invalid draft"}, 409)
-                else:
-                    Fixture.capability_state = {"pause": "paused", "disconnect": "disconnected", "resume": "enabled"}[preview["action"]]
-                    self.send_json({"state": "applied", "capability": {"id": "google-drive-read", "state": Fixture.capability_state}})
-            elif operation == "cancel":
-                Fixture.drafts.pop(body.get("draft_id"), None)
-                self.send_json({"state": "cancelled"})
-            else:
-                self.send_json({"error": "unsupported settings operation"}, 400)
         elif path == "/api/workspaces/workspace-382/save-result":
             if Fixture.delay_save:
                 Fixture.delay_save = False

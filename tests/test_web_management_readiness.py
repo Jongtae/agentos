@@ -148,10 +148,6 @@ assert.deepEqual(ui.filterLocalRecords(space,'durable-key','saved').map(x=>x.id)
 assert.deepEqual(ui.filterLocalRecords(space,'needle-after-truncation','all').map(x=>x.id),['long']);
 assert.deepEqual(ui.workspaceSaveCandidates([{id:'unassigned',status:'succeeded'},{id:'here',workspace_id:'w',status:'partial'},{id:'elsewhere',workspace_id:'other',status:'succeeded'},{id:'queued',status:'queued'}],'w',['here']).map(x=>x.id),['unassigned']);
 assert.deepEqual(ui.modelPresetDraft({provider:'compatible',endpoint:'https://openrouter.ai/api/v1/',model:'fixture/free'}),{provider:'compatible',endpoint:'https://openrouter.ai/api/v1',model:'fixture/free',api_key:''});
-assert.deepEqual(ui.capabilityActions({id:'google-drive-read',state:'enabled'}),['pause','disconnect']);
-assert.deepEqual(ui.capabilityActions({id:'google-drive-read',state:'paused'}),['resume']);
-assert.deepEqual(ui.capabilityActions({id:'google-drive-read',state:'disconnected'}),[]);
-assert.deepEqual(ui.capabilityActions({id:'isolated-runtime-placeholder',state:'enabled'}),[]);
 assert.match(ui.contextSharingWarning({sharing_requires_policy_and_per_request_approval:true}),/각 Telegram 작업마다/);
 assert.equal(ui.settingsFeedbackId('subscription'),'active-ai-feedback');
 assert.equal(ui.routeText({kind:'subscription',engine:'codex',status:'failed'}),'Codex 구독 CLI · 실행했지만 실패');
@@ -312,13 +308,17 @@ console.log(JSON.stringify({checks:40}));
             self.assertEqual([item['id'] for item in store.personal_records('STRASSE')['items']],
                              ['eszett'])
 
-    def test_capability_lifecycle_uses_existing_confirmed_settings_route(self):
+    def test_settings_offers_no_retired_capability_lifecycle_controls(self):
+        # #506: the legacy CapabilityRegistry pause/disconnect/resume changed
+        # no real connector authority, so Settings must not offer it at all.
         app = (ROOT / 'src/personal_agent/web/app.js').read_text()
         html = (ROOT / 'src/personal_agent/web/index.html').read_text()
-        self.assertIn('id="capability-controls"', html)
-        self.assertIn("api('/api/settings/request',{operation:'draft'", app)
-        self.assertIn("api('/api/settings/request',{operation:'confirm'", app)
-        self.assertIn("api('/api/settings/request',{operation:'cancel'", app)
+        self.assertNotIn('capability-controls', html)
+        self.assertNotIn('/api/settings/request', app)
+        self.assertNotIn('/api/capabilities', app)
+        for retired in ('builtin-mcp-read', 'isolated-runtime-placeholder', 'google-calendar-create', 'renderCapabilities'):
+            self.assertNotIn(retired, app)
+        self.assertIn('id="connector-controls"', html)
         self.assertIn("$('brand-home').onclick", app)
         self.assertIn("setError('active-ai-feedback',error)", app)
         self.assertIn('각 Telegram 작업마다 공유 승인이 필요합니다.', app)

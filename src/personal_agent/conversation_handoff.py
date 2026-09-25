@@ -22,7 +22,12 @@ from .providers import ProviderError
 TELEGRAM_API_ROOT = 'https://api.telegram.org'
 TELEGRAM_TIMEOUT = 15
 TELEGRAM_FAILURE_TEXT = 'Telegram 요청이 실패했습니다. 봇 설정을 확인하세요.'
-TELEGRAM_POLL_UPDATE_KINDS = ('message', 'callback_query')
+#: ``stopped_message_generation`` carries the owner's Stop on a draft (#581).
+TELEGRAM_POLL_UPDATE_KINDS = ('message', 'callback_query', 'stopped_message_generation')
+#: Presence calls (reaction, chat action, draft) are best-effort decoration
+#: sent while terminal delivery may be waiting on the same lock, so they get a
+#: short budget instead of the full delivery timeout.
+TELEGRAM_PRESENCE_TIMEOUT = 4
 
 
 class TelegramChannel:
@@ -42,21 +47,31 @@ class TelegramChannel:
         """Resolve the live transport callable for this one call."""
         return self._transport_source()
 
-    def call_with_token(self, token, method, body):
+    def call_with_token(self, token, method, body, timeout=TELEGRAM_TIMEOUT):
         """Call one Bot API method with an explicitly supplied bot token."""
-        result = self.transport(f'{TELEGRAM_API_ROOT}/bot{token}/{method}', body, {}, timeout=TELEGRAM_TIMEOUT)
+        result = self.transport(f'{TELEGRAM_API_ROOT}/bot{token}/{method}', body, {}, timeout=timeout)
         if not result.get('ok'):
             raise ProviderError(TELEGRAM_FAILURE_TEXT)
         return result['result']
 
-    def call(self, method, body):
+    def call(self, method, body, timeout=TELEGRAM_TIMEOUT):
         """Call one Bot API method with the currently stored bot token."""
-        return self.call_with_token(self._token_source(), method, body)
+        return self.call_with_token(self._token_source(), method, body, timeout=timeout)
 
-    def send_message(self, chat_id, text, reply_markup=None):
+    def send_message(self, chat_id, text, reply_markup=None, *, parse_mode=None, reply_to=None):
+        """Send one durable message.
+
+        ``reply_to`` anchors it to an owner message through ``reply_parameters``
+        with ``allow_sending_without_reply`` so a deleted original never turns
+        a delivery into a failure.
+        """
         body = {'chat_id': chat_id, 'text': text}
         if reply_markup is not None:
             body['reply_markup'] = reply_markup
+        if parse_mode is not None:
+            body['parse_mode'] = parse_mode
+        if isinstance(reply_to, int):
+            body['reply_parameters'] = {'message_id': reply_to, 'allow_sending_without_reply': True}
         return self.call('sendMessage', body)
 
     def edit_message_text(self, chat_id, message_id, text, reply_markup=None):
@@ -65,8 +80,36 @@ class TelegramChannel:
             body['reply_markup'] = reply_markup
         return self.call('editMessageText', body)
 
-    def answer_callback_query(self, callback_query_id, text):
-        return self.call('answerCallbackQuery', {'callback_query_id': callback_query_id, 'text': text})
+    def edit_message_reply_markup(self, chat_id, message_id, reply_markup):
+        return self.call('editMessageReplyMarkup', {'chat_id': chat_id, 'message_id': message_id,
+                                                    'reply_markup': reply_markup})
+
+    def answer_callback_query(self, callback_query_id, text=None, show_alert=False):
+        body = {'callback_query_id': callback_query_id}
+        if text:
+            body['text'] = text[:200]
+        if show_alert:
+            body['show_alert'] = True
+        return self.call('answerCallbackQuery', body)
+
+    # --- presence (#581): best-effort, never Evidence -------------------------
+
+    def set_message_reaction(self, chat_id, message_id, emoji):
+        """Set one emoji reaction on a message (bots may set at most one)."""
+        return self.call('setMessageReaction', {'chat_id': chat_id, 'message_id': message_id,
+                                                'reaction': [{'type': 'emoji', 'emoji': emoji}]},
+                         timeout=TELEGRAM_PRESENCE_TIMEOUT)
+
+    def send_chat_action(self, chat_id, action='typing'):
+        return self.call('sendChatAction', {'chat_id': chat_id, 'action': action},
+                         timeout=TELEGRAM_PRESENCE_TIMEOUT)
+
+    def send_message_draft(self, chat_id, draft_id, text='', can_stop=True):
+        """Show an ephemeral draft; empty text is Telegram's "Thinking…" placeholder."""
+        body = {'chat_id': chat_id, 'draft_id': draft_id, 'text': text}
+        if can_stop:
+            body['can_stop'] = True
+        return self.call('sendMessageDraft', body, timeout=TELEGRAM_PRESENCE_TIMEOUT)
 
     def get_updates(self, offset, timeout=5, allowed_updates=None, limit=20):
         """Long-poll only the update kinds this conversation actually handles."""

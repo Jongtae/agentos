@@ -513,5 +513,25 @@ class HttpSurfaceTests(HandoffTestCase):
         self.assertEqual(status, 401)
 
 
+class FilesPaneTests(unittest.TestCase):
+    """The 파일 · 저장 pane carries the owner-local approval surface."""
+
+    WEB = Path(__file__).parents[1] / 'src' / 'personal_agent' / 'web'
+
+    def test_pending_requests_render_before_folder_management(self):
+        html = (self.WEB / 'index.html').read_text(encoding='utf-8')
+        pane = html[html.index('id="settings-files"'):]
+        self.assertLess(pane.index('id="folder-requests"'), pane.index('id="roots-heading"'))
+        self.assertIn('id="folder-requests-feedback" class="field-feedback" role="status" aria-live="polite"', pane)
+
+    def test_the_browser_sends_only_the_opaque_request_id_to_approve(self):
+        app = (self.WEB / 'app.js').read_text(encoding='utf-8')
+        self.assertIn("api('/api/folder-requests/'+action,{handoff_id:request.handoff_id,...(body||{})})", app)
+        self.assertIn("folderRequestAction(event.currentTarget,'approve',request,null,", app)
+        self.assertIn('void loadFolderRequests();', app)
+        # A remote (tunnel/phone) surface offers only "continue on the Mac" and decline.
+        self.assertIn("if(!data.local_surface){actions.append(folderRequestDeny(request))", app)
+
+
 if __name__ == '__main__':
     unittest.main()

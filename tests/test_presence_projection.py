@@ -174,15 +174,16 @@ class LongWorkTests(ProjectionTestCase):
         self.assertLessEqual(kinds.count('edit'), 2)
         self.assertOneVoice(self.outbound)
 
-    def test_the_acknowledgement_reflects_running_work_and_offers_no_cancel(self):
+    def test_running_work_gets_native_presence_and_no_processing_card(self):
+        """#581 replaces the running-Work card with typing/draft presence."""
         self.connect_model()
         job_id = self.receive('진행 중인 긴 요청')
         with self.store.db() as db:
             db.execute("UPDATE jobs SET status='running' WHERE id=?", (job_id,))
         self.age(job_id, TELEGRAM_ACK_AFTER_SECONDS + 1)
-        self.assertEqual(self.service.acknowledge_long_work(), [job_id])
-        self.assertEqual(self.outbound, [('send', '요청을 처리하고 있어요.')])
-        self.assertEqual(self.store.task_card(job_id)['state'], 'running')
+        self.assertEqual(self.service.acknowledge_long_work(), [])
+        self.assertEqual(self.outbound, [], 'no "요청을 처리하고 있어요" bubble')
+        self.assertIsNone(self.store.task_card(job_id))
 
     def test_only_this_owner_s_natural_language_work_is_acknowledged(self):
         other = self.store.enqueue('web request', 'web-1', channel='web')
@@ -196,8 +197,6 @@ class LongWorkTests(ProjectionTestCase):
         self.connect_model()
         job_id = self.receive('긴 요청을 처리해 줘')
         self.age(job_id, TELEGRAM_ACK_AFTER_SECONDS + 1)
-        with self.store.db() as db:
-            db.execute("UPDATE jobs SET status='running' WHERE id=?",(job_id,))
         original = self.service.telegram_transport
         raced = False
         delivery_thread = None
@@ -207,9 +206,9 @@ class LongWorkTests(ProjectionTestCase):
             if url.endswith('/editMessageText') and body.get('message_id') == -1:
                 raise ProviderError('card reservation has no remote message id yet')
             if (not raced and url.endswith('/sendMessage')
-                    and body.get('text') == '요청을 처리하고 있어요.'):
+                    and body.get('text') == '요청을 받았습니다. 곧 시작할게요.'):
                 raced = True
-                # Model a running worker finishing during Telegram's send.
+                # Model the Work finishing during Telegram's send.
                 with self.store.db() as db:
                     db.execute("UPDATE jobs SET status='succeeded',response=?,delivery='pending' WHERE id=?",
                                (self.text,job_id))
@@ -227,8 +226,8 @@ class LongWorkTests(ProjectionTestCase):
         self.assertEqual(self.store.job(job_id)['status'], 'succeeded')
         self.assertEqual(self.store.task_card(job_id)['state'], 'succeeded', self.outbound)
         self.assertEqual([kind for kind, _text in self.outbound], ['send', 'edit', 'send'])
-        self.assertEqual(self.outbound[0][1], '요청을 처리하고 있어요.')
-        self.assertIn('처리가 끝났습니다', self.outbound[1][1])
+        self.assertEqual(self.outbound[0][1], '요청을 받았습니다. 곧 시작할게요.')
+        self.assertEqual(self.outbound[1][1], '요청을 처리했어요.')
         self.assertTrue(self.outbound[2][1].startswith(self.text))
 
     def test_in_flight_card_reservation_is_not_expired_by_the_grace_check(self):

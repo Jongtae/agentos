@@ -995,16 +995,20 @@ finally:
         labels=[button['text'] for button in initial[1]['reply_markup']['inline_keyboard'][0]]
         self.assertEqual(labels,['진행 보기','작업 취소'])
         self.service.ingest_callback({'id':'foreign-progress','from':{'id':99},'message':{'chat':{'id':99,'type':'private'},'message_id':card['message_id']},'data':f"p7v:{job['id']}"},generation)
-        self.assertFalse(any(c[0].endswith('/sendMessage') and c[1].get('text','').startswith('작업 상태:') for c in self.calls))
+        self.assertFalse(any(c[0].endswith(('/sendMessage','/answerCallbackQuery')) and c[1].get('text','').startswith('작업 상태:') for c in self.calls))
         self.service.ingest_callback({'id':'progress','from':{'id':42},'message':{'chat':{'id':42,'type':'private'},'message_id':card['message_id']},'data':f"p7v:{job['id']}"},generation)
-        progress=[c for c in self.calls if c[0].endswith('/sendMessage') and c[1].get('text','').startswith('작업 상태:')][-1]
+        # #581: progress is the tap's own alert, not a new chat bubble.
+        self.assertFalse(any(c[0].endswith('/sendMessage') and c[1].get('text','').startswith('작업 상태:') for c in self.calls))
+        progress=[c for c in self.calls if c[0].endswith('/answerCallbackQuery') and c[1].get('text','').startswith('작업 상태:')][-1]
+        self.assertTrue(progress[1]['show_alert'])
         self.assertIn('대기 중',progress[1]['text'])
         self.assertNotIn('private request',progress[1]['text'])
         self.assertNotIn(job['id'],progress[1]['text'])
         self.make_due(job['id'])
         self.service.run_one()
         edit=[c for c in self.calls if c[0].endswith('/editMessageText')][-1]
-        self.assertEqual(edit[1]['reply_markup']['inline_keyboard'][0][0]['text'],'결과 상태 보기')
+        # #581: an unsuccessful card keeps one on-demand 상세, never "결과 상태 보기".
+        self.assertEqual(edit[1]['reply_markup']['inline_keyboard'][0][0]['text'],'상세')
 
     def test_telegram_normal_request_has_one_terminal_answer_without_generic_completion(self):
         generation=self.pair()
@@ -1060,7 +1064,7 @@ finally:
             db.execute("UPDATE jobs SET status='running',delivery='sending' WHERE id=?",(job['id'],))
         self.store.recover()
         self.service.ingest_callback({'id':'recovery-progress','from':{'id':42},'message':{'chat':{'id':42,'type':'private'},'message_id':card['message_id']},'data':f"p7v:{job['id']}"},generation)
-        progress=[c for c in self.calls if c[0].endswith('/sendMessage') and c[1].get('text','').startswith('작업 상태:')][-1][1]['text']
+        progress=[c for c in self.calls if c[0].endswith('/answerCallbackQuery') and c[1].get('text','').startswith('작업 상태:')][-1][1]['text']
         self.assertIn('중단됨',progress)
         self.assertIn('자동으로 다시 실행하지 않았습니다.',progress)
         self.assertIn('전달 여부를 확인할 수 없습니다.',progress)

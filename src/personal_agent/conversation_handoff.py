@@ -17,12 +17,81 @@ Two resolution rules are deliberate and load bearing:
 supplied by the owner is checked against Telegram *before* it is stored, so
 that path cannot use the stored-token resolver.
 """
-from .providers import ProviderError
+import json as _json
+from urllib.error import HTTPError as _HTTPError, URLError as _URLError
+from urllib.request import Request as _Request, build_opener as _build_opener
+
+from .providers import NoRedirect, ProviderError
 
 TELEGRAM_API_ROOT = 'https://api.telegram.org'
 TELEGRAM_TIMEOUT = 15
 TELEGRAM_FAILURE_TEXT = 'Telegram 요청이 실패했습니다. 봇 설정을 확인하세요.'
-TELEGRAM_POLL_UPDATE_KINDS = ('message', 'callback_query')
+#: ``stopped_message_generation`` carries the owner's Stop on a draft (#581).
+TELEGRAM_POLL_UPDATE_KINDS = ('message', 'callback_query', 'stopped_message_generation')
+#: Presence calls (reaction, chat action, draft) are best-effort decoration
+#: sent while terminal delivery may be waiting on the same lock, so they get a
+#: short budget instead of the full delivery timeout.
+TELEGRAM_PRESENCE_TIMEOUT = 4
+#: Telegram's documented rejection for malformed formatting entities.
+TELEGRAM_ENTITY_REJECTION = "can't parse entities"
+
+
+class TelegramRejected(ProviderError):
+    """Telegram answered and *refused* the request (``ok: false``).
+
+    Unlike a timeout or a lost response this is definite: nothing was
+    delivered.  ``error_code``/``description`` come from Telegram's documented
+    error envelope; they only classify the refusal and are never shown to the
+    owner or logged.
+    """
+
+    def __init__(self, error_code=None, description=''):
+        super().__init__(TELEGRAM_FAILURE_TEXT, status=error_code)
+        self.error_code = error_code
+        self.description = str(description or '')
+
+    @property
+    def entity_parse_error(self):
+        return self.error_code == 400 and TELEGRAM_ENTITY_REJECTION in self.description.lower()
+
+
+def telegram_request_json(url, body, headers=None, timeout=TELEGRAM_TIMEOUT):
+    """``providers.request_json`` for the Bot API, keeping Telegram's error envelope.
+
+    Telegram reports a refused request as HTTP 4xx with a JSON body
+    ``{"ok": false, "error_code", "description"}``.  ``request_json`` turns
+    every HTTP error into one opaque failure, which makes a definite refusal
+    indistinguishable from a lost response.  A bounded, well-formed 4xx
+    envelope is returned as data; every other outcome raises the same
+    owner-safe ``ProviderError`` texts as ``request_json``.  Each call makes
+    exactly one HTTP request.
+    """
+    req = _Request(url, data=None if body is None else _json.dumps(body).encode(),
+                   headers={'Content-Type': 'application/json', **(headers or {})})
+    try:
+        with _build_opener(NoRedirect()).open(req, timeout=timeout) as response:
+            raw = response.read(2_000_001)
+    except _HTTPError as exc:
+        if 400 <= exc.code < 500:
+            try:
+                envelope = _json.loads(exc.read(65_536))
+            except (ValueError, TypeError, OSError):
+                envelope = None
+            if isinstance(envelope, dict) and envelope.get('ok') is False:
+                return {'ok': False, 'error_code': envelope.get('error_code', exc.code),
+                        'description': str(envelope.get('description', ''))[:512]}
+        raise ProviderError(f'연결 대상이 HTTP {exc.code} 오류를 반환했습니다. 주소·모델·인증 설정을 확인하세요.',
+                            status=exc.code) from None
+    except (_URLError, TimeoutError, OSError) as exc:
+        timed_out = isinstance(exc, TimeoutError) or isinstance(getattr(exc, 'reason', None), TimeoutError)
+        raise ProviderError('연결할 수 없거나 응답 시간이 초과되었습니다. 서버와 네트워크를 확인하세요.',
+                            status='timeout' if timed_out else None) from None
+    if len(raw) > 2_000_000:
+        raise ProviderError('응답이 너무 큽니다. 요청 범위를 줄여 주세요.')
+    try:
+        return _json.loads(raw)
+    except (ValueError, TypeError):
+        raise ProviderError('연결 대상이 올바른 JSON 응답을 반환하지 않았습니다.') from None
 
 
 class TelegramChannel:
@@ -42,21 +111,31 @@ class TelegramChannel:
         """Resolve the live transport callable for this one call."""
         return self._transport_source()
 
-    def call_with_token(self, token, method, body):
+    def call_with_token(self, token, method, body, timeout=TELEGRAM_TIMEOUT):
         """Call one Bot API method with an explicitly supplied bot token."""
-        result = self.transport(f'{TELEGRAM_API_ROOT}/bot{token}/{method}', body, {}, timeout=TELEGRAM_TIMEOUT)
+        result = self.transport(f'{TELEGRAM_API_ROOT}/bot{token}/{method}', body, {}, timeout=timeout)
         if not result.get('ok'):
-            raise ProviderError(TELEGRAM_FAILURE_TEXT)
+            raise TelegramRejected(result.get('error_code'), result.get('description'))
         return result['result']
 
-    def call(self, method, body):
+    def call(self, method, body, timeout=TELEGRAM_TIMEOUT):
         """Call one Bot API method with the currently stored bot token."""
-        return self.call_with_token(self._token_source(), method, body)
+        return self.call_with_token(self._token_source(), method, body, timeout=timeout)
 
-    def send_message(self, chat_id, text, reply_markup=None):
+    def send_message(self, chat_id, text, reply_markup=None, *, parse_mode=None, reply_to=None):
+        """Send one durable message.
+
+        ``reply_to`` anchors it to an owner message through ``reply_parameters``
+        with ``allow_sending_without_reply`` so a deleted original never turns
+        a delivery into a failure.
+        """
         body = {'chat_id': chat_id, 'text': text}
         if reply_markup is not None:
             body['reply_markup'] = reply_markup
+        if parse_mode is not None:
+            body['parse_mode'] = parse_mode
+        if isinstance(reply_to, int):
+            body['reply_parameters'] = {'message_id': reply_to, 'allow_sending_without_reply': True}
         return self.call('sendMessage', body)
 
     def edit_message_text(self, chat_id, message_id, text, reply_markup=None):
@@ -65,8 +144,36 @@ class TelegramChannel:
             body['reply_markup'] = reply_markup
         return self.call('editMessageText', body)
 
-    def answer_callback_query(self, callback_query_id, text):
-        return self.call('answerCallbackQuery', {'callback_query_id': callback_query_id, 'text': text})
+    def edit_message_reply_markup(self, chat_id, message_id, reply_markup):
+        return self.call('editMessageReplyMarkup', {'chat_id': chat_id, 'message_id': message_id,
+                                                    'reply_markup': reply_markup})
+
+    def answer_callback_query(self, callback_query_id, text=None, show_alert=False):
+        body = {'callback_query_id': callback_query_id}
+        if text:
+            body['text'] = text[:200]
+        if show_alert:
+            body['show_alert'] = True
+        return self.call('answerCallbackQuery', body)
+
+    # --- presence (#581): best-effort, never Evidence -------------------------
+
+    def set_message_reaction(self, chat_id, message_id, emoji):
+        """Set one emoji reaction on a message (bots may set at most one)."""
+        return self.call('setMessageReaction', {'chat_id': chat_id, 'message_id': message_id,
+                                                'reaction': [{'type': 'emoji', 'emoji': emoji}]},
+                         timeout=TELEGRAM_PRESENCE_TIMEOUT)
+
+    def send_chat_action(self, chat_id, action='typing'):
+        return self.call('sendChatAction', {'chat_id': chat_id, 'action': action},
+                         timeout=TELEGRAM_PRESENCE_TIMEOUT)
+
+    def send_message_draft(self, chat_id, draft_id, text='', can_stop=True):
+        """Show an ephemeral draft; empty text is Telegram's "Thinking…" placeholder."""
+        body = {'chat_id': chat_id, 'draft_id': draft_id, 'text': text}
+        if can_stop:
+            body['can_stop'] = True
+        return self.call('sendMessageDraft', body, timeout=TELEGRAM_PRESENCE_TIMEOUT)
 
     def get_updates(self, offset, timeout=5, allowed_updates=None, limit=20):
         """Long-poll only the update kinds this conversation actually handles."""

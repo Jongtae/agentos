@@ -830,6 +830,7 @@ class AgentService:
         selected_subscription=self.subscription_engine_status().get('selected')
         observed=[]
         model_events=self._model_attempts(job['id'] for job in jobs)
+        retained_rows=[]
         for job in jobs:
             kind,label=self._progress_status(job)
             events=self.store.task_events(job['id'])
@@ -842,6 +843,7 @@ class AgentService:
                 if notification['kind'] in ('approval_needed','context_approval_needed') and notification['state'] in ('queued','sent'):
                     waits.append('승인 대기')
             artifacts=[{'id':item['id'],'kind':'저장된 결과' if 'path' not in item else '파일 결과','path':item.get('path'),'workspace_id':item.get('workspace_id'),'created':item.get('created'),'state':item.get('state','current')} for item in self.store.task_artifacts(job['id'])]
+            retained_rows.append((job['id'],events))
             task={'id':job['id'],'title':self._progress_title(job.get('message'),job['id']),'status':job.get('status'),'status_kind':kind,'status_label':label,'started_at':job.get('created'),'observed_at':last,'result_available':bool(job.get('response')) and job.get('status') in ('succeeded','partial'),'workspace_id':job.get('workspace_id'),'events_count':len(events),'waits':waits,'configured':{'provider':configured.get('provider'),'model':configured.get('model'),'runtime':selected_subscription or (configured.get('provider') if configured else None)},'observed':{'provider':job.get('provider'),'model':job.get('model'),'runtime':job.get('provider') or None},'route':self._observed_route(job,events,model_events),'artifacts':artifacts}
             # The same typed qualifier the transcript and model context use
             # (#494), so the card cannot disagree with them.
@@ -866,7 +868,102 @@ class AgentService:
                 task['error']=job.get('error') if job.get('status') in ('failed','partial','interrupted') else None
                 task['conversation']={'job_id':job['id'],'workspace_id':job.get('workspace_id')}
             observed.append(task)
+        retained=self._retained_links(retained_rows)
+        for task in observed:task['retained']=retained.get(task['id'],[])
         return {'tasks':observed,'selected':next((task for task in observed if task['id']==job_id),None),'unknown_detail_message':'중간 실행 정보가 저장되지 않은 구간은 마지막으로 관찰된 이벤트만 표시합니다.'}
+
+    # -- exact retained items (PRESENCE-WEB-IA-01 / #562) --------------------
+    # The local web has no generic records browser.  A turn links to the exact
+    # items its own Work recorded, and a link opens one item.  Both come from
+    # typed records only: a save_note/save_memory tool event carrying the id it
+    # saved, the note a /note-style Work stores under its own Work id, a
+    # MemoryCandidate bound to this Work, and the Work's own artifacts.
+    # Nothing here reads the request or answer text to decide what to link.
+    RETAINED_TOOLS={'save_note':'note','save_memory':'memory'}
+
+    def _retained_links(self, rows):
+        """Map Work id -> exact retained items that Work recorded, content-free."""
+        found={};notes=set();memories=set()
+        def add(work_id,kind,item_id,label=None):
+            found.setdefault(work_id,[]).append({'kind':kind,'id':item_id,'label':label})
+            if kind=='note':notes.add(item_id)
+            elif kind=='memory':memories.add(item_id)
+        for work_id,events in rows:
+            for event in events:
+                trace=event.get('trace') or {}
+                kind=self.RETAINED_TOOLS.get(trace.get('host_action') or event.get('tool'))
+                evidence=trace.get('evidence') if isinstance(trace.get('evidence'),dict) else {}
+                item_id=evidence.get('id')
+                if event.get('status')!='succeeded' or not kind or not isinstance(item_id,str) or not item_id:continue
+                # A withheld save_memory became a MemoryCandidate; that is
+                # linked below from the candidate row, never as Memory.
+                if kind=='memory' and evidence.get('state')!='current':continue
+                add(work_id,kind,item_id,evidence.get('memory_key') if kind=='memory' else None)
+        work_ids=[work_id for work_id,_ in rows]
+        bindings={self.store._work_binding(work_id):work_id for work_id in work_ids}
+        def chunks(values):
+            values=list(values)
+            for start in range(0,len(values),200):yield values[start:start+200]
+        def marks(chunk):return ','.join('?'*len(chunk))
+        with self.store.db() as db:
+            for chunk in chunks(work_ids):
+                for row in db.execute(f'SELECT id FROM notes WHERE id IN ({marks(chunk)})',chunk):add(row['id'],'note',row['id'])
+            for chunk in chunks(bindings):
+                for row in db.execute(f"SELECT id,work_key,memory_key,state,resulting_memory_id FROM memory_candidates WHERE work_key IN ({marks(chunk)}) AND state IN ('pending','accepted') ORDER BY created,id",chunk).fetchall():
+                    work_id=bindings[row['work_key']]
+                    if row['state']=='pending':add(work_id,'candidate',row['id'],row['memory_key'])
+                    elif row['resulting_memory_id']:add(work_id,'memory',row['resulting_memory_id'],row['memory_key'])
+            live_notes={row[0] for chunk in chunks(notes) for row in db.execute(f'SELECT id FROM notes WHERE id IN ({marks(chunk)})',chunk)}
+            live_memories={row[0] for chunk in chunks(memories) for row in db.execute(f"SELECT id FROM memories WHERE state='current' AND id IN ({marks(chunk)})",chunk)}
+        for items in found.values():
+            seen=set();kept=[]
+            for item in items:
+                key=(item['kind'],item['id'])
+                if key in seen:continue
+                seen.add(key)
+                # A later correction or deletion is said, not hidden: the link
+                # stays truthful about whether the exact item still exists.
+                item['available']=True if item['kind']=='candidate' else item['id'] in (live_notes if item['kind']=='note' else live_memories)
+                kept.append(item)
+            items[:]=kept
+        return found
+
+    PERSONAL_ITEM_KINDS=('note','memory','artifact','candidate')
+
+    def personal_item(self, kind, item_id):
+        """One exact retained item for the owner's deep link, or None.
+
+        Returns only that item (and, for a saved result, its project title),
+        never neighbouring records.  A candidate is returned only while it is
+        pending, so it is never presented as remembered.
+        """
+        if kind not in self.PERSONAL_ITEM_KINDS or not isinstance(item_id,str) or not item_id or len(item_id)>200:
+            raise ValueError('열 기록을 확인하세요.')
+        # The Work that produced the item, only when it is still in the
+        # recent trace, so "관련 대화" can point at it; never guessed.
+        recent={job['id'] for job in self.store.jobs()}
+        def work_for(binding):
+            return next((work_id for work_id in recent if binding and self.store._work_binding(work_id)==binding),None)
+        with self.store.db() as db:
+            if kind=='note':
+                row=db.execute('SELECT id,content,created FROM notes WHERE id=?',(item_id,)).fetchone()
+                return {'kind':'note','id':row['id'],'content':row['content'],'created':row['created'],'work_id':row['id'] if row['id'] in recent else None} if row else None
+            if kind=='memory':
+                row=db.execute("SELECT id,memory_key,content,created,work_key FROM memories WHERE id=? AND state='current'",(item_id,)).fetchone()
+                if not row:return None
+                item=dict(row);binding=item.pop('work_key')
+                return {'kind':'memory',**item,'work_id':work_for(binding)}
+            if kind=='artifact':
+                row=db.execute('SELECT r.id,r.workspace_id,r.job_id,r.content,r.created,w.title AS workspace_title,j.status AS work_outcome,j.error AS work_error '
+                               'FROM workspace_results r LEFT JOIN workspaces w ON w.id=r.workspace_id LEFT JOIN jobs j ON j.id=r.job_id WHERE r.id=?',(item_id,)).fetchone()
+                if not row:return None
+                item={key:row[key] for key in ('id','workspace_id','job_id','content','created','workspace_title')}
+                return {'kind':'artifact',**item,'work_id':row['job_id'] if row['job_id'] in recent else None,
+                        'qualifier':turn_qualifier(row['work_outcome'],row['work_error'])}
+            row=db.execute("SELECT id,memory_key,content,created,state,content_digest,work_key FROM memory_candidates WHERE id=? AND state='pending'",(item_id,)).fetchone()
+            if not row:return None
+            item=dict(row);binding=item.pop('work_key') or ''
+            return {'kind':'candidate',**item,'work_ref':'workref:'+binding,'work_id':work_for(binding)}
 
     def create_workspace(self, body):
         if not isinstance(body,dict):raise ValueError('작업공간 정보를 확인하세요.')

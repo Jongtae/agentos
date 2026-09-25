@@ -443,7 +443,8 @@ class ApprovalTests(ConversationTestCase):
         self.say('내일 오후 3시에 치과 일정 잡아줘')
         self.provider.fail = GoogleCalendarError('provider-timeout', 'unknown')
         job = self.say('승인')
-        self.assertEqual(job['status'], 'succeeded')
+        # #598 I1: the Work outcome is unknown, not succeeded, from its own Evidence.
+        self.assertEqual(job['status'], 'unknown')
         self.assertEqual(job['response'], OUTCOME_UNKNOWN)
         self.assertEqual(len(self.provider.calls), 1)
         self.assertEqual(self.states(), ['outcome-unknown'])

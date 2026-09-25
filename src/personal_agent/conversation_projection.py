@@ -67,6 +67,29 @@ def tool_label(tool_id):
     return TOOL_LABELS.get(tool_id, TOOL_LABEL_FALLBACK) if isinstance(tool_id, str) else TOOL_LABEL_FALLBACK
 
 
+#: Latin letters and digits whose Korean reading ends in a final consonant
+#: (엘, 엠, 엔, 알 / 영, 일, 삼, 육, 칠, 팔), for names such as ``Gmail``.
+_FINAL_CONSONANT_READINGS = frozenset('lmnr013678')
+
+
+def object_particle(word):
+    """``을`` or ``를`` for ``word`` - never the ``을(를)`` template (#598).
+
+    Hangul uses the final syllable's own consonant (Unicode composition:
+    ``(code - 0xAC00) % 28``); a Latin letter or digit uses how it is read.
+    Anything else keeps the neutral template rather than guessing.
+    """
+    text = str(word or '').rstrip(' )]}\'"')
+    if not text:
+        return '을(를)'
+    last = text[-1]
+    if '가' <= last <= '힣':
+        return '를' if (ord(last) - 0xAC00) % 28 == 0 else '을'
+    if last.isascii() and last.isalnum():
+        return '을' if last.lower() in _FINAL_CONSONANT_READINGS else '를'
+    return '을(를)'
+
+
 def owner_cause(steps):
     """The owner-language cause of a failed/partial Work, or ``None``.
 

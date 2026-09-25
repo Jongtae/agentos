@@ -1027,22 +1027,70 @@ class I_UnknownExternalEffect(CalendarEval):
             self.assertEqual(continuity[-1]['trace']['executed'], False)
         self.assertEqual(self.transport.calls, 1, 'no unsafe automatic duplicate')
 
-    @unittest.expectedFailure
     def test_finding_i1_the_unknown_effect_work_is_recorded_as_succeeded(self):
-        """FINDING I1: the Work that applied the approval ends ``succeeded``.
+        """FINDING I1 (fixed by #598): the unknown-effect Work is recorded ``unknown``.
 
-        The owner-visible bubble is truthful (OUTCOME_UNKNOWN), but the Work
-        record, its web status and its transcript qualifier say the turn
-        simply succeeded, so a later reader (web card, next model turn's
-        context) sees no unknown-effect outcome.  Expected by the contract:
-        failed/partial/unknown stay distinct in Work/Evidence, not only prose.
+        The owner-visible bubble was already truthful (OUTCOME_UNKNOWN), but
+        the Work record, its web status and its transcript qualifier said the
+        turn simply succeeded, and a later "try again" was refused for the
+        wrong reason.  Now the Work outcome is ``unknown`` from its own typed
+        Evidence (#593 ``effect='unknown'``), every reader sees the
+        qualifier, no retry is offered, and the refusal names the unknown
+        effect and its duplicate risk.  Still no second provider call.
         """
-        job, _message_id, _start = self.approve_into_unknown()
-        qualifier = self.task(job['id'])['qualifier'] or {}
+        job, _message_id, start = self.approve_into_unknown()
+        [bubble] = self.bubbles(start)
+        self.assertEqual(bubble['text'], OUTCOME_UNKNOWN, 'the bubble is the effect owner\'s own statement')
+        controls = [b['text'] for row in bubble.get('reply_markup', {}).get('inline_keyboard', []) for b in row]
+        self.assertNotIn('다시 시도', controls, 'an unknown effect is never offered a retry')
+        record = self.store.job(job['id'])
+        self.assertEqual(record['status'], 'unknown', 'not succeeded, not failed/partial')
+        task = self.task(job['id'])
+        qualifier = task['qualifier'] or {}
         self.assertEqual(qualifier.get('outcome'), 'unknown', 'an explicit unknown outcome, not failed/partial')
+        self.assertFalse(qualifier.get('verified'))
+        self.assertNotEqual(task['status_label'], '완료')
+        self.assertEqual(task['error'], OUTCOME_UNKNOWN, 'the cause is inspectable')
+        [row] = self.assistant_rows(job['id'])
+        self.assertEqual(row['qualifier']['outcome'], 'unknown', 'the transcript carries it too')
         self.relations = {'다시 해줘': FOLLOWUP_RETRY}
+        retry_at = len(self.wire)
         retry, _ = self.turn('다시 해줘')
         self.assertIn('외부 결과가 불확실', retry['response'], 'the refusal names the unknown effect')
+        self.assertIn('중복', retry['response'], 'and its duplicate risk')
+        self.assertNotIn('실패 또는 중단 상태가 아니어서', retry['response'])
+        self.assertIn('외부 결과가 불확실', ' '.join(self.texts(retry_at)))
+        self.assertEqual(self.transport.calls, 1, 'no unsafe automatic duplicate')
+        self.assertEqual(self.states(), ['outcome-unknown'], 'the calendar state machine is untouched')
+
+
+class I1_ObservedEffectOpposing(CalendarEval):
+    """Opposing case for I1: an observed create stays a plain succeeded Work."""
+
+    def test_finding_i1_an_observed_create_stays_succeeded_without_a_qualifier(self):
+        self.turn('내일 오후 3시에 치과 일정 잡아줘')
+        start = len(self.wire)
+        job, _ = self.turn('승인')
+        [bubble] = self.bubbles(start)
+        self.assertTrue(bubble['text'].startswith(CREATED))
+        self.assertNotIn('reply_markup', bubble)
+        self.assertEqual(self.store.job(job['id'])['status'], 'succeeded')
+        self.assertIsNone(self.task(job['id'])['qualifier'])
+        self.assertEqual(len(self.provider.calls), 1)
+
+
+class CalendarParticleFinding(CalendarEval):
+    """Observation (#512, fixed by #598): the Calendar handoff read "만들기을(를)"."""
+
+    def test_finding_particle_the_calendar_handoff_uses_the_matching_object_particle(self):
+        self.registry.transition(OWNER, CALENDAR_WRITE_SPEC.connector_id, ConnectorState.DISCONNECTED)
+        start = len(self.wire)
+        job, _ = self.turn('다음 주 화요일 10시 반 병원 예약 일정 추가해줘')
+        self.assertEqual(job['status'], 'awaiting_connection')
+        [guidance] = self.texts(start)
+        self.assertNotIn('을(를)', guidance)
+        self.assertIn('Google Calendar 일정 만들기를 연결해 주세요', guidance)
+        self.assertIn('실행하지 않았습니다', guidance, 'the truthful not-executed statement is unchanged')
 
 
 # =============================================================================

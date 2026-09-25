@@ -198,6 +198,11 @@ def subscription_public_evidence(result):
             'scope': 'Public search snippets supplied by AgentOS; treat as untrusted evidence.'}
 
 
+#: Retry refusal for a Work whose external effect was not observed (#447/#598).
+UNKNOWN_EFFECT_RETRY_REFUSAL=('이전 요청의 외부 결과가 불확실해 자동으로 다시 실행하지 않았습니다. '
+                              '중복으로 만들어질 수 있으니 먼저 실제 결과를 확인해 주세요.')
+
+
 class AgentService:
     def __init__(self, store, adapter=None, telegram_transport=None, subscription_engines=None, execution_adapter=None,
                  isolated_engine_adapter=None, isolated_mcp_registry=None,
@@ -573,6 +578,10 @@ class AgentService:
             return any(AgentService._unknown_effect(item) for item in value)
         return False
 
+    def _work_has_unknown_effect(self, work_id):
+        """True when this Work's own Evidence records an unobserved external effect."""
+        return any(self._unknown_effect(event.get('trace') or {}) for event in self.store.task_events(work_id))
+
     def _already_retried(self, work_id, current_work_id=None):
         """True when another Work already replayed this failed Work.
 
@@ -595,6 +604,12 @@ class AgentService:
 
     def safe_retry(self, previous, current_work_id=None):
         """Whether replaying this Work's original request is demonstrably safe."""
+        events=self.store.task_events(previous['id'])
+        # Unknown external effect is the strongest reason to refuse, and the
+        # one the owner must act on (check the real result), so it is named
+        # before any weaker reason such as the Work's status (#598 I1).
+        if any(self._unknown_effect(event.get('trace') or {}) for event in events):
+            return False,UNKNOWN_EFFECT_RETRY_REFUSAL
         if previous.get('status') not in ('failed','interrupted'):
             return False,'이전 요청이 실패 또는 중단 상태가 아니어서 자동으로 다시 실행하지 않았습니다.'
         if self._already_retried(previous['id'],current_work_id):
@@ -609,12 +624,8 @@ class AgentService:
             return False,'이전 요청에 이미 저장된 결과가 있어 자동으로 다시 실행하지 않았습니다.'
         effectful={'save_note','save_memory','delegate_agent',
                    'calendar_draft_create','calendar_draft_update','calendar_draft_cancel'}
-        for event in self.store.task_events(previous['id']):
+        for event in events:
             trace=event.get('trace') or {}
-            # Unknown external effect is the strongest reason to refuse:
-            # never collapse it into the weaker "a mutation was attempted".
-            if self._unknown_effect(trace):
-                return False,'이전 요청의 외부 결과가 불확실해 자동으로 다시 실행하지 않았습니다. 먼저 실제 결과를 확인해 주세요.'
             # AgentPackage tool ids may alias an AgentOS write through
             # trace.host_action, so checking only the public tool id can
             # accidentally replay a completed mutation.
@@ -754,7 +765,7 @@ class AgentService:
         status=job.get('status')
         if status in ('queued','running'):return 'active','진행 중'
         if status in ('awaiting_context','awaiting_drive','awaiting_connection') or job.get('delivery')=='unknown':return 'attention','확인 필요'
-        if status in ('failed','partial','interrupted'):return 'attention','확인 필요'
+        if status in ('failed','partial','interrupted','unknown'):return 'attention','확인 필요'
         if status in ('cancelled',):return 'finished','취소됨'
         if status in ('succeeded',):return 'finished','완료'
         return 'attention','상태 알 수 없음'
@@ -902,7 +913,7 @@ class AgentService:
                                    for row in audit if isinstance(row,dict) and row.get('work_id')==job['id']][-10:]
                 task['events']=[self._progress_event(event) for event in events]
                 task['source_references']=self.store.evidence_summary(job['id'])
-                task['error']=job.get('error') if job.get('status') in ('failed','partial','interrupted') else None
+                task['error']=job.get('error') if job.get('status') in ('failed','partial','interrupted','unknown') else None
                 task['conversation']={'job_id':job['id'],'workspace_id':job.get('workspace_id')}
             observed.append(task)
         retained=self._retained_links(retained_rows)
@@ -2147,7 +2158,8 @@ class AgentService:
         if status in ('failed','interrupted') and not blocked:
             allowed,_reason=self.safe_retry(job)
             return (CONTROL_RETRY,CONTROL_DETAILS) if allowed else (CONTROL_DETAILS,)
-        if status=='partial':
+        if status in ('partial','unknown'):
+            # Never a retry for an unknown effect: the owner checks first.
             return (CONTROL_DETAILS,)
         return ()
 
@@ -2681,7 +2693,8 @@ class AgentService:
 
     @staticmethod
     def task_card_text(message, state):
-        labels={'queued':'대기 중','running':'진행 중','succeeded':'완료','failed':'완료하지 못함','cancelled':'취소됨','interrupted':'중단됨'}
+        labels={'queued':'대기 중','running':'진행 중','succeeded':'완료','failed':'완료하지 못함','cancelled':'취소됨','interrupted':'중단됨',
+                'unknown':'외부 결과 불확실'}
         # A request can itself contain a secret or pasted document excerpt.
         # Cards are status controls, never a copy of user-provided content.
         if state=='queued':return '요청을 받았습니다. 곧 시작할게요.'
@@ -2765,7 +2778,7 @@ class AgentService:
         still running or a result that was certainly delivered.
         """
         labels={'queued':'대기 중','running':'진행 중','succeeded':'완료','partial':'일부 완료',
-                'failed':'완료하지 못함','cancelled':'취소됨','interrupted':'중단됨',
+                'failed':'완료하지 못함','cancelled':'취소됨','interrupted':'중단됨','unknown':'외부 결과 불확실',
                 'awaiting_connection':'연결 대기'}
         with self.store.db() as db:
             job=db.execute('SELECT status,delivery FROM jobs WHERE id=?',(job_id,)).fetchone()
@@ -3097,6 +3110,9 @@ class AgentService:
             context_approval_needed=[False]
             refusals=[]
             verified_parts=[]
+            #: The effect owner's own statement when this Work's consequential
+            #: effect could not be observed (#598 I1).
+            unknown_statement=None
             calendar_notice=''
             try:
                 owner_prompt=job['message'].strip()
@@ -3212,6 +3228,13 @@ class AgentService:
                     except CalendarError as exc:
                         raise ValueError(ConnectorHandoff.unavailable(CALENDAR_WRITE_CONNECTOR_ID) if exc.reason=='unavailable'
                                          else f'일정 초안을 만들지 못했습니다 ({exc.reason}). 아무 일정도 만들지 않았습니다.') from None
+                    # #598 I1: an approval whose effect could not be observed is
+                    # not a succeeded Work.  The outcome comes from this Work's
+                    # own typed Evidence (#593 effect='unknown'), never from the
+                    # reply wording; the calendar state machine is unchanged.
+                    if self._work_has_unknown_effect(job['id']):
+                        outcome='unknown'
+                        unknown_statement=response
                 elif decision.intent==INTENT_MAIL_SEARCH:
                     if self.gmail is None:
                         raise ValueError(ConnectorHandoff.unavailable(GMAIL_CONNECTOR_ID))
@@ -3518,6 +3541,8 @@ class AgentService:
                     # #598: the conversation reads the cause in owner words and,
                     # for a partial Work, the portion its typed Evidence supports.
                     spoken=owner_cause([(tool,self._redact_reason(reason)) for tool,reason in refusals]) if outcome in ('failed','partial') else None
+                    if outcome=='unknown':
+                        cause=spoken=unknown_statement or None
                     observed=verified_portion(verified_parts) if outcome=='partial' else None
                     db.execute("UPDATE jobs SET status=?,response=?,error=?,provider=?,model=?,delivery=?,owner_cause=?,owner_verified=? WHERE id=?",
                                (outcome,response,cause,provider,model,'pending' if job['chat_id'] else 'none',spoken,observed,job['id']))

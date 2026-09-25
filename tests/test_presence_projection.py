@@ -537,6 +537,51 @@ class TerminalTextTests(unittest.TestCase):
         self.assertEqual(text, TERMINAL_FAILED_HEADER + '\n\n연결이 끊어졌습니다\n\n다시 연결한 뒤 같은 요청을 보내 주세요.')
 
 
+class TruthfulRepliesTests(unittest.TestCase):
+    """#598 at the renderer level: verified portion, unknown outcome, owner words, particles."""
+
+    def test_partial_states_the_verified_portion_before_the_unfinished_one(self):
+        from personal_agent.conversation_projection import TERMINAL_VERIFIED_LABEL
+        text = terminal_text('모델이 쓴 문장', '완료하지 못한 부분 — 파일 읽기: 거부', 'partial', verified='찾은 파일:\n- a.txt')
+        self.assertTrue(text.startswith(TERMINAL_PARTIAL_HEADER))
+        self.assertLess(text.index(TERMINAL_VERIFIED_LABEL), text.index('a.txt'))
+        self.assertLess(text.index('a.txt'), text.index('파일 읽기: 거부'))
+        self.assertNotIn('모델이 쓴 문장', text)
+
+    def test_verified_never_appears_for_failed_interrupted_or_succeeded(self):
+        from personal_agent.conversation_projection import TERMINAL_VERIFIED_LABEL
+        for outcome in ('failed', 'interrupted', 'succeeded', None):
+            with self.subTest(outcome=outcome):
+                self.assertNotIn(TERMINAL_VERIFIED_LABEL, terminal_text('답', '원인', outcome, verified='찾은 파일'))
+
+    def test_the_verified_portion_is_bounded(self):
+        from personal_agent.conversation_projection import TERMINAL_VERIFIED_CHARS, TERMINAL_VERIFIED_MORE, verified_portion
+        long = verified_portion(['가' * (TERMINAL_VERIFIED_CHARS + 50)])
+        self.assertTrue(long.endswith(TERMINAL_VERIFIED_MORE))
+        self.assertIsNone(verified_portion(['', '  ', None]))
+
+    def test_unknown_delivers_the_effect_statement_never_the_model_text(self):
+        from personal_agent.conversation_projection import TERMINAL_UNKNOWN_EFFECT, turn_qualifier
+        self.assertEqual(terminal_text('일정을 만들었습니다.', '확인할 수 없습니다.', 'unknown'), '확인할 수 없습니다.')
+        self.assertEqual(terminal_text('일정을 만들었습니다.', None, 'unknown'), TERMINAL_UNKNOWN_EFFECT)
+        self.assertEqual(turn_qualifier('unknown')['outcome'], 'unknown')
+        self.assertIsNone(turn_qualifier('succeeded'))
+
+    def test_owner_cause_uses_labels_and_a_generic_fallback(self):
+        from personal_agent.conversation_projection import owner_cause
+        text = owner_cause([('find_files', '한도에서 멈춤'), ('pkg.custom_tool', None), ('find_files', '한도에서 멈춤')])
+        self.assertEqual(text, '완료하지 못한 부분 — 파일 찾기: 한도에서 멈춤 · 도구 실행')
+        self.assertIsNone(owner_cause([]))
+
+    def test_object_particle_follows_the_final_sound(self):
+        from personal_agent.conversation_projection import object_particle
+        cases = {'Google Calendar 일정 만들기': '를', 'Gmail': '을', '캘린더': '를', '일정': '을',
+                 'Google Drive': '를', 'Notion': '을', 'Office 365': '를', '폴더(읽기)': '를', '': '을(를)', '✓': '을(를)'}
+        for word, particle in cases.items():
+            with self.subTest(word=word):
+                self.assertEqual(object_particle(word), particle)
+
+
 class ConversationContinuityTests(ProjectionTestCase):
     """PRESENCE-CONT-01 / #511 continuity through the real Telegram worker."""
 

@@ -1308,22 +1308,37 @@ class RouteAndIdentity(LocalHttp, PresenceEval):
         self.http('POST', '/api/ai-route', {'route': 'codex', 'officially_authenticated': True})
         self.assertEqual(self.task(loud['id'])['route']['kind'], 'direct-api')
 
-    @unittest.expectedFailure
     def test_finding_r1_configured_model_is_recorded_as_the_observed_response_model(self):
-        """FINDING R1: with no provider-reported model, the configured name is stored as observed.
+        """FINDING R1 (fixed by #598): an unreported model stays "not reported" on every path.
 
-        ``ModelAdapter`` falls back to the configured model when a response
-        names none; that value is written to the ``model``/``responded``
-        event and surfaces as ``task.observed.model`` / the route label.
-        ``turn_provenance`` already keeps ``requested_model`` and a ``None``
-        ``reported_model`` apart, so the technical record is truthful, but
-        two read-model fields present configured identity as observed.
+        ``ModelAdapter`` used to fall back to the configured model when a
+        response named none; that value reached the ``model``/``responded``
+        event and ``task.observed.model``.  The requested model now stays
+        the requested model (route label, ``requested_model``) and the
+        observed fields say "not reported".  Opposing case: a provider that
+        does report a model is recorded as observed with that exact name.
         """
         self.connect_model()
         self.http('POST', '/api/ai-route', {'route': 'direct-api'})
         job, _ = self.turn('안녕?')
         self.assertIsNone(self.store.turn_provenance(job['id']).get('reported_model'))
-        self.assertNotEqual(self.task(job['id'])['observed']['model'], 'eval-model')
+        task = self.task(job['id'])
+        self.assertNotEqual(task['observed']['model'], 'eval-model')
+        self.assertEqual(task['observed']['model'], 'not reported')
+        with self.store.db() as db:
+            responded = [json.loads(row['detail']) for row in db.execute(
+                "SELECT detail FROM tool_events WHERE job_id=? AND tool='model' AND status='responded'", (job['id'],))]
+        self.assertTrue(responded)
+        for detail in responded:
+            self.assertEqual(detail['model'], 'not reported', 'the event never presents configured as observed')
+            self.assertEqual(detail['requested_model'], 'eval-model')
+        self.assertEqual(task['route']['model'], 'eval-model', 'the route still names the requested AI')
+        # Opposing: a reported model is observed, exactly.
+        self.reported = 'eval-model-2026-09-01'
+        loud, _ = self.turn('반가워')
+        task = self.task(loud['id'])
+        self.assertEqual(task['observed']['model'], 'eval-model-2026-09-01')
+        self.assertEqual(self.store.turn_provenance(loud['id'])['reported_model'], 'eval-model-2026-09-01')
 
     def test_a_failed_route_never_silently_falls_back_to_another_worker(self):
         self.connect_model()

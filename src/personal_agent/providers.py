@@ -61,6 +61,11 @@ def validate_model(config):
     return {'provider': provider, 'endpoint': endpoint, 'model': model}
 
 
+#: Recorded when a provider/CLI did not report the model it used.  The
+#: requested model is never copied into an observed field (#587, #598).
+NOT_REPORTED = 'not reported'
+
+
 @dataclass
 class ModelResult:
     content: str

@@ -20,7 +20,7 @@ existing ``ModelAdapter`` tool-call shape.
 import json
 import time
 
-from .providers import ProviderError, validate_model
+from .providers import NOT_REPORTED, ProviderError, validate_model
 
 # --- outcomes ----------------------------------------------------------------
 OUTCOME_DECIDED = 'decided'
@@ -90,9 +90,9 @@ class DecisionConfidence:
         self.route, self.engine, self.model_policy = route, engine, model_policy
 
 
-#: Recorded when a provider/CLI did not report the model it used.  The
-#: requested model is never copied into the observed field.
-NOT_REPORTED = 'not reported'
+# NOT_REPORTED (imported from ``providers``) is recorded when a provider/CLI
+# did not report the model it used; the requested model is never copied into
+# the observed field.
 
 
 class _Decision:

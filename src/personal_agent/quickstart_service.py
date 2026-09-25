@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 from .local_tools import LocalTools, normalize_public_url
 from .agent_runtime import Capabilities, run_agent, AGENTS, evidence_summary, turn_context, render_turn_prompt
 from .plugins import PluginRegistry
-from .providers import ModelAdapter, ProviderError, request_json, validate_model
+from .providers import NOT_REPORTED, ModelAdapter, ProviderError, request_json, validate_model
 from .decision import DEFAULT_DECISION_PROVIDER, RoutedDecisionEngine
 from .decision_routes import DecisionRoutes
 from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_UNVERIFIED, BLOCKER_NO_AI_ROUTE,
@@ -834,7 +834,11 @@ class AgentService:
             return {'kind':'subscription','engine':name,'status':outcome(engine[-1]['status'])}
         attempt=model_events.get(job['id'])
         if attempt:
+            # The route names the AI this Work asked for; a response that
+            # reported no model keeps the requested name here, while the
+            # observed field keeps NOT_REPORTED (#598 R1).
             model=attempt.get('model')
+            if not isinstance(model,str) or model==NOT_REPORTED:model=attempt.get('requested_model')
             return {'kind':'direct-api','model':model if isinstance(model,str) else job.get('model'),
                     'status':outcome('running' if job.get('status') in ('queued','running') else job.get('status'))}
         # 'builtin' marks turns AgentOS answered itself (e.g. notes): no AI ran.
@@ -3479,10 +3483,10 @@ class AgentService:
                         refusals.extend(getattr(result,'incomplete',()) or ())
                         response,provider,model=result.content,result.provider,result.model
                         resolved_blocker=outcome=='succeeded'
-                        # The provider layer falls back to the configured model when the
-                        # response names none, so only a different name is evidence.
+                        # run_agent records NOT_REPORTED when the response names no
+                        # model (#598 R1); any name the provider did report is evidence.
                         self.record_turn_provenance(job['id'],status='answered' if outcome=='succeeded' else outcome,
-                                                    reported_model=model if isinstance(model,str) and model!=runtime_config.get('model') else None)
+                                                    reported_model=model if isinstance(model,str) and model and model!=NOT_REPORTED else None)
                         # #505: a read-only turn whose file tool found no covering
                         # folder grant is setup-required, not an answer.  The model
                         # chose the tool; AgentOS parks the Work for one local grant.

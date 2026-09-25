@@ -5,7 +5,7 @@ import re
 import time
 from collections import namedtuple
 from pathlib import Path
-from .providers import ModelResult, ProviderError
+from .providers import NOT_REPORTED, ModelResult, ProviderError
 from .local_tools import LocalTools
 from .document_reader import read as read_document, supported as supported_document, MAX_FILE_BYTES
 from . import folder_grants
@@ -837,16 +837,19 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
  active_config=dict(config);rerouted=False;checked_direct=False;attempts={}
  for turn in range(9):
   try:
-   message,actual=adapter.tool_turn(active_config,key,messages,definitions)
+   # report_observed: an unreported response model stays unreported (#598 R1);
+   # the configured name is the *requested* model, never the observed one.
+   message,actual=adapter.tool_turn(active_config,key,messages,definitions,report_observed=True)
   except ProviderError as exc:
    if exc.status!=429 or config.get('model')!='openrouter/free' or rerouted:raise
    rerouted=True;active_config=dict(config)
    record('model','retrying',json.dumps({'scope':scope,'reason':'rate_limit','action':'free router retry; completed tool results retained'}))
    messages=[{k:v for k,v in m.items() if k!='reasoning_details'} for m in messages]
-   message,actual=adapter.tool_turn(active_config,key,messages,definitions)
-  if active_config.get('model')=='openrouter/free' and actual!='openrouter/free':active_config['model']=actual
+   message,actual=adapter.tool_turn(active_config,key,messages,definitions,report_observed=True)
+  if actual and active_config.get('model')=='openrouter/free' and actual!='openrouter/free':active_config['model']=actual
+  actual=actual or NOT_REPORTED
   calls=message.get('tool_calls') or []
-  record('model','responded',json.dumps({'scope':scope,'model':actual,'tool_calls':calls,'has_text':bool(message.get('content'))},ensure_ascii=False))
+  record('model','responded',json.dumps({'scope':scope,'model':actual,'requested_model':active_config.get('model'),'tool_calls':calls,'has_text':bool(message.get('content'))},ensure_ascii=False))
   if not calls and not successful and not failed and not checked_direct:
    checked_direct=True
    messages.append(message)

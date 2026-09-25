@@ -143,6 +143,14 @@ const base=(active,extra={})=>({decision_route:{active,suite_version:'decision-q
  box().dataset.state='';ctx.openDecisionChooser('');
  ctx.renderDecisionRoute(base({transport:'subscription_cli',source:'owner',engine:'codex',model_policy:'explicit',requested_model:'small',available:false,requalification_needed:true,destination:'OpenAI (Codex 구독 계정)'}));
  assert.equal(stateOf(rowTitled('사용 방식')).textContent,'확인 필요');assert(rowTitled('사용 방식').textContent.includes('CLI가 바뀌어 다시 확인해야 합니다'));
+ // A CLI refused for its tool surface is a visible needs-attention state with the reason, not an absence.
+ box().dataset.state='';ctx.openDecisionChooser('');
+ ctx.renderDecisionRoute(base({transport:'direct_api',source:'owner',destination:'api.openai.com',available:true},
+  {route:{subscription_cli:engines('supported').map(e=>e.id==='codex'?{...e,tool_surface:'tool-features-enabled',tool_surface_detail:'unified_exec'}:e)}}));
+ const refused=rowTitled('구독 AI · Codex');assert(refused,'the refused engine is still listed');
+ assert.equal(stateOf(refused).textContent,'사용할 수 없음');assert(stateOf(refused).className.endsWith('attention'));
+ assert(refused.textContent.includes('도구 기능을 모두 끌 수 없어')&&refused.textContent.includes('unified_exec'),'the reason is named');
+ assert(button(refused,'다시 확인'),'a re-check stays available after a CLI update');assert(!button(refused,'사용'));
  // Off is an explicit owner choice.
  box().dataset.state='';
  ctx.renderDecisionRoute(base({transport:'direct_api',source:'owner',destination:'api.openai.com',available:true},

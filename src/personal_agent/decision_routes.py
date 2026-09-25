@@ -65,7 +65,7 @@ REQUIRED_FLAGS = {
     'codex': ('--json', '--ignore-user-config', '--ephemeral', '--output-schema', '--disable', '--sandbox',
               '--skip-git-repo-check', '--config'),
     'claude-code': ('--output-format', '--json-schema', '--tools', '--strict-mcp-config', '--no-session-persistence',
-                    '--system-prompt', '--setting-sources'),
+                    '--system-prompt', '--setting-sources', '--restricted'),
 }
 MODEL_FLAG = '--model'
 
@@ -195,6 +195,10 @@ class DecisionRoutes:
                             'model_selection': ('supported' if capability.get('model_override') is True
                                                 else 'unsupported' if capability.get('model_override') is False
                                                 else 'unchecked'),
+                            # A refused tool surface is shown with its reason
+                            # (for example `unified_exec` on Codex 0.153.4).
+                            'tool_surface': capability.get('tool_surface'),
+                            'tool_surface_detail': capability.get('tool_surface_detail') or '',
                             'destination': CLI_DESTINATIONS[engine_id],
                             'check': checks.get(f'{ROUTE_SUBSCRIPTION_CLI}:{engine_id}')})
         if route is None:

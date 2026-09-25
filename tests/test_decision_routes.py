@@ -131,7 +131,7 @@ CODEX_HELP = ('Usage: codex exec [OPTIONS] [PROMPT]\n -c, --config <key=value>\n
               ' --ephemeral\n --skip-git-repo-check\n --output-schema <FILE>\n -m, --model <MODEL>\n'
               ' --disable <FEATURE>\n --sandbox <MODE>\n')
 CLAUDE_HELP = (' -p, --print\n --output-format <format>\n --json-schema <schema>\n --tools <tools...>\n'
-               ' --strict-mcp-config\n --setting-sources <sources>\n --no-session-persistence\n'
+               ' --strict-mcp-config\n --setting-sources <sources>\n --restricted\n --no-session-persistence\n'
                ' --system-prompt <prompt>\n --model <model>\n')
 #: A `codex features list` shape (name, stage, enabled), as printed by 0.153.4.
 CODEX_FEATURES = (('apps', 'stable', True), ('auth_elicitation', 'stable', True), ('browser_use', 'stable', True),
@@ -288,10 +288,12 @@ class SubscriptionCliTests(Temp):
             self.assertIn(flag, argv)
         self.assertEqual(argv[argv.index('--sandbox') + 1], 'read-only')
         disabled = [argv[i + 1] for i, part in enumerate(argv) if part == '--disable']
-        self.assertEqual(sorted(disabled), ['apps', 'browser_use', 'memories', 'multi_agent', 'shell_tool',
+        self.assertEqual(sorted(disabled), ['apps', 'artifact', 'browser_use', 'memories', 'multi_agent', 'shell_tool',
                                             'unified_exec', 'view_image', 'web_search_request'],
-                         'every enabled tool-bearing feature plus the always-off ones; allowlisted ones stay')
+                         'every listed non-removed feature outside the allowlist, whatever its default')
+        self.assertIn('artifact', disabled, 'a feature off by default is still disabled (P3-a)')
         self.assertNotIn('personality', disabled)
+        self.assertNotIn('sqlite', disabled, 'removed features are no-ops and are not passed')
         overrides = [argv[i + 1] for i, part in enumerate(argv) if part == '-c']
         self.assertEqual(overrides, [f'{key}={value}' for key, value in CODEX_DECISION_CONFIG])
         self.assertIn('web_search="disabled"', overrides)
@@ -312,6 +314,7 @@ class SubscriptionCliTests(Temp):
         call = self.runner.calls[-1]
         argv = call['argv']
         self.assertEqual(argv[argv.index('--tools') + 1], '')
+        self.assertIn('--restricted', argv, 'no code-running tools or WebFetch (P3-b)')
         self.assertIn('--strict-mcp-config', argv)
         self.assertNotIn('--mcp-config', argv)
         self.assertIn('--no-session-persistence', argv)
@@ -539,6 +542,11 @@ class ServiceRouteSelectionTests(Temp):
                     service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'codex'})
                 self.assertIsNone(self.store.config('decision_route'))
                 self.assertEqual(self.store.config('decision_cli_capabilities')['codex']['tool_surface'], surface)
+                codex = next(e for e in service.settings()['decision_route']['subscription_cli'] if e['id'] == 'codex')
+                self.assertEqual(codex['tool_surface'], surface, 'Settings shows why Codex was refused')
+                if surface == 'tool-features-enabled':
+                    self.assertIn('unified_exec', codex['tool_surface_detail'])
+                self.assertEqual(codex['check']['failure'], 'tool-surface-unverified')
                 self.assertFalse(any('exec' in call['argv'] and '--help' not in call['argv'] for call in runner.calls),
                                  'no judgment runs on an unverified tool surface')
         self.store = QuickStore(tempfile.mkdtemp(dir=self.root))
@@ -649,6 +657,13 @@ class ServiceRouteSelectionTests(Temp):
         self.assertEqual(codex['model_selection'], 'unsupported')
         self.assertFalse(any('--model' in call['argv'] for call in no_model_flag.calls),
                          'an unsupported model flag is never emulated')
+
+    def test_claude_code_without_restricted_mode_is_refused(self):
+        service = self.service(runner=CliRunner(help_text={'claude-code': CLAUDE_HELP.replace(' --restricted\n', '')}))
+        with self.assertRaises(DecisionRouteError):
+            service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'claude-code'})
+        self.assertIn('--restricted', self.store.config('decision_cli_capabilities')['claude-code']['missing_flags'])
+        self.assertFalse(any('-p' in call['argv'] for call in self.runner.calls))
 
     def test_isolation_flags_are_required_before_any_judgment(self):
         service = self.service(runner=CliRunner(help_text={'claude-code': ' --model <model>\n'}))

@@ -118,13 +118,16 @@ def parse_codex_features(text):
 
 
 def codex_disable_plan(rows):
-    """The ``--disable`` names for decision calls: every enabled, non-removed
-    feature outside the allowlist, plus the always-disabled ones the CLI lists."""
-    listed = {name for name, _stage, _enabled in rows}
-    plan = [name for name, stage, enabled in rows
-            if enabled and stage != 'removed' and name not in CODEX_ALLOWED_ENABLED_FEATURES]
-    plan += [name for name in CODEX_ALWAYS_DISABLE if name in listed and name not in plan]
-    return sorted(plan)
+    """The ``--disable`` names for decision calls: **every** listed, non-removed
+    feature outside the allowlist, whatever its default in the listing.
+
+    So correctness does not depend on the empty-profile listing matching the
+    call-time profile (a feature that is off here but on under the owner's
+    profile is still disabled).  ``removed`` features are no-ops and are not
+    passed.  ``CODEX_ALWAYS_DISABLE`` names are covered by the same rule.
+    """
+    return sorted(name for name, stage, _enabled in rows
+                  if stage != 'removed' and name not in CODEX_ALLOWED_ENABLED_FEATURES)
 
 
 def codex_still_enabled(rows):
@@ -206,7 +209,10 @@ class SubscriptionCliDecisionEngine(SchemaDecisionEngine):
                 argv += ['--model', self.model]
             return argv + [prompt]
         argv = [binary, '-p', prompt, '--output-format', 'json', '--json-schema', json.dumps(schema),
-                '--tools', '', '--strict-mcp-config', '--setting-sources', '', '--no-session-persistence',
+                # --restricted (listed by 2.1.280 --help): no code-running tools or
+                # WebFetch unless --tools names them, and no user/project/local
+                # settings; --tools "" names none.  Checked via --help only.
+                '--tools', '', '--restricted', '--strict-mcp-config', '--setting-sources', '', '--no-session-persistence',
                 '--system-prompt', DECISION_SYSTEM]
         if self.model:
             argv += ['--model', self.model]

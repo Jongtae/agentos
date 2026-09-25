@@ -3496,7 +3496,10 @@ class AgentService:
                             return self.park_for_local_authority(job,local_need,calendar_notice)
                     if workspace_request:
                         saved=FileWorkspace(self.store).save(job['id'],workspace_request['title'],response,workspace_request['sources'])
-                        response+=f"\n\n저장됨: {saved['path']} · {saved['id']}"
+                        # The file name is owner language; the result id is an internal
+                        # identifier that stays in Task/Artifact detail, where #562's
+                        # exact-item link resolves it from typed Work data (#598 E1).
+                        response+=f"\n\n저장됨: {saved['path']}"
                         self.record_file_workspace_document_job(job['id'])
                     if turn_provenance&{'connected-drive-file','owner-context-inbox'}:
                         # Drive and owner-selected context are approved for this

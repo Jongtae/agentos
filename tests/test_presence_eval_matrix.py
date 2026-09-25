@@ -851,19 +851,22 @@ class E_MissingFolder(LocalHttp, PresenceEval):
         self.assertNotIn(str(results.resolve()), self.roots(), 'the write grant is never an AI read folder')
         self.last_result_bubble = self.texts()[-1]
 
-    @unittest.expectedFailure
     def test_finding_e1_the_saved_result_bubble_exposes_the_internal_result_id(self):
-        """FINDING E1: the result-saved reply ends ``저장됨: <file name> · <result id>``.
+        """FINDING E1 (fixed by #598): the result-saved reply names the file, not its id.
 
-        ``quickstart_service`` appends the saved artifact's internal UUID to
-        the Telegram reply.  The file name is owner language; the id is an
-        internal identifier the Presence contract keeps in technical detail
-        (#562 already offers an exact-item deep link from typed Work data).
+        ``quickstart_service`` used to append the saved artifact's internal
+        UUID (``저장됨: <file name> · <result id>``).  The file name is owner
+        language and stays; the id lives in Task/Artifact detail, where the
+        #562 exact-item link resolves it from typed Work data.
         """
         self.test_read_and_result_write_are_two_distinct_mac_approvals_for_one_request()
         job_id = self.store.jobs()[-1]['id']
         [artifact] = self.store.task_artifacts(job_id)
         self.assertNotIn(artifact['id'], self.last_result_bubble)
+        self.assertIn(f"저장됨: {artifact['path']}", self.last_result_bubble, 'the owner still learns what was saved')
+        self.assert_no_raw_ids(self.last_result_bubble)
+        # The id is still inspectable where technical detail belongs.
+        self.assertIn(artifact['id'], [row['id'] for row in self.task(job_id)['artifacts']])
 
     def test_a_telegram_message_naming_a_path_grants_nothing(self):
         job, _ = self.park(self.PHRASES[0])

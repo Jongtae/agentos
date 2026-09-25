@@ -23,7 +23,7 @@ Files, runtime boundaries, repositories, and external systems this goal may chan
 
 ## Existing solutions review (Adopt / Adapt / Build)
 
-Required before non-trivial implementation that introduces or replaces a component, abstraction, integration, dependency, framework, or commodity infrastructure. Start with internal repository reuse. For a pure bug fix/data/content change that introduces none of those, set the decision to `N/A` and give a concrete reason.
+Required when this issue proposes a new design, contract, architecture element, loop, component or framework adoption, and before non-trivial implementation that introduces or replaces a component, abstraction, integration, dependency, framework, or commodity infrastructure. Start with internal repository reuse. For a pure bug fix/data/content change that introduces none of those, set the decision to `N/A` and give a concrete reason.
 
 - problem/boundary:
 - internal repository candidates:

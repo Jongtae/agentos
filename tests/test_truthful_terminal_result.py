@@ -280,7 +280,9 @@ class SurfaceConsistencyTests(TerminalResultTestCase):
         self.text = '급여 파일 한 건을 찾았습니다.'
         job, bubble = self.ask('급여 파일 찾아줘', card=True)
         self.assertEqual(job['status'], 'succeeded', job.get('error'))
-        self.assertEqual(self.cards[-1], '처리가 끝났습니다. 아래 결과를 확인하세요.')
+        # #581: the card no longer frames the answer as "처리가 끝났습니다 →
+        # 결과 상태 보기"; it states the Work outcome and the answer follows.
+        self.assertEqual(self.cards[-1], '요청을 처리했어요.')
         self.assertEqual(bubble, self.text)
 
     def test_an_interrupted_turn_claims_no_completed_step_and_no_web_result(self):

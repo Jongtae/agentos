@@ -53,15 +53,16 @@ class RecordingChannel:
     def call_with_token(self, token, method, body):
         return self._record('call_with_token', token=token, method=method, body=body)
 
-    def send_message(self, chat_id, text, reply_markup=None):
+    def send_message(self, chat_id, text, reply_markup=None, *, parse_mode=None, reply_to=None):
         return self._record('send_message', chat_id=chat_id, text=text, reply_markup=reply_markup)
 
     def edit_message_text(self, chat_id, message_id, text, reply_markup=None):
         return self._record('edit_message_text', chat_id=chat_id, message_id=message_id,
                             text=text, reply_markup=reply_markup)
 
-    def answer_callback_query(self, callback_query_id, text):
-        return self._record('answer_callback_query', callback_query_id=callback_query_id, text=text)
+    def answer_callback_query(self, callback_query_id, text=None, show_alert=False):
+        return self._record('answer_callback_query', callback_query_id=callback_query_id, text=text,
+                            show_alert=show_alert)
 
     def get_updates(self, offset, timeout=5, allowed_updates=None, limit=20):
         self._record('get_updates', offset=offset, timeout=timeout,
@@ -147,7 +148,8 @@ class TelegramChannelTests(unittest.TestCase):
         channel.get_updates(11)
         self.assertEqual(log[0]['url'], 'https://api.telegram.org/botBOT:TOKEN/getUpdates')
         self.assertEqual(log[0]['body'], {'offset': 11, 'timeout': 5,
-                                          'allowed_updates': ['message', 'callback_query'], 'limit': 20})
+                                          'allowed_updates': ['message', 'callback_query', 'stopped_message_generation'],
+                                          'limit': 20})
 
     def test_answer_callback_query_body_is_exact(self):
         log = []
@@ -211,7 +213,7 @@ class TelegramPolicyRoutingTests(unittest.TestCase):
                                       'message': {'message_id': 5, 'chat': {'id': 42, 'type': 'private'}}}, 'g')
         self.assertEqual(self.channel.names, ['answer_callback_query'])
         self.assertEqual(self.channel.calls[0][1],
-                         {'callback_query_id': 'cb-1', 'text': '처리할 수 있는 요청이 아닙니다.'})
+                         {'callback_query_id': 'cb-1', 'text': '처리할 수 있는 요청이 아닙니다.', 'show_alert': False})
 
     def test_connect_verifies_the_candidate_token_through_the_seam_before_storing_it(self):
         self.channel = RecordingChannel(results={'get_me': {'username': 'owner_bot'},

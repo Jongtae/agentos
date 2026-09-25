@@ -770,9 +770,13 @@ class AgentService:
         error=AgentService._redact_reason(trace.get('error'))
         summary={'running':'실행을 시작했습니다.','succeeded':'실행을 완료했습니다.','failed':error or '실행하지 못했습니다.'}.get(status,'관찰된 이벤트입니다.')
         safe={}
-        for key in ('scope','engine','mode','exit_code','attempt','context_messages','context_bytes','context_mode','failure_class'):
+        # #559: 'relation'/'executed' (conversation continuity) and 'authority'
+        # (local authority request) are content-free enums/flags; 'evidence'
+        # is reduced to a flag so the trace can say a source was checked.
+        for key in ('scope','engine','mode','exit_code','attempt','context_messages','context_bytes','context_mode','failure_class',
+                    'relation','executed','authority'):
             if key in trace and isinstance(trace[key],(str,int,float,bool)):safe[key]=trace[key]
-        if trace.get('evidence'):summary='근거를 확인했습니다.'
+        if trace.get('evidence'):summary='근거를 확인했습니다.';safe['evidence']=True
         return {'id':event['id'],'job_id':event['job_id'],'tool':event['tool'],'status':status,'created':event['created'],'summary':summary,'details':safe}
 
     def _observed_route(self, job, events, model_events):
@@ -848,7 +852,7 @@ class AgentService:
             if job_id==job['id']:
                 task['provenance']=self.store.turn_provenance(job['id'])
                 audit=self.store.config('decision_audit',[]);audit=audit if isinstance(audit,list) else []
-                task['decisions']=[{key:value for key,value in row.items() if key in ('kind','purpose','outcome','provider','model','observed_model','elapsed_seconds','at',
+                task['decisions']=[{key:value for key,value in row.items() if key in ('kind','purpose','outcome','answer','provider','model','observed_model','elapsed_seconds','at',
                                                                                         'route','engine','model_policy','requested_model','failure')}
                                    for row in audit if isinstance(row,dict) and row.get('work_id')==job['id']][-10:]
                 task['events']=[self._progress_event(event) for event in events]

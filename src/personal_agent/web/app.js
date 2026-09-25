@@ -312,7 +312,7 @@ function renderTasks(){
  // the page shows it newest first (#578).
  const ordered=[...tasks].sort((a,b)=>(a.started_at||0)-(b.started_at||0)),known=new Map(ordered.map(task=>[task.id,task]));
  const view=traceWindow(ordered,traceLimit,collapsedDays);
- const fingerprint=JSON.stringify([ordered,traceLimit,[...collapsedDays]]);if(taskRenderFingerprint===fingerprint)return;taskRenderFingerprint=fingerprint;const focusKey=rememberFocus(list),anchor=traceAnchor(list),newest=ordered[ordered.length-1],previousNewest=traceLastNewest,grew=Boolean(previousNewest)&&newest.id!==previousNewest.id,arrived=grew?ordered.filter(task=>(task.started_at||0)>(previousNewest.started_at||0)).length||1:0;traceLastNewest={id:newest.id,started_at:newest.started_at};list.replaceChildren();
+ const fingerprint=JSON.stringify([ordered,traceLimit,[...collapsedDays]]);if(taskRenderFingerprint===fingerprint)return;taskRenderFingerprint=fingerprint;const focusKey=rememberFocus(list),anchor=traceNearTop?null:traceAnchor(list),newest=ordered[ordered.length-1],previousNewest=traceLastNewest,grew=Boolean(previousNewest)&&newest.id!==previousNewest.id,arrived=grew?ordered.filter(task=>(task.started_at||0)>(previousNewest.started_at||0)).length||1:0;traceLastNewest={id:newest.id,started_at:newest.started_at};list.replaceChildren();
  const position=new Map(ordered.map((task,index)=>[task.id,index]));
  const top=element('li',undefined,'trace-top');top.setAttribute('aria-hidden','true');list.append(top);
  for(const group of view.groups){const separator=element('li',undefined,'trace-day'),toggle=element('button',undefined,'trace-day-toggle');toggle.type='button';toggle.dataset.focusKey='day:'+group.key;toggle.setAttribute('aria-expanded',String(!group.collapsed));toggle.append(element('span',group.label,'trace-day-label'));if(group.collapsed)toggle.append(element('span',t('{count}개 대화 접힘',{count:group.tasks.length}),'trace-day-count'));if(group.key===dayKey(Date.now()/1000))toggle.disabled=true;toggle.onclick=()=>{if(collapsedDays.has(group.key))collapsedDays.delete(group.key);else collapsedDays.add(group.key);taskRenderFingerprint='';renderTasks();};separator.append(toggle);list.append(separator);if(group.collapsed)continue;
@@ -344,10 +344,14 @@ function renderTasks(){
  if(grew&&!traceNearTop){traceUnseen+=arrived;paintJumpLatest();}
 }
 // The first exchange visible in the viewport, so a re-render can keep it still.
+// Measured only when the owner is away from the top, and it stops at the first
+// visible exchange.
+let traceAnchorRun=0;
 function traceAnchor(list){for(const node of list.querySelectorAll('.turn-pair')){const box=node.getBoundingClientRect();if(box.bottom>0)return {id:node.dataset.workId,top:box.top};}return null;}
 function keepTraceAnchor(list,anchor){const same=[...list.querySelectorAll('.turn-pair')].find(node=>node.dataset.workId===anchor.id);if(!same)return;
  // Content-visibility sizes settle over the next frames; correct each time.
- const settle=passes=>{window.scrollBy(0,same.getBoundingClientRect().top-anchor.top);if(passes)requestAnimationFrame(()=>settle(passes-1));};settle(3);}
+ // A newer render supersedes this one; never adjust against a detached node.
+ const run=++traceAnchorRun,settle=passes=>{if(run!==traceAnchorRun||!same.isConnected)return;window.scrollBy(0,same.getBoundingClientRect().top-anchor.top);if(passes)requestAnimationFrame(()=>settle(passes-1));};settle(3);}
 let traceObserver=null;
 function observeTraceTop(node){if(typeof IntersectionObserver==='undefined')return;traceObserver?.disconnect();traceObserver=new IntersectionObserver(entries=>{for(const entry of entries){traceNearTop=entry.isIntersecting;if(traceNearTop)traceUnseen=0;paintJumpLatest();}},{rootMargin:'160px 0px 0px 0px'});traceObserver.observe(node);}
 function paintJumpLatest(){const button=$('trace-jump-latest');if(!button)return;const show=!traceNearTop&&activeView==='tasks';button.hidden=!show;button.textContent=traceUnseen?t('새 대화 {count}개 · 최신으로',{count:traceUnseen}):t('최신 대화로 이동');}

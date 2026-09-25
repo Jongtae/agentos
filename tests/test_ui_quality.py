@@ -346,6 +346,8 @@ console.log(JSON.stringify({ok:true}));
         self.assertLess(render.index("'trace-top'"), render.index("group.tasks.forEach"), "the top sentinel precedes the turns")
         self.assertGreater(render.index("'trace-earlier'"), render.index("group.tasks.forEach"), "older turns load at the end")
         self.assertIn("if(anchor&&!traceNearTop)keepTraceAnchor(list,anchor);", render)
+        self.assertIn("anchor=traceNearTop?null:traceAnchor(list)", render, "no layout read while at the top")
+        self.assertIn("if(run!==traceAnchorRun||!same.isConnected)return;", APP, "stale settling frames stop")
         self.assertIn("if(grew&&!traceNearTop){traceUnseen+=arrived;", render)
         self.assertIn("window.scrollTo(0,0)", APP, "jump goes to the newest exchange at the top")
         self.assertIn('id="trace-jump-latest"', HTML)

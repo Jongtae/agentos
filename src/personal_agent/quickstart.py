@@ -723,6 +723,10 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 if path=='/api/subscription-engines/login-status':return self.reply(200,service.check_engine_login(body.get('engine','') if isinstance(body,dict) else ''))
                 if path=='/api/subscription-engines/credential':return self.reply(200,service.save_engine_credential(body))
                 if path=='/api/ai-route':return self.reply(200,service.select_ai_route(body))
+                # DecisionEngine route (#580): explicit owner actions, separate from the Work route above.
+                if path=='/api/decision-route/activate':return self.reply(200,service.activate_decision_route(body))
+                if path=='/api/decision-route/credential':return self.reply(200,service.save_decision_route_credential(body))
+                if path=='/api/decision-route/capabilities':return self.reply(200,service.check_decision_cli_capabilities(body))
                 if path=='/api/openrouter/models':return self.reply(200,service.free_models())
                 if path=='/api/ollama/models':return self.reply(200,service.local_models())
                 if path in ('/api/folder-requests/select','/api/folder-requests/approve','/api/folder-requests/deny'):

@@ -77,7 +77,14 @@ class ModelAdapter:
         # arguments; the timeout is passed only when a caller sets its own.
         return self.transport(url,body,headers) if timeout==60 else self.transport(url,body,headers,timeout)
 
-    def tool_turn(self, config, key, messages, tools, tool_choice="auto", timeout=60):
+    def tool_turn(self, config, key, messages, tools, tool_choice="auto", timeout=60, report_observed=False):
+        """One tool-capable turn.  Returns ``(message, model)``.
+
+        By default ``model`` falls back to the configured model when the
+        provider reports none (existing callers).  ``report_observed=True``
+        (the DecisionEngine, #580) returns ``''`` instead, so a requested
+        model is never presented as the observed one.
+        """
         import uuid
         cfg=validate_model(config);provider=cfg['provider']
         try:
@@ -121,6 +128,9 @@ class ModelAdapter:
                 if calls:message['tool_calls']=calls
             if not isinstance(message,dict) or message.get('role','assistant')!='assistant':raise TypeError()
             message={k:v for k,v in message.items() if k in ('role','content','tool_calls','reasoning_details')};message['role']='assistant'
+            if report_observed:
+                actual=data.get('model') if isinstance(data,dict) else None
+                return message,actual[:200] if isinstance(actual,str) and actual else ''
             actual=data.get('model') or cfg['model']
             return message,actual if isinstance(actual,str) else cfg['model']
         except (KeyError,IndexError,TypeError,AttributeError):raise ProviderError('도구 응답 형식이 올바르지 않습니다. 도구 호출 지원 모델을 선택하세요.') from None

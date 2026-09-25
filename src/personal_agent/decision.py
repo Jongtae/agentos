@@ -69,20 +69,30 @@ class DecisionContext:
 
 
 class DecisionConfidence:
-    """How sure the provider said it was, and which provider that was.
+    """How sure the provider said it was, and which route/provider that was.
 
     ``probability`` is the provider's own number; calibration is a property
-    measured per provider, never assumed here.  ``model`` is the configured
-    identity and ``observed_model`` what the provider reported, kept apart
-    so neither is presented as the other.
+    measured per provider, never assumed here.  ``model`` is the requested /
+    configured identity and ``observed_model`` what the provider reported
+    (empty when it reported nothing), kept apart so neither is presented as
+    the other.  ``route``, ``engine`` and ``model_policy`` name the
+    DecisionEngine route (#580) - never the Work-execution route.
     """
 
-    __slots__ = ('probability', 'provider', 'model', 'observed_model', 'elapsed_seconds')
+    __slots__ = ('probability', 'provider', 'model', 'observed_model', 'elapsed_seconds',
+                 'route', 'engine', 'model_policy')
 
-    def __init__(self, probability=None, *, provider='', model='', observed_model='', elapsed_seconds=None):
+    def __init__(self, probability=None, *, provider='', model='', observed_model='', elapsed_seconds=None,
+                 route='', engine='', model_policy=''):
         self.probability = probability
         self.provider, self.model, self.observed_model = provider, model, observed_model
         self.elapsed_seconds = elapsed_seconds
+        self.route, self.engine, self.model_policy = route, engine, model_policy
+
+
+#: Recorded when a provider/CLI did not report the model it used.  The
+#: requested model is never copied into the observed field.
+NOT_REPORTED = 'not reported'
 
 
 class _Decision:
@@ -155,6 +165,28 @@ class UnavailableDecisionEngine(DecisionEngine):
         return ScoreDecision(OUTCOME_UNAVAILABLE, scale=scale)
 
 
+class RoutedDecisionEngine(DecisionEngine):
+    """Delegates each judgment to the engine of the currently active route.
+
+    ``resolve`` returns a ``DecisionEngine`` and is consulted per judgment,
+    so an owner route change applies to the next judgment without a
+    restart.  Callers keep depending on this one contract (#580); they never
+    branch on the route.
+    """
+
+    def __init__(self, resolve):
+        self.resolve = resolve
+
+    def judge(self, context, proposition):
+        return self.resolve().judge(context, proposition)
+
+    def choose(self, context, candidates, question):
+        return self.resolve().choose(context, candidates, question)
+
+    def score(self, context, question, scale=(0, 1)):
+        return self.resolve().score(context, question, scale)
+
+
 class FixtureDecisionEngine(DecisionEngine):
     """Scripted answers for tests and fixture-backed acceptance.
 
@@ -224,31 +256,39 @@ class DecisionPolicy:
         return decision.choice
 
 
-# --- the model-backed adapter ------------------------------------------------
+# --- the model-backed adapters ----------------------------------------------
 DEFAULT_DECISION_MODEL = 'gpt-4o-mini'
 DEFAULT_DECISION_PROVIDER = {'provider': 'openai', 'endpoint': 'https://api.openai.com/v1',
                              'model': DEFAULT_DECISION_MODEL}
 
-_SYSTEM = ('You make one bounded judgment for a personal assistant. Read the facts, answer '
-           'only by calling the `decide` tool, and report how confident you are as a '
-           'probability between 0 and 1. Do not take any action and do not add commentary.')
+DECISION_SYSTEM = ('You make one bounded judgment for a personal assistant. Read the facts, answer '
+                   'only with the requested structured judgment, and report how confident you are as a '
+                   'probability between 0 and 1. Do not take any action, do not use any tool other than '
+                   'the one that records the judgment, and do not add commentary.')
+_SYSTEM = DECISION_SYSTEM
 
 _DECIDE_TOOL = 'decide'
 
+#: The route labels an adapter reports in provenance (#580).
+ROUTE_DIRECT_API = 'direct_api'
+ROUTE_JEV = 'jev'
+ROUTE_SUBSCRIPTION_CLI = 'subscription_cli'
 
-class ModelDecisionEngine(DecisionEngine):
-    """The production adapter: one model tool call per judgment.
 
-    ``adapter`` is the repository's ``ModelAdapter``; ``route`` returns
-    ``(config, key)`` for the configured decision provider, or ``None`` when
-    no provider is configured - in which case no call is made and the
-    decision is unavailable.  ``audit`` receives one small record per
-    judgment (outcome, confidence, provider identity, timing); no reasoning
-    text is ever recorded.
+class SchemaDecisionEngine(DecisionEngine):
+    """The contract mapped onto one JSON-schema-shaped answer per judgment.
+
+    ``judge``/``choose``/``score`` declare the answer schema and a shape
+    check; a subclass's ``_ask`` obtains one structured answer from its
+    transport (a model tool call, a subscription CLI's structured output).
+    Every adapter therefore returns the same AgentOS-owned typed envelopes,
+    and provider vocabulary stays inside ``_ask``.
     """
 
-    def __init__(self, adapter, route, *, timeout=20.0, audit=None, now=time.time):
-        self.adapter, self.route, self.timeout, self.audit, self.now = adapter, route, timeout, audit, now
+    route_label = ''
+
+    def __init__(self, *, audit=None, now=time.time):
+        self.audit, self.now = audit, now
 
     # -- contract -----------------------------------------------------------
     def judge(self, context, proposition):
@@ -283,7 +323,69 @@ class ModelDecisionEngine(DecisionEngine):
             and low <= d.get('score') <= high)
         return ScoreDecision(outcome, data.get('score'), (low, high), confidence)
 
-    # -- one call -------------------------------------------------------------
+    def _ask(self, context, kind, question, schema, valid):  # pragma: no cover - interface
+        raise NotImplementedError
+
+    # -- shared checks and the audit record -----------------------------------
+    @staticmethod
+    def _checked(data, confidence, valid):
+        """``decided`` only when the answer fits the schema and carries a probability."""
+        probability = confidence.probability
+        if not isinstance(data, dict) or not isinstance(probability, (int, float)) \
+                or isinstance(probability, bool) or not 0 <= probability <= 1 or not valid(data):
+            return OUTCOME_MALFORMED
+        return OUTCOME_DECIDED
+
+    _ANSWER_FIELD = {'judge': 'answer', 'choose': 'choice', 'score': 'score'}
+
+    def _done(self, context, kind, outcome, data, confidence, started, failure=''):
+        confidence.elapsed_seconds = round(self.now() - started, 3)
+        if self.audit:
+            self.audit(audit_record(context, kind, outcome, data, confidence, self.now(), failure))
+        return outcome, data if isinstance(data, dict) else {}, confidence
+
+
+_ANSWER_FIELD = SchemaDecisionEngine._ANSWER_FIELD
+
+
+def audit_record(context, kind, outcome, data, confidence, at, failure=''):
+    """One small, content-free record of a judgment (shared by every adapter).
+
+    The decided value is a bool, a declared candidate name or a number -
+    never owner content.  #580: which DecisionEngine route answered, under
+    which model policy; the requested and observed model stay separate and
+    an unreported model is recorded as ``not reported``.
+    """
+    answer = data.get(_ANSWER_FIELD[kind]) if outcome == OUTCOME_DECIDED and isinstance(data, dict) else None
+    record = {'at': at, 'kind': kind, 'purpose': context.purpose, 'outcome': outcome,
+              'answer': answer,
+              'confidence': confidence.probability, 'provider': confidence.provider,
+              'model': confidence.model, 'observed_model': confidence.observed_model or NOT_REPORTED,
+              'elapsed_seconds': confidence.elapsed_seconds,
+              'route': confidence.route, 'engine': confidence.engine,
+              'model_policy': confidence.model_policy, 'requested_model': confidence.model or ''}
+    if failure:
+        record['failure'] = failure
+    return record
+
+
+class ModelDecisionEngine(SchemaDecisionEngine):
+    """The direct-API adapter: one model tool call per judgment.
+
+    ``adapter`` is the repository's ``ModelAdapter``; ``route`` returns
+    ``(config, key)`` for the configured decision provider, or ``None`` when
+    no provider is configured - in which case no call is made and the
+    decision is unavailable.  ``audit`` receives one small record per
+    judgment (outcome, confidence, route/provider identity, timing); no
+    reasoning text is ever recorded.
+    """
+
+    route_label = ROUTE_DIRECT_API
+
+    def __init__(self, adapter, route, *, timeout=20.0, audit=None, now=time.time):
+        super().__init__(audit=audit, now=now)
+        self.adapter, self.route, self.timeout = adapter, route, timeout
+
     def _ask(self, context, kind, question, schema, valid):
         """Return (outcome, parsed arguments, confidence) for one judgment.
 
@@ -293,13 +395,16 @@ class ModelDecisionEngine(DecisionEngine):
         started = self.now()
         resolved = self.route() if self.route else None
         if not resolved:
-            return self._done(context, kind, OUTCOME_UNAVAILABLE, {}, DecisionConfidence(), started)
+            return self._done(context, kind, OUTCOME_UNAVAILABLE, {}, DecisionConfidence(route=self.route_label),
+                              started, 'not-configured')
         config, key = resolved
         try:
             config = validate_model(config)
         except ValueError:
-            return self._done(context, kind, OUTCOME_UNAVAILABLE, {}, DecisionConfidence(), started)
-        identity = dict(provider=config['provider'], model=config['model'])
+            return self._done(context, kind, OUTCOME_UNAVAILABLE, {}, DecisionConfidence(route=self.route_label),
+                              started, 'invalid-configuration')
+        identity = dict(provider=config['provider'], model=config['model'], route=self.route_label,
+                        engine=config['provider'])
         if context.is_cancelled():
             return self._done(context, kind, OUTCOME_CANCELLED, {}, DecisionConfidence(**identity), started)
         rendered = context.render()
@@ -311,22 +416,21 @@ class ModelDecisionEngine(DecisionEngine):
                                                    'parameters': schema}}]
         try:
             message, observed = self.adapter.tool_turn(config, key, messages, tools, tool_choice='required',
-                                                       timeout=self.timeout)
+                                                       timeout=self.timeout, report_observed=True)
         except ProviderError as exc:
             outcome = OUTCOME_TIMEOUT if exc.status == 'timeout' else OUTCOME_REJECTED if exc.status in (400, 413) else OUTCOME_UNAVAILABLE
-            return self._done(context, kind, outcome, {}, DecisionConfidence(**identity), started)
+            failure = 'auth' if exc.status in (401, 403) else 'usage-limit' if exc.status == 429 else ''
+            return self._done(context, kind, outcome, {}, DecisionConfidence(**identity), started, failure)
         except ValueError:
             # The adapter refuses a configuration it cannot call (for example
             # a provider that requires a key).  Nothing was sent.
-            return self._done(context, kind, OUTCOME_UNAVAILABLE, {}, DecisionConfidence(**identity), started)
+            return self._done(context, kind, OUTCOME_UNAVAILABLE, {}, DecisionConfidence(**identity), started,
+                              'not-configured')
         data = self._arguments(message)
         confidence = DecisionConfidence(data.get('confidence') if isinstance(data, dict) else None,
                                         observed_model=observed if isinstance(observed, str) else '', **identity)
-        if not isinstance(data, dict) or not isinstance(confidence.probability, (int, float)) \
-                or isinstance(confidence.probability, bool) or not 0 <= confidence.probability <= 1 \
-                or not valid(data):
-            return self._done(context, kind, OUTCOME_MALFORMED, {}, confidence, started)
-        return self._done(context, kind, OUTCOME_DECIDED, data, confidence, started)
+        outcome = self._checked(data, confidence, valid)
+        return self._done(context, kind, outcome, data if outcome == OUTCOME_DECIDED else {}, confidence, started)
 
     @staticmethod
     def _arguments(message):
@@ -341,18 +445,3 @@ class ModelDecisionEngine(DecisionEngine):
             return json.loads(call['function']['arguments'])
         except (KeyError, TypeError, ValueError):
             return None
-
-    _ANSWER_FIELD = {'judge': 'answer', 'choose': 'choice', 'score': 'score'}
-
-    def _done(self, context, kind, outcome, data, confidence, started):
-        confidence.elapsed_seconds = round(self.now() - started, 3)
-        if self.audit:
-            # The decided value is a bool, a declared candidate name or a
-            # number - never owner content.
-            answer = data.get(self._ANSWER_FIELD[kind]) if outcome == OUTCOME_DECIDED and isinstance(data, dict) else None
-            self.audit({'at': self.now(), 'kind': kind, 'purpose': context.purpose, 'outcome': outcome,
-                        'answer': answer,
-                        'confidence': confidence.probability, 'provider': confidence.provider,
-                        'model': confidence.model, 'observed_model': confidence.observed_model,
-                        'elapsed_seconds': confidence.elapsed_seconds})
-        return outcome, data if isinstance(data, dict) else {}, confidence

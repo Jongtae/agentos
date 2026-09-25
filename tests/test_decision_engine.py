@@ -136,7 +136,19 @@ class ModelEngineTests(unittest.TestCase):
         self.assertIs(audit[0]['answer'], True)
         self.assertEqual(audit[0]['observed_model'], 'gpt-4o-mini-2024-07-18')
         self.assertEqual(set(audit[0]), {'at', 'kind', 'purpose', 'outcome', 'answer', 'confidence', 'provider',
-                                         'model', 'observed_model', 'elapsed_seconds'})
+                                         'model', 'observed_model', 'elapsed_seconds',
+                                         # #580: route provenance, requested kept apart from observed.
+                                         'route', 'engine', 'model_policy', 'requested_model'})
+        self.assertEqual((audit[0]['route'], audit[0]['requested_model']), ('direct_api', DEFAULT_DECISION_MODEL))
+
+    def test_an_unreported_api_model_is_recorded_as_not_reported_never_as_the_requested_one(self):
+        reply = openai_tool_reply({'answer': True, 'confidence': 0.9})
+        del reply['model']
+        engine, audit = engine_for(ScriptedTransport(reply))
+        decision = engine.judge(self.context(), 'withdraws?')
+        self.assertEqual(decision.confidence.observed_model, '')
+        self.assertEqual(decision.confidence.model, DEFAULT_DECISION_MODEL)
+        self.assertEqual(audit[0]['observed_model'], 'not reported')
 
     def test_choose_and_score_validate_the_provider_answer_against_the_declared_range(self):
         transport = ScriptedTransport(openai_tool_reply({'choice': 'b', 'confidence': 0.7}),

@@ -13,7 +13,8 @@ from .local_tools import LocalTools, normalize_public_url
 from .agent_runtime import Capabilities, run_agent, AGENTS, evidence_summary, turn_context, render_turn_prompt
 from .plugins import PluginRegistry
 from .providers import ModelAdapter, ProviderError, request_json, validate_model
-from .decision import DEFAULT_DECISION_PROVIDER, ModelDecisionEngine
+from .decision import DEFAULT_DECISION_PROVIDER, RoutedDecisionEngine
+from .decision_routes import DecisionRoutes
 from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_UNVERIFIED, BLOCKER_NO_AI_ROUTE,
                                       TELEGRAM_RESULT_PREVIEW_CHARS, TERMINAL_FAILED_HEADER,
                                       TERMINAL_INTERRUPTED_HEADER, TERMINAL_NEXT_ACTION, TERMINAL_PARTIAL_HEADER,
@@ -222,7 +223,11 @@ class AgentService:
         # (#417).  The production engine calls the configured decision
         # provider through the same ModelAdapter as the conversation; with no
         # provider configured it makes no call and answers unavailable.
-        self.decision_engine=ModelDecisionEngine(self.adapter,self.decision_route,audit=self.record_decision)
+        # #580: the owner-selected DecisionEngine route (direct API, Jev or a
+        # subscription CLI) is resolved per judgment; with no owner choice the
+        # #417 default above applies.  It is independent of the Work route.
+        self.decision_routes=DecisionRoutes(self)
+        self.decision_engine=RoutedDecisionEngine(self.decision_routes.engine)
         self.decision_judge=ConversationJudgments(self.decision_engine)
         self.intent_classifier=IntentClassifier(workspace_search=workspace_search_request,judge=self.decision_judge)
         # Owner-facing projection of blocked turns (#510). The projected
@@ -381,12 +386,25 @@ class AgentService:
         return {'provider':config['provider'],'model':config['model'],
                 'source':'explicit' if isinstance(explicit,dict) and explicit.get('provider') else 'default-openai'}
 
+    # -- DecisionEngine route selection (DECISION-ROUTE-01 / #580) -------------
+    # Explicit owner actions only; none of them touches the Work-execution
+    # route (`subscription_engine` / `model`).  See decision_routes.py.
+    def activate_decision_route(self, body):
+        return self.decision_routes.activate(body)
+
+    def save_decision_route_credential(self, body):
+        return self.decision_routes.save_credential(body)
+
+    def check_decision_cli_capabilities(self, body):
+        engine=body.get('engine','') if isinstance(body,dict) else ''
+        return self.decision_routes.check_cli_capabilities(engine)
+
     # -- turn provenance (#570) ------------------------------------------------
     def _redact_provenance(self, text):
         # Adopt the existing redaction: the stored secrets' literal values, the
         # adapter's credential patterns, then the owner-visible path mask.
         text=str(text or '')
-        for name in ('model_key','decision_model_key','claude_code_token','telegram_token'):
+        for name in ('model_key','decision_model_key','decision_jev_key','claude_code_token','telegram_token'):
             value=self.store.secret(name)
             if isinstance(value,str) and len(value)>=8:text=text.replace(value,'[redacted]')
         text=SECRET_PATTERN.sub('[redacted]',text)
@@ -662,6 +680,7 @@ class AgentService:
             packages=PluginRegistry(self.store.root).declared_packages()
             return {'model':model,'has_api_key':bool(self.store.secret('model_key')),
                     'decision_model':self.decision_route_status(),
+                    'decision_route':self.decision_routes.status(),
                     'subscription_engines':self.subscription_engine_status(),
                     'subscription_execution':{'mode':'isolated-agentos-mcp','tools':['list_notes']} if self.isolated_engine_adapter else {'mode':'bounded-agentos-mcp','tools':['list_notes','save_note','web_search']},
                     'telegram':{'enabled':tg.get('enabled',False),'mode':tg.get('mode','owner-token'),'username':tg.get('username',''),'paired':bool(tg.get('user_id')),'user_id':tg.get('user_id')},
@@ -829,7 +848,8 @@ class AgentService:
             if job_id==job['id']:
                 task['provenance']=self.store.turn_provenance(job['id'])
                 audit=self.store.config('decision_audit',[]);audit=audit if isinstance(audit,list) else []
-                task['decisions']=[{key:value for key,value in row.items() if key in ('kind','purpose','outcome','provider','model','observed_model','elapsed_seconds','at')}
+                task['decisions']=[{key:value for key,value in row.items() if key in ('kind','purpose','outcome','provider','model','observed_model','elapsed_seconds','at',
+                                                                                        'route','engine','model_policy','requested_model','failure')}
                                    for row in audit if isinstance(row,dict) and row.get('work_id')==job['id']][-10:]
                 task['events']=[self._progress_event(event) for event in events]
                 task['source_references']=self.store.evidence_summary(job['id'])

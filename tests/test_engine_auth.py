@@ -2,11 +2,17 @@
 import json
 import subprocess
 import tempfile
+import threading
 import unittest
+from http.cookiejar import CookieJar
+from http.server import ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import HTTPError
+from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 from personal_agent.bounded_execution import (AgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult,
                                               is_not_signed_in)
+from personal_agent.quickstart import make_handler
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
 from personal_agent.subscription_engines import SubscriptionEngines
@@ -67,7 +73,7 @@ class AdapterCredentialAndStatus(unittest.TestCase):
 
     def test_status_parsing(self):
         cases = [
-            ('claude-code', _Done(stdout=json.dumps({'loggedIn': True, 'authMethod': 'oauth_token'})), 'signed-in'),
+            ('claude-code', _Done(stdout=json.dumps({'loggedIn': True, 'authMethod': 'claude.ai'})), 'signed-in'),
             ('claude-code', _Done(stdout=json.dumps({'loggedIn': False, 'authMethod': 'none'})), 'signed-out'),
             ('claude-code', _Done(stdout='garbled'), 'unknown'),
             ('codex', _Done(stdout='Logged in using ChatGPT'), 'signed-in'),
@@ -86,6 +92,44 @@ class AdapterCredentialAndStatus(unittest.TestCase):
         self.assertEqual(self._adapter(boom).login_status('claude-code')['state'], 'unknown')
         self.assertEqual(self._adapter(lambda *a, **k: _Done(), codex_profile=False).login_status('codex')['state'], 'signed-out')
         self.assertEqual(BoundedExecutionAdapter(finder=lambda name: None).login_status('codex')['state'], 'signed-out')
+
+    def test_present_token_is_only_token_saved_until_a_run_confirms_it(self):
+        done = _Done(stdout=json.dumps({'loggedIn': True, 'authMethod': 'oauth_token'}))
+        self.assertEqual(self._adapter(lambda argv, **kw: done).login_status('claude-code')['state'], 'token-saved')
+
+    def test_codex_login_check_never_gets_the_token(self):
+        seen = []
+        adapter = self._adapter(lambda argv, **kw: seen.append(kw['env']) or _Done(stdout='Logged in using ChatGPT'))
+        adapter.login_status('codex')
+        self.assertNotIn('CLAUDE_CODE_OAUTH_TOKEN', seen[0])
+        self.assertNotIn(TOKEN, json.dumps(seen[0]))
+
+    def test_echoed_token_of_any_format_is_removed_from_failures(self):
+        odd = 'Zq9' + 'w' * 30 + '_opaque'
+        adapter = self._adapter(lambda argv, **kw: _Done(returncode=1, stderr=f'error: token x_{odd} was rejected'), token=odd)
+        with self.assertLogs('personal_agent.engine', level='WARNING') as logs:
+            with self.assertRaises(ExecutionError) as caught:
+                adapter.execute('claude-code', 'hi', AgentOSMcpTools(_Caps()))
+        exposed = str(caught.exception) + json.dumps(caught.exception.diagnostics(), ensure_ascii=False) + '\n'.join(logs.output)
+        self.assertNotIn(odd, exposed)
+        self.assertNotIn(odd[:12], exposed)
+
+    def test_model_text_about_signing_in_does_not_make_a_failure_auth(self):
+        stream = json.dumps({'item': {'type': 'agent_message', 'text': 'If it says Not logged in, run codex login.'}})
+        adapter = self._adapter(lambda argv, **kw: _Done(returncode=1, stdout=stream, stderr='context window exceeded'))
+        with self.assertRaises(ExecutionError) as caught:
+            adapter.execute('codex', 'hi', AgentOSMcpTools(_Caps()))
+        self.assertNotEqual(caught.exception.failure_class, 'auth')
+
+    def test_bridge_config_blanks_the_token(self):
+        configs = []
+
+        def runner(argv, **kwargs):
+            config = Path(kwargs['cwd']) / 'agentos-mcp.json'
+            configs.append(json.loads(config.read_text()))
+            return _Done(stdout=json.dumps({'result': 'ok'}))
+        self._adapter(runner).execute('claude-code', 'hi', AgentOSMcpTools(_Caps()))
+        self.assertEqual(configs[0]['mcpServers']['agentos']['env'], {'CLAUDE_CODE_OAUTH_TOKEN': ''})
 
     def test_not_signed_in_output_is_classified_auth(self):
         self.assertTrue(is_not_signed_in('Not logged in · Please run /login'))
@@ -112,12 +156,69 @@ class _FakeEngine:
 
 
 class ServiceLoginFlow(unittest.TestCase):
-    def _service(self, engine):
+    def _service(self, engine, **kwargs):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.store = QuickStore(Path(self.tmp.name) / 'state')
         return AgentService(self.store, subscription_engines=SubscriptionEngines(finder=lambda c: '/runtime/' + c, clock=lambda: 1),
-                            execution_adapter=engine)
+                            execution_adapter=engine, **kwargs)
+
+    def _login(self, service, engine_id):
+        return [e for e in service.subscription_engine_status()['engines'] if e['id'] == engine_id][0]['login']
+
+    def test_token_saved_can_be_selected_and_a_run_settles_the_state(self):
+        engine = _FakeEngine('token-saved')
+        service = self._service(engine)
+        service.connect_subscription_engine({'engine': 'claude-code', 'officially_authenticated': True})
+        self.assertEqual(self._login(service, 'claude-code')['state'], 'token-saved')
+        self.store.enqueue('hello', 'k1')
+        self.assertTrue(service.run_one())
+        self.assertEqual(self._login(service, 'claude-code'), {**self._login(service, 'claude-code'), 'state': 'signed-in', 'source': 'run'})
+        engine.fail = ExecutionError('not signed in', failure_class='auth', exit_code=1)
+        self.store.enqueue('again', 'k2')
+        self.assertTrue(service.run_one())
+        self.assertEqual(self._login(service, 'claude-code')['state'], 'signed-out')
+        self.assertEqual(self._login(service, 'claude-code')['source'], 'run')
+
+    def test_isolated_route_never_reports_host_login(self):
+        engine = _FakeEngine('signed-out')
+        service = self._service(engine, isolated_engine_adapter=object())
+        status = service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
+        self.assertEqual(status['selected'], 'codex')
+        self.assertEqual(engine.checks, [], 'the host CLI is not asked about the sidecar login')
+        self.assertEqual(service.check_engine_login('codex'), {'state': 'sidecar'})
+        self.assertEqual(self._login(service, 'codex')['state'], 'sidecar')
+
+    def test_login_endpoints_need_a_session_and_same_origin(self):
+        service = self._service(_FakeEngine('signed-in'))
+        service.start()
+        server = ThreadingHTTPServer(('127.0.0.1', 0), make_handler(service))
+        thread = threading.Thread(target=server.serve_forever); thread.start()
+        client = build_opener(HTTPCookieProcessor(CookieJar()))
+        url = 'http://127.0.0.1:' + str(server.server_port)
+
+        def post(path, body, headers=None):
+            req = Request(url + path, data=json.dumps(body).encode(), headers={'Content-Type': 'application/json', **(headers or {})})
+            with client.open(req, timeout=3) as response:
+                return json.load(response)
+        try:
+            for path, body in (('/api/subscription-engines/login-status', {'engine': 'codex'}),
+                               ('/api/subscription-engines/credential', {'engine': 'claude-code', 'token': TOKEN})):
+                with self.subTest(path=path, session=False):
+                    with self.assertRaises(HTTPError) as error:
+                        post(path, body)
+                    self.assertEqual(error.exception.code, 401)
+            post('/api/claim', {'password': 'long-password-test'})
+            for path, body in (('/api/subscription-engines/login-status', {'engine': 'codex'}),
+                               ('/api/subscription-engines/credential', {'engine': 'claude-code', 'token': TOKEN})):
+                with self.subTest(path=path, origin='evil'):
+                    with self.assertRaises(HTTPError) as error:
+                        post(path, body, {'Origin': 'https://evil.test'})
+                    self.assertEqual(error.exception.code, 403)
+            self.assertEqual(self.store.secret('claude_code_token'), '', 'a rejected request stored nothing')
+            self.assertEqual(post('/api/subscription-engines/login-status', {'engine': 'codex'})['state'], 'signed-in')
+        finally:
+            server.shutdown(); thread.join(); server.server_close(); service.stop.set()
 
     def test_signed_out_cli_is_not_selected_and_says_how_to_sign_in(self):
         service = self._service(_FakeEngine('signed-out'))

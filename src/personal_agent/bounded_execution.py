@@ -277,6 +277,11 @@ class BoundedExecutionAdapter:
             except ValueError:
                 data = None
             if isinstance(data, dict) and isinstance(data.get('loggedIn'), bool):
+                # `claude auth status` only sees that a token is present; it
+                # does not validate it. Report that honestly until a real run
+                # confirms or rejects the token.
+                if data['loggedIn'] and data.get('authMethod') == 'oauth_token':
+                    return {'state': 'token-saved', 'detail': 'oauth_token'}
                 return {'state': 'signed-in' if data['loggedIn'] else 'signed-out',
                         'detail': str(data.get('authMethod') or '')[:40]}
             return {'state': 'signed-out' if is_not_signed_in(out) else 'unknown', 'detail': 'unparsed status'}
@@ -370,6 +375,8 @@ class BoundedExecutionAdapter:
             # access to the AgentOS tool facade.
             config.write_text(json.dumps({'mcpServers': {'agentos': {
                 'command': sys.executable,
+                # The bridge never needs the CLI's own credential.
+                **({'env': {'CLAUDE_CODE_OAUTH_TOKEN': ''}} if engine_id == 'claude-code' else {}),
                 'args': ['-m', 'personal_agent.mcp_bridge', '--data', str(tools.capabilities.store.root), '--job', tools.capabilities.job_id,
                          # The bridge is a separate process: hand it this Work's
                          # private-source provenance so its public egress closes
@@ -392,15 +399,20 @@ class BoundedExecutionAdapter:
                 raise ExecutionError('구독 엔진 CLI를 실행하지 못했습니다.', failure_class='start-failed') from exc
             elapsed = time.monotonic() - started
             if completed.returncode != 0:
-                status, reason = failure_details(engine_id, completed.stdout,
-                                                 getattr(completed, 'stderr', ''), prompt)
+                # Remove the stored credential's literal value before any
+                # output is parsed, logged or shown, whatever its format.
+                secret = self.credentials(engine_id) if engine_id == 'claude-code' else ''
+                scrub = (lambda text: (text or '').replace(secret, '[redacted]')) if isinstance(secret, str) and len(secret) >= 8 else (lambda text: text or '')
+                stdout, stderr = scrub(completed.stdout), scrub(getattr(completed, 'stderr', ''))
+                status, reason = failure_details(engine_id, stdout, stderr, prompt)
                 failure_class, hint = 'engine-failed', ''
                 for match, name, text in _STATUS_HINTS:
                     if status is not None and match(status):
                         failure_class, hint = name, text
                         break
-                if failure_class == 'engine-failed' and is_not_signed_in(' '.join(
-                        (reason or '', (completed.stdout or '')[-4000:], (getattr(completed, 'stderr', '') or '')[-4000:]))):
+                # Only the structured error and stderr: stdout carries model
+                # and tool text that may merely mention signing in.
+                if failure_class == 'engine-failed' and is_not_signed_in(' '.join((reason or '', stderr[-4000:]))):
                     failure_class, hint = 'auth', AUTH_HINT
                 LOG.warning('engine turn failed engine=%s exit_code=%s class=%s status=%s duration=%.1fs reason=%s',
                             engine_id, completed.returncode, failure_class, status, elapsed, reason or '-')

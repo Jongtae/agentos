@@ -808,6 +808,8 @@ class AgentService:
             item['authentication']=connected.get('authentication','') if item['connected'] else ''
             # Last observed login check (#571); never run on page entry.
             item['login']=dict((self.store.config('engine_login',{}) or {}).get(engine['id']) or {'state':'unchecked'})
+            # The isolated sidecar owns its own CLI login; host state would mislead.
+            if self.isolated_engine_adapter:item['login']={'state':'sidecar'}
             if engine['id']=='claude-code':item['credential']=bool(self.store.secret('claude_code_token'))
             engines.append(item)
         return {'engines':engines, 'selected':connected.get('id','')}
@@ -818,13 +820,17 @@ class AgentService:
     def check_engine_login(self, engine_id):
         """Run the official, local login check for one CLI and remember it."""
         if engine_id not in ('codex','claude-code'):raise ValueError('지원하는 구독 엔진을 선택하세요.')
+        if self.isolated_engine_adapter:return {'state':'sidecar'}
         checker=getattr(self.execution_adapter,'login_status',None)
         # Resolve the CLI exactly as discovery does, so the check and the
         # installed/selectable state describe the same binary.
         binary=self.subscription_engines.finder({'codex':'codex','claude-code':'claude'}[engine_id])
         result=checker(engine_id,binary=binary) if callable(checker) else {'state':'unknown','detail':'no checker'}
-        state=result.get('state') if result.get('state') in ('signed-in','signed-out','unknown') else 'unknown'
-        record={'state':state,'checked_at':time.time()}
+        state=result.get('state') if result.get('state') in ('signed-in','signed-out','unknown','token-saved') else 'unknown'
+        return self._remember_engine_login(engine_id,state,'check')
+
+    def _remember_engine_login(self, engine_id, state, source):
+        record={'state':state,'checked_at':time.time(),'source':source}
         with self.lock:
             rows=dict(self.store.config('engine_login',{}) or {});rows[engine_id]=record
             self.store.put('engine_login',rows)
@@ -2508,9 +2514,15 @@ class AgentService:
                                 result=self.execution_adapter.execute(subscription['id'],engine_prompt,AgentOSMcpTools(capabilities),context=adapter_context)
                         except (ExecutionError,EngineGatewayError) as exc:
                             diagnostics=exc.diagnostics() if isinstance(exc,ExecutionError) else {}
+                            # A run that the CLI rejected as signed out is the
+                            # strongest login evidence we have; show it (#571).
+                            if not isolated and diagnostics.get('failure_class')=='auth':
+                                self._remember_engine_login(subscription['id'],'signed-out','run')
                             record('subscription_engine','failed',json.dumps({'engine':subscription['id'],'error':str(exc),**diagnostics},ensure_ascii=False))
                             raise
                         record('subscription_engine','succeeded',json.dumps({'engine':result.engine,'exit_code':result.exit_code}))
+                        if not isolated and result.exit_code==0 and (self.store.config('engine_login',{}) or {}).get(subscription['id'],{}).get('state')!='signed-in':
+                            self._remember_engine_login(subscription['id'],'signed-in','run')
                         response,provider,model=result.content,'subscription',result.engine
                         resolved_blocker=result.exit_code==0
                     else:

@@ -337,5 +337,197 @@ class OversizeRequestKeepsWorking(DestinationScopedHistory):
         job = self.store.jobs()[0]
         self.assertEqual(job['status'], 'succeeded')
 
+
+# -- AGENCY-BASE-01 (#603, AX-11): no-model baseline reproducers ---------------
+#
+# Evidence class: controlled local integration without a model.  A scripted
+# model transport or scripted CLI stands in for the worker and a stub replaces
+# only the public network; AgentService.run_one, turn context, Capabilities,
+# provenance and the route's real tool facade run unchanged.  The
+# ``test_finding_*`` tests are ``expectedFailure`` baselines of known defects
+# owned by later AGENCY children (#604 bindings, #605 context/egress).  They
+# are not repaired here; an unexpected pass fails the suite so the owning
+# change removes the marker.
+
+class _PublicNetwork:
+    """Stands in for LocalTools' public reads; records every outbound plan."""
+    def __init__(self):
+        self.plans = []
+
+    def execute(self, plan):
+        self.plans.append(plan)
+        if plan['tool'] == 'weather':
+            return {'location': {'name': 'Daejeon'}, 'sources': ['https://open-meteo.com/'],
+                    'forecast': {'current': {'time': '2026-09-25T12:00', 'temperature_2m': 21, 'apparent_temperature': 21,
+                                             'precipitation': 1.2, 'wind_speed_10m': 5},
+                                 'current_units': {'temperature_2m': '°C', 'apparent_temperature': '°C',
+                                                   'precipitation': 'mm', 'wind_speed_10m': 'km/h'}}}
+        return {'query': plan.get('query'), 'retrieved_at': 1, 'sources': ['https://example.org/'],
+                'results': [{'title': 'news', 'url': 'https://example.org/', 'snippet': 'public snippet'}]}
+
+
+class _ScriptedCli:
+    """A CLI that uses the AgentOS tool the goal needs when the route offers it."""
+    def __init__(self):
+        self.offered, self.refusals = [], []
+
+    def execute(self, engine, prompt, tools, **kwargs):
+        names = [tool['name'] for tool in tools.definitions()]
+        self.offered.append(names)
+        request = (kwargs.get('context') or {}).get('request', prompt)
+        wanted = ('weather', {'city': 'Daejeon', 'country': 'KR'}) if '비' in request else \
+                 ('web_search', {'query': 'today news'}) if 'search' in request else None
+        if wanted and wanted[0] in names:
+            try:
+                tools.call(*wanted)
+            except Exception as exc:
+                self.refusals.append(str(exc))
+        return ExecutionResult('engine answer', engine, 0)
+
+
+WEATHER_TURNS = ('나는 대전에 있어.', '아직 비가 내려? 우산 챙겨야 해?')
+
+
+class _RouteFixture(unittest.TestCase):
+    CONFIG = {'provider': 'compatible', 'endpoint': 'http://127.0.0.1:9999', 'model': 'fixture'}
+
+    def _service(self, script=None, cli=False):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.store = QuickStore(Path(tmp.name) / 'state')
+        self.network, self.engine, self.requests = _PublicNetwork(), _ScriptedCli(), []
+
+        def transport(url, body, headers):
+            self.requests.append(json.loads(json.dumps(body)))
+            return script(body['messages']) if script else {'choices': [{'message': {'content': 'answer'}}]}
+
+        self.service = AgentService(self.store, adapter=ModelAdapter(transport),
+                                    subscription_engines=SubscriptionEngines(finder=lambda _: '/runtime/cli', clock=lambda: 1),
+                                    execution_adapter=self.engine)
+        self.service.local_tools = self.network
+        if cli:
+            self.service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
+        else:
+            self.store.put('model', self.CONFIG)
+            self.store.put('model_test', {'ok': True, 'tools_ok': True, 'time': 9999999999,
+                                          'fingerprint': self.service.model_fingerprint(self.CONFIG)})
+
+    def _turns(self, *texts):
+        for index, text in enumerate(texts):
+            self.store.enqueue(text, f'k{index}')
+            self.assertTrue(self.service.run_one())
+
+    def _outbound(self, tool):
+        return [plan for plan in self.network.plans if plan['tool'] == tool]
+
+
+def _tool_call(name, arguments):
+    return {'choices': [{'message': {'content': None, 'tool_calls': [
+        {'id': 'c1', 'type': 'function', 'function': {'name': name, 'arguments': json.dumps(arguments)}}]}}]}
+
+
+def _answer(text='answer'):
+    return {'choices': [{'message': {'content': text}}]}
+
+
+class MissingWeatherBinding(_RouteFixture):
+    """AX-S01 shape: an authorized prior city, then a rain question (no city/weather keyword pair)."""
+
+    @staticmethod
+    def _weather_model(messages):
+        last = messages[-1]
+        if last['role'] == 'tool':
+            return _answer('대전은 지금 1.2mm 비가 옵니다.')
+        if last['role'] == 'user' and '비' in last['content']:
+            return _tool_call('weather', {'city': 'Daejeon', 'country': 'KR'})
+        return _answer()
+
+    def test_direct_api_route_reaches_weather_and_returns_the_observation(self):
+        """Positive control: the native binding exists and its observation reaches the next model input."""
+        self._service(self._weather_model)
+        self._turns(*WEATHER_TURNS)
+        self.assertEqual(self._outbound('weather'), [{'tool': 'weather', 'city': 'Daejeon', 'country': 'KR'}])
+        self.assertEqual(self.requests[-1]['messages'][-1]['role'], 'tool')
+        self.assertIn('Daejeon', self.requests[-1]['messages'][-1]['content'])
+        self.assertIn('weather', [tool['function']['name'] for tool in self.requests[-1]['tools']])
+
+    @unittest.expectedFailure
+    def test_finding_cli_route_has_no_weather_binding(self):
+        """Owner #604 (AX-02).  Defect layers, both observed here:
+
+        * ``bounded_execution.MCP_TOOLS`` offers the CLI only list_notes,
+          save_note and web_search -- no ``weather``;
+        * ``quickstart_service.subscription_public_lookup_query`` only
+          preflights a ``…시/군/구`` + ``날씨/기온`` phrase, so this turn gets
+          no AgentOS lookup either.
+        """
+        self._service(cli=True)
+        self._turns(*WEATHER_TURNS)
+        self.assertEqual(len(self.engine.offered), 2, 'the scripted CLI ran both turns')
+        self.assertTrue(self._outbound('weather') or 'weather' in self.engine.offered[-1],
+                        f'offered={self.engine.offered[-1]} outbound={self.network.plans}')
+
+
+class PriorAssistantEgressDecision(_RouteFixture):
+    """Which earlier assistant messages close public egress, per route.
+
+    Defect layer for both findings: the decision is taken from the message
+    *role* (CLI: any assistant message -> ``conversation-history``) or from the
+    file-workspace job list (API), not from the provenance of the source that
+    produced the earlier answer.
+    """
+
+    @staticmethod
+    def _search_model(messages):
+        last = messages[-1]
+        if last['role'] == 'user' and 'search' in last['content']:
+            # The scripted model derives its query from the visible history.
+            prior = [m['content'] for m in messages if m['role'] == 'assistant']
+            return _tool_call('web_search', {'query': prior[-1][:80] if prior else 'today news'})
+        return _answer('done') if last['role'] == 'tool' else _answer('hello back')
+
+    def test_cli_first_turn_reaches_public_search(self):
+        """Allowed control (CLI)."""
+        self._service(cli=True)
+        self._turns('search the web for today news')
+        self.assertEqual(len(self._outbound('web_search')), 1)
+        self.assertEqual(self.engine.refusals, [])
+
+    def test_cli_prior_note_listing_closes_public_search(self):
+        """Denied control (CLI): a private note listing in history keeps egress closed."""
+        self._service(cli=True)
+        self._turns('/note PRIVATE-XYZ', '/notes', 'search the web for today news')
+        self.assertEqual(self._outbound('web_search'), [])
+        self.assertEqual(len(self.engine.refusals), 1)
+
+    def test_api_first_turn_reaches_public_search(self):
+        """Allowed control (API)."""
+        self._service(self._search_model)
+        self._turns('search the web for today news')
+        self.assertEqual(self._outbound('web_search'), [{'tool': 'web_search', 'query': 'today news'}])
+
+    @unittest.expectedFailure
+    def test_finding_cli_benign_prior_answer_closes_public_search(self):
+        """Owner #605 (AX-04).  Over-restriction: a greeting answer is not
+        private material, yet ``run_one`` taints the CLI Work with
+        ``conversation-history`` and the refusal text blames connected
+        documents that were never read."""
+        self._service(cli=True)
+        self._turns('hello there', 'search the web for today news')
+        self.assertEqual(self.engine.refusals, [])
+        self.assertEqual(len(self._outbound('web_search')), 1)
+
+    @unittest.expectedFailure
+    def test_finding_api_prior_private_answer_does_not_close_public_search(self):
+        """Owner #605 (AX-04).  Under-restriction on the API route: a note
+        listing answered earlier stays in the visible history untainted, so a
+        model-composed query carrying it reaches the public search host (the
+        pre-existing gap documented at ``Capabilities.execute``)."""
+        self._service(self._search_model)
+        self._turns('/note PRIVATE-XYZ', '/notes', 'search the web for it')
+        self.assertTrue(self.requests, 'the scripted model was consulted')
+        self.assertFalse([plan for plan in self._outbound('web_search') if 'PRIVATE-XYZ' in plan['query']],
+                         self.network.plans)
+
 if __name__ == '__main__':
     unittest.main()

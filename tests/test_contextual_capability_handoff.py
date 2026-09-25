@@ -545,6 +545,25 @@ class OutputFolderHandoffTests(HandoffTestCase):
         self.assertEqual(self.sent[before:], [LOCAL_KEPT_WORKSPACE_TEXT])
         self.assertEqual(self.job(job_id)['status'], 'queued')
 
+    def test_removing_the_original_meanwhile_still_grants_the_chosen_result_folder(self):
+        minutes = self.folder('minutes', {'meeting.md': '회의 결정'})
+        FileWorkspace(self.store).plan_grant('reference', str(minutes))[1]()
+        job_id, _ = self.ask(self.REQUEST)
+        chosen = self.folder('chosen')
+        self.picked = str(chosen)
+        request = self.pending()[0]
+        self.service.select_local_folder({'handoff_id': request['handoff_id']})
+        self.store.put('file_workspace', {**self.store.config('file_workspace', {}), 'references': []})
+        before = len(self.sent)
+        approved = self.service.approve_local_folder({'handoff_id': request['handoff_id']})
+        self.assertFalse(approved['kept_existing'])
+        self.assertEqual(self.store.config('file_workspace', {})['workspace'], str(chosen.resolve()))
+        self.assertNotIn(LOCAL_KEPT_WORKSPACE_TEXT, self.sent[before:])
+        self.service.run_one()
+        # The request now lacks only its original; it asks for that read next.
+        self.assertEqual(self.job(job_id)['status'], 'awaiting_connection')
+        self.assertEqual(self.pending()[0]['authority'], 'read')
+
     def test_read_then_write_are_two_distinct_approvals_for_one_request(self):
         minutes = self.folder('minutes', {'meeting.md': '회의 결정: 출시일 확정'})
         results = self.folder('results')

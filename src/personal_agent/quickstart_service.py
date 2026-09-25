@@ -1622,7 +1622,9 @@ class AgentService:
             raise ConversationHandoffError('work_already_completed')
         # A result folder set in Settings meanwhile is never silently replaced:
         # the request continues with it and the owner is told so.
-        kept_existing=key==LOCAL_RESULT_WRITE and self.workspace_authority_need()!=LOCAL_RESULT_WRITE
+        # Keyed on a usable workspace actually existing (active() drops a blocked
+        # one), not on what else the request still lacks.
+        kept_existing=key==LOCAL_RESULT_WRITE and bool(FileWorkspace(self.store).active().get('workspace'))
         def schedule(work_id):
             # Reached only after a successful single-use claim: the grant is
             # written, then the parked Work is re-queued by compare-and-set.

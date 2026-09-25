@@ -133,7 +133,9 @@ def cli_metadata(engine_id, raw):
     absent: a missing model is "not reported", never guessed."""
     meta = {'reported_model': None, 'usage': None, 'tool_calls': [], 'num_turns': None, 'cost_usd': None}
     records = []
-    for line in (raw or '').splitlines()[:5000]:
+    lines = (raw or '').splitlines()
+    # Keep the head (init record) and the tail (result record) of a long stream.
+    for line in (lines if len(lines) <= 5000 else lines[:1000] + lines[-4000:]):
         # Tool results can be large and carry nothing this summary reads.
         if len(line) > MAX_OUTPUT_BYTES:
             continue

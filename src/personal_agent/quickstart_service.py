@@ -372,7 +372,7 @@ class AgentService:
         for root,label in ((getattr(self.store,'root',None),'[AgentOS data]'),
                            (getattr(self.execution_adapter,'runtime_root',None),'[turn folder]')):
             if root:
-                for form in {str(root),str(Path(root).resolve())}:
+                for form in sorted({str(root),str(Path(root).resolve())},key=len,reverse=True):
                     if len(form)>1:text=text.replace(form,label)
         return (self._redact_reason(text) or '')[:60000]
 
@@ -2621,7 +2621,7 @@ class AgentService:
                                 result=self.execution_adapter.execute(subscription['id'],engine_prompt,AgentOSMcpTools(capabilities),context=adapter_context)
                         except (ExecutionError,EngineGatewayError) as exc:
                             diagnostics=exc.diagnostics() if isinstance(exc,ExecutionError) else {}
-                            self.record_turn_provenance(job['id'],status='failed',failure_class=diagnostics.get('failure_class'),
+                            self.record_turn_provenance(job['id'],status='failed',failure_class=diagnostics.get('failure_class'),egress_taint=sorted(capabilities.private_provenance),
                                                         exit_code=diagnostics.get('exit_code'),**(getattr(exc,'meta',None) or {}))
                             # A run that the CLI rejected as signed out is the
                             # strongest login evidence we have; show it (#571).
@@ -2664,7 +2664,7 @@ class AgentService:
                         try:
                             result=run_agent(self.adapter,runtime_config,key,[*api_context['conversation'],{'role':'user','content':api_context['request']}],'',capabilities,record)
                         except Exception as exc:
-                            self.record_turn_provenance(job['id'],status='failed',failure_class=type(exc).__name__)
+                            self.record_turn_provenance(job['id'],status='failed',failure_class=type(exc).__name__,egress_taint=sorted(capabilities.private_provenance))
                             raise
                         self.record_observed_tools(job['id'])
                         # Private reads during the run widen the egress guard;

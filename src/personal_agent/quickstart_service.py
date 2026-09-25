@@ -50,6 +50,10 @@ from .conversation_handoff import (LOCAL_AUTHORITY_KIND, LOCAL_AUTHORITY_LABELS,
                                    LOCAL_RESULT_WRITE, LOCAL_RESUMED_NOTICE, local_authority_guidance,
                                    local_authority_handoff, local_refusal_text, LOCAL_RESUME_TTL_SECONDS)
 from . import local_folder_picker
+# PRESENCE-TG-01 / #581: native Telegram presence (reaction, typing, draft, anchor).
+from .telegram_presence import (CONTROL_DETAILS, CONTROL_RETRY, WAIT_CHAT_ACTION, WAIT_DRAFT, PresenceTiming,
+                                TelegramTurnAddressing, WaitState, draft_id_for, render_telegram_html,
+                                reply_controls_markup, turn_gesture, without_consumed)
 LOCAL_RESUMED_KEY='local_authority_resumed_jobs'
 LOCAL_DOCUMENT_RESUME_KEY='local_authority_document_resume_jobs'
 LOCAL_DOCUMENT_APPROVAL_TEXT=('폴더를 허용한 방금 요청을 계속하려면 연결 문서 발췌문을 외부 모델에 보내는 승인이 필요합니다. '
@@ -205,6 +209,12 @@ class AgentService:
         # the secret store per call, never captured here.
         self.telegram=TelegramChannel(lambda:self.telegram_transport,
                                       lambda:self.store.secret('telegram_token'))
+        # #581: which Telegram messages belong to a Work (reaction target,
+        # reply anchor, control message) and the in-memory wait surface of
+        # running Work.  Neither is a truth source.
+        self.telegram_turns=TelegramTurnAddressing(store)
+        self.presence_timing=PresenceTiming()
+        self.presence={}
         self.subscription_engines=subscription_engines or SubscriptionEngines()
         # The Claude Code token is read from the secret store per run and
         # handed to that CLI only as CLAUDE_CODE_OAUTH_TOKEN (#571).
@@ -1912,20 +1922,24 @@ class AgentService:
         return ''
 
     def acknowledge_long_work(self, now=None):
-        """Send the one acknowledgement card for Work that is taking long.
+        """Acknowledge Work that is taking long, with the smallest native surface.
 
-        Short Work answers in a single bubble, so no card is created when a
-        request arrives.  A paired owner's natural-language Work that is still
-        queued or running after TELEGRAM_ACK_AFTER_SECONDS gets its task card
-        once (진행 보기; 작업 취소 while it is still queued).  Later edits of
-        that card happen only on owner-relevant transitions.  Runs on the
-        poll thread, so a blocking model call cannot suppress it.
+        Short Work answers in a single bubble, so nothing is sent when a
+        request arrives.  Running Work gets Telegram-native presence only
+        (`typing…`, then an ephemeral draft with Stop; see
+        `present_waiting_work`, #581) - never a "processing" bubble.  Work
+        still *queued* behind another request after TELEGRAM_ACK_AFTER_SECONDS
+        gets its task card once, because only there is a durable 작업 취소
+        control meaningful.  Later card edits happen only on owner-relevant
+        transitions.  Runs on its own thread, so a blocking model call cannot
+        suppress it.
         """
         cfg=self.store.config('telegram',{})
         if not (cfg.get('enabled') and isinstance(cfg.get('user_id'),int)):return []
+        self.present_waiting_work(now=now)
         cutoff=(time.time() if now is None else now)-TELEGRAM_ACK_AFTER_SECONDS
         with self.store.db() as db:
-            rows=db.execute("SELECT j.id,j.message,j.chat_id,j.status FROM jobs j WHERE j.channel=? AND j.chat_id=? AND j.status IN ('queued','running') AND j.created<=? AND NOT EXISTS (SELECT 1 FROM telegram_task_cards c WHERE c.job_id=j.id) ORDER BY j.created",
+            rows=db.execute("SELECT j.id,j.message,j.chat_id,j.status FROM jobs j WHERE j.channel=? AND j.chat_id=? AND j.status='queued' AND j.created<=? AND NOT EXISTS (SELECT 1 FROM telegram_task_cards c WHERE c.job_id=j.id) ORDER BY j.created",
                             (f"telegram:{cfg.get('generation')}",cfg['user_id'],cutoff)).fetchall()
         acknowledged=[]
         for row in rows:
@@ -1946,6 +1960,186 @@ class AgentService:
                     if current and card and current['status']!=card['state']:
                         self.update_task_card(current,current['status'])
         return acknowledged
+
+    # --- PRESENCE-TG-01 / #581: native Telegram presence ------------------------
+    #
+    # Everything below is presentation.  Each Telegram call is best-effort: a
+    # failure is swallowed here and never changes Work status, delivery or
+    # Evidence, and nothing is retried in a way that could send a second
+    # durable bubble.  Truth (outcome, cancellation, unknown effect) is decided
+    # before these run.
+
+    def _telegram_work(self, job):
+        cfg=self.store.config('telegram',{})
+        return bool(job and cfg.get('enabled') and job.get('channel')==f"telegram:{cfg.get('generation')}"
+                    and isinstance(job.get('chat_id'),int) and job.get('chat_id')==cfg.get('user_id'))
+
+    def _presence_call(self, method, *args, **kwargs):
+        try:
+            getattr(self.telegram,method)(*args,**kwargs)
+            return True
+        except Exception as exc:  # presentation only; see the block comment above
+            LOG.debug('telegram presence %s failed: %s',method,type(exc).__name__)
+            return False
+
+    def present_turn(self, job, *, relation=None, decision=None):
+        """React once to the owner's message from already-typed decisions.
+
+        The semantic class is the DecisionEngine-judged follow-up relation or
+        the routed intent; no text is read and no model is called here.  A
+        resumed Work (it already answered once) is not reacted to again.
+        """
+        if not self._telegram_work(job) or not self.is_natural_language(job.get('message')):return
+        state=self.presence.setdefault(job['id'],WaitState())
+        if state.reacted:return
+        state.reacted=True
+        if self._answered_before(job['id']):return
+        gesture=(turn_gesture(relation=relation) if relation is not None else
+                 turn_gesture(intent=getattr(decision,'intent',None),executes=bool(getattr(decision,'executes',False))))
+        source=self.telegram_turns.source(job['id'])
+        if gesture.reaction and isinstance(source,int):
+            self._presence_call('set_message_reaction',job['chat_id'],source,gesture.reaction)
+
+    def present_waiting_work(self, now=None):
+        """Show `typing…` or a Stop-able draft for running Telegram Work.
+
+        The surface is chosen from elapsed time only (`PresenceTiming`); no
+        sleep is ever added.  The re-check and the send happen under
+        `self.lock`, the lock terminal delivery holds while sending, so a
+        stale `typing…` or draft can never follow the final answer.
+        """
+        cfg=self.store.config('telegram',{})
+        if not (cfg.get('enabled') and isinstance(cfg.get('user_id'),int)):return []
+        now=time.time() if now is None else now
+        with self.store.db() as db:
+            rows=db.execute("SELECT id,message FROM jobs WHERE channel=? AND chat_id=? AND status='running' ORDER BY created",
+                            (f"telegram:{cfg.get('generation')}",cfg['user_id'])).fetchall()
+        shown=[]
+        for row in rows:
+            if not self.is_natural_language(row['message']):continue
+            with self.lock:
+                job=self.store.job(row['id'])
+                if not job or job['status']!='running' or not self._telegram_work(job):continue
+                state=self.presence.setdefault(job['id'],WaitState())
+                if state.stopped:continue
+                surface=self.presence_timing.wait_surface(now-job['created'],
+                                                          durable_surface=self.store.task_card(job['id']) is not None,
+                                                          draft_available=not state.draft_failed)
+                if surface==WAIT_DRAFT:
+                    if state.draft_at is not None and now-state.draft_at<self.presence_timing.draft_refresh:
+                        continue
+                    if self._presence_call('send_message_draft',job['chat_id'],draft_id_for(job['id']),'',can_stop=True):
+                        state.draft_at=now
+                        state.shown.add(WAIT_DRAFT)
+                        shown.append((job['id'],WAIT_DRAFT))
+                        continue
+                    # Unsupported/rejected draft: fall back to typing for this Work.
+                    state.draft_failed=True
+                if surface in (WAIT_CHAT_ACTION,WAIT_DRAFT):
+                    if state.chat_action_at is None or now-state.chat_action_at>=self.presence_timing.chat_action_refresh:
+                        state.chat_action_at=now
+                        if self._presence_call('send_chat_action',job['chat_id'],'typing'):
+                            state.shown.add(WAIT_CHAT_ACTION)
+                            shown.append((job['id'],WAIT_CHAT_ACTION))
+        return shown
+
+    STOP_CANCELLED_TEXT='요청을 멈췄어요. 이 요청은 실행하지 않았습니다.'
+    STOP_RUNNING_TEXT=('표시는 멈췄지만 이미 실행 중인 작업이라 중간에 취소하지 못했어요. '
+                       '작업은 계속되고, 끝나면 실제 결과를 그대로 알려드릴게요.')
+
+    def ingest_stop(self, stopped, generation):
+        """Reconcile Telegram's Stop on a draft with real Work state.
+
+        Stop ends further drafts at once.  Whether anything was *cancelled*
+        is decided by the existing `cancel_focused_work` state machine: queued
+        Work is cancelled and that is said; running Work is not cancellable
+        mid-turn, so the owner is told it continues - never that it stopped.
+        Finished Work gets nothing, because its one reply is the answer.
+        """
+        with self.lock:
+            cfg=self.store.config('telegram',{})
+            chat=stopped.get('chat',{}) if isinstance(stopped,dict) else {}
+            draft_id=stopped.get('draft_id') if isinstance(stopped,dict) else None
+            if not (cfg.get('enabled') and cfg.get('generation')==generation and isinstance(chat,dict)
+                    and chat.get('type')=='private' and isinstance(chat.get('id'),int)
+                    and chat.get('id')==cfg.get('user_id') and isinstance(draft_id,int)):
+                return None
+            with self.store.db() as db:
+                rows=db.execute("SELECT * FROM jobs WHERE channel=? AND chat_id=? AND status IN ('queued','running')",
+                                (f"telegram:{generation}",chat['id'])).fetchall()
+            job=next((dict(row) for row in rows if draft_id_for(row['id'])==draft_id),None)
+            if not job:return 'finished'
+            self.presence.setdefault(job['id'],WaitState()).stopped=True
+            cancelled,_reason=self.cancel_focused_work(job,self.connector_owner_id(job))
+            current=self.store.job(job['id'])
+            if cancelled:
+                self.presence.pop(job['id'],None)
+                text=self.STOP_CANCELLED_TEXT
+            elif current and current['status']=='running':
+                text=self.STOP_RUNNING_TEXT
+            else:
+                return 'finished'
+            try:self.telegram.send_message(job['chat_id'],text,reply_to=self.telegram_turns.source(job['id']))
+            except ProviderError:pass
+            return 'cancelled' if cancelled else 'running'
+
+    def reply_anchor(self, job):
+        """The owner message to anchor this reply to, when it clarifies anything.
+
+        A reply that directly follows its request needs no quote.  It is
+        anchored when the turn did not simply succeed (failure/recovery),
+        when a card or draft sat in between, or when the owner has already
+        sent a newer message.
+        """
+        source=self.telegram_turns.source(job['id'])
+        if not isinstance(source,int):return None
+        state=self.presence.get(job['id'])
+        retried_from_control=str(job.get('request_key') or '').startswith('tgr:')
+        if (job.get('status')!='succeeded' or retried_from_control or self.store.task_card(job['id'])
+                or (state and WAIT_DRAFT in state.shown)):
+            return source
+        with self.store.db() as db:
+            newer=db.execute('SELECT 1 FROM jobs WHERE channel=? AND chat_id=? AND created>? AND id!=? LIMIT 1',
+                             (job['channel'],job['chat_id'],job['created'],job['id'])).fetchone()
+        return source if newer else None
+
+    def reply_controls(self, job, blocked):
+        """Bounded recovery controls for a reply that did not simply succeed."""
+        status=job.get('status')
+        if status=='failed' and not blocked:
+            allowed,_reason=self.safe_retry(job)
+            return (CONTROL_RETRY,CONTROL_DETAILS) if allowed else (CONTROL_DETAILS,)
+        if status in ('partial','interrupted'):
+            return (CONTROL_DETAILS,)
+        return ()
+
+    def _consume_control(self, chat_id, message_id, markup):
+        """Make a used control visibly inert; fall back to removing it."""
+        if self._presence_call('edit_message_reply_markup',chat_id,message_id,markup):return
+        self._presence_call('edit_message_reply_markup',chat_id,message_id,without_consumed(markup))
+
+    def retry_from_control(self, job, generation, sender):
+        """Owner tapped 다시 시도 on a failed reply.
+
+        The same deterministic `safe_retry` gate as a conversational "try
+        again" decides; an unknown effect, a mutation attempt or private
+        context refuses.  The request key is derived from the failed Work, so
+        a repeated tap or a replayed update can create at most one retry.
+        """
+        allowed,reason=self.safe_retry(job)
+        if not allowed:return None,reason
+        source=self.canonical_retry_source(job)
+        if not source:return None,'이전 요청의 재시도 연결 기록을 확인할 수 없어 자동으로 다시 실행하지 않았습니다.'
+        key=f"tgr:{generation}:{job['id']}"
+        with self.store.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            if db.execute('SELECT 1 FROM jobs WHERE request_key=?',(key,)).fetchone():
+                return None,'이미 다시 시도를 요청했습니다.'
+            task_id=self.store.enqueue(source['message'],key,f'telegram:{generation}',sender,db=db)
+            self.telegram_turns.record_source(task_id,sender,self.telegram_turns.source(job['id']),db=db)
+        self.record_continuity(task_id,job['id'],FOLLOWUP_RETRY,executed=True,
+                               source_work_id=source['id'] if source['id']!=job['id'] else None)
+        return task_id,None
 
     def connector_connect_url(self, connector_id):
         """The absolute local address that starts this connector's OAuth, or ''.
@@ -2454,7 +2648,9 @@ class AgentService:
         # Cards are status controls, never a copy of user-provided content.
         if state=='queued':return '요청을 받았습니다. 곧 시작할게요.'
         if state=='running':return '요청을 처리하고 있어요.'
-        if state=='succeeded':return '처리가 끝났습니다. 아래 결과를 확인하세요.'
+        # #581: no "처리가 끝났습니다 → 결과 상태 보기" framing; the answer
+        # itself is the next bubble and speaks for the turn.
+        if state=='succeeded':return '요청을 처리했어요.'
         # The card sits directly above the terminal bubble.  A partial turn
         # must not be announced here as a finished result the bubble then
         # refuses to show.
@@ -2514,7 +2710,10 @@ class AgentService:
 
     @staticmethod
     def task_card_markup(job_id, state):
-        progress_label='진행 보기' if state in ('queued','running') else '결과 상태 보기'
+        # #581: a succeeded card has served its purpose and keeps no control;
+        # other terminal states keep one on-demand 상세 (technical detail).
+        if state=='succeeded':return {'inline_keyboard':[]}
+        progress_label='진행 보기' if state in ('queued','running') else '상세'
         buttons=[{'text':progress_label,'callback_data':f'p7v:{job_id}'}]
         if state=='queued':
             buttons.append({'text':'작업 취소','callback_data':f'p7c:{job_id}'})
@@ -2599,15 +2798,40 @@ class AgentService:
             authorized=(cfg.get('enabled') and cfg.get('generation')==generation and isinstance(sender,int)
                         and sender==cfg.get('user_id') and chat.get('type')=='private' and chat.get('id')==sender)
             changed=False
-            if authorized and isinstance(data,str) and data.startswith('p7v:'):
+            #: (text, show_alert) for this tap's answerCallbackQuery.  Detail is
+            #: shown as the tap's own alert (#581) instead of a new bubble.
+            alert=None
+            if authorized and isinstance(data,str) and data[:4] in ('p7v:','p7d:'):
                 job_id=data[4:]
                 job=self.store.job(job_id)
-                card=self.store.task_card(job_id)
-                if (job and card and card['chat_id']==sender and card['message_id']==message.get('message_id')
-                        and job['channel']==f"telegram:{generation}" and job['chat_id']==sender):
-                    try:self.telegram.send_message(sender,self.task_progress_text(job_id))
-                    except ProviderError:pass
+                card=self.store.task_card(job_id) if data.startswith('p7v:') else None
+                turn=self.telegram_turns.get(job_id) if data.startswith('p7d:') else None
+                exact_surface=((card and card['chat_id']==sender and card['message_id']==message.get('message_id'))
+                               or (turn and turn['chat_id']==sender and turn['reply_message_id']==message.get('message_id')))
+                if (job and exact_surface and job['channel']==f"telegram:{generation}" and job['chat_id']==sender):
+                    progress=self.task_progress_text(job_id)
+                    if len(progress)<=200:
+                        alert=(progress,True)
+                    else:
+                        # An alert holds 200 characters; never truncate a
+                        # truth line (unknown delivery) - send it instead.
+                        try:self.telegram.send_message(sender,progress)
+                        except ProviderError:pass
                     changed=True
+            elif authorized and isinstance(data,str) and data.startswith('p7r:'):
+                job_id=data[4:]
+                job=self.store.job(job_id)
+                turn=self.telegram_turns.get(job_id)
+                if (job and turn and turn['chat_id']==sender and turn['reply_message_id']==message.get('message_id')
+                        and job['channel']==f"telegram:{generation}" and job['chat_id']==sender):
+                    retry_id,reason=self.retry_from_control(job,generation,sender)
+                    if retry_id:
+                        alert=('다시 시도할게요.',False)
+                        changed=True
+                        self._consume_control(sender,message.get('message_id'),
+                                              reply_controls_markup(job_id,(CONTROL_RETRY,CONTROL_DETAILS),consumed=(CONTROL_RETRY,)))
+                    else:
+                        alert=(reason,True)
             elif authorized and isinstance(data,str) and data.startswith('p7c:'):
                 job_id=data[4:]
                 with self.store.db() as db:
@@ -2716,7 +2940,8 @@ class AgentService:
                         except ProviderError:pass
                         changed=True
             if authorized and isinstance(callback_id,str):
-                try:self.telegram.answer_callback_query(callback_id,'처리했습니다.' if changed else '처리할 수 있는 요청이 아닙니다.')
+                text,show=alert or ('처리했습니다.' if changed else '처리할 수 있는 요청이 아닙니다.',False)
+                try:self.telegram.answer_callback_query(callback_id,text,show_alert=show)
                 except ProviderError:pass
 
     def ingest_update(self, update, generation):
@@ -2758,6 +2983,9 @@ class AgentService:
                             guided_context=True
                         elif drive_connection_needed:
                             db.execute("UPDATE jobs SET status='awaiting_drive' WHERE id=?", (task_id,))
+                    # #581: the owner's own message is the reaction target and
+                    # reply anchor for this Work.
+                    self.telegram_turns.record_source(task_id,sender,message.get('message_id'),db=db)
                 else:
                     task_id=None
                 cfg['cursor']=update_id+1
@@ -2776,8 +3004,9 @@ class AgentService:
                 if guided_context:
                     self.offer_telegram_context_choices(task_id,sender,generation)
                 # An ordinary request gets no card here: short Work answers in
-                # one bubble, and `acknowledge_long_work` sends the card only
-                # for Work still running after TELEGRAM_ACK_AFTER_SECONDS (#510).
+                # one bubble; running Work gets native typing/draft presence and
+                # only Work still queued after TELEGRAM_ACK_AFTER_SECONDS gets a
+                # card (`acknowledge_long_work`, #510/#581).
 
     def poll_telegram(self):
         with self.lock:
@@ -2786,8 +3015,14 @@ class AgentService:
         if not cfg.get('enabled') or not token: return
         updates=self.telegram.get_updates(cfg.get('cursor',0), timeout=1)
         for update in sorted(updates,key=lambda u:u.get('update_id',0)):
+            control=None
             if isinstance(update.get('callback_query'),dict):
-                self.ingest_callback(update['callback_query'],cfg['generation'])
+                control=lambda:self.ingest_callback(update['callback_query'],cfg['generation'])
+            elif isinstance(update.get('stopped_message_generation'),dict):
+                # #581: the owner pressed Stop on a draft.
+                control=lambda:self.ingest_stop(update['stopped_message_generation'],cfg['generation'])
+            if control:
+                control()
                 # Callback updates must advance the durable cursor too, or
                 # Telegram will resend them after every restart.
                 with self.lock:
@@ -2831,6 +3066,7 @@ class AgentService:
                 continuity=self.continuity_relation(owner_prompt,connector_owner,current_work_id=job['id'])
                 if continuity:
                     relation,previous=continuity['relation'],continuity['previous']
+                    self.present_turn(job,relation=relation)
                     if relation==FOLLOWUP_RETRY:
                         allowed,reason=self.safe_retry(previous)
                         source=self.canonical_retry_source(previous) if allowed else None
@@ -2880,6 +3116,7 @@ class AgentService:
                 elif decision.intent not in (INTENT_CALENDAR_CREATE,INTENT_AMBIGUOUS) and self.calendar_conversation.has_pending(connector_owner):
                     if self.calendar_conversation.clear(connector_owner):calendar_notice=CALENDAR_DROPPED_NOTICE+'\n\n'
                 self.conversation_focus.record(decision,job['id'])
+                self.present_turn(job,decision=decision)
                 owner=f"channel:{job['channel']}:{job.get('chat_id') or 'local'}"
                 # A parked request was promised to run once after its
                 # connection, so it is kept unless the owner withdraws it
@@ -3283,15 +3520,33 @@ class AgentService:
                 allowed=cfg.get('enabled') and job['channel']==f"telegram:{cfg.get('generation')}" and job['chat_id']==cfg.get('user_id')
                 db.execute('UPDATE jobs SET delivery=? WHERE id=?',('sending' if allowed else 'cancelled',job['id']))
             if not allowed:return
-            text=(self.store.blocked_delivery_reply(job['id'])
-                  or self.telegram_result_text(job['response'],job['error'],job.get('status')))
+            blocked=self.store.blocked_delivery_reply(job['id'])
+            text=blocked or self.telegram_result_text(job['response'],job['error'],job.get('status'))
+            # #581: one durable reply, valid Telegram HTML (no leaked `**`),
+            # anchored to the owner turn only when that clarifies it, with
+            # bounded recovery controls only when the turn did not succeed.
+            # Presentation choices are computed before the send; none of them
+            # can turn a delivered reply into a second send.
             try:
-                self.telegram.send_message(job['chat_id'],text)
+                anchor=self.reply_anchor(job)
+                controls=self.reply_controls(job,bool(blocked))
+            except Exception as exc:  # presentation must never block the reply
+                LOG.debug('telegram reply presentation failed: %s',type(exc).__name__)
+                anchor,controls=None,()
+            markup=reply_controls_markup(job['id'],controls)
+            message_id=None
+            try:
+                result=self.telegram.send_message(job['chat_id'],render_telegram_html(text),markup,
+                                                  parse_mode='HTML',reply_to=anchor)
+                message_id=result.get('message_id') if isinstance(result,dict) else None
                 status='sent'
             except ProviderError:
                 status='unknown'
             with self.store.db() as db:
                 db.execute('UPDATE jobs SET delivery=? WHERE id=?',(status,job['id']))
+            self.presence.pop(job['id'],None)
+            if markup and isinstance(message_id,int):
+                self.telegram_turns.record_reply(job['id'],job['chat_id'],message_id)
 
     def mark_telegram_connected(self):
         cfg=self.store.config('telegram',{})

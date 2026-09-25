@@ -729,11 +729,15 @@ class D_MissingGmail(LocalHttp, PresenceEval):
         self.assertFalse(self.service.run_one(), 'a withdrawn request never runs after connecting')
         self.assertEqual(self.searches(), 0)
 
-    def capability_engine(self, needs):
-        """The shared fixture engine plus a scripted capability-need answer (#597)."""
+    def capability_engine(self, needs, subjects=()):
+        """The shared fixture engine plus scripted capability-need / query-term answers (#597)."""
         base = self.decision_engine()
 
         def choose(context, candidates, question):
+            if context.purpose == 'mail-query-term':
+                terms = dict(item.split(' = ', 1) for item in context.facts['terms'].split('; '))
+                pick = next((label for label, term in terms.items() if term in subjects), 'none-of-these')
+                return SelectionDecision(OUTCOME_DECIDED, pick, candidates, fixture_confidence())
             if context.purpose == 'capability-need':
                 return SelectionDecision(OUTCOME_DECIDED, needs.get(context.facts.get('owner_message'), 'none-of-these'),
                                          candidates, fixture_confidence())
@@ -754,8 +758,12 @@ class D_MissingGmail(LocalHttp, PresenceEval):
         mail = ('집주인한테 답장 왔어?', 'did the landlord write back to me?', '관리사무소에서 뭐 온 거 있나?',
                 'has the bank gotten back to me yet?')
         engine = self.capability_engine({**{phrase: 'mail-search' for phrase in mail},
-                                         'tell the landlord I agree': 'mail-send'})
+                                         'tell the landlord I agree': 'mail-send'},
+                                        subjects=('집주인', 'landlord', '관리사무소', 'bank'))
         self.service.use_decision_engine(engine)
+        queries = []
+        search = self.gmail.search
+        self.gmail.search = lambda owner, query, **kwargs: (queries.append(query), search(owner, query, **kwargs))[1]
         # Opposing: a question about the landlord that is not about mail.
         for phrase in ('집주인이 월세를 올리면 어떻게 대응하지?', 'what does a landlord usually fix?'):
             with self.subTest(phrase=phrase):
@@ -798,6 +806,8 @@ class D_MissingGmail(LocalHttp, PresenceEval):
         self.assertFalse(self.service.run_one(), 'exactly once')
         self.assertEqual(self.store.job(latest['id'])['status'], 'succeeded')
         self.assertEqual(self.searches(), 1)
+        # A bounded query - the owner's word the judgment selected, not the whole question.
+        self.assertEqual(queries, ['bank'])
 
     def test_finding_d1_an_unavailable_engine_invents_no_handoff(self):
         """With no DecisionEngine answer a cue-free turn stays ordinary conversation."""

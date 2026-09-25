@@ -477,6 +477,16 @@ CAPABILITY_NEED_QUESTION = ('Does answering the owner\'s message require one of 
                             'whatever words they use. Choose none-of-these for ordinary conversation, general '
                             'knowledge, public web research, notes, calendar, files, a mail they only mention, '
                             'or when it is unclear. This judgment does not authorize any action.')
+MAIL_QUERY_TERM_QUESTION = ('The owner is asking about their own mail. Which one of the listed terms, all taken from '
+                            'the owner\'s message, best identifies the mail to look for - its sender, organisation '
+                            'or subject? Choose none-of-these if no listed term identifies it. This judgment does '
+                            'not authorize any action.')
+#: At most this many of the owner's own words are offered as query terms.
+MAIL_QUERY_MAX_TERMS = 12
+#: Recipient/source endings trimmed from a query-term candidate so a Gmail
+#: search gets the bare name ("집주인한테" -> "집주인").  Query formatting only;
+#: which term is used is the DecisionEngine's selection.
+_TERM_ENDINGS = ('한테서', '에게서', '한테', '께서', '께')
 MEMORY_REQUEST_PROPOSITION = ('The owner\'s latest message explicitly instructs the assistant to remember, keep '
                               'in mind or not forget a specific fact, value or preference that the owner states in '
                               'that same message, for later conversations. It is false when the owner asks the '
@@ -570,6 +580,27 @@ class ConversationJudgments:
         choice = self.policy.selection(decision)
         if choice is not None:
             return Judgment(JUDGMENT_YES, value=choice, source=decision.confidence.provider or decision.outcome)
+        if self.policy.confident_selection(decision):
+            return Judgment(JUDGMENT_NO, source=decision.confidence.provider or decision.outcome)
+        return Judgment(JUDGMENT_UNAVAILABLE, source=decision.outcome)
+
+    def mail_query_term(self, utterance, terms):
+        """Which of ``terms`` (the owner's own words) identifies the mail sought?
+
+        Candidates are index labels (``term-1`` ...) so the decision and its
+        audit row stay content-free; the caller maps the label back to the
+        owner's word.  ``value`` is the index on yes.
+        """
+        labels = tuple(f'term-{index}' for index in range(1, len(terms) + 1))
+        context = DecisionContext('mail-query-term', {
+            'owner_message': utterance,
+            'terms': '; '.join(f'{label} = {term}' for label, term in zip(labels, terms)),
+        })
+        decision = self.engine.choose(context, labels, MAIL_QUERY_TERM_QUESTION)
+        choice = self.policy.selection(decision)
+        if choice is not None:
+            return Judgment(JUDGMENT_YES, value=labels.index(choice),
+                            source=decision.confidence.provider or decision.outcome)
         if self.policy.confident_selection(decision):
             return Judgment(JUDGMENT_NO, source=decision.confidence.provider or decision.outcome)
         return Judgment(JUDGMENT_UNAVAILABLE, source=decision.outcome)
@@ -981,8 +1012,8 @@ class IntentClassifier:
 
         Reached only when no local rule claimed the turn, so notes, settings,
         private searches and calendar drafts are never sent.  A yes selects
-        an AgentOS-declared candidate; the argument is the owner's own words
-        minus filler, never text the engine produced.  Unavailable, unsure or
+        an AgentOS-declared candidate; the argument is one of the owner's own
+        words (``_judged_mail_query``), never text the engine produced.  Unavailable, unsure or
         none-of-these returns ``None`` and the turn stays on conversation.
         """
         if not eligible_for_capability_judgment(text):
@@ -992,15 +1023,45 @@ class IntentClassifier:
             return None
         cues = ('judgment:capability-need',)
         if need.value == INTENT_MAIL_SEARCH:
-            quoted = _QUOTED.findall(text)
-            query = quoted[0] if quoted else _strip_noise(text)
-            if len(query) < 2:
+            query = self._judged_mail_query(text)
+            if query is None:
+                # Still a mail request: a missing connection is handed off
+                # first, and the owner is asked what to look for instead of
+                # the whole question being sent to Gmail as a query.
                 return IntentDecision(INTENT_MAIL_SEARCH, AUTHORITY_RULE, cues=cues, clarification=MAIL_CLARIFICATION)
             return IntentDecision(INTENT_MAIL_SEARCH, AUTHORITY_RULE, argument=query, cues=cues)
         if need.value in UNSUPPORTED_CAPABILITY_TEXT:
             return IntentDecision(INTENT_UNSUPPORTED, AUTHORITY_RULE, argument=need.value, cues=cues,
                                   clarification=UNSUPPORTED_CAPABILITY_TEXT[need.value])
         return None
+
+    def _judged_mail_query(self, text):
+        """A bounded Gmail query for a cue-free mail request, or None.
+
+        A quoted phrase is the owner's literal query.  Otherwise the
+        DecisionEngine selects one of the owner's own words (sender,
+        organisation or subject); a single candidate needs no judgment.  No
+        selection means no query - never the whole question.
+        """
+        quoted = _QUOTED.findall(text)
+        if quoted:
+            return quoted[0]
+        terms = []
+        for token in _strip_noise(text).split():
+            token = _trim_particle(token.strip('?!.,;:·"“”‘’()'))
+            for ending in _TERM_ENDINGS:
+                if token.endswith(ending) and len(token) > len(ending) + 1:
+                    token = token[:-len(ending)]
+                    break
+            if len(token) >= 2 and token not in terms:
+                terms.append(token)
+        terms = terms[:MAIL_QUERY_MAX_TERMS]
+        if len(terms) == 1:
+            return terms[0]
+        if not terms:
+            return None
+        judged = self._judge.mail_query_term(text, terms)
+        return terms[judged.value] if judged.outcome == JUDGMENT_YES else None
 
     # -- the model-suggestion gate ------------------------------------------
     @staticmethod

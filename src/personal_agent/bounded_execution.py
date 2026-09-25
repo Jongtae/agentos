@@ -109,6 +109,20 @@ def _provider_error(message):
     return status, message if isinstance(message, str) else ''
 
 
+# CLI output that means "no usable login", whatever the exit code (#571).
+# Deterministic protocol classification, not semantic judgment.
+_NOT_SIGNED_IN = re.compile(r'not logged in|please run /login|run `?claude setup-token|invalid api key|'
+                            r'oauth token (?:has )?expired|codex login|not signed in', re.I)
+
+
+def is_not_signed_in(text):
+    return bool(_NOT_SIGNED_IN.search(text or ''))
+
+
+LOGIN_COMMANDS = {'claude-code': 'claude setup-token', 'codex': 'codex login'}
+AUTH_HINT = '엔진 로그인이 필요합니다. 설정 › AI 연결에서 로그인을 확인하세요.'
+
+
 def failure_details(engine_id, stdout, stderr, prompt=None):
     """Summarise a failed CLI turn from its official machine output.
 
@@ -197,17 +211,26 @@ class BoundedExecutionAdapter:
     configuration parameters.  Expanding those is a security design change,
     not an engine prompt option.
     """
-    def __init__(self, finder=None, runner=subprocess.run, runtime_root=None, codex_home=None):
+    def __init__(self, finder=None, runner=subprocess.run, runtime_root=None, codex_home=None, credentials=None):
         from shutil import which
         self.finder = finder or which
         self.runner = runner
         configured_root = runtime_root or os.environ.get('AGENTOS_ENGINE_RUNS')
         self.runtime_root = Path(configured_root).expanduser() if configured_root else Path.home()/'.local/share/agentos/engine-runs'
         self.codex_home = Path(codex_home).expanduser() if codex_home else None
+        # Narrow credential source (#571): returns the owner-provided token for
+        # an engine or ''. Only Claude Code uses it, as its documented
+        # CLAUDE_CODE_OAUTH_TOKEN; HOME stays the empty per-turn directory.
+        self.credentials = credentials or (lambda engine_id: '')
 
     def environment(self, engine_id, binary, run_dir):
         env = {'HOME': str(run_dir), 'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}
         env['PYTHONPATH'] = str(Path(__file__).resolve().parents[1])
+        if engine_id == 'claude-code':
+            token = self.credentials('claude-code')
+            if isinstance(token, str) and token:
+                env['CLAUDE_CODE_OAUTH_TOKEN'] = token
+            return env
         if engine_id != 'codex':
             return env
         # Codex owns its official session under CODEX_HOME. AgentOS never
@@ -221,6 +244,47 @@ class BoundedExecutionAdapter:
         if binary_path.is_absolute():
             env['PATH'] = str(binary_path.parent) + ':' + env['PATH']
         return env
+
+    def login_status(self, engine_id, binary=None):
+        """Ask the official CLI whether it is signed in, under the same
+        environment AgentOS uses to run it (#571). Local and read-only: no
+        model request, no credential file is read by AgentOS.
+
+        Returns {'state': 'signed-in'|'signed-out'|'unknown', 'detail': str}.
+        """
+        binaries = {'codex': 'codex', 'claude-code': 'claude'}
+        if engine_id not in binaries:
+            return {'state': 'unknown', 'detail': 'unsupported engine'}
+        binary = binary or self.finder(binaries[engine_id])
+        if not binary:
+            return {'state': 'signed-out', 'detail': 'CLI not found'}
+        argv = [binary, 'auth', 'status', '--json'] if engine_id == 'claude-code' else [binary, 'login', 'status']
+        self.runtime_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with tempfile.TemporaryDirectory(dir=self.runtime_root, prefix='login-') as folder:
+            try:
+                env = self.environment(engine_id, binary, Path(folder))
+            except ExecutionError:
+                return {'state': 'signed-out', 'detail': 'login profile not found'}
+            try:
+                done = self.runner(argv, cwd=folder, env=env, stdin=subprocess.DEVNULL, capture_output=True,
+                                   text=True, timeout=20, shell=False)
+            except (subprocess.TimeoutExpired, OSError) as exc:
+                return {'state': 'unknown', 'detail': type(exc).__name__}
+        out = (done.stdout or '') + '\n' + (getattr(done, 'stderr', '') or '')
+        if engine_id == 'claude-code':
+            try:
+                data = json.loads(done.stdout or '')
+            except ValueError:
+                data = None
+            if isinstance(data, dict) and isinstance(data.get('loggedIn'), bool):
+                return {'state': 'signed-in' if data['loggedIn'] else 'signed-out',
+                        'detail': str(data.get('authMethod') or '')[:40]}
+            return {'state': 'signed-out' if is_not_signed_in(out) else 'unknown', 'detail': 'unparsed status'}
+        if done.returncode == 0 and re.search(r'logged in', out, re.I) and not re.search(r'not logged in', out, re.I):
+            return {'state': 'signed-in', 'detail': ''}
+        if done.returncode != 0 or is_not_signed_in(out):
+            return {'state': 'signed-out', 'detail': ''}
+        return {'state': 'unknown', 'detail': 'unparsed status'}
 
     def command(self, engine_id, binary, prompt, mcp_config, instructions=''):
         if engine_id == 'codex':
@@ -335,6 +399,9 @@ class BoundedExecutionAdapter:
                     if status is not None and match(status):
                         failure_class, hint = name, text
                         break
+                if failure_class == 'engine-failed' and is_not_signed_in(' '.join(
+                        (reason or '', (completed.stdout or '')[-4000:], (getattr(completed, 'stderr', '') or '')[-4000:]))):
+                    failure_class, hint = 'auth', AUTH_HINT
                 LOG.warning('engine turn failed engine=%s exit_code=%s class=%s status=%s duration=%.1fs reason=%s',
                             engine_id, completed.returncode, failure_class, status, elapsed, reason or '-')
                 message = f'{ENGINE_NAMES[engine_id]} 엔진이 작업을 완료하지 못했습니다(종료 코드 {completed.returncode}).'

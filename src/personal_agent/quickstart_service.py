@@ -190,7 +190,10 @@ class AgentService:
         self.telegram=TelegramChannel(lambda:self.telegram_transport,
                                       lambda:self.store.secret('telegram_token'))
         self.subscription_engines=subscription_engines or SubscriptionEngines()
-        self.execution_adapter=execution_adapter or BoundedExecutionAdapter()
+        # The Claude Code token is read from the secret store per run and
+        # handed to that CLI only as CLAUDE_CODE_OAUTH_TOKEN (#571).
+        self.execution_adapter=execution_adapter or BoundedExecutionAdapter(
+            credentials=lambda engine_id:self.store.secret('claude_code_token') if engine_id=='claude-code' else '')
         self.isolated_engine_adapter=isolated_engine_adapter
         self.isolated_mcp_registry=isolated_mcp_registry or TaskCapabilityRegistry()
         self.isolated_mcp_proxy=IsolatedMcpProxy(self.isolated_mcp_registry)
@@ -638,7 +641,7 @@ class AgentService:
         error=AgentService._redact_reason(trace.get('error'))
         summary={'running':'실행을 시작했습니다.','succeeded':'실행을 완료했습니다.','failed':error or '실행하지 못했습니다.'}.get(status,'관찰된 이벤트입니다.')
         safe={}
-        for key in ('scope','engine','mode','exit_code','attempt','context_messages','context_bytes','context_mode'):
+        for key in ('scope','engine','mode','exit_code','attempt','context_messages','context_bytes','context_mode','failure_class'):
             if key in trace and isinstance(trace[key],(str,int,float,bool)):safe[key]=trace[key]
         if trace.get('evidence'):summary='근거를 확인했습니다.'
         return {'id':event['id'],'job_id':event['job_id'],'tool':event['tool'],'status':status,'created':event['created'],'summary':summary,'details':safe}
@@ -701,6 +704,13 @@ class AgentService:
                     waits.append('승인 대기')
             artifacts=[{'id':item['id'],'kind':'저장된 결과' if 'path' not in item else '파일 결과','path':item.get('path'),'workspace_id':item.get('workspace_id'),'created':item.get('created'),'state':item.get('state','current')} for item in self.store.task_artifacts(job['id'])]
             task={'id':job['id'],'title':self._progress_title(job.get('message'),job['id']),'status':job.get('status'),'status_kind':kind,'status_label':label,'started_at':job.get('created'),'observed_at':last,'result_available':bool(job.get('response')) and job.get('status') in ('succeeded','partial'),'workspace_id':job.get('workspace_id'),'events_count':len(events),'waits':waits,'configured':{'provider':configured.get('provider'),'model':configured.get('model'),'runtime':selected_subscription or (configured.get('provider') if configured else None)},'observed':{'provider':job.get('provider'),'model':job.get('model'),'runtime':job.get('provider') or None},'route':self._observed_route(job,events,model_events),'artifacts':artifacts}
+            # #571: expose the class of the last failed CLI run (e.g. 'auth')
+            # so the owner sees the right recovery, not raw CLI output.
+            for event in reversed(events):
+                if event.get('tool')=='subscription_engine' and event.get('status')=='failed':
+                    failure_class=(event.get('trace') or {}).get('failure_class')
+                    if isinstance(failure_class,str) and failure_class:task['failure_class']=failure_class
+                    break
             if job.get('relation_kind') and job.get('related_job_id'):
                 task['relation']={'kind':job['relation_kind'],'work_id':job['related_job_id']}
             if job_id==job['id']:
@@ -796,8 +806,44 @@ class AgentService:
         for engine in self.subscription_engines.available():
             item=dict(engine);item['connected']=connected.get('id')==engine['id']
             item['authentication']=connected.get('authentication','') if item['connected'] else ''
+            # Last observed login check (#571); never run on page entry.
+            item['login']=dict((self.store.config('engine_login',{}) or {}).get(engine['id']) or {'state':'unchecked'})
+            if engine['id']=='claude-code':item['credential']=bool(self.store.secret('claude_code_token'))
             engines.append(item)
         return {'engines':engines, 'selected':connected.get('id','')}
+
+    ENGINE_LOGIN_HELP={'claude-code':'터미널에서 `claude setup-token`을 실행하고, 표시된 토큰을 설정 › AI 연결 › Claude Code에 붙여 넣으세요.',
+                       'codex':'터미널에서 `codex login`을 실행해 로그인하세요.'}
+
+    def check_engine_login(self, engine_id):
+        """Run the official, local login check for one CLI and remember it."""
+        if engine_id not in ('codex','claude-code'):raise ValueError('지원하는 구독 엔진을 선택하세요.')
+        checker=getattr(self.execution_adapter,'login_status',None)
+        # Resolve the CLI exactly as discovery does, so the check and the
+        # installed/selectable state describe the same binary.
+        binary=self.subscription_engines.finder({'codex':'codex','claude-code':'claude'}[engine_id])
+        result=checker(engine_id,binary=binary) if callable(checker) else {'state':'unknown','detail':'no checker'}
+        state=result.get('state') if result.get('state') in ('signed-in','signed-out','unknown') else 'unknown'
+        record={'state':state,'checked_at':time.time()}
+        with self.lock:
+            rows=dict(self.store.config('engine_login',{}) or {});rows[engine_id]=record
+            self.store.put('engine_login',rows)
+        return record
+
+    def save_engine_credential(self, body):
+        """Store or remove the Claude Code token from `claude setup-token` (#571)."""
+        if not isinstance(body,dict) or body.get('engine')!='claude-code':raise ValueError('토큰은 Claude Code에만 저장할 수 있습니다.')
+        token=body.get('token')
+        if not isinstance(token,str):raise ValueError('토큰을 입력하세요.')
+        token=token.strip()
+        if token and (len(token)<20 or len(token)>1024 or any(ch.isspace() for ch in token)):
+            raise ValueError('`claude setup-token`이 표시한 토큰 한 줄을 그대로 붙여 넣으세요.')
+        self.store.secret('claude_code_token',token)
+        if token:self.check_engine_login('claude-code')
+        else:
+            with self.lock:
+                rows=dict(self.store.config('engine_login',{}) or {});rows.pop('claude-code',None);self.store.put('engine_login',rows)
+        return self.subscription_engine_status()
 
     def onboarding(self):
         """Credential-free local readiness and recovery guidance for an owner."""
@@ -850,6 +896,16 @@ class AgentService:
     def connect_subscription_engine(self, body):
         if not isinstance(body,dict):raise ValueError('연결 정보를 확인하세요.')
         record=self.subscription_engines.connect(body.get('engine',''),body.get('officially_authenticated'))
+        # #571: check the CLI's own login, in the environment AgentOS runs it
+        # with, before switching. A known sign-out refuses the switch; an
+        # unknown result is allowed only as this explicit owner action and is
+        # labelled as unconfirmed.
+        # The isolated sidecar owns its own CLI login, so the host check does
+        # not describe it.
+        if not self.isolated_engine_adapter and callable(getattr(self.execution_adapter,'login_status',None)):
+            login=self.check_engine_login(record['id'])
+            if login['state']=='signed-out':
+                raise ValueError(f"{ {'codex':'Codex','claude-code':'Claude Code'}[record['id']] }에 로그인되어 있지 않아 전환하지 않았습니다. "+self.ENGINE_LOGIN_HELP[record['id']])
         with self.lock:self.store.put('subscription_engine',record)
         return self.subscription_engine_status()
 

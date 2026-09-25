@@ -456,3 +456,9 @@ details.technical details>summary{color:var(--muted)}
 .trace-jump{position:fixed;right:24px;bottom:24px;z-index:4;background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:0 2px 8px rgba(20,25,35,.18)}
 .trace-jump:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
 @media(max-width:620px){.trace-earlier{padding-left:24px}.trace-jump{right:16px;bottom:calc(16px + env(safe-area-inset-bottom))}}
+
+/* #571 */
+.engine-token{display:grid;gap:6px;margin:6px 0 0 16px;max-width:420px}
+.engine-token input{min-height:32px}
+.turn-recovery{margin-top:10px;padding-top:10px;border-top:1px solid var(--danger-line);display:grid;gap:6px}
+.turn-recovery .button-row{margin-top:4px}

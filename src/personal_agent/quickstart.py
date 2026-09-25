@@ -21,7 +21,7 @@ from urllib.request import Request, urlopen
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError
-from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qs, unquote, urlencode, urlsplit, urlunsplit
 from .quickstart_store import QuickStore
 from .calendar import CalendarConnector
 from .calendar_oauth import CalendarOAuth, EncryptedCalendarSecretStore, calendar_transport
@@ -629,6 +629,16 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                     return self.reply(400,{'error':'Open AgentOS on its local address to review calendar drafts.'})
                 try:return self.reply(200,service.calendar_draft_request({'operation':'list'}))
                 except ValueError as exc:return self.reply(400,{'error':str(exc)})
+            if path.startswith('/api/personal-space/items/'):
+                # #562: one exact retained item for a contextual deep link.
+                # Same owner session gate as /api/personal-records, which
+                # already returns every such item; this returns one.
+                item_parts=path.split('/')
+                if len(item_parts)!=6:return self.reply(404,{'error':'기록을 찾을 수 없습니다.'})
+                try:item=service.personal_item(item_parts[4],unquote(item_parts[5]))
+                except ValueError as error:return self.reply(400,{'error':str(error)})
+                if not item:return self.reply(404,{'error':'이 기록은 지금 저장돼 있지 않습니다. 이미 지웠거나 바뀌었을 수 있습니다.'})
+                return self.reply(200,{'item':item})
             if path=='/api/personal-space':return self.reply(200,store.personal_space())
             if path=='/api/personal-records':
                 values=parse_qs(parts.query)

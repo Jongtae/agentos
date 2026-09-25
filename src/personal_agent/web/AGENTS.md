@@ -5,7 +5,7 @@ Read the root AGENTS.md and [Local Web Management Contract](../../../docs/web-ma
 ## Product boundary
 
 - The default local web is an AgentOS management utility, not another messenger. Telegram is the current conversation channel; AgentOS remains channel-independent and owns history, work, memory, results and authority.
-- Default destinations: 작업 현황, 내 기록, 설정. Settings: AI 연결, 파일 · 저장, 외부 연결, 개인정보 · 진단. One stable navigation and one visible pane; no below-chat expansion, duplicate menus or global transcript/composer by default.
+- Default destinations: 작업 현황, 설정 (#562 removed the generic 내 기록 browser; exact retained items open at `#item/<kind>/<id>` from the turn that recorded them or from the Settings pane that manages that type, chosen from typed Work data only). Settings: AI 연결, 파일 · 저장, 외부 연결, 개인정보 · 진단. One stable navigation and one visible pane; no below-chat expansion, duplicate menus or global transcript/composer by default.
 - Projects are optional secondary grouping. Preserve project access and data; do not force a project/setup flow. No dashboard hero, mascot, model shop, permanent checklist, tip/support panel or empty agent marketplace.
 - Preserve existing Telegram delivery, chat APIs, stored conversations, drafts, files, records and grants. Removing a visible chat view is not deletion or permission to break the execution backend.
 - Task detail shows actual result/required action first, then observed events and optional redacted execution details. Original request context is task-scoped and explicitly expanded. Do not copy all Telegram messages or repository CI/heartbeat into product task progress.

@@ -20,11 +20,12 @@ This is a successor presentation contract, not a relaxation of data/authority ru
 
 ## 3. Information architecture
 
-Default destinations:
+Default destinations (amended 2026-09-24 by owner decision, #562 PRESENCE-WEB-IA-01):
 
-- **작업 현황**: meaningful owner requests, status, results and observed execution.
-- **내 기록**: searchable typed records and results.
+- **작업 현황**: the chronological conversation/execution trace (#559): owner requests, results and observed execution.
 - **설정**: AI 연결; 파일 · 저장; 외부 연결; 개인정보 · 진단.
+
+The earlier **내 기록** destination (searchable typed records, #382 W3) is superseded and removed. There is no generic page whose purpose is browsing all AgentOS record types. Exact retained items open at a deep link (`#item/<note|memory|artifact|candidate>/<id>`) reached contextually from the turn whose Work recorded them, or from the Settings surface that manages that type: Memory, notes and pending MemoryCandidates under 개인정보 · 진단, projects and their saved results under 파일 · 저장, temporary material under 개인정보 · 진단 as before. Settings lists are per-type management, not a cross-type search or browser. Which items a turn links to comes only from typed records attached to that Work, never from keyword or text matching. The item view has no navigation entry of its own and is useful without a parent destination.
 
 Use one stable navigation and one visible destination. Selecting a destination replaces the content pane, not scrolls to another section under a conversation. Do not duplicate the same navigation in the content. Desktop may use a quiet sidebar; mobile uses destination/list/detail with a clear back action. Preserve appropriate URL history, selection, scroll, focus and unsaved drafts.
 
@@ -49,7 +50,7 @@ A completed text response is itself inspectable. An artifact needs an actual wor
 
 ## 5. Records and files
 
-Records start with search, type filters, list and selected detail, not a glossary or policy form. Keep notes, durable memory, temporary context and artifacts distinct underneath. Labels, counts, previews and allowed actions must match their real type. Identify an item before removal; never send artifact deletion to a memory endpoint, ignore an error, or implicitly delete an original file.
+Since #562 records are not browsed from a dedicated destination (see section 3); an exact item view shows one item and only that item. Removing the browsing page deletes, migrates or re-scopes no stored data. A MemoryCandidate is shown as a candidate, never as remembered, until an owner decision commits it. Keep notes, durable memory, temporary context and artifacts distinct underneath. Labels, counts, previews and allowed actions must match their real type. Identify an item before removal; never send artifact deletion to a memory endpoint, ignore an error, or implicitly delete an original file.
 
 Temporary collection/sharing controls live under their relevant settings. Record empty states explain what is absent without implying ordinary conversation history was lost. Example: '아직 따로 저장한 기록이 없습니다. 대화 이력과 저장한 기록은 구분됩니다.' This is copy guidance, not a change to retention.
 

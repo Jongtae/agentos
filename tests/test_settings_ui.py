@@ -113,7 +113,7 @@ def test_settings_uses_goal_oriented_owner_language():
     assert "AI 연결" in HTML
     assert "파일 · 저장" in HTML
     assert "외부 연결" in HTML
-    assert "내 기록" in HTML
+    assert "내 기록" not in HTML
     assert "AI가 찾아볼 폴더" in HTML
     assert "정리 결과 만들기" in HTML
     assert "결과 저장 폴더" in HTML
@@ -144,11 +144,16 @@ def test_mobile_checkbox_is_not_full_width_input():
     assert "@media(max-width:620px)" in CSS
 
 
-def test_owner_flow_has_three_management_destinations_and_optional_projects():
-    for destination in ('data-view="tasks"', 'data-view="records"', 'data-view="settings"'):
+def test_owner_flow_has_two_destinations_and_optional_projects():
+    # #562: 작업 현황 and 설정 only; 내 기록 is no longer a destination.
+    for destination in ('data-view="tasks"', 'data-view="settings"'):
         assert HTML.count(destination) == 1
+    assert HTML.count('data-view="') == 2
+    assert 'data-view="records"' not in HTML
     assert 'id="chat-form"' not in HTML
-    assert 'id="projects"' in HTML
+    # Projects stay reachable as optional grouping under 파일 · 저장.
+    files = HTML[HTML.index('id="settings-files"'):HTML.index('id="settings-external"')]
+    assert 'id="projects"' in files and 'id="workspace-form"' in files
     assert "setup-checklist" not in APP
 
 
@@ -181,12 +186,14 @@ def test_setting_rows_translate_internal_connection_ids_and_keep_details_disclos
     assert ".settings-row-action.destructive" in CSS
 
 
-def test_records_surface_each_owner_record_type():
-    for label in ("메모", "기억", "임시 자료", "저장된 결과"):
+def test_exact_items_keep_each_owner_record_type_distinct():
+    for label in ("t('메모')", "t('기억')", "t('저장된 결과')", "t('저장 전 기억 후보')"):
         assert label in APP
-    assert "recordItems" in APP
-    assert "deleteKind:'results'" in APP
-    assert "function showRecords()" in APP
+    # Deletion stays type-bound: a saved result never goes to a Memory endpoint.
+    assert "const kind=item.kind==='artifact'?'results':'memories'" in APP
+    # Temporary material keeps its own Settings list and delete confirmation.
+    assert "api('/api/context-inbox/delete',{id:item.id})" in APP
+    assert "function showRecords()" not in APP
 
 
 def test_settings_renderers_preserve_polling_controls_and_truthful_route_state():

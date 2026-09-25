@@ -90,7 +90,8 @@ class WebManagementReadinessTests(unittest.TestCase):
     def test_management_is_the_only_default_product_surface(self):
         html = (ROOT / 'src/personal_agent/web/index.html').read_text()
         self.assertEqual(html.count('data-view="tasks"'), 1)
-        self.assertEqual(html.count('data-view="records"'), 1)
+        # #562: the generic 내 기록 destination is gone.
+        self.assertEqual(html.count('data-view="records"'), 0)
         self.assertEqual(html.count('data-view="settings"'), 1)
         self.assertNotIn('id="chat-form"', html)
         self.assertNotIn('id="messages"', html)
@@ -99,12 +100,13 @@ class WebManagementReadinessTests(unittest.TestCase):
         self.assertIn('data-settings="files"', html)
         self.assertIn('data-settings="external"', html)
         self.assertIn('data-settings="privacy"', html)
-        # The J6 MemoryCandidate control is a management control inside the
-        # existing records view: it adds no top-level view and no second
-        # conversation surface.
+        # The J6 MemoryCandidate control is a management control: since #562 it
+        # lives in Settings › 개인정보 · 진단 and opens one candidate in the
+        # exact-item view. It adds no top-level view and no conversation surface.
         self.assertEqual(html.count('id="memory-candidates"'), 1)
-        self.assertGreater(html.index('id="memory-candidates"'), html.index('id="view-records"'))
-        self.assertLess(html.index('id="memory-candidates"'), html.index('id="view-settings"'))
+        self.assertGreater(html.index('id="memory-candidates"'), html.index('id="settings-privacy"'))
+        self.assertIn('data-view-panel="item"', html)
+        self.assertNotIn('data-view="item"', html)
 
     def test_source_derived_task_record_and_model_regressions(self):
         node = shutil.which('node')
@@ -135,17 +137,14 @@ assert(!ui.isDiagnosticTask({title:'compare flights'}));
 const proofA=ui.modelDraftFingerprint({provider:'openai',endpoint:'https://api.example/v1/',model:'m',credential_revision:1});
 const proofB=ui.modelDraftFingerprint({provider:'openai',endpoint:'https://api.example/v1',model:'m',credential_revision:2});
 assert.notEqual(proofA,proofB);
-const records=ui.recordItems({memories:[{id:'n',content:'note'},{id:'m',memory_key:'pref',content:'memory'}],context:[{id:'c',source_kind:'text'}],results:[{id:'r',content:'artifact'}]});
-assert.deepEqual(records.map(x=>[x.id,x.type,x.deleteKind]),[['n','saved','memories'],['m','memory','memories'],['c','temporary',undefined],['r','artifact','results']]);
-const projected=ui.recordItems({items:[{id:'old',type:'note',label:'메모',content:'authoritative',deleteKind:'memories'}]});
-assert.deepEqual(projected,[{id:'old',type:'note',label:'메모',content:'authoritative',deleteKind:'memories'}]);
-assert.equal(ui.recordPageMatches({query:'durable-key',filter:'all'},' durable-key ','all'),true);
-assert.equal(ui.recordPageMatches({query:'durable-key',filter:'all'},'other','all'),false);
-const long='x'.repeat(300)+'needle-after-truncation';
-const space={memories:[{id:'exact',memory_key:'durable-key',content:'exact durable memory'},{id:'long',content:long}]};
-assert.deepEqual(ui.filterLocalRecords(space,'durable-key','all').map(x=>x.id),['exact']);
-assert.deepEqual(ui.filterLocalRecords(space,'durable-key','saved').map(x=>x.id),['exact']);
-assert.deepEqual(ui.filterLocalRecords(space,'needle-after-truncation','all').map(x=>x.id),['long']);
+assert.deepEqual(ui.itemRoute('#item/memory/m%2F1'),{kind:'memory',id:'m/1'});
+assert.equal(ui.itemRoute('#item/unknown/x'),null);
+assert.equal(ui.itemRoute('#records'),null);
+assert.equal(ui.itemHref('artifact','r 1'),'#item/artifact/r%201');
+const links=ui.retainedLinks({retained:[{kind:'candidate',id:'c',label:'pref',available:true},{kind:'note',id:'n',available:false}],artifacts:[{id:'r',workspace_id:'w'},{id:'f',path:'/out/a.md'}]});
+assert.deepEqual(links.map(x=>[x.kind,x.id,x.available]),[['candidate','c',true],['note','n',false],['artifact','r',true]]);
+assert.equal(ui.itemLabel('candidate'),'저장 전 기억 후보');
+assert.equal(ui.itemLabel('memory'),'기억');
 assert.deepEqual(ui.workspaceSaveCandidates([{id:'unassigned',status:'succeeded'},{id:'here',workspace_id:'w',status:'partial'},{id:'elsewhere',workspace_id:'other',status:'succeeded'},{id:'queued',status:'queued'}],'w',['here']).map(x=>x.id),['unassigned']);
 assert.deepEqual(ui.modelPresetDraft({provider:'compatible',endpoint:'https://openrouter.ai/api/v1/',model:'fixture/free'}),{provider:'compatible',endpoint:'https://openrouter.ai/api/v1',model:'fixture/free',api_key:''});
 assert.match(ui.contextSharingWarning({sharing_requires_policy_and_per_request_approval:true}),/각 Telegram 작업마다/);
@@ -205,14 +204,16 @@ console.log(JSON.stringify({checks:40}));
         self.assertIn('modelGuard.test', app)
         self.assertIn('modelGuard.apply', app)
         self.assertIn("method||(body===undefined?'GET':'POST')", app)
-        self.assertIn("'/api/personal-space/'+item.deleteKind", app)
-        deletion = app[app.index("if(item.deleteKind)"):app.index("$('record-search').onsubmit")]
-        self.assertIn('recordLoadSequence++', deletion)
+        # #562: deletion is bound to the one item on screen and asks twice.
+        deletion = app[app.index("function itemDeleteActions("):app.index("function renderCandidateItem(")]
+        self.assertIn("api('/api/personal-space/'+kind+'/'+encodeURIComponent(item.id),undefined,'DELETE')", deletion)
+        self.assertIn("if(!itemDeletePending){itemDeletePending=true;", deletion)
+        self.assertIn("deleted.deleted===false", deletion)
         self.assertNotIn("api('/api/personal-space')", deletion)
-        self.assertLess(deletion.index('lastRecords.items=lastRecords.items.filter'),
-                        deletion.index('await loadRecords({refreshLoaded:true,throwOnError:true})'))
-        self.assertIn('recordPageMatches(lastRecords', app)
-        self.assertIn("if(activeView==='records')void refreshLoadedRecords()", app)
+        # Opening an item reads only that item.
+        load = app[app.index("async function loadItem("):app.index("function relatedWork(")]
+        self.assertEqual(load.count("api("), 1)
+        self.assertIn("'/api/personal-space/items/'", load)
         self.assertIn('if(taskDetailInflight.has(id))return taskDetailInflight.get(id)', app)
         self.assertEqual(app.count("invalidateModelDraft(t('연결 결과가 바뀌었습니다. 적용 전에 다시 테스트하세요.'))"), 2)
 
@@ -240,7 +241,7 @@ console.log(JSON.stringify({checks:40}));
         self.assertIn('if(requestedFileWorkspaceRevision===fileWorkspaceLoadRevision)renderFileWorkspace(', hydration)
         self.assertIn('requestedRootsRevision===rootsLoadRevision', app)
         self.assertIn('requestedFileWorkspaceRevision===fileWorkspaceLoadRevision', app)
-        self.assertIn('shouldInvalidateWorkspaceDetailForDeletion(item,selectedWorkspaceId)', app)
+        self.assertIn('shouldInvalidateWorkspaceDetailForDeletion({deleteKind:kind,workspace_id:item.workspace_id},selectedWorkspaceId)', app)
 
     def test_workspace_result_projection_is_complete_and_duplicate_save_is_not_success(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -1,8 +1,8 @@
 # Goal Execution Contract
 
-## Assistant execution closeout refinement
+## Assistant execution closeout refinement — #612
 
-For #600, follow the [execution contract](assistant-execution-contract.en.md) and [finite ownership plan](assistant-execution-delivery.en.md). Repaired journeys require baseline-red/fixed-green, opposing cases and a meaningful actual-entrypoint mutation. Child implementation, integrated runtime and product qualification are separate closeouts. Missing/skip/xfail, fixture-as-live, stale installed builds and mandatory risks cannot satisfy promotion. #601 checks evidence consistency; #608 must bind trusted artifacts/reviews and prove enforcement in the real promotion path. A standalone validator is not a release certificate.
+For #600, the [execution contract](assistant-execution-contract.en.md) and [delivery policy](assistant-execution-delivery.en.md) apply unit-test-first, risk-proportionate verification. This owner amendment replaces the blanket baseline/mutation/trace bundles, repeated all-profile model trials and fixed score in #602 and older linked planning prose; selection/order/authority in the root plan are unchanged. A normal child closes with focused unit tests, necessary model-free boundary tests and required CI. Mutations and independent review are targeted to actual risk. No routine per-answer judge or live-model evaluation. Report only changed-scope evidence and actual limits; missing live authorization prevents unsupported live claims, not safe development closure. #608 reuses existing test/diagnostic tools for optional targeted checks, not a custom certification platform. Unknown effects, permissions and truthful state remain fully enforced.
 
 ## Purpose
 

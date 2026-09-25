@@ -2,7 +2,7 @@
 
 ## Status and authority
 
-Owner-directed on 2026-09-25. Integration parent: [#600](https://github.com/Jongtae/agentos/issues/600); specification and gate infrastructure: [#601](https://github.com/Jongtae/agentos/issues/601). This is the normative execution/acceptance refinement for the finite AGENCY track within PRESENCE-01, not a replacement kernel, second active coordinator or shipped-capability claim. [Delivery and ownership](assistant-execution-delivery.en.md) defines the work breakdown. GitHub owns execution status; repository-root `delivery-plan.yaml` owns selection/dependencies. The retired runtime plan mirror must not be recreated.
+Owner-directed on 2026-09-25; cost/reuse amendment [#612](https://github.com/Jongtae/agentos/issues/612) supersedes the blanket verification policy introduced by #602. Integration parent: [#600](https://github.com/Jongtae/agentos/issues/600); specification and gate infrastructure: [#601](https://github.com/Jongtae/agentos/issues/601). This is the normative execution/acceptance refinement for the finite AGENCY track within PRESENCE-01, not a replacement kernel, second active coordinator or shipped-capability claim. [Delivery and ownership](assistant-execution-delivery.en.md) defines the work breakdown. GitHub owns execution status; repository-root `delivery-plan.yaml` owns selection/dependencies. The retired runtime plan mirror must not be recreated.
 
 Retain the [architecture](personal-agentos-architecture.en.md), [Owner Control Contract](owner-control-contract.en.md), [Presence contract](presence-experience-contract.en.md), [DecisionEngine boundary](decision-layer.en.md) and [usefulness rubric](default-agent-usefulness.en.md). This refinement supersedes interpretations equating a declaration, semantic seam, fixture, fluent copy or successful worker exit with a functioning assistant. Historical evidence and closed scopes are not retroactively enlarged. Publishing this contract does not authorize credentials, live evaluation, deployment, account mutation or another automation.
 
@@ -41,7 +41,7 @@ The [machine-readable manifest](evals/assistant-execution-v1.json) is developmen
 | AX-09 | Source-grounded facts and substantive, attributable artifacts | #606 |
 | AX-10 | Shared finite budgets and actual cancellation outside the model | #607 |
 | AX-11 | Exact source/artifact/config/catalog/policy/runtime identity | #603 |
-| AX-12 | Separate evidence layers and enforced product promotion | #608; infrastructure #601 |
+| AX-12 | Unit-first checks, optional bounded model checks and truthful claims | #608; specification check #601/#612 |
 | AX-13 | Useful, truthful partial/unknown projection in one assistant voice | #598 |
 | AX-14 | Explicit owner-memory instructions generalize without fabricated authority | #597 |
 
@@ -68,7 +68,7 @@ Rules enforce schemas, exact approval, state, budgets, destinations, idempotency
 
 ### Typed interfaces
 
-Adapt existing types rather than introducing parallel stores.
+Map these conceptual fields to existing AgentOS or selected SDK types first. They are NOT required new classes, services, stores or a second state machine. Add only fields absent from a concrete existing contract.
 
 **CapabilityDescriptor:** stable capability/action ID, revision/schema digest, description, input/output schema, effect class, source/destination restrictions, required grants, profile binding, availability reason, timeout/retry/idempotency/cancellation contract. Implementation, install/enablement, connector state, current authorization, route availability and qualification are independent facts. Discovery does not grant; invocation rechecks current state.
 
@@ -102,7 +102,7 @@ A public lookup is still an external disclosure. Owner-authored text can contain
 
 Preserve current provenance/public-egress guards until the reviewed replacement qualifies. No blanket history-taint removal, weather exemption, label stripping, delegate laundering or LLM-certified declassification.
 
-For a separable public subtask, construct a fresh minimal context **before** private material enters it. Its inputs are an explicitly authorized public goal and admissible source records, never a private parent's free-form summary. A broker-owned request ticket binds owner, Work/goal revision, source IDs/revisions, normalized payload digest, destination/action, grant/policy revision, expiry and budget. Models cannot mint or modify tickets. Revalidate on invocation, restart and revocation.
+For a separable public subtask, construct a fresh minimal context **before** private material enters it. Its inputs are an explicitly authorized public goal and admissible source records, never a private parent's free-form summary. The existing broker/Grant/approval binding (conceptually a request ticket, not a new credential or signing scheme) binds owner, Work/goal revision, source IDs/revisions, normalized payload digest, destination/action, grant/policy revision, expiry and budget. Models cannot mint or modify tickets. Revalidate on invocation, restart and revocation.
 
 Weather arguments should refer to an authorized location identity; trusted host code resolves and serializes the necessary coordinates/country/timezone. An arbitrary bounded string is not an information-flow control. Open-ended search also requires admissible source roots and covering destination permission. If private-derived input is necessary or admissibility cannot be established, ask for exact disclosure approval or the genuinely missing input. Do not evade denial through another worker.
 
@@ -116,7 +116,7 @@ Weather answers need resolved location, observation/forecast time and data seman
 
 Choose fallback from the observed reason, not a universal fixed chain. An equivalent same-authority method, one schema repair, one idempotent transient read retry, an exact authority handoff, a decision-critical question, or useful verified partial output can be appropriate. Auth/policy denial is not a transient retry. The assistant need not exhaust every tool, and casual conversation should not trigger unnecessary external work.
 
-Obligations specify required entities/facts, freshness, artifact fidelity or exact effect. Deterministic checks cover IDs, units, timestamps, hashes and effects; nuanced completeness may use calibrated bounded semantic judgment. Neither confidence nor prose upgrades unknown evidence. Attempt outcome, goal outcome and external effect remain separate.
+Obligations specify required entities/facts, freshness, artifact fidelity or exact effect. Deterministic checks cover IDs, units, timestamps, hashes and effects; nuanced completeness is primarily part of the existing answer-generation step. A separate semantic judge is not a default or per-answer requirement; use one only for an explicitly justified, bounded need. Neither confidence nor prose upgrades unknown evidence. Attempt outcome, goal outcome and external effect remain separate.
 
 ## Durable lifecycle and resource policy
 
@@ -134,32 +134,53 @@ Provide the useful result, material uncertainty and necessary next action in one
 
 A local diagnostic reports source revision, installed artifact digest, entrypoint/module origin, process start, effective route/isolation/CLI version, requested versus observed model, and configuration/catalog/policy digests. It reads existing state without invoking models or reinstalling anything. Exports are redacted before persistence and retention-bounded. A stale installation and missing route binding are different failures.
 
-## Four evidence layers and promotion policy
+## Verification policy — unit tests first
 
-The manifest is not runtime input. Freeze rubrics and held-out paraphrases before tuning. Report complete denominators, failures and unqualified profiles; never best-of-three.
+The 2026-09-25 #612 owner amendment replaces the earlier all-case/all-profile three-trial matrix, universal 90% threshold and per-child evidence-packet obligation. It also narrows the interpretation of older root-plan qualification prose and the historical U1/U2/U3 numerical proposals: required user outcomes and authority remain; the blanket workload does not. No new evaluation platform or continuous model judge is required.
 
-| Layer | Proves | Does not prove |
+| Change | Default check | Model calls |
 | --- | --- | --- |
-| Contract | Actual service/state/security behavior under controlled transports | Real-model or live service quality |
-| Protocol | Actual serialization/process/MCP/proxy and observed host action | A real model chose correctly |
-| Real model | Actual selected model/qualified CLI acts on synthetic controlled tasks, three independent trials | Live external facts when the world/effects are simulated |
-| Owner smoke | Bounded real Telegram/macOS interaction on exact installed artifact | Universal reliability or statistical safety |
+| Mapping, policy, arguments, errors, state transitions, projection | Focused unit tests using injected transports/fake clock/temp store | None |
+| Changed native/MCP serializer, broker wiring, resume or process boundary | One small relevant integration test; real boundary, fake model/external service | None |
+| Model, prompt or tool-description change; unexplained model-dependent defect | Opt-in sample of affected cases/profiles under explicit budget | Only the selected sample |
+| Installation/UI change or public quality claim | Narrow version check/smoke or claim-specific evaluation | Only if needed and authorized |
 
-A behavioral fix requires baseline-red, candidate-green and an opposing case/mutation. Remove a binding, swallow an observation, bypass a claim, corrupt an artifact or relabel a fixture as live: the corresponding assertion must fail. File existence, text presence or pre-scripted final answers cannot certify usefulness. A different harmless action order is valid if it satisfies the same goal and authority.
+For example, a scripted model requests weather, real service/broker/serialization code handles it, a fake weather endpoint returns evidence, and the test checks that the observation reaches the next model input. This proves wiring, not model language competence. Do not replace the very broker/serializer being tested with a fake final answer. Parameterized adapter tests share cases rather than duplicating whole model runs.
 
-Initial product targets: all mandatory contract/protocol and critical safety regressions pass; three real-model trials per required case/profile, at least 90% useful success per family/profile, and at least one success on every required positive case; zero observed unauthorized effects/egress, false completion, wrong-owner access or blind unknown-effect retry. Existing U1/U2/U3 criteria remain. These are engineering targets, not measured performance or safety proof. Calibrate latency/cost/friction SLOs from baseline before promotion; report p50/p95 and uncertainty.
+A regression test should reproduce its bug where practical. A separate historical run, mutation, trace archive and model evaluation are NOT mandatory for every fix. Target adversarial/mutation checks at sole authority guards, duplicate-effect prevention or an otherwise untested binding. Existing relevant negative tests and required CI are not skipped or weakened. Do not require a fresh review of an unchanged library or unrelated historical code.
 
-#601's validator checks spec structure and report consistency against content-addressed JUnit/trace artifacts. It rejects missing/duplicate cells, skipped/xfail evidence, stale identities, assertion/JUnit disagreement and fixture-as-live substitution. **It cannot authenticate arbitrary self-authored files.** #608 must connect trusted runner/CI artifacts, required security review, frozen holdout and owner attestation to the actual promotion path and prove refused promotion. A validator unit test is infrastructure evidence, not product readiness.
+Normal CI uses injected models and must not use live credentials/provider calls. #608 owns narrowly scoped integration of a request guard using the existing test seams; it must not block loopback test servers or require a new agent framework. In production the normal tool-observation-answer loop remains; a second model to grade every answer is not the default. Code checks tool results, authorization and effect status without re-asking a model for those facts.
 
-Closeout stages are separate: specification/gate infrastructure, merged runtime integration, and product qualification. Missing authorized live evidence permits safe development but blocks product-ready claims. A parent cannot close just because each child has some merged PR. Mandatory findings, skipped routes, stale builds and fixture/live disagreement remain release blockers. Explicit de-scoping cannot erase history.
+Optional model checks require a stated trigger, selected cases/routes, provider/destination/data authorization, maximum requests or tokens/cost and a time limit. Start with a small representative sample; repeat only to resolve observed variability or support a specific claim. Report all executed attempts, not the best answer. No global default trial count or score is encoded. Provider credentials alone are not authorization. A model-free installation fingerprint check needs no model call.
+
+Keep unit/controlled integration, real-model and owner observations accurately labelled. An unrun optional check is not a failed development test and cannot become a success claim. Conversely a relevant known regression is not optional merely to make CI pass. Before claiming a particular live profile works, observe that scoped path or describe it as unverified. Existing release protection and issue-specific critical operating checks remain; there is no required exhaustive model matrix.
+
+Use existing pytest/unittest reports and GitHub checks. The #612-reduced `verify_assistant_execution.py --check-spec` checks requirement/owner/plan consistency only; the unadopted custom `--evidence` certification path is removed. It cannot grade outcomes, authenticate reports or certify product readiness. Do not replace it with another report platform. Success output is brief; inspect failing test IDs and bounded diagnostics only. Normal local iteration runs focused tests, then the existing required suite once on a stable head.
+
+## Concrete reuse decisions
+
+Reuse the following internal implementation first; upstream APIs are explicit comparison targets, not packages silently installed by this amendment.
+
+| Responsibility | Existing implementation | Upstream comparison / decision | AgentOS-specific remainder |
+| --- | --- | --- | --- |
+| Tool selection and observation loop | `agent_runtime.run_agent`, `providers.ModelAdapter.tool_turn` | Keep/adapt unless a bounded compatibility test justifies an SDK substitution; LangGraph model/tool nodes are a pattern, not a new mandatory runtime | Work linkage, current authority/effect truth, global budgets |
+| Tool definitions and invocation | `Capabilities.definitions/execute`, manifests, `AgentOSMcpTools` | #604 derives native/MCP bindings from these, removing the independently maintained facade list | Per-Work allowed actions and revision checks |
+| MCP wire mechanics | `mcp_types.version`, bridge code and #426 decision | Keep already adopted version types; compare official Python SDK client session/server list/call/result handling only for the changed framing/error seam | Strict unknown-field validation, Work token, allowlist, audit |
+| Approval/deferred execution | Connector/folder pending registry and existing exact preview | Keep existing durable claims; PydanticAI `DeferredToolRequests`/`DeferredToolResults` are a compatibility candidate, not a replacement authority layer | Owner/payload/revision-bound approval and crash-safe claim |
+| Model-free tests | Injected `ModelAdapter` transport, `FixtureDecisionEngine`, existing unittest/pytest helpers | Adopt existing tests; PydanticAI `TestModel`, `FunctionModel`, `Agent.override`, `ALLOW_MODEL_REQUESTS=False` illustrate already-solved test seams | A small request guard only if missing; no external framework just for tests |
+| Result correctness | Existing Evidence/effect/qualifier functions | Reuse structured tool result/error fields; no new GoalResult engine or LLM grader by default | Requested result references and deterministic effect qualification |
+
+Each affected child records a short decision: prior review reused, concrete symbol/API/version inspected, required behavior, glue retained, duplicate code removed/avoided, and actual mismatch if custom Build remains. Do this once per changed boundary, not an independent broad research/review cycle on each patch. A small no-model compatibility test is stronger than a generic framework comparison. Do not rebuild strict protocol framing until checking the adopted types/full SDK at the exact version against the recorded #426 mismatch.
+
+Adding dependencies changes supply-chain/attack surface, but does not itself issue a network Grant. Conversely an SDK approval object is not AgentOS authorization. Before actual adoption, check supported API/version, licence, maintained path and isolation; no blanket framework migration or new dependency is selected here.
 
 ## Migration, rollout and risk disposition
 
 Serialize shared seams after #597/#598. New binding/context paths are initially disabled/unqualified behind per-profile flags; restrictive current behavior remains until reviewed qualification. No silent provider fallback. Any read-only shadow comparison stays within existing data/destination/budget authority and never duplicates writes.
 
-Rollout: baseline → reviewed broker/context contracts → opt-in qualified profile → real-model trials → pinned installed-artifact smoke → explicit promotion. Rollback preserves Artifacts, Evidence, pending effect uncertainty and revoked grants; it does not replay Work. Pin tested executable/runtime/schema versions and requalify affected profiles after upgrades.
+Rollout: focused regression → reviewed changed boundary → opt-in profile → targeted model or installed-artifact smoke only where justified → scoped release under existing checks. Rollback preserves Artifacts, Evidence, pending effect uncertainty and revoked grants; it does not replay Work. Pin tested executable/runtime/schema versions and requalify affected profiles after upgrades.
 
-#607 owns relevant #594 retry/atomicity/secret-chain/process/effect/saved-item/resume findings. #608 dispositions remaining retention and owner-local Host-boundary risks. Google-connected profile promotion requires #588 disconnect/revoke resolution or explicit narrower product scope. A historical non-blocking label is not evidence of safety. Attention, marketplace acquisition, multi-owner collaboration, new mail-send/body scope and purchases are excluded.
+#607 owns relevant #594 retry/atomicity/secret-chain/process/effect/saved-item/resume findings. #608 records applicable retention and owner-local Host-boundary dispositions without starting a broad historical re-audit. Google-connected profile promotion requires #588 disconnect/revoke resolution or explicit narrower product scope. A historical non-blocking label is not evidence of safety. Attention, marketplace acquisition, multi-owner collaboration, new mail-send/body scope and purchases are excluded.
 
 ## Existing Solutions Review — Adapt
 
@@ -170,7 +191,10 @@ Primary references verified 2026-09-25:
 - [ReAct](https://arxiv.org/abs/2210.03629): observation-driven reasoning/action, not privacy or authority enforcement.
 - [LangGraph workflows/agents](https://docs.langchain.com/oss/python/langgraph/workflows-agents): comparison for loop patterns; wholesale replacement is not selected without migration evidence preserving current state/policy.
 - [Anthropic effective agents](https://www.anthropic.com/engineering/building-effective-agents): workflow/agent tradeoffs and tool interfaces, not an AgentOS benchmark.
-- [Anthropic evaluations](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents): outcomes distinct from prose, repeated trials and calibrated graders; our thresholds are our policy.
+- [PydanticAI testing](https://ai.pydantic.dev/testing/): TestModel/FunctionModel, dependency override and disabling accidental model requests. Pattern reference; not an added dependency.
+- [PydanticAI deferred tools](https://ai.pydantic.dev/deferred-tools/): typed external/approval requests and results; not a substitute for host authorization.
+- [Official MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk): client/server protocol implementation considered against the already recorded #426 boundary.
+- [MCP host architecture](https://modelcontextprotocol.io/specification/2025-11-25/architecture): host responsibility for permission/context coordination, not a newly invented AgentOS framework.
 - [Versioned MCP tools specification](https://modelcontextprotocol.io/specification/2025-06-18/server/tools): discovery, structured results and tool-versus-protocol errors. Negotiate the actually supported revision; this historical URL is not a claim about the latest revision.
 
-Python standard-library JSON/hashing/XML/path/unittest supports the bounded development validator. Reuse existing MCP types only when strict envelopes are preserved. Any new dependency requires exact version, maintenance, AGPL-3.0 compatibility, supply-chain, deployment/isolation and migration review. No framework owns canonical memory, Grants or completion truth.
+Python standard-library JSON/path/unittest supports the offline specification check; the custom result-certification subsystem was removed by #612. Reuse existing MCP types only when strict envelopes are preserved. Any new dependency requires exact version, maintenance, AGPL-3.0 compatibility, supply-chain, deployment/isolation and migration review. No framework owns canonical memory, Grants or completion truth.

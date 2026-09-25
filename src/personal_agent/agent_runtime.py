@@ -510,7 +510,7 @@ class Capabilities:
    # context, so the model composed the query from this turn's public task
    # input. It does not reach back through the conversation:
    # `document_context` is driven by `file_workspace_document_jobs`, which is
-   # written for workspace-summary, Gmail and Drive turns and NOT for a
+   # written for workspace-summary and Gmail turns (not Drive) and NOT for a
    # model-driven `read_file` or `list_notes`. So a private read in an
    # earlier turn leaves the secret in the visible history with no taint, and
    # a later turn can put a query derived from it on the wire.
@@ -613,7 +613,7 @@ CORE_INSTRUCTIONS='''You are the owner's personal assistant inside Personal Agen
 # Tool guidance for the direct-API route (unchanged wording from the former POLICY).
 API_TOOL_GUIDANCE='''For each NEW request select the relevant available tools, or answer directly for ordinary conversation. Tools actually run on the user's host. Use weather for weather, public_page_read for a user-supplied anonymous public URL, web_search for snippets, find_files/read_file for local documents, list_notes/save_note for notes, save_memory/list_memory only for explicit owner-authorized memory requests or corrections, and list_agents/delegate_agent for explicit specialist tasks. Do not transmit file contents through web_search, public_page_read, bounded_public_research or weather. Use bounded_public_research for a product comparison or travel plan; it cannot purchase, book, reserve, create an account or sign in, and you must not claim it did. A specialist is a separate execution with its own context, not a human. No shell, external messages, arbitrary file writes or unlisted tools exist.'''
 # Tool guidance for a subscription CLI turn: the CLI sees only the AgentOS MCP bridge.
-CLI_TOOL_GUIDANCE='''For this turn the only tools are the AgentOS tools offered through the "agentos" MCP server. Answer directly for ordinary conversation. Do not read or write local files, run shell commands, or use any other network access; the working directory is an empty read-only sandbox. Do not transmit note or document contents through web_search.'''
+CLI_TOOL_GUIDANCE='''For this turn use only the tools offered by the "agentos" MCP server; do not use built-in file, shell or web tools. Answer directly for ordinary conversation. Do not transmit note or document contents through web_search.'''
 POLICY=CORE_INSTRUCTIONS+' '+API_TOOL_GUIDANCE
 # Bounded recent conversation shared by every route: the last 16 messages,
 # newest first until the byte budget is spent, never cutting the current request.

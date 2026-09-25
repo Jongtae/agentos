@@ -168,5 +168,51 @@ class RoutesReceiveTheSameContext(unittest.TestCase):
         self.assertIn('ordinary follow-up', call['prompt'])
 
 
+
+class _ProbingEngine:
+    """Records the egress taint the CLI tools would see, and tries web_search."""
+    def __init__(self):
+        self.taint = []
+        self.web_search_error = []
+
+    def execute(self, engine, prompt, tools, **kwargs):
+        self.taint.append(tools.capabilities.private_egress_provenance())
+        try:
+            if self.taint[-1]:
+                tools.call('web_search', {'query': 'today news'})
+        except Exception as exc:  # the refusal is what we assert on
+            self.web_search_error.append(str(exc))
+        return ExecutionResult('engine answer', engine, 0)
+
+
+class CrossTurnEgressGuard(unittest.TestCase):
+    """Independent review M1 on #574: private answers from earlier turns must not reach public egress."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.store = QuickStore(Path(self.tmp.name) / 'state')
+        self.engine = _ProbingEngine()
+        self.service = AgentService(self.store, adapter=ModelAdapter(lambda *a: {'choices': [{'message': {'content': 'x'}}]}),
+                                    subscription_engines=SubscriptionEngines(finder=lambda _: '/runtime/cli', clock=lambda: 1),
+                                    execution_adapter=self.engine)
+        self.service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
+
+    def _run(self, text, key):
+        self.store.enqueue(text, key)
+        self.assertTrue(self.service.run_one())
+
+    def test_first_cli_turn_without_prior_answers_is_not_tainted(self):
+        self._run('hello there', 'k1')
+        self.assertEqual(self.engine.taint[-1], [])
+
+    def test_a_prior_note_listing_closes_cli_web_search(self):
+        self._run('/note PRIVATE-XYZ', 'n1')
+        self._run('/notes', 'n2')
+        self._run('search the web for today news', 'k3')
+        self.assertIn('conversation-history', self.engine.taint[-1])
+        self.assertEqual(len(self.engine.web_search_error), 1, 'the CLI web_search call is refused')
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -18,7 +18,7 @@ from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_U
                                       TERMINAL_INTERRUPTED_HEADER, TERMINAL_NEXT_ACTION, TERMINAL_PARTIAL_HEADER,
                                       TERMINAL_UNVERIFIED_MARKER, BlockedTurn, ConversationProjection, terminal_text)
 from .subscription_engines import SubscriptionEngines
-from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult
+from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult, MAX_PROMPT_BYTES
 from .isolated_engine_gateway import EngineGatewayError
 from .isolated_mcp_proxy import IsolatedMcpProxy, TaskCapabilityRegistry
 from .settings_orchestrator import SettingsOrchestrator, SettingsError
@@ -638,7 +638,7 @@ class AgentService:
         error=AgentService._redact_reason(trace.get('error'))
         summary={'running':'실행을 시작했습니다.','succeeded':'실행을 완료했습니다.','failed':error or '실행하지 못했습니다.'}.get(status,'관찰된 이벤트입니다.')
         safe={}
-        for key in ('scope','engine','mode','exit_code','attempt'):
+        for key in ('scope','engine','mode','exit_code','attempt','context_messages','context_bytes'):
             if key in trace and isinstance(trace[key],(str,int,float,bool)):safe[key]=trace[key]
         if trace.get('evidence'):summary='근거를 확인했습니다.'
         return {'id':event['id'],'job_id':event['job_id'],'tool':event['tool'],'status':status,'created':event['created'],'summary':summary,'details':safe}
@@ -2411,8 +2411,21 @@ class AgentService:
                         # same bounded recent conversation as the direct-API route.
                         engine_context=turn_context([*history[:-1],{'role':'user','content':current_request}],'cli')
                         engine_prompt=render_turn_prompt(engine_context)
+                        if len(engine_prompt.encode())>MAX_PROMPT_BYTES:
+                            raise ValueError('요청 내용이 너무 길어 구독 CLI로 보낼 수 없습니다. 내용을 줄이거나 직접 API 연결을 사용하세요.')
+                        # Earlier AgentOS answers can carry private material (note
+                        # lists, summaries, knowledge excerpts, Drive or inbox
+                        # answers) whose provenance is not persisted per turn.
+                        # Once any of them is in the CLI context, close the
+                        # CLI's own public egress for this Work, exactly as the
+                        # API route does for document history.  The AgentOS
+                        # preflight lookup above ran first, from this turn's
+                        # raw request only.  Finer per-turn provenance is #448.
+                        if any(message['role']=='assistant' for message in engine_context['conversation']):
+                            capabilities.private_provenance.add('conversation-history')
                         mode='isolated-agentos-mcp' if isolated else 'bounded-agentos-mcp'
-                        record('subscription_engine','running',json.dumps({'engine':subscription['id'],'mode':mode}))
+                        record('subscription_engine','running',json.dumps({'engine':subscription['id'],'mode':mode,
+                            'context_messages':len(engine_context['conversation']),'context_bytes':len(engine_prompt.encode())}))
                         try:
                             if isolated:
                                 tools=ReadOnlyAgentOSMcpTools(capabilities)

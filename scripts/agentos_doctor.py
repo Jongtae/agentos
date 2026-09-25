@@ -332,12 +332,11 @@ def _listening_process_started(port, runner, env):
         return None
 
 
-def _latest_mtime(directory):
+def _latest_mtime(directory, shipped):
+    """Newest modification time among the files the digest covers."""
+    root = Path(directory)
     try:
-        return max(
-            path.stat().st_mtime for path in Path(directory).rglob("*")
-            if path.is_file() and "__pycache__" not in path.parts
-        )
+        return max(path.stat().st_mtime for path in root.rglob("*") if path.is_file() and shipped(root, path))
     except (OSError, ValueError):
         return None
 
@@ -378,7 +377,7 @@ def inspect_installation(root=ROOT, interpreter=None, data=None, port=None,
     source_path = str(Path(root).resolve() / "src")
     if source_path not in sys.path:
         sys.path.insert(0, source_path)
-    from personal_agent.service_control import package_digest, package_origin
+    from personal_agent.service_control import shipped_file, package_digest, package_origin
 
     root = Path(root).resolve()
     findings, unknown = [], []
@@ -461,7 +460,7 @@ def inspect_installation(root=ROOT, interpreter=None, data=None, port=None,
     running = {"observed": False}
     started = _listening_process_started(port or int(os.environ.get("AGENTOS_PORT", 8787)), runner, env)
     code_dir = package_dir or (root / "src" / "personal_agent")
-    newest = _latest_mtime(code_dir)
+    newest = _latest_mtime(code_dir, shipped_file)
     if started is None:
         unknown.append("running-process")
     else:
@@ -484,9 +483,11 @@ def inspect_installation(root=ROOT, interpreter=None, data=None, port=None,
     stale = {"installed-package-differs-from-source", "running-process-predates-package-files",
              "last-recorded-turn-ran-a-different-build"}
     # `build_state` is about identity only; route bindings are `findings`.
+    # `current` needs both the installed package and a listening process to
+    # have been observed; either missing leaves the state unknown.
     if any(isinstance(item, str) and item in stale for item in findings):
         build_state = "stale"
-    elif {"installed-package", "running-process"} <= set(unknown):
+    elif {"installed-package", "running-process"} & set(unknown):
         build_state = "unknown"
     else:
         build_state = "current"

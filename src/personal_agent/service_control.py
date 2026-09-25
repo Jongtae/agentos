@@ -640,24 +640,38 @@ PACKAGE_DIGEST_SCHEME = "agentos-package-sha256-v1"
 PACKAGE_DIR = Path(__file__).resolve().parent
 
 
+#: The web assets ``pyproject.toml`` package-data ships next to the modules.
+SHIPPED_WEB_SUFFIXES = (".html", ".css", ".js")
+
+
+def shipped_file(root: Path, path: Path) -> bool:
+    """True for a file both a source checkout and a built wheel contain.
+
+    Only Python modules and the declared ``web/*.html|css|js`` package data:
+    checkout-only files such as ``web/AGENTS.md`` and derived bytecode would
+    otherwise make an unchanged wheel differ from its own source.
+    """
+    relative = path.relative_to(root)
+    if "__pycache__" in relative.parts or path.name.startswith("."):
+        return False
+    if path.suffix == ".py":
+        return True
+    return relative.parent.as_posix() == "web" and path.suffix in SHIPPED_WEB_SUFFIXES
+
+
 def package_digest(directory: str | Path) -> str | None:
     """Content digest of one ``personal_agent`` package directory.
 
-    Covers every shipped file (sources, web assets) by relative path and
-    content; bytecode caches and dotfiles are excluded because they are
-    derived and change without a code change. ``None`` when the directory is
-    unreadable or empty, so an unknown build is never reported as a known one.
+    Covers the shipped file set (modules and packaged web assets) by relative
+    path and content. ``None`` when the directory is unreadable or has no
+    shipped file, so an unknown build is never reported as a known one.
     """
     import hashlib
 
     root = Path(directory)
     digest = hashlib.sha256(PACKAGE_DIGEST_SCHEME.encode())
     try:
-        files = sorted(
-            path for path in root.rglob("*")
-            if path.is_file() and "__pycache__" not in path.relative_to(root).parts
-            and not path.name.startswith(".") and path.suffix not in (".pyc", ".pyo")
-        )
+        files = sorted(path for path in root.rglob("*") if path.is_file() and shipped_file(root, path))
         if not files:
             return None
         for path in files:

@@ -183,7 +183,17 @@ def test_matching_installation_is_current_and_reports_every_route(tmp_path):
     assert routes["exposure_of"] == "installed"
     assert "weather" in routes["direct-api-declared"]
     assert routes["isolated-cli-mcp"] == ["list_notes"]
-    assert "running-process" in report["unknown"], "no listener observed stays unknown, not current"
+    assert "running-process" in report["unknown"]
+    assert report["state"] == "unknown", "no listener observed stays unknown, not current"
+
+
+def test_wheel_shaped_install_without_checkout_only_files_matches_source(tmp_path):
+    """A wheel ships modules and web/*.html|css|js only (pyproject package-data)."""
+    site = fake_install(tmp_path)
+    (site / "personal_agent" / "web" / "AGENTS.md").unlink()
+    report = installation(site)
+    assert "installed-package-differs-from-source" not in report["findings"]
+    assert report["installed"]["package_digest"] == report["source"]["package_digest"]
 
 
 def test_deliberately_stale_build_is_identified_without_a_model(tmp_path):

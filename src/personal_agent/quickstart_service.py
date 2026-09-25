@@ -17,7 +17,8 @@ from .decision import DEFAULT_DECISION_PROVIDER, ModelDecisionEngine
 from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_UNVERIFIED, BLOCKER_NO_AI_ROUTE,
                                       TELEGRAM_RESULT_PREVIEW_CHARS, TERMINAL_FAILED_HEADER,
                                       TERMINAL_INTERRUPTED_HEADER, TERMINAL_NEXT_ACTION, TERMINAL_PARTIAL_HEADER,
-                                      TERMINAL_UNVERIFIED_MARKER, BlockedTurn, ConversationProjection, terminal_text)
+                                      TERMINAL_UNVERIFIED_MARKER, BlockedTurn, ConversationProjection, context_message,
+                                      terminal_text, turn_qualifier)
 from .subscription_engines import SubscriptionEngines
 from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult, MAX_PROMPT_BYTES, SECRET_PATTERN
 from .isolated_engine_gateway import EngineGatewayError
@@ -790,6 +791,9 @@ class AgentService:
                     waits.append('승인 대기')
             artifacts=[{'id':item['id'],'kind':'저장된 결과' if 'path' not in item else '파일 결과','path':item.get('path'),'workspace_id':item.get('workspace_id'),'created':item.get('created'),'state':item.get('state','current')} for item in self.store.task_artifacts(job['id'])]
             task={'id':job['id'],'title':self._progress_title(job.get('message'),job['id']),'status':job.get('status'),'status_kind':kind,'status_label':label,'started_at':job.get('created'),'observed_at':last,'result_available':bool(job.get('response')) and job.get('status') in ('succeeded','partial'),'workspace_id':job.get('workspace_id'),'events_count':len(events),'waits':waits,'configured':{'provider':configured.get('provider'),'model':configured.get('model'),'runtime':selected_subscription or (configured.get('provider') if configured else None)},'observed':{'provider':job.get('provider'),'model':job.get('model'),'runtime':job.get('provider') or None},'route':self._observed_route(job,events,model_events),'artifacts':artifacts}
+            # The same typed qualifier the transcript and model context use
+            # (#494), so the card cannot disagree with them.
+            task['qualifier']=turn_qualifier(job.get('status'))
             # #571: expose the class of the last failed CLI run (e.g. 'auth')
             # so the owner sees the right recovery, not raw CLI output.
             for event in reversed(events):
@@ -2447,7 +2451,9 @@ class AgentService:
                     stored_history=self.store.history()[-16:]
                     document_jobs=set(self.store.config('file_workspace_document_jobs',[]))
                     document_history=any(message.get('job_id') in document_jobs for message in stored_history)
-                    history=[{'role':m['role'],'content':m['content']} for m in stored_history]
+                    # Earlier replies of failed/partial/interrupted Work carry
+                    # their outcome into the model's context (#494).
+                    history=[context_message(m) for m in stored_history]
                     if continuity and continuity['relation']==FOLLOWUP_RETRY and history:
                         # The owner-visible transcript keeps the actual
                         # follow-up ("retry that"). The worker gets the
@@ -2527,7 +2533,7 @@ class AgentService:
                     boundary=self.document_boundary(config)
                     subscription=route_snapshot
                     if document_history and (boundary['requires_approval'] or subscription.get('id')):
-                        history=[{'role':message['role'],'content':message['content']} for message in stored_history if message.get('job_id') not in document_jobs]
+                        history=[context_message(message) for message in stored_history if message.get('job_id') not in document_jobs]
                         if prepared_latest and history:
                             history[-1]=prepared_latest
                     original_record=record
@@ -2671,6 +2677,8 @@ class AgentService:
                         # record the final set, not only the pre-run snapshot.
                         self.record_turn_provenance(job['id'],egress_taint=sorted(capabilities.private_provenance))
                         outcome=getattr(result,'outcome','succeeded')
+                        # Calls that ran incomplete name their cause like refusals do (#494).
+                        refusals.extend(getattr(result,'incomplete',()) or ())
                         response,provider,model=result.content,result.provider,result.model
                         resolved_blocker=outcome=='succeeded'
                         # The provider layer falls back to the configured model when the

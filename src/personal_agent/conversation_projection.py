@@ -142,3 +142,65 @@ class ConversationProjection:
             return '연결한 AI의 확인이 아직 끝나지 않아 이 요청은 처리하지 못했습니다. ' + self._where_to_connect()
         return ('연결한 AI가 도구 호출까지 되는지 아직 확인하지 못해 이 요청은 처리하지 못했습니다. '
                 '설정에서 “모델 연결 확인”을 한 번 실행하면 이어서 쓸 수 있습니다.\n\n' + self._where_to_connect())
+
+
+# --- truth qualifiers for stored turns (#494) -------------------------------
+#
+# #476 keeps an unverified model sentence out of the terminal bubble; the
+# same sentence is also stored in ``messages`` and read back by the web API,
+# by project views and by the next turn's model context.  The stored text is
+# never rewritten or deleted - preserving it is the point.  Instead every
+# reader attaches the producing Work's typed outcome at read time, through
+# the functions below, so one policy decides what "unverified" means for
+# every surface.  The outcome comes from the Work record, never from reading
+# the wording.
+
+#: Work outcomes whose assistant text is preserved and offered, not asserted.
+UNVERIFIED_OUTCOMES = ('failed', 'partial', 'interrupted')
+TRANSCRIPT_LABELS = {'failed': '완료하지 못함', 'partial': '일부 완료', 'interrupted': '중단됨'}
+TRANSCRIPT_NOTICE = '확인된 결과가 아니므로 그대로 신뢰하지 마세요.'
+#: What a later model turn reads in front of an unverified earlier reply.  It
+#: names only the typed outcome, so no cause text or tool payload is added to
+#: what the route already receives.
+CONTEXT_QUALIFIER = ('[AgentOS record: the Work behind this earlier assistant reply ended "{outcome}". '
+                     'Any result, action or completion it states is unverified and is not an observed fact.]')
+
+
+def turn_qualifier(outcome, cause=None):
+    """The typed truth qualifier for one Work's text, or ``None`` when none is needed."""
+    if outcome not in UNVERIFIED_OUTCOMES:
+        return None
+    return {'outcome': outcome, 'verified': False, 'label': TRANSCRIPT_LABELS[outcome],
+            'notice': TRANSCRIPT_NOTICE, 'cause': (cause or '').strip() or None}
+
+
+def qualify_transcript(rows):
+    """Attach ``qualifier`` to every stored turn; the stored text is untouched.
+
+    ``rows`` carry ``work_outcome`` / ``work_error`` joined from the Work that
+    produced them.  Those join columns are consumed here, so every reader sees
+    the same single field.  Owner turns are never qualified: they are
+    requests, not claims.
+    """
+    projected = []
+    for row in rows:
+        row = dict(row)
+        outcome, cause = row.pop('work_outcome', None), row.pop('work_error', None)
+        row['qualifier'] = turn_qualifier(outcome, cause) if row.get('role') == 'assistant' else None
+        projected.append(row)
+    return projected
+
+
+def context_message(row):
+    """One stored turn as a later model turn may read it.
+
+    A qualified assistant reply keeps its full text - the owner may refer to
+    it ("try that again") - but is preceded by its outcome, so an unobserved
+    claim cannot re-enter the model's own context as an established fact.
+    """
+    content = str(row.get('content') or '')
+    qualifier = row.get('qualifier')
+    if (row.get('role') == 'assistant' and isinstance(qualifier, dict)
+            and qualifier.get('outcome') in UNVERIFIED_OUTCOMES):
+        content = CONTEXT_QUALIFIER.format(outcome=qualifier['outcome']) + '\n' + content
+    return {'role': row.get('role'), 'content': content}

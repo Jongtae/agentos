@@ -1,5 +1,5 @@
-"""One-shot conflict reconciliation of the verified concurrent #599 plan.
-No runtime changes, no force push, and no unreviewed main content discarded.
+"""One-shot reconciliation of verified concurrent #599 planning changes.
+No runtime changes, force push or unreviewed deletion of owner decisions.
 """
 import json
 from pathlib import Path
@@ -16,9 +16,18 @@ def merge(base,ours,theirs,path=''):
  if ours==theirs:return ours
  if ours==base:return theirs
  if theirs==base:return ours
+ if path in ('/iterations/PRESENCE-INTENT-01','/iterations/PRESENCE-TRUTH-02'):
+  # Both branches added the same existing issue, not competing capabilities.
+  # Preserve #599's original contract and split work-unit ownership, adding
+  # only the current integration dependency and secondary contract reference.
+  result={**ours,**theirs}
+  result['depends_on']=list(dict.fromkeys(ours.get('depends_on',[])+theirs.get('depends_on',[])))
+  result['tests']=list(dict.fromkeys(ours.get('tests',[])+theirs.get('tests',[])))
+  result['execution_integration_contract']='assistant-execution-contract.en.md'
+  return result
  if isinstance(ours,dict) and isinstance(theirs,dict):
   result={}
-  for k in set(ours)|set(theirs):
+  for k in list(ours)+[k for k in theirs if k not in ours]:
    if k not in ours:result[k]=theirs[k]
    elif k not in theirs:result[k]=ours[k]
    else:result[k]=merge(base.get(k) if isinstance(base,dict) else None,ours[k],theirs[k],path+'/'+k)
@@ -30,18 +39,14 @@ def merge(base,ours,theirs,path=''):
    return [merge(bd.get(k),od[k],td[k],path+'/'+k) if k in od and k in td else od.get(k,td.get(k)) for k in ids]
   if all(isinstance(v,(str,int)) for v in ours+theirs):return list(dict.fromkeys(ours+theirs))
  if isinstance(ours,str) and isinstance(theirs,str):
-  # Current new program/child wording is normative. Retain superseded incoming
-  # prose as attributable historical decision evidence, never as a second queue.
   allowed=('summary','authority','completion_rule','action','rule','purpose','description','validation','evidence','non_goals')
   if path.rsplit('/',1)[-1] in allowed:
-   record.append({'path':path,'incoming_decision':theirs,'disposition':'Preserved as historical #599 decision; current #600 refinement governs the expanded scope.'})
+   record.append({'path':path,'incoming_decision':theirs,'disposition':'Preserved historical #599 decision; current #600 refinement governs expanded integration scope.'})
    return ours
  raise SystemExit('Unresolved semantic conflict: '+path)
 merged=merge(b,o,t)
 program=merged['programs']['PRESENCE-01']
 program.setdefault('execution_integration',{})['concurrent_owner_decision']={'commit':THEIRS,'pr':599,'retained_conflicting_prose':record}
-# #599's independent work-unit/evaluation ownership and existing dependencies
-# are retained by recursive union; the current program orders shared files.
 Path('delivery-plan.yaml').write_text(json.dumps(merged,ensure_ascii=False,separators=(',',':'))+'\n')
 subprocess.run(['git','add','delivery-plan.yaml'],check=True)
 if subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).strip():raise SystemExit('Unresolved files remain')

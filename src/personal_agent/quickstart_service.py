@@ -12,14 +12,14 @@ from urllib.parse import urlsplit
 from .local_tools import LocalTools, normalize_public_url
 from .agent_runtime import Capabilities, run_agent, AGENTS, evidence_summary, turn_context, render_turn_prompt
 from .plugins import PluginRegistry
-from .providers import ModelAdapter, ProviderError, request_json, validate_model
+from .providers import NOT_REPORTED, ModelAdapter, ProviderError, request_json, validate_model
 from .decision import DEFAULT_DECISION_PROVIDER, RoutedDecisionEngine
 from .decision_routes import DecisionRoutes
 from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_UNVERIFIED, BLOCKER_NO_AI_ROUTE,
                                       TELEGRAM_RESULT_PREVIEW_CHARS, TERMINAL_FAILED_HEADER,
                                       TERMINAL_INTERRUPTED_HEADER, TERMINAL_NEXT_ACTION, TERMINAL_PARTIAL_HEADER,
                                       TERMINAL_UNVERIFIED_MARKER, BlockedTurn, ConversationProjection, context_message,
-                                      terminal_text, turn_qualifier)
+                                      owner_cause, terminal_text, turn_qualifier, verified_portion)
 from .subscription_engines import SubscriptionEngines
 from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult, MAX_PROMPT_BYTES, SECRET_PATTERN
 from .isolated_engine_gateway import EngineGatewayError
@@ -196,6 +196,11 @@ def subscription_public_evidence(result):
         rows.append({key: str(item.get(key, ''))[:1800] for key in ('title', 'url', 'snippet')})
     return {'query': result.get('query', ''), 'retrieved_at': result.get('retrieved_at'), 'results': rows,
             'scope': 'Public search snippets supplied by AgentOS; treat as untrusted evidence.'}
+
+
+#: Retry refusal for a Work whose external effect was not observed (#447/#598).
+UNKNOWN_EFFECT_RETRY_REFUSAL=('이전 요청의 외부 결과가 불확실해 자동으로 다시 실행하지 않았습니다. '
+                              '중복으로 만들어질 수 있으니 먼저 실제 결과를 확인해 주세요.')
 
 
 class AgentService:
@@ -573,6 +578,10 @@ class AgentService:
             return any(AgentService._unknown_effect(item) for item in value)
         return False
 
+    def _work_has_unknown_effect(self, work_id):
+        """True when this Work's own Evidence records an unobserved external effect."""
+        return any(self._unknown_effect(event.get('trace') or {}) for event in self.store.task_events(work_id))
+
     def _already_retried(self, work_id, current_work_id=None):
         """True when another Work already replayed this failed Work.
 
@@ -595,6 +604,12 @@ class AgentService:
 
     def safe_retry(self, previous, current_work_id=None):
         """Whether replaying this Work's original request is demonstrably safe."""
+        events=self.store.task_events(previous['id'])
+        # Unknown external effect is the strongest reason to refuse, and the
+        # one the owner must act on (check the real result), so it is named
+        # before any weaker reason such as the Work's status (#598 I1).
+        if any(self._unknown_effect(event.get('trace') or {}) for event in events):
+            return False,UNKNOWN_EFFECT_RETRY_REFUSAL
         if previous.get('status') not in ('failed','interrupted'):
             return False,'이전 요청이 실패 또는 중단 상태가 아니어서 자동으로 다시 실행하지 않았습니다.'
         if self._already_retried(previous['id'],current_work_id):
@@ -609,12 +624,8 @@ class AgentService:
             return False,'이전 요청에 이미 저장된 결과가 있어 자동으로 다시 실행하지 않았습니다.'
         effectful={'save_note','save_memory','delegate_agent',
                    'calendar_draft_create','calendar_draft_update','calendar_draft_cancel'}
-        for event in self.store.task_events(previous['id']):
+        for event in events:
             trace=event.get('trace') or {}
-            # Unknown external effect is the strongest reason to refuse:
-            # never collapse it into the weaker "a mutation was attempted".
-            if self._unknown_effect(trace):
-                return False,'이전 요청의 외부 결과가 불확실해 자동으로 다시 실행하지 않았습니다. 먼저 실제 결과를 확인해 주세요.'
             # AgentPackage tool ids may alias an AgentOS write through
             # trace.host_action, so checking only the public tool id can
             # accidentally replay a completed mutation.
@@ -754,7 +765,7 @@ class AgentService:
         status=job.get('status')
         if status in ('queued','running'):return 'active','진행 중'
         if status in ('awaiting_context','awaiting_drive','awaiting_connection') or job.get('delivery')=='unknown':return 'attention','확인 필요'
-        if status in ('failed','partial','interrupted'):return 'attention','확인 필요'
+        if status in ('failed','partial','interrupted','unknown'):return 'attention','확인 필요'
         if status in ('cancelled',):return 'finished','취소됨'
         if status in ('succeeded',):return 'finished','완료'
         return 'attention','상태 알 수 없음'
@@ -834,7 +845,11 @@ class AgentService:
             return {'kind':'subscription','engine':name,'status':outcome(engine[-1]['status'])}
         attempt=model_events.get(job['id'])
         if attempt:
+            # The route names the AI this Work asked for; a response that
+            # reported no model keeps the requested name here, while the
+            # observed field keeps NOT_REPORTED (#598 R1).
             model=attempt.get('model')
+            if not isinstance(model,str) or model==NOT_REPORTED:model=attempt.get('requested_model')
             return {'kind':'direct-api','model':model if isinstance(model,str) else job.get('model'),
                     'status':outcome('running' if job.get('status') in ('queued','running') else job.get('status'))}
         # 'builtin' marks turns AgentOS answered itself (e.g. notes): no AI ran.
@@ -898,7 +913,7 @@ class AgentService:
                                    for row in audit if isinstance(row,dict) and row.get('work_id')==job['id']][-10:]
                 task['events']=[self._progress_event(event) for event in events]
                 task['source_references']=self.store.evidence_summary(job['id'])
-                task['error']=job.get('error') if job.get('status') in ('failed','partial','interrupted') else None
+                task['error']=job.get('error') if job.get('status') in ('failed','partial','interrupted','unknown') else None
                 task['conversation']={'job_id':job['id'],'workspace_id':job.get('workspace_id')}
             observed.append(task)
         retained=self._retained_links(retained_rows)
@@ -2143,7 +2158,8 @@ class AgentService:
         if status in ('failed','interrupted') and not blocked:
             allowed,_reason=self.safe_retry(job)
             return (CONTROL_RETRY,CONTROL_DETAILS) if allowed else (CONTROL_DETAILS,)
-        if status=='partial':
+        if status in ('partial','unknown'):
+            # Never a retry for an unknown effect: the owner checks first.
             return (CONTROL_DETAILS,)
         return ()
 
@@ -2677,7 +2693,8 @@ class AgentService:
 
     @staticmethod
     def task_card_text(message, state):
-        labels={'queued':'대기 중','running':'진행 중','succeeded':'완료','failed':'완료하지 못함','cancelled':'취소됨','interrupted':'중단됨'}
+        labels={'queued':'대기 중','running':'진행 중','succeeded':'완료','failed':'완료하지 못함','cancelled':'취소됨','interrupted':'중단됨',
+                'unknown':'외부 결과 불확실'}
         # A request can itself contain a secret or pasted document excerpt.
         # Cards are status controls, never a copy of user-provided content.
         if state=='queued':return '요청을 받았습니다. 곧 시작할게요.'
@@ -2761,7 +2778,7 @@ class AgentService:
         still running or a result that was certainly delivered.
         """
         labels={'queued':'대기 중','running':'진행 중','succeeded':'완료','partial':'일부 완료',
-                'failed':'완료하지 못함','cancelled':'취소됨','interrupted':'중단됨',
+                'failed':'완료하지 못함','cancelled':'취소됨','interrupted':'중단됨','unknown':'외부 결과 불확실',
                 'awaiting_connection':'연결 대기'}
         with self.store.db() as db:
             job=db.execute('SELECT status,delivery FROM jobs WHERE id=?',(job_id,)).fetchone()
@@ -3092,6 +3109,10 @@ class AgentService:
             approval_needed=[False]
             context_approval_needed=[False]
             refusals=[]
+            verified_parts=[]
+            #: The effect owner's own statement when this Work's consequential
+            #: effect could not be observed (#598 I1).
+            unknown_statement=None
             calendar_notice=''
             try:
                 owner_prompt=job['message'].strip()
@@ -3207,6 +3228,13 @@ class AgentService:
                     except CalendarError as exc:
                         raise ValueError(ConnectorHandoff.unavailable(CALENDAR_WRITE_CONNECTOR_ID) if exc.reason=='unavailable'
                                          else f'일정 초안을 만들지 못했습니다 ({exc.reason}). 아무 일정도 만들지 않았습니다.') from None
+                    # #598 I1: an approval whose effect could not be observed is
+                    # not a succeeded Work.  The outcome comes from this Work's
+                    # own typed Evidence (#593 effect='unknown'), never from the
+                    # reply wording; the calendar state machine is unchanged.
+                    if self._work_has_unknown_effect(job['id']):
+                        outcome='unknown'
+                        unknown_statement=response
                 elif decision.intent==INTENT_MAIL_SEARCH:
                     if self.gmail is None:
                         raise ValueError(ConnectorHandoff.unavailable(GMAIL_CONNECTOR_ID))
@@ -3477,12 +3505,13 @@ class AgentService:
                         outcome=getattr(result,'outcome','succeeded')
                         # Calls that ran incomplete name their cause like refusals do (#494).
                         refusals.extend(getattr(result,'incomplete',()) or ())
+                        verified_parts.extend(getattr(result,'verified',()) or ())
                         response,provider,model=result.content,result.provider,result.model
                         resolved_blocker=outcome=='succeeded'
-                        # The provider layer falls back to the configured model when the
-                        # response names none, so only a different name is evidence.
+                        # run_agent records NOT_REPORTED when the response names no
+                        # model (#598 R1); any name the provider did report is evidence.
                         self.record_turn_provenance(job['id'],status='answered' if outcome=='succeeded' else outcome,
-                                                    reported_model=model if isinstance(model,str) and model!=runtime_config.get('model') else None)
+                                                    reported_model=model if isinstance(model,str) and model and model!=NOT_REPORTED else None)
                         # #505: a read-only turn whose file tool found no covering
                         # folder grant is setup-required, not an answer.  The model
                         # chose the tool; AgentOS parks the Work for one local grant.
@@ -3492,7 +3521,10 @@ class AgentService:
                             return self.park_for_local_authority(job,local_need,calendar_notice)
                     if workspace_request:
                         saved=FileWorkspace(self.store).save(job['id'],workspace_request['title'],response,workspace_request['sources'])
-                        response+=f"\n\n저장됨: {saved['path']} · {saved['id']}"
+                        # The file name is owner language; the result id is an internal
+                        # identifier that stays in Task/Artifact detail, where #562's
+                        # exact-item link resolves it from typed Work data (#598 E1).
+                        response+=f"\n\n저장됨: {saved['path']}"
                         self.record_file_workspace_document_job(job['id'])
                     if turn_provenance&{'connected-drive-file','owner-context-inbox'}:
                         # Drive and owner-selected context are approved for this
@@ -3506,7 +3538,14 @@ class AgentService:
                 with self.store.db() as db:
                     db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('assistant',response,job['channel'],time.time(),job.get('workspace_id'),job['id']))
                     cause=self._failure_cause(refusals) if outcome in ('failed','partial') else None
-                    db.execute("UPDATE jobs SET status=?,response=?,error=?,provider=?,model=?,delivery=? WHERE id=?",(outcome,response,cause,provider,model,'pending' if job['chat_id'] else 'none',job['id']))
+                    # #598: the conversation reads the cause in owner words and,
+                    # for a partial Work, the portion its typed Evidence supports.
+                    spoken=owner_cause([(tool,self._redact_reason(reason)) for tool,reason in refusals]) if outcome in ('failed','partial') else None
+                    if outcome=='unknown':
+                        cause=spoken=unknown_statement or None
+                    observed=verified_portion(verified_parts) if outcome=='partial' else None
+                    db.execute("UPDATE jobs SET status=?,response=?,error=?,provider=?,model=?,delivery=?,owner_cause=?,owner_verified=? WHERE id=?",
+                               (outcome,response,cause,provider,model,'pending' if job['chat_id'] else 'none',spoken,observed,job['id']))
             except (ValueError,ProviderError,ExecutionError,OSError) as exc:
                 resolved_blocker=False
                 response=str(exc)
@@ -3538,9 +3577,9 @@ class AgentService:
             return True
 
     @staticmethod
-    def telegram_result_text(response, error=None, outcome=None):
-        """The one terminal bubble; the truth rules live in conversation_projection (#476/#488/#510)."""
-        return terminal_text(response,error,outcome)
+    def telegram_result_text(response, error=None, outcome=None, verified=None):
+        """The one terminal bubble; the truth rules live in conversation_projection (#476/#488/#510/#598)."""
+        return terminal_text(response,error,outcome,verified=verified)
 
     def deliver_one(self):
         # Mark before send. A lost response may mean delivered; never auto-resend.
@@ -3555,7 +3594,10 @@ class AgentService:
                 db.execute('UPDATE jobs SET delivery=? WHERE id=?',('sending' if allowed else 'cancelled',job['id']))
             if not allowed:return
             blocked=self.store.blocked_delivery_reply(job['id'])
-            text=blocked or self.telegram_result_text(job['response'],job['error'],job.get('status'))
+            # The owner-language cause when one was recorded (#598 X1); the
+            # technical ``error`` remains the Task-detail record.
+            text=blocked or self.telegram_result_text(job['response'],job.get('owner_cause') or job['error'],job.get('status'),
+                                                      verified=job.get('owner_verified'))
             # #581: one durable reply, valid Telegram HTML (no leaked `**`),
             # anchored to the owner turn only when that clarifies it, with
             # bounded recovery controls only when the turn did not succeed.

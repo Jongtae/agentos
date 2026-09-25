@@ -21,6 +21,7 @@ import json as _json
 from urllib.error import HTTPError as _HTTPError, URLError as _URLError
 from urllib.request import Request as _Request, build_opener as _build_opener
 
+from .conversation_projection import object_particle
 from .providers import NoRedirect, ProviderError
 
 TELEGRAM_API_ROOT = 'https://api.telegram.org'
@@ -993,10 +994,10 @@ CONNECTOR_LABELS = {
 HANDOFF_GUIDANCE = {
     ConnectorResultKind.CONNECTION_REQUIRED:
         '{label} 연결이 아직 없어 이 요청을 실행하지 않았습니다. 지금 필요한 다음 단계는 하나입니다: '
-        '{label}을(를) 연결해 주세요. 연결이 확인되면 방금 요청을 한 번만 이어서 처리합니다.',
+        '{label}{obj} 연결해 주세요. 연결이 확인되면 방금 요청을 한 번만 이어서 처리합니다.',
     ConnectorResultKind.REAUTH_REQUIRED:
         '{label} 연결을 다시 인증해야 해서 이 요청을 실행하지 않았습니다. 지금 필요한 다음 단계는 하나입니다: '
-        '{label}을(를) 다시 인증해 주세요. 인증이 확인되면 방금 요청을 한 번만 이어서 처리합니다.',
+        '{label}{obj} 다시 인증해 주세요. 인증이 확인되면 방금 요청을 한 번만 이어서 처리합니다.',
     ConnectorResultKind.BLOCKED:
         '{label} 접근이 차단되어 있어 이 요청을 실행하지 않았습니다. 지금 필요한 다음 단계는 하나입니다: '
         '{label}의 접근 권한을 확인해 주세요. 차단이 풀릴 때까지 이 요청은 이어서 처리하지 않습니다.',
@@ -1158,7 +1159,8 @@ class ConnectorHandoff:
         as it did before and still claims nothing about a connection.
         """
         label = CONNECTOR_LABELS.get(result.connector_id, result.connector_id)
-        text = HANDOFF_GUIDANCE[result.kind].format(label=label)
+        # #598: the object particle matches the label (을/를), not 을(를).
+        text = HANDOFF_GUIDANCE[result.kind].format(label=label, obj=object_particle(label))
         if connect_url and result.kind in LINKABLE_KINDS:
             text += CONNECT_LINK.format(url=connect_url)
         return text

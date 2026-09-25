@@ -109,8 +109,14 @@ class ProviderToolProtocolTests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as folder:
    store=QuickStore(Path(folder));adapter=ModelAdapter(transport)
    caps=Capabilities(store,adapter,CFG,'','job',lambda *a:None)
-   run_agent(adapter,CFG,'',[{'role':'user','content':'agents'}],'',caps,lambda *a:None)
+   events=[]
+   run_agent(adapter,CFG,'',[{'role':'user','content':'agents'}],'',caps,lambda *a:events.append(a))
   self.assertEqual(seen,['openrouter/free','selected/model:free'])
+  # #598: each responded event names the model that call was sent with,
+  # apart from the one the provider reported.
+  responded=[json.loads(e[2]) for e in events if e[0]=='model' and e[1]=='responded']
+  self.assertEqual([(r['requested_model'],r['model']) for r in responded],
+                   [('openrouter/free','selected/model:free'),('selected/model:free','selected/model:free')])
  def test_rate_limit_reroute_preserves_completed_tool(self):
   from personal_agent.providers import ProviderError
   seen=[]

@@ -28,8 +28,96 @@ TERMINAL_FAILED_HEADER = '이 요청은 완료하지 못했습니다.'
 TERMINAL_PARTIAL_HEADER = '일부 단계만 완료했습니다.'
 TERMINAL_INTERRUPTED_HEADER = '이 요청은 중단되었습니다. 자동으로 다시 실행하지 않았습니다.'
 TERMINAL_NEXT_ACTION = 'AgentOS 웹에서 실행 기록과 다음 단계를 확인하세요.'
-TERMINAL_UNVERIFIED_MARKER = ('완료한 단계까지의 내용은 AgentOS 웹 기록에서 확인할 수 있습니다. '
+#: Used only when an ``unknown`` Work carries no statement of its own.
+TERMINAL_UNKNOWN_EFFECT = ('외부 결과를 확인할 수 없습니다. 실제 결과를 직접 확인해 주세요. '
+                           '자동으로 다시 시도하지 않았습니다.')
+TERMINAL_UNVERIFIED_MARKER = ('AI가 작성한 답변 전체는 AgentOS 웹 기록에서 볼 수 있습니다. '
                               '확인된 결과가 아니므로 그대로 신뢰하지 마세요.')
+#: Opens the portion of a partial Work that its own typed Evidence supports
+#: (#598 H1).  What follows is AgentOS's rendering of observed tool results,
+#: never the model's prose.
+TERMINAL_VERIFIED_LABEL = '확인된 부분:'
+#: Opens the portion that did not complete, so it reads apart from the above.
+TERMINAL_UNFINISHED_LABEL = '완료하지 못한 부분'
+#: Upper bound for the verified portion inside one bubble; the full record
+#: stays in the AgentOS web Task detail.
+TERMINAL_VERIFIED_CHARS = 1600
+TERMINAL_VERIFIED_MORE = '… (나머지는 AgentOS 웹 기록에서 확인하세요.)'
+
+# --- owner words for internal tool ids (#598 X1) -----------------------------
+#: The same owner vocabulary the web Task detail uses (``TOOL_NAMES`` in
+#: web/app.js; shared keys must match, see tests).  Exact ids stay in
+#: 상세/기술 정보; conversation says what kind of step it was.
+TOOL_LABELS = {
+    'subscription_engine': '구독 CLI 실행', 'model': 'AI 응답', 'web_search': '웹 검색',
+    'list_notes': '메모 조회', 'save_note': '메모 저장', 'save_memory': '기억 저장',
+    'list_memory': '기억 조회', 'local_authority': '폴더 권한', 'calendar_create': '일정 만들기',
+    'calendar_query': '일정 조회', 'calendar_draft_create': '일정 초안', 'calendar_draft_update': '일정 초안',
+    'calendar_draft_cancel': '일정 초안', 'weather': '날씨 조회', 'ask_location': '위치 확인',
+    'delegate_agent': '다른 에이전트에 맡김', 'list_agents': '에이전트 목록 조회',
+    'find_files': '파일 찾기', 'read_file': '파일 읽기', 'public_page_read': '공개 페이지 읽기',
+    'bounded_public_research': '공개 자료 조사',
+}
+#: A tool this catalogue does not name (for example an AgentPackage tool).
+TOOL_LABEL_FALLBACK = '도구 실행'
+
+
+def tool_label(tool_id):
+    """Owner words for one tool id; never the id itself."""
+    return TOOL_LABELS.get(tool_id, TOOL_LABEL_FALLBACK) if isinstance(tool_id, str) else TOOL_LABEL_FALLBACK
+
+
+#: Latin letters and digits whose Korean reading ends in a final consonant
+#: (엘, 엠, 엔, 알 / 영, 일, 삼, 육, 칠, 팔), for names such as ``Gmail``.
+_FINAL_CONSONANT_READINGS = frozenset('lmnr013678')
+
+
+def object_particle(word):
+    """``을`` or ``를`` for ``word`` - never the ``을(를)`` template (#598).
+
+    Hangul uses the final syllable's own consonant (Unicode composition:
+    ``(code - 0xAC00) % 28``); a Latin letter or digit uses how it is read.
+    Anything else keeps the neutral template rather than guessing.
+    """
+    text = str(word or '').rstrip(' )]}\'"')
+    if not text:
+        return '을(를)'
+    last = text[-1]
+    if '가' <= last <= '힣':
+        return '를' if (ord(last) - 0xAC00) % 28 == 0 else '을'
+    if last.isascii() and last.isalnum():
+        return '을' if last.lower() in _FINAL_CONSONANT_READINGS else '를'
+    return '을(를)'
+
+
+def owner_cause(steps):
+    """The owner-language cause of a failed/partial Work, or ``None``.
+
+    ``steps`` are ``(tool_id, reason)`` pairs observed for the Work, with the
+    reason already redacted by the caller.  The technical cause (with ids)
+    stays on the Work record for Task detail; this is what the conversation
+    reads.  One generic rendering: no tool gets its own wording here.
+    """
+    entries = []
+    for tool, reason in steps:
+        label = tool_label(tool)
+        text = (reason or '').strip()
+        entry = f'{label}: {text}' if text else label
+        if entry not in entries:
+            entries.append(entry)
+    if not entries:
+        return None
+    return (TERMINAL_UNFINISHED_LABEL + ' — ' + ' · '.join(entries[:3]))[:400]
+
+
+def verified_portion(parts):
+    """Join AgentOS-rendered verified parts into one bounded block, or ``None``."""
+    text = '\n\n'.join(part.strip() for part in parts or () if isinstance(part, str) and part.strip())
+    if not text:
+        return None
+    if len(text) > TERMINAL_VERIFIED_CHARS:
+        text = text[:TERMINAL_VERIFIED_CHARS].rstrip() + TERMINAL_VERIFIED_MORE
+    return text
 
 # --- blockers ---------------------------------------------------------------
 BLOCKER_NO_AI_ROUTE = 'no-ai-route'
@@ -49,20 +137,29 @@ class BlockedTurn(ValueError):
         self.kind = kind
 
 
-def terminal_text(response, error=None, outcome=None, next_action=None):
+def terminal_text(response, error=None, outcome=None, next_action=None, verified=None):
     """The one readable terminal bubble for a paired owner.
 
     * ``failed`` - no tool produced anything, so no model sentence is
       attributable to an observed result.  The failure, its cause and the
       next step go out; the model text does not.
     * ``partial`` / ``interrupted`` - something may have completed, but
-      which sentence rests on it cannot be decided here, so the bubble says
-      what completed and what did not and points at the record.  The text
-      is not deleted; the web card still offers it under 확인 필요.
+      which model sentence rests on it cannot be decided here.  The bubble
+      states the portion the Work's own typed Evidence supports
+      (``verified``, rendered by AgentOS from observed tool results - never
+      the model's prose), then the portion that did not complete, and points
+      at the record for the rest (#598 H1).  The model text is not deleted;
+      the web card still offers it under 확인 필요.
+    * ``unknown`` - a consequential external effect was attempted and its
+      result could not be observed.  ``error`` is the effect owner's own
+      complete statement (what could not be confirmed and what to check);
+      it is the whole bubble.  Model text is never shown, nothing claims
+      success, and no retry is offered here (#598 I1).
     * ``succeeded`` and any unrecognised status - unchanged.
 
     ``next_action`` replaces the generic web pointer when a safer, more
-    specific action exists; it never replaces the truth header.
+    specific action exists; it never replaces the truth header.  Nothing
+    here upgrades the outcome: ``verified`` only adds what was observed.
     """
     cause = (error or '').strip()
     action = next_action or TERMINAL_NEXT_ACTION
@@ -74,10 +171,15 @@ def terminal_text(response, error=None, outcome=None, next_action=None):
         text = '\n\n'.join(body)
     elif outcome in ('partial', 'interrupted'):
         body = [TERMINAL_PARTIAL_HEADER if outcome == 'partial' else TERMINAL_INTERRUPTED_HEADER]
+        observed = verified_portion([verified]) if outcome == 'partial' else None
+        if observed:
+            body.append(TERMINAL_VERIFIED_LABEL + '\n' + observed)
         if cause:
             body.append(cause)
         body.append(TERMINAL_UNVERIFIED_MARKER if (outcome == 'partial' and (response or '').strip()) else action)
         text = '\n\n'.join(body)
+    elif outcome == 'unknown':
+        text = cause or TERMINAL_UNKNOWN_EFFECT
     else:
         text = response or (TERMINAL_FAILED_HEADER + ' ' + (cause or action))
     if len(text) > TELEGRAM_RESULT_PREVIEW_CHARS:
@@ -156,8 +258,10 @@ class ConversationProjection:
 # the wording.
 
 #: Work outcomes whose assistant text is preserved and offered, not asserted.
-UNVERIFIED_OUTCOMES = ('failed', 'partial', 'interrupted')
-TRANSCRIPT_LABELS = {'failed': '완료하지 못함', 'partial': '일부 완료', 'interrupted': '중단됨'}
+#: ``unknown``: a consequential effect was attempted and not observed (#598 I1).
+UNVERIFIED_OUTCOMES = ('failed', 'partial', 'interrupted', 'unknown')
+TRANSCRIPT_LABELS = {'failed': '완료하지 못함', 'partial': '일부 완료', 'interrupted': '중단됨',
+                     'unknown': '외부 결과 불확실'}
 TRANSCRIPT_NOTICE = '확인된 결과가 아니므로 그대로 신뢰하지 마세요.'
 #: What a later model turn reads in front of an unverified earlier reply.  It
 #: names only the typed outcome, so no cause text or tool payload is added to

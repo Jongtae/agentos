@@ -851,19 +851,22 @@ class E_MissingFolder(LocalHttp, PresenceEval):
         self.assertNotIn(str(results.resolve()), self.roots(), 'the write grant is never an AI read folder')
         self.last_result_bubble = self.texts()[-1]
 
-    @unittest.expectedFailure
     def test_finding_e1_the_saved_result_bubble_exposes_the_internal_result_id(self):
-        """FINDING E1: the result-saved reply ends ``저장됨: <file name> · <result id>``.
+        """FINDING E1 (fixed by #598): the result-saved reply names the file, not its id.
 
-        ``quickstart_service`` appends the saved artifact's internal UUID to
-        the Telegram reply.  The file name is owner language; the id is an
-        internal identifier the Presence contract keeps in technical detail
-        (#562 already offers an exact-item deep link from typed Work data).
+        ``quickstart_service`` used to append the saved artifact's internal
+        UUID (``저장됨: <file name> · <result id>``).  The file name is owner
+        language and stays; the id lives in Task/Artifact detail, where the
+        #562 exact-item link resolves it from typed Work data.
         """
         self.test_read_and_result_write_are_two_distinct_mac_approvals_for_one_request()
         job_id = self.store.jobs()[-1]['id']
         [artifact] = self.store.task_artifacts(job_id)
         self.assertNotIn(artifact['id'], self.last_result_bubble)
+        self.assertIn(f"저장됨: {artifact['path']}", self.last_result_bubble, 'the owner still learns what was saved')
+        self.assert_no_raw_ids(self.last_result_bubble)
+        # The id is still inspectable where technical detail belongs.
+        self.assertIn(artifact['id'], [row['id'] for row in self.task(job_id)['artifacts']])
 
     def test_a_telegram_message_naming_a_path_grants_nothing(self):
         job, _ = self.park(self.PHRASES[0])
@@ -1024,22 +1027,70 @@ class I_UnknownExternalEffect(CalendarEval):
             self.assertEqual(continuity[-1]['trace']['executed'], False)
         self.assertEqual(self.transport.calls, 1, 'no unsafe automatic duplicate')
 
-    @unittest.expectedFailure
     def test_finding_i1_the_unknown_effect_work_is_recorded_as_succeeded(self):
-        """FINDING I1: the Work that applied the approval ends ``succeeded``.
+        """FINDING I1 (fixed by #598): the unknown-effect Work is recorded ``unknown``.
 
-        The owner-visible bubble is truthful (OUTCOME_UNKNOWN), but the Work
-        record, its web status and its transcript qualifier say the turn
-        simply succeeded, so a later reader (web card, next model turn's
-        context) sees no unknown-effect outcome.  Expected by the contract:
-        failed/partial/unknown stay distinct in Work/Evidence, not only prose.
+        The owner-visible bubble was already truthful (OUTCOME_UNKNOWN), but
+        the Work record, its web status and its transcript qualifier said the
+        turn simply succeeded, and a later "try again" was refused for the
+        wrong reason.  Now the Work outcome is ``unknown`` from its own typed
+        Evidence (#593 ``effect='unknown'``), every reader sees the
+        qualifier, no retry is offered, and the refusal names the unknown
+        effect and its duplicate risk.  Still no second provider call.
         """
-        job, _message_id, _start = self.approve_into_unknown()
-        qualifier = self.task(job['id'])['qualifier'] or {}
+        job, _message_id, start = self.approve_into_unknown()
+        [bubble] = self.bubbles(start)
+        self.assertEqual(bubble['text'], OUTCOME_UNKNOWN, 'the bubble is the effect owner\'s own statement')
+        controls = [b['text'] for row in bubble.get('reply_markup', {}).get('inline_keyboard', []) for b in row]
+        self.assertNotIn('다시 시도', controls, 'an unknown effect is never offered a retry')
+        record = self.store.job(job['id'])
+        self.assertEqual(record['status'], 'unknown', 'not succeeded, not failed/partial')
+        task = self.task(job['id'])
+        qualifier = task['qualifier'] or {}
         self.assertEqual(qualifier.get('outcome'), 'unknown', 'an explicit unknown outcome, not failed/partial')
+        self.assertFalse(qualifier.get('verified'))
+        self.assertNotEqual(task['status_label'], '완료')
+        self.assertEqual(task['error'], OUTCOME_UNKNOWN, 'the cause is inspectable')
+        [row] = self.assistant_rows(job['id'])
+        self.assertEqual(row['qualifier']['outcome'], 'unknown', 'the transcript carries it too')
         self.relations = {'다시 해줘': FOLLOWUP_RETRY}
+        retry_at = len(self.wire)
         retry, _ = self.turn('다시 해줘')
         self.assertIn('외부 결과가 불확실', retry['response'], 'the refusal names the unknown effect')
+        self.assertIn('중복', retry['response'], 'and its duplicate risk')
+        self.assertNotIn('실패 또는 중단 상태가 아니어서', retry['response'])
+        self.assertIn('외부 결과가 불확실', ' '.join(self.texts(retry_at)))
+        self.assertEqual(self.transport.calls, 1, 'no unsafe automatic duplicate')
+        self.assertEqual(self.states(), ['outcome-unknown'], 'the calendar state machine is untouched')
+
+
+class I1_ObservedEffectOpposing(CalendarEval):
+    """Opposing case for I1: an observed create stays a plain succeeded Work."""
+
+    def test_finding_i1_an_observed_create_stays_succeeded_without_a_qualifier(self):
+        self.turn('내일 오후 3시에 치과 일정 잡아줘')
+        start = len(self.wire)
+        job, _ = self.turn('승인')
+        [bubble] = self.bubbles(start)
+        self.assertTrue(bubble['text'].startswith(CREATED))
+        self.assertNotIn('reply_markup', bubble)
+        self.assertEqual(self.store.job(job['id'])['status'], 'succeeded')
+        self.assertIsNone(self.task(job['id'])['qualifier'])
+        self.assertEqual(len(self.provider.calls), 1)
+
+
+class CalendarParticleFinding(CalendarEval):
+    """Observation (#512, fixed by #598): the Calendar handoff read "만들기을(를)"."""
+
+    def test_finding_particle_the_calendar_handoff_uses_the_matching_object_particle(self):
+        self.registry.transition(OWNER, CALENDAR_WRITE_SPEC.connector_id, ConnectorState.DISCONNECTED)
+        start = len(self.wire)
+        job, _ = self.turn('다음 주 화요일 10시 반 병원 예약 일정 추가해줘')
+        self.assertEqual(job['status'], 'awaiting_connection')
+        [guidance] = self.texts(start)
+        self.assertNotIn('을(를)', guidance)
+        self.assertIn('Google Calendar 일정 만들기를 연결해 주세요', guidance)
+        self.assertIn('실행하지 않았습니다', guidance, 'the truthful not-executed statement is unchanged')
 
 
 # =============================================================================
@@ -1092,21 +1143,52 @@ class H_PartialResult(PresenceEval):
         controls = [[b['text'] for b in body.get('reply_markup', {}).get('inline_keyboard', [[]])[0]] for body in bubbles]
         self.assertEqual(controls, [[], ['다시 시도', '상세'], ['상세']])
 
-    @unittest.expectedFailure
     def test_finding_h1_the_verified_portion_is_not_stated_in_conversation(self):
-        """FINDING H1: the partial bubble names what failed, not what was verified.
+        """FINDING H1 (fixed by #598): the partial bubble states what was verified.
 
         Page A was read and supports "ships for 3,000 KRW"; page B failed.
-        The contract asks the conversation to state the verified completed
-        portion and the failed portion separately.  The bubble says only that
-        some material was unreadable and points to the AgentOS web record, so
-        the verified portion is available only on demand.
+        The bubble now states the verified portion - the quoted fact from the
+        page that was read and its source, rendered by AgentOS from the
+        research result - separately from the failed portion.  Opposing
+        cases: the unread page contributes nothing, the model's unobserved
+        "compared both" claim is still not asserted, and the outcome stays
+        ``partial`` everywhere.
         """
-        self.partial_research()
+        from personal_agent.conversation_projection import TERMINAL_VERIFIED_LABEL
+        job, _ = self.partial_research()
         [bubble] = self.bubbles()
-        self.assertIn('일부 자료는 읽지 못했습니다', bubble['text'], 'the failed portion')
-        self.assertIn('3,000', bubble['text'], 'the verified fact from the page that was read')
-        self.assertIn('example.com/a', bubble['text'], 'and its source')
+        text = bubble['text']
+        self.assertIn('일부 자료는 읽지 못했습니다', text, 'the failed portion')
+        self.assertIn('3,000', text, 'the verified fact from the page that was read')
+        self.assertIn('example.com/a', text, 'and its source')
+        verified_at, failed_at = text.index(TERMINAL_VERIFIED_LABEL), text.index('일부 자료는 읽지 못했습니다')
+        self.assertLess(text.index(TERMINAL_PARTIAL_HEADER), verified_at)
+        self.assertLess(verified_at, text.index('3,000'))
+        self.assertLess(text.index('example.com/a'), failed_at, 'verified and failed portions are separate')
+        # Opposing: nothing from the unread page, no unobserved claim, no upgrade.
+        self.assertNotIn('example.com/b', text)
+        self.assertNotIn('Model B', text)
+        self.assertNotIn('모두 비교했습니다', text)
+        self.assertEqual(self.store.job(job['id'])['status'], 'partial')
+        self.assertEqual(self.task(job['id'])['qualifier']['outcome'], 'partial')
+
+    def test_finding_h1_a_failed_or_succeeded_turn_gets_no_verified_portion(self):
+        """Opposing outcomes: a failed turn verified nothing; a succeeded one is the answer itself."""
+        from personal_agent.conversation_projection import TERMINAL_VERIFIED_LABEL
+        self.connect_model()
+        self.service.local_tools = EvalNet(unreadable=('a', 'b'))
+        self.script = [('tool', 'bounded_public_research', {'mode': 'product_comparison', 'query': 'kettle'})]
+        self.text = '두 제품을 모두 비교했습니다.'
+        failed, _ = self.turn('전기포트 비교해줘')
+        self.assertEqual(failed['status'], 'failed')
+        self.text = '확인된 답입니다.'
+        succeeded, _ = self.turn('차 한 잔 추천해줘')
+        failed_text, succeeded_text = self.texts()
+        self.assertTrue(failed_text.startswith(TERMINAL_FAILED_HEADER))
+        for text in (failed_text, succeeded_text):
+            self.assertNotIn(TERMINAL_VERIFIED_LABEL, text)
+        self.assertEqual(succeeded_text, '확인된 답입니다.')
+        self.assertIsNone(self.store.job(succeeded['id'])['owner_verified'])
 
 
 class Inspectability(LocalHttp, PresenceEval):
@@ -1141,24 +1223,47 @@ class Inspectability(LocalHttp, PresenceEval):
 
 
 class OwnerLanguageFindings(PresenceEval):
-    @unittest.expectedFailure
     def test_finding_x1_failed_and_partial_bubbles_name_raw_tool_ids(self):
-        """FINDING X1: failed/partial bubbles say "완료하지 못한 도구 실행 — <tool_id>: ...".
+        """FINDING X1 (fixed by #598): failed/partial bubbles use owner words for tools.
 
-        Observed ids in owner-visible Telegram text: ``bounded_public_research``
-        (H), ``save_memory`` (J), ``find_files`` (#489/#493 capped search).
-        The cause text after the id is owner language; the id itself is an
-        internal tool identifier the contract keeps in Task/Evidence detail.
+        Observed ids in owner-visible Telegram text were
+        ``bounded_public_research`` (H), ``save_memory`` (J) and
+        ``find_files`` (#489/#493 capped search).  The bubble now names the
+        step in the same owner vocabulary as the web Task detail; the exact
+        id stays in the Work's technical cause and Task events (opposing
+        case: technical detail is not lost).
         """
         self.connect_model()
         self.service.local_tools = EvalNet(unreadable=('b',))
         self.script = [('tool', 'bounded_public_research', {'mode': 'product_comparison', 'query': 'kettle'})]
-        self.turn('전기포트 두 개 비교해줘')
+        research, _ = self.turn('전기포트 두 개 비교해줘')
         self.script = [('tool', 'save_memory', {'memory_key': 'x', 'content': 'not what the owner said'})]
-        self.turn('내 취향 기억해줘: 녹차')
-        for text in self.texts():
-            for tool in ('bounded_public_research', 'save_memory'):
+        memory, _ = self.turn('내 취향 기억해줘: 녹차')
+        texts = self.texts()
+        self.assertEqual(len(texts), 2)
+        for text in texts:
+            for tool in ('bounded_public_research', 'save_memory', 'find_files'):
                 self.assertNotIn(tool, text)
+        self.assertIn('공개 자료 조사', texts[0], 'the step is named in owner words')
+        # Technical detail keeps the exact ids.
+        for job, tool in ((research, 'bounded_public_research'), (memory, 'save_memory')):
+            record = self.store.job(job['id'])
+            if record['status'] in ('failed', 'partial'):
+                self.assertIn(tool, record['error'])
+            self.assertIn(tool, [event['tool'] for event in self.events(job['id'])])
+
+    def test_finding_x1_the_owner_tool_labels_match_the_web_task_detail(self):
+        """One owner vocabulary: shared ids read the same in conversation and on the web."""
+        import re
+        from personal_agent.conversation_projection import TOOL_LABEL_FALLBACK, TOOL_LABELS, tool_label
+        app = (Path(__file__).resolve().parent.parent / 'src/personal_agent/web/app.js').read_text(encoding='utf-8')
+        web = dict(re.findall(r"(\w+):'([^']*)'", re.search(r'const TOOL_NAMES=\{([^}]*)\}', app).group(1)))
+        self.assertIn("TOOL_NAMES[id]||'" + TOOL_LABEL_FALLBACK + "'", app)
+        for tool in set(web) & set(TOOL_LABELS):
+            self.assertEqual(TOOL_LABELS[tool], web[tool], tool)
+        self.assertEqual(tool_label('package.unknown_tool'), TOOL_LABEL_FALLBACK)
+        for label in TOOL_LABELS.values():
+            self.assertNotIn('_', label)
 
 
 # =============================================================================
@@ -1308,22 +1413,37 @@ class RouteAndIdentity(LocalHttp, PresenceEval):
         self.http('POST', '/api/ai-route', {'route': 'codex', 'officially_authenticated': True})
         self.assertEqual(self.task(loud['id'])['route']['kind'], 'direct-api')
 
-    @unittest.expectedFailure
     def test_finding_r1_configured_model_is_recorded_as_the_observed_response_model(self):
-        """FINDING R1: with no provider-reported model, the configured name is stored as observed.
+        """FINDING R1 (fixed by #598): an unreported model stays "not reported" on every path.
 
-        ``ModelAdapter`` falls back to the configured model when a response
-        names none; that value is written to the ``model``/``responded``
-        event and surfaces as ``task.observed.model`` / the route label.
-        ``turn_provenance`` already keeps ``requested_model`` and a ``None``
-        ``reported_model`` apart, so the technical record is truthful, but
-        two read-model fields present configured identity as observed.
+        ``ModelAdapter`` used to fall back to the configured model when a
+        response named none; that value reached the ``model``/``responded``
+        event and ``task.observed.model``.  The requested model now stays
+        the requested model (route label, ``requested_model``) and the
+        observed fields say "not reported".  Opposing case: a provider that
+        does report a model is recorded as observed with that exact name.
         """
         self.connect_model()
         self.http('POST', '/api/ai-route', {'route': 'direct-api'})
         job, _ = self.turn('안녕?')
         self.assertIsNone(self.store.turn_provenance(job['id']).get('reported_model'))
-        self.assertNotEqual(self.task(job['id'])['observed']['model'], 'eval-model')
+        task = self.task(job['id'])
+        self.assertNotEqual(task['observed']['model'], 'eval-model')
+        self.assertEqual(task['observed']['model'], 'not reported')
+        with self.store.db() as db:
+            responded = [json.loads(row['detail']) for row in db.execute(
+                "SELECT detail FROM tool_events WHERE job_id=? AND tool='model' AND status='responded'", (job['id'],))]
+        self.assertTrue(responded)
+        for detail in responded:
+            self.assertEqual(detail['model'], 'not reported', 'the event never presents configured as observed')
+            self.assertEqual(detail['requested_model'], 'eval-model')
+        self.assertEqual(task['route']['model'], 'eval-model', 'the route still names the requested AI')
+        # Opposing: a reported model is observed, exactly.
+        self.reported = 'eval-model-2026-09-01'
+        loud, _ = self.turn('반가워')
+        task = self.task(loud['id'])
+        self.assertEqual(task['observed']['model'], 'eval-model-2026-09-01')
+        self.assertEqual(self.store.turn_provenance(loud['id'])['reported_model'], 'eval-model-2026-09-01')
 
     def test_a_failed_route_never_silently_falls_back_to_another_worker(self):
         self.connect_model()

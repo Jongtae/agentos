@@ -64,6 +64,13 @@ class QuickStore:
             if 'workspace_id' not in columns: db.execute('ALTER TABLE jobs ADD COLUMN workspace_id TEXT')
             if 'relation_kind' not in columns: db.execute('ALTER TABLE jobs ADD COLUMN relation_kind TEXT')
             if 'related_job_id' not in columns: db.execute('ALTER TABLE jobs ADD COLUMN related_job_id TEXT')
+            # #598: what the owner's terminal bubble reads for a failed/partial/
+            # unknown Work.  ``error`` stays the technical cause (tool ids) for
+            # Task detail; ``owner_cause`` is the same cause in owner words and
+            # ``owner_verified`` the portion the Work's typed Evidence supports.
+            # Neither is ever sent to a model: they are not transcript rows.
+            if 'owner_cause' not in columns: db.execute('ALTER TABLE jobs ADD COLUMN owner_cause TEXT')
+            if 'owner_verified' not in columns: db.execute('ALTER TABLE jobs ADD COLUMN owner_verified TEXT')
             memory_columns={row['name'] for row in db.execute('PRAGMA table_info(memories)')}
             for name,kind in (('owner_key','TEXT'),('work_key','TEXT'),('content_digest','TEXT'),('candidate_id','TEXT')):
                 if name not in memory_columns: db.execute(f'ALTER TABLE memories ADD COLUMN {name} {kind}')

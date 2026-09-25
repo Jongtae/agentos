@@ -19,7 +19,7 @@ from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_U
                                       TELEGRAM_RESULT_PREVIEW_CHARS, TERMINAL_FAILED_HEADER,
                                       TERMINAL_INTERRUPTED_HEADER, TERMINAL_NEXT_ACTION, TERMINAL_PARTIAL_HEADER,
                                       TERMINAL_UNVERIFIED_MARKER, BlockedTurn, ConversationProjection, context_message,
-                                      terminal_text, turn_qualifier)
+                                      owner_cause, terminal_text, turn_qualifier, verified_portion)
 from .subscription_engines import SubscriptionEngines
 from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult, MAX_PROMPT_BYTES, SECRET_PATTERN
 from .isolated_engine_gateway import EngineGatewayError
@@ -3096,6 +3096,7 @@ class AgentService:
             approval_needed=[False]
             context_approval_needed=[False]
             refusals=[]
+            verified_parts=[]
             calendar_notice=''
             try:
                 owner_prompt=job['message'].strip()
@@ -3481,6 +3482,7 @@ class AgentService:
                         outcome=getattr(result,'outcome','succeeded')
                         # Calls that ran incomplete name their cause like refusals do (#494).
                         refusals.extend(getattr(result,'incomplete',()) or ())
+                        verified_parts.extend(getattr(result,'verified',()) or ())
                         response,provider,model=result.content,result.provider,result.model
                         resolved_blocker=outcome=='succeeded'
                         # run_agent records NOT_REPORTED when the response names no
@@ -3513,7 +3515,12 @@ class AgentService:
                 with self.store.db() as db:
                     db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('assistant',response,job['channel'],time.time(),job.get('workspace_id'),job['id']))
                     cause=self._failure_cause(refusals) if outcome in ('failed','partial') else None
-                    db.execute("UPDATE jobs SET status=?,response=?,error=?,provider=?,model=?,delivery=? WHERE id=?",(outcome,response,cause,provider,model,'pending' if job['chat_id'] else 'none',job['id']))
+                    # #598: the conversation reads the cause in owner words and,
+                    # for a partial Work, the portion its typed Evidence supports.
+                    spoken=owner_cause([(tool,self._redact_reason(reason)) for tool,reason in refusals]) if outcome in ('failed','partial') else None
+                    observed=verified_portion(verified_parts) if outcome=='partial' else None
+                    db.execute("UPDATE jobs SET status=?,response=?,error=?,provider=?,model=?,delivery=?,owner_cause=?,owner_verified=? WHERE id=?",
+                               (outcome,response,cause,provider,model,'pending' if job['chat_id'] else 'none',spoken,observed,job['id']))
             except (ValueError,ProviderError,ExecutionError,OSError) as exc:
                 resolved_blocker=False
                 response=str(exc)
@@ -3545,9 +3552,9 @@ class AgentService:
             return True
 
     @staticmethod
-    def telegram_result_text(response, error=None, outcome=None):
-        """The one terminal bubble; the truth rules live in conversation_projection (#476/#488/#510)."""
-        return terminal_text(response,error,outcome)
+    def telegram_result_text(response, error=None, outcome=None, verified=None):
+        """The one terminal bubble; the truth rules live in conversation_projection (#476/#488/#510/#598)."""
+        return terminal_text(response,error,outcome,verified=verified)
 
     def deliver_one(self):
         # Mark before send. A lost response may mean delivered; never auto-resend.
@@ -3562,7 +3569,10 @@ class AgentService:
                 db.execute('UPDATE jobs SET delivery=? WHERE id=?',('sending' if allowed else 'cancelled',job['id']))
             if not allowed:return
             blocked=self.store.blocked_delivery_reply(job['id'])
-            text=blocked or self.telegram_result_text(job['response'],job['error'],job.get('status'))
+            # The owner-language cause when one was recorded (#598 X1); the
+            # technical ``error`` remains the Task-detail record.
+            text=blocked or self.telegram_result_text(job['response'],job.get('owner_cause') or job['error'],job.get('status'),
+                                                      verified=job.get('owner_verified'))
             # #581: one durable reply, valid Telegram HTML (no leaked `**`),
             # anchored to the owner turn only when that clarifies it, with
             # bounded recovery controls only when the turn did not succeed.

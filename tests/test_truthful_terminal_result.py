@@ -187,8 +187,16 @@ class PartialTurnTests(TerminalResultTestCase):
     def test_a_partial_turn_names_what_did_not_complete(self):
         job, bubble = self.partial_turn('초안을 만들었습니다.')
         self.assertTrue(job['error'], 'the job carries no cause to report')
-        self.assertIn(job['error'], bubble,
+        # #598 X1: the same observed cause, in owner words; the technical
+        # cause with the tool id stays on the Work record for Task detail.
+        self.assertTrue(job['owner_cause'])
+        self.assertIn(job['owner_cause'], bubble,
                       'the bubble must carry the observed cause, not only a header')
+        self.assertIn('calendar_draft_cancel', job['error'])
+        self.assertNotIn('calendar_draft_cancel', bubble)
+        # #598 H1: the step that did complete is stated as verified, apart.
+        self.assertIn('확인된 부분:', bubble)
+        self.assertIn('pay.txt', bubble)
 
 
 class SucceededTurnTests(TerminalResultTestCase):
@@ -225,9 +233,12 @@ class SurfaceConsistencyTests(TerminalResultTestCase):
         self.assertEqual(card['status_label'], '확인 필요')
         self.assertFalse(card['result_available'])
         self.assertNotIn(self.text, bubble)
-        # ...and the cause the web card carries is the one Telegram carries.
+        # ...and the cause the web card carries is the one Telegram carries,
+        # Telegram in owner words (#598 X1) and the card with the exact id.
         self.assertEqual(card['error'], job['error'])
-        self.assertIn(job['error'], bubble)
+        self.assertIn(job['owner_cause'], bubble)
+        self.assertIn(job['error'].split(': ', 1)[1], bubble)
+        self.assertNotIn('calendar_query', bubble)
 
     def test_a_partial_turn_agrees_across_both_surfaces(self):
         """Neither surface presents the text as the answer; both flag attention.

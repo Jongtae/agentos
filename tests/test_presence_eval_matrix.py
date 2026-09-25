@@ -1095,21 +1095,52 @@ class H_PartialResult(PresenceEval):
         controls = [[b['text'] for b in body.get('reply_markup', {}).get('inline_keyboard', [[]])[0]] for body in bubbles]
         self.assertEqual(controls, [[], ['다시 시도', '상세'], ['상세']])
 
-    @unittest.expectedFailure
     def test_finding_h1_the_verified_portion_is_not_stated_in_conversation(self):
-        """FINDING H1: the partial bubble names what failed, not what was verified.
+        """FINDING H1 (fixed by #598): the partial bubble states what was verified.
 
         Page A was read and supports "ships for 3,000 KRW"; page B failed.
-        The contract asks the conversation to state the verified completed
-        portion and the failed portion separately.  The bubble says only that
-        some material was unreadable and points to the AgentOS web record, so
-        the verified portion is available only on demand.
+        The bubble now states the verified portion - the quoted fact from the
+        page that was read and its source, rendered by AgentOS from the
+        research result - separately from the failed portion.  Opposing
+        cases: the unread page contributes nothing, the model's unobserved
+        "compared both" claim is still not asserted, and the outcome stays
+        ``partial`` everywhere.
         """
-        self.partial_research()
+        from personal_agent.conversation_projection import TERMINAL_VERIFIED_LABEL
+        job, _ = self.partial_research()
         [bubble] = self.bubbles()
-        self.assertIn('일부 자료는 읽지 못했습니다', bubble['text'], 'the failed portion')
-        self.assertIn('3,000', bubble['text'], 'the verified fact from the page that was read')
-        self.assertIn('example.com/a', bubble['text'], 'and its source')
+        text = bubble['text']
+        self.assertIn('일부 자료는 읽지 못했습니다', text, 'the failed portion')
+        self.assertIn('3,000', text, 'the verified fact from the page that was read')
+        self.assertIn('example.com/a', text, 'and its source')
+        verified_at, failed_at = text.index(TERMINAL_VERIFIED_LABEL), text.index('일부 자료는 읽지 못했습니다')
+        self.assertLess(text.index(TERMINAL_PARTIAL_HEADER), verified_at)
+        self.assertLess(verified_at, text.index('3,000'))
+        self.assertLess(text.index('example.com/a'), failed_at, 'verified and failed portions are separate')
+        # Opposing: nothing from the unread page, no unobserved claim, no upgrade.
+        self.assertNotIn('example.com/b', text)
+        self.assertNotIn('Model B', text)
+        self.assertNotIn('모두 비교했습니다', text)
+        self.assertEqual(self.store.job(job['id'])['status'], 'partial')
+        self.assertEqual(self.task(job['id'])['qualifier']['outcome'], 'partial')
+
+    def test_finding_h1_a_failed_or_succeeded_turn_gets_no_verified_portion(self):
+        """Opposing outcomes: a failed turn verified nothing; a succeeded one is the answer itself."""
+        from personal_agent.conversation_projection import TERMINAL_VERIFIED_LABEL
+        self.connect_model()
+        self.service.local_tools = EvalNet(unreadable=('a', 'b'))
+        self.script = [('tool', 'bounded_public_research', {'mode': 'product_comparison', 'query': 'kettle'})]
+        self.text = '두 제품을 모두 비교했습니다.'
+        failed, _ = self.turn('전기포트 비교해줘')
+        self.assertEqual(failed['status'], 'failed')
+        self.text = '확인된 답입니다.'
+        succeeded, _ = self.turn('차 한 잔 추천해줘')
+        failed_text, succeeded_text = self.texts()
+        self.assertTrue(failed_text.startswith(TERMINAL_FAILED_HEADER))
+        for text in (failed_text, succeeded_text):
+            self.assertNotIn(TERMINAL_VERIFIED_LABEL, text)
+        self.assertEqual(succeeded_text, '확인된 답입니다.')
+        self.assertIsNone(self.store.job(succeeded['id'])['owner_verified'])
 
 
 class Inspectability(LocalHttp, PresenceEval):
@@ -1144,24 +1175,47 @@ class Inspectability(LocalHttp, PresenceEval):
 
 
 class OwnerLanguageFindings(PresenceEval):
-    @unittest.expectedFailure
     def test_finding_x1_failed_and_partial_bubbles_name_raw_tool_ids(self):
-        """FINDING X1: failed/partial bubbles say "완료하지 못한 도구 실행 — <tool_id>: ...".
+        """FINDING X1 (fixed by #598): failed/partial bubbles use owner words for tools.
 
-        Observed ids in owner-visible Telegram text: ``bounded_public_research``
-        (H), ``save_memory`` (J), ``find_files`` (#489/#493 capped search).
-        The cause text after the id is owner language; the id itself is an
-        internal tool identifier the contract keeps in Task/Evidence detail.
+        Observed ids in owner-visible Telegram text were
+        ``bounded_public_research`` (H), ``save_memory`` (J) and
+        ``find_files`` (#489/#493 capped search).  The bubble now names the
+        step in the same owner vocabulary as the web Task detail; the exact
+        id stays in the Work's technical cause and Task events (opposing
+        case: technical detail is not lost).
         """
         self.connect_model()
         self.service.local_tools = EvalNet(unreadable=('b',))
         self.script = [('tool', 'bounded_public_research', {'mode': 'product_comparison', 'query': 'kettle'})]
-        self.turn('전기포트 두 개 비교해줘')
+        research, _ = self.turn('전기포트 두 개 비교해줘')
         self.script = [('tool', 'save_memory', {'memory_key': 'x', 'content': 'not what the owner said'})]
-        self.turn('내 취향 기억해줘: 녹차')
-        for text in self.texts():
-            for tool in ('bounded_public_research', 'save_memory'):
+        memory, _ = self.turn('내 취향 기억해줘: 녹차')
+        texts = self.texts()
+        self.assertEqual(len(texts), 2)
+        for text in texts:
+            for tool in ('bounded_public_research', 'save_memory', 'find_files'):
                 self.assertNotIn(tool, text)
+        self.assertIn('공개 자료 조사', texts[0], 'the step is named in owner words')
+        # Technical detail keeps the exact ids.
+        for job, tool in ((research, 'bounded_public_research'), (memory, 'save_memory')):
+            record = self.store.job(job['id'])
+            if record['status'] in ('failed', 'partial'):
+                self.assertIn(tool, record['error'])
+            self.assertIn(tool, [event['tool'] for event in self.events(job['id'])])
+
+    def test_finding_x1_the_owner_tool_labels_match_the_web_task_detail(self):
+        """One owner vocabulary: shared ids read the same in conversation and on the web."""
+        import re
+        from personal_agent.conversation_projection import TOOL_LABEL_FALLBACK, TOOL_LABELS, tool_label
+        app = (Path(__file__).resolve().parent.parent / 'src/personal_agent/web/app.js').read_text(encoding='utf-8')
+        web = dict(re.findall(r"(\w+):'([^']*)'", re.search(r'const TOOL_NAMES=\{([^}]*)\}', app).group(1)))
+        self.assertIn("TOOL_NAMES[id]||'" + TOOL_LABEL_FALLBACK + "'", app)
+        for tool in set(web) & set(TOOL_LABELS):
+            self.assertEqual(TOOL_LABELS[tool], web[tool], tool)
+        self.assertEqual(tool_label('package.unknown_tool'), TOOL_LABEL_FALLBACK)
+        for label in TOOL_LABELS.values():
+            self.assertNotIn('_', label)
 
 
 # =============================================================================

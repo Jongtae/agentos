@@ -784,6 +784,23 @@ def _evidence_detail(name,result):
 #: reports that a tool ran; it never characterises the request as done (#490).
 FALLBACK_UNDESCRIBED='도구 실행은 끝났지만 결과를 설명하는 답변을 받지 못했습니다. 요청이 완료됐는지는 확인되지 않았습니다. 실행 기록을 확인해 주세요.'
 
+#: Results that are another model's prose, not an observed fact.
+UNVERIFIABLE_RESULTS=('delegate_agent',)
+
+def verified_text(name,result):
+ """AgentOS's own rendering of what one observed tool result supports, or None.
+
+ Used for the verified portion of a partial Work (#598 H1).  It is the same
+ rendering ``fallback_response`` uses, from the result the tool returned -
+ never model text.  A setup-required result consulted nothing, and a result
+ AgentOS cannot describe states nothing, so neither contributes.
+ """
+ if name in UNVERIFIABLE_RESULTS or not isinstance(result,dict):return None
+ if 'setup-required' in evidence_qualifiers(result):return None
+ own=[url for url in result.get('sources',[]) if isinstance(url,str)] if isinstance(result.get('sources'),list) else []
+ text=_fallback_text(name,result,own)
+ return None if text==FALLBACK_UNDESCRIBED or not str(text).strip() else str(text)
+
 def fallback_response(executions, sources):
  """Return a useful safe result when a tool-capable model stops after tools.
 
@@ -812,6 +829,10 @@ def _fallback_text(name, result, sources):
   return '\n'.join(lines)+(('\n\n조회 출처:\n'+'\n'.join(dict.fromkeys(sources))) if sources else '')
  if name=='public_page_read' and isinstance(result,dict):
   return (result.get('content','')[:12000] + '\n\n출처: ' + result.get('url',''))
+ if name=='bounded_public_research' and isinstance(result,dict):
+  from .research import verified_summary
+  summary=verified_summary(result)
+  if summary:return summary
  if name=='save_note' and isinstance(result,dict) and result.get('saved'):return '메모를 저장했습니다.'
  if name=='save_memory' and isinstance(result,dict):
   if result.get('state')=='pending':return MEMORY_REFUSALS.get(result.get('refused_because'),'소유자 확인이 필요해 기억 후보로 보관했습니다. 승인 후 저장할 수 있습니다.')
@@ -834,6 +855,8 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
  sources=[];executions=[];failed=False;count=0;successful=0;invalid_calls=set()
  # (tool, note) for calls that ran but whose own Evidence says they are incomplete.
  incomplete=[]
+ # AgentOS-rendered text for calls whose result was observed (#598 H1).
+ verified=[]
  active_config=dict(config);rerouted=False;checked_direct=False;attempts={}
  for turn in range(9):
   try:
@@ -867,6 +890,7 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
    result=ModelResult(content[:24000],config['provider'],actual)
    result.outcome=('partial' if successful else 'failed') if (failed or invalid_calls) else 'succeeded'
    result.incomplete=incomplete
+   result.verified=verified
    return result
   if not isinstance(calls,list) or turn==8 or count+len(calls)>12:raise ProviderError('도구 호출 한도 또는 응답 형식 오류입니다.')
   ids=[c.get('id') for c in calls if isinstance(c,dict)]
@@ -911,6 +935,8 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
      # writes text, so the one qualifier projection applies to the reply
      # too (#494).  Setup-required keeps its current outcome semantics.
      gaps=[label for label in evidence_qualifiers(result) if label in INCOMPLETE_QUALIFIERS]
+     observed=verified_text(name,result)
+     if observed and observed not in verified:verified.append(observed)
      if gaps:
       failed=True
       incomplete.append((name,' '.join(QUALIFIER_NOTES[label] for label in gaps)))

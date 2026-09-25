@@ -264,7 +264,7 @@ class EvidenceLog(list):
   for item in items:self.append(item)
 
 class Capabilities:
- def __init__(self,store,adapter,config,key,job_id,record,readonly=False,network=None,document_access=True,packages=None,allowed_tools=None,document_context=False,public_page_scope=None,memory_approval=None,inherited_provenance=(),calendar=None,calendar_owner=None):
+ def __init__(self,store,adapter,config,key,job_id,record,readonly=False,network=None,document_access=True,packages=None,allowed_tools=None,document_context=False,public_page_scope=None,memory_approval=None,inherited_provenance=(),calendar=None,calendar_owner=None,memory_request=None):
   self.store,self.adapter,self.config,self.key=store,adapter,config,key
   self.job_id,self.record,self.readonly=job_id,record,readonly
   self.network=network or LocalTools()
@@ -272,6 +272,10 @@ class Capabilities:
   self.document_context=document_context
   self.public_page_scope=None if public_page_scope is None else frozenset(public_page_scope)
   self.memory_approval=memory_approval
+  # #597: a zero-argument resolver that asks, once and only when a write is
+  # proposed, whether the owner explicitly requested a memory in this Work;
+  # it returns the owner-request approval or None.
+  self.memory_request=memory_request
   self.calendar=calendar
   # Connector identity is the paired Telegram chat or the one local owner
   # (`AgentService.connector_owner_id`), NOT the Memory owner. Using
@@ -355,7 +359,7 @@ class Capabilities:
   """Why this exact key and value may not become canonical Memory in this turn.
 
   ``verify_memory_approval`` only proves the owner asked for *a* memory in
-  *this* Work.  It is minted from the owner's message before the model runs,
+  *this* Work.  It is minted from the owner's message (since #597 on a DecisionEngine judgment, not a regex),
   so on its own it lets an approved turn write whatever key and value the
   model chooses - the J6 defect #392 recorded on the live path and carried to
   #393/#394.  This is the missing value half, and it is deliberately the same
@@ -370,6 +374,9 @@ class Capabilities:
   reason never raises: an uncovered write falls back to the pending candidate
   the owner can inspect and approve, so a refusal is visible, not silent.
   """
+  if self.memory_approval is None and self.memory_request is not None:
+   resolve,self.memory_request=self.memory_request,None
+   self.memory_approval=resolve()
   if not self.store.verify_memory_approval(self.memory_approval,self.job_id):
    return 'no-owner-memory-request'
   owner_words=memory_words((self.store.job(self.job_id) or {}).get('message'))

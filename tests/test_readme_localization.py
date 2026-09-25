@@ -482,7 +482,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
                     if want == "workspace-summary":
                         self.assertIsNotNone(service.workspace_summary_request(text))
                     elif want == "memory":
-                        self.assertTrue(service.AgentService.explicit_memory_request(text))
+                        self.assertTrue(service.AgentService.memory_followup_prefilter(text))
                     else:
                         self.assertEqual(want, classifier.classify(text).intent)
 

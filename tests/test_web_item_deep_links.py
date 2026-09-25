@@ -26,6 +26,7 @@ import unittest
 from http.cookiejar import CookieJar
 from urllib.request import HTTPCookieProcessor, build_opener
 
+from personal_agent.decision import OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine, fixture_confidence
 from test_pa1_memory_candidate_owner_path import (CANDIDATE_CONTENT, CANDIDATE_KEY,
                                                    _OwnerSurface)
 
@@ -113,6 +114,9 @@ class ExactRetainedItems(_OwnerSurface):
         self.model_plan = [('save_memory', json.dumps({'memory_key': 'meeting-time', 'content': '오전 회의를 선호합니다'},
                                                       ensure_ascii=False))]
         self.model_text = '기억했습니다.'
+        # #597: the fixture DecisionEngine judges this turn an explicit remember request.
+        self.service.use_decision_engine(FixtureDecisionEngine(judge=lambda context, proposition: BinaryDecision(
+            OUTCOME_DECIDED, True, fixture_confidence()) if context.purpose == 'explicit-memory-request' else None))
         job = self.ask('내 회의 시간 선호를 기억해 줘: 오전이 좋아')
         self.model_plan = []
         [link] = self.task(job)['retained']

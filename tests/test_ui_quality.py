@@ -290,7 +290,11 @@ console.log(JSON.stringify({ok:true}));
 
     def test_open_disclosures_do_not_rebuild_the_trace(self):
         render = APP[APP.index("function renderTasks(){"):APP.index("function recordKey(item){")]
-        self.assertIn("const fingerprint=JSON.stringify([ordered]);", render)
+        fingerprint = render[render.index("const fingerprint=JSON.stringify("):]
+        fingerprint = fingerprint[:fingerprint.index(";")]
+        self.assertNotIn("openTraces", fingerprint)
+        self.assertNotIn("openTechnical", fingerprint)
+        self.assertNotIn("openOriginals", fingerprint)
         disclosure = APP[APP.index("function traceDisclosure("):APP.index("function renderTasks(){")]
         self.assertIn("if(box.open===openSet.has(task.id))return;", disclosure)
         self.assertNotIn("taskRenderFingerprint=''", disclosure)
@@ -308,6 +312,46 @@ class TaskScopedContext(unittest.TestCase):
         # the raw request is added to the DOM only inside the opened disclosure
         self.assertIn("if(box.open)box.append(element('p',original,'turn-text'))", render)
         self.assertIn("box.open=openOriginals.has(task.id)", render)
+
+
+class TraceNavigation(unittest.TestCase):
+    """#572: long traces open at the latest exchange with a bounded, day-grouped window."""
+
+    def test_window_keeps_the_latest_turns_grouped_by_day(self):
+        out = node_run(r"""
+const assert=require('node:assert/strict');const ui=require(process.argv[1]);ui.setLanguage('ko');
+const now=Date.UTC(2026,8,25,12,0,0),day=86400;
+const tasks=[];for(let i=0;i<45;i++)tasks.push({id:'t'+i,started_at:now/1000-(44-i)*3*3600});
+const view=ui.traceWindow(tasks,20,new Set(),now);
+assert.equal(view.hidden,25,'older turns are hidden, not dropped');
+const shown=view.groups.flatMap(g=>g.tasks.map(x=>x.id));
+assert.equal(shown.length,20);assert.equal(shown[shown.length-1],'t44','the latest turn is last');
+assert.deepEqual(shown,tasks.slice(25).map(x=>x.id),'chronological order is kept');
+assert(view.groups.length>=2,'turns are split by day');
+assert.equal(view.groups[view.groups.length-1].label,'오늘');
+const yesterday=view.groups.find(g=>g.label==='어제');assert(yesterday,'yesterday is labelled');
+const collapsed=ui.traceWindow(tasks,20,new Set([yesterday.key,ui.dayKey(now/1000)]),now);
+assert.equal(collapsed.groups.find(g=>g.key===yesterday.key).collapsed,true,'a past day can be collapsed');
+assert.equal(collapsed.groups[collapsed.groups.length-1].collapsed,false,'today is never collapsed');
+assert.equal(ui.traceWindow(tasks.slice(0,5),20,new Set(),now).hidden,0);
+ui.setLanguage('en');assert.equal(ui.dayLabel(now/1000,now),'today');
+console.log(JSON.stringify({ok:true}));
+""")
+        self.assertEqual(json.loads(out.strip().splitlines()[-1]), {"ok": True})
+
+    def test_render_uses_the_window_pinning_and_jump_control(self):
+        render = APP[APP.index("function renderTasks(){"):APP.index("let traceObserver=null;")]
+        self.assertIn("traceWindow(ordered,traceLimit,collapsedDays)", render)
+        self.assertIn("'trace-earlier'", render)
+        self.assertIn("else if(grew&&wasNearEnd&&activeView==='tasks')", render)
+        self.assertIn('id="trace-jump-latest"', HTML)
+        self.assertIn("IntersectionObserver", APP)
+        self.assertIn("content-visibility:auto", CSS.replace(" ", ""))
+        focus = APP[APP.index("function focusTurn("):APP.index("function turnHead(")]
+        self.assertIn("traceLimit=Math.max(traceLimit,ordered.length-position)", focus, "a relation jump reveals an older turn")
+        self.assertIn("grew=Boolean(previousNewest)&&newest.id!==previousNewest.id", render, "growth is detected by the newest turn, not the capped count")
+        self.assertIn("previous=ordered[view.hidden+index-1]", render, "repeat detection uses the full order")
+        self.assertNotIn(":last-of-type", APP)
 
 
 if __name__ == "__main__":

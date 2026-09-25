@@ -57,11 +57,15 @@ from urllib.request import Request, build_opener, HTTPCookieProcessor, HTTPRedir
 from cryptography.fernet import Fernet
 
 from personal_agent.connector_contract import CONNECTOR_STATE_KEY, ConnectorState
-from personal_agent.decision import OUTCOME_DECIDED, FixtureDecisionEngine, SelectionDecision, fixture_confidence
+from personal_agent.decision import (OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine, SelectionDecision,
+                                     fixture_confidence)
 from personal_agent.gmail import GMAIL_CONNECTOR_ID, GMAIL_READONLY_SCOPE
 from personal_agent.providers import ModelAdapter, ProviderError
 from personal_agent.quickstart import configured_service, make_handler
 from personal_agent.quickstart_store import QuickStore
+
+#: Owner turns the fixture DecisionEngine judges as explicit remember requests (#597).
+OWNER_MEMORY_REQUESTS = frozenset({'내 회의 시간 선호를 기억해 줘: 오전이 좋아', '아니 오후가 좋아. 회의 시간 선호를 저장해 줘'})
 
 #: What this acceptance does and does not establish, per #386 journey.  It is
 #: deliberately part of the test file rather than prose in an issue comment,
@@ -320,9 +324,16 @@ class FirstUseEndToEndAcceptance(unittest.TestCase):
         # judgment with none-of-these for ordinary mail searches. This keeps
         # the acceptance's focus on shipped boundaries and connector recovery
         # while ensuring an unavailable semantic judgment never starts a read.
+        # #597: whether a turn explicitly asks to remember a value is the
+        # DecisionEngine's judgment; the fixture answers it for the owner
+        # phrasings below and a confident "no" for everything else.
         service.use_decision_engine(FixtureDecisionEngine(choose=lambda context,candidates,question:
             SelectionDecision(OUTCOME_DECIDED,'none-of-these',candidates,fixture_confidence())
-            if context.purpose == 'unsupported-capability' else None))
+            if context.purpose == 'unsupported-capability' else None,
+            judge=lambda context,proposition:
+            BinaryDecision(OUTCOME_DECIDED,context.facts.get('owner_message') in OWNER_MEMORY_REQUESTS,
+                           fixture_confidence())
+            if context.purpose == 'explicit-memory-request' else None))
         service.telegram_transport = self.transport
         service.adapter = ModelAdapter(self.transport)
         # Guarded rather than assumed, so that a deployment which stopped

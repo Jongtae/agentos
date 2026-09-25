@@ -219,11 +219,12 @@ class ServiceProvenance(unittest.TestCase):
         service.execution_adapter.execute = execute
         service.run_one()
         selected = self._selected(service)
-        self.assertEqual([row['purpose'] for row in selected['decisions']], ['presence'])
-        self.assertNotIn('raw', selected['decisions'][0], 'only the summary fields are exposed')
+        # #597: the turn's own capability-need judgment is linked to it as well.
+        self.assertEqual([row['purpose'] for row in selected['decisions']], ['capability-need', 'presence'])
+        self.assertNotIn('raw', selected['decisions'][-1], 'only the summary fields are exposed')
         # #559: the content-free declared answer is shown; the probability is not.
-        self.assertEqual(selected['decisions'][0]['answer'], 'retry')
-        self.assertNotIn('confidence', selected['decisions'][0])
+        self.assertEqual(selected['decisions'][-1]['answer'], 'retry')
+        self.assertNotIn('confidence', selected['decisions'][-1])
         self.assertIsNone(service.current_work_id, 'the link ends with the Work')
 
     def test_direct_api_records_requested_and_reported_model(self):

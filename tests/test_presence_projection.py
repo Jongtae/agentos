@@ -626,8 +626,8 @@ class ConversationContinuityTests(ProjectionTestCase):
         self.assertTrue(any(
             kind == 'send' and '다시 처리했습니다.' in text for kind, text in bubbles
         ))
-        asked = [item for item in engine.asked if item[0] == 'choose']
-        self.assertEqual(asked[-1][1].purpose, 'conversation-followup')
+        asked = [item for item in engine.asked
+                 if item[0] == 'choose' and item[1].purpose == 'conversation-followup']
         self.assertEqual(asked[-1][1].facts['previous_status'], 'failed')
 
     def test_retry_chain_always_replays_the_oldest_canonical_request(self):

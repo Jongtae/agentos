@@ -21,6 +21,7 @@ from personal_agent.agent_runtime import CALENDAR_DRAFT_TOOLS, withheld_effect
 from personal_agent.calendar import (CALENDAR_SPEC, CALENDAR_WRITE_SPEC,
                                      CalendarConnector)
 from personal_agent.connector_contract import ConnectorRegistry, ConnectorState
+from personal_agent.decision import OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine, fixture_confidence
 from personal_agent.google_calendar import CALENDAR_READ_SCOPE, CALENDAR_WRITE_SCOPE
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService
@@ -230,6 +231,9 @@ class AcceptedWriteTests(RefusedWriteTestCase):
         self.plan = [('save_memory', {'memory_key': 'meal-preference',
                                       'content': '땅콩 알레르기'})]
         self.text = '기억했습니다.'
+        # #597: the fixture DecisionEngine judges this turn an explicit remember request.
+        self.service.use_decision_engine(FixtureDecisionEngine(judge=lambda context, proposition: BinaryDecision(
+            OUTCOME_DECIDED, True, fixture_confidence()) if context.purpose == 'explicit-memory-request' else None))
         job, bubble = self.ask('땅콩 알레르기가 있다는 걸 기억해 줘')
         self.assertEqual(job['status'], 'succeeded', job.get('error'))
         self.assertEqual(bubble, '기억했습니다.')

@@ -911,6 +911,10 @@ finally:
         self.service.adapter=ModelAdapter(document_model)
         self.model('compatible','https://example.test/v1','private-api-key')
         self.assertTrue(self.service.test_model()['ok'])
+        # A folder is granted first: with no folder at all the request is parked
+        # for a folder grant (#505) before document sharing is ever relevant.
+        docs=Path(self.temp.name).resolve()/'docs';docs.mkdir();(docs/'plan.txt').write_text('plan')
+        self.service.save_roots({'paths':[str(docs)]})
         self.service.ingest_update({'update_id':11,'message':{'from':{'id':42},'chat':{'id':42,'type':'private'},'text':'문서를 찾아 줘'}},generation)
         self.service.acknowledge_long_work(now=time.time()+10)  # the card is the long-work acknowledgement (#510)
         card=[c for c in self.calls if c[0].endswith('/sendMessage') and c[1]['text'].startswith('요청을 받았습니다.')][-1]

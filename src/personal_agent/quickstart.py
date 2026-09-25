@@ -28,6 +28,7 @@ from .calendar_oauth import CalendarOAuth, EncryptedCalendarSecretStore, calenda
 from .google_calendar import GoogleCalendar
 from .quickstart_service import AgentService, CALENDAR_CONNECT_PATH, GMAIL_CONNECT_PATH, LOCAL_ADDRESS_HOST
 from .subscription_engines import SubscriptionEngines
+from .conversation_handoff import ConversationHandoffError, local_refusal_text
 from .plugins import PluginRegistry
 from .providers import ProviderError
 from .isolated_engine_gateway import IsolatedEngineGateway
@@ -479,6 +480,14 @@ def make_handler(service, public_hosts=(), public_access_token=''):
         def public_host(self):
             return self.headers.get('Host','').lower() in public_hosts
 
+        def owner_local_surface(self):
+            """This Mac, reached directly: loopback server, loopback client, no tunnel host.
+
+            A tunnel forwards from loopback too, so the Host check is what keeps a
+            phone on the public address from choosing or approving a Mac folder.
+            """
+            return self.local_setup() and not self.public_host()
+
         def cookie(self,token,max_age=86400):
             secure='; Secure' if os.environ.get('AGENTOS_SECURE_COOKIE')=='1' or public_hosts else ''
             return f'agentos_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={max_age}{secure}'
@@ -596,6 +605,10 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             if not self.auth():return
             if path=='/api/home':return self.reply(200,service.home())
             if path=='/api/tasks':return self.reply(200,service.task_progress())
+            if path=='/api/folder-requests':
+                # #505: the owner-local approval surface.  Any owner session may
+                # see that a request is waiting; only this Mac may choose/approve.
+                return self.reply(200,{**service.local_authority_requests(),'local_surface':self.owner_local_surface()})
             if path.startswith('/api/tasks/'):
                 return self.reply(200,service.task_progress(path.rsplit('/',1)[-1]))
             if path=='/api/settings':return self.reply(200,service.conversation_settings_request({'operation':'read'}))
@@ -712,6 +725,17 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 if path=='/api/ai-route':return self.reply(200,service.select_ai_route(body))
                 if path=='/api/openrouter/models':return self.reply(200,service.free_models())
                 if path=='/api/ollama/models':return self.reply(200,service.local_models())
+                if path in ('/api/folder-requests/select','/api/folder-requests/approve','/api/folder-requests/deny'):
+                    # #505: choosing and approving a Mac folder happens only on this
+                    # Mac.  Declining removes authority, so any owner session may.
+                    action=path.rsplit('/',1)[-1]
+                    if action!='deny' and not self.owner_local_surface():
+                        return self.reply(403,{'error':'Mac에서 계속: 폴더 선택과 허용은 이 Mac에서 AgentOS를 직접 열어야 할 수 있습니다. 요청은 그대로 기다립니다.'})
+                    try:
+                        handler={'select':service.select_local_folder,'approve':service.approve_local_folder,'deny':service.deny_local_folder}[action]
+                        return self.reply(200,handler(body))
+                    except ConversationHandoffError as exc:
+                        return self.reply(409,{'error':local_refusal_text(exc.reason),'reason':exc.reason})
                 if path=='/api/files/roots':return self.reply(200,service.save_roots(body))
                 if path=='/api/file-workspace':return self.reply(200,service.configure_file_workspace(body))
                 if path=='/api/context-inbox/config':return self.reply(200,service.context_inbox().configure(body))

@@ -325,8 +325,12 @@ class Capabilities:
   source=f'파일: {path} · {segments[0]["location"]}' if segments else f'파일: {path}'
   return {'root_id':root_id,'path':path,'kind':document.kind,'content':content,'locations':[segment['location'] for segment in segments[:100]],'sources':[source],'truncated':len(document.text)>len(content)}
  def find_files(self,query):
+  # No covering folder grant is checked first: saying so reads nothing and
+  # sends nothing, and it lets AgentOS ask for the one folder (#505) before
+  # the separate external-AI document-sharing approval is ever relevant.
+  # `requires` names the declared local authority; it grants nothing.
+  if not self.roots():return {'files':[],'needs_setup':True,'requires':'local-folder-read','message':'연결 설정에서 접근할 폴더를 먼저 연결해 주세요.'}
   if not self.document_access:raise ValueError('연결 문서 검색 결과를 외부 AI에 전달하려면 설정에서 문서 공유를 승인하세요.')
-  if not self.roots():return {'files':[],'needs_setup':True,'message':'연결 설정에서 접근할 폴더를 먼저 연결해 주세요.'}
   if not query.strip() or len(query)>200:raise ValueError('검색어는 1~200자로 입력하세요.')
   hits=[];visited=0;deadline=time.monotonic()+5
   for root in self.roots():

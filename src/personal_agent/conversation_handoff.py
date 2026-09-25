@@ -366,7 +366,7 @@ class ConversationJudgments:
     def parked_work_withdrawn(self, utterance, parked_connectors):
         """Does ``utterance`` withdraw the owner's request(s) parked for
         ``parked_connectors``?  Unavailable/unknown keeps them parked."""
-        labels = ', '.join(CONNECTOR_LABELS.get(c, c) for c in parked_connectors)
+        labels = ', '.join(CONNECTOR_LABELS.get(c) or LOCAL_AUTHORITY_LABELS.get(c, c) for c in parked_connectors)
         context = DecisionContext('parked-work-withdrawal',
                                   {'waiting_connection': labels, 'owner_message': utterance})
         decision = self.engine.judge(context, WITHDRAWAL_PROPOSITION)
@@ -987,12 +987,22 @@ class ConnectorHandoff:
     """
 
     def __init__(self, store, connector_registry, pending_registry=None, *,
-                 now=time.time, ttl_seconds=RESUME_TTL_SECONDS):
+                 now=time.time, ttl_seconds=RESUME_TTL_SECONDS, requirements=None):
         self.store = store
         self.connectors = connector_registry
         self.pending = pending_registry or PendingWorkRegistry(store, connector_registry, clock=now)
         self.now = now
         self.ttl_seconds = ttl_seconds
+        # Declared non-connector requirements (#505): a local authority such
+        # as a folder read grant is parked in this same index with the same
+        # owner/generation binding, but its scopes come from this table
+        # rather than a ConnectorRegistry definition.
+        self.requirements = dict(requirements or {})
+
+    def _required_scopes(self, key):
+        if key in self.requirements:
+            return tuple(self.requirements[key])
+        return self.connectors.definition(key).required_scopes
 
     # -- prerequisite detection ---------------------------------------------
     @staticmethod
@@ -1069,9 +1079,8 @@ class ConnectorHandoff:
         reports it, so the caller can cancel the Work that is being replaced
         rather than leaving two resume paths racing for the same connection.
         """
-        connector = self.connectors.definition(connector_id)
         handle = self.pending.issue(owner_id, work_id, connector_id,
-                                    connector.required_scopes, ttl_seconds=self.ttl_seconds)
+                                    self._required_scopes(connector_id), ttl_seconds=self.ttl_seconds)
         row = {'connector_id': connector_id,
                'work_id': work_id,
                'handoff_id': str(uuid.uuid4()),
@@ -1205,3 +1214,231 @@ class ConnectorHandoff:
     @staticmethod
     def refusal_text(reason):
         return RESUME_REFUSALS.get(reason, RESUME_REFUSAL_DEFAULT)
+
+
+# ---------------------------------------------------------------------------
+# Contextual local authority (PRESENCE-CAP-01 / #505)
+# ---------------------------------------------------------------------------
+# A file request that finds no covering folder grant is parked exactly like a
+# request waiting for a connector: the same content-free index row, the same
+# hashed owner and Telegram-generation binding, the same `resume` order
+# (claim -> durable compare-and-set schedule -> complete) and the same
+# supersede/deny exits.  Only two things differ, and both are declared here:
+#
+#   * the requirement is a declared local authority, not a ConnectorRegistry
+#     row, so its scope comes from ``LOCAL_AUTHORITY_SCOPES``;
+#   * the single-use pending state is ``LocalGrantPending`` below, because the
+#     Wave 0 ``PendingWorkRegistry`` re-checks ``require_connected`` against a
+#     connector definition inside ``claim`` and a folder grant has none.  It
+#     keeps that registry's interface and refusal vocabulary so
+#     ``ConnectorHandoff.resume`` is reused unchanged.
+#
+# What is deliberately *not* here: which folder.  A folder is chosen only on
+# the owner's Mac through the local approval surface, never inferred from
+# conversation text and never accepted from Telegram.  The index row names
+# the authority kind only; no path, folder name or utterance is stored in it.
+import hashlib as _hashlib
+
+LOCAL_FOLDER_READ = 'local-folder-read'
+LOCAL_REFERENCE_READ = 'local-reference-read'
+LOCAL_RESULT_WRITE = 'local-result-write'
+
+#: The one scope each declared local authority carries.  Read and result-write
+#: are distinct authorities: a read grant never implies a write grant, and a
+#: result-write grant only lets AgentOS create *new* result files.
+LOCAL_AUTHORITY_SCOPES = {
+    LOCAL_FOLDER_READ: ('folder:read',),
+    LOCAL_REFERENCE_READ: ('folder:read',),
+    LOCAL_RESULT_WRITE: ('folder:create-result',),
+}
+LOCAL_AUTHORITY_KIND = {LOCAL_FOLDER_READ: 'read', LOCAL_REFERENCE_READ: 'read', LOCAL_RESULT_WRITE: 'write'}
+
+LOCAL_AUTHORITY_LABELS = {
+    LOCAL_FOLDER_READ: '이 Mac의 참고 폴더 읽기',
+    LOCAL_REFERENCE_READ: '이 Mac의 원본 폴더 읽기',
+    LOCAL_RESULT_WRITE: '이 Mac의 결과 저장 폴더',
+}
+
+#: Plain-language authority previews, shown before the owner chooses and again
+#: next to the chosen folder.  They state what is included and what is not.
+LOCAL_AUTHORITY_PREVIEWS = {
+    LOCAL_FOLDER_READ: ('선택한 폴더 하나를 읽기만 허용합니다. 파일을 바꾸거나 지우지 않고, '
+                        '이 허용만으로 파일 내용을 외부 AI에 보내지 않습니다.'),
+    LOCAL_REFERENCE_READ: ('선택한 폴더 하나를 정리할 원본으로 읽기만 허용합니다. 파일을 바꾸거나 지우지 않고, '
+                           '이 허용만으로 파일 내용을 외부 AI에 보내지 않습니다.'),
+    LOCAL_RESULT_WRITE: ('선택한 폴더 하나에 새 결과 파일을 만드는 것만 허용합니다. 기존 파일을 덮어쓰거나 '
+                         '지우지 않고, 이 허용만으로 파일을 외부로 보내지 않습니다.'),
+}
+
+#: The one next action, in conversation.  Telegram never receives a path, a
+#: folder name, a handle or an internal identifier: the message is the
+#: trigger, and the folder is chosen only on the Mac.
+LOCAL_AUTHORITY_GUIDANCE = {
+    LOCAL_FOLDER_READ: '이 요청에는 이 Mac의 폴더를 읽는 권한이 필요해 아직 파일을 찾지 않았습니다.',
+    LOCAL_REFERENCE_READ: '이 요청에는 정리할 원본 폴더를 읽는 권한이 필요해 아직 실행하지 않았습니다.',
+    LOCAL_RESULT_WRITE: '이 요청은 결과 파일을 저장할 폴더가 필요해 아직 실행하지 않았습니다.',
+}
+LOCAL_AUTHORITY_NEXT_ACTION = (' 지금 필요한 다음 단계는 하나입니다: Mac에서 계속 — Mac에서 AgentOS를 열고 '
+                               '설정 → 파일 · 저장에서 폴더를 선택해 주세요.')
+LOCAL_AUTHORITY_LINK = ' (Mac의 브라우저에서 {url} 주소를 열어도 됩니다.)'
+LOCAL_AUTHORITY_REMOTE = (' 휴대폰이나 다른 기기에서는 Mac 폴더 권한을 줄 수 없으며, 요청은 그대로 기다립니다. '
+                          '허용하면 방금 요청을 한 번만 이어서 처리합니다.')
+
+LOCAL_RESUME_TTL_SECONDS = 3600
+LOCAL_PENDING_KEY = 'local_authority_pending'
+LOCAL_PENDING_MAX = 64
+
+LOCAL_REFUSALS = {
+    'no_pending_work': '폴더 권한을 기다리는 요청이 없어 아무 작업도 실행하지 않았습니다.',
+    'wrong_owner': '이 요청은 현재 연결된 소유자의 것이 아니라 이어서 처리하지 않았습니다.',
+    'generation_changed': 'Telegram 봇 연결이 교체되어 이전 요청은 이어서 처리하지 않았습니다. 필요하면 다시 요청해 주세요.',
+    'expired_resume': ('폴더 권한을 기다리던 요청이 만료되어 이어서 처리하지 않았습니다. 폴더 권한은 추가하지 않았습니다. '
+                       '다시 요청해 주세요.'),
+    'superseded_resume': '요청이 바뀌어 이전 요청은 이어서 처리하지 않았습니다.',
+    'replayed_resume': '이미 이어서 처리한 요청이라 다시 실행하지 않았습니다.',
+    'resume_claimed': '이 요청은 이미 다른 승인 처리가 진행 중이라 다시 실행하지 않았습니다.',
+    'scope_mismatch': '허용한 권한이 요청에 필요한 권한과 달라 요청을 이어서 처리하지 않았습니다.',
+    'denied': '폴더 권한을 허용하지 않아 요청을 실행하지 않았습니다. 폴더 권한은 추가하지 않았습니다.',
+    'work_already_completed': '이 요청은 이미 끝났거나 취소되어 다시 실행하지 않았습니다.',
+    'invalid_resume': '이어서 처리할 유효한 폴더 요청을 찾지 못했습니다.',
+}
+LOCAL_REFUSAL_DEFAULT = '폴더 권한을 확인하지 못해 요청을 이어서 처리하지 않았습니다.'
+LOCAL_RESUMED_NOTICE = {
+    'read': '선택한 폴더를 읽기로 허용했습니다. 방금 요청을 이어서 처리합니다.',
+    'write': '선택한 폴더에 결과 파일을 만들도록 허용했습니다. 방금 요청을 이어서 처리합니다.',
+}
+
+
+def local_authority_guidance(key, local_url=''):
+    """The one contextual next action for a missing local authority."""
+    text = LOCAL_AUTHORITY_GUIDANCE[key] + LOCAL_AUTHORITY_NEXT_ACTION
+    if local_url:
+        text += LOCAL_AUTHORITY_LINK.format(url=local_url)
+    return text + ' ' + LOCAL_AUTHORITY_PREVIEWS[key] + LOCAL_AUTHORITY_REMOTE
+
+
+def local_refusal_text(reason):
+    return LOCAL_REFUSALS.get(reason, LOCAL_REFUSAL_DEFAULT)
+
+
+class _LocalHandle:
+    __slots__ = ('token',)
+
+    def __init__(self, token):
+        self.token = token
+
+
+class _LocalReference:
+    __slots__ = ('work_id',)
+
+    def __init__(self, work_id):
+        self.work_id = work_id
+
+
+class LocalGrantPending:
+    """Single-use, owner-bound, expiring pending state for a local authority.
+
+    Same interface and refusal vocabulary as ``PendingWorkRegistry`` so the
+    shared ``ConnectorHandoff.resume`` order applies unchanged.  Rows are
+    keyed by a hash of the handle, hold a hashed owner, and never hold a
+    path or any request content.  States: pending -> claimed -> completed;
+    pending -> expired.  A completed row answers a replay with
+    ``replayed_resume`` for its retention window.
+    """
+
+    def __init__(self, store, *, clock=time.time, token_factory=lambda: _secrets.token_urlsafe(32),
+                 retention_seconds=3600, max_records=LOCAL_PENDING_MAX):
+        self.store = store
+        self.clock = clock
+        self.token_factory = token_factory
+        self.retention_seconds = retention_seconds
+        self.max_records = max_records
+
+    @staticmethod
+    def _key(token):
+        return _hashlib.sha256(str(token).encode()).hexdigest()
+
+    def _rows(self):
+        raw = self.store.secret(LOCAL_PENDING_KEY)
+        return dict(raw) if isinstance(raw, dict) else {}
+
+    def _save(self, rows):
+        self.store.secret(LOCAL_PENDING_KEY, rows)
+
+    def _prune(self, rows, now):
+        for row in rows.values():
+            if row.get('state') == 'pending' and now >= float(row.get('expires_at', 0)):
+                row['state'], row['terminal_at'] = 'expired', now
+        for key in [k for k, row in rows.items()
+                    if row.get('state') in ('completed', 'expired')
+                    and now - float(row.get('terminal_at') or 0) >= self.retention_seconds]:
+            rows.pop(key, None)
+        while len(rows) > self.max_records:
+            oldest = min(rows, key=lambda k: float(rows[k].get('issued_at', 0)))
+            rows.pop(oldest, None)
+
+    def issue(self, owner_id, work_id, key, required_scopes, *, ttl_seconds=LOCAL_RESUME_TTL_SECONDS):
+        if key not in LOCAL_AUTHORITY_SCOPES or tuple(required_scopes) != LOCAL_AUTHORITY_SCOPES[key]:
+            raise ConnectorContractError('scope_mismatch')
+        token = self.token_factory()
+        now = self.clock()
+        with _RESUME_LOCK:
+            rows = self._rows()
+            self._prune(rows, now)
+            rows[self._key(token)] = {'owner': _owner_key(owner_id), 'work_id': str(work_id), 'key': key,
+                                      'scopes': list(required_scopes), 'issued_at': now,
+                                      'expires_at': now + float(ttl_seconds), 'state': 'pending',
+                                      'claim': None, 'terminal_at': None}
+            self._save(rows)
+        return _LocalHandle(token)
+
+    def _row(self, rows, token, owner_id, key):
+        row = rows.get(self._key(token)) if isinstance(token, str) and token else None
+        if not isinstance(row, dict) or row.get('key') != key:
+            raise ConnectorContractError('invalid_resume')
+        if not _secrets.compare_digest(str(row.get('owner', '')), _owner_key(owner_id)):
+            raise ConnectorContractError('wrong_owner')
+        return row
+
+    def claim(self, token, owner_id, key, granted_scopes, handoff_id):
+        now = self.clock()
+        claim = _hashlib.sha256(str(handoff_id).encode()).hexdigest()
+        with _RESUME_LOCK:
+            rows = self._rows()
+            self._prune(rows, now)
+            try:
+                row = self._row(rows, token, owner_id, key)
+                state = row.get('state')
+                if state == 'expired':
+                    raise ConnectorContractError('expired_resume')
+                if state == 'completed':
+                    raise ConnectorContractError('replayed_resume')
+                if tuple(granted_scopes) != tuple(row.get('scopes') or ()):
+                    raise ConnectorContractError('scope_mismatch')
+                if state == 'claimed':
+                    if row.get('claim') == claim:
+                        return _LocalReference(row['work_id'])
+                    raise ConnectorContractError('resume_claimed')
+                if state != 'pending':
+                    raise ConnectorContractError('invalid_resume')
+                row['state'], row['claim'] = 'claimed', claim
+                return _LocalReference(row['work_id'])
+            finally:
+                self._save(rows)
+
+    def complete(self, token, owner_id, key, handoff_id):
+        now = self.clock()
+        claim = _hashlib.sha256(str(handoff_id).encode()).hexdigest()
+        with _RESUME_LOCK:
+            rows = self._rows()
+            row = self._row(rows, token, owner_id, key)
+            if row.get('state') != 'claimed' or row.get('claim') != claim:
+                raise ConnectorContractError('unclaimed_resume')
+            row['state'], row['terminal_at'] = 'completed', now
+            self._save(rows)
+
+
+def local_authority_handoff(store, *, now=time.time, ttl_seconds=LOCAL_RESUME_TTL_SECONDS):
+    """The #393 handoff, parameterised for declared local authorities."""
+    return ConnectorHandoff(store, None, LocalGrantPending(store, clock=now), now=now,
+                            ttl_seconds=ttl_seconds, requirements=LOCAL_AUTHORITY_SCOPES)

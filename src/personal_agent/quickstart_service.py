@@ -43,6 +43,12 @@ from .conversation_handoff import (CONNECTOR_LABELS, JUDGMENT_YES,
                                    INTENT_MAIL_SEARCH, INTENT_NOTE_CREATE, INTENT_NOTE_LIST,
                                    INTENT_SETTINGS,
                                    INTENT_WORKSPACE_SEARCH, SUPERSEDED_WORK_ERROR)
+# PRESENCE-CAP-01 / #505: contextual local authority handoff.
+from .conversation_handoff import (LOCAL_AUTHORITY_KIND, LOCAL_AUTHORITY_LABELS, LOCAL_AUTHORITY_PREVIEWS,
+                                   LOCAL_AUTHORITY_SCOPES, LOCAL_FOLDER_READ, LOCAL_REFERENCE_READ,
+                                   LOCAL_RESULT_WRITE, LOCAL_RESUMED_NOTICE, local_authority_guidance,
+                                   local_authority_handoff, local_refusal_text)
+from . import local_folder_picker
 
 LOG=logging.getLogger('personal_agent.service')
 
@@ -256,6 +262,12 @@ class AgentService:
         self.stop=threading.Event()
         self.threads=[]
         self.local_server_port=None
+        # Contextual local authority (#505).  Always present: it declares no
+        # connector and grants nothing by existing; it only parks a file
+        # request until the owner approves one folder on this Mac.
+        self.local_handoff=local_authority_handoff(store)
+        self.folder_picker=None
+        self._local_selections={}
 
     def conversation_settings_request(self, body, owner_id='local-owner', channel='http'):
         """The only settings policy entry point for every local channel."""
@@ -593,11 +605,11 @@ class AgentService:
     def cancel_focused_work(self, previous, connector_owner):
         """Cancel only the focused Work through an existing safe boundary."""
         work_id=previous['id']
-        if previous.get('status')=='awaiting_connection' and self.connector_handoff:
-            for connector_id in self.connector_handoff.parked_for(connector_owner):
-                record=self.connector_handoff.record(connector_id)
+        if previous.get('status')=='awaiting_connection' and self.resume_index:
+            for connector_id in self.resume_index.parked_for(connector_owner):
+                record=self.resume_index.record(connector_id)
                 if record and record.get('work_id')==work_id:
-                    dropped=self.connector_handoff.supersede(connector_id=connector_id,owner_id=connector_owner)
+                    dropped=self.resume_index.supersede(connector_id=connector_id,owner_id=connector_owner)
                     cancelled=self.cancel_superseded_work(dropped,notify=False)
                     return bool(cancelled),'이전 요청을 취소했습니다. 연결이 끝나도 실행하지 않습니다.'
         if previous.get('status')=='queued':
@@ -1363,8 +1375,8 @@ class AgentService:
 
     def supersede_pending_handoffs(self, except_work_id=None, owner_id=None):
         """Drop this owner's pending resume paths because the owner corrected course."""
-        if not self.connector_handoff:return []
-        dropped=[work_id for work_id in self.connector_handoff.supersede(owner_id=owner_id) if work_id!=except_work_id]
+        if not self.resume_index:return []
+        dropped=[work_id for work_id in self.resume_index.supersede(owner_id=owner_id) if work_id!=except_work_id]
         return self.cancel_superseded_work(dropped)
 
     def _schedule_resumed_work(self, work_id):
@@ -1428,6 +1440,190 @@ class AgentService:
             db.execute("UPDATE jobs SET status='failed',error=? WHERE id=? AND status='awaiting_connection'",(text,work_id))
         self._notify_owner(owner_id,text)
         return work_id
+
+    # -- contextual local authority handoff (PRESENCE-CAP-01 / #505) ------
+    # Conversation is the trigger; the owner's Mac is the only surface that
+    # chooses and approves a folder.  The Work is parked in the same resume
+    # index, status and compare-and-set as a connector handoff, so cancel,
+    # correction, supersession and exactly-once resume behave identically.
+
+    #: Host actions that only read.  A turn that ran anything else is never
+    #: parked, because resuming it would repeat that effect.
+    LOCAL_PARK_READ_ONLY=frozenset({'find_files','read_file','list_notes','list_memory','calendar_query',
+                                   'web_search','public_page_read','weather','list_agents',
+                                   'bounded_public_research'})
+    LOCAL_PICKER_PROMPTS={LOCAL_FOLDER_READ:'AgentOS가 읽기만 할 폴더를 선택하세요.',
+                          LOCAL_REFERENCE_READ:'AgentOS가 정리할 원본으로 읽기만 할 폴더를 선택하세요.',
+                          LOCAL_RESULT_WRITE:'AgentOS가 새 결과 파일만 만들 폴더를 선택하세요.'}
+
+    @property
+    def resume_index(self):
+        """The one pending-resume index; connector and local handoffs share its rows."""
+        return self.connector_handoff or self.local_handoff
+
+    def local_authority_need(self, capabilities):
+        """The declared local authority a read-only turn found missing, or None.
+
+        Keyed on the typed tool result (``needs_setup`` + ``requires``), never
+        on the owner's wording: the model chose the tool, AgentOS decides
+        whether the grant exists.
+        """
+        need=None
+        for key,result in capabilities.memo.items():
+            try:name=json.loads(key)[0]
+            except (TypeError,ValueError,IndexError):return None
+            if capabilities.tools.get(name,{}).get('host_action') not in self.LOCAL_PARK_READ_ONLY:return None
+            if isinstance(result,dict) and result.get('needs_setup') is True and result.get('requires') in LOCAL_AUTHORITY_SCOPES:
+                need=need or result['requires']
+        return need
+
+    def workspace_authority_need(self):
+        """Which folder a save-a-result request still lacks: the read first, then the write."""
+        active=FileWorkspace(self.store).active()
+        if not active.get('references'):return LOCAL_REFERENCE_READ
+        if not active.get('workspace'):return LOCAL_RESULT_WRITE
+        return None
+
+    def local_folder_request_url(self):
+        base=self.local_settings_url()
+        return base+'#settings/files' if base else ''
+
+    def park_for_local_authority(self, job, key, notice=''):
+        """Park one Work for one local authority and say the one next action."""
+        owner_id=self.connector_owner_id(job)
+        try:
+            _handle,superseded=self.local_handoff.park(owner_id,job['id'],key,generation=self._owner_generation(owner_id))
+        except ConnectorContractError as exc:
+            raise ValueError(local_refusal_text(exc.reason)) from None
+        if superseded:
+            self.cancel_superseded_work([superseded])
+        guidance=notice+local_authority_guidance(key,self.local_folder_request_url())
+        with self.store.db() as db:
+            db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('assistant',guidance,job['channel'],time.time(),job.get('workspace_id'),job['id']))
+            db.execute("UPDATE jobs SET status='awaiting_connection',response=?,error=NULL,delivery=? WHERE id=?",(guidance,'pending' if job['chat_id'] else 'none',job['id']))
+            db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',(job['id'],'local_authority','requested',json.dumps({'authority':LOCAL_AUTHORITY_KIND[key],'scopes':list(LOCAL_AUTHORITY_SCOPES[key])}),time.time()))
+        self.update_task_card(job,'awaiting_connection')
+        return True
+
+    def _local_handoff_owner(self, row):
+        """Recover the parked owner from the hashed index row, never from the request."""
+        candidates=[]
+        telegram=self.store.config('telegram',{})
+        if isinstance(telegram,dict) and telegram.get('enabled') and telegram.get('user_id') is not None:
+            candidates.append(f"telegram:{telegram['user_id']}")
+        candidates.append('local-owner')
+        for candidate in candidates:
+            if hmac.compare_digest(_owner_key(candidate),str(row.get('owner',''))):
+                return candidate
+        return None
+
+    def _local_row(self, handoff_id):
+        if not isinstance(handoff_id,str) or not handoff_id:return None
+        for key in LOCAL_AUTHORITY_SCOPES:
+            row=self.resume_index.record(key)
+            if row and hmac.compare_digest(str(row.get('handoff_id','')),handoff_id):
+                return key,row
+        return None
+
+    def _plan_local_grant(self, key, value):
+        """Validate one folder for one declared authority; nothing is written yet."""
+        if key==LOCAL_FOLDER_READ:
+            path=folder_grants.validate(value,self.store)
+            paths=[root.get('path') for root in self.store.config('file_roots',[]) if isinstance(root,dict)]
+            if str(path) not in paths and len(paths)>=8:raise ValueError('폴더는 최대 8개까지 연결할 수 있습니다.')
+            def commit():
+                current=[root.get('path') for root in self.store.config('file_roots',[]) if isinstance(root,dict)]
+                if str(path) not in current:self.save_roots({'paths':[*current,str(path)]})
+            return path,commit
+        return FileWorkspace(self.store).plan_grant('reference' if key==LOCAL_REFERENCE_READ else 'workspace',value)
+
+    def folder_picker_available(self):
+        return bool(self.folder_picker) or local_folder_picker.available()
+
+    def local_authority_requests(self):
+        """Pending folder requests for the owner-local approval surface."""
+        requests=[]
+        for key in LOCAL_AUTHORITY_SCOPES:
+            row=self.resume_index.record(key)
+            job=self.store.job(row['work_id']) if row else None
+            if not job or job.get('status')!='awaiting_connection':continue
+            selected=self._local_selections.get(row['handoff_id'])
+            requests.append({'handoff_id':row['handoff_id'],'authority':LOCAL_AUTHORITY_KIND[key],
+                             'label':LOCAL_AUTHORITY_LABELS[key],'preview':LOCAL_AUTHORITY_PREVIEWS[key],
+                             'request':self._progress_title(job.get('message'),job['id']),
+                             'selection':{'name':Path(selected).name,'path':selected} if selected else None})
+        return {'requests':requests,'picker':self.folder_picker_available()}
+
+    def select_local_folder(self, body):
+        """Choose (not yet grant) one folder for one pending request on this Mac."""
+        found=self._local_row(body.get('handoff_id') if isinstance(body,dict) else None)
+        if not found:raise ConversationHandoffError('no_pending_work')
+        key,row=found
+        value=body.get('path')
+        if value is None:
+            picker=self.folder_picker or local_folder_picker.choose_folder
+            value=picker(self.LOCAL_PICKER_PROMPTS[key])
+            if not value:return {'state':'cancelled'}
+        path,_commit=self._plan_local_grant(key,value)
+        self._local_selections[row['handoff_id']]=str(path)
+        return {'state':'selected','authority':LOCAL_AUTHORITY_KIND[key],'name':path.name,'path':str(path),
+                'preview':LOCAL_AUTHORITY_PREVIEWS[key]}
+
+    def approve_local_folder(self, body):
+        """Grant exactly the selected folder for exactly one authority, then resume once."""
+        found=self._local_row(body.get('handoff_id') if isinstance(body,dict) else None)
+        if not found:raise ConversationHandoffError('no_pending_work')
+        key,row=found
+        selected=self._local_selections.get(row['handoff_id'])
+        if not selected:raise ValueError('먼저 이 Mac에서 폴더를 선택해 주세요.')
+        # Re-validate at approval: the folder may have changed since selection.
+        _path,commit=self._plan_local_grant(key,selected)
+        owner=self._local_handoff_owner(row)
+        if owner is None:raise ConversationHandoffError('wrong_owner')
+        job=self.store.job(row['work_id'])
+        if not job or job.get('status')!='awaiting_connection':
+            self.resume_index.supersede(connector_id=key,owner_id=owner)
+            self._local_selections.pop(row['handoff_id'],None)
+            raise ConversationHandoffError('work_already_completed')
+        def schedule(work_id):
+            # Reached only after a successful single-use claim: the grant is
+            # written, then the parked Work is re-queued by compare-and-set.
+            commit()
+            return self._schedule_resumed_work(work_id)
+        try:
+            _work_id,scheduled=self.local_handoff.resume(owner,key,LOCAL_AUTHORITY_SCOPES[key],schedule,
+                                                         generation=self._owner_generation(owner),
+                                                         abandon=self._abandon_local_work)
+        except ConversationHandoffError as exc:
+            self._notify_owner(owner,local_refusal_text(exc.reason))
+            raise
+        finally:
+            current=self.resume_index.record(key)
+            if not current or current.get('handoff_id')!=row['handoff_id']:
+                self._local_selections.pop(row['handoff_id'],None)
+        self._notify_owner(owner,LOCAL_RESUMED_NOTICE[LOCAL_AUTHORITY_KIND[key]])
+        return {'state':'approved','authority':LOCAL_AUTHORITY_KIND[key],'scheduled':scheduled,'name':Path(selected).name}
+
+    def deny_local_folder(self, body):
+        """The owner declined: nothing is granted and the parked Work fails explicitly."""
+        found=self._local_row(body.get('handoff_id') if isinstance(body,dict) else None)
+        if not found:raise ConversationHandoffError('no_pending_work')
+        key,row=found
+        self._local_selections.pop(row['handoff_id'],None)
+        self.resume_index._release(key,row.get('handoff_id'))
+        self._abandon_local_work(row['work_id'],'denied')
+        owner=self._local_handoff_owner(row)
+        if owner:self._notify_owner(owner,local_refusal_text('denied'))
+        return {'state':'denied'}
+
+    def _abandon_local_work(self, work_id, reason):
+        text=local_refusal_text(reason)
+        with self.store.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            db.execute("UPDATE jobs SET delivery='cancelled' WHERE id=? AND status='awaiting_connection' AND delivery='pending'",(work_id,))
+            db.execute("UPDATE jobs SET status='failed',error=? WHERE id=? AND status='awaiting_connection'",(text,work_id))
+        job=self.store.job(work_id)
+        if job and job.get('status')=='failed':self.update_task_card(job,'failed')
 
     # -- the browser half of the connector handoff (PA1-INT-01 / #394) ----
     def connector_callback_owner(self, connector_id):
@@ -2440,7 +2636,7 @@ class AgentService:
                 # draft claimed ("아니 4시로" is addressed to the draft), and a
                 # resumed Work re-reading its own words, which were judged
                 # the first time it ran.
-                parked=self.connector_handoff.parked_for(connector_owner) if self.connector_handoff else ()
+                parked=self.resume_index.parked_for(connector_owner) if self.resume_index else ()
                 if parked and not (decision.intent==INTENT_CALENDAR_CREATE and decision.continuation) \
                         and not self._answered_before(job['id']) \
                         and self.decision_judge.parked_work_withdrawn(prompt,parked).outcome==JUDGMENT_YES:
@@ -2547,6 +2743,11 @@ class AgentService:
                     if request:=workspace_summary_request(prompt):
                         query,title=request
                         if not title.strip():raise ValueError('결과 제목을 입력하세요.')
+                        # #505: ask for the missing read or result-write folder now,
+                        # one authority at a time, instead of failing the request.
+                        local_need=self.workspace_authority_need()
+                        if local_need:
+                            return self.park_for_local_authority(job,local_need,calendar_notice)
                         sources=FileWorkspace(self.store).find_references(query)
                         if not sources: raise ValueError('연결한 참고 폴더에서 일치하는 자료를 찾지 못했습니다.')
                         workspace_request={'title':title,'sources':sources}
@@ -2756,6 +2957,12 @@ class AgentService:
                         # response names none, so only a different name is evidence.
                         self.record_turn_provenance(job['id'],status='answered' if outcome=='succeeded' else outcome,
                                                     reported_model=model if isinstance(model,str) and model!=runtime_config.get('model') else None)
+                        # #505: a read-only turn whose file tool found no covering
+                        # folder grant is setup-required, not an answer.  The model
+                        # chose the tool; AgentOS parks the Work for one local grant.
+                        local_need=self.local_authority_need(capabilities)
+                        if local_need:
+                            return self.park_for_local_authority(job,local_need,calendar_notice)
                     if workspace_request:
                         saved=FileWorkspace(self.store).save(job['id'],workspace_request['title'],response,workspace_request['sources'])
                         response+=f"\n\n저장됨: {saved['path']} · {saved['id']}"

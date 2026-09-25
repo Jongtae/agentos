@@ -354,5 +354,26 @@ console.log(JSON.stringify({ok:true}));
         self.assertNotIn(":last-of-type", APP)
 
 
+
+class EngineAuthUi(unittest.TestCase):
+    """#571: login state, token entry and recovery are explicit and never echo the token."""
+
+    def test_recovery_is_shown_only_for_auth_failures_and_switches_are_explicit(self):
+        self.assertIn("if(task.failure_class==='auth')body.append(authRecovery(task))", APP)
+        recovery = APP[APP.index("function authRecovery("):APP.index("function turnHead(")]
+        self.assertIn("'/api/subscription-engines/login-status'", recovery)
+        self.assertIn("'/api/ai-route',{route:'direct-api'}", recovery)
+        self.assertIn("engine.login?.state!=='signed-in'", recovery, "only signed-in CLIs are offered")
+        self.assertNotIn("setInterval", recovery)
+
+    def test_token_form_is_write_only(self):
+        form = APP[APP.index("function claudeTokenForm("):APP.index("// Routes are listed once in #active-ai")]
+        self.assertIn("input.type='password'", form)
+        self.assertIn("input.autocomplete='off'", form)
+        self.assertIn("input.value=''", form)
+        self.assertNotIn("engine.credential)input.value", form)
+        self.assertNotIn("token:engine", form)
+
+
 if __name__ == "__main__":
     unittest.main()

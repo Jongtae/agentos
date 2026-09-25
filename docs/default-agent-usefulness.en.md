@@ -1,5 +1,9 @@
 # Useful default agents and delivery plan
 
+## Current adoption boundary — 2026-09-25
+
+U1/U2/U3 usefulness and evidence principles below remain requirements. The historical #358/#359/#360 delivery order is not active authority; those issue scopes were retired. Current #600 execution integration follows the [execution contract](assistant-execution-contract.en.md) and [delivery/ownership](assistant-execution-delivery.en.md). Its additional manifest complements rather than weakens the 24-case seed. Real-model and exact installed-owner qualification remain separate from fixture-backed development completion.
+
 ## Status
 
 Product/evaluation specification from GOV-USE-01 (#357). Not a runtime implementation, executed model benchmark, live operation or automatic activation. See the [owner-control contract](owner-control-contract.en.md), [architecture](personal-agentos-architecture.en.md), [PRD](../PRD.md), [roadmap](roadmap.md) and [USE-01 readiness](use-01-goal-readiness.en.md).

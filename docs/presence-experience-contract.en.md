@@ -1,5 +1,9 @@
 # Personal AgentOS Presence Experience Contract
 
+## Execution integration refinement — AGENCY #600
+
+Presence requires useful action, not only natural projection. The [execution contract](assistant-execution-contract.en.md) and [delivery/ownership](assistant-execution-delivery.en.md) add actual tool reachability, safe context composition, typed recovery and separate model/installed-owner qualification. Reuse #597/#598 and #581. #512 can run fixture baselines early; final convergence follows #608 and cannot promote missing/xfail/stale or fixture-only evidence. No authority to weaken grants, privacy guards or uncertain-effect handling follows from this refinement.
+
 ## Status and purpose
 
 This is the canonical owner-facing experience refinement for conversation, Settings, contextual capability handoff and recovery. It distills the 2026-09-23 focused [Presence and Settings UX research](research/presence-and-settings-ux.ko.md) into implementation and review rules. Experience convergence is tracked by [PRESENCE-01 #508](https://github.com/Jongtae/agentos/issues/508). On 2026-09-24 the owner selected Presence as the next product goal; governance migration is tracked by #523. This document still does not itself authorize runtime execution outside the delivery-plan contract.

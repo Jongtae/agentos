@@ -55,6 +55,9 @@ jobs:
 
           echo "full_suite=$full_suite" >> "$GITHUB_OUTPUT"
 
+      - name: Verify assistant execution specification and ownership
+        run: python3 scripts/verify_assistant_execution.py --check-spec
+
       - name: Verify canonical documents and plan integrity
         run: python3 scripts/verify_master_plan_docs.py
 

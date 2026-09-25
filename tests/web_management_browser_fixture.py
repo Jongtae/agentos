@@ -44,6 +44,8 @@ class Fixture:
     workspace_updated = {"workspace-382": 1, "workspace-other": 2}
     rich_tasks = False
     many_tasks = False
+    new_turns = 0
+    new_turn_times = []
     rich_now = time.time()
 
     RICH_RESULT = ("**서울–도쿄 항공권 비교**\n\n- 대한항공 KE703 · 왕복 412,000원 · [예약 페이지](https://example.invalid/ke703)\n- 아시아나 OZ102 · 왕복 398,000원\n\n"
@@ -157,6 +159,11 @@ class Handler(BaseHTTPRequestHandler):
                           "events_count": 0, "waits": [], "artifacts": [], "configured": {}, "observed": {},
                           "response": f"답변 {i}: 할 일 세 가지를 정리했어요.", "route": {"kind": "subscription", "engine": "codex", "status": "succeeded"}}
                          for i in range(40)]
+                rows += [{"id": f"task-new-{i}", "title": f"새 질문 {i}", "status": "succeeded", "status_kind": "finished",
+                          "started_at": Fixture.new_turn_times[i], "observed_at": Fixture.new_turn_times[i] + 1, "events_count": 0, "waits": [], "artifacts": [],
+                          "configured": {}, "observed": {}, "response": f"새 답변 {i}", "route": {"kind": "subscription", "engine": "codex", "status": "succeeded"}}
+                         for i in range(Fixture.new_turns)]
+                rows = sorted(rows, key=lambda row: row["started_at"])[-40:]
             self.send_json({"tasks": rows, "unknown_detail_message": "fixture"})
         elif path.startswith("/api/tasks/task-") and Fixture.rich_tasks and path.rsplit("/", 1)[-1] in Fixture.rich_task_rows():
             selected = Fixture.rich_task_rows(True)[path.rsplit("/", 1)[-1]]
@@ -239,6 +246,10 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/control/append-event":
             Fixture.events.append({"id": len(Fixture.events) + 1, "tool": "fixture", "status": "succeeded", "created": Fixture.events[-1]["created"] + 1, "summary": "폴링으로 추가된 이벤트", "details": {}})
             self.send_json({"events": len(Fixture.events)})
+        elif path == "/control/new-turn":
+            Fixture.new_turns += 1
+            Fixture.new_turn_times.append(time.time())
+            self.send_json({"new_turns": Fixture.new_turns})
         elif path == "/control/many-tasks":
             Fixture.rich_tasks = True
             Fixture.many_tasks = True

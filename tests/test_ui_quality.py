@@ -349,6 +349,9 @@ console.log(JSON.stringify({ok:true}));
         self.assertIn("content-visibility:auto", CSS.replace(" ", ""))
         focus = APP[APP.index("function focusTurn("):APP.index("function turnHead(")]
         self.assertIn("traceLimit=Math.max(traceLimit,ordered.length-position)", focus, "a relation jump reveals an older turn")
+        self.assertIn("grew=Boolean(previousNewest)&&newest.id!==previousNewest.id", render, "growth is detected by the newest turn, not the capped count")
+        self.assertIn("previous=ordered[view.hidden+index-1]", render, "repeat detection uses the full order")
+        self.assertNotIn(":last-of-type", APP)
 
 
 if __name__ == "__main__":

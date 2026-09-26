@@ -40,6 +40,10 @@ NON_ANSWERS = frozenset({OUTCOME_UNAVAILABLE, OUTCOME_TIMEOUT, OUTCOME_MALFORMED
 #: channel for history, Memory or documents.
 MAX_CONTEXT_CHARS = 6000
 
+#: ``DecisionConfidence.engine`` of a route that cannot answer ``choose_many``
+#: (the Jev API has no multi-selection type), so callers can say so truthfully.
+MULTI_SELECTION_UNSUPPORTED = 'multi-selection-unsupported'
+
 #: The selection candidate a provider may pick to say "none of these".
 NO_CANDIDATE = 'none-of-these'
 
@@ -164,8 +168,10 @@ class DecisionEngine:
     def choose_many(self, context, candidates, question):
         """Which of ``candidates`` (zero or more) answer ``question``?
         -> SelectionSetDecision.  An engine that cannot answer a multi-selection
-        says so: the default is an explicit non-answer, never a guess."""
-        return SelectionSetDecision(OUTCOME_UNAVAILABLE, candidates=candidates)
+        says so: the default is an explicit non-answer marked
+        ``MULTI_SELECTION_UNSUPPORTED``, never a guess."""
+        return SelectionSetDecision(OUTCOME_UNAVAILABLE, candidates=candidates,
+                                    confidence=DecisionConfidence(engine=MULTI_SELECTION_UNSUPPORTED))
 
 
 class UnavailableDecisionEngine(DecisionEngine):

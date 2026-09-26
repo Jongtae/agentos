@@ -273,6 +273,8 @@ UNRECORDED_PROVENANCE='unrecorded'
 PROVENANCE_WINDOW[OWNER_CONVERSATION]='owner'
 PROVENANCE_WINDOW[UNRECORDED_PROVENANCE]='history'
 WORK_SOURCES_KEY='work_source_provenance'
+#: #605 P3: per-Work lookup state shared by every process serving the Work.
+LOOKUP_STATE_KEY='work_lookup_state'
 WORK_SOURCES_LIMIT=400
 
 def base_label(label):
@@ -388,6 +390,7 @@ PUBLIC_TASK_NO_JUDGMENT={
  'uncertain':'민감 정보 판단이 이번 요청 내용에 대해 확실한 답을 주지 않아, 요청에 적힌 내용을 공개 조회에 보내지 않았습니다.',
  'budget':'이 작업에서 민감 정보 판단 횟수 한도에 도달해, 요청에 적힌 새 내용을 공개 조회에 보내지 않았습니다. 새 요청으로 보내 주세요.',
  'bridge':'구독 CLI의 도구 호출에서는 아직 민감 정보 판단을 사용할 수 없어, 이번 요청에 적힌 내용을 공개 조회에 보내지 않았습니다.',
+ 'unsupported':'지금 설정된 대화 해석 경로는 이 민감 정보 판단을 지원하지 않아, 이번 요청에 적힌 내용을 공개 조회에 보내지 않았습니다. 설정 › 대화 해석에서 다른 경로를 고를 수 있습니다.',
 }
 #: True for search and research only: an owner-typed `/search` string is sent
 #: without the judgment (#605 D1).  Weather has no such path.
@@ -426,6 +429,15 @@ LOOKUP_JUDGED_TERMS=12
 #: At most this many sensitivity judgments are asked per Work (#605 P2-4);
 #: beyond it current-message terms are withheld.
 LOOKUP_JUDGMENTS_PER_WORK=6
+#: #605 P1-A: the only non-whitespace characters a clean-context separator may
+#: keep (search operators and ordinary punctuation), per separator and in total.
+LOOKUP_SEPARATOR_CHARS=frozenset('.-+#:/"\'(),&')
+#: Before the first and after the last kept token only an opening/closing
+#: quote or parenthesis may stay.
+LOOKUP_LEADING_CHARS=frozenset('"\'(')
+LOOKUP_TRAILING_CHARS=frozenset('"\')')
+LOOKUP_SEPARATOR_MAX=3
+LOOKUP_SEPARATOR_TOTAL=12
 _DIGIT_SEPARATOR=re.compile(r'(?<=\d)[\W_]+(?=\d)')
 
 def lookup_norm(text):
@@ -480,7 +492,7 @@ def _lookup_match(word,words):
   if len(permitted)>=2 and word.startswith(permitted) and (longest is None or len(permitted)>len(longest)):longest=permitted
  return longest
 
-def select_lookup_words(value, permitted, excluded, *, owner_worded, private, cap=LOOKUP_WORD_CAP):
+def select_lookup_words(value, permitted, excluded, *, owner_worded, private, cap=LOOKUP_WORD_CAP, blocked=None):
  """AgentOS's selection of the outbound words of one lookup value.
 
  ``permitted`` is the permitted text in chronological order (the current
@@ -498,12 +510,12 @@ def select_lookup_words(value, permitted, excluded, *, owner_worded, private, ca
  excluded_words=[word for text in excluded for word in lookup_words(text)]
  excluded_runs=value_digit_runs(excluded)
  kept=[];seen=set();dropped=0
- # Tokens of the value as written (spans index the original string, so a
- # clean-context lookup can keep its punctuation, #605 P2-1); each token is
- # compared after NFKC and casefolding.
- for match in _MEMORY_WORD.finditer(str(value or '')):
-  shown=unicodedata.normalize('NFKC',match.group(0));word=shown.casefold()
-  if (excluded_words and owner_said(word,excluded_words)) or _digits_inside(word,excluded_runs):
+ # Tokens of the value after NFKC (spans index that string, which
+ # `rebuild_lookup_value` reads the same way, #605 P2-1/P1-A); compared
+ # casefolded.  ``blocked`` is the durable per-Work withheld set (P2-4/P3).
+ for match in _MEMORY_WORD.finditer(unicodedata.normalize('NFKC',str(value or ''))):
+  shown=match.group(0);word=shown.casefold()
+  if (excluded_words and owner_said(word,excluded_words)) or _digits_inside(word,excluded_runs) or (blocked and blocked(word)):
    dropped+=1;continue
   origin=None;send=shown
   for index,words in enumerate(indexed):
@@ -521,36 +533,101 @@ def select_lookup_words(value, permitted, excluded, *, owner_worded, private, ca
  return kept,dropped
 
 def rebuild_lookup_value(value, kept):
- """``value`` as written with only the tokens not in ``kept`` removed (#605 P2-1).
+ """The worker's string with only kept tokens and admissible separators (#605 P2-1, P1-A, P2-B).
 
- Punctuation between kept tokens stays (``Python 3.13``, ``C++20``,
- ``site:cppreference.com``, ``node.js -deno``, ``₩50,000``).  A separator next
- to a removed token becomes one space if it held whitespace, otherwise
- nothing.  A kept token is replaced by its send form (a truncation, N1).
+ ``value`` is read after NFKC.  Kept tokens are emitted in their send form
+ (a truncation, N1).  Separators follow LOOKUP_SEPARATOR_CHARS: whitespace
+ (collapsed to one space) and a small ASCII operator allowlist, at most
+ LOOKUP_SEPARATOR_MAX operator characters per separator and
+ LOOKUP_SEPARATOR_TOTAL in the whole value.  Every other character --
+ format/private-use/unassigned (Cf/Co/Cn, e.g. TAG or zero-width
+ characters), symbols (So/Sk/Sm/Sc) and non-allowlisted punctuation -- is
+ dropped.  Before the first and after the last kept token only an
+ opening/closing quote or parenthesis may stay.  Two tokens are never glued: when
+ a removed token or a dropped separator stood between two kept tokens, one
+ space separates them, keeping only the punctuation attached to the kept
+ sides (``-deno``, ``"강좌"``).
  """
- value=str(value or '');forms={row['span']:row['word'] for row in kept}
+ value=unicodedata.normalize('NFKC',str(value or ''))
+ forms={row['span']:row['word'] for row in kept}
  tokens=[match.span() for match in _MEMORY_WORD.finditer(value)]
- if all(span in forms and forms[span]==unicodedata.normalize('NFKC',value[span[0]:span[1]]) for span in tokens):
-  return value.strip()
- out=[];position=0;previous_removed=False
- for index,span in enumerate(tokens):
-  gap=value[position:span[0]];removed=span not in forms
-  if removed or previous_removed:gap=_trim_gap(gap,keep_left=not previous_removed,keep_right=not removed)
-  out.append(gap)
-  if not removed:out.append(forms[span])
-  position=span[1];previous_removed=removed
- tail=value[position:]
- out.append(_trim_gap(tail,keep_left=False,keep_right=False) if previous_removed else tail)
- return re.sub(r'\s{2,}',' ',''.join(out)).strip()
+ kept_index=[index for index,span in enumerate(tokens) if span in forms]
+ if not kept_index:return ''
+ gaps=[value[(tokens[index-1][1] if index else 0):tokens[index][0]] for index in range(len(tokens))]
+ tail=value[tokens[-1][1]:]
+ budget=[LOOKUP_SEPARATOR_TOTAL]
+ def clean(gap,inner,allowed=LOOKUP_SEPARATOR_CHARS):
+  out=[];used=0
+  for ch in gap:
+   if ch.isspace():
+    if not out or out[-1]!=' ':out.append(' ')
+   elif ch in allowed and used<LOOKUP_SEPARATOR_MAX and budget[0]>0:
+    out.append(ch);used+=1;budget[0]-=1
+  text=''.join(out)
+  # Never glue two tokens: an emptied inner separator becomes one space.
+  return text if text or not inner else ' '
+ first,last=kept_index[0],kept_index[-1]
+ parts=[clean(gaps[first] if first==0 else _right_attached(gaps[first]),False,LOOKUP_LEADING_CHARS)]
+ for a,b in zip(kept_index,kept_index[1:]):
+  parts.append(forms[tokens[a]])
+  sep=gaps[b] if b==a+1 else _left_attached(gaps[a+1])+' '+_right_attached(gaps[b])
+  parts.append(clean(sep,True))
+ parts.append(forms[tokens[last]])
+ parts.append(clean(tail if last==len(tokens)-1 else _left_attached(gaps[last+1]),False,LOOKUP_TRAILING_CHARS))
+ return re.sub(r' {2,}',' ',''.join(parts)).strip()
 
-def _trim_gap(gap,*,keep_left,keep_right):
- """A separator next to a removed token: punctuation attached to the removed
- side goes with it (up to the whitespace); punctuation attached to a kept side
- stays (``-deno`` keeps its ``-``, ``"강좌"`` its quotes)."""
+def _left_attached(gap):
+ """Punctuation attached to the token on the left of ``gap`` (up to its first whitespace)."""
  spaces=[index for index,ch in enumerate(gap) if ch.isspace()]
- if not spaces:return gap if keep_left and keep_right else ''
- left,right=gap[:spaces[0]],gap[spaces[-1]+1:]
- return (left if keep_left else '')+' '+(right if keep_right else '')
+ return gap[:spaces[0]] if spaces else ''
+
+def _right_attached(gap):
+ """Punctuation attached to the token on the right of ``gap`` (after its last whitespace)."""
+ spaces=[index for index,ch in enumerate(gap) if ch.isspace()]
+ return gap[spaces[-1]+1:] if spaces else ''
+
+def lookup_text_violations(text, excluded, blocked=None):
+ """Tokens of a FINAL outbound string that match a withheld or written value (#605 P1-A, P2-B).
+
+ Re-tokenises ``text`` and checks every token against the excluded values
+ (word match, and digit runs as in N4/R7) and ``blocked`` (the durable
+ per-Work withheld set).  The digit runs of the whole string with the
+ separators between digit groups removed are checked too, so a value split
+ or glued across separators (``M123 456 78``) is caught.  Returns
+ ``(bad tokens, digits_joined)``; ``digits_joined`` means only a cross-token
+ digit run matched.
+ """
+ excluded_words=[word for value in excluded for word in lookup_words(value)]
+ runs=value_digit_runs(excluded)
+ bad=set()
+ for word in lookup_words(text):
+  if (excluded_words and owner_said(word,excluded_words)) or _digits_inside(word,runs) or (blocked and blocked(word)):
+   bad.add(word)
+ joined=value_digit_runs([text])
+ digits_joined=any(len(value)>=MIN_PARTIAL_DIGITS and value in run for run in joined for value in runs) \
+     or any(len(run)>=MIN_PARTIAL_DIGITS and run in value for run in joined for value in runs) \
+     or bool(blocked and any(blocked(run) for run in joined))
+ return bad,digits_joined
+
+def finalize_lookup_text(value, kept, excluded, blocked=None, *, joined=False):
+ """Build the outbound string and re-check it; withhold whatever still matches.
+
+ ``joined`` builds the string from the kept words joined by single spaces (a
+ private context); otherwise ``rebuild_lookup_value``.  A token that matches
+ is removed and the string rebuilt; when only a cross-token digit run
+ matches, every digit-bearing token is removed.  Returns ``(text, removed)``;
+ ``text`` is '' when nothing admissible remains.
+ """
+ rows=list(kept);removed=0
+ for _ in range(3):
+  text=' '.join(row['word'] for row in rows) if joined else rebuild_lookup_value(value,rows)
+  if not text:return '',removed
+  bad,digits_joined=lookup_text_violations(text,excluded,blocked)
+  if not bad and not digits_joined:return text,removed
+  keep=[row for row in rows if lookup_norm(row['word']) not in bad
+        and not (digits_joined and _MEMORY_DIGITS.search(row['word']))]
+  removed+=len(rows)-len(keep);rows=keep
+ return '',removed+len(rows)
 
 def explicit_search_query(message):
  """The query of an owner-typed ``/search <query>`` message, or None (#605 D1)."""
@@ -872,7 +949,7 @@ class Capabilities:
   if key in state['cache']:return state['cache'][key]
   if self.lookup_sensitivity is None:
    result=(None,'unavailable')
-  elif state['calls']>=LOOKUP_JUDGMENTS_PER_WORK:
+  elif not self._claim_state('judgment',limit=LOOKUP_JUDGMENTS_PER_WORK):
    return (None,'budget')
   else:
    state['calls']+=1
@@ -885,9 +962,84 @@ class Capabilities:
          and all(isinstance(index,int) and not isinstance(index,bool) and 0<=index<len(terms) for index in value)):
     result=(frozenset(lookup_norm(terms[index]) for index in value),'')
    else:
-    result=(None,'bridge' if source=='bridge-cli-route' else 'uncertain' if source=='uncertain' else 'unavailable')
+    result=(None,{'bridge-cli-route':'bridge','uncertain':'uncertain','route-unsupported':'unsupported'}.get(source,'unavailable'))
   state['cache'][key]=result
   return result
+ # -- durable per-Work lookup state (#605 P3) ---------------------------------
+ # The one explicit `/search`, the judgment count and the withheld set hold
+ # per Work across the CLI host preflight, the bridge and a restarted bridge.
+ # They live in one config row (`work_lookup_state`, bounded like
+ # `work_source_provenance`) updated in one immediate transaction, so two
+ # processes cannot both claim.  Not tool events: these are not tools the
+ # Work ran, and the owner's task views list tool events.  A withheld value
+ # is stored only as keyed digests (HMAC with a local store secret) of its
+ # normalised form and digit runs, never as text.
+ def _state_key(self):
+  import secrets as _secrets
+  if 'key' not in self.lookup_state:
+   try:self.lookup_state['key']=self.store.secret('lookup_state_key',create=lambda:_secrets.token_hex(32)).encode()
+   except Exception:self.lookup_state['key']=b''
+  return self.lookup_state['key']
+ def _digest(self,text):
+  import hashlib,hmac
+  return hmac.new(self._state_key(),str(text).encode(),hashlib.sha256).hexdigest()
+ def _update_state(self,change):
+  """Apply ``change(row) -> result`` to this Work's durable row atomically."""
+  with self.store.db() as db:
+   db.execute('BEGIN IMMEDIATE')
+   found=db.execute('SELECT value FROM config WHERE key=?',(LOOKUP_STATE_KEY,)).fetchone()
+   try:rows=json.loads(found[0]) if found else {}
+   except (TypeError,ValueError):rows={}
+   rows=rows if isinstance(rows,dict) else {}
+   row=rows.pop(self.job_id,None)
+   row=row if isinstance(row,dict) else {}
+   result=change(row)
+   rows[self.job_id]=row
+   while len(rows)>WORK_SOURCES_LIMIT:rows.pop(next(iter(rows)))
+   db.execute('INSERT INTO config VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+              (LOOKUP_STATE_KEY,json.dumps(rows)))
+  return result
+ def _claim_state(self,kind,limit=1):
+  """Atomically count one ``kind`` use unless the Work already has ``limit``."""
+  def change(row):
+   used=int(row.get(kind) or 0)
+   if used>=limit:return False
+   row[kind]=used+1;return True
+  try:return self._update_state(change)
+  except Exception:return False  # fail closed: no explicit exemption, no further judgment
+ def _record_withheld(self,words):
+  """Durably remember withheld values as keyed digests only."""
+  entries=[]
+  for word in words:
+   norm=lookup_norm(word);runs=value_digit_runs([word])
+   subs={run[i:j] for run in runs for i in range(len(run)) for j in range(i+MIN_PARTIAL_DIGITS,len(run)+1)}|set(runs)
+   entries.append({'term':self._digest(norm),'runs':sorted(self._digest(sub) for sub in subs),
+                   'full':[[len(run),self._digest(run)] for run in runs]})
+  if not entries:return
+  def change(row):
+   row['withheld']=[*(row.get('withheld') or []),*entries][-64:]
+  try:self._update_state(change)
+  except Exception:pass
+ def _withheld_check(self):
+  """A predicate: does a normalised word (or digit run) match the Work's durable withheld set?"""
+  terms,runs,full=set(),set(),[]
+  try:
+   rows=self.store.config(LOOKUP_STATE_KEY,{})
+   row=rows.get(self.job_id) if isinstance(rows,dict) else None
+   for data in (row or {}).get('withheld') or []:
+    if not isinstance(data,dict):continue
+    terms.add(data.get('term'));runs.update(data.get('runs') or ());full.extend(data.get('full') or ())
+  except Exception:pass
+  if not terms:return None
+  def blocked(word):
+   word=lookup_norm(word)
+   if self._digest(word) in terms:return True
+   for run in _MEMORY_DIGITS.findall(word):
+    if self._digest(run) in runs:return True
+    for length,digest in full:
+     if isinstance(length,int) and any(self._digest(run[i:i+length])==digest for i in range(len(run)-length+1)):return True
+   return False
+  return blocked
  def _compose(self,fields,sources,excluded,*,private):
   """Compose the outbound words of one lookup's fields with ONE judgment.
 
@@ -906,10 +1058,12 @@ class Capabilities:
   keeps the worker's string, with only withheld tokens removed (P2-1).
   """
   excluded=[*excluded,*self.lookup_state['withheld']]
+  blocked=self._withheld_check()
   rows={};dropped={};spec={}
   for name,value,owner_worded,field_private in fields:
    spec[name]=(value,field_private)
-   rows[name],dropped[name]=select_lookup_words(value,sources['permitted'],excluded,owner_worded=owner_worded,private=field_private)
+   rows[name],dropped[name]=select_lookup_words(value,sources['permitted'],excluded,owner_worded=owner_worded,
+                                               private=field_private,blocked=blocked)
   current=sources.get('current')
   if current is None:current=sources['permitted'][-1] if sources['permitted'] else ''
   current_words=lookup_words(current)
@@ -933,6 +1087,7 @@ class Capabilities:
     # Sticky for this Work: a later lookup cannot resample the judgment by
     # reordering or re-adding the same term (P2-4).
     self.lookup_state['withheld'].extend(row['word'] for row in hit)
+    self._record_withheld([row['word'] for row in hit])
    # Terms beyond the judged cap are never sent.
    withheld|={id(row) for _,row in beyond}
    for name in rows:
@@ -941,7 +1096,11 @@ class Capabilities:
   texts={}
   for name in rows:
    value,field_private=spec[name]
-   texts[name]=' '.join(row['word'] for row in rows[name]) if field_private else rebuild_lookup_value(value,rows[name]) if rows[name] else ''
+   # P1-A/P2-B: the FINAL string is re-checked against every written or
+   # withheld value; whatever still matches is withheld.
+   texts[name],removed=finalize_lookup_text(value,rows[name],[*excluded,*self.lookup_state['withheld']],
+                                            self._withheld_check(),joined=field_private)
+   dropped[name]+=removed
   return texts,dropped,reason
  def _claim_attempt(self,tool_id,action):
   """Spend this Work's one attempt at ``action``, atomically (#605 F3, R8).
@@ -1013,6 +1172,9 @@ class Capabilities:
    if action in ('web_search','bounded_public_research') and not self.lookup_state['explicit_spent']:
     typed=explicit_search_query(sources.get('current'))
     if typed and ' '.join(str(args.get('query') or '').split())==' '.join(typed.split()):explicit=typed
+   if explicit is not None and not self._claim_state('explicit-search'):
+    # Once per Work across processes (P3): already used by another process.
+    self.lookup_state['explicit_spent']=True;explicit=None
    if explicit is not None:
     # #605 D1: the owner typed `/search <query>`; that exact string is sent
     # for this one lookup without the sensitivity judgment.  Saved private
@@ -1020,7 +1182,8 @@ class Capabilities:
     # this path (the proposal must equal the typed string).
     self.lookup_state['explicit_spent']=True
     kept,dropped=select_lookup_words(explicit,[explicit],excluded,owner_worded=False,private=False)
-    query=rebuild_lookup_value(explicit,kept) if kept else ''
+    # The same separator policy and final re-check as any lookup (P1-A/P2-B).
+    query,removed=finalize_lookup_text(explicit,kept,excluded);dropped+=removed
     if not query:raise ValueError(PUBLIC_TASK_UNRESOLVED)
     plan={'tool':'web_search' if action=='web_search' else action,'query':query}
     if action=='bounded_public_research':plan['mode']=args.get('mode')

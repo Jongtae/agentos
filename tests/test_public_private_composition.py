@@ -701,12 +701,16 @@ class RoundFiveFindings(unittest.TestCase):
 
     # -- P2-1: a clean-context query keeps its punctuation
     def test_p2_1_clean_queries_keep_the_worker_string(self):
-        for query in ('Python 3.13 release notes', '"C++20" modules site:cppreference.com', 'node.js -deno',
-                      '₩50,000 이하 이어폰'):
+        # Exactly what is sent under the P1-A separator policy: the ASCII
+        # operator allowlist survives; the currency symbol does not.
+        for query, sent in (('Python 3.13 release notes', 'Python 3.13 release notes'),
+                            ('"C++20" modules site:cppreference.com', '"C++20" modules site:cppreference.com'),
+                            ('node.js -deno', 'node.js -deno'),
+                            ('₩50,000 이하 이어폰', '50,000 이하 이어폰')):
             with self.subTest(query):
                 self.wire.plans.clear()
                 self.caps((), ['검색해줘']).execute('web_search', {'query': query})
-                self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': query}])
+                self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': sent}])
 
     def test_p2_1_only_withheld_spans_are_removed(self):
         self.caps((), [f'{SECRET_ID} 가진 사람 node.js 강좌 검색해줘'],
@@ -770,6 +774,119 @@ class RoundFiveFindings(unittest.TestCase):
         saved = self.caps(('owner-memory',), [f'/search {SECRET_ID} 병원'], [SECRET_ID], judge=None)
         saved.execute('web_search', {'query': f'{SECRET_ID} 병원'})
         self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}])
+
+
+TAG_ID = ''.join(chr(0xE0000 + ord(ch)) for ch in SECRET_ID)  # invisible Unicode TAG characters
+
+
+class RoundSixFindings(unittest.TestCase):
+    """PR #622 re-review @ 81596b5: P1-A separator channel, P2-B glue, P3 durable state."""
+
+    MESSAGE = f'여권번호 {SECRET_ID} 기억해 둬. 그리고 병원 검색해줘'
+    SAVED = [f'여권번호 {SECRET_ID}']
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        self.path = Path(tmp.name) / 'state'
+        self.store = QuickStore(self.path)
+        self.wire = Wire()
+
+    def caps(self, permitted=None, excluded=None, judge=judged_ordinary, work=None, **kwargs):
+        permitted = [self.MESSAGE] if permitted is None else permitted
+        excluded = self.SAVED if excluded is None else excluded
+
+        def sources():
+            return {'permitted': list(permitted), 'excluded': list(excluded), 'current': permitted[-1]}
+        return Capabilities(self.store, None, CFG, '', work or next_work(), lambda *e: None, network=self.wire,
+                            lookup_sources=sources, lookup_sensitivity=judge, **kwargs)
+
+    # -- P1-A: only admissible separators leave; the final string is re-checked
+    def test_p1_a_separator_channel_exploits_are_closed(self):
+        cases = [
+            ('invisible TAG characters after a kept word', {}, 'web_search', {'query': '병원 ' + TAG_ID},
+             {'tool': 'web_search', 'query': '병원'}),
+            ('TAG characters with no judgment and an earlier permitted word',
+             {'permitted': ['약국 알려줘', self.MESSAGE], 'judge': None}, 'web_search', {'query': '약국 ' + TAG_ID},
+             {'tool': 'web_search', 'query': '약국'}),
+            ('a symbol run', {}, 'web_search', {'query': '병원 !@#$%^&*('}, {'tool': 'web_search', 'query': '병원'}),
+            ('zero-width and format characters between words', {}, 'web_search',
+             {'query': '병\u200b원\u2060 \u200d\ufeff검색'}, {'tool': 'web_search', 'query': '병 원 검색'}),
+            ('private-use and unassigned characters', {}, 'web_search', {'query': '병원 \ue000\U000f0000\U0001fffe'},
+             {'tool': 'web_search', 'query': '병원'}),
+            ('weather city with TAG characters', {}, 'weather', {'city': 'Seoul' + TAG_ID, 'country': 'KR'},
+             {'tool': 'weather', 'city': 'Seoul', 'country': 'KR'}),
+        ]
+        for case, options, action, args, sent in cases:
+            with self.subTest(case):
+                self.wire.plans.clear()
+                self.caps(**options).execute(action, args)
+                self.assertEqual(self.wire.plans, [sent])
+                self.assertTrue(all(ord(ch) < 0xE0000 for ch in json.dumps(self.wire.plans, ensure_ascii=False)))
+
+    def test_p1_a_separators_are_capped_per_separator_and_in_total(self):
+        self.caps(permitted=['검색해줘']).execute('web_search', {'query': 'a.-+#:/b c(),&"d ' + ' '.join('e' * 1 + '.' + 'f' for _ in range(10))})
+        sent = self.wire.plans[0]['query']
+        self.assertIn('a.-+b', sent, 'at most 3 operator characters per separator')
+        self.assertLessEqual(sum(1 for ch in sent if not ch.isalnum() and not ch.isspace()), 12)
+
+    # -- P2-B: removing a word never glues its neighbours
+    def test_p2_b_removal_does_not_glue_neighbours(self):
+        self.caps().execute('web_search', {'query': '병원 M123-여권번호-456-여권번호-78'})
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}])
+        self.wire.plans.clear()
+        self.caps(permitted=['이혼 변호사 알려줘'], excluded=[],
+                  judge=ConversationJudgments(flagging('zz')).lookup_term_sensitivity).execute(
+            'web_search', {'query': '이-zz-혼 변호사'})
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '이 혼 변호사'}])
+
+    def test_p2_b_the_explicit_search_string_is_rechecked_too(self):
+        typed = '병원 M123-여권번호-456-여권번호-78'
+        self.caps(permitted=[f'/search {typed}'], judge=None).execute('web_search', {'query': typed})
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}])
+
+    # -- P3: explicit use, judgment cap and withheld set are durable per Work
+    def test_p3_state_holds_across_two_processes_of_the_same_work(self):
+        typed = '성남 병원'
+        first = self.caps(permitted=[f'/search {typed}'], judge=None, work='w-explicit')
+        first.execute('web_search', {'query': typed})
+        second = self.caps(permitted=[f'/search {typed}'], judge=None, work='w-explicit')  # another bridge
+        with self.assertRaises(ValueError):
+            second.execute('web_search', {'query': typed})
+        self.assertEqual(len(self.wire.plans), 1, 'D1 is once per Work, not per process')
+
+        engine = flagging()
+        a = self.caps(permitted=['성남 약국 찾아줘'], excluded=[], work='w-cap',
+                      judge=ConversationJudgments(engine).lookup_term_sensitivity)
+        for index in range(LOOKUP_JUDGMENTS_PER_WORK):
+            a.execute('web_search', {'query': f'성남 약국 a{index}'})
+        b = self.caps(permitted=['성남 약국 찾아줘'], excluded=[], work='w-cap',
+                      judge=ConversationJudgments(engine).lookup_term_sensitivity)
+        with self.assertRaises(ValueError) as raised:
+            b.execute('web_search', {'query': '성남 약국 b0'})
+        self.assertIn('한도', str(raised.exception))
+        self.assertEqual(len(sensitivity_asked(engine)), LOOKUP_JUDGMENTS_PER_WORK)
+
+        self.wire.plans.clear()
+        flag = self.caps(permitted=[f'{SECRET_ID} 병원 찾아줘'], excluded=[], work='w-sticky',
+                         judge=ConversationJudgments(flagging(SECRET_ID)).lookup_term_sensitivity)
+        flag.execute('web_search', {'query': f'{SECRET_ID} 병원'})
+        miss = self.caps(permitted=[f'{SECRET_ID} 병원 찾아줘'], excluded=[], work='w-sticky',
+                         judge=ConversationJudgments(flagging()).lookup_term_sensitivity)  # a judge that misses
+        miss.execute('web_search', {'query': f'병원 근처 {SECRET_ID[1:5]}-{SECRET_ID[5:]}'})
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'},
+                                           {'tool': 'web_search', 'query': '병원 근처'}])
+        stored = json.dumps(self.store.config('work_lookup_state', {}))
+        self.assertIn('w-sticky', stored)
+        self.assertNotIn('12345678', stored, 'only keyed digests are stored')
+        self.assertNotIn('1234', stored)
+
+    def test_a_route_without_multi_selection_says_so(self):
+        from personal_agent.decision_adapters import JevDecisionEngine
+        jev = ConversationJudgments(JevDecisionEngine(lambda: 'key')).lookup_term_sensitivity
+        with self.assertRaises(ValueError) as raised:
+            self.caps(permitted=['성남 병원 찾아줘'], excluded=[], judge=jev).execute('web_search', {'query': '성남 병원'})
+        self.assertTrue(str(raised.exception).startswith(PUBLIC_TASK_NO_JUDGMENT['unsupported']))
+        self.assertEqual(self.wire.plans, [])
 
 
 class NoEngineEndToEnd(unittest.TestCase):

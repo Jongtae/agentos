@@ -221,7 +221,7 @@ class TelegramChannel:
 import re
 import time
 
-from .decision import OUTCOME_DECIDED, OUTCOME_MALFORMED, DecisionContext, DecisionPolicy, UnavailableDecisionEngine
+from .decision import MULTI_SELECTION_UNSUPPORTED, OUTCOME_DECIDED, OUTCOME_MALFORMED, DecisionContext, DecisionPolicy, UnavailableDecisionEngine
 
 INTENT_GREETING = 'greeting'
 INTENT_KNOWLEDGE = 'personal-knowledge'
@@ -655,6 +655,8 @@ class ConversationJudgments:
         if chosen is None:
             # `source` tells AgentOS's refusal text apart: the engine could not
             # answer at all, or it answered without enough confidence.
+            if decision.confidence.engine == MULTI_SELECTION_UNSUPPORTED:
+                return Judgment(JUDGMENT_UNAVAILABLE, source='route-unsupported')
             return Judgment(JUDGMENT_UNAVAILABLE,
                             source='uncertain' if decision.outcome in (OUTCOME_DECIDED, OUTCOME_MALFORMED)
                             else decision.outcome)

@@ -1,5 +1,9 @@
 # Goal-directed assistant execution contract
 
+## Pilot posture — #653 (2026-09-26)
+
+The [Secretary Agency Contract](secretary-agency-contract.en.md) governs the active program. Its pilot posture removes the per-request lookup sensitivity judgment, the `uncertain` fail-closed path, the `/search` explicit-query requirement and per-provider gating described in the lookup/egress sections below (implemented by SEC-PILOT-01 #654). Deterministic redaction of saved private values, the document-sharing grant and Work/Event/Evidence semantics remain. The text below is preserved for traceability and returns to force only if a hardening program is activated.
+
 ## Current-context adoption — #625 (2026-09-26)
 
 For the selected single-owner current-state scope, read [Current context contract](current-context-contract.en.md) and [Implementer playbook](current-context-implementation.en.md). This selectively adopts #383 observation/time/current-state principles, not background Attention or multi-person collaboration. The plan is existing #605 → #606 → #607 → #626 input/time → #627 current-state consumption → #608/#512/#513; #625 is the immediate documentation adoption. Existing #616 and other independently directed work are preserved. Current-context claims remain unimplemented until those children deliver. Earlier blanket #383 deferrals do not exclude these two explicitly selected slices. #612 unit-test-first verification and concrete reuse still govern; no extra evaluator, graph platform or per-tick model calls. The new source-time, retention, inference/disclosure defaults and migration/test details are canonical in the two linked documents rather than duplicated here.

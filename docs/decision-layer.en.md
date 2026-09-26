@@ -1,5 +1,9 @@
 # Provider-independent Decision Layer
 
+## Pilot posture — #653 (2026-09-26)
+
+Under SECRETARY-01 the DecisionEngine is the gate that lets the assistant choose and change paths (provider, site, query, recovery, goal-reached judgment), not a request-time blocker. The `lookup_term_sensitivity` judgment and its qualification case are removed by SEC-PILOT-01 #654; SEC-LOOP-01 #657 adds a `goal_reached` judgment. See the [Secretary Agency Contract](secretary-agency-contract.en.md).
+
 ## Status and purpose
 
 This document defines the intended **AgentOS-owned decision boundary** for bounded judgment such as Attention relevance, capability/runtime selection, result scoring, and “do we need another reasoning/evidence step?” routing.

@@ -110,21 +110,42 @@ No-model local evidence, recorded 2026-09-26 with a fake store only:
 
 **#616 strict-isolated profile record ([#616](https://github.com/Jongtae/agentos/issues/616), AX-15).** `strict-isolated` is a separate host-CLI profile in `bounded_execution.CLI_PROFILES`. It offers the same actions through the same stdio bridge as `trusted-local`. Only the CLI launch differs:
 
-- **Codex (tested 0.153.4, macOS).** An official permissions profile, `agentos-strict-isolated`, replaces `--sandbox read-only`. It gives filesystem `:minimal` and the turn directory read access only, and network is disabled. Apps, multi-agent and the provider-hosted web search are disabled. The two must never be combined: with `--sandbox read-only` also present, Codex applies the legacy policy and the store is readable again.
-- **Claude Code (tested 2.1.280, macOS).** `--tools ""` removes every built-in tool, `--restricted` stops settings files from adding one back, and `--allowedTools` pre-approves only the profile's AgentOS MCP tools.
+- **Codex (tested 0.153.4, macOS).** The launch combines four things:
+  - The official permissions profile `agentos-strict-isolated` replaces `--sandbox read-only`. It gives read access to filesystem `:minimal` and the turn directory only, and network is disabled. The two must never be combined: with `--sandbox read-only` also present, Codex applies the legacy policy.
+  - `--ignore-rules`. Without it, an "always allow" `$CODEX_HOME/rules` exec rule ran `cat` outside the sandbox and read the store (independent review P1, reproduced).
+  - The DecisionEngine route's official instruction overrides (`CODEX_DECISION_CONFIG`, #580).
+  - One `--disable` for every listed feature outside the #580 allowlist plus `unified_exec`. That flag cannot be disabled on 0.153.4, but with `shell_tool` disabled no command tool is offered. The plan is computed and re-listed at qualification, the check fails closed, and the plan is stored with the record.
+  
+  The model is then offered no shell, file, image or web tool: only the AgentOS bridge, the MCP resource helpers and `request_user_input`.
+- **Claude Code (tested 2.1.280, macOS).**
+  - `--tools ""` removes every built-in tool.
+  - `--restricted` stops settings files from adding one back.
+  - `--allowedTools` pre-approves only the profile's five AgentOS MCP tools. On trusted-local those tools are unreachable under `-p`. Under strict they are callable, so the CLI's effective egress-capable authority is larger than on trusted-local. It stays governed by `Capabilities.execute` and the provenance taint.
 - **Choice and qualification.** The owner chooses the profile (`/api/subscription-engines/isolation`, Settings › AI 연결). Strict is saved only after a no-model qualification passes:
-  - the tested CLI version and platform;
-  - for Codex, the CLI's own `codex sandbox -P` runner under the same profile must refuse the real store, home and login-profile directories, and must list a turn directory.
-- **Failure handling.** A failed qualification keeps the previous profile. At run time any other CLI version, or a platform other than the one recorded at qualification (for example a data folder moved to another OS), is refused with `isolation-unqualified`. AgentOS never falls back to trusted-local.
-- **Where it is shown.** Settings (`subscription_execution`), turn provenance (`capability_trust`) and the doctor (`routes.trust`, `selected_host_cli_profile`, recorded turns).
+  - the tested platform and CLI version;
+  - an engine runtime root that is not under a path the Codex baseline keeps readable (`/tmp`, `/private/tmp`, `/var/tmp`, `/private/var/tmp`);
+  - for Codex, the CLI's own `codex sandbox -P` runner under the same profile must refuse the real store, home, login profile and a sibling turn directory, while a turn-directory listing succeeds;
+  - for Codex, the verified feature plan.
+- **What the record binds.** Platform, version, resolved binary path, sha256 and fingerprint, and the resolved store, home, runtime root and login-profile paths.
+- **Failure handling.**
+  - A failed qualification keeps the previous profile.
+  - The save is compare-and-set under the service lock, so a concurrent owner choice is not overwritten.
+  - At run time, any version, platform, binary, path or plan mismatch is refused with `isolation-unqualified`. AgentOS never falls back to trusted-local.
+  - An unrecognised stored profile value fails closed; it is not read as trusted-local.
+- **Where it is shown.** Settings (`subscription_execution`, including `requalify_needed`), turn provenance (`capability_trust`) and the doctor (`routes.trust`, `selected_host_cli_profile`, which reports `unrecognised`, and recorded turns).
 
-Process-level evidence, recorded 2026-09-26: the exact argv drove real CLIs against a loopback scripted model on a fake store (`tests/test_strict_isolation.py`, opt-in `AGENTOS_CLI_QUALIFICATION=1`). No live model, account or owner data was involved.
+Process-level evidence, recorded 2026-09-26: the exact argv drove real CLIs against a loopback scripted model on a fake store and a synthetic, populated `CODEX_HOME` (exec allow-rules, `AGENTS.md`, a skill, a plugin, `hooks.json`, and a `config.toml` that asks for `danger-full-access`). Tests are in `tests/test_strict_isolation.py`, opt-in with `AGENTOS_CLI_QUALIFICATION=1`. No live model, account or owner data was involved.
 
-- **Codex strict.** Store, home, `CODEX_HOME`, sibling turns and loopback network were denied, as was `view_image` of a store file. The turn directory was readable. The Codex-launched bridge is not confined by the profile: `web_search`, `weather` (public network stubbed in the bridge process) and `list_notes` worked.
+- **Codex strict.** No host tool was offered. The store, home and skill/plugin canaries never reached the model. `web_search`, `weather` (public network stubbed in the bridge process) and `list_notes` worked. With the shell re-offered test-only, the allow-rule no longer escaped: store and home were denied and the turn directory was readable.
 - **Codex trusted-local.** The store and home were readable, as its label states.
-- **Claude Code strict.** Only the five AgentOS tools were offered, `Read` / `Bash` / `WebSearch` / `Agent` were absent, and the three bridge calls worked.
-- **Claude Code trusted-local (`-p`, default permissions).** Out-of-directory reads were denied by its permission layer. So was every AgentOS MCP call, because nothing pre-approves them. This is a pre-existing reachability defect, not changed here.
-- **Residual.** Codex `:minimal` keeps OS paths and `/tmp` readable, and an explicit deny does not override it. Qualification therefore fails for a store under `/tmp`. Claude Code's confinement is application-level tool removal, not an OS sandbox. Upgrading a CLI requires requalification.
+- **Claude Code strict.** Only the five AgentOS tools were offered. `Read` / `Bash` / `WebSearch` / `Agent` were absent, and the three bridge calls worked.
+- **Claude Code trusted-local (`-p`, default permissions).** Out-of-directory reads were denied by its permission layer, and so was every AgentOS MCP call. This is a pre-existing reachability defect, not changed here.
+- **Residual.**
+  - Under Codex strict, the owner-authored `$CODEX_HOME/AGENTS.md` still reaches the model context. Neither `project_doc_max_bytes=0`, `project_doc_fallback_filenames=[]`, `project_root_markers=[]`, `instructions`, `developer_instructions`, `skip_host_skill_discovery` nor the full feature plan stops it. It is untrusted input that AgentOS provenance does not track.
+  - The Codex `:minimal` baseline keeps OS paths, `/tmp` and `/private/var/tmp` readable to a sandboxed command, and an explicit deny does not override it.
+  - Claude Code's confinement is application-level tool removal, not an OS sandbox.
+  - An upgrade requires requalification.
+  - **Follow-up:** the DecisionEngine Codex route record in [DecisionEngine boundary](decision-layer.en.md) states that its overrides keep `AGENTS.md` out of the input. This observation contradicts that for the global `$CODEX_HOME/AGENTS.md`. That record is not changed here.
 
 ## Public/private information flow
 

@@ -403,7 +403,11 @@ def _selected_host_profile(data):
     value = _json_or_none(row[0]) if row else {}
     value = value if isinstance(value, dict) else {}
     qualified = value.get("qualified") if isinstance(value.get("qualified"), dict) else {}
-    return {"profile": value.get("profile") if value.get("profile") in ("trusted-local", "strict-isolated") else "trusted-local",
+    stored = value.get("profile")
+    # No choice is the trusted-local default; an unknown stored value is
+    # reported as such (the service refuses CLI turns for it), never as trusted.
+    profile = "trusted-local" if stored is None else stored if stored in ("trusted-local", "strict-isolated") else "unrecognised"
+    return {"profile": profile,
             "qualified_versions": {engine: row.get("version") for engine, row in qualified.items() if isinstance(row, dict)}}
 
 

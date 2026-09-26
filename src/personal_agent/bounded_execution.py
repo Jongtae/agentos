@@ -77,15 +77,24 @@ TRUSTED_LOCAL_LIMITATION = ('the CLI may read host files outside AgentOS provena
                             '(verified: codex sandbox -P :read-only, codex-cli 0.153.4)')
 
 #: The verified limitation of the strict-isolated profile (#616).  Observed
-#: with no-model process tests that drive the exact argv below through a real
-#: `codex exec` / `claude -p` against a local fake provider on a fake store
-#: (tests/test_strict_isolation.py): the owner store, the home directory and
-#: CODEX_HOME were unreadable, the turn directory was readable (Codex) and the
-#: AgentOS bridge still served its tools.  Codex's `:minimal` platform set
-#: keeps OS paths and /tmp readable; an explicit deny does not override it.
-STRICT_ISOLATED_LIMITATION = ('the CLI reads only its turn directory and AgentOS-mediated tool results; '
-                              'owner store and home reads are denied at process level, but Codex still '
-                              'reads OS system paths and /tmp; qualified only for the tested CLI versions')
+#: with no-model process tests that drive the exact argv through a real
+#: `codex exec` / `claude -p` against a loopback scripted model, on a fake store
+#: and a synthetic, populated CODEX_HOME (tests/test_strict_isolation.py): the
+#: CLI was offered no shell, file or image tool, the permissions profile
+#: denied the store, home and CODEX_HOME even to a command an "always allow"
+#: exec rule would run, and the AgentOS bridge still served its tools.  Not
+#: prevented by any override found on Codex 0.153.4: the owner-authored
+#: `$CODEX_HOME/AGENTS.md` reaches the model context (untracked by AgentOS
+#: provenance).  Codex's `:minimal` baseline keeps OS paths, /tmp and
+#: /private/var/tmp readable to a sandboxed command.
+STRICT_ISOLATED_LIMITATION = ('the CLI gets no shell, file or image tool and its sandbox denies the owner store and home; '
+                              'Codex still loads $CODEX_HOME/AGENTS.md (owner-authored, not tracked by AgentOS) into '
+                              'the model context and its sandbox baseline keeps OS paths, /tmp and /private/var/tmp '
+                              'readable; qualified only for the tested CLI version, platform and paths')
+
+#: Paths Codex's `:minimal` baseline keeps readable (observed on 0.153.4); the
+#: engine runtime root must not be under one for strict isolation.
+BASELINE_READABLE_ROOTS = ('/tmp', '/private/tmp', '/var/tmp', '/private/var/tmp')
 
 #: Name of the Codex permissions profile AgentOS defines on the command line.
 CODEX_STRICT_PERMISSIONS = 'agentos-strict-isolated'
@@ -162,8 +171,9 @@ CLI_PROFILES = {
         # other version is refused until requalified (no silent downgrade).
         'runtimes': {
             'codex': {'tested_versions': ('0.153.4',), 'tested_platforms': ('darwin',), 'live_tested_version': None,
-                      'enforcement': f'Codex permissions profile {CODEX_STRICT_PERMISSIONS} (Seatbelt) '
-                                     'instead of --sandbox read-only; apps, multi-agent and hosted web search off'},
+                      'enforcement': f'Codex permissions profile {CODEX_STRICT_PERMISSIONS} (Seatbelt) instead of '
+                                     '--sandbox read-only, --ignore-rules, every non-allowlisted feature disabled '
+                                     '(verified at qualification), decision-route instruction overrides'},
             'claude-code': {'tested_versions': ('2.1.280',), 'tested_platforms': ('darwin',), 'live_tested_version': None,
                             'enforcement': 'no built-in tools (--tools ""), --restricted, '
                                            'only the offered AgentOS MCP tools allowed'},
@@ -175,20 +185,45 @@ BOUNDED_PROFILE, ISOLATED_PROFILE, STRICT_PROFILE = 'trusted-local', 'isolated-a
 HOST_CLI_PROFILES = (BOUNDED_PROFILE, STRICT_PROFILE)
 
 
-def strict_launch_arguments(engine_id):
+def strict_allowed_features():
+    """Enabled Codex features the strict Work profile keeps.
+
+    The #580 decision-call allowlist (request/transport behaviour, not tools)
+    plus ``unified_exec``, which 0.153.4 still lists as enabled after
+    ``--disable`` (docs/decision-layer.en.md).  With ``shell_tool`` disabled
+    no command tool is offered at all (observed); the permissions profile
+    would still confine one.
+    """
+    from .decision_adapters import CODEX_ALLOWED_ENABLED_FEATURES
+    return frozenset(CODEX_ALLOWED_ENABLED_FEATURES | {'unified_exec'})
+
+
+def strict_launch_arguments(engine_id, disabled_features=()):
     """CLI arguments that confine one engine under the strict-isolated profile.
 
     Codex: the permissions profile replaces ``--sandbox read-only`` (never
-    both).  Apps/connectors, sub-agents and the provider-hosted web search are
-    input channels AgentOS does not mediate, so they are switched off.
+    both); ``--ignore-rules`` so an "always allow" exec rule in CODEX_HOME
+    cannot run a command outside the sandbox (review P1, observed); the
+    decision route's official instruction overrides (#580, reused); and one
+    ``--disable`` per non-allowlisted feature from the qualification-time plan
+    (review P2: browser/computer use, plugins, hooks, image generation, ...).
+    An empty plan is refused: it was never verified.
     Claude Code: no built-in tool at all (no Read/Bash/WebFetch/WebSearch/
     Agent), ``--restricted`` so no settings file can re-add one, and only the
     profile's AgentOS MCP tools are pre-approved; without that approval ``-p``
     denies every MCP call (observed, 2.1.280).
     """
     if engine_id == 'codex':
-        return ['-c', f'default_permissions="{CODEX_STRICT_PERMISSIONS}"', '-c', CODEX_STRICT_TABLE,
-                '--disable', 'apps', '--disable', 'multi_agent', '-c', 'web_search="disabled"']
+        from .decision_adapters import CODEX_DECISION_CONFIG
+        disabled = sorted(set(disabled_features or ()))
+        if not disabled or set(disabled) & strict_allowed_features():
+            raise ExecutionError('엄격 격리 Codex 기능 목록이 검증되지 않았습니다.', failure_class='isolation-unqualified')
+        argv = ['--ignore-rules', '-c', f'default_permissions="{CODEX_STRICT_PERMISSIONS}"', '-c', CODEX_STRICT_TABLE]
+        for key, value in CODEX_DECISION_CONFIG:
+            argv += ['-c', f'{key}={value}']
+        for feature in disabled:
+            argv += ['--disable', feature]
+        return argv
     if engine_id == 'claude-code':
         return ['--tools', '', '--restricted', '--allowedTools',
                 ','.join(f'mcp__agentos__{action}' for action in profile_actions(STRICT_PROFILE))]
@@ -486,14 +521,20 @@ class ReadOnlyAgentOSMcpTools(AgentOSMcpTools):
 class StrictIsolatedAgentOSMcpTools(AgentOSMcpTools):
     """Host-CLI facade under the strict-isolated profile (#616).
 
-    ``qualified_version`` is the CLI version the owner's qualification
-    passed on; the adapter refuses to launch any other version.
+    ``qualification`` is the owner's stored qualification record for this CLI
+    (version, platform, binary identity, resolved paths and, for Codex, the
+    verified feature-disable plan).  The adapter refuses to launch unless the
+    current CLI and paths still match it; without one nothing runs.
     """
     PROFILE = STRICT_PROFILE
 
-    def __init__(self, capabilities, qualified_version=None):
+    def __init__(self, capabilities, qualification=None):
         super().__init__(capabilities)
-        self.qualified_version = qualified_version
+        self.qualification = dict(qualification) if isinstance(qualification, dict) else None
+
+    @property
+    def qualified_version(self):
+        return (self.qualification or {}).get('version')
 
 
 class BoundedExecutionAdapter:
@@ -587,7 +628,8 @@ class BoundedExecutionAdapter:
             return {'state': 'signed-out', 'detail': ''}
         return {'state': 'unknown', 'detail': 'unparsed status'}
 
-    def command(self, engine_id, binary, prompt, mcp_config, instructions='', profile=BOUNDED_PROFILE):
+    def command(self, engine_id, binary, prompt, mcp_config, instructions='', profile=BOUNDED_PROFILE,
+                disabled_features=()):
         if profile not in HOST_CLI_PROFILES:
             raise ExecutionError('지원하지 않는 구독 엔진 실행 프로필입니다.')
         strict = profile == STRICT_PROFILE
@@ -598,7 +640,7 @@ class BoundedExecutionAdapter:
             # --ignore-user-config keeps the owner's own Codex defaults (model,
             # MCP servers, plugins) out of this bounded turn; login still
             # comes from CODEX_HOME.  --ephemeral keeps no session files.
-            sandbox = strict_launch_arguments('codex') if strict else ['--sandbox', 'read-only']
+            sandbox = strict_launch_arguments('codex', disabled_features) if strict else ['--sandbox', 'read-only']
             return [binary, 'exec', '--json', *sandbox, '--skip-git-repo-check',
                     '--ignore-user-config', '--ephemeral',
                     '-c', f'mcp_servers.agentos.command={json.dumps(sys.executable)}',
@@ -632,6 +674,34 @@ class BoundedExecutionAdapter:
             return None
         return parse_cli_version(engine_id, done.stdout) if done.returncode == 0 else None
 
+    def _login_profile(self):
+        return Path(self.codex_home or os.environ.get('CODEX_HOME', Path.home() / '.codex')).expanduser()
+
+    def strict_binding(self, engine_id, binary, store_root):
+        """What a strict qualification is bound to, computed without a subprocess.
+
+        Platform, the resolved CLI binary and its (#580) fingerprint, and the
+        resolved owner store, home, engine runtime root and (Codex) login
+        profile.  A change to any of them makes the qualification stale.
+        """
+        from .decision_adapters import cli_fingerprint
+        binding = {'platform': sys.platform, 'binary': os.path.realpath(binary) if binary else '',
+                   'fingerprint': cli_fingerprint(binary), 'home': str(Path.home().resolve()),
+                   'runtime_root': str(Path(self.runtime_root).expanduser().resolve()),
+                   'store': str(Path(store_root).expanduser().resolve()) if store_root else ''}
+        if engine_id == 'codex':
+            binding['codex_home'] = str(self._login_profile().resolve())
+        return binding
+
+    def strict_binding_mismatch(self, engine_id, qualification, store_root, binary=None):
+        """Binding fields that no longer match a stored qualification (no subprocess)."""
+        recorded = (qualification or {}).get('binding')
+        if not isinstance(recorded, dict):
+            return ['binding']
+        binary = binary or self.finder({'codex': 'codex', 'claude-code': 'claude'}.get(engine_id, ''))
+        current = self.strict_binding(engine_id, binary, store_root)
+        return sorted(key for key in current if recorded.get(key) != current[key])
+
     def _codex_sandbox_denies(self, binary, run_dir, target):
         """Run the CLI's own sandbox runner under the strict permissions profile.
 
@@ -649,15 +719,46 @@ class BoundedExecutionAdapter:
                            text=True, timeout=30, shell=False)
         return done.returncode != 0
 
-    def qualify_strict(self, engine_id, binary=None, protected=()):
+    def _codex_feature_plan(self, binary, run_dir):
+        """Reuse the #580 allowlist plan for the strict Work profile.
+
+        ``codex features list`` (local, no model) with an empty CODEX_HOME,
+        ``--disable`` every listed non-removed feature outside
+        ``strict_allowed_features()``, list again with those disables and
+        fail closed unless only allowlisted features remain enabled.
+        Returns ``(plan, remaining)``; ValueError on anything unparsable.
+        """
+        from .decision_adapters import codex_disable_plan, codex_still_enabled, parse_codex_features
+        home = run_dir / '.codex-qualify'
+        home.mkdir(exist_ok=True, mode=0o700)
+        env = {**self.environment('codex', binary, run_dir), 'CODEX_HOME': str(home)}
+        allowed = strict_allowed_features()
+
+        def listing(argv):
+            done = self.runner(argv, cwd=run_dir, env=env, stdin=subprocess.DEVNULL, capture_output=True,
+                               text=True, timeout=30, shell=False)
+            if done.returncode != 0:
+                raise ValueError(f'features list exit {done.returncode}')
+            return parse_codex_features(done.stdout)
+        plan = codex_disable_plan(listing([binary, 'features', 'list']), allowed)
+        argv = [binary, 'features', 'list']
+        for feature in plan:
+            argv += ['--disable', feature]
+        return plan, codex_still_enabled(listing(argv), allowed)
+
+    def qualify_strict(self, engine_id, binary=None, store_root=None):
         """No-model qualification of the strict-isolated profile for one CLI.
 
-        Passes only for a tested CLI version and, for Codex, when its own
-        sandbox runner under the exact permissions profile refuses every
-        ``protected`` directory (the owner store, home and CODEX_HOME) while
-        a control listing of the turn directory succeeds.  The result never
-        contains file content.  Claude Code's confinement is structural (no
-        built-in tools), so its version pin is the check.
+        Passes only when all hold: a tested platform and CLI version; an
+        engine runtime root outside the paths Codex's baseline keeps readable;
+        and, for Codex, (a) its own sandbox runner under the exact permissions
+        profile refuses the owner store, home, the login profile and a sibling
+        turn directory while a control listing of the turn directory succeeds,
+        and (b) the #580-style feature plan leaves only allowlisted features.
+        The record binds the resolved binary (path, sha256, fingerprint) and
+        paths.  It never contains file content.  Claude Code's confinement is
+        structural (no built-in tools), so version, platform and paths are
+        its checks.
         """
         declared = CLI_PROFILES[STRICT_PROFILE]['runtimes'].get(engine_id)
         if declared is None:
@@ -671,30 +772,52 @@ class BoundedExecutionAdapter:
         if not checks[0]['passed']:
             return {'engine': engine_id, 'profile': STRICT_PROFILE, 'qualified': False, 'version': None,
                     'checks': checks, 'reason': 'tested-platform'}
-        self.runtime_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        with tempfile.TemporaryDirectory(dir=self.runtime_root, prefix='qualify-') as folder:
-            run_dir = Path(folder)
-            try:
-                version = self.runtime_version(engine_id, binary, run_dir)
-                checks.append({'check': 'tested-version', 'observed': version,
-                               'expected': list(declared['tested_versions']),
-                               'passed': version in declared['tested_versions']})
-                if engine_id == 'codex' and checks[-1]['passed']:
-                    checks.append({'check': 'turn-directory-readable',
-                                   'passed': not self._codex_sandbox_denies(binary, run_dir, run_dir)})
-                    login_profile = self.codex_home or Path(os.environ.get('CODEX_HOME', Path.home() / '.codex'))
-                    for target in (Path.home(), login_profile, *protected):
-                        target = Path(target).expanduser()
-                        if not target.is_dir():
-                            continue
-                        checks.append({'check': 'protected-directory-denied', 'target': target.name or str(target),
-                                       'passed': self._codex_sandbox_denies(binary, run_dir, target)})
-            except (ExecutionError, subprocess.TimeoutExpired, OSError) as exc:
-                checks.append({'check': 'runner', 'passed': False, 'error': type(exc).__name__})
-        qualified = bool(checks) and all(check['passed'] for check in checks)
+        runtime_root = Path(self.runtime_root).expanduser().resolve()
+        under_baseline = any(runtime_root == Path(root).resolve() or Path(root).resolve() in runtime_root.parents
+                             for root in BASELINE_READABLE_ROOTS)
+        checks.append({'check': 'runtime-root-not-baseline-readable', 'passed': not under_baseline})
+        disabled, version = None, None
+        if not under_baseline:
+            self.runtime_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+            with tempfile.TemporaryDirectory(dir=self.runtime_root, prefix='qualify-') as folder, \
+                    tempfile.TemporaryDirectory(dir=self.runtime_root, prefix='qualify-sibling-') as sibling:
+                run_dir = Path(folder)
+                try:
+                    version = self.runtime_version(engine_id, binary, run_dir)
+                    checks.append({'check': 'tested-version', 'observed': version,
+                                   'expected': list(declared['tested_versions']),
+                                   'passed': version in declared['tested_versions']})
+                    if engine_id == 'codex' and checks[-1]['passed']:
+                        checks.append({'check': 'turn-directory-readable',
+                                       'passed': not self._codex_sandbox_denies(binary, run_dir, run_dir)})
+                        checks.append({'check': 'sibling-turn-denied',
+                                       'passed': self._codex_sandbox_denies(binary, run_dir, Path(sibling))})
+                        for target in (Path.home(), self._login_profile(), *([store_root] if store_root else [])):
+                            target = Path(target).expanduser()
+                            if not target.is_dir():
+                                continue
+                            checks.append({'check': 'protected-directory-denied', 'target': target.name or str(target),
+                                           'passed': self._codex_sandbox_denies(binary, run_dir, target)})
+                        try:
+                            plan, remaining = self._codex_feature_plan(binary, run_dir)
+                            checks.append({'check': 'tool-features-allowlisted', 'passed': bool(plan) and not remaining,
+                                           'still_enabled': remaining})
+                            disabled = plan if plan and not remaining else None
+                        except ValueError as exc:
+                            checks.append({'check': 'tool-features-allowlisted', 'passed': False, 'error': str(exc)[:120]})
+                except (ExecutionError, subprocess.TimeoutExpired, OSError) as exc:
+                    checks.append({'check': 'runner', 'passed': False, 'error': type(exc).__name__})
+        qualified = all(check['passed'] for check in checks)
         failed = [check['check'] for check in checks if not check['passed']]
-        return {'engine': engine_id, 'profile': STRICT_PROFILE, 'qualified': qualified,
-                'version': checks[1].get('observed') if len(checks) > 1 else None, 'checks': checks,
+        binding = self.strict_binding(engine_id, binary, store_root)
+        try:
+            import hashlib
+            binding_digest = hashlib.sha256(Path(binding['binary']).read_bytes()).hexdigest()
+        except OSError:
+            binding_digest = None
+        return {'engine': engine_id, 'profile': STRICT_PROFILE, 'qualified': qualified, 'version': version,
+                'checks': checks, 'binding': binding, 'binary_sha256': binding_digest,
+                'disabled_features': disabled if engine_id == 'codex' else None,
                 'reason': '' if qualified else ', '.join(dict.fromkeys(failed)) or 'not checked'}
 
     @staticmethod
@@ -775,23 +898,32 @@ class BoundedExecutionAdapter:
             }}}, ensure_ascii=False), encoding='utf-8')
             env = self.environment(engine_id, binary, run_dir)
             profile = getattr(tools, 'PROFILE', BOUNDED_PROFILE)
+            disabled = ()
             if profile == STRICT_PROFILE:
                 # #616: never launch an unqualified CLI under the strict
                 # profile and never fall back to trusted-local; the owner
                 # requalifies after a CLI upgrade or chooses another profile.
-                # The platform is checked too: a data folder moved to an
-                # untested OS keeps its record but is refused here.
+                # Platform, binary and paths are checked too: a data folder
+                # moved to another OS or install keeps its record but is
+                # refused here.
                 declared = CLI_PROFILES[STRICT_PROFILE]['runtimes'][engine_id]
-                version = self.runtime_version(engine_id, binary, run_dir) if sys.platform in declared['tested_platforms'] else None
-                if version is None or version not in declared['tested_versions'] or version != getattr(tools, 'qualified_version', None):
+                qualification = getattr(tools, 'qualification', None) or {}
+                stale = self.strict_binding_mismatch(engine_id, qualification, tools.capabilities.store.root, binary)
+                disabled = qualification.get('disabled_features') or ()
+                if engine_id == 'codex' and not disabled:
+                    stale.append('disabled_features')
+                version = (self.runtime_version(engine_id, binary, run_dir)
+                           if sys.platform in declared['tested_platforms'] and not stale else None)
+                if stale or version is None or version not in declared['tested_versions'] \
+                        or version != qualification.get('version'):
                     LOG.warning('engine turn refused engine=%s profile=%s version=%s', engine_id, profile, version or '-')
                     raise ExecutionError('엄격 격리 프로필이 현재 CLI 버전 또는 플랫폼에서 검증되지 않아 실행하지 않았습니다. '
                                          '설정에서 다시 검증하거나 다른 실행 프로필을 선택하세요.',
                                          failure_class='isolation-unqualified',
-                                         reason=f'observed {sys.platform} version {version or "unknown"}')
+                                         reason=f'stale: {", ".join(stale) or "version"}; observed version {version or "unknown"}')
             started = time.monotonic()
             LOG.info('engine turn started engine=%s profile=%s', engine_id, profile)
-            argv = self.command(engine_id, binary, prompt, config, instructions, profile=profile)
+            argv = self.command(engine_id, binary, prompt, config, instructions, profile=profile, disabled_features=disabled)
             run_meta = {'argv': display_argv(argv, prompt, instructions), 'requested_model': None}
             try:
                 completed = self.runner(argv, cwd=run_dir,

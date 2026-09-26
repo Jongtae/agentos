@@ -721,36 +721,73 @@ class AgentService:
         if result.get('state') == 'recovery': return result['action']
         return '설정 요청을 처리했습니다.'
 
+    #: A stored profile value this build does not recognise (#616 review P3).
+    UNRECOGNISED_PROFILE = 'unrecognised'
+
     def subscription_execution_profile(self):
         """The CLI capability profile, read from its one declaration (#604).
 
         #616: on the host CLI route it is the owner-selected trust profile;
-        the strict-isolated choice also shows which CLI versions passed.
+        the strict-isolated choice also shows which CLI versions passed and
+        whether the current CLI, platform or paths no longer match them.
         """
         if self.isolated_engine_adapter:
             return profile_status(ReadOnlyAgentOSMcpTools.PROFILE)
         selection=self.subscription_isolation()
+        if selection['profile']==self.UNRECOGNISED_PROFILE:
+            return {'profile':self.UNRECOGNISED_PROFILE,'mode':'bounded-agentos-mcp','trust':'unknown',
+                    'limitation':'the stored CLI profile is not recognised; CLI turns are refused until a profile is chosen',
+                    'tools':[],'unavailable':{},'selectable':list(HOST_CLI_PROFILES),'qualified':{},'requalify_needed':True}
         status=profile_status(selection['profile'])
-        status.update(selectable=list(HOST_CLI_PROFILES),qualified=selection.get('qualified',{}))
+        qualified={engine:{key:row.get(key) for key in ('version','platform','checked_at')}
+                   for engine,row in selection['qualified'].items() if isinstance(row,dict)}
+        status.update(selectable=list(HOST_CLI_PROFILES),qualified=qualified)
+        if selection['profile']==STRICT_PROFILE:
+            status['requalify_needed']=bool(self.strict_requalify_reasons())
         return status
 
     def subscription_isolation(self):
-        """The owner's host-CLI profile choice (#616); trusted-local by default."""
+        """The owner's host-CLI profile choice (#616).
+
+        No choice means trusted-local (the #604 default).  A stored value this
+        build does not recognise fails closed: it is not read as trusted-local.
+        """
         row=self.store.config('subscription_isolation',{}) or {}
-        profile=row.get('profile') if row.get('profile') in HOST_CLI_PROFILES else BOUNDED_PROFILE
-        qualified=row.get('qualified') if isinstance(row.get('qualified'),dict) else {}
+        stored=row.get('profile') if isinstance(row,dict) else None
+        if stored is None:profile=BOUNDED_PROFILE
+        elif stored in HOST_CLI_PROFILES:profile=stored
+        else:profile=self.UNRECOGNISED_PROFILE
+        qualified=row.get('qualified') if isinstance(row,dict) and isinstance(row.get('qualified'),dict) else {}
         return {'profile':profile,'qualified':qualified}
 
-    def subscription_facade(self):
-        """The facade class and constructor keywords of the selected host-CLI profile."""
+    def strict_requalify_reasons(self):
+        """Why the selected CLI's strict qualification no longer applies (no subprocess)."""
         selection=self.subscription_isolation()
-        if selection['profile']!=STRICT_PROFILE:
-            return AgentOSMcpTools,{}
         engine=self.store.config('subscription_engine',{}).get('id','')
-        record=selection['qualified'].get(engine) or {}
+        record=selection['qualified'].get(engine)
+        if not isinstance(record,dict):return ['not-qualified']
+        check=getattr(self.execution_adapter,'strict_binding_mismatch',None)
+        if not callable(check):return []
+        binary=self.subscription_engines.finder({'codex':'codex','claude-code':'claude'}.get(engine,''))
+        return check(engine,record,self.store.root,binary)
+
+    def subscription_facade(self):
+        """The facade class and constructor keywords of the selected host-CLI profile.
+
+        strict-isolated and an unrecognised stored value both yield the strict
+        facade; with no (or another platform's) record it carries no
+        qualification and the adapter refuses the turn.  Nothing falls back.
+        """
+        selection=self.subscription_isolation()
+        if selection['profile']==BOUNDED_PROFILE:
+            return AgentOSMcpTools,{}
+        if selection['profile']!=STRICT_PROFILE:
+            return StrictIsolatedAgentOSMcpTools,{'qualification':None}
+        engine=self.store.config('subscription_engine',{}).get('id','')
+        record=selection['qualified'].get(engine)
         # A record from another platform (a moved data folder) qualifies nothing here.
-        version=record.get('version') if record.get('platform')==sys.platform else None
-        return StrictIsolatedAgentOSMcpTools,{'qualified_version':version}
+        usable=isinstance(record,dict) and record.get('platform')==sys.platform
+        return StrictIsolatedAgentOSMcpTools,{'qualification':record if usable else None}
 
     def select_subscription_isolation(self, body):
         """Owner choice of the host-CLI trust profile (#616).
@@ -758,32 +795,40 @@ class AgentService:
         strict-isolated is saved only after a passing no-model qualification of
         the selected CLI; on failure the previous profile stays in effect.
         Choosing trusted-local is always an explicit owner action.  Neither
-        choice ever happens automatically.
+        choice ever happens automatically.  The write is compare-and-set: a
+        qualification that finishes after another owner choice changed the
+        selection is not applied.
         """
         if not isinstance(body,dict) or body.get('profile') not in HOST_CLI_PROFILES:
             raise ValueError('선택할 실행 프로필을 확인하세요.')
         if self.isolated_engine_adapter:
             raise ValueError('격리 사이드카 경로는 자체 제한 프로필을 사용합니다. 현재 프로필은 그대로 유지됩니다.')
         profile=body['profile']
+        if profile==BOUNDED_PROFILE:
+            with self.lock:
+                current=self.subscription_isolation()
+                self.store.put('subscription_isolation',{'profile':BOUNDED_PROFILE,'qualified':current['qualified']})
+            return {'profile':BOUNDED_PROFILE,'subscription_execution':self.subscription_execution_profile()}
         with self.lock:
             current=self.subscription_isolation()
-        if profile==BOUNDED_PROFILE:
-            with self.lock:self.store.put('subscription_isolation',{**current,'profile':BOUNDED_PROFILE})
-            return {'profile':BOUNDED_PROFILE,'subscription_execution':self.subscription_execution_profile()}
-        engine=body.get('engine') or self.store.config('subscription_engine',{}).get('id','')
+            engine=body.get('engine') or self.store.config('subscription_engine',{}).get('id','')
         if engine not in ('codex','claude-code'):
             raise ValueError('엄격 격리를 검증할 구독 엔진을 먼저 연결하세요. 현재 프로필은 그대로 유지됩니다.')
         qualify=getattr(self.execution_adapter,'qualify_strict',None)
         if not callable(qualify):
             raise ValueError('이 실행 환경은 엄격 격리 검증을 지원하지 않습니다. 현재 프로필은 그대로 유지됩니다.')
         binary=self.subscription_engines.finder({'codex':'codex','claude-code':'claude'}[engine])
-        result=qualify(engine,binary=binary,protected=[self.store.root])
+        result=qualify(engine,binary=binary,store_root=self.store.root)
         if not result.get('qualified'):
             raise ValueError(f"엄격 격리 검증을 통과하지 못했습니다({result.get('reason') or 'unknown'}). "
                              f"현재 프로필({current['profile']})은 그대로 유지됩니다.")
-        qualified={**current['qualified'],engine:{'version':result['version'],'platform':sys.platform,'checked_at':time.time(),
-                                                   'checks':[check['check'] for check in result['checks']]}}
-        with self.lock:self.store.put('subscription_isolation',{'profile':STRICT_PROFILE,'qualified':qualified})
+        record={'version':result['version'],'platform':sys.platform,'checked_at':time.time(),
+                'checks':[check['check'] for check in result['checks']],'binding':result.get('binding'),
+                'binary_sha256':result.get('binary_sha256'),'disabled_features':result.get('disabled_features')}
+        with self.lock:
+            if self.subscription_isolation()!=current:
+                raise ValueError('검증하는 동안 실행 프로필이 바뀌어 결과를 적용하지 않았습니다. 다시 시도하세요.')
+            self.store.put('subscription_isolation',{'profile':STRICT_PROFILE,'qualified':{**current['qualified'],engine:record}})
         return {'profile':STRICT_PROFILE,'qualification':result,'subscription_execution':self.subscription_execution_profile()}
 
     def settings(self):

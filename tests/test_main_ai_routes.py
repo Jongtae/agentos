@@ -185,6 +185,17 @@ class MainAiRouteTests(unittest.TestCase):
         used = [call['headers'].get('Authorization') for call in self.transport.calls[before:]]
         self.assertEqual(used, ['Bearer ' + OPENAI_KEY])
 
+    def test_pending_and_inactive_provider_keys_are_redacted_from_provenance(self):
+        self._save('openai', OPENAI_KEY)
+        self.service.activate_main_ai({'route': 'openai'})
+        self._save('openai', 'sk-fixture-openai-PENDING')   # saved, not confirmed
+        self._save('anthropic', ANTHROPIC_KEY)              # inactive provider
+        self.store.secret('api_key:openrouter', 'or-fixture-openrouter-0001')
+        text = 'a sk-fixture-openai-PENDING b ak-fixture-anthropic-0001 c or-fixture-openrouter-0001 d ' + OPENAI_KEY
+        redacted = self.service._redact_provenance(text)
+        for secret in ('sk-fixture-openai-PENDING', ANTHROPIC_KEY, 'or-fixture-openrouter-0001', OPENAI_KEY):
+            self.assertNotIn(secret, redacted)
+
     # -- AC6 re-check without switching ----------------------------------------
     def test_check_reprobes_current_without_switching(self):
         self._save('openai', OPENAI_KEY)

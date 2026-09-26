@@ -1,34 +1,44 @@
 import unittest
-from unittest.mock import patch
-from personal_agent.local_tools import LocalTools,needs_lookup
-from personal_agent.providers import ModelResult,ProviderError
+from personal_agent.local_tools import LocalTools, weather_answer
+
+
+WEATHER = {'tool': 'weather', 'location': {'name': 'Seongnam-si', 'admin1': 'Gyeonggi-do', 'country': 'South Korea'},
+           'forecast': {'timezone': 'Asia/Seoul',
+                        'current': {'time': '2026-09-26T10:00', 'temperature_2m': 21.0, 'apparent_temperature': 20.5,
+                                    'precipitation': 0.0, 'wind_speed_10m': 5.2},
+                        'current_units': {'temperature_2m': '°C', 'apparent_temperature': '°C',
+                                          'precipitation': 'mm', 'wind_speed_10m': 'km/h'},
+                        'daily': {'time': ['2026-09-26', '2026-09-27', '2026-09-28'],
+                                  'temperature_2m_min': [15.0, 14.1, 13.0], 'temperature_2m_max': [24.0, 22.3, 21.0],
+                                  'precipitation_probability_max': [10, 70, 20]},
+                        'daily_units': {'temperature_2m_min': '°C', 'temperature_2m_max': '°C',
+                                        'precipitation_probability_max': '%'}},
+           'sources': ['https://api.open-meteo.com/v1/forecast?x', 'https://open-meteo.com/']}
+
+
 class LocalToolTests(unittest.TestCase):
-    def test_intents(self):
-        self.assertTrue(needs_lookup('서울 오늘 날씨 알려줘'))
-        self.assertTrue(needs_lookup('최신 뉴스 검색해줘'))
-        self.assertFalse(needs_lookup('안녕'))
-    def test_search_result_is_passed_to_model(self):
-        class Adapter:
-            def invoke(self,c,k,m):
-                self.messages=m
-                return ModelResult('근거 기반 답변','compatible','test-model')
-        a=Adapter();events=[]
-        with patch.object(LocalTools,'search',return_value={'tool':'web_search','results':[{'snippet':'untrusted'}],'sources':['https://example.com']}):
-            r=LocalTools().answer(a,{},'',[],'system','/search public query',lambda *e:events.append(e))
-        self.assertIn('https://example.com',r.content)
-        self.assertIn('untrusted',a.messages[-1]['content'])
-        self.assertEqual([e[1] for e in events],['running','succeeded'])
-    def test_missing_weather_location_clarifies_without_network(self):
-        class Adapter:
-            def invoke(self,*args):return ModelResult('{"tool":"clarify","question":"어느 도시의 날씨를 확인할까요?"}','test','test')
-        with patch.object(LocalTools,'execute') as execute:
-            r=LocalTools().answer(Adapter(),{},'',[],'','오늘 날씨',lambda *e:None)
-            execute.assert_not_called();self.assertIn('도시',r.content)
     def test_unknown_tool_rejected(self):
         with self.assertRaises(ValueError):LocalTools().execute({'tool':'shell','command':'bad'})
-    def test_failure_does_not_claim_success(self):
-        with patch.object(LocalTools,'search',side_effect=ProviderError('검색 실패')):
-            events=[]
-            with self.assertRaises(ProviderError):LocalTools().answer(None,{},'',[],'','/search hello',lambda *e:events.append(e))
-            self.assertEqual(events[-1][1],'failed')
+
+    def test_dead_duplicate_loops_are_removed(self):
+        # #606 T7: the native loop in agent_runtime is the only tool loop.
+        import personal_agent.local_tools as module
+        for name in ('run_native_tools','weather_context','ASK_LOCATION','TOOL_DEFINITIONS','TOOL_ROUTING','needs_lookup'):
+            self.assertFalse(hasattr(module,name),name)
+        self.assertFalse(hasattr(LocalTools,'answer'))
+
+    def test_weather_rendering_shows_dated_forecast_rows_with_timezone(self):
+        # #606 T6: "tomorrow" is answered from a dated row, not the current reading.
+        text = weather_answer(WEATHER)
+        self.assertIn('기준 시각: 2026-09-26T10:00 (Asia/Seoul)', text)
+        self.assertIn('예보 (Asia/Seoul 기준 날짜):', text)
+        self.assertIn('- 2026-09-27: 최저 14.1 °C / 최고 22.3 °C, 강수 확률 70%', text)
+
+    def test_weather_rendering_without_daily_rows_still_renders_current(self):
+        forecast = {k: v for k, v in WEATHER['forecast'].items() if k not in ('daily', 'daily_units')}
+        text = weather_answer({**WEATHER, 'forecast': forecast})
+        self.assertIn('기온: 21.0 °C', text)
+        self.assertNotIn('예보 (', text)
+
+
 if __name__=='__main__':unittest.main()

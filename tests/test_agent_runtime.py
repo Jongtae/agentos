@@ -170,7 +170,7 @@ class ProviderToolProtocolTests(unittest.TestCase):
    if count[0]==1:return {'choices':[{'message':{'tool_calls':[{'id':'read','function':{'name':'read_file','arguments':'{"root_id":"root","path":"launch.txt"}'}}]}}]}
    return {'choices':[{'message':{'content':'done'}}]}
   with tempfile.TemporaryDirectory() as folder:
-   root=Path(folder)/'docs';root.mkdir();(root/'launch.txt').write_text('secret Aurora release detail')
+   root=Path(folder).resolve()/'docs';root.mkdir();(root/'launch.txt').write_text('secret Aurora release detail')
    store=QuickStore(Path(folder)/'data');store.put('file_roots',[{'id':'root','path':str(root)}])
    caps=Capabilities(store,ModelAdapter(transport),CFG,'','job',lambda *a:None)
    run_agent(caps.adapter,CFG,'',[{'role':'user','content':'read'}],'',caps,lambda *a:events.append(a))

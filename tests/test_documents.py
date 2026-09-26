@@ -13,7 +13,7 @@ from personal_agent.quickstart_service import AgentService
 
 class DocumentTests(unittest.TestCase):
  def setUp(self):
-  self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name)/'connected';self.root.mkdir()
+  self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name).resolve()/'connected';self.root.mkdir()
   (self.root/'brief.txt').write_text('Aurora launch date is 2031-10-12.\nOwner Mina.')
   (self.root/'notes.md').write_text('# Aurora\nBudget: 4200 USD')
   word=WordDocument();word.add_paragraph('DOCX Aurora owner Mina');table=word.add_table(rows=1,cols=2);table.cell(0,0).text='Status';table.cell(0,1).text='Approved';word.save(self.root/'report.docx')

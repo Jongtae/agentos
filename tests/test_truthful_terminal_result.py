@@ -130,12 +130,15 @@ class FailedTurnTests(TerminalResultTestCase):
                          'the model summarised a file it never read')
 
     def test_a_refused_research_request_does_not_deliver_a_comparison(self):
-        """#476 case 3 — the #448 refusal, then an apparent answer."""
+        """#476 case 3 — a refused public read, then an apparent answer.
+
+        Since #654 a private context no longer closes public search, so the
+        refusal here is the page read outside the owner's approved scope.
+        """
         root = self.connect_folder()
         self.plan = [
             ('find_files', {'query': '급여'}),
-            ('bounded_public_research', {'mode': 'product_comparison',
-                                                    'query': 'noise cancelling headphones'}),
+            ('public_page_read', {'url': 'https://example.com/headphones/compare'}),
         ]
         self.text = '관찰됨: Model A 30시간 재생. 확인되지 않음: 가격·재고.'
         job, bubble = self.ask('노이즈캔슬링 헤드폰 비교해줘')

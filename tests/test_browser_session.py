@@ -281,7 +281,7 @@ class ToolSchemaTests(unittest.TestCase):
 
 class MediationTests(unittest.TestCase):
     def test_password_otp_values_and_a_rendered_token_never_leave_the_driver(self):
-        sess, driver = session(excluded=lambda: ([PASSPORT], None))
+        sess, driver = session(excluded=lambda: [PASSPORT])
         page = sess.open({'url': ORIGIN + '/account', 'effect': 'read'})
         self.assertEqual(page['state'], 'page')
         self.assertEqual(page['url'], ORIGIN + '/account')
@@ -299,7 +299,7 @@ class MediationTests(unittest.TestCase):
         self.assertGreaterEqual(page['redacted_values'], 1)
 
     def test_saved_private_values_are_redacted_from_page_text(self):
-        sess, _ = session(excluded=lambda: ([PASSPORT], None))
+        sess, _ = session(excluded=lambda: [PASSPORT])
         page = sess.open({'url': ORIGIN + '/product', 'effect': 'read'})
         self.assertNotIn(PASSPORT, flat(page))
         self.assertIn('보관 위치 ' + bs.REDACTED, page['text'])
@@ -889,7 +889,7 @@ class PlaywrightIntegrationTests(unittest.TestCase):
         profile = bs.BrowserProfile(Path(self.tmp.name) / 'profile', headless=True)
         approvals = Approvals()
         sess = bs.BrowserSession(profile.driver_factory('work-int'), work_id='work-int', approvals=approvals,
-                                 excluded=lambda: ([PASSPORT], None))
+                                 excluded=lambda: [PASSPORT])
         try:
             page = sess.open({'url': self.origin + '/product', 'effect': 'navigate'})
             self.assertEqual(page['state'], 'page')

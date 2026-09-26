@@ -47,7 +47,6 @@ from personal_agent.bounded_execution import (
     profile_actions,
     route_unavailable,
 )
-from personal_agent.agent_runtime import PUBLIC_TASK_NO_JUDGMENT
 from personal_agent.decision import OUTCOME_DECIDED, DecisionContext
 from personal_agent.decision_adapters import (CODEX_DECISION_CONFIG, SubscriptionCliDecisionEngine, codex_disable_plan,
                                               parse_codex_features)
@@ -817,11 +816,9 @@ def populate_codex_home(home, store_root):
 
 #: The owner's request in the qualification Work is ``/search PUBLIC_QUERY``.
 PUBLIC_QUERY = 'public query'
-#: #605: with no sensitivity judgment configured, AgentOS withholds the
-#: worker-composed weather city (the request names none) and returns its
-#: fixed owner-visible text; the call still reached the bridge and was recorded.
-WEATHER_WITHHELD = json.dumps(PUBLIC_TASK_NO_JUDGMENT['unavailable'])[1:-1]
-BRIDGED_EVENTS = [('web_search', 'succeeded'), ('weather', 'failed'), ('list_notes', 'succeeded')]
+#: #654: the worker-composed weather city goes out with no sensitivity
+#: judgment (the request names none); the call reached the bridge and was recorded.
+BRIDGED_EVENTS = [('web_search', 'succeeded'), ('weather', 'succeeded'), ('list_notes', 'succeeded')]
 
 
 #: Tools Codex may still offer under strict: the AgentOS bridge namespace,
@@ -947,8 +944,7 @@ class ProcessLevelQualification(unittest.TestCase):
         self.assertIn('unsupported call', shell)
         self.assertIn('unsupported call', image)
         self.assertIn('stub-search-616', search)
-        self.assertIn(WEATHER_WITHHELD, weather)
-        self.assertNotIn('stub-weather-616', weather)
+        self.assertIn('stub-weather-616', weather)
         self.assertIn('fake-note-616', notes)
         self.assertEqual(events, BRIDGED_EVENTS)
         offered = {tool.get('name') or tool.get('type') for tool in model.offered_tools()}
@@ -1082,8 +1078,7 @@ class ProcessLevelQualification(unittest.TestCase):
             self.assertIn('No such tool available', denied)
             self.assertNotIn('canary-616', denied)
         self.assertIn('stub-search-616', search)
-        self.assertIn(WEATHER_WITHHELD, weather)
-        self.assertNotIn('stub-weather-616', weather)
+        self.assertIn('stub-weather-616', weather)
         self.assertIn('fake-note-616', notes)
         self.assertEqual(events, BRIDGED_EVENTS)
         self.assertEqual(sorted(tool['name'] for tool in model.offered_tools()),

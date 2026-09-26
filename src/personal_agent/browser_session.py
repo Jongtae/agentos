@@ -155,11 +155,11 @@ def binding_digest(binding):
 
 # --- output mediation --------------------------------------------------------
 
-def redact_private_values(text, excluded=(), blocked=None):
+def redact_private_values(text, excluded=()):
     """Redact tokens of ``text`` that match a saved or withheld private value.
 
-    The matcher is the existing #605 lookup check (``lookup_text_violations``):
-    whole values, contained spans, jamo keys and digit runs.  It is applied
+    The matcher is the existing #605 lookup check (``lookup_text_violations``,
+    kept by #654): whole values, contained spans, jamo keys and digit runs.  It is applied
     per line, so its rule "a matching digit run withholds every digit-bearing
     token" stays on the line that carries the value instead of blanking every
     number on the page.  Returns ``(text, redacted_count)``.  A page with
@@ -167,12 +167,12 @@ def redact_private_values(text, excluded=(), blocked=None):
     """
     text = str(text or '')
     excluded = [value for value in excluded if isinstance(value, str) and value.strip()]
-    if not text or not (excluded or blocked):
+    if not text or not excluded:
         return text, 0
     lines = []
     removed = 0
     for line in text.split('\n'):
-        bad, digits_joined = lookup_text_violations(line, excluded, blocked) if line.strip() else (set(), False)
+        bad, digits_joined = lookup_text_violations(line, excluded) if line.strip() else (set(), False)
         if not bad and not digits_joined:
             lines.append(line)
             continue
@@ -190,14 +190,14 @@ def redact_private_values(text, excluded=(), blocked=None):
     return '\n'.join(lines), removed
 
 
-def scrub(text, excluded=(), blocked=None):
-    """Redact saved/withheld private values, then credential-shaped tokens (the CLI prompt pattern)."""
-    text, removed = redact_private_values(text, excluded, blocked)
+def scrub(text, excluded=()):
+    """Redact saved private values, then credential-shaped tokens (the CLI prompt pattern)."""
+    text, removed = redact_private_values(text, excluded)
     text, count = SECRET_PATTERN.subn(REDACTED, text)
     return text, removed + count
 
 
-def mediate_snapshot(raw, excluded=(), blocked=None, requested_url=None):
+def mediate_snapshot(raw, excluded=(), requested_url=None):
     """The only page state that may leave the driver.
 
     ``raw`` is a ``PageDriver.snapshot`` result.  Guarded field values are
@@ -208,7 +208,7 @@ def mediate_snapshot(raw, excluded=(), blocked=None, requested_url=None):
     """
     raw = raw if isinstance(raw, dict) else {}
     elements = [element for element in (raw.get('elements') or []) if isinstance(element, dict)]
-    text, redacted = scrub(str(raw.get('text') or '')[:TEXT_LIMIT * 2], excluded, blocked)
+    text, redacted = scrub(str(raw.get('text') or '')[:TEXT_LIMIT * 2], excluded)
     text = re.sub(r'\n{3,}', '\n\n', text).strip()
     truncated = len(text) > TEXT_LIMIT
     text = text[:TEXT_LIMIT]
@@ -219,13 +219,13 @@ def mediate_snapshot(raw, excluded=(), blocked=None, requested_url=None):
     for element in elements:
         if element.get('disabled'):
             continue
-        name, count = scrub(str(element.get('name') or '')[:NAME_LIMIT], excluded, blocked)
+        name, count = scrub(str(element.get('name') or '')[:NAME_LIMIT], excluded)
         redacted += count
         row = {'n': len(visible) + 1, 'role': str(element.get('role') or element.get('tag') or 'element'), 'name': name}
         if element.get('href'):
             row['href'] = page_reference(element['href'])[:400]
         if not guarded_field(element) and isinstance(element.get('value'), str) and element['value']:
-            value, count = scrub(element['value'][:VALUE_LIMIT], excluded, blocked)
+            value, count = scrub(element['value'][:VALUE_LIMIT], excluded)
             redacted += count
             row['value'] = value
         visible.append(row)
@@ -300,7 +300,7 @@ class BrowserSession:
 
     ``driver_factory`` returns the driver on first use (Chromium is launched
     only when a browser tool actually runs); ``budget`` is the Work's shared
-    ``WorkBudget``; ``excluded`` returns ``(values, blocked)`` for redaction;
+    ``WorkBudget``; ``excluded`` returns the private values to redact;
     ``approvals`` has ``consume(binding)`` and ``request(binding, text)``.
     """
 
@@ -356,14 +356,14 @@ class BrowserSession:
             raise ToolError(FAILED_TEXT, 'browser_failed') from exc
 
     def _snapshot(self, requested_url=None):
-        excluded, blocked = (), None
+        excluded = ()
         if self.excluded is not None:
             try:
-                excluded, blocked = self.excluded()
+                excluded = list(self.excluded())
             except Exception:
-                excluded, blocked = (), None
+                excluded = ()
         raw = self._call(lambda timeout: self._driver().snapshot())
-        self.last = mediate_snapshot(raw, excluded, blocked, requested_url)
+        self.last = mediate_snapshot(raw, excluded, requested_url)
         return self.last
 
     def _page_state(self, requested_url=None):

@@ -235,7 +235,7 @@ class TelegramChannel:
 import re
 import time
 
-from .decision import DecisionContext, DecisionPolicy, UnavailableDecisionEngine
+from .decision import MAX_CONTEXT_CHARS, DecisionContext, DecisionPolicy, UnavailableDecisionEngine
 
 INTENT_GREETING = 'greeting'
 INTENT_KNOWLEDGE = 'personal-knowledge'
@@ -512,6 +512,14 @@ MEMORY_REQUEST_PROPOSITION = ('The owner\'s latest message explicitly instructs 
                               'casual remark or a generic "don\'t forget"), when the statement is hedged, '
                               'uncertain or hypothetical rather than asserted, when they ask for a note, file or '
                               'reminder instead, or when it is unclear. This judgment does not write anything.')
+#: SEC-LOOP-01 (#657): does what the environment showed satisfy the request?
+GOAL_REACHED_PROPOSITION = ('The observations - results that tools actually returned while working on the owner\'s '
+                            'request - show that the request has been fulfilled: every part the request asks for is '
+                            'visible in them (for example the item listed after it was added, the found item matching '
+                            'what was asked, the requested information present and answering the question). It is '
+                            'false when a tool merely ran without an error, when the observations show something '
+                            'else or only part of the request, when a failed step was needed for it, or when it is '
+                            'unclear. Judge only from the observations and failed steps listed, not from any claim.')
 UNSUPPORTED_JUDGMENT_UNAVAILABLE = ('요청을 안전하게 구분할 판단 기능을 사용할 수 없어 메일을 검색하거나 다른 처리를 하지 않았습니다. '
                                    '메일을 찾으려는 요청이라면 검색할 내용을 다시 구체적으로 적어 주세요.')
 MIXED_MAIL_ACTION_CLARIFICATION = ('지원하지 않는 메일 발송 요청과 다른 작업이 함께 있어 아무 작업도 실행하지 않았습니다. '
@@ -623,6 +631,25 @@ class ConversationJudgments:
         if self.policy.confident_selection(decision):
             return Judgment(JUDGMENT_NO, source=decision.confidence.provider or decision.outcome)
         return Judgment(JUDGMENT_UNAVAILABLE, source=decision.outcome)
+
+    def goal_reached(self, request, observations, failed_steps='', work_id=None):
+        """Do the observed tool results satisfy the owner's ``request`` (#657)?
+
+        One ``judge`` call over the owner's request, the observations a
+        completion claim cited and the run's failed steps - never the
+        worker's own summary.  Only a confident yes lets the Work succeed;
+        no or unavailable leaves it partial.  The caller bounds the
+        observations and failed steps; the owner's request is never cut, so
+        this context's bound is widened by exactly its length.
+        """
+        request = str(request or '')
+        context = DecisionContext('goal-reached', {'owner_request': request, 'observations': observations,
+                                                   'failed_steps': failed_steps or 'none'}, work_id=work_id,
+                                  max_chars=MAX_CONTEXT_CHARS + len(request))
+        decision = self.engine.judge(context, GOAL_REACHED_PROPOSITION)
+        verdict = self.policy.binary(decision)
+        return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
+                        source=decision.confidence.provider or decision.outcome)
 
     def explicit_memory_request(self, utterance):
         """Does ``utterance`` explicitly ask AgentOS to remember a stated value (#597)?

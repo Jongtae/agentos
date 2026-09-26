@@ -381,8 +381,10 @@ class CapabilitiesPath(unittest.TestCase):
             return {'choices': [{'message': {'content': '다른 제공자로 다시 찾겠습니다.'}}]}
         caps = Capabilities(self.store, ModelAdapter(transport), CFG, '', 'job-4', self.record, network=Refusing())
         run_agent(caps.adapter, CFG, '', [{'role': 'user', 'content': 'x'}], '', caps, self.record)
-        observation = json.loads(bodies[1]['messages'][-1]['content'])
+        observation = json.loads(next(m['content'] for m in bodies[1]['messages'] if m.get('tool_call_id') == '1'))
         self.assertEqual((observation['code'], observation['retry']), ('provider_auth', 'permanent'))
+        # #657: a failed provider earns one explicit "different path" turn.
+        self.assertIn('Path check', bodies[1]['messages'][-1]['content'])
         failed = [json.loads(detail) for tool, status, detail in self.events if status == 'failed' and tool != 'model']
         self.assertEqual([row['code'] for row in failed], ['provider_auth'])
 

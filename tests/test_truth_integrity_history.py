@@ -31,6 +31,7 @@ from personal_agent.google_calendar import CALENDAR_READ_SCOPE, CALENDAR_WRITE_S
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
+from test_agency_loop import goal_engine
 
 CHAT = 909
 GENERATION = 'g1'
@@ -53,6 +54,8 @@ class TruthIntegrityTestCase(unittest.TestCase):
         self.child_plan = []
         self.text = '완료했습니다.'
         self.turn = 0
+        # #657: when set, the parent ends with a finish claim citing every result it was shown.
+        self.claim = False
         self.model_requests = []   # the messages every parent model turn received
 
         def transport(url, body=None, headers=None, timeout=60):
@@ -79,6 +82,13 @@ class TruthIntegrityTestCase(unittest.TestCase):
                 self.turn += 1
                 return {'message': {'content': '', 'tool_calls': [
                     {'id': f'call-{self.turn}', 'function': {'name': name, 'arguments': arguments}}]}}
+            refs = [json.loads(m['content']).get('ref') for m in body.get('messages', [])
+                    if m.get('role') == 'tool' and m.get('content', '').startswith('{')]
+            if parent and self.claim and any(refs):
+                self.claim = False
+                return {'message': {'content': '', 'tool_calls': [
+                    {'id': 'finish', 'function': {'name': 'finish', 'arguments': {
+                        'status': 'done', 'evidence_refs': [ref for ref in refs if ref], 'summary': self.text}}}]}}
             return {'message': {'content': self.text if parent else '전문 보고서'}}
 
         self.service = AgentService(self.store, ModelAdapter(model), transport, calendar=self.calendar())
@@ -104,6 +114,11 @@ class TruthIntegrityTestCase(unittest.TestCase):
             registry.transition(CONNECTOR_OWNER, spec.connector_id, ConnectorState.CONNECTED,
                                 granted_scopes=(scope,))
         return CalendarConnector(self.store, Provider(), registry=registry)
+
+    def claim_completion(self):
+        """#657: the model claims completion and the judgment finds it shown."""
+        self.claim = True
+        self.service.use_decision_engine(goal_engine(True))
 
     def ask(self, message):
         job_id = self.store.enqueue(message, f'ask-{self.turn}-{len(self.sent)}-{message}',
@@ -186,6 +201,7 @@ class TranscriptQualificationTests(TruthIntegrityTestCase):
         self.plan = [('calendar_query', {'start': '2026-09-25T00:00:00+09:00',
                                          'end': '2026-09-26T00:00:00+09:00', 'timezone': 'Asia/Seoul'})]
         self.text = '팀 회의 하나가 있습니다.'
+        self.claim_completion()
         job, bubble = self.ask('모레 일정 뭐 있어?')
         self.assertEqual(job['status'], 'succeeded', job.get('error'))
         self.assertEqual(bubble, self.text)
@@ -361,6 +377,7 @@ class IncompleteEvidenceOutcomeTests(TruthIntegrityTestCase):
         self.connect_folder({'pay.txt': '급여 명세'})
         self.plan = [('find_files', {'query': '급여'})]
         self.text = '급여 파일 한 건을 찾았습니다.'
+        self.claim_completion()
         job, bubble = self.ask('급여 파일 찾아줘')
         self.assertEqual(job['status'], 'succeeded', job.get('error'))
         self.assertEqual(bubble, self.text)
@@ -385,7 +402,11 @@ class FallbackTextTests(TruthIntegrityTestCase):
         self.text = ''
         job, bubble = self.ask('모레 일정 뭐 있어?')
         self.assertEqual(job['response'], FALLBACK_UNDESCRIBED)
-        for text in (job['response'], bubble):
+        # #657: nothing claimed completion, so the Work is partial; AgentOS's
+        # own truth header is the only "완료" in the bubble.
+        self.assertEqual(job['status'], 'partial')
+        self.assertTrue(bubble.startswith(TERMINAL_PARTIAL_HEADER))
+        for text in (job['response'], bubble[len(TERMINAL_PARTIAL_HEADER):]):
             self.assertNotIn('완료했습니다', text)
 
     def test_an_unconfigured_search_is_not_reported_as_finding_nothing(self):

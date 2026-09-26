@@ -40,6 +40,9 @@ WEB = Path(__file__).resolve().parents[1] / 'src' / 'personal_agent' / 'web'
 def judging(answer):
     """A DecisionEngine that answers only the explicit-memory judgment."""
     def judge(context, proposition):
+        if context.purpose == 'goal-reached':
+            # #657: the stored row the claim cites is judged as the request fulfilled.
+            return BinaryDecision(OUTCOME_DECIDED, True, fixture_confidence())
         if context.purpose != 'explicit-memory-request':
             return None
         if answer is None:
@@ -80,6 +83,7 @@ class ProfileFactsInConversation(_OwnerSurface):
     def test_an_explicit_statement_lands_under_a_profile_key(self):
         """The judged-explicit statement is stored where the model keyed it."""
         self.service.use_decision_engine(judging(True))
+        self.model_claim = True
         self.propose('profile.allergy.peanut', '땅콩 알러지')
         job = self.ask('나 땅콩 알러지 있어')
         self.model_plan = []

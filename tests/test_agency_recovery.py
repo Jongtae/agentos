@@ -320,7 +320,7 @@ class RecoveryEntryPointTests(unittest.TestCase):
         for route in self.CHANNELS:
             with self.subTest(route=route[0]):
                 script = loop.Script({'tool_calls': [loop.call('1', 'weather', city='Seongnam', country='KR')]},
-                                     {'content': '내일(2026-09-27) 성남은 최저 14°C, 최고 22°C입니다.'})
+                                     loop.finish_observed('f', summary='내일(2026-09-27) 성남은 최저 14°C, 최고 22°C입니다.'))
                 network = loop.Network(weather=loop.FORECAST)
                 calls = []
                 def flaky(plan, original=network.execute):
@@ -328,7 +328,8 @@ class RecoveryEntryPointTests(unittest.TestCase):
                     if len(calls) == 1:raise OFFLINE
                     return original(plan)
                 network.execute = flaky
-                row, failed = self.run_turn('내일 성남 날씨 알려줘', script, network, route)
+                # #657: the recovered read is the claim's evidence, judged to satisfy the request.
+                row, failed = self.run_turn('내일 성남 날씨 알려줘', script, network, route, engine=loop.goal_engine(True))
                 self.assertEqual(row['status'], 'succeeded')
                 self.assertEqual(calls, ['weather', 'weather'])
                 self.assertEqual([event['trace']['code'] for event in failed], ['transient_failure'])

@@ -7,6 +7,8 @@ HOST_ACTIONS={'web_search','public_page_read','bounded_public_research','weather
               'browser_open','browser_read','browser_find','browser_click','browser_type'}
 WRITE_ACTIONS={'save_note','save_memory','delegate_agent','calendar_draft_create','calendar_draft_update','calendar_draft_cancel','browser_click','browser_type'}
 ROLE_PERMISSIONS={'read_only','bounded_write'}
+#: Tool ids the agent loop itself owns (#657 `finish`); no package may declare one.
+RESERVED_TOOL_IDS=frozenset({'finish'})
 
 BUILTIN_MANIFEST={'version':1,'id':'builtin','tools':[{'id':name,'host_action':name,'mode':'bounded_write' if name in WRITE_ACTIONS else 'read_only'} for name in sorted(HOST_ACTIONS)],'roles':[
  {'id':'researcher','name':'조사 에이전트','instructions':'Research the assigned question using read-only tools when needed. Cite evidence and identify gaps. Never invent findings.','permissions':['read_only'],'tools':['web_search','weather','list_roots','find_files','read_file','list_notes','list_agents']},
@@ -24,6 +26,7 @@ def validate(manifest):
  tool_ids=set()
  for tool in tools:
   if not isinstance(tool,dict) or not _id(tool.get('id')) or tool['id'] in tool_ids or tool.get('host_action') not in HOST_ACTIONS:raise ValueError('허용하지 않은 도구 매니페스트입니다.')
+  if tool['id'] in RESERVED_TOOL_IDS:raise ValueError(f"도구 id '{tool['id']}'는 AgentOS 실행 루프 전용이라 패키지에서 선언할 수 없습니다.")
   if tool.get('mode') != ('bounded_write' if tool['host_action'] in WRITE_ACTIONS else 'read_only'):raise ValueError('도구 모드는 host action의 안전 등급과 일치해야 합니다.')
   tool_ids.add(tool['id'])
  role_ids=set()

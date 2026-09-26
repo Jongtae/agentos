@@ -53,6 +53,8 @@ class HandoffTestCase(unittest.TestCase):
         self.plan = []
         self.text = '계약서 갱신일은 10월 1일입니다.'
         self.turn = 0
+        # #657: when set, the model ends a tool-using turn with a finish claim citing every result it was shown.
+        self.claim = False
         self.picked = None
         self.service = self.make_service()
         self.store.put('telegram', {'enabled': True, 'user_id': CHAT, 'generation': GENERATION})
@@ -74,6 +76,13 @@ class HandoffTestCase(unittest.TestCase):
                 self.turn += 1
                 return {'message': {'content': '', 'tool_calls': [
                     {'id': f'call-{self.turn}', 'function': {'name': name, 'arguments': arguments}}]}}
+            refs = [json.loads(m['content']).get('ref') for m in body.get('messages', [])
+                    if m.get('role') == 'tool' and str(m.get('content', '')).startswith('{')]
+            if self.claim and tools and any(refs):
+                self.claim = False
+                return {'message': {'content': '', 'tool_calls': [
+                    {'id': 'finish', 'function': {'name': 'finish', 'arguments': {
+                        'status': 'done', 'evidence_refs': [ref for ref in refs if ref], 'summary': self.text}}}]}}
             return {'message': {'content': self.text}}
 
         service = AgentService(self.store, ModelAdapter(model), transport)
@@ -84,6 +93,12 @@ class HandoffTestCase(unittest.TestCase):
         service.local_server_port = 8765
         service.folder_picker = lambda prompt: self.picked
         return service
+
+    def claim_completion(self):
+        """#657: the model claims completion and the judgment finds it shown."""
+        from test_agency_loop import goal_engine
+        self.claim = True
+        self.service.use_decision_engine(goal_engine(True))
 
     def folder(self, name, files=None):
         path = self.root / name
@@ -187,8 +202,9 @@ class ReadHandoffTests(HandoffTestCase):
         self.assertEqual(notice, ['선택한 폴더를 읽기로 허용했습니다. 방금 요청을 이어서 처리합니다.'])
         self.assert_telegram_safe(notice[0])
 
-        # The original Work resumes, once.
+        # The original Work resumes, once; #657: its answer is a judged completion claim.
         self.plan = [('find_files', {'query': '계약서'})]
+        self.claim_completion()
         self.assertTrue(self.service.run_one())
         before = len(self.sent)
         self.service.deliver_one()
@@ -381,6 +397,13 @@ class HostedModelDocumentApprovalTests(HandoffTestCase):
                 self.turn += 1
                 return {'choices': [{'message': {'content': '', 'tool_calls': [
                     {'id': f'call-{self.turn}', 'function': {'name': name, 'arguments': json.dumps(arguments)}}]}}]}
+            refs = [json.loads(m['content']).get('ref') for m in body.get('messages', [])
+                    if m.get('role') == 'tool' and str(m.get('content', '')).startswith('{')]
+            if self.claim and tools and any(refs):
+                self.claim = False
+                return {'choices': [{'message': {'content': '', 'tool_calls': [
+                    {'id': 'finish', 'function': {'name': 'finish', 'arguments': json.dumps(
+                        {'status': 'done', 'evidence_refs': [ref for ref in refs if ref], 'summary': self.text})}}]}}]}
             return {'choices': [{'message': {'content': self.text}}]}
 
         service.adapter = ModelAdapter(hosted)
@@ -413,6 +436,7 @@ class HostedModelDocumentApprovalTests(HandoffTestCase):
         self.assertFalse(self.service.document_boundary()['requires_approval'])
         self.assertEqual(self.job(job_id)['status'], 'queued')
         self.plan = [('find_files', {'query': '계약서'})]
+        self.claim_completion()
         self.assertTrue(self.service.run_one())
         self.assertEqual(self.job(job_id)['status'], 'succeeded', self.job(job_id).get('error'))
         self.assertFalse(self.service.resume_after_document_approval(job_id), 'continues once only')

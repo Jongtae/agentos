@@ -23,6 +23,7 @@ from pathlib import Path
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import TELEGRAM_CARD_GRACE_SECONDS, AgentService
 from personal_agent.quickstart_store import QuickStore
+from test_agency_loop import goal_engine
 
 CHAT = 4242
 GENERATION = 'g1'
@@ -40,6 +41,9 @@ class TerminalResultTestCase(unittest.TestCase):
         self.plan = []          # [(tool, arguments_mapping), ...] consumed in order
         self.text = '완료했습니다.'
         self.turn = 0
+        # #657: when set, the model ends with a finish claim citing every
+        # result it was shown (see `claim_completion`).
+        self.claim = False
 
         def transport(url, body=None, headers=None, timeout=60):
             if url.endswith('/sendMessage'):
@@ -69,6 +73,13 @@ class TerminalResultTestCase(unittest.TestCase):
                 return {'message': {'content': '', 'tool_calls': [
                     {'id': f'call-{self.turn}',
                      'function': {'name': name, 'arguments': arguments}}]}}
+            refs = [json.loads(m['content']).get('ref') for m in body.get('messages', [])
+                    if m.get('role') == 'tool' and m.get('content', '').startswith('{')]
+            if self.claim and any(refs):
+                self.claim = False
+                return {'message': {'content': '', 'tool_calls': [
+                    {'id': 'finish', 'function': {'name': 'finish', 'arguments': {
+                        'status': 'done', 'evidence_refs': [ref for ref in refs if ref], 'summary': self.text}}}]}}
             return {'message': {'content': self.text}}
 
         self.service = AgentService(self.store, ModelAdapter(model), transport)
@@ -77,6 +88,11 @@ class TerminalResultTestCase(unittest.TestCase):
         self.assertTrue(self.service.test_model()['ok'])
         self.store.put('telegram', {'enabled': True, 'user_id': CHAT,
                                     'generation': GENERATION})
+
+    def claim_completion(self):
+        """#657: the model claims completion and the judgment finds it shown."""
+        self.claim = True
+        self.service.use_decision_engine(goal_engine(True))
 
     def ask(self, message, card=False):
         """Run one Telegram turn and return the job plus the terminal bubble."""
@@ -208,6 +224,7 @@ class SucceededTurnTests(TerminalResultTestCase):
         self.connect_folder()
         self.plan = [('find_files', {'query': '급여'})]
         self.text = '급여 파일 한 건을 찾았습니다.'
+        self.claim_completion()
         job, bubble = self.ask('급여 파일 찾아줘')
         self.assertEqual(job['status'], 'succeeded', job.get('error'))
         self.assertEqual(bubble, self.text)
@@ -292,6 +309,7 @@ class SurfaceConsistencyTests(TerminalResultTestCase):
         self.connect_folder()
         self.plan = [('find_files', {'query': '급여'})]
         self.text = '급여 파일 한 건을 찾았습니다.'
+        self.claim_completion()
         job, bubble = self.ask('급여 파일 찾아줘', card=True)
         self.assertEqual(job['status'], 'succeeded', job.get('error'))
         # #581: the card no longer frames the answer as "처리가 끝났습니다 →

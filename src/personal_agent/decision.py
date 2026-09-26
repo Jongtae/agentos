@@ -57,13 +57,21 @@ class DecisionContext:
     callable consulted before a provider is contacted.
     """
 
-    __slots__ = ('purpose', 'facts', 'work_id', 'cancelled')
+    __slots__ = ('purpose', 'facts', 'work_id', 'cancelled', 'max_chars')
 
-    def __init__(self, purpose, facts=None, *, work_id=None, cancelled=None):
+    def __init__(self, purpose, facts=None, *, work_id=None, cancelled=None, max_chars=MAX_CONTEXT_CHARS):
         self.purpose = str(purpose)
         self.facts = {str(k): str(v) for k, v in (facts or {}).items()}
         self.work_id = work_id
         self.cancelled = cancelled
+        # The size bound adapters enforce before any provider call.  A caller
+        # may widen it for one context whose owner-authored fact must not be
+        # cut (#657: the owner's whole request); every other fact stays bounded.
+        self.max_chars = int(max_chars)
+
+    def too_large(self, rendered=None):
+        """Whether the rendered facts exceed this context's bound."""
+        return len(self.render() if rendered is None else rendered) > self.max_chars
 
     def render(self):
         return '\n'.join(f'{label}: {value}' for label, value in self.facts.items())
@@ -467,7 +475,7 @@ class ModelDecisionEngine(SchemaDecisionEngine):
         if context.is_cancelled():
             return self._done(context, kind, OUTCOME_CANCELLED, {}, DecisionConfidence(**identity), started)
         rendered = context.render()
-        if len(rendered) > MAX_CONTEXT_CHARS:
+        if context.too_large(rendered):
             return self._done(context, kind, OUTCOME_REJECTED, {}, DecisionConfidence(**identity), started)
         messages = [{'role': 'system', 'content': _SYSTEM},
                     {'role': 'user', 'content': f'Purpose: {context.purpose}\n{rendered}\n\n{question}'}]

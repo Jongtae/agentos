@@ -1,4 +1,5 @@
 """Capability registry and a provider-independent, bounded native tool loop."""
+import hashlib
 import json
 import os
 import re
@@ -895,6 +896,9 @@ WORK_ATTEMPTS_EXHAUSTED=f'이 작업의 도구 실행 한도({WORK_TOOL_ATTEMPTS
 #: Codes that end the Work's remaining steps; never a recoverable read failure.
 #: ``deadline`` is the pre-#607 spelling kept for older events.
 BUDGET_CODES=frozenset({'stopped','deadline','deadline_exceeded','turn_budget','attempt_budget'})
+#: SEC-LOOP-01 (#657): "try a different path" system turns one Work may get
+#: after a failed path; spent on the Work's own ``WorkBudget``.
+WORK_ALTERNATIVE_NUDGES=2
 
 class ToolError(ValueError):
  """A tool refusal with a stable ``code`` and, when known, the authority it ``requires`` (#606 T2).
@@ -963,9 +967,10 @@ class WorkBudget:
  optional ``ledger`` (``WorkLedger``) makes attempts and the deadline shared
  with the other processes serving the same Work (#607 AX-10).
  """
- def __init__(self,*,turns=WORK_MODEL_TURNS,attempts=WORK_TOOL_ATTEMPTS,seconds=WORK_DEADLINE_SECONDS,clock=time.monotonic,stop=None,ledger=None):
+ def __init__(self,*,turns=WORK_MODEL_TURNS,attempts=WORK_TOOL_ATTEMPTS,seconds=WORK_DEADLINE_SECONDS,clock=time.monotonic,stop=None,ledger=None,nudges=WORK_ALTERNATIVE_NUDGES):
   self.turns,self.attempts,self.clock,self.stop,self.ledger=turns,attempts,clock,stop,ledger
   self.deadline=clock()+seconds;self.turns_used=0;self.attempts_used=0
+  self.nudges,self.nudges_used=nudges,0
  def interrupted(self):
   """``'stopped'``, ``'deadline_exceeded'`` or None, without raising (polled while a CLI runs)."""
   if self.stop is not None:
@@ -993,6 +998,10 @@ class WorkBudget:
   if self.ledger is not None and not self.ledger.spend(self.attempts):
    raise ToolError(WORK_ATTEMPTS_EXHAUSTED,'attempt_budget')
   self.attempts_used+=1
+ def spend_nudge(self):
+  """Whether one more "try a different path" turn is allowed (#657); never raises."""
+  if self.nudges_used>=self.nudges:return False
+  self.nudges_used+=1;return True
 
 #: Durable Stop requests of running Works, so a separate process serving the
 #: same Work (the CLI's MCP bridge) sees the owner's Stop too.
@@ -1114,7 +1123,7 @@ def outcome_from_events(rows, tools=None):
  return ('partial' if advanced else 'failed'),refusals
 
 class Capabilities:
- def __init__(self,store,adapter,config,key,job_id,record,readonly=False,network=None,document_access=True,packages=None,allowed_tools=None,document_context=False,public_page_scope=None,memory_approval=None,inherited_provenance=(),calendar=None,calendar_owner=None,memory_request=None,current_packages=None,lookup_sources=None,lookup_hint='',delegated=False,inherited_excluded=(),budget=None,browser=None,browser_approvals=None):
+ def __init__(self,store,adapter,config,key,job_id,record,readonly=False,network=None,document_access=True,packages=None,allowed_tools=None,document_context=False,public_page_scope=None,memory_approval=None,inherited_provenance=(),calendar=None,calendar_owner=None,memory_request=None,current_packages=None,lookup_sources=None,lookup_hint='',delegated=False,inherited_excluded=(),budget=None,browser=None,browser_approvals=None,judgments=None,secret_redactor=None):
   # #606 T1: shared with a delegated specialist, spent in `execute`.
   # Without an injected budget (the MCP bridge process) the durable Stop
   # request is the stop signal.
@@ -1167,6 +1176,14 @@ class Capabilities:
   # is the owner's per-step approval surface (consume/request); the model
   # never holds a token.
   self.browser=browser;self.browser_approvals=browser_approvals;self._browser_session=None
+  # #657: the conversation's bounded judgments (``ConversationJudgments``);
+  # `run_agent` asks its ``goal_reached`` before a Work may succeed.  None
+  # means no DecisionEngine: a claimed completion stays ``partial``.
+  self.judgments=judgments
+  # #657 / pilot boundary 1: the service's stored-secret redactor
+  # (`AgentService._redact_known_secrets`), injected so this module never
+  # imports the service; applied before anything reaches a judgment.
+  self.secret_redactor=secret_redactor
   # `run_agent`'s per-call result cache (one execution per identical call in a
   # Work); not a lookup attempt memo (#654 removed that).
   self.memo={}
@@ -1205,6 +1222,28 @@ class Capabilities:
    try:excluded=[*self.lookup_sources()['excluded'],*excluded]
    except Exception:pass
   return excluded
+ def judgment_text(self,text,private=True):
+  """Text as it may reach the completion judgment (#657, pilot boundary 1).
+
+  Deterministic exclusion only, no judgment about the text: saved private
+  values (``private``; the same #605 set the browser mediation uses), the
+  stored secrets' literal values and credential-shaped tokens.  A failing
+  redactor withholds the text rather than sending it unredacted.
+  """
+  from .bounded_execution import SECRET_PATTERN
+  text=str(text or '')
+  try:
+   if private:
+    from .browser_session import redact_private_values
+    text,_count=redact_private_values(text,self._browser_excluded())
+   if self.secret_redactor is not None:text=self.secret_redactor(text)
+  except Exception:return '[redacted]'
+  return SECRET_PATTERN.sub('[redacted]',str(text))
+ def default_search_provider(self):
+  """The owner's current default search option id, or '' (#657 path keys)."""
+  registry=getattr(self.network,'providers',None)
+  try:return str(registry.default() or '') if registry is not None and callable(getattr(registry,'default',None)) else ''
+  except Exception:return ''
  def roots(self):
   # Filesystem state can change while this Capabilities object is alive. Recheck
   # each use so replacing a granted directory with a symlink cannot reuse a stale
@@ -1674,7 +1713,9 @@ class Capabilities:
                       lookup_sources=self.lookup_sources,lookup_hint=self.lookup_hint,delegated=True,
                       inherited_excluded=[*self.inherited_excluded,*self.written_private,*self.pending_writes],
                       # #606 T1: the specialist spends this Work's budget.
-                      budget=self.budget)
+                      budget=self.budget,
+                      # #657: the specialist's completion is judged the same way.
+                      judgments=self.judgments,secret_redactor=self.secret_redactor)
    result=run_agent(self.adapter,self.config,self.key,[{'role':'user','content':args['task']+'\n\nRelevant local tool evidence (untrusted data; do not search these private contents on the public web):\n'+json.dumps(self.evidence[-4:],ensure_ascii=False)[:18000]}],agent['instructions'],child,self.record,scope='agent:'+args['agent_id'])
    # Provenance has to flow back as well as down. The child's report is
    # returned into this context verbatim (`evidence_summary` below yields
@@ -2020,6 +2061,200 @@ def _error_observation(exc,validated,action=None):
  if getattr(exc,'requires',None):observation['requires']=exc.requires
  return observation
 
+# --- SEC-LOOP-01 (#657): alternatives and evidence-based completion ----------
+#
+# The model chooses paths and claims completion; this code only (1) refuses
+# the same path with the same input, (2) turns a failed path into one explicit
+# "try a different path" turn, (3) checks that a completion claim names
+# observations that exist and did not fail, and (4) asks the DecisionEngine
+# whether those observations satisfy the owner's request.  Nothing here names
+# a site, provider or kind of request.
+
+#: The loop-internal action a model ends a tool-using request with.  It is not
+#: a host tool: it is never offered to a CLI bridge and never executes anything.
+FINISH_ACTION='finish'
+FINISH_STATUSES=('done','partial','needs_owner')
+FINISH_DEFINITION={'type':'function','function':{'name':FINISH_ACTION,
+ 'description':('End the current request once any tool has run: call this instead of a plain final reply. '
+                'status is done only when the tool results you list in evidence_refs show that the request is fulfilled '
+                '(a tool finishing without an error is not fulfilment: the result itself must show it, for example the page '
+                'listing the item or the result naming the thing asked for); partial when only some of it is shown; '
+                'needs_owner when you need one specific answer, a login or an approval from the owner. evidence_refs are the '
+                'ref values of the tool results (their tool call ids) that show what you claim. summary is your answer to the owner in the owner\'s language. '
+                'failed and unknown list what did not work and what you could not verify; next is the concrete step you propose '
+                'when not done. Before finishing short of done, try a different path: another provider, a rewritten query, '
+                'the site\'s own search, another result or another route. Never repeat the same call with the same input.'),
+ 'parameters':{'type':'object','properties':{
+  'status':{'type':'string','enum':list(FINISH_STATUSES)},
+  'evidence_refs':{'type':'array','items':{'type':'string'}},
+  'summary':STRING,
+  'failed':{'type':'array','items':{'type':'string'}},
+  'unknown':{'type':'array','items':{'type':'string'}},
+  'next':STRING},
+  'required':['status','evidence_refs','summary'],'additionalProperties':False}}}
+
+#: Steps inside a stateful page session: the same step is a repeat only on the
+#: same page, keyed on the digest of the page state the session last returned.
+PAGE_STEP_ACTIONS=frozenset({'browser_click','browser_type'})
+
+REPEAT_PATH_TEXT=('같은 경로를 같은 입력으로 다시 실행하지 않습니다. 다른 제공자, 바꾼 검색어, 사이트 자체 검색, '
+                  '다른 결과나 다른 경로를 고르거나 소유자에게 구체적인 질문 하나를 하세요.')
+ALTERNATIVE_NUDGE=('Path check: the last path did not yield the goal. Choose a different path (another provider, a rewritten '
+                   'query, the site\'s own search, another result or another route) or ask the owner one specific question. '
+                   'Do not repeat the same call.')
+COMPLETION_CHECK=('Completion check: tools have run for this request but no completion was claimed. Call finish now: status done '
+                  'only if the results you name in evidence_refs show the request fulfilled; otherwise partial or needs_owner '
+                  'with what failed, what is unknown and the next step. If a different path could still reach the goal, take it first.')
+#: What AgentOS states when completion could not be established.
+GOAL_NOT_CLAIMED='완료를 뒷받침하는 관찰 결과가 제시되지 않아 요청이 끝났는지 확인하지 못했습니다.'
+GOAL_NOT_SHOWN='관찰된 결과만으로는 요청이 완료됐다고 확인되지 않았습니다.'
+GOAL_UNJUDGED='완료 여부를 판단할 기능을 사용할 수 없어 요청이 끝났는지 확인하지 못했습니다.'
+#: Completion judgments per run: one, plus one after a "not shown" answer.
+GOAL_JUDGMENTS=2
+#: Bounds of the facts one completion judgment is asked over besides the
+#: owner's request, which is never cut (`goal_reached` widens its bound by it).
+GOAL_OBSERVATION_CHARS=3800
+GOAL_FAILURE_CHARS=600
+REPORT_ITEM_CHARS=200
+REPORT_ITEMS=3
+
+def _normalized(value):
+ return ' '.join(str(value if value is not None else '').split()).casefold()
+
+def result_page_digest(result):
+ """Digest of a page state a tool returned (``state`` + ``url``), or None."""
+ if not isinstance(result,dict) or not isinstance(result.get('state'),str) or 'url' not in result:return None
+ view={key:result.get(key) for key in ('state','url','title','text','elements')}
+ return hashlib.sha256(json.dumps(view,sort_keys=True,ensure_ascii=False,default=str).encode()).hexdigest()
+
+def canonical_search_args(args,default_provider=''):
+ """A search's arguments with its omitted selectors made explicit (#657).
+
+ An omitted or blank ``provider`` is the owner's current default option and
+ an omitted or blank ``locale`` is '', so ``web_search(query=x)`` and
+ ``web_search(query=x, provider=<default>)`` are one path.
+ """
+ canon=dict(args)
+ canon['provider']=str(args.get('provider') or '').strip() or str(default_provider or '')
+ canon['locale']=str(args.get('locale') or '').strip()
+ return canon
+
+def path_key(action,args,page=None):
+ """The identity a repeated path is refused on (#657), or None.
+
+ A search is the same path when every argument matches after whitespace and
+ case normalisation (query, provider, locale, mode); a page step is the same
+ when action, target and input digests match on the same page digest.  The model's
+ declared ``effect`` label is not part of the path.  Other actions keep the
+ exact-argument ``duplicate_call`` guard.
+ """
+ if action in SEARCH_BACKED_ACTIONS:
+  return json.dumps([action,sorted((key,_normalized(value)) for key,value in args.items())],ensure_ascii=False)
+ if action in PAGE_STEP_ACTIONS and page:
+  # Digests only: typed text (possibly a password or card number, #656) is
+  # never held, even in memory, as part of a key.
+  return json.dumps([action,sorted((key,hashlib.sha256(_normalized(value).encode()).hexdigest())
+                                   for key,value in args.items() if key!='effect'),page])
+ return None
+
+def alternative_kind(action,args,last_search,after_failure):
+ """What kind of different path this call is, or None when it is not one.
+
+ ``provider_switch``: the same query to another provider, or another provider
+ after a failed path; ``query_rewrite``: another search input after a failed
+ path; ``route_change``: another action after a failed path.
+ """
+ if action in SEARCH_BACKED_ACTIONS and last_search is not None:
+  same_query=_normalized(args.get('query'))==_normalized(last_search.get('query'))
+  if _normalized(args.get('provider'))!=_normalized(last_search.get('provider')) and (same_query or after_failure):
+   return 'provider_switch'
+  return 'query_rewrite' if after_failure else None
+ return 'route_change' if after_failure else None
+
+def check_claim(args,observations):
+ """``(claim, reason)`` for one ``finish`` call (#657).
+
+ ``observations`` maps tool call ids to ``(name, action, state, result)``.
+ ``reason`` is None for an accepted claim, else ``invalid_claim``,
+ ``no_evidence`` (done without refs), ``unknown_ref`` or ``failed_ref``.
+ A done claim must name only observations that ran and succeeded; a
+ partial or needs_owner claim keeps only the refs that did.
+ """
+ if not isinstance(args,dict) or set(args)-set(FINISH_DEFINITION['function']['parameters']['properties']):return None,'invalid_claim'
+ status,refs,summary=args.get('status'),args.get('evidence_refs'),args.get('summary')
+ lists=[args.get(key,[]) for key in ('failed','unknown')]
+ if (status not in FINISH_STATUSES or not isinstance(refs,list) or any(not isinstance(ref,str) for ref in refs)
+     or not isinstance(summary,str) or not summary.strip() or not isinstance(args.get('next',''),str)
+     or any(not isinstance(items,list) or any(not isinstance(item,str) for item in items) for items in lists)):
+  return None,'invalid_claim'
+ refs=list(dict.fromkeys(refs))
+ claim={'status':status,'evidence_refs':refs,'summary':summary.strip(),
+        'failed':[item.strip()[:REPORT_ITEM_CHARS] for item in lists[0] if item.strip()][:REPORT_ITEMS],
+        'unknown':[item.strip()[:REPORT_ITEM_CHARS] for item in lists[1] if item.strip()][:REPORT_ITEMS],
+        'next':(args.get('next') or '').strip()[:REPORT_ITEM_CHARS]}
+ if status!='done':
+  claim['evidence_refs']=[ref for ref in refs if ref in observations and observations[ref][2]=='succeeded']
+  return claim,None
+ if not refs:return claim,'no_evidence'
+ if any(ref not in observations for ref in refs):return claim,'unknown_ref'
+ if any(observations[ref][2]!='succeeded' for ref in refs):return claim,'failed_ref'
+ return claim,None
+
+CLAIM_REJECTIONS={
+ 'invalid_claim':'finish 인수가 올바르지 않습니다. status, evidence_refs(도구 호출 id 목록), summary를 지정하세요.',
+ 'no_evidence':'완료(done)에는 요청이 끝났음을 보여 주는 도구 호출 id가 evidence_refs에 하나 이상 필요합니다. 도구가 필요 없는 대화라면 finish 없이 바로 답하세요.',
+ 'unknown_ref':'evidence_refs에 이 작업에서 실행되지 않은 도구 호출 id가 있습니다. 실제로 실행된 호출 id만 지정하세요.',
+ 'failed_ref':'evidence_refs에 실패했거나 보류·미완료된 결과가 있습니다. 실패한 관찰은 완료의 근거가 될 수 없습니다.',
+ 'goal_not_observed':'지정한 관찰 결과가 요청의 완료를 보여 주지 않습니다. 다른 경로로 목표를 확인하거나, 끝낼 수 없다면 partial 또는 needs_owner로 마치세요.',
+}
+
+def _observation_text(ref,name,result):
+ """One referenced observation, as the completion judgment reads it.
+
+ One value per line, so the line-scoped private-value redaction
+ (``redact_private_values``) withholds only the line that carries a value.
+ """
+ try:body=json.dumps(result,ensure_ascii=False,default=str,indent=1)
+ except (TypeError,ValueError):body=str(result)
+ return f'[{ref}] {name}:\n{body}'
+
+def goal_judgment(judgments,goal,claim,observations,failures,work_id=None,redact=None):
+ """``yes`` / ``no`` / ``unavailable``: do the referenced observations satisfy ``goal``?
+
+ One ``ConversationJudgments.goal_reached`` call over the owner's request,
+ the referenced observed results and the Work's failed steps - never the
+ model's own summary.  No judgments, an engine error or a non-answer is
+ ``unavailable``, which never yields ``succeeded``.  ``redact(text,
+ private)`` (``Capabilities.judgment_text``) runs on every fact before it is
+ bounded, so a cut can never leave part of a secret; the owner's request is
+ passed whole and only its stored-secret values are replaced.
+ """
+ if judgments is None or not hasattr(judgments,'goal_reached'):return 'unavailable'
+ clean=redact or (lambda text,private=True:str(text or ''))
+ refs=claim['evidence_refs']
+ share=max(300,GOAL_OBSERVATION_CHARS//max(1,len(refs)))
+ observed='\n'.join(clean(_observation_text(ref,observations[ref][0],observations[ref][3]))[:share] for ref in refs)[:GOAL_OBSERVATION_CHARS]
+ failed=clean('; '.join(f'{tool}: {reason or "failed"}' for tool,reason in failures))[:GOAL_FAILURE_CHARS]
+ try:judged=judgments.goal_reached(clean(goal,private=False),observed,failed,work_id=work_id)
+ except Exception:return 'unavailable'
+ outcome=getattr(judged,'outcome',None)
+ return outcome if outcome in ('yes','no') else 'unavailable'
+
+def agency_report(goal,verified,failures,unknown,next_step,question=None):
+ """The typed owner report of one run: requested / observed / failed / unknown / next.
+
+ ``observed`` is AgentOS's rendering of observed results (#598 H1), never
+ model prose; ``failed`` are the typed failures of this run; ``unknown`` and
+ ``next`` are bounded statements of what was not verified and the proposed
+ step; ``question`` is the one question a ``needs_owner`` finish asks.  None
+ of them says a step completed.  The service renders it
+ (``conversation_projection.report_statement``).
+ """
+ return {'requested':str(goal or '')[:300],'observed':list(verified),
+         'failed':[[tool,reason] for tool,reason in failures],
+         'unknown':list(dict.fromkeys(item for item in unknown if item))[:REPORT_ITEMS+2],
+         'next':next_step or None,'question':(question or '')[:600] or None}
+
 def _budget_end(exc,executions,sources,successful,incomplete,verified,config,actual):
  """End a run whose budget, deadline or Stop ran out, keeping what was observed.
 
@@ -2035,6 +2270,13 @@ def _budget_end(exc,executions,sources,successful,incomplete,verified,config,act
 def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'):
  messages=[{'role':'system','content':POLICY+'\n'+system},*history]
  definitions=capabilities.definitions();specs={d['function']['name']:d['function']['parameters'] for d in definitions}
+ # #657: the loop-internal completion claim, offered beside the host tools.
+ # `finish` is reserved (manifests.RESERVED_TOOL_IDS); should a tool of that
+ # name ever reach this list, the loop's own definition replaces it.
+ definitions=[d for d in definitions if d['function']['name']!=FINISH_ACTION]
+ specs.pop(FINISH_ACTION,None)
+ finish_offered=True
+ definitions=[*definitions,FINISH_DEFINITION]
  sources=[];executions=[];failed=False;successful=0;invalid_calls=set()
  # (tool, note) for calls that ran but whose own Evidence says they are incomplete.
  incomplete=[]
@@ -2042,8 +2284,47 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
  verified=[]
  # #606 T2: ordered (host_action, state) of every validated attempt, for `recovered`.
  trail=[]
+ # #657: call id -> (name, host_action, state, result) of every validated
+ # attempt (what a completion claim may cite); the refusable paths already
+ # taken; the digest of the page state last returned; the last search input;
+ # the alternatives tried; and this run's typed failures as (tool, reason).
+ observations={};paths=set();page=None;last_search=None;alternatives=[];failures=[]
+ goal=next((m.get('content') for m in reversed(history) if isinstance(m,dict) and m.get('role')=='user' and isinstance(m.get('content'),str)),'')
+ judged=0;nudges=0;checked_completion=False;draft=None
  budget=capabilities.budget
  active_config=dict(config);rerouted=False;checked_direct=False;attempts={};actual=None
+
+ def conclude(content,claim=None,judgment=None):
+  """The run's result: ``succeeded`` needs an accepted done claim judged yes (#657)."""
+  if sources and '조회 출처:' not in content:content+='\n\n조회 출처:\n'+'\n'.join(dict.fromkeys(sources))
+  result=ModelResult(content[:24000],config['provider'],actual)
+  if not trail and not invalid_calls:
+   # Ordinary conversation: no tool ran, so there is nothing to observe.
+   result.outcome='succeeded'
+  elif claim is not None and claim['status']=='done' and judgment=='yes' and not invalid_calls:
+   result.outcome='succeeded'
+  else:result.outcome='partial' if successful else 'failed'
+  unknown=[]
+  if trail and result.outcome!='succeeded':
+   if claim is None:unknown.append(GOAL_NOT_CLAIMED)
+   elif judgment=='no':unknown.append(GOAL_NOT_SHOWN)
+   elif judgment=='unavailable':unknown.append(GOAL_UNJUDGED)
+  stated=[['assistant',item] for item in (claim or {}).get('failed',())]
+  unknown.extend((claim or {}).get('unknown',()))
+  result.incomplete=incomplete
+  result.verified=verified
+  result.alternatives=list(alternatives)
+  question=claim['summary'] if claim is not None and claim['status']=='needs_owner' and result.outcome!='succeeded' else None
+  result.report=agency_report(goal,verified,[*failures,*stated],unknown,(claim or {}).get('next') or None,question)
+  if trail:
+   kinds={}
+   for row in alternatives:kinds[row['kind']]=kinds.get(row['kind'],0)+1
+   record('model','concluded',json.dumps({'scope':scope,'outcome':result.outcome,
+    'claim':None if claim is None else {'status':claim['status'],'evidence_refs':claim['evidence_refs']},
+    'judgment':judgment,'alternatives_tried':{'count':len(alternatives),'kinds':kinds},
+    'nudges':nudges,'unknown':len(result.report['unknown'])},ensure_ascii=False))
+  return result
+
  while True:
   # #606 T1: the Work's shared turn budget, deadline and Stop, before every model turn.
   try:budget.spend_turn()
@@ -2076,21 +2357,25 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
    messages.append(message)
    messages.append({'role':'system','content':'Execution check: NO tool has run for the current request. The preceding assistant text is only a draft. If the latest user requested an action, retrieval, saving, or delegation, actually call the appropriate tool now. Never say saved, searched, read, or delegated without execution. If this is ordinary conversation or requires no tool, return the final answer directly. Do not work on older requests.'})
    continue
+  if not calls and successful and finish_offered and not checked_completion:
+   # #657: a plain reply after tools ran is a draft until a completion is
+   # claimed with the observations that show it.  One check per run.
+   checked_completion=True
+   if isinstance(message.get('content'),str) and message['content'].strip():draft=message['content']
+   messages.append(message)
+   messages.append({'role':'system','content':COMPLETION_CHECK})
+   continue
   if not calls:
-   content=message.get('content')
+   # A plain reply to the completion check is not a new answer: the draft
+   # it followed stays the text, still without a completion claim.
+   content=draft if draft is not None else message.get('content')
    if not isinstance(content,str) or not content.strip():
     # `executions`, not `successful`: a withheld effect is not a successful
     # call, but it did run and fallback_response explains it better than a
     # bare provider error would.
     if executions:content=fallback_response(executions,sources)
     else:raise ProviderError('모델이 답변을 반환하지 않았습니다.')
-   if sources and '조회 출처:' not in content:content+='\n\n조회 출처:\n'+'\n'.join(dict.fromkeys(sources))
-   result=ModelResult(content[:24000],config['provider'],actual)
-   if not (failed or invalid_calls) or (not invalid_calls and recovered(trail)):result.outcome='succeeded'
-   else:result.outcome='partial' if successful else 'failed'
-   result.incomplete=incomplete
-   result.verified=verified
-   return result
+   return conclude(content)
   if not isinstance(calls,list):raise ProviderError('도구 호출 한도 또는 응답 형식 오류입니다.')
   ids=[c.get('id') for c in calls if isinstance(c,dict)]
   if len(ids)!=len(calls) or any(not isinstance(i,str) or not i for i in ids) or len(set(ids))!=len(ids):raise ProviderError('도구 호출 식별자가 올바르지 않습니다.')
@@ -2099,10 +2384,33 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
   # any call runs, so a lookup listed first cannot carry their values.
   capabilities.pending_writes=_batch_private_writes(calls,capabilities.tools)
   capabilities.written_labels.update(_batch_write_labels(calls,capabilities.tools))
+  # #657: a typed failure in this batch earns one "try a different path" turn.
+  path_failed=False
   for call in calls:
-   name='unknown';validated=False;attempt=0;args={}
+   function=call.get('function') if isinstance(call.get('function'),dict) else {}
+   if finish_offered and function.get('name')==FINISH_ACTION:
+    # #657: the completion claim.  Deterministic checks first (refs exist
+    # and did not fail), then one DecisionEngine judgment for a done claim.
+    try:claim_args=json.loads(function.get('arguments') or '{}')
+    except (TypeError,ValueError):claim_args=None
+    claim,reason=check_claim(claim_args,observations)
+    judgment=None
+    if reason is None and claim['status']=='done':
+     judged+=1
+     judgment=goal_judgment(capabilities.judgments,goal,claim,observations,failures,capabilities.job_id,
+                            getattr(capabilities,'judgment_text',None))
+     # A "not shown" answer returns the claim once, so the model can take
+     # another path; a second one, or no engine, ends the run below.
+     if judgment=='no' and judged<GOAL_JUDGMENTS:reason='goal_not_observed'
+    if reason is None:return conclude(claim['summary'],claim,judgment)
+    record('model','claim_rejected',json.dumps({'scope':scope,'call_id':call['id'],'code':reason,
+                                                 'evidence_refs':(claim or {}).get('evidence_refs')},ensure_ascii=False))
+    messages.append({'role':'tool','tool_call_id':call['id'],'content':json.dumps(
+     {'error':CLAIM_REJECTIONS[reason],'code':reason,'retry':'permanent','effect':'none'},ensure_ascii=False)})
+    continue
+   name='unknown';validated=False;attempt=0;args={};action=None;ran=False
    try:
-    function=call.get('function',{});name=function.get('name')
+    name=function.get('name')
     if not isinstance(name,str):
      name='unknown';raise ValueError('도구 이름은 문자열이어야 합니다.')
     args=json.loads(function.get('arguments','{}'))
@@ -2110,27 +2418,45 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
     if not spec:raise ValueError('허용하지 않은 도구 또는 인수입니다.')
     check_arguments(spec,args)
     validated=True
+    action=capabilities.tools[name]['host_action']
     cache_key=json.dumps([name,args],sort_keys=True)
     attempts[cache_key]=attempts.get(cache_key,0)+1;attempt=attempts[cache_key]
+    # #657: the same path with the same input is refused, not re-run.  A
+    # browser step is keyed on the page digest it acts on, so the same target
+    # on a changed page is a new path; its input is keyed as a digest only.
+    # #657: omitted search selectors are the owner's current default.
+    keyed=canonical_search_args(args,capabilities.default_search_provider()) if action in SEARCH_BACKED_ACTIONS else args
+    path=path_key(action,keyed,page)
+    if path is not None:
+     if path in paths:raise ToolError(REPEAT_PATH_TEXT,'repeat_path')
+     paths.add(path)
     # #656: a browser call reads or changes page state, so the same call may run again.
-    stateful=capabilities.tools[name]['host_action'] in BROWSER_ACTIONS
+    stateful=action in BROWSER_ACTIONS
     if attempt>1 and not stateful:raise ToolError('같은 도구 요청은 현재 작업에서 한 번만 실행합니다. 결과를 사용하거나 새 요청을 보내 주세요.','duplicate_call')
-    record(name,'running',json.dumps({'scope':scope,'call_id':call['id'],'attempt':attempt,'host_action':capabilities.tools[name]['host_action'],'arguments':recorded_arguments(capabilities.tools[name]['host_action'],args)},ensure_ascii=False))
+    kind=alternative_kind(action,keyed,last_search,bool(trail) and trail[-1][1] in ('failed','incomplete'))
+    if action in SEARCH_BACKED_ACTIONS:last_search=keyed
+    # #656: typed browser text is replaced before this (or any) record.
+    running={'scope':scope,'call_id':call['id'],'attempt':attempt,'host_action':action,'arguments':recorded_arguments(action,args)}
+    if kind:
+     alternatives.append({'kind':kind,'action':action});running['alternative']=kind
+    record(name,'running',json.dumps(running,ensure_ascii=False))
     if stateful:result=capabilities.execute(name,args)
     else:
      if cache_key not in capabilities.memo:capabilities.memo[cache_key]=capabilities.execute(name,args)
      result=capabilities.memo[cache_key]
+    ran=True
     executions.append((name,result))
     if name in ('find_files','read_file','list_notes','list_memory','save_memory','calendar_query')+CALENDAR_DRAFT_TOOLS:capabilities.evidence.append({'tool':name,'result':result})
     invalid_calls.discard(name)
     sources.extend(result.get('sources',[]))
-    action=capabilities.tools[name]['host_action']
+    # #657: a page state the call returned is the page the next step acts on.
+    page=result_page_digest(result) or page
     # A tool that declined or deferred returned normally, so this loop used to
     # count it as a fully successful call and the turn reported success (#488).
     withheld=withheld_effect(name,result)
     trace={'scope':scope,'call_id':call['id'],'attempt':attempt,'host_action':action,'evidence':evidence_summary(name,result)}
     if withheld:
-     failed=True;trail.append((action,'withheld'))
+     failed=True;trail.append((action,'withheld'));failures.append((name,withheld.reason))
      if withheld.advanced:successful+=1
      # 'error' is the field the owner-visible cause is built from; without it
      # the turn would report a failure it could not explain.
@@ -2146,8 +2472,9 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
      observed=verified_text(name,result)
      if observed and observed not in verified:verified.append(observed)
      if gaps:
+      note=' '.join(QUALIFIER_NOTES[label] for label in gaps)
       failed=True;trail.append((action,'incomplete'))
-      incomplete.append((name,' '.join(QUALIFIER_NOTES[label] for label in gaps)))
+      incomplete.append((name,note));failures.append((name,note))
      else:trail.append((action,'succeeded'))
      record(name,'succeeded',json.dumps(trace,ensure_ascii=False))
    except (ValueError,TypeError,AttributeError,OSError,ProviderError) as exc:
@@ -2157,8 +2484,19 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
      failed=True
      # Failed attempts stay in the durable tool events and the trail (#606 T2).
      trail.append((action,'exhausted' if result['code'] in BUDGET_CODES else 'failed'))
+     failures.append((name,result['error']))
+     # A path that failed on its own terms (not the budget, not a missing
+     # connection, login or approval) is where a different path helps.
+     if result['retry'] in ('permanent','transient') and not result.get('requires'):path_failed=True
     else:invalid_calls.add(name if isinstance(name,str) else 'unknown')
     record(name,'failed',json.dumps({'scope':scope,'call_id':call['id'],'attempt':attempt,**result},ensure_ascii=False))
-   encoded=json.dumps(result,ensure_ascii=False)
-   if len(encoded)>24000:encoded=json.dumps({'truncated':True,'preview':encoded[:22000]},ensure_ascii=False)
+   if validated:observations[call['id']]=(name,action,trail[-1][1],result)
+   # #657: a result that ran carries its ref, the id a completion claim cites
+   # (a provider that hides tool call ids from the model still shows this).
+   ref={'ref':call['id']} if ran else {}
+   encoded=json.dumps({**ref,**result} if ran and isinstance(result,dict) else result,ensure_ascii=False)
+   if len(encoded)>24000:encoded=json.dumps({**ref,'truncated':True,'preview':encoded[:22000]},ensure_ascii=False)
    messages.append({'role':'tool','tool_call_id':call['id'],'content':encoded})
+  if path_failed and budget.spend_nudge():
+   nudges+=1
+   messages.append({'role':'system','content':ALTERNATIVE_NUDGE})

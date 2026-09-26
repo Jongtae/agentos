@@ -1807,8 +1807,9 @@ class AgentService:
 
     def work_budget(self, job_id):
         # #607 AX-10: attempts and the deadline are one durable row shared
-        # with the CLI's MCP bridge process serving the same Work.
-        return WorkBudget(stop=lambda:self.work_stopped(job_id),ledger=WorkLedger(self.store,job_id))
+        # with the CLI's MCP bridge process serving the same Work.  Each host
+        # run (including a resumed parked Work) starts one fresh budget.
+        return WorkBudget(stop=lambda:self.work_stopped(job_id),ledger=WorkLedger(self.store,job_id,fresh=True))
 
     #: Rule-matched natural-language reads whose empty or unclear result is
     #: re-judged by the Work model loop (#606 T4, owner Q1).  Mail is not a

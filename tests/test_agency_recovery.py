@@ -183,6 +183,26 @@ class SharedBudgetTests(unittest.TestCase):
         now[0] += 2
         self.assertEqual(WorkBudget(ledger=later).interrupted(), 'deadline_exceeded')
 
+    def test_a_resumed_work_starts_a_fresh_budget_and_the_bridge_inherits_it(self):
+        """Park/resume boundary: a later host run never inherits an expired deadline or spent attempts."""
+        store, _ = _store(self)
+        job = _running(store)
+        now = [1000.0]
+        parked = WorkBudget(attempts=2, ledger=WorkLedger(store, job, seconds=5, wall=lambda: now[0], fresh=True))
+        parked.spend_attempt(); parked.spend_attempt()
+        with store.db() as db:  # parked, then requeued hours later with no other Work in between
+            db.execute("UPDATE jobs SET status='awaiting_connection' WHERE id=?", (job,))
+            db.execute("UPDATE jobs SET status='running' WHERE id=?", (job,))
+        now[0] += 3600
+        resumed = WorkBudget(attempts=2, ledger=WorkLedger(store, job, seconds=5, wall=lambda: now[0], fresh=True))
+        bridge = WorkBudget(attempts=2, ledger=WorkLedger(store, job, seconds=600, wall=lambda: now[0]))
+        self.assertIsNone(resumed.interrupted())
+        resumed.spend_attempt(); bridge.spend_attempt()
+        with self.assertRaises(ToolError):bridge.spend_attempt()
+        self.assertEqual(bridge.ledger.deadline, resumed.ledger.deadline)
+        # The service's own budget is the fresh opener.
+        self.assertEqual(AgentService(store).work_budget(job).ledger.used(), 0)
+
     def test_the_real_bridge_process_spends_the_hosts_budget(self):
         """Through the service's CLI broker: 10 host attempts leave the bridge 2."""
         store, _ = _store(self)
@@ -280,8 +300,8 @@ class CliProcessStopTests(unittest.TestCase):
         script, marker = self.fake_cli(root)
         service, store = self.service(root, script)
         job = store.enqueue('긴 작업 해줘', 'deadline-cli', channel='http')
-        # A Work whose shared deadline is two seconds away (opened first, inherited by the host).
-        WorkLedger(store, job, seconds=2)
+        # A Work whose shared deadline is two seconds away (the host's fresh ledger).
+        service.work_budget = lambda job_id: WorkBudget(ledger=WorkLedger(store, job_id, seconds=2, fresh=True))
         started = time.monotonic()
         self.assertTrue(service.run_one())
         self.assertLess(time.monotonic() - started, 20)

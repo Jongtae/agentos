@@ -1026,17 +1026,20 @@ class WorkLedger:
  row per Work, changed in one ``BEGIN IMMEDIATE`` transaction, so the host
  and its CLI's MCP bridge cannot both spend the last attempt.  The first
  opener (the host, before the CLI starts) fixes the wall-clock deadline; a
- later opener inherits it.  A store error fails closed for spending.
+ later opener inherits it.  ``fresh=True`` (the host starting a run) starts
+ a new budget: a parked Work resumed later is a new bounded run, exactly as
+ its in-memory #606 budget was, and never inherits a long-expired deadline.
+ A store error fails closed for spending.
  """
- def __init__(self,store,job_id,*,seconds=WORK_DEADLINE_SECONDS,wall=time.time):
+ def __init__(self,store,job_id,*,seconds=WORK_DEADLINE_SECONDS,wall=time.time,fresh=False):
   self.store,self.job_id,self.wall=store,job_id,wall
   self.key=f'{WORK_LEDGER_KEY}:{job_id}'
-  try:self.deadline=self._change(lambda row:None,open_seconds=seconds)['deadline']
+  try:self.deadline=self._change(lambda row:None,open_seconds=seconds,fresh=fresh)['deadline']
   except Exception:self.deadline=wall()+seconds
- def _change(self,change,open_seconds=None):
+ def _change(self,change,open_seconds=None,fresh=False):
   with self.store.db() as db:
    db.execute('BEGIN IMMEDIATE')
-   found=db.execute('SELECT value FROM config WHERE key=?',(self.key,)).fetchone()
+   found=None if fresh else db.execute('SELECT value FROM config WHERE key=?',(self.key,)).fetchone()
    row=json.loads(found[0]) if found else None
    if row is None:
     row={'attempts':0,'deadline':self.wall()+(open_seconds or WORK_DEADLINE_SECONDS)}

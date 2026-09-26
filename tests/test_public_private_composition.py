@@ -20,6 +20,9 @@ from personal_agent.agent_runtime import (ENGINE_UNMEDIATED, HISTORY_PREFIX, OWN
                                           PUBLIC_TASK_UNRESOLVED, WORK_SOURCES_KEY, Capabilities, egress_refusal,
                                           history_provenance, run_agent, work_sources)
 from personal_agent.bounded_execution import ExecutionResult
+from personal_agent.conversation_handoff import (LOOKUP_SENSITIVE_ANY_PROPOSITION, LOOKUP_SENSITIVE_TERM_PROPOSITION,
+                                                 ConversationJudgments)
+from personal_agent.decision import OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine, fixture_confidence
 from personal_agent.local_tools import LocalTools
 from personal_agent.manifests import runtime_packages
 from personal_agent.providers import ModelAdapter, ProviderError
@@ -91,7 +94,7 @@ class DecisionTable(unittest.TestCase):
          'weather', {'city': PRIVATE}, [], '출처 기록이 없는 이전 대화'),
         ('private word dropped, owner words sent', NOTES, ['병원 검색해줘'], (),
          'web_search', {'query': f'{PRIVATE} 병원'}, [{'tool': 'web_search', 'query': '병원'}], None),
-        ('earlier region is permitted context (성남)', NOTES, ['여기 병원 찾아줘', '성남에 있어'], (),
+        ('earlier region is permitted context (성남)', NOTES, ['성남에 있어', '여기 병원 찾아줘'], (),
          'web_search', {'query': f'성남 병원 {PRIVATE}'}, [{'tool': 'web_search', 'query': '성남 병원'}], None),
         ('passport number written to Memory is excluded even though the owner typed it', ('owner-memory',),
          [f'여권번호 {PASSPORT} 기억해 두고 병원 검색해줘'], [PASSPORT],
@@ -390,6 +393,234 @@ class BridgeRehydration(unittest.TestCase):
     def test_the_cli_unmediated_label_does_not_taint_its_own_work(self):
         plans, _reply = self.serve([OWNER_CONVERSATION, ENGINE_UNMEDIATED], 'weather radar', 'hello')
         self.assertEqual(plans, [{'tool': 'web_search', 'query': 'weather radar'}])
+
+
+SECRET_ID = 'M12345678'
+
+
+def sensitivity_engine(sensitive=(SECRET_ID,)):
+    """A fixture DecisionEngine: a term is sensitive exactly when listed here."""
+    marked = {term.casefold() for term in sensitive}
+
+    def judge(context, proposition):
+        if proposition == LOOKUP_SENSITIVE_ANY_PROPOSITION:
+            terms = [part.split(' = ', 1)[1] for part in context.facts['terms'].split('; ')]
+            answer = any(term.casefold() in marked for term in terms)
+        elif proposition == LOOKUP_SENSITIVE_TERM_PROPOSITION:
+            answer = context.facts['term'].casefold() in marked
+        else:
+            return None
+        return BinaryDecision(OUTCOME_DECIDED, answer, fixture_confidence(1.0))
+    return FixtureDecisionEngine(judge=judge)
+
+
+def sensitivity_asked(engine):
+    return [entry for entry in engine.asked if entry[0] == 'judge' and entry[2] in
+            (LOOKUP_SENSITIVE_ANY_PROPOSITION, LOOKUP_SENSITIVE_TERM_PROPOSITION)]
+
+
+def judged_ordinary(message, terms):
+    """A (wrong) judgment that calls every term ordinary: isolates the deterministic exclusion."""
+    return ConversationJudgments(sensitivity_engine(())).lookup_term_sensitivity(message, terms)
+
+
+class RoundThreeFindings(unittest.TestCase):
+    """PR #622 scoped re-review @ 5e660bf, findings N1-N6 and F3 (actual outbound arguments)."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        self.store = QuickStore(Path(tmp.name) / 'state')
+        self.wire = Wire()
+
+    def caps(self, labels=(), permitted=(), excluded=(), current=None, record=None, **kwargs):
+        def sources():
+            return {'permitted': list(permitted), 'excluded': list(excluded),
+                    'current': current if current is not None else (list(permitted) or [''])[-1]}
+        return Capabilities(self.store, None, CFG, '', 'job-1', record or (lambda *e: None), network=self.wire,
+                            inherited_provenance=set(labels), lookup_sources=sources, **kwargs)
+
+    NOTES = (HISTORY_PREFIX + 'personal-space',)
+
+    def test_n1_a_word_extending_a_permitted_word_sends_only_the_permitted_word(self):
+        for proposal in ('병원이혼 병원소송 근처우울', '병원ab 병원cd'):
+            with self.subTest(proposal):
+                self.wire.plans.clear()
+                self.caps(self.NOTES, ['병원 찾아줘']).execute('web_search', {'query': proposal})
+                self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}])
+
+    def test_n4_a_reformatted_saved_value_is_excluded_in_every_spelling(self):
+        saved = {'M12345678': ['M1234-5678 병원', 'M1234 5678 병원', 'm12345678 병원', 'Ｍ１２３４５６７８ 병원', '5678 병원'],
+                 'M1234-5678': ['M12345678 병원', 'm1234 병원']}
+        for value, proposals in saved.items():
+            for proposal in proposals:
+                with self.subTest(saved=value, proposal=proposal):
+                    self.wire.plans.clear()
+                    request = f'여권 {proposal} 기억해 두고 병원 검색해줘'
+                    # The request itself carries the value, and the judgment is
+                    # (wrongly) "ordinary": only the exclusion can stop it.
+                    self.caps(('owner-memory',), [request], [value],
+                              lookup_sensitivity=judged_ordinary).execute('web_search', {'query': proposal})
+                    self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}])
+
+    def test_n5_words_are_deduplicated_ordered_by_permitted_text_and_capped(self):
+        earlier, current = '성남에 있어', '여기 병원 찾아줘 내과 소아과 치과 안과 피부과 정형외과 한의원'
+        caps = self.caps(self.NOTES, [earlier, current])
+        caps.execute('web_search', {'query': '한의원 병원 성남 병원 성남 치과 안과 내과 소아과 피부과 정형외과'})
+        sent = self.wire.plans[0]['query'].split()
+        self.assertEqual(sent, ['성남', '병원', '내과', '소아과', '치과', '안과', '피부과', '정형외과'])
+        self.assertEqual(len(set(sent)), len(sent))
+
+    def test_n6_weather_needs_the_owner_wording_in_a_clean_context_too(self):
+        clean = self.caps((), ['나는 대전에 있어. 비 와?'])
+        with self.assertRaisesRegex(ValueError, '지역명은 소유자가'):
+            clean.execute('weather', {'city': 'Daejeon', 'country': 'KR'})
+        self.assertEqual(self.wire.plans, [])
+        clean.execute('weather', {'city': '대전', 'country': 'KR'})
+        self.assertEqual(self.wire.plans, [{'tool': 'weather', 'city': '대전'}])
+
+    def test_f3_the_attempt_is_durable_across_a_restarted_bridge(self):
+        def record(tool, status, detail):
+            with self.store.db() as db:
+                db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                           ('job-1', tool, status, detail, 1))
+        self.wire.fail = True
+        with self.assertRaises((ValueError, ProviderError)):
+            self.caps(self.NOTES, ['병원 뉴스'], record=record).execute('web_search', {'query': '병원'})
+        self.wire.fail = False
+        restarted = self.caps(self.NOTES, ['병원 뉴스'], record=record)  # a new process: empty memo
+        with self.assertRaisesRegex(ValueError, '이미 한 번 시도'):
+            restarted.execute('web_search', {'query': '뉴스'})
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}])
+        with self.store.db() as db:
+            row = db.execute("SELECT detail FROM tool_events WHERE status='requested'").fetchone()
+        self.assertEqual(json.loads(row[0])['composed_by'], 'agentos-public-task')
+
+
+class CurrentMessageSensitivity(unittest.TestCase):
+    """N3 and the owner decision: the existing DecisionEngine judges which words of
+    the owner's current message are sensitive, on every lookup that includes them."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        self.store = QuickStore(Path(tmp.name) / 'state')
+        self.wire = Wire()
+
+    def api(self, script, engine=None):
+        self.service = AgentService(self.store, adapter=ModelAdapter(lambda url, body, *a, **k: script(body['messages'])))
+        self.service.local_tools = self.wire
+        if engine is not None:
+            self.service.use_decision_engine(engine)
+        self.store.put('model', CFG)
+        self.store.put('model_test', {'ok': True, 'tools_ok': True, 'time': 9999999999,
+                                      'fingerprint': self.service.model_fingerprint(CFG)})
+
+    def turn(self, text):
+        self.store.enqueue(text, f'k{len(self.store.jobs())}')
+        self.assertTrue(self.service.run_one())
+
+    @staticmethod
+    def steps(*batches):
+        """A worker that runs ``batches`` (lists of tool calls) one model step each, then answers."""
+        def script(messages):
+            done = sum(1 for m in messages if m['role'] == 'assistant' and m.get('tool_calls'))
+            if done >= len(batches):
+                return answer('done')
+            return calls(*[tool_call(name, args, f'c{done}-{index}') for index, (name, args) in enumerate(batches[done])])
+        return script
+
+    SEARCH = ('web_search', {'query': f'성남 병원 {SECRET_ID}'})
+    SAVE = ('save_memory', {'memory_key': 'passport', 'content': SECRET_ID})
+
+    def test_search_before_save_in_a_later_step(self):
+        engine = sensitivity_engine()
+        self.api(self.steps([self.SEARCH], [self.SAVE]), engine)
+        self.turn(f'여권번호 {SECRET_ID} 기억해 두고 성남 병원 검색해줘')
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '성남 병원'}])
+
+    def test_no_save_at_all(self):
+        engine = sensitivity_engine()
+        self.api(self.steps([self.SEARCH]), engine)
+        self.turn(f'내 여권번호 {SECRET_ID}로 성남 병원 예약하는 법 검색해줘')
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '성남 병원'}])
+        asked = sensitivity_asked(engine)
+        self.assertEqual(set(asked[0][1].facts), {'owner_message', 'terms'}, 'no history, Memory or files')
+
+    def test_same_batch_search_first(self):
+        engine = sensitivity_engine()
+        self.api(self.steps([self.SEARCH, self.SAVE]), engine)
+        self.turn(f'여권번호 {SECRET_ID} 기억해 두고 성남 병원 검색해줘')
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '성남 병원'}])
+
+    def test_ordinary_region_and_place_still_go_out(self):
+        """The opposing case: "성남 병원" is judged ordinary and is sent."""
+        engine = sensitivity_engine()
+        self.api(self.steps([('web_search', {'query': '성남 병원'})]), engine)
+        self.turn('성남 병원 찾아줘')
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '성남 병원'}])
+        self.assertTrue(sensitivity_asked(engine), 'asked because the lookup includes the current message')
+
+    def test_the_judgment_is_not_asked_when_no_current_words_leave(self):
+        engine = sensitivity_engine()
+        self.api(self.steps([('web_search', {'query': 'today news'})]), engine)
+        self.turn('오늘 소식 검색해줘')
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': 'today news'}])
+        self.assertEqual(sensitivity_asked(engine), [])
+
+    def test_unavailable_or_abstaining_judgment_fails_safe(self):
+        abstain = FixtureDecisionEngine(judge=lambda context, proposition: BinaryDecision(
+            OUTCOME_DECIDED, False, fixture_confidence(0.2)))
+        for engine in (None, abstain):
+            with self.subTest(engine=engine):
+                self.wire.plans.clear()
+                self.api(self.steps([self.SEARCH]), engine)
+                self.turn(f'내 여권번호 {SECRET_ID}로 성남 병원 예약하는 법 검색해줘')
+                self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '성남 병원'}],
+                                 'the value is withheld; ordinary words still go out')
+
+
+class BridgeWrites(unittest.TestCase):
+    """N2: a CLI ``save_note`` served by the real bridge labels its Work durably."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        self.store = QuickStore(Path(tmp.name) / 'state')
+        self.wire = Wire()
+
+    def test_a_bridge_note_keeps_the_owner_row_out_of_a_later_lookup(self):
+        wire, store = self.wire, self.store
+
+        def bridge(job_id, name, arguments):
+            lines = '\n'.join(json.dumps(r) for r in [
+                {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {}},
+                {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call', 'params': {'name': name, 'arguments': arguments}},
+            ]) + '\n'
+            with mock.patch.object(mcp_bridge, 'LocalTools', lambda: wire), \
+                 mock.patch.object(sys, 'stdin', io.StringIO(lines)), contextlib.redirect_stdout(io.StringIO()):
+                mcp_bridge.serve(str(store.root), job_id, [], judge=judged_ordinary)
+
+        class Cli:
+            def execute(self, engine, prompt, tools, **kwargs):
+                request = (kwargs.get('context') or {}).get('request', prompt)
+                job_id = tools.capabilities.job_id
+                if 'keep' in request:
+                    bridge(job_id, 'save_note', {'content': f'{SECRET_ID} 병원'})
+                elif '검색' in request:
+                    bridge(job_id, 'web_search', {'query': f'{SECRET_ID} 병원'})
+                return ExecutionResult('engine answer', engine, 0)
+
+        service = AgentService(self.store, adapter=ModelAdapter(lambda *a, **k: answer()),
+                               subscription_engines=SubscriptionEngines(finder=lambda _: '/runtime/cli', clock=lambda: 1),
+                               execution_adapter=Cli())
+        service.local_tools = self.wire
+        service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
+        # An ordinary CLI Work (not the built-in /note intent) whose engine saves a note.
+        for index, text in enumerate((f'please keep {SECRET_ID} 병원 for me', '병원 검색해줘')):
+            self.store.enqueue(text, f'k{index}')
+            self.assertTrue(service.run_one())
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}])
+        first = self.store.jobs()[-1]
+        self.assertEqual(first['provider'], 'subscription', 'the note was saved by the CLI through the bridge')
+        self.assertIn('personal-space', work_sources(self.store, first['id']))
 
 
 if __name__ == '__main__':

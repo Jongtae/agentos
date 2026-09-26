@@ -451,14 +451,16 @@ class MissingWeatherBinding(_RouteFixture):
         if last['role'] == 'tool':
             return _answer('대전은 지금 1.2mm 비가 옵니다.')
         if last['role'] == 'user' and '비' in last['content']:
-            return _tool_call('weather', {'city': 'Daejeon', 'country': 'KR'})
+            # #605 N6: the place is the owner's own wording on every path; an
+            # AI-composed transliteration or country code is not sent.
+            return _tool_call('weather', {'city': '대전', 'country': 'KR'})
         return _answer()
 
     def test_direct_api_route_reaches_weather_and_returns_the_observation(self):
         """Positive control: the native binding exists and its observation reaches the next model input."""
         self._service(self._weather_model)
         self._turns(*WEATHER_TURNS)
-        self.assertEqual(self._outbound('weather'), [{'tool': 'weather', 'city': 'Daejeon', 'country': 'KR'}])
+        self.assertEqual(self._outbound('weather'), [{'tool': 'weather', 'city': '대전'}])
         self.assertEqual(self.requests[-1]['messages'][-1]['role'], 'tool')
         self.assertIn('Daejeon', self.requests[-1]['messages'][-1]['content'])
         self.assertIn('weather', [tool['function']['name'] for tool in self.requests[-1]['tools']])

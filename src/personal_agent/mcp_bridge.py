@@ -87,13 +87,36 @@ def _recorded_private_sources(store, job_id, tools=None):
 
 
 def _lookup_sources(store, job_id):
-    """The same permitted-text resolver the host uses (#605), or None in restrictive mode."""
-    if (store.config('egress_composition', {}) or {}).get('mode') == 'restrictive':
-        return None
+    """The same permitted-text resolver the host uses (#605)."""
     return lambda: lookup_sources(store, job_id)
 
 
-def serve(data, job_id, provenance=()):
+def _restrictive(store):
+    return (store.config('egress_composition', {}) or {}).get('mode') == 'restrictive'
+
+
+def _lookup_sensitivity(store, job_id):
+    """The host's DecisionEngine judgment path (#605 N3), built on first use.
+
+    The bridge has no service of its own, so the first lookup that would send
+    words of the owner's current message builds one ``AgentService`` over the
+    same store and asks its ``decision_judge`` -- the same route, context
+    bounds and audit as the host.  Any failure is an unavailable judgment,
+    which ``Capabilities`` answers with its fail-safe policy.
+    """
+    built = {}
+
+    def judge(message, terms):
+        if 'judge' not in built:
+            from .quickstart_service import AgentService
+            service = AgentService(store)
+            service.current_work_id = job_id
+            built['judge'] = service.decision_judge
+        return built['judge'].lookup_term_sensitivity(message, terms)
+    return judge
+
+
+def serve(data, job_id, provenance=(), judge=None):
     store = QuickStore(data)
     def record(tool, status, detail):
         with store.db() as db:
@@ -103,7 +126,8 @@ def serve(data, job_id, provenance=()):
     capabilities = Capabilities(store, None, {}, '', job_id, record, network=LocalTools(), document_access=False,
                                 allowed_tools=set(profile_actions(AgentOSMcpTools.PROFILE)),
                                 inherited_provenance=_provenance(provenance), lookup_hint=CLI_LOOKUP_HINT,
-                                lookup_sources=_lookup_sources(store, job_id))
+                                lookup_sources=_lookup_sources(store, job_id), lookup_restrictive=_restrictive(store),
+                                lookup_sensitivity=judge or _lookup_sensitivity(store, job_id))
     capabilities.private_provenance.update(_recorded_private_sources(store, job_id, capabilities.tools))
     tools = AgentOSMcpTools(capabilities)
     for line in sys.stdin:

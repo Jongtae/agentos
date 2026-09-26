@@ -401,6 +401,9 @@ class BoundedProfileHostInvocation(unittest.TestCase):
         return json.loads(reply["result"]["content"][0]["text"])
 
     def test_allowed_public_and_private_reads_reach_the_host_with_exact_fields(self):
+        # #605 N6: a weather place must be the owner's own wording on every path.
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET message=? WHERE id=?", ("Daejeon KR weather", self.job))
         replies = self._serve([
             self._call(2, "weather", {"city": "Daejeon", "country": "KR"}),
             self._call(3, "web_search", {"query": "today news"}),

@@ -1500,8 +1500,11 @@ class AgentService:
         return (self.store.config('egress_composition',{}) or {}).get('mode')!='restrictive'
 
     def work_lookup_sources(self, job, prompt):
-        """Resolver of the text permitted for this Work's public lookups (#605), or None in restrictive mode."""
-        if not self.public_composition_enabled():return None
+        """Resolver of the text permitted for this Work's public lookups (#605).
+
+        Always supplied, so every public lookup is composed (N3).  In
+        restrictive mode ``lookup_restrictive`` refuses a private context.
+        """
         tools={tool['id']:tool for package in self.runtime_packages() for tool in package['tools']}
         def resolve(bound=job['message']):
             current=self.store.job(job['id']) or {}
@@ -1509,9 +1512,27 @@ class AgentService:
                 raise ValueError('이 작업의 요청이 바뀌어 공개 조회를 실행하지 않았습니다.')
             sources=lookup_sources(self.store,job['id'],tools)
             # A retry's effective request is the owner's own earlier words.
-            if prompt!=bound:sources['permitted'].append(prompt)
+            if prompt!=bound:sources['permitted'].append(prompt);sources['current']=prompt
             return sources
         return resolve
+
+    def work_lookup_options(self, job, prompt, hint=''):
+        """The #605 lookup-composition arguments of one Work's ``Capabilities``."""
+        return {'lookup_sources':self.work_lookup_sources(job,prompt),
+                'lookup_sensitivity':self.work_lookup_sensitivity(job),
+                'lookup_restrictive':not self.public_composition_enabled(),
+                'lookup_hint':hint}
+
+    def work_lookup_sensitivity(self, job):
+        """The existing DecisionEngine judgment path for #605 N3.
+
+        Asked by ``Capabilities`` only when a public lookup would send words of
+        the owner's current message; audited like every decision (#570).
+        """
+        def judge(message, terms):
+            self.current_work_id=job['id']
+            return self.decision_judge.lookup_term_sensitivity(message, terms)
+        return judge
 
     def shown_history_provenance(self, rows, document_jobs):
         """History-window labels for the earlier messages a worker is actually shown."""
@@ -3614,8 +3635,7 @@ class AgentService:
                         capabilities=Capabilities(self.store,None,{},'',job['id'],record,network=self.local_tools,
                                                   document_access=False,packages=self.runtime_packages(),
                                                   allowed_tools=allowed_tools,inherited_provenance=turn_provenance,
-                                                  current_packages=self.runtime_packages,lookup_hint=CLI_LOOKUP_HINT,
-                                                  lookup_sources=self.work_lookup_sources(job,prompt))
+                                                  current_packages=self.runtime_packages,**self.work_lookup_options(job,prompt,CLI_LOOKUP_HINT))
                         work_capabilities[0]=capabilities
                         # Use the same owner-approved request payload prepared
                         # for the local model path.  In particular, /summarize
@@ -3741,7 +3761,7 @@ class AgentService:
                                                   # during this Work refuses a read that starts afterwards.
                                                   public_page_scope=lambda:self.public_page_boundary(config)['urls'],
                                                   memory_request=owner_memory_request,inherited_provenance=set(turn_provenance)|shown_sources,calendar=self.calendar_for(job),calendar_owner=self.connector_owner_id(job),current_packages=self.runtime_packages,
-                                                  lookup_sources=self.work_lookup_sources(job,prompt))
+                                                  **self.work_lookup_options(job,prompt))
                         work_capabilities[0]=capabilities
                         work_sources|=capabilities.private_provenance
                         # Recorded before model use.

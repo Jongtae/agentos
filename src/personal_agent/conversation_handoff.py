@@ -493,6 +493,18 @@ MEMORY_REQUEST_PROPOSITION = ('The owner\'s latest message explicitly instructs 
                               'assistant not to remember something, when there is no stated value to keep (a '
                               'casual remark or a generic "don\'t forget"), when they ask for a note, file or '
                               'reminder instead, or when it is unclear. This judgment does not write anything.')
+LOOKUP_SENSITIVE_ANY_PROPOSITION = (
+    'At least one of the listed terms, all taken from the owner\'s latest message, is sensitive personal '
+    'information - for example an identity, passport, account, card or phone number, a personal address, or a '
+    'health, legal or financial fact about a person - that should not be sent to a public web search, weather '
+    'or page service. It is false when every listed term is an ordinary lookup word such as a city or region, '
+    'a topic, a kind of place or business, a product or a date. This judgment does not send anything.')
+LOOKUP_SENSITIVE_TERM_PROPOSITION = (
+    'The listed term, taken from the owner\'s latest message, is sensitive personal information - for example '
+    'an identity, passport, account, card or phone number, a personal address, or a health, legal or financial '
+    'fact about a person - that should not be sent to a public web search, weather or page service. It is false '
+    'for an ordinary lookup word such as a city or region, a topic, a kind of place or business, a product or a '
+    'date. This judgment does not send anything.')
 UNSUPPORTED_JUDGMENT_UNAVAILABLE = ('요청을 안전하게 구분할 판단 기능을 사용할 수 없어 메일을 검색하거나 다른 처리를 하지 않았습니다. '
                                    '메일을 찾으려는 요청이라면 검색할 내용을 다시 구체적으로 적어 주세요.')
 MIXED_MAIL_ACTION_CLARIFICATION = ('지원하지 않는 메일 발송 요청과 다른 작업이 함께 있어 아무 작업도 실행하지 않았습니다. '
@@ -620,6 +632,46 @@ class ConversationJudgments:
         return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
                         source=decision.confidence.provider or decision.outcome)
 
+
+    def lookup_term_sensitivity(self, utterance, terms):
+        """Which of ``terms`` (words of the owner's current message that a public
+        lookup would send) are sensitive (#605 N3)?
+
+        The same bounded path as ``explicit_memory_request``: one short owner
+        utterance and the candidate terms, no history, Memory or files.  One
+        judgment over the whole set first; only after a yes is each term
+        judged.  ``value`` is the set of term indices on yes.  A term that is
+        not confidently ordinary is reported as sensitive, and any non-answer
+        of the first judgment (or a yes no single term confirms) is unavailable,
+        so AgentOS's fail-safe policy decides then.  Judgment only; it sends nothing and grants nothing.
+        """
+        terms = [str(term) for term in terms]
+        if not terms:
+            return Judgment(JUDGMENT_NO, value=frozenset())
+        labels = [f'term-{index}' for index in range(1, len(terms) + 1)]
+        context = DecisionContext('public-lookup-sensitivity', {
+            'owner_message': utterance,
+            'terms': '; '.join(f'{label} = {term}' for label, term in zip(labels, terms)),
+        })
+        decision = self.engine.judge(context, LOOKUP_SENSITIVE_ANY_PROPOSITION)
+        verdict = self.policy.binary(decision)
+        source = decision.confidence.provider or decision.outcome
+        if verdict == 'unknown':
+            return Judgment(JUDGMENT_UNAVAILABLE, source=decision.outcome)
+        if verdict == 'no':
+            return Judgment(JUDGMENT_NO, value=frozenset(), source=source)
+        sensitive = set()
+        for index, term in enumerate(terms):
+            one = self.engine.judge(DecisionContext('public-lookup-sensitivity-term',
+                                                    {'owner_message': utterance, 'term': term}),
+                                    LOOKUP_SENSITIVE_TERM_PROPOSITION)
+            if self.policy.binary(one) != 'no':
+                sensitive.add(index)
+        if not sensitive:
+            # The set was judged sensitive and no term was: contradictory, so
+            # the caller's fail-safe policy decides.
+            return Judgment(JUDGMENT_UNAVAILABLE, source=source)
+        return Judgment(JUDGMENT_YES, value=frozenset(sensitive), source=source)
 
 
 

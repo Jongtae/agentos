@@ -3,6 +3,7 @@ import json
 import os
 import re
 import time
+import unicodedata
 from collections import namedtuple
 from pathlib import Path
 from .providers import NOT_REPORTED, ModelResult, ProviderError
@@ -293,6 +294,13 @@ def provenance_window(label):
   return 'owner' if base==OWNER_CONVERSATION else 'history'
  return PROVENANCE_WINDOW.get(label,'turn')
 
+#: Host actions that write owner text into a private store, and the store's
+#: label (#605 N2), kept beside the read map PRIVATE_PROVENANCE.  A successful
+#: write event labels its Work durably, whichever process ran the tool.
+PRIVATE_WRITE_PROVENANCE={'save_note':'personal-space','save_memory':'owner-memory',
+                          'calendar_draft_create':'owner-calendar','calendar_draft_update':'owner-calendar',
+                          'calendar_draft_cancel':'owner-calendar'}
+
 def recorded_private_sources(store, job_id, tools=None):
  """Private-source labels a Work's own successful tool events already carry.
 
@@ -310,7 +318,12 @@ def recorded_private_sources(store, job_id, tools=None):
   except (ValueError,AttributeError):recorded=None
   # Union, not precedence: any reading that names a private read taints.
   for action in (recorded,(tools or {}).get(tool,{}).get('host_action'),tool):
-   if isinstance(action,str) and action in PRIVATE_PROVENANCE:labels.add(PRIVATE_PROVENANCE[action])
+   if not isinstance(action,str):continue
+   # A private-store *write* labels its Work too (#605 N2): a CLI's
+   # `save_note` runs in the bridge process, and only this durable event
+   # tells a later Work that the owner row it saved is not public context.
+   label=PRIVATE_PROVENANCE.get(action) or PRIVATE_WRITE_PROVENANCE.get(action)
+   if label:labels.add(label)
  return labels
 
 def work_source_records(store):
@@ -359,7 +372,8 @@ def egress_refusal(action, labels, hint=''):
  text=f"{', '.join(names)}에서 나온 내용이 이 작업 문맥에 있어 {DESTINATION_NAMES.get(action,'공개 조회에 사용할 수 없습니다')}."
  return text+(' '+hint if hint else '')
 
-#: Public destinations an admissible public lookup may serve after private work.
+#: Public destinations whose every lookup AgentOS composes (#605): after private
+#: work, and in a clean context too (current-message sensitivity, place wording).
 PUBLIC_TASK_ACTIONS=frozenset({'web_search','weather','public_page_read','bounded_public_research'})
 #: The truthful next step when no admissible lookup is available (rollback
 #: mode): the only public path that never sees the conversation is AgentOS's
@@ -378,33 +392,106 @@ SOURCE_NAMES[ENGINE_UNMEDIATED]='CLI가 AgentOS 밖에서 읽었을 수 있는 �
 #: lookup context: they concern what the worker saw or said afterwards.
 _OWNER_TEXT_NEUTRAL=frozenset({OWNER_CONVERSATION,ENGINE_UNMEDIATED})
 
-def _lookup_word_covered(word,words):
- """Is one outbound lookup word taken from permitted text?
+#: At most this many words leave in one lookup composed from a private
+#: context (#605 N5).  With dedupe and AgentOS-fixed word order this bounds
+#: the worker's selection channel; it does not remove it (recorded residual).
+LOOKUP_WORD_CAP=8
+_DIGIT_SEPARATOR=re.compile(r'(?<=\d)[\W_]+(?=\d)')
 
- Stricter than `owner_said` (memory coverage): a digit-bearing word must
- match exactly (`owner_said`'s digit rule), and otherwise the word must equal
- a permitted word, be a prefix of one, or extend one by at most a two-
- character particle -- so `성남에` covers `성남` but `성남` does not cover
- `성남정신과`, and `Daejeon` is not covered by `대전`.
+def lookup_norm(text):
+ """NFKC then casefold: full-width, compatibility and case variants compare equal (#605 N4)."""
+ return unicodedata.normalize('NFKC',str(text or '')).casefold()
+
+def lookup_words(text):
+ return _MEMORY_WORD.findall(lookup_norm(text))
+
+def value_digit_runs(texts):
+ """Digit runs of values, with separators between digit groups removed.
+
+ ``M1234-5678``, ``M1234 5678`` and ``m12345678`` all give ``12345678``, so
+ a reformatted or split identifier is still recognised (#605 N4).
  """
- if _MEMORY_DIGITS.search(word):return owner_said(word,words)
+ runs=set()
+ for text in texts:
+  runs.update(_MEMORY_DIGITS.findall(_DIGIT_SEPARATOR.sub('',lookup_norm(text))))
+ return runs
+
+def _digits_inside(word,runs):
+ """A digit run of ``word`` is part of one of ``runs`` (``5678`` of ``12345678``)."""
+ return any(run in value for run in _MEMORY_DIGITS.findall(word) for value in runs)
+
+def _lookup_match(word,words):
+ """The permitted form of one normalised outbound word, or None.
+
+ Only two directions are accepted, and digit runs must be identical in both:
+
+ * the word equals a permitted word, or is a prefix of one, so the owner's
+   ``성남에`` covers an outbound ``성남`` (the owner's own word without its
+   particle);
+ * the word *extends* a permitted word, in which case only the permitted
+   word leaves.  ``병원이혼`` or ``병원ab`` sends ``병원``, and ``성남정신과`` sends
+   ``성남``: text that is not in permitted text is never sent (#605 N1).  The
+   earlier rule let a word extend a permitted one by two characters, which
+   sent ``병원이혼``.
+ """
+ digits=_MEMORY_DIGITS.findall(word);longest=None
  for permitted in words:
-  if word==permitted:return True
-  if len(word)>=2 and permitted.startswith(word):return True
-  if len(permitted)>=2 and word.startswith(permitted) and len(word)-len(permitted)<=2:return True
- return False
+  if _MEMORY_DIGITS.findall(permitted)!=digits:continue
+  if word==permitted:return word
+  if len(word)>=2 and permitted.startswith(word):return word
+  if len(permitted)>=2 and word.startswith(permitted) and (longest is None or len(permitted)>len(longest)):longest=permitted
+ return longest
+
+def select_lookup_words(value, permitted, excluded, *, owner_worded, private, cap=LOOKUP_WORD_CAP):
+ """AgentOS's selection of the outbound words of one lookup value.
+
+ ``permitted`` is the permitted text in chronological order (the current
+ request last).  Returns ``(kept, dropped)``; each kept row carries the word
+ to send and its origin ``(message, position)`` in permitted text, or None.
+
+ * A word this Work wrote to a private store is dropped, including a word
+   whose digit run is part of such a value in any spelling (#605 N4).
+ * ``owner_worded``: a word with no origin in permitted text is dropped.
+ * ``private``: words are deduplicated, put in the order they have in
+   permitted text (message by message, then word order; the worker's order is
+   not kept), and capped at ``cap`` (#605 N5).
+ """
+ indexed=[lookup_words(text) for text in permitted]
+ excluded_words=[word for text in excluded for word in lookup_words(text)]
+ excluded_runs=value_digit_runs(excluded)
+ kept=[];seen=set();dropped=0
+ for match in _MEMORY_WORD.finditer(unicodedata.normalize('NFKC',str(value or ''))):
+  shown=match.group(0);word=shown.casefold()
+  if (excluded_words and owner_said(word,excluded_words)) or _digits_inside(word,excluded_runs):
+   dropped+=1;continue
+  origin=None;send=shown
+  for index,words in enumerate(indexed):
+   for position,candidate in enumerate(words):
+    form=_lookup_match(word,[candidate])
+    if form is not None:
+     origin=(index,position);send=shown if form==word else form;break
+   if origin is not None:break
+  if origin is None and owner_worded:dropped+=1;continue
+  if private and send.casefold() in seen:dropped+=1;continue
+  seen.add(send.casefold());kept.append({'word':send,'origin':origin})
+ if private:
+  kept.sort(key=lambda row:row['origin'] or (len(indexed),0))
+  if len(kept)>cap:dropped+=len(kept)-cap;kept=kept[:cap]
+ return kept,dropped
 
 def lookup_sources(store, job_id, tools=None, history=15):
  """Permitted and excluded text for one public lookup of a running Work.
 
- Permitted: the owner's current request, earlier owner messages whose Work
- read or wrote no private store (inherited history taint and a CLI's
- unmediated reads concern the reply, not what the owner typed), and earlier
- assistant replies whose Work saw nothing but owner conversation.  Excluded:
- values this Work wrote to a private store (Memory candidates) -- the
- `여권번호를 기억해 둬` case, including when it shares the request with
- the lookup.  Raises when the Work is no longer running (the binding).
+ Permitted (chronological, the current request last): earlier owner messages
+ whose Work read or wrote no private store (inherited history taint and a
+ CLI's unmediated reads concern the reply, not what the owner typed), earlier
+ assistant replies whose Work saw nothing but owner conversation, and the
+ owner's current request.  ``current`` is that request.  Excluded: values this
+ Work wrote to a private store -- Memory candidates and notes -- the
+ `여권번호를 기억해 둬` case, including when it shares the request with the
+ lookup.  Raises when the Work is no longer running (the binding).
  """
+ import hashlib
  job=store.job(job_id) if isinstance(job_id,str) and job_id else None
  if not job or job.get('status')!='running':
   raise ValueError('이 작업은 더 이상 실행 중이 아니어서 공개 조회를 실행하지 않았습니다.')
@@ -413,7 +500,11 @@ def lookup_sources(store, job_id, tools=None, history=15):
   before=first['id'] if first and first['id'] is not None else 1<<62
   rows=[dict(row) for row in db.execute('SELECT role,content,job_id FROM messages WHERE id<? ORDER BY id DESC LIMIT ?',(before,history))]
   written=[row['content'] for row in db.execute('SELECT content FROM memory_candidates WHERE work_key=?',(store._work_binding(job_id),))]
- records=work_source_records(store);permitted=[job.get('message') or ''];cache={}
+  # A note this Work saved: `/note` stores it under the Work id, `save_note`
+  # under sha256(Work id + content).  Survives a restarted bridge (#605 N2).
+  for row in db.execute('SELECT id,content FROM notes'):
+   if row['id']==job_id or row['id']==hashlib.sha256((job_id+str(row['content'])).encode()).hexdigest():written.append(row['content'])
+ records=work_source_records(store);permitted=[];cache={}
  for row in reversed(rows):
   jid=row.get('job_id')
   if jid not in cache:
@@ -426,21 +517,8 @@ def lookup_sources(store, job_id, tools=None, history=15):
   labels,direct=cache[jid]
   if row.get('role')=='user' and direct<=_OWNER_TEXT_NEUTRAL:permitted.append(row['content'])
   elif row.get('role')=='assistant' and labels<={OWNER_CONVERSATION}:permitted.append(row['content'])
- return {'permitted':permitted,'excluded':written}
-
-def admissible_value(value, permitted_words, excluded_words, whole=False):
- """The words of ``value`` that may leave, and how many were dropped.
-
- ``whole`` is for a value that cannot be partly sent (a place name): any
- dropped word refuses the whole value.
- """
- kept=[];dropped=0
- for match in _MEMORY_WORD.finditer(str(value or '')):
-  word=match.group(0).casefold()
-  if _lookup_word_covered(word,permitted_words) and not (excluded_words and owner_said(word,excluded_words)):kept.append(match.group(0))
-  else:dropped+=1
- if whole and dropped:return None,dropped
- return ' '.join(kept),dropped
+ current=job.get('message') or ''
+ return {'permitted':[*permitted,current],'current':current,'excluded':written}
 
 class EvidenceLog(list):
  """Tool evidence that records the provenance of everything put into it.
@@ -492,7 +570,7 @@ def check_arguments(parameters,args):
  return args
 
 class Capabilities:
- def __init__(self,store,adapter,config,key,job_id,record,readonly=False,network=None,document_access=True,packages=None,allowed_tools=None,document_context=False,public_page_scope=None,memory_approval=None,inherited_provenance=(),calendar=None,calendar_owner=None,memory_request=None,current_packages=None,lookup_sources=None,lookup_hint=''):
+ def __init__(self,store,adapter,config,key,job_id,record,readonly=False,network=None,document_access=True,packages=None,allowed_tools=None,document_context=False,public_page_scope=None,memory_approval=None,inherited_provenance=(),calendar=None,calendar_owner=None,memory_request=None,current_packages=None,lookup_sources=None,lookup_hint='',lookup_sensitivity=None,lookup_restrictive=False,delegated=False,inherited_excluded=()):
   self.store,self.adapter,self.config,self.key=store,adapter,config,key
   self.job_id,self.record,self.readonly=job_id,record,readonly
   self.network=network or LocalTools()
@@ -528,7 +606,17 @@ class Capabilities:
   # Values this Work wrote to a private store in-process, and the private
   # writes proposed alongside the current tool batch (`run_agent`): never
   # admissible as public lookup words.
-  self.written_private=[];self.pending_writes=[]
+  self.written_private=[];self.pending_writes=[];self.written_labels=set()
+  # #605 N3: the existing DecisionEngine judgment of which words of the
+  # owner's current message are sensitive (`ConversationJudgments.
+  # lookup_term_sensitivity`), asked only when a lookup would include them.
+  self.lookup_sensitivity=lookup_sensitivity
+  # Rollback (`egress_composition = restrictive`): a private context is
+  # refused instead of composed; a clean one is still composed.
+  self.lookup_restrictive=lookup_restrictive
+  # A delegated specialist never composes a lookup from a private context,
+  # and never sends what its parent wrote to a private store.
+  self.delegated=delegated;self.inherited_excluded=list(inherited_excluded or ())
   # Route-specific, truthful next step appended to a public-egress refusal.
   self.lookup_hint=lookup_hint
   self.memo={}
@@ -654,66 +742,132 @@ class Capabilities:
    try:scope=scope()
    except Exception:scope=()
   return frozenset(scope or ())
- def _public_task(self,tool_id,action,args):
-  """Serve a public destination proposed from a private context, or refuse.
+ def lookup_private(self):
+  """Does private material, or a private-store write, share this Work's context?"""
+  return bool(self.private_egress_provenance() or self.pending_writes or self.written_private or self.inherited_excluded)
+ def _judge_sensitive(self,current,terms):
+  """Indices of ``terms`` (words of the owner's current message) not to send.
 
-  AgentOS composes the outbound arguments itself from the worker's proposal,
-  keeping only words that come from text permitted for this lookup
-  (`lookup_sources`: the owner's current request, earlier owner messages and
-  owner-conversation-only replies) and never words this Work wrote to a
-  private store.  Nothing else of the conversation, and no private material,
-  is passed; the worker cannot add a word that is not already in permitted
-  text, so its proposal is a selection, not a redaction AgentOS trusts.  An
-  unnecessary private word is dropped rather than asked about; when nothing
-  admissible remains, or a place name is not the owner's own wording, the
-  worker gets a question to ask instead.  The checked arguments are exactly
-  the transmitted arguments.
-
-  Budget: one network attempt per destination per Work, recorded *before*
-  the request, so a repeated proposal after success or failure gets the
-  first outcome and never another request (#605 F3).
+  The judgment is the existing DecisionEngine path (``lookup_sensitivity``,
+  the #597 seam), asked only here -- when an outbound lookup would include
+  words of the owner's current message.  AgentOS policy then reads it: a
+  confident no sends every term, a yes withholds the named terms, and
+  anything else -- no engine, unavailable, abstaining, malformed -- fails
+  safe: every term carrying a digit (an exact value such as an identifier,
+  the same digit rule `owner_said` applies) is withheld and ordinary words
+  still go out.  The fallback only ever withholds; it never widens.
   """
+  judgment=None
+  if self.lookup_sensitivity is not None:
+   try:judgment=self.lookup_sensitivity(current,list(terms))
+   except Exception:judgment=None
+  outcome,value=getattr(judgment,'outcome',None),getattr(judgment,'value',None)
+  if outcome=='no':return set()
+  if (outcome=='yes' and isinstance(value,(set,frozenset,list,tuple)) and value
+      and all(isinstance(index,int) and not isinstance(index,bool) and 0<=index<len(terms) for index in value)):
+   return set(value)
+  return {index for index,term in enumerate(terms) if _MEMORY_DIGITS.search(term)}
+ def _compose(self,value,sources,excluded,*,owner_worded,private):
+  """The words of one value that may leave, and how many were withheld."""
+  kept,dropped=select_lookup_words(value,sources['permitted'],excluded,owner_worded=owner_worded,private=private)
+  current=sources.get('current')
+  if current is None:current=sources['permitted'][-1] if sources['permitted'] else ''
+  current_words=lookup_words(current)
+  terms=[row for row in kept if _lookup_match(row['word'].casefold(),current_words) is not None]
+  if terms:
+   sensitive=self._judge_sensitive(current,[row['word'] for row in terms])
+   withheld={id(terms[index]) for index in sensitive}
+   runs=value_digit_runs([terms[index]['word'] for index in sensitive])
+   remaining=[row for row in kept if id(row) not in withheld and not _digits_inside(row['word'].casefold(),runs)]
+   dropped+=len(kept)-len(remaining);kept=remaining
+  return [row['word'] for row in kept],dropped
+ def _attempted(self,action):
+  """Has this Work already spent its one attempt at ``action`` (#605 F3)?
+
+  Read from the Work's durable tool events, so a restarted bridge or a
+  resumed Work sees an attempt another process made before the request.
+  """
+  try:
+   with self.store.db() as db:
+    rows=db.execute("SELECT detail FROM tool_events WHERE job_id=? AND status='requested'",(self.job_id,)).fetchall()
+  except Exception:return False
+  for row in rows:
+   try:detail=json.loads(row[0] or '{}')
+   except (TypeError,ValueError):continue
+   if isinstance(detail,dict) and detail.get('composed_by')=='agentos-public-task' and detail.get('host_action')==action:return True
+  return False
+ def _public_task(self,tool_id,action,args):
+  """Serve one public lookup: AgentOS composes what leaves, or refuses.
+
+  Every public lookup of a Work with a lookup resolver goes through here,
+  the first turn included (#605 N3).  AgentOS composes the outbound
+  arguments from the worker's proposal:
+
+  * never a word this Work wrote to a private store (Memory candidates,
+    notes, and writes proposed in the same batch), in any spelling (N4);
+  * words of the owner's current message are sent only after the existing
+    DecisionEngine judgment (`_judge_sensitive`) did not name them (N3);
+  * a place name is the owner's own wording, on every path (F4.1, N6);
+  * when the context holds private material, only words from text permitted
+    for this lookup (`lookup_sources`), deduplicated, in AgentOS's order and
+    capped (N5), and one network attempt per destination per Work, recorded
+    durably *before* the request (F3).
+
+  A clean context keeps the worker's other words (its own knowledge, such as
+  a translation): no private material is in that context.  When nothing
+  admissible remains, or a place name is not the owner's wording, the worker
+  gets a question to ask instead.  The checked arguments are exactly the
+  transmitted arguments.
+  """
+  private=self.lookup_private()
   labels=self.private_egress_provenance()
-  if self.lookup_sources is None or action not in PUBLIC_TASK_ACTIONS:
-   raise ValueError(egress_refusal(action,labels,self.lookup_hint))
+  if private and (self.lookup_sources is None or self.lookup_restrictive or self.delegated):
+   raise ValueError(egress_refusal(action,labels or sorted(self.written_labels) or [UNATTRIBUTED_PROVENANCE],self.lookup_hint))
+  if self.lookup_sources is None:return None  # no resolver and a clean context: the caller's own path
   key=json.dumps(['agentos-public-task',action])
-  if key in self.memo:
+  if private and key in self.memo:
    earlier=self.memo[key]
    if isinstance(earlier,Exception):raise ValueError(str(earlier))
    return earlier
+  if private and self._attempted(action):
+   raise ValueError('이 작업에서는 이 공개 조회를 이미 한 번 시도했습니다.')
   if action=='public_page_read':
    # The address is fixed by the owner's approval, not composed from the
    # conversation; the current approval is the whole check.
    scope=self.page_scope()
+   if not private:return None
    if args.get('url') not in scope:raise ValueError('소유자가 현재 승인한 공개 페이지 주소가 아니어서 조회하지 않았습니다.')
    plan={'tool':action,'url':args['url'],'approved_urls':sorted(scope)};dropped=0
   else:
    sources=self.lookup_sources()  # raises when the Work binding no longer holds
-   permitted=[word for text in sources['permitted'] for word in memory_words(text)]
-   excluded=[word for text in [*sources['excluded'],*self.written_private,*self.pending_writes] for word in memory_words(text)]
+   excluded=[*sources['excluded'],*self.written_private,*self.pending_writes,*self.inherited_excluded]
    if action=='weather':
-    city,dropped=admissible_value(args.get('city',''),permitted,excluded,whole=True)
-    if not city:raise ValueError(PUBLIC_TASK_PLACE)
-    plan={'tool':action,'city':city}
-    country,_=admissible_value(args.get('country',''),permitted,excluded,whole=True)
-    if country:plan['country']=country
+    city,dropped=self._compose(args.get('city',''),sources,excluded,owner_worded=True,private=False)
+    if not city or dropped:raise ValueError(PUBLIC_TASK_PLACE)
+    plan={'tool':action,'city':' '.join(city)}
+    country,withheld=self._compose(args.get('country',''),sources,excluded,owner_worded=True,private=False)
+    if country and not withheld:plan['country']=' '.join(country)
    else:
-    query,dropped=admissible_value(args.get('query',''),permitted,excluded)
+    query,dropped=self._compose(args.get('query',''),sources,excluded,owner_worded=private,private=private)
     if not query:raise ValueError(PUBLIC_TASK_UNRESOLVED)
-    plan={'tool':'web_search' if action=='web_search' else action,'query':query}
+    plan={'tool':'web_search' if action=='web_search' else action,'query':' '.join(query)}
     if action=='bounded_public_research':plan['mode']=args.get('mode')
   sent={k:v for k,v in plan.items() if k!='tool'}
-  self.memo[key]=RuntimeError('이 작업에서는 이 공개 조회를 이미 한 번 시도했습니다.')
+  if private:
+   self.memo[key]=RuntimeError('이 작업에서는 이 공개 조회를 이미 한 번 시도했습니다.')
+   # Durable before the request: a restarted bridge or resumed Work reads it.
+   self.record(tool_id,'requested',json.dumps({'host_action':action,'composed_by':'agentos-public-task','phase':'attempt'},ensure_ascii=False))
   try:
    if action=='bounded_public_research':
     value=self._research(plan['mode'],plan['query'])
    else:
     value=self.network.execute(plan)
   except (ValueError,TypeError,OSError,ProviderError) as exc:
-   self.memo[key]=exc;raise
+   if private:self.memo[key]=exc
+   raise
   value={**value,'composed_by':'agentos-public-task','sent':sent,'excluded_terms':dropped,
-         'note':'AgentOS sent only the listed arguments, taken from text permitted for this public lookup.'}
-  self.memo[key]=value
+         'note':'AgentOS sent only the listed arguments, composed by AgentOS for this public lookup.'}
+  if private:self.memo[key]=value
   return value
  def _research(self,mode,query):
   """One bounded public research run (J5); egress only through `self.network`."""
@@ -792,10 +946,12 @@ class Capabilities:
     raise ValueError('이 도구는 작업 시작 후 비활성화되었거나 선언이 바뀌어 실행하지 않았습니다. 새 요청으로 다시 시도해 주세요.')
   tool_id,name=name,tool['host_action']
   if name=='web_search':
-   if self.private_egress_provenance() or self.pending_writes:return self._public_task(tool_id,name,args)
+   composed=self._public_task(tool_id,name,args)
+   if composed is not None:return composed
    return self.network.execute({'tool':name,**args})
   if name=='public_page_read':
-   if self.private_egress_provenance() or self.pending_writes:return self._public_task(tool_id,name,args)
+   composed=self._public_task(tool_id,name,args)
+   if composed is not None:return composed
    scope=self.page_scope()
    if not scope:raise ValueError('소유자가 승인한 공개 페이지 범위가 없습니다. 먼저 정확한 주소와 조회 매개변수를 승인하세요.')
    return self.network.execute({'tool':name,'url':args['url'],'approved_urls':sorted(scope)})
@@ -844,7 +1000,8 @@ class Capabilities:
    # This is a public destination and takes the same composition as the
    # others (#605).  It is checked before the mode/query validation, so a
    # tainted context cannot learn anything from the shape of the error.
-   if self.private_egress_provenance() or self.pending_writes:return self._public_task(tool_id,name,args)
+   composed=self._public_task(tool_id,name,args)
+   if composed is not None:return composed
    return self._research(args['mode'],args['query'])
   if name=='weather':
    # `weather` sends `name=<city>` - an arbitrary 100-character string - to a
@@ -852,7 +1009,8 @@ class Capabilities:
    # the two above. It sat unguarded between them: the provenance model knew
    # the context was private and this branch never asked, which falsified the
    # very property `test_private_provenance_egress` asserts.
-   if self.private_egress_provenance() or self.pending_writes:return self._public_task(tool_id,name,args)
+   composed=self._public_task(tool_id,name,args)
+   if composed is not None:return composed
    return self.network.execute({'tool':name,**args})
   # Folder basenames are owner-private: `이혼소송_2026` is a fact about the
   # owner's life, not a public string, and independent review put one
@@ -882,7 +1040,7 @@ class Capabilities:
    if not content or len(content)>12000:raise ValueError('메모는 1~12000자로 입력하세요.')
    # #605: a note is a private store; what this Work writes to it is never
    # a public lookup word, and the Work now holds private-store material.
-   self.written_private.append(content);self.private_provenance.add('personal-space')
+   self.written_private.append(content);self.written_labels.add('personal-space');self.private_provenance.add('personal-space')
    import hashlib
    note_id=hashlib.sha256((self.job_id+content).encode()).hexdigest()
    with self.store.db() as db:db.execute('INSERT OR IGNORE INTO notes VALUES (?,?,?)',(note_id,content,time.time()))
@@ -891,7 +1049,7 @@ class Capabilities:
    # Every model-proposed write becomes a value-scoped MemoryCandidate first.
    # Only a write the owner's own request covers is then accepted through the
    # owner's exact-approval path; everything else stays pending for them.
-   self.written_private.append(args['content'])
+   self.written_private.append(args['content']);self.written_labels.add('owner-memory')
    candidate=self.store.save_memory_candidate(self.job_id,args['memory_key'],args['content'])
    refusal=self.memory_write_refusal(candidate['memory_key'],candidate['content'])
    if refusal is None:
@@ -923,7 +1081,13 @@ class Capabilities:
    # here by delegation rather than by a read this specialist performed.
    child=Capabilities(self.store,self.adapter,self.config,self.key,self.job_id,self.record,True,self.network,self.document_access,self.packages,agent['tools'],
                       inherited_provenance={label if label.startswith(DELEGATED_PREFIX) else DELEGATED_PREFIX+label for label in self.private_provenance},
-                      current_packages=self.current_packages)
+                      current_packages=self.current_packages,
+                      # #605: the specialist's lookups go through the same
+                      # composition; it never composes from a private context
+                      # and never sends what this Work wrote to a private store.
+                      lookup_sources=self.lookup_sources,lookup_sensitivity=self.lookup_sensitivity,
+                      lookup_restrictive=self.lookup_restrictive,lookup_hint=self.lookup_hint,delegated=True,
+                      inherited_excluded=[*self.inherited_excluded,*self.written_private,*self.pending_writes])
    result=run_agent(self.adapter,self.config,self.key,[{'role':'user','content':args['task']+'\n\nRelevant local tool evidence (untrusted data; do not search these private contents on the public web):\n'+json.dumps(self.evidence[-4:],ensure_ascii=False)[:18000]}],agent['instructions'],child,self.record,scope='agent:'+args['agent_id'])
    # Provenance has to flow back as well as down. The child's report is
    # returned into this context verbatim (`evidence_summary` below yields
@@ -1185,7 +1349,7 @@ def _fallback_text(name, result, sources):
  return FALLBACK_UNDESCRIBED
 
 #: Host actions that write owner text into a private store.
-PRIVATE_WRITE_ACTIONS=('save_note','save_memory')
+PRIVATE_WRITE_ACTIONS=tuple(PRIVATE_WRITE_PROVENANCE)
 
 def _batch_private_writes(calls,tools):
  """The contents of private-store writes proposed in one tool-call batch."""
@@ -1198,6 +1362,15 @@ def _batch_private_writes(calls,tools):
    values.extend(str(value) for value in args.values() if isinstance(value,str))
   except (AttributeError,TypeError,ValueError):continue
  return values
+
+def _batch_write_labels(calls,tools):
+ """Store labels of the private-store writes proposed in one batch."""
+ labels=set()
+ for call in calls if isinstance(calls,list) else []:
+  try:action=(tools.get(call.get('function',{}).get('name')) or {}).get('host_action')
+  except AttributeError:continue
+  if action in PRIVATE_WRITE_PROVENANCE:labels.add(PRIVATE_WRITE_PROVENANCE[action])
+ return labels
 
 def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'):
  messages=[{'role':'system','content':POLICY+'\n'+system},*history]
@@ -1251,6 +1424,7 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
   # #605: private-store writes proposed in this same batch are known before
   # any call runs, so a lookup listed first cannot carry their values.
   capabilities.pending_writes=_batch_private_writes(calls,capabilities.tools)
+  capabilities.written_labels.update(_batch_write_labels(calls,capabilities.tools))
   for call in calls:
    count+=1;name='unknown';validated=False;attempt=0;args={}
    try:

@@ -156,7 +156,7 @@ class DecisionTable(unittest.TestCase):
 
     def test_research_query_is_composed_the_same_way(self):
         caps = self.caps(self.NOTES, ['노트북 비교해줘'], [PRIVATE])
-        with mock.patch.object(Capabilities, '_research', lambda self, mode, query: {'query': query, 'mode': mode, 'sources': []}):
+        with mock.patch.object(Capabilities, '_research', lambda self, mode, query, **selectors: {'query': query, 'mode': mode, 'sources': []}):
             result = caps.execute('bounded_public_research', {'mode': 'product', 'query': f'노트북 {PRIVATE}'})
         self.assertEqual(result['sent'], {'query': '노트북', 'mode': 'product'})
 

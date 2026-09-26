@@ -978,7 +978,9 @@ class PublicResearch:
         for name in ('inventory','payable_total','fee'):
             qualified=_qualified_dynamic(name,evidence)
             dynamic[name]={'status':'observed' if qualified else 'unknown','evidence':qualified}
-        return {'tool':'bounded_public_research','mode':mode,'query':query,'query_source':query_source,
+        # #655: the provider that answered the one search, as its result names it.
+        search_used={key:search_result[key] for key in ('provider','locale') if isinstance(search_result.get(key),str) and search_result[key]}
+        return {'tool':'bounded_public_research','mode':mode,'query':query,'query_source':query_source,**search_used,
                 'search_retrieved_at':search_result.get('retrieved_at'),'retrieved_at':self.clock(),
                 'brief':self._brief(mode,evidence,dynamic),'evidence':evidence,
                 'dynamic_facts':dynamic,'read_failures':failures,

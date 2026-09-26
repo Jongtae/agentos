@@ -241,6 +241,15 @@ class ToolSchema(unittest.TestCase):
         for steer in ('prefer', 'Korean quer', 'best for'):
             self.assertNotIn(steer, function['description'])
 
+    def test_bounded_research_carries_the_same_provider_enum_and_text(self):
+        rows = action_definitions(self.tools, {'bounded_public_research', 'web_search'}, search_providers=registry(**all_keys()))
+        research, search = (next(r['function'] for r in rows if r['function']['name'] == name)
+                            for name in ('bounded_public_research', 'web_search'))
+        self.assertEqual(research['parameters']['properties']['provider'], search['parameters']['properties']['provider'])
+        self.assertIn('locale', research['parameters']['properties'])
+        self.assertEqual(research['parameters']['required'], ['mode', 'query'])
+        self.assertTrue(research['description'].endswith(search['description'][search['description'].index(' Providers configured'):]))
+
     def test_enum_shrinks_with_the_keys_and_is_absent_without_a_registry(self):
         self.assertEqual(self.definition(registry())['parameters']['properties']['provider']['enum'], ['bing'])
         self.assertNotIn('enum', self.definition()['parameters']['properties']['provider'])
@@ -267,6 +276,8 @@ class Wire:
 
     def execute(self, plan):
         self.plans.append(dict(plan))
+        if plan['tool'] == 'public_page_read':
+            return {'tool': 'public_page_read', 'url': plan['url'], 'content': 'Model A costs 100 USD.', 'sources': [plan['url']], 'retrieved_at': 1}
         return {'tool': 'web_search', 'query': plan['query'], 'provider': plan.get('provider', 'bing'), 'kind': 'web',
                 'locale': plan.get('locale', ''), 'retrieved_at': 1,
                 'results': [{'title': 't', 'url': 'https://example.org/', 'snippet': 's', 'provider': plan.get('provider', 'bing')}],
@@ -306,6 +317,42 @@ class CapabilitiesPath(unittest.TestCase):
                             lookup_sources=lambda: {'permitted': ['leaders'], 'excluded': []})
         caps.execute('web_search', {'query': 'leaders'})
         self.assertEqual(wire.plans, [{'tool': 'web_search', 'query': 'leaders'}])
+
+    def test_bounded_research_carries_the_model_provider_on_both_routes(self):
+        # Codex P1 on PR #666: research made a bare web_search plan, so the
+        # model could not choose or switch providers for a comparison.
+        for route, resolver in (('direct', None), ('composed', lambda: {'permitted': ['headphones'], 'excluded': []})):
+            with self.subTest(route=route):
+                wire = Wire()
+                caps = Capabilities(self.store, None, CFG, '', f'job-{route}', self.record, network=wire, lookup_sources=resolver)
+                result = caps.execute('bounded_public_research', {'mode': 'product_comparison', 'query': 'headphones',
+                                                                  'provider': 'brave', 'locale': 'en-US'})
+                self.assertEqual(wire.plans[0], {'tool': 'web_search', 'query': 'headphones', 'provider': 'brave', 'locale': 'en-US'})
+                self.assertEqual((result['provider'], result['locale']), ('brave', 'en-US'))
+                if route == 'composed':
+                    self.assertEqual(result['sent'], {'query': 'headphones', 'mode': 'product_comparison', 'provider': 'brave', 'locale': 'en-US'})
+                summary = evidence_summary('bounded_public_research', result)
+                self.assertEqual((summary['provider'], summary['locale']), ('brave', 'en-US'))
+                # Without selectors the plan is bare: the configured default applies, nothing is inferred.
+                wire.plans.clear()
+                caps.execute('bounded_public_research', {'mode': 'travel_plan', 'query': 'headphones'})
+                self.assertEqual(wire.plans[0], {'tool': 'web_search', 'query': 'headphones'})
+
+    def test_bounded_research_default_and_choice_reach_the_configured_provider(self):
+        class Pages:
+            @staticmethod
+            def read(url, approved_urls=None):
+                return {'tool': 'public_page_read', 'url': url, 'content': 'Brave result page.', 'sources': [url], 'retrieved_at': 1}
+        opener = Opener()
+        tools = LocalTools(page_reader=Pages(), providers=registry(opener, default='naver-book', **all_keys()))
+        caps = Capabilities(self.store, None, CFG, '', 'job-r', self.record, network=tools)
+        result = caps.execute('bounded_public_research', {'mode': 'travel_plan', 'query': 'seoul hotels', 'provider': 'brave'})
+        self.assertEqual(urlsplit(opener.requests[0]['url']).hostname, 'api.search.brave.com')
+        self.assertEqual(result['provider'], 'brave')
+        opener.requests.clear()
+        result = caps.execute('bounded_public_research', {'mode': 'product_comparison', 'query': 'leaders'})
+        self.assertTrue(opener.requests[0]['url'].startswith('https://openapi.naver.com/v1/search/book.json?'))
+        self.assertEqual(result['provider'], 'naver-book')
 
     def test_selectors_are_bounded_ids_not_free_text(self):
         self.assertEqual(search_arguments({'query': 'x', 'provider': ' naver-book ', 'locale': 'ko-KR'}),

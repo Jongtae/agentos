@@ -995,6 +995,7 @@ class ProcessLevelQualification(unittest.TestCase):
         target = self._allow_touch()
         results, _ = self._run('codex', binary, _ScriptedModel('responses', self._write_script(target)), BOUNDED_PROFILE)
         self.assertEqual(self.argv.count('--ignore-rules'), 1)
+        self.assertIn('Operation not permitted', results[0], 'the touch was attempted and denied by the sandbox')
         self.assertFalse(target.exists(), results[:1])
 
     def test_codex_trusted_local_allow_rule_escapes_without_ignore_rules(self):

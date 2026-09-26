@@ -83,10 +83,14 @@ CODEX_ALWAYS_DISABLE = ('memories', 'multi_agent', 'multi_agent_v2', 'web_search
                         'standalone_web_search', 'external_agent_memory_import', 'chronicle')
 CODEX_FEATURE_STAGES = ('stable', 'under development', 'experimental', 'deprecated', 'removed')
 #: Official `-c key=value` overrides for decision calls: no web search, no
-#: AGENTS.md/project docs, no skills/apps/permissions/environment/collaboration
+#: project docs, no skills/apps/permissions/environment/collaboration
 #: instructions in the model-visible input, no plan tool.  The prompt-input
 #: effect of these was checked locally with `codex debug prompt-input` (no
 #: model call); the resulting *tool* list is not observable locally.
+#: Not covered (#624, observed on 0.153.4): `project_doc_max_bytes=0` limits
+#: project docs only; the global `$CODEX_HOME/AGENTS.override.md` or
+#: `AGENTS.md` still reaches the model, and no official override stops it.
+#: That content is owner-authored, untracked, untrusted input.
 CODEX_DECISION_CONFIG = (
     ('web_search', '"disabled"'), ('project_doc_max_bytes', '0'), ('skills.include_instructions', 'false'),
     ('include_environment_context', 'false'), ('include_permissions_instructions', 'false'),
@@ -203,8 +207,10 @@ class SubscriptionCliDecisionEngine(SchemaDecisionEngine):
 
     def argv(self, binary, prompt, schema_path, schema):
         if self.engine_id == 'codex':
+            # --ignore-rules: no CODEX_HOME execpolicy rule can allow a
+            # command outside the sandbox (#616 review P1, reused; #624).
             argv = [binary, 'exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check',
-                    '--ignore-user-config', '--ephemeral', '--output-schema', str(schema_path)]
+                    '--ignore-user-config', '--ignore-rules', '--ephemeral', '--output-schema', str(schema_path)]
             for key, value in CODEX_DECISION_CONFIG:
                 argv += ['-c', f'{key}={value}']
             for feature in self.codex_disabled_features or ():

@@ -33,12 +33,13 @@ from personal_agent.providers import ModelAdapter, ProviderError
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
 from personal_agent.telegram_presence import (REACTION_FOR_SEMANTICS, REACTION_SEMANTICS, TELEGRAM_REACTION_EMOJI,
+                                              THINKING_DRAFT_TEXT,
                                               WAIT_CHAT_ACTION, WAIT_DRAFT, WAIT_NONE, PresenceTiming, draft_id_for,
                                               render_telegram_html, turn_gesture)
 
 CHAT = 4242
 GENERATION = 'g1'
-PRESENCE_METHODS = ('setMessageReaction', 'sendChatAction', 'sendMessageDraft')
+PRESENCE_METHODS = ('setMessageReaction', 'sendChatAction', 'sendRichMessageDraft', 'sendMessageDraft')
 
 
 class NativePresenceTestCase(unittest.TestCase):
@@ -193,11 +194,12 @@ class WaitSurfaceTests(NativePresenceTestCase):
                 self.service.acknowledge_long_work(now=job['created'] + offset)
         self.during_model = think
         job, message_id = self.turn('제주 여행 준비 자료 조사해줘')
-        drafts = [body for method, body in self.calls if method == 'sendMessageDraft']
+        drafts = [body for method, body in self.calls if method == 'sendRichMessageDraft']
         # First draft at 6s, refreshed once at 27s (>= 20s later); 7s and 12s are no-ops.
         self.assertEqual(len(drafts), 2)
         for body in drafts:
-            self.assertEqual(body, {'chat_id': CHAT, 'draft_id': draft_id_for(job['id']), 'text': '', 'can_stop': True})
+            self.assertEqual(body, {'chat_id': CHAT, 'draft_id': draft_id_for(job['id']), 'can_stop': True,
+                                    'rich_message': {'blocks': [{'type': 'thinking', 'text': THINKING_DRAFT_TEXT}]}})
         self.assertNotIn('sendChatAction', self.methods())
         self.assertEqual(self.methods()[-1], 'sendMessage')
         [reply] = self.sends()
@@ -254,11 +256,26 @@ class PresentationFailureTests(NativePresenceTestCase):
         for secret in ('REACTION_INVALID', 'owner-text', 'SECRET-TOKEN', '저녁'):
             self.assertNotIn(secret, line)
 
+    def test_refused_rich_thinking_draft_falls_back_to_the_plain_placeholder_draft(self):
+        self.connect_model()
+        self.failing = {'sendRichMessageDraft': TelegramRejected(400, 'Bad Request: method not supported')}
+        self.during_model = lambda job: [self.service.acknowledge_long_work(now=job['created'] + t) for t in (6, 27)]
+        job, _ = self.turn('긴 요청')
+        self.assertEqual(self.methods().count('sendRichMessageDraft'), 1, 'a refused rich draft is not retried')
+        plain = [body for method, body in self.calls if method == 'sendMessageDraft']
+        self.assertEqual(len(plain), 2, 'the plain placeholder draft is shown at once and refreshed')
+        for body in plain:
+            self.assertEqual(body, {'chat_id': CHAT, 'draft_id': draft_id_for(job['id']), 'text': '', 'can_stop': True})
+        self.assertNotIn('sendChatAction', self.methods())
+        self.assertEqual(len(self.sends()), 1)
+
     def test_unsupported_draft_falls_back_to_typing(self):
         self.connect_model()
-        self.failing = {'sendMessageDraft': ProviderError('method not found')}
+        self.failing = {'sendRichMessageDraft': ProviderError('method not found'),
+                        'sendMessageDraft': ProviderError('method not found')}
         self.during_model = lambda job: [self.service.acknowledge_long_work(now=job['created'] + t) for t in (6, 7)]
         self.turn('긴 요청')
+        self.assertEqual(self.methods().count('sendRichMessageDraft'), 1, 'a failed draft is not retried')
         self.assertEqual(self.methods().count('sendMessageDraft'), 1, 'a failed draft is not retried')
         self.assertIn('sendChatAction', self.methods())
         self.assertEqual(len(self.sends()), 1)
@@ -434,7 +451,7 @@ class StopTests(NativePresenceTestCase):
         self.during_model = think
         job, message_id = self.turn('긴 조사 부탁해')
         self.assertEqual(outcomes, ['running'])
-        self.assertEqual(self.methods().count('sendMessageDraft'), 1, 'no draft after Stop')
+        self.assertEqual(self.methods().count('sendRichMessageDraft'), 1, 'no draft after Stop')
         self.assertNotIn('sendChatAction', self.methods())
         # #606 T1: Stop is checked before the next model turn or tool call, so
         # the running Work ends there and its one real result says why.
@@ -907,6 +924,7 @@ class ChannelWireTests(unittest.TestCase):
         channel.set_message_reaction(1, 2, '👍')
         channel.send_chat_action(1)
         channel.send_message_draft(1, 77)
+        channel.send_rich_message_draft(1, 77, THINKING_DRAFT_TEXT)
         channel.send_message(1, 'x', parse_mode='HTML', reply_to=5)
         channel.edit_message_reply_markup(1, 5, {'inline_keyboard': []})
         channel.answer_callback_query('c', 'y' * 300, show_alert=True)
@@ -914,6 +932,10 @@ class ChannelWireTests(unittest.TestCase):
                                                          'reaction': [{'type': 'emoji', 'emoji': '👍'}]}, 4))
         self.assertEqual(log[1], ('sendChatAction', {'chat_id': 1, 'action': 'typing'}, 4))
         self.assertEqual(log[2], ('sendMessageDraft', {'chat_id': 1, 'draft_id': 77, 'text': '', 'can_stop': True}, 4))
+        # Bot API 10.3: InputRichMessage.blocks with one InputRichBlockThinking.
+        self.assertEqual(log.pop(3), ('sendRichMessageDraft', {
+            'chat_id': 1, 'draft_id': 77, 'can_stop': True,
+            'rich_message': {'blocks': [{'type': 'thinking', 'text': THINKING_DRAFT_TEXT}]}}, 4))
         self.assertEqual(log[3][1], {'chat_id': 1, 'text': 'x', 'parse_mode': 'HTML',
                                      'reply_parameters': {'message_id': 5, 'allow_sending_without_reply': True}})
         self.assertEqual(log[4][1], {'chat_id': 1, 'message_id': 5, 'reply_markup': {'inline_keyboard': []}})

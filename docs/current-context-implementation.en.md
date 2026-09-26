@@ -78,7 +78,11 @@ Proposed functions: `record_observation(db, owner, envelope, now)`, `invalidate_
 Telegram ingress algorithm:
 
 ```text
-validate configured generation, update_id, paired owner, private chat
+validate configured generation, update_id, private chat
+if sender is unpaired: handle only the existing pairing command
+  (`/start <pair_code>` with an unexpired code, constant-time compare, as in
+  `AgentService.ingest_update`) — pair, advance the cursor, stop; drop anything else
+require the paired owner for text, edits and location observations
 select message or edited_message (preserve callback/Stop paths)
 normalize source identity + source/receive times
 BEGIN IMMEDIATE
@@ -91,7 +95,7 @@ COMMIT
 emit at most existing bounded acknowledgement; no model for a location tick
 ```
 
-The source key includes generation/chat/message ID, so re-pairing or reused message IDs cannot cross owners. Known duplicate/invalid/unsupported events may advance the cursor transactionally without creating state. A storage failure rolls back the cursor so it can retry. Continue preserving callback/Stop cursor semantics. Delayed events older than the source revision cannot overwrite it. Respect the existing poll ordering contract; do not convert every late text edit into a new user action.
+The pairing branch runs before the paired-owner requirement so a fresh installation or re-pair still works; it records no context observation and enqueues no Work. The source key includes generation/chat/message ID, so re-pairing or reused message IDs cannot cross owners. Known duplicate/invalid/unsupported events may advance the cursor transactionally without creating state. A storage failure rolls back the cursor so it can retry. Continue preserving callback/Stop cursor semantics. Delayed events older than the source revision cannot overwrite it. Respect the existing poll ordering contract; do not convert every late text edit into a new user action.
 
 Validate `latitude [-90,90]`, `longitude [-180,180]`, finite numeric types (reject bool/NaN/Infinity), optional nonnegative accuracy, positive bounded message identifiers and known source dates. Telegram documents accuracy 0–1500m; missing accuracy stays unknown. Retain only the fields required by this scope; heading/proximity/bot metadata are not a free input bag.
 

@@ -441,7 +441,9 @@ class QuickstartTests(unittest.TestCase):
         self.assertIn('도구 호출 연결',self.store.jobs()[0]['error'])
         self.assertEqual(self.calls,[])
         self.assertTrue(self.service.test_model()['ok'])
-        checked=self.store.config('model_test');checked['time']=time.time()-90000;self.store.put('model_test',checked)
+        # #619 AC6: age alone no longer invalidates a passed check; a changed
+        # config (different fingerprint) still does.
+        self.store.put('model',dict(self.store.config('model'),model='changed-after-test'))
         self.store.enqueue('다시 찾아줘','stale')
         self.service.run_one()
         self.assertEqual(self.store.jobs()[0]['status'],'failed')
@@ -1147,9 +1149,12 @@ finally:
         from unittest.mock import patch
         with patch('personal_agent.quickstart_service.request_json',return_value={'key':'test-only-key'}) as transport:
             connected=self.service.connect_openrouter({'code':'test-code','verifier':'a'*64})
-            self.assertTrue(connected['model_test']['ok'])
-            self.assertEqual(self.store.config('model')['model'],'openrouter/free')
-            self.assertEqual(self.store.secret('model_key'),'test-only-key')
+            # #619: the account key is stored in the OpenRouter slot only; it
+            # never switches the Main AI or becomes the active Work key.
+            self.assertEqual(connected['saved'],'openrouter')
+            self.assertEqual(self.store.secret('api_key:openrouter'),'test-only-key')
+            self.assertEqual(self.store.config('model',{}),{})
+            self.assertEqual(self.store.secret('model_key'),'')
             self.assertNotIn('test-only-key',str(self.service.settings()))
             self.assertEqual(transport.call_args.args[1]['code_challenge_method'],'S256')
         with patch('personal_agent.quickstart_service.request_json',return_value={'models':[{'name':'local-model','size':123},{}]}) as transport:

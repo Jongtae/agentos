@@ -18,6 +18,7 @@ from .plugins import PluginRegistry
 from .providers import NOT_REPORTED, ModelAdapter, ProviderError, request_json, validate_model
 from .decision import DEFAULT_DECISION_PROVIDER, RoutedDecisionEngine
 from .decision_routes import DecisionRoutes
+from .main_ai import MainAiRoutes
 from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_UNVERIFIED, BLOCKER_NO_AI_ROUTE,
                                       TELEGRAM_RESULT_PREVIEW_CHARS, TERMINAL_FAILED_HEADER,
                                       TERMINAL_INTERRUPTED_HEADER, TERMINAL_NEXT_ACTION, TERMINAL_PARTIAL_HEADER,
@@ -91,8 +92,9 @@ SYSTEM = ('You are the user’s personal AgentOS assistant. Respond in the user�
 
 # A successful text completion does not prove that a provider will accept and
 # return native tool calls.  Keep the probe deliberately inert: it is never
-# executed, so testing a connection cannot change a user's data.
-MODEL_TEST_TTL = 24 * 60 * 60
+# executed, so testing a connection cannot change a user's data.  A passed
+# probe stays valid until the config changes or the owner re-checks (#619:
+# the former 24h expiry flipped a working key to "확인 필요" by time alone).
 
 #: Gmail callback failures that prove the callback carried the exact pending
 #: state this owner's `begin_oauth` issued, so the parked Work may be failed.
@@ -253,6 +255,8 @@ class AgentService:
         # #417 default above applies.  It is independent of the Work route.
         self.decision_routes=DecisionRoutes(self)
         self.decision_engine=RoutedDecisionEngine(self.decision_routes.engine)
+        # #619: the Main AI (Work route) chooser and per-provider API keys.
+        self.main_ai=MainAiRoutes(self)
         self.decision_judge=ConversationJudgments(self.decision_engine)
         self.intent_classifier=IntentClassifier(workspace_search=workspace_search_request,judge=self.decision_judge)
         # Owner-facing projection of blocked turns (#510). The projected
@@ -419,6 +423,16 @@ class AgentService:
 
     def save_decision_route_credential(self, body):
         return self.decision_routes.save_credential(body)
+
+    # -- Main AI (기본 AI) chooser (#619) -------------------------------------
+    def activate_main_ai(self, body):
+        return self.main_ai.activate(body)
+
+    def check_main_ai(self, _body=None):
+        return self.main_ai.check()
+
+    def save_main_ai_key(self, body):
+        return self.main_ai.save_key(body)
 
     def check_decision_cli_capabilities(self, body):
         engine=body.get('engine','') if isinstance(body,dict) else ''
@@ -844,6 +858,7 @@ class AgentService:
         return {'profile':STRICT_PROFILE,'qualification':result,'subscription_execution':self.subscription_execution_profile()}
 
     def settings(self):
+        main_ai=self.main_ai.status()
         with self.lock:
             model=self.store.config('model',{})
             tg=self.store.config('telegram',{})
@@ -854,6 +869,7 @@ class AgentService:
             return {'model':model,'has_api_key':bool(self.store.secret('model_key')),
                     'decision_model':self.decision_route_status(),
                     'decision_route':self.decision_routes.status(),
+                    'main_ai':main_ai,
                     'subscription_engines':self.subscription_engine_status(),
                     'subscription_execution':self.subscription_execution_profile(),
                     'telegram':{'enabled':tg.get('enabled',False),'mode':tg.get('mode','owner-token'),'username':tg.get('username',''),'paired':bool(tg.get('user_id')),'user_id':tg.get('user_id')},
@@ -1443,8 +1459,7 @@ class AgentService:
         result=self.store.config('model_test') if result is None else result
         return bool(config and isinstance(result,dict) and result.get('ok') and result.get('tools_ok')
                     and result.get('fingerprint')==self.model_fingerprint(config)
-                    and isinstance(result.get('time'),(int,float))
-                    and result['time'] >= time.time()-MODEL_TEST_TTL)
+                    and isinstance(result.get('time'),(int,float)))
 
     def save_roots(self, body):
         from pathlib import Path
@@ -1591,11 +1606,10 @@ class AgentService:
             raise ValueError('연결을 다시 시작해 주세요.')
         result=request_json('https://openrouter.ai/api/v1/auth/keys',{'code':code,'code_verifier':verifier,'code_challenge_method':'S256'})
         if not isinstance(result,dict) or not isinstance(result.get('key'),str):raise ProviderError('계정 연결을 완료하지 못했습니다.')
-        self.save_model({'provider':'compatible','endpoint':'https://openrouter.ai/api/v1','model':'openrouter/free','api_key':result['key']})
-        # A connected account alone is insufficient: `openrouter/free` may
-        # route to a model without native tools. Probe it now so a newly paired
-        # Telegram bot never surprises its owner with a later readiness error.
-        return {'ok':True,'model_test':self.test_model()}
+        # #619: the account key goes into the OpenRouter slot only.  Saving a
+        # key never switches the Main AI; 확인하고 사용 probes and switches.
+        self.main_ai.store_openrouter_key(result['key'])
+        return {'ok':True,'saved':'openrouter'}
 
     def free_models(self):
         # `openrouter/free` can route to text-only models. Ask OpenRouter for
@@ -1619,19 +1633,11 @@ class AgentService:
         if not isinstance(data,dict) or not isinstance(data.get('models'),list):raise ProviderError('모델 목록을 읽을 수 없습니다.')
         return {'models':[{'name':m['name'],'size':m.get('size',0)} for m in data['models'] if isinstance(m,dict) and isinstance(m.get('name'),str)]}
 
-    def test_model(self, draft=None, strict=False):
-        with self.lock:
-            config=validate_model(draft) if draft is not None else self.store.config('model',{})
-            key=(draft or {}).get('api_key','') if draft is not None else ''
-            current=self.store.config('model',{})
-            if not key and config.get('provider')==current.get('provider') and config.get('endpoint')==current.get('endpoint'):
-                key=self.store.secret('model_key')
-            if (draft is not None and config.get('provider') != 'ollama' and
-                    (strict or draft.get('require_key')) and
-                    any(config.get(k)!=current.get(k) for k in ('provider','endpoint')) and not key):
-                raise ValueError('연결 대상이 바뀌었습니다. 새 API 키를 입력한 뒤 테스트하세요.')
-        if not config:
-            raise ValueError('먼저 모델을 선택하세요.')
+    def probe_model(self, config, key):
+        """Probe one exact config/key (text + native tool call); stores nothing."""
+        return self._probe_model(validate_model(config),key)[0]
+
+    def _probe_model(self, config, key):
         now=time.time()
         record={'ok':False,'text_ok':False,'tools_ok':False,'time':now,
                 'provider':config['provider'],'model':config['model'],
@@ -1656,6 +1662,22 @@ class AgentService:
         except (ValueError,ProviderError) as exc:
             record['error']=str(exc)
             response=''
+        return record,response
+
+    def test_model(self, draft=None, strict=False):
+        with self.lock:
+            config=validate_model(draft) if draft is not None else self.store.config('model',{})
+            key=(draft or {}).get('api_key','') if draft is not None else ''
+            current=self.store.config('model',{})
+            if not key and config.get('provider')==current.get('provider') and config.get('endpoint')==current.get('endpoint'):
+                key=self.store.secret('model_key')
+            if (draft is not None and config.get('provider') != 'ollama' and
+                    (strict or draft.get('require_key')) and
+                    any(config.get(k)!=current.get(k) for k in ('provider','endpoint')) and not key):
+                raise ValueError('연결 대상이 바뀌었습니다. 새 API 키를 입력한 뒤 테스트하세요.')
+        if not config:
+            raise ValueError('먼저 모델을 선택하세요.')
+        record,response=self._probe_model(config,key)
         with self.lock:
             if self.store.config('model',{})==config:
                 self.store.put('model_test',record)

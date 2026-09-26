@@ -733,6 +733,10 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 if path=='/api/subscription-engines/login-status':return self.reply(200,service.check_engine_login(body.get('engine','') if isinstance(body,dict) else ''))
                 if path=='/api/subscription-engines/credential':return self.reply(200,service.save_engine_credential(body))
                 if path=='/api/ai-route':return self.reply(200,service.select_ai_route(body))
+                # #619: Main AI chooser - probe-and-switch, re-check, per-provider keys.
+                if path=='/api/main-ai/activate':return self.reply(200,service.activate_main_ai(body))
+                if path=='/api/main-ai/check':return self.reply(200,service.check_main_ai(body))
+                if path=='/api/main-ai/key':return self.reply(200,service.save_main_ai_key(body))
                 # #616: explicit owner choice of the host-CLI trust profile.
                 if path=='/api/subscription-engines/isolation':return self.reply(200,service.select_subscription_isolation(body))
                 # DecisionEngine route (#580): explicit owner actions, separate from the Work route above.

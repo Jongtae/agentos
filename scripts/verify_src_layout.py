@@ -24,34 +24,48 @@ def _src_constants(node, assignments, seen=()):
             yield from _src_constants(assignments[child.id], assignments, (*seen, child.id))
 
 
-def _bootstraps_src(tree):
-    """True when a real ``sys.path.insert/append`` call targets a ``src`` root."""
+def _module_level_statements(tree):
+    """Yield statements that run at import time, in source order (not def/class bodies)."""
+    pending = list(reversed(tree.body))
+    while pending:
+        statement = pending.pop()
+        yield statement
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        children = []
+        for field in ("body", "orelse", "finalbody", "handlers"):
+            children.extend(getattr(statement, field, ()))
+        pending.extend(reversed(children))
+
+
+def _src_bootstrap_line(tree):
+    """Line of the first module-level ``sys.path.insert/append`` targeting a ``src`` root."""
     assignments = {}
-    for statement in tree.body:
+    for statement in _module_level_statements(tree):
         if isinstance(statement, ast.Assign):
             for target in statement.targets:
                 if isinstance(target, ast.Name):
                     assignments[target.id] = statement.value
-    for node in ast.walk(tree):
-        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                and node.func.attr in ("insert", "append")
-                and ast.unparse(node.func.value) == "sys.path"):
-            for value in _src_constants(node, assignments):
+        call = statement.value if isinstance(statement, ast.Expr) else None
+        if (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                and call.func.attr in ("insert", "append")
+                and ast.unparse(call.func.value) == "sys.path"):
+            for value in _src_constants(call, assignments):
                 if value == "src" or value.rstrip("/").endswith("/src"):
-                    return True
-    return False
+                    return statement.lineno
+    return None
 
 
 def _package_imports(tree):
-    """Return ``(module, names)`` for every personal_agent import in the script."""
+    """Return ``(line, module, names)`` for every personal_agent import in the script."""
     imports = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            imports.extend((alias.name, ()) for alias in node.names
+            imports.extend((node.lineno, alias.name, ()) for alias in node.names
                            if alias.name.split(".")[0] == "personal_agent")
         elif (isinstance(node, ast.ImportFrom) and node.level == 0 and node.module
               and node.module.split(".")[0] == "personal_agent"):
-            imports.append((node.module, tuple(alias.name for alias in node.names)))
+            imports.append((node.lineno, node.module, tuple(alias.name for alias in node.names)))
     return imports
 
 
@@ -88,6 +102,8 @@ def _top_level_names(tree):
 
 
 def _defines(spec, name):
+    if name == "*":
+        return True
     if spec.submodule_search_locations is not None:
         if PathFinder.find_spec(f"{spec.name}.{name}", spec.submodule_search_locations):
             return True
@@ -105,12 +121,15 @@ def check_package_script(script, src_root):
     """
     tree = ast.parse(script.read_text(encoding="utf-8"), filename=str(script))
     failures = []
-    if not _bootstraps_src(tree):
+    bootstrap = _src_bootstrap_line(tree)
+    if bootstrap is None:
         failures.append(f"{script.name} does not bootstrap the src package root")
     imports = _package_imports(tree)
     if not imports:
         failures.append(f"{script.name} does not import personal_agent from the src root")
-    for module, names in imports:
+    for line, module, names in imports:
+        if bootstrap is not None and line < bootstrap:
+            failures.append(f"{script.name} imports {module} before the src bootstrap")
         spec = _find_spec(module, src_root)
         if spec is None:
             failures.append(f"{script.name} imports missing module {module}")

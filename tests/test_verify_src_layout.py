@@ -80,3 +80,25 @@ def test_listed_script_without_package_import_fails(layout):
     script = _script(layout, BOOTSTRAP)
     assert verifier.check_package_script(script, layout / "src") == [
         "tool.py does not import personal_agent from the src root"]
+
+
+def test_package_import_before_bootstrap_fails(layout):
+    script = _script(layout, "from personal_agent.store import Store\n" + BOOTSTRAP)
+    assert verifier.check_package_script(script, layout / "src") == [
+        "tool.py imports personal_agent.store before the src bootstrap"]
+
+
+def test_bootstrap_inside_uncalled_function_is_not_a_bootstrap(layout):
+    script = _script(layout, """\
+        import sys
+        def setup():
+            sys.path.insert(0, "src")
+        from personal_agent.store import Store
+        """)
+    assert verifier.check_package_script(script, layout / "src") == [
+        "tool.py does not bootstrap the src package root"]
+
+
+def test_wildcard_import_from_resolved_module_passes(layout):
+    script = _script(layout, BOOTSTRAP + "from personal_agent.store import *\n")
+    assert verifier.check_package_script(script, layout / "src") == []

@@ -60,6 +60,7 @@ from .conversation_handoff import (LOCAL_AUTHORITY_KIND, LOCAL_AUTHORITY_LABELS,
                                    local_authority_handoff, local_refusal_text, LOCAL_RESUME_TTL_SECONDS)
 from . import local_folder_picker
 # PRESENCE-TG-01 / #581: native Telegram presence (reaction, typing, draft, anchor).
+from .context_observations import ContextObservations
 from .telegram_presence import (CONTROL_DETAILS, CONTROL_RETRY, WAIT_CHAT_ACTION, WAIT_DRAFT, PresenceTiming,
                                 TelegramTurnAddressing, WaitState, draft_id_for, render_telegram_html,
                                 reply_controls_markup, turn_gesture, without_consumed)
@@ -223,6 +224,9 @@ class AgentService:
         # reply anchor, control message) and the in-memory wait surface of
         # running Work.  Neither is a truth source.
         self.telegram_turns=TelegramTurnAddressing(store)
+        # #626: volunteered Telegram location / source-time observations in
+        # the same store; recorded by ingress, consumed later by #627.
+        self.context_observations=ContextObservations(store)
         self.presence_timing=PresenceTiming()
         self.presence={}
         self.subscription_engines=subscription_engines or SubscriptionEngines()
@@ -872,7 +876,7 @@ class AgentService:
                     'subscription_engines':self.subscription_engine_status(),
                     'subscription_execution':self.subscription_execution_profile(),
                     'telegram':{'enabled':tg.get('enabled',False),'mode':tg.get('mode','owner-token'),'username':tg.get('username',''),'paired':bool(tg.get('user_id')),'user_id':tg.get('user_id')},
-                    'file_roots':[{**root,'blocked':folder_grants.blocked(root.get('path',''),self.store)} for root in self.store.config('file_roots',[])], 'file_workspace':FileWorkspace(self.store).projection(), 'document_boundary':boundary, 'context_inbox':__import__('personal_agent.context_inbox',fromlist=['ContextInbox']).ContextInbox(self.store).status(), 'agents':[{'id':role['id'],'name':role['name'],'permissions':role['permissions'],'package_id':package['id']} for package in active_packages for role in package['roles']], 'packages':packages, 'tool_run':self.store.config('tool_run'), 'model_test':model_test, 'model_ready':self.model_ready(model,model_test), 'telegram_status':self.store.config('telegram_status'),'connectors':self.google_connection_rows()}
+                    'file_roots':[{**root,'blocked':folder_grants.blocked(root.get('path',''),self.store)} for root in self.store.config('file_roots',[])], 'file_workspace':FileWorkspace(self.store).projection(), 'document_boundary':boundary, 'context_inbox':__import__('personal_agent.context_inbox',fromlist=['ContextInbox']).ContextInbox(self.store).status(), 'agents':[{'id':role['id'],'name':role['name'],'permissions':role['permissions'],'package_id':package['id']} for package in active_packages for role in package['roles']], 'packages':packages, 'tool_run':self.store.config('tool_run'), 'model_test':model_test, 'model_ready':self.model_ready(model,model_test), 'telegram_status':self.store.config('telegram_status'),'connectors':self.google_connection_rows(),'current_context':self.context_observations.status()}
 
     def home(self):
         """Return the minimal, credential-free read model for the owner home."""
@@ -3416,16 +3420,48 @@ class AgentService:
                 try:self.telegram.answer_callback_query(callback_id,text,show_alert=show)
                 except ProviderError:pass
 
+    def set_current_context(self, body):
+        """Owner privacy control for current context (#626): use/timezone/clear only."""
+        return self.context_observations.set_controls(body)
+
+    def request_current_location(self, job_id, prompt):
+        """Ask the paired owner for a current position for one Work (#626 I3).
+
+        A one-time reply keyboard with ``request_location``; the matching
+        answer is a sender-reported current position bound to this Work, not
+        verified GPS.  The owner may type a place instead.
+        """
+        job=self.store.job(job_id)
+        cfg=self.store.config('telegram',{})
+        if (not job or not cfg.get('enabled') or not isinstance(cfg.get('user_id'),int)
+                or job.get('chat_id')!=cfg['user_id'] or not str(job.get('channel','')).startswith('telegram:')):
+            raise ValueError('이 작업은 Telegram에서 위치를 요청할 수 없습니다.')
+        if not isinstance(prompt,str) or not 0<len(prompt.strip())<=300:
+            raise ValueError('위치를 요청하는 목적을 짧게 적어 주세요.')
+        request_id=self.context_observations.open_location_request(job_id,cfg['user_id'],cfg.get('generation'))
+        markup={'keyboard':[[{'text':'현재 위치 보내기','request_location':True}]],
+                'one_time_keyboard':True,'resize_keyboard':True,
+                'input_field_placeholder':'또는 장소 이름을 입력하세요'}
+        try:
+            self.telegram.send_message(cfg['user_id'],prompt.strip(),markup)
+        except ProviderError:
+            self.context_observations.cancel_location_request(request_id)
+            raise
+        return request_id
+
     def ingest_update(self, update, generation):
         with self.lock:
             cfg=self.store.config('telegram',{})
             if not cfg.get('enabled') or cfg.get('generation')!=generation: return
             update_id=update.get('update_id')
             if not isinstance(update_id,int) or update_id<cfg.get('cursor',0): return
-            message=update.get('message',{})
+            # #626: an edit is a source revision of an earlier message, never
+            # a new request or a pairing attempt, so its text is not a turn.
+            edited=not isinstance(update.get('message'),dict) and isinstance(update.get('edited_message'),dict)
+            message=update['edited_message'] if edited else update.get('message',{})
             sender=message.get('from',{}).get('id')
             chat=message.get('chat',{})
-            text=message.get('text','')
+            text='' if edited else message.get('text','')
             private=chat.get('type')=='private' and isinstance(sender,int) and chat.get('id')==sender
             authorized=private and sender==cfg.get('user_id')
             paired=False
@@ -3458,8 +3494,14 @@ class AgentService:
                     # #581: the owner's own message is the reaction target and
                     # reply anchor for this Work.
                     self.telegram_turns.record_source(task_id,sender,message.get('message_id'),db=db)
+                    self.context_observations.note_text_source(db,task_id,message,generation)
                 else:
                     task_id=None
+                if authorized and not paired:
+                    # #626: a location or an edit is recorded (or refused) in
+                    # this same transaction as the cursor; it never becomes
+                    # a Work, a model call or a reply.
+                    self.context_observations.ingest_telegram(db,update,generation,sender)
                 cfg['cursor']=update_id+1
                 db.execute('INSERT INTO config VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',('telegram',json.dumps(cfg)))
             if paired:

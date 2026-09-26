@@ -2,12 +2,12 @@
 import json
 import shutil
 from pathlib import Path
-from .manifests import BUILTIN_MANIFEST, validate, runtime_packages
+from .manifests import BUILTIN_MANIFEST, validate, validate_package, runtime_packages
 
 class PluginRegistry:
  def __init__(self,data):self.root=Path(data)/'plugins';self.root.mkdir(parents=True,exist_ok=True)
  def install(self,manifest_path):
-  manifest=validate(json.loads(Path(manifest_path).read_text()));plugin_id=manifest.get('id')
+  manifest=validate_package(json.loads(Path(manifest_path).read_text()));plugin_id=manifest.get('id')
   if not isinstance(plugin_id,str) or not plugin_id.replace('-','').isalnum():raise ValueError('플러그인 id가 올바르지 않습니다.')
   target=self.root/(plugin_id+'.json');target.write_text(json.dumps({**manifest,'enabled':True},ensure_ascii=False));return plugin_id
  def list(self):

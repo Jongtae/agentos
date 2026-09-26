@@ -34,13 +34,19 @@ def validate(manifest):
   role_ids.add(role['id'])
  return manifest
 
+def validate_package(manifest):
+ """Validate a third-party package: the built-in id is reserved (#604)."""
+ manifest=validate(manifest)
+ if manifest.get('id')==BUILTIN_MANIFEST['id']:raise ValueError('builtin은 AgentOS 기본 패키지 전용 id입니다.')
+ return manifest
+
 def load(path):return validate(json.loads(Path(path).read_text()))
 
 def runtime_packages(manifests):
  """Resolve built-ins plus enabled declarations without granting new actions."""
  builtin=validate(BUILTIN_MANIFEST);packages=[{'id':'builtin','enabled':True,**builtin}];seen_tools={tool['id'] for tool in builtin['tools']};seen_roles={role['id'] for role in builtin['roles']}
  for package in manifests:
-  manifest=validate(package)
+  manifest=validate_package(package)
   if manifest.get('enabled') is not True:continue
   package_id=manifest.get('id')
   if not package_id:raise ValueError('활성 플러그인에는 id가 필요합니다.')

@@ -36,13 +36,134 @@ _STATUS_HINTS = (
 )
 
 
-MCP_TOOLS = (
-    {'name': 'list_notes', 'description': 'List saved AgentOS notes.'},
-    {'name': 'save_note', 'description': 'Save an explicitly requested personal note.',
-     'input_schema': {'type': 'object', 'properties': {'content': {'type': 'string', 'maxLength': 12000}}, 'required': ['content'], 'additionalProperties': False}},
-    {'name': 'web_search', 'description': 'Search public web snippets through AgentOS.',
-     'input_schema': {'type': 'object', 'properties': {'query': {'type': 'string', 'maxLength': 500}}, 'required': ['query'], 'additionalProperties': False}},
-)
+# -- Worker-visible capability profiles (#604, AX-02/AX-03) -------------------
+#
+# A profile names *which* AgentOS actions a CLI route may see; it never carries
+# a schema.  Every name, description and input schema a CLI receives is derived
+# from the one native action source, ``Capabilities.definitions()`` (i.e.
+# ``agent_runtime.DEFINITIONS`` resolved through the manifest ``tools``), so
+# the direct-API list and the MCP ``tools/list`` cannot drift apart.  The
+# independently maintained three-tool list this replaces is gone.
+#
+# Discovery grants nothing: an offered tool still goes through
+# ``Capabilities.execute`` (declared/allowed tool, current package state,
+# provenance egress guard, owner-approved page scope, idempotent writes) on
+# every call.  An action a profile does not offer has a *declared* reason, so a
+# missing binding is reported as a route limit, never as global incapability,
+# and an undeclared omission is a diagnosable defect (scripts/agentos_doctor.py).
+#
+# No profile here unlocks shell, home or network access for the CLI itself:
+# these are AgentOS-hosted actions executed by this process under AgentOS
+# policy.  The CLI's own sandbox/argv are unchanged (see ``command``).
+_API_BOUND_PAGES = 'owner-page-approval-bound-to-direct-api-model'
+_API_BOUND_DOCUMENTS = 'document-sharing-approval-bound-to-direct-api-model'
+_CALENDAR = 'calendar-connector-not-bound-to-cli-route'
+_MEMORY = 'owner-memory-not-bound-to-cli-route'
+_SPECIALISTS = 'specialists-require-direct-api-model'
+_ISOLATED = 'isolation-restricted-profile'
+
+#: The verified limitation of the trusted-local profile (owner decision on
+#: #604).  The CLI's own built-in tools can read local host files that AgentOS
+#: never mediates, so those reads carry no AgentOS provenance and the public
+#: reads offered here cannot be closed by it.  Observed with a no-model probe of
+#: `codex sandbox -P :read-only` (the policy behind `codex exec --sandbox
+#: read-only`) on codex-cli 0.153.4: a fake owner store, a home file and the
+#: turn directory were readable; network and writes were blocked.  Claude Code
+#: 2.1.280 documents that its file tools may read outside the working directory
+#: unless `--restricted` is used (not observed locally).  The owner accepts this
+#: trusted-local-worker risk; strict read isolation is #616 AGENCY-ISOLATION-01.
+TRUSTED_LOCAL_LIMITATION = ('the CLI may read host files outside AgentOS provenance '
+                            '(verified: codex sandbox -P :read-only, codex-cli 0.153.4)')
+
+CLI_PROFILES = {
+    'trusted-local': {
+        # The subscription CLI route: an owner-trusted local worker.
+        'mode': 'bounded-agentos-mcp',
+        'trust': 'trusted-local',
+        'limitation': TRUSTED_LOCAL_LIMITATION,
+        # Public reads the native route has by default, one owner-private read
+        # and the explicit note write, all under the unchanged AgentOS guards.
+        'actions': ('bounded_public_research', 'list_notes', 'save_note', 'weather', 'web_search'),
+        # Approvals bound to the direct-API model fingerprint are not carried to
+        # another provider: doing so would silently change the data destination.
+        'unavailable': {
+            'public_page_read': _API_BOUND_PAGES,
+            'find_files': _API_BOUND_DOCUMENTS, 'read_file': _API_BOUND_DOCUMENTS, 'list_roots': _API_BOUND_DOCUMENTS,
+            'calendar_query': _CALENDAR, 'calendar_draft_create': _CALENDAR,
+            'calendar_draft_update': _CALENDAR, 'calendar_draft_cancel': _CALENDAR,
+            'save_memory': _MEMORY, 'list_memory': _MEMORY,
+            'list_agents': _SPECIALISTS, 'delegate_agent': _SPECIALISTS,
+        },
+        # No AgentOS-mediated live run of this catalog has been observed.
+        # Reference versions are the argv shapes recorded from each CLI's own
+        # --help (docs/decision-layer.en.md), exercised only by scripted runners.
+        'runtimes': {'codex': {'reference_version': '0.153.4', 'live_tested_version': None},
+                     'claude-code': {'reference_version': '2.1.280', 'live_tested_version': None}},
+    },
+    'isolated-agentos-mcp': {
+        # Deliberately restricted isolation profile (not a full-profile pass):
+        # the sidecar reaches AgentOS only through a single-use, task-bound
+        # bearer capability that serves exactly this read.
+        'mode': 'isolated-agentos-mcp',
+        'trust': 'isolated-restricted',
+        'limitation': 'only the argumentless list_notes read is offered',
+        'actions': ('list_notes',),
+        'unavailable': {action: _ISOLATED for action in (
+            'bounded_public_research', 'save_note', 'weather', 'web_search', 'public_page_read',
+            'find_files', 'read_file', 'list_roots', 'calendar_query', 'calendar_draft_create',
+            'calendar_draft_update', 'calendar_draft_cancel', 'save_memory', 'list_memory',
+            'list_agents', 'delegate_agent')},
+        # Pinned in Dockerfile.engine; a test keeps the two in step.
+        'runtimes': {'codex': {'pinned_version': '0.153.4', 'live_tested_version': None}},
+    },
+}
+BOUNDED_PROFILE, ISOLATED_PROFILE = 'trusted-local', 'isolated-agentos-mcp'
+
+
+def profile_actions(profile):
+    return tuple(CLI_PROFILES[profile]['actions'])
+
+
+def route_unavailable(profile):
+    """Declared reasons for every action a CLI profile does not offer."""
+    return dict(CLI_PROFILES[profile]['unavailable'])
+
+
+def profile_status(profile):
+    """What Settings, provenance and the doctor show about one profile."""
+    declared = CLI_PROFILES[profile]
+    return {'profile': profile, 'mode': declared['mode'], 'trust': declared['trust'],
+            'limitation': declared['limitation'], 'tools': list(profile_actions(profile)),
+            'unavailable': route_unavailable(profile)}
+
+
+def mcp_tool(definition, mode=None):
+    """Project one native function definition onto the MCP ``Tool`` wire shape.
+
+    Field names are the MCP wire aliases (``inputSchema``), checked against the
+    adopted ``mcp_types.Tool`` in tests/test_mcp_bridge_protocol.py.  The
+    manifest ``mode`` becomes the ``readOnlyHint`` annotation; it is a hint to
+    the client and authorizes nothing.
+    """
+    function = definition['function']
+    tool = {'name': function['name'], 'description': function['description'],
+            'inputSchema': json.loads(json.dumps(function['parameters']))}
+    if mode in ('read_only', 'bounded_write'):
+        tool['annotations'] = {'readOnlyHint': mode == 'read_only'}
+    return tool
+
+
+def profile_mcp_tools(profile):
+    """The MCP tool list of a profile from the built-in manifest alone.
+
+    For the isolated bridge, which runs without an owner store: it is the same
+    projection ``AgentOSMcpTools.definitions`` makes from a live Capabilities.
+    """
+    from .agent_runtime import action_definitions
+    from .manifests import runtime_packages
+    tools = {tool['id']: tool for package in runtime_packages([]) for tool in package['tools']}
+    return [mcp_tool(definition, tools[definition['function']['name']]['mode'])
+            for definition in action_definitions(tools, profile_actions(profile))]
 
 
 class ExecutionError(ValueError):
@@ -229,45 +350,50 @@ class ExecutionResult:
 
 
 class AgentOSMcpTools:
-    """The only tool facade that may be offered to a subscription engine."""
+    """The only tool facade that may be offered to a subscription engine.
+
+    It offers the intersection of its route profile and the Work's current
+    ``Capabilities.definitions()``, recomputed on every list and call, so a
+    tool removed from the Work after discovery is refused, not remembered.
+    """
+    PROFILE = BOUNDED_PROFILE
+
     def __init__(self, capabilities):
         self.capabilities = capabilities
 
+    def _offered(self):
+        allowed = set(profile_actions(self.PROFILE))
+        return {definition['function']['name']: definition for definition in self.capabilities.definitions()
+                if definition['function']['name'] in allowed}
+
     def definitions(self):
-        # Return JSON-compatible copies: callers must not mutate the contract.
-        return json.loads(json.dumps(MCP_TOOLS))
+        # Fresh JSON-compatible copies: callers must not mutate the contract.
+        tools = getattr(self.capabilities, 'tools', {}) or {}
+        return [mcp_tool(definition, (tools.get(name) or {}).get('mode'))
+                for name, definition in sorted(self._offered().items())]
 
     def call(self, name, arguments):
         if not isinstance(arguments, dict):
             raise ExecutionError('MCP 도구 인수는 객체여야 합니다.')
-        allowed = {
-            'list_notes': set(),
-            'save_note': {'content'},
-            'web_search': {'query'},
-        }
-        if name not in allowed or set(arguments) - allowed[name]:
+        definition = self._offered().get(name) if isinstance(name, str) else None
+        if definition is None:
             raise ExecutionError('허용하지 않은 AgentOS MCP 도구 또는 인수입니다.')
-        if name == 'list_notes' and arguments:
-            raise ExecutionError('list_notes에는 인수가 없습니다.')
-        if name in ('save_note', 'web_search'):
-            value = arguments.get('content' if name == 'save_note' else 'query')
-            if not isinstance(value, str) or not value.strip():
-                raise ExecutionError('MCP 도구의 필수 문자열 인수가 비어 있습니다.')
+        from .agent_runtime import check_arguments
+        parameters = definition['function']['parameters']
+        try:
+            check_arguments(parameters, arguments)
+        except ValueError:
+            raise ExecutionError('허용하지 않은 AgentOS MCP 도구 또는 인수입니다.') from None
+        if any(not arguments[field].strip() for field in parameters['required']):
+            raise ExecutionError('MCP 도구의 필수 문자열 인수가 비어 있습니다.')
         # Capabilities is AgentOS-owned and applies its normal validation,
-        # document boundary, evidence and idempotency rules.
+        # document boundary, egress, evidence and idempotency rules.
         return self.capabilities.execute(name, arguments)
 
 
 class ReadOnlyAgentOSMcpTools(AgentOSMcpTools):
-    """Isolated-engine facade limited to the sole approved read operation."""
-
-    def definitions(self):
-        return json.loads(json.dumps((MCP_TOOLS[0],)))
-
-    def call(self, name, arguments):
-        if name != 'list_notes' or arguments != {}:
-            raise ExecutionError('격리 엔진에는 읽기 전용 메모 목록 도구만 허용됩니다.')
-        return self.capabilities.execute('list_notes', {})
+    """Isolated-engine facade: the deliberately restricted isolation profile."""
+    PROFILE = ISOLATED_PROFILE
 
 
 class BoundedExecutionAdapter:

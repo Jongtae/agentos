@@ -4,7 +4,9 @@ REUSE-R2 (#426): the advertised revision comes from the ``mcp_types`` registry,
 not a hand-maintained literal, so SDK protocol drift is visible instead of silent.
 """
 
+import contextlib
 import inspect
+import io
 import json
 import os
 import subprocess
@@ -147,7 +149,9 @@ class SubscriptionBridgeWireTests(unittest.TestCase):
 # process, JSON-RPC loop, AgentOSMcpTools facade and Capabilities run for real.
 # ``test_finding_*`` tests are ``expectedFailure`` baselines of known defects
 # owned by later AGENCY children; they are not repaired here, and an unexpected
-# pass fails the suite so the owning change must remove the marker.
+# pass fails the suite so the owning change must remove the marker.  #604 fixed
+# and un-marked the wire-conformance finding; the #607 error-mapping findings
+# below remain expected failures.
 
 def _doctor():
     import importlib.util
@@ -164,8 +168,8 @@ class ExposedToolWireBoundary(unittest.TestCase):
     Unit tests of ``AgentOSMcpTools.definitions`` pass, and ``mcp_types.Tool``
     accepts a Python-style ``input_schema`` because it populates by field name.
     Only the wire -- the exact bridge command from the per-turn MCP config,
-    answering ``tools/list`` over stdio -- shows what an MCP client reading
-    ``inputSchema`` sees.
+    answering over stdio *while its Work is running* -- shows what an MCP
+    client reading ``inputSchema`` sees and what the host actually executes.
     """
 
     def setUp(self):
@@ -177,7 +181,7 @@ class ExposedToolWireBoundary(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.store = QuickStore(Path(tmp.name) / "state")
-        captured = {}
+        self.pending, self.replies, self.turns = None, None, 0
 
         class Done:
             returncode = 0
@@ -186,43 +190,50 @@ class ExposedToolWireBoundary(unittest.TestCase):
         adapter = None
 
         def runner(argv, **kwargs):
+            # The scripted CLI: it speaks to the exact configured bridge while
+            # AgentOS holds this Work in `running`, as a real CLI would.
             config = json.loads((Path(kwargs["cwd"]) / "agentos-mcp.json").read_text())
-            captured["server"] = config["mcpServers"]["agentos"]
-            captured["env"] = adapter.environment("codex", "/runtime/codex", Path(kwargs["cwd"]))
+            self.server = config["mcpServers"]["agentos"]
+            self.env = adapter.environment("codex", "/runtime/codex", Path(kwargs["cwd"]))
+            if self.pending is not None:
+                self.replies = self._run_bridge(self.server["args"], self.pending)
             return Done()
 
         profile = Path(tmp.name) / "codex-home"
         profile.mkdir()
         adapter = BoundedExecutionAdapter(finder=lambda name: "/runtime/" + name, runner=runner,
                                           runtime_root=Path(tmp.name) / "turns", codex_home=profile)
-        service = AgentService(self.store, adapter=ModelAdapter(lambda *a: {"choices": [{"message": {"content": "x"}}]}),
-                               subscription_engines=SubscriptionEngines(finder=lambda _: "/runtime/codex", clock=lambda: 1),
-                               execution_adapter=adapter)
-        service.connect_subscription_engine({"engine": "codex", "officially_authenticated": True})
-        self.store.enqueue("hello there", "k1")
-        self.assertTrue(service.run_one())
-        self.server, self.env = captured["server"], captured["env"]
+        self.service = AgentService(self.store, adapter=ModelAdapter(lambda *a: {"choices": [{"message": {"content": "x"}}]}),
+                                    subscription_engines=SubscriptionEngines(finder=lambda _: "/runtime/codex", clock=lambda: 1),
+                                    execution_adapter=adapter)
+        self.service.connect_subscription_engine({"engine": "codex", "officially_authenticated": True})
 
-    def _wire(self, *requests):
-        """Run the exact configured bridge command; it exits at end of input."""
+    def _run_bridge(self, args, requests):
         env = {**self.env, **self.server.get("env", {})}
         env["HOME"] = self.env["HOME"] if Path(self.env["HOME"]).exists() else tempfile.gettempdir()
         completed = subprocess.run(
-            [self.server["command"], *self.server["args"]],
+            [self.server["command"], *args],
             input="".join(json.dumps(request) + "\n" for request in requests),
             capture_output=True, text=True, timeout=30, env=env)
         return {reply.get("id"): reply for reply in map(json.loads, completed.stdout.splitlines()) if reply}
 
+    def _wire(self, *requests):
+        """One owner turn whose scripted CLI sends ``requests`` to the real bridge."""
+        self.pending = (INIT, *requests)
+        self.turns += 1
+        self.store.enqueue("hello there", f"wire-{self.turns}")
+        self.assertTrue(self.service.run_one())
+        self.pending = None
+        return self.replies
+
     def _listed(self):
-        return self._wire({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
-                          {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})[2]["result"]["tools"]
+        return self._wire({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})[2]["result"]["tools"]
 
     def test_listed_local_tools_are_invocable_through_the_real_bridge(self):
         """Positive control: exposure and host invocation agree for local tools."""
         names = [tool["name"] for tool in self._listed()]
-        self.assertEqual(names, ["list_notes", "save_note", "web_search"])
+        self.assertEqual(names, ["bounded_public_research", "list_notes", "save_note", "weather", "web_search"])
         replies = self._wire(
-            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
             {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
              "params": {"name": "save_note", "arguments": {"content": "wire note"}}},
             {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "list_notes", "arguments": {}}})
@@ -232,20 +243,280 @@ class ExposedToolWireBoundary(unittest.TestCase):
 
     def test_an_unlisted_native_tool_is_refused_by_the_real_bridge(self):
         """Denied control: invocation never exceeds exposure."""
-        replies = self._wire({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
-                             {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        replies = self._wire({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
                               "params": {"name": "read_file", "arguments": {"root_id": "r", "path": "a.md"}}})
         self.assertIn("error", replies[2])
 
-    @unittest.expectedFailure
-    def test_finding_listed_tools_are_not_valid_mcp_wire_tools(self):
-        """Owner #604 (AX-02).  Defect layer: ``bounded_execution.MCP_TOOLS``.
+    def test_the_bridge_refuses_calls_once_its_work_is_no_longer_running(self):
+        """#604: discovery grants nothing; a finished or foreign Work cannot act.
 
-        ``list_notes`` has no ``inputSchema`` and the others send
-        ``input_schema``; MCP requires ``inputSchema`` (an object schema).
-        How Codex/Claude Code react to this list is not observed here.
+        The same configured command, run after the Work ended, still lists its
+        tools but refuses the call; a foreign Work id is refused too.  The
+        allowed control is the in-Work call above.
+        """
+        self._listed()
+        args = self.server["args"]
+        list_notes = {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "list_notes", "arguments": {}}}
+        after = self._run_bridge(args, (INIT, {"jsonrpc": "2.0", "id": 3, "method": "tools/list"}, list_notes))
+        self.assertIn("tools", after[3]["result"], "listing is still answered")
+        self.assertIn("error", after[2], "a finished Work is refused")
+        foreign = list(args)
+        foreign[foreign.index("--job") + 1] = "not-a-work-of-this-store"
+        self.assertIn("error", self._run_bridge(foreign, (INIT, list_notes))[2])
+        with self.store.db() as db:
+            failed = [json.loads(row[0]) for row in db.execute(
+                "SELECT detail FROM tool_events WHERE tool='list_notes' AND status='failed'")]
+        self.assertTrue(failed and all(set(detail) == {"scope", "error"} for detail in failed),
+                        "the refusal is recorded with a reason and no arguments")
+
+    def test_finding_listed_tools_are_not_valid_mcp_wire_tools(self):
+        """Fixed by #604 (was an ``expectedFailure`` baseline from #603).
+
+        The list is now derived from ``Capabilities.definitions()``, so every
+        tool carries an MCP ``inputSchema`` object and no Python-style field.
         """
         self.assertEqual(_doctor().mcp_wire_problems(self._listed()), [])
+
+    def test_listed_tools_and_results_match_the_adopted_mcp_types_models_strictly(self):
+        """The one no-model compatibility check for the changed list/call framing.
+
+        Adopted type: ``mcp_types`` (REUSE-R2 #426) ``Tool``, ``ListToolsResult``
+        and ``CallToolResult``.  Its models ignore unknown fields (``extra`` is
+        unset) and also populate by Python name, so validation alone would pass
+        a misnamed field.  Strict unknown-field rejection is therefore a
+        wire-alias-only validation plus exact round-trip equality: anything the
+        model would drop or rename fails here.  The bridge's hand-written
+        envelope handling (#426 mismatch) is unchanged by #604.
+        """
+        from mcp_types import CallToolResult, ListToolsResult, Tool
+
+        def strict(model, wire):
+            parsed = model.model_validate(wire, by_alias=True, by_name=False)
+            self.assertEqual(parsed.model_dump(by_alias=True, exclude_unset=True, mode="json"), wire)
+
+        # The recorded mismatch this check compensates for stays visible.
+        dropped = Tool.model_validate({"name": "t", "inputSchema": {"type": "object"}, "unknownField": 1})
+        self.assertNotIn("unknownField", dropped.model_dump(by_alias=True, exclude_unset=True))
+
+        listed = self._listed()
+        strict(ListToolsResult, {"tools": listed})
+        for tool in listed:
+            with self.subTest(tool=tool["name"]):
+                strict(Tool, tool)
+                self.assertEqual(tool["inputSchema"]["type"], "object")
+                self.assertIs(tool["inputSchema"]["additionalProperties"], False)
+        reply = self._wire({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                            "params": {"name": "list_notes", "arguments": {}}})[2]
+        self.assertEqual(set(reply), {"jsonrpc", "id", "result"})
+        strict(CallToolResult, reply["result"])
+
+
+INIT = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
+
+
+def _running_work(store, text="bridge turn"):
+    """A Work of ``store`` in the state a bridge serves: ``running``."""
+    job = store.enqueue(text, "bridge-" + str(len(store.jobs())))
+    with store.db() as db:
+        db.execute("UPDATE jobs SET status='running' WHERE id=?", (job,))
+    return job
+
+
+class BoundedProfileHostInvocation(unittest.TestCase):
+    """#604: weather, search, search-result page follow-up and a private read
+    through the real bridge JSON-RPC loop and actual host invocation.
+
+    Stubs replace only the public network: the search host, the weather host
+    and page transport/DNS (the real ``PublicPageReader`` still enforces its
+    SSRF, redirect and approved-scope rules).  No model is involved.
+    """
+
+    RESULTS = [
+        {"url": "https://example.com/a", "title": "A", "snippet": "a"},
+        {"url": "https://example.com/b", "title": "B", "snippet": "b"},
+        {"url": "http://169.254.169.254/latest/meta-data/", "title": "M", "snippet": "m"},
+    ]
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.store = QuickStore(Path(tmp.name) / "state")
+        with self.store.db() as db:
+            db.execute("INSERT INTO notes VALUES (?,?,?)", ("n1", "granted private note", 1))
+        self.job = _running_work(self.store)
+        self.searches, self.weather, self.opened = [], [], []
+
+    def _network(self):
+        from personal_agent.local_tools import LocalTools, PublicPageReader
+        test = self
+
+        class Response:
+            def __init__(self, status=200, headers=None, body=b""):
+                self.status, self.headers, self._body = status, headers or {}, io.BytesIO(body)
+
+            def read(self, size=-1):
+                return self._body.read(size)
+
+        class Opener:
+            def open(self, request, timeout=None):
+                test.opened.append(request.full_url)
+                if request.full_url.endswith("/b"):
+                    return Response(302, {"Location": "https://elsewhere.example/landing"})
+                return Response(200, {"Content-Type": "text/plain"}, b"Model A costs 100 USD. In stock: 3 units.")
+
+        def public_dns(host, port, type=None, timeout=None):
+            return [(None, None, None, None, ("93.184.216.34", port))]
+
+        tools = LocalTools(page_reader=PublicPageReader(opener=Opener(), resolver=public_dns))
+
+        def search(query):
+            test.searches.append(query)
+            return {"tool": "web_search", "query": query, "retrieved_at": 1, "results": test.RESULTS,
+                    "sources": [row["url"] for row in test.RESULTS]}
+
+        def weather(city, country=""):
+            test.weather.append({"city": city, "country": country})
+            return {"tool": "weather", "location": {"name": city}, "retrieved_at": 1, "forecast": {},
+                    "sources": ["https://open-meteo.com/"]}
+
+        tools.search, tools.weather = search, weather
+        return tools
+
+    def _serve(self, requests, job=None, provenance=()):
+        from unittest import mock
+
+        out = io.StringIO()
+        with mock.patch.object(mcp_bridge, "LocalTools", self._network), \
+             mock.patch.object(sys, "stdin", io.StringIO("".join(json.dumps(r) + "\n" for r in (INIT, *requests)))), \
+             contextlib.redirect_stdout(out):
+            mcp_bridge.serve(str(self.store.root), job or self.job, provenance)
+        return {reply["id"]: reply for reply in map(json.loads, out.getvalue().splitlines())}
+
+    @staticmethod
+    def _call(ident, name, arguments):
+        return {"jsonrpc": "2.0", "id": ident, "method": "tools/call", "params": {"name": name, "arguments": arguments}}
+
+    @staticmethod
+    def _value(reply):
+        return json.loads(reply["result"]["content"][0]["text"])
+
+    def test_allowed_public_and_private_reads_reach_the_host_with_exact_fields(self):
+        replies = self._serve([
+            self._call(2, "weather", {"city": "Daejeon", "country": "KR"}),
+            self._call(3, "web_search", {"query": "today news"}),
+            self._call(4, "bounded_public_research", {"mode": "product_comparison", "query": "model a price"}),
+            self._call(5, "list_notes", {}),
+        ])
+        self.assertEqual(self.weather, [{"city": "Daejeon", "country": "KR"}])
+        self.assertEqual(self.searches, ["today news", "model a price"])
+        self.assertEqual(self._value(replies[2])["location"]["name"], "Daejeon")
+        research = self._value(replies[4])
+        # Only the research's own search results were contacted.  The metadata
+        # address fails public-URL normalisation and is never a candidate; the
+        # redirect off a result leaves its single-URL scope and is refused by
+        # the shared reader, never followed.
+        self.assertEqual(research["attempted_urls"], ["https://example.com/a", "https://example.com/b"])
+        self.assertEqual(self.opened, ["https://example.com/a", "https://example.com/b"])
+        self.assertEqual(research["sources"][:1], ["https://example.com/a"])
+        self.assertEqual([row["url"] for row in research["read_failures"]], ["https://example.com/b"])
+        self.assertIn("granted private note", [note["content"] for note in self._value(replies[5])["notes"]])
+        with self.store.db() as db:
+            events = [tuple(row) for row in db.execute(
+                "SELECT tool,status FROM tool_events WHERE job_id=? ORDER BY id", (self.job,))]
+        self.assertEqual(events, [("weather", "succeeded"), ("web_search", "succeeded"),
+                                  ("bounded_public_research", "succeeded"), ("list_notes", "succeeded")])
+        # Review P1: the success trace carries the direct route's redacted
+        # Evidence -- every contacted URL, failed reads and sources, no payload.
+        traces = self._traces("succeeded")
+        self.assertEqual(traces["bounded_public_research"]["evidence"]["attempted_urls"],
+                         ["https://example.com/a", "https://example.com/b"])
+        self.assertEqual(traces["bounded_public_research"]["evidence"]["read_failures"], ["https://example.com/b"])
+        self.assertEqual(traces["weather"]["evidence"]["sources"], ["https://open-meteo.com/"])
+        self.assertEqual(traces["list_notes"]["evidence"], {"note_count": 1})
+        self.assertNotIn("granted private note", json.dumps(traces, ensure_ascii=False))
+
+    def _traces(self, status):
+        with self.store.db() as db:
+            return {row[0]: json.loads(row[1]) for row in db.execute(
+                "SELECT tool,detail FROM tool_events WHERE job_id=? AND status=?", (self.job, status))}
+
+    def test_a_recorded_private_read_under_a_package_alias_taints_too(self):
+        """Re-review P3: rehydration is keyed on the host action, not the built-in name."""
+        with self.store.db() as db:
+            db.execute("INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)",
+                       (self.job, "my_notes", "succeeded",
+                        json.dumps({"scope": "x", "host_action": "list_notes"}), 1))
+        replies = self._serve([self._call(2, "web_search", {"query": "granted private note"})])
+        self.assertIn("error", replies[2])
+        self.assertEqual(self.searches, [])
+
+    def test_private_taint_survives_a_second_bridge_process_for_the_same_work(self):
+        """Review P2: a restarted bridge rehydrates taint from this Work's own events."""
+        first = self._serve([self._call(2, "list_notes", {})])
+        self.assertIn("result", first[2])
+        second = self._serve([
+            self._call(2, "weather", {"city": "granted private note"}),
+            self._call(3, "web_search", {"query": "granted private note"}),
+            self._call(4, "bounded_public_research", {"mode": "travel_plan", "query": "granted private note"}),
+        ])
+        for ident in (2, 3, 4):
+            self.assertIn("error", second[ident])
+        self.assertEqual((self.searches, self.weather, self.opened), ([], [], []))
+        # Allowed control: another running Work of the same store is not tainted.
+        other = _running_work(self.store, "another turn")
+        self.assertIn("result", self._serve([self._call(2, "web_search", {"query": "today news"})], job=other)[2])
+
+    def test_an_unlisted_tool_name_is_not_stored_verbatim(self):
+        """Review P3: a CLI-chosen unknown name becomes 'unlisted' in the event store."""
+        replies = self._serve([self._call(2, "run_shell; rm -rf ~ " + "x" * 200, {})])
+        self.assertIn("error", replies[2])
+        with self.store.db() as db:
+            tools = [row[0] for row in db.execute("SELECT tool FROM tool_events WHERE job_id=?", (self.job,))]
+        self.assertEqual(tools, ["unlisted"])
+
+    def test_out_of_scope_self_approving_and_stale_calls_are_refused_before_the_network(self):
+        cases = [
+            self._call(2, "public_page_read", {"url": "https://example.com/a"}),        # not in the CLI profile
+            self._call(3, "bounded_public_research", {"mode": "travel_plan", "query": "q",
+                                                      "url": "https://evil.example/"}),  # no URL/approval channel
+            self._call(4, "weather", {"city": "Daejeon", "approved_urls": ["x"]}),     # unknown field
+            self._call(5, "read_file", {"root_id": "r", "path": "a.md"}),               # private, not bound
+            self._call(6, "weather", {"city": 7}),                                      # non-string
+        ]
+        replies = self._serve(cases)
+        for ident in range(2, 7):
+            with self.subTest(case=ident):
+                self.assertIn("error", replies[ident])
+        self.assertEqual((self.searches, self.weather, self.opened), ([], [], []))
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='succeeded' WHERE id=?", (self.job,))
+        stale = self._serve([self._call(2, "weather", {"city": "Daejeon"})])
+        self.assertIn("error", stale[2], "a Work that ended cannot keep calling")
+        self.assertEqual(self.weather, [])
+
+    def test_private_provenance_still_closes_every_public_destination(self):
+        replies = self._serve([
+            self._call(2, "weather", {"city": "Daejeon"}),
+            self._call(3, "web_search", {"query": "q"}),
+            self._call(4, "bounded_public_research", {"mode": "travel_plan", "query": "q"}),
+            self._call(5, "list_notes", {}),
+        ], provenance=["personal-space"])
+        for ident in (2, 3, 4):
+            self.assertIn("error", replies[ident])
+        self.assertIn("result", replies[5], "the granted private read still works")
+        self.assertEqual((self.searches, self.weather, self.opened), ([], [], []))
+
+    def test_a_private_read_in_the_same_bridge_session_closes_the_new_public_reads(self):
+        """Same-Work provenance: after list_notes, weather and research are refused."""
+        replies = self._serve([
+            self._call(2, "list_notes", {}),
+            self._call(3, "weather", {"city": "Daejeon"}),
+            self._call(4, "bounded_public_research", {"mode": "travel_plan", "query": "q"}),
+        ])
+        self.assertIn("result", replies[2])
+        self.assertIn("error", replies[3])
+        self.assertIn("error", replies[4])
+        self.assertEqual((self.searches, self.weather, self.opened), ([], [], []))
 
 
 class BridgeErrorMapping(unittest.TestCase):
@@ -260,6 +531,7 @@ class BridgeErrorMapping(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         store = QuickStore(Path(tmp.name) / "state")
+        job = _running_work(store)
         calls = []
 
         def execute(_self, plan):
@@ -274,7 +546,7 @@ class BridgeErrorMapping(unittest.TestCase):
              mock.patch.object(sys, "stdin", io.StringIO("".join(json.dumps(r) + "\n" for r in requests))), \
              contextlib.redirect_stdout(out):
             try:
-                mcp_bridge.serve(str(store.root), "err-job", provenance)
+                mcp_bridge.serve(str(store.root), job, provenance)
             except Exception as exc:  # recorded, asserted by the finding below
                 calls.append({"bridge_crashed": type(exc).__name__})
         replies = {reply["id"]: reply for reply in map(json.loads, out.getvalue().splitlines())}
@@ -301,7 +573,7 @@ class BridgeErrorMapping(unittest.TestCase):
         replies, _ = self._serve([
             self._call(1, "web_search", {"query": "today news"}),       # policy denied (taint below)
             self._call(2, "web_search", {"q": "today news"}),           # invalid arguments
-            self._call(3, "weather", {"city": "Daejeon"}),              # tool not exposed
+            self._call(3, "read_file", {"root_id": "r", "path": "a"}),  # tool not exposed (weather is, since #604)
             {"jsonrpc": "2.0", "id": 4, "method": "resources/list"},     # unsupported method
         ], provenance=["conversation-history"])
         return {ident: json.dumps(reply.get("error") or reply.get("result"), sort_keys=True) for ident, reply in replies.items()}

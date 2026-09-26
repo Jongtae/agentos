@@ -16,17 +16,6 @@ import time
 from typing import Callable
 
 
-LIST_NOTES_TOOL = {
-    "name": "list_notes",
-    "description": "List saved AgentOS notes.",
-    "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "additionalProperties": False,
-    },
-}
-
-
 @dataclass
 class _Capability:
     task_id: str

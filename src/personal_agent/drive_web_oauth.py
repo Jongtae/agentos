@@ -293,6 +293,34 @@ class DriveWebOAuthHandoff:
         self.store.put(SELECTED_FILES_KEY, {})
         self._finish("reauth-required")
 
+    def disconnect(self, stash):
+        """Owner disconnect (CONNECTOR-REVOKE-01 #588): stop local Drive access now.
+
+        ``stash`` receives the stored credential (or None) before anything is
+        cleared; if it raises, nothing is cleared. Then the token, the Picker
+        file selection (the per-file grant), any unused Picker link and any
+        in-progress authorization are invalidated, and the Work waiting for
+        Drive is detached and returned so the caller can end it explicitly.
+        """
+        try:
+            tokens = self.store.secret(TOKEN_KEY)
+        except DriveWebOAuthError:
+            tokens = None
+        stash(tokens if isinstance(tokens, dict) and tokens else None)
+        self.store.secret(TOKEN_KEY, {})
+        self.store.put(SELECTED_FILES_KEY, {})
+        with self._picker_grant_lock:
+            self.store.secret(PICKER_GRANT_KEY, {"used": True})
+        job_id = self.store.config(STATUS_KEY, {}).get("pending_job_id")
+        self.store.secret(PENDING_KEY, {"status": "used"})
+        self._record("owner-disconnected", state="disconnected", pending_job_id=None)
+        return job_id
+
+    def revision_marker(self):
+        """An opaque marker that changes whenever the recorded Drive lifecycle changes."""
+        value = self.store.config(STATUS_KEY, {})
+        return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
+
     def picker_grant_active(self, grant):
         value = self.store.secret(PICKER_GRANT_KEY)
         return (isinstance(grant, str) and isinstance(value, dict)

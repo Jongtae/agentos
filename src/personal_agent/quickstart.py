@@ -429,6 +429,11 @@ def configured_service(store, environ=None):
     return service
 
 
+#: CONNECTOR-REVOKE-01 #588 owner routes (backend only; Settings UI is #619).
+GOOGLE_DISCONNECT_PATHS=('/api/connections/google/disconnect/preview','/api/connections/google/disconnect',
+                         '/api/connections/google/revocation/retry')
+
+
 def make_handler(service, public_hosts=(), public_access_token=''):
     store=service.store
     attempts=[]
@@ -611,6 +616,9 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 return self.reply(200,{**service.local_authority_requests(),'local_surface':self.owner_local_surface()})
             if path.startswith('/api/tasks/'):
                 return self.reply(200,service.task_progress(path.rsplit('/',1)[-1]))
+            if path=='/api/connections/google/revocations':
+                if self.public_host():return self.reply(403,{'error':'이 작업은 이 기기에서만 할 수 있습니다.'})
+                return self.reply(200,service.google_revocations())
             if path=='/api/settings':return self.reply(200,service.conversation_settings_request({'operation':'read'}))
             if path=='/api/personal-knowledge':return self.reply(200,service.personal_knowledge_request({'query':parse_qs(parts.query).get('query',[''])[0]}, channel='local-companion'))
             if path=='/api/personal-space/memory-candidates':
@@ -779,6 +787,15 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 if path=='/api/telegram/pair':return self.reply(200,service.pair_telegram())
                 if path=='/api/telegram/verify':return self.reply(202,service.queue_telegram_connection_verification())
                 if path=='/api/telegram/disconnect':return self.reply(200,service.disconnect_telegram())
+                if path in GOOGLE_DISCONNECT_PATHS:
+                    # CONNECTOR-REVOKE-01 #588: owner-session only, and never
+                    # through a public tunnel host, like the connect routes.
+                    if self.public_host():return self.reply(403,{'error':'이 작업은 이 기기에서만 할 수 있습니다.'})
+                    if path=='/api/connections/google/disconnect/preview':
+                        return self.reply(200,service.google_disconnect_preview(body,self.token()))
+                    if path=='/api/connections/google/disconnect':
+                        return self.reply(200,service.google_disconnect(body,self.token()))
+                    return self.reply(200,service.retry_google_revocation(body))
                 if path=='/api/workspaces':return self.reply(201,service.create_workspace(body))
                 if path.startswith('/api/workspaces/') and path.endswith('/save-result'):
                     return self.reply(200,service.save_workspace_result(path.split('/')[3],body))

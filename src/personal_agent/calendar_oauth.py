@@ -742,6 +742,32 @@ class CalendarOAuth:
             expected_revision=expected_revision,
         )
 
+    def disconnect(self, owner_id: str, stash: Callable[[dict | None], None], *, write: bool = False) -> dict:
+        """Owner disconnect of exactly one grant (CONNECTOR-REVOKE-01 #588).
+
+        Same shape as ``GmailConnector.disconnect``: ``stash`` sees the stored
+        credential before it is cleared, the grant's pending authorization is
+        consumed, and the row moves to DISCONNECTED with a new revision so an
+        in-flight request or refresh for the old revision is refused. The
+        other grant is untouched locally. A BLOCKED row stays BLOCKED.
+        """
+        grant = _grant_label(write)
+        spec = _spec(grant)
+        with _OAUTH_LOCK:
+            with _lifecycle_guard(self.registry, owner_id, spec.connector_id):
+                current = self.registry.status(owner_id, spec.connector_id)
+                token_slot = _secret_slot(TOKEN_SECRET_KEY, grant, owner_id)
+                try:
+                    tokens = self.store.secret(token_slot)
+                except CalendarOAuthError:
+                    tokens = None
+                stash(tokens if isinstance(tokens, dict) and tokens else None)
+                self.store.secret(token_slot, {})
+                self.store.secret(_secret_slot(PENDING_SECRET_KEY, grant, owner_id), {"status": "used"})
+                if current.state not in (ConnectorState.DISCONNECTED, ConnectorState.BLOCKED):
+                    self.registry.transition(owner_id, spec.connector_id, ConnectorState.DISCONNECTED)
+        return self.status(owner_id, write=write)
+
     def _assert_unchanged_authority(self, owner_id: str, spec: ConnectorSpec, pending: dict) -> None:
         with _lifecycle_guard(self.registry, owner_id, spec.connector_id):
             current = self.registry.status(owner_id, spec.connector_id)

@@ -10,11 +10,11 @@ import ssl
 import threading
 import time
 import zlib
-import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
-from urllib.request import OpenerDirector, Request, build_opener
-from .providers import NoRedirect, ProviderError, request_json
+from urllib.request import OpenerDirector, Request
+from .providers import ProviderError, request_json
+from .search_providers import ProviderRegistry, validate_locale
 
 
 MAX_PAGE_BYTES = 1_000_000
@@ -474,28 +474,23 @@ class PublicPageReader:
         raise ProviderError('공개 페이지를 읽지 못했습니다.')
 
 class LocalTools:
-    def __init__(self, page_reader=None): self.page_reader=page_reader or PublicPageReader()
-    def search(self, query):
+    def __init__(self, page_reader=None, providers=None):
+        self.page_reader=page_reader or PublicPageReader()
+        # #655: the configured search providers; without an owner store only
+        # the keyless Bing RSS read exists.
+        self.providers=providers or ProviderRegistry.from_config({})
+    def search(self, query, provider=None, kind=None, locale=None):
+        """One public web search through the provider the model named (#655).
+
+        ``provider`` is an option id from ``self.providers.options()``
+        (``bing``, ``naver``, ``naver-book``, ``brave``); absent means the
+        owner's configured default.  No provider is chosen here from the
+        query's language, script or subject.
+        """
         if not isinstance(query,str) or not 1<=len(query.strip())<=500:raise ValueError('검색어는 1~500자로 입력하세요.')
-        url='https://www.bing.com/search?'+urlencode({'format':'rss','q':query.strip(),'mkt':'ko-KR' if re.search('[가-힣]',query) else 'en-US','setlang':'ko' if re.search('[가-힣]',query) else 'en'})
-        try:
-            req=Request(url,headers={'User-Agent':'Mozilla/5.0 (compatible; AgentOS/0.1 personal search)'})
-            with build_opener(NoRedirect()).open(req,timeout=15) as response:
-                raw=response.read(1_000_001)
-            if len(raw)>1_000_000:raise ValueError()
-            root=ET.fromstring(raw)
-            results=[]
-            for item in root.findall('./channel/item')[:5]:
-                link=item.findtext('link','')
-                if urlsplit(link).scheme not in ('https','http'):continue
-                results.append({'title':item.findtext('title','')[:300],'url':link,'snippet':item.findtext('description','')[:1800]})
-            # Bing's RSS titles are localized and often omit the exact query
-            # token. Returning its bounded result set is more reliable than
-            # silently discarding valid results with a second text filter.
-            if not results:raise ValueError()
-            return {'tool':'web_search','query':query,'retrieved_at':time.time(),'results':results,'sources':[r['url'] for r in results], 'scope':'Search snippets only; full pages have not been read.'}
-        except (OSError,ValueError,ET.ParseError):
-            raise ProviderError('웹 검색 결과를 가져오지 못했습니다. 잠시 후 다시 요청하세요.') from None
+        if provider is not None and not isinstance(provider,str):raise ValueError('검색 제공자 이름은 문자열이어야 합니다.')
+        if kind is not None and not isinstance(kind,str):raise ValueError('검색 종류는 문자열이어야 합니다.')
+        return self.providers.search(query.strip(),provider=provider or None,kind=kind or None,locale=validate_locale(locale))
 
     def weather(self, city, country=''):
         if not isinstance(city,str) or not 1<=len(city.strip())<=100:raise ValueError('날씨를 조회할 도시를 알려 주세요.')
@@ -516,7 +511,8 @@ class LocalTools:
         return {'tool':'weather','location':{k:place.get(k) for k in ('name','country','admin1','latitude','longitude')},'retrieved_at':time.time(),'forecast':data,'sources':[url,'https://open-meteo.com/'],'scope':'Open-Meteo model-derived current weather and three-day forecast; report units and timestamps.'}
 
     def execute(self, plan):
-        if plan.get('tool')=='web_search':return self.search(plan.get('query'))
+        if plan.get('tool')=='web_search':
+            return self.search(plan.get('query'),provider=plan.get('provider'),kind=plan.get('kind'),locale=plan.get('locale'))
         if plan.get('tool')=='public_page_read':return self.page_reader.read(plan.get('url'),plan.get('approved_urls'))
         if plan.get('tool')=='weather':return self.weather(plan.get('city'),plan.get('country',''))
         raise ValueError('지원하지 않는 조회 도구입니다.')

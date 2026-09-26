@@ -429,6 +429,20 @@ LOOKUP_JUDGED_TERMS=12
 #: At most this many sensitivity judgments are asked per Work (#605 P2-4);
 #: beyond it current-message terms are withheld.
 LOOKUP_JUDGMENTS_PER_WORK=6
+#: #605 owner threat scope: a hostile worker in a clean context can encode
+#: data in its own word choice, order and allowlisted punctuation.  That is
+#: bounded, not removed: at most this many clean-context public lookups per
+#: Work (6: a research or comparison turn needs a few searches, and each
+#: further one widens the channel), and at most LOOKUP_CLEAN_WORD_CAP
+#: distinct words per lookup.
+LOOKUP_CLEAN_PER_WORK=6
+#: Bounds of the durable withheld digests (#605 P3): characters of one value
+#: hashed, the longest span hashed, and entries kept per Work.
+LOOKUP_DIGEST_WORD_MAX=32
+LOOKUP_DIGEST_SPAN=8
+LOOKUP_DIGEST_ENTRIES=32
+LOOKUP_CLEAN_WORD_CAP=12
+PUBLIC_TASK_LOOKUP_LIMIT='이 작업에서 공개 조회 횟수 한도(6회)에 도달해 더 조회하지 않았습니다. 이어서 조회하려면 새 요청으로 보내 주세요.'
 #: #605 P1-A: the only non-whitespace characters a clean-context separator may
 #: keep (search operators and ordinary punctuation), per separator and in total.
 LOOKUP_SEPARATOR_CHARS=frozenset('.-+#:/"\'(),&')
@@ -441,8 +455,13 @@ LOOKUP_SEPARATOR_TOTAL=12
 _DIGIT_SEPARATOR=re.compile(r'(?<=\d)[\W_]+(?=\d)')
 
 def lookup_norm(text):
- """NFKC then casefold: full-width, compatibility and case variants compare equal (#605 N4)."""
- return unicodedata.normalize('NFKC',str(text or '')).casefold()
+ """NFKC, every Unicode decimal digit (Nd) as ASCII, then casefold (#605 N4, P1-C).
+
+ Full-width, compatibility, case and digit-script variants compare equal:
+ ``M١٢٣٤٥٦٧٨`` (Arabic-Indic) and ``M१२३४५६७८`` (Devanagari) are ``m12345678``.
+ """
+ text=unicodedata.normalize('NFKC',str(text or ''))
+ return ''.join(str(unicodedata.decimal(ch)) if unicodedata.category(ch)=='Nd' else ch for ch in text).casefold()
 
 def lookup_words(text):
  return _MEMORY_WORD.findall(lookup_norm(text))
@@ -463,10 +482,11 @@ def value_digit_runs(texts):
 MIN_PARTIAL_DIGITS=4
 
 def _digits_inside(word,runs):
- """A digit run of ``word`` is part of one of ``runs`` (``5678`` of ``12345678``).
+ """A digit run of ``word`` (normalised, P1-C) is part of one of ``runs``.
 
  The run must be the whole value or at least MIN_PARTIAL_DIGITS long.
  """
+ word=lookup_norm(word)
  return any(run in value and (run==value or len(run)>=MIN_PARTIAL_DIGITS)
             for run in _MEMORY_DIGITS.findall(word) for value in runs)
 
@@ -514,8 +534,8 @@ def select_lookup_words(value, permitted, excluded, *, owner_worded, private, ca
  # `rebuild_lookup_value` reads the same way, #605 P2-1/P1-A); compared
  # casefolded.  ``blocked`` is the durable per-Work withheld set (P2-4/P3).
  for match in _MEMORY_WORD.finditer(unicodedata.normalize('NFKC',str(value or ''))):
-  shown=match.group(0);word=shown.casefold()
-  if (excluded_words and owner_said(word,excluded_words)) or _digits_inside(word,excluded_runs) or (blocked and blocked(word)):
+  shown=match.group(0);word=lookup_norm(shown)
+  if (excluded_words and owner_said(word,excluded_words)) or _digits_inside(word,excluded_runs) or (blocked and blocked.word(word)):
    dropped+=1;continue
   origin=None;send=shown
   for index,words in enumerate(indexed):
@@ -525,11 +545,16 @@ def select_lookup_words(value, permitted, excluded, *, owner_worded, private, ca
      origin=(index,position);send=shown if form==word else form;break
    if origin is not None:break
   if origin is None and owner_worded:dropped+=1;continue
-  if private and send.casefold() in seen:continue  # a duplicate carries nothing new; not counted
-  seen.add(send.casefold());kept.append({'word':send,'origin':origin,'span':match.span()})
+  # Deduplicated in every context (#605 N5; clean contexts too since the
+  # owner's threat scope): a repeated word carries nothing new.
+  if lookup_norm(send) in seen:continue
+  seen.add(lookup_norm(send));kept.append({'word':send,'origin':origin,'span':match.span()})
  if private:
   kept.sort(key=lambda row:row['origin'] or (len(indexed),0))
   if len(kept)>cap:dropped+=len(kept)-cap;kept=kept[:cap]
+ elif len(kept)>LOOKUP_CLEAN_WORD_CAP:
+  # Clean contexts: a word cap bounds the worker's covert channel (#605 scope).
+  dropped+=len(kept)-LOOKUP_CLEAN_WORD_CAP;kept=kept[:LOOKUP_CLEAN_WORD_CAP]
  return kept,dropped
 
 def rebuild_lookup_value(value, kept):
@@ -586,27 +611,68 @@ def _right_attached(gap):
  spaces=[index for index,ch in enumerate(gap) if ch.isspace()]
  return gap[spaces[-1]+1:] if spaces else ''
 
-def lookup_text_violations(text, excluded, blocked=None):
- """Tokens of a FINAL outbound string that match a withheld or written value (#605 P1-A, P2-B).
+#: Longest joined span (characters) compared against withheld/written words.
+LOOKUP_SPAN_MAX=32
 
- Re-tokenises ``text`` and checks every token against the excluded values
- (word match, and digit runs as in N4/R7) and ``blocked`` (the durable
- per-Work withheld set).  The digit runs of the whole string with the
- separators between digit groups removed are checked too, so a value split
- or glued across separators (``M123 456 78``) is caught.  Returns
- ``(bad tokens, digits_joined)``; ``digits_joined`` means only a cross-token
- digit run matched.
+def _script_class(ch):
+ """Coarse script of one normalised character, for splitting mixed tokens (``kim철수``)."""
+ if ch.isdigit():return 'd'
+ code=ord(ch)
+ if 0xAC00<=code<=0xD7AF or 0x1100<=code<=0x11FF or 0x3130<=code<=0x318F:return 'h'
+ if 0x3040<=code<=0x30FF:return 'k'
+ if 0x3400<=code<=0x9FFF or 0xF900<=code<=0xFAFF:return 'c'
+ return 'l'
+
+def lookup_pieces(text):
+ """``[(token, piece)]`` of a string: each normalised token split into same-script runs."""
+ out=[]
+ for token in lookup_words(text):
+  start=0
+  for index in range(1,len(token)+1):
+   if index==len(token) or _script_class(token[index])!=_script_class(token[start]):
+    out.append((token,token[start:index]));start=index
+ return out
+
+def lookup_text_violations(text, excluded, blocked=None):
+ """Tokens of a FINAL outbound string that match a withheld or written value (#605 P1-A, P2-B, P2-D).
+
+ Re-tokenises ``text`` (normalised: NFKC, ASCII digits, casefold) and
+ withholds a token when:
+
+ * it matches a written/withheld word (``owner_said``) or its digit run is
+   part of one (N4/R7), or the durable per-Work withheld set says so;
+ * it takes part in a run of adjacent same-script pieces -- joined with no
+   separator, up to LOOKUP_SPAN_MAX characters, at least 2 characters and
+   not digits only -- that is a substring of a written or withheld word
+   (P2-D): ``김 철수``, ``김-철수`` and ``KIM철수`` against a withheld ``김철수``.
+   This over-blocks: any outbound word of 2+ characters that occurs inside a
+   written or withheld word of this Work is withheld too (``번호`` after
+   ``여권번호`` was saved, ``as`` after ``passport``).
+
+ The digit runs of the whole string with the separators between digit groups
+ removed are checked as well (``M123 456 78``).  Returns ``(bad tokens,
+ digits_joined)``; ``digits_joined`` means a cross-token digit run matched.
  """
  excluded_words=[word for value in excluded for word in lookup_words(value)]
  runs=value_digit_runs(excluded)
  bad=set()
  for word in lookup_words(text):
-  if (excluded_words and owner_said(word,excluded_words)) or _digits_inside(word,runs) or (blocked and blocked(word)):
+  if (excluded_words and owner_said(word,excluded_words)) or _digits_inside(word,runs) or (blocked and blocked.word(word)):
    bad.add(word)
- joined=value_digit_runs([text])
- digits_joined=any(len(value)>=MIN_PARTIAL_DIGITS and value in run for run in joined for value in runs) \
-     or any(len(run)>=MIN_PARTIAL_DIGITS and run in value for run in joined for value in runs) \
-     or bool(blocked and any(blocked(run) for run in joined))
+ pieces=lookup_pieces(text)
+ if excluded_words or blocked:
+  for start in range(len(pieces)):
+   joined=''
+   for end in range(start,len(pieces)):
+    joined+=pieces[end][1]
+    if len(joined)>LOOKUP_SPAN_MAX:break
+    if len(joined)<2 or joined.isdigit():continue
+    if any(joined in word for word in excluded_words) or (blocked and blocked.span(joined)):
+     bad.update(token for token,_piece in pieces[start:end+1])
+ joined_runs=value_digit_runs([text])
+ digits_joined=any(len(value)>=MIN_PARTIAL_DIGITS and value in run for run in joined_runs for value in runs) \
+     or any(len(run)>=MIN_PARTIAL_DIGITS and run in value for run in joined_runs for value in runs) \
+     or bool(blocked and any(blocked.digits(run) for run in joined_runs))
  return bad,digits_joined
 
 def finalize_lookup_text(value, kept, excluded, blocked=None, *, joined=False):
@@ -619,6 +685,14 @@ def finalize_lookup_text(value, kept, excluded, blocked=None, *, joined=False):
  ``text`` is '' when nothing admissible remains.
  """
  rows=list(kept);removed=0
+ # The worker's own string is checked first: a word removed earlier (for
+ # example by the durable withheld set) must not hide the neighbour it was
+ # split from (``김 철수`` -> ``김``, P2-D).
+ bad,digits_joined=lookup_text_violations(value,excluded,blocked)
+ if bad or digits_joined:
+  keep=[row for row in rows if lookup_norm(row['word']) not in bad
+        and not (digits_joined and _MEMORY_DIGITS.search(row['word']))]
+  removed+=len(rows)-len(keep);rows=keep
  for _ in range(3):
   text=' '.join(row['word'] for row in rows) if joined else rebuild_lookup_value(value,rows)
   if not text:return '',removed
@@ -628,6 +702,33 @@ def finalize_lookup_text(value, kept, excluded, blocked=None, *, joined=False):
         and not (digits_joined and _MEMORY_DIGITS.search(row['word']))]
   removed+=len(rows)-len(keep);rows=keep
  return '',removed+len(rows)
+
+class _WithheldDigests:
+ """Checks outbound words, spans and digit runs against keyed digests (#605 P3, P2-D)."""
+ def __init__(self,capabilities,digests):
+  self.capabilities,self.digests=capabilities,digests
+ def _has(self,kind,text):
+  return self.capabilities._digest(kind,text) in self.digests
+ def span(self,text):
+  """``text`` (normalised, 2+ characters) is a substring of a withheld word."""
+  if len(text)<=LOOKUP_DIGEST_SPAN:return self._has('s',text)
+  return all(self._has('s',text[i:i+LOOKUP_DIGEST_SPAN]) for i in range(len(text)-LOOKUP_DIGEST_SPAN+1))
+ def digits(self,run):
+  """``run`` equals a withheld digit run, or shares a MIN_PARTIAL_DIGITS window with one."""
+  run=lookup_norm(run)
+  return self._has('d',run[:LOOKUP_DIGEST_WORD_MAX]) or any(
+   self._has('d',run[i:i+MIN_PARTIAL_DIGITS]) for i in range(len(run)-MIN_PARTIAL_DIGITS+1))
+ def word(self,word):
+  word=lookup_norm(word)
+  if self._has('t',word[:LOOKUP_DIGEST_WORD_MAX]):return True
+  if len(word)>=2 and not word.isdigit() and self.span(word):return True
+  return any(self.digits(run) for run in _MEMORY_DIGITS.findall(word))
+
+class _BlockEverything:
+ """A corrupt durable withheld set: nothing is admissible (fail closed)."""
+ def span(self,text):return True
+ def digits(self,run):return True
+ def word(self,word):return True
 
 def explicit_search_query(message):
  """The query of an owner-typed ``/search <query>`` message, or None (#605 D1)."""
@@ -966,80 +1067,97 @@ class Capabilities:
   state['cache'][key]=result
   return result
  # -- durable per-Work lookup state (#605 P3) ---------------------------------
- # The one explicit `/search`, the judgment count and the withheld set hold
- # per Work across the CLI host preflight, the bridge and a restarted bridge.
- # They live in one config row (`work_lookup_state`, bounded like
- # `work_source_provenance`) updated in one immediate transaction, so two
- # processes cannot both claim.  Not tool events: these are not tools the
- # Work ran, and the owner's task views list tool events.  A withheld value
- # is stored only as keyed digests (HMAC with a local store secret) of its
- # normalised form and digit runs, never as text.
+ # The one explicit `/search`, the judgment count, the clean-lookup count and
+ # the withheld set hold per Work across the CLI host preflight, the bridge
+ # and a restarted bridge.  One config row per Work
+ # (`work_lookup_state:<work>`), updated in one immediate transaction, so two
+ # processes cannot both claim; rows of Works that are no longer running are
+ # pruned.  Not tool events: these are not tools the Work ran.  A withheld
+ # value is stored only as truncated keyed digests (HMAC with a local store
+ # secret) of its normalised form, its spans and its digit windows -- never
+ # as text and never with lengths.  Without the secret nothing is persisted:
+ # the state stays in this process.  A corrupt row fails closed.
  def _state_key(self):
   import secrets as _secrets
   if 'key' not in self.lookup_state:
-   try:self.lookup_state['key']=self.store.secret('lookup_state_key',create=lambda:_secrets.token_hex(32)).encode()
-   except Exception:self.lookup_state['key']=b''
+   try:
+    key=self.store.secret('lookup_state_key',create=lambda:_secrets.token_hex(32))
+    self.lookup_state['key']=key.encode() if isinstance(key,str) and key else None
+   except Exception:self.lookup_state['key']=None
   return self.lookup_state['key']
- def _digest(self,text):
+ def _digest(self,kind,text):
   import hashlib,hmac
-  return hmac.new(self._state_key(),str(text).encode(),hashlib.sha256).hexdigest()
+  return hmac.new(self._state_key(),f'{kind}:{text}'.encode(),hashlib.sha256).hexdigest()[:16]
+ def _state_row_key(self):
+  return f'{LOOKUP_STATE_KEY}:{self.job_id}'
  def _update_state(self,change):
-  """Apply ``change(row) -> result`` to this Work's durable row atomically."""
+  """Apply ``change(row) -> result`` to this Work's durable row atomically.
+
+  Raises on a corrupt row (fail closed).  Without a store secret the row is
+  this process's memory only.
+  """
+  if self._state_key() is None:
+   return change(self.lookup_state.setdefault('memory_row',{}))
   with self.store.db() as db:
    db.execute('BEGIN IMMEDIATE')
-   found=db.execute('SELECT value FROM config WHERE key=?',(LOOKUP_STATE_KEY,)).fetchone()
-   try:rows=json.loads(found[0]) if found else {}
-   except (TypeError,ValueError):rows={}
-   rows=rows if isinstance(rows,dict) else {}
-   row=rows.pop(self.job_id,None)
-   row=row if isinstance(row,dict) else {}
+   found=db.execute('SELECT value FROM config WHERE key=?',(self._state_row_key(),)).fetchone()
+   row=json.loads(found[0]) if found else {}
+   if not isinstance(row,dict):raise ValueError('corrupt lookup state')
    result=change(row)
-   rows[self.job_id]=row
-   while len(rows)>WORK_SOURCES_LIMIT:rows.pop(next(iter(rows)))
    db.execute('INSERT INTO config VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
-              (LOOKUP_STATE_KEY,json.dumps(rows)))
+              (self._state_row_key(),json.dumps(row)))
+   if not self.lookup_state.get('pruned'):
+    self.lookup_state['pruned']=True
+    stale=[key for (key,) in db.execute("SELECT key FROM config WHERE key LIKE ?",(LOOKUP_STATE_KEY+':%',))
+           if key!=self._state_row_key()]
+    for key in stale:
+     job=db.execute('SELECT status FROM jobs WHERE id=?',(key[len(LOOKUP_STATE_KEY)+1:],)).fetchone()
+     if job is None or job[0] not in ('queued','running'):db.execute('DELETE FROM config WHERE key=?',(key,))
   return result
  def _claim_state(self,kind,limit=1):
   """Atomically count one ``kind`` use unless the Work already has ``limit``."""
   def change(row):
-   used=int(row.get(kind) or 0)
+   used=row.get(kind) or 0
+   if not isinstance(used,int) or isinstance(used,bool):raise ValueError('corrupt lookup state')
    if used>=limit:return False
    row[kind]=used+1;return True
   try:return self._update_state(change)
-  except Exception:return False  # fail closed: no explicit exemption, no further judgment
+  except Exception:return False  # fail closed: no exemption, no further judgment or lookup
  def _record_withheld(self,words):
-  """Durably remember withheld values as keyed digests only."""
+  """Durably remember withheld values as bounded keyed digests only."""
+  if self._state_key() is None:return  # in-process sticky list only
   entries=[]
   for word in words:
-   norm=lookup_norm(word);runs=value_digit_runs([word])
-   subs={run[i:j] for run in runs for i in range(len(run)) for j in range(i+MIN_PARTIAL_DIGITS,len(run)+1)}|set(runs)
-   entries.append({'term':self._digest(norm),'runs':sorted(self._digest(sub) for sub in subs),
-                   'full':[[len(run),self._digest(run)] for run in runs]})
+   norm=lookup_norm(word)[:LOOKUP_DIGEST_WORD_MAX];digests={self._digest('t',norm)}
+   letters=''.join(ch for ch in norm if not ch.isdigit())
+   for text in {norm,letters}:
+    for start in range(len(text)):
+     for end in range(start+2,min(len(text),start+LOOKUP_DIGEST_SPAN)+1):
+      digests.add(self._digest('s',text[start:end]))
+   for run in value_digit_runs([word]):
+    run=run[:LOOKUP_DIGEST_WORD_MAX];digests.add(self._digest('d',run))
+    digests.update(self._digest('d',run[i:i+MIN_PARTIAL_DIGITS]) for i in range(len(run)-MIN_PARTIAL_DIGITS+1))
+   entries.append(sorted(digests))
   if not entries:return
   def change(row):
-   row['withheld']=[*(row.get('withheld') or []),*entries][-64:]
+   withheld=row.get('withheld') or []
+   if not isinstance(withheld,list):raise ValueError('corrupt lookup state')
+   row['withheld']=[*withheld,*entries][-LOOKUP_DIGEST_ENTRIES:]
   try:self._update_state(change)
   except Exception:pass
  def _withheld_check(self):
-  """A predicate: does a normalised word (or digit run) match the Work's durable withheld set?"""
-  terms,runs,full=set(),set(),[]
+  """The Work's durable withheld set as a checker, or None when it is empty."""
+  if self._state_key() is None:return None
   try:
-   rows=self.store.config(LOOKUP_STATE_KEY,{})
-   row=rows.get(self.job_id) if isinstance(rows,dict) else None
-   for data in (row or {}).get('withheld') or []:
-    if not isinstance(data,dict):continue
-    terms.add(data.get('term'));runs.update(data.get('runs') or ());full.extend(data.get('full') or ())
-  except Exception:pass
-  if not terms:return None
-  def blocked(word):
-   word=lookup_norm(word)
-   if self._digest(word) in terms:return True
-   for run in _MEMORY_DIGITS.findall(word):
-    if self._digest(run) in runs:return True
-    for length,digest in full:
-     if isinstance(length,int) and any(self._digest(run[i:i+length])==digest for i in range(len(run)-length+1)):return True
-   return False
-  return blocked
+   found=self.store.config(self._state_row_key(),{})
+   if not isinstance(found,dict) or not isinstance(found.get('withheld') or [],list):raise ValueError
+   digests=set()
+   for entry in found.get('withheld') or []:
+    if not isinstance(entry,list):raise ValueError
+    digests.update(str(value) for value in entry)
+  except Exception:
+   return _BlockEverything()  # a corrupt row fails closed
+  return _WithheldDigests(self,digests) if digests else None
  def _compose(self,fields,sources,excluded,*,private):
   """Compose the outbound words of one lookup's fields with ONE judgment.
 
@@ -1069,7 +1187,7 @@ class Capabilities:
   current_words=lookup_words(current)
   earlier_words=[word for text in sources['permitted'] if text!=current for word in lookup_words(text)]
   def from_current(word):
-   word=word.casefold()
+   word=lookup_norm(word)
    return _lookup_match(word,current_words) is not None or _lookup_match(word,earlier_words) is None
   flat=[(name,row) for name in rows for row in rows[name]]
   reason=''
@@ -1083,7 +1201,7 @@ class Capabilities:
     hit=[row for _,row in judged if lookup_norm(row['word']) in verdict]
     withheld={id(row) for row in hit}
     runs=value_digit_runs([row['word'] for row in hit])
-    withheld|={id(row) for _,row in flat if _digits_inside(row['word'].casefold(),runs)}
+    withheld|={id(row) for _,row in flat if _digits_inside(row['word'],runs)}
     # Sticky for this Work: a later lookup cannot resample the judgment by
     # reordering or re-adding the same term (P2-4).
     self.lookup_state['withheld'].extend(row['word'] for row in hit)
@@ -1207,6 +1325,10 @@ class Capabilities:
     if action=='bounded_public_research':plan['mode']=args.get('mode')
    # R5: the Work may have ended (or its request changed) during the judgment.
    self.lookup_sources()
+   # #605 owner threat scope: clean-context lookups are capped per Work,
+   # across processes, to bound a hostile worker's covert channel.
+   if not private and not self._claim_state('clean-lookup',limit=LOOKUP_CLEAN_PER_WORK):
+    raise ValueError(PUBLIC_TASK_LOOKUP_LIMIT)
   sent={k:v for k,v in plan.items() if k!='tool'}
   if private:
    if not self._claim_attempt(tool_id,action):

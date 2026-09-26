@@ -9,6 +9,7 @@ Owner decisions on #605 (2026-09-26) define the F2/F4 cases.
 import contextlib
 import io
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -16,7 +17,7 @@ from pathlib import Path
 from unittest import mock
 
 from personal_agent import mcp_bridge
-from personal_agent.agent_runtime import (lookup_words, PUBLIC_TASK_NO_JUDGMENT, PUBLIC_TASK_SEARCH_HINT, LOOKUP_JUDGMENTS_PER_WORK, ENGINE_UNMEDIATED, HISTORY_PREFIX, OWNER_CONVERSATION, PUBLIC_TASK_PLACE,
+from personal_agent.agent_runtime import (lookup_words, PUBLIC_TASK_LOOKUP_LIMIT, LOOKUP_CLEAN_PER_WORK, PUBLIC_TASK_NO_JUDGMENT, PUBLIC_TASK_SEARCH_HINT, LOOKUP_JUDGMENTS_PER_WORK, ENGINE_UNMEDIATED, HISTORY_PREFIX, OWNER_CONVERSATION, PUBLIC_TASK_PLACE,
                                           PUBLIC_TASK_UNRESOLVED, WORK_SOURCES_KEY, Capabilities, egress_refusal,
                                           history_provenance, run_agent, work_sources)
 from personal_agent.bounded_execution import ExecutionResult
@@ -745,8 +746,11 @@ class RoundFiveFindings(unittest.TestCase):
             try:
                 caps.execute('web_search', {'query': f'성남 약국 w{index}'})
             except ValueError as exc:
-                self.assertEqual(str(exc), PUBLIC_TASK_NO_JUDGMENT['budget'] + PUBLIC_TASK_SEARCH_HINT)
-        self.assertEqual(len(sensitivity_asked(engine)), LOOKUP_JUDGMENTS_PER_WORK)
+                # The per-Work judgment cap and the clean-lookup cap (both 6)
+                # bind together in a clean context.
+                self.assertIn(str(exc), (PUBLIC_TASK_NO_JUDGMENT['budget'] + PUBLIC_TASK_SEARCH_HINT, PUBLIC_TASK_LOOKUP_LIMIT))
+        self.assertLessEqual(len(sensitivity_asked(engine)), LOOKUP_JUDGMENTS_PER_WORK)
+        self.assertLessEqual(len(self.wire.plans), LOOKUP_CLEAN_PER_WORK)
 
     # -- P3-2: private-context weather city is deduplicated/ordered/capped
     def test_p3_2_private_weather_city_follows_the_private_rules(self):
@@ -875,8 +879,8 @@ class RoundSixFindings(unittest.TestCase):
         miss.execute('web_search', {'query': f'병원 근처 {SECRET_ID[1:5]}-{SECRET_ID[5:]}'})
         self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'},
                                            {'tool': 'web_search', 'query': '병원 근처'}])
-        stored = json.dumps(self.store.config('work_lookup_state', {}))
-        self.assertIn('w-sticky', stored)
+        stored = json.dumps(self.store.config('work_lookup_state:w-sticky', {}))
+        self.assertIn('withheld', stored)
         self.assertNotIn('12345678', stored, 'only keyed digests are stored')
         self.assertNotIn('1234', stored)
 
@@ -886,6 +890,127 @@ class RoundSixFindings(unittest.TestCase):
         with self.assertRaises(ValueError) as raised:
             self.caps(permitted=['성남 병원 찾아줘'], excluded=[], judge=jev).execute('web_search', {'query': '성남 병원'})
         self.assertTrue(str(raised.exception).startswith(PUBLIC_TASK_NO_JUDGMENT['unsupported']))
+        self.assertEqual(self.wire.plans, [])
+
+
+class RoundSevenFindings(unittest.TestCase):
+    """PR #622 re-review @ 90d4647 under the owner's fixed #605 threat scope."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        self.path = Path(tmp.name) / 'state'
+        self.store = QuickStore(self.path)
+        self.wire = Wire()
+
+    def caps(self, permitted, excluded=(), judge=judged_ordinary, work=None, store=None):
+        def sources():
+            return {'permitted': list(permitted), 'excluded': list(excluded), 'current': permitted[-1]}
+        return Capabilities(store or self.store, None, CFG, '', work or next_work(), lambda *e: None, network=self.wire,
+                            lookup_sources=sources, lookup_sensitivity=judge)
+
+    # -- P1-C: every Unicode decimal-digit script is the same value
+    def test_p1_c_non_ascii_digits_of_a_saved_value_never_leave(self):
+        message = f'여권번호 {SECRET_ID} 기억해 둬. 그리고 병원 검색해줘'
+        for name, query in (('Arabic-Indic', '병원 M١٢٣٤٥٦٧٨'), ('Devanagari', '병원 M१२३४५६७८'),
+                            ('Bengali', '병원 M১২৩৪৫৬৭৮'), ('Thai', '병원 M๑๒๓๔๕๖๗๘'),
+                            ('Extended Arabic-Indic, split', '병원 ۱۲۳۴-۵۶۷۸'), ('Fullwidth', '병원 Ｍ１２３４５６７８')):
+            with self.subTest(name):
+                self.wire.plans.clear()
+                self.caps([message], [f'여권번호 {SECRET_ID}']).execute('web_search', {'query': query})
+                self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}])
+
+    def test_p1_c_a_withheld_value_in_another_digit_script_stays_withheld_across_processes(self):
+        first = self.caps([f'{SECRET_ID} 병원 찾아줘'], work='w-digits',
+                          judge=ConversationJudgments(flagging(SECRET_ID)).lookup_term_sensitivity)
+        first.execute('web_search', {'query': f'{SECRET_ID} 병원'})
+        second = self.caps([f'{SECRET_ID} 병원 찾아줘'], work='w-digits', judge=judged_ordinary)
+        second.execute('web_search', {'query': '병원 근처 M١٢٣٤٥٦٧٨'})
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'},
+                                           {'tool': 'web_search', 'query': '병원 근처'}])
+
+    # -- P2-D: split or re-joined withheld words
+    def test_p2_d_a_split_withheld_name_never_leaves(self):
+        answers = [['김철수']]  # withheld on the first lookup, released (missed) afterwards
+
+        def choose_many(context, candidates, question):
+            terms = dict(part.split(' = ', 1) for part in context.facts['terms'].split('; '))
+            marked = set(answers.pop(0)) if answers else set()
+            return SelectionSetDecision(OUTCOME_DECIDED, [l for l in candidates if terms[l] in marked],
+                                        candidates, fixture_confidence(1.0))
+        judge = ConversationJudgments(FixtureDecisionEngine(choose_many=choose_many)).lookup_term_sensitivity
+        message = ['김철수 이혼 상담 병원 찾아줘']
+        work = self.caps(message, judge=judge, work='w-name')
+        work.execute('web_search', {'query': '김철수 병원'})
+        work.execute('web_search', {'query': '김 철수 병원'})
+        work.execute('web_search', {'query': '김-철수 이혼'})
+        other = self.caps(message, judge=judged_ordinary, work='w-name')  # a second process
+        other.execute('web_search', {'query': '김 철수 상담'})
+        other.execute('web_search', {'query': 'KIM철수 병원'})
+        self.assertEqual([plan['query'] for plan in self.wire.plans], ['병원', '병원', '이혼', '상담', '병원'])
+
+    def test_p2_d_a_split_written_value_never_leaves_and_the_over_block_is_as_stated(self):
+        saved = ['김철수 상담 예약']
+        for query, sent in (('김 철수 병원', '병원'), ('김-철수 병원', '병원'), ('KIM철수 병원', '병원'),
+                            ('철수 병원', '병원'), ('상담소 병원', '병원'), ('담 병원', '담 병원')):
+            with self.subTest(query):
+                self.wire.plans.clear()
+                self.caps(['병원 찾아줘'], saved).execute('web_search', {'query': query})
+                self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': sent}])
+
+    # -- P1-A residual bound: clean lookups per Work, dedupe, word cap
+    def test_clean_lookups_are_capped_per_work_across_processes(self):
+        # Words from an earlier permitted message: no judgment, so only the
+        # clean-lookup cap binds.
+        permitted = ['news again ' + ' '.join(f'n{index}' for index in range(8)), '찾아줘']
+        a = self.caps(permitted, work='w-clean')
+        b = self.caps(permitted, work='w-clean')
+        for index in range(LOOKUP_CLEAN_PER_WORK):
+            (a if index % 2 else b).execute('web_search', {'query': f'news n{index}'})
+        with self.assertRaises(ValueError) as raised:
+            b.execute('web_search', {'query': 'news again'})
+        self.assertEqual(str(raised.exception), PUBLIC_TASK_LOOKUP_LIMIT)
+        self.assertEqual(len(self.wire.plans), LOOKUP_CLEAN_PER_WORK)
+
+    def test_clean_words_are_deduplicated_and_capped(self):
+        self.caps(['검색해줘']).execute('web_search', {'query': 'a b a B ' + ' '.join(f'w{i}' for i in range(20))})
+        sent = self.wire.plans[0]['query'].split()
+        self.assertEqual(sent[:2], ['a', 'b'])
+        self.assertEqual(len(sent), 12)
+
+    # -- P3: the durable row is bounded, secret-less state is not persisted, corruption fails closed
+    def test_p3_the_state_row_is_bounded_and_stores_no_lengths_or_text(self):
+        long_value = '9' * 5000
+        caps = self.caps([f'{long_value} 병원'], work='w-long',
+                         judge=ConversationJudgments(flagging(long_value)).lookup_term_sensitivity)
+        caps.execute('web_search', {'query': f'{long_value} 병원'})
+        caps._record_withheld([f'x{i}yz' for i in range(100)])
+        row = self.store.config('work_lookup_state:w-long')
+        self.assertLess(len(json.dumps(row)), 60000)
+        self.assertLessEqual(len(row['withheld']), 32)
+        # Only truncated hex digests and counters: no text, no lengths.  (A
+        # random digest may itself contain "9999", so the check is structural.)
+        self.assertEqual(set(row) - {'withheld'}, {'judgment', 'clean-lookup'})
+        self.assertTrue(all(isinstance(row[key], int) for key in ('judgment', 'clean-lookup')))
+        self.assertTrue(all(isinstance(value, str) and re.fullmatch('[0-9a-f]{16}', value)
+                            for entry in row['withheld'] for value in entry))
+        self.assertNotIn('9' * 20, json.dumps(row))
+
+    def test_p3_without_the_store_secret_nothing_is_persisted(self):
+        with mock.patch.object(QuickStore, 'secret', side_effect=OSError('no secret store')):
+            caps = self.caps([f'{SECRET_ID} 병원 찾아줘'], work='w-nosecret',
+                             judge=ConversationJudgments(flagging(SECRET_ID)).lookup_term_sensitivity)
+            caps.execute('web_search', {'query': f'{SECRET_ID} 병원'})
+            caps.execute('web_search', {'query': f'병원 근처 {SECRET_ID}'})  # in-process sticky still holds
+        self.assertIsNone(self.store.config('work_lookup_state:w-nosecret', None))
+        self.assertEqual([plan['query'] for plan in self.wire.plans], ['병원', '병원 근처'])
+
+    def test_p3_a_corrupt_row_fails_closed(self):
+        self.store.put('work_lookup_state:w-corrupt', ['not', 'a', 'row'])
+        with self.assertRaises(ValueError):
+            self.caps(['뉴스 검색해줘'], work='w-corrupt').execute('web_search', {'query': 'news'})
+        self.store.put('work_lookup_state:w-corrupt2', {'withheld': 'broken'})
+        with self.assertRaises(ValueError):
+            self.caps(['뉴스 검색해줘'], work='w-corrupt2').execute('web_search', {'query': 'news'})
         self.assertEqual(self.wire.plans, [])
 
 

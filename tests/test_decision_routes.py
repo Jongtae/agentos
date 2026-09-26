@@ -24,7 +24,7 @@ from personal_agent.decision_adapters import (CODEX_DECISION_CONFIG, JEV_ENDPOIN
                                               SubscriptionCliDecisionEngine, bounded_run, codex_disable_plan,
                                               parse_codex_features)
 from personal_agent.decision_qualification import CASE_IDS, SUITE_VERSION, qualify
-from personal_agent.decision_routes import DecisionRouteError
+from personal_agent.decision_routes import CODEX_INSTRUCTION_FILES_QUALIFIED, DecisionRouteError
 from personal_agent.providers import ModelAdapter, ProviderError
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
@@ -137,7 +137,7 @@ class JevTransport:
 
 
 CODEX_HELP = ('Usage: codex exec [OPTIONS] [PROMPT]\n -c, --config <key=value>\n --json\n --ignore-user-config\n'
-              ' --ephemeral\n --skip-git-repo-check\n --output-schema <FILE>\n -m, --model <MODEL>\n'
+              ' --ignore-rules\n --ephemeral\n --skip-git-repo-check\n --output-schema <FILE>\n -m, --model <MODEL>\n'
               ' --disable <FEATURE>\n --sandbox <MODE>\n')
 CLAUDE_HELP = (' -p, --print\n --output-format <format>\n --json-schema <schema>\n --tools <tools...>\n'
                ' --strict-mcp-config\n --setting-sources <sources>\n --restricted\n --no-session-persistence\n'
@@ -299,7 +299,8 @@ class SubscriptionCliTests(Temp):
         self.assertEqual((decision.outcome, decision.choice), (OUTCOME_DECIDED, 'retry'))
         call = self.runner.calls[-1]
         argv = call['argv']
-        for flag in ('--ignore-user-config', '--ephemeral', '--skip-git-repo-check', '--output-schema', '--json'):
+        for flag in ('--ignore-user-config', '--ignore-rules', '--ephemeral', '--skip-git-repo-check', '--output-schema',
+                     '--json'):
             self.assertIn(flag, argv)
         self.assertEqual(argv[argv.index('--sandbox') + 1], 'read-only')
         disabled = [argv[i + 1] for i, part in enumerate(argv) if part == '--disable']
@@ -486,6 +487,9 @@ class ServiceRouteSelectionTests(Temp):
                                subscription_engines=SubscriptionEngines(finder=finder),
                                execution_adapter=cli_adapter(self.runner, self.root, finder=finder))
         service.decision_routes.jev_transport = self.jev
+        # Fixture only: treat the fixture CLI version as instruction-file
+        # qualified so the other activation paths stay testable (#624).
+        service.decision_routes.codex_instruction_qualified = frozenset({'0.153.4'})
         return service
 
     def judge(self, service):
@@ -679,6 +683,56 @@ class ServiceRouteSelectionTests(Temp):
             service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'claude-code'})
         self.assertIn('--restricted', self.store.config('decision_cli_capabilities')['claude-code']['missing_flags'])
         self.assertFalse(any('-p' in call['argv'] for call in self.runner.calls))
+
+    def test_decision_layer_doc_states_the_codex_home_instruction_limitation(self):
+        # #624: the overrides do not keep CODEX_HOME instruction files out.
+        doc = (Path(__file__).resolve().parents[1] / 'docs' / 'decision-layer.en.md').read_text(encoding='utf-8')
+        self.assertNotIn('(no AGENTS.md/project docs)', doc)
+        for phrase in ('$CODEX_HOME/AGENTS.override.md', '$CODEX_HOME/AGENTS.md', 'untracked, untrusted input',
+                       'CodexDecisionInstructionFiles', '--ignore-rules'):
+            self.assertIn(phrase, doc)
+
+    def test_codex_is_refused_until_its_instruction_files_are_qualified(self):
+        # #624: no Codex version is qualified in the product; activation fails
+        # closed before any judgment even when the tool surface passes.
+        service = self.service()
+        service.decision_routes.codex_instruction_qualified = CODEX_INSTRUCTION_FILES_QUALIFIED
+        self.assertEqual(CODEX_INSTRUCTION_FILES_QUALIFIED, frozenset())
+        with self.assertRaises(DecisionRouteError):
+            service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'codex'})
+        self.assertIsNone(self.store.config('decision_route'))
+        self.assertEqual(self.store.config('decision_cli_capabilities')['codex']['tool_surface'], 'allowlisted-features-only')
+        self.assertFalse(any('exec' in call['argv'] and '--json' in call['argv'] for call in self.runner.calls))
+        engines = {e['id']: e for e in service.settings()['decision_route']['subscription_cli']}
+        self.assertEqual(engines['codex']['check']['failure'], 'instruction-files-unqualified')
+        self.assertIn('AGENTS.md', engines['codex']['instruction_files'])
+        self.assertEqual(engines['claude-code']['instruction_files'], '')
+
+    def test_a_stored_codex_route_stops_when_its_version_is_not_instruction_qualified(self):
+        # #624 review P3: the runtime guard applies the activation rule to a
+        # route stored earlier (unchanged binary), for every policy.
+        service = self.service()
+        service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'codex'})
+        self.assertTrue(service.decision_routes.status()['active']['available'])
+        calls = len(self.runner.calls)
+        service.decision_routes.codex_instruction_qualified = CODEX_INSTRUCTION_FILES_QUALIFIED
+        active = service.decision_routes.status()['active']
+        self.assertTrue(active['instruction_files_unqualified'])
+        self.assertFalse(active['available'])
+        engine = service.decision_routes.engine()
+        decision = engine.choose(DecisionContext('conversation-followup', {'owner_message': '다시 해봐'}),
+                                 ('retry', 'reference'), 'relation?')
+        self.assertEqual(decision.outcome, OUTCOME_UNAVAILABLE)
+        self.assertEqual(engine.last_failure, 'instruction-files-unqualified')
+        self.assertFalse(any('exec' in call['argv'] for call in self.runner.calls[calls:]))
+
+    def test_codex_without_ignore_rules_is_refused(self):
+        # #624: a CODEX_HOME execpolicy rule must not widen a judgment's sandbox.
+        service = self.service(runner=CliRunner(help_text={'codex': CODEX_HELP.replace(' --ignore-rules\n', '')}))
+        with self.assertRaises(DecisionRouteError):
+            service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'codex'})
+        self.assertIn('--ignore-rules', self.store.config('decision_cli_capabilities')['codex']['missing_flags'])
+        self.assertFalse(any('exec' in call['argv'] and '--json' in call['argv'] for call in self.runner.calls))
 
     def test_isolation_flags_are_required_before_any_judgment(self):
         service = self.service(runner=CliRunner(help_text={'claude-code': ' --model <model>\n'}))

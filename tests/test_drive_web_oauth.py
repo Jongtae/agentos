@@ -123,6 +123,24 @@ class DriveWebOAuthTests(unittest.TestCase):
         with self.assertRaises(DriveScopeError):
             self.flow.read_selected(42, "f1", lambda *args: "body")
 
+    def test_read_selected_refuses_another_owner_and_an_unpicked_file_before_any_transport_call(self):
+        """Pins ``read_selected``'s own ``assert_selected`` call (#445).
+
+        The credential check after it does not look at the owner or the
+        selection, so removing that call lets another owner read the picked
+        file and lets an unpicked id reach the lookup unguarded.
+        """
+        self.connect()
+        self.flow.select_files(42, [{"id": "picked", "name": "plan", "mime_type": "text/plain"}])
+        calls = []
+        transport = lambda url, body, headers: calls.append(url) or "body"
+        with self.assertRaises(DriveWebOAuthError):
+            self.flow.read_selected(99, "picked", transport)
+        with self.assertRaises(DriveScopeError):
+            self.flow.read_selected(42, "unpicked", transport)
+        self.assertEqual(calls, [])
+        self.assertEqual(self.flow.read_selected(42, "picked", transport), "body")
+
     def test_the_validated_scope_is_stored_rather_than_the_providers_text(self):
         self.connect()
         self.assertEqual(self.encrypted_store.secret(TOKEN_KEY)["scope"], DRIVE_FILE)

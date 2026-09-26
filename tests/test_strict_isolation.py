@@ -47,7 +47,9 @@ from personal_agent.bounded_execution import (
     profile_actions,
     route_unavailable,
 )
-from personal_agent.decision_adapters import CODEX_DECISION_CONFIG
+from personal_agent.decision import OUTCOME_DECIDED, DecisionContext
+from personal_agent.decision_adapters import (CODEX_DECISION_CONFIG, SubscriptionCliDecisionEngine, codex_disable_plan,
+                                              parse_codex_features)
 from personal_agent.quickstart_store import QuickStore
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1032,6 +1034,85 @@ class ProcessLevelQualification(unittest.TestCase):
         self.assertNotIn('canary-616', results[0] + results[1])
         self.assertIn("haven't granted", results[2], 'bridge tools are not pre-approved on trusted-local')
         self.assertEqual(events, [])
+
+
+@unittest.skipUnless(os.environ.get('AGENTOS_CLI_QUALIFICATION') == '1',
+                     'opt-in process-level CLI qualification (set AGENTOS_CLI_QUALIFICATION=1)')
+class CodexDecisionInstructionFiles(unittest.TestCase):
+    """#624: what a synthetic CODEX_HOME puts into a Codex *decision* prompt.
+
+    The exact ``SubscriptionCliDecisionEngine`` argv against the real
+    ``codex exec`` and the loopback scripted model; the only argv additions are
+    the fake provider's endpoint settings.  Activation is bypassed on purpose
+    (on 0.153.4 it is refused because ``unified_exec`` cannot be disabled):
+    this pins the instruction-file behaviour a future qualification must
+    re-check, it does not qualify the route.  No owner profile or model.
+    """
+
+    def setUp(self):
+        binary, version = _installed('codex')
+        if version != '0.153.4':
+            self.skipTest(f'codex {version} is not the observed version')
+        self.binary = binary
+        tmp = tempfile.TemporaryDirectory(dir=Path.home(), prefix='.agentos-624-decision-')
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        (self.root / 'store').mkdir()
+        populate_codex_home(self.root / 'codex-home', self.root / 'store')
+        with tempfile.TemporaryDirectory(dir=self.root) as empty:
+            listing = subprocess.run([binary, 'features', 'list'], cwd=empty, capture_output=True, text=True, timeout=30,
+                                     env={'HOME': empty, 'CODEX_HOME': empty, 'PATH': f'{Path(binary).parent}:/usr/bin:/bin'})
+        self.plan = codex_disable_plan(parse_codex_features(listing.stdout))
+        self.argv = None
+
+    def _decide(self):
+        model = _ScriptedModel('responses', [{'message': json.dumps({'choice': 'retry', 'confidence': 0.9})}])
+
+        def runner(argv, **kwargs):
+            argv, env = list(argv), dict(kwargs['env'])
+            at = argv.index('exec') + 1
+            argv[at:at] = ['-c', 'model_provider="fake"', '-c', 'model="fake-model"', '-c',
+                           f'model_providers.fake={{name="fake", base_url="http://127.0.0.1:{model.port}/v1", '
+                           'wire_api="responses", env_key="AGENTOS_FAKE_MODEL_KEY", request_max_retries=0, stream_max_retries=0}']
+            env['AGENTOS_FAKE_MODEL_KEY'] = 'fake'
+            self.argv = argv
+            kwargs['env'] = env
+            return subprocess.run(argv, **kwargs)
+
+        adapter = BoundedExecutionAdapter(finder=lambda name: self.binary, runner=runner,
+                                          runtime_root=self.root / 'engine-runs', codex_home=self.root / 'codex-home')
+        engine = SubscriptionCliDecisionEngine(adapter, 'codex', codex_disabled_features=self.plan)
+        try:
+            decision = engine.choose(DecisionContext('decision-route-probe', {'owner_message': 'retry please'}),
+                                     ('retry', 'reference'), 'How does the owner message relate to the previous Work?')
+        finally:
+            model.close()
+        self.failure = engine.last_failure
+        return decision, json.dumps([request['body'] for request in model.requests])
+
+    def test_global_instruction_files_reach_the_decision_prompt(self):
+        decision, context = self._decide()
+        self.assertEqual((decision.outcome, decision.choice), (OUTCOME_DECIDED, 'retry'), self.failure)
+        for flag in ('--ignore-user-config', '--ignore-rules'):
+            self.assertIn(flag, self.argv)
+        self.assertIn('project_doc_max_bytes=0', self.argv)
+        for canary in ('SKILL-CANARY-616', 'canary-skill-616', 'PLUGIN-CANARY-616'):
+            self.assertNotIn(canary, context)
+        # Observed limitation (documented in docs/decision-layer.en.md): the
+        # overrides do not stop the global file; the override file wins.
+        self.assertIn('AGENTS-OVERRIDE-CANARY-616', context)
+        self.assertNotIn('AGENTS-MD-CANARY-616', context)
+        (self.root / 'codex-home' / 'AGENTS.override.md').unlink()
+        _decision, context = self._decide()
+        self.assertIn('AGENTS-MD-CANARY-616', context)
+        # With neither file present no instruction-file content reaches the prompt.
+        (self.root / 'codex-home' / 'AGENTS.md').unlink()
+        _decision, context = self._decide()
+        for canary in ('AGENTS-MD-CANARY-616', 'AGENTS-OVERRIDE-CANARY-616', 'SKILL-CANARY-616', 'canary-skill-616',
+                       'PLUGIN-CANARY-616'):
+            self.assertNotIn(canary, context)
+        self.assertNotIn('# AGENTS.md instructions', context)
+        self.assertNotIn('<INSTRUCTIONS>', context)
 
 
 if __name__ == '__main__':

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Verify the repository's src-layout package boundary."""
 
+import ast
+from importlib.machinery import PathFinder
 from pathlib import Path
 
 
@@ -11,6 +13,131 @@ PACKAGE = ROOT / "src" / "personal_agent"
 def _require(condition, message, failures):
     if not condition:
         failures.append(message)
+
+
+def _src_constants(node, assignments, seen=()):
+    """Yield string constants reachable from ``node`` through module-level names."""
+    for child in ast.walk(node):
+        if isinstance(child, ast.Constant) and isinstance(child.value, str):
+            yield child.value
+        elif isinstance(child, ast.Name) and child.id in assignments and child.id not in seen:
+            yield from _src_constants(assignments[child.id], assignments, (*seen, child.id))
+
+
+def _module_level_statements(tree):
+    """Yield statements that run at import time, in source order (not def/class bodies)."""
+    pending = list(reversed(tree.body))
+    while pending:
+        statement = pending.pop()
+        yield statement
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        children = []
+        for field in ("body", "orelse", "finalbody", "handlers"):
+            children.extend(getattr(statement, field, ()))
+        pending.extend(reversed(children))
+
+
+def _src_bootstrap_line(tree):
+    """Line of the first module-level ``sys.path.insert/append`` targeting a ``src`` root."""
+    assignments = {}
+    for statement in _module_level_statements(tree):
+        if isinstance(statement, ast.Assign):
+            for target in statement.targets:
+                if isinstance(target, ast.Name):
+                    assignments[target.id] = statement.value
+        call = statement.value if isinstance(statement, ast.Expr) else None
+        if (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                and call.func.attr in ("insert", "append")
+                and ast.unparse(call.func.value) == "sys.path"):
+            for value in _src_constants(call, assignments):
+                if value == "src" or value.rstrip("/").endswith("/src"):
+                    return statement.lineno
+    return None
+
+
+def _package_imports(tree):
+    """Return ``(line, module, names)`` for every personal_agent import in the script."""
+    imports = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports.extend((node.lineno, alias.name, ()) for alias in node.names
+                           if alias.name.split(".")[0] == "personal_agent")
+        elif (isinstance(node, ast.ImportFrom) and node.level == 0 and node.module
+              and node.module.split(".")[0] == "personal_agent"):
+            imports.append((node.lineno, node.module, tuple(alias.name for alias in node.names)))
+    return imports
+
+
+def _find_spec(module, src_root):
+    """Resolve ``module`` against ``src_root`` only, without executing any code."""
+    spec, search = None, [str(src_root)]
+    parts = module.split(".")
+    for index in range(len(parts)):
+        spec = PathFinder.find_spec(".".join(parts[:index + 1]), search)
+        if spec is None:
+            return None
+        search = spec.submodule_search_locations
+        if search is None and index + 1 < len(parts):
+            return None
+    return spec
+
+
+def _top_level_names(tree):
+    names, pending = set(), list(tree.body)
+    while pending:
+        statement = pending.pop()
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(statement.name)
+        elif isinstance(statement, (ast.Import, ast.ImportFrom)):
+            names.update((alias.asname or alias.name).split(".")[0] for alias in statement.names)
+        elif isinstance(statement, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+            for target in targets:
+                names.update(node.id for node in ast.walk(target) if isinstance(node, ast.Name))
+        for field in ("body", "orelse", "finalbody", "handlers"):
+            if not isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                pending.extend(getattr(statement, field, ()))
+    return names
+
+
+def _defines(spec, name):
+    if name == "*":
+        return True
+    if spec.submodule_search_locations is not None:
+        if PathFinder.find_spec(f"{spec.name}.{name}", spec.submodule_search_locations):
+            return True
+    if not spec.origin or not spec.origin.endswith(".py"):
+        return True
+    names = _top_level_names(ast.parse(Path(spec.origin).read_text(encoding="utf-8")))
+    return "*" in names or "__getattr__" in names or name in names
+
+
+def check_package_script(script, src_root):
+    """Prove ``script`` bootstraps ``src_root`` and every package import it makes resolves there.
+
+    The check is static: it parses the script and the imported package modules
+    and uses the import system's path finder, so no script or package code runs.
+    """
+    tree = ast.parse(script.read_text(encoding="utf-8"), filename=str(script))
+    failures = []
+    bootstrap = _src_bootstrap_line(tree)
+    if bootstrap is None:
+        failures.append(f"{script.name} does not bootstrap the src package root")
+    imports = _package_imports(tree)
+    if not imports:
+        failures.append(f"{script.name} does not import personal_agent from the src root")
+    for line, module, names in imports:
+        if bootstrap is not None and line < bootstrap:
+            failures.append(f"{script.name} imports {module} before the src bootstrap")
+        spec = _find_spec(module, src_root)
+        if spec is None:
+            failures.append(f"{script.name} imports missing module {module}")
+            continue
+        for name in names:
+            if not _defines(spec, name):
+                failures.append(f"{script.name} imports missing name {module}.{name}")
+    return failures
 
 
 def main():
@@ -56,9 +183,7 @@ def main():
         "verify_weather_acceptance.py",
     )
     for name in package_scripts:
-        text = (ROOT / "scripts" / name).read_text(encoding="utf-8")
-        _require("/src" in text or " / 'src'" in text or ' / "src"' in text,
-                 f"{name} does not bootstrap the src package root", failures)
+        failures.extend(check_package_script(ROOT / "scripts" / name, ROOT / "src"))
 
     if failures:
         for failure in failures:

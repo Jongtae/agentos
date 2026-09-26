@@ -2994,13 +2994,32 @@ class AgentService:
             def request(self,binding,description):return service._request_browser_step(job,binding,description)
         return Approvals()
 
+    def _browser_step_keys(self, binding):
+        """Keyed digests of one step binding: what the approval row and request row hold.
+
+        The binding's own digests are plain SHA-256 of short values (a card
+        number is guessable from its hash), so only an HMAC under this
+        installation's secret is ever stored.
+        """
+        secret=self.store.secret('browser_step_secret',create=lambda:secrets.token_hex(32)).encode()
+        keyed=lambda value:hmac.new(secret,str(value).encode(),hashlib.sha256).hexdigest()
+        return {'digest':keyed(binding_digest(binding)),'page_digest':keyed('page|'+binding['page_digest']),
+                'target_digest':keyed('target|'+binding['target_digest']),
+                'step_digest':keyed('step|'+binding['argument_digest']+'|'+binding['state_digest'])}
+
     def _consume_browser_step(self, job, binding):
-        """Spend an approval the owner issued for exactly this step of this Work, once."""
+        """Spend an approval the owner issued for exactly this step of this Work, once.
+
+        Different typed text, another target or a changed form (price,
+        quantity, terms) is a different binding: the issued approval is left
+        unspent and the step asks again.
+        """
         row=self._browser_request(job['id'])
-        if not row or row.get('state')!='issued' or row.get('digest')!=binding_digest(binding):return False
+        keys=self._browser_step_keys(binding)
+        if not row or row.get('state')!='issued' or not hmac.compare_digest(str(row.get('digest','')),keys['digest']):return False
         try:
             self.store.consume_browser_step_approval(self.connector_owner_id(job),job['id'],binding['action'],
-                                                     binding['page_digest'],binding['target_digest'],row.get('token'))
+                                                     keys['page_digest'],keys['target_digest'],keys['step_digest'],row.get('token'))
         except ValueError:
             return False
         finally:
@@ -3011,8 +3030,7 @@ class AgentService:
     def _request_browser_step(self, job, binding, description):
         """Record the refused step for the owner's approval surfaces (web Settings, Telegram)."""
         label=self._redact_reason(' '.join(str(description or '').split()))[:120]
-        row={'work_id':job['id'],'action':binding['action'],'digest':binding_digest(binding),'label':label,
-             'page_digest':binding['page_digest'],'target_digest':binding['target_digest'],
+        row={'work_id':job['id'],'action':binding['action'],'label':label,**self._browser_step_keys(binding),
              'state':'requested','requested_at':time.time()}
         self._put_browser_request(job['id'],row)
         self.queue_notification(job,'browser_approval_needed',fingerprint=row['digest'])
@@ -3038,7 +3056,7 @@ class AgentService:
             self._put_browser_request(work_id,None)
             return {'approved':False,'resumed':False,'work_id':work_id}
         approval=self.store.issue_browser_step_approval(self.connector_owner_id(job),work_id,row['action'],
-                                                        row['page_digest'],row['target_digest'])
+                                                        row['page_digest'],row['target_digest'],row['step_digest'])
         self._put_browser_request(work_id,{**row,'state':'issued','token':approval['approval_token'],'issued_at':time.time()})
         # The same continuation the context approval uses: this exact Work,
         # returned to the durable queue once, never a replay after failure.

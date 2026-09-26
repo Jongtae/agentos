@@ -71,8 +71,24 @@ LIMITATION_TEXT = ('카드번호·CVC·일회용 코드 입력과 그 양식의 
 
 # --- element classification (deterministic, site-independent) ---------------
 
+def autocomplete_field(value):
+    """The field-name token of an HTML ``autocomplete`` attribute.
+
+    The attribute is a token list (HTML Living Standard, "autofill detail
+    tokens"): an optional ``section-*`` token, an optional ``shipping`` or
+    ``billing`` token, an optional contact token (``home``/``work``/``mobile``/
+    ``fax``/``pager``), the field name, and an optional trailing ``webauthn``.
+    The field name is therefore the last token once ``webauthn`` is removed:
+    ``section-checkout billing cc-number`` is ``cc-number``.
+    """
+    tokens = str(value or '').strip().lower().split()
+    if tokens and tokens[-1] == 'webauthn':
+        tokens = tokens[:-1]
+    return tokens[-1] if tokens else ''
+
+
 def _autocomplete(element):
-    return str(element.get('autocomplete') or '').strip().lower()
+    return autocomplete_field(element.get('autocomplete'))
 
 
 def guarded_field(element):
@@ -134,23 +150,41 @@ def digest(text):
     return hashlib.sha256(str(text or '').encode()).hexdigest()
 
 
+def _host(parts):
+    """``host[:port]`` of a split URL, without any userinfo."""
+    try:
+        host, port = parts.hostname or '', parts.port
+    except ValueError:
+        host, port = parts.hostname or '', None
+    if ':' in host:
+        host = f'[{host}]'
+    return f'{host}:{port}' if port else host
+
+
 def page_reference(url):
-    """A URL without its query and fragment: what Evidence and approvals may carry."""
+    """A URL without userinfo, query and fragment: what Evidence and approvals may carry."""
     try:
         parts = urlsplit(str(url or ''))
     except ValueError:
         return ''
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, '', ''))
+    return urlunsplit((parts.scheme, _host(parts), parts.path, '', ''))
 
 
-def step_binding(work_id, action, url, element_key):
-    """What one approval is bound to: Work, action, page URL digest and target element."""
+#: Binding fields, in order.  ``argument_digest`` is the normalized step
+#: argument (the typed text, the clicked target, the opened URL) and
+#: ``state_digest`` the relevant current page state, so an approval never
+#: covers different text or a changed form (price, quantity, terms).
+BINDING_FIELDS = ('work_id', 'action', 'page_digest', 'target_digest', 'argument_digest', 'state_digest')
+
+
+def step_binding(work_id, action, url, element_key, argument='', state=''):
+    """What one approval is bound to: Work, action, page, target, arguments and page state."""
     return {'work_id': work_id, 'action': action, 'page_digest': digest(page_reference(url)),
-            'target_digest': digest(element_key)}
+            'target_digest': digest(element_key), 'argument_digest': digest(argument), 'state_digest': digest(state)}
 
 
 def binding_digest(binding):
-    return digest('|'.join(str(binding.get(key) or '') for key in ('work_id', 'action', 'page_digest', 'target_digest')))
+    return digest('|'.join(str(binding.get(key) or '') for key in BINDING_FIELDS))
 
 
 # --- output mediation --------------------------------------------------------
@@ -197,6 +231,29 @@ def scrub(text, excluded=()):
     return text, removed + count
 
 
+def mediate_url(url, excluded=()):
+    """A model-visible URL: no userinfo, query or fragment; each path segment scrubbed.
+
+    Returns ``(url, redacted_count)``.  A path segment that carries a saved
+    private value or a credential-shaped token is replaced as a whole.
+    """
+    try:
+        parts = urlsplit(str(url or ''))
+    except ValueError:
+        return '', 0
+    removed = 0
+    host, count = scrub(_host(parts), excluded)
+    removed += count
+    segments = []
+    for segment in parts.path.split('/'):
+        cleaned, count = scrub(segment, excluded)
+        if count:
+            removed += count
+            cleaned = REDACTED
+        segments.append(cleaned)
+    return urlunsplit((parts.scheme, host, '/'.join(segments), '', '')), removed
+
+
 def mediate_snapshot(raw, excluded=(), requested_url=None):
     """The only page state that may leave the driver.
 
@@ -223,7 +280,9 @@ def mediate_snapshot(raw, excluded=(), requested_url=None):
         redacted += count
         row = {'n': len(visible) + 1, 'role': str(element.get('role') or element.get('tag') or 'element'), 'name': name}
         if element.get('href'):
-            row['href'] = page_reference(element['href'])[:400]
+            href, count = mediate_url(element['href'], excluded)
+            redacted += count
+            row['href'] = href[:400]
         if not guarded_field(element) and isinstance(element.get('value'), str) and element['value']:
             value, count = scrub(element['value'][:VALUE_LIMIT], excluded)
             redacted += count
@@ -235,11 +294,39 @@ def mediate_snapshot(raw, excluded=(), requested_url=None):
             break
     for row in internal:
         row['submit_guarded'] = guarded_submit(row, elements)
-    snapshot = {'url': page_reference(raw.get('url')), 'title': str(raw.get('title') or '')[:200], 'text': text,
+    url, count = mediate_url(raw.get('url'), excluded)
+    redacted += count
+    title, count = scrub(str(raw.get('title') or '')[:200], excluded)
+    redacted += count
+    snapshot = {'url': url, 'title': title, 'text': text,
                 'elements': visible, 'login_required': login_required, 'truncated': truncated,
                 'redacted_values': redacted}
     snapshot['_elements'] = internal
+    # Internal only (never returned): the unmediated page reference the
+    # approval binds to, and the page state a guarded step is bound to.
+    snapshot['_page'] = page_reference(raw.get('url'))
+    snapshot['_states'] = page_states(raw, elements, text, excluded)
     return snapshot
+
+
+def page_states(raw, elements, text, excluded=()):
+    """``{form id: state, None: page state}`` a guarded step's approval is bound to.
+
+    A form's state is its mediated visible text (price, quantity, terms) and
+    the mediated values of its non-guarded fields; guarded values (card, code,
+    password) are never part of it.  A target outside any form is bound to the
+    mediated page text.
+    """
+    forms = {}
+    for form in raw.get('forms') or []:
+        if isinstance(form, dict) and form.get('id') is not None:
+            forms[form['id']] = scrub(str(form.get('text') or '')[:TEXT_LIMIT], excluded)[0]
+    states = {None: text}
+    for form_id in {element.get('form') for element in elements if element.get('form') is not None}:
+        values = sorted((target_key(element), scrub(str(element.get('value') or ''), excluded)[0])
+                        for element in elements if element.get('form') == form_id and not guarded_field(element))
+        states[form_id] = forms.get(form_id, '') + '\n' + '\n'.join(f'{key}={value}' for key, value in values)
+    return states
 
 
 def public_view(snapshot):
@@ -382,15 +469,17 @@ class BrowserSession:
             raise ValueError('effect는 read, navigate, mutate, payment 중 하나여야 합니다.')
         return effect
 
-    def _guard(self, action, url, element_key, description, effect, deterministic):
+    def _guard(self, action, url, element_key, description, effect, deterministic, argument='', state=''):
         """Refuse a guarded step unless an exact owner approval is consumed now.
 
         ``deterministic`` is AgentOS's own classification of the target; the
         model's ``effect`` label is consulted only to ADD the requirement.
+        The approval is bound to the step's arguments and the current page
+        state too, so different text or a changed form asks again.
         """
         if not (deterministic or effect == 'payment'):
             return
-        binding = step_binding(self.work_id, action, url, element_key)
+        binding = step_binding(self.work_id, action, url, element_key, argument, state)
         if self.approvals.consume(binding):
             return
         try:
@@ -420,7 +509,7 @@ class BrowserSession:
         if parts.scheme not in ('http', 'https') or not parts.netloc:
             raise ValueError('http 또는 https 주소만 열 수 있습니다.')
         self._spend_step()
-        self._guard('browser_open', url, url, f'{parts.netloc} 페이지 열기', effect, False)
+        self._guard('browser_open', url, url, f'{_host(parts)} 페이지 열기', effect, False, argument=url)
         self._call(lambda timeout: self._driver().goto(url, timeout))
         return self._page_state(requested_url=url)
 
@@ -441,8 +530,10 @@ class BrowserSession:
         self._spend_step()
         snapshot = self._snapshot()
         element = resolve_target(snapshot, args.get('target'))
-        self._guard('browser_click', snapshot['url'], target_key(element),
-                    f"'{element.get('name') or element.get('role')}' 버튼 누르기", effect, element['submit_guarded'])
+        key = target_key(element)
+        self._guard('browser_click', snapshot['_page'], key,
+                    f"'{element.get('name') or element.get('role')}' 버튼 누르기", effect, element['submit_guarded'],
+                    argument=key, state=self._state_of(snapshot, element))
         self._call(lambda timeout: self._driver().click(element['index'], timeout))
         return self._page_state()
 
@@ -455,10 +546,16 @@ class BrowserSession:
         self._spend_step()
         snapshot = self._snapshot()
         element = resolve_target(snapshot, args.get('target'))
-        self._guard('browser_type', snapshot['url'], target_key(element),
-                    f"'{element.get('name') or element.get('role')}' 입력란에 입력", effect, element['payment'])
+        self._guard('browser_type', snapshot['_page'], target_key(element),
+                    f"'{element.get('name') or element.get('role')}' 입력란에 입력", effect, element['payment'],
+                    argument=text, state=self._state_of(snapshot, element))
         self._call(lambda timeout: self._driver().type(element['index'], text, timeout))
         return self._page_state()
+
+    @staticmethod
+    def _state_of(snapshot, element):
+        states = snapshot.get('_states') or {}
+        return states.get(element.get('form'), states.get(None, ''))
 
     def _require_page(self):
         if self.driver is None or self.last is None:
@@ -536,7 +633,8 @@ SNAPSHOT_SCRIPT = r"""
       value: takesValue ? String(el.value || '').slice(0, 200) : null, form: formId, disabled: !!el.disabled});
   });
   return {url: location.href, title: document.title, text: (document.body ? document.body.innerText : '').slice(0, 20000),
-    elements: elements.slice(0, 300)};
+    elements: elements.slice(0, 300),
+    forms: Array.from(forms.entries()).map(([form, id]) => ({id, text: String(form.innerText || '').slice(0, 6000)}))};
 }
 """
 INTERACTIVE_SELECTOR = ('a[href], button, input, select, textarea, summary, [role="button"], [role="link"], [role="textbox"], '

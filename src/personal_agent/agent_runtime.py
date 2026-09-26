@@ -26,6 +26,34 @@ STRING={'type':'string'}
 #: deterministic guard there never depends on it.
 BROWSER_ACTIONS=frozenset({'browser_open','browser_read','browser_find','browser_click','browser_type'})
 EFFECT={'type':'string','enum':['read','navigate','mutate','payment']}
+def recorded_arguments(action,args):
+ """Tool-call arguments as AgentOS may record or project them (#656).
+
+ ``browser_type`` text can be a password, a card number or a one-time code,
+ and is recorded before the payment guard runs, so it is replaced by a
+ length placeholder at every recording point; nothing else changes.
+ """
+ if action!='browser_type' or not isinstance(args,dict):return args
+ text=args.get('text')
+ return {**args,'text':f'[가림: {len(text)}자]' if isinstance(text,str) else '[가림]'}
+
+def recorded_calls(calls,tools):
+ """The model's tool calls with ``recorded_arguments`` applied to each (#656)."""
+ if not isinstance(calls,list):return calls
+ out=[]
+ for call in calls:
+  try:
+   function=call.get('function') or {}
+   action=(tools.get(function.get('name')) or {}).get('host_action')
+  except AttributeError:
+   out.append(call);continue
+  if action!='browser_type':
+   out.append(call);continue
+  try:arguments=json.dumps(recorded_arguments(action,json.loads(function.get('arguments','{}'))),ensure_ascii=False)
+  except (TypeError,ValueError):arguments='[가림]'
+  out.append({**call,'function':{**function,'arguments':arguments}})
+ return out
+
 BROWSER_EFFECT_NOTE=' Declare effect: read (only looking), navigate (moving between pages), mutate (changes account state such as a cart or a form), payment (pays or enters card data; always needs owner approval). AgentOS refuses card/one-time-code/password fields and their form buttons without the owner\'s approval whatever the label says.'
 #: #655: actions whose one public search takes the model's provider/locale.
 SEARCH_BACKED_ACTIONS=frozenset({'web_search','bounded_public_research'})
@@ -2042,7 +2070,7 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
   if actual and active_config.get('model')=='openrouter/free' and actual!='openrouter/free':active_config['model']=actual
   actual=actual or NOT_REPORTED
   calls=message.get('tool_calls') or []
-  record('model','responded',json.dumps({'scope':scope,'model':actual,'requested_model':requested,'tool_calls':calls,'has_text':bool(message.get('content'))},ensure_ascii=False))
+  record('model','responded',json.dumps({'scope':scope,'model':actual,'requested_model':requested,'tool_calls':recorded_calls(calls,capabilities.tools),'has_text':bool(message.get('content'))},ensure_ascii=False))
   if not calls and not successful and not failed and not checked_direct:
    checked_direct=True
    messages.append(message)
@@ -2087,7 +2115,7 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
     # #656: a browser call reads or changes page state, so the same call may run again.
     stateful=capabilities.tools[name]['host_action'] in BROWSER_ACTIONS
     if attempt>1 and not stateful:raise ToolError('같은 도구 요청은 현재 작업에서 한 번만 실행합니다. 결과를 사용하거나 새 요청을 보내 주세요.','duplicate_call')
-    record(name,'running',json.dumps({'scope':scope,'call_id':call['id'],'attempt':attempt,'host_action':capabilities.tools[name]['host_action'],'arguments':args},ensure_ascii=False))
+    record(name,'running',json.dumps({'scope':scope,'call_id':call['id'],'attempt':attempt,'host_action':capabilities.tools[name]['host_action'],'arguments':recorded_arguments(capabilities.tools[name]['host_action'],args)},ensure_ascii=False))
     if stateful:result=capabilities.execute(name,args)
     else:
      if cache_key not in capabilities.memo:capabilities.memo[cache_key]=capabilities.execute(name,args)

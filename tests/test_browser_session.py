@@ -65,6 +65,7 @@ PAGES = {
       <button type="button">저장</button></body></html>''',
     '/checkout': '''<html><head><title>결제</title></head><body><h1>결제</h1>
       <form action="/pay" method="post">
+        <p>결제 금액 12,900원</p>
         <label>카드번호 <input type="text" autocomplete="cc-number" name="card"></label>
         <label>CVC <input type="text" autocomplete="cc-csc" name="cvc"></label>
         <label>받는 사람 <input type="text" autocomplete="name" name="who"></label>
@@ -72,6 +73,17 @@ PAGES = {
       </form>
       <form action="/coupon" method="post"><label>쿠폰 <input type="text" name="coupon"></label><button type="submit">쿠폰 적용</button></form>
       </body></html>''',
+    '/checkout-compound': '''<html><head><title>결제</title></head><body><h1>결제</h1>
+      <form action="/pay" method="post">
+        <label>카드 <input type="text" autocomplete="section-checkout billing cc-number" name="card" value="4242424242424242"></label>
+        <label>보안코드 <input type="text" autocomplete="shipping cc-csc" name="cvc" value="987"></label>
+        <label>확인 코드 <input type="text" autocomplete="one-time-code webauthn" name="otp" value="246810"></label>
+        <label>메모 <input type="text" autocomplete="section-a shipping street-address" name="addr" value="서울"></label>
+        <button type="submit">주문하기</button>
+      </form></body></html>''',
+    '/reset/' + PASSPORT: '''<html><head><title>Reset token=abcDEF123456secret</title></head><body><h1>재설정</h1>
+      <a href="https://owner:hunter2@fixture.test/reset/''' + PASSPORT + '''?code=1#x">다시 열기</a>
+      <a href="https://fixture.test/help">도움말</a></body></html>''',
     '/pay': '''<html><head><title>결제 완료</title></head><body><h1>결제 완료</h1></body></html>''',
     '/coupon': '''<html><head><title>쿠폰</title></head><body><h1>쿠폰 적용됨</h1></body></html>''',
     '/login': '''<html><head><title>로그인</title></head><body><form action="/session" method="post">
@@ -138,6 +150,8 @@ class _PageParser(HTMLParser):
         if not text or self.skip:
             return
         self.text.append(text)
+        if self.form is not None:
+            self.form.setdefault('texts', []).append(text)
         if self.label is not None:
             self.label.append(text)
         for element in self.pending:
@@ -146,7 +160,8 @@ class _PageParser(HTMLParser):
 
     def result(self, title):
         elements = [{k: v for k, v in e.items() if k not in ('hidden', 'action')} for e in self.elements if not e['hidden']]
-        return {'url': self.url, 'title': title, 'text': '\n'.join(self.text), 'elements': elements}, self.elements
+        forms = [{'id': form['id'], 'text': '\n'.join(form.get('texts', []))} for form in self.forms]
+        return {'url': self.url, 'title': title, 'text': '\n'.join(self.text), 'elements': elements, 'forms': forms}, self.elements
 
 
 class FakeDriver:
@@ -334,6 +349,21 @@ class MediationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             sess.open({'url': ORIGIN + '/product', 'effect': 'purchase'})
 
+    def test_title_url_and_hrefs_are_mediated_and_userinfo_dropped(self):
+        sess, _ = session(excluded=lambda: [PASSPORT])
+        page = sess.open({'url': 'https://owner:hunter2@fixture.test/reset/' + PASSPORT + '?t=1', 'effect': 'read'})
+        text = flat(page)
+        for secret in (PASSPORT, 'hunter2', 'abcDEF123456secret', 'owner:', 'code=1'):
+            self.assertNotIn(secret, text)
+        self.assertEqual(page['url'], 'https://fixture.test/reset/' + bs.REDACTED)
+        self.assertIn(bs.REDACTED, page['title'])
+        rows = {row['name']: row for row in page['elements']}
+        self.assertEqual(rows['다시 열기']['href'], 'https://fixture.test/reset/' + bs.REDACTED)
+        self.assertEqual(rows['도움말']['href'], 'https://fixture.test/help', 'ordinary links are unchanged')
+        self.assertEqual(bs.page_reference('https://u:p@h.test:8443/x?y#z'), 'https://h.test:8443/x')
+        found = sess.find({'text': '재설정'})
+        self.assertNotIn(PASSPORT, flat(found))
+
     def test_page_reference_drops_query_and_fragment(self):
         self.assertEqual(bs.page_reference('https://h.test/p?session=abc#x'), 'https://h.test/p')
         snapshot = evidence_summary('browser_open', {'state': 'page', 'url': 'https://h.test/p', 'title': 't', 'text': 'x' * 10,
@@ -366,9 +396,11 @@ class PaymentGuardTests(unittest.TestCase):
         self.assertEqual([entry for entry in self.driver.log if entry[0] in ('type', 'click')], [], 'nothing reached the page')
         self.assertEqual(len(self.approvals.requests), 12)
         binding, description = self.approvals.requests[0]
-        self.assertEqual(binding, bs.step_binding('work-1', 'browser_type', ORIGIN + '/checkout',
-                                                  bs.target_key({'role': 'textbox', 'name': '카드번호', 'tag': 'input', 'type': 'text',
-                                                                 'autocomplete': 'cc-number', 'form': 1})))
+        self.assertEqual(set(binding), set(bs.BINDING_FIELDS))
+        self.assertEqual((binding['work_id'], binding['action']), ('work-1', 'browser_type'))
+        self.assertEqual(binding['page_digest'], bs.digest(ORIGIN + '/checkout'))
+        self.assertEqual(binding['argument_digest'], bs.digest('4111'))
+        self.assertNotIn('4111', repr(self.approvals.requests), 'the typed text is never carried, only its digest')
         self.assertIn('카드번호', description)
 
     def test_ordinary_fields_and_buttons_proceed_and_the_label_can_only_add(self):
@@ -381,9 +413,17 @@ class PaymentGuardTests(unittest.TestCase):
         self.refused(self.sess.click, {'target': '쿠폰 적용', 'effect': 'payment'})
         self.refused(self.sess.open, {'url': ORIGIN + '/pay', 'effect': 'payment'})
 
+    def refused_binding(self, pages, action, args):
+        """The binding a fresh session is refused on (what the owner then approves)."""
+        probe = Approvals()
+        sess, _ = session(FakeDriver(pages), approvals=probe)
+        sess.open({'url': ORIGIN + '/checkout', 'effect': 'navigate'})
+        with self.assertRaises(ToolError):
+            getattr(sess, action)(args)
+        return probe.requests[-1][0]
+
     def test_an_exact_approval_is_consumed_once_and_only_for_its_binding(self):
-        card = bs.target_key({'role': 'textbox', 'name': '카드번호', 'tag': 'input', 'type': 'text', 'autocomplete': 'cc-number', 'form': 1})
-        approvals = Approvals(bs.step_binding('work-1', 'browser_type', ORIGIN + '/checkout', card))
+        approvals = Approvals(self.refused_binding(PAGES, 'type', {'target': '카드번호', 'text': '4111', 'effect': 'payment'}))
         sess, driver = session(approvals=approvals)
         sess.open({'url': ORIGIN + '/checkout', 'effect': 'navigate'})
         # Same page, different target (CVC): refused.  Same target on another page: refused.
@@ -394,6 +434,65 @@ class PaymentGuardTests(unittest.TestCase):
         with self.assertRaises(ToolError) as caught:
             sess.type({'target': '카드번호', 'text': '4111', 'effect': 'payment'})
         self.assertEqual(caught.exception.code, 'approval_required', 'one approval, one step')
+
+    def test_different_text_or_a_changed_form_does_not_consume_the_approval(self):
+        approved = self.refused_binding(PAGES, 'type', {'target': '카드번호', 'text': '4111', 'effect': 'payment'})
+        # The resumed run types different text: a new request, the approval is left unspent.
+        approvals = Approvals(approved)
+        sess, driver = session(approvals=approvals)
+        sess.open({'url': ORIGIN + '/checkout', 'effect': 'navigate'})
+        with self.assertRaises(ToolError) as caught:
+            sess.type({'target': '카드번호', 'text': '5555', 'effect': 'payment'})
+        self.assertEqual(caught.exception.code, 'approval_required')
+        self.assertEqual(len(approvals.issued), 1, 'the old approval was not consumed')
+        self.assertEqual(approvals.requests[-1][0]['argument_digest'], bs.digest('5555'))
+        # The form's total changed on the same URL: also a new request.
+        changed = dict(PAGES)
+        changed['/checkout'] = PAGES['/checkout'].replace('결제 금액 12,900원', '결제 금액 129,000원')
+        sess, driver = session(FakeDriver(changed), approvals=approvals)
+        sess.open({'url': ORIGIN + '/checkout', 'effect': 'navigate'})
+        with self.assertRaises(ToolError):
+            sess.type({'target': '카드번호', 'text': '4111', 'effect': 'payment'})
+        self.assertEqual(len(approvals.issued), 1)
+        self.assertNotEqual(approvals.requests[-1][0]['state_digest'], approved['state_digest'])
+        self.assertEqual([entry for entry in driver.log if entry[0] == 'type'], [])
+        # A changed field value of the form (quantity, recipient) changes the state of the button too.
+        click = self.refused_binding(PAGES, 'click', {'target': '결제하기', 'effect': 'navigate'})
+        approvals = Approvals(click)
+        sess, driver = session(approvals=approvals, steps=40)
+        sess.open({'url': ORIGIN + '/checkout', 'effect': 'navigate'})
+        sess.type({'target': '받는 사람', 'text': '다른 사람', 'effect': 'mutate'})
+        with self.assertRaises(ToolError):
+            sess.click({'target': '결제하기', 'effect': 'navigate'})
+        self.assertEqual(len(approvals.issued), 1)
+        # Unchanged page, same button: the approval is spent and the click runs.
+        sess.open({'url': ORIGIN + '/checkout', 'effect': 'navigate'})
+        driver.values.clear()
+        sess.click({'target': '결제하기', 'effect': 'navigate'})
+        self.assertEqual(driver.posts, [('post', '/pay')])
+        self.assertEqual(approvals.issued, [])
+
+    def test_compound_autocomplete_tokens_are_redacted_and_guarded(self):
+        self.assertEqual(bs.autocomplete_field('section-checkout billing cc-number'), 'cc-number')
+        self.assertEqual(bs.autocomplete_field('shipping cc-csc'), 'cc-csc')
+        self.assertEqual(bs.autocomplete_field('one-time-code webauthn'), 'one-time-code')
+        self.assertEqual(bs.autocomplete_field('  Section-A HOME tel  '), 'tel')
+        self.assertEqual(bs.autocomplete_field(''), '')
+        approvals = Approvals()
+        sess, driver = session(approvals=approvals, steps=40)
+        page = sess.open({'url': ORIGIN + '/checkout-compound', 'effect': 'navigate'})
+        for secret in ('4242424242424242', '987', '246810'):
+            self.assertNotIn(secret, flat(page))
+        rows = {row['name']: row for row in page['elements']}
+        self.assertEqual(rows['메모']['value'], '서울', 'a non-credential compound token keeps its value')
+        for target in ('카드', '보안코드', '확인 코드'):
+            with self.assertRaises(ToolError) as caught:
+                sess.type({'target': target, 'text': '1', 'effect': 'mutate'})
+            self.assertEqual(caught.exception.code, 'approval_required', target)
+        with self.assertRaises(ToolError) as caught:
+            sess.click({'target': '주문하기', 'effect': 'navigate'})
+        self.assertEqual(caught.exception.code, 'approval_required', 'the submit of a form with those fields')
+        self.assertEqual([entry for entry in driver.log if entry[0] in ('type', 'click')], [])
 
     def test_password_fields_are_guarded_too(self):
         sess, _ = session()
@@ -525,6 +624,24 @@ class LoopTests(unittest.TestCase):
         self.assertEqual(len(approvals.requests), 1)
         self.assertEqual([e for e in driver.log if e[0] == 'type'], [])
 
+    def test_browser_type_text_is_never_recorded(self):
+        card = '4111111111111111'
+        script = Script({'tool_calls': [call('1', 'browser_open', url=ORIGIN + '/checkout', effect='navigate')]},
+                        {'tool_calls': [call('2', 'browser_type', target='카드번호', text=card, effect='mutate'),
+                                        call('3', 'browser_type', target='받는 사람', text='홍길동 010-1234-5678', effect='mutate')]},
+                        {'content': '끝'})
+        caps = self.caps(script, FakeDriver())
+        run_agent(caps.adapter, CFG, '', [{'role': 'user', 'content': '입력해줘'}], '', caps, self.record)
+        recorded = flat(self.events)
+        self.assertNotIn(card, recorded)
+        self.assertNotIn('010-1234-5678', recorded)
+        running = [json.loads(d) for t, s, d in self.events if t == 'browser_type' and s == 'running']
+        self.assertEqual([row['arguments']['text'] for row in running], ['[가림: 16자]', '[가림: 17자]'],
+                         'both calls are recorded before the guard runs, each redacted')
+        responded = [json.loads(d) for t, s, d in self.events if t == 'model' and s == 'responded']
+        typed = [json.loads(c['function']['arguments']) for row in responded for c in row['tool_calls'] if c['function']['name'] == 'browser_type']
+        self.assertEqual(sorted(row['text'] for row in typed), ['[가림: 16자]', '[가림: 17자]'])
+
     def test_login_required_keeps_the_turn_from_claiming_success(self):
         script = Script({'tool_calls': [call('1', 'browser_open', url=ORIGIN + '/login', effect='navigate')]},
                         {'content': '장바구니에 담았습니다.'})
@@ -549,34 +666,35 @@ class StoreApprovalTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.store = QuickStore(Path(self.tmp.name) / 'data')
-        self.page, self.target = bs.digest('https://h.test/checkout'), bs.digest('textbox|카드번호')
+        self.page, self.target, self.step = bs.digest('https://h.test/checkout'), bs.digest('textbox|카드번호'), bs.digest('4111|state')
 
     def test_issue_and_consume_exactly_once_for_the_exact_binding(self):
-        issued = self.store.issue_browser_step_approval('local-owner', 'w1', 'browser_type', self.page, self.target, now=1000)
+        issued = self.store.issue_browser_step_approval('local-owner', 'w1', 'browser_type', self.page, self.target, self.step, now=1000)
         token = issued['approval_token']
-        for owner, work, action, page, target in (('other', 'w1', 'browser_type', self.page, self.target),
-                                                  ('local-owner', 'w2', 'browser_type', self.page, self.target),
-                                                  ('local-owner', 'w1', 'browser_click', self.page, self.target),
-                                                  ('local-owner', 'w1', 'browser_type', bs.digest('other'), self.target),
-                                                  ('local-owner', 'w1', 'browser_type', self.page, bs.digest('other'))):
+        for owner, work, action, page, target, step in (('other', 'w1', 'browser_type', self.page, self.target, self.step),
+                                                        ('local-owner', 'w2', 'browser_type', self.page, self.target, self.step),
+                                                        ('local-owner', 'w1', 'browser_click', self.page, self.target, self.step),
+                                                        ('local-owner', 'w1', 'browser_type', bs.digest('other'), self.target, self.step),
+                                                        ('local-owner', 'w1', 'browser_type', self.page, bs.digest('other'), self.step),
+                                                        ('local-owner', 'w1', 'browser_type', self.page, self.target, bs.digest('5555|state'))):
             with self.assertRaises(ValueError):
-                self.store.consume_browser_step_approval(owner, work, action, page, target, token, now=1001)
+                self.store.consume_browser_step_approval(owner, work, action, page, target, step, token, now=1001)
         with self.assertRaises(ValueError):
-            self.store.consume_browser_step_approval('local-owner', 'w1', 'browser_type', self.page, self.target, 'not-the-token', now=1001)
-        self.assertEqual(self.store.consume_browser_step_approval('local-owner', 'w1', 'browser_type', self.page, self.target, token, now=1001),
+            self.store.consume_browser_step_approval('local-owner', 'w1', 'browser_type', self.page, self.target, self.step, 'not-the-token', now=1001)
+        self.assertEqual(self.store.consume_browser_step_approval('local-owner', 'w1', 'browser_type', self.page, self.target, self.step, token, now=1001),
                          {'consumed': True, 'action': 'browser_type'})
         with self.assertRaises(ValueError):
-            self.store.consume_browser_step_approval('local-owner', 'w1', 'browser_type', self.page, self.target, token, now=1002)
+            self.store.consume_browser_step_approval('local-owner', 'w1', 'browser_type', self.page, self.target, self.step, token, now=1002)
 
     def test_expired_and_replaced_approvals_are_refused(self):
-        stale = self.store.issue_browser_step_approval('local-owner', 'w1', 'browser_type', self.page, self.target, ttl=10, now=1000)
+        stale = self.store.issue_browser_step_approval('local-owner', 'w1', 'browser_type', self.page, self.target, self.step, ttl=10, now=1000)
         with self.assertRaises(ValueError):
-            self.store.consume_browser_step_approval('local-owner', 'w1', 'browser_type', self.page, self.target, stale['approval_token'], now=1011)
-        first = self.store.issue_browser_step_approval('local-owner', 'w1', 'browser_type', self.page, self.target, now=2000)
-        second = self.store.issue_browser_step_approval('local-owner', 'w1', 'browser_type', self.page, self.target, now=2001)
+            self.store.consume_browser_step_approval('local-owner', 'w1', 'browser_type', self.page, self.target, self.step, stale['approval_token'], now=1011)
+        first = self.store.issue_browser_step_approval('local-owner', 'w1', 'browser_type', self.page, self.target, self.step, now=2000)
+        second = self.store.issue_browser_step_approval('local-owner', 'w1', 'browser_type', self.page, self.target, self.step, now=2001)
         with self.assertRaises(ValueError):
-            self.store.consume_browser_step_approval('local-owner', 'w1', 'browser_type', self.page, self.target, first['approval_token'], now=2002)
-        self.store.consume_browser_step_approval('local-owner', 'w1', 'browser_type', self.page, self.target, second['approval_token'], now=2002)
+            self.store.consume_browser_step_approval('local-owner', 'w1', 'browser_type', self.page, self.target, self.step, first['approval_token'], now=2002)
+        self.store.consume_browser_step_approval('local-owner', 'w1', 'browser_type', self.page, self.target, self.step, second['approval_token'], now=2002)
 
 
 # ---------------------------------------------------------------- service surfaces
@@ -694,6 +812,47 @@ class ServiceTests(unittest.TestCase):
         with self.store.db() as db:
             rows = db.execute("SELECT state FROM memory_approvals WHERE action='browser-step'").fetchall()
         self.assertEqual([r['state'] for r in rows], ['consumed'])
+
+    def scan_store(self, needle):
+        """Every table row, config row and file under the data directory, searched for ``needle``."""
+        hits = []
+        with self.store.db() as db:
+            tables = [row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+            for table in tables:
+                for row in db.execute(f'SELECT * FROM "{table}"'):
+                    if needle in flat([str(value) for value in tuple(row)]):
+                        hits.append(table)
+        for path in Path(self.store.root).rglob('*'):
+            if path.is_file() and needle.encode() in path.read_bytes():
+                hits.append(str(path.relative_to(self.store.root)))
+        return hits
+
+    def test_a_refused_card_number_leaves_no_trace_in_the_store(self):
+        job_id = self.refused_work()
+        self.assertTrue(self.service.deliver_notification())
+        self.assertEqual(self.store.job(job_id)['status'], 'partial')
+        self.assertEqual(self.scan_store('4111111111111111'), [])
+        self.assertEqual(self.scan_store('41111111'), [])
+        self.assertNotIn('4111111111111111', flat(self.calls), 'nor in anything sent to Telegram')
+        self.assertNotIn('4111111111111111', flat(self.service.task_progress()))
+        self.assertNotIn('4111111111111111', flat(self.service.settings()))
+        row = self.service._browser_request(job_id)
+        self.assertEqual(set(row) - {'work_id', 'action', 'label', 'state', 'requested_at'},
+                         {'digest', 'page_digest', 'target_digest', 'step_digest'}, 'only keyed digests are kept')
+
+    def test_a_resumed_run_typing_different_text_asks_again(self):
+        job_id = self.refused_work()
+        self.service.browser_step_decision({'work_id': job_id, 'decision': 'approve'})
+        self.scripts = [Script({'tool_calls': [call('1', 'browser_open', url=ORIGIN + '/checkout', effect='navigate')]},
+                               {'tool_calls': [call('2', 'browser_type', target='카드번호', text='5555555555554444', effect='mutate')]},
+                               {'content': '다른 카드를 입력하려 했습니다.'})]
+        self.assertTrue(self.service.run_one())
+        self.assertEqual([e for e in self.driver_log if e[0] == 'type'], [], 'the approval did not cover different text')
+        self.assertEqual(self.service._browser_request(job_id)['state'], 'requested', 'a new request for the new text')
+        with self.store.db() as db:
+            states = [r['state'] for r in db.execute("SELECT state FROM memory_approvals WHERE action='browser-step'")]
+        self.assertEqual(states, ['issued'], 'the old approval stays unspent until it expires or is replaced')
+        self.assertEqual(self.scan_store('5555555555554444'), [])
 
     def test_web_decision_deny_drops_the_request_and_approve_requeues(self):
         job_id = self.refused_work()
@@ -913,6 +1072,17 @@ class PlaywrightIntegrationTests(unittest.TestCase):
             with self.assertRaises(ToolError):
                 sess.click({'target': '결제하기', 'effect': 'mutate'})
             self.assertEqual(self.server.posts, ['/cart'], 'no payment form was submitted')
+            # Compound autocomplete tokens are classified by their field token on the real DOM too.
+            compound = sess.open({'url': self.origin + '/checkout-compound', 'effect': 'navigate'})
+            for secret in ('4242424242424242', '987', '246810'):
+                self.assertNotIn(secret, flat(compound))
+            with self.assertRaises(ToolError):
+                sess.click({'target': '주문하기', 'effect': 'navigate'})
+            # Title, path and link userinfo are mediated.
+            reset = sess.open({'url': self.origin + '/reset/' + PASSPORT, 'effect': 'read'})
+            for secret in (PASSPORT, 'hunter2', 'abcDEF123456secret'):
+                self.assertNotIn(secret, flat(reset))
+            self.assertEqual(self.server.posts, ['/cart'])
             login = sess.open({'url': self.origin + '/login', 'effect': 'navigate'})
             self.assertEqual(login['state'], 'login_required')
         finally:

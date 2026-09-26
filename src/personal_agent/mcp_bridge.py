@@ -13,7 +13,8 @@ import time
 
 from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS, LATEST_HANDSHAKE_VERSION
 
-from .agent_runtime import (CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, PUBLIC_TASK_NO_JUDGMENT, PUBLIC_TASK_SEARCH_HINT,
+from .agent_runtime import (CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, PUBLIC_TASK_LOOKUP_LIMIT, PUBLIC_TASK_NO_JUDGMENT,
+                            PUBLIC_TASK_SEARCH_HINT, PUBLIC_TASK_STATE_UNAVAILABLE,
                             Capabilities, evidence_summary, lookup_sources,
                             recorded_private_sources, work_source_records)
 from .bounded_execution import AgentOSMcpTools, ExecutionError, profile_actions, redact_reason
@@ -22,7 +23,7 @@ from .quickstart_store import QuickStore
 
 
 #: AgentOS's own fixed lookup-refusal texts (#605 D2): safe to return verbatim.
-_OWNER_VISIBLE_REFUSALS = frozenset({*PUBLIC_TASK_NO_JUDGMENT.values(),
+_OWNER_VISIBLE_REFUSALS = frozenset({*PUBLIC_TASK_NO_JUDGMENT.values(), PUBLIC_TASK_LOOKUP_LIMIT, PUBLIC_TASK_STATE_UNAVAILABLE,
                                      *(text + PUBLIC_TASK_SEARCH_HINT for text in PUBLIC_TASK_NO_JUDGMENT.values())})
 
 

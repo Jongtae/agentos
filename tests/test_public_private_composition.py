@@ -17,7 +17,7 @@ from pathlib import Path
 from unittest import mock
 
 from personal_agent import mcp_bridge
-from personal_agent.agent_runtime import (lookup_words, LOOKUP_CLEAN_QUERY_MAX, LOOKUP_CLEAN_WORD_MAX, PUBLIC_TASK_LOOKUP_LIMIT, LOOKUP_CLEAN_PER_WORK, PUBLIC_TASK_NO_JUDGMENT, PUBLIC_TASK_SEARCH_HINT, LOOKUP_JUDGMENTS_PER_WORK, ENGINE_UNMEDIATED, HISTORY_PREFIX, OWNER_CONVERSATION, PUBLIC_TASK_PLACE,
+from personal_agent.agent_runtime import (lookup_words, PUBLIC_TASK_STATE_UNAVAILABLE, LOOKUP_CLEAN_QUERY_MAX, LOOKUP_CLEAN_WORD_MAX, PUBLIC_TASK_LOOKUP_LIMIT, LOOKUP_CLEAN_PER_WORK, PUBLIC_TASK_NO_JUDGMENT, PUBLIC_TASK_SEARCH_HINT, LOOKUP_JUDGMENTS_PER_WORK, ENGINE_UNMEDIATED, HISTORY_PREFIX, OWNER_CONVERSATION, PUBLIC_TASK_PLACE,
                                           PUBLIC_TASK_UNRESOLVED, WORK_SOURCES_KEY, Capabilities, egress_refusal,
                                           history_provenance, run_agent, work_sources)
 from personal_agent.bounded_execution import ExecutionResult
@@ -1168,6 +1168,107 @@ class RoundEightFindings(unittest.TestCase):
                 self.assertEqual(self.sent(), [sent])
         with self.assertRaises(ValueError):
             self.caps(['서울 날씨 알려줘'], ['서울 병원 예약 메모']).execute('weather', {'city': '서울'})
+
+
+class RoundNineFindings(unittest.TestCase):
+    """Review of draft PR #634 @ 8a8df7a (within the owner's #605 scope)."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        self.path = Path(tmp.name) / 'state'
+        self.store = QuickStore(self.path)
+        self.wire = Wire()
+
+    def caps(self, permitted, excluded=(), judge=judged_ordinary, work=None):
+        def sources():
+            return {'permitted': list(permitted), 'excluded': list(excluded), 'current': permitted[-1]}
+        return Capabilities(self.store, None, CFG, '', work or next_work(), lambda *e: None, network=self.wire,
+                            lookup_sources=sources, lookup_sensitivity=judge)
+
+    def sent(self):
+        return [plan.get('query', plan.get('city')) for plan in self.wire.plans]
+
+    def check_saved(self, saved, cases):
+        for query, expected in cases:
+            with self.subTest(saved=saved, query=query):
+                self.wire.plans.clear()
+                self.caps(['병원 hospital 찾아줘'], saved).execute('web_search', {'query': query})
+                self.assertEqual(self.sent(), [expected])
+
+    def check_withheld(self, value, cases, explicit=()):
+        """``value`` withheld by the judgment in one process; ``cases`` looked up by a second process."""
+        work = next_work()
+        self.caps([f'{value} 병원 찾아줘'], judge=ConversationJudgments(flagging(value)).lookup_term_sensitivity,
+                  work=work).execute('web_search', {'query': f'{value} 병원'})
+        for query, expected in cases:
+            with self.subTest(withheld=value, query=query):
+                self.wire.plans.clear()
+                self.caps(['병원 hospital 찾아줘'], work=work).execute('web_search', {'query': query})
+                self.assertEqual(self.sent(), [expected])
+        for typed, expected in explicit:
+            with self.subTest(withheld=value, explicit=typed):
+                self.wire.plans.clear()
+                self.caps([f'/search {typed}'], judge=None, work=work).execute('web_search', {'query': typed})
+                self.assertEqual(self.sent(), [expected])
+
+    # -- P1-A: a jamo-spelled value followed by a particle or suffix
+    def test_p1_a_jamo_spelled_value_with_a_suffix(self):
+        self.check_saved(['김철수'], [('ㄱㅣㅁㅊㅓㄹㅅㅜ님 병원', '병원'), ('김ㅊㅓㄹㅅㅜ에게 병원', '병원'),
+                                     ('기ㅁ처ㄹ수씨 병원', '병원')])
+        self.check_saved(['여권번호'], [('ㅇㅕㄱㅝㄴ번호를 병원', '병원')])
+        self.check_withheld('김철수', [('ㄱㅣㅁㅊㅓㄹㅅㅜ님 병원', '병원'), ('김ㅊㅓㄹㅅㅜ에게 병원', '병원'),
+                                     ('기ㅁ처ㄹ수씨 병원', '병원')],
+                            explicit=[('ㄱㅣㅁㅊㅓㄹㅅㅜ님 병원', '병원')])
+
+    # -- P2-B: a judgment-withheld value with a suffix, in another process
+    def test_p2_b_withheld_value_with_a_suffix_across_processes(self):
+        self.check_withheld('김철수', [('김철수님 병원', '병원'), ('김철수에게 병원', '병원')],
+                            explicit=[('김철수님 병원', '병원')])
+        self.check_withheld('kimchulsoo', [('mrkimchulsoo hospital', 'hospital')],
+                            explicit=[('kimchulsoos hospital', 'hospital')])
+
+    # -- P2-C: spaced jamo of a short value without final consonants
+    def test_p2_c_spaced_jamo_of_a_four_jamo_value(self):
+        for value in ('이수', '김이수'):
+            self.check_saved([value], [('ㅇ ㅣ ㅅ ㅜ 병원', '병원')])
+            self.check_withheld(value, [('ㅇ ㅣ ㅅ ㅜ 병원', '병원')], explicit=[('ㅇ ㅣ ㅅ ㅜ 병원', '병원')])
+
+    # -- P3-D: a cluster final spelled as two jamo
+    def test_p3_d_cluster_final_spelled_as_two_jamo(self):
+        self.check_saved(['닭갈비집'], [('ㄷㅏㄹㄱㄱㅏㄹㅂㅣ 병원', '병원'), ('닭갈비 병원', '병원')])
+
+    # -- P3-E: stroke letters and ligatures
+    def test_p3_e_stroke_letters_fold(self):
+        self.check_withheld('Łukasz', [('lukasz hospital', 'hospital')])
+        self.check_withheld('lukasz', [('Łukasz hospital', 'hospital')])
+        self.check_saved(['Øster'], [('oster hospital', 'hospital')])
+
+    # -- P3-F: pruning of vanished Works, the row cap, and no silent loss
+    def test_p3_f_rows_of_vanished_works_are_pruned_and_the_row_cap_fails_closed(self):
+        self.store.put('work_lookup_state:gone', {'clean-lookup': 1})
+        self.caps(['뉴스 찾아줘']).execute('web_search', {'query': 'news'})
+        self.assertIsNone(self.store.config('work_lookup_state:gone', None))
+        with mock.patch('personal_agent.agent_runtime.LOOKUP_STATE_ROWS_MAX', 1):
+            with self.assertRaises(ValueError) as raised:
+                self.caps(['뉴스 찾아줘']).execute('web_search', {'query': 'news'})
+        self.assertIn('공개 조회 기록을 저장', str(raised.exception))  # the judgment or lookup claim, truthfully
+
+    def test_p3_f_a_failed_durable_write_refuses_the_lookup_and_keeps_the_value(self):
+        caps = self.caps([f'{SECRET_ID} 병원 찾아줘'], judge=ConversationJudgments(flagging(SECRET_ID)).lookup_term_sensitivity)
+        original = Capabilities._update_state
+        calls = []
+
+        def failing(self, change):
+            calls.append(1)
+            if len(calls) >= 3:  # claims succeed; the withheld write fails
+                raise OSError('disk full')
+            return original(self, change)
+        with mock.patch.object(Capabilities, '_update_state', failing):
+            with self.assertRaises(ValueError) as raised:
+                caps.execute('web_search', {'query': f'{SECRET_ID} 병원'})
+        self.assertEqual(str(raised.exception), PUBLIC_TASK_STATE_UNAVAILABLE)
+        self.assertEqual(self.wire.plans, [])
+        self.assertIn(SECRET_ID, caps.lookup_state['withheld'])
 
 
 class NoEngineEndToEnd(unittest.TestCase):

@@ -106,7 +106,7 @@ class LoopUnitTests(unittest.TestCase):
         self.assertEqual(result.outcome, 'succeeded')
         # The failed attempt reached the model as a typed observation and stays in the log.
         observation = json.loads(script.bodies[1]['messages'][-1]['content'])
-        self.assertEqual(observation, {'error': NOT_FOUND, 'code': 'tool_failed'})
+        self.assertEqual(observation, {'error': NOT_FOUND, 'code': 'tool_failed', 'retry': 'permanent', 'effect': 'none'})
         self.assertEqual([row['code'] for row in self.failed()], ['tool_failed'])
 
     def test_failed_write_is_not_erased_by_a_later_read(self):
@@ -153,7 +153,7 @@ class LoopUnitTests(unittest.TestCase):
         caps.execute('list_notes', {})
         clock.now += 11
         with self.assertRaises(ToolError) as refused:caps.execute('list_notes', {})
-        self.assertEqual(refused.exception.code, 'deadline')
+        self.assertEqual(refused.exception.code, 'deadline_exceeded')
         self.assertIn('deadline', BUDGET_CODES)
 
     def test_stop_is_checked_before_the_next_model_turn_and_call(self):

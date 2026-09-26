@@ -14,7 +14,7 @@ from .local_tools import LocalTools, normalize_public_url
 from .agent_runtime import (Capabilities, run_agent, AGENTS, evidence_summary, turn_context, render_turn_prompt,
                             CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, OWNER_CONVERSATION, lookup_sources, WORK_SOURCES_KEY, WORK_SOURCES_LIMIT, base_label,
                             history_provenance, WorkBudget, EFFECT_FREE_READS, explicit_search_query, outcome_from_events,
-                            WORK_STOP_KEY, WORK_STOP_KEEP, work_stop_requested)
+                            WORK_STOP_KEY, WORK_STOP_KEEP, work_stop_requested, WorkLedger, goal_summary, work_source_records)
 from .plugins import PluginRegistry
 from .providers import NOT_REPORTED, ModelAdapter, ProviderError, request_json, validate_model
 from .decision import DEFAULT_DECISION_PROVIDER, RoutedDecisionEngine
@@ -60,6 +60,7 @@ from .conversation_handoff import (LOCAL_AUTHORITY_KIND, LOCAL_AUTHORITY_LABELS,
                                    local_authority_handoff, local_refusal_text, LOCAL_RESUME_TTL_SECONDS)
 from . import local_folder_picker
 # PRESENCE-TG-01 / #581: native Telegram presence (reaction, typing, draft, anchor).
+from .context_observations import ContextObservations
 from .telegram_presence import (CONTROL_DETAILS, CONTROL_RETRY, THINKING_DRAFT_TEXT, WAIT_CHAT_ACTION, WAIT_DRAFT, PresenceTiming,
                                 TelegramTurnAddressing, WaitState, draft_id_for, render_telegram_html,
                                 reply_controls_markup, turn_gesture, without_consumed)
@@ -223,6 +224,9 @@ class AgentService:
         # reply anchor, control message) and the in-memory wait surface of
         # running Work.  Neither is a truth source.
         self.telegram_turns=TelegramTurnAddressing(store)
+        # #626: volunteered Telegram location / source-time observations in
+        # the same store; recorded by ingress, consumed later by #627.
+        self.context_observations=ContextObservations(store)
         self.presence_timing=PresenceTiming()
         self.presence={}
         self.subscription_engines=subscription_engines or SubscriptionEngines()
@@ -648,6 +652,12 @@ class AgentService:
             return False,'이전 요청이 개인 문서 내용을 사용해 자동으로 다시 실행하지 않았습니다.'
         if self.store.task_artifacts(previous['id']):
             return False,'이전 요청에 이미 저장된 결과가 있어 자동으로 다시 실행하지 않았습니다.'
+        # #594 item 1 (#607): a settings change, or a trusted-local CLI turn
+        # that could act outside AgentOS's mediated tools, may have changed
+        # state that no tool event records; it is never replayed blindly.
+        sources=work_source_records(self.store).get(previous['id'])
+        if isinstance(sources,list) and ({'owner-settings',ENGINE_UNMEDIATED}&set(sources)):
+            return False,'이전 요청이 설정 변경 또는 AgentOS가 중개하지 않은 엔진 작업을 포함해 자동으로 다시 실행하지 않았습니다.'
         effectful={'save_note','save_memory','delegate_agent',
                    'calendar_draft_create','calendar_draft_update','calendar_draft_cancel'}
         for event in events:
@@ -688,15 +698,19 @@ class AgentService:
             current=parent
         return None
 
-    def record_continuity(self, job_id, previous_id, relation, *, executed=False, reason=None, source_work_id=None):
-        self.store.link_work_relation(job_id,previous_id,relation)
+    def record_continuity(self, job_id, previous_id, relation, *, executed=False, reason=None, source_work_id=None, db=None):
         detail={'relation':relation,'related_work_id':previous_id,'executed':bool(executed)}
         if source_work_id and source_work_id!=previous_id:
             detail['source_work_id']=source_work_id
         if reason:detail['reason']=reason
-        with self.store.db() as db:
-            db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
-                       (job_id,'conversation_continuity','succeeded',json.dumps(detail,ensure_ascii=False),time.time()))
+        if db is None:
+            with self.store.db() as conn:
+                conn.execute('BEGIN IMMEDIATE')
+                return self.record_continuity(job_id,previous_id,relation,executed=executed,reason=reason,
+                                              source_work_id=source_work_id,db=conn)
+        self.store.link_work_relation(job_id,previous_id,relation,db=db)
+        db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                   (job_id,'conversation_continuity','succeeded',json.dumps(detail,ensure_ascii=False),time.time()))
 
     def cancel_focused_work(self, previous, connector_owner):
         """Cancel only the focused Work through an existing safe boundary."""
@@ -872,7 +886,7 @@ class AgentService:
                     'subscription_engines':self.subscription_engine_status(),
                     'subscription_execution':self.subscription_execution_profile(),
                     'telegram':{'enabled':tg.get('enabled',False),'mode':tg.get('mode','owner-token'),'username':tg.get('username',''),'paired':bool(tg.get('user_id')),'user_id':tg.get('user_id')},
-                    'file_roots':[{**root,'blocked':folder_grants.blocked(root.get('path',''),self.store)} for root in self.store.config('file_roots',[])], 'file_workspace':FileWorkspace(self.store).projection(), 'document_boundary':boundary, 'context_inbox':__import__('personal_agent.context_inbox',fromlist=['ContextInbox']).ContextInbox(self.store).status(), 'agents':[{'id':role['id'],'name':role['name'],'permissions':role['permissions'],'package_id':package['id']} for package in active_packages for role in package['roles']], 'packages':packages, 'tool_run':self.store.config('tool_run'), 'model_test':model_test, 'model_ready':self.model_ready(model,model_test), 'telegram_status':self.store.config('telegram_status'),'connectors':self.google_connection_rows()}
+                    'file_roots':[{**root,'blocked':folder_grants.blocked(root.get('path',''),self.store)} for root in self.store.config('file_roots',[])], 'file_workspace':FileWorkspace(self.store).projection(), 'document_boundary':boundary, 'context_inbox':__import__('personal_agent.context_inbox',fromlist=['ContextInbox']).ContextInbox(self.store).status(), 'agents':[{'id':role['id'],'name':role['name'],'permissions':role['permissions'],'package_id':package['id']} for package in active_packages for role in package['roles']], 'packages':packages, 'tool_run':self.store.config('tool_run'), 'model_test':model_test, 'model_ready':self.model_ready(model,model_test), 'telegram_status':self.store.config('telegram_status'),'connectors':self.google_connection_rows(),'current_context':self.context_observations.status()}
 
     def home(self):
         """Return the minimal, credential-free read model for the owner home."""
@@ -1825,7 +1839,10 @@ class AgentService:
         return (self.store.job(job_id) or {}).get('status')=='cancelled'
 
     def work_budget(self, job_id):
-        return WorkBudget(stop=lambda:self.work_stopped(job_id))
+        # #607 AX-10: attempts and the deadline are one durable row shared
+        # with the CLI's MCP bridge process serving the same Work.  Each host
+        # run (including a resumed parked Work) starts one fresh budget.
+        return WorkBudget(stop=lambda:self.work_stopped(job_id),ledger=WorkLedger(self.store,job_id,fresh=True))
 
     #: Rule-matched natural-language reads whose empty or unclear result is
     #: re-judged by the Work model loop (#606 T4, owner Q1).  Mail is not a
@@ -1848,6 +1865,24 @@ class AgentService:
             return True
         config=self.store.config('model',{})
         return bool(config) and self.model_ready(config)
+
+    def work_goal(self, job_id, capabilities, outcome):
+        """Attempts versus the goal, from this Work's durable events (#607 AX-07).
+
+        A recovered attempt is not the goal outcome: the record keeps how many
+        attempts ran and failed, which tools left their part unresolved, and
+        whether an effect is unknown, next to the Work's own outcome.
+        """
+        try:
+            with self.store.db() as db:
+                rows=db.execute('SELECT tool,status,detail FROM tool_events WHERE job_id=? ORDER BY id',(job_id,)).fetchall()
+            summary=goal_summary([(row['tool'],row['status'],row['detail']) for row in rows],
+                                 getattr(capabilities,'tools',None))
+            summary['outcome']=outcome
+            if self._work_has_unknown_effect(job_id):summary['effect']='unknown'
+            return summary
+        except Exception:
+            return None
 
     def cli_work_outcome(self, job_id, tools):
         """``(outcome, refusals)`` of a CLI Work from its own tool events (#606 T3)."""
@@ -2529,8 +2564,11 @@ class AgentService:
                 return None,'이미 다시 시도를 요청했습니다.'
             task_id=self.store.enqueue(source['message'],key,f'telegram:{generation}',sender,db=db)
             self.telegram_turns.record_source(task_id,sender,self.telegram_turns.source(job['id']),db=db)
-        self.record_continuity(task_id,job['id'],FOLLOWUP_RETRY,executed=True,
-                               source_work_id=source['id'] if source['id']!=job['id'] else None)
+            # #594 item 2 (#607): the retry, its relation and its continuity
+            # record commit together, so a crash cannot leave a retry that
+            # `_already_retried` does not see.
+            self.record_continuity(task_id,job['id'],FOLLOWUP_RETRY,executed=True,
+                                   source_work_id=source['id'] if source['id']!=job['id'] else None,db=db)
         return task_id,None
 
     def connector_connect_url(self, connector_id):
@@ -3430,16 +3468,48 @@ class AgentService:
                 try:self.telegram.answer_callback_query(callback_id,text,show_alert=show)
                 except ProviderError:pass
 
+    def set_current_context(self, body):
+        """Owner privacy control for current context (#626): use/timezone/clear only."""
+        return self.context_observations.set_controls(body)
+
+    def request_current_location(self, job_id, prompt):
+        """Ask the paired owner for a current position for one Work (#626 I3).
+
+        A one-time reply keyboard with ``request_location``; the matching
+        answer is a sender-reported current position bound to this Work, not
+        verified GPS.  The owner may type a place instead.
+        """
+        job=self.store.job(job_id)
+        cfg=self.store.config('telegram',{})
+        if (not job or not cfg.get('enabled') or not isinstance(cfg.get('user_id'),int)
+                or job.get('chat_id')!=cfg['user_id'] or not str(job.get('channel','')).startswith('telegram:')):
+            raise ValueError('이 작업은 Telegram에서 위치를 요청할 수 없습니다.')
+        if not isinstance(prompt,str) or not 0<len(prompt.strip())<=300:
+            raise ValueError('위치를 요청하는 목적을 짧게 적어 주세요.')
+        request_id=self.context_observations.open_location_request(job_id,cfg['user_id'],cfg.get('generation'))
+        markup={'keyboard':[[{'text':'현재 위치 보내기','request_location':True}]],
+                'one_time_keyboard':True,'resize_keyboard':True,
+                'input_field_placeholder':'또는 장소 이름을 입력하세요'}
+        try:
+            self.telegram.send_message(cfg['user_id'],prompt.strip(),markup)
+        except ProviderError:
+            self.context_observations.cancel_location_request(request_id)
+            raise
+        return request_id
+
     def ingest_update(self, update, generation):
         with self.lock:
             cfg=self.store.config('telegram',{})
             if not cfg.get('enabled') or cfg.get('generation')!=generation: return
             update_id=update.get('update_id')
             if not isinstance(update_id,int) or update_id<cfg.get('cursor',0): return
-            message=update.get('message',{})
+            # #626: an edit is a source revision of an earlier message, never
+            # a new request or a pairing attempt, so its text is not a turn.
+            edited=not isinstance(update.get('message'),dict) and isinstance(update.get('edited_message'),dict)
+            message=update['edited_message'] if edited else update.get('message',{})
             sender=message.get('from',{}).get('id')
             chat=message.get('chat',{})
-            text=message.get('text','')
+            text='' if edited else message.get('text','')
             private=chat.get('type')=='private' and isinstance(sender,int) and chat.get('id')==sender
             authorized=private and sender==cfg.get('user_id')
             paired=False
@@ -3472,8 +3542,14 @@ class AgentService:
                     # #581: the owner's own message is the reaction target and
                     # reply anchor for this Work.
                     self.telegram_turns.record_source(task_id,sender,message.get('message_id'),db=db)
+                    self.context_observations.note_text_source(db,task_id,message,generation)
                 else:
                     task_id=None
+                if authorized and not paired:
+                    # #626: a location or an edit is recorded (or refused) in
+                    # this same transaction as the cursor; it never becomes
+                    # a Work, a model call or a reply.
+                    self.context_observations.ingest_telegram(db,update,generation,sender)
                 cfg['cursor']=update_id+1
                 db.execute('INSERT INTO config VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',('telegram',json.dumps(cfg)))
             if paired:
@@ -4077,6 +4153,7 @@ class AgentService:
                     observed=verified_portion(verified_parts) if outcome=='partial' else None
                     db.execute("UPDATE jobs SET status=?,response=?,error=?,provider=?,model=?,delivery=?,owner_cause=?,owner_verified=? WHERE id=?",
                                (outcome,response,cause,provider,model,'pending' if job['chat_id'] else 'none',spoken,observed,job['id']))
+                self.record_turn_provenance(job['id'],goal=self.work_goal(job['id'],work_capabilities[0],outcome))
             except (ValueError,ProviderError,ExecutionError,OSError) as exc:
                 resolved_blocker=False
                 response=str(exc)
@@ -4098,8 +4175,12 @@ class AgentService:
                 self.record_work_sources(job['id'],work_sources|set(getattr(work_capabilities[0],'private_provenance',()) or ()))
                 with self.store.db() as db:
                     db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id,delivery_projection) VALUES (?,?,?,?,?,?,?)',('assistant',transcript,job['channel'],time.time(),job.get('workspace_id'),job['id'],'blocked-turn' if isinstance(exc,BlockedTurn) else None))
-                    db.execute("UPDATE jobs SET status='failed',error=?,delivery=? WHERE id=?",(response,'pending' if job['chat_id'] else 'none',job['id']))
-                outcome='failed'
+                    # #607: a run that failed (or was stopped / timed out) after an
+                    # action whose effect is unknown is not a plain failure: the
+                    # unknown effect stays visible and retry refuses to replay it.
+                    outcome='unknown' if self._work_has_unknown_effect(job['id']) else 'failed'
+                    db.execute("UPDATE jobs SET status=?,error=?,delivery=? WHERE id=?",(outcome,response,'pending' if job['chat_id'] else 'none',job['id']))
+                self.record_turn_provenance(job['id'],goal=self.work_goal(job['id'],work_capabilities[0],outcome))
             self.update_task_card(job,outcome)
             if resolved_blocker:
                 self.projection.clear(self.connector_owner_id(job))

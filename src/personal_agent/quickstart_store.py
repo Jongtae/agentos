@@ -71,6 +71,13 @@ class QuickStore:
             # Neither is ever sent to a model: they are not transcript rows.
             if 'owner_cause' not in columns: db.execute('ALTER TABLE jobs ADD COLUMN owner_cause TEXT')
             if 'owner_verified' not in columns: db.execute('ALTER TABLE jobs ADD COLUMN owner_verified TEXT')
+            # #626: the owner's own source time/identity, separate from
+            # ``created`` (local persistence time).  Nullable and never
+            # backfilled: an unknown source time stays unknown.
+            if 'source_at' not in columns: db.execute('ALTER TABLE jobs ADD COLUMN source_at REAL')
+            if 'source_edited_at' not in columns: db.execute('ALTER TABLE jobs ADD COLUMN source_edited_at REAL')
+            if 'source_message_key' not in columns: db.execute('ALTER TABLE jobs ADD COLUMN source_message_key TEXT')
+            db.execute('CREATE INDEX IF NOT EXISTS jobs_source_message_key ON jobs(source_message_key)')
             memory_columns={row['name'] for row in db.execute('PRAGMA table_info(memories)')}
             for name,kind in (('owner_key','TEXT'),('work_key','TEXT'),('content_digest','TEXT'),('candidate_id','TEXT')):
                 if name not in memory_columns: db.execute(f'ALTER TABLE memories ADD COLUMN {name} {kind}')
@@ -236,7 +243,10 @@ class QuickStore:
     #: every reader can qualify unverified text (#494).  Read-time only: the
     #: stored message text and schema are unchanged.
     TRANSCRIPT_COLUMNS=('m.id,m.role,m.content,m.channel,m.created,m.workspace_id,m.job_id,'
-                        'j.status AS work_outcome,j.error AS work_error')
+                        'j.status AS work_outcome,j.error AS work_error,'
+                        # #626: the owner turn's source time, if known.
+                        "CASE WHEN m.role='user' THEN j.source_at END AS source_at,"
+                        "CASE WHEN m.role='user' THEN j.source_edited_at END AS source_edited_at")
 
     def history(self):
         with self.db() as db:
@@ -260,19 +270,24 @@ class QuickStore:
             row=db.execute('SELECT * FROM jobs WHERE id=?',(job_id,)).fetchone()
             return dict(row) if row else None
 
-    def link_work_relation(self, job_id, related_job_id, relation_kind):
-        """Bind one Work to an earlier Work without copying either request."""
+    def link_work_relation(self, job_id, related_job_id, relation_kind, db=None):
+        """Bind one Work to an earlier Work without copying either request.
+
+        With ``db`` the link joins the caller's transaction (#607).
+        """
         if relation_kind not in {'retry','reference','cancel','correction'}:
             raise ValueError('작업 관계를 확인하세요.')
         if not isinstance(job_id,str) or not isinstance(related_job_id,str) or job_id==related_job_id:
             raise ValueError('연결할 작업을 확인하세요.')
-        with self.db() as db:
-            current=db.execute('SELECT id FROM jobs WHERE id=?',(job_id,)).fetchone()
-            related=db.execute('SELECT id FROM jobs WHERE id=?',(related_job_id,)).fetchone()
-            if not current or not related:
-                raise ValueError('연결할 작업을 찾을 수 없습니다.')
-            db.execute('UPDATE jobs SET relation_kind=?,related_job_id=? WHERE id=?',
-                       (relation_kind,related_job_id,job_id))
+        if db is None:
+            with self.db() as conn:
+                return self.link_work_relation(job_id,related_job_id,relation_kind,db=conn)
+        current=db.execute('SELECT id FROM jobs WHERE id=?',(job_id,)).fetchone()
+        related=db.execute('SELECT id FROM jobs WHERE id=?',(related_job_id,)).fetchone()
+        if not current or not related:
+            raise ValueError('연결할 작업을 찾을 수 없습니다.')
+        db.execute('UPDATE jobs SET relation_kind=?,related_job_id=? WHERE id=?',
+                   (relation_kind,related_job_id,job_id))
         return {'relation_kind':relation_kind,'related_job_id':related_job_id}
 
     def notes(self):

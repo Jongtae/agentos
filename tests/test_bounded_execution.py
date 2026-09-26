@@ -115,7 +115,7 @@ class BoundedExecutionTests(unittest.TestCase):
                 process.terminate(); process.wait(timeout=3); process.stdin.close(); process.stdout.close()
             self.assertEqual(replies[-1]['result']['content'][0]['type'],'text')
             self.assertIn('Bridge note',replies[-1]['result']['content'][0]['text'])
-            with store.db() as db: self.assertEqual(db.execute("SELECT status FROM tool_events WHERE job_id=? AND tool='list_notes'",(job,)).fetchone()[0],'succeeded')
+            with store.db() as db: self.assertEqual(db.execute("SELECT status FROM tool_events WHERE job_id=? AND tool='list_notes' ORDER BY id DESC",(job,)).fetchone()[0],'succeeded')
 
     def test_default_engine_run_directory_is_owner_local_and_private(self):
         adapter=BoundedExecutionAdapter()

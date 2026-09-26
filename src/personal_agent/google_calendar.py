@@ -87,6 +87,12 @@ class GoogleCalendar:
                 # Neither may be reported as "no external effect".
                 reason = "event-already-exists" if method == "POST" else "provider-conflict"
                 raise GoogleCalendarError(reason, "unknown") from None
+            if mutation and (error.status in (408, 429) or (method in ("PATCH", "DELETE") and error.status in (404, 410))):
+                # #594 item 6 (#607): a timed-out/throttled mutation may still
+                # have been applied, and "not found"/"gone" on PATCH/DELETE can
+                # be the trace of an earlier attempt of this same action.
+                # Neither proves that nothing changed; reconcile, never replay.
+                raise GoogleCalendarError("provider-error", "unknown") from None
             if error.status >= 500:
                 raise GoogleCalendarError("provider-error", "unknown" if mutation else "none") from None
             raise GoogleCalendarError("provider-rejected") from None

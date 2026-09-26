@@ -16,6 +16,8 @@ import sys
 import tempfile
 import time
 
+from .manifests import CONTEXT_GATED_ACTIONS  # noqa: F401 (#627: re-exported for route checks)
+
 
 MAX_PROMPT_BYTES = 48_000
 MAX_OUTPUT_BYTES = 96_000
@@ -131,7 +133,7 @@ CLI_PROFILES = {
         'limitation': TRUSTED_LOCAL_LIMITATION,
         # Public reads the native route has by default, one owner-private read
         # and the explicit note write, all under the unchanged AgentOS guards.
-        'actions': ('bounded_public_research', 'list_notes', 'save_note', 'weather', 'web_search'),
+        'actions': ('bounded_public_research', 'list_notes', 'propose_current_state', 'save_note', 'weather', 'web_search'),
         # Approvals bound to the direct-API model fingerprint are not carried to
         # another provider: doing so would silently change the data destination.
         'unavailable': {
@@ -161,7 +163,7 @@ CLI_PROFILES = {
             'bounded_public_research', 'save_note', 'weather', 'web_search', 'public_page_read',
             'find_files', 'read_file', 'list_roots', 'calendar_query', 'calendar_draft_create',
             'calendar_draft_update', 'calendar_draft_cancel', 'save_memory', 'list_memory',
-            'list_agents', 'delegate_agent', *_BROWSER_ACTIONS)},
+            'list_agents', 'delegate_agent', 'propose_current_state', *_BROWSER_ACTIONS)},
         # Pinned in Dockerfile.engine; a test keeps the two in step.
         'runtimes': {'codex': {'pinned_version': '0.153.4', 'live_tested_version': None}},
     },
@@ -175,7 +177,7 @@ CLI_PROFILES = {
         'limitation': STRICT_ISOLATED_LIMITATION,
         # The bridge serves the bounded action set (mcp_bridge.serve); a test
         # keeps these identical so the bridge needs no profile argument.
-        'actions': ('bounded_public_research', 'list_notes', 'save_note', 'weather', 'web_search'),
+        'actions': ('bounded_public_research', 'list_notes', 'propose_current_state', 'save_note', 'weather', 'web_search'),
         'unavailable': {
             'public_page_read': _API_BOUND_PAGES,
             'find_files': _API_BOUND_DOCUMENTS, 'read_file': _API_BOUND_DOCUMENTS, 'list_roots': _API_BOUND_DOCUMENTS,

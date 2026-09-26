@@ -20,9 +20,10 @@ Truth vocabulary kept here, never widened:
   derived from the old wording (#627 reads the revision); it never replays
   the original Work.
 
-Consumption (a model snapshot, weather/search location refs) is #627; this
-module only exposes :meth:`ContextObservations.usable` for it.  Precise
-coordinates are never logged and never returned by :meth:`status`.
+Consumption (a model snapshot, weather location refs and the revisable
+current-state hypotheses of #627) lives in ``current_context``; this module
+owns the tables, the owner controls and :meth:`ContextObservations.usable`.
+Precise coordinates are never logged and never returned by :meth:`status`.
 """
 import json
 import math
@@ -53,6 +54,19 @@ POSITION_KINDS = ('current_position_report', 'live_position_report')
 #: owner's present position.
 FORWARD_FIELDS = ('forward_origin', 'forward_date', 'forward_from', 'forward_from_chat',
                   'forward_sender_name', 'forward_from_message_id', 'via_bot')
+
+#: #627: revisable current-state hypotheses, derived from the observations
+#: above and the owner's own messages.  Same DB, same epoch and owner scope;
+#: never canonical Memory.  ``current_context`` reads and writes it.
+CLAIMS_DDL = '''
+            CREATE TABLE IF NOT EXISTS current_state_claims(
+              id TEXT PRIMARY KEY, owner_key TEXT NOT NULL, generation TEXT NOT NULL, context_epoch INTEGER NOT NULL,
+              predicate TEXT NOT NULL, value_json TEXT NOT NULL, kind TEXT NOT NULL, source_refs_json TEXT NOT NULL,
+              effective_from REAL NOT NULL, effective_until REAL NOT NULL, expires_at REAL NOT NULL,
+              revision INTEGER NOT NULL, supersedes TEXT, state TEXT NOT NULL, created_by_work TEXT, created REAL NOT NULL);
+            CREATE INDEX IF NOT EXISTS current_state_claims_use
+              ON current_state_claims(owner_key, context_epoch, state, expires_at);
+'''
 
 DEFAULT_SETTINGS = {'version': POLICY_VERSION, 'enabled': False, 'epoch': 0, 'cutoff': 0.0, 'timezone': ''}
 
@@ -134,7 +148,7 @@ class ContextObservations:
             CREATE TABLE IF NOT EXISTS context_location_requests(
               id TEXT PRIMARY KEY, job_id TEXT NOT NULL, chat_id INTEGER NOT NULL, generation TEXT NOT NULL,
               context_epoch INTEGER NOT NULL, created REAL NOT NULL, expires REAL NOT NULL, state TEXT NOT NULL);
-            ''')
+            ''' + CLAIMS_DDL)
 
     # --- settings ---------------------------------------------------------
 
@@ -201,6 +215,7 @@ class ContextObservations:
                 settings['epoch'] += 1
                 settings['cutoff'] = max(settings['cutoff'], now)
                 db.execute('DELETE FROM context_observations')
+                db.execute('DELETE FROM current_state_claims')
                 db.execute("UPDATE context_location_requests SET state='cleared' WHERE state='pending'")
             self._put(db, settings)
         return self.status()
@@ -226,6 +241,7 @@ class ContextObservations:
 
     def prune(self, db, now):
         db.execute('DELETE FROM context_observations WHERE expires_at<=?', (now,))
+        db.execute('DELETE FROM current_state_claims WHERE expires_at<=?', (now,))
         db.execute("UPDATE context_location_requests SET state='expired' WHERE state='pending' AND expires<=?", (now,))
 
     @staticmethod
@@ -283,8 +299,9 @@ class ContextObservations:
                           'expires_at': entry['expires_at'], 'label': entry['payload'].get('label') or '',
                           'time_uncertain': bool(entry['payload'].get('time_uncertain'))})
         return {'enabled': settings['enabled'], 'timezone': settings['timezone'],
-                # Truthful boundary: #626 stores; answers do not read it yet (#627).
-                'used_in_answers': False,
+                # #627: answers read the current context only while it is on
+                # (a task-scoped location still serves the one task it answers).
+                'used_in_answers': settings['enabled'],
                 'retention_hours': RETENTION_SECONDS // 3600, 'freshness_minutes': FRESHNESS_SECONDS // 60,
                 'observations': [item for item in items if item['kind'] != 'text_edit'],
                 'edited_sources': sum(1 for item in items if item['kind'] == 'text_edit'),

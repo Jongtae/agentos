@@ -15,6 +15,7 @@ from personal_agent.agent_runtime import DEFINITIONS, Capabilities, check_argume
 from personal_agent.bounded_execution import (
     BOUNDED_PROFILE,
     CLI_PROFILES,
+    CONTEXT_GATED_ACTIONS,
     ISOLATED_PROFILE,
     AgentOSMcpTools,
     BoundedExecutionAdapter,
@@ -58,6 +59,10 @@ class _Store(unittest.TestCase):
         return Capabilities(self.store, None, {}, '', 'job', lambda *a: None, network=self.network,
                             document_access=False, allowed_tools=allowed, **kwargs)
 
+    def enable_context(self):
+        from personal_agent.context_observations import ContextObservations
+        ContextObservations(self.store).set_controls({'enabled': True})
+
     def install(self, manifest):
         path = Path(self.store.root) / (manifest['id'] + '.manifest.json')
         path.write_text(json.dumps(manifest))
@@ -68,6 +73,8 @@ class OneActionSource(_Store):
     """Native schemas and MCP tools/list derive from the same definitions."""
 
     def test_every_profile_tool_is_the_native_definition_on_the_mcp_wire(self):
+        # #627: with current context on, every declared action is on the wire.
+        self.enable_context()
         for profile, facade in FACADES.items():
             listed = facade(self.caps()).definitions()
             with self.subTest(profile=profile):
@@ -136,7 +143,10 @@ ARGUMENT_CASES = (
     # (tool, arguments, accepted)
     ('weather', {'city': 'Daejeon', 'country': 'KR'}, True),
     ('weather', {'city': 'Daejeon'}, True),
-    ('weather', {'country': 'KR'}, False),                      # missing required
+    # #627: city OR location_ref - the schema requires neither, the broker
+    # refuses a call with neither before any host is reached.
+    ('weather', {'country': 'KR'}, 'broker'),
+    ('weather', {'city': 'Daejeon', 'location_ref': 'obs:x'}, 'broker'),
     ('weather', {'city': 'Daejeon', 'lat': '1'}, False),        # unknown field
     ('weather', {'city': 7}, False),                            # non-string
     ('web_search', {'query': 'today news'}, True),
@@ -160,9 +170,14 @@ class ArgumentConversion(_Store):
                     native = True
                 except ValueError:
                     native = False
-                self.assertEqual(native, accepted, 'native loop decision')
+                self.assertEqual(native, bool(accepted), 'native loop decision')
                 before = len(self.network.plans)
-                if accepted:
+                if accepted == 'broker':
+                    with self.assertRaises(ValueError) as refused:
+                        tools.call(name, dict(arguments))
+                    self.assertNotIsInstance(refused.exception, ExecutionError, 'a broker refusal, not a schema one')
+                    self.assertEqual(len(self.network.plans), before, 'a refused call reaches no host')
+                elif accepted:
                     tools.call(name, dict(arguments))
                 else:
                     with self.assertRaises(ExecutionError):
@@ -192,6 +207,12 @@ class EffectiveAvailability(_Store):
         native = [definition['function']['name'] for definition in self.caps().definitions()]
         self.assertIn('public_page_read', native)
         self.assertIn('weather', native)
+        # #627: current context off (the default) keeps the pre-#627 surface.
+        self.assertNotIn('propose_current_state', native)
+        self.assertEqual([t['name'] for t in AgentOSMcpTools(self.caps()).definitions()],
+                         sorted(set(profile_actions(BOUNDED_PROFILE)) - CONTEXT_GATED_ACTIONS))
+        self.enable_context()
+        self.assertIn('propose_current_state', [d['function']['name'] for d in self.caps().definitions()])
         self.assertEqual([t['name'] for t in AgentOSMcpTools(self.caps()).definitions()],
                          sorted(profile_actions(BOUNDED_PROFILE)))
         self.assertEqual([t['name'] for t in ReadOnlyAgentOSMcpTools(self.caps()).definitions()], ['list_notes'])
@@ -275,7 +296,8 @@ class SettingsProjection(_Store):
         profile = AgentService(self.store).settings()['subscription_execution']
         self.assertEqual(profile, {'profile': 'trusted-local', 'mode': 'bounded-agentos-mcp', 'trust': 'trusted-local',
                                    'limitation': CLI_PROFILES[BOUNDED_PROFILE]['limitation'],
-                                   'tools': ['bounded_public_research', 'list_notes', 'save_note', 'weather', 'web_search'],
+                                   'tools': ['bounded_public_research', 'list_notes', 'propose_current_state',
+                                             'save_note', 'weather', 'web_search'],
                                    'unavailable': route_unavailable(BOUNDED_PROFILE),
                                    # #616: the owner can choose; nothing is qualified by default.
                                    'selectable': ['trusted-local', 'strict-isolated'], 'qualified': {}})

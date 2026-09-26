@@ -254,7 +254,10 @@ class ServiceProvenance(unittest.TestCase):
         self.store.enqueue('hello', 'k1')
         self.assertTrue(service.run_one())
         record = self._selected(service)['provenance']
-        self.assertEqual(record['exposed_tools'], [tool['name'] for tool in profile_mcp_tools('trusted-local')])
+        # #627: current context is off here, so its gated action is not offered.
+        from personal_agent.bounded_execution import CONTEXT_GATED_ACTIONS
+        self.assertEqual(record['exposed_tools'], [tool['name'] for tool in profile_mcp_tools('trusted-local')
+                                                   if tool['name'] not in CONTEXT_GATED_ACTIONS])
         self.assertEqual(record['capability_profile'], 'trusted-local')
         self.assertEqual(record['capability_trust'], 'trusted-local')
         self.assertIn('outside AgentOS provenance', record['capability_limitation'])

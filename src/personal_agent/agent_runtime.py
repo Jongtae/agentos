@@ -1731,14 +1731,21 @@ class Capabilities:
      # folder reads, so the service can park the Work for one connection
      # handoff and resume it once.  Nothing was read.
      return {'needs_setup':True,'requires':CALENDAR_CONNECTOR_ID,'events':[],
-             'next_step':'Google Calendar 연결이 필요합니다.'}
+             'next_step':CALENDAR_UNCONFIGURED}
     raise ToolError('Google Calendar가 로컬에 구성되어 있지 않습니다. 먼저 캘린더를 연결해 주세요.','needs_setup',
                     requires=CALENDAR_WRITE_CONNECTOR_ID)
    owner=self.calendar_owner
    if name=='calendar_query':
     # Calendar contents are owner-private and this is the read that makes
     # `event_id`/`event_version` available to the draft tools.
-    return self._from_private('owner-calendar',self.calendar.query(owner,args['start'],args['end'],args['timezone']))
+    from .calendar import CALENDAR_CONNECTOR_ID, CalendarError
+    try:events=self.calendar.query(owner,args['start'],args['end'],args['timezone'])
+    except CalendarError as exc:
+     # #606 T5: a declared calendar the owner has not connected (or must
+     # reconnect) is the same setup-required read as no calendar at all.
+     if getattr(exc,'recovery',None)!='reconnect':raise
+     return {'needs_setup':True,'requires':CALENDAR_CONNECTOR_ID,'events':[],'next_step':CALENDAR_UNCONFIGURED}
+    return self._from_private('owner-calendar',events)
    # Refuse an unsupported field rather than filtering it out. The tool
    # schema already sets additionalProperties:false, but a filter here would
    # have turned "invite alice@example.com" into a silently attendee-less
@@ -1934,6 +1941,8 @@ def render_turn_prompt(context,*,include_instructions=True):
  return '\n\n'.join(parts)
 
 CALENDAR_DRAFT_TOOLS=('calendar_draft_create','calendar_draft_update','calendar_draft_cancel')
+#: #606 T5: a calendar read with no calendar read nothing; never a satisfied read.
+CALENDAR_UNCONFIGURED='Google Calendar가 연결 또는 구성되어 있지 않아 일정을 읽지 못했습니다. 먼저 캘린더를 연결해 주세요.'
 
 #: An effect a tool declined or deferred, and whether the call still advanced
 #: this Work.  See ``withheld_effect``.
@@ -1969,6 +1978,9 @@ def withheld_effect(name,result):
  step remaining, which is what ``partial`` already means.
  """
  if not isinstance(result,dict):return None
+ if name=='calendar_query' and result.get('needs_setup') is True:
+  # #606 T5: nothing was read, so a model's schedule claim is unsupported.
+  return Withheld(result.get('next_step') or CALENDAR_UNCONFIGURED,advanced=False)
  if result.get('refused_because'):
   return Withheld(MEMORY_REFUSALS.get(result['refused_because'],
                                       '소유자 확인이 필요해 기억 후보로 보관했습니다. 승인 후 저장할 수 있습니다.'),

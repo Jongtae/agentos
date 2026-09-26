@@ -199,11 +199,12 @@ class CalendarToolTests(unittest.TestCase):
     # -- boundaries --------------------------------------------------------
 
     def test_an_unconfigured_calendar_refuses_cleanly(self):
-        """The honest state before this work, preserved for that case."""
+        """Nothing is read; #606 T5 types it as setup-required for one handoff."""
         caps = self.caps(calendar=False)
-        with self.assertRaises(ValueError) as refused:
-            self.query(caps)
-        self.assertIn('구성되어 있지 않습니다', str(refused.exception))
+        result = self.query(caps)
+        self.assertEqual((result['needs_setup'], result['requires']), (True, 'google-calendar'))
+        self.assertEqual(result['events'], [])
+        self.assertIn('구성되어 있지 않아', result['next_step'])
 
     def test_reading_the_calendar_closes_public_destinations(self):
         """Calendar contents are owner-private.

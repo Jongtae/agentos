@@ -1807,8 +1807,17 @@ class AgentService:
                            'the owner one short question. Do not guess it and do not repeat the same lookup.')
 
     def rule_fallthrough(self, decision):
-        """Whether a natural-language rule decision may fall through to the model loop."""
-        return decision.authority==AUTHORITY_RULE and decision.intent in self.RULE_FALLTHROUGH_INTENTS
+        """Whether a natural-language rule decision may fall through to the model loop.
+
+        Only when a Work model loop can actually run: with no usable AI route
+        the handler's own truthful answer is kept instead of a setup blocker.
+        """
+        if decision.authority!=AUTHORITY_RULE or decision.intent not in self.RULE_FALLTHROUGH_INTENTS:
+            return False
+        if (self.store.config('subscription_engine',{}) or {}).get('id'):
+            return True
+        config=self.store.config('model',{})
+        return bool(config) and self.model_ready(config)
 
     def cli_work_outcome(self, job_id, tools):
         """``(outcome, refusals)`` of a CLI Work from its own tool events (#606 T3)."""

@@ -314,6 +314,49 @@ class OwnerEntryPointTests(unittest.TestCase):
 
 
 
+class CalendarReadHandoffTests(unittest.TestCase):
+    """T5: a model-chosen calendar read with no connection parks one durable handoff."""
+
+    def test_unconnected_calendar_read_parks_the_work_once(self):
+        from cryptography.fernet import Fernet
+        from personal_agent.quickstart import configured_service
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        store = QuickStore(Path(tmp.name) / 'data')
+        service = configured_service(store, {'AGENTOS_CALENDAR_LOCAL_ONLY': '1',
+                                             'AGENTOS_CALENDAR_CLIENT_ID': 'calendar-client',
+                                             'AGENTOS_CALENDAR_CLIENT_SECRET': 'fixture-secret',
+                                             'AGENTOS_CALENDAR_LOCAL_PORT': '8799',
+                                             'AGENTOS_CALENDAR_ENCRYPTION_KEY': Fernet.generate_key().decode()})
+        script = Script({'tool_calls': [call('1', 'calendar_query', start='2026-09-27T00:00:00+09:00',
+                                             end='2026-09-28T00:00:00+09:00', timezone='Asia/Seoul')]},
+                        {'content': '내일 일정은 팀 회의 하나입니다.'})
+
+        def transport(url, body, headers=None, timeout=60):
+            names = [tool.get('function', {}).get('name') for tool in body.get('tools', [])]
+            if 'agentos_connection_probe' in names:
+                return {'message': {'content': '', 'tool_calls': [
+                    {'function': {'name': 'agentos_connection_probe', 'arguments': {}}}]}}
+            if len(body.get('messages', [])) <= 2 and not names:
+                return {'message': {'content': 'ok'}}
+            answer = script(url, body)['choices'][0]['message']
+            if answer.get('tool_calls'):
+                answer = {'content': '', 'tool_calls': [{'id': item['id'], 'function': {
+                    'name': item['function']['name'], 'arguments': json.loads(item['function']['arguments'])}}
+                    for item in answer['tool_calls']]}
+            return {'message': answer}
+        service.adapter = ModelAdapter(transport)
+        service.save_model({'provider': 'ollama', 'endpoint': 'http://127.0.0.1:11434', 'model': 'test-model', 'api_key': ''})
+        self.assertTrue(service.test_model()['ok'])
+        job = store.enqueue('내일 일정 뭐 있어?', 'agency-calendar')
+        self.assertTrue(service.run_one())
+        row = store.job(job)
+        self.assertEqual(row['status'], 'awaiting_connection')
+        self.assertNotIn('팀 회의', row['response'])
+        self.assertEqual(service.resume_index.parked_for(service.connector_owner_id(row)), ('google-calendar',))
+        self.assertEqual(service.resume_index.record('google-calendar')['work_id'], job)
+
+
 class BridgeCli:
     """A scripted CLI that drives the REAL AgentOS MCP bridge process.
 

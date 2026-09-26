@@ -393,7 +393,9 @@ class SubscriptionServiceTests(unittest.TestCase):
             adapter=Adapter(); service=AgentService(store, subscription_engines=engines, execution_adapter=adapter)
             network=Network(); service.local_tools=network
             service.connect_subscription_engine({'engine':'codex','officially_authenticated':True})
-            job=store.enqueue('성남시 날씨를 찾아줘','subscription-preflight')
+            # #606 T3: only the owner's explicit /search is preflighted; prose
+            # reaches the CLI's own tool loop through the broker instead.
+            job=store.enqueue('/search 성남시 날씨','subscription-preflight')
             self.assertTrue(service.run_one())
             self.assertEqual(network.calls,[{'tool':'web_search','query':'성남시 날씨'}])
             self.assertIn('https://example.test/result',adapter.prompt)
@@ -407,6 +409,7 @@ class SubscriptionServiceTests(unittest.TestCase):
         self.assertEqual(subscription_public_lookup_query('/search AgentOS release'), 'AgentOS release')
         self.assertIsNone(subscription_public_lookup_query('/search my api token is abc'))
         self.assertIsNone(subscription_public_lookup_query('내 메모를 정리해줘'))
+        self.assertIsNone(subscription_public_lookup_query('성남시 날씨를 찾아줘'))  # #606 T3
 
 
 class BoundedExecutionPreservedBoundaryTests(unittest.TestCase):

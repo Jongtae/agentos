@@ -56,7 +56,6 @@ from urllib.request import Request, build_opener, HTTPCookieProcessor, HTTPRedir
 
 from cryptography.fernet import Fernet
 
-from lookup_judgment import ordinary_lookup_judgment
 from personal_agent.connector_contract import CONNECTOR_STATE_KEY, ConnectorState
 from personal_agent.decision import (OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine, SelectionDecision,
                                      fixture_confidence)
@@ -208,10 +207,6 @@ class _FakeEgress:
         raise AssertionError('unexpected egress plan: ' + str(plan))
 
 
-# #605 R1/R4: the first-use install is exercised as if its DecisionEngine
-# judged every lookup term ordinary; the judgment is tested in
-# tests/test_public_private_composition.py.
-@ordinary_lookup_judgment
 class FirstUseEndToEndAcceptance(unittest.TestCase):
     """One clean-store first-use walk through the shipped boundaries."""
 

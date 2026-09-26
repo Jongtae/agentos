@@ -22,7 +22,6 @@ from mcp_types.version import (
     MODERN_PROTOCOL_VERSIONS,
 )
 
-from lookup_judgment import ordinary_lookup_judgment
 from personal_agent import isolated_engine_mcp_bridge, mcp_bridge
 from personal_agent.quickstart_store import QuickStore
 
@@ -331,7 +330,6 @@ def _running_work(store, text="bridge turn"):
     return job
 
 
-@ordinary_lookup_judgment
 class BoundedProfileHostInvocation(unittest.TestCase):
     """#604: weather, search, search-result page follow-up and a private read
     through the real bridge JSON-RPC loop and actual host invocation.
@@ -529,7 +527,6 @@ class BoundedProfileHostInvocation(unittest.TestCase):
         self.assertEqual((self.searches, self.weather, self.opened), ([], [], []))
 
 
-@ordinary_lookup_judgment
 class BridgeErrorMapping(unittest.TestCase):
     """What the CLI receives when a bridged AgentOS call does not succeed."""
 

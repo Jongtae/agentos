@@ -4,7 +4,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from lookup_judgment import ordinary_lookup_judgment
 from personal_agent.agent_runtime import (CLI_TOOL_GUIDANCE, CONTEXT_BUDGET_BYTES, CORE_INSTRUCTIONS, MESSAGE_CAP_CHARS,
                                           POLICY, render_turn_prompt, turn_context)
 from personal_agent.bounded_execution import AgentOSMcpTools, BoundedExecutionAdapter, ExecutionResult
@@ -221,7 +220,6 @@ class CrossTurnEgressGuard(unittest.TestCase):
 
 
 
-@ordinary_lookup_judgment
 class BridgeProcessEgressGuard(unittest.TestCase):
     """Re-review of #574: the taint must reach the separate MCP bridge process the CLI actually calls."""
 
@@ -445,7 +443,6 @@ def _answer(text='answer'):
     return {'choices': [{'message': {'content': text}}]}
 
 
-@ordinary_lookup_judgment
 class MissingWeatherBinding(_RouteFixture):
     """AX-S01 shape: an authorized prior city, then a rain question (no city/weather keyword pair)."""
 
@@ -456,7 +453,7 @@ class MissingWeatherBinding(_RouteFixture):
             return _answer('대전은 지금 1.2mm 비가 옵니다.')
         if last['role'] == 'user' and '비' in last['content']:
             # #605 R2: in a clean context the worker's transliteration and a
-            # validated ISO-2 country code are sent after the lookup judgment.
+            # validated ISO-2 country code are sent (no judgment since #654).
             return _tool_call('weather', {'city': 'Daejeon', 'country': 'KR'})
         return _answer()
 
@@ -486,7 +483,6 @@ class MissingWeatherBinding(_RouteFixture):
                         f'offered={self.engine.offered[-1]} outbound={self.network.plans}')
 
 
-@ordinary_lookup_judgment
 class PriorAssistantEgressDecision(_RouteFixture):
     """Which earlier assistant messages close public egress, per route.
 

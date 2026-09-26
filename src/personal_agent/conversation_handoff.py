@@ -235,7 +235,7 @@ class TelegramChannel:
 import re
 import time
 
-from .decision import DecisionContext, DecisionPolicy, UnavailableDecisionEngine
+from .decision import MAX_CONTEXT_CHARS, DecisionContext, DecisionPolicy, UnavailableDecisionEngine
 
 INTENT_GREETING = 'greeting'
 INTENT_KNOWLEDGE = 'personal-knowledge'
@@ -638,10 +638,14 @@ class ConversationJudgments:
         One ``judge`` call over the owner's request, the observations a
         completion claim cited and the run's failed steps - never the
         worker's own summary.  Only a confident yes lets the Work succeed;
-        no or unavailable leaves it partial.  The caller bounds the facts.
+        no or unavailable leaves it partial.  The caller bounds the
+        observations and failed steps; the owner's request is never cut, so
+        this context's bound is widened by exactly its length.
         """
+        request = str(request or '')
         context = DecisionContext('goal-reached', {'owner_request': request, 'observations': observations,
-                                                   'failed_steps': failed_steps or 'none'}, work_id=work_id)
+                                                   'failed_steps': failed_steps or 'none'}, work_id=work_id,
+                                  max_chars=MAX_CONTEXT_CHARS + len(request))
         decision = self.engine.judge(context, GOAL_REACHED_PROPOSITION)
         verdict = self.policy.binary(decision)
         return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,

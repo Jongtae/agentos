@@ -4293,6 +4293,8 @@ class AgentService:
                                                   browser=self.browser_profile.driver_factory(job['id']),browser_approvals=self.browser_approvals_for(job),
                                                   # #657: completion is judged from observations.
                                                   judgments=self.decision_judge,
+                                                  # Pilot boundary 1: stored secrets never reach the judgment.
+                                                  secret_redactor=self._redact_known_secrets,
                                                   **self.work_lookup_options(job,prompt))
                         work_capabilities[0]=capabilities
                         work_sources|=capabilities.private_provenance

@@ -10,3 +10,10 @@ class ManifestTests(unittest.TestCase):
   with self.assertRaises(ValueError):validate({'version':1,'tools':[{'id':'shell','host_action':'shell'}],'roles':[]})
  def test_rejects_role_permission(self):
   with self.assertRaises(ValueError):validate({'version':1,'tools':[],'roles':[{'id':'x','permissions':['network_write']} ]})
+ def test_rejects_the_loop_reserved_finish_tool_id(self):
+  # #657: `finish` is the agent loop's own completion claim; a package cannot shadow it.
+  from personal_agent.manifests import runtime_packages,validate_package
+  tool={'id':'finish','host_action':'web_search','mode':'read_only'}
+  with self.assertRaisesRegex(ValueError,'finish'):validate({'version':1,'tools':[tool],'roles':[]})
+  with self.assertRaisesRegex(ValueError,'finish'):validate_package({'version':1,'id':'shadow','tools':[tool],'roles':[]})
+  with self.assertRaisesRegex(ValueError,'finish'):runtime_packages([{'version':1,'id':'shadow','enabled':True,'tools':[tool],'roles':[]}])

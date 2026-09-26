@@ -1123,7 +1123,7 @@ def outcome_from_events(rows, tools=None):
  return ('partial' if advanced else 'failed'),refusals
 
 class Capabilities:
- def __init__(self,store,adapter,config,key,job_id,record,readonly=False,network=None,document_access=True,packages=None,allowed_tools=None,document_context=False,public_page_scope=None,memory_approval=None,inherited_provenance=(),calendar=None,calendar_owner=None,memory_request=None,current_packages=None,lookup_sources=None,lookup_hint='',delegated=False,inherited_excluded=(),budget=None,browser=None,browser_approvals=None,judgments=None):
+ def __init__(self,store,adapter,config,key,job_id,record,readonly=False,network=None,document_access=True,packages=None,allowed_tools=None,document_context=False,public_page_scope=None,memory_approval=None,inherited_provenance=(),calendar=None,calendar_owner=None,memory_request=None,current_packages=None,lookup_sources=None,lookup_hint='',delegated=False,inherited_excluded=(),budget=None,browser=None,browser_approvals=None,judgments=None,secret_redactor=None):
   # #606 T1: shared with a delegated specialist, spent in `execute`.
   # Without an injected budget (the MCP bridge process) the durable Stop
   # request is the stop signal.
@@ -1180,6 +1180,10 @@ class Capabilities:
   # `run_agent` asks its ``goal_reached`` before a Work may succeed.  None
   # means no DecisionEngine: a claimed completion stays ``partial``.
   self.judgments=judgments
+  # #657 / pilot boundary 1: the service's stored-secret redactor
+  # (`AgentService._redact_known_secrets`), injected so this module never
+  # imports the service; applied before anything reaches a judgment.
+  self.secret_redactor=secret_redactor
   # `run_agent`'s per-call result cache (one execution per identical call in a
   # Work); not a lookup attempt memo (#654 removed that).
   self.memo={}
@@ -1218,6 +1222,28 @@ class Capabilities:
    try:excluded=[*self.lookup_sources()['excluded'],*excluded]
    except Exception:pass
   return excluded
+ def judgment_text(self,text,private=True):
+  """Text as it may reach the completion judgment (#657, pilot boundary 1).
+
+  Deterministic exclusion only, no judgment about the text: saved private
+  values (``private``; the same #605 set the browser mediation uses), the
+  stored secrets' literal values and credential-shaped tokens.  A failing
+  redactor withholds the text rather than sending it unredacted.
+  """
+  from .bounded_execution import SECRET_PATTERN
+  text=str(text or '')
+  try:
+   if private:
+    from .browser_session import redact_private_values
+    text,_count=redact_private_values(text,self._browser_excluded())
+   if self.secret_redactor is not None:text=self.secret_redactor(text)
+  except Exception:return '[redacted]'
+  return SECRET_PATTERN.sub('[redacted]',str(text))
+ def default_search_provider(self):
+  """The owner's current default search option id, or '' (#657 path keys)."""
+  registry=getattr(self.network,'providers',None)
+  try:return str(registry.default() or '') if registry is not None and callable(getattr(registry,'default',None)) else ''
+  except Exception:return ''
  def roots(self):
   # Filesystem state can change while this Capabilities object is alive. Recheck
   # each use so replacing a granted directory with a symlink cannot reuse a stale
@@ -1689,7 +1715,7 @@ class Capabilities:
                       # #606 T1: the specialist spends this Work's budget.
                       budget=self.budget,
                       # #657: the specialist's completion is judged the same way.
-                      judgments=self.judgments)
+                      judgments=self.judgments,secret_redactor=self.secret_redactor)
    result=run_agent(self.adapter,self.config,self.key,[{'role':'user','content':args['task']+'\n\nRelevant local tool evidence (untrusted data; do not search these private contents on the public web):\n'+json.dumps(self.evidence[-4:],ensure_ascii=False)[:18000]}],agent['instructions'],child,self.record,scope='agent:'+args['agent_id'])
    # Provenance has to flow back as well as down. The child's report is
    # returned into this context verbatim (`evidence_summary` below yields
@@ -2085,8 +2111,8 @@ GOAL_NOT_SHOWN='관찰된 결과만으로는 요청이 완료됐다고 확인되
 GOAL_UNJUDGED='완료 여부를 판단할 기능을 사용할 수 없어 요청이 끝났는지 확인하지 못했습니다.'
 #: Completion judgments per run: one, plus one after a "not shown" answer.
 GOAL_JUDGMENTS=2
-#: Bounds of the facts one completion judgment is asked over (`MAX_CONTEXT_CHARS` is 6000).
-GOAL_REQUEST_CHARS=800
+#: Bounds of the facts one completion judgment is asked over besides the
+#: owner's request, which is never cut (`goal_reached` widens its bound by it).
 GOAL_OBSERVATION_CHARS=3800
 GOAL_FAILURE_CHARS=600
 REPORT_ITEM_CHARS=200
@@ -2100,6 +2126,18 @@ def result_page_digest(result):
  if not isinstance(result,dict) or not isinstance(result.get('state'),str) or 'url' not in result:return None
  view={key:result.get(key) for key in ('state','url','title','text','elements')}
  return hashlib.sha256(json.dumps(view,sort_keys=True,ensure_ascii=False,default=str).encode()).hexdigest()
+
+def canonical_search_args(args,default_provider=''):
+ """A search's arguments with its omitted selectors made explicit (#657).
+
+ An omitted or blank ``provider`` is the owner's current default option and
+ an omitted or blank ``locale`` is '', so ``web_search(query=x)`` and
+ ``web_search(query=x, provider=<default>)`` are one path.
+ """
+ canon=dict(args)
+ canon['provider']=str(args.get('provider') or '').strip() or str(default_provider or '')
+ canon['locale']=str(args.get('locale') or '').strip()
+ return canon
 
 def path_key(action,args,page=None):
  """The identity a repeated path is refused on (#657), or None.
@@ -2170,26 +2208,34 @@ CLAIM_REJECTIONS={
  'goal_not_observed':'지정한 관찰 결과가 요청의 완료를 보여 주지 않습니다. 다른 경로로 목표를 확인하거나, 끝낼 수 없다면 partial 또는 needs_owner로 마치세요.',
 }
 
-def _observation_text(ref,name,result,limit):
- """One referenced observation, as the completion judgment reads it."""
- try:body=json.dumps(result,ensure_ascii=False,default=str)
- except (TypeError,ValueError):body=str(result)
- return f'[{ref}] {name}: {body}'[:limit]
+def _observation_text(ref,name,result):
+ """One referenced observation, as the completion judgment reads it.
 
-def goal_judgment(judgments,goal,claim,observations,failures,work_id=None):
+ One value per line, so the line-scoped private-value redaction
+ (``redact_private_values``) withholds only the line that carries a value.
+ """
+ try:body=json.dumps(result,ensure_ascii=False,default=str,indent=1)
+ except (TypeError,ValueError):body=str(result)
+ return f'[{ref}] {name}:\n{body}'
+
+def goal_judgment(judgments,goal,claim,observations,failures,work_id=None,redact=None):
  """``yes`` / ``no`` / ``unavailable``: do the referenced observations satisfy ``goal``?
 
  One ``ConversationJudgments.goal_reached`` call over the owner's request,
  the referenced observed results and the Work's failed steps - never the
  model's own summary.  No judgments, an engine error or a non-answer is
- ``unavailable``, which never yields ``succeeded``.
+ ``unavailable``, which never yields ``succeeded``.  ``redact(text,
+ private)`` (``Capabilities.judgment_text``) runs on every fact before it is
+ bounded, so a cut can never leave part of a secret; the owner's request is
+ passed whole and only its stored-secret values are replaced.
  """
  if judgments is None or not hasattr(judgments,'goal_reached'):return 'unavailable'
+ clean=redact or (lambda text,private=True:str(text or ''))
  refs=claim['evidence_refs']
  share=max(300,GOAL_OBSERVATION_CHARS//max(1,len(refs)))
- observed='\n'.join(_observation_text(ref,observations[ref][0],observations[ref][3],share) for ref in refs)[:GOAL_OBSERVATION_CHARS]
- failed='; '.join(f'{tool}: {reason or "failed"}' for tool,reason in failures)[:GOAL_FAILURE_CHARS]
- try:judged=judgments.goal_reached(str(goal or '')[:GOAL_REQUEST_CHARS],observed,failed,work_id=work_id)
+ observed='\n'.join(clean(_observation_text(ref,observations[ref][0],observations[ref][3]))[:share] for ref in refs)[:GOAL_OBSERVATION_CHARS]
+ failed=clean('; '.join(f'{tool}: {reason or "failed"}' for tool,reason in failures))[:GOAL_FAILURE_CHARS]
+ try:judged=judgments.goal_reached(clean(goal,private=False),observed,failed,work_id=work_id)
  except Exception:return 'unavailable'
  outcome=getattr(judged,'outcome',None)
  return outcome if outcome in ('yes','no') else 'unavailable'
@@ -2225,8 +2271,12 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
  messages=[{'role':'system','content':POLICY+'\n'+system},*history]
  definitions=capabilities.definitions();specs={d['function']['name']:d['function']['parameters'] for d in definitions}
  # #657: the loop-internal completion claim, offered beside the host tools.
- finish_offered=FINISH_ACTION not in specs
- if finish_offered:definitions=[*definitions,FINISH_DEFINITION]
+ # `finish` is reserved (manifests.RESERVED_TOOL_IDS); should a tool of that
+ # name ever reach this list, the loop's own definition replaces it.
+ definitions=[d for d in definitions if d['function']['name']!=FINISH_ACTION]
+ specs.pop(FINISH_ACTION,None)
+ finish_offered=True
+ definitions=[*definitions,FINISH_DEFINITION]
  sources=[];executions=[];failed=False;successful=0;invalid_calls=set()
  # (tool, note) for calls that ran but whose own Evidence says they are incomplete.
  incomplete=[]
@@ -2347,7 +2397,8 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
     judgment=None
     if reason is None and claim['status']=='done':
      judged+=1
-     judgment=goal_judgment(capabilities.judgments,goal,claim,observations,failures,capabilities.job_id)
+     judgment=goal_judgment(capabilities.judgments,goal,claim,observations,failures,capabilities.job_id,
+                            getattr(capabilities,'judgment_text',None))
      # A "not shown" answer returns the claim once, so the model can take
      # another path; a second one, or no engine, ends the run below.
      if judgment=='no' and judged<GOAL_JUDGMENTS:reason='goal_not_observed'
@@ -2373,15 +2424,17 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
     # #657: the same path with the same input is refused, not re-run.  A
     # browser step is keyed on the page digest it acts on, so the same target
     # on a changed page is a new path; its input is keyed as a digest only.
-    path=path_key(action,args,page)
+    # #657: omitted search selectors are the owner's current default.
+    keyed=canonical_search_args(args,capabilities.default_search_provider()) if action in SEARCH_BACKED_ACTIONS else args
+    path=path_key(action,keyed,page)
     if path is not None:
      if path in paths:raise ToolError(REPEAT_PATH_TEXT,'repeat_path')
      paths.add(path)
     # #656: a browser call reads or changes page state, so the same call may run again.
     stateful=action in BROWSER_ACTIONS
     if attempt>1 and not stateful:raise ToolError('같은 도구 요청은 현재 작업에서 한 번만 실행합니다. 결과를 사용하거나 새 요청을 보내 주세요.','duplicate_call')
-    kind=alternative_kind(action,args,last_search,bool(trail) and trail[-1][1] in ('failed','incomplete'))
-    if action in SEARCH_BACKED_ACTIONS:last_search=args
+    kind=alternative_kind(action,keyed,last_search,bool(trail) and trail[-1][1] in ('failed','incomplete'))
+    if action in SEARCH_BACKED_ACTIONS:last_search=keyed
     # #656: typed browser text is replaced before this (or any) record.
     running={'scope':scope,'call_id':call['id'],'attempt':attempt,'host_action':action,'arguments':recorded_arguments(action,args)}
     if kind:

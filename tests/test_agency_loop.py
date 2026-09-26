@@ -573,6 +573,67 @@ class AlternativesAndCompletionTests(unittest.TestCase):
         self.assertFalse(any(m['role'] == 'system' and m['content'].startswith('Path check')
                              for m in script.bodies[-1]['messages']))
 
+    def test_secrets_and_saved_private_values_are_redacted_before_the_judgment(self):
+        """Pilot boundary 1: the judgment provider may be separate; it never reads a secret."""
+        secret, private = 'stored-fixture-secret-9f8e7d6c', 'M12345678'
+        with self.store.db() as db:
+            db.execute('INSERT INTO notes VALUES (?,?,?)', ('n1', f'여권 {private} / 키 {secret}', 1))
+            db.execute('INSERT INTO notes VALUES (?,?,?)', ('n2', '공항 3시', 2))
+        seen = []
+        script = Script({'tool_calls': [call('1', 'list_notes')]}, finish('f', '1', summary='메모를 찾았습니다.'))
+        caps = Capabilities(self.store, ModelAdapter(script), CFG, '', 'job', self.record, network=Network(),
+                            judgments=judgments(lambda facts: seen.append(dict(facts)) or True),
+                            secret_redactor=lambda text: text.replace(secret, '[redacted]'),
+                            lookup_sources=lambda: {'permitted': [], 'excluded': [private]})
+        result = run_agent(caps.adapter, CFG, '', [{'role': 'user', 'content': f'메모 찾아줘 {secret}'}], '', caps, self.record)
+        self.assertEqual(result.outcome, 'succeeded')
+        [facts] = seen
+        judged = json.dumps(facts, ensure_ascii=False)
+        self.assertNotIn(secret, judged)
+        self.assertNotIn(private, judged)
+        self.assertIn('공항 3시', facts['observations'], 'only the excluded values are removed')
+        self.assertIn('[redacted]', facts['owner_request'])
+
+    def test_the_whole_request_reaches_the_judgment_and_its_last_part_counts(self):
+        """A long request is never cut: an unmet requirement at its end keeps the Work from succeeding."""
+        request = '다음 조건을 모두 확인해 줘. ' + '앞부분 조건은 이미 충족됐습니다. ' * 60 + '마지막 조건: 영수증 번호 R-7788이 보여야 합니다.'
+        self.assertGreater(len(request), 800)
+        seen = []
+        shown = lambda facts: seen.append(dict(facts)) or 'R-7788' in facts['observations']
+        network = ProviderNetwork({'default': MATCHING})
+        script = Script({'tool_calls': [call('1', 'web_search', query='receipt')]},
+                        finish('f1', '1', summary='확인했습니다.'), finish('f2', '1', summary='확인했습니다.'))
+        caps = Capabilities(self.store, ModelAdapter(script), CFG, '', 'job', self.record, network=network,
+                            judgments=judgments(shown))
+        result = run_agent(caps.adapter, CFG, '', [{'role': 'user', 'content': request}], '', caps, self.record)
+        self.assertNotEqual(result.outcome, 'succeeded')
+        self.assertEqual(seen[0]['owner_request'], request)
+        self.assertTrue(seen[0]['owner_request'].endswith('R-7788이 보여야 합니다.'))
+
+    def test_a_long_request_is_not_rejected_by_the_decision_size_bound(self):
+        from personal_agent.decision import MAX_CONTEXT_CHARS, DecisionContext
+        request = '가' * 11000
+        context = DecisionContext('goal-reached', {'owner_request': request, 'observations': 'x'},
+                                  max_chars=MAX_CONTEXT_CHARS + len(request))
+        self.assertFalse(context.too_large())
+        self.assertTrue(DecisionContext('other', {'owner_message': request}).too_large())
+
+    def test_an_omitted_provider_is_the_default_so_naming_it_is_a_repeat(self):
+        class Registry:
+            def default(self):return 'alpha'
+            def options(self):return [{'id': 'alpha', 'label': 'A'}, {'id': 'beta', 'label': 'B'}]
+        network = ProviderNetwork({'default': UNRELATED, 'alpha': UNRELATED, 'beta': MATCHING})
+        network.providers = Registry()
+        script = Script({'tool_calls': [call('1', 'web_search', query='leaders')]},
+                        {'tool_calls': [call('2', 'web_search', query='leaders', provider='alpha', locale='')]},
+                        {'tool_calls': [call('3', 'web_search', query='leaders', provider='beta')]},
+                        finish('f', '3'))
+        result, _caps = self.run_script(script, network)
+        self.assertEqual(self.failed_codes(), ['repeat_path'])
+        self.assertEqual(len(network.plans), 2)
+        # The refused call is no alternative; the real switch is one.
+        self.assertEqual(result.alternatives, [{'kind': 'provider_switch', 'action': 'web_search'}])
+
     def test_finish_is_loop_internal_and_never_offered_to_a_cli_bridge(self):
         caps = Capabilities(self.store, None, CFG, '', 'job', self.record, network=Network())
         self.assertNotIn('finish', {row['function']['name'] for row in caps.definitions()})
@@ -618,6 +679,31 @@ class AgencyReportEntryPointTests(unittest.TestCase):
         self.assertEqual(concluded[0]['claim']['status'], 'partial')
         self.assertEqual(len(concluded[0]['claim']['evidence_refs']), 1)
         self.assertEqual(concluded[0]['alternatives_tried'], {'count': 1, 'kinds': {'route_change': 1}})
+
+    def test_the_service_redacts_its_stored_secrets_before_the_judgment(self):
+        """Pilot boundary 1 through the shipped wiring: `AgentService._redact_known_secrets`."""
+        token = 'fixture-telegram-token-7d6c5b4a'
+        network = Network()
+        original = network.execute
+
+        def leaky(plan):
+            result = original(plan)
+            return {**result, 'results': [{**row, 'snippet': f'{row["snippet"]} {token}'} for row in result['results']]}
+        network.execute = leaky
+        seen = []
+        engine = goal_engine(lambda facts: seen.append(dict(facts)) or True)
+        script = Script({'tool_calls': [call('1', 'web_search', query='Seongnam weather tomorrow')]},
+                        finish_observed('f', summary='내일 성남은 22°C입니다.'))
+        service, store = self.service(script, network)
+        store.secret('telegram_token', token)
+        service.use_decision_engine(engine)
+        self._store = store
+        job = store.enqueue('내일 성남 날씨', 'agency-secret', channel='http')
+        self.assertTrue(service.run_one())
+        self.assertEqual(store.job(job)['status'], 'succeeded')
+        [facts] = seen
+        self.assertIn('Sat 22°C', facts['observations'])
+        self.assertNotIn(token, json.dumps(facts, ensure_ascii=False))
 
     def test_a_judged_done_finish_succeeds_through_the_service(self):
         route = self.CHANNELS[0]

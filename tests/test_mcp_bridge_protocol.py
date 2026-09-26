@@ -22,6 +22,7 @@ from mcp_types.version import (
     MODERN_PROTOCOL_VERSIONS,
 )
 
+from lookup_judgment import ordinary_lookup_judgment
 from personal_agent import isolated_engine_mcp_bridge, mcp_bridge
 from personal_agent.quickstart_store import QuickStore
 
@@ -322,6 +323,7 @@ def _running_work(store, text="bridge turn"):
     return job
 
 
+@ordinary_lookup_judgment
 class BoundedProfileHostInvocation(unittest.TestCase):
     """#604: weather, search, search-result page follow-up and a private read
     through the real bridge JSON-RPC loop and actual host invocation.
@@ -401,9 +403,6 @@ class BoundedProfileHostInvocation(unittest.TestCase):
         return json.loads(reply["result"]["content"][0]["text"])
 
     def test_allowed_public_and_private_reads_reach_the_host_with_exact_fields(self):
-        # #605 N6: a weather place must be the owner's own wording on every path.
-        with self.store.db() as db:
-            db.execute("UPDATE jobs SET message=? WHERE id=?", ("Daejeon KR weather", self.job))
         replies = self._serve([
             self._call(2, "weather", {"city": "Daejeon", "country": "KR"}),
             self._call(3, "web_search", {"query": "today news"}),
@@ -522,6 +521,7 @@ class BoundedProfileHostInvocation(unittest.TestCase):
         self.assertEqual((self.searches, self.weather, self.opened), ([], [], []))
 
 
+@ordinary_lookup_judgment
 class BridgeErrorMapping(unittest.TestCase):
     """What the CLI receives when a bridged AgentOS call does not succeed."""
 

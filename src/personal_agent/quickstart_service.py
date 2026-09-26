@@ -513,9 +513,10 @@ class AgentService:
     def record_decision(self, record):
         # Link a DecisionEngine call to the Work being processed (#570).
         if self.current_work_id:record={**record,'work_id':self.current_work_id}
-        with self.lock:  # read-modify-write of one config row
-            rows=self.store.config('decision_audit',[]);rows=rows if isinstance(rows,list) else []
-            self.store.put('decision_audit',[*rows,record][-100:])
+        # One atomic append: an MCP bridge process may audit a judgment on the
+        # same store (#605 R9), so an in-process lock alone would lose rows.
+        with self.lock:
+            self.store.append_config_list('decision_audit',record,100)
 
     def use_decision_engine(self, engine):
         """Replace the engine behind both consumers (tests, later providers)."""

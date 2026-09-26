@@ -175,6 +175,23 @@ class QuickStore:
         with self.db() as db:
             db.execute('INSERT INTO config VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(key,json.dumps(value)))
 
+    def append_config_list(self, key, item, limit):
+        """Append one item to a list-valued config row, keeping the last ``limit``.
+
+        One immediate transaction, so two processes sharing the store (the
+        service and an MCP bridge, #605 R9) cannot lose each other's rows.
+        """
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT value FROM config WHERE key=?', (key,)).fetchone()
+            try:
+                rows = json.loads(row['value']) if row else []
+            except (TypeError, ValueError):
+                rows = []
+            rows = rows if isinstance(rows, list) else []
+            db.execute('INSERT INTO config VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                       (key, json.dumps([*rows, item][-limit:])))
+
     def secret(self, key, value=None, create=None):
         if value is not None and create is not None:raise ValueError('secret value and factory are mutually exclusive')
         with self.secret_lock:

@@ -36,6 +36,7 @@ Core contracts use provider-neutral names. The conceptual model includes:
 
 - **DecisionContext** — minimal, attributable Work-scoped state supplied for a bounded question.
 - **SelectionDecision<T>** — selection among declared candidates.
+- **SelectionSetDecision<T>** — zero or more of the declared candidates (`choose_many`, #605: which terms of a public lookup to withhold). An engine that cannot answer one returns an explicit non-answer; the Jev route does not offer it and answers unavailable.
 - **ScoreDecision** — evaluation against a declared scale or rubric.
 - **BinaryDecision** — bounded yes/no judgment with confidence/probability.
 - **DecisionConfidence** — confidence/probability (calibration is measured per provider, not assumed) plus available provenance/telemetry.
@@ -62,6 +63,12 @@ interface DecisionEngine {
     context: DecisionContext,
     proposition: string,
   ): Promise<BinaryDecision>;
+
+  choose_many<T>(
+    context: DecisionContext,
+    candidates: readonly T[],
+    question: string,
+  ): Promise<SelectionSetDecision<T>>;
 }
 ```
 

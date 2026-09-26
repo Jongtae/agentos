@@ -15,6 +15,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
+from lookup_judgment import ordinary_lookup_judgment
 from personal_agent.conversation_handoff import (FOLLOWUP_REFERENCE, FOLLOWUP_RETRY,
                                                     INTENT_UNSUPPORTED, UNSUPPORTED_CAPABILITY_TEXT)
 from personal_agent.conversation_projection import (BLOCKER_NO_AI_ROUTE, TERMINAL_FAILED_HEADER,
@@ -134,6 +135,7 @@ class ShortWorkTests(ProjectionTestCase):
         self.assertIsNone(self.store.task_card(job['id']))
 
 
+@ordinary_lookup_judgment
 class LongWorkTests(ProjectionTestCase):
     """Matrix row G: one acknowledgement, then only owner-relevant changes."""
 

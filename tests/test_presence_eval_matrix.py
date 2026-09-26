@@ -43,6 +43,7 @@ from zoneinfo import ZoneInfo
 
 from cryptography.fernet import Fernet
 
+from lookup_judgment import ordinary_lookup_judgment
 from personal_agent.agent_runtime import CORE_INSTRUCTIONS
 from personal_agent.bounded_execution import ExecutionError, ExecutionResult
 from personal_agent.calendar import CALENDAR_SPEC, CALENDAR_WRITE_SPEC, CalendarConnector
@@ -511,6 +512,7 @@ class C_RetryContinuity(PresenceEval):
 # =============================================================================
 # G. long research -> selective semantic progress, not scheduler narration
 # =============================================================================
+@ordinary_lookup_judgment
 class G_LongResearch(PresenceEval):
     def research_turn(self, text, net, reply, think=None):
         self.connect_model()
@@ -1176,6 +1178,7 @@ class CalendarParticleFinding(CalendarEval):
 # =============================================================================
 # H. partial result -> verified and failed portions separated
 # =============================================================================
+@ordinary_lookup_judgment
 class H_PartialResult(PresenceEval):
     def partial_research(self):
         self.connect_model()
@@ -1271,6 +1274,7 @@ class H_PartialResult(PresenceEval):
         self.assertIsNone(self.store.job(succeeded['id'])['owner_verified'])
 
 
+@ordinary_lookup_judgment
 class Inspectability(LocalHttp, PresenceEval):
     """Presence recedes the machinery; it never hides it (Task/Evidence detail on the Mac)."""
 

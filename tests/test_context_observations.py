@@ -426,6 +426,39 @@ class CT07PauseClearRetentionTests(ContextInputCase):
         self.update({'message_id': self.message_id, 'location': POINT, 'date': paused_date})
         self.assertEqual(1, len(self.rows()))
 
+    def test_existing_live_share_continues_after_resume_but_not_after_clear(self):
+        self.enable()
+        self.message_id += 1
+        live_id, live_date = self.message_id, int(self.now)
+        self.update({'message_id': live_id, 'location': {**POINT, 'live_period': 3600}})
+        self.now += 30
+        self.service.set_current_context({'enabled': False})
+        self.now += 30
+        self.enable()
+        self.now += 30
+        self.update({'message_id': live_id, 'date': live_date, 'edit_date': int(self.now),
+                     'location': {**POINT, 'latitude': 37.7, 'live_period': 3600}}, edited=True)
+        self.assertEqual(2, self.rows()[0]['source_revision'])
+        # An edit stamped before the resume cutoff is still refused.
+        self.update({'message_id': live_id, 'date': live_date, 'edit_date': live_date + 40,
+                     'location': {**POINT, 'live_period': 3600}}, edited=True)
+        self.assertEqual(2, self.rows()[0]['source_revision'])
+
+    def test_repair_or_disconnect_hides_the_previous_accounts_observations(self):
+        self.enable()
+        self.pin()
+        self.assertEqual(1, len(self.service.context_observations.usable()))
+        cfg = self.store.config('telegram')
+        self.store.put('telegram', {**cfg, 'user_id': FOREIGN})
+        self.assertEqual([], self.service.context_observations.usable())
+        self.assertEqual([], self.service.context_observations.status()['observations'])
+        self.store.put('telegram', {**cfg, 'generation': 'g2'})
+        self.assertEqual([], self.service.context_observations.usable())
+        self.store.put('telegram', {**cfg, 'enabled': False})
+        self.assertEqual([], self.service.context_observations.usable())
+        self.store.put('telegram', cfg)
+        self.assertEqual(1, len(self.service.context_observations.usable()))
+
     def test_clear_restart_and_late_updates_do_not_resurrect_context(self):
         self.enable()
         self.message_id += 1

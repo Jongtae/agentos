@@ -207,6 +207,23 @@ class ContextObservations:
 
     # --- reads ------------------------------------------------------------
 
+    @staticmethod
+    def _active_identity(db):
+        """The currently paired Telegram owner and generation, or None.
+
+        Reads are scoped to it so a disconnect or re-pair never exposes the
+        previous account's observations, even inside the retention window.
+        """
+        row = db.execute("SELECT value FROM config WHERE key='telegram'").fetchone()
+        try:
+            cfg = json.loads(row['value']) if row else {}
+        except (TypeError, ValueError):
+            return None
+        user_id, generation = cfg.get('user_id'), cfg.get('generation')
+        if not cfg.get('enabled') or not isinstance(user_id, int) or isinstance(user_id, bool) or not generation:
+            return None
+        return owner_key(user_id), generation
+
     def prune(self, db, now):
         db.execute('DELETE FROM context_observations WHERE expires_at<=?', (now,))
         db.execute("UPDATE context_location_requests SET state='expired' WHERE state='pending' AND expires<=?", (now,))
@@ -234,8 +251,11 @@ class ContextObservations:
         now = self.clock() if now is None else now
         with self.store.db() as db:
             settings = self.settings(db)
-            rows = db.execute('SELECT * FROM context_observations WHERE context_epoch=? AND expires_at>? '
-                              "AND state!='invalidated' ORDER BY observed_at DESC", (settings['epoch'], now)).fetchall()
+            identity = self._active_identity(db)
+            rows = [] if identity is None else db.execute(
+                'SELECT * FROM context_observations WHERE owner_key=? AND generation=? AND context_epoch=? '
+                "AND expires_at>? AND state!='invalidated' ORDER BY observed_at DESC",
+                (*identity, settings['epoch'], now)).fetchall()
         entries = [self._entry(row, now) for row in rows]
         if not settings['enabled']:
             entries = [entry for entry in entries if job_id is not None and entry['job_id'] == job_id
@@ -249,8 +269,10 @@ class ContextObservations:
             db.execute('BEGIN IMMEDIATE')
             self.prune(db, now)
             settings = self.settings(db)
-            rows = db.execute('SELECT * FROM context_observations WHERE context_epoch=? '
-                              'ORDER BY observed_at DESC LIMIT ?', (settings['epoch'], USABLE_ENTRY_LIMIT)).fetchall()
+            identity = self._active_identity(db)
+            rows = [] if identity is None else db.execute(
+                'SELECT * FROM context_observations WHERE owner_key=? AND generation=? AND context_epoch=? '
+                'ORDER BY observed_at DESC LIMIT ?', (*identity, settings['epoch'], USABLE_ENTRY_LIMIT)).fetchall()
             pending = db.execute("SELECT count(*) FROM context_location_requests WHERE state='pending' AND expires>?",
                                  (now,)).fetchone()[0]
         items = []
@@ -363,14 +385,16 @@ class ContextObservations:
         point = normalize_point(location)
         if point is None:
             return 'rejected:invalid_location'
-        if sent_at < settings['cutoff']:
-            return 'rejected:before_cutoff'
-        if observed_at + RETENTION_SECONDS <= now:
-            return 'rejected:expired'
         owner = owner_key(owner_id)
         existing = db.execute('SELECT * FROM context_observations WHERE owner_key=? AND generation=? '
                               'AND context_epoch=? AND source_key=?',
                               (owner, generation, settings['epoch'], key)).fetchone()
+        # A source first seen now must postdate the cutoff; a share already
+        # recorded in this epoch (so not cleared) may continue after a resume.
+        if (observed_at if existing else sent_at) < settings['cutoff']:
+            return 'rejected:before_cutoff'
+        if observed_at + RETENTION_SECONDS <= now:
+            return 'rejected:expired'
         if existing and (observed_at, update['update_id']) <= (existing['revision_at'], existing['revision_update_id']):
             return 'ignored:stale_revision'
         live_period = _live_period(location)

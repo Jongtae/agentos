@@ -1364,7 +1364,7 @@ class NoEngineEndToEnd(unittest.TestCase):
             {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call', 'params': {'name': 'web_search', 'arguments': {'query': '성남 병원'}}},
         ]) + '\n'
         out = io.StringIO()
-        with mock.patch.object(mcp_bridge, 'LocalTools', lambda: self.wire), \
+        with mock.patch.object(mcp_bridge, 'LocalTools', lambda providers=None: self.wire), \
              mock.patch('personal_agent.decision_routes.DecisionRoutes._cli_engine',
                         side_effect=AssertionError('no decision CLI may run inside the bridge')), \
              mock.patch.object(sys, 'stdin', io.StringIO(lines)), contextlib.redirect_stdout(out):
@@ -1449,7 +1449,7 @@ class BridgeWrites(unittest.TestCase):
                 {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {}},
                 {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call', 'params': {'name': name, 'arguments': arguments}},
             ]) + '\n'
-            with mock.patch.object(mcp_bridge, 'LocalTools', lambda: wire), \
+            with mock.patch.object(mcp_bridge, 'LocalTools', lambda providers=None: wire), \
                  mock.patch.object(sys, 'stdin', io.StringIO(lines)), contextlib.redirect_stdout(io.StringIO()):
                 mcp_bridge.serve(str(store.root), job_id, [], judge=judged_ordinary)
 

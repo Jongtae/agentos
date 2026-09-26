@@ -20,6 +20,7 @@ from .agent_runtime import (CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, PUBLIC_TASK_LOOK
 from .providers import ProviderError
 from .bounded_execution import AgentOSMcpTools, ExecutionError, profile_actions, redact_reason
 from .local_tools import LocalTools
+from .search_providers import ProviderRegistry
 from .quickstart_store import QuickStore
 
 
@@ -189,7 +190,7 @@ def serve(data, job_id, provenance=(), judge=None):
             db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)', (job_id,tool,status,detail,time.time()))
     # #604: the Work's allowed actions are the bounded CLI profile; names and
     # schemas come from Capabilities.definitions(), never a bridge-local list.
-    capabilities = Capabilities(store, None, {}, '', job_id, record, network=LocalTools(), document_access=False,
+    capabilities = Capabilities(store, None, {}, '', job_id, record, network=LocalTools(providers=ProviderRegistry.from_store(store)), document_access=False,
                                 allowed_tools=set(profile_actions(AgentOSMcpTools.PROFILE)),
                                 inherited_provenance=_provenance(provenance), lookup_hint=CLI_LOOKUP_HINT,
                                 lookup_sources=_lookup_sources(store, job_id), lookup_restrictive=_restrictive(store),

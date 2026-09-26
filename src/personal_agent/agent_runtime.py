@@ -8,6 +8,7 @@ from collections import namedtuple
 from pathlib import Path
 from .providers import NOT_REPORTED, ModelResult, ProviderError
 from .local_tools import LocalTools
+from .search_providers import describe_options, search_arguments
 from .document_reader import read as read_document, supported as supported_document, MAX_FILE_BYTES
 from . import folder_grants
 from .manifests import BUILTIN_MANIFEST, runtime_packages
@@ -19,8 +20,12 @@ BUILTIN_ROLES={role['id']:{**role,'package_id':BUILTIN_MANIFEST['id']} for role 
 def schema(name,description,properties=None,required=None):
  return {'type':'function','function':{'name':name,'description':description,'parameters':{'type':'object','properties':properties or {},'required':required or [],'additionalProperties':False}}}
 STRING={'type':'string'}
+#: #655: the model chooses the provider per call from the owner's configured
+#: set; `action_definitions` appends the configured list and the enum at run
+#: time.  The text names what each provider covers, never which to prefer.
+WEB_SEARCH_DESCRIPTION='Search public web snippets through one of the configured search providers. Use for current public information, not local files. provider selects the provider for this call (omit it for the owner\'s default); locale is an optional language tag such as ko-KR or en-US. If one provider\'s results do not fit, try another provider or another query rather than repeating the same call. Never include credentials or private file contents in search terms.'
 DEFINITIONS=[
- schema('web_search','Search public web snippets. Use for current public information, not local files. Never include credentials or private file contents in search terms.',{'query':STRING},['query']),
+ schema('web_search',WEB_SEARCH_DESCRIPTION,{'query':STRING,'provider':STRING,'locale':STRING},['query']),
  schema('public_page_read','Read one anonymous public HTTP(S) page as bounded text. Use only for a user-supplied public URL; no login, cookies, JavaScript, private destinations or mutations.',{'url':STRING},['url']),
  schema('bounded_public_research','Compare public products or plan travel from public web evidence. Runs one bounded public search and reads at most three of its own result pages, then separates facts it actually observed from price/inventory/fee details it could not confirm. Use for a comparison or travel plan, not for a single lookup - web_search is cheaper for that. Never include private file contents or credentials in the query. This cannot purchase, book, reserve, create an account or sign in.',{'mode':{'type':'string','enum':['product_comparison','travel_plan']},'query':STRING},['mode','query']),
  schema('calendar_query','List the owner\'s calendar events between two RFC3339 timestamps that both carry an explicit UTC offset. Use this to answer what is scheduled. Read-only; returns event ids and versions needed to change or cancel an event.',{'start':STRING,'end':STRING,'timezone':STRING},['start','end','timezone']),
@@ -959,7 +964,7 @@ class EvidenceLog(list):
 
 READONLY_EXCLUDED=('save_note','save_memory','delegate_agent')
 
-def action_definitions(tools,allowed,readonly=False):
+def action_definitions(tools,allowed,readonly=False,search_providers=None):
  """Native function definitions for ``allowed`` tool ids of resolved package tools.
 
  This is the single action source every route derives from (#604): the
@@ -967,13 +972,24 @@ def action_definitions(tools,allowed,readonly=False):
  and the isolated bridge's list are all projections of ``DEFINITIONS`` through
  the manifest ``tools`` (``manifests.runtime_packages``).  No route keeps its
  own schema copy.
+
+ ``search_providers`` (#655) is the owner's configured ``ProviderRegistry``;
+ when given, ``web_search.provider`` is an enum of exactly its option ids and
+ the description lists them.  Without one (the isolated bridge, which has no
+ owner store) the parameter stays a free string checked at execution.
  """
  definitions=[]
  for tool_id in sorted(allowed):
   tool=tools.get(tool_id)
   if not tool or (readonly and tool['host_action'] in READONLY_EXCLUDED):continue
   source=next(d for d in DEFINITIONS if d['function']['name']==tool['host_action'])
-  definitions.append({**source,'function':{**source['function'],'name':tool_id}})
+  function={**source['function'],'name':tool_id}
+  if tool['host_action']=='web_search' and search_providers is not None:
+   options=search_providers.options()
+   properties={**function['parameters']['properties'],'provider':{'type':'string','enum':[row['id'] for row in options]}}
+   function={**function,'description':function['description']+describe_options(options,search_providers.default()),
+             'parameters':{**function['parameters'],'properties':properties}}
+  definitions.append({**source,'function':function})
  return definitions
 
 def check_arguments(parameters,args):
@@ -1294,7 +1310,7 @@ class Capabilities:
   if document_context:self.private_provenance.add('conversation-history')
   self.evidence=EvidenceLog(self.private_provenance)
  def definitions(self):
-  return action_definitions(self.tools,self.allowed_tools,self.readonly)
+  return action_definitions(self.tools,self.allowed_tools,self.readonly,search_providers=getattr(self.network,'providers',None))
  def roots(self):
   # Filesystem state can change while this Capabilities object is alive. Recheck
   # each use so replacing a granted directory with a symlink cannot reuse a stale
@@ -1745,6 +1761,9 @@ class Capabilities:
    if not private:
     claimed=self._claim_state('clean-lookup',limit=LOOKUP_CLEAN_PER_WORK)
     if not claimed:raise ValueError(PUBLIC_TASK_LOOKUP_LIMIT if claimed is False else PUBLIC_TASK_STATE_UNAVAILABLE)
+  # #655: the model's provider/locale selectors ride along unchanged; they
+  # are bounded ids, not composed text, and the same enum for every context.
+  if action=='web_search':plan.update(search_arguments(args))
   sent={k:v for k,v in plan.items() if k!='tool'}
   if private:
    if not self._claim_attempt(tool_id,action):
@@ -2208,6 +2227,10 @@ def _evidence_detail(name,result):
   # every host a failed research read reached.
   if result.get('attempted_urls'):summary['attempted_urls']=result['attempted_urls'][:8]
   if result.get('read_failures'):summary['read_failures']=[row.get('url') for row in result['read_failures'][:8] if isinstance(row,dict)]
+  # #655: which configured provider answered this search, and the selectors sent.
+  if name=='web_search' and result.get('provider'):
+   summary['provider']=result['provider']
+   if result.get('locale'):summary['locale']=result['locale']
   # #605: the owner-visible record says the call was composed by a separate
   # public task, not from the arguments the proposing worker wrote.
   if result.get('composed_by')=='agentos-public-task':

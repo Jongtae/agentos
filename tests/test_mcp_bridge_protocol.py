@@ -356,7 +356,9 @@ class BoundedProfileHostInvocation(unittest.TestCase):
         self.job = _running_work(self.store)
         self.searches, self.weather, self.opened = [], [], []
 
-    def _network(self):
+    def _network(self, providers=None):
+        # #655: the bridge passes the owner's provider registry; this fake
+        # keeps the keyless default and records only what was sent.
         from personal_agent.local_tools import LocalTools, PublicPageReader
         test = self
 
@@ -379,7 +381,7 @@ class BoundedProfileHostInvocation(unittest.TestCase):
 
         tools = LocalTools(page_reader=PublicPageReader(opener=Opener(), resolver=public_dns))
 
-        def search(query):
+        def search(query, provider=None, kind=None, locale=None):
             test.searches.append(query)
             return {"tool": "web_search", "query": query, "retrieved_at": 1, "results": test.RESULTS,
                     "sources": [row["url"] for row in test.RESULTS]}

@@ -21,7 +21,7 @@ from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_U
                                       TERMINAL_UNVERIFIED_MARKER, BlockedTurn, ConversationProjection, context_message,
                                       owner_cause, terminal_text, turn_qualifier, verified_portion)
 from .subscription_engines import SubscriptionEngines
-from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult, MAX_PROMPT_BYTES, SECRET_PATTERN, profile_actions, profile_status, route_unavailable
+from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, StrictIsolatedAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult, MAX_PROMPT_BYTES, SECRET_PATTERN, BOUNDED_PROFILE, HOST_CLI_PROFILES, STRICT_PROFILE, profile_actions, profile_status, route_unavailable
 from .isolated_engine_gateway import EngineGatewayError
 from .service_control import build_identity
 from .isolated_mcp_proxy import IsolatedMcpProxy, TaskCapabilityRegistry
@@ -721,8 +721,67 @@ class AgentService:
         return '설정 요청을 처리했습니다.'
 
     def subscription_execution_profile(self):
-        """The CLI capability profile, read from its one declaration (#604)."""
-        return profile_status((ReadOnlyAgentOSMcpTools if self.isolated_engine_adapter else AgentOSMcpTools).PROFILE)
+        """The CLI capability profile, read from its one declaration (#604).
+
+        #616: on the host CLI route it is the owner-selected trust profile;
+        the strict-isolated choice also shows which CLI versions passed.
+        """
+        if self.isolated_engine_adapter:
+            return profile_status(ReadOnlyAgentOSMcpTools.PROFILE)
+        selection=self.subscription_isolation()
+        status=profile_status(selection['profile'])
+        status.update(selectable=list(HOST_CLI_PROFILES),qualified=selection.get('qualified',{}))
+        return status
+
+    def subscription_isolation(self):
+        """The owner's host-CLI profile choice (#616); trusted-local by default."""
+        row=self.store.config('subscription_isolation',{}) or {}
+        profile=row.get('profile') if row.get('profile') in HOST_CLI_PROFILES else BOUNDED_PROFILE
+        qualified=row.get('qualified') if isinstance(row.get('qualified'),dict) else {}
+        return {'profile':profile,'qualified':qualified}
+
+    def subscription_facade(self):
+        """The facade class and constructor keywords of the selected host-CLI profile."""
+        selection=self.subscription_isolation()
+        if selection['profile']!=STRICT_PROFILE:
+            return AgentOSMcpTools,{}
+        engine=self.store.config('subscription_engine',{}).get('id','')
+        record=selection['qualified'].get(engine) or {}
+        return StrictIsolatedAgentOSMcpTools,{'qualified_version':record.get('version')}
+
+    def select_subscription_isolation(self, body):
+        """Owner choice of the host-CLI trust profile (#616).
+
+        strict-isolated is saved only after a passing no-model qualification of
+        the selected CLI; on failure the previous profile stays in effect.
+        Choosing trusted-local is always an explicit owner action.  Neither
+        choice ever happens automatically.
+        """
+        if not isinstance(body,dict) or body.get('profile') not in HOST_CLI_PROFILES:
+            raise ValueError('선택할 실행 프로필을 확인하세요.')
+        if self.isolated_engine_adapter:
+            raise ValueError('격리 사이드카 경로는 자체 제한 프로필을 사용합니다. 현재 프로필은 그대로 유지됩니다.')
+        profile=body['profile']
+        with self.lock:
+            current=self.subscription_isolation()
+        if profile==BOUNDED_PROFILE:
+            with self.lock:self.store.put('subscription_isolation',{**current,'profile':BOUNDED_PROFILE})
+            return {'profile':BOUNDED_PROFILE,'subscription_execution':self.subscription_execution_profile()}
+        engine=body.get('engine') or self.store.config('subscription_engine',{}).get('id','')
+        if engine not in ('codex','claude-code'):
+            raise ValueError('엄격 격리를 검증할 구독 엔진을 먼저 연결하세요. 현재 프로필은 그대로 유지됩니다.')
+        qualify=getattr(self.execution_adapter,'qualify_strict',None)
+        if not callable(qualify):
+            raise ValueError('이 실행 환경은 엄격 격리 검증을 지원하지 않습니다. 현재 프로필은 그대로 유지됩니다.')
+        binary=self.subscription_engines.finder({'codex':'codex','claude-code':'claude'}[engine])
+        result=qualify(engine,binary=binary,protected=[self.store.root])
+        if not result.get('qualified'):
+            raise ValueError(f"엄격 격리 검증을 통과하지 못했습니다({result.get('reason') or 'unknown'}). "
+                             f"현재 프로필({current['profile']})은 그대로 유지됩니다.")
+        qualified={**current['qualified'],engine:{'version':result['version'],'checked_at':time.time(),
+                                                   'checks':[check['check'] for check in result['checks']]}}
+        with self.lock:self.store.put('subscription_isolation',{'profile':STRICT_PROFILE,'qualified':qualified})
+        return {'profile':STRICT_PROFILE,'qualification':result,'subscription_execution':self.subscription_execution_profile()}
 
     def settings(self):
         with self.lock:
@@ -3422,7 +3481,8 @@ class AgentService:
                         # restricted profile and rejects direct web_search calls.
                         # #604: the bounded route's actions are its declared
                         # profile (bounded_execution.CLI_PROFILES).
-                        facade=ReadOnlyAgentOSMcpTools if isolated else AgentOSMcpTools
+                        # #616: the host route runs the owner-selected trust profile.
+                        facade,facade_options=(ReadOnlyAgentOSMcpTools,{}) if isolated else self.subscription_facade()
                         allowed_tools=set(profile_actions(facade.PROFILE))|{'web_search'}
                         capabilities=Capabilities(self.store,None,{},'',job['id'],record,network=self.local_tools,
                                                   document_access=False,packages=self.runtime_packages(),
@@ -3502,7 +3562,7 @@ class AgentService:
                                     self.isolated_mcp_registry.revoke(token)
                                 result=ExecutionResult(content,subscription['id'],0)
                             else:
-                                result=self.execution_adapter.execute(subscription['id'],engine_prompt,AgentOSMcpTools(capabilities),context=adapter_context)
+                                result=self.execution_adapter.execute(subscription['id'],engine_prompt,facade(capabilities,**facade_options),context=adapter_context)
                         except (ExecutionError,EngineGatewayError) as exc:
                             diagnostics=exc.diagnostics() if isinstance(exc,ExecutionError) else {}
                             self.record_turn_provenance(job['id'],status='failed',failure_class=diagnostics.get('failure_class'),egress_taint=sorted(capabilities.private_provenance),

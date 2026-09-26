@@ -733,6 +733,8 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 if path=='/api/subscription-engines/login-status':return self.reply(200,service.check_engine_login(body.get('engine','') if isinstance(body,dict) else ''))
                 if path=='/api/subscription-engines/credential':return self.reply(200,service.save_engine_credential(body))
                 if path=='/api/ai-route':return self.reply(200,service.select_ai_route(body))
+                # #616: explicit owner choice of the host-CLI trust profile.
+                if path=='/api/subscription-engines/isolation':return self.reply(200,service.select_subscription_isolation(body))
                 # DecisionEngine route (#580): explicit owner actions, separate from the Work route above.
                 if path=='/api/decision-route/activate':return self.reply(200,service.activate_decision_route(body))
                 if path=='/api/decision-route/credential':return self.reply(200,service.save_decision_route_credential(body))

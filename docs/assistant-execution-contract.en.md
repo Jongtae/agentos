@@ -108,6 +108,24 @@ No-model local evidence, recorded 2026-09-26 with a fake store only:
 - A Codex permissions profile with filesystem `:minimal=read` plus the turn directory only, passed with `-c`: store and home reads were blocked, while the turn directory and the system interpreter remained usable. Whether the Codex MCP server process is confined too, and whether the bridge still works under that profile, has **not** been observed. Observing it needs a `codex exec` run. This is input to #616.
 - Claude Code 2.1.280: there is no local runner for its file tools. Its `--help` states that `--restricted` removes code-running tools and WebFetch and confines file tools to the working directories. AgentOS does not pass that flag today, and none of this is locally verified.
 
+**#616 strict-isolated profile record ([#616](https://github.com/Jongtae/agentos/issues/616), AX-15).** `strict-isolated` is a separate host-CLI profile in `bounded_execution.CLI_PROFILES`. It offers the same actions through the same stdio bridge as `trusted-local`. Only the CLI launch differs:
+
+- **Codex (tested 0.153.4, macOS).** An official permissions profile, `agentos-strict-isolated`, replaces `--sandbox read-only`. It gives filesystem `:minimal` and the turn directory read access only, and network is disabled. Apps, multi-agent and the provider-hosted web search are disabled. The two must never be combined: with `--sandbox read-only` also present, Codex applies the legacy policy and the store is readable again.
+- **Claude Code (tested 2.1.280, macOS).** `--tools ""` removes every built-in tool, `--restricted` stops settings files from adding one back, and `--allowedTools` pre-approves only the profile's AgentOS MCP tools.
+- **Choice and qualification.** The owner chooses the profile (`/api/subscription-engines/isolation`, Settings › AI 연결). Strict is saved only after a no-model qualification passes:
+  - the tested CLI version and platform;
+  - for Codex, the CLI's own `codex sandbox -P` runner under the same profile must refuse the real store, home and login-profile directories, and must list a turn directory.
+- **Failure handling.** A failed qualification keeps the previous profile. At run time any other CLI version is refused with `isolation-unqualified`. AgentOS never falls back to trusted-local.
+- **Where it is shown.** Settings (`subscription_execution`), turn provenance (`capability_trust`) and the doctor (`routes.trust`, `selected_host_cli_profile`, recorded turns).
+
+Process-level evidence, recorded 2026-09-26: the exact argv drove real CLIs against a loopback scripted model on a fake store (`tests/test_strict_isolation.py`, opt-in `AGENTOS_CLI_QUALIFICATION=1`). No live model, account or owner data was involved.
+
+- **Codex strict.** Store, home, `CODEX_HOME`, sibling turns and loopback network were denied, as was `view_image` of a store file. The turn directory was readable. The Codex-launched bridge is not confined by the profile: `web_search`, `weather` (public network stubbed in the bridge process) and `list_notes` worked.
+- **Codex trusted-local.** The store and home were readable, as its label states.
+- **Claude Code strict.** Only the five AgentOS tools were offered, `Read` / `Bash` / `WebSearch` / `Agent` were absent, and the three bridge calls worked.
+- **Claude Code trusted-local (`-p`, default permissions).** Out-of-directory reads were denied by its permission layer. So was every AgentOS MCP call, because nothing pre-approves them. This is a pre-existing reachability defect, not changed here.
+- **Residual.** Codex `:minimal` keeps OS paths and `/tmp` readable, and an explicit deny does not override it. Qualification therefore fails for a store under `/tmp`. Claude Code's confinement is application-level tool removal, not an OS sandbox. Upgrading a CLI requires requalification.
+
 ## Public/private information flow
 
 A public lookup is still an external disclosure. Owner-authored text can contain credentials or private material. Permission to send content to one AI provider is not permission to send it to search/weather or another provider. Semantic confidence, sensitivity labels and model-authored sanitization are not Grants.

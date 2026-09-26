@@ -273,7 +273,9 @@ class SettingsProjection(_Store):
         self.assertEqual(profile, {'profile': 'trusted-local', 'mode': 'bounded-agentos-mcp', 'trust': 'trusted-local',
                                    'limitation': CLI_PROFILES[BOUNDED_PROFILE]['limitation'],
                                    'tools': ['bounded_public_research', 'list_notes', 'save_note', 'weather', 'web_search'],
-                                   'unavailable': route_unavailable(BOUNDED_PROFILE)})
+                                   'unavailable': route_unavailable(BOUNDED_PROFILE),
+                                   # #616: the owner can choose; nothing is qualified by default.
+                                   'selectable': ['trusted-local', 'strict-isolated'], 'qualified': {}})
 
 
 class PackageAuthorityRechecks(_Store):

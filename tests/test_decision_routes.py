@@ -137,7 +137,7 @@ class JevTransport:
 
 
 CODEX_HELP = ('Usage: codex exec [OPTIONS] [PROMPT]\n -c, --config <key=value>\n --json\n --ignore-user-config\n'
-              ' --ephemeral\n --skip-git-repo-check\n --output-schema <FILE>\n -m, --model <MODEL>\n'
+              ' --ignore-rules\n --ephemeral\n --skip-git-repo-check\n --output-schema <FILE>\n -m, --model <MODEL>\n'
               ' --disable <FEATURE>\n --sandbox <MODE>\n')
 CLAUDE_HELP = (' -p, --print\n --output-format <format>\n --json-schema <schema>\n --tools <tools...>\n'
                ' --strict-mcp-config\n --setting-sources <sources>\n --restricted\n --no-session-persistence\n'
@@ -299,7 +299,8 @@ class SubscriptionCliTests(Temp):
         self.assertEqual((decision.outcome, decision.choice), (OUTCOME_DECIDED, 'retry'))
         call = self.runner.calls[-1]
         argv = call['argv']
-        for flag in ('--ignore-user-config', '--ephemeral', '--skip-git-repo-check', '--output-schema', '--json'):
+        for flag in ('--ignore-user-config', '--ignore-rules', '--ephemeral', '--skip-git-repo-check', '--output-schema',
+                     '--json'):
             self.assertIn(flag, argv)
         self.assertEqual(argv[argv.index('--sandbox') + 1], 'read-only')
         disabled = [argv[i + 1] for i, part in enumerate(argv) if part == '--disable']
@@ -679,6 +680,22 @@ class ServiceRouteSelectionTests(Temp):
             service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'claude-code'})
         self.assertIn('--restricted', self.store.config('decision_cli_capabilities')['claude-code']['missing_flags'])
         self.assertFalse(any('-p' in call['argv'] for call in self.runner.calls))
+
+    def test_decision_layer_doc_states_the_codex_home_instruction_limitation(self):
+        # #624: the overrides do not keep CODEX_HOME instruction files out.
+        doc = (Path(__file__).resolve().parents[1] / 'docs' / 'decision-layer.en.md').read_text(encoding='utf-8')
+        self.assertNotIn('(no AGENTS.md/project docs)', doc)
+        for phrase in ('$CODEX_HOME/AGENTS.override.md', '$CODEX_HOME/AGENTS.md', 'untracked, untrusted input',
+                       'CodexDecisionInstructionFiles', '--ignore-rules'):
+            self.assertIn(phrase, doc)
+
+    def test_codex_without_ignore_rules_is_refused(self):
+        # #624: a CODEX_HOME execpolicy rule must not widen a judgment's sandbox.
+        service = self.service(runner=CliRunner(help_text={'codex': CODEX_HELP.replace(' --ignore-rules\n', '')}))
+        with self.assertRaises(DecisionRouteError):
+            service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'codex'})
+        self.assertIn('--ignore-rules', self.store.config('decision_cli_capabilities')['codex']['missing_flags'])
+        self.assertFalse(any('exec' in call['argv'] and '--json' in call['argv'] for call in self.runner.calls))
 
     def test_isolation_flags_are_required_before_any_judgment(self):
         service = self.service(runner=CliRunner(help_text={'claude-code': ' --model <model>\n'}))

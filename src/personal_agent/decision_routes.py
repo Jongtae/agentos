@@ -62,7 +62,7 @@ CLI_DESTINATIONS = {'codex': 'OpenAI (Codex 구독 계정)', 'claude-code': 'Ant
 #: through it: the isolation/no-tools flags are mandatory, the model flag
 #: decides whether ``explicit`` / ``lowest_qualified`` can be offered.
 REQUIRED_FLAGS = {
-    'codex': ('--json', '--ignore-user-config', '--ephemeral', '--output-schema', '--disable', '--sandbox',
+    'codex': ('--json', '--ignore-user-config', '--ignore-rules', '--ephemeral', '--output-schema', '--disable', '--sandbox',
               '--skip-git-repo-check', '--config'),
     'claude-code': ('--output-format', '--json-schema', '--tools', '--strict-mcp-config', '--no-session-persistence',
                     '--system-prompt', '--setting-sources', '--restricted'),

@@ -556,12 +556,13 @@ class G_LongResearch(PresenceEval):
         job, message_id = self.research_turn('캠핑 의자 조사 좀 해줄래', EvalNet(), '의자 A가 가볍습니다.', think)
         self.assertEqual(outcomes, ['running', 'duplicate'])
         self.assertEqual(self.methods().count('sendMessageDraft'), 1, 'no draft after Stop')
-        self.assertEqual(job['status'], 'succeeded', 'running Work was not cancellable and was not cancelled')
+        # #606 T1: Stop is checked before the next model turn or tool call.
+        self.assertEqual(job['status'], 'failed', 'Stop ended the Work before its next step')
         notice, answer = self.bubbles()
         self.assertEqual(notice['text'], AgentService.STOP_RUNNING_TEXT)
         self.assertNotIn('취소했', notice['text'])
-        self.assertTrue(answer['text'].startswith('의자 A가 가볍습니다.'), 'the real result is still delivered once')
-        self.assertIn('https://example.com/a', answer['text'], 'observed sources travel with the answer')
+        self.assertIn('멈춤을 요청해 다음 단계를 실행하지 않았습니다', answer['text'], 'the real result is still delivered once')
+        self.assertNotIn('의자 A가 가볍습니다.', answer['text'])
 
     def test_stop_on_queued_work_cancels_it_through_the_state_machine(self):
         self.connect_model()

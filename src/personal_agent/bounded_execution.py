@@ -81,6 +81,7 @@ _ISOLATED = 'isolation-restricted-profile'
 #: #616 AGENCY-ISOLATION-01.
 TRUSTED_LOCAL_LIMITATION = ('the CLI may read host files outside AgentOS provenance '
                             '(verified: codex sandbox -P :read-only, codex-cli 0.153.4); '
+                            'Codex exec rules in CODEX_HOME, allow and forbidden, are ignored (--ignore-rules); '
                             'Claude Code 2.1.280 -p denied the tested store and home reads, a Write and WebFetch and could '
                             'read its turn directory (observed); managed settings could allow more (documented only)')
 
@@ -662,7 +663,12 @@ class BoundedExecutionAdapter:
             # --ignore-user-config keeps the owner's own Codex defaults (model,
             # MCP servers, plugins) out of this bounded turn; login still
             # comes from CODEX_HOME.  --ephemeral keeps no session files.
-            sandbox = strict_launch_arguments('codex', disabled_features) if strict else ['--sandbox', 'read-only']
+            # trusted-local: --ignore-rules so an "always allow" CODEX_HOME exec
+            # rule cannot run a command outside the read-only sandbox (#636,
+            # the #616 review P1 finding); an older CLI rejects the unknown
+            # flag and the turn fails instead of running without it.
+            sandbox = (strict_launch_arguments('codex', disabled_features) if strict
+                       else ['--sandbox', 'read-only', '--ignore-rules'])
             return [binary, 'exec', '--json', *sandbox, '--skip-git-repo-check',
                     '--ignore-user-config', '--ephemeral',
                     '-c', f'mcp_servers.agentos.command={json.dumps(sys.executable)}',

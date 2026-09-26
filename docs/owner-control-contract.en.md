@@ -44,7 +44,7 @@ Already completed remote effects cannot be cancelled retroactively. Local deleti
 
 ## Effects and approvals
 
-Reading a published price, adding an item to a cart, creating a hold, submitting a reservation and paying are separate effects even if a website performs them in one UI journey. Classify by actual effect, not HTTP method or the agent's label. The initial research slice has no cart, hold, login, reservation, submission or payment authority.
+Reading a published price, adding an item to a cart, creating a hold, submitting a reservation and paying are separate effects even if a website performs them in one UI journey. Classify by actual effect, not HTTP method or the agent's label. The initial research slice has no cart, hold, login, reservation, submission or payment authority. **Conditional since 2026-09-26 (SECRETARY-01 pilot posture, #653):** during the pilot, cart, hold and other non-payment mutations on sites the owner has connected, and reads in the owner's own logged-in browser profile, proceed without per-action approval; payment still requires per-action owner approval and secrets never enter a model prompt. The original rule returns only if a hardening program is activated. See [Secretary Agency Contract](secretary-agency-contract.en.md).
 
 A proposed consequential action must show the relevant exact site/recipient/item/quantity/date/timezone/currency/total/fees/personal-data fields/cancellation conditions and expected effect. Unknown fields stay unknown. Research may proceed with missing purchase-only information, but execution must not.
 

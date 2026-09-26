@@ -1,5 +1,13 @@
 # AgentOS contribution workflow
 
+## Secretary agency re-plan — #653 (2026-09-26)
+
+Owner decision 2026-09-26: the active top-level goal is **SECRETARY-01 [#662](https://github.com/Jongtae/agentos/issues/662)** under the canonical [Secretary Agency Contract](docs/secretary-agency-contract.en.md), activated by GOV-SECRETARY-01 [#653](https://github.com/Jongtae/agentos/issues/653). The center of the product is the secretary agency loop: the decision model chooses providers, sites, queries and recovery paths from the owner's context; deterministic code enforces only Grants, approvals, secret exclusion, idempotency and Evidence. PRESENCE-01 #508 is owner-paused; its merged work is regression input.
+
+**Pilot posture.** One owner, own machine, own accounts. Enforced at request time: secrets never enter a model prompt, log or Evidence; payment needs per-action owner approval. Per-request sensitivity judgments, re-asks, per-provider gating and the "no cart authority" rule are removed from the request path and deferred to a separately activated hardening program. The #625 paragraph below and the AGENCY/#605 egress-composition rules are historical for this program; Attention preparations and phase-2 family delegation are explicitly selected, not deferred.
+
+**No scenario-specific code.** Probes (book → cart, calendar reminder, lunch with allergies, one held-out) are observation windows, not completion criteria. Decision/runtime code must not branch on a named site, provider or question category; every PR states whether it generalizes the loop or only makes a probe pass.
+
 ## Current-context adoption — #625 (2026-09-26)
 
 For the selected single-owner current-state scope, read [Current context contract](docs/current-context-contract.en.md) and [Implementer playbook](docs/current-context-implementation.en.md). This selectively adopts #383 observation/time/current-state principles, not background Attention or multi-person collaboration. The plan is existing #605 → #606 → #607 → #626 input/time → #627 current-state consumption → #608/#512/#513; #625 is the immediate documentation adoption. Existing #616 and other independently directed work are preserved. Current-context claims remain unimplemented until those children deliver. Earlier blanket #383 deferrals do not exclude these two explicitly selected slices. #612 unit-test-first verification and concrete reuse still govern; no extra evaluator, graph platform or per-tick model calls. The new source-time, retention, inference/disclosure defaults and migration/test details are canonical in the two linked documents rather than duplicated here.
@@ -200,7 +208,6 @@ Use role-appropriate delegation only for independent bounded work. Record the re
 Independent review is required only for a material security/authority boundary change. Triggers include widening filesystem/network/secret/connector/runtime authority; OAuth or credential-boundary changes; consequential-action approval changes; sandbox/isolation/privilege changes; private-data egress or recipient-boundary changes; package/dependency supply-chain trust or install/update authority changes; canonical owner-state/authority ownership changes; or weakening/removing a declared safety invariant. Recovery work requires independent review only when it changes one of those semantics. Final completion, ordinary UI/conversation/Settings work, non-authority bug fixes/refactors/docs, and tracker/ledger reconciliation do not trigger review by themselves. When review is required, an implementer's self-review or a label transition alone is not independent review.
 
 Completion is rejected unless a current requirement-to-evidence audit maps every acceptance criterion to merged artifacts and required CI, plus any substantive planning/governance update required because the plan itself changed. GitHub-native execution status must not be duplicated into tracker/roadmap/ledger files merely to prove a merge. A local command, fixture, signature, package manifest, closed issue, branch or PR alone never proves live capability completion.
-
 
 ## Verification budget and stable-head review
 

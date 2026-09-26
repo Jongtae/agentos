@@ -752,10 +752,13 @@ class AgentService:
         No choice means trusted-local (the #604 default).  A stored value this
         build does not recognise fails closed: it is not read as trusted-local.
         """
-        row=self.store.config('subscription_isolation',{}) or {}
-        stored=row.get('profile') if isinstance(row,dict) else None
-        if stored is None:profile=BOUNDED_PROFILE
-        elif stored in HOST_CLI_PROFILES:profile=stored
+        absent=object()
+        row=self.store.config('subscription_isolation',absent)
+        # Review N3: only an absent row is the default; a present row that is
+        # not a dict (even JSON null), lacks `profile` or names an unknown one
+        # fails closed.
+        if row is absent:profile=BOUNDED_PROFILE
+        elif isinstance(row,dict) and row.get('profile') in HOST_CLI_PROFILES:profile=row['profile']
         else:profile=self.UNRECOGNISED_PROFILE
         qualified=row.get('qualified') if isinstance(row,dict) and isinstance(row.get('qualified'),dict) else {}
         return {'profile':profile,'qualified':qualified}
@@ -824,7 +827,8 @@ class AgentService:
                              f"현재 프로필({current['profile']})은 그대로 유지됩니다.")
         record={'version':result['version'],'platform':sys.platform,'checked_at':time.time(),
                 'checks':[check['check'] for check in result['checks']],'binding':result.get('binding'),
-                'binary_sha256':result.get('binary_sha256'),'disabled_features':result.get('disabled_features')}
+                'binary_sha256':result.get('binary_sha256'),'native_sha256':result.get('native_sha256'),
+                'disabled_features':result.get('disabled_features')}
         with self.lock:
             if self.subscription_isolation()!=current:
                 raise ValueError('검증하는 동안 실행 프로필이 바뀌어 결과를 적용하지 않았습니다. 다시 시도하세요.')

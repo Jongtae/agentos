@@ -163,6 +163,10 @@ class StrictLaunchArguments(unittest.TestCase):
         self.assertNotIn('shell_tool', strict_allowed_features())
 
 
+#: A fake native CLI: the ELF magic the strict profile requires of the executable.
+FAKE_NATIVE = b'\x7fELF fake native cli\n'
+
+
 def _pinned_platform(case):
     """The qualification logic is platform-independent; CI runs on Linux."""
     from unittest import mock
@@ -179,7 +183,7 @@ class StrictExecuteRefusesStaleQualifications(unittest.TestCase):
         (self.folder / 'codex-home').mkdir()
         (self.folder / 'bin').mkdir()
         self.binary = self.folder / 'bin' / 'codex'
-        self.binary.write_text('#!/bin/sh\n')
+        self.binary.write_bytes(FAKE_NATIVE)
         self.calls = []
         _pinned_platform(self)
 
@@ -194,7 +198,8 @@ class StrictExecuteRefusesStaleQualifications(unittest.TestCase):
 
     def _record(self, adapter, **changes):
         record = {'version': CODEX_VERSION, 'platform': sys.platform, 'disabled_features': PLAN,
-                  'binding': adapter.strict_binding('codex', str(self.binary), self.folder)}
+                  'binding': adapter.strict_binding('codex', str(self.binary), self.folder),
+                  **adapter.strict_digests('codex', str(self.binary))}
         record.update(changes)
         return record
 
@@ -240,6 +245,20 @@ class StrictExecuteRefusesStaleQualifications(unittest.TestCase):
             with self.subTest(record=broken):
                 self._refused(adapter, broken, [])
 
+    def test_changed_bytes_with_the_same_path_size_and_mtime_are_refused(self):
+        """Review N2: the sha256 is enforced, not only path/size/mtime."""
+        adapter = self._adapter()
+        record = self._record(adapter)
+        stat = self.binary.stat()
+        self.binary.write_bytes(FAKE_NATIVE.replace(b'fake', b'fak3'))
+        os.utime(self.binary, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        self.assertEqual(adapter.strict_binding('codex', str(self.binary), self.folder), record['binding'])
+        error = self._refused(adapter, record, [])
+        self.assertIn('binary_sha256', error.reason)
+        for missing in ('binary_sha256', 'native_sha256'):
+            with self.subTest(missing=missing):
+                self._refused(adapter, {**self._record(adapter), missing: None}, [])
+
     def test_an_untested_platform_is_refused_even_with_a_matching_record(self):
         """A data folder moved from the qualified Mac to another OS (review P1)."""
         from unittest import mock
@@ -274,6 +293,10 @@ class StrictQualificationLogic(unittest.TestCase):
         self.store = self.folder / 'store'
         self.store.mkdir()
         (self.folder / 'codex-home').mkdir()
+        (self.folder / 'bin').mkdir()
+        for name in ('codex', 'claude'):
+            (self.folder / 'bin' / name).write_bytes(FAKE_NATIVE)
+        self.finder = lambda name: str(self.folder / 'bin' / name)
         self.calls = []
         _pinned_platform(self)
         # tempfile lives under /tmp on Linux CI; the baseline-readable
@@ -300,7 +323,7 @@ class StrictQualificationLogic(unittest.TestCase):
 
     def _qualify(self, engine='codex', version=None, readable=(), stuck=(), runtime_root=None):
         version = version or (f'codex-cli {CODEX_VERSION}' if engine == 'codex' else f'{CLAUDE_VERSION} (Claude Code)')
-        adapter = BoundedExecutionAdapter(finder=lambda name: '/runtime/' + name, runner=self._runner(version, readable, stuck),
+        adapter = BoundedExecutionAdapter(finder=self.finder, runner=self._runner(version, readable, stuck),
                                           runtime_root=runtime_root or self.folder / 'turns',
                                           codex_home=self.folder / 'codex-home')
         return adapter.qualify_strict(engine, store_root=self.store)
@@ -312,7 +335,10 @@ class StrictQualificationLogic(unittest.TestCase):
         self.assertEqual([check['check'] for check in result['checks']],
                          ['tested-platform', 'runtime-root-not-baseline-readable', 'tested-version',
                           'turn-directory-readable', 'sibling-turn-denied', 'protected-directory-denied',
-                          'protected-directory-denied', 'protected-directory-denied', 'tool-features-allowlisted'])
+                          'protected-directory-denied', 'protected-directory-denied', 'tool-features-allowlisted',
+                          'native-binary-identified'])
+        self.assertEqual(result['binary_sha256'], result['native_sha256'], 'a plain executable is its own native binary')
+        self.assertEqual(len(result['binary_sha256']), 64)
         self.assertEqual(result['disabled_features'], ['apps', 'memories', 'shell_tool'],
                          'every non-removed feature outside the allowlist, whatever its default')
         binding = result['binding']
@@ -371,7 +397,7 @@ class StrictQualificationLogic(unittest.TestCase):
         """Every probe failing (for example no sandbox) fails the turn-dir control."""
         def runner(argv, **kwargs):
             return _Done(stdout=f'codex-cli {CODEX_VERSION}') if argv[1:] == ['--version'] else _Done(returncode=1)
-        adapter = BoundedExecutionAdapter(finder=lambda name: '/runtime/' + name, runner=runner,
+        adapter = BoundedExecutionAdapter(finder=self.finder, runner=runner,
                                           runtime_root=self.folder / 'turns', codex_home=self.folder / 'codex-home')
         result = adapter.qualify_strict('codex', store_root=self.store)
         self.assertFalse(result['qualified'])
@@ -391,6 +417,54 @@ class StrictQualificationLogic(unittest.TestCase):
         self.assertNotIn('codex_home', result['binding'])
         self.assertFalse(self._qualify('claude-code', version='2.2.0 (Claude Code)')['qualified'])
         self.assertFalse(BoundedExecutionAdapter(finder=lambda name: None).qualify_strict('codex')['qualified'])
+        # A launcher whose native executable cannot be identified fails closed.
+        missing = BoundedExecutionAdapter(finder=lambda name: '/runtime/' + name, runner=self._runner(f'codex-cli {CODEX_VERSION}'),
+                                          runtime_root=self.folder / 'turns', codex_home=self.folder / 'codex-home')
+        self.assertIn('native-binary-identified', missing.qualify_strict('codex', store_root=self.store)['reason'])
+
+    def test_the_codex_js_shim_resolves_to_the_native_binary_it_spawns(self):
+        """Review N2: mirror codex.js's findCodexExecutable; anything else fails closed."""
+        from unittest import mock
+        native_of = BoundedExecutionAdapter.native_cli_binary
+        modules = self.folder / 'lib' / 'node_modules'
+        root = modules / '@openai' / 'codex'
+        (root / 'bin').mkdir(parents=True)
+        shim = root / 'bin' / 'codex.js'
+        shim.write_text('#!/usr/bin/env node\n// shim\n')
+        link = self.folder / 'codex-link'
+        link.symlink_to(shim)
+
+        def platform_package(base):
+            (base / 'package.json').parent.mkdir(parents=True, exist_ok=True)
+            (base / 'package.json').write_text('{}')
+            native = base / 'vendor' / 'aarch64-apple-darwin' / 'bin' / 'codex'
+            native.parent.mkdir(parents=True)
+            native.write_bytes(FAKE_NATIVE)
+            return native.resolve()
+
+        with mock.patch('platform.machine', return_value='arm64'):
+            self.assertEqual(native_of('codex', str(link)), '', 'no native binary: fail closed')
+            fallback = platform_package(root)  # the package's own vendor/
+            (root / 'package.json').unlink()
+            self.assertEqual(native_of('codex', str(link)), str(fallback))
+            hoisted = platform_package(modules / '@openai' / 'codex-darwin-arm64')
+            self.assertEqual(native_of('codex', str(link)), str(hoisted), 'a hoisted platform package wins over vendor/')
+            nested = platform_package(root / 'node_modules' / '@openai' / 'codex-darwin-arm64')
+            self.assertEqual(native_of('codex', str(link)), str(nested), 'the nearest node_modules wins')
+            nested.write_text('#!/bin/sh\nexec /somewhere/else "$@"\n')
+            self.assertEqual(native_of('codex', str(link)), '', 'a resolved non-native file fails closed')
+            nested.write_bytes(FAKE_NATIVE)
+            digests = BoundedExecutionAdapter().strict_digests('codex', str(link))
+        self.assertNotEqual(digests['binary_sha256'], digests['native_sha256'])
+        with mock.patch('platform.machine', return_value='riscv64'):
+            self.assertEqual(native_of('codex', str(link)), '', 'an unknown target triple fails closed')
+        wrapper = self.folder / 'wrapper'
+        wrapper.write_text('#!/bin/sh\nexec codex "$@"\n')
+        for engine in ('codex', 'claude-code'):
+            with self.subTest(engine=engine):
+                self.assertEqual(native_of(engine, str(wrapper)), '', 'a shell wrapper fails closed')
+                self.assertEqual(native_of(engine, str(self.folder / 'bin' / 'codex')),
+                                 str((self.folder / 'bin' / 'codex').resolve()))
         self.assertFalse(BoundedExecutionAdapter().qualify_strict('other')['qualified'])
 
 
@@ -505,8 +579,12 @@ class OwnerChoosesTheProfile(unittest.TestCase):
             service.select_subscription_isolation({'profile': 'strict-isolated'})
         self.assertEqual(service.settings()['subscription_execution']['trust'], 'trusted-local')
 
-    def test_an_unrecognised_stored_profile_fails_closed(self):
+    def test_an_unrecognised_or_malformed_stored_profile_fails_closed(self):
         service = self._service(PASS)
+        for row in (None, 'strict-isolated', [], {}, {'qualified': {}}, {'profile': None}, {'profile': 'strict-isolated-v2'}):
+            with self.subTest(row=row):
+                self.store.put('subscription_isolation', row)
+                self.assertEqual(service.subscription_isolation()['profile'], 'unrecognised')
         self.store.put('subscription_isolation', {'profile': 'strict-isolated-v2', 'qualified': {}})
         status = service.settings()['subscription_execution']
         self.assertEqual((status['profile'], status['trust'], status['requalify_needed']), ('unrecognised', 'unknown', True))
@@ -558,8 +636,9 @@ class DoctorReportsTheSelectedProfile(unittest.TestCase):
             store = QuickStore(Path(folder) / 'data')
             self.assertEqual(agentos_doctor._selected_host_profile(store.root),
                              {'profile': 'trusted-local', 'qualified_versions': {}})
-            store.put('subscription_isolation', {'profile': 'strict-isolated-v2'})
-            self.assertEqual(agentos_doctor._selected_host_profile(store.root)['profile'], 'unrecognised')
+            for row in ({'profile': 'strict-isolated-v2'}, {}, None, ['strict-isolated'], 'trusted-local'):
+                store.put('subscription_isolation', row)
+                self.assertEqual(agentos_doctor._selected_host_profile(store.root)['profile'], 'unrecognised', row)
             store.put('subscription_isolation', {'profile': 'strict-isolated', 'qualified': {'codex': {'version': CODEX_VERSION}}})
             with store.db() as db:
                 db.execute('INSERT INTO turn_provenance VALUES (?,?,?)',
@@ -716,6 +795,7 @@ def populate_codex_home(home, store_root):
     (home / 'rules' / 'default.rules').write_text(
         'prefix_rule(pattern=["cat"], decision="allow")\nprefix_rule(pattern=["ls"], decision="allow")\n')
     (home / 'AGENTS.md').write_text('AGENTS-MD-CANARY-616 global owner instructions\n')
+    (home / 'AGENTS.override.md').write_text('AGENTS-OVERRIDE-CANARY-616 global owner override\n')
     skill = home / 'skills' / 'canary-skill'
     skill.mkdir(parents=True)
     (skill / 'SKILL.md').write_text('---\nname: canary-skill-616\ndescription: SKILL-CANARY-616\n---\nSKILL-BODY-CANARY-616\n')
@@ -794,7 +874,8 @@ class ProcessLevelQualification(unittest.TestCase):
         self.assertTrue(result['qualified'], result)
         # The record the service stores (quickstart_service.select_subscription_isolation).
         return {'version': result['version'], 'platform': sys.platform, 'binding': result['binding'],
-                'binary_sha256': result['binary_sha256'], 'disabled_features': result['disabled_features']}
+                'binary_sha256': result['binary_sha256'], 'native_sha256': result['native_sha256'],
+                'disabled_features': result['disabled_features']}
 
     def _run(self, engine, binary, model, profile, qualification=None, argv_edit=None):
         adapter = self._adapter(engine, binary, model, argv_edit)
@@ -856,9 +937,11 @@ class ProcessLevelQualification(unittest.TestCase):
         for canary in ('fake-store-canary-616', 'fake-home-canary-616', 'SKILL-CANARY-616', 'canary-skill-616',
                        'PLUGIN-CANARY-616'):
             self.assertNotIn(canary, context)
-        # Declared limitation: no official override stops the global AGENTS.md.
-        self.assertIn('AGENTS-MD-CANARY-616', context)
-        self.assertIn('AGENTS.md', CLI_PROFILES[STRICT_PROFILE]['limitation'])
+        # Declared limitation: no official override stops the global
+        # AGENTS.override.md (it takes precedence over AGENTS.md).
+        self.assertIn('AGENTS-OVERRIDE-CANARY-616', context)
+        for name in ('AGENTS.override.md', 'AGENTS.md'):
+            self.assertIn(name, CLI_PROFILES[STRICT_PROFILE]['limitation'])
         self.assertIn('--ignore-rules', self.argv)
         self.assertNotIn('--sandbox', self.argv)
 

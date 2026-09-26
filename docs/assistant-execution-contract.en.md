@@ -126,26 +126,26 @@ No-model local evidence, recorded 2026-09-26 with a fake store only:
   - an engine runtime root that is not under a path the Codex baseline keeps readable (`/tmp`, `/private/tmp`, `/var/tmp`, `/private/var/tmp`);
   - for Codex, the CLI's own `codex sandbox -P` runner under the same profile must refuse the real store, home, login profile and a sibling turn directory, while a turn-directory listing succeeds;
   - for Codex, the verified feature plan.
-- **What the record binds.** Platform, version, resolved binary path, sha256 and fingerprint, and the resolved store, home, runtime root and login-profile paths.
+- **What the record binds.** Platform, version, the resolved launcher path, sha256 and fingerprint, the native executable the launcher runs (for the npm/Homebrew `codex.js` shim, the platform package's `vendor/<triple>/bin/codex`, located the way the shim does) with its own sha256 and fingerprint, and the resolved store, home, runtime root and login-profile paths. A launcher whose native Mach-O/ELF executable cannot be identified (a shell wrapper, an unknown layout or target) fails qualification.
 - **Failure handling.**
   - A failed qualification keeps the previous profile.
   - The save is compare-and-set under the service lock, so a concurrent owner choice is not overwritten.
-  - At run time, any version, platform, binary, path or plan mismatch is refused with `isolation-unqualified`. AgentOS never falls back to trusted-local.
-  - An unrecognised stored profile value fails closed; it is not read as trusted-local.
+  - At run time, any version, platform, binary, path or plan mismatch is refused with `isolation-unqualified`, and both sha256 digests are recomputed and compared on every strict turn, so bytes changed under the same path, size and mtime are refused too. AgentOS never falls back to trusted-local.
+  - Only an absent stored choice is the trusted-local default. A stored value that is not an object, lacks `profile` or names an unknown profile fails closed; it is not read as trusted-local.
 - **Where it is shown.** Settings (`subscription_execution`, including `requalify_needed`), turn provenance (`capability_trust`) and the doctor (`routes.trust`, `selected_host_cli_profile`, which reports `unrecognised`, and recorded turns).
 
-Process-level evidence, recorded 2026-09-26: the exact argv drove real CLIs against a loopback scripted model on a fake store and a synthetic, populated `CODEX_HOME` (exec allow-rules, `AGENTS.md`, a skill, a plugin, `hooks.json`, and a `config.toml` that asks for `danger-full-access`). Tests are in `tests/test_strict_isolation.py`, opt-in with `AGENTOS_CLI_QUALIFICATION=1`. No live model, account or owner data was involved.
+Process-level evidence, recorded 2026-09-26: the exact argv drove real CLIs against a loopback scripted model on a fake store and a synthetic, populated `CODEX_HOME` (exec allow-rules, `AGENTS.md` and `AGENTS.override.md`, a skill, a plugin, `hooks.json`, and a `config.toml` that asks for `danger-full-access`). Tests are in `tests/test_strict_isolation.py`, opt-in with `AGENTOS_CLI_QUALIFICATION=1`. No live model, account or owner data was involved.
 
 - **Codex strict.** No host tool was offered. The store, home and skill/plugin canaries never reached the model. `web_search`, `weather` (public network stubbed in the bridge process) and `list_notes` worked. With the shell re-offered test-only, the allow-rule no longer escaped: store and home were denied and the turn directory was readable.
 - **Codex trusted-local.** The store and home were readable, as its label states.
 - **Claude Code strict.** Only the five AgentOS tools were offered. `Read` / `Bash` / `WebSearch` / `Agent` were absent, and the three bridge calls worked.
 - **Claude Code trusted-local (`-p`, default permissions).** Out-of-directory reads were denied by its permission layer, and so was every AgentOS MCP call. This is a pre-existing reachability defect, not changed here.
 - **Residual.**
-  - Under Codex strict, the owner-authored `$CODEX_HOME/AGENTS.md` still reaches the model context. Neither `project_doc_max_bytes=0`, `project_doc_fallback_filenames=[]`, `project_root_markers=[]`, `instructions`, `developer_instructions`, `skip_host_skill_discovery` nor the full feature plan stops it. It is untrusted input that AgentOS provenance does not track.
+  - Under Codex strict, the owner-authored `$CODEX_HOME/AGENTS.override.md` or, when it is absent, `$CODEX_HOME/AGENTS.md` still reaches the model context (the override takes precedence; the process test observed the override canary). Neither `project_doc_max_bytes=0`, `project_doc_fallback_filenames=[]`, `project_root_markers=[]`, `instructions`, `developer_instructions`, `skip_host_skill_discovery` nor the full feature plan stops it. It is untrusted input that AgentOS provenance does not track.
   - The Codex `:minimal` baseline keeps OS paths, `/tmp` and `/private/var/tmp` readable to a sandboxed command, and an explicit deny does not override it.
   - Claude Code's confinement is application-level tool removal, not an OS sandbox.
   - An upgrade requires requalification.
-  - **Follow-up:** the DecisionEngine Codex route record in [DecisionEngine boundary](decision-layer.en.md) states that its overrides keep `AGENTS.md` out of the input. This observation contradicts that for the global `$CODEX_HOME/AGENTS.md`. That record is not changed here.
+  - **Follow-up:** the DecisionEngine Codex route record in [DecisionEngine boundary](decision-layer.en.md) states that its overrides keep `AGENTS.md` out of the input. This observation contradicts that for the global `$CODEX_HOME/AGENTS.override.md` / `AGENTS.md`. That record is not changed here; it is tracked by #624 (not activated).
 
 ## Public/private information flow
 

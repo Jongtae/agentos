@@ -84,11 +84,13 @@ TRUSTED_LOCAL_LIMITATION = ('the CLI may read host files outside AgentOS provena
 #: denied the store, home and CODEX_HOME even to a command an "always allow"
 #: exec rule would run, and the AgentOS bridge still served its tools.  Not
 #: prevented by any override found on Codex 0.153.4: the owner-authored
+#: `$CODEX_HOME/AGENTS.override.md` (which takes precedence) or
 #: `$CODEX_HOME/AGENTS.md` reaches the model context (untracked by AgentOS
 #: provenance).  Codex's `:minimal` baseline keeps OS paths, /tmp and
 #: /private/var/tmp readable to a sandboxed command.
 STRICT_ISOLATED_LIMITATION = ('the CLI gets no shell, file or image tool and its sandbox denies the owner store and home; '
-                              'Codex still loads $CODEX_HOME/AGENTS.md (owner-authored, not tracked by AgentOS) into '
+                              'Codex still loads $CODEX_HOME/AGENTS.override.md or AGENTS.md (owner-authored, not '
+                              'tracked by AgentOS) into '
                               'the model context and its sandbox baseline keeps OS paths, /tmp and /private/var/tmp '
                               'readable; qualified only for the tested CLI version, platform and paths')
 
@@ -677,16 +679,95 @@ class BoundedExecutionAdapter:
     def _login_profile(self):
         return Path(self.codex_home or os.environ.get('CODEX_HOME', Path.home() / '.codex')).expanduser()
 
+    #: codex.js's PLATFORM_PACKAGE_BY_TARGET, keyed by (sys.platform, machine).
+    CODEX_NATIVE_PACKAGES = {
+        ('darwin', 'arm64'): ('aarch64-apple-darwin', 'codex-darwin-arm64'),
+        ('darwin', 'x86_64'): ('x86_64-apple-darwin', 'codex-darwin-x64'),
+        ('linux', 'aarch64'): ('aarch64-unknown-linux-musl', 'codex-linux-arm64'),
+        ('linux', 'x86_64'): ('x86_64-unknown-linux-musl', 'codex-linux-x64'),
+    }
+    #: Mach-O (64-bit, either byte order), fat/universal Mach-O and ELF.
+    NATIVE_MAGIC = (b'\xcf\xfa\xed\xfe', b'\xfe\xed\xfa\xcf', b'\xca\xfe\xba\xbe', b'\x7fELF')
+
+    @classmethod
+    def _native_file(cls, path):
+        try:
+            with open(path, 'rb') as stream:
+                return stream.read(4) in cls.NATIVE_MAGIC
+        except OSError:
+            return False
+
+    @classmethod
+    def native_cli_binary(cls, engine_id, binary):
+        """The native executable the CLI launcher actually runs, or ``''``.
+
+        Claude Code's launcher resolves to its native binary.  The npm/Homebrew
+        ``codex`` resolves to the ``codex.js`` shim, which spawns the platform
+        package's ``vendor/<triple>/bin/codex``; that lookup is mirrored here
+        (the shim's ``findCodexExecutable``: Node package resolution from the
+        shim's directory, then the package's own ``vendor``).  Anything else,
+        such as a shell wrapper or an unknown layout, gives ``''``, which
+        fails strict qualification closed.
+        """
+        if not binary:
+            return ''
+        resolved = Path(os.path.realpath(binary))
+        if engine_id == 'codex' and resolved.suffix == '.js':
+            import platform
+            target = cls.CODEX_NATIVE_PACKAGES.get((sys.platform, platform.machine()))
+            if not target:
+                return ''
+            triple, package = target
+            vendor = resolved.parent.parent / 'vendor'
+            # require.resolve('@openai/<package>/package.json') walks up from
+            # the shim's directory, skipping directories named node_modules.
+            for directory in (resolved.parent, *resolved.parent.parents):
+                if directory.name == 'node_modules':
+                    continue
+                candidate = directory / 'node_modules' / '@openai' / package
+                if (candidate / 'package.json').is_file():
+                    vendor = candidate / 'vendor'
+                    break
+            resolved = vendor / triple / 'bin' / 'codex'
+            if not resolved.is_file():
+                return ''
+            resolved = resolved.resolve()
+        return str(resolved) if resolved.is_file() and cls._native_file(resolved) else ''
+
+    @staticmethod
+    def _sha256(path):
+        if not path:
+            return None
+        import hashlib
+        digest = hashlib.sha256()
+        try:
+            with open(path, 'rb') as stream:
+                for chunk in iter(lambda: stream.read(1 << 20), b''):
+                    digest.update(chunk)
+        except OSError:
+            return None
+        return digest.hexdigest()
+
+    def strict_digests(self, engine_id, binary):
+        """sha256 of the launched file and of the native executable it runs."""
+        return {'binary_sha256': self._sha256(os.path.realpath(binary) if binary else ''),
+                'native_sha256': self._sha256(self.native_cli_binary(engine_id, binary))}
+
     def strict_binding(self, engine_id, binary, store_root):
         """What a strict qualification is bound to, computed without a subprocess.
 
-        Platform, the resolved CLI binary and its (#580) fingerprint, and the
-        resolved owner store, home, engine runtime root and (Codex) login
-        profile.  A change to any of them makes the qualification stale.
+        Platform, the resolved CLI launcher and the native executable it runs
+        with their (#580) fingerprints, and the resolved owner store, home,
+        engine runtime root and (Codex) login profile.  A change to any of
+        them makes the qualification stale; the sha256 digests are compared
+        separately on every strict turn.
         """
         from .decision_adapters import cli_fingerprint
+        native = self.native_cli_binary(engine_id, binary)
         binding = {'platform': sys.platform, 'binary': os.path.realpath(binary) if binary else '',
-                   'fingerprint': cli_fingerprint(binary), 'home': str(Path.home().resolve()),
+                   'fingerprint': cli_fingerprint(binary), 'native_binary': native,
+                   'native_fingerprint': cli_fingerprint(native) if native else '',
+                   'home': str(Path.home().resolve()),
                    'runtime_root': str(Path(self.runtime_root).expanduser().resolve()),
                    'store': str(Path(store_root).expanduser().resolve()) if store_root else ''}
         if engine_id == 'codex':
@@ -807,16 +888,14 @@ class BoundedExecutionAdapter:
                             checks.append({'check': 'tool-features-allowlisted', 'passed': False, 'error': str(exc)[:120]})
                 except (ExecutionError, subprocess.TimeoutExpired, OSError) as exc:
                     checks.append({'check': 'runner', 'passed': False, 'error': type(exc).__name__})
+        binding = self.strict_binding(engine_id, binary, store_root)
+        digests = self.strict_digests(engine_id, binary)
+        checks.append({'check': 'native-binary-identified',
+                       'passed': bool(binding['native_binary']) and all(digests.values())})
         qualified = all(check['passed'] for check in checks)
         failed = [check['check'] for check in checks if not check['passed']]
-        binding = self.strict_binding(engine_id, binary, store_root)
-        try:
-            import hashlib
-            binding_digest = hashlib.sha256(Path(binding['binary']).read_bytes()).hexdigest()
-        except OSError:
-            binding_digest = None
         return {'engine': engine_id, 'profile': STRICT_PROFILE, 'qualified': qualified, 'version': version,
-                'checks': checks, 'binding': binding, 'binary_sha256': binding_digest,
+                'checks': checks, 'binding': binding, **digests,
                 'disabled_features': disabled if engine_id == 'codex' else None,
                 'reason': '' if qualified else ', '.join(dict.fromkeys(failed)) or 'not checked'}
 
@@ -912,6 +991,10 @@ class BoundedExecutionAdapter:
                 disabled = qualification.get('disabled_features') or ()
                 if engine_id == 'codex' and not disabled:
                     stale.append('disabled_features')
+                if not stale:
+                    # Review N2: the qualified bytes, not only path/size/mtime.
+                    current = self.strict_digests(engine_id, binary)
+                    stale += [key for key, value in current.items() if not value or value != qualification.get(key)]
                 version = (self.runtime_version(engine_id, binary, run_dir)
                            if sys.platform in declared['tested_platforms'] and not stale else None)
                 if stale or version is None or version not in declared['tested_versions'] \

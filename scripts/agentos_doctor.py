@@ -400,13 +400,13 @@ def _selected_host_profile(data):
             row = db.execute("SELECT value FROM config WHERE key='subscription_isolation'").fetchone()
     except sqlite3.Error:
         return None
-    value = _json_or_none(row[0]) if row else {}
-    value = value if isinstance(value, dict) else {}
-    qualified = value.get("qualified") if isinstance(value.get("qualified"), dict) else {}
-    stored = value.get("profile")
-    # No choice is the trusted-local default; an unknown stored value is
-    # reported as such (the service refuses CLI turns for it), never as trusted.
-    profile = "trusted-local" if stored is None else stored if stored in ("trusted-local", "strict-isolated") else "unrecognised"
+    value = _json_or_none(row[0]) if row else None
+    # No row is the trusted-local default; a present row that is malformed or
+    # names an unknown profile is reported as such (the service refuses CLI
+    # turns for it), never as trusted.
+    stored = value.get("profile") if isinstance(value, dict) else object()
+    qualified = value.get("qualified") if isinstance(value, dict) and isinstance(value.get("qualified"), dict) else {}
+    profile = "trusted-local" if not row else stored if stored in ("trusted-local", "strict-isolated") else "unrecognised"
     return {"profile": profile,
             "qualified_versions": {engine: row.get("version") for engine, row in qualified.items() if isinstance(row, dict)}}
 

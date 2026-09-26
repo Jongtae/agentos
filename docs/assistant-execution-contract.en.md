@@ -115,7 +115,7 @@ No-model local evidence, recorded 2026-09-26 with a fake store only:
 - **Choice and qualification.** The owner chooses the profile (`/api/subscription-engines/isolation`, Settings › AI 연결). Strict is saved only after a no-model qualification passes:
   - the tested CLI version and platform;
   - for Codex, the CLI's own `codex sandbox -P` runner under the same profile must refuse the real store, home and login-profile directories, and must list a turn directory.
-- **Failure handling.** A failed qualification keeps the previous profile. At run time any other CLI version is refused with `isolation-unqualified`. AgentOS never falls back to trusted-local.
+- **Failure handling.** A failed qualification keeps the previous profile. At run time any other CLI version, or a platform other than the one recorded at qualification (for example a data folder moved to another OS), is refused with `isolation-unqualified`. AgentOS never falls back to trusted-local.
 - **Where it is shown.** Settings (`subscription_execution`), turn provenance (`capability_trust`) and the doctor (`routes.trust`, `selected_host_cli_profile`, recorded turns).
 
 Process-level evidence, recorded 2026-09-26: the exact argv drove real CLIs against a loopback scripted model on a fake store (`tests/test_strict_isolation.py`, opt-in `AGENTOS_CLI_QUALIFICATION=1`). No live model, account or owner data was involved.

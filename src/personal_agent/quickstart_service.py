@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import secrets
+import sys
 import threading
 from pathlib import Path
 import time
@@ -747,7 +748,9 @@ class AgentService:
             return AgentOSMcpTools,{}
         engine=self.store.config('subscription_engine',{}).get('id','')
         record=selection['qualified'].get(engine) or {}
-        return StrictIsolatedAgentOSMcpTools,{'qualified_version':record.get('version')}
+        # A record from another platform (a moved data folder) qualifies nothing here.
+        version=record.get('version') if record.get('platform')==sys.platform else None
+        return StrictIsolatedAgentOSMcpTools,{'qualified_version':version}
 
     def select_subscription_isolation(self, body):
         """Owner choice of the host-CLI trust profile (#616).
@@ -778,7 +781,7 @@ class AgentService:
         if not result.get('qualified'):
             raise ValueError(f"엄격 격리 검증을 통과하지 못했습니다({result.get('reason') or 'unknown'}). "
                              f"현재 프로필({current['profile']})은 그대로 유지됩니다.")
-        qualified={**current['qualified'],engine:{'version':result['version'],'checked_at':time.time(),
+        qualified={**current['qualified'],engine:{'version':result['version'],'platform':sys.platform,'checked_at':time.time(),
                                                    'checks':[check['check'] for check in result['checks']]}}
         with self.lock:self.store.put('subscription_isolation',{'profile':STRICT_PROFILE,'qualified':qualified})
         return {'profile':STRICT_PROFILE,'qualification':result,'subscription_execution':self.subscription_execution_profile()}

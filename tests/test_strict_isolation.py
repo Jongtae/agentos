@@ -143,6 +143,10 @@ class StrictExecuteRefusesUnqualifiedVersions(unittest.TestCase):
         self.folder = Path(tmp.name)
         (self.folder / 'codex-home').mkdir()
         self.calls = []
+        from unittest import mock
+        patcher = mock.patch.object(sys, 'platform', 'darwin')
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _adapter(self, version_output):
         def runner(argv, **kwargs):
@@ -168,6 +172,15 @@ class StrictExecuteRefusesUnqualifiedVersions(unittest.TestCase):
                                               StrictIsolatedAgentOSMcpTools(_Caps(self.folder), qualified_version=qualified))
             self.assertEqual(caught.exception.failure_class, 'isolation-unqualified')
             self.assertEqual(self.calls, [['/runtime/codex', '--version']], 'no CLI turn is started at all')
+
+    def test_an_untested_platform_is_refused_even_with_a_matching_record(self):
+        """A data folder moved from the qualified Mac to another OS (review P1)."""
+        from unittest import mock
+        with mock.patch.object(sys, 'platform', 'linux'), self.assertRaises(ExecutionError) as caught:
+            self._adapter(f'codex-cli {CODEX_VERSION}').execute(
+                'codex', 'hello', StrictIsolatedAgentOSMcpTools(_Caps(self.folder), qualified_version=CODEX_VERSION))
+        self.assertEqual(caught.exception.failure_class, 'isolation-unqualified')
+        self.assertEqual(self.calls, [], 'no CLI process is started at all')
 
     def test_trusted_local_does_not_check_versions(self):
         result = self._adapter('garbled').execute('codex', 'hello', AgentOSMcpTools(_Caps(self.folder)))
@@ -355,6 +368,18 @@ class OwnerChoosesTheProfile(unittest.TestCase):
                          ('strict-isolated', 'failed', 'isolation-unqualified'))
         self.assertTrue(all(isinstance(facade, StrictIsolatedAgentOSMcpTools) for facade in self.engine.facades),
                         'no trusted-local facade was ever used instead')
+
+    def test_a_record_from_another_platform_qualifies_nothing(self):
+        service = self._service(PASS)
+        service.select_subscription_isolation({'profile': 'strict-isolated'})
+        row = self.store.config('subscription_isolation')
+        self.assertEqual(row['qualified']['codex']['platform'], sys.platform)
+        row['qualified']['codex']['platform'] = 'another-os'
+        self.store.put('subscription_isolation', row)
+        record = self._turn(service)
+        self.assertEqual((record['capability_trust'], record['status'], record['failure_class']),
+                         ('strict-isolated', 'failed', 'isolation-unqualified'))
+        self.assertIsNone(self.engine.facades[-1].qualified_version)
 
     def test_trusted_local_is_an_explicit_owner_choice_and_input_is_checked(self):
         service = self._service(PASS)

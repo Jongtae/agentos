@@ -779,14 +779,16 @@ class BoundedExecutionAdapter:
                 # #616: never launch an unqualified CLI under the strict
                 # profile and never fall back to trusted-local; the owner
                 # requalifies after a CLI upgrade or chooses another profile.
-                version = self.runtime_version(engine_id, binary, run_dir)
-                tested = CLI_PROFILES[STRICT_PROFILE]['runtimes'][engine_id]['tested_versions']
-                if version is None or version not in tested or version != getattr(tools, 'qualified_version', None):
+                # The platform is checked too: a data folder moved to an
+                # untested OS keeps its record but is refused here.
+                declared = CLI_PROFILES[STRICT_PROFILE]['runtimes'][engine_id]
+                version = self.runtime_version(engine_id, binary, run_dir) if sys.platform in declared['tested_platforms'] else None
+                if version is None or version not in declared['tested_versions'] or version != getattr(tools, 'qualified_version', None):
                     LOG.warning('engine turn refused engine=%s profile=%s version=%s', engine_id, profile, version or '-')
-                    raise ExecutionError('엄격 격리 프로필이 현재 CLI 버전에서 검증되지 않아 실행하지 않았습니다. '
+                    raise ExecutionError('엄격 격리 프로필이 현재 CLI 버전 또는 플랫폼에서 검증되지 않아 실행하지 않았습니다. '
                                          '설정에서 다시 검증하거나 다른 실행 프로필을 선택하세요.',
                                          failure_class='isolation-unqualified',
-                                         reason=f'observed version {version or "unknown"}')
+                                         reason=f'observed {sys.platform} version {version or "unknown"}')
             started = time.monotonic()
             LOG.info('engine turn started engine=%s profile=%s', engine_id, profile)
             argv = self.command(engine_id, binary, prompt, config, instructions, profile=profile)

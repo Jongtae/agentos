@@ -443,7 +443,8 @@ class AgentService:
         # Adopt the existing redaction: the stored secrets' literal values, the
         # adapter's credential patterns, then the owner-visible path mask.
         text=str(text or '')
-        for name in ('model_key','decision_model_key','decision_jev_key','claude_code_token','telegram_token'):
+        for name in ('model_key','decision_model_key','decision_jev_key','claude_code_token','telegram_token',
+                     'api_key:openai','api_key:anthropic','api_key:openrouter'):
             value=self.store.secret(name)
             if isinstance(value,str) and len(value)>=8:text=text.replace(value,'[redacted]')
         text=SECRET_PATTERN.sub('[redacted]',text)

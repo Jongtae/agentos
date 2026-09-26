@@ -47,7 +47,7 @@ from .decision_adapters import (CLI_BINARIES, JEV_DEFAULT_MODEL, JEV_DESTINATION
                                 codex_still_enabled, parse_codex_features, valid_model_id)
 from .bounded_execution import parse_cli_version
 from .decision_qualification import SUITE_VERSION, qualify
-from .main_ai import CHOOSER_ORDER, key_slot
+from .main_ai import CHOOSER_ORDER, api_route_of
 
 ROUTE_OFF = 'off'
 TRANSPORTS = (ROUTE_DIRECT_API, ROUTE_JEV, ROUTE_SUBSCRIPTION_CLI, ROUTE_OFF)
@@ -210,12 +210,23 @@ class DecisionRoutes:
         return self._cli_engine(engine_id, model, policy, audit, guard,
                                 route.get('codex_disabled_features') if engine_id == 'codex' else None)
 
+    def _main_key(self, main_id):
+        """The Main AI's own probed Work key (``model_key``), only while ``main_id`` is it.
+
+        Not the provider slot: a newly saved, not yet probed key in the slot
+        must not reach judgments before 확인하고 사용 (#643 review P2-1), and
+        the Work and the Judgment AI always use the same account.
+        """
+        if self.service.main_ai.current() != main_id or api_route_of(self.store.config('model', {})) != main_id:
+            return ''
+        return self.store.secret('model_key') or ''
+
     def _follow_resolve(self, route):
-        """``(config, key)`` of a follow row: the Main AI provider's own key, read live.
+        """``(config, key)`` of a follow row: the Main AI's probed key, read live.
 
         A removed key makes the route unavailable; nothing falls back.
         """
-        key = self.store.secret(key_slot(route.get('main', ''))) or ''
+        key = self._main_key(route.get('main', ''))
         config = {'provider': route.get('provider'), 'endpoint': route.get('endpoint'),
                   'model': route.get('requested_model')}
         return (config, key) if key else None
@@ -252,7 +263,18 @@ class DecisionRoutes:
         if self.mode() != MODE_FOLLOW:
             return {'state': 'unchanged', 'mode': self.mode()}
         with self._activating:
-            return self._follow(main_id, keep_previous=False)
+            # Re-check under the lock: an explicit choice that finished while
+            # this switch waited is the owner's latest decision (#643 review).
+            if self.mode() != MODE_FOLLOW:
+                return {'state': 'unchanged', 'mode': self.mode()}
+            try:
+                return self._follow(main_id, keep_previous=False)
+            except Exception:  # never report a committed Main AI switch as failed
+                with self.service.lock:
+                    self.store.put('decision_route', {'mode': MODE_FOLLOW, 'main': main_id, 'transport': ROUTE_OFF,
+                                                      'failure': 'probe-failed', 'activated_at': self.clock()})
+                return {'state': 'attention', 'failure': 'probe-failed',
+                        'message': '판단 AI를 확인하는 중 오류가 났습니다.'}
 
     def _follow(self, main_id, keep_previous):
         option = f'{MODE_FOLLOW}:{main_id}'
@@ -271,7 +293,7 @@ class DecisionRoutes:
             return failed('follow-unsupported', FOLLOW_UNAVAILABLE.get(main_id, FOLLOW_UNAVAILABLE['other']))
         follow = {'mode': MODE_FOLLOW, 'main': main_id}
         if candidate['transport'] == ROUTE_DIRECT_API:
-            key = self.store.secret(key_slot(main_id)) or ''
+            key = self._main_key(main_id)
             if not key:
                 return failed('not-configured', '기본 AI의 API 키가 없어 판단 AI를 확인하지 못했습니다.')
             config = dict(candidate['config'])

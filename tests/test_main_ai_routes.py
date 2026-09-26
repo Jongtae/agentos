@@ -173,6 +173,18 @@ class MainAiRouteTests(unittest.TestCase):
         # The following Judgment AI does not borrow any other key.
         self.assertIsNone(self.service.decision_routes._follow_resolve(self.store.config('decision_route')))
 
+    def test_a_newly_saved_key_reaches_neither_work_nor_judgment_before_confirm(self):
+        # #643 review P2-1: the Judgment AI uses the Main AI's probed key.
+        self._save('openai', OPENAI_KEY)
+        self.service.activate_main_ai({'route': 'openai'})
+        self._save('openai', 'sk-fixture-openai-NEW')
+        self.assertTrue(self.service.main_ai.status()['routes'][2]['key']['pending'])
+        before = len(self.transport.calls)
+        decision = self.service.decision_engine.choose(DecisionContext('p', {'a': 'b'}), ('retry', 'x'), 'q')
+        self.assertEqual(decision.outcome, OUTCOME_DECIDED)
+        used = [call['headers'].get('Authorization') for call in self.transport.calls[before:]]
+        self.assertEqual(used, ['Bearer ' + OPENAI_KEY])
+
     # -- AC6 re-check without switching ----------------------------------------
     def test_check_reprobes_current_without_switching(self):
         self._save('openai', OPENAI_KEY)

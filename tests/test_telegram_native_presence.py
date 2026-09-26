@@ -241,6 +241,18 @@ class PresentationFailureTests(NativePresenceTestCase):
                 self.assertEqual(len(self.sends()), 1)
                 self.assertEqual(self.methods()[-1], 'sendMessage')
 
+    def test_a_refused_presence_call_is_logged_without_telegram_detail(self):
+        self.connect_model()
+        self.store.secret('telegram_token', '123:SECRET-TOKEN')
+        self.failing = {'setMessageReaction': TelegramRejected(400, 'Bad Request: REACTION_INVALID owner-text')}
+        with self.assertLogs('personal_agent.service', 'INFO') as logs:
+            job, _ = self.turn('오늘 저녁은 뭐해 먹을까?')
+        self.assertEqual(job['delivery'], 'sent')
+        [line] = [line for line in logs.output if 'telegram presence' in line]
+        self.assertIn('set_message_reaction failed: TelegramRejected status=400', line)
+        for secret in ('REACTION_INVALID', 'owner-text', 'SECRET-TOKEN', '저녁'):
+            self.assertNotIn(secret, line)
+
     def test_unsupported_draft_falls_back_to_typing(self):
         self.connect_model()
         self.failing = {'sendMessageDraft': ProviderError('method not found')}
@@ -759,6 +771,123 @@ class TelegramErrorEnvelopeTests(unittest.TestCase):
         opener, _ = self.opener()
         with mock.patch('personal_agent.conversation_handoff._build_opener', return_value=opener):
             self.assertEqual(telegram_request_json('https://api.telegram.org/botX/getMe', {}), {'ok': True, 'result': 1})
+
+
+class _TelegramNestingChecker(_TagChecker):
+    """Also enforce Telegram's nesting rule: bold/italic never contain or sit inside code/pre."""
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ('code', 'pre'):
+            assert not set(self.stack) & {'b', 'i'}, f'<{tag}> inside {self.stack}'
+        if tag in ('b', 'i'):
+            assert not set(self.stack) & {'code', 'pre'}, f'<{tag}> inside {self.stack}'
+        super().handle_starttag(tag, attrs)
+
+
+class EmphasisAroundSpansWireTests(unittest.TestCase):
+    """#581 live discrepancy: emphasis wrapping a link or inline code leaked literal ``**``.
+
+    Driven through the real ingest -> worker -> delivery path and the real
+    ``telegram_request_json`` transport; only the HTTP opener (the network
+    seam) is fake, so the asserted text is the exact wire body Telegram gets.
+    """
+
+    CASES = (
+        ('**[기사 제목](https://news.test/a)** — 요약',
+         '<b><a href="https://news.test/a">기사 제목</a></b> — 요약'),
+        ('**출처: [A](https://a.test)**', '<b>출처: <a href="https://a.test">A</a></b>'),
+        ('*[링크](https://a.test)*', '<i><a href="https://a.test">링크</a></i>'),
+        ('**`npm test`** 로 확인', '<code>npm test</code> 로 확인'),
+        ('**실행: `make` 후 확인**', '<b>실행: </b><code>make</code><b> 후 확인</b>'),
+        ('# 설치 `pip`', '<b>설치 </b><code>pip</code>'),
+    )
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(dir=str(Path(__file__).resolve().parent))
+        self.addCleanup(self.temp.cleanup)
+        self.store = QuickStore(Path(self.temp.name) / 'data')
+        self.answer = 'ok'  # the connection check needs a text reply
+        self.wire = []
+
+        def model(url, body, headers=None, timeout=60):
+            tools = [t.get('function', {}).get('name') or t.get('name') for t in body.get('tools', [])]
+            if 'agentos_connection_probe' in tools:
+                return {'message': {'content': '', 'tool_calls': [
+                    {'id': 'probe', 'function': {'name': 'agentos_connection_probe', 'arguments': {}}}]}}
+            return {'message': {'content': self.answer}}
+
+        wire = self.wire
+
+        class Response(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        class Opener:
+            def open(self, req, timeout=None):
+                method = req.full_url.rsplit('/', 1)[-1]
+                wire.append((method, json.loads(req.data.decode())))
+                result = {'message_id': 9000 + len(wire)} if method == 'sendMessage' else True
+                return Response(json.dumps({'ok': True, 'result': result}).encode())
+
+        patcher = mock.patch('personal_agent.conversation_handoff._build_opener', return_value=Opener())
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.service = AgentService(self.store, ModelAdapter(model))  # default telegram_request_json transport
+        self.service.save_model({'provider': 'ollama', 'endpoint': 'http://127.0.0.1:11434',
+                                 'model': 'test-model', 'api_key': ''})
+        self.assertTrue(self.service.test_model()['ok'])
+        self.store.secret('telegram_token', '123:fixture')
+        self.store.put('telegram', {'enabled': True, 'user_id': CHAT, 'generation': GENERATION, 'cursor': 0})
+
+    def test_emphasis_around_links_and_code_reaches_telegram_formatted(self):
+        for update_id, (answer, expected) in enumerate(self.CASES, start=1):
+            with self.subTest(answer=answer):
+                self.answer = answer
+                self.wire.clear()
+                self.service.ingest_update({'update_id': update_id, 'message': {
+                    'message_id': 700 + update_id, 'from': {'id': CHAT},
+                    'chat': {'id': CHAT, 'type': 'private'}, 'text': f'질문 {update_id}'}}, GENERATION)
+                self.service.run_one()
+                self.service.deliver_one()
+                [reply] = [body for method, body in self.wire if method == 'sendMessage']
+                self.assertEqual(reply['parse_mode'], 'HTML')
+                self.assertEqual(reply['text'], expected)
+                self.assertNotIn('**', reply['text'])
+                checker = _TelegramNestingChecker()
+                checker.feed(reply['text'])
+                checker.close()
+                self.assertEqual(checker.stack, [])
+
+    def test_rendering_around_spans_still_only_consumes_delimiters(self):
+        for text in ('**a [b** c](https://x.test)', '`a **b` c**', '**[x](https://x.test)', 'x**`y`**z',
+                     '2**`n`** 이고', '**`a`** **`b`**', '# **`c`**', '*`i`* 와 **[l](https://l.test)**'):
+            with self.subTest(text=text):
+                rendered = render_telegram_html(text)
+                checker = _TelegramNestingChecker()
+                checker.feed(rendered)
+                checker.close()
+                self.assertEqual(checker.stack, [])
+                self.assertNotRegex(rendered, r'<(b|i)></\1>')
+        # Unmatched or arithmetic-adjacent markers stay literal; matched ones are consumed.
+        self.assertEqual(visible(render_telegram_html('**a [b** c](https://x.test)')), '**a b** c')
+        self.assertEqual(visible(render_telegram_html('x**`y`**z')), 'x**y**z')
+        self.assertEqual(visible(render_telegram_html('**`a`** **`b`**')), 'a b')
+        self.assertEqual(visible(render_telegram_html('*`i`* 와 **[l](https://l.test)**')), 'i 와 l')
+
+    def test_code_inside_a_link_is_restored_never_a_placeholder(self):
+        # Review P2: a code span inside a link label or URL must not leak U+E000/U+E001.
+        self.assertEqual(render_telegram_html('[run `foo` now](https://example.com)'),
+                         '<a href="https://example.com">run foo now</a>')
+        self.assertEqual(render_telegram_html('**[run `foo`](https://example.com)**'),
+                         '<b><a href="https://example.com">run foo</a></b>')
+        self.assertEqual(render_telegram_html('[x](https://a.test/`y`)'), '[x](https://a.test/<code>y</code>)')
+        for text in ('[run `foo` now](https://example.com)', '[x](https://a.test/`y`)', '[`a`](https://a.test) `b`'):
+            with self.subTest(text=text):
+                rendered = render_telegram_html(text)
+                self.assertNotRegex(rendered, '[\ue000\ue001]')
 
 
 class ChannelWireTests(unittest.TestCase):

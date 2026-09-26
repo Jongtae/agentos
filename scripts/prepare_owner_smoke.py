@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import shlex
 import sys
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -82,6 +83,14 @@ TEXT_FIELDS_OMITTED = "[omitted: {chars} chars, sha256 {digest}]"
 #: readable under --omit-text so the record still shows which path ran.
 SELECTOR_ARGUMENTS = frozenset({"provider", "locale", "kind", "mode", "effect", "target", "predicate",
                                 "location_ref", "status"})
+#: Evidence keys whose string values are structure (ids, refs, action and
+#: provider names, states, kinds, typed reasons); kept under --omit-text.
+#: Every other string in evidence (titles, text, snippets, names, URLs) is
+#: free text: a URL keeps its scheme and host, the rest is length and digest.
+STRUCTURAL_EVIDENCE_KEYS = frozenset({"id", "ref", "state_ref", "draft_id", "agent_id", "root_id", "state", "status",
+                                      "provider", "locale", "kind", "predicate", "action", "composed_by", "qualifiers",
+                                      "freshness", "reason", "refused_because", "supersedes", "superseded", "model",
+                                      "retrieved_at"})
 
 
 def _import_runtime():
@@ -144,7 +153,7 @@ def _redactor(runtime, store, job_id, omit_text):
                 value = value.replace(root, "[AgentOS data]")
         value = runtime["redact_reason"](value) or ""
         if free and omit_text:
-            return TEXT_FIELDS_OMITTED.format(chars=len(value), digest=hashlib.sha256(value.encode()).hexdigest()[:16])
+            return _omitted(value)
         return value
 
     def tree(value, free=False):
@@ -155,7 +164,35 @@ def _redactor(runtime, store, job_id, omit_text):
         if isinstance(value, str):
             return text(value, free)
         return value
-    return text, tree
+
+    def evidence(value, key=None):
+        """An evidence tree: under --omit-text every string outside a
+        structural key is free text (#660 review P1)."""
+        if isinstance(value, dict):
+            return {str(name): evidence(item, str(name)) for name, item in value.items()
+                    if not DROPPED_KEY.search(str(name))}
+        if isinstance(value, (list, tuple)):
+            return [evidence(item, key) for item in value]
+        if isinstance(value, str):
+            return text(value, key not in STRUCTURAL_EVIDENCE_KEYS)
+        return value
+    return text, tree, evidence
+
+
+def _omitted(value):
+    """Length and digest of free text; an http(s) URL keeps scheme and host."""
+    marker = TEXT_FIELDS_OMITTED.format(chars=len(value), digest=hashlib.sha256(value.encode()).hexdigest()[:16])
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return marker
+    if parts.scheme in ("http", "https") and parts.hostname and " " not in value:
+        rest = value[len(f"{parts.scheme}://{parts.netloc}"):]
+        host = f"{parts.scheme}://{parts.hostname}"
+        if not rest or rest == "/":
+            return host + rest
+        return host + "/" + TEXT_FIELDS_OMITTED.format(chars=len(rest), digest=hashlib.sha256(rest.encode()).hexdigest()[:16])
+    return marker
 
 
 def _detail(raw):
@@ -184,22 +221,27 @@ def _select_work(store, work):
     return store.job(work)
 
 
-def record_probe(data: Path, work: str, probe: str, date: str | None = None, head: str | None = None,
-                 omit_text: bool = False) -> dict:
-    """The redacted evidence record of one Work, for probe ``probe``."""
+def record_probe(data: Path, work: str, probe: str, recorded_at: datetime.datetime | None = None,
+                 head: str | None = None, omit_text: bool = False) -> dict:
+    """The redacted evidence record of one Work, for probe ``probe``.
+
+    ``recorded_at`` (timezone-aware; default now) names the record in UTC.
+    """
     if probe not in PROBES:
         raise ValueError("Probe must be one of A, B, C, D.")
     if head is not None and not re.fullmatch(r"[0-9a-f]{7,40}", head):
         raise ValueError("--head must be a git commit id.")
-    date = date or datetime.date.today().isoformat()
-    datetime.date.fromisoformat(date)
+    recorded_at = recorded_at or datetime.datetime.now(datetime.timezone.utc)
+    if not isinstance(recorded_at, datetime.datetime) or recorded_at.tzinfo is None:
+        raise ValueError("recorded_at must be a timezone-aware datetime.")
+    recorded_at = recorded_at.astimezone(datetime.timezone.utc)
     runtime = _import_runtime()
     store = _open_store(runtime, data)
     job = _select_work(store, work)
     if not job:
         raise LookupError("No Work with that id in this store.")
     job_id = job["id"]
-    text, tree = _redactor(runtime, store, job_id, omit_text)
+    text, tree, evidence_tree = _redactor(runtime, store, job_id, omit_text)
     with store.db() as db:
         events = [dict(row) for row in db.execute(
             "SELECT tool,status,detail,created FROM tool_events WHERE job_id=? ORDER BY id", (job_id,))]
@@ -249,7 +291,7 @@ def record_probe(data: Path, work: str, probe: str, date: str | None = None, hea
         else:
             row["status"] = status
             if isinstance(detail.get("evidence"), dict):
-                evidence = tree(detail["evidence"])
+                evidence = evidence_tree(detail["evidence"])
                 row["evidence"] = evidence
                 if evidence.get("provider"):
                     row["provider"] = evidence["provider"]
@@ -257,7 +299,7 @@ def record_probe(data: Path, work: str, probe: str, date: str | None = None, hea
                 if detail.get(field):
                     row[field] = detail[field]
             if detail.get("error"):
-                row["error"] = text(detail["error"])
+                row["error"] = text(detail["error"], True)
     tool_calls = [calls[key] for key in order]
     main = next((row for row in reversed(conclusions) if row.get("scope", "main") == "main"), None)
     claim = (main or {}).get("claim")
@@ -274,7 +316,8 @@ def record_probe(data: Path, work: str, probe: str, date: str | None = None, hea
         and len(finish["cited"]) == len(finish["evidence_refs"])
     judged_done = finish is not None and finish["status"] == "done" and (main or {}).get("judgment") == "yes"
     record = {
-        "record": RECORD_SCHEMA, "probe": probe, "date": date, "evidence_class": EVIDENCE_CLASS,
+        "record": RECORD_SCHEMA, "probe": probe, "date": recorded_at.date().isoformat(),
+        "recorded_at": recorded_at.strftime("%Y-%m-%dT%H%MZ"), "evidence_class": EVIDENCE_CLASS,
         "statement": STATEMENT, "head": head,
         "work": {"id": job_id, "channel": job.get("channel"), "created": job.get("created")},
         "requested": text(job.get("message"), True),
@@ -303,15 +346,22 @@ def record_probe(data: Path, work: str, probe: str, date: str | None = None, hea
                       "values this Work saved to Memory candidates or notes",
                       "stored secret values and credential-shaped tokens", "bearer tokens and home paths",
                       "keys naming cookies, storage, sessions, passwords, secrets, tokens or credentials"]
-                     + (["free text replaced by length and digest (--omit-text)"] if omit_text else []),
+                     + (["free text (request, queries, reply, report, errors, evidence titles, text and URL paths) "
+                         "replaced by length and digest; URLs keep scheme and host (--omit-text)"] if omit_text else []),
     }
     return record
 
 
+def record_filename(record: dict) -> str:
+    """``secretary-01-probe-<P>-<UTC yyyy-mm-ddTHHMMZ>-<work8>.json``."""
+    work8 = re.sub(r"[^0-9A-Za-z]", "", str(record["work"]["id"]))[:8] or "work"
+    return f"secretary-01-probe-{record['probe']}-{record['recorded_at']}-{work8}.json"
+
+
 def write_probe_record(record: dict, out_dir: Path) -> Path:
-    """Save as ``secretary-01-probe-<P>-<date>.json``; never overwrite a record."""
+    """Save under ``record_filename``; exclusive creation, never overwrite a record."""
     out_dir = Path(os.path.abspath(Path(out_dir).expanduser()))
-    path = out_dir / f"secretary-01-probe-{record['probe']}-{record['date']}.json"
+    path = out_dir / record_filename(record)
     with path.open("x", encoding="utf-8") as stream:
         stream.write(json.dumps(record, ensure_ascii=False, indent=2) + "\n")
     return path
@@ -324,15 +374,15 @@ def record_main(argv: list[str]) -> int:
                         help="AgentOS data folder (default: AGENTOS_DATA, else ~/.local/share/agentos).")
     parser.add_argument("--work", required=True, help="Work id from 작업 현황, or 'latest'.")
     parser.add_argument("--probe", required=True, choices=PROBES)
-    parser.add_argument("--date", help="Record date, YYYY-MM-DD (default: today).")
     parser.add_argument("--head", help="git commit the installation ran (git rev-parse HEAD).")
     parser.add_argument("--out-dir", type=Path, default=ROOT / "docs" / "evidence")
     parser.add_argument("--omit-text", action="store_true",
-                        help="Replace free text (request, queries, reply, report) with its length and digest.")
+                        help="Replace free text (request, queries, reply, report, errors, evidence titles/text/"
+                             "URL paths) with its length and digest; structure stays readable.")
     parser.add_argument("--print-only", action="store_true", help="Print without saving a file.")
     args = parser.parse_args(argv)
     try:
-        record = record_probe(args.data, args.work, args.probe, args.date, args.head, args.omit_text)
+        record = record_probe(args.data, args.work, args.probe, None, args.head, args.omit_text)
         path = None if args.print_only else write_probe_record(record, args.out_dir)
     except (OSError, ValueError, LookupError) as exc:
         # Never echo store content, configuration or a raw OS error payload.

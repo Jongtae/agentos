@@ -15,9 +15,10 @@ control flow:
 - ``match``: a ``case`` value or mapping key of a ``match`` statement;
 - ``dispatch-key``: a key of a dict literal that is subscripted or ``get``-ed,
   directly or through the name it is bound to;
-- ``match-table``: an element of a module/class-level constant collection of
-  strings (or ``re.compile`` pattern) that the module reads, the shape of a
-  cue list consumed by a matcher.
+- ``match-table``: an element of a string collection (or ``re.compile``
+  pattern) bound to a name in any scope - module, class or function - that
+  the module reads, or iterated inline by a ``for``/comprehension: the shape
+  of a cue list consumed by a matcher.
 
 Message text is excluded by construction: an owner-facing Korean or English
 sentence passed to a reply, a tool description or an error is not in any of
@@ -136,24 +137,33 @@ def _bound_names(target):
 def scan_source(source, module):
     """``[(module, line, kind, literal, tokens)]`` for one module's source."""
     tree = ast.parse(source)
-    constants = {}      # module/class-level name -> string literals it holds
-    collections = {}    # module/class-level name -> (line, literals) of a string collection or pattern
+    # String collections and patterns are collected from every scope (module,
+    # class and function bodies, #660 review); a name bound more than once
+    # keeps every literal it was bound to, so the guard over-reports rather
+    # than misses a shadowed cue list.  A single string is resolved only from
+    # module/class constants: a local variable assigned one value and compared
+    # to another (`provider = 'x'` then `provider == y`) is a value, not a table.
+    top_level = {id(statement) for scope in [tree, *[node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]]
+                 for statement in scope.body}
+    constants = {}      # bound name -> string literals it holds
+    collections = {}    # bound name -> [(line, literals)] of a string collection or pattern
     dicts = {}          # any bound name -> [(line, key)] of a dict literal's string keys
-    for scope in [tree, *[node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]]:
-        for statement in scope.body:
-            if isinstance(statement, ast.Assign):
-                targets, value = statement.targets, statement.value
-            elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
-                targets, value = [statement.target], statement.value
-            else:
-                continue
-            literals = _strings(value)
-            for target in targets:
-                for name in _bound_names(target):
-                    if literals:
-                        constants[name] = literals
-                        if not (isinstance(value, ast.Constant)):
-                            collections[name] = (statement.lineno, literals)
+    for statement in ast.walk(tree):
+        if isinstance(statement, ast.Assign):
+            targets, value = statement.targets, statement.value
+        elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+            targets, value = [statement.target], statement.value
+        else:
+            continue
+        literals = _strings(value)
+        single = isinstance(value, ast.Constant)
+        if not literals or (single and id(statement) not in top_level):
+            continue
+        for target in targets:
+            for name in _bound_names(target):
+                constants.setdefault(name, []).extend(literals)
+                if not single:
+                    collections.setdefault(name, []).append((statement.lineno, literals))
     for node in ast.walk(tree):
         if isinstance(node, (ast.Assign, ast.AnnAssign)) and isinstance(node.value, ast.Dict):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
@@ -198,6 +208,10 @@ def scan_source(source, module):
                 add(node.lineno, 'dispatch-key', [key.value for key in node.value.keys
                                                   if isinstance(key, ast.Constant) and isinstance(key.value, str)])
             dispatched.update(_bound_names(node.value))
+        elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)) and isinstance(
+                node.iter, (ast.Tuple, ast.List, ast.Set, ast.Call)):
+            # An inline cue list iterated by a matcher: `any(c in text for c in ('a', 'b'))`.
+            add(getattr(node, 'lineno', None) or node.iter.lineno, 'match-table', _strings(node.iter))
         elif isinstance(node, ast.Match):
             for case in node.cases:
                 for pattern in ast.walk(case.pattern):
@@ -209,9 +223,10 @@ def scan_source(source, module):
     for name in dispatched & set(dicts):
         for line, key in dicts[name]:
             add(line, 'dispatch-key', [key])
-    for name, (line, literals) in collections.items():
+    for name, bindings in collections.items():
         if name in loaded:
-            add(line, 'match-table', literals)
+            for line, literals in bindings:
+                add(line, 'match-table', literals)
     return hits
 
 
@@ -285,6 +300,13 @@ class NoScenarioCodeTests(unittest.TestCase):
                         return 'mall'
                 handler = HANDLERS[site]
                 route = {'baemin': 1}.get(site)
+                # A cue list bound inside the function, then consumed by a matcher.
+                cues = ('kyobo', '점심 메뉴')
+                if any(c in text for c in cues):
+                    return 'local'
+                # A cue list iterated inline.
+                if any(word in text for word in ('gmarket', 'yogiyo')):
+                    return 'inline'
                 # Message text is not a branch condition and is never read.
                 reply('책을 찾았습니다. 점심 추천도 준비할게요.', notice=NOTICE)
                 description = 'Search Naver, Brave or Bing; add the book to the cart.'
@@ -307,6 +329,10 @@ class NoScenarioCodeTests(unittest.TestCase):
         self.assertIn('match', by_literal['11st'])
         self.assertIn('dispatch-key', by_literal['yes24'])
         self.assertIn('dispatch-key', by_literal['baemin'])
+        self.assertIn('match-table', by_literal['kyobo'])
+        self.assertIn('match-table', by_literal['점심 메뉴'])
+        self.assertIn('match-table', by_literal['gmarket'])
+        self.assertIn('match-table', by_literal['yogiyo'])
         # Owner-facing message text and a tool description are not conditions.
         for message in ('장바구니에 담았습니다.', '책을 찾았습니다. 점심 추천도 준비할게요.',
                         'Search Naver, Brave or Bing; add the book to the cart.'):

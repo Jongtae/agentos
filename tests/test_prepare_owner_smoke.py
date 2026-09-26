@@ -1,4 +1,5 @@
 import contextlib
+import datetime
 import importlib.util
 import io
 import json
@@ -68,6 +69,7 @@ class SmokeSetupTests(unittest.TestCase):
 # --- SEC-EVAL-01 (#660): probe evidence records -------------------------------
 
 TOKEN = 'fixture-telegram-token-9f8e7d6c5b'
+AT = datetime.datetime(2026, 9, 27, 9, 30, 12, tzinfo=datetime.timezone.utc)
 PASSWORD = 'hunter2-correct-horse'
 SAVED = '여권번호 M12345678'
 
@@ -141,12 +143,12 @@ class ProbeRecordTests(unittest.TestCase):
 
     def record(self, **kwargs):
         return smoke.record_probe(self.data, kwargs.pop('work', self.job), kwargs.pop('probe', 'A'),
-                                  kwargs.pop('date', '2026-09-27'), **kwargs)
+                                  kwargs.pop('recorded_at', AT), **kwargs)
 
     def test_record_shows_goal_calls_alternatives_claim_judgment_outcome_and_report(self):
         record = self.record(head='49b4fac')
-        self.assertEqual((record['record'], record['probe'], record['date'], record['head']),
-                         ('secretary-01-probe/1', 'A', '2026-09-27', '49b4fac'))
+        self.assertEqual((record['record'], record['probe'], record['date'], record['recorded_at'], record['head']),
+                         ('secretary-01-probe/1', 'A', '2026-09-27', '2026-09-27T0930Z', '49b4fac'))
         self.assertEqual(record['evidence_class'], 'owner-installation-record')
         self.assertIn('리더는 언제 차이를 만들어내는가', record['requested'])
         calls = record['tool_calls']
@@ -197,6 +199,43 @@ class ProbeRecordTests(unittest.TestCase):
         self.assertEqual(record['tool_calls'][2]['provider'], 'naver')
         self.assertEqual(record['finish']['evidence_refs'], ['3', '5'])
 
+    def test_omit_text_covers_evidence_titles_text_names_and_url_paths(self):
+        """#660 review P1: evidence free text is omitted too; structure stays."""
+        title = '내 계정 · 알레르기 메모'
+        with self.store.db() as db:
+            detail = {'scope': 'main', 'call_id': '6', 'attempt': 1, 'host_action': 'browser_read',
+                      'evidence': {'state': 'page', 'url': 'https://shop.example/account/orders?id=77',
+                                   'title': title, 'characters': 120, 'found': '땅콩 알레르기',
+                                   'files': [{'root_id': 'r1', 'path': 'notes/allergy.md'}],
+                                   'sources': ['https://blog.example/lunch/peanut-free', 'https://maps.example/'],
+                                   'qualifiers': ['partial'], 'provider': 'naver', 'result_count': 2},
+                      'error': f'{title} 페이지를 읽지 못했습니다'}
+            for status in ('running', 'failed'):
+                db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                           (self.job, 'browser_read', status, json.dumps(detail, ensure_ascii=False), time.time()))
+        record = self.record(omit_text=True)
+        text = json.dumps(record, ensure_ascii=False)
+        for leaked in (title, '땅콩', 'account/orders', 'id=77', 'allergy.md', 'peanut-free', '장바구니 페이지',
+                       'shop.example/cart', '리더는'):
+            self.assertNotIn(leaked, text)
+        row = record['tool_calls'][5]
+        evidence = row['evidence']
+        self.assertTrue(evidence['title'].startswith('[omitted: '))
+        self.assertTrue(evidence['found'].startswith('[omitted: '))
+        self.assertTrue(evidence['url'].startswith('https://shop.example/[omitted: '))
+        self.assertTrue(evidence['files'][0]['path'].startswith('[omitted: '))
+        self.assertEqual(evidence['sources'][1], 'https://maps.example/')
+        self.assertTrue(row['error'].startswith('[omitted: '))
+        # Structure stays readable.
+        self.assertEqual((evidence['state'], evidence['provider'], evidence['qualifiers'], evidence['characters'],
+                          evidence['result_count'], evidence['files'][0]['root_id']),
+                         ('page', 'naver', ['partial'], 120, 2, 'r1'))
+        cited = record['finish']['cited'][1]['evidence']
+        self.assertEqual((cited['state'], cited['element_count']), ('page', 12))
+        self.assertTrue(cited['title'].startswith('[omitted: '))
+        self.assertEqual(cited['url'], 'https://shop.example/[omitted: 5 chars, sha256 '
+                         + smoke.hashlib.sha256(b'/cart').hexdigest()[:16] + ']')
+
     def test_report_sections_are_parsed_from_the_owner_report(self):
         from personal_agent.conversation_projection import TERMINAL_UNFINISHED_LABEL, report_statement
         statement = report_statement({'failed': [['assistant', '결제는 하지 않았습니다']], 'unknown': ['재고'],
@@ -217,33 +256,49 @@ class ProbeRecordTests(unittest.TestCase):
         self.assertEqual(self.record(work='latest')['work']['id'], self.job)
         with self.assertRaises(LookupError):
             self.record(work='no-such-work')
-        for bad in ({'probe': 'E'}, {'date': 'yesterday'}, {'head': 'main'}):
+        for bad in ({'probe': 'E'}, {'recorded_at': datetime.datetime(2026, 9, 27)}, {'head': 'main'}):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 self.record(**bad)
 
     def test_a_missing_store_is_refused_without_creating_one(self):
         missing = Path(self.tmp.name) / 'nowhere'
         with self.assertRaises(FileNotFoundError):
-            smoke.record_probe(missing, 'latest', 'A', '2026-09-27')
+            smoke.record_probe(missing, 'latest', 'A', AT)
         self.assertFalse(missing.exists())
 
-    def test_cli_writes_the_named_file_once_and_never_overwrites(self):
+    def test_cli_writes_a_utc_timestamped_file_named_after_the_work(self):
         out = Path(self.tmp.name) / 'evidence'
         out.mkdir()
-        argv = ['record-probe', '--data', str(self.data), '--work', self.job, '--probe', 'B', '--date', '2026-09-27',
-                '--out-dir', str(out)]
+        argv = ['record-probe', '--data', str(self.data), '--work', self.job, '--probe', 'B', '--out-dir', str(out)]
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(smoke.main(argv), 0)
-        saved = out / 'secretary-01-probe-B-2026-09-27.json'
-        self.assertEqual(json.loads(saved.read_text(encoding='utf-8')), json.loads(stdout.getvalue()))
+        [saved] = list(out.iterdir())
+        record = json.loads(stdout.getvalue())
+        work8 = self.job.replace('-', '')[:8]
+        self.assertRegex(saved.name, r'^secretary-01-probe-B-\d{4}-\d{2}-\d{2}T\d{4}Z-' + work8 + r'\.json$')
+        self.assertEqual(saved.name, f"secretary-01-probe-B-{record['recorded_at']}-{work8}.json")
+        self.assertEqual(json.loads(saved.read_text(encoding='utf-8')), record)
         self.assertNotIn(TOKEN, saved.read_text(encoding='utf-8'))
-        before = saved.read_text(encoding='utf-8')
-        stdout = io.StringIO()
-        with contextlib.redirect_stdout(stdout):
-            self.assertEqual(smoke.main(argv), 2)
-        self.assertEqual(json.loads(stdout.getvalue())['error'], 'FileExistsError')
-        self.assertEqual(saved.read_text(encoding='utf-8'), before)
+
+    def test_two_records_of_one_probe_on_one_day_both_save_and_none_is_overwritten(self):
+        out = Path(self.tmp.name) / 'evidence'
+        out.mkdir()
+        second = self.store.enqueue('내일 일정 보고 미리 알려줘', 'probe-b-2', channel='telegram:g', chat_id=7)
+        first_path = smoke.write_probe_record(self.record(probe='B'), out)
+        # Same probe, same day, same minute, another Work (the reminder delivery).
+        second_path = smoke.write_probe_record(self.record(probe='B', work=second), out)
+        # Same probe, same day, same Work, later: a new file.
+        later_path = smoke.write_probe_record(
+            self.record(probe='B', recorded_at=AT + datetime.timedelta(hours=3)), out)
+        self.assertEqual(len({first_path, second_path, later_path}), 3)
+        self.assertEqual(first_path.name, f"secretary-01-probe-B-2026-09-27T0930Z-{self.job.replace('-', '')[:8]}.json")
+        self.assertTrue(later_path.name.startswith('secretary-01-probe-B-2026-09-27T1230Z-'))
+        # The exact same record name again is refused, and the file is unchanged.
+        before = first_path.read_text(encoding='utf-8')
+        with self.assertRaises(FileExistsError):
+            smoke.write_probe_record(self.record(probe='B', head='abcdef1'), out)
+        self.assertEqual(first_path.read_text(encoding='utf-8'), before)
 
     def test_legacy_setup_invocation_is_unchanged(self):
         root = Path(self.tmp.name) / 'smoke'
@@ -271,7 +326,7 @@ class ProbeRecordLoopIntegrationTests(unittest.TestCase):
         row, _failed = harness.run_turn('리더 책 찾아줘', script, network, harness.CHANNELS[0],
                                         engine=loop.goal_engine(True))
         self.assertEqual(row['status'], 'succeeded')
-        record = smoke.record_probe(harness._store.root, row['id'], 'D', '2026-09-27')
+        record = smoke.record_probe(harness._store.root, row['id'], 'D', AT)
         calls = record['tool_calls']
         self.assertEqual([(c.get('status'), c.get('code')) for c in calls],
                          [('succeeded', None), ('failed', 'repeat_path'), ('succeeded', None)])

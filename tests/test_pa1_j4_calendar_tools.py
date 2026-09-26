@@ -18,6 +18,7 @@ proposal carrying an exact preview.  Applying it needs a one-time approval
 token bound to this owner, this draft, this payload hash and the write
 connector's `connection_revision` -- and the model has no tool that mints one.
 """
+import hashlib
 import json
 import tempfile
 import unittest
@@ -337,11 +338,12 @@ class OwnerApplyPathTests(unittest.TestCase):
                          'the provider was contacted twice for one approval')
         self.assertEqual(first['result']['id'], second['result']['id'])
 
-    def draft_as(self, owner):
+    def draft_as(self, owner, **content):
         """A draft owned by an arbitrary connector identity."""
         return self.calendar.draft_create(
             {'summary': '비밀 상담', 'start': '2026-09-26T10:00:00+09:00',
-             'end': '2026-09-26T11:00:00+09:00', 'timezone': 'Asia/Seoul'}, owner)
+             'end': '2026-09-26T11:00:00+09:00', 'timezone': 'Asia/Seoul',
+             **content}, owner)
 
     def test_listing_never_returns_another_identity_s_draft(self):
         """`preview`/`approve`/`apply` enforce the owner; listing did not.
@@ -350,13 +352,21 @@ class OwnerApplyPathTests(unittest.TestCase):
         so a draft created under `telegram:4242` came back verbatim -- payload,
         location, owner hash -- to a `local-owner` web session.
         """
-        self.draft_as('telegram:9999')
+        # A short token such as the chat id can occur by chance inside a
+        # timestamp or hash in the listing, so the foreign draft carries a
+        # marker that cannot, and every foreign trace is checked by value.
+        marker = 'foreign-5f0c2e7a-91d4-4b6e-a3c8-0d7e19b2c4f6'
+        foreign = self.draft_as('telegram:9999', summary=marker,
+                                location=marker, description=marker)
         mine = self.draft_as('local-owner')
         listed = self.service.calendar_draft_request({'operation': 'list'},
                                                      owner_id='local-owner')
         ids = [row['id'] for row in listed['drafts']]
         self.assertEqual(ids, [mine['id']])
-        self.assertNotIn('9999', json.dumps(listed, ensure_ascii=False))
+        serialized = json.dumps(listed, ensure_ascii=False)
+        self.assertNotIn(marker, serialized)
+        self.assertNotIn(foreign['id'], serialized)
+        self.assertNotIn(hashlib.sha256(b'telegram:9999').hexdigest(), serialized)
 
     def test_a_telegram_draft_is_approvable_by_the_owner_surface(self):
         """The primary J4 journey.

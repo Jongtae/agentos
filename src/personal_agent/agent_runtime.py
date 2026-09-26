@@ -1203,8 +1203,11 @@ def goal_summary(rows, tools=None):
  trail,_refusals=event_trail(rows,tools)
  failed=[index for index,(_action,state) in enumerate(trail) if state!='succeeded']
  fixed=recovered(trail)
+ # A failed action stays unresolved unless the same action later succeeded.
+ retried={action for index,(action,state) in enumerate(trail) if state=='failed'
+          and not any(later==(action,'succeeded') for later in trail[index+1:])}
  unresolved=sorted({action for action,state in trail if state in ('withheld','incomplete','exhausted')}|
-                   (set() if fixed else {action for action,state in trail if state=='failed'}))
+                   (set() if fixed else retried))
  return {'attempts':len(trail),'failed_attempts':len(failed),'recovered':fixed,'unresolved':unresolved,'effect':'none'}
 
 def outcome_from_events(rows, tools=None):

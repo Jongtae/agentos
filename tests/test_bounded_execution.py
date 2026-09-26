@@ -30,9 +30,7 @@ class _Capabilities:
     def execute(self, name, arguments): self.calls.append((name, arguments)); return {'ok': True}
 
 
-# Default bounded profile: weather/bounded_public_research are implemented but
-# gated until CLI isolation is qualified (#604 owner decision).
-BOUNDED_NAMES = ['list_notes', 'save_note', 'web_search']
+BOUNDED_NAMES = ['bounded_public_research', 'list_notes', 'save_note', 'weather', 'web_search']
 
 
 class BoundedExecutionTests(unittest.TestCase):

@@ -232,8 +232,7 @@ class ExposedToolWireBoundary(unittest.TestCase):
     def test_listed_local_tools_are_invocable_through_the_real_bridge(self):
         """Positive control: exposure and host invocation agree for local tools."""
         names = [tool["name"] for tool in self._listed()]
-        # Default profile: weather/bounded_public_research are gated (#604 owner decision).
-        self.assertEqual(names, ["list_notes", "save_note", "web_search"])
+        self.assertEqual(names, ["bounded_public_research", "list_notes", "save_note", "weather", "web_search"])
         replies = self._wire(
             {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
              "params": {"name": "save_note", "arguments": {"content": "wire note"}}},
@@ -339,13 +338,6 @@ class BoundedProfileHostInvocation(unittest.TestCase):
     ]
 
     def setUp(self):
-        from unittest import mock
-        from personal_agent.bounded_execution import CLI_PROFILES
-        # These tests exercise the gated bindings, so the gate is open here;
-        # test_gated_bindings_are_refused_by_default covers the shipped default.
-        gate = mock.patch.dict(CLI_PROFILES["bounded-agentos-mcp"], {"gate_qualified": True})
-        gate.start()
-        self.addCleanup(gate.stop)
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.store = QuickStore(Path(tmp.name) / "state")
@@ -448,21 +440,15 @@ class BoundedProfileHostInvocation(unittest.TestCase):
             return {row[0]: json.loads(row[1]) for row in db.execute(
                 "SELECT tool,detail FROM tool_events WHERE job_id=? AND status=?", (self.job, status))}
 
-    def test_gated_bindings_are_refused_by_default(self):
-        from unittest import mock
-        from personal_agent.bounded_execution import CLI_PROFILES
-        with mock.patch.dict(CLI_PROFILES["bounded-agentos-mcp"], {"gate_qualified": False}):
-            replies = self._serve([
-                {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
-                self._call(3, "weather", {"city": "Daejeon"}),
-                self._call(4, "bounded_public_research", {"mode": "travel_plan", "query": "q"}),
-                self._call(5, "web_search", {"query": "today news"}),
-            ])
-        self.assertEqual([tool["name"] for tool in replies[2]["result"]["tools"]], ["list_notes", "save_note", "web_search"])
-        self.assertIn("error", replies[3])
-        self.assertIn("error", replies[4])
-        self.assertIn("result", replies[5], "the pre-#604 surface is unchanged")
-        self.assertEqual((self.weather, self.opened, self.searches), ([], [], ["today news"]))
+    def test_a_recorded_private_read_under_a_package_alias_taints_too(self):
+        """Re-review P3: rehydration is keyed on the host action, not the built-in name."""
+        with self.store.db() as db:
+            db.execute("INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)",
+                       (self.job, "my_notes", "succeeded",
+                        json.dumps({"scope": "x", "host_action": "list_notes"}), 1))
+        replies = self._serve([self._call(2, "web_search", {"query": "granted private note"})])
+        self.assertIn("error", replies[2])
+        self.assertEqual(self.searches, [])
 
     def test_private_taint_survives_a_second_bridge_process_for_the_same_work(self):
         """Review P2: a restarted bridge rehydrates taint from this Work's own events."""

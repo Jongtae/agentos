@@ -261,9 +261,9 @@ _NATIVE_PROBE = (
 #: Declared per-profile limits of the inspected build (#604).  A build older
 #: than #604 declares none, so every missing public read stays a finding.
 _PROFILE_PROBE = (
-    "import json; from personal_agent.bounded_execution import route_unavailable; "
-    "print(json.dumps({'bounded-cli-mcp': route_unavailable('bounded-agentos-mcp'), "
-    "'isolated-cli-mcp': route_unavailable('isolated-agentos-mcp')}))"
+    "import json; from personal_agent.bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, profile_status; "
+    "print(json.dumps({'bounded-cli-mcp': profile_status(AgentOSMcpTools.PROFILE), "
+    "'isolated-cli-mcp': profile_status(ReadOnlyAgentOSMcpTools.PROFILE)}))"
 )
 
 
@@ -456,7 +456,11 @@ def inspect_installation(root=ROOT, interpreter=None, data=None, port=None,
         if offered == "unknown":
             unknown.append(route)
             continue
-        reasons = declared.get(route) if isinstance(declared.get(route), dict) else {}
+        status = declared.get(route) if isinstance(declared.get(route), dict) else {}
+        reasons = status.get("unavailable") if isinstance(status.get("unavailable"), dict) else {}
+        if isinstance(status.get("trust"), str):
+            # The profile's declared trust level and verified limitation (#604).
+            routes.setdefault("trust", {})[route] = {"trust": status["trust"], "limitation": status.get("limitation")}
         # A declared profile limit (for example an approval bound to another
         # provider) is a route limit, not a missing binding; an undeclared
         # omission is the defect this check exists to find.

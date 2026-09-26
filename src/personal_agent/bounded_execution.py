@@ -61,29 +61,29 @@ _CALENDAR = 'calendar-connector-not-bound-to-cli-route'
 _MEMORY = 'owner-memory-not-bound-to-cli-route'
 _SPECIALISTS = 'specialists-require-direct-api-model'
 _ISOLATED = 'isolation-restricted-profile'
-# Owner decision on #604 (review of #615): the CLI's own built-in tools can
-# read local owner data that AgentOS never sees, so AgentOS records no taint
-# for it.  A no-model probe of `codex sandbox -P :read-only` (the policy behind
-# `codex exec --sandbox read-only`, Codex 0.153.4) read a fake owner store, a
-# home file and the turn directory; network and writes were blocked.  Claude
-# Code 2.1.280 documents that its file tools may read outside the working
-# directory unless `--restricted` is used.  Adding more public-egress actions
-# on top of that is gated until a verified isolation keeps the CLI's built-in
-# reads inside what AgentOS mediates.
-_UNMEDIATED_READS = 'gated-cli-built-in-reads-not-mediated-by-agentos'
+
+#: The verified limitation of the trusted-local profile (owner decision on
+#: #604).  The CLI's own built-in tools can read local host files that AgentOS
+#: never mediates, so those reads carry no AgentOS provenance and the public
+#: reads offered here cannot be closed by it.  Observed with a no-model probe of
+#: `codex sandbox -P :read-only` (the policy behind `codex exec --sandbox
+#: read-only`) on codex-cli 0.153.4: a fake owner store, a home file and the
+#: turn directory were readable; network and writes were blocked.  Claude Code
+#: 2.1.280 documents that its file tools may read outside the working directory
+#: unless `--restricted` is used (not observed locally).  The owner accepts this
+#: trusted-local-worker risk; strict read isolation is #616 AGENCY-ISOLATION-01.
+TRUSTED_LOCAL_LIMITATION = ('the CLI may read host files outside AgentOS provenance '
+                            '(verified: codex sandbox -P :read-only, codex-cli 0.153.4)')
 
 CLI_PROFILES = {
-    'bounded-agentos-mcp': {
+    'trusted-local': {
+        # The subscription CLI route: an owner-trusted local worker.
+        'mode': 'bounded-agentos-mcp',
+        'trust': 'trusted-local',
+        'limitation': TRUSTED_LOCAL_LIMITATION,
         # Public reads the native route has by default, one owner-private read
-        # and the explicit note write, all under the unchanged guards.
+        # and the explicit note write, all under the unchanged AgentOS guards.
         'actions': ('bounded_public_research', 'list_notes', 'save_note', 'weather', 'web_search'),
-        # Implemented but offered only once this profile's isolation is
-        # qualified (docs/assistant-execution-contract.en.md: new binding paths
-        # start disabled behind per-profile flags).  Default OFF keeps the
-        # restrictive pre-#604 public surface.  `web_search` predates #604 and
-        # stays; it carries the same combination, recorded in the PR.
-        'gated': {'bounded_public_research': _UNMEDIATED_READS, 'weather': _UNMEDIATED_READS},
-        'gate_qualified': False,
         # Approvals bound to the direct-API model fingerprint are not carried to
         # another provider: doing so would silently change the data destination.
         'unavailable': {
@@ -94,12 +94,9 @@ CLI_PROFILES = {
             'save_memory': _MEMORY, 'list_memory': _MEMORY,
             'list_agents': _SPECIALISTS, 'delegate_agent': _SPECIALISTS,
         },
-        # The engines' own built-in tools (e.g. Codex ``unified_exec``) cannot
-        # all be disabled, and no AgentOS-mediated live run of this catalog has
-        # been observed, so the profile is unqualified.  Reference versions are
-        # the argv shapes recorded from each CLI's own --help
-        # (docs/decision-layer.en.md), exercised here only by scripted runners.
-        'qualification': 'unqualified',
+        # No AgentOS-mediated live run of this catalog has been observed.
+        # Reference versions are the argv shapes recorded from each CLI's own
+        # --help (docs/decision-layer.en.md), exercised only by scripted runners.
         'runtimes': {'codex': {'reference_version': '0.153.4', 'live_tested_version': None},
                      'claude-code': {'reference_version': '2.1.280', 'live_tested_version': None}},
     },
@@ -107,43 +104,37 @@ CLI_PROFILES = {
         # Deliberately restricted isolation profile (not a full-profile pass):
         # the sidecar reaches AgentOS only through a single-use, task-bound
         # bearer capability that serves exactly this read.
+        'mode': 'isolated-agentos-mcp',
+        'trust': 'isolated-restricted',
+        'limitation': 'only the argumentless list_notes read is offered',
         'actions': ('list_notes',),
         'unavailable': {action: _ISOLATED for action in (
             'bounded_public_research', 'save_note', 'weather', 'web_search', 'public_page_read',
             'find_files', 'read_file', 'list_roots', 'calendar_query', 'calendar_draft_create',
             'calendar_draft_update', 'calendar_draft_cancel', 'save_memory', 'list_memory',
             'list_agents', 'delegate_agent')},
-        'qualification': 'restricted',
         # Pinned in Dockerfile.engine; a test keeps the two in step.
         'runtimes': {'codex': {'pinned_version': '0.153.4', 'live_tested_version': None}},
     },
 }
-BOUNDED_PROFILE, ISOLATED_PROFILE = 'bounded-agentos-mcp', 'isolated-agentos-mcp'
-
-
-def _gated(profile):
-    declared = CLI_PROFILES[profile]
-    return {} if declared.get('gate_qualified') else dict(declared.get('gated') or {})
+BOUNDED_PROFILE, ISOLATED_PROFILE = 'trusted-local', 'isolated-agentos-mcp'
 
 
 def profile_actions(profile):
-    """The actions a CLI profile offers now: declared actions minus gated ones."""
-    gated = _gated(profile)
-    return tuple(action for action in CLI_PROFILES[profile]['actions'] if action not in gated)
+    return tuple(CLI_PROFILES[profile]['actions'])
 
 
 def route_unavailable(profile):
     """Declared reasons for every action a CLI profile does not offer."""
-    return {**CLI_PROFILES[profile]['unavailable'], **_gated(profile)}
+    return dict(CLI_PROFILES[profile]['unavailable'])
 
 
 def profile_status(profile):
-    """What Settings and provenance show about one profile."""
+    """What Settings, provenance and the doctor show about one profile."""
     declared = CLI_PROFILES[profile]
-    return {'mode': profile, 'tools': list(profile_actions(profile)), 'unavailable': route_unavailable(profile),
-            'qualification': declared['qualification'],
-            'gated_actions': sorted(declared.get('gated') or {}),
-            'gate_qualified': bool(declared.get('gate_qualified'))}
+    return {'profile': profile, 'mode': declared['mode'], 'trust': declared['trust'],
+            'limitation': declared['limitation'], 'tools': list(profile_actions(profile)),
+            'unavailable': route_unavailable(profile)}
 
 
 def mcp_tool(definition, mode=None):

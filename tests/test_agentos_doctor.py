@@ -204,8 +204,8 @@ def test_deliberately_stale_build_is_identified_without_a_model(tmp_path):
 
 
 def test_deliberately_missing_binding_is_identified(tmp_path):
-    drop = ("\nCLI_PROFILES['bounded-agentos-mcp']['actions'] = tuple(action for action in "
-            "CLI_PROFILES['bounded-agentos-mcp']['actions'] if action != 'web_search')\n")
+    drop = ("\nCLI_PROFILES['trusted-local']['actions'] = tuple(action for action in "
+            "CLI_PROFILES['trusted-local']['actions'] if action != 'web_search')\n")
     report = installation(fake_install(tmp_path, drop))
     assert "web_search" not in report["routes"]["bounded-cli-mcp"]
     missing = next(item for item in report["findings"]
@@ -217,10 +217,11 @@ def test_declared_profile_limits_are_reported_as_limits_not_missing_bindings(tmp
     """#604: an approval bound to another provider is a route limit, not incapability."""
     report = installation(fake_install(tmp_path))
     routes = report["routes"]
-    assert "web_search" in routes["bounded-cli-mcp"]
+    assert {"weather", "web_search"} <= set(routes["bounded-cli-mcp"])
     assert routes["declared_limits"]["bounded-cli-mcp"] == {
-        "public_page_read": "owner-page-approval-bound-to-direct-api-model",
-        "weather": "gated-cli-built-in-reads-not-mediated-by-agentos"}
+        "public_page_read": "owner-page-approval-bound-to-direct-api-model"}
+    assert routes["trust"]["bounded-cli-mcp"]["trust"] == "trusted-local"
+    assert "outside AgentOS provenance" in routes["trust"]["bounded-cli-mcp"]["limitation"]
     assert set(routes["declared_limits"]["isolated-cli-mcp"]) == {"weather", "web_search", "public_page_read"}
     assert not [item for item in report["findings"]
                 if isinstance(item, dict) and "missing-public-read-binding" in item]

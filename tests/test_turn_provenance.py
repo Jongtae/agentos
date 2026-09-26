@@ -254,8 +254,10 @@ class ServiceProvenance(unittest.TestCase):
         self.store.enqueue('hello', 'k1')
         self.assertTrue(service.run_one())
         record = self._selected(service)['provenance']
-        self.assertEqual(record['exposed_tools'], [tool['name'] for tool in profile_mcp_tools('bounded-agentos-mcp')])
-        self.assertEqual(record['capability_profile'], 'bounded-agentos-mcp')
+        self.assertEqual(record['exposed_tools'], [tool['name'] for tool in profile_mcp_tools('trusted-local')])
+        self.assertEqual(record['capability_profile'], 'trusted-local')
+        self.assertEqual(record['capability_trust'], 'trusted-local')
+        self.assertIn('outside AgentOS provenance', record['capability_limitation'])
         self.assertEqual(record['unavailable_tools']['public_page_read'], 'owner-page-approval-bound-to-direct-api-model')
         self.assertEqual(record['build'], build_identity())
         self.assertEqual(record['build']['package_digest'], package_digest(PACKAGE_DIR))

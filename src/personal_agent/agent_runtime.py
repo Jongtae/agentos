@@ -13,6 +13,7 @@ from .manifests import BUILTIN_MANIFEST, runtime_packages
 
 AGENTS={role['id']:{key:value for key,value in role.items() if key!='id'} for role in BUILTIN_MANIFEST['roles']}
 BUILTIN_TOOLS={tool['id']:tool['host_action'] for tool in BUILTIN_MANIFEST['tools']}
+BUILTIN_ROLES={role['id']:{**role,'package_id':BUILTIN_MANIFEST['id']} for role in BUILTIN_MANIFEST['roles']}
 
 def schema(name,description,properties=None,required=None):
  return {'type':'function','function':{'name':name,'description':description,'parameters':{'type':'object','properties':properties or {},'required':required or [],'additionalProperties':False}}}
@@ -631,7 +632,9 @@ class Capabilities:
    if not agent:raise ValueError('활성 전문 에이전트를 선택하세요.')
    # #604: a role whose package was disabled, removed or re-declared since
    # discovery is refused, exactly as a stale tool is.
-   if self.current_packages is not None and agent['package_id']!='builtin':
+   # Built-in is decided by the declaration itself, not by a package id a
+   # third-party manifest could claim.
+   if self.current_packages is not None and BUILTIN_ROLES.get(args['agent_id'])!=agent:
     try:current=next((role for package in self.current_packages() if package['id']==agent['package_id'] for role in package['roles'] if role['id']==args['agent_id']),None)
     except Exception:current=None
     if current is None or {**current,'package_id':agent['package_id']}!=agent:

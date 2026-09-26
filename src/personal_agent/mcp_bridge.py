@@ -64,18 +64,31 @@ def _work_running(store, job_id):
     return bool(job) and job.get('status') == 'running'
 
 
-def _recorded_private_sources(store, job_id):
+def _recorded_private_sources(store, job_id, tools=None):
     """Private-source labels this Work's own tool events already carry.
 
     Taint used to live only in one bridge process: a second bridge started for
     the same running Work (a CLI restarting its MCP server) received only the
     argv ``--provenance`` labels and forgot a ``list_notes`` the first one had
     served.  Every successful private read is a durable ``tool_events`` row,
-    so the bridge rehydrates from it on start and before every call.
+    so the bridge rehydrates from it on start and before every call.  Labels
+    are keyed on the *host action*: the recorded ``host_action``
+    and the tool id's declared action in ``tools`` (any one suffices), so a package alias of a
+    private read taints exactly like the built-in.
     """
     with store.db() as db:
-        rows = db.execute("SELECT DISTINCT tool FROM tool_events WHERE job_id=? AND status='succeeded'", (job_id,)).fetchall()
-    return {PRIVATE_PROVENANCE[row[0]] for row in rows if row[0] in PRIVATE_PROVENANCE}
+        rows = db.execute("SELECT tool, detail FROM tool_events WHERE job_id=? AND status='succeeded'", (job_id,)).fetchall()
+    labels = set()
+    for tool, detail in rows:
+        try:
+            recorded = json.loads(detail or '{}').get('host_action')
+        except (ValueError, AttributeError):
+            recorded = None
+        # Union, not precedence: any reading that names a private read taints.
+        for action in (recorded, (tools or {}).get(tool, {}).get('host_action'), tool):
+            if isinstance(action, str) and action in PRIVATE_PROVENANCE:
+                labels.add(PRIVATE_PROVENANCE[action])
+    return labels
 
 
 def serve(data, job_id, provenance=()):
@@ -87,7 +100,8 @@ def serve(data, job_id, provenance=()):
     # schemas come from Capabilities.definitions(), never a bridge-local list.
     capabilities = Capabilities(store, None, {}, '', job_id, record, network=LocalTools(), document_access=False,
                                 allowed_tools=set(profile_actions(AgentOSMcpTools.PROFILE)),
-                                inherited_provenance=_provenance(provenance) | _recorded_private_sources(store, job_id))
+                                inherited_provenance=_provenance(provenance))
+    capabilities.private_provenance.update(_recorded_private_sources(store, job_id, capabilities.tools))
     tools = AgentOSMcpTools(capabilities)
     for line in sys.stdin:
         try:
@@ -105,7 +119,7 @@ def serve(data, job_id, provenance=()):
                 try:
                     if not _work_running(store, job_id):
                         raise ExecutionError('이 작업은 더 이상 실행 중이 아니어서 도구를 실행하지 않았습니다.')
-                    capabilities.private_provenance.update(_recorded_private_sources(store, job_id))
+                    capabilities.private_provenance.update(_recorded_private_sources(store, job_id, capabilities.tools))
                     value = tools.call(name, params.get('arguments', {}))
                 except (ValueError, ExecutionError, TypeError) as exc:
                     # Redacted recovery metadata: the reason, never the arguments.

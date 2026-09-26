@@ -456,36 +456,21 @@ class MissingWeatherBinding(_RouteFixture):
         self.assertIn('Daejeon', self.requests[-1]['messages'][-1]['content'])
         self.assertIn('weather', [tool['function']['name'] for tool in self.requests[-1]['tools']])
 
-    @unittest.expectedFailure
     def test_finding_cli_route_has_no_weather_binding(self):
-        """Owner #604 (AX-02), still an expected failure by owner decision.
+        """Fixed by #604 (AX-02); was an ``expectedFailure`` baseline from #603.
 
-        #604 implemented the binding (derived from ``Capabilities.definitions()``
-        through the bounded CLI profile) but gates it OFF: the CLI's own
-        built-in reads are not mediated by AgentOS, so more public egress waits
-        for a qualified isolation.  ``test_a_qualified_gate_offers_weather_on_the_cli``
-        shows the binding once the gate opens.  Also owned elsewhere: the
-        lexical preflight (#606) and the second turn's history taint (#605).
+        The CLI's tool list is derived from ``Capabilities.definitions()``
+        through the trusted-local profile, so ``weather`` is offered.  Still
+        owned elsewhere: the lexical preflight (#606) and the second turn's
+        history taint that refuses this call once any assistant answer is in
+        context (#605) -- which is why the offer, not the outbound request, is
+        what this reproducer can require.
         """
         self._service(cli=True)
         self._turns(*WEATHER_TURNS)
         self.assertEqual(len(self.engine.offered), 2, 'the scripted CLI ran both turns')
         self.assertTrue(self._outbound('weather') or 'weather' in self.engine.offered[-1],
                         f'offered={self.engine.offered[-1]} outbound={self.network.plans}')
-
-
-class QualifiedCliWeatherBinding(_RouteFixture):
-    def test_a_qualified_gate_offers_weather_on_the_cli(self):
-        """#604: with the profile gate open the binding reaches the CLI; default is closed."""
-        from unittest import mock
-        from personal_agent.bounded_execution import CLI_PROFILES
-        self._service(cli=True)
-        self._turns(WEATHER_TURNS[0])
-        self.assertNotIn('weather', self.engine.offered[-1], 'default: gated')
-        with mock.patch.dict(CLI_PROFILES['bounded-agentos-mcp'], {'gate_qualified': True}):
-            self.store.enqueue('비 와?', 'gated-k')
-            self.assertTrue(self.service.run_one())
-        self.assertIn('weather', self.engine.offered[-1])
 
 
 class PriorAssistantEgressDecision(_RouteFixture):

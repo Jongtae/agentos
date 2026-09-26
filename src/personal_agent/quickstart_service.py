@@ -3463,7 +3463,7 @@ class AgentService:
                         # raw request only.  Finer per-turn provenance is #448.
                         if any(message['role']=='assistant' for message in engine_context['conversation']):
                             capabilities.private_provenance.add('conversation-history')
-                        mode='isolated-agentos-mcp' if isolated else 'bounded-agentos-mcp'
+                        mode=profile_status(facade.PROFILE)['mode']
                         # Record exactly what reached the CLI: bounded Claude Code
                         # gets the instructions as their own argv element, and the
                         # bare-request fallback sends no instructions at all.
@@ -3474,7 +3474,8 @@ class AgentService:
                         self.record_turn_sent(job['id'],sent=sent if separate else engine_prompt,
                             exposed_tools=[tool.get('name') for tool in offered],build=self.build,
                             capability_profile=facade.PROFILE,unavailable_tools=route_unavailable(facade.PROFILE),
-                            capability_gate_qualified=profile_status(facade.PROFILE)['gate_qualified'],
+                            capability_trust=profile_status(facade.PROFILE)['trust'],
+                            capability_limitation=profile_status(facade.PROFILE)['limitation'],
                             instructions=engine_context['instructions'] if adapter_context is not None else '',
                             instructions_channel='append-system-prompt' if separate else ('prompt' if adapter_context is not None else 'not sent (bare request)'),
                             private_sources=set(turn_provenance)|set(capabilities.private_provenance),

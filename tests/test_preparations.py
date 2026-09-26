@@ -427,6 +427,22 @@ class AcceptanceTests(_Case):
         self.assertEqual(len(self.sends()), 3)
         self.assertTrue(self.sends()[-1]['text'].startswith('미리 준비한 결과입니다 (점심 후보 준비)'))
 
+    def test_declining_the_proposal_cancels_it(self):
+        self.service.use_decision_engine(engine(preparation=False))
+        work, row = self.propose()
+        self.service.deliver_one()
+        self.service.deliver_notification()
+        with self.store.db() as db:
+            notification = dict(db.execute("SELECT * FROM telegram_notifications WHERE job_id=? AND kind='preparation_proposed'",
+                                           (work,)).fetchone())
+        self.tap(f"p7p:{notification['id']}:deny", notification['message_id'])
+        self.assertEqual(self.service.preparations.get(row['id'])['state'], 'cancelled')
+        self.assertIn('editMessageText', [method for method, _body in self.telegram])
+        self.tap(f"p7p:{notification['id']}:accept", notification['message_id'])
+        self.assertEqual(self.service.preparations.get(row['id'])['state'], 'cancelled', 'a used message cannot accept later')
+        self.now += 3600
+        self.assertFalse(self.tick())
+
     def test_without_a_decision_engine_the_owner_is_asked(self):
         self.service.use_decision_engine(engine(preparation=None))
         _work, row = self.propose('매일 11시 반에 점심 후보 준비해 둬')

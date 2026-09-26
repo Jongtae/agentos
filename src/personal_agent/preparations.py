@@ -390,14 +390,15 @@ class Preparations:
             if existing:
                 job_id = existing['id']
             elif current['kind'] == KIND_REMINDER:
-                # The reminder text is the Work's observed result; the existing
-                # terminal delivery sends it once (mark-before-send).
+                # The reminder text is the Work's observed result ('builtin':
+                # no AI ran, as for notes); the existing terminal delivery
+                # sends it once (mark-before-send).
                 job_id = str(uuid.uuid4())
                 text = reminder_text(current['goal_text'], current['due_at'], current['timezone'], now)
                 db.execute('INSERT INTO jobs(id,request_key,message,channel,chat_id,status,response,error,delivery,provider,model,created) '
                            'VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
                            (job_id, key, current['goal_text'], channel, chat_id, 'succeeded', text, None,
-                            'pending' if chat_id else 'none', 'agentos', 'preparation', now))
+                            'pending' if chat_id else 'none', 'builtin', 'preparation', now))
                 db.execute('INSERT INTO messages(role,content,channel,created,job_id) VALUES (?,?,?,?,?)',
                            ('assistant', text, channel, now, job_id))
             else:

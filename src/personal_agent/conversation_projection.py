@@ -57,6 +57,8 @@ TOOL_LABELS = {
     'delegate_agent': '다른 에이전트에 맡김', 'list_agents': '에이전트 목록 조회',
     'find_files': '파일 찾기', 'read_file': '파일 읽기', 'public_page_read': '공개 페이지 읽기',
     'bounded_public_research': '공개 자료 조사',
+    # SEC-BROWSER-01 (#656): steps in the owner-logged-in browser profile.
+    'browser_open': '브라우저 페이지 열기', 'browser_read': '브라우저 페이지 읽기', 'browser_find': '브라우저 페이지에서 찾기', 'browser_click': '브라우저에서 누르기', 'browser_type': '브라우저에 입력',
 }
 #: A tool this catalogue does not name (for example an AgentPackage tool).
 TOOL_LABEL_FALLBACK = '도구 실행'

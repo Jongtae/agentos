@@ -416,9 +416,11 @@ function renderDecisionRoute(settings){
  const requalify=active.requalification_needed?' '+t('CLI가 바뀌어 다시 확인해야 합니다. 판단 모델에서 변경을 눌러 다시 확인하세요.'):'';
  box.append(settingsRow(t('사용 방식'),decisionActiveTitle(active)+' — '+activeDescription+requalify,activeState[0],activeState[1],methodActions.children.length?methodActions:null,
   transport==='direct_api'&&decisionChooser==='direct_api'?decisionKeyForm('direct_api',false,direct.has_decision_key):null));
- if(transport==='subscription_cli'){box.append(settingsRow(t('구독 엔진'),t('로그인은 작업 실행과 같은 계정을 쓰지만 도구 없이 판단만 합니다.'),DECISION_ENGINE_NAMES[active.engine]||active.engine||'-','neutral'));
-  // The model policy is changed in place; the active engine is not listed again under 다른 선택지.
+ if(transport==='subscription_cli'){
+  // The model policy is changed in place; the active engine is not listed again under 다른 선택지,
+  // so its instruction-file limitation (#624) is shown here.
   const activeEngine=(route.subscription_cli||[]).find(engine=>engine.id===active.engine),chooserId='cli:'+active.engine;
+  box.append(settingsRow(t('구독 엔진'),t('로그인은 작업 실행과 같은 계정을 쓰지만 도구 없이 판단만 합니다.')+(activeEngine&&activeEngine.instruction_files?' '+t(activeEngine.instruction_files):''),DECISION_ENGINE_NAMES[active.engine]||active.engine||'-','neutral'));
   const policyDescription=(active.model_policy==='lowest_qualified'?t('적격성 검사를 통과한 가장 가벼운 후보입니다.'):active.model_policy==='explicit'?t('직접 고른 모델입니다.'):t('구독 CLI가 정하는 기본 모델입니다. 개인 CLI 설정은 쓰지 않습니다.'))+(active.requested_model?' '+t('요청 모델: {model}',{model:active.requested_model}):'');
   box.append(settingsRow(t('판단 모델'),policyDescription,t(DECISION_POLICY_LABEL[active.model_policy]||'구독 AI 기본 모델'),'neutral',activeEngine?settingsAction(t('변경'),()=>openDecisionChooser(chooserId)):null,activeEngine&&decisionChooser===chooserId?decisionPolicyForm(activeEngine):null));}
  const others=element('h4',t('다른 선택지'),'settings-subheading');box.append(others);

@@ -168,10 +168,17 @@ class DecisionRoutes:
                 return 'isolated-deployment'
             if fingerprint != cli_fingerprint(self.service.execution_adapter.finder(CLI_BINARIES[engine_id])):
                 return 'requalification-needed'
+            if engine_id == 'codex' and not self._codex_instructions_qualified(route):
+                return 'instruction-files-unqualified'
             return ''
 
         return self._cli_engine(engine_id, model, policy, audit, guard,
                                 route.get('codex_disabled_features') if engine_id == 'codex' else None)
+
+    def _codex_instructions_qualified(self, route):
+        # #624: a stored Codex route is usable only while its recorded CLI
+        # version is instruction-file qualified (the same rule as activation).
+        return parse_cli_version('codex', route.get('cli_version') or '') in self.codex_instruction_qualified
 
     # -- read model (no subprocess, no model call) ---------------------------
     def status(self):
@@ -233,10 +240,12 @@ class DecisionRoutes:
                 requalify = (route.get('engine') in CLI_BINARIES
                              and (route.get('fingerprint') or '') != cli_fingerprint(
                                  self.service.execution_adapter.finder(CLI_BINARIES[route['engine']])))
+                unqualified = route.get('engine') == 'codex' and not self._codex_instructions_qualified(route)
                 active.update(destination=CLI_DESTINATIONS.get(route.get('engine'), ''),
-                              requalification_needed=requalify,
+                              requalification_needed=requalify, instruction_files_unqualified=unqualified,
                               available=bool(engine and engine['installed'] and engine['login'] != 'signed-out'
-                                             and not engine['isolated_deployment'] and not requalify))
+                                             and not engine['isolated_deployment'] and not requalify
+                                             and not unqualified))
         return {'active': active, 'direct_api': direct, 'jev': jev, 'subscription_cli': engines,
                 'suite_version': SUITE_VERSION}
 

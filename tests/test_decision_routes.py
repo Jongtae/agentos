@@ -708,6 +708,24 @@ class ServiceRouteSelectionTests(Temp):
         self.assertIn('AGENTS.md', engines['codex']['instruction_files'])
         self.assertEqual(engines['claude-code']['instruction_files'], '')
 
+    def test_a_stored_codex_route_stops_when_its_version_is_not_instruction_qualified(self):
+        # #624 review P3: the runtime guard applies the activation rule to a
+        # route stored earlier (unchanged binary), for every policy.
+        service = self.service()
+        service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'codex'})
+        self.assertTrue(service.decision_routes.status()['active']['available'])
+        calls = len(self.runner.calls)
+        service.decision_routes.codex_instruction_qualified = CODEX_INSTRUCTION_FILES_QUALIFIED
+        active = service.decision_routes.status()['active']
+        self.assertTrue(active['instruction_files_unqualified'])
+        self.assertFalse(active['available'])
+        engine = service.decision_routes.engine()
+        decision = engine.choose(DecisionContext('conversation-followup', {'owner_message': '다시 해봐'}),
+                                 ('retry', 'reference'), 'relation?')
+        self.assertEqual(decision.outcome, OUTCOME_UNAVAILABLE)
+        self.assertEqual(engine.last_failure, 'instruction-files-unqualified')
+        self.assertFalse(any('exec' in call['argv'] for call in self.runner.calls[calls:]))
+
     def test_codex_without_ignore_rules_is_refused(self):
         # #624: a CODEX_HOME execpolicy rule must not widen a judgment's sandbox.
         service = self.service(runner=CliRunner(help_text={'codex': CODEX_HELP.replace(' --ignore-rules\n', '')}))

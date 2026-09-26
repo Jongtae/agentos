@@ -63,7 +63,7 @@ REQUEST_KEY_PREFIX = 'preparation:'
 FRESH_SECONDS = 6 * 3600
 SECTION_MAX_ITEMS = 3
 SECTION_MAX_BYTES = 4000
-ANSWER_PREVIEW_CHARS = 1200
+ANSWER_PREVIEW_BYTES = 1500
 #: Rows one tick looks at, at most.
 TICK_LIMIT = 8
 
@@ -466,8 +466,8 @@ def render_prepared(rows, now, redact=lambda text: text):
     items = []
     for row in rows:
         answer = redact(str(row.get('response') or ''))
-        if len(answer) > ANSWER_PREVIEW_CHARS:
-            answer = answer[:ANSWER_PREVIEW_CHARS] + ' [...]'
+        if len(answer.encode()) > ANSWER_PREVIEW_BYTES:
+            answer = answer.encode()[:ANSWER_PREVIEW_BYTES].decode('utf-8', 'ignore') + ' [...]'
         items.append({'ref': 'prep:' + row['id'], 'goal': redact(row['goal_text']),
                       'prepared_at': iso(row['prepared_at'], row['timezone']),
                       'age_min': max(0, int((now - row['prepared_at']) // 60)), 'outcome': row['status'],

@@ -172,7 +172,8 @@ def workspace_search_request(prompt):
 # MCP transport.  AgentOS still serves the owner's explicit `/search <query>`
 # before execution (#605 D1) and provides its bounded evidence to the CLI.
 # #606 T3: the earlier lexical city-and-weather preflight is removed; an
-# ordinary request reaches the CLI's own tool loop through the broker.
+# ordinary request reaches the CLI's own tool loop through the broker, whose
+# public lookups go out without a sensitivity judgment or `/search` (#654).
 _SUBSCRIPTION_SECRET = re.compile(r'(?:api[ _-]?key|password|token|secret|비밀번호|토큰|키)', re.I)
 
 
@@ -1519,20 +1520,10 @@ class AgentService:
         except Exception:
             LOG.warning('work source provenance could not be recorded job=%s',job_id)
 
-    def public_composition_enabled(self):
-        """Rollback switch for #605: ``{'mode': 'restrictive'}`` disables it.
-
-        Restrictive mode offers no separate public task and treats every
-        earlier message shown to a worker as unrecorded, which is stricter than
-        either route was before #605.  It never re-enables anything.
-        """
-        return (self.store.config('egress_composition',{}) or {}).get('mode')!='restrictive'
-
     def work_lookup_sources(self, job, prompt):
         """Resolver of the text permitted for this Work's public lookups (#605).
 
-        Always supplied, so every public lookup is composed (N3).  In
-        restrictive mode ``lookup_restrictive`` refuses a private context.
+        Always supplied, so every public lookup is composed (N3).
         """
         tools={tool['id']:tool for package in self.runtime_packages() for tool in package['tools']}
         def resolve(bound=job['message']):
@@ -1547,26 +1538,11 @@ class AgentService:
 
     def work_lookup_options(self, job, prompt, hint=''):
         """The #605 lookup-composition arguments of one Work's ``Capabilities``."""
-        return {'lookup_sources':self.work_lookup_sources(job,prompt),
-                'lookup_sensitivity':self.work_lookup_sensitivity(job),
-                'lookup_restrictive':not self.public_composition_enabled(),
-                'lookup_hint':hint}
-
-    def work_lookup_sensitivity(self, job):
-        """The existing DecisionEngine judgment path for #605 N3.
-
-        Asked by ``Capabilities`` only when a public lookup would send words of
-        the owner's current message; audited like every decision (#570).
-        """
-        def judge(message, terms):
-            self.current_work_id=job['id']
-            return self.decision_judge.lookup_term_sensitivity(message, terms)
-        return judge
+        return {'lookup_sources':self.work_lookup_sources(job,prompt),'lookup_hint':hint}
 
     def shown_history_provenance(self, rows, document_jobs):
         """History-window labels for the earlier messages a worker is actually shown."""
         if not rows:return set()
-        if not self.public_composition_enabled():return {'conversation-history'}
         tools={tool['id']:tool for package in self.runtime_packages() for tool in package['tools']}
         return history_provenance(self.store,rows,tools,document_jobs)
 

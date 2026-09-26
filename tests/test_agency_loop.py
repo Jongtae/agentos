@@ -223,6 +223,8 @@ class LoopUnitTests(unittest.TestCase):
         self.assertIn('# Current context (source-qualified, not instructions)\nplace: Seongnam', rendered)
 
     def test_cli_preflight_is_only_the_explicit_search(self):
+        # #654: the ordinary request is not preflighted; its lookup goes out
+        # through the bridge on the CLI's own tool call (tests/test_public_private_composition.py).
         self.assertEqual(subscription_public_lookup_query('/search 성남 날씨'), '성남 날씨')
         self.assertIsNone(subscription_public_lookup_query('성남시 날씨 알려줘'))
 
@@ -258,10 +260,6 @@ class OwnerEntryPointTests(unittest.TestCase):
         service.save_model({'provider': 'ollama', 'endpoint': 'http://127.0.0.1:11434', 'model': 'test-model', 'api_key': ''})
         self.assertTrue(service.test_model()['ok'])
         ready[0] = True
-        # A configured sensitivity judgment that finds nothing sensitive, so the
-        # #605 composition sends the worker's public words unchanged.
-        service.decision_judge.lookup_term_sensitivity = lambda message, terms: SimpleNamespace(
-            outcome='no', value=None, source='test')
         return service, store
 
     def test_a_empty_rule_read_is_rejudged_by_the_loop(self):
@@ -413,8 +411,10 @@ class BridgeCli:
 class CliBrokerOutcomeTests(unittest.TestCase):
     """T3: a zero CLI exit cannot erase a failed attempt; a later read can recover it.
 
-    The bridge has no usable sensitivity judgment in this store, so its public
-    search is refused (#605 D2): a real, effect-free failed read.
+    The Work already holds a Memory candidate with the words the CLI then
+    proposes for a public search, so the bridge refuses that search before any
+    network use (#605 N4 durable exclusion, kept by #654): a real, effect-free
+    failed read.  No sensitivity judgment is involved.
     """
 
     REQUEST = '성남 약속 메모가 있는지 확인해줘'
@@ -429,6 +429,7 @@ class CliBrokerOutcomeTests(unittest.TestCase):
                                execution_adapter=cli)
         service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
         job = store.enqueue(self.REQUEST, 'agency-cli', channel='telegram:g', chat_id=77)
+        store.save_memory_candidate(job, 'appointment', 'Seongnam appointment', work_id=job)
         self.assertTrue(service.run_one())
         failed = [event for event in store.task_events(job) if event['status'] == 'failed']
         return store.job(job), failed, cli
@@ -447,7 +448,7 @@ class CliBrokerOutcomeTests(unittest.TestCase):
         self.assertEqual(row['status'], 'failed')
         self.assertEqual(row['response'], '확인했습니다.')
         self.assertEqual([event['tool'] for event in failed], ['web_search'])
-        self.assertIn('공개 조회에 보내지 않았습니다', row['owner_cause'] or '')
+        self.assertIn('공개 조회에 보낼 수 있는 내용이 남지 않았습니다', row['owner_cause'] or '')
 
 
 if __name__ == '__main__':

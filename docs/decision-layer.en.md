@@ -40,7 +40,7 @@ Core contracts use provider-neutral names. The conceptual model includes:
 
 - **DecisionContext** — minimal, attributable Work-scoped state supplied for a bounded question.
 - **SelectionDecision<T>** — selection among declared candidates.
-- **SelectionSetDecision<T>** — zero or more of the declared candidates (`choose_many`, #605: which terms of a public lookup to withhold). An engine that cannot answer one returns an explicit non-answer; the Jev route does not offer it and answers unavailable.
+- **SelectionSetDecision<T>** — zero or more of the declared candidates (`choose_many`). Its first caller, the #605 lookup sensitivity judgment, was removed by SEC-PILOT-01 #654; the envelope remains. An engine that cannot answer one returns an explicit non-answer; the Jev route does not offer it and answers unavailable.
 - **ScoreDecision** — evaluation against a declared scale or rubric.
 - **BinaryDecision** — bounded yes/no judgment with confidence/probability.
 - **DecisionConfidence** — confidence/probability (calibration is measured per provider, not assumed) plus available provenance/telemetry.
@@ -231,7 +231,7 @@ When no route has been chosen, the #417 default applies unchanged. Every route r
 
 ### Qualification suite
 
-`decision_qualification.py`, `SUITE_VERSION = decision-qualification/2` (#605 added the `lookup-withholds-the-identifier` case, which exercises `choose_many`; `/1` qualifications recorded earlier stay as historical evidence), all cases must pass. Cases run through the production caller (`ConversationJudgments`) or `DecisionEngine.choose` + `DecisionPolicy`: retry after failed Work, correction, reference, a new topic is not a follow-up, an ambiguous referent abstains, declared-candidate selection, no invented candidate, parked-request withdrawal, and failed/partial/unknown projections that must not be upgraded. Contexts are synthetic. A provider failure is a failed case, never a pass. Changing any case requires a new suite version.
+`decision_qualification.py`, `SUITE_VERSION = decision-qualification/3` (#654 removed the `lookup-withholds-the-identifier` case that #605 had added in `/2`, so every route including Jev qualifies on the same cases; `/1` and `/2` qualifications recorded earlier stay as historical evidence), all cases must pass. Cases run through the production caller (`ConversationJudgments`) or `DecisionEngine.choose` + `DecisionPolicy`: retry after failed Work, correction, reference, a new topic is not a follow-up, an ambiguous referent abstains, declared-candidate selection, no invented candidate, parked-request withdrawal, and failed/partial/unknown projections that must not be upgraded. Contexts are synthetic. A provider failure is a failed case, never a pass. Changing any case requires a new suite version.
 
 ### Authority and threat model
 
@@ -298,6 +298,8 @@ PRESENCE-INTENT-01 / [#597](https://github.com/Jongtae/agentos/issues/597) (from
 - **Explicit remember request** (`ConversationJudgments.explicit_memory_request`, purpose `explicit-memory-request`): replaces the `explicit_memory_request` regex. It is asked at most once per Work and only when a `save_memory` write is actually proposed. A yes lets AgentOS issue the existing message-bound owner-request approval; the deterministic value-coverage and key-replacement checks still decide canonical write versus MemoryCandidate. No or unavailable issues nothing, so the write stays a pending candidate and the turn reports it truthfully. The old regex remains only as `memory_followup_prefilter`, which keeps memory-looking turns away from the remote follow-up judge (#557) and grants nothing.
 
 Evidence class for #597: deterministic tests with fixture DecisionEngines. The decision-qualification suite is unchanged (`decision-qualification/1`); no live-provider accuracy for these judgments is claimed.
+
+AGENCY-EGRESS-01 / #605 added a third judgment point, **lookup term sensitivity** (`ConversationJudgments.lookup_term_sensitivity`, purpose `public-lookup-sensitivity`, the `choose_many` envelope), asked before a public lookup that carried words of the owner's current message. **Removed by SEC-PILOT-01 / [#654](https://github.com/Jongtae/agentos/issues/654)** under the pilot posture: no per-request judgment precedes a public lookup on either route, and the qualification case that probed it is gone (`decision-qualification/3`). Deterministic redaction of saved private values remains in `agent_runtime`.
 
 ## Staged implementation
 

@@ -13,7 +13,8 @@ from urllib.parse import urlsplit
 from .local_tools import LocalTools, normalize_public_url
 from .agent_runtime import (Capabilities, run_agent, AGENTS, evidence_summary, turn_context, render_turn_prompt,
                             CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, OWNER_CONVERSATION, lookup_sources, WORK_SOURCES_KEY, WORK_SOURCES_LIMIT, base_label,
-                            history_provenance, WorkBudget, EFFECT_FREE_READS, explicit_search_query, outcome_from_events)
+                            history_provenance, WorkBudget, EFFECT_FREE_READS, explicit_search_query, outcome_from_events,
+                            WORK_STOP_KEY, WORK_STOP_KEEP, work_stop_requested)
 from .plugins import PluginRegistry
 from .providers import NOT_REPORTED, ModelAdapter, ProviderError, request_json, validate_model
 from .decision import DEFAULT_DECISION_PROVIDER, RoutedDecisionEngine
@@ -1790,7 +1791,7 @@ class AgentService:
     def work_stopped(self, job_id):
         """Did the owner Stop or cancel this running Work (#606 T1)?"""
         state=self.presence.get(job_id)
-        if state is not None and state.stopped:
+        if (state is not None and state.stopped) or work_stop_requested(self.store,job_id):
             return True
         return (self.store.job(job_id) or {}).get('status')=='cancelled'
 
@@ -2420,6 +2421,9 @@ class AgentService:
                 self.presence.pop(job['id'],None)
                 text=self.STOP_CANCELLED_TEXT
             elif current and current['status']=='running':
+                # #606 T1: durable, so the CLI's separate MCP bridge process
+                # refuses its next call too, not only this process's loop.
+                self.store.append_config_list(WORK_STOP_KEY,job['id'],WORK_STOP_KEEP)
                 text=self.STOP_RUNNING_TEXT
             else:
                 return 'finished'

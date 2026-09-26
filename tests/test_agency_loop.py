@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from personal_agent.agent_runtime import (BUDGET_CODES, WORK_STOPPED, Capabilities, ToolError, WorkBudget,
+from personal_agent.agent_runtime import (BUDGET_CODES, WORK_STOP_KEEP, WORK_STOP_KEY, WORK_STOPPED, Capabilities, ToolError, WorkBudget,
                                           outcome_from_events, recovered, render_turn_prompt, run_agent,
                                           turn_context)
 from personal_agent.bounded_execution import ExecutionResult
@@ -169,6 +169,29 @@ class LoopUnitTests(unittest.TestCase):
             run_agent(caps.adapter, CFG, '', [{'role': 'user', 'content': '메모'}], '', caps, self.record)
         self.assertEqual([row['code'] for row in self.failed()], ['stopped'])
         self.assertIn(('model', 'stopped'), [(tool, status) for tool, status, _ in self.events])
+
+    def test_a_durable_stop_reaches_a_capabilities_built_without_a_budget(self):
+        # The CLI's MCP bridge builds its own Capabilities in another process.
+        caps = Capabilities(self.store, None, {}, '', 'job', self.record, network=Network())
+        caps.execute('list_notes', {})
+        self.store.append_config_list(WORK_STOP_KEY, 'job', WORK_STOP_KEEP)
+        with self.assertRaises(ToolError) as refused:caps.execute('list_notes', {})
+        self.assertEqual(refused.exception.code, 'stopped')
+
+    def test_the_free_router_retry_spends_a_turn_and_checks_stop(self):
+        stopped = [False]
+
+        class Limited:
+            calls = 0
+            def tool_turn(self, *args, **kwargs):
+                Limited.calls += 1
+                stopped[0] = True
+                raise ProviderError('rate limited', status=429)
+        caps = self.caps(Script(), budget=WorkBudget(stop=lambda: stopped[0]))
+        config = {**CFG, 'model': 'openrouter/free'}
+        with self.assertRaisesRegex(ProviderError, WORK_STOPPED):
+            run_agent(Limited(), config, '', [{'role': 'user', 'content': '안녕'}], '', caps, self.record)
+        self.assertEqual(Limited.calls, 1)
 
     def test_calendar_read_without_a_calendar_is_typed_setup_required(self):
         result = self.caps(Script()).execute('calendar_query', {'start': '2026-09-27T00:00:00+09:00',

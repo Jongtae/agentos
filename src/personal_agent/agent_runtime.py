@@ -1037,6 +1037,17 @@ class WorkBudget:
   if self.attempts_used>=self.attempts:raise ToolError(WORK_ATTEMPTS_EXHAUSTED,'attempt_budget')
   self.attempts_used+=1
 
+#: Durable Stop requests of running Works, so a separate process serving the
+#: same Work (the CLI's MCP bridge) sees the owner's Stop too.
+WORK_STOP_KEY='work_stop_requests'
+WORK_STOP_KEEP=200
+
+def work_stop_requested(store, job_id):
+ """Did the owner ask this running Work to stop?  Read on every check."""
+ try:rows=store.config(WORK_STOP_KEY,[])
+ except Exception:return False
+ return isinstance(rows,list) and job_id in rows
+
 #: Host actions that only read and have no external or durable effect.  A Work
 #: whose every failed attempt is one of these may still succeed after a later
 #: read recovers (#606 owner Q2); the service's parking guard reuses the set.
@@ -1092,7 +1103,9 @@ def outcome_from_events(rows, tools=None):
 class Capabilities:
  def __init__(self,store,adapter,config,key,job_id,record,readonly=False,network=None,document_access=True,packages=None,allowed_tools=None,document_context=False,public_page_scope=None,memory_approval=None,inherited_provenance=(),calendar=None,calendar_owner=None,memory_request=None,current_packages=None,lookup_sources=None,lookup_hint='',lookup_sensitivity=None,lookup_restrictive=False,delegated=False,inherited_excluded=(),lookup_state=None,budget=None):
   # #606 T1: shared with a delegated specialist, spent in `execute`.
-  self.budget=budget if budget is not None else WorkBudget()
+  # Without an injected budget (the MCP bridge process) the durable Stop
+  # request is the stop signal.
+  self.budget=budget if budget is not None else WorkBudget(stop=lambda:work_stop_requested(store,job_id))
   self.store,self.adapter,self.config,self.key=store,adapter,config,key
   self.job_id,self.record,self.readonly=job_id,record,readonly
   self.network=network or LocalTools()
@@ -2209,6 +2222,11 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
    if exc.status!=429 or config.get('model')!='openrouter/free' or rerouted:raise
    rerouted=True;active_config=dict(config)
    record('model','retrying',json.dumps({'scope':scope,'reason':'rate_limit','action':'free router retry; completed tool results retained'}))
+   # The retry is another provider request: it spends a turn and checks Stop/deadline.
+   try:budget.spend_turn()
+   except ToolError as stop:
+    record('model','stopped',json.dumps({'scope':scope,'code':stop.code,'reason':str(stop)},ensure_ascii=False))
+    return _budget_end(stop,executions,sources,successful,incomplete,verified,config,actual)
    messages=[{k:v for k,v in m.items() if k!='reasoning_details'} for m in messages]
    message,actual=adapter.tool_turn(active_config,key,messages,definitions,report_observed=True)
   # The model this call was sent with, before free-router pinning below.

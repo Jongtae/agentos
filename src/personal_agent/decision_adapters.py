@@ -117,7 +117,7 @@ def parse_codex_features(text):
     return rows
 
 
-def codex_disable_plan(rows):
+def codex_disable_plan(rows, allowed=CODEX_ALLOWED_ENABLED_FEATURES):
     """The ``--disable`` names for decision calls: **every** listed, non-removed
     feature outside the allowlist, whatever its default in the listing.
 
@@ -127,13 +127,17 @@ def codex_disable_plan(rows):
     passed.  ``CODEX_ALWAYS_DISABLE`` names are covered by the same rule.
     """
     return sorted(name for name, stage, _enabled in rows
-                  if stage != 'removed' and name not in CODEX_ALLOWED_ENABLED_FEATURES)
+                  if stage != 'removed' and name not in allowed)
 
 
-def codex_still_enabled(rows):
-    """Enabled, non-removed features outside the allowlist (must be empty)."""
+def codex_still_enabled(rows, allowed=CODEX_ALLOWED_ENABLED_FEATURES):
+    """Enabled, non-removed features outside the allowlist (must be empty).
+
+    ``allowed`` defaults to the decision-call allowlist; the strict-isolated
+    Work profile (#616) passes its own, slightly larger one.
+    """
     return sorted(name for name, stage, enabled in rows
-                  if enabled and stage != 'removed' and name not in CODEX_ALLOWED_ENABLED_FEATURES)
+                  if enabled and stage != 'removed' and name not in allowed)
 
 
 def bounded_run(runner, argv, *, cwd, env, timeout):

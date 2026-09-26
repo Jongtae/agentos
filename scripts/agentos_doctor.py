@@ -261,9 +261,13 @@ _NATIVE_PROBE = (
 #: Declared per-profile limits of the inspected build (#604).  A build older
 #: than #604 declares none, so every missing public read stays a finding.
 _PROFILE_PROBE = (
-    "import json; from personal_agent.bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, profile_status; "
-    "print(json.dumps({'bounded-cli-mcp': profile_status(AgentOSMcpTools.PROFILE), "
-    "'isolated-cli-mcp': profile_status(ReadOnlyAgentOSMcpTools.PROFILE)}))"
+    "import json; from personal_agent import bounded_execution as b; "
+    "rows = {'bounded-cli-mcp': b.profile_status(b.AgentOSMcpTools.PROFILE), "
+    "'isolated-cli-mcp': b.profile_status(b.ReadOnlyAgentOSMcpTools.PROFILE)}; "
+    # #616: the strict-isolated host profile, absent from older builds.
+    "strict = getattr(b, 'STRICT_PROFILE', None); "
+    "rows.update({'strict-cli-mcp': b.profile_status(strict)} if strict else {}); "
+    "print(json.dumps(rows))"
 )
 
 
@@ -373,10 +377,38 @@ def _recent_turns(data, limit=5):
             "mode": record.get("mode"),
             "status": record.get("status"),
             "exposed_tools": record.get("exposed_tools") if isinstance(record.get("exposed_tools"), list) else "unknown",
+            # The trust profile the turn actually ran under (#604/#616).
+            "capability_profile": record.get("capability_profile"),
+            "capability_trust": record.get("capability_trust"),
             "build_digest": build.get("package_digest") or "unknown",
             "build_origin": build.get("origin") or "unknown",
         })
     return turns
+
+
+def _selected_host_profile(data):
+    """The owner-selected host-CLI trust profile (#616), read-only.
+
+    Only the profile name and the qualified CLI versions are reported.  No
+    selection means the default trusted-local profile.
+    """
+    database = Path(data) / "private" / "quickstart.db"
+    if not database.is_file():
+        return None
+    try:
+        with closing(sqlite3.connect(f"{database.resolve().as_uri()}?mode=ro", uri=True)) as db:
+            row = db.execute("SELECT value FROM config WHERE key='subscription_isolation'").fetchone()
+    except sqlite3.Error:
+        return None
+    value = _json_or_none(row[0]) if row else None
+    # No row is the trusted-local default; a present row that is malformed or
+    # names an unknown profile is reported as such (the service refuses CLI
+    # turns for it), never as trusted.
+    stored = value.get("profile") if isinstance(value, dict) else object()
+    qualified = value.get("qualified") if isinstance(value, dict) and isinstance(value.get("qualified"), dict) else {}
+    profile = "trusted-local" if not row else stored if stored in ("trusted-local", "strict-isolated") else "unrecognised"
+    return {"profile": profile,
+            "qualified_versions": {engine: row.get("version") for engine, row in qualified.items() if isinstance(row, dict)}}
 
 
 def inspect_installation(root=ROOT, interpreter=None, data=None, port=None,
@@ -472,6 +504,13 @@ def inspect_installation(root=ROOT, interpreter=None, data=None, port=None,
         if missing:
             findings.append({"missing-public-read-binding": route, "actions": missing})
     routes["declared_limits"] = limits
+    strict = declared.get("strict-cli-mcp") if isinstance(declared.get("strict-cli-mcp"), dict) else {}
+    if isinstance(strict.get("trust"), str):
+        # Same bridge as bounded-cli-mcp; only the CLI launch differs (#616).
+        routes.setdefault("trust", {})["strict-cli-mcp"] = {"trust": strict["trust"], "limitation": strict.get("limitation")}
+    if data:
+        selected = _selected_host_profile(data)
+        routes["selected_host_cli_profile"] = selected if selected is not None else "unknown"
     wire = {}
     for route, tools in (("bounded-cli-mcp", bridge), ("isolated-cli-mcp", isolated)):
         if isinstance(tools, list):

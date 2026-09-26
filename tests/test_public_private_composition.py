@@ -156,7 +156,7 @@ class DecisionTable(unittest.TestCase):
 
     def test_research_query_is_composed_the_same_way(self):
         caps = self.caps(self.NOTES, ['노트북 비교해줘'], [PRIVATE])
-        with mock.patch.object(Capabilities, '_research', lambda self, mode, query: {'query': query, 'mode': mode, 'sources': []}):
+        with mock.patch.object(Capabilities, '_research', lambda self, mode, query, **selectors: {'query': query, 'mode': mode, 'sources': []}):
             result = caps.execute('bounded_public_research', {'mode': 'product', 'query': f'노트북 {PRIVATE}'})
         self.assertEqual(result['sent'], {'query': '노트북', 'mode': 'product'})
 
@@ -827,7 +827,7 @@ class BridgeWrites(unittest.TestCase):
                 {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {}},
                 {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call', 'params': {'name': name, 'arguments': arguments}},
             ]) + '\n'
-            with mock.patch.object(mcp_bridge, 'LocalTools', lambda: wire), \
+            with mock.patch.object(mcp_bridge, 'LocalTools', lambda providers=None: wire), \
                  mock.patch.object(sys, 'stdin', io.StringIO(lines)), contextlib.redirect_stdout(io.StringIO()):
                 mcp_bridge.serve(str(store.root), job_id, [])
 

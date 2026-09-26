@@ -8,6 +8,7 @@ from collections import namedtuple
 from pathlib import Path
 from .providers import NOT_REPORTED, ModelResult, ProviderError
 from .local_tools import LocalTools
+from .search_providers import describe_options, search_arguments
 from .document_reader import read as read_document, supported as supported_document, MAX_FILE_BYTES
 from . import folder_grants
 from .manifests import BUILTIN_MANIFEST, runtime_packages
@@ -25,10 +26,16 @@ STRING={'type':'string'}
 BROWSER_ACTIONS=frozenset({'browser_open','browser_read','browser_find','browser_click','browser_type'})
 EFFECT={'type':'string','enum':['read','navigate','mutate','payment']}
 BROWSER_EFFECT_NOTE=' Declare effect: read (only looking), navigate (moving between pages), mutate (changes account state such as a cart or a form), payment (pays or enters card data; always needs owner approval). AgentOS refuses card/one-time-code/password fields and their form buttons without the owner\'s approval whatever the label says.'
+#: #655: actions whose one public search takes the model's provider/locale.
+SEARCH_BACKED_ACTIONS=frozenset({'web_search','bounded_public_research'})
+#: #655: the model chooses the provider per call from the owner's configured
+#: set; `action_definitions` appends the configured list and the enum at run
+#: time.  The text names what each provider covers, never which to prefer.
+WEB_SEARCH_DESCRIPTION='Search public web snippets through one of the configured search providers. Use for current public information, not local files. provider selects the provider for this call (omit it for the owner\'s default); locale is an optional language tag such as ko-KR or en-US. If one provider\'s results do not fit, try another provider or another query rather than repeating the same call. Never include credentials or private file contents in search terms.'
 DEFINITIONS=[
- schema('web_search','Search public web snippets. Use for current public information, not local files. Never include credentials or private file contents in search terms.',{'query':STRING},['query']),
+ schema('web_search',WEB_SEARCH_DESCRIPTION,{'query':STRING,'provider':STRING,'locale':STRING},['query']),
  schema('public_page_read','Read one anonymous public HTTP(S) page as bounded text. Use only for a user-supplied public URL; no login, cookies, JavaScript, private destinations or mutations.',{'url':STRING},['url']),
- schema('bounded_public_research','Compare public products or plan travel from public web evidence. Runs one bounded public search and reads at most three of its own result pages, then separates facts it actually observed from price/inventory/fee details it could not confirm. Use for a comparison or travel plan, not for a single lookup - web_search is cheaper for that. Never include private file contents or credentials in the query. This cannot purchase, book, reserve, create an account or sign in.',{'mode':{'type':'string','enum':['product_comparison','travel_plan']},'query':STRING},['mode','query']),
+ schema('bounded_public_research','Compare public products or plan travel from public web evidence. Runs one bounded public search and reads at most three of its own result pages, then separates facts it actually observed from price/inventory/fee details it could not confirm. Use for a comparison or travel plan, not for a single lookup - web_search is cheaper for that. Never include private file contents or credentials in the query. This cannot purchase, book, reserve, create an account or sign in. provider and locale select the search provider for its one search exactly as in web_search (omit provider for the owner\'s default).',{'mode':{'type':'string','enum':['product_comparison','travel_plan']},'query':STRING,'provider':STRING,'locale':STRING},['mode','query']),
  schema('calendar_query','List the owner\'s calendar events between two RFC3339 timestamps that both carry an explicit UTC offset. Use this to answer what is scheduled. Read-only; returns event ids and versions needed to change or cancel an event.',{'start':STRING,'end':STRING,'timezone':STRING},['start','end','timezone']),
  schema('calendar_draft_create','Draft a new calendar event and return an exact preview for the owner to approve. This does NOT create the event: nothing reaches the calendar until the owner approves the preview separately. Attendees, invitations and recurrence are not supported. Times are RFC3339 with an explicit UTC offset.',{'summary':STRING,'start':STRING,'end':STRING,'timezone':STRING,'location':STRING,'description':STRING},['summary','start','end','timezone']),
  schema('calendar_draft_update','Draft a change to one existing event and return an exact preview for the owner to approve. Requires the event_id and event_version returned by calendar_query. Does not apply the change.',{'event_id':STRING,'event_version':STRING,'summary':STRING,'start':STRING,'end':STRING,'timezone':STRING,'location':STRING,'description':STRING},['event_id','event_version']),
@@ -801,7 +808,7 @@ class EvidenceLog(list):
 
 READONLY_EXCLUDED=('save_note','save_memory','delegate_agent')
 
-def action_definitions(tools,allowed,readonly=False):
+def action_definitions(tools,allowed,readonly=False,search_providers=None):
  """Native function definitions for ``allowed`` tool ids of resolved package tools.
 
  This is the single action source every route derives from (#604): the
@@ -809,13 +816,24 @@ def action_definitions(tools,allowed,readonly=False):
  and the isolated bridge's list are all projections of ``DEFINITIONS`` through
  the manifest ``tools`` (``manifests.runtime_packages``).  No route keeps its
  own schema copy.
+
+ ``search_providers`` (#655) is the owner's configured ``ProviderRegistry``;
+ when given, ``provider`` on ``web_search`` and ``bounded_public_research``
+ is an enum of exactly its option ids and the description lists them.  Without one (the isolated bridge, which has no
+ owner store) the parameter stays a free string checked at execution.
  """
  definitions=[]
  for tool_id in sorted(allowed):
   tool=tools.get(tool_id)
   if not tool or (readonly and tool['host_action'] in READONLY_EXCLUDED):continue
   source=next(d for d in DEFINITIONS if d['function']['name']==tool['host_action'])
-  definitions.append({**source,'function':{**source['function'],'name':tool_id}})
+  function={**source['function'],'name':tool_id}
+  if tool['host_action'] in SEARCH_BACKED_ACTIONS and search_providers is not None:
+   options=search_providers.options()
+   properties={**function['parameters']['properties'],'provider':{'type':'string','enum':[row['id'] for row in options]}}
+   function={**function,'description':function['description']+describe_options(options,search_providers.default()),
+             'parameters':{**function['parameters'],'properties':properties}}
+  definitions.append({**source,'function':function})
  return definitions
 
 def check_arguments(parameters,args):
@@ -1131,7 +1149,7 @@ class Capabilities:
   if document_context:self.private_provenance.add('conversation-history')
   self.evidence=EvidenceLog(self.private_provenance)
  def definitions(self):
-  return action_definitions(self.tools,self.offered_tools(),self.readonly)
+  return action_definitions(self.tools,self.offered_tools(),self.readonly,search_providers=getattr(self.network,'providers',None))
  def offered_tools(self):
   """Allowed tool ids minus the browser tools when no profile is registered (#656)."""
   if self.browser is not None:return self.allowed_tools
@@ -1339,20 +1357,29 @@ class Capabilities:
     plan={'tool':'web_search' if action=='web_search' else action,'query':texts['query']}
     dropped=withheld['query']
     if action=='bounded_public_research':plan['mode']=args.get('mode')
+  # #655: the model's provider/locale selectors ride along unchanged; they
+  # are bounded ids, not composed text, and the same enum for every context.
+  if action in SEARCH_BACKED_ACTIONS:plan.update(search_arguments(args))
   sent={k:v for k,v in plan.items() if k!='tool'}
   if action=='bounded_public_research':
-   value=self._research(plan['mode'],plan['query'])
+   value=self._research(plan['mode'],plan['query'],provider=plan.get('provider'),locale=plan.get('locale'))
   else:
    value=self._read_network(plan)
   return {**value,'composed_by':'agentos-public-task','sent':sent,'excluded_terms':dropped,
           'note':'AgentOS sent only the listed arguments, composed by AgentOS for this public lookup.'}
- def _research(self,mode,query):
-  """One bounded public research run (J5); egress only through `self.network`."""
+ def _research(self,mode,query,provider=None,locale=None):
+  """One bounded public research run (J5); egress only through `self.network`.
+
+  ``provider``/``locale`` (#655) are the model's selectors for the one
+  search this run makes, already bounded by ``search_arguments``; absent,
+  the owner's configured default applies exactly as for ``web_search``.
+  """
   # Egress goes through `self.network`, not through a reader this branch
   # builds, so the injected transport the tests already fake stays the single
   # place anything reaches the wire.
   from .research import PublicResearch
-  def search(query):return self._read_network({'tool':'web_search','query':query})
+  selectors={key:value for key,value in (('provider',provider),('locale',locale)) if value}
+  def search(query):return self._read_network({'tool':'web_search','query':query,**selectors})
   attempted=[]
   class _Reader:
    # `PublicResearch` reads URLs its own search returned, self-approving
@@ -1532,7 +1559,7 @@ class Capabilities:
    # tainted context cannot learn anything from the shape of the error.
    composed=self._public_task(tool_id,name,args)
    if composed is not None:return composed
-   return self._research(args['mode'],args['query'])
+   return self._research(args['mode'],args['query'],**search_arguments(args))
   if name=='weather':
    # `weather` sends `name=<city>` - an arbitrary 100-character string - to a
    # third-party geocoding host, so it is a public destination exactly like
@@ -1800,6 +1827,10 @@ def _evidence_detail(name,result):
   # every host a failed research read reached.
   if result.get('attempted_urls'):summary['attempted_urls']=result['attempted_urls'][:8]
   if result.get('read_failures'):summary['read_failures']=[row.get('url') for row in result['read_failures'][:8] if isinstance(row,dict)]
+  # #655: which configured provider answered this search, and the selectors sent.
+  if name in SEARCH_BACKED_ACTIONS and result.get('provider'):
+   summary['provider']=result['provider']
+   if result.get('locale'):summary['locale']=result['locale']
   # #605: the owner-visible record says the call was composed by a separate
   # public task, not from the arguments the proposing worker wrote.
   if result.get('composed_by')=='agentos-public-task':

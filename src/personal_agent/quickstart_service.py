@@ -20,6 +20,7 @@ from .providers import NOT_REPORTED, ModelAdapter, ProviderError, request_json, 
 from .decision import DEFAULT_DECISION_PROVIDER, RoutedDecisionEngine
 from .decision_routes import DecisionRoutes
 from .main_ai import MainAiRoutes
+from .search_providers import SECRET_SLOTS as SEARCH_SECRET_SLOTS, ProviderRegistry, SearchProviderSettings
 from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_UNVERIFIED, BLOCKER_NO_AI_ROUTE,
                                       TELEGRAM_RESULT_PREVIEW_CHARS, TERMINAL_FAILED_HEADER,
                                       TERMINAL_INTERRUPTED_HEADER, TERMINAL_NEXT_ACTION, TERMINAL_PARTIAL_HEADER,
@@ -312,7 +313,9 @@ class AgentService:
         self.drive_picker_config=None
         self.lock=threading.RLock()
         self.worker_lock=threading.Lock()
-        self.local_tools=LocalTools()
+        # #655: the owner's configured search providers, read at call time.
+        self.local_tools=LocalTools(providers=ProviderRegistry.from_store(self.store))
+        self.search_settings=SearchProviderSettings(self.store,self.lock)
         self.stop=threading.Event()
         self.threads=[]
         self.local_server_port=None
@@ -447,6 +450,13 @@ class AgentService:
     def save_main_ai_key(self, body):
         return self.main_ai.save_key(body)
 
+    # -- web search providers (#655): key rows and the default ------------------
+    def save_search_provider_key(self, body):
+        return self.search_settings.save_key(body)
+
+    def set_search_provider_default(self, body):
+        return self.search_settings.set_default(body)
+
     def check_decision_cli_capabilities(self, body):
         engine=body.get('engine','') if isinstance(body,dict) else ''
         return self.decision_routes.check_cli_capabilities(engine)
@@ -457,7 +467,7 @@ class AgentService:
         # adapter's credential patterns, then the owner-visible path mask.
         text=str(text or '')
         for name in ('model_key','decision_model_key','decision_jev_key','claude_code_token','telegram_token',
-                     'api_key:openai','api_key:anthropic','api_key:openrouter'):
+                     'api_key:openai','api_key:anthropic','api_key:openrouter',*SEARCH_SECRET_SLOTS):
             value=self.store.secret(name)
             if isinstance(value,str) and len(value)>=8:text=text.replace(value,'[redacted]')
         text=SECRET_PATTERN.sub('[redacted]',text)
@@ -885,6 +895,7 @@ class AgentService:
 
     def settings(self):
         main_ai=self.main_ai.status()
+        search_providers=self.search_settings.status()
         with self.lock:
             model=self.store.config('model',{})
             tg=self.store.config('telegram',{})
@@ -896,6 +907,7 @@ class AgentService:
                     'decision_model':self.decision_route_status(),
                     'decision_route':self.decision_routes.status(),
                     'main_ai':main_ai,
+                    'search_providers':search_providers,
                     'subscription_engines':self.subscription_engine_status(),
                     'subscription_execution':self.subscription_execution_profile(),
                     'telegram':{'enabled':tg.get('enabled',False),'mode':tg.get('mode','owner-token'),'username':tg.get('username',''),'paired':bool(tg.get('user_id')),'user_id':tg.get('user_id')},

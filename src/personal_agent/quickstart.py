@@ -783,6 +783,8 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                     try:return self.reply(200,service.calendar_draft_request(body))
                     except ValueError as exc:return self.reply(400,{'error':str(exc)})
                 if path=='/api/context-inbox/telegram-policy':return self.reply(200,service.set_context_telegram_policy(body))
+                # #626: current-context privacy control (use/timezone/clear only).
+                if path=='/api/current-context':return self.reply(200,service.set_current_context(body))
                 if path=='/api/documents/approval':return self.reply(200,service.set_document_approval(body))
                 if path=='/api/public-pages/approval':return self.reply(200,service.set_public_page_approval(body))
                 if path=='/api/model':return self.reply(200,service.save_model(body,strict=True))

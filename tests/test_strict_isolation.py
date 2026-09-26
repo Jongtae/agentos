@@ -1105,9 +1105,12 @@ class CodexDecisionInstructionFiles(unittest.TestCase):
         (self.root / 'codex-home' / 'AGENTS.override.md').unlink()
         _decision, context = self._decide()
         self.assertIn('AGENTS-MD-CANARY-616', context)
-        # With neither file present nothing is loaded from CODEX_HOME.
+        # With neither file present no instruction-file content reaches the prompt.
         (self.root / 'codex-home' / 'AGENTS.md').unlink()
         _decision, context = self._decide()
+        for canary in ('AGENTS-MD-CANARY-616', 'AGENTS-OVERRIDE-CANARY-616', 'SKILL-CANARY-616', 'canary-skill-616',
+                       'PLUGIN-CANARY-616'):
+            self.assertNotIn(canary, context)
         self.assertNotIn('# AGENTS.md instructions', context)
         self.assertNotIn('<INSTRUCTIONS>', context)
 

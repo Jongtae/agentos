@@ -43,6 +43,7 @@ import threading
 from .decision_adapters import (CLI_BINARIES, JEV_DEFAULT_MODEL, JEV_DESTINATION, JevDecisionEngine,
                                 SubscriptionCliDecisionEngine, bounded_run, cli_fingerprint, codex_disable_plan,
                                 codex_still_enabled, parse_codex_features, valid_model_id)
+from .bounded_execution import parse_cli_version
 from .decision_qualification import SUITE_VERSION, qualify
 
 ROUTE_OFF = 'off'
@@ -68,6 +69,16 @@ REQUIRED_FLAGS = {
                     '--system-prompt', '--setting-sources', '--restricted'),
 }
 MODEL_FLAG = '--model'
+#: Codex CLI versions whose CODEX_HOME instruction-file behaviour was re-checked
+#: with the no-model harness (tests/test_strict_isolation.py::
+#: CodexDecisionInstructionFiles) *and* whose limitation below is accepted for
+#: a decision route (#624).  Empty: no Codex version is qualified, so Codex
+#: activation fails closed even if a future version passes the tool check.
+CODEX_INSTRUCTION_FILES_QUALIFIED = frozenset()
+#: Owner-visible limitation for the Codex route (#624, observed on 0.153.4).
+CODEX_INSTRUCTION_FILES_LIMITATION = ('Codex는 로그인 프로필(CODEX_HOME)의 AGENTS.override.md 또는 AGENTS.md를 '
+                                      '판단 요청에 함께 보냅니다. 끌 수 있는 공식 옵션이 없고, AgentOS는 그 내용을 '
+                                      '읽거나 기록하지 않습니다.')
 
 
 def has_flag(help_text, flag):
@@ -97,6 +108,7 @@ class DecisionRoutes:
         self.jev_transport = jev_transport
         self.store = service.store
         self._activating = threading.Lock()
+        self.codex_instruction_qualified = CODEX_INSTRUCTION_FILES_QUALIFIED
 
     # -- configuration rows -------------------------------------------------
     def active(self):
@@ -200,6 +212,7 @@ class DecisionRoutes:
                             'tool_surface': capability.get('tool_surface'),
                             'tool_surface_detail': capability.get('tool_surface_detail') or '',
                             'destination': CLI_DESTINATIONS[engine_id],
+                            'instruction_files': CODEX_INSTRUCTION_FILES_LIMITATION if engine_id == 'codex' else '',
                             'check': checks.get(f'{ROUTE_SUBSCRIPTION_CLI}:{engine_id}')})
         if route is None:
             active = ({'transport': ROUTE_DIRECT_API, 'source': 'default', 'provider': direct['provider'],
@@ -425,6 +438,13 @@ class DecisionRoutes:
             self._fail(option, 'tool-surface-unverified',
                        f'설치된 {name} CLI에서 도구 기능을 모두 끌 수 있는지 확인하지 못했습니다.',
                        detail=capability.get('tool_surface_detail') or capability.get('tool_surface') or '')
+        if engine_id == 'codex' and parse_cli_version('codex', capability['version']) not in self.codex_instruction_qualified:
+            # #624: CODEX_HOME instruction files reach the prompt and no
+            # official option stops them; a version is allowed only after the
+            # no-model harness was re-run and the limitation is shown.
+            self._fail(option, 'instruction-files-unqualified',
+                       f'설치된 {name} CLI가 로그인 프로필의 지침 파일을 판단 요청에 보내는지 아직 확인하지 않았습니다.',
+                       detail=CODEX_INSTRUCTION_FILES_LIMITATION)
         base = {'transport': ROUTE_SUBSCRIPTION_CLI, 'engine': engine_id, 'model_policy': policy,
                 'fingerprint': capability['fingerprint'], 'cli_version': capability['version'],
                 **({'codex_disabled_features': disabled} if engine_id == 'codex' else {})}

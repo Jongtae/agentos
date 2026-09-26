@@ -376,7 +376,7 @@ function renderSubscriptionEngines(subscription){const box=$('subscription-engin
 // server; rendering this section never contacts a model or runs a CLI.
 const DECISION_TRANSPORT_LABEL={direct_api:'API',jev:'Jev',subscription_cli:'구독 AI',off:'사용 안 함',none:'설정 안 됨'};
 const DECISION_POLICY_LABEL={lowest_qualified:'자동 · 적합한 가벼운 모델',explicit:'직접 선택',engine_default:'구독 AI 기본 모델'};
-const DECISION_FAILURE_TEXT={'auth':'로그인 또는 인증 실패','not-configured':'설정 필요','timeout':'시간 초과','usage-limit':'사용량 한도','request-rejected':'요청 거부','model-not-verified':'모델을 확인하지 못함','model-selection-unsupported':'모델 지정 미지원','no-qualified-candidate':'적격 모델 없음','requalification-needed':'CLI가 바뀌어 다시 확인 필요','cli-not-found':'CLI 없음','isolated-deployment':'격리 런타임에서 미지원','isolation-flags-missing':'격리 옵션 미지원','tool-surface-unverified':'도구 기능을 모두 끌 수 있는지 확인 못 함','capability-unchecked':'CLI 기능 확인 필요'};
+const DECISION_FAILURE_TEXT={'auth':'로그인 또는 인증 실패','not-configured':'설정 필요','timeout':'시간 초과','usage-limit':'사용량 한도','request-rejected':'요청 거부','model-not-verified':'모델을 확인하지 못함','model-selection-unsupported':'모델 지정 미지원','no-qualified-candidate':'적격 모델 없음','requalification-needed':'CLI가 바뀌어 다시 확인 필요','cli-not-found':'CLI 없음','isolated-deployment':'격리 런타임에서 미지원','isolation-flags-missing':'격리 옵션 미지원','tool-surface-unverified':'도구 기능을 모두 끌 수 있는지 확인 못 함','instruction-files-unqualified':'지침 파일 전송 여부 확인 전','capability-unchecked':'CLI 기능 확인 필요'};
 const DECISION_ENGINE_NAMES={codex:'Codex','claude-code':'Claude Code'};
 let decisionChooser='',decisionSettings=null;
 function decisionFailedSuffix(check){return check&&check.state==='failed'?' · '+decisionCheckText(check):'';}
@@ -430,7 +430,7 @@ function renderDecisionRoute(settings){
   const actions=element('div',undefined,'settings-inline-confirm');actions.append(settingsAction(jev.configured?t('키 변경'):t('설정'),()=>openDecisionChooser('jev')));if(jev.configured)actions.append(settingsAction(t('사용'),event=>decisionActivate({transport:'jev'},event.currentTarget)));
   box.append(settingsRow(title,description,jev.configured?t('선택 가능'):t('키 필요'),'neutral',actions,decisionChooser==='jev'?decisionKeyForm('jev',true,jev.configured):null));}
  for(const engine of route.subscription_cli||[]){if(transport==='subscription_cli'&&active.engine===engine.id)continue;
-  const title=t('구독 AI · {engine}',{engine:engine.name}),description=t('전송 대상: {destination}',{destination:t(engine.destination||'-')})+decisionFailedSuffix(engine.check);let state,kind='neutral',action=null;
+  const title=t('구독 AI · {engine}',{engine:engine.name}),description=t('전송 대상: {destination}',{destination:t(engine.destination||'-')})+(engine.instruction_files?' '+t(engine.instruction_files):'')+decisionFailedSuffix(engine.check);let state,kind='neutral',action=null;
   // A CLI whose tool features could not all be turned off (e.g. Codex 0.153.4 keeps `unified_exec` on) is shown
   // with that reason as needing attention - never silently omitted; a re-check stays available after a CLI update.
   const toolRefused=engine.tool_surface&&engine.tool_surface!=='allowlisted-features-only';let refusal='';

@@ -24,7 +24,7 @@ from personal_agent.decision_adapters import (CODEX_DECISION_CONFIG, JEV_ENDPOIN
                                               SubscriptionCliDecisionEngine, bounded_run, codex_disable_plan,
                                               parse_codex_features)
 from personal_agent.decision_qualification import CASE_IDS, SUITE_VERSION, qualify
-from personal_agent.decision_routes import DecisionRouteError
+from personal_agent.decision_routes import CODEX_INSTRUCTION_FILES_QUALIFIED, DecisionRouteError
 from personal_agent.providers import ModelAdapter, ProviderError
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
@@ -487,6 +487,9 @@ class ServiceRouteSelectionTests(Temp):
                                subscription_engines=SubscriptionEngines(finder=finder),
                                execution_adapter=cli_adapter(self.runner, self.root, finder=finder))
         service.decision_routes.jev_transport = self.jev
+        # Fixture only: treat the fixture CLI version as instruction-file
+        # qualified so the other activation paths stay testable (#624).
+        service.decision_routes.codex_instruction_qualified = frozenset({'0.153.4'})
         return service
 
     def judge(self, service):
@@ -688,6 +691,22 @@ class ServiceRouteSelectionTests(Temp):
         for phrase in ('$CODEX_HOME/AGENTS.override.md', '$CODEX_HOME/AGENTS.md', 'untracked, untrusted input',
                        'CodexDecisionInstructionFiles', '--ignore-rules'):
             self.assertIn(phrase, doc)
+
+    def test_codex_is_refused_until_its_instruction_files_are_qualified(self):
+        # #624: no Codex version is qualified in the product; activation fails
+        # closed before any judgment even when the tool surface passes.
+        service = self.service()
+        service.decision_routes.codex_instruction_qualified = CODEX_INSTRUCTION_FILES_QUALIFIED
+        self.assertEqual(CODEX_INSTRUCTION_FILES_QUALIFIED, frozenset())
+        with self.assertRaises(DecisionRouteError):
+            service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'codex'})
+        self.assertIsNone(self.store.config('decision_route'))
+        self.assertEqual(self.store.config('decision_cli_capabilities')['codex']['tool_surface'], 'allowlisted-features-only')
+        self.assertFalse(any('exec' in call['argv'] and '--json' in call['argv'] for call in self.runner.calls))
+        engines = {e['id']: e for e in service.settings()['decision_route']['subscription_cli']}
+        self.assertEqual(engines['codex']['check']['failure'], 'instruction-files-unqualified')
+        self.assertIn('AGENTS.md', engines['codex']['instruction_files'])
+        self.assertEqual(engines['claude-code']['instruction_files'], '')
 
     def test_codex_without_ignore_rules_is_refused(self):
         # #624: a CODEX_HOME execpolicy rule must not widen a judgment's sandbox.

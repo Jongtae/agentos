@@ -72,16 +72,17 @@ _ISOLATED = 'isolation-restricted-profile'
 #: turn directory were readable; network and writes were blocked.  Claude Code
 #: is stated per CLI (#623), from no-model process tests of the exact
 #: trusted-local argv on 2.1.280 `-p` (tests/test_strict_isolation.py): its
-#: permission layer denied the store read, the home `cat`, a write and
-#: WebFetch, and allowed reads of the turn directory; only the declared
+#: permission layer denied the store read, the home `cat`, a Write and
+#: WebFetch, and allowed reads of the turn directory (only those paths were
+#: probed); only the declared
 #: AgentOS bridge tools are pre-approved.  An allow rule in managed settings
 #: (loaded regardless of HOME) could widen that - documented, not observed.
 #: The owner accepts this trusted-local-worker risk; strict read isolation is
 #: #616 AGENCY-ISOLATION-01.
 TRUSTED_LOCAL_LIMITATION = ('the CLI may read host files outside AgentOS provenance '
                             '(verified: codex sandbox -P :read-only, codex-cli 0.153.4); '
-                            'Claude Code 2.1.280 -p denied store and home reads, writes and WebFetch and read only '
-                            'its turn directory (observed), unless managed settings allow more (documented only)')
+                            'Claude Code 2.1.280 -p denied the tested store and home reads, a Write and WebFetch and could '
+                            'read its turn directory (observed); managed settings could allow more (documented only)')
 
 #: The verified limitation of the strict-isolated profile (#616).  Observed
 #: with no-model process tests that drive the exact argv through a real
@@ -677,7 +678,8 @@ class BoundedExecutionAdapter:
                 # the conversation and request as the prompt.
                 argv += ['--append-system-prompt', instructions]
             # #623: trusted-local pre-approves only its declared bridge tools;
-            # strict also removes every built-in tool.
+            # strict also removes every built-in tool.  --allowedTools is variadic,
+            # so it must stay the last argument.
             argv += strict_launch_arguments('claude-code') if strict else claude_bridge_allowlist(BOUNDED_PROFILE)
             return argv
         raise ExecutionError('지원하는 구독 엔진을 선택하세요.')

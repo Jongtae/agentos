@@ -143,6 +143,7 @@ class StrictLaunchArguments(unittest.TestCase):
         # #623: both pre-approve exactly the same bridge tools; strict also
         # removes every built-in tool.
         self.assertEqual(trusted[-2:], allow)
+        self.assertEqual(strict[-2:], allow, 'the variadic --allowedTools stays last')
         self.assertEqual(strict[:len(trusted) - 2], trusted[:-2])
         self.assertEqual(strict[len(trusted) - 2:], ['--tools', '', '--restricted', *allow])
         self.assertNotIn('--tools', trusted)

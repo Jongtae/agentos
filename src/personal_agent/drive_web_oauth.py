@@ -26,6 +26,10 @@ SELECTED_FILES_KEY = "drive_web_oauth_selected_files"
 PICKER_GRANT_KEY = "drive_web_oauth_picker_grant"
 FILES_ENDPOINT = "https://www.googleapis.com/drive/v3/files"
 PICKER_GRANT_LOCK = threading.Lock()
+# Serializes owner disconnect with the commit half of a callback (#588): a
+# callback that passed ``_pending`` before a disconnect must not store the
+# token it exchanged afterwards.
+LIFECYCLE_LOCK = threading.RLock()
 
 
 class DriveWebOAuthError(ValueError):
@@ -237,8 +241,15 @@ class DriveWebOAuthHandoff:
         tokens["scope"] = DRIVE_FILE
         if isinstance(tokens.get("expires_in"), (int, float)):
             tokens["expires_at"] = self.now() + max(0, tokens["expires_in"])
-        self.store.secret(TOKEN_KEY, tokens)
-        self._finish("connected")
+        with LIFECYCLE_LOCK:
+            # Re-check after the exchange: an owner disconnect meanwhile
+            # consumed this pending authorization, and it must stay undone.
+            current = self.store.secret(PENDING_KEY)
+            if (not isinstance(current, dict) or current.get("status") != "pending"
+                    or not secrets.compare_digest(str(current.get("state", "")), str(pending.get("state", "")))):
+                raise DriveWebOAuthError("Google Drive connection was cancelled; request a new link.")
+            self.store.secret(TOKEN_KEY, tokens)
+            self._finish("connected")
         return self.status()
 
     def select_files(self, telegram_owner_id, files):
@@ -292,6 +303,42 @@ class DriveWebOAuthHandoff:
         self.store.secret(TOKEN_KEY, {})
         self.store.put(SELECTED_FILES_KEY, {})
         self._finish("reauth-required")
+
+    def disconnect(self, stash):
+        """Owner disconnect (CONNECTOR-REVOKE-01 #588): stop local Drive access now.
+
+        ``stash`` receives the stored credential (or None) before anything is
+        cleared; if it raises, nothing is cleared. Then the token, the Picker
+        file selection (the per-file grant), any unused Picker link and any
+        in-progress authorization are invalidated, and the Work waiting for
+        Drive is detached and returned so the caller can end it explicitly.
+        """
+        with LIFECYCLE_LOCK:
+            try:
+                tokens = self.store.secret(TOKEN_KEY)
+            except DriveWebOAuthError:
+                tokens = None
+            stash(tokens if isinstance(tokens, dict) and tokens else None)
+            self.store.secret(PENDING_KEY, {"status": "used"})
+            self.store.secret(TOKEN_KEY, {})
+            self.store.put(SELECTED_FILES_KEY, {})
+            with self._picker_grant_lock:
+                self.store.secret(PICKER_GRANT_KEY, {"used": True})
+            job_id = self.store.config(STATUS_KEY, {}).get("pending_job_id")
+            self._record("owner-disconnected", state="disconnected", pending_job_id=None)
+            return job_id
+
+    def authorization_in_progress(self):
+        try:
+            pending = self.store.secret(PENDING_KEY)
+        except DriveWebOAuthError:
+            return False
+        return isinstance(pending, dict) and pending.get("status") == "pending"
+
+    def revision_marker(self):
+        """An opaque marker that changes whenever the recorded Drive lifecycle changes."""
+        value = self.store.config(STATUS_KEY, {})
+        return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
 
     def picker_grant_active(self, grant):
         value = self.store.secret(PICKER_GRANT_KEY)

@@ -390,6 +390,10 @@ def _parsed_mime_header(name: str, value: str):
 class GmailConnector:
     """Minimum-authority Gmail OAuth, bounded search, and explicit body read."""
 
+    #: Held by ``complete_oauth`` from state check through token commit;
+    #: provider-revocation retry (#588) holds it so no completion interleaves.
+    oauth_lock = _OAUTH_LOCK
+
     def __init__(
         self,
         store,
@@ -686,6 +690,32 @@ class GmailConnector:
             self.store.secret(_owner_secret_key(TOKEN_SECRET_KEY, owner_id), {})
             if current.state is ConnectorState.CONNECTED:
                 self.registry.transition(owner_id, GMAIL_CONNECTOR_ID, ConnectorState.REAUTH_REQUIRED)
+        return self.status(owner_id)
+
+    def disconnect(self, owner_id: str, stash: Callable[[dict | None], None]) -> dict:
+        """Owner disconnect (CONNECTOR-REVOKE-01 #588): stop local access now.
+
+        ``stash`` receives the stored credential (or None) *before* it is
+        cleared, so the caller can keep what provider revocation needs; if it
+        raises, nothing is cleared. The credential is then overwritten, any
+        in-progress authorization is consumed, and the row moves to
+        DISCONNECTED with a new revision, so every in-flight request fails its
+        revision re-check. A BLOCKED row stays BLOCKED: disconnecting never
+        lifts a policy block.
+        """
+        with _OAUTH_LOCK:
+            with self._lifecycle_guard(owner_id):
+                current = self.registry.status(owner_id, GMAIL_CONNECTOR_ID)
+                token_key = _owner_secret_key(TOKEN_SECRET_KEY, owner_id)
+                try:
+                    tokens = self.store.secret(token_key)
+                except GmailError:
+                    tokens = None
+                stash(tokens if isinstance(tokens, dict) and tokens else None)
+                self.store.secret(token_key, {})
+                self.store.secret(_owner_secret_key(PENDING_SECRET_KEY, owner_id), {"status": "used"})
+                if current.state not in (ConnectorState.DISCONNECTED, ConnectorState.BLOCKED):
+                    self.registry.transition(owner_id, GMAIL_CONNECTOR_ID, ConnectorState.DISCONNECTED)
         return self.status(owner_id)
 
     def _pending(self, owner_id: str, state: object) -> dict:

@@ -36,6 +36,8 @@ from .file_workspace import FileWorkspace
 from . import folder_grants
 from .connector_contract import ConnectorContractError, _owner_key
 from .gmail import GMAIL_CONNECTOR_ID, GmailError
+from .connector_revocation import (GoogleConnectionRevoker, RevocationError, drive_connection,
+                                   google_revoke_transport, registry_connection)
 from .calendar import CALENDAR_CONNECTOR_ID, CALENDAR_WRITE_CONNECTOR_ID, CalendarError
 from .calendar_conversation import DROPPED_NOTICE as CALENDAR_DROPPED_NOTICE, CalendarConversation
 from .conversation_handoff import (CONNECTOR_LABELS, JUDGMENT_YES,
@@ -283,6 +285,10 @@ class AgentService:
         # supplied by the same deployment that supplies `gmail`.  Kept off the
         # connector so the client secret never enters connector state.
         self.gmail_token_exchange=None
+        # CONNECTOR-REVOKE-01 #588: the one hop to Google's revocation
+        # endpoint.  None means the production transport; tests inject a fake.
+        self.google_revoke_transport=None
+        self.google_revocation_clock=time.time
         self.drive_read=None
         self.drive_picker_config=None
         self.lock=threading.RLock()
@@ -2633,6 +2639,97 @@ class AgentService:
                          'connectable':bool(row.get('connect_path')),'connect_hint':row.get('connect_hint','')})
         return rows
 
+    # -- owner disconnect / provider revocation (CONNECTOR-REVOKE-01 #588) --
+    # Backend only.  The Settings row wiring is deliberately left to the
+    # Settings rebuild (#619): it calls `google_disconnect_preview` to show the
+    # exact effects and obtain a single-use confirmation, then
+    # `google_disconnect` with that confirmation, and offers
+    # `retry_google_revocation` while `google_revocations()` lists a row.
+    GOOGLE_DISCONNECTED_WORK_TEXT='연결을 해제해서 이 요청은 이어서 처리하지 않았습니다. 필요하면 다시 연결한 뒤 요청해 주세요.'
+
+    CONNECTOR_OWNERS_KEY='connector_owner_identities'
+
+    def _remember_connector_owner(self, owner):
+        """Record an identity a Google authorization completed under.
+
+        Disconnect must reach it later even after Telegram is unpaired or
+        re-paired, when it is no longer derivable from current config.
+        """
+        known=self.store.config(self.CONNECTOR_OWNERS_KEY,[])
+        known=known if isinstance(known,list) else []
+        if isinstance(owner,str) and owner not in known:
+            self.store.put(self.CONNECTOR_OWNERS_KEY,[*known,owner][-50:])
+
+    def _connector_owner_candidates(self):
+        """Every connector owner identity this install can hold a row under."""
+        owners=['local-owner']
+        telegram=self.store.config('telegram',{})
+        if isinstance(telegram,dict) and telegram.get('user_id') is not None:
+            owners.insert(0,f"telegram:{telegram['user_id']}")
+        known=self.store.config(self.CONNECTOR_OWNERS_KEY,[])
+        for owner in known if isinstance(known,list) else []:
+            if isinstance(owner,str) and owner not in owners:
+                owners.append(owner)
+        return owners
+
+    def google_revocation(self):
+        connections=[]
+        if self.gmail:
+            connections.append(registry_connection(GMAIL_CONNECTOR_ID,'Google Gmail',self.gmail,
+                                                   self._connector_owner_candidates))
+        if self.calendar_oauth:
+            connections.append(registry_connection(CALENDAR_CONNECTOR_ID,'Google Calendar',self.calendar_oauth,
+                                                   self._connector_owner_candidates,write=False))
+            connections.append(registry_connection(CALENDAR_WRITE_CONNECTOR_ID,'Google Calendar 일정 만들기',
+                                                   self.calendar_oauth,self._connector_owner_candidates,write=True))
+        if self.drive_web_oauth:
+            connections.append(drive_connection('Google Drive',self.drive_web_oauth))
+        transport=self.google_revoke_transport or google_revoke_transport()
+        return GoogleConnectionRevoker(self.store,connections,transport,now=self.google_revocation_clock,
+                                       on_disconnected=self._withdraw_disconnected_work)
+
+    def _withdraw_disconnected_work(self, connector_id, parked):
+        """End Work that was waiting on a connection the owner just removed.
+
+        A parked request must not run later through a stale resume handle
+        just because the owner reconnects: the handle is destroyed and the
+        Work gets an explicit terminal state.  Only waiting Work is touched;
+        a finished result is an owner Artifact and stays.
+        """
+        work_ids=list(parked or [])
+        if self.connector_handoff and connector_id!='google-drive-read':
+            work_ids+=self.connector_handoff.supersede(connector_id=connector_id)
+        text=self.GOOGLE_DISCONNECTED_WORK_TEXT
+        with self.store.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            for work_id in work_ids:
+                db.execute("UPDATE jobs SET delivery='cancelled' WHERE id=? AND status IN ('awaiting_connection','awaiting_drive') AND delivery='pending'",(work_id,))
+                db.execute("UPDATE jobs SET status='failed',error=? WHERE id=? AND status IN ('awaiting_connection','awaiting_drive')",(text,work_id))
+        return work_ids
+
+    @staticmethod
+    def _revocation_call(fn):
+        try:
+            return fn()
+        except RevocationError as exc:
+            raise ValueError(str(exc)) from None
+
+    def google_disconnect_preview(self, body, session):
+        body=body if isinstance(body,dict) else {}
+        return self._revocation_call(lambda:self.google_revocation().preview(session,body.get('connector_id')))
+
+    def google_disconnect(self, body, session):
+        body=body if isinstance(body,dict) else {}
+        return self._revocation_call(lambda:self.google_revocation().disconnect(
+            session,body.get('connector_id'),body.get('confirmation')))
+
+    def retry_google_revocation(self, body):
+        body=body if isinstance(body,dict) else {}
+        return self._revocation_call(lambda:self.google_revocation().retry(body.get('connector_id')))
+
+    def google_revocations(self):
+        return {'pending_provider_revocations':self.google_revocation().pending_revocations()}
+
     def begin_gmail_connection(self):
         """Return one owner-local Gmail authorization URL; grant nothing here.
 
@@ -2773,6 +2870,7 @@ class AgentService:
         # returned HTTP 400 telling the owner it had failed.
         parked=bool(self.connector_handoff and self.connector_handoff.record(connector_id))
         result=self.calendar_oauth.complete_oauth(owner,callback,self.calendar_token_exchange)
+        self._remember_connector_owner(owner)
         connector_id=result.get('connector_id') or connector_id
         granted=tuple(result.get('granted_scopes') or ())
         if not parked:
@@ -2804,6 +2902,7 @@ class AgentService:
         parked=bool(self.connector_handoff and self.connector_handoff.record(GMAIL_CONNECTOR_ID))
         try:
             status=self.gmail.complete_oauth(owner,dict(callback),self.gmail_token_exchange)
+            self._remember_connector_owner(owner)
         except GmailError as exc:
             if parked and exc.reason in GMAIL_PROVEN_CALLBACK_REASONS:
                 try:

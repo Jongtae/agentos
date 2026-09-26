@@ -112,7 +112,9 @@ class DeclaredProfileLimits(unittest.TestCase):
         self.assertEqual(CLI_PROFILES[BOUNDED_PROFILE]['trust'], 'trusted-local')
         self.assertEqual(CLI_PROFILES[BOUNDED_PROFILE]['limitation'],
                          'the CLI may read host files outside AgentOS provenance '
-                         '(verified: codex sandbox -P :read-only, codex-cli 0.153.4)')
+                         '(verified: codex sandbox -P :read-only, codex-cli 0.153.4); '
+                         'Claude Code 2.1.280 -p denied store and home reads, writes and WebFetch and read only '
+                         'its turn directory (observed), unless managed settings allow more (documented only)')
         self.assertEqual(CLI_PROFILES[ISOLATED_PROFILE]['trust'], 'isolated-restricted')
         for profile in CLI_PROFILES.values():
             self.assertNotIn('gate_qualified', profile, 'no dead qualification flag')

@@ -70,11 +70,18 @@ _ISOLATED = 'isolation-restricted-profile'
 #: `codex sandbox -P :read-only` (the policy behind `codex exec --sandbox
 #: read-only`) on codex-cli 0.153.4: a fake owner store, a home file and the
 #: turn directory were readable; network and writes were blocked.  Claude Code
-#: 2.1.280 documents that its file tools may read outside the working directory
-#: unless `--restricted` is used (not observed locally).  The owner accepts this
-#: trusted-local-worker risk; strict read isolation is #616 AGENCY-ISOLATION-01.
+#: is stated per CLI (#623), from no-model process tests of the exact
+#: trusted-local argv on 2.1.280 `-p` (tests/test_strict_isolation.py): its
+#: permission layer denied the store read, the home `cat`, a write and
+#: WebFetch, and allowed reads of the turn directory; only the declared
+#: AgentOS bridge tools are pre-approved.  An allow rule in managed settings
+#: (loaded regardless of HOME) could widen that - documented, not observed.
+#: The owner accepts this trusted-local-worker risk; strict read isolation is
+#: #616 AGENCY-ISOLATION-01.
 TRUSTED_LOCAL_LIMITATION = ('the CLI may read host files outside AgentOS provenance '
-                            '(verified: codex sandbox -P :read-only, codex-cli 0.153.4)')
+                            '(verified: codex sandbox -P :read-only, codex-cli 0.153.4); '
+                            'Claude Code 2.1.280 -p denied store and home reads, writes and WebFetch and read only '
+                            'its turn directory (observed), unless managed settings allow more (documented only)')
 
 #: The verified limitation of the strict-isolated profile (#616).  Observed
 #: with no-model process tests that drive the exact argv through a real
@@ -227,9 +234,21 @@ def strict_launch_arguments(engine_id, disabled_features=()):
             argv += ['--disable', feature]
         return argv
     if engine_id == 'claude-code':
-        return ['--tools', '', '--restricted', '--allowedTools',
-                ','.join(f'mcp__agentos__{action}' for action in profile_actions(STRICT_PROFILE))]
+        return ['--tools', '', '--restricted', *claude_bridge_allowlist(STRICT_PROFILE)]
     raise ExecutionError('지원하는 구독 엔진을 선택하세요.')
+
+
+def claude_bridge_allowlist(profile):
+    """Claude Code's official ``--allowedTools`` rule for exactly the
+    profile's AgentOS bridge tools (#623).
+
+    Under ``-p`` Claude Code denies every MCP call that no allow rule covers
+    (observed, 2.1.280: "haven't granted").  Each name is exact - no
+    ``mcp__agentos`` server-wide rule, no wildcard - so a bridge tool the
+    profile does not declare stays denied, and no built-in tool (Read, Bash,
+    WebFetch, ...) is named, so their permission behaviour is unchanged.
+    """
+    return ['--allowedTools', ','.join(f'mcp__agentos__{action}' for action in profile_actions(profile))]
 
 
 _VERSION_PATTERNS = {'codex': re.compile(r'^codex-cli (\d+\.\d+\.\d+)\s*$'),
@@ -657,8 +676,9 @@ class BoundedExecutionAdapter:
                 # #569: AgentOS instructions travel as a system-prompt addition,
                 # the conversation and request as the prompt.
                 argv += ['--append-system-prompt', instructions]
-            if strict:
-                argv += strict_launch_arguments('claude-code')
+            # #623: trusted-local pre-approves only its declared bridge tools;
+            # strict also removes every built-in tool.
+            argv += strict_launch_arguments('claude-code') if strict else claude_bridge_allowlist(BOUNDED_PROFILE)
             return argv
         raise ExecutionError('지원하는 구독 엔진을 선택하세요.')
 

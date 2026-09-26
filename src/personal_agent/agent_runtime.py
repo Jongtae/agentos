@@ -380,7 +380,6 @@ PUBLIC_TASK_ACTIONS=frozenset({'web_search','weather','public_page_read','bounde
 #: own preflight of an explicit request (`subscription_public_lookup_query`).
 CLI_LOOKUP_HINT="대화 내용 없이 따로 조회하려면 '/search 검색어'처럼 검색어를 직접 적어 보내 주세요."
 PUBLIC_TASK_UNRESOLVED='요청과 대화에서 공개 조회에 보낼 수 있는 내용이 남지 않았습니다. 개인 자료는 공개 조회에 보내지 않으므로, 조회할 내용(검색어, 도시 등)을 요청에 직접 적어 주세요.'
-PUBLIC_TASK_PLACE='지역명은 소유자가 대화에 적은 표기 그대로 보내야 합니다(번역하거나 새로 만든 지역명은 보내지 않습니다). 대화에 적힌 지역명으로 다시 요청하거나, 지역을 알려 달라고 물어 주세요.'
 #: #605 P3-1: ISO 3166-1 alpha-2 codes (tz database `iso3166.tab`, public domain).
 ISO_COUNTRY_CODES=frozenset('''
  AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT
@@ -406,10 +405,6 @@ SOURCE_NAMES[ENGINE_UNMEDIATED]='CLI가 AgentOS 밖에서 읽었을 수 있는 �
 #: lookup context: they concern what the worker saw or said afterwards.
 _OWNER_TEXT_NEUTRAL=frozenset({OWNER_CONVERSATION,ENGINE_UNMEDIATED})
 
-#: At most this many words leave in one lookup composed from a private
-#: context (#605 N5).  With dedupe and AgentOS-fixed word order this bounds
-#: the worker's selection channel; it does not remove it (recorded residual).
-LOOKUP_WORD_CAP=8
 #: Hangul compared on jamo (#605 owner scope): at least this many jamo, so a
 #: jamo-level match spans more than one bare syllable.
 LOOKUP_JAMO_MIN=5
@@ -505,69 +500,24 @@ def _digits_inside(word,runs):
  return any(run in value and (run==value or len(run)>=MIN_PARTIAL_DIGITS)
             for run in _MEMORY_DIGITS.findall(word) for value in runs)
 
-def _lookup_match(word,words):
- """The permitted form of one normalised outbound word, or None.
+def select_lookup_words(value, excluded):
+ """AgentOS's selection of the outbound tokens of one lookup value (#654 pilot posture).
 
- Only two directions are accepted, and digit runs must be identical in both:
-
- * the word equals a permitted word, or is a prefix of one, so the owner's
-   ``성남에`` covers an outbound ``성남`` (the owner's own word without its
-   particle);
- * the word *extends* a permitted word, in which case only the permitted
-   word leaves.  ``병원이혼`` or ``병원ab`` sends ``병원``, and ``성남정신과`` sends
-   ``성남``: text that is not in permitted text is never sent (#605 N1).  The
-   earlier rule let a word extend a permitted one by two characters, which
-   sent ``병원이혼``.
+ Returns ``(kept, dropped)``: every token of ``value`` (read after NFKC, so
+ spans index the string ``rebuild_lookup_value`` reads) in the worker's own
+ order and spelling, minus a token that matches an excluded value -- a saved
+ private value or a value this Work wrote to a private store -- or whose
+ digit run is part of one, in any spelling (#605 N4).  Nothing else is
+ judged, reordered, deduplicated or capped.
  """
- digits=_MEMORY_DIGITS.findall(word);longest=None
- for permitted in words:
-  if _MEMORY_DIGITS.findall(permitted)!=digits:continue
-  if word==permitted:return word
-  if len(word)>=2 and permitted.startswith(word):return word
-  if len(permitted)>=2 and word.startswith(permitted) and (longest is None or len(permitted)>len(longest)):longest=permitted
- return longest
-
-def select_lookup_words(value, permitted, excluded, *, owner_worded, private, cap=LOOKUP_WORD_CAP):
- """AgentOS's selection of the outbound words of one lookup value.
-
- ``permitted`` is the permitted text in chronological order (the current
- request last).  Returns ``(kept, dropped)``; each kept row carries the word
- to send and its origin ``(message, position)`` in permitted text, or None.
-
- * A word this Work wrote to a private store, or a saved private value, is
-   dropped, including a word whose digit run is part of such a value in any
-   spelling (#605 N4).  This is the deterministic redaction kept by #654.
- * ``owner_worded``: a word with no origin in permitted text is dropped.
- * ``private``: words are deduplicated, put in the order they have in
-   permitted text (message by message, then word order; the worker's order is
-   not kept), and capped at ``cap`` (#605 N5).  A clean context keeps the
-   worker's words, deduplicated, with no cap (#654).
- """
- indexed=[lookup_words(text) for text in permitted]
  excluded_words=[word for text in excluded for word in lookup_words(text)]
  excluded_runs=value_digit_runs(excluded)
- kept=[];seen=set();dropped=0
- # Tokens of the value after NFKC (spans index that string, which
- # `rebuild_lookup_value` reads the same way, #605 P2-1/P1-A); compared
- # casefolded.
+ kept=[];dropped=0
  for match in _MEMORY_WORD.finditer(unicodedata.normalize('NFKC',str(value or ''))):
   shown=match.group(0);word=lookup_norm(shown)
   if (excluded_words and owner_said(word,excluded_words)) or _digits_inside(word,excluded_runs):
    dropped+=1;continue
-  origin=None;send=shown
-  for index,words in enumerate(indexed):
-   for position,candidate in enumerate(words):
-    form=_lookup_match(word,[candidate])
-    if form is not None:
-     origin=(index,position);send=shown if form==word else form;break
-   if origin is not None:break
-  if origin is None and owner_worded:dropped+=1;continue
-  # Deduplicated in every context (#605 N5): a repeated word carries nothing new.
-  if lookup_norm(send) in seen:continue
-  seen.add(lookup_norm(send));kept.append({'word':send,'origin':origin,'span':match.span()})
- if private:
-  kept.sort(key=lambda row:row['origin'] or (len(indexed),0))
-  if len(kept)>cap:dropped+=len(kept)-cap;kept=kept[:cap]
+  kept.append({'word':shown,'span':match.span()})
  return kept,dropped
 
 def rebuild_lookup_value(value, kept):
@@ -713,14 +663,12 @@ def lookup_text_violations(text, excluded):
      or any(len(run)>=MIN_PARTIAL_DIGITS and run in value for run in joined_runs for value in runs)
  return bad,digits_joined
 
-def finalize_lookup_text(value, kept, excluded, *, joined=False, max_length=LOOKUP_QUERY_MAX):
- """Build the outbound string and re-check it; withhold whatever still matches.
+def finalize_lookup_text(value, kept, excluded, *, max_length=LOOKUP_QUERY_MAX):
+ """Build the outbound string (``rebuild_lookup_value``) and re-check it; withhold whatever still matches.
 
- ``joined`` builds the string from the kept words joined by single spaces (a
- private context); otherwise ``rebuild_lookup_value``.  A token that matches
- is removed and the string rebuilt; when only a cross-token digit run
- matches, every digit-bearing token is removed.  Returns ``(text, removed)``;
- ``text`` is '' when nothing admissible remains.
+ A token that matches is removed and the string rebuilt; when only a
+ cross-token digit run matches, every digit-bearing token is removed.
+ Returns ``(text, removed)``; ``text`` is '' when nothing admissible remains.
  """
  rows=list(kept);removed=0
  # The worker's own string is checked first: a word removed earlier must not
@@ -731,11 +679,11 @@ def finalize_lookup_text(value, kept, excluded, *, joined=False, max_length=LOOK
         and not (digits_joined and _MEMORY_DIGITS.search(row['word']))]
   removed+=len(rows)-len(keep);rows=keep
  for _ in range(4):
-  text=' '.join(row['word'] for row in rows) if joined else rebuild_lookup_value(value,rows)
+  text=rebuild_lookup_value(value,rows)
   if not text:return '',removed
   if len(text)>max_length:
    # The provider's query length: drop trailing words until it fits.
-   while rows and len(' '.join(row['word'] for row in rows) if joined else rebuild_lookup_value(value,rows))>max_length:
+   while rows and len(rebuild_lookup_value(value,rows))>max_length:
     rows=rows[:-1];removed+=1
    continue
   bad,digits_joined=lookup_text_violations(text,excluded)
@@ -1022,7 +970,7 @@ def classify_failure(exc,action=None):
  if getattr(exc,'effect',None)=='unknown':return 'effect_unknown','never','unknown'
  if not code and isinstance(exc,ValueError):
   # AgentOS's own fixed #605 refusals: the owner must supply words.
-  if str(exc) in (PUBLIC_TASK_UNRESOLVED,PUBLIC_TASK_PLACE):code='input_required'
+  if str(exc)==PUBLIC_TASK_UNRESOLVED:code='input_required'
  if code in BUDGET_CODES:return code,'budget','none'
  if code=='needs_setup':return code,'needs_setup','none'
  if isinstance(code,str) and code:return code,'permanent','none'
@@ -1150,6 +1098,8 @@ class Capabilities:
   self.delegated=delegated;self.inherited_excluded=list(inherited_excluded or ())
   # Route-specific, truthful next step appended to a public-egress refusal.
   self.lookup_hint=lookup_hint
+  # `run_agent`'s per-call result cache (one execution per identical call in a
+  # Work); not a lookup attempt memo (#654 removed that).
   self.memo={}
   # One set, two writers: `document_context` is the history-window source and
   # `EvidenceLog` adds a label for every private tool result stored in this
@@ -1276,140 +1226,78 @@ class Capabilities:
  def lookup_private(self):
   """Does private material, or a private-store write, share this Work's context?"""
   return bool(self.private_egress_provenance() or self.pending_writes or self.written_private or self.inherited_excluded)
- def _compose(self,fields,sources,excluded,*,private):
-  """Compose the outbound words of one lookup's fields (#605, pilot posture #654).
+ def _compose(self,fields,excluded):
+  """Compose the outbound text of one lookup's ``[(name, value)]`` fields (#654 pilot posture).
 
-  ``fields`` is ``[(name, value, owner_worded, field_private)]``.  Returns
-  ``({name: text}, {name: withheld count})``.  Deterministic only: a saved or
-  written private value is removed in every spelling; a private context keeps
-  owner-worded, deduplicated, ordered, capped words; a clean context keeps the
-  worker's string with only excluded tokens removed (P2-1).  No sensitivity
-  judgment is asked of the owner's current message (#654).
+  Returns ``({name: text}, {name: withheld count})``.  Deterministic only:
+  the worker's string is kept, in either context, with every excluded value
+  (a saved private value or a value this Work wrote to a private store)
+  removed in every spelling, and the FINAL string re-checked (P1-A/P2-B).
   """
   texts={};dropped={}
-  for name,value,owner_worded,field_private in fields:
-   kept,dropped[name]=select_lookup_words(value,sources['permitted'],excluded,owner_worded=owner_worded,private=field_private)
-   # P1-A/P2-B: the FINAL string is re-checked against every excluded value.
-   texts[name],removed=finalize_lookup_text(value,kept,excluded,joined=field_private)
+  for name,value in fields:
+   kept,dropped[name]=select_lookup_words(value,excluded)
+   texts[name],removed=finalize_lookup_text(value,kept,excluded)
    dropped[name]+=removed
   return texts,dropped
- def _claim_attempt(self,tool_id,action):
-  """Spend this Work's one attempt at ``action``, atomically (#605 F3, R8).
-
-  The check and the durable ``requested`` tool event are one immediate
-  transaction, so two bridge processes or a restarted one cannot both
-  proceed.  False when the attempt was already spent.
-  """
-  detail=json.dumps({'host_action':action,'composed_by':'agentos-public-task','phase':'attempt'},ensure_ascii=False)
-  with self.store.db() as db:
-   db.execute('BEGIN IMMEDIATE')
-   for row in db.execute("SELECT detail FROM tool_events WHERE job_id=? AND status='requested'",(self.job_id,)).fetchall():
-    try:earlier=json.loads(row[0] or '{}')
-    except (TypeError,ValueError):continue
-    if isinstance(earlier,dict) and earlier.get('composed_by')=='agentos-public-task' and earlier.get('host_action')==action:
-     return False
-   db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
-              (self.job_id,tool_id,'requested',detail,time.time()))
-  return True
  def _public_task(self,tool_id,action,args):
   """Serve one public lookup: AgentOS composes what leaves, or refuses.
 
   Every public lookup of a Work with a lookup resolver goes through here,
-  the first turn included (#605 N3).  Under the pilot posture (#654) AgentOS
-  composes the outbound arguments from the worker's proposal with no
-  per-request sensitivity judgment, no per-Work lookup cap and no `/search`
-  requirement:
+  the first turn included.  Under the pilot posture (#654) the worker's own
+  query -- its translations, synonyms, provider keywords, rewrites and
+  additions -- goes out as composed, in a clean context and in a private one
+  (a private document or store shares the Work) alike, with only the
+  excluded values removed: saved private values, this Work's private-store
+  writes (Memory candidates, notes, calendar drafts) and writes proposed in
+  the same batch, in any spelling (#605 N4, R3).  There is no sensitivity
+  judgment, no per-Work lookup cap, no one-attempt memo and no `/search`
+  requirement: a Work may look up several times and change its query.
 
-  * never a word this Work wrote to a private store (Memory candidates,
-    notes, calendar drafts, and writes proposed in the same batch) or a saved
-    private value, in any spelling (N4, R3);
-  * from a private context (a private document or store shares this Work's
-    context): only words from text permitted for this lookup
-    (`lookup_sources`), deduplicated, in AgentOS's order, capped (N5); a place
-    name in the owner's own wording (F4.1); one network attempt per
-    destination per Work, claimed durably and atomically before the request
-    (F3, R8);
-  * in a clean context the worker's own words go out as composed (its
-    translations, rewrites and additions included), minus excluded values; a
-    weather country must be a validated ISO-2 code (R2).
-
-  An owner-typed `/search <query>` proposed as typed is sent as typed, minus
-  excluded values, in either context (D1, now a convenience).  When nothing
-  admissible remains, or a place name is not admissible, the worker gets a
-  question to ask instead.  The checked arguments are exactly the
-  transmitted arguments.
+  What is refused: a private context whose provenance cannot be attributed
+  (no lookup resolver) or a delegated specialist (`egress_refusal`); a query
+  or weather place with nothing left after the exclusion
+  (`PUBLIC_TASK_UNRESOLVED`); a page read outside the owner's current
+  approved scope when private material shares the Work.  A weather country
+  goes out only as a validated ISO 3166-1 alpha-2 code.  The checked
+  arguments are exactly the transmitted arguments.
   """
   private=self.lookup_private()
   labels=self.private_egress_provenance()
   if private and (self.lookup_sources is None or self.delegated):
    raise ToolError(egress_refusal(action,labels or sorted(self.written_labels) or [UNATTRIBUTED_PROVENANCE],self.lookup_hint),'policy_denied')
   if self.lookup_sources is None:return None  # no resolver and a clean context: the caller's own path
-  key=json.dumps(['agentos-public-task',action])
-  if private and key in self.memo:
-   earlier=self.memo[key]
-   if isinstance(earlier,Exception):raise ValueError(str(earlier))
-   return earlier
   if action=='public_page_read':
    # The address is fixed by the owner's approval, not composed from the
    # conversation; the current approval is the whole check.
    if not private:return None
    scope=self.page_scope()
    if args.get('url') not in scope:raise ValueError('소유자가 현재 승인한 공개 페이지 주소가 아니어서 조회하지 않았습니다.')
-   plan={'tool':action,'url':args['url'],'approved_urls':sorted(scope)};dropped=0;explicit=None
+   plan={'tool':action,'url':args['url'],'approved_urls':sorted(scope)};dropped=0
   else:
    sources=self.lookup_sources()  # raises when the Work binding no longer holds
    excluded=[*sources['excluded'],*self.written_private,*self.pending_writes,*self.inherited_excluded]
-   explicit=None
-   if action in ('web_search','bounded_public_research'):
-    typed=explicit_search_query(sources.get('current'))
-    if typed and ' '.join(str(args.get('query') or '').split())==' '.join(typed.split()):explicit=typed
-   if explicit is not None:
-    # #605 D1: the owner typed `/search <query>` and the worker proposes
-    # exactly that string: it is sent as typed, minus excluded values, under
-    # the same separator policy and final re-check as any lookup (P1-A/P2-B).
-    kept,dropped=select_lookup_words(explicit,[explicit],excluded,owner_worded=False,private=True,cap=LOOKUP_QUERY_MAX)
-    kept.sort(key=lambda row:row['span'])
-    query,removed=finalize_lookup_text(explicit,kept,excluded)
-    dropped+=removed
-    if not query:raise ValueError(PUBLIC_TASK_UNRESOLVED)
-    plan={'tool':'web_search' if action=='web_search' else action,'query':query}
-    if action=='bounded_public_research':plan['mode']=args.get('mode')
-   elif action=='weather':
+   if action=='weather':
     country=str(args.get('country') or '')
-    fields=[('city',args.get('city',''),private,private)]
-    if private:fields.append(('country',country,True,True))
-    elif country.upper() in ISO_COUNTRY_CODES:fields.append(('country',country.upper(),False,False))
-    texts,withheld=self._compose(fields,sources,excluded,private=private)
-    # A place name that lost a word to the exclusion, or is not the owner's
-    # wording in a private context, is not a place to send.
-    if not texts['city'] or withheld['city']:raise ValueError(PUBLIC_TASK_PLACE)
+    fields=[('city',args.get('city',''))]
+    if country.upper() in ISO_COUNTRY_CODES:fields.append(('country',country.upper()))
+    texts,withheld=self._compose(fields,excluded)
+    if not texts['city']:raise ValueError(PUBLIC_TASK_UNRESOLVED)
     plan={'tool':action,'city':texts['city']};dropped=withheld['city']
-    if texts.get('country') and not withheld.get('country'):plan['country']=texts['country'].upper()
+    if texts.get('country'):plan['country']=texts['country'].upper()
    else:
-    texts,withheld=self._compose([('query',args.get('query',''),private,private)],sources,excluded,private=private)
+    texts,withheld=self._compose([('query',args.get('query',''))],excluded)
     if not texts['query']:raise ValueError(PUBLIC_TASK_UNRESOLVED)
     plan={'tool':'web_search' if action=='web_search' else action,'query':texts['query']}
     dropped=withheld['query']
     if action=='bounded_public_research':plan['mode']=args.get('mode')
   sent={k:v for k,v in plan.items() if k!='tool'}
-  if private:
-   if not self._claim_attempt(tool_id,action):
-    self.memo[key]=RuntimeError('이 작업에서는 이 공개 조회를 이미 한 번 시도했습니다.')
-    raise ValueError('이 작업에서는 이 공개 조회를 이미 한 번 시도했습니다.')
-   self.memo[key]=RuntimeError('이 작업에서는 이 공개 조회를 이미 한 번 시도했습니다.')
-  try:
-   if action=='bounded_public_research':
-    value=self._research(plan['mode'],plan['query'])
-   else:
-    value=self._read_network(plan)
-  except (ValueError,TypeError,OSError,ProviderError) as exc:
-   if private:self.memo[key]=exc
-   raise
-  value={**value,'composed_by':'agentos-public-task','sent':sent,'excluded_terms':dropped,
-         'note':'AgentOS sent only the listed arguments, composed by AgentOS for this public lookup.'}
-  if explicit is not None:value['explicit_owner_query']=True
-  if private:self.memo[key]=value
-  return value
+  if action=='bounded_public_research':
+   value=self._research(plan['mode'],plan['query'])
+  else:
+   value=self._read_network(plan)
+  return {**value,'composed_by':'agentos-public-task','sent':sent,'excluded_terms':dropped,
+          'note':'AgentOS sent only the listed arguments, composed by AgentOS for this public lookup.'}
  def _research(self,mode,query):
   """One bounded public research run (J5); egress only through `self.network`."""
   # Egress goes through `self.network`, not through a reader this branch

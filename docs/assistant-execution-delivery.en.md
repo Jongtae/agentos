@@ -1,5 +1,9 @@
 # Assistant execution: delivery, ownership and completion
 
+## Current-context adoption — #625 (2026-09-26)
+
+For the selected single-owner current-state scope, read [Current context contract](current-context-contract.en.md) and [Implementer playbook](current-context-implementation.en.md). This selectively adopts #383 observation/time/current-state principles, not background Attention or multi-person collaboration. The plan is existing #605 → #606 → #607 → #626 input/time → #627 current-state consumption → #608/#512/#513; #625 is the immediate documentation adoption. Existing #616 and other independently directed work are preserved. Current-context claims remain unimplemented until those children deliver. Earlier blanket #383 deferrals do not exclude these two explicitly selected slices. #612 unit-test-first verification and concrete reuse still govern; no extra evaluator, graph platform or per-tick model calls. The new source-time, retention, inference/disclosure defaults and migration/test details are canonical in the two linked documents rather than duplicated here.
+
 Parent [#600](https://github.com/Jongtae/agentos/issues/600). Normative [execution contract](assistant-execution-contract.en.md). Cost/reuse amendment [#612](https://github.com/Jongtae/agentos/issues/612) is authoritative for verification depth. This is the 2026-09-25 owner-selected execution-integration refinement of PRESENCE-01, not a second coordinator. The two-child limit counts actively executing implementation worktrees, not backlog issue records.
 
 ## Finite work breakdown

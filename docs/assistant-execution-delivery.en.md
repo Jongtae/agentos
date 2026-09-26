@@ -13,7 +13,7 @@ Parent [#600](https://github.com/Jongtae/agentos/issues/600). Normative [executi
 | 2 | #604 | One broker contract and actual native/MCP/isolated capability bindings | #603 |
 | 2b | #616 | Strict-isolated CLI runtime profile: CLI reads only AgentOS-approved inputs, process-level qualification; #604 ships a named trusted-local profile with the verified host-read limitation (owner decision 2026-09-26) | #604 |
 | 3 | #605 | Reviewed source/destination-authorized public context composition; assumes a declared runtime trust/isolation profile and does not own OS-level filesystem sandboxing; runs in parallel with #616 (owner decision 2026-09-26; `mcp_bridge.py` split: #616 process/sandbox setup, #605 taint/refusal policy) | #604 |
-| 4 | #606 | Existing goal loop, observations, alternatives and completion obligations | #605/#597 |
+| 4 | #606 | Existing goal loop, observations, alternatives and completion obligations | #605/#616/#597 |
 | 5 | #607 | Typed recovery, safe effects/retry/Stop/restart and transactional resume | #606/#598 |
 | 6 | #608 | Existing unit/integration harness, accidental-request guard and optional scoped smoke | #607 and relevant #581 |
 | Final | #512 | Rerun original A-J and cross-track integration on final candidate | #608/#598; fixture baselines may run earlier |

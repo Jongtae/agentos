@@ -142,6 +142,11 @@ class PresenceEval(unittest.TestCase):
         self.withdrawals = set()    # owner utterances the fixture engine judges as withdrawing parked work
         self.remember_requests = set()  # owner utterances the fixture engine judges as explicit remember requests
         self.picked = None          # what the fixture macOS folder dialog returns
+        # #657: when set, the model ends a tool-using turn with a finish claim
+        # citing every result it was shown; `goal_reached` is the fixture's
+        # completion judgment.
+        self.claim = False
+        self.goal_reached = True
         self.service = self.make_service()
         self.store.put('telegram', {'enabled': True, 'user_id': CHAT, 'generation': GENERATION, 'cursor': 0})
 
@@ -176,6 +181,13 @@ class PresenceEval(unittest.TestCase):
                 return {'message': {'content': '', 'tool_calls': [
                     {'id': f'call-{len(self.model_bodies)}', 'function': {'name': step[1], 'arguments': step[2]}}]}}
             return {'message': {'content': step[1]}}
+        refs = [json.loads(m['content']).get('ref') for m in body.get('messages', [])
+                if m.get('role') == 'tool' and str(m.get('content', '')).startswith('{')]
+        if self.claim and tools and any(refs):
+            self.claim = False
+            return {'message': {'content': '', 'tool_calls': [
+                {'id': 'finish', 'function': {'name': 'finish', 'arguments': {
+                    'status': 'done', 'evidence_refs': [ref for ref in refs if ref], 'summary': self.text}}}]}}
         return {'message': {'content': self.text}}
 
     def make_service(self, **kwargs):
@@ -193,6 +205,8 @@ class PresenceEval(unittest.TestCase):
             return SelectionDecision(OUTCOME_DECIDED, 'none-of-these', candidates, fixture_confidence())
 
         def judge(context, proposition):
+            if context.purpose == 'goal-reached':
+                return BinaryDecision(OUTCOME_DECIDED, self.goal_reached, fixture_confidence())
             if context.purpose == 'explicit-memory-request':
                 return BinaryDecision(OUTCOME_DECIDED, context.facts.get('owner_message') in self.remember_requests,
                                       fixture_confidence())
@@ -517,6 +531,7 @@ class G_LongResearch(PresenceEval):
         self.service.local_tools = net
         self.script = [('tool', 'bounded_public_research', {'mode': 'product_comparison', 'query': 'headphones'})]
         self.text = reply
+        self.claim = True
         self.during_model = think
         return self.turn(text)
 
@@ -885,6 +900,7 @@ class E_MissingFolder(LocalHttp, PresenceEval):
                 self.assertEqual(self.texts(notice_at), ['선택한 폴더를 읽기로 허용했습니다. 방금 요청을 이어서 처리합니다.'])
                 # Exactly-once resume of the ORIGINAL Work.
                 self.script = [('tool', 'find_files', {'query': '계약서'})]
+                self.claim = True
                 answer_at = len(self.wire)
                 self.assertTrue(self.service.run_one())
                 self.service.deliver_one()
@@ -1362,6 +1378,7 @@ class J_MemoryCorrection(LocalHttp, PresenceEval):
             self.remember_requests.add(phrase)
         self.script = [('tool', 'save_memory', {'memory_key': key, 'content': value})]
         self.text = reply
+        self.claim = judged
         return self.turn(phrase)
 
     def canonical(self):

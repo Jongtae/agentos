@@ -164,6 +164,9 @@ class _PageParser(HTMLParser):
         return {'url': self.url, 'title': title, 'text': '\n'.join(self.text), 'elements': elements, 'forms': forms}, self.elements
 
 
+from test_agency_loop import judgments
+
+
 class FakeDriver:
     """A ``PageDriver`` over the fixture pages: links navigate, submit buttons post their form."""
 
@@ -591,13 +594,16 @@ class LoopTests(unittest.TestCase):
                         {'tool_calls': [call('3', 'browser_click', target='장바구니', effect='mutate')]},
                         {'tool_calls': [call('4', 'browser_read')]},
                         {'tool_calls': [call('5', 'browser_read')]},
-                        {'content': '장바구니에 세탁세제 3L이 담겼습니다.'})
+                        # #657: the cart page the model read is the claim's evidence.
+                        {'tool_calls': [call('6', 'finish', status='done', evidence_refs=['5'],
+                                             summary='장바구니에 세탁세제 3L이 담겼습니다.')]})
         driver = FakeDriver()
-        caps = self.caps(script, driver)
+        caps = self.caps(script, driver, judgments=judgments(True))
         result = run_agent(caps.adapter, CFG, '', [{'role': 'user', 'content': '세탁세제 장바구니에 담아줘'}], '', caps, self.record)
         self.assertEqual(result.outcome, 'succeeded')
         self.assertEqual(driver.posts, [('post', '/cart')])
         cart = json.loads(script.bodies[-1]['messages'][-1]['content'])
+        self.assertEqual(cart['ref'], '5')
         self.assertIn('세탁세제 3L × 1', cart['text'])
         self.assertIn('owner-browser-session', caps.private_provenance)
         failed = [json.loads(d) for t, s, d in self.events if s == 'failed']
@@ -608,6 +614,30 @@ class LoopTests(unittest.TestCase):
         caps.close_browser()
         self.assertTrue(driver.closed)
 
+    def test_the_same_step_on_the_same_page_is_refused_and_on_a_changed_page_runs(self):
+        """#657: a browser repeat is keyed on (action, target, input, page digest), not on the memo."""
+        script = Script({'tool_calls': [call('1', 'browser_open', url=ORIGIN + '/account', effect='navigate')]},
+                        {'tool_calls': [call('2', 'browser_click', target='저장', effect='mutate')]},
+                        # Nothing on the page changed: the same click is the same path.
+                        {'tool_calls': [call('3', 'browser_click', target='저장', effect='read')]},
+                        {'tool_calls': [call('4', 'browser_type', target='이름', text='김철수', effect='mutate')]},
+                        # The page now differs (the field's value): the same target is a new step.
+                        {'tool_calls': [call('5', 'browser_click', target='저장', effect='mutate')]},
+                        {'tool_calls': [call('6', 'finish', status='done', evidence_refs=['5'], summary='저장했습니다.')]})
+        driver = FakeDriver()
+        caps = self.caps(script, driver, judgments=judgments(True))
+        result = run_agent(caps.adapter, CFG, '', [{'role': 'user', 'content': '내 계정 이름을 바꿔서 저장해줘'}], '', caps, self.record)
+        failed = [json.loads(d)['code'] for t, s, d in self.events if s == 'failed']
+        self.assertEqual(failed, ['repeat_path'])
+        self.assertEqual(len([entry for entry in driver.log if entry[0] == 'click']), 2)
+        self.assertEqual(result.outcome, 'succeeded')
+        # The typed text is never recorded: not in responded/running events,
+        # the alternative or claim evidence, nor the concluded record.
+        recorded = json.dumps(self.events, ensure_ascii=False)
+        self.assertNotIn('김철수', recorded)
+        self.assertIn('[가림: 3자]', recorded)
+        self.assertNotIn('김철수', json.dumps(result.report, ensure_ascii=False))
+
     def test_a_refused_payment_step_is_a_typed_failure_the_owner_can_read(self):
         script = Script({'tool_calls': [call('1', 'browser_open', url=ORIGIN + '/checkout', effect='navigate')]},
                         {'tool_calls': [call('2', 'browser_type', target='카드번호', text='4111111111111111', effect='mutate')]},
@@ -617,7 +647,7 @@ class LoopTests(unittest.TestCase):
         caps = self.caps(script, driver, browser_approvals=approvals)
         result = run_agent(caps.adapter, CFG, '', [{'role': 'user', 'content': '결제해줘'}], '', caps, self.record)
         self.assertEqual(result.outcome, 'partial')
-        observation = json.loads(script.bodies[2]['messages'][-1]['content'])
+        observation = json.loads(next(m['content'] for m in script.bodies[2]['messages'] if m.get('tool_call_id') == '2'))
         self.assertEqual((observation['code'], observation['retry'], observation['requires']),
                          ('approval_required', 'permanent', 'browser-step-approval'))
         self.assertEqual(observation['error'], bs.APPROVAL_TEXT)

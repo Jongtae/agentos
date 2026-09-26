@@ -19,13 +19,14 @@ import time
 import unittest
 from pathlib import Path
 
-from personal_agent.agent_runtime import (CURRENT_CONTEXT_HEADING, Capabilities, ToolError, lookup_sources)
+from personal_agent.agent_runtime import (CURRENT_CONTEXT_HEADING, Capabilities, ToolError, lookup_sources, run_agent)
 from personal_agent.bounded_execution import AgentOSMcpTools, ExecutionResult, profile_actions
 from personal_agent.memory_service import MemoryService
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
 from personal_agent.subscription_engines import SubscriptionEngines
+from test_agency_loop import CFG, Script, call, finish, judgments
 
 CHAT = 4242
 GENERATION = 'g1'
@@ -94,7 +95,7 @@ class _ConsumptionCase:
         self.store = QuickStore(Path(tmp.name) / 'state')
         self.now = float(int(time.time()))
         self.network, self.model_calls, self.telegram_calls = _Network(), [], []
-        self.worker_inputs, self.results = [], []
+        self.worker_inputs, self.results, self.claims = [], [], []
         self.before_dispatch = None
         self.update_id, self.message_id = 100, 500
 
@@ -126,10 +127,33 @@ class _ConsumptionCase:
         """Direct-API worker: reads the snapshot from its system text only."""
         messages = body['messages']
         self.model_calls.append(messages)
-        if messages[-1]['role'] == 'tool':
-            self.results.extend(json.loads(m['content']) for m in messages if m['role'] == 'tool'
-                                and m is messages[-1])
+        tail = list(messages)
+        nudged = False
+        while tail and tail[-1]['role'] == 'system' and len(tail) > 1:
+            tail.pop()
+            nudged = True
+        if tail[-1]['role'] == 'tool' and nudged:
+            # A failed path earned a "try another path" turn (#657): this
+            # worker has none, so it records what it saw and answers.
+            self.results.extend(json.loads(m['content']) for m in tail[-1:])
             return {'choices': [{'message': {'content': 'done'}}]}
+        if messages[-1]['role'] == 'tool':
+            batch = []
+            for message in reversed(messages):
+                if message['role'] != 'tool':
+                    break
+                batch.insert(0, json.loads(message['content']))
+            if messages[-1]['tool_call_id'] == 'finish':
+                # The claim was refused (for example: internal state only).
+                self.claims.append(batch[-1])
+                return {'choices': [{'message': {'content': 'done'}}]}
+            self.results.extend(batch)
+            # #657: a tool-using turn ends with a completion claim citing the
+            # loop's result refs; a result that failed is not cited.
+            refs = [item['ref'] for item in batch if 'ref' in item and 'error' not in item]
+            return {'choices': [{'message': {'content': None, 'tool_calls': [
+                {'id': 'finish', 'type': 'function', 'function': {'name': 'finish', 'arguments': json.dumps(
+                    {'status': 'done' if refs else 'partial', 'evidence_refs': refs, 'summary': 'done'})}}]}}]}
         if messages[-1]['role'] == 'system':
             return {'choices': [{'message': {'content': 'done'}}]}
         system = messages[0]['content']
@@ -321,6 +345,94 @@ class BridgeProcessResolution(unittest.TestCase):
                                                                        'source': 'state:x'})
         self.assertEqual((refused['recorded'], refused['reason']), (False, 'unsupported_source'))
         self.assertEqual(len(network.plans), 1)
+
+
+def last_tool(body):
+    """The last tool result a model turn was shown (a loop nudge may follow it)."""
+    return json.loads(next(m for m in reversed(body['messages']) if m['role'] == 'tool')['content'])
+
+
+class LoopCompletion(unittest.TestCase):
+    """SEC-LOOP-01 (#657) meets #627: refs, internal state and repeat keys in ``run_agent``."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.store = QuickStore(Path(tmp.name) / 'state')
+        self.service = AgentService(self.store)
+        self.now = float(int(time.time()) + 1)
+        self.service.context_observations.clock = lambda: self.now
+        self.store.put('telegram', {'enabled': True, 'user_id': CHAT, 'generation': GENERATION, 'cursor': 0})
+        self.service.set_current_context({'enabled': True, 'timezone': 'Asia/Seoul'})
+        self.update_id = 0
+        self.network, self.events = _Network(), []
+
+    def share(self, edit=False):
+        self.update_id += 1
+        message = {'message_id': 7, 'from': {'id': CHAT}, 'chat': {'id': CHAT, 'type': 'private'},
+                   'date': int(self.now) - (30 if edit else 0), 'location': {**SEOUL_POINT, 'live_period': 3600}}
+        if edit:
+            message['edit_date'] = int(self.now)
+        self.service.ingest_update({'update_id': self.update_id,
+                                    ('edited_message' if edit else 'message'): message}, GENERATION)
+        return 'obs:' + self.service.current_state.observations.usable()[0]['id']
+
+    def loop(self, text, *script, answer=True):
+        job = self.store.enqueue(text, f'k{len(self.events)}')
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='running', created=? WHERE id=?", (self.now, job))
+        transport = Script(*script)
+        caps = Capabilities(self.store, ModelAdapter(transport), CFG, '', job,
+                            lambda tool, status, detail: self.events.append((tool, status, detail)),
+                            network=self.network, lookup_sources=lambda: lookup_sources(self.store, job),
+                            judgments=judgments(answer), current_context=self.service.current_state)
+        result = run_agent(caps.adapter, CFG, '',
+                           [{'role': 'user', 'content': text}], '', caps, caps.record)
+        return result, transport
+
+    def test_a_weather_ref_result_carries_the_loop_ref_and_can_be_cited(self):
+        ref = self.share()
+        result, transport = self.loop('여기 비 와?', {'tool_calls': [call('w1', 'weather', location_ref=ref)]},
+                                     finish('f1', 'w1'), answer=True)
+        tool = last_tool(transport.bodies[1])
+        self.assertEqual(tool['ref'], 'w1', 'the loop call id, not the location ref')
+        self.assertEqual(tool['location_source']['ref'], ref)
+        self.assertEqual(result.outcome, 'succeeded')
+
+    def test_a_proposal_is_neither_failure_nor_goal_evidence(self):
+        # Only internal state ran: a plain answer concludes like conversation.
+        result, transport = self.loop('오늘 재택이야', {'tool_calls': [call('p1', 'propose_current_state',
+                                                                     predicate='work_mode', value='remote')]},
+                                     {'content': '오늘은 재택으로 기억해 둘게요.'})
+        tool = last_tool(transport.bodies[1])
+        self.assertEqual(tool['ref'], 'p1')
+        self.assertTrue(tool['recorded'])
+        self.assertTrue(tool['state_ref'].startswith('state:'))
+        self.assertEqual(result.outcome, 'succeeded')
+        self.assertEqual(len(transport.bodies), 2, 'no completion check for internal bookkeeping')
+        # A done claim resting only on a proposal has no goal evidence.
+        result, transport = self.loop('오늘 재택이야 2', {'tool_calls': [call('p2', 'propose_current_state',
+                                                                       predicate='work_mode', value='office')]},
+                                     finish('f2', 'p2'), {'content': '알겠어요.'})
+        rejected = last_tool(transport.bodies[2])
+        self.assertEqual(rejected['code'], 'no_evidence')
+        self.assertEqual(result.outcome, 'succeeded', 'then answered as conversation, not a failure')
+
+    def test_the_same_ref_is_a_repeat_only_while_its_source_revision_is_unchanged(self):
+        ref = self.share()
+        weather = lambda ident: {'tool_calls': [call(ident, 'weather', location_ref=ref)]}  # noqa: E731
+
+        def moved(body):
+            self.now += 60
+            self.share(edit=True)
+            return weather('w3')
+        result, transport = self.loop('여기 비 와?', weather('w1'), weather('w2'), moved,
+                                     finish('f1', 'w1', 'w3'))
+        second = last_tool(transport.bodies[2])
+        self.assertEqual(second['code'], 'duplicate_call', 'unchanged source: a repeat')
+        third = last_tool(transport.bodies[3])
+        self.assertEqual(third['ref'], 'w3', 'a new live point: a new path that runs')
+        self.assertEqual(len([plan for plan in self.network.plans if plan['tool'] == 'weather']), 2)
 
 
 if __name__ == '__main__':

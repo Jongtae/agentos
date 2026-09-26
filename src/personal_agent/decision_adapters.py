@@ -221,7 +221,7 @@ class SubscriptionCliDecisionEngine(SchemaDecisionEngine):
         if context.is_cancelled():
             return done(OUTCOME_CANCELLED)
         rendered = context.render()
-        if len(rendered) > MAX_CONTEXT_CHARS:
+        if context.too_large(rendered):
             return done(OUTCOME_REJECTED)
         if self.engine_id == 'codex' and self.codex_disabled_features is None:
             return done(OUTCOME_UNAVAILABLE, failure='capability-unchecked')
@@ -433,7 +433,7 @@ class JevDecisionEngine(DecisionEngine):
             return done(OUTCOME_UNAVAILABLE, failure='not-configured')
         if context.is_cancelled():
             return done(OUTCOME_CANCELLED)
-        if len(context.render()) > MAX_CONTEXT_CHARS:
+        if context.too_large():
             return done(OUTCOME_REJECTED)
         body = {'state': {'purpose': context.purpose, **context.facts}, 'model': self.model,
                 'questions': {_QUESTION: question}}

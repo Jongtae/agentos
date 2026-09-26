@@ -13,6 +13,7 @@ refusal is visible, not silent". These tests hold the whole turn to it, so
 they assert on the text the owner actually receives rather than on the tool
 result the model sees.
 """
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -26,6 +27,7 @@ from personal_agent.google_calendar import CALENDAR_READ_SCOPE, CALENDAR_WRITE_S
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
+from test_agency_loop import goal_engine
 
 CHAT = 909
 GENERATION = 'g1'
@@ -48,6 +50,8 @@ class RefusedWriteTestCase(unittest.TestCase):
         self.child_plan = []    # the same, for a delegated specialist's own turn
         self.text = '완료했습니다.'
         self.turn = 0
+        # #657: when set, the parent ends with a finish claim citing every result it was shown.
+        self.claim = False
 
         def transport(url, body=None, headers=None, timeout=60):
             if url.endswith('/sendMessage'):
@@ -77,6 +81,13 @@ class RefusedWriteTestCase(unittest.TestCase):
                 return {'message': {'content': '', 'tool_calls': [
                     {'id': f'call-{self.turn}',
                      'function': {'name': name, 'arguments': arguments}}]}}
+            refs = [json.loads(m['content']).get('ref') for m in body.get('messages', [])
+                    if m.get('role') == 'tool' and m.get('content', '').startswith('{')]
+            if 'delegate_agent' in tools and self.claim and any(refs):
+                self.claim = False
+                return {'message': {'content': '', 'tool_calls': [
+                    {'id': 'finish', 'function': {'name': 'finish', 'arguments': {
+                        'status': 'done', 'evidence_refs': [ref for ref in refs if ref], 'summary': self.text}}}]}}
             return {'message': {'content': self.text}}
 
         self.service = AgentService(self.store, ModelAdapter(model), transport,
@@ -86,6 +97,11 @@ class RefusedWriteTestCase(unittest.TestCase):
         self.assertTrue(self.service.test_model()['ok'])
         self.store.put('telegram', {'enabled': True, 'user_id': CHAT,
                                     'generation': GENERATION})
+
+    def claim_completion(self, engine=None):
+        """#657: the model claims completion and the judgment finds it shown."""
+        self.claim = True
+        self.service.use_decision_engine(engine or goal_engine(True))
 
     def calendar(self):
         """A connected read+write Calendar whose provider records every call."""
@@ -231,9 +247,11 @@ class AcceptedWriteTests(RefusedWriteTestCase):
         self.plan = [('save_memory', {'memory_key': 'meal-preference',
                                       'content': '땅콩 알레르기'})]
         self.text = '기억했습니다.'
-        # #597: the fixture DecisionEngine judges this turn an explicit remember request.
-        self.service.use_decision_engine(FixtureDecisionEngine(judge=lambda context, proposition: BinaryDecision(
-            OUTCOME_DECIDED, True, fixture_confidence()) if context.purpose == 'explicit-memory-request' else None))
+        # #597: the fixture DecisionEngine judges this turn an explicit remember
+        # request; #657: and the stored Memory row as the request fulfilled.
+        self.claim_completion(FixtureDecisionEngine(judge=lambda context, proposition: BinaryDecision(
+            OUTCOME_DECIDED, True, fixture_confidence())
+            if context.purpose in ('explicit-memory-request', 'goal-reached') else None))
         job, bubble = self.ask('땅콩 알레르기가 있다는 걸 기억해 줘')
         self.assertEqual(job['status'], 'succeeded', job.get('error'))
         self.assertEqual(bubble, '기억했습니다.')
@@ -247,6 +265,7 @@ class AcceptedWriteTests(RefusedWriteTestCase):
         self.service.save_roots({'paths': [str(root)]})
         self.plan = [('find_files', {'query': '급여'})]
         self.text = '급여 파일 한 건을 찾았습니다.'
+        self.claim_completion()
         job, bubble = self.ask('급여 파일 찾아줘')
         self.assertEqual(job['status'], 'succeeded', job.get('error'))
         self.assertEqual(bubble, self.text)
@@ -395,6 +414,7 @@ class DeferredCalendarWriteTests(RefusedWriteTestCase):
                                          'end': '2026-09-26T00:00:00+09:00',
                                          'timezone': 'Asia/Seoul'})]
         self.text = '팀 회의 하나가 있습니다.'
+        self.claim_completion()
         job, bubble = self.ask('모레 일정 뭐 있어?')
         self.assertEqual(job['status'], 'succeeded', job.get('error'))
         self.assertEqual(bubble, self.text)

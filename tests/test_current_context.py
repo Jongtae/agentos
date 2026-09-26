@@ -249,7 +249,7 @@ class Corrections(ContextCase):
         first = self.propose(job, predicate='work_mode', value='remote')
         again = self.propose(job, predicate='work_mode', value='remote')
         self.assertTrue(again['duplicate'])
-        self.assertEqual(again['ref'], first['ref'])
+        self.assertEqual(again['state_ref'], first['state_ref'])
         self.assertEqual(len(self.claims()), 1)
 
     def test_the_owners_correction_supersedes_only_that_proposition(self):
@@ -259,12 +259,12 @@ class Corrections(ContextCase):
         busy = self.propose(job, predicate='availability_hint', value='회의 중', until='2026-09-21T15:00:00+09:00')
         self.now += 600
         fix, _ = self.request('아 오늘 출근이야')
-        office = self.propose(fix, predicate='work_mode', value='office', supersedes=remote['ref'])
-        self.assertEqual(office['superseded'], [remote['ref']])
+        office = self.propose(fix, predicate='work_mode', value='office', supersedes=remote['state_ref'])
+        self.assertEqual(office['superseded'], [remote['state_ref']])
         live = {c['predicate']: c for c in self.context.hypotheses()}
         self.assertEqual(live['work_mode']['value'], 'office')
         self.assertEqual(live['availability_hint']['value'], '회의 중', 'an unrelated hypothesis is untouched')
-        self.assertEqual('state:' + live['availability_hint']['id'], busy['ref'])
+        self.assertEqual('state:' + live['availability_hint']['id'], busy['state_ref'])
         # A later owner statement of the same proposition corrects it even
         # without naming it.
         self.now += 600
@@ -282,7 +282,7 @@ class Corrections(ContextCase):
         states = {c['kind']: c['state'] for c in self.context.hypotheses()}
         self.assertEqual(states, {'owner_statement_interpretation': 'conflicting', 'source_report': 'conflicting'})
         # A report cannot supersede the owner's statement.
-        refused = self.propose(job, predicate='current_place', value='Seoul', source=ref, supersedes=stated['ref'])
+        refused = self.propose(job, predicate='current_place', value='Seoul', source=ref, supersedes=stated['state_ref'])
         self.assertEqual(refused['reason'], 'invalid_supersedes')
 
     def test_editing_the_source_message_invalidates_what_was_derived_from_it(self):

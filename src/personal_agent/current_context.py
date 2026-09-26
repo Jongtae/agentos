@@ -416,7 +416,9 @@ class CurrentContext:
 
     @staticmethod
     def _result(claim, duplicate=False, superseded=()):
-        result = {'recorded': True, 'ref': STATE_PREFIX + claim['id'], 'predicate': claim['predicate'],
+        # ``state_ref`` names the hypothesis; ``ref`` is reserved for the loop's
+        # call id that a ``finish`` claim cites (#657).
+        result = {'recorded': True, 'state_ref': STATE_PREFIX + claim['id'], 'predicate': claim['predicate'],
                   'value': claim['value'], 'kind': claim['kind'], 'until': iso(claim['end']),
                   'note': 'A revisable, source-qualified hypothesis for the stated interval. It is not Memory, '
                           'not a profile fact and not verified GPS.'}
@@ -464,6 +466,27 @@ class CurrentContext:
                 'label': payload.get('label') or '',
                 'source': {'ref': ref, 'kind': entry['kind'], 'freshness': entry['freshness'],
                            'age_seconds': max(0, int(now - entry['observed_at'])), 'basis': basis}}
+
+    def ref_revision(self, ref):
+        """The current revision of the source behind a location ref, or None.
+
+        ``obs:<id>`` -> the observation's source revision (a new live point
+        is a new revision); ``profile:place.<name>`` -> the current Memory row
+        id (a correction supersedes the row).  The loop keys a repeated
+        ``weather(location_ref)`` on it, so the same ref is a repeat only
+        while its source is unchanged (#657 path keys).
+        """
+        if not isinstance(ref, str):
+            return None
+        if ref.startswith(PROFILE_PREFIX):
+            anchor = self._place_anchor('profile.' + ref[len(PROFILE_PREFIX):])
+            return None if anchor is None else 'memory:' + str(anchor['memory_id'])
+        if ref.startswith(OBS_PREFIX):
+            with self.store.db() as db:
+                row = db.execute('SELECT source_revision, context_epoch FROM context_observations WHERE id=?',
+                                 (ref[len(OBS_PREFIX):],)).fetchone()
+            return None if row is None else f"{row['context_epoch']}:{row['source_revision']}"
+        return None
 
     # --- snapshot (S2) -----------------------------------------------------
 

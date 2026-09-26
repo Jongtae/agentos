@@ -286,6 +286,17 @@ class FirstUseEndToEndAcceptance(unittest.TestCase):
                 return {'choices': [{'message': {'tool_calls': [
                     {'id': f'call-{done}', 'type': 'function',
                      'function': {'name': name, 'arguments': arguments}}]}}]}
+            # #657: after its tools the model claims completion once, citing
+            # every result it was shown; the fixture judgment decides it.
+            refs = [json.loads(m['content']).get('ref') for m in body['messages']
+                    if m.get('role') == 'tool' and str(m.get('content', '')).startswith('{')]
+            claimed = any((call.get('function') or {}).get('name') == 'finish'
+                          for m in body['messages'] for call in (m.get('tool_calls') or []))
+            if any(refs) and not claimed:
+                return {'choices': [{'message': {'tool_calls': [
+                    {'id': 'finish', 'type': 'function', 'function': {'name': 'finish', 'arguments': json.dumps(
+                        {'status': 'done', 'evidence_refs': [ref for ref in refs if ref], 'summary': self.model_text},
+                        ensure_ascii=False)}}]}}]}
             return {'choices': [{'message': {'content': self.model_text}}]}
         raise AssertionError('unexpected outbound call: ' + url)
 
@@ -334,7 +345,10 @@ class FirstUseEndToEndAcceptance(unittest.TestCase):
             judge=lambda context,proposition:
             BinaryDecision(OUTCOME_DECIDED,context.facts.get('owner_message') in OWNER_MEMORY_REQUESTS,
                            fixture_confidence())
-            if context.purpose == 'explicit-memory-request' else None))
+            if context.purpose == 'explicit-memory-request' else
+            # #657: the cited observations are judged to satisfy the request.
+            BinaryDecision(OUTCOME_DECIDED,True,fixture_confidence())
+            if context.purpose == 'goal-reached' else None))
         service.telegram_transport = self.transport
         service.adapter = ModelAdapter(self.transport)
         # Guarded rather than assumed, so that a deployment which stopped

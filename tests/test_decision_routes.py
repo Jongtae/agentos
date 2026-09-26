@@ -41,6 +41,10 @@ def oracle(purpose, facts, kind, options):
     Returns ``(value, confidence)`` - a bool for judge, an option for choose.
     """
     message = facts.get('owner_message', '')
+    if kind == 'choose_many':
+        # #605 lookup probe: withhold the identifier term (a fixture oracle).
+        terms = dict(part.split(' = ', 1) for part in facts.get('terms', '').split('; ') if ' = ' in part)
+        return [label for label in options if any(ch.isdigit() for ch in terms.get(label, ''))], 0.9
     if kind == 'judge':
         return ('취소' in message or '안 해도' in message), 0.9
     if purpose in ('conversation-followup', 'decision-route-probe'):
@@ -57,6 +61,8 @@ def oracle(purpose, facts, kind, options):
 
 def careless(purpose, facts, kind, options):
     """A fluent but unqualified engine: always confident, always the first option."""
+    if kind == 'choose_many':
+        return [], 0.95
     return (True if kind == 'judge' else options[0]), 0.95
 
 
@@ -81,6 +87,9 @@ def schema_answer(schema, purpose, facts, judge=oracle):
     if 'choice' in props:
         value, confidence = judge(purpose, facts, 'choose', props['choice']['enum'])
         return {'choice': value, 'confidence': confidence}
+    if 'choices' in props:
+        value, confidence = judge(purpose, facts, 'choose_many', props['choices']['items']['enum'])
+        return {'choices': value, 'confidence': confidence}
     return {'score': props['score']['minimum'], 'confidence': 0.9}
 
 
@@ -239,6 +248,12 @@ class AdapterParityTests(Temp):
             with self.subTest(route=name):
                 result = qualify(engine, stop_on_failure=False)
                 self.assertEqual(result['suite_version'], SUITE_VERSION)
+                if name == 'jev':
+                    # Jev's API has no multi-selection type, so it cannot serve
+                    # the #605 lookup judgment and does not qualify for it.
+                    self.assertEqual([row['case'] for row in result['results'] if not row['passed']],
+                                     ['lookup-withholds-the-identifier'])
+                    continue
                 self.assertTrue(result['qualified'], (name, result['results']))
                 self.assertEqual([row['case'] for row in result['results']], list(CASE_IDS))
 

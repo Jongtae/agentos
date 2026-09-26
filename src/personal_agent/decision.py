@@ -280,6 +280,10 @@ class DecisionPolicy:
             return None
         return frozenset(decision.choices)
 
+    def confident_binary(self, decision):
+        """True when a decided answer met the binary threshold."""
+        return decision.decided and self._confident(decision, self.binary_threshold)
+
     def selection(self, decision):
         """The chosen candidate, or None (including an explicit none-of-these)."""
         if not decision.decided or not self._confident(decision, self.selection_threshold):
@@ -359,8 +363,10 @@ class SchemaDecisionEngine(DecisionEngine):
     def choose_many(self, context, candidates, question):
         options = [*dict.fromkeys(str(c) for c in candidates)]
         schema = {'type': 'object', 'additionalProperties': False,
+                  # No `uniqueItems`: not every structured-output transport
+                  # accepts it; uniqueness is checked after parsing below.
                   'properties': {'choices': {'type': 'array', 'items': {'type': 'string', 'enum': options},
-                                             'uniqueItems': True, 'maxItems': len(options)},
+                                             'maxItems': len(options)},
                                  'confidence': {'type': 'number', 'minimum': 0, 'maximum': 1}},
                   'required': ['choices', 'confidence']}
         outcome, data, confidence = self._ask(

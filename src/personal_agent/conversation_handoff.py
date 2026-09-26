@@ -221,7 +221,7 @@ class TelegramChannel:
 import re
 import time
 
-from .decision import DecisionContext, DecisionPolicy, UnavailableDecisionEngine
+from .decision import OUTCOME_DECIDED, OUTCOME_MALFORMED, DecisionContext, DecisionPolicy, UnavailableDecisionEngine
 
 INTENT_GREETING = 'greeting'
 INTENT_KNOWLEDGE = 'personal-knowledge'
@@ -653,8 +653,16 @@ class ConversationJudgments:
         chosen = self.policy.selection_set(decision)
         source = decision.confidence.provider or decision.outcome
         if chosen is None:
-            return Judgment(JUDGMENT_UNAVAILABLE, source=decision.outcome)
+            # `source` tells AgentOS's refusal text apart: the engine could not
+            # answer at all, or it answered without enough confidence.
+            return Judgment(JUDGMENT_UNAVAILABLE,
+                            source='uncertain' if decision.outcome in (OUTCOME_DECIDED, OUTCOME_MALFORMED)
+                            else decision.outcome)
         if not chosen:
+            # Releasing every term is a yes/no-strength claim, so it must meet
+            # the binary threshold (#605 P3-3), not the selection one.
+            if not self.policy.confident_binary(decision):
+                return Judgment(JUDGMENT_UNAVAILABLE, source='uncertain')
             return Judgment(JUDGMENT_NO, value=frozenset(), source=source)
         return Judgment(JUDGMENT_YES, value=frozenset(labels.index(label) for label in chosen), source=source)
 

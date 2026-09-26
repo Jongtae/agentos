@@ -16,7 +16,7 @@ from pathlib import Path
 from unittest import mock
 
 from personal_agent import mcp_bridge
-from personal_agent.agent_runtime import (lookup_words, ENGINE_UNMEDIATED, HISTORY_PREFIX, OWNER_CONVERSATION, PUBLIC_TASK_PLACE,
+from personal_agent.agent_runtime import (lookup_words, PUBLIC_TASK_NO_JUDGMENT, PUBLIC_TASK_SEARCH_HINT, LOOKUP_JUDGMENTS_PER_WORK, ENGINE_UNMEDIATED, HISTORY_PREFIX, OWNER_CONVERSATION, PUBLIC_TASK_PLACE,
                                           PUBLIC_TASK_UNRESOLVED, WORK_SOURCES_KEY, Capabilities, egress_refusal,
                                           history_provenance, run_agent, work_sources)
 from personal_agent.bounded_execution import ExecutionResult
@@ -511,14 +511,21 @@ class RoundFindings(unittest.TestCase):
             OUTCOME_DECIDED, [], cands, fixture_confidence(0.2)))
         malformed = FixtureDecisionEngine(choose_many=lambda c, cands, q: SelectionSetDecision(
             OUTCOME_DECIDED, ['not-a-term'], cands, fixture_confidence(1.0)))
-        for name, judge in (('none', None), ('unavailable', ConversationJudgments(FixtureDecisionEngine()).lookup_term_sensitivity),
-                            ('abstaining', ConversationJudgments(abstain).lookup_term_sensitivity),
-                            ('malformed', ConversationJudgments(malformed).lookup_term_sensitivity)):
+        release_unsure = FixtureDecisionEngine(choose_many=lambda c, cands, q: SelectionSetDecision(
+            OUTCOME_DECIDED, [], cands, fixture_confidence(0.7)))  # P3-3: below the 0.75 binary threshold
+        for name, judge, reason in (
+                ('none', None, 'unavailable'),
+                ('unavailable', ConversationJudgments(FixtureDecisionEngine()).lookup_term_sensitivity, 'unavailable'),
+                ('abstaining', ConversationJudgments(abstain).lookup_term_sensitivity, 'uncertain'),
+                ('malformed', ConversationJudgments(malformed).lookup_term_sensitivity, 'uncertain'),
+                ('release-all below the binary threshold', ConversationJudgments(release_unsure).lookup_term_sensitivity, 'uncertain')):
             with self.subTest(name):
                 self.wire.plans.clear()
                 caps = self.caps((), [f'내 여권번호 {SECRET_ID}로 성남 병원 검색해줘'], lookup_sensitivity=judge)
-                with self.assertRaisesRegex(ValueError, '공개 조회에 보낼 수 있는 내용이 남지 않았습니다'):
+                with self.assertRaises(ValueError) as raised:
                     caps.execute('web_search', {'query': f'성남 병원 {SECRET_ID}'})
+                # D2: the truthful reason, not "retype it in the request".
+                self.assertEqual(str(raised.exception), PUBLIC_TASK_NO_JUDGMENT[reason] + PUBLIC_TASK_SEARCH_HINT)
                 self.assertEqual(self.wire.plans, [])
                 # Words from earlier permitted text may still go out.
                 earlier = self.caps((), ['성남에 있어', f'여권번호 {SECRET_ID} 병원 검색해줘'], lookup_sensitivity=judge)
@@ -531,9 +538,12 @@ class RoundFindings(unittest.TestCase):
         self.caps((), ['나는 대전에 있어. 비 와?'], engine=engine).execute('weather', {'city': 'Daejeon', 'country': 'kr'})
         self.assertEqual(self.wire.plans, [{'tool': 'weather', 'city': 'Daejeon', 'country': 'KR'}])
         self.assertIn('term-2 = KR', sensitivity_asked(engine)[0][1].facts['terms'], 'the country passes the same judgment')
-        self.wire.plans.clear()
-        self.caps((), ['나는 대전에 있어. 비 와?']).execute('weather', {'city': 'Daejeon', 'country': 'Korea'})
-        self.assertEqual(self.wire.plans, [{'tool': 'weather', 'city': 'Daejeon'}], 'not an ISO-2 code: omitted')
+        for country in ('Korea', 'ZZ', 'QX', 'K1'):
+            with self.subTest(country=country):
+                self.wire.plans.clear()
+                self.caps((), ['나는 대전에 있어. 비 와?']).execute('weather', {'city': 'Daejeon', 'country': country})
+                self.assertEqual(self.wire.plans, [{'tool': 'weather', 'city': 'Daejeon'}],
+                                 'not an ISO 3166-1 alpha-2 code (P3-1): omitted')
 
     def test_r2_private_weather_keeps_owner_wording_only(self):
         with self.assertRaisesRegex(ValueError, '지역명은 소유자가'):
@@ -672,6 +682,198 @@ class RoundFindings(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '이미 한 번 시도'):
             self.caps(self.NOTES, ['병원 뉴스'], work='f3').execute('web_search', {'query': '뉴스'})  # a new process
         self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}])
+
+
+class RoundFiveFindings(unittest.TestCase):
+    """PR #622 re-review @ 6a878c1 (P2-1, P2-4, P3-2) and owner decisions D1-D3."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        self.path = Path(tmp.name) / 'state'
+        self.store = QuickStore(self.path)
+        self.wire = Wire()
+
+    def caps(self, labels=(), permitted=(), excluded=(), judge=judged_ordinary, **kwargs):
+        def sources():
+            return {'permitted': list(permitted), 'excluded': list(excluded), 'current': list(permitted)[-1]}
+        return Capabilities(self.store, None, CFG, '', next_work(), lambda *e: None, network=self.wire,
+                            inherited_provenance=set(labels), lookup_sources=sources, lookup_sensitivity=judge, **kwargs)
+
+    # -- P2-1: a clean-context query keeps its punctuation
+    def test_p2_1_clean_queries_keep_the_worker_string(self):
+        for query in ('Python 3.13 release notes', '"C++20" modules site:cppreference.com', 'node.js -deno',
+                      '₩50,000 이하 이어폰'):
+            with self.subTest(query):
+                self.wire.plans.clear()
+                self.caps((), ['검색해줘']).execute('web_search', {'query': query})
+                self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': query}])
+
+    def test_p2_1_only_withheld_spans_are_removed(self):
+        self.caps((), [f'{SECRET_ID} 가진 사람 node.js 강좌 검색해줘'],
+                  judge=ConversationJudgments(flagging(SECRET_ID)).lookup_term_sensitivity).execute(
+            'web_search', {'query': f'node.js -deno {SECRET_ID} "강좌"'})
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': 'node.js -deno "강좌"'}])
+
+    # -- P2-4: sticky withheld set, order-insensitive cache, per-Work cap
+    def test_p2_4_a_reordered_retry_cannot_resample_the_judgment(self):
+        answers = [[SECRET_ID], []]  # flags the value once, then misses it
+
+        def choose_many(context, candidates, question):
+            terms = dict(part.split(' = ', 1) for part in context.facts['terms'].split('; '))
+            marked = {term.casefold() for term in answers.pop(0)} if answers else set()
+            return SelectionSetDecision(OUTCOME_DECIDED, [l for l in candidates if terms[l].casefold() in marked],
+                                        candidates, fixture_confidence(1.0))
+        engine = FixtureDecisionEngine(choose_many=choose_many)
+        caps = self.caps((), [f'여권번호 {SECRET_ID} 병원 근처 검색해줘'],
+                         judge=ConversationJudgments(engine).lookup_term_sensitivity)
+        caps.execute('web_search', {'query': f'{SECRET_ID} 병원'})
+        caps.execute('web_search', {'query': f'병원 근처 {SECRET_ID}'})
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'},
+                                           {'tool': 'web_search', 'query': '병원 근처'}])
+
+    def test_p2_4_the_cache_ignores_term_order_and_judgments_are_capped(self):
+        engine = flagging()
+        caps = self.caps((), ['성남 병원 약국 찾아줘'], judge=ConversationJudgments(engine).lookup_term_sensitivity)
+        caps.execute('web_search', {'query': '성남 병원'})
+        caps.execute('web_search', {'query': '병원 성남'})
+        self.assertEqual(len(sensitivity_asked(engine)), 1, 'the same term set is judged once')
+        for index in range(LOOKUP_JUDGMENTS_PER_WORK + 2):
+            try:
+                caps.execute('web_search', {'query': f'성남 약국 w{index}'})
+            except ValueError as exc:
+                self.assertEqual(str(exc), PUBLIC_TASK_NO_JUDGMENT['budget'] + PUBLIC_TASK_SEARCH_HINT)
+        self.assertEqual(len(sensitivity_asked(engine)), LOOKUP_JUDGMENTS_PER_WORK)
+
+    # -- P3-2: private-context weather city is deduplicated/ordered/capped
+    def test_p3_2_private_weather_city_follows_the_private_rules(self):
+        self.caps(('connected-document',), ['분당구 정자동 날씨 알려줘']).execute('weather', {'city': '정자동 분당구 정자동'})
+        self.assertEqual(self.wire.plans, [{'tool': 'weather', 'city': '분당구 정자동'}])
+
+    # -- D1: an owner-typed /search string is sent as typed
+    def test_d1_the_typed_search_string_is_sent_without_the_judgment_once(self):
+        typed = '이혼소송 강남 변호사 "상담 비용"'
+        caps = self.caps((), [f'/search {typed}'], judge=None)  # no judgment at all
+        result = caps.execute('web_search', {'query': typed})
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': typed}])
+        self.assertTrue(result['explicit_owner_query'])
+        # The same string again is an ordinary lookup: no judgment, nothing leaves.
+        with self.assertRaises(ValueError):
+            caps.execute('web_search', {'query': typed})
+        self.assertEqual(len(self.wire.plans), 1)
+
+    def test_d1_rewritten_words_are_not_covered_and_saved_values_still_leave_out(self):
+        rewritten = self.caps((), ['/search 이혼소송 강남 변호사'], judge=None)
+        with self.assertRaises(ValueError) as raised:
+            rewritten.execute('web_search', {'query': '이혼소송 강남 변호사 추천'})
+        self.assertIn('민감 정보 판단', str(raised.exception))
+        self.assertEqual(self.wire.plans, [])
+        saved = self.caps(('owner-memory',), [f'/search {SECRET_ID} 병원'], [SECRET_ID], judge=None)
+        saved.execute('web_search', {'query': f'{SECRET_ID} 병원'})
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}])
+
+
+class NoEngineEndToEnd(unittest.TestCase):
+    """P2-5/D2/D3: no usable judgment, end to end, with the owner-visible text."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        self.store = QuickStore(Path(tmp.name) / 'state')
+        self.wire = Wire()
+
+    def api(self, script):
+        service = AgentService(self.store, adapter=ModelAdapter(lambda url, body, *a, **k: script(body['messages'])))
+        service.local_tools = self.wire
+        self.store.put('model', CFG)
+        self.store.put('model_test', {'ok': True, 'tools_ok': True, 'time': 9999999999,
+                                      'fingerprint': service.model_fingerprint(CFG)})
+        return service
+
+    def turn(self, service, text):
+        self.store.enqueue(text, f'k{len(self.store.jobs())}')
+        self.assertTrue(service.run_one())
+        return self.store.jobs()[0]
+
+    @staticmethod
+    def searching(query):
+        def script(messages):
+            if messages[-1]['role'] == 'tool':
+                return answer('done')
+            return calls(tool_call('web_search', {'query': query}))
+        return script
+
+    def owner_visible(self, job):
+        with self.store.db() as db:
+            rows = [row['content'] for row in db.execute("SELECT content FROM messages WHERE job_id=? AND role='assistant'", (job['id'],))]
+        return '\n'.join(rows) + '\n' + str(job.get('error') or '')
+
+    def test_api_route_without_an_engine_tells_the_owner_why(self):
+        service = self.api(self.searching('성남 병원'))
+        job = self.turn(service, '성남 병원 찾아줘')
+        self.assertEqual(self.wire.plans, [])
+        self.assertIn(PUBLIC_TASK_NO_JUDGMENT['unavailable'], self.owner_visible(job))
+        self.assertIn('설정 › 대화 해석', self.owner_visible(job))
+        self.assertIn(job['status'], ('failed', 'partial'))
+
+    def test_api_route_explicit_search_goes_out_without_an_engine(self):
+        service = self.api(self.searching('성남 병원'))
+        job = self.turn(service, '/search 성남 병원')
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '성남 병원'}])
+        self.assertEqual(job['status'], 'succeeded')
+
+    def cli(self, planned):
+        refusals, wire = [], self.wire
+
+        class Cli:
+            def execute(self, engine, prompt, tools, **kwargs):
+                if planned:
+                    try:
+                        tools.call(*planned)
+                    except Exception as exc:
+                        refusals.append(str(exc))
+                return ExecutionResult('engine answer', engine, 0)
+
+        service = AgentService(self.store, adapter=ModelAdapter(lambda *a, **k: answer()),
+                               subscription_engines=SubscriptionEngines(finder=lambda _: '/runtime/cli', clock=lambda: 1),
+                               execution_adapter=Cli())
+        service.local_tools = wire
+        service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
+        return service, refusals
+
+    def test_cli_route_without_an_engine_refuses_with_the_truthful_text(self):
+        service, refusals = self.cli(('web_search', {'query': '성남 병원'}))
+        self.turn(service, '성남 병원 찾아줘')
+        self.assertEqual(self.wire.plans, [])
+        self.assertEqual(refusals, [PUBLIC_TASK_NO_JUDGMENT['unavailable'] + PUBLIC_TASK_SEARCH_HINT])
+
+    def test_cli_route_host_preflight_sends_an_explicit_search_as_typed(self):
+        service, _ = self.cli(None)
+        job = self.turn(service, '/search 이혼소송 강남 변호사')
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '이혼소송 강남 변호사'}])
+        self.assertEqual(job['status'], 'succeeded')
+
+    def test_d3_bridge_with_a_cli_decision_route_fails_closed_with_the_truthful_text(self):
+        job = self.store.enqueue('성남 병원 찾아줘', 'b1')
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='running' WHERE id=?", (job,))
+            db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',
+                       ('user', '성남 병원 찾아줘', 'web', 1, None, job))
+        self.store.put(WORK_SOURCES_KEY, {job: [OWNER_CONVERSATION]})
+        self.store.put('decision_route', {'transport': 'subscription_cli', 'engine': 'claude-code',
+                                          'model_policy': 'engine_default', 'fingerprint': 'x'})
+        lines = '\n'.join(json.dumps(r) for r in [
+            {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {}},
+            {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call', 'params': {'name': 'web_search', 'arguments': {'query': '성남 병원'}}},
+        ]) + '\n'
+        out = io.StringIO()
+        with mock.patch.object(mcp_bridge, 'LocalTools', lambda: self.wire), \
+             mock.patch('personal_agent.decision_routes.DecisionRoutes._cli_engine',
+                        side_effect=AssertionError('no decision CLI may run inside the bridge')), \
+             mock.patch.object(sys, 'stdin', io.StringIO(lines)), contextlib.redirect_stdout(out):
+            mcp_bridge.serve(str(self.store.root), job, [])
+        reply = [json.loads(line) for line in out.getvalue().splitlines() if line.strip()][-1]
+        self.assertEqual(self.wire.plans, [])
+        self.assertTrue(reply['result']['isError'])
+        self.assertEqual(reply['result']['content'][0]['text'], PUBLIC_TASK_NO_JUDGMENT['bridge'] + PUBLIC_TASK_SEARCH_HINT)
 
 
 class CurrentMessageSensitivity(unittest.TestCase):

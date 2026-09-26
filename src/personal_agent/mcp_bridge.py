@@ -13,11 +13,17 @@ import time
 
 from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS, LATEST_HANDSHAKE_VERSION
 
-from .agent_runtime import (CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, Capabilities, evidence_summary, lookup_sources,
+from .agent_runtime import (CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, PUBLIC_TASK_NO_JUDGMENT, PUBLIC_TASK_SEARCH_HINT,
+                            Capabilities, evidence_summary, lookup_sources,
                             recorded_private_sources, work_source_records)
 from .bounded_execution import AgentOSMcpTools, ExecutionError, profile_actions, redact_reason
 from .local_tools import LocalTools
 from .quickstart_store import QuickStore
+
+
+#: AgentOS's own fixed lookup-refusal texts (#605 D2): safe to return verbatim.
+_OWNER_VISIBLE_REFUSALS = frozenset({*PUBLIC_TASK_NO_JUDGMENT.values(),
+                                     *(text + PUBLIC_TASK_SEARCH_HINT for text in PUBLIC_TASK_NO_JUDGMENT.values())})
 
 
 def negotiated_protocol_version(offered):
@@ -108,10 +114,23 @@ def _lookup_sensitivity(store, job_id):
 
     def judge(message, terms):
         if 'judge' not in built:
+            from .conversation_handoff import JUDGMENT_UNAVAILABLE, Judgment
+            from .decision_routes import ROUTE_SUBSCRIPTION_CLI
             from .quickstart_service import AgentService
             service = AgentService(store)
             service.current_work_id = job_id
-            built['judge'] = service.decision_judge
+            route = service.decision_routes.active()
+            if route and route.get('transport') == ROUTE_SUBSCRIPTION_CLI:
+                # #605 D3: a subscription-CLI decision route cannot run inside
+                # the CLI's restricted bridge environment (no CLI home, bare
+                # PATH).  Fail closed with the truthful reason instead of
+                # attempting it; a host round trip is #629 (not activated).
+                built['judge'] = None
+                built['refusal'] = Judgment(JUDGMENT_UNAVAILABLE, source='bridge-cli-route')
+            else:
+                built['judge'] = service.decision_judge
+        if built['judge'] is None:
+            return built['refusal']
         return built['judge'].lookup_term_sensitivity(message, terms)
     return judge
 
@@ -152,6 +171,12 @@ def serve(data, job_id, provenance=(), judge=None):
                     # Redacted recovery metadata: the reason, never the arguments.
                     record(listed, 'failed',
                            json.dumps({'scope':'subscription-mcp-bridge','error':redact_reason(str(exc))}, ensure_ascii=False))
+                    if str(exc) in _OWNER_VISIBLE_REFUSALS:
+                        # #605 D2/D3: AgentOS's own fixed refusal text reaches the
+                        # CLI as a tool error, so the owner is told the true reason.
+                        if ident is not None:
+                            _send({'jsonrpc':'2.0','id':ident,'result':{'content':[{'type':'text','text':str(exc)}],'isError':True}})
+                        continue
                     raise
                 # The same redacted Evidence the direct route records
                 # (sources, attempted/failed URLs, counts), never the payload.

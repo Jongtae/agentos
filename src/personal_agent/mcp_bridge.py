@@ -13,19 +13,13 @@ import time
 
 from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS, LATEST_HANDSHAKE_VERSION
 
-from .agent_runtime import (CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, PUBLIC_TASK_LOOKUP_LIMIT, PUBLIC_TASK_NO_JUDGMENT,
-                            PUBLIC_TASK_SEARCH_HINT, PUBLIC_TASK_STATE_UNAVAILABLE, TRANSIENT_FAILURE_TEXT,
+from .agent_runtime import (CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, TRANSIENT_FAILURE_TEXT,
                             Capabilities, ToolError, WorkBudget, WorkLedger, classify_failure, evidence_summary,
                             lookup_sources, recorded_private_sources, work_source_records, work_stop_requested)
 from .providers import ProviderError
 from .bounded_execution import AgentOSMcpTools, ExecutionError, profile_actions, redact_reason
 from .local_tools import LocalTools
 from .quickstart_store import QuickStore
-
-
-#: AgentOS's own fixed lookup-refusal texts (#605 D2): safe to return verbatim.
-_OWNER_VISIBLE_REFUSALS = frozenset({*PUBLIC_TASK_NO_JUDGMENT.values(), PUBLIC_TASK_LOOKUP_LIMIT, PUBLIC_TASK_STATE_UNAVAILABLE,
-                                     *(text + PUBLIC_TASK_SEARCH_HINT for text in PUBLIC_TASK_NO_JUDGMENT.values())})
 
 
 def negotiated_protocol_version(offered):
@@ -99,53 +93,10 @@ def _lookup_sources(store, job_id):
     return lambda: lookup_sources(store, job_id)
 
 
-def _restrictive(store):
-    return (store.config('egress_composition', {}) or {}).get('mode') == 'restrictive'
-
-
-def _lookup_sensitivity(store, job_id):
-    """The host's DecisionEngine judgment path (#605 N3), built on first use.
-
-    The bridge has no service of its own, so the first lookup that would send
-    words of the owner's current message builds one ``AgentService`` over the
-    same store and asks its ``decision_judge`` -- the same route, context
-    bounds and audit as the host.  Any failure is an unavailable judgment,
-    which ``Capabilities`` answers with its fail-safe policy.
-    """
-    built = {}
-
-    def judge(message, terms):
-        if 'judge' not in built:
-            from .conversation_handoff import JUDGMENT_UNAVAILABLE, Judgment
-            from .decision_routes import ROUTE_SUBSCRIPTION_CLI
-            from .quickstart_service import AgentService
-            service = AgentService(store)
-            service.current_work_id = job_id
-            route = service.decision_routes.active()
-            if route and route.get('transport') == ROUTE_SUBSCRIPTION_CLI:
-                # #605 D3: a subscription-CLI decision route cannot run inside
-                # the CLI's restricted bridge environment (no CLI home, bare
-                # PATH).  Fail closed with the truthful reason instead of
-                # attempting it; a host round trip is #629 (not activated).
-                built['judge'] = None
-                built['refusal'] = Judgment(JUDGMENT_UNAVAILABLE, source='bridge-cli-route')
-            else:
-                built['judge'] = service.decision_judge
-        if built['judge'] is None:
-            return built['refusal']
-        return built['judge'].lookup_term_sensitivity(message, terms)
-    return judge
-
-
 #: The Work this bridge serves has ended; a typed tool error, not a protocol one.
 WORK_NOT_RUNNING = '이 작업은 더 이상 실행 중이 아니어서 도구를 실행하지 않았습니다.'
 #: Returned for an untyped tool failure whose own text is not AgentOS's.
 TOOL_FAILED_TEXT = 'AgentOS 도구가 이 요청을 처리하지 못했습니다. 다른 방법을 고르거나 소유자에게 필요한 정보를 물어보세요.'
-
-
-#: #605 policy refusals name private-source categories; the CLI gets a fixed
-#: text and the owner reads the exact reason from the Work's own record.
-POLICY_DENIED_TEXT = '개인 자료가 이 작업 문맥에 있어 AgentOS가 이 공개 조회를 허용하지 않았습니다. 같은 조회를 반복하지 마세요.'
 
 
 class _Rejected(ExecutionError):
@@ -161,15 +112,13 @@ def tool_error_result(exc, action):
     Normal tool failures are tool results (``isError``), not JSON-RPC protocol
     errors, so the CLI can tell a transient read failure from a denial, a
     setup need, the Work's Stop/deadline or an unknown effect.  The text is
-    AgentOS's own: a typed ``ToolError`` or #605 refusal verbatim, a fixed
+    AgentOS's own: a typed ``ToolError`` or #605 input request verbatim, a fixed
     text otherwise (an exception's own text may quote a URL or credential).
     """
     code, retry, effect = classify_failure(exc, action)
-    if str(exc) in _OWNER_VISIBLE_REFUSALS or code == 'input_required':
-        # #605 D2/D3: AgentOS's own fixed texts reach the CLI verbatim.
+    if code == 'input_required':
+        # #605 D2: AgentOS's own fixed texts reach the CLI verbatim.
         text = str(exc)
-    elif code == 'policy_denied':
-        text = POLICY_DENIED_TEXT
     elif isinstance(exc, ToolError):
         text = str(exc)
     elif code == 'transient_failure':
@@ -182,7 +131,7 @@ def tool_error_result(exc, action):
     return {'content': [{'type': 'text', 'text': text}], 'structuredContent': typed, 'isError': True}, typed
 
 
-def serve(data, job_id, provenance=(), judge=None):
+def serve(data, job_id, provenance=()):
     store = QuickStore(data)
     def record(tool, status, detail):
         with store.db() as db:
@@ -192,8 +141,7 @@ def serve(data, job_id, provenance=(), judge=None):
     capabilities = Capabilities(store, None, {}, '', job_id, record, network=LocalTools(), document_access=False,
                                 allowed_tools=set(profile_actions(AgentOSMcpTools.PROFILE)),
                                 inherited_provenance=_provenance(provenance), lookup_hint=CLI_LOOKUP_HINT,
-                                lookup_sources=_lookup_sources(store, job_id), lookup_restrictive=_restrictive(store),
-                                lookup_sensitivity=judge or _lookup_sensitivity(store, job_id),
+                                lookup_sources=_lookup_sources(store, job_id),
                                 # #607 AX-10: the same durable attempt count and
                                 # deadline as the host serving this Work.
                                 budget=WorkBudget(stop=lambda: work_stop_requested(store, job_id),

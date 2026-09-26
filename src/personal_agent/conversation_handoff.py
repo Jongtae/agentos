@@ -235,7 +235,7 @@ class TelegramChannel:
 import re
 import time
 
-from .decision import MULTI_SELECTION_UNSUPPORTED, OUTCOME_DECIDED, OUTCOME_MALFORMED, DecisionContext, DecisionPolicy, UnavailableDecisionEngine
+from .decision import DecisionContext, DecisionPolicy, UnavailableDecisionEngine
 
 INTENT_GREETING = 'greeting'
 INTENT_KNOWLEDGE = 'personal-knowledge'
@@ -507,14 +507,6 @@ MEMORY_REQUEST_PROPOSITION = ('The owner\'s latest message explicitly instructs 
                               'assistant not to remember something, when there is no stated value to keep (a '
                               'casual remark or a generic "don\'t forget"), when they ask for a note, file or '
                               'reminder instead, or when it is unclear. This judgment does not write anything.')
-LOOKUP_WITHHOLD_QUESTION = (
-    'A public web search, weather or page lookup is about to send the listed terms. The owner\'s latest message '
-    'is given for context. Choose every term that carries sensitive personal information from that message - '
-    'for example an identity, passport, account, card or phone number (in any spelling, spacing, with separators, '
-    'split across several terms, or written out in words), a personal address, or a health, legal or financial '
-    'fact about a person (also when spelled out, split or translated). Choose each part of a split value. Choose '
-    'none when every term is an ordinary lookup word such as a city or region, a topic, a kind of place or '
-    'business, a product or a date. This judgment does not send anything.')
 UNSUPPORTED_JUDGMENT_UNAVAILABLE = ('요청을 안전하게 구분할 판단 기능을 사용할 수 없어 메일을 검색하거나 다른 처리를 하지 않았습니다. '
                                    '메일을 찾으려는 요청이라면 검색할 내용을 다시 구체적으로 적어 주세요.')
 MIXED_MAIL_ACTION_CLARIFICATION = ('지원하지 않는 메일 발송 요청과 다른 작업이 함께 있어 아무 작업도 실행하지 않았습니다. '
@@ -641,47 +633,6 @@ class ConversationJudgments:
         verdict = self.policy.binary(decision)
         return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
                         source=decision.confidence.provider or decision.outcome)
-
-
-    def lookup_term_sensitivity(self, utterance, terms):
-        """Which of ``terms`` - the whole outbound term list of one public
-        lookup - must be withheld (#605 N3, owner decision R1)?
-
-        One ``choose_many`` judgment over the one owner utterance and the term
-        list (index labels only, so the audit row stays content-free), the same
-        bounds as ``explicit_memory_request``: no history, Memory or files.
-        ``value`` is the set of term indices to withhold on yes; a confident
-        empty selection is no.  Any non-answer is unavailable, and AgentOS's
-        policy then withholds every current-message term (R4).  Judgment only;
-        it sends nothing and grants nothing.
-        """
-        terms = [str(term) for term in terms]
-        if not terms:
-            return Judgment(JUDGMENT_NO, value=frozenset())
-        labels = tuple(f'term-{index}' for index in range(1, len(terms) + 1))
-        context = DecisionContext('public-lookup-sensitivity', {
-            'owner_message': utterance,
-            'terms': '; '.join(f'{label} = {term}' for label, term in zip(labels, terms)),
-        })
-        decision = self.engine.choose_many(context, labels, LOOKUP_WITHHOLD_QUESTION)
-        chosen = self.policy.selection_set(decision)
-        source = decision.confidence.provider or decision.outcome
-        if chosen is None:
-            # `source` tells AgentOS's refusal text apart: the engine could not
-            # answer at all, or it answered without enough confidence.
-            if decision.confidence.engine == MULTI_SELECTION_UNSUPPORTED:
-                return Judgment(JUDGMENT_UNAVAILABLE, source='route-unsupported')
-            return Judgment(JUDGMENT_UNAVAILABLE,
-                            source='uncertain' if decision.outcome in (OUTCOME_DECIDED, OUTCOME_MALFORMED)
-                            else decision.outcome)
-        if not chosen:
-            # Releasing every term is a yes/no-strength claim, so it must meet
-            # the binary threshold (#605 P3-3), not the selection one.
-            if not self.policy.confident_binary(decision):
-                return Judgment(JUDGMENT_UNAVAILABLE, source='uncertain')
-            return Judgment(JUDGMENT_NO, value=frozenset(), source=source)
-        return Judgment(JUDGMENT_YES, value=frozenset(labels.index(label) for label in chosen), source=source)
-
 
 
 class IntentDecision:

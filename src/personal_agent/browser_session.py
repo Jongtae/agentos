@@ -10,7 +10,8 @@ independently of anything the model says (pilot posture, #653):
   ``mediate_snapshot``: values of ``password`` inputs and of fields whose
   ``autocomplete`` names a credential, one-time code or card field are
   dropped; the existing saved-private-value matcher of public lookups
-  (``lookup_text_violations``, #605) redacts page text; the raw DOM, cookies,
+  (``lookup_text_violations``, #605) and the CLI prompt secret pattern redact
+  page text; the raw DOM, cookies,
   ``localStorage`` and storage state have no accessor at all.
 * **Payment guard.**  Typing into a card-number, CVC, card-expiry, one-time
   code or password field, and pressing a button of a form that contains such
@@ -32,6 +33,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from .agent_runtime import BROWSER_ACTIONS, ToolError, lookup_norm, lookup_text_violations, lookup_words
+from .bounded_execution import SECRET_PATTERN
 
 #: The model's declared effect class of one action.
 EFFECTS = ('read', 'navigate', 'mutate', 'payment')
@@ -97,6 +99,32 @@ def guarded_submit(element, elements):
     return button_like(element) and element.get('form') is not None and element['form'] in payment_forms(elements)
 
 
+USERNAME_TYPES = frozenset({'text', 'email', 'tel', ''})
+
+
+def login_form_present(elements, redirected=False):
+    """Generic login detection: a password field asking for the current password.
+
+    True when a ``password`` input (not ``new-password``) sits in a form that
+    also has a username-like text/email/tel field, or when the navigation was
+    redirected to a page with such a password field.  A change-password form
+    or a lone password field on an account page is not a login wall.  No
+    site, path or wording is consulted.
+    """
+    for element in elements:
+        if element.get('type') != 'password' or _autocomplete(element) == 'new-password':
+            continue
+        if redirected:
+            return True
+        form = element.get('form')
+        if form is None:
+            continue
+        if any(other is not element and other.get('form') == form and other.get('tag') == 'input'
+               and str(other.get('type') or '').lower() in USERNAME_TYPES for other in elements):
+            return True
+    return False
+
+
 def target_key(element):
     """The stable descriptor an approval is bound to (not the list number, which shifts)."""
     return '|'.join(str(element.get(key) or '') for key in ('role', 'name', 'tag', 'type', 'autocomplete', 'form'))
@@ -131,33 +159,45 @@ def redact_private_values(text, excluded=(), blocked=None):
     """Redact tokens of ``text`` that match a saved or withheld private value.
 
     The matcher is the existing #605 lookup check (``lookup_text_violations``):
-    whole values, contained spans, jamo keys and digit runs.  Returns
-    ``(text, redacted_count)``.  A page with nothing to compare against is
-    returned unchanged.
+    whole values, contained spans, jamo keys and digit runs.  It is applied
+    per line, so its rule "a matching digit run withholds every digit-bearing
+    token" stays on the line that carries the value instead of blanking every
+    number on the page.  Returns ``(text, redacted_count)``.  A page with
+    nothing to compare against is returned unchanged.
     """
     text = str(text or '')
     excluded = [value for value in excluded if isinstance(value, str) and value.strip()]
     if not text or not (excluded or blocked):
         return text, 0
-    bad, digits_joined = lookup_text_violations(text, excluded, blocked)
-    if not bad and not digits_joined:
-        return text, 0
-    out = []
+    lines = []
     removed = 0
-    for token in re.split(r'(\s+)', text):
-        if not token or token.isspace():
-            out.append(token)
+    for line in text.split('\n'):
+        bad, digits_joined = lookup_text_violations(line, excluded, blocked) if line.strip() else (set(), False)
+        if not bad and not digits_joined:
+            lines.append(line)
             continue
-        words = lookup_words(token)
-        if any(word in bad for word in words) or (digits_joined and re.search(r'\d', lookup_norm(token))):
-            out.append(REDACTED)
-            removed += 1
-        else:
-            out.append(token)
-    return ''.join(out), removed
+        out = []
+        for token in re.split(r'(\s+)', line):
+            if not token or token.isspace():
+                out.append(token)
+                continue
+            if any(word in bad for word in lookup_words(token)) or (digits_joined and re.search(r'\d', lookup_norm(token))):
+                out.append(REDACTED)
+                removed += 1
+            else:
+                out.append(token)
+        lines.append(''.join(out))
+    return '\n'.join(lines), removed
 
 
-def mediate_snapshot(raw, excluded=(), blocked=None):
+def scrub(text, excluded=(), blocked=None):
+    """Redact saved/withheld private values, then credential-shaped tokens (the CLI prompt pattern)."""
+    text, removed = redact_private_values(text, excluded, blocked)
+    text, count = SECRET_PATTERN.subn(REDACTED, text)
+    return text, removed + count
+
+
+def mediate_snapshot(raw, excluded=(), blocked=None, requested_url=None):
     """The only page state that may leave the driver.
 
     ``raw`` is a ``PageDriver.snapshot`` result.  Guarded field values are
@@ -168,23 +208,24 @@ def mediate_snapshot(raw, excluded=(), blocked=None):
     """
     raw = raw if isinstance(raw, dict) else {}
     elements = [element for element in (raw.get('elements') or []) if isinstance(element, dict)]
-    text, redacted = redact_private_values(str(raw.get('text') or '')[:TEXT_LIMIT * 2], excluded, blocked)
+    text, redacted = scrub(str(raw.get('text') or '')[:TEXT_LIMIT * 2], excluded, blocked)
     text = re.sub(r'\n{3,}', '\n\n', text).strip()
     truncated = len(text) > TEXT_LIMIT
     text = text[:TEXT_LIMIT]
-    login_required = any(element.get('type') == 'password' for element in elements)
+    redirected = bool(requested_url) and page_reference(requested_url) != page_reference(raw.get('url'))
+    login_required = login_form_present(elements, redirected)
     visible = []
     internal = []
     for element in elements:
         if element.get('disabled'):
             continue
-        name, count = redact_private_values(str(element.get('name') or '')[:NAME_LIMIT], excluded, blocked)
+        name, count = scrub(str(element.get('name') or '')[:NAME_LIMIT], excluded, blocked)
         redacted += count
         row = {'n': len(visible) + 1, 'role': str(element.get('role') or element.get('tag') or 'element'), 'name': name}
         if element.get('href'):
             row['href'] = page_reference(element['href'])[:400]
         if not guarded_field(element) and isinstance(element.get('value'), str) and element['value']:
-            value, count = redact_private_values(element['value'][:VALUE_LIMIT], excluded, blocked)
+            value, count = scrub(element['value'][:VALUE_LIMIT], excluded, blocked)
             redacted += count
             row['value'] = value
         visible.append(row)
@@ -314,7 +355,7 @@ class BrowserSession:
         except Exception as exc:
             raise ToolError(FAILED_TEXT, 'browser_failed') from exc
 
-    def _snapshot(self):
+    def _snapshot(self, requested_url=None):
         excluded, blocked = (), None
         if self.excluded is not None:
             try:
@@ -322,14 +363,14 @@ class BrowserSession:
             except Exception:
                 excluded, blocked = (), None
         raw = self._call(lambda timeout: self._driver().snapshot())
-        self.last = mediate_snapshot(raw, excluded, blocked)
+        self.last = mediate_snapshot(raw, excluded, blocked, requested_url)
         return self.last
 
-    def _page_state(self):
-        snapshot = self._snapshot()
+    def _page_state(self, requested_url=None):
+        snapshot = self._snapshot(requested_url)
         if snapshot['login_required']:
-            # Generic: a password field on the page (or after a redirect) means
-            # the profile holds no session for it.  Nothing else is returned.
+            # Generic (`login_form_present`): the profile holds no session for
+            # this page.  Nothing else of the page is returned.
             return {'state': 'login_required', 'url': snapshot['url'], 'title': snapshot['title'],
                     'needs_setup': True, 'requires': 'browser-login', 'next_step': LOGIN_REQUIRED_TEXT}
         return {'state': 'page', **public_view(snapshot)}
@@ -381,7 +422,7 @@ class BrowserSession:
         self._spend_step()
         self._guard('browser_open', url, url, f'{parts.netloc} 페이지 열기', effect, False)
         self._call(lambda timeout: self._driver().goto(url, timeout))
-        return self._page_state()
+        return self._page_state(requested_url=url)
 
     def read(self):
         self._require_page()

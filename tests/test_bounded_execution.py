@@ -266,8 +266,28 @@ class EngineFailureDiagnosticsTests(unittest.TestCase):
         self.assertIn('--ignore-user-config', argv)
         self.assertIn('--ephemeral', argv)
         self.assertEqual(argv[argv.index('--sandbox') + 1], 'read-only')
+        self.assertEqual(argv.count('--ignore-rules'), 1, 'CODEX_HOME exec rules never widen the sandbox (#636)')
         self.assertTrue(any(a.startswith('mcp_servers.agentos.command=') for a in argv))
         self.assertEqual(argv[-1], 'hello')
+
+    def test_a_codex_without_ignore_rules_fails_the_turn_instead_of_running_without_it(self):
+        # #636: no --help pre-check; the CLI's own argument parser rejects the
+        # unknown flag (observed on 0.153.4: exit 2, "unexpected argument")
+        # and the turn fails - it is never retried without the flag.
+        calls = []
+        def runner(argv, **kwargs):
+            calls.append(list(argv))
+            class Done: returncode = 2; stdout = ''; stderr = "error: unexpected argument '--ignore-rules' found"
+            return Done()
+        with tempfile.TemporaryDirectory() as folder:
+            profile = Path(folder) / 'profile'; profile.mkdir()
+            adapter = BoundedExecutionAdapter(finder=lambda _: '/bin/codex', runner=runner,
+                                              runtime_root=Path(folder) / 'turns', codex_home=profile)
+            with self.assertRaises(ExecutionError):
+                adapter.execute('codex', 'hello', AgentOSMcpTools(_Capabilities()))
+        runs = [argv for argv in calls if 'exec' in argv]
+        self.assertEqual(len(runs), 1)
+        self.assertIn('--ignore-rules', runs[0])
 
 
 @ordinary_lookup_judgment
@@ -511,7 +531,7 @@ class BoundedExecutionPreservedBoundaryTests(unittest.TestCase):
                                     codex_home=profile).execute(
                 'codex', 'hello', AgentOSMcpTools(_Capabilities()))
         argv = seen['argv']
-        self.assertEqual(argv[1:6], ['exec', '--json', '--sandbox', 'read-only',
+        self.assertEqual(argv[1:7], ['exec', '--json', '--sandbox', 'read-only', '--ignore-rules',
                                      '--skip-git-repo-check'])
         # No generic argv/approval hook: the caller cannot relax these.
         self.assertNotIn('--dangerously-bypass-approvals-and-sandbox', argv)

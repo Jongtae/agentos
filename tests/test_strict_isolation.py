@@ -47,6 +47,7 @@ from personal_agent.bounded_execution import (
     profile_actions,
     route_unavailable,
 )
+from personal_agent.agent_runtime import PUBLIC_TASK_NO_JUDGMENT
 from personal_agent.decision import OUTCOME_DECIDED, DecisionContext
 from personal_agent.decision_adapters import (CODEX_DECISION_CONFIG, SubscriptionCliDecisionEngine, codex_disable_plan,
                                               parse_codex_features)
@@ -124,10 +125,10 @@ class StrictLaunchArguments(unittest.TestCase):
         self.assertIn('web_search="disabled"', strict, 'provider-hosted search stays off')
         self.assertEqual(CODEX_STRICT_TABLE, 'permissions.agentos-strict-isolated={filesystem={":minimal"="read", '
                                              '":workspace_roots"={"."="read"}}, network={enabled=false}}')
-        self.assertEqual(strict[:3] + strict[3 + len(expected):], trusted[:3] + trusted[5:],
+        self.assertEqual(strict[:3] + strict[3 + len(expected):], trusted[:3] + trusted[6:],
                          'everything else is the trusted-local argv')
-        self.assertEqual(trusted[3:5], ['--sandbox', 'read-only'], 'trusted-local is unchanged')
-        self.assertNotIn('--ignore-rules', trusted)
+        self.assertEqual(trusted[3:6], ['--sandbox', 'read-only', '--ignore-rules'],
+                         'trusted-local keeps the read-only sandbox and ignores CODEX_HOME exec rules (#636)')
 
     def test_codex_strict_without_a_verified_feature_plan_is_refused(self):
         for plan in ((), None, ['apps', 'unified_exec'], ['personality']):
@@ -814,6 +815,15 @@ def populate_codex_home(home, store_root):
     (home / 'config.toml').write_text('sandbox_mode = "danger-full-access"\napproval_policy = "never"\n')
 
 
+#: The owner's request in the qualification Work is ``/search PUBLIC_QUERY``.
+PUBLIC_QUERY = 'public query'
+#: #605: with no sensitivity judgment configured, AgentOS withholds the
+#: worker-composed weather city (the request names none) and returns its
+#: fixed owner-visible text; the call still reached the bridge and was recorded.
+WEATHER_WITHHELD = json.dumps(PUBLIC_TASK_NO_JUDGMENT['unavailable'])[1:-1]
+BRIDGED_EVENTS = [('web_search', 'succeeded'), ('weather', 'failed'), ('list_notes', 'succeeded')]
+
+
 #: Tools Codex may still offer under strict: the AgentOS bridge namespace,
 #: the MCP resource helpers (the bridge serves no resources) and the
 #: non-interactive user-input request.  No shell, file, image or web tool.
@@ -836,7 +846,9 @@ class ProcessLevelQualification(unittest.TestCase):
         (self.store.root / 'FAKE-STORE-CANARY.txt').write_text('fake-store-canary-616\n')
         with self.store.db() as db:
             db.execute("INSERT INTO notes VALUES ('n1','fake-note-616',1)")
-        self.job = self.store.enqueue('qualification', 'q-' + uuid.uuid4().hex)
+        # An owner-typed `/search` (#605 D1) so the bridged search is sent as
+        # typed and reaches the stubbed network without a sensitivity judgment.
+        self.job = self.store.enqueue(f'/search {PUBLIC_QUERY}', 'q-' + uuid.uuid4().hex)
         with self.store.db() as db:
             db.execute("UPDATE jobs SET status='running' WHERE id=?", (self.job,))
         self.home_canary = Path.home() / f'.agentos-616-home-canary-{uuid.uuid4().hex}.txt'
@@ -926,7 +938,7 @@ class ProcessLevelQualification(unittest.TestCase):
         model = _ScriptedModel('responses', [
             {'name': 'exec_command', 'arguments': {'cmd': f'cat {self.store.root / "FAKE-STORE-CANARY.txt"}', 'login': False}},
             {'name': 'view_image', 'arguments': {'path': str(self.store.root / 'FAKE-STORE-CANARY.txt')}},
-            {'name': 'web_search', 'namespace': 'mcp__agentos', 'arguments': {'query': 'public query'}},
+            {'name': 'web_search', 'namespace': 'mcp__agentos', 'arguments': {'query': PUBLIC_QUERY}},
             {'name': 'weather', 'namespace': 'mcp__agentos', 'arguments': {'city': 'Daejeon'}},
             {'name': 'list_notes', 'namespace': 'mcp__agentos', 'arguments': {}},
             {'message': 'qualification finished'}])
@@ -935,9 +947,10 @@ class ProcessLevelQualification(unittest.TestCase):
         self.assertIn('unsupported call', shell)
         self.assertIn('unsupported call', image)
         self.assertIn('stub-search-616', search)
-        self.assertIn('stub-weather-616', weather)
+        self.assertIn(WEATHER_WITHHELD, weather)
+        self.assertNotIn('stub-weather-616', weather)
         self.assertIn('fake-note-616', notes)
-        self.assertEqual(events, [('web_search', 'succeeded'), ('weather', 'succeeded'), ('list_notes', 'succeeded')])
+        self.assertEqual(events, BRIDGED_EVENTS)
         offered = {tool.get('name') or tool.get('type') for tool in model.offered_tools()}
         self.assertLessEqual(offered, STRICT_CODEX_TOOLS, offered)
         context = json.dumps([request['body'] for request in model.requests])
@@ -983,6 +996,53 @@ class ProcessLevelQualification(unittest.TestCase):
         self.assertIn('fake-home-canary-616', results[1])
         self.assertIn('outside AgentOS provenance', CLI_PROFILES[BOUNDED_PROFILE]['limitation'])
 
+    def _write_script(self, target):
+        shell = lambda cmd: {'name': 'exec_command', 'arguments': {'cmd': cmd, 'login': False}}
+        return [shell(f'touch {target}'), {'message': 'qualification finished'}]
+
+    def _allow_touch(self):
+        rules = self.root / 'codex-home' / 'rules' / 'default.rules'
+        rules.write_text(rules.read_text() + 'prefix_rule(pattern=["touch"], decision="allow")\n')
+        target = Path.home() / f'.agentos-636-write-canary-{uuid.uuid4().hex}'
+        self.addCleanup(lambda: target.unlink(missing_ok=True))
+        return target
+
+    def test_codex_trusted_local_ignores_an_allow_rule(self):
+        """#636: with --ignore-rules the read-only sandbox blocks the write."""
+        binary = self._codex(tested=False)
+        target = self._allow_touch()
+        results, _ = self._run('codex', binary, _ScriptedModel('responses', self._write_script(target)), BOUNDED_PROFILE)
+        self.assertEqual(self.argv.count('--ignore-rules'), 1)
+        self.assertIn('Operation not permitted', results[0], 'the touch was attempted and denied by the sandbox')
+        self.assertFalse(target.exists(), results[:1])
+
+    def test_codex_trusted_local_allow_rule_escapes_without_ignore_rules(self):
+        """Counterexample: why --ignore-rules is pinned on trusted-local (#636)."""
+        binary = self._codex(tested=False)
+        target = self._allow_touch()
+        self._run('codex', binary, _ScriptedModel('responses', self._write_script(target)), BOUNDED_PROFILE,
+                  argv_edit=lambda argv: self._without(argv, ('--ignore-rules',)))
+        self.assertTrue(target.exists(), 'the "always allow" rule ran touch outside the read-only sandbox')
+
+    def test_codex_trusted_local_forbidden_prefix_rule_is_not_a_read_boundary(self):
+        """#637 thread: what --ignore-rules gives up.  Without the flag an
+        owner "forbidden" rule rejects its exact prefix, but another reader
+        gets the same file under the read-only sandbox; with the flag the rule
+        is not loaded.  The read limitation is the declared one either way."""
+        binary = self._codex(tested=False)
+        rules = self.root / 'codex-home' / 'rules' / 'default.rules'
+        rules.write_text('prefix_rule(pattern=["cat"], decision="forbidden")\n')
+        canary = self.store.root / 'FAKE-STORE-CANARY.txt'
+        shell = lambda cmd: {'name': 'exec_command', 'arguments': {'cmd': cmd, 'login': False}}
+        script = lambda: [shell(f'cat {canary}'), shell(f'head -n 1 {canary}'), {'message': 'qualification finished'}]
+        loaded, _ = self._run('codex', binary, _ScriptedModel('responses', script()), BOUNDED_PROFILE,
+                              argv_edit=lambda argv: self._without(argv, ('--ignore-rules',)))
+        self.assertNotIn('fake-store-canary-616', loaded[0])
+        self.assertIn('Rejected', loaded[0], 'the forbidden rule itself rejected the prefix')
+        self.assertIn('fake-store-canary-616', loaded[1], 'another reader is not')
+        ignored, _ = self._run('codex', binary, _ScriptedModel('responses', script()), BOUNDED_PROFILE)
+        self.assertIn('fake-store-canary-616', ignored[0], 'with --ignore-rules the owner rule is not loaded')
+
     def test_codex_in_product_qualification_uses_the_real_cli(self):
         binary = self._codex()
         result = self._adapter('codex', binary).qualify_strict('codex', store_root=self.store.root)
@@ -1001,7 +1061,7 @@ class ProcessLevelQualification(unittest.TestCase):
     def _claude_script(self):
         return [{'tool': 'Read', 'input': {'file_path': str(self.store.root / 'FAKE-STORE-CANARY.txt')}},
                 {'tool': 'Bash', 'input': {'command': f'cat {self.home_canary}'}},
-                {'tool': 'mcp__agentos__web_search', 'input': {'query': 'public query'}},
+                {'tool': 'mcp__agentos__web_search', 'input': {'query': PUBLIC_QUERY}},
                 {'tool': 'mcp__agentos__weather', 'input': {'city': 'Daejeon'}},
                 {'tool': 'mcp__agentos__list_notes', 'input': {}},
                 {'message': 'qualification finished'}]
@@ -1022,9 +1082,10 @@ class ProcessLevelQualification(unittest.TestCase):
             self.assertIn('No such tool available', denied)
             self.assertNotIn('canary-616', denied)
         self.assertIn('stub-search-616', search)
-        self.assertIn('stub-weather-616', weather)
+        self.assertIn(WEATHER_WITHHELD, weather)
+        self.assertNotIn('stub-weather-616', weather)
         self.assertIn('fake-note-616', notes)
-        self.assertEqual(events, [('web_search', 'succeeded'), ('weather', 'succeeded'), ('list_notes', 'succeeded')])
+        self.assertEqual(events, BRIDGED_EVENTS)
         self.assertEqual(sorted(tool['name'] for tool in model.offered_tools()),
                          sorted(f'mcp__agentos__{action}' for action in profile_actions(STRICT_PROFILE)),
                          'no built-in tool is offered at all')
@@ -1033,7 +1094,7 @@ class ProcessLevelQualification(unittest.TestCase):
     def _claude_trusted_script(self):
         return [{'tool': 'Read', 'input': {'file_path': str(self.store.root / 'FAKE-STORE-CANARY.txt')}},
                 {'tool': 'Bash', 'input': {'command': f'cat {self.home_canary}'}},
-                {'tool': 'mcp__agentos__web_search', 'input': {'query': 'public query'}},
+                {'tool': 'mcp__agentos__web_search', 'input': {'query': PUBLIC_QUERY}},
                 {'tool': 'mcp__agentos__weather', 'input': {'city': 'Daejeon'}},
                 {'tool': 'mcp__agentos__list_notes', 'input': {}},
                 {'tool': 'Read', 'input': {'file_path': 'agentos-mcp.json'}},

@@ -393,9 +393,16 @@ class AgentService:
         needs the allergies *and* a web search in the same turn.  The
         snapshot is still private owner content and still travels only to
         the owner-configured model route with the rest of the context.
+
+        Pilot boundary 1 still holds: a profile value is free text the owner
+        typed, so the stored secrets' literal values and credential shapes
+        are removed by the existing deterministic pass before the text can
+        reach any prompt.  Provenance marks the turn as carrying
+        ``owner-memory`` (size/digest only in the record) at the call sites;
+        that label is deliberately not added to the Work's egress provenance.
         """
         memory=MemoryService(self.store,private_read_sink=MemoryService.NO_EGRESS_GUARD)
-        return memory.profile_snapshot(MEMORY_OWNER)['text']
+        return self._redact_known_secrets(memory.profile_snapshot(MEMORY_OWNER)['text'])
 
     #: The Work identity a Settings profile write is recorded under (#658).
     #: It is an owner operation from the local surface, not a conversation Work.
@@ -484,15 +491,26 @@ class AgentService:
         return self.decision_routes.check_cli_capabilities(engine)
 
     # -- turn provenance (#570) ------------------------------------------------
+    #: Stored secrets whose literal values are removed from any text AgentOS
+    #: records or sends on the owner's behalf.
+    KNOWN_SECRET_NAMES=('model_key','decision_model_key','decision_jev_key','claude_code_token','telegram_token',
+                        'api_key:openai','api_key:anthropic','api_key:openrouter')
+
+    def _redact_known_secrets(self, text):
+        """Deterministic secret exclusion: the stored secrets' literal values and
+        the adapter's credential shapes are replaced.  No judgment about the
+        text; the same pass provenance records already go through (#570), reused
+        for model-bound owner text (#658 profile snapshot, pilot boundary 1)."""
+        text=str(text or '')
+        for name in self.KNOWN_SECRET_NAMES:
+            value=self.store.secret(name)
+            if isinstance(value,str) and len(value)>=8:text=text.replace(value,'[redacted]')
+        return SECRET_PATTERN.sub('[redacted]',text)
+
     def _redact_provenance(self, text):
         # Adopt the existing redaction: the stored secrets' literal values, the
         # adapter's credential patterns, then the owner-visible path mask.
-        text=str(text or '')
-        for name in ('model_key','decision_model_key','decision_jev_key','claude_code_token','telegram_token',
-                     'api_key:openai','api_key:anthropic','api_key:openrouter'):
-            value=self.store.secret(name)
-            if isinstance(value,str) and len(value)>=8:text=text.replace(value,'[redacted]')
-        text=SECRET_PATTERN.sub('[redacted]',text)
+        text=self._redact_known_secrets(text)
         # The configured data and turn folders can live anywhere, not only
         # under /Users or /home; mask them by their actual value.
         for root,label in ((getattr(self.store,'root',None),'[AgentOS data]'),
@@ -4020,7 +4038,10 @@ class AgentService:
                             capability_limitation=profile_status(facade.PROFILE)['limitation'],
                             instructions=engine_context['instructions'] if adapter_context is not None else '',
                             instructions_channel='append-system-prompt' if separate else ('prompt' if adapter_context is not None else 'not sent (bare request)'),
-                            private_sources=set(turn_provenance)|{base_label(label) for label in capabilities.private_provenance},
+                            # #658: a profile section is private Memory in the prompt; the
+                            # record keeps size/digest only. Provenance label for the
+                            # record, not for capabilities (lookups stay open).
+                            private_sources=set(turn_provenance)|{base_label(label) for label in capabilities.private_provenance}|({'owner-memory'} if engine_context.get('profile') else set()),
                             route='subscription',engine=subscription['id'],mode=mode,status='sent',
                             context_mode=engine_context.get('mode','shared-context'),instructions_version=engine_context.get('version'),
                             context_messages=len(engine_context['conversation']),egress_taint=sorted(capabilities.private_provenance))
@@ -4103,7 +4124,9 @@ class AgentService:
                         self.record_turn_sent(job['id'],sent=render_turn_prompt(api_context),instructions=api_context['instructions'],
                             instructions_channel='system-message',build=self.build,
                             exposed_tools=[tool['function']['name'] for tool in capabilities.definitions()],
-                            private_sources=set(turn_provenance)|{base_label(label) for label in capabilities.private_provenance}|({'connected-document'} if workspace_request or document_history else set()),
+                            private_sources=set(turn_provenance)|{base_label(label) for label in capabilities.private_provenance}|({'connected-document'} if workspace_request or document_history else set())
+                                            # #658: see the CLI route - record-only label for the profile section.
+                                            |({'owner-memory'} if api_context.get('profile') else set()),
                             route='direct-api',provider=runtime_config.get('provider'),status='sent',
                             requested_model=runtime_config.get('model'),instructions_version=api_context.get('version'),
                             context_messages=len(api_context['conversation']),egress_taint=sorted(capabilities.private_provenance))

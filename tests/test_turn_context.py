@@ -212,6 +212,51 @@ class RoutesReceiveTheSameContext(unittest.TestCase):
         self.assertLess(call['prompt'].index(PROFILE_HEADING), call['prompt'].index('# Current request'))
         self.assertNotIn('meeting-time', call['prompt'])
 
+    def test_a_profile_value_equal_to_a_stored_secret_is_redacted_and_the_record_keeps_no_text(self):
+        """#664 review P1/P2: pilot boundary 1 holds for profile text, and the
+        turn record withholds the profile like any other Memory-bearing prompt.
+
+        The owner may type anything into a profile value.  A value equal to a
+        stored secret is replaced by the existing deterministic pass before
+        the section is built - on both routes - while the benign row still
+        reaches the model.  The recorded envelope carries size/digest only,
+        and nothing here closes the public lookup (see the _RouteFixture
+        tests for that half).
+        """
+        secret = 'opaque-telegram-value-123'
+        self.store.secret('telegram_token', secret)
+        memory = MemoryService(self.store, private_read_sink=MemoryService.NO_EGRESS_GUARD)
+        memory.remember_profile('local-owner', 'settings', 'profile.wifi.password', secret)
+        memory.remember_profile('local-owner', 'settings', 'profile.allergy.peanut', '땅콩 알러지')
+        snapshot = self.service.owner_profile_snapshot()
+        self.assertNotIn(secret, snapshot)
+        self.assertRegex(snapshot, r'profile\.wifi\.[^\n]*\[redacted\] \(saved ')
+        self.assertIn('profile.allergy.peanut: 땅콩 알러지', snapshot)
+
+        api_job = self.store.enqueue('점심 뭐 먹지?', 'k1')                     # direct API
+        self.assertTrue(self.service.run_one())
+        system = self.api_messages[-1][0]['content']
+        self.assertNotIn(secret, system)
+        self.assertIn('[redacted]', system)
+        self.assertIn('땅콩 알러지', system)
+        api_record = self.store.turn_provenance(api_job)
+        self.assertIn('owner-memory', api_record['prompt_withheld'])
+        self.assertTrue(api_record['prompt_envelope'].startswith('[not stored: this turn included'))
+        self.assertNotIn('땅콩', json.dumps(api_record, ensure_ascii=False), 'the record holds size/digest only')
+
+        self.service.connect_subscription_engine({'engine': 'claude-code', 'officially_authenticated': True})
+        cli_job = self.store.enqueue('저녁은?', 'k2')                          # CLI route
+        self.assertTrue(self.service.run_one())
+        call = self.engine.calls[-1]
+        self.assertNotIn(secret, call['prompt'])
+        self.assertNotIn(secret, call['context']['profile'])
+        self.assertIn('[redacted]', call['context']['profile'])
+        self.assertIn('땅콩 알러지', call['prompt'])
+        cli_record = self.store.turn_provenance(cli_job)
+        self.assertIn('owner-memory', cli_record['prompt_withheld'])
+        self.assertTrue(cli_record['prompt_envelope'].startswith('[not stored: this turn included'))
+        self.assertNotIn('땅콩', json.dumps(cli_record, ensure_ascii=False))
+
     def test_no_profile_rows_means_no_profile_section(self):
         self._run('hello', 'k1')
         self.assertNotIn(PROFILE_HEADING, self.api_messages[-1][0]['content'])
@@ -610,6 +655,7 @@ class PriorAssistantEgressDecision(_RouteFixture):
         self.assertIn(PROFILE_HEADING, self.requests[-1]['messages'][0]['content'])
         self.assertEqual(self._outbound('web_search'), [{'tool': 'web_search', 'query': 'today news'}])
         self.assertNotIn('PEANUT-ALLERGY-XYZ', json.dumps(self.network.plans))
+        self._record_withholds_the_profile()
 
     def test_cli_profile_in_context_does_not_close_public_search(self):
         self._service(cli=True)
@@ -618,6 +664,15 @@ class PriorAssistantEgressDecision(_RouteFixture):
         self.assertEqual(len(self._outbound('web_search')), 1)
         self.assertEqual(self.engine.refusals, [])
         self.assertNotIn('PEANUT-ALLERGY-XYZ', json.dumps(self.network.plans))
+        self._record_withholds_the_profile()
+
+    def _record_withholds_the_profile(self):
+        """#664 review P2: the record keeps size/digest, the lookup still went out."""
+        [job] = self.store.jobs()
+        record = self.store.turn_provenance(job['id'])
+        self.assertIn('owner-memory', record['prompt_withheld'])
+        self.assertTrue(record['prompt_envelope'].startswith('[not stored: this turn included'))
+        self.assertNotIn('PEANUT-ALLERGY-XYZ', json.dumps(record))
 
     def test_finding_cli_benign_prior_answer_closes_public_search(self):
         """Fixed by #605 (AX-04); was an ``expectedFailure`` baseline from #603.

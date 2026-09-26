@@ -194,6 +194,23 @@ class ProfileFactsInSettings(_OwnerSurface):
         self.assertEqual(self.refused('/api/personal-space/profile/request', {'operation': 'forget'})[0], 400)
         self.assertEqual(self.store.memories(), [])
 
+    def test_the_owner_sees_a_secret_like_value_but_the_prompt_never_does(self):
+        """#664 review P1: Settings shows the owner their own row; the model-bound
+        snapshot has the stored secret's value removed deterministically."""
+        secret = 'sk-fixture-provider-key-0123456789'
+        self.store.secret('api_key:openai', secret)
+        self.remember('profile.wifi.password', secret)
+        self.assertEqual(self.profile()['memories'][0]['content'], secret, 'the owner surface is not redacted')
+        snapshot = self.service.owner_profile_snapshot()
+        self.assertNotIn(secret, snapshot)
+        self.assertRegex(snapshot, r'^profile\.wifi\.[^\n]*\[redacted\] \(saved ')
+
+    def test_settings_copy_says_profile_text_reaches_the_ai_and_excludes_secrets(self):
+        html = (WEB / 'index.html').read_text(encoding='utf-8')
+        section = html[html.index('id="owner-profile"'):html.index('id="saved-memory"')]
+        self.assertIn('요청할 때마다 AI에게 함께 보내므로 비밀번호, 토큰, API 키는 적지 마세요', section)
+        self.assertIn('비밀번호나 키는 적지 마세요', section[section.index('owner-profile-form'):])
+
     def test_the_profile_surface_needs_the_owner_session(self):
         from http.cookiejar import CookieJar
         from urllib.request import HTTPCookieProcessor, build_opener

@@ -764,6 +764,73 @@ class ServiceTests(unittest.TestCase):
         self.assertIn('owner-browser-session', record.get('egress_taint', []))
 
 
+# ---------------------------------------------------------------- HTTP and CLI surfaces
+
+class HttpAndCliTests(unittest.TestCase):
+    def test_routes_are_owner_session_bound_and_typed(self):
+        from http.cookiejar import CookieJar
+        from urllib.error import HTTPError
+        from urllib.request import HTTPCookieProcessor, Request, build_opener
+        from personal_agent.quickstart import make_handler
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        store = QuickStore(tmp.name)
+        store.claim(store.bootstrap.read_text(), 'long-password-test')
+        profile = bs.BrowserProfile(Path(tmp.name) / 'profile', launcher=lambda d, h: FakeDriver())
+        service = AgentService(store, browser_profile=profile)
+        server = ThreadingHTTPServer(('127.0.0.1', 0), make_handler(service))
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        client = build_opener(HTTPCookieProcessor(CookieJar()))
+        url = f'http://127.0.0.1:{server.server_port}'
+
+        def request(path, body=None):
+            headers = {'Content-Type': 'application/json'} if body is not None else {}
+            req = Request(url + path, data=json.dumps(body).encode() if body is not None else None, headers=headers)
+            with client.open(req, timeout=3) as response:
+                return json.load(response)
+        try:
+            with self.assertRaises(HTTPError) as error:
+                request('/api/browser/approval', {'work_id': 'x', 'decision': 'approve'})
+            self.assertEqual(error.exception.code, 401, 'owner session required')
+            request('/api/login', {'password': 'long-password-test'})
+            state = request('/api/state')
+            self.assertEqual(state['settings']['browser']['pending_steps'], [])
+            self.assertTrue(state['settings']['browser']['available'])
+            with self.assertRaises(HTTPError) as error:
+                request('/api/browser/approval', {'work_id': 'x', 'decision': 'approve'})
+            self.assertEqual(error.exception.code, 400)
+            with self.assertRaises(HTTPError) as error:
+                request('/api/browser/login', {'url': ''})
+            self.assertEqual(error.exception.code, 400)
+            receipt = request('/api/browser/login', {'url': ORIGIN + '/login'})
+            self.assertEqual(receipt['state'], 'opened')
+        finally:
+            server.shutdown()
+            thread.join()
+            server.server_close()
+
+    def test_cli_login_refuses_without_the_extra_and_opens_with_it(self):
+        from unittest import mock
+        from personal_agent import quickstart
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        with mock.patch.object(bs, 'playwright_available', lambda: False):
+            with self.assertRaises(SystemExit) as caught:
+                quickstart.browser_login_main(['--url', ORIGIN + '/login', '--data', tmp.name])
+            self.assertEqual(caught.exception.code, 2)
+        class ClosedByOwner(FakeDriver):
+            def is_open(self):
+                return False   # the owner closed the window at once
+        with mock.patch.object(bs, 'playwright_launcher', lambda d, h: ClosedByOwner()), \
+             mock.patch.object(bs, 'playwright_available', lambda: True), \
+             mock.patch('sys.stdout') as out:
+            code = quickstart.browser_login_main(['--url', ORIGIN + '/login', '--data', tmp.name])
+        self.assertEqual(code, 0)
+        printed = ''.join(str(c.args[0]) for c in out.write.call_args_list)
+        self.assertIn('"state": "closed"', printed)
+
+
 # ---------------------------------------------------------------- integration (real driver)
 
 def _chromium_available():

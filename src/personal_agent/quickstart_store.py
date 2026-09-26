@@ -426,11 +426,17 @@ class QuickStore:
         with self.db() as db:
             return self._memory_row(db.execute(query,(memory_id,self._memory_binding(owner_id))).fetchone())
 
-    def memories(self, owner_id=None, limit=50, offset=0):
+    def memories(self, owner_id=None, limit=50, offset=0, key_prefix=None):
         if isinstance(limit,bool) or not isinstance(limit,int) or not 1<=limit<=101:raise ValueError('기억 조회 범위를 확인하세요.')
         if isinstance(offset,bool) or not isinstance(offset,int) or offset<0:raise ValueError('기억 조회 위치를 확인하세요.')
         where="state='current'";parameters=[]
         if owner_id is not None:where+=" AND owner_key=?";parameters.append(self._memory_binding(owner_id))
+        if key_prefix is not None:
+            # #658: a key namespace (for example ``profile.``) is an ordinary
+            # prefix on the existing key column, not a second table.
+            if not isinstance(key_prefix,str) or not key_prefix.strip():raise ValueError('기억 조회 범위를 확인하세요.')
+            escaped=key_prefix.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')
+            where+=" AND memory_key LIKE ? ESCAPE '\\'";parameters.append(escaped+'%')
         with self.db() as db:
             return [self._memory_row(r) for r in db.execute('SELECT * FROM memories WHERE '+where+' ORDER BY created DESC,id DESC LIMIT ? OFFSET ?',(*parameters,limit,offset))]
 

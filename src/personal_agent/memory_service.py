@@ -39,7 +39,32 @@ not arm the guard.
 
 from __future__ import annotations
 
+import re
 import time
+from datetime import datetime, timezone
+
+#: SEC-PROFILE-01 (#658): owner profile facts (allergies, food preferences,
+#: home/work places, preferred stores) are ordinary canonical Memory rows whose
+#: key starts with this namespace.  Nothing here decides *what* is a profile
+#: fact - the model (or the owner in Settings) chooses the key; deterministic
+#: code validates only the key shape.
+PROFILE_PREFIX = 'profile.'
+#: ``profile.`` followed by one or more dot-separated, whitespace-free segments.
+_PROFILE_KEY = re.compile(r'profile\.[^\s.]+(?:\.[^\s.]+)*')
+#: Default byte-agnostic character budget for a prompt snapshot; one line per
+#: current row, longest content clipped so one fact cannot crowd out the rest.
+PROFILE_SNAPSHOT_CHARS = 1200
+PROFILE_LINE_CHARS = 200
+#: Hard cap on rows a snapshot will ever read, whatever the char budget.
+_PROFILE_ROWS_CAP = 500
+#: Tool-description text the runtime may append to ``save_memory`` so the
+#: model lands profile facts under this namespace (wired by the runtime owner).
+PROFILE_KEY_GUIDANCE = ('For a durable owner profile fact - an allergy, food preference, home/work '
+                        'place or preferred store the owner states - use a memory_key that starts '
+                        'with "profile." followed by dot-separated segments, for example '
+                        'profile.allergy.peanut, profile.food_preference, profile.place.home, '
+                        'profile.store.books. One current value per key; saving a key again '
+                        'corrects it, so use a distinct key for each separate fact.')
 
 
 class MemoryServiceError(ValueError):
@@ -110,6 +135,102 @@ class MemoryService:
         """Persist one fact only through this explicit owner operation."""
         owner_id, work_id = self._request(owner_id, work_id)
         return self.store.save_memory(memory_key, content, owner_id=owner_id, work_id=work_id)
+
+    # -- owner profile facts (SEC-PROFILE-01 #658) ---------------------------
+    #
+    # A profile fact is a canonical Memory row like any other; the only thing
+    # that makes it "profile" is its key namespace.  Writes from conversation
+    # keep going through ``Capabilities.execute('save_memory')`` and its
+    # explicit-request / MemoryCandidate rules; the owner's Settings surface
+    # uses ``remember_profile`` (an explicit owner operation) and the runtime
+    # reads ``profile_snapshot`` for the turn prompt.
+
+    @staticmethod
+    def is_profile_key(memory_key):
+        """Shape check only: ``profile.`` plus dot-separated non-blank segments."""
+        return isinstance(memory_key, str) and _PROFILE_KEY.fullmatch(memory_key.strip()) is not None
+
+    @classmethod
+    def profile_key(cls, memory_key):
+        """The validated profile key, or a fail-closed error for an owner surface."""
+        if not cls.is_profile_key(memory_key):
+            raise MemoryServiceError(
+                'profile memory key must be "profile." followed by dot-separated names, '
+                'for example profile.allergy.peanut or profile.place.home'
+            )
+        return memory_key.strip()
+
+    def remember_profile(self, owner_id, work_id, memory_key, content):
+        """Explicit owner write of one profile fact; the same key supersedes."""
+        return self.remember(owner_id, work_id, self.profile_key(memory_key), content)
+
+    def _profile_rows(self, owner_id):
+        """Every current ``profile.*`` row of this owner, ordered by key then value."""
+        rows, offset = [], 0
+        while len(rows) < _PROFILE_ROWS_CAP:
+            page = self.store.memories(owner_id, limit=101, offset=offset, key_prefix=PROFILE_PREFIX)
+            rows.extend(row for row in page if self.is_profile_key(row.get('memory_key')))
+            if len(page) < 101:
+                break
+            offset += 101
+        rows.sort(key=lambda row: (row['memory_key'], row['content']))
+        return rows[:_PROFILE_ROWS_CAP]
+
+    def profile_memories(self, owner_id):
+        """The owner's current profile rows, ordered by key; a private read."""
+        self._identity(owner_id, 'owner')
+        rows = self._profile_rows(owner_id)
+        return self._private_read('memory_service.profile_memories', {
+            'state': 'current', 'memories': rows, 'memory_count': len(rows),
+        }, len(rows))
+
+    @staticmethod
+    def _saved_date(created):
+        try:
+            return datetime.fromtimestamp(float(created), timezone.utc).date().isoformat()
+        except (TypeError, ValueError, OverflowError, OSError):
+            return 'unknown-date'
+
+    def profile_snapshot(self, owner_id, *, limit_chars=PROFILE_SNAPSHOT_CHARS, line_chars=PROFILE_LINE_CHARS):
+        """A bounded, attributable snapshot of ``profile.*`` rows for a turn prompt.
+
+        ``text`` is one line per row - ``key: value (saved YYYY-MM-DD)`` - in
+        key order, never longer than ``limit_chars``; a value longer than
+        ``line_chars`` is clipped with a marker rather than dropped.  Rows
+        that did not fit are counted in ``omitted_count`` so the caller can
+        say the snapshot is partial instead of pretending it is complete.
+        ``entries`` carries the same rows with their Memory ids and saved
+        times, so every line in the prompt is attributable to one row.
+
+        This is a private read like ``list_memories``: it arms the caller's
+        turn-scoped egress sink unless the service was built with
+        ``NO_EGRESS_GUARD``.
+        """
+        self._identity(owner_id, 'owner')
+        if isinstance(limit_chars, bool) or not isinstance(limit_chars, int) or limit_chars < 1:
+            raise MemoryServiceError('profile snapshot size is invalid')
+        if isinstance(line_chars, bool) or not isinstance(line_chars, int) or line_chars < 8:
+            raise MemoryServiceError('profile snapshot line size is invalid')
+        rows = self._profile_rows(owner_id)
+        lines, entries, used = [], [], 0
+        for row in rows:
+            content = ' '.join(str(row.get('content') or '').split())
+            if len(content) > line_chars:
+                content = content[:line_chars - 6] + ' [...]'
+            line = f"{row['memory_key']}: {content} (saved {self._saved_date(row.get('created'))})"
+            size = len(line) + (1 if lines else 0)
+            if used + size > limit_chars:
+                break
+            used += size
+            lines.append(line)
+            entries.append({'id': row['id'], 'memory_key': row['memory_key'], 'content': row['content'],
+                            'created': row.get('created')})
+        omitted = len(rows) - len(entries)
+        return self._private_read('memory_service.profile_snapshot', {
+            'state': 'current', 'text': '\n'.join(lines), 'entries': entries,
+            'total_count': len(rows), 'omitted_count': omitted, 'truncated': omitted > 0,
+            'limit_chars': limit_chars,
+        }, len(entries))
 
     def write(self, owner_id, work_id, memory_key, content, *, origin, explicit_owner_request=False):
         """Route non-owner output to a candidate rather than canonical Memory."""

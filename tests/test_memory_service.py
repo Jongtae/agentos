@@ -859,5 +859,123 @@ class MemoryServiceTests(unittest.TestCase):
         self.assertEqual(exported, [("consumed", ""), ("expired", "")])
 
 
+class ProfileFactTests(unittest.TestCase):
+    """SEC-PROFILE-01 (#658): profile facts are ordinary Memory rows under ``profile.``.
+
+    Evidence class: unit tests over a temporary QuickStore.  No model, no
+    network; what counts as a profile fact is never decided here, only the
+    key shape, the write path and the bounded, ordered snapshot.
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.store = QuickStore(Path(self.temp.name) / "state")
+        self.service = MemoryService(self.store, now=lambda: 1000.0,
+                                     private_read_sink=MemoryService.NO_EGRESS_GUARD)
+
+    def test_profile_key_is_a_shape_check_only(self):
+        for key in ("profile.allergy", "profile.allergy.peanut", "profile.place.home",
+                    "profile.store.books", "profile.food_preference", "profile.알러지.땅콩",
+                    " profile.allergy "):
+            self.assertTrue(MemoryService.is_profile_key(key), key)
+            self.assertEqual(MemoryService.profile_key(key), key.strip())
+        for key in ("profile", "profile.", "profile..allergy", "profile.allergy.", "Profile.allergy",
+                    "profile.al lergy", "profiles.allergy", "allergy", "", None, 12):
+            self.assertFalse(MemoryService.is_profile_key(key), repr(key))
+            with self.assertRaises(MemoryServiceError):
+                MemoryService.profile_key(key)
+
+    def test_remember_profile_is_the_explicit_owner_write_and_the_same_key_corrects(self):
+        with self.assertRaises(MemoryServiceError):
+            self.service.remember_profile("owner-a", "settings", "allergy.peanut", "땅콩")
+        self.assertEqual(self.store.memories("owner-a"), [])
+        first = self.service.remember_profile("owner-a", "settings", "profile.allergy.peanut", "땅콩 알러지")
+        second = self.service.remember_profile("owner-a", "settings", "profile.allergy.peanut", "땅콩 알러지 (심함)")
+        rows = self.store.memories("owner-a")
+        self.assertEqual([(row["memory_key"], row["content"], row["state"]) for row in rows],
+                         [("profile.allergy.peanut", "땅콩 알러지 (심함)", "current")])
+        self.assertEqual(second["supersedes"], first["id"])
+        self.assertEqual(self.store.memory_candidates("owner-a"), [], "an owner write is not a candidate")
+
+    def test_profile_memories_are_only_the_namespace_ordered_by_key(self):
+        self.service.remember("owner-a", "w", "meeting-time", "mornings")
+        self.service.remember("owner-a", "w", "profilex", "not a profile row")
+        self.service.remember_profile("owner-a", "w", "profile.store.books", "교보문고")
+        self.service.remember_profile("owner-a", "w", "profile.allergy.peanut", "땅콩")
+        self.service.remember_profile("owner-a", "w", "profile.place.home", "서울 마포구")
+        self.service.remember_profile("owner-b", "w", "profile.allergy.shrimp", "새우")
+        listed = self.service.profile_memories("owner-a")
+        self.assertEqual([row["memory_key"] for row in listed["memories"]],
+                         ["profile.allergy.peanut", "profile.place.home", "profile.store.books"])
+        self.assertEqual(listed["memory_count"], 3)
+        self.assertTrue(listed["private_content_included"])
+        self.assertEqual([row["memory_key"] for row in self.store.memories("owner-a", key_prefix="profile.")],
+                         ["profile.place.home", "profile.allergy.peanut", "profile.store.books"],
+                         "the store filter is a plain key prefix, newest first")
+        with self.assertRaises(ValueError):
+            self.store.memories("owner-a", key_prefix="")
+
+    def test_snapshot_is_ordered_bounded_and_attributable(self):
+        rows = {
+            "profile.allergy.peanut": "땅콩 알러지",
+            "profile.food_preference": "매운 음식 선호",
+            "profile.place.home": "서울 마포구",
+            "profile.place.work": "판교",
+            "profile.store.books": "교보문고",
+        }
+        saved = {key: self.service.remember_profile("owner-a", "w", key, value) for key, value in rows.items()}
+        self.service.remember("owner-a", "w", "meeting-time", "mornings")
+
+        full = self.service.profile_snapshot("owner-a")
+        lines = full["text"].split("\n")
+        self.assertEqual([line.split(":")[0] for line in lines], sorted(rows))
+        self.assertRegex(lines[0], r"^profile\.allergy\.peanut: 땅콩 알러지 \(saved \d{4}-\d{2}-\d{2}\)$")
+        self.assertTrue(all(rows[key] in line for key, line in zip(sorted(rows), lines)))
+        self.assertNotIn("meeting-time", full["text"], "only the profile namespace enters the snapshot")
+        self.assertEqual([entry["id"] for entry in full["entries"]], [saved[key]["id"] for key in sorted(rows)])
+        self.assertEqual((full["total_count"], full["omitted_count"], full["truncated"]), (5, 0, False))
+        self.assertTrue(full["private_content_included"])
+        self.assertFalse(full["egress_guard_armed"])
+
+        first_two = len(lines[0]) + 1 + len(lines[1])
+        bounded = self.service.profile_snapshot("owner-a", limit_chars=first_two)
+        self.assertEqual(bounded["text"], lines[0] + "\n" + lines[1])
+        self.assertLessEqual(len(bounded["text"]), first_two)
+        self.assertEqual((bounded["total_count"], bounded["omitted_count"], bounded["truncated"]), (5, 3, True))
+        self.assertEqual([entry["memory_key"] for entry in bounded["entries"]], sorted(rows)[:2])
+
+        tiny = self.service.profile_snapshot("owner-a", limit_chars=3)
+        self.assertEqual((tiny["text"], tiny["entries"], tiny["omitted_count"]), ("", [], 5))
+        for bad in (0, -1, True, "12", None):
+            with self.assertRaises(MemoryServiceError):
+                self.service.profile_snapshot("owner-a", limit_chars=bad)
+
+    def test_snapshot_clips_one_long_value_instead_of_dropping_the_rest(self):
+        self.service.remember_profile("owner-a", "w", "profile.allergy.list", "x" * 3000)
+        self.service.remember_profile("owner-a", "w", "profile.place.home", "서울")
+        snapshot = self.service.profile_snapshot("owner-a", limit_chars=600, line_chars=100)
+        first, second = snapshot["text"].split("\n")
+        self.assertTrue(first.startswith("profile.allergy.list: " + "x" * 94 + " [...] (saved "))
+        self.assertIn("profile.place.home: 서울", second)
+        self.assertEqual(snapshot["omitted_count"], 0)
+        self.assertEqual(snapshot["entries"][0]["content"], "x" * 3000, "entries keep the exact row")
+
+    def test_snapshot_is_empty_for_an_owner_without_profile_rows(self):
+        self.service.remember("owner-a", "w", "meeting-time", "mornings")
+        snapshot = self.service.profile_snapshot("owner-a")
+        self.assertEqual((snapshot["text"], snapshot["entries"], snapshot["total_count"]), ("", [], 0))
+
+    def test_snapshot_is_a_private_read_that_arms_the_turn_sink(self):
+        self.service.remember_profile("owner-a", "w", "profile.allergy.peanut", "땅콩")
+        markers = []
+        guarded = MemoryService(self.store, private_read_sink=markers.append)
+        snapshot = guarded.profile_snapshot("owner-a")
+        self.assertTrue(snapshot["egress_guard_armed"])
+        self.assertEqual(markers, [{"tool": "memory_service.profile_snapshot",
+                                    "result": {"private_content_included": True, "row_count": 1}}])
+        self.assertNotIn("땅콩", str(markers), "the marker carries no content")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -473,3 +473,25 @@ details.technical details>summary{color:var(--muted)}
 .settings-subheading{margin:var(--sp-4) 0 0;padding-bottom:6px;font-size:var(--fs-2);font-weight:600;color:var(--muted);border-bottom:1px solid var(--line)}
 .decision-choice{display:flex;align-items:center;gap:8px;min-height:32px;font-size:var(--fs-2)}
 .decision-choice input{margin:0}
+
+/* #619 AI 연결: one card, a subordinate Judgment AI line and fixed-order chooser dialogs. */
+.settings-row.subordinate{padding-left:var(--sp-4);border-left:2px solid var(--line)}
+.settings-dialog{width:min(640px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:0;border:1px solid var(--line-strong);border-radius:12px;background:var(--surface);color:var(--ink);overscroll-behavior:contain}
+.settings-dialog::backdrop{background:rgb(15 23 42 / .4)}
+.dialog-body{display:grid;gap:var(--sp-3);padding:var(--sp-5)}
+.dialog-body h2{margin:0;font-size:var(--fs-4,1.125rem)}
+.dialog-actions{justify-self:stretch;justify-content:flex-end;position:sticky;bottom:0;padding:var(--sp-2) 0 0;border-top:1px solid var(--line);background:var(--surface)}
+.chooser-group{display:grid;gap:var(--sp-2);margin:0 0 var(--sp-3);padding:0;border:0;min-width:0}
+.chooser-group legend{margin-bottom:var(--sp-1);padding:0;font-size:var(--fs-2);font-weight:600;color:var(--muted)}
+.chooser-row{display:grid;gap:var(--sp-2);padding:10px var(--sp-3);border:1px solid var(--line);border-radius:8px;min-width:0}
+.chooser-row:has(input[name="main-ai"]:checked){border-color:var(--accent)}
+.chooser-option{display:flex;align-items:center;gap:10px;flex-wrap:wrap;cursor:pointer;min-width:0}
+.chooser-option input{width:auto;margin:0}
+.chooser-option:has(input:disabled){cursor:default}
+.chooser-name{font-weight:600}
+.chooser-status{font-size:var(--fs-2);color:var(--muted);overflow-wrap:anywhere}
+.chooser-actions,.chooser-key{display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap}
+.chooser-key input{flex:1 1 220px;min-width:0}
+.chooser-model{display:grid;gap:var(--sp-1)}
+.chooser-consequence{display:grid;gap:var(--sp-1);margin:0;font-size:var(--fs-2)}
+@media(max-width:620px){.settings-dialog{width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;margin:0;border:0;border-radius:0}.dialog-body{padding:var(--sp-4)}}

@@ -124,28 +124,29 @@ const checks=[];
 
 
 class ConnectionRouteUiTests(unittest.TestCase):
-    def test_direct_api_is_visible_and_shortcuts_are_secondary(self):
+    def test_ai_tab_is_one_card_with_dialog_choosers(self):
+        # #619 AC1: one card; no static API form, "다른 연결 방법" or per-row disclosures on the scan path.
         html = (WEB / "index.html").read_text(encoding="utf-8")
         items = Elements(html).items
         by_id = {attrs["id"]: (tag, attrs) for tag, attrs in items if "id" in attrs}
         all_ids = [attrs["id"] for _, attrs in items if "id" in attrs]
         self.assertEqual(len(all_ids), len(set(all_ids)))
-        self.assertEqual(by_id["advanced-model"][0], "details")
-        self.assertNotIn("open", by_id["advanced-model"][1])
-        self.assertNotIn("open", by_id["optional-providers"][1])
-        self.assertIn("OpenAI Developer API", html)
-        self.assertLess(html.index('id="model-form"'), html.index('id="optional-providers"'))
-        self.assertLess(html.index('id="optional-providers"'), html.index('id="connect-openrouter"'))
-        self.assertIn("disabled", by_id["apply-model"][1])
-        self.assertNotIn("required", by_id["api-key"][1])
+        pane = html[html.index('id="settings-ai"'):html.index('id="settings-files"')]
+        for retired in ("advanced-model", "optional-providers", "model-form", "직접 API 설정 변경", "다른 연결 방법", "<details"):
+            self.assertNotIn(retired, pane)
+        self.assertEqual(by_id["ai-chooser"][0], "dialog")
+        self.assertEqual(by_id["judgment-chooser"][0], "dialog")
+        self.assertEqual(by_id["ai-chooser"][1]["aria-labelledby"], "ai-chooser-title")
+        # The explicit Judgment routes (#580) live in the 고급 dialog, not on the scan path.
+        self.assertLess(html.index('id="judgment-chooser"'), html.index('id="decision-route"'))
+        self.assertIn("확인하고 사용", pane)
 
     def test_existing_draft_and_primary_route_wiring_are_preserved(self):
         app = (WEB / "app.js").read_text(encoding="utf-8")
         self.assertIn("renderExecutionConnection(settings);", app)
         self.assertIn("renderSubscriptionEngines(settings.subscription_engines);", app)
-        self.assertIn("api('/api/model/test',value)", app)
-        self.assertIn("modelGuard.test", app)
-        self.assertIn("credential_revision", app)
+        self.assertIn("api('/api/main-ai/activate',body)", app)
+        self.assertIn("api('/api/main-ai/key',{provider:route.id,key:input.value})", app)
         self.assertIn("contextDraftDirty", app)
         self.assertIn("if(!contextDraftDirty", app)
         self.assertNotIn("Telegram용 구독 엔진", app)

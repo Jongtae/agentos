@@ -136,6 +136,8 @@ Raw connector IDs, capability IDs, grant IDs, provider diagnostics, scopes and v
 
 AI settings must show exactly one effective route when one is selected. A successful configuration test does not silently activate that route.
 
+Settings › AI 연결 names the two roles **기본 AI (Main AI)** — the Work route — and **판단 AI (Judgment AI)** — the DecisionEngine route, labelled 판단 AI (대화 해석) so that owner pointers to 설정 › 대화 해석 land on it. They appear as one card with the Judgment AI as a subordinate line; the Judgment AI follows the Main AI by default (#619, see the DecisionEngine contract). Changing either happens in a fixed-order chooser; a saved credential is shown as saved with its date, never as a value.
+
 ## Truth and authority invariants
 
 Presence may change projection, never the underlying truth boundary:

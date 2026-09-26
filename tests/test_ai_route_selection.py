@@ -100,12 +100,12 @@ class AiRouteSelectionTests(unittest.TestCase):
         self._run('hello', 'still-cli')
         self.assertEqual((self.engine.calls, self.model_calls), (1, 0))
 
-    def test_expired_or_changed_verification_is_refused(self):
+    def test_changed_verification_is_refused_but_age_alone_is_not(self):
+        # #619 AC6: a passed check does not flip to "확인 필요" by time alone.
         self._ready_model()
-        stale = dict(self.store.config('model_test'), time=1)
-        self.store.put('model_test', stale)
-        with self.assertRaisesRegex(ValueError, '연결 확인'):
-            self.service.select_ai_route({'route': 'direct-api'})
+        old = dict(self.store.config('model_test'), time=1)
+        self.store.put('model_test', old)
+        self.assertTrue(self.service.model_ready())
         self._ready_model()
         self.store.put('model', dict(self.CONFIG, model='other-model'))  # changed after the test
         with self.assertRaisesRegex(ValueError, '연결 확인'):

@@ -41,6 +41,10 @@ class Fixture:
         {"connector_id": "fixture-unknown", "label": "A very long synthetic connector label that must wrap inside the settings row without overflowing its column on narrow screens", "state": "surprising-new-state", "required_scopes": ["fixture.scope.with.a.very.long.identifier.that.has.no.natural.break.points.at.all"], "connect_path": "/fixture-connect/unknown"},
     ]
     tasks_empty = False
+    # #588 synthetic disconnect/revocation read model: nothing leaves this
+    # fixture; the Google outcome is chosen by /control/revoke-outcome.
+    revoke_outcome = "unconfirmed"
+    pending_revocations = {}
     # Synthetic DecisionEngine route read model (#580): an owner-selected
     # subscription route with a qualified model, plus inactive choices.
     decision_route = {
@@ -195,6 +199,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/favicon.ico":
             self.send_response(204)
             self.end_headers()
+        elif path == "/api/connections/google/revocations":
+            self.send_json({"pending_provider_revocations": [{"connector_id": key, "label": key, "since": since} for key, since in Fixture.pending_revocations.items()]})
         elif path in ("/", "/app.js", "/style.css"):
             name = {"/": "index.html", "/app.js": "app.js", "/style.css": "style.css"}[path]
             raw = (WEB / name).read_bytes()
@@ -315,7 +321,33 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         body = json.loads(self.rfile.read(length) or b"{}")
         self.observe("POST", path)
-        if path == "/control/reset-observation":
+        if path == "/control/revoke-outcome":
+            Fixture.revoke_outcome = body.get("outcome", "unconfirmed")
+            self.send_json({"outcome": Fixture.revoke_outcome})
+        elif path == "/api/connections/google/disconnect/preview":
+            self.send_json({"connector_id": body.get("connector_id"), "label": body.get("connector_id"), "state": "connected", "confirmation": "fixture-confirmation", "expires_at": time.time() + 300,
+                            "effects": {"local_access": "stop", "local_credentials": "delete", "provider_revocation": "request", "provider_destination": "oauth2.googleapis.com", "retained_data": "preserve", "remote_data_deletion": "none"},
+                            "message": "fixture preview"})
+        elif path == "/api/connections/google/disconnect":
+            connector_id = body.get("connector_id")
+            if body.get("confirmation") != "fixture-confirmation":
+                self.send_json({"error": "확인 정보가 올바르지 않습니다. 연결 해제를 처음부터 다시 진행해 주세요."}, 400)
+                return
+            for row in Fixture.connectors:
+                if row["connector_id"] == connector_id:
+                    row["state"] = "disconnected"
+            outcome = Fixture.revoke_outcome
+            retry = outcome in ("unconfirmed", "failed")
+            if retry:
+                Fixture.pending_revocations[connector_id] = time.time()
+            self.send_json({"connector_id": connector_id, "operation": "disconnect", "local_access": "stopped", "local_credentials": "deleted", "provider_revocation": outcome,
+                            "provider_request": "unknown" if outcome == "unconfirmed" else "observed", "provider_destination": "oauth2.googleapis.com", "retained_data": "preserved",
+                            "retry_available": retry, "label": connector_id, "state": "disconnected", "message": "fixture receipt"})
+        elif path == "/api/connections/google/revocation/retry":
+            Fixture.pending_revocations.pop(body.get("connector_id"), None)
+            self.send_json({"connector_id": body.get("connector_id"), "operation": "retry_revocation", "local_access": "stopped", "local_credentials": "deleted", "provider_revocation": "revoked",
+                            "provider_request": "observed", "provider_destination": "oauth2.googleapis.com", "retained_data": "preserved", "retry_available": False, "message": "fixture receipt"})
+        elif path == "/control/reset-observation":
             Fixture.task_polls = 0
             Fixture.requests.clear()
             self.send_json({"ok": True})

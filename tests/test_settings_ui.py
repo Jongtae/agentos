@@ -22,7 +22,7 @@ class Element {
  querySelector(selector){return descendants(this).find(node=>selector[0]==='.'?node.className.split(' ').includes(selector.slice(1)):node.tag===selector)||null;}
 }
 function descendants(node){return node.children.flatMap(child=>typeof child==='string'?[]:[child,...descendants(child)]);}
-for(const id of ['active-ai','ai-chooser-list','ai-chooser-consequence','ai-chooser-feedback','ai-chooser-apply','telegram-current','telegram-change','telegram-form','telegram-status','telegram-feedback','telegram-submit','disconnect','new-pair','telegram-pair','connector-controls'])new Element('div').id=id;
+for(const id of ['active-ai','ai-chooser-list','ai-chooser-consequence','ai-chooser-feedback','ai-chooser-apply','telegram-current','telegram-change','telegram-form','telegram-status','telegram-feedback','telegram-submit','disconnect','new-pair','telegram-pair','connector-controls','connector-feedback','google-disconnect','google-disconnect-cancel','google-disconnect-confirm','google-disconnect-retry'])new Element('div').id=id;
 const $=id=>ids.get(id),document={getElementById:$,createElement:tag=>new Element(tag)};
 const part=(start,end)=>app.slice(app.indexOf(start),app.indexOf(end));
 const source=part('const LANGUAGES=','function normalizeEndpoint(')+

@@ -266,6 +266,7 @@ class EngineFailureDiagnosticsTests(unittest.TestCase):
         self.assertIn('--ignore-user-config', argv)
         self.assertIn('--ephemeral', argv)
         self.assertEqual(argv[argv.index('--sandbox') + 1], 'read-only')
+        self.assertEqual(argv.count('--ignore-rules'), 1, 'CODEX_HOME exec rules never widen the sandbox (#636)')
         self.assertTrue(any(a.startswith('mcp_servers.agentos.command=') for a in argv))
         self.assertEqual(argv[-1], 'hello')
 
@@ -511,7 +512,7 @@ class BoundedExecutionPreservedBoundaryTests(unittest.TestCase):
                                     codex_home=profile).execute(
                 'codex', 'hello', AgentOSMcpTools(_Capabilities()))
         argv = seen['argv']
-        self.assertEqual(argv[1:6], ['exec', '--json', '--sandbox', 'read-only',
+        self.assertEqual(argv[1:7], ['exec', '--json', '--sandbox', 'read-only', '--ignore-rules',
                                      '--skip-git-repo-check'])
         # No generic argv/approval hook: the caller cannot relax these.
         self.assertNotIn('--dangerously-bypass-approvals-and-sandbox', argv)

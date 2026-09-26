@@ -372,6 +372,7 @@ class IsolationIsNotUnlockedForParity(unittest.TestCase):
             claude, claude_env = self._argv('claude-code', folder)
         self.assertEqual(codex[codex.index('--sandbox') + 1], 'read-only')
         self.assertIn('--ignore-user-config', codex)
+        self.assertIn('--ignore-rules', codex)
         self.assertIn('--strict-mcp-config', claude)
         for argv in (codex, claude):
             joined = ' '.join(argv)

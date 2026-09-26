@@ -642,7 +642,12 @@ class BoundedExecutionAdapter:
             # --ignore-user-config keeps the owner's own Codex defaults (model,
             # MCP servers, plugins) out of this bounded turn; login still
             # comes from CODEX_HOME.  --ephemeral keeps no session files.
-            sandbox = strict_launch_arguments('codex', disabled_features) if strict else ['--sandbox', 'read-only']
+            # trusted-local: --ignore-rules so an "always allow" CODEX_HOME exec
+            # rule cannot run a command outside the read-only sandbox (#636,
+            # the #616 review P1 finding); an older CLI rejects the unknown
+            # flag and the turn fails instead of running without it.
+            sandbox = (strict_launch_arguments('codex', disabled_features) if strict
+                       else ['--sandbox', 'read-only', '--ignore-rules'])
             return [binary, 'exec', '--json', *sandbox, '--skip-git-repo-check',
                     '--ignore-user-config', '--ephemeral',
                     '-c', f'mcp_servers.agentos.command={json.dumps(sys.executable)}',

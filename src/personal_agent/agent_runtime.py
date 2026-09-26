@@ -275,6 +275,8 @@ PROVENANCE_WINDOW[UNRECORDED_PROVENANCE]='history'
 WORK_SOURCES_KEY='work_source_provenance'
 #: #605 P3: per-Work lookup state shared by every process serving the Work.
 LOOKUP_STATE_KEY='work_lookup_state'
+#: Work statuses never re-queued under the same id; only their state rows are pruned.
+LOOKUP_STATE_TERMINAL=frozenset({'succeeded','cancelled','partial','unknown','interrupted'})
 WORK_SOURCES_LIMIT=400
 
 def base_label(label):
@@ -390,6 +392,7 @@ PUBLIC_TASK_NO_JUDGMENT={
  'uncertain':'민감 정보 판단이 이번 요청 내용에 대해 확실한 답을 주지 않아, 요청에 적힌 내용을 공개 조회에 보내지 않았습니다.',
  'budget':'이 작업에서 민감 정보 판단 횟수 한도에 도달해, 요청에 적힌 새 내용을 공개 조회에 보내지 않았습니다. 새 요청으로 보내 주세요.',
  'bridge':'구독 CLI의 도구 호출에서는 아직 민감 정보 판단을 사용할 수 없어, 이번 요청에 적힌 내용을 공개 조회에 보내지 않았습니다.',
+ 'state':'이 작업의 공개 조회 기록을 저장하거나 읽을 수 없어, 이번 요청에 적힌 내용을 공개 조회에 보내지 않았습니다.',
  'unsupported':'지금 설정된 대화 해석 경로는 이 민감 정보 판단을 지원하지 않아, 이번 요청에 적힌 내용을 공개 조회에 보내지 않았습니다. 설정 › 대화 해석에서 다른 경로를 고를 수 있습니다.',
 }
 #: True for search and research only: an owner-typed `/search` string is sent
@@ -438,10 +441,34 @@ LOOKUP_JUDGMENTS_PER_WORK=6
 LOOKUP_CLEAN_PER_WORK=6
 #: Bounds of the durable withheld digests (#605 P3): characters of one value
 #: hashed, the longest span hashed, and entries kept per Work.
-LOOKUP_DIGEST_WORD_MAX=32
 LOOKUP_DIGEST_SPAN=8
-LOOKUP_DIGEST_ENTRIES=32
+#: Withheld values kept per Work (one judgment can withhold every judged term
+#: of each allowed judgment) and digests kept per Work.  Past the digest cap
+#: the row is marked overflowing and nothing more is admissible (fail closed).
+LOOKUP_DIGEST_ENTRIES=72
+LOOKUP_DIGEST_TOTAL=4096
+#: Hangul compared on jamo (#605 owner scope): at least this many jamo, so a
+#: jamo-level match spans more than one bare syllable; spans hashed up to 8.
+LOOKUP_JAMO_MIN=5
+LOOKUP_JAMO_SPAN=8
+#: A written/withheld value found INSIDE an outbound word or joined run
+#: (``김철수님``, ``mrkimchulsoo``) is withheld when it has at least 2
+#: characters of Hangul/CJK/kana or 3 of any other script (P1-A, P2-B), up to
+#: LOOKUP_CONTAIN_MAX characters (LOOKUP_JAMO_CONTAIN_MAX jamo) for the durable
+#: digest check.
+LOOKUP_CONTAIN_MAX=32
+LOOKUP_JAMO_CONTAIN_MAX=48
+#: The durable per-Work state rows kept in all; past it no new Work can record
+#: state and its lookups are refused (fail closed, P3-F).
+LOOKUP_STATE_ROWS_MAX=1000
+PUBLIC_TASK_STATE_UNAVAILABLE='이 작업의 공개 조회 기록을 저장할 수 없어 공개 조회를 하지 않았습니다. 잠시 뒤 새 요청으로 다시 보내 주세요.'
+#: Clean-context bounds on what a worker's own words can carry (#605 scope):
+#: distinct words per lookup, characters per word, characters per query.
 LOOKUP_CLEAN_WORD_CAP=12
+LOOKUP_CLEAN_WORD_MAX=24
+LOOKUP_CLEAN_QUERY_MAX=120
+#: The provider's own limit for an owner-typed `/search` string (LocalTools).
+LOOKUP_EXPLICIT_QUERY_MAX=500
 PUBLIC_TASK_LOOKUP_LIMIT='이 작업에서 공개 조회 횟수 한도(6회)에 도달해 더 조회하지 않았습니다. 이어서 조회하려면 새 요청으로 보내 주세요.'
 #: #605 P1-A: the only non-whitespace characters a clean-context separator may
 #: keep (search operators and ordinary punctuation), per separator and in total.
@@ -454,14 +481,55 @@ LOOKUP_SEPARATOR_MAX=3
 LOOKUP_SEPARATOR_TOTAL=12
 _DIGIT_SEPARATOR=re.compile(r'(?<=\d)[\W_]+(?=\d)')
 
-def lookup_norm(text):
- """NFKC, every Unicode decimal digit (Nd) as ASCII, then casefold (#605 N4, P1-C).
+#: #605 P3-E: stroke letters and ligatures without a canonical decomposition,
+#: folded like diacritics before comparison.
+_LETTER_FOLD=str.maketrans({'Ł':'L','ł':'l','Ø':'O','ø':'o','Đ':'D','đ':'d','Ħ':'H','ħ':'h','ı':'i','ß':'ss',
+                            'ẞ':'SS','Æ':'AE','æ':'ae','Œ':'OE','œ':'oe','Þ':'TH','þ':'th','Ŀ':'L','ŀ':'l',
+                            'Ð':'D','ð':'d','Ŧ':'T','ŧ':'t','Ɨ':'I','ɨ':'i','Ƚ':'L','ƚ':'l','Ȼ':'C','ȼ':'c'})
 
- Full-width, compatibility, case and digit-script variants compare equal:
- ``M١٢٣٤٥٦٧٨`` (Arabic-Indic) and ``M१२३४५६७८`` (Devanagari) are ``m12345678``.
+def lookup_norm(text):
+ """The comparison form of lookup text (#605 N4, P1-C and the owner scope).
+
+ NFKD with combining marks (Mn/Me) removed, then NFKC; every character with a
+ Unicode digit value (Nd and No: ``١`` ``१`` ``❶`` ``➀`` Kharoshthi ``𐩁``) as
+ its ASCII digit; stroke letters and ligatures folded (``Ł`` ``Ø`` ``Æ``, P3-E);
+ casefolded.  Full-width, compatibility, case, digit-script
+ and diacritic variants compare equal.  Only for comparison: what is sent is
+ the worker's (NFKC) text.
  """
- text=unicodedata.normalize('NFKC',str(text or ''))
- return ''.join(str(unicodedata.decimal(ch)) if unicodedata.category(ch)=='Nd' else ch for ch in text).casefold()
+ text=unicodedata.normalize('NFKD',str(text or ''))
+ text=unicodedata.normalize('NFKC',''.join(ch for ch in text if unicodedata.category(ch) not in ('Mn','Me')))
+ # Letters whose stroke or ligature has no Unicode decomposition (P3-E).
+ text=text.translate(_LETTER_FOLD)
+ out=[]
+ for ch in text:
+  value=unicodedata.digit(ch,None)
+  out.append(str(value) if value is not None else ch)
+ return ''.join(out).casefold()
+
+_JONG_TO_CHO={}
+for _code in range(0x11A8,0x1200):
+ _name=unicodedata.name(chr(_code),'')
+ if not _name.startswith('HANGUL JONGSEONG '):continue
+ # A cluster final (``ᆰ`` RIEUL-KIYEOK) is its component consonants (P3-D);
+ # a single final is its leading-consonant form.
+ try:_JONG_TO_CHO[chr(_code)]=''.join(unicodedata.lookup('HANGUL CHOSEONG '+part)
+                                      for part in _name[len('HANGUL JONGSEONG '):].split('-'))
+ except KeyError:pass
+
+def jamo_key(text):
+ """Hangul of ``text`` as one jamo sequence (#605 owner scope).
+
+ Syllables are decomposed, compatibility jamo (``ㄱ``) and trailing
+ consonants fold to the leading consonant form and cluster finals (``ᆰ``,
+ ``ㄺ``) to their component consonants, so ``김철수``, ``기ᄆ처ᄅ수``,
+ ``김처ᄅ수`` and ``ㄱㅣㅁㅊㅓㄹㅅㅜ`` share one key and ``닭`` equals ``ㄷㅏㄹㄱ``.
+ Non-Hangul is dropped.
+ """
+ out=[]
+ for ch in unicodedata.normalize('NFKD',lookup_norm(text)):
+  if 0x1100<=ord(ch)<=0x11FF:out.append(_JONG_TO_CHO.get(ch,ch))
+ return ''.join(out)
 
 def lookup_words(text):
  return _MEMORY_WORD.findall(lookup_norm(text))
@@ -545,6 +613,7 @@ def select_lookup_words(value, permitted, excluded, *, owner_worded, private, ca
      origin=(index,position);send=shown if form==word else form;break
    if origin is not None:break
   if origin is None and owner_worded:dropped+=1;continue
+  if not private and len(shown)>LOOKUP_CLEAN_WORD_MAX:dropped+=1;continue  # clean-context word length bound
   # Deduplicated in every context (#605 N5; clean contexts too since the
   # owner's threat scope): a repeated word carries nothing new.
   if lookup_norm(send) in seen:continue
@@ -633,27 +702,35 @@ def lookup_pieces(text):
     out.append((token,token[start:index]));start=index
  return out
 
-def lookup_text_violations(text, excluded, blocked=None):
- """Tokens of a FINAL outbound string that match a withheld or written value (#605 P1-A, P2-B, P2-D).
+def _contain_min(ch):
+ return 2 if _script_class(ch) in ('h','c','k') else 3
 
- Re-tokenises ``text`` (normalised: NFKC, ASCII digits, casefold) and
- withholds a token when:
+def lookup_text_violations(text, excluded, blocked=None):
+ """Tokens of an outbound string that match a written or withheld value (#605).
+
+ ``text`` is compared in ``lookup_norm`` form.  A token is withheld when:
 
  * it matches a written/withheld word (``owner_said``) or its digit run is
    part of one (N4/R7), or the durable per-Work withheld set says so;
  * it takes part in a run of adjacent same-script pieces -- joined with no
-   separator, up to LOOKUP_SPAN_MAX characters, at least 2 characters and
-   not digits only -- that is a substring of a written or withheld word
-   (P2-D): ``김 철수``, ``김-철수`` and ``KIM철수`` against a withheld ``김철수``.
-   This over-blocks: any outbound word of 2+ characters that occurs inside a
-   written or withheld word of this Work is withheld too (``번호`` after
-   ``여권번호`` was saved, ``as`` after ``passport``).
+   separator, up to LOOKUP_SPAN_MAX characters, 2+ characters, not digits
+   only -- that is a substring of a written or withheld word, also after NFC
+   recomposition of spaced jamo (``ㅇ ㅣ ㅅ ㅜ`` is ``이수``) and on the jamo
+   key (``ㄱㅣㅁㅊㅓㄹㅅㅜ``) with at least LOOKUP_JAMO_MIN jamo (P2-D, P2-C);
+ * a written or withheld value (2+ Hangul/CJK/kana or 3+ other characters)
+   occurs INSIDE the pieces joined without separators, or its jamo key
+   (LOOKUP_JAMO_MIN+ jamo) inside their jamo key: ``김철수님``,
+   ``mrkimchulsoo``, ``기ᄆ처ᄅ수님`` (P1-A, P2-B).  Only the pieces that
+   overlap the occurrence are withheld.
 
- The digit runs of the whole string with the separators between digit groups
- removed are checked as well (``M123 456 78``).  Returns ``(bad tokens,
- digits_joined)``; ``digits_joined`` means a cross-token digit run matched.
+ This over-blocks: an outbound word of 2+ characters inside a written or
+ withheld word, and an outbound word containing one, are withheld too.  The
+ digit runs of the whole string with separators removed are checked as well
+ (``M123 456 78``).  Returns ``(bad tokens, digits_joined)``.
  """
  excluded_words=[word for value in excluded for word in lookup_words(value)]
+ excluded_jamo=[key for key in (jamo_key(word) for word in excluded_words) if len(key)>=LOOKUP_JAMO_MIN]
+ contained=[word for word in excluded_words if word and not word.isdigit() and len(word)>=_contain_min(word[0])]
  runs=value_digit_runs(excluded)
  bad=set()
  for word in lookup_words(text):
@@ -667,15 +744,37 @@ def lookup_text_violations(text, excluded, blocked=None):
     joined+=pieces[end][1]
     if len(joined)>LOOKUP_SPAN_MAX:break
     if len(joined)<2 or joined.isdigit():continue
-    if any(joined in word for word in excluded_words) or (blocked and blocked.span(joined)):
+    composed=unicodedata.normalize('NFC',joined)
+    if any(form in word for form in {joined,composed} for word in excluded_words) \
+       or (blocked and (blocked.span(joined) or (len(composed)>=2 and blocked.span(composed)))):
+     bad.update(token for token,_piece in pieces[start:end+1]);continue
+    key=jamo_key(joined)
+    if len(key)>=LOOKUP_JAMO_MIN and all(_script_class(ch)=='h' for ch in joined) \
+       and (any(key in word_key for word_key in excluded_jamo) or (blocked and blocked.jamo(key))):
      bad.update(token for token,_piece in pieces[start:end+1])
+  # A value inside the outbound pieces (joined without separators).
+  concat='';owner=[];jamo='';jamo_owner=[]
+  for index,(_token,piece) in enumerate(pieces):
+   concat+=piece;owner.extend([index]*len(piece))
+   key=jamo_key(piece);jamo+=key;jamo_owner.extend([index]*len(key))
+  def mark(where,first,last):
+   bad.update(pieces[index][0] for index in set(where[first:last]))
+  for word in contained:
+   at=concat.find(word)
+   while at>=0:mark(owner,at,at+len(word));at=concat.find(word,at+1)
+  for word_key in excluded_jamo:
+   at=jamo.find(word_key)
+   while at>=0:mark(jamo_owner,at,at+len(word_key));at=jamo.find(word_key,at+1)
+  if blocked:
+   for first,last in blocked.inside(concat):mark(owner,first,last)
+   for first,last in blocked.inside_jamo(jamo):mark(jamo_owner,first,last)
  joined_runs=value_digit_runs([text])
  digits_joined=any(len(value)>=MIN_PARTIAL_DIGITS and value in run for run in joined_runs for value in runs) \
      or any(len(run)>=MIN_PARTIAL_DIGITS and run in value for run in joined_runs for value in runs) \
      or bool(blocked and any(blocked.digits(run) for run in joined_runs))
  return bad,digits_joined
 
-def finalize_lookup_text(value, kept, excluded, blocked=None, *, joined=False):
+def finalize_lookup_text(value, kept, excluded, blocked=None, *, joined=False, max_length=LOOKUP_CLEAN_QUERY_MAX):
  """Build the outbound string and re-check it; withhold whatever still matches.
 
  ``joined`` builds the string from the kept words joined by single spaces (a
@@ -693,9 +792,14 @@ def finalize_lookup_text(value, kept, excluded, blocked=None, *, joined=False):
   keep=[row for row in rows if lookup_norm(row['word']) not in bad
         and not (digits_joined and _MEMORY_DIGITS.search(row['word']))]
   removed+=len(rows)-len(keep);rows=keep
- for _ in range(3):
+ for _ in range(4):
   text=' '.join(row['word'] for row in rows) if joined else rebuild_lookup_value(value,rows)
   if not text:return '',removed
+  if len(text)>max_length:
+   # The query length bound (#605 scope): drop trailing words until it fits.
+   while rows and len(' '.join(row['word'] for row in rows) if joined else rebuild_lookup_value(value,rows))>max_length:
+    rows=rows[:-1];removed+=1
+   continue
   bad,digits_joined=lookup_text_violations(text,excluded,blocked)
   if not bad and not digits_joined:return text,removed
   keep=[row for row in rows if lookup_norm(row['word']) not in bad
@@ -704,29 +808,59 @@ def finalize_lookup_text(value, kept, excluded, blocked=None, *, joined=False):
  return '',removed+len(rows)
 
 class _WithheldDigests:
- """Checks outbound words, spans and digit runs against keyed digests (#605 P3, P2-D)."""
+ """Checks outbound words, spans, jamo and digit runs against keyed digests (#605 P3, P2-D)."""
  def __init__(self,capabilities,digests):
   self.capabilities,self.digests=capabilities,digests
  def _has(self,kind,text):
   return self.capabilities._digest(kind,text) in self.digests
+ def _windows(self,kind,text,width):
+  if len(text)<=width:return self._has(kind,text)
+  return all(self._has(kind,text[i:i+width]) for i in range(len(text)-width+1))
  def span(self,text):
   """``text`` (normalised, 2+ characters) is a substring of a withheld word."""
-  if len(text)<=LOOKUP_DIGEST_SPAN:return self._has('s',text)
-  return all(self._has('s',text[i:i+LOOKUP_DIGEST_SPAN]) for i in range(len(text)-LOOKUP_DIGEST_SPAN+1))
+  return self._windows('s',text,LOOKUP_DIGEST_SPAN)
+ def jamo(self,key):
+  """``key`` (LOOKUP_JAMO_MIN+ jamo) is part of a withheld word's jamo key."""
+  return self._windows('j',key,LOOKUP_JAMO_SPAN)
  def digits(self,run):
   """``run`` equals a withheld digit run, or shares a MIN_PARTIAL_DIGITS window with one."""
   run=lookup_norm(run)
-  return self._has('d',run[:LOOKUP_DIGEST_WORD_MAX]) or any(
-   self._has('d',run[i:i+MIN_PARTIAL_DIGITS]) for i in range(len(run)-MIN_PARTIAL_DIGITS+1))
+  return self._has('d',run) or any(self._has('d',run[i:i+MIN_PARTIAL_DIGITS]) for i in range(len(run)-MIN_PARTIAL_DIGITS+1))
+ def inside(self,text):
+  """``(first, last)`` of every whole withheld value found inside ``text``.
+
+  Every substring of 2/3..LOOKUP_CONTAIN_MAX characters is hashed and tested
+  against the whole-value digests: at most 31 digests per character of the
+  (bounded) outbound text.
+  """
+  found=[]
+  for first in range(len(text)):
+   low=_contain_min(text[first])
+   for last in range(first+low,min(len(text),first+LOOKUP_CONTAIN_MAX)+1):
+    piece=text[first:last]
+    if not piece.isdigit() and self._has('t',piece):found.append((first,last))
+  return found
+ def inside_jamo(self,key):
+  """``(first, last)`` of every whole withheld jamo key found inside ``key``."""
+  found=[]
+  for first in range(len(key)):
+   for last in range(first+LOOKUP_JAMO_MIN,min(len(key),first+LOOKUP_JAMO_CONTAIN_MAX)+1):
+    if self._has('J',key[first:last]):found.append((first,last))
+  return found
  def word(self,word):
   word=lookup_norm(word)
-  if self._has('t',word[:LOOKUP_DIGEST_WORD_MAX]):return True
+  if self._has('t',word):return True
   if len(word)>=2 and not word.isdigit() and self.span(word):return True
+  key=jamo_key(word)
+  if len(key)>=LOOKUP_JAMO_MIN and self.jamo(key):return True
   return any(self.digits(run) for run in _MEMORY_DIGITS.findall(word))
 
 class _BlockEverything:
- """A corrupt durable withheld set: nothing is admissible (fail closed)."""
+ """A corrupt or overflowing durable withheld set: nothing is admissible (fail closed)."""
+ def inside(self,text):return [(0,len(text))] if text else []
+ def inside_jamo(self,key):return [(0,len(key))] if key else []
  def span(self,text):return True
+ def jamo(self,key):return True
  def digits(self,run):return True
  def word(self,word):return True
 
@@ -1050,9 +1184,9 @@ class Capabilities:
   if key in state['cache']:return state['cache'][key]
   if self.lookup_sensitivity is None:
    result=(None,'unavailable')
-  elif not self._claim_state('judgment',limit=LOOKUP_JUDGMENTS_PER_WORK):
-   return (None,'budget')
   else:
+   claimed=self._claim_state('judgment',limit=LOOKUP_JUDGMENTS_PER_WORK)
+   if not claimed:return (None,'budget' if claimed is False else 'state')
    state['calls']+=1
    try:judgment=self.lookup_sensitivity(current,list(terms))
    except Exception:judgment=None
@@ -1103,6 +1237,9 @@ class Capabilities:
    found=db.execute('SELECT value FROM config WHERE key=?',(self._state_row_key(),)).fetchone()
    row=json.loads(found[0]) if found else {}
    if not isinstance(row,dict):raise ValueError('corrupt lookup state')
+   if found is None:
+    rows=db.execute("SELECT COUNT(*) FROM config WHERE key LIKE ?",(LOOKUP_STATE_KEY+':%',)).fetchone()[0]
+    if rows>=LOOKUP_STATE_ROWS_MAX:raise ValueError('lookup state rows exhausted')  # fail closed
    result=change(row)
    db.execute('INSERT INTO config VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
               (self._state_row_key(),json.dumps(row)))
@@ -1112,52 +1249,80 @@ class Capabilities:
            if key!=self._state_row_key()]
     for key in stale:
      job=db.execute('SELECT status FROM jobs WHERE id=?',(key[len(LOOKUP_STATE_KEY)+1:],)).fetchone()
-     if job is None or job[0] not in ('queued','running'):db.execute('DELETE FROM config WHERE key=?',(key,))
+     # Only Works that no longer exist or can never run again under the
+     # same id: a parked (`awaiting_*`) or failed Work may be re-queued under
+     # its id (#605 P2), so its row is kept; LOOKUP_STATE_ROWS_MAX bounds the
+     # total and fails closed past it (P3-F).
+     if job is None or job[0] in LOOKUP_STATE_TERMINAL:db.execute('DELETE FROM config WHERE key=?',(key,))
   return result
  def _claim_state(self,kind,limit=1):
-  """Atomically count one ``kind`` use unless the Work already has ``limit``."""
+  """Atomically count one ``kind`` use unless the Work already has ``limit``.
+
+  True when counted, False at the limit, None when the state could not be
+  read or written (corrupt row, row cap, store error).
+  """
   def change(row):
    used=row.get(kind) or 0
    if not isinstance(used,int) or isinstance(used,bool):raise ValueError('corrupt lookup state')
    if used>=limit:return False
    row[kind]=used+1;return True
   try:return self._update_state(change)
-  except Exception:return False  # fail closed: no exemption, no further judgment or lookup
+  except Exception:return None  # fail closed: callers treat it as refused, with the true reason
  def _record_withheld(self,words):
-  """Durably remember withheld values as bounded keyed digests only."""
-  if self._state_key() is None:return  # in-process sticky list only
-  entries=[]
+  """Durably remember withheld values as keyed digests only (no text, no lengths).
+
+  Digests cover the whole normalised value, its 2-8-character spans, its
+  jamo spans of LOOKUP_JAMO_MIN-LOOKUP_JAMO_SPAN and every 4-digit window of
+  its digit runs -- over the WHOLE value, not a prefix (P3).  The Work keeps
+  one digest set of at most LOOKUP_DIGEST_TOTAL; past it the row is marked
+  overflowing and everything is withheld (fail closed).
+  """
+  if self._state_key() is None:return True  # in-process sticky list only
+  new=set()
   for word in words:
-   norm=lookup_norm(word)[:LOOKUP_DIGEST_WORD_MAX];digests={self._digest('t',norm)}
+   norm=lookup_norm(word);new.add(self._digest('t',norm))
    letters=''.join(ch for ch in norm if not ch.isdigit())
    for text in {norm,letters}:
     for start in range(len(text)):
-     for end in range(start+2,min(len(text),start+LOOKUP_DIGEST_SPAN)+1):
-      digests.add(self._digest('s',text[start:end]))
+     for end in range(start+2,min(len(text),start+LOOKUP_DIGEST_SPAN)+1):new.add(self._digest('s',text[start:end]))
+   key=jamo_key(norm)
+   if LOOKUP_JAMO_MIN<=len(key)<=LOOKUP_JAMO_CONTAIN_MAX:new.add(self._digest('J',key))
+   for start in range(len(key)):
+    for end in range(start+LOOKUP_JAMO_MIN,min(len(key),start+LOOKUP_JAMO_SPAN)+1):new.add(self._digest('j',key[start:end]))
    for run in value_digit_runs([word]):
-    run=run[:LOOKUP_DIGEST_WORD_MAX];digests.add(self._digest('d',run))
-    digests.update(self._digest('d',run[i:i+MIN_PARTIAL_DIGITS]) for i in range(len(run)-MIN_PARTIAL_DIGITS+1))
-   entries.append(sorted(digests))
-  if not entries:return
+    new.add(self._digest('d',run))
+    new.update(self._digest('d',run[i:i+MIN_PARTIAL_DIGITS]) for i in range(len(run)-MIN_PARTIAL_DIGITS+1))
+  if not new:return True
+  count=len(words)
   def change(row):
-   withheld=row.get('withheld') or []
-   if not isinstance(withheld,list):raise ValueError('corrupt lookup state')
-   row['withheld']=[*withheld,*entries][-LOOKUP_DIGEST_ENTRIES:]
-  try:self._update_state(change)
-  except Exception:pass
+   digests=row.get('withheld') or []
+   if not isinstance(digests,list) or not all(isinstance(value,str) for value in digests):raise ValueError('corrupt lookup state')
+   merged=set(digests)|new
+   row['withheld_terms']=int(row.get('withheld_terms') or 0)+count
+   if len(merged)>LOOKUP_DIGEST_TOTAL or row['withheld_terms']>LOOKUP_DIGEST_ENTRIES:
+    row['overflow']=True;row['withheld']=sorted(digests)
+   else:row['withheld']=sorted(merged)
+  try:
+   self._update_state(change);return True
+  except Exception:
+   # No silent loss (P3-F): the value stays withheld in this process, the
+   # Work's row is marked overflowing if it can be, and the caller refuses
+   # this lookup.
+   try:self._update_state(lambda row:row.__setitem__('overflow',True))
+   except Exception:pass
+   return False
  def _withheld_check(self):
   """The Work's durable withheld set as a checker, or None when it is empty."""
   if self._state_key() is None:return None
   try:
    found=self.store.config(self._state_row_key(),{})
-   if not isinstance(found,dict) or not isinstance(found.get('withheld') or [],list):raise ValueError
-   digests=set()
-   for entry in found.get('withheld') or []:
-    if not isinstance(entry,list):raise ValueError
-    digests.update(str(value) for value in entry)
+   if not isinstance(found,dict):raise ValueError
+   if found.get('overflow'):return _BlockEverything()
+   digests=found.get('withheld') or []
+   if not isinstance(digests,list) or not all(isinstance(value,str) for value in digests):raise ValueError
   except Exception:
    return _BlockEverything()  # a corrupt row fails closed
-  return _WithheldDigests(self,digests) if digests else None
+  return _WithheldDigests(self,set(digests)) if digests else None
  def _compose(self,fields,sources,excluded,*,private):
   """Compose the outbound words of one lookup's fields with ONE judgment.
 
@@ -1205,7 +1370,8 @@ class Capabilities:
     # Sticky for this Work: a later lookup cannot resample the judgment by
     # reordering or re-adding the same term (P2-4).
     self.lookup_state['withheld'].extend(row['word'] for row in hit)
-    self._record_withheld([row['word'] for row in hit])
+    if not self._record_withheld([row['word'] for row in hit]):
+     raise ValueError(PUBLIC_TASK_STATE_UNAVAILABLE)
    # Terms beyond the judged cap are never sent.
    withheld|={id(row) for _,row in beyond}
    for name in rows:
@@ -1299,9 +1465,14 @@ class Capabilities:
     # values are still removed.  Worker-rewritten or added words never take
     # this path (the proposal must equal the typed string).
     self.lookup_state['explicit_spent']=True
-    kept,dropped=select_lookup_words(explicit,[explicit],excluded,owner_worded=False,private=False)
+    # Saved values AND values the judgment withheld in this Work (owner scope).
+    explicit_excluded=[*excluded,*self.lookup_state['withheld']];blocked=self._withheld_check()
+    kept,dropped=select_lookup_words(explicit,[explicit],explicit_excluded,owner_worded=False,private=True,
+                                     cap=LOOKUP_EXPLICIT_QUERY_MAX,blocked=blocked)
+    kept.sort(key=lambda row:row['span'])
     # The same separator policy and final re-check as any lookup (P1-A/P2-B).
-    query,removed=finalize_lookup_text(explicit,kept,excluded);dropped+=removed
+    query,removed=finalize_lookup_text(explicit,kept,explicit_excluded,blocked,max_length=LOOKUP_EXPLICIT_QUERY_MAX)
+    dropped+=removed
     if not query:raise ValueError(PUBLIC_TASK_UNRESOLVED)
     plan={'tool':'web_search' if action=='web_search' else action,'query':query}
     if action=='bounded_public_research':plan['mode']=args.get('mode')
@@ -1327,8 +1498,9 @@ class Capabilities:
    self.lookup_sources()
    # #605 owner threat scope: clean-context lookups are capped per Work,
    # across processes, to bound a hostile worker's covert channel.
-   if not private and not self._claim_state('clean-lookup',limit=LOOKUP_CLEAN_PER_WORK):
-    raise ValueError(PUBLIC_TASK_LOOKUP_LIMIT)
+   if not private:
+    claimed=self._claim_state('clean-lookup',limit=LOOKUP_CLEAN_PER_WORK)
+    if not claimed:raise ValueError(PUBLIC_TASK_LOOKUP_LIMIT if claimed is False else PUBLIC_TASK_STATE_UNAVAILABLE)
   sent={k:v for k,v in plan.items() if k!='tool'}
   if private:
    if not self._claim_attempt(tool_id,action):

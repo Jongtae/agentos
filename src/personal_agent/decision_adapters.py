@@ -46,7 +46,8 @@ import subprocess
 import tempfile
 import time
 
-from .bounded_execution import ExecutionError, cli_metadata, failure_details, is_not_signed_in
+from .bounded_execution import (ExecutionError, bounded_run, cli_metadata, failure_details, is_not_signed_in,  # noqa: F401
+                                kill_process_group)
 from .decision import (DECISION_SYSTEM, MAX_CONTEXT_CHARS, NO_CANDIDATE, OUTCOME_CANCELLED,
                        OUTCOME_DECIDED, OUTCOME_MALFORMED, OUTCOME_REJECTED, OUTCOME_TIMEOUT,
                        OUTCOME_UNAVAILABLE, ROUTE_JEV, ROUTE_SUBSCRIPTION_CLI, BinaryDecision,
@@ -142,34 +143,6 @@ def codex_still_enabled(rows, allowed=CODEX_ALLOWED_ENABLED_FEATURES):
     """
     return sorted(name for name, stage, enabled in rows
                   if enabled and stage != 'removed' and name not in allowed)
-
-
-def bounded_run(runner, argv, *, cwd, env, timeout):
-    """Run one CLI with no shell in its own process group.
-
-    With the real ``subprocess.run`` a timeout kills the whole group, so the
-    native binary behind a wrapper script (Codex's ``codex.js``) is not left
-    running.  An injected test runner receives ``start_new_session=True``.
-    """
-    if runner is not subprocess.run:
-        return runner(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
-                      timeout=timeout, shell=False, start_new_session=True)
-    process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, text=True, shell=False, start_new_session=True)
-    try:
-        stdout, stderr = process.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        kill_process_group(process)
-        process.communicate()
-        raise
-    return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
-
-
-def kill_process_group(process):
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError, OSError):
-        process.kill()
 
 
 def valid_model_id(value):

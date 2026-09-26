@@ -260,19 +260,24 @@ class QuickStore:
             row=db.execute('SELECT * FROM jobs WHERE id=?',(job_id,)).fetchone()
             return dict(row) if row else None
 
-    def link_work_relation(self, job_id, related_job_id, relation_kind):
-        """Bind one Work to an earlier Work without copying either request."""
+    def link_work_relation(self, job_id, related_job_id, relation_kind, db=None):
+        """Bind one Work to an earlier Work without copying either request.
+
+        With ``db`` the link joins the caller's transaction (#607).
+        """
         if relation_kind not in {'retry','reference','cancel','correction'}:
             raise ValueError('작업 관계를 확인하세요.')
         if not isinstance(job_id,str) or not isinstance(related_job_id,str) or job_id==related_job_id:
             raise ValueError('연결할 작업을 확인하세요.')
-        with self.db() as db:
-            current=db.execute('SELECT id FROM jobs WHERE id=?',(job_id,)).fetchone()
-            related=db.execute('SELECT id FROM jobs WHERE id=?',(related_job_id,)).fetchone()
-            if not current or not related:
-                raise ValueError('연결할 작업을 찾을 수 없습니다.')
-            db.execute('UPDATE jobs SET relation_kind=?,related_job_id=? WHERE id=?',
-                       (relation_kind,related_job_id,job_id))
+        if db is None:
+            with self.db() as conn:
+                return self.link_work_relation(job_id,related_job_id,relation_kind,db=conn)
+        current=db.execute('SELECT id FROM jobs WHERE id=?',(job_id,)).fetchone()
+        related=db.execute('SELECT id FROM jobs WHERE id=?',(related_job_id,)).fetchone()
+        if not current or not related:
+            raise ValueError('연결할 작업을 찾을 수 없습니다.')
+        db.execute('UPDATE jobs SET relation_kind=?,related_job_id=? WHERE id=?',
+                   (relation_kind,related_job_id,job_id))
         return {'relation_kind':relation_kind,'related_job_id':related_job_id}
 
     def notes(self):

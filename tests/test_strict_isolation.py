@@ -138,11 +138,16 @@ class StrictLaunchArguments(unittest.TestCase):
     def test_claude_strict_has_no_built_in_tools_and_allows_only_the_offered_bridge_tools(self):
         trusted = self.adapter.command('claude-code', '/runtime/claude', 'prompt', self.config, 'instructions')
         strict = self.adapter.command('claude-code', '/runtime/claude', 'prompt', self.config, 'instructions', profile=STRICT_PROFILE)
-        self.assertEqual(strict[:len(trusted)], trusted)
-        self.assertEqual(strict[len(trusted):], ['--tools', '', '--restricted', '--allowedTools',
-                                                 'mcp__agentos__bounded_public_research,mcp__agentos__list_notes,'
-                                                 'mcp__agentos__save_note,mcp__agentos__weather,mcp__agentos__web_search'])
+        allow = ['--allowedTools', 'mcp__agentos__bounded_public_research,mcp__agentos__list_notes,'
+                                   'mcp__agentos__save_note,mcp__agentos__weather,mcp__agentos__web_search']
+        # #623: both pre-approve exactly the same bridge tools; strict also
+        # removes every built-in tool.
+        self.assertEqual(trusted[-2:], allow)
+        self.assertEqual(strict[-2:], allow, 'the variadic --allowedTools stays last')
+        self.assertEqual(strict[:len(trusted) - 2], trusted[:-2])
+        self.assertEqual(strict[len(trusted) - 2:], ['--tools', '', '--restricted', *allow])
         self.assertNotIn('--tools', trusted)
+        self.assertNotIn('--restricted', trusted)
 
     def test_no_widening_for_parity_and_unknown_profiles_are_refused(self):
         for engine in ('codex', 'claude-code'):
@@ -1025,14 +1030,72 @@ class ProcessLevelQualification(unittest.TestCase):
                          'no built-in tool is offered at all')
         self.assertFalse(any(request['authorization'] for request in model.requests), 'no owner credential was sent')
 
-    def test_claude_trusted_local_documents_its_permission_layer(self):
-        """Observed, not endorsed: under -p the trusted-local argv denies the
-        out-of-directory read by permission, and also every bridge call."""
+    def _claude_trusted_script(self):
+        return [{'tool': 'Read', 'input': {'file_path': str(self.store.root / 'FAKE-STORE-CANARY.txt')}},
+                {'tool': 'Bash', 'input': {'command': f'cat {self.home_canary}'}},
+                {'tool': 'mcp__agentos__web_search', 'input': {'query': 'public query'}},
+                {'tool': 'mcp__agentos__weather', 'input': {'city': 'Daejeon'}},
+                {'tool': 'mcp__agentos__list_notes', 'input': {}},
+                {'tool': 'Read', 'input': {'file_path': 'agentos-mcp.json'}},
+                {'tool': 'Bash', 'input': {'command': 'cat agentos-mcp.json'}},
+                {'tool': 'WebFetch', 'input': {'url': 'https://example.com/', 'prompt': 'summarise'}},
+                {'tool': 'Write', 'input': {'file_path': 'written-623.txt', 'content': 'x'}},
+                {'message': 'qualification finished'}]
+
+    def test_claude_trusted_local_allows_exactly_its_bridge_tools(self):
+        """#623: every declared bridge call reaches AgentOS; built-in tools are
+        not widened (observed on 2.1.280 under -p, no model, fake store)."""
         binary = self._claude()
-        model = _ScriptedModel('anthropic', self._claude_script())
+        model = _ScriptedModel('anthropic', self._claude_trusted_script())
         results, events = self._run('claude-code', binary, model, BOUNDED_PROFILE)
-        self.assertNotIn('canary-616', results[0] + results[1])
-        self.assertIn("haven't granted", results[2], 'bridge tools are not pre-approved on trusted-local')
+        store_read, home_cat, search, weather, notes, turn_read, turn_cat, fetch, write = results[:9]
+        at = self.argv.index('--allowedTools')
+        self.assertEqual(self.argv[at + 1].split(','), [f'mcp__agentos__{a}' for a in profile_actions(BOUNDED_PROFILE)])
+        self.assertEqual(self.argv.count('--allowedTools'), 1)
+        for denied in (store_read, home_cat, fetch, write):
+            self.assertNotIn('canary-616', denied)
+        self.assertIn("haven't granted", store_read)
+        self.assertIn('was blocked', home_cat)
+        self.assertIn("haven't granted", fetch, 'WebFetch stays unapproved')
+        self.assertIn("haven't granted", write, 'writes stay unapproved')
+        self.assertFalse(any(self.root.rglob('written-623.txt')))
+        # Every bridge call ran in AgentOS (its own guards decide the outcome;
+        # #605 withholds unjudged request text from public lookups).
+        for bridged in (search, weather, notes):
+            self.assertNotIn("haven't granted", bridged)
+        self.assertIn('fake-note-616', notes)
+        self.assertEqual([tool for tool, _ in events], ['web_search', 'weather', 'list_notes'])
+        # Declared limitation: the turn directory itself is readable.
+        self.assertIn('personal_agent.mcp_bridge', turn_read)
+        self.assertIn('personal_agent.mcp_bridge', turn_cat)
+        self.assertIn('Claude Code 2.1.280', CLI_PROFILES[BOUNDED_PROFILE]['limitation'])
+        self.assertFalse(any(request['authorization'] for request in model.requests), 'no owner credential was sent')
+
+    def test_claude_trusted_local_denies_a_bridge_tool_outside_the_allowlist(self):
+        """Opposing case: the rule is exact, not server-wide - a bridge tool
+        missing from --allowedTools is denied before AgentOS sees it."""
+        binary = self._claude()
+        model = _ScriptedModel('anthropic', [{'tool': 'mcp__agentos__weather', 'input': {'city': 'Daejeon'}},
+                                             {'tool': 'mcp__agentos__list_notes', 'input': {}},
+                                             {'message': 'qualification finished'}])
+
+        def drop_weather(argv):
+            at = argv.index('--allowedTools') + 1
+            argv[at] = ','.join(t for t in argv[at].split(',') if t != 'mcp__agentos__weather')
+            return argv
+        results, events = self._run('claude-code', binary, model, BOUNDED_PROFILE, argv_edit=drop_weather)
+        self.assertIn("haven't granted", results[0])
+        self.assertIn('fake-note-616', results[1])
+        self.assertEqual(events, [('list_notes', 'succeeded')])
+
+    def test_claude_trusted_local_without_the_allowlist_denies_every_bridge_call(self):
+        """Counterexample (#621 observation): why the allowlist is pinned."""
+        binary = self._claude()
+        model = _ScriptedModel('anthropic', [{'tool': 'mcp__agentos__list_notes', 'input': {}},
+                                             {'message': 'qualification finished'}])
+        results, events = self._run('claude-code', binary, model, BOUNDED_PROFILE,
+                                    argv_edit=lambda argv: argv[:argv.index('--allowedTools')])
+        self.assertIn("haven't granted", results[0])
         self.assertEqual(events, [])
 
 

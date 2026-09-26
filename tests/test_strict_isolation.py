@@ -124,10 +124,10 @@ class StrictLaunchArguments(unittest.TestCase):
         self.assertIn('web_search="disabled"', strict, 'provider-hosted search stays off')
         self.assertEqual(CODEX_STRICT_TABLE, 'permissions.agentos-strict-isolated={filesystem={":minimal"="read", '
                                              '":workspace_roots"={"."="read"}}, network={enabled=false}}')
-        self.assertEqual(strict[:3] + strict[3 + len(expected):], trusted[:3] + trusted[5:],
+        self.assertEqual(strict[:3] + strict[3 + len(expected):], trusted[:3] + trusted[6:],
                          'everything else is the trusted-local argv')
-        self.assertEqual(trusted[3:5], ['--sandbox', 'read-only'], 'trusted-local is unchanged')
-        self.assertNotIn('--ignore-rules', trusted)
+        self.assertEqual(trusted[3:6], ['--sandbox', 'read-only', '--ignore-rules'],
+                         'trusted-local keeps the read-only sandbox and ignores CODEX_HOME exec rules (#636)')
 
     def test_codex_strict_without_a_verified_feature_plan_is_refused(self):
         for plan in ((), None, ['apps', 'unified_exec'], ['personality']):
@@ -982,6 +982,53 @@ class ProcessLevelQualification(unittest.TestCase):
         self.assertIn('fake-store-canary-616', results[0])
         self.assertIn('fake-home-canary-616', results[1])
         self.assertIn('outside AgentOS provenance', CLI_PROFILES[BOUNDED_PROFILE]['limitation'])
+
+    def _write_script(self, target):
+        shell = lambda cmd: {'name': 'exec_command', 'arguments': {'cmd': cmd, 'login': False}}
+        return [shell(f'touch {target}'), {'message': 'qualification finished'}]
+
+    def _allow_touch(self):
+        rules = self.root / 'codex-home' / 'rules' / 'default.rules'
+        rules.write_text(rules.read_text() + 'prefix_rule(pattern=["touch"], decision="allow")\n')
+        target = Path.home() / f'.agentos-636-write-canary-{uuid.uuid4().hex}'
+        self.addCleanup(lambda: target.unlink(missing_ok=True))
+        return target
+
+    def test_codex_trusted_local_ignores_an_allow_rule(self):
+        """#636: with --ignore-rules the read-only sandbox blocks the write."""
+        binary = self._codex(tested=False)
+        target = self._allow_touch()
+        results, _ = self._run('codex', binary, _ScriptedModel('responses', self._write_script(target)), BOUNDED_PROFILE)
+        self.assertEqual(self.argv.count('--ignore-rules'), 1)
+        self.assertIn('Operation not permitted', results[0], 'the touch was attempted and denied by the sandbox')
+        self.assertFalse(target.exists(), results[:1])
+
+    def test_codex_trusted_local_allow_rule_escapes_without_ignore_rules(self):
+        """Counterexample: why --ignore-rules is pinned on trusted-local (#636)."""
+        binary = self._codex(tested=False)
+        target = self._allow_touch()
+        self._run('codex', binary, _ScriptedModel('responses', self._write_script(target)), BOUNDED_PROFILE,
+                  argv_edit=lambda argv: self._without(argv, ('--ignore-rules',)))
+        self.assertTrue(target.exists(), 'the "always allow" rule ran touch outside the read-only sandbox')
+
+    def test_codex_trusted_local_forbidden_prefix_rule_is_not_a_read_boundary(self):
+        """#637 thread: what --ignore-rules gives up.  Without the flag an
+        owner "forbidden" rule rejects its exact prefix, but another reader
+        gets the same file under the read-only sandbox; with the flag the rule
+        is not loaded.  The read limitation is the declared one either way."""
+        binary = self._codex(tested=False)
+        rules = self.root / 'codex-home' / 'rules' / 'default.rules'
+        rules.write_text('prefix_rule(pattern=["cat"], decision="forbidden")\n')
+        canary = self.store.root / 'FAKE-STORE-CANARY.txt'
+        shell = lambda cmd: {'name': 'exec_command', 'arguments': {'cmd': cmd, 'login': False}}
+        script = lambda: [shell(f'cat {canary}'), shell(f'head -n 1 {canary}'), {'message': 'qualification finished'}]
+        loaded, _ = self._run('codex', binary, _ScriptedModel('responses', script()), BOUNDED_PROFILE,
+                              argv_edit=lambda argv: self._without(argv, ('--ignore-rules',)))
+        self.assertNotIn('fake-store-canary-616', loaded[0])
+        self.assertIn('Rejected', loaded[0], 'the forbidden rule itself rejected the prefix')
+        self.assertIn('fake-store-canary-616', loaded[1], 'another reader is not')
+        ignored, _ = self._run('codex', binary, _ScriptedModel('responses', script()), BOUNDED_PROFILE)
+        self.assertIn('fake-store-canary-616', ignored[0], 'with --ignore-rules the owner rule is not loaded')
 
     def test_codex_in_product_qualification_uses_the_real_cli(self):
         binary = self._codex()

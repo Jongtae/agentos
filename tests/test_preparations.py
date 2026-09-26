@@ -546,5 +546,71 @@ class SurfaceTests(unittest.TestCase):
         self.assertEqual(recorded_arguments('schedule_preparation', {'goal': 'abc', 'kind': 'reminder'})['goal'], '[가림: 3자]')
 
 
+UI_CHECK = r"""
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const app=fs.readFileSync(process.argv[1],'utf8'),ids=new Map();
+class Element {
+ constructor(tag){this.tag=tag;this.children=[];this.dataset={};this.attrs={};this.className='';this.hidden=false;this._text='';}
+ set id(value){this._id=value;ids.set(value,this);} get id(){return this._id;}
+ set textContent(value){this._text=String(value);this.children=[];} get textContent(){return this._text+this.children.map(node=>typeof node==='string'?node:node.textContent).join('');}
+ append(...nodes){this.children.push(...nodes);} replaceChildren(...nodes){this._text='';this.children=[];this.append(...nodes);}
+ setAttribute(key,value){this.attrs[key]=value;} focus(){} get isConnected(){return true;}
+ get classList(){const node=this;return {toggle(name,on){node._cls=Boolean(on);},add(){},remove(){},contains:()=>Boolean(node._cls)};}
+ querySelector(){return null;} querySelectorAll(){return [];}
+}
+function descendants(node){return node.children.flatMap(child=>typeof child==='string'?[]:[child,...descendants(child)]);}
+for(const id of ['preparations-list','preparations-feedback'])new Element('div').id=id;
+const $=id=>ids.get(id),document={getElementById:$,createElement:tag=>new Element(tag)};
+const part=(start,end)=>app.slice(app.indexOf(start),app.indexOf(end));
+const source=part('const LANGUAGES=','function normalizeEndpoint(')+part('function element(','function setError(')+part('let preparationRows=','// end of #659 preparations');
+const calls=[];
+const ctx={document,$,console,calls,
+ api:async(path,body)=>{calls.push({path,body});if(body&&body.operation==='accept')ctx.rows=[{...ctx.rows[0],state:'scheduled',accepted_by:'owner-settings'}];if(body&&body.operation==='delete')ctx.rows=[];return {preparations:ctx.rows};},
+ busy:async(button,fn)=>fn(),setError:(id,error)=>{$(id).textContent=error?.message||String(error||'');},setFeedback:(id,text)=>{$(id).textContent=text||'';}};
+vm.createContext(ctx);vm.runInContext(source,ctx);vm.runInContext("setLanguage('ko')",ctx);
+const rows=()=>$('preparations-list').children.filter(node=>node.tag==='div'&&node.className.split(' ')[0]==='settings-row');
+const texts=(node,cls)=>descendants(node).filter(n=>n.className===cls).map(n=>n.textContent);
+const buttons=node=>descendants(node).filter(n=>n.tag==='button').map(n=>n.textContent);
+const press=async(label)=>{const button=descendants(rows()[0]).find(n=>n.tag==='button'&&n.textContent===label);await button.onclick({currentTarget:button});};
+(async()=>{
+ ctx.rows=[];await ctx.loadPreparations();
+ assert.equal($('preparations-list').children[0].className,'settings-empty');
+ ctx.rows=[{id:'p1',kind:'prepare',goal:'점심 후보 준비',state:'proposed',due_local:'2026-09-28 11:30 (Mon, Asia/Seoul)',recurrence:'daily',delivery:'keep',last_result:''}];
+ await ctx.loadPreparations();
+ assert.deepEqual(texts(rows()[0],'settings-row-title'),['점심 후보 준비']);
+ assert.equal(texts(rows()[0],'settings-row-description')[0],'미리 준비 · 매일 · 2026-09-28 11:30 (Mon, Asia/Seoul) 예정 · 결과는 보관만 함');
+ assert.deepEqual(texts(rows()[0],'settings-state attention'),['수락 대기']);
+ assert.deepEqual(buttons(rows()[0]),['수락','취소','삭제']);
+ await press('수락');
+ assert.equal(JSON.stringify(calls.at(-1)),JSON.stringify({path:'/api/preparations/request',body:{operation:'accept',id:'p1'}}));
+ assert.deepEqual(texts(rows()[0],'settings-state active'),['예약됨']);
+ assert.deepEqual(buttons(rows()[0]),['취소','삭제']);
+ await press('삭제');
+ assert.equal(calls.filter(c=>c.body).length,1,'the first press deletes nothing');
+ assert(texts(rows()[0],'confirm-text')[0].includes('지난 실행 기록은 남습니다'));
+ await press('삭제 확인');
+ assert.equal(JSON.stringify(calls.at(-1).body),JSON.stringify({operation:'delete',id:'p1'}));
+ assert.equal($('preparations-feedback').textContent,'지웠습니다.');
+ ctx.rows=[{id:'p2',kind:'reminder',goal:'치과',state:'running',due_local:'x',recurrence:null,delivery:'send',last_result:''}];
+ await ctx.loadPreparations();
+ assert.deepEqual(buttons(rows()[0]),['취소'],'a running preparation can be cancelled, not deleted');
+ console.log('ok');
+})().catch(error=>{console.error(error);process.exit(1);});
+"""
+
+
+class PreparationSettingsUi(unittest.TestCase):
+    def test_the_settings_group_lists_accepts_cancels_and_deletes(self):
+        import shutil
+        import subprocess
+        node = shutil.which('node')
+        if node is None:
+            raise unittest.SkipTest('Node is needed for the DOM-stub check')
+        app = Path(__file__).resolve().parents[1] / 'src' / 'personal_agent' / 'web' / 'app.js'
+        result = subprocess.run([node, '-e', UI_CHECK, str(app)], capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip().splitlines()[-1], 'ok')
+
+
 if __name__ == '__main__':
     unittest.main()

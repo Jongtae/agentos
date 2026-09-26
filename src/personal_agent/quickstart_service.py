@@ -61,6 +61,7 @@ from .conversation_handoff import (LOCAL_AUTHORITY_KIND, LOCAL_AUTHORITY_LABELS,
 from . import local_folder_picker
 # PRESENCE-TG-01 / #581: native Telegram presence (reaction, typing, draft, anchor).
 from .context_observations import ContextObservations
+from .browser_session import BrowserProfile, binding_digest
 from .telegram_presence import (CONTROL_DETAILS, CONTROL_RETRY, THINKING_DRAFT_TEXT, WAIT_CHAT_ACTION, WAIT_DRAFT, PresenceTiming,
                                 TelegramTurnAddressing, WaitState, draft_id_for, render_telegram_html,
                                 reply_controls_markup, turn_gesture, without_consumed)
@@ -204,11 +205,20 @@ UNKNOWN_EFFECT_RETRY_REFUSAL=('이전 요청의 외부 결과가 불확실해 �
                               '중복으로 만들어질 수 있으니 먼저 실제 결과를 확인해 주세요.')
 
 
+#: #656: owner-private config row of refused/approved browser steps, by Work id.
+BROWSER_REQUESTS_KEY='browser_step_requests'
+BROWSER_APPROVAL_PROMPT='결제 단계는 승인이 필요합니다. 승인하면 이 요청을 한 번만 이어서 처리하고, 승인한 단계 하나만 실행합니다.'
+
 class AgentService:
     def __init__(self, store, adapter=None, telegram_transport=None, subscription_engines=None, execution_adapter=None,
                  isolated_engine_adapter=None, isolated_mcp_registry=None,
-                 drive_web_oauth=None, connector_registry=None, gmail=None, calendar=None, calendar_oauth=None, calendar_factory=None):
+                 drive_web_oauth=None, connector_registry=None, gmail=None, calendar=None, calendar_oauth=None, calendar_factory=None,
+                 browser_profile=None):
         self.store=store
+        # #656: the one persistent browser profile this installation owns,
+        # under the owner-only private directory.  Chromium is launched only
+        # when a Work's browser tool runs or the owner opens the login window.
+        self.browser_profile=browser_profile or BrowserProfile(store.private/'browser-profile')
         # AX-11 (#603): identity of the code this process loaded, taken once
         # near start-up and recorded with each turn's provenance, so a stale
         # running build is distinguishable from a missing route binding.
@@ -483,7 +493,7 @@ class AgentService:
     # Memory, calendar). A turn that carried any of them keeps only a size and
     # digest of what was sent, never the text (#570 review, major 1).
     PROVENANCE_WITHHELD_SOURCES=frozenset({'connected-drive-file','owner-context-inbox','personal-space','connected-document',
-                                           'owner-memory','owner-folder-names','owner-calendar',
+                                           'owner-memory','owner-folder-names','owner-calendar','owner-browser-session',
                                            # #605 F5: unknown or unlabelled history is withheld too.
                                            'owner-mail','owner-settings','unrecorded','unattributed-tool-evidence',
                                            'conversation-history','engine-unmediated-read'})
@@ -659,7 +669,9 @@ class AgentService:
         if isinstance(sources,list) and ({'owner-settings',ENGINE_UNMEDIATED}&set(sources)):
             return False,'이전 요청이 설정 변경 또는 AgentOS가 중개하지 않은 엔진 작업을 포함해 자동으로 다시 실행하지 않았습니다.'
         effectful={'save_note','save_memory','delegate_agent',
-                   'calendar_draft_create','calendar_draft_update','calendar_draft_cancel'}
+                   'calendar_draft_create','calendar_draft_update','calendar_draft_cancel',
+                   # #656: a browser step in the owner's session may have added to a cart or submitted a form.
+                   'browser_open','browser_click','browser_type'}
         for event in events:
             trace=event.get('trace') or {}
             # AgentPackage tool ids may alias an AgentOS write through
@@ -886,7 +898,7 @@ class AgentService:
                     'subscription_engines':self.subscription_engine_status(),
                     'subscription_execution':self.subscription_execution_profile(),
                     'telegram':{'enabled':tg.get('enabled',False),'mode':tg.get('mode','owner-token'),'username':tg.get('username',''),'paired':bool(tg.get('user_id')),'user_id':tg.get('user_id')},
-                    'file_roots':[{**root,'blocked':folder_grants.blocked(root.get('path',''),self.store)} for root in self.store.config('file_roots',[])], 'file_workspace':FileWorkspace(self.store).projection(), 'document_boundary':boundary, 'context_inbox':__import__('personal_agent.context_inbox',fromlist=['ContextInbox']).ContextInbox(self.store).status(), 'agents':[{'id':role['id'],'name':role['name'],'permissions':role['permissions'],'package_id':package['id']} for package in active_packages for role in package['roles']], 'packages':packages, 'tool_run':self.store.config('tool_run'), 'model_test':model_test, 'model_ready':self.model_ready(model,model_test), 'telegram_status':self.store.config('telegram_status'),'connectors':self.google_connection_rows(),'current_context':self.context_observations.status()}
+                    'file_roots':[{**root,'blocked':folder_grants.blocked(root.get('path',''),self.store)} for root in self.store.config('file_roots',[])], 'file_workspace':FileWorkspace(self.store).projection(), 'document_boundary':boundary, 'context_inbox':__import__('personal_agent.context_inbox',fromlist=['ContextInbox']).ContextInbox(self.store).status(), 'agents':[{'id':role['id'],'name':role['name'],'permissions':role['permissions'],'package_id':package['id']} for package in active_packages for role in package['roles']], 'packages':packages, 'tool_run':self.store.config('tool_run'), 'model_test':model_test, 'model_ready':self.model_ready(model,model_test), 'telegram_status':self.store.config('telegram_status'),'connectors':self.google_connection_rows(),'current_context':self.context_observations.status(),'browser':self.browser_status()}
 
     def home(self):
         """Return the minimal, credential-free read model for the owner home."""
@@ -2885,6 +2897,108 @@ class AgentService:
             raise ValueError('지원하지 않는 일정 초안 요청입니다.')
         raise ValueError('해당 일정 초안을 찾을 수 없습니다.')
 
+    # -- the owner-logged-in browser profile (SEC-BROWSER-01 #656) -----------
+    #
+    # Settings status, the owner's login window and the per-step approval of
+    # a guarded browser action.  Approval state is one owner-private config
+    # row per Work (`BROWSER_REQUESTS_KEY`): what step was refused (binding
+    # digests and an owner-readable label, never page text), and once the
+    # owner approves, the token the runtime consumes on the re-queued run.
+    # The token binding itself is verified by `QuickStore.
+    # consume_browser_step_approval` (the exact-approval row Memory uses).
+    def browser_status(self):
+        status=self.browser_profile.status()
+        status['pending_steps']=[{'work_id':row['work_id'],'action':row['action'],'label':row.get('label',''),
+                                  'host':row.get('host',''),'state':row.get('state'),'requested_at':row.get('requested_at')}
+                                 for row in self.browser_step_requests()]
+        return status
+
+    def open_browser_for_login(self, body):
+        """Open the headed login window on the profile; AgentOS types nothing in it."""
+        url=(body or {}).get('url') if isinstance(body,dict) else None
+        if not isinstance(url,str) or not url.strip():raise ValueError('로그인할 사이트 주소를 입력하세요.')
+        return self.browser_profile.open_for_login(url.strip())
+
+    def browser_step_requests(self):
+        rows=self.store.config(BROWSER_REQUESTS_KEY,{})
+        if not isinstance(rows,dict):return []
+        return sorted((row for row in rows.values() if isinstance(row,dict) and row.get('work_id')),
+                      key=lambda row:row.get('requested_at') or 0)
+
+    def _browser_request(self, work_id):
+        rows=self.store.config(BROWSER_REQUESTS_KEY,{})
+        row=rows.get(work_id) if isinstance(rows,dict) and isinstance(work_id,str) else None
+        return row if isinstance(row,dict) else None
+
+    def _put_browser_request(self, work_id, row):
+        with self.lock:
+            rows=self.store.config(BROWSER_REQUESTS_KEY,{})
+            rows=rows if isinstance(rows,dict) else {}
+            if row is None:rows.pop(work_id,None)
+            else:rows[work_id]=row
+            self.store.put(BROWSER_REQUESTS_KEY,rows)
+
+    def browser_approvals_for(self, job):
+        """The runtime's per-step approval surface for one Work: consume or request."""
+        service=self
+        class Approvals:
+            def consume(self,binding):return service._consume_browser_step(job,binding)
+            def request(self,binding,description):return service._request_browser_step(job,binding,description)
+        return Approvals()
+
+    def _consume_browser_step(self, job, binding):
+        """Spend an approval the owner issued for exactly this step of this Work, once."""
+        row=self._browser_request(job['id'])
+        if not row or row.get('state')!='issued' or row.get('digest')!=binding_digest(binding):return False
+        try:
+            self.store.consume_browser_step_approval(self.connector_owner_id(job),job['id'],binding['action'],
+                                                     binding['page_digest'],binding['target_digest'],row.get('token'))
+        except ValueError:
+            return False
+        finally:
+            # Spent or unusable, the row is gone: a token never outlives its one use.
+            self._put_browser_request(job['id'],None)
+        return True
+
+    def _request_browser_step(self, job, binding, description):
+        """Record the refused step for the owner's approval surfaces (web Settings, Telegram)."""
+        label=self._redact_reason(' '.join(str(description or '').split()))[:120]
+        row={'work_id':job['id'],'action':binding['action'],'digest':binding_digest(binding),'label':label,
+             'page_digest':binding['page_digest'],'target_digest':binding['target_digest'],
+             'state':'requested','requested_at':time.time()}
+        self._put_browser_request(job['id'],row)
+        self.queue_notification(job,'browser_approval_needed',fingerprint=row['digest'])
+
+    def browser_step_prompt(self, work_id):
+        row=self._browser_request(work_id) or {}
+        label=row.get('label') or '브라우저 단계'
+        return f"{BROWSER_APPROVAL_PROMPT} 단계: {label}."
+
+    def browser_step_decision(self, body):
+        """The owner's web decision on one pending browser step."""
+        if not isinstance(body,dict) or not isinstance(body.get('work_id'),str) or body.get('decision') not in ('approve','deny'):
+            raise ValueError('승인할 브라우저 단계와 결정을 확인하세요.')
+        pending=self._browser_request(body['work_id'])
+        if not pending or pending.get('state')!='requested':raise ValueError('승인 대기 중인 브라우저 단계가 없습니다.')
+        return self._decide_browser_step(body['work_id'],body['decision']=='approve')
+
+    def _decide_browser_step(self, work_id, approve):
+        """Issue (or drop) the exact approval and re-queue the Work once on approval."""
+        job=self.store.job(work_id);row=self._browser_request(work_id)
+        if not job or not row:return {'approved':False,'resumed':False,'work_id':work_id}
+        if not approve:
+            self._put_browser_request(work_id,None)
+            return {'approved':False,'resumed':False,'work_id':work_id}
+        approval=self.store.issue_browser_step_approval(self.connector_owner_id(job),work_id,row['action'],
+                                                        row['page_digest'],row['target_digest'])
+        self._put_browser_request(work_id,{**row,'state':'issued','token':approval['approval_token'],'issued_at':time.time()})
+        # The same continuation the context approval uses: this exact Work,
+        # returned to the durable queue once, never a replay after failure.
+        with self.store.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            resumed=db.execute("UPDATE jobs SET status='queued',error=NULL,delivery='none' WHERE id=? AND status IN ('failed','partial')",(work_id,)).rowcount==1
+        return {'approved':True,'resumed':resumed,'work_id':work_id}
+
     def calendar_for(self, job):
         """The Calendar connector bound to this Work's owner, or None."""
         return self.calendar_for_owner(self.connector_owner_id(job))
@@ -3191,12 +3305,15 @@ class AgentService:
                 'approval_needed':'연결 문서를 외부 모델에 전달하려면 승인이 필요합니다. 문서 내용은 전송되지 않았습니다.',
                 'context_approval_needed':'개인 컨텍스트를 외부 모델에 전달하려면 이 작업의 승인이 필요합니다. 컨텍스트 내용은 전송되지 않았습니다.',
                 'approved':'문서 공유를 승인했습니다. 같은 요청을 다시 보내 주세요.',
-                'denied':'문서 공유를 허용하지 않았습니다.'}.get(kind,'AgentOS 상태 알림')
+                'denied':'문서 공유를 허용하지 않았습니다.',
+                'browser_approval_needed':BROWSER_APPROVAL_PROMPT,
+                'browser_approved':'이 단계를 승인했습니다. 요청을 한 번만 이어서 처리합니다.',
+                'browser_denied':'이 단계를 허용하지 않았습니다. 요청은 여기서 멈춥니다.'}.get(kind,'AgentOS 상태 알림')
 
-    def queue_notification(self, job, kind):
+    def queue_notification(self, job, kind, fingerprint=None):
         cfg=self.store.config('telegram',{})
         if not (cfg.get('enabled') and job.get('channel')==f"telegram:{cfg.get('generation')}" and job.get('chat_id')==cfg.get('user_id')):return
-        fingerprint=self.document_fingerprint() if kind=='approval_needed' else None
+        fingerprint=self.document_fingerprint() if kind=='approval_needed' else fingerprint
         self.store.queue_notification(job['id'],job['chat_id'],cfg['generation'],kind,fingerprint)
 
     def deliver_notification(self):
@@ -3221,9 +3338,16 @@ class AgentService:
                     {'text':'이번 작업에 컨텍스트 공유 승인','callback_data':f"v1c:{notification['id']}:approve"},
                     {'text':'허용 안 함','callback_data':f"v1c:{notification['id']}:deny"},
                 ]]}
+            elif notification['kind']=='browser_approval_needed':
+                # #656: the same owner-only inline buttons; the step is named, never the page.
+                reply_markup={'inline_keyboard':[[
+                    {'text':'이 단계 승인','callback_data':f"p7w:{notification['id']}:approve"},
+                    {'text':'허용 안 함','callback_data':f"p7w:{notification['id']}:deny"},
+                ]]}
             try:
                 text=(LOCAL_DOCUMENT_APPROVAL_TEXT if notification['kind']=='approval_needed'
                       and self.document_resume_eligible(notification.get('job_id'))
+                      else self.browser_step_prompt(notification.get('job_id')) if notification['kind']=='browser_approval_needed'
                       else self.notification_text(notification['kind']))
                 result=self.telegram.send_message(notification['chat_id'],text,reply_markup)
                 message_id=result.get('message_id') if isinstance(result,dict) else None
@@ -3433,6 +3557,25 @@ class AgentService:
                         self.store.update_notification(notification['id'],result_kind)
                         try:self.telegram.edit_message_text(sender,notification['message_id'],
                             LOCAL_DOCUMENT_RESUMED_TEXT if resumed else self.notification_text(result_kind),{'inline_keyboard':[]})
+                        except ProviderError:pass
+                        changed=True
+            elif authorized and isinstance(data,str) and data.startswith('p7w:'):
+                # #656: one guarded browser step of one Work.  Exact: this
+                # notification, sent, this chat and message, and the request
+                # it names is still the pending one (fingerprint).
+                parts=data.split(':')
+                if len(parts)==3 and parts[2] in ('approve','deny'):
+                    notification=self.store.notification(parts[1])
+                    pending=self._browser_request(notification['job_id']) if notification else None
+                    exact=(notification and notification['kind']=='browser_approval_needed' and notification['state']=='sent'
+                           and notification['generation']==generation and notification['chat_id']==sender
+                           and notification['message_id']==message.get('message_id') and pending
+                           and pending.get('state')=='requested' and notification['fingerprint']==pending.get('digest'))
+                    if exact:
+                        decision=self._decide_browser_step(notification['job_id'],parts[2]=='approve')
+                        result_kind='browser_approved' if decision.get('approved') else 'browser_denied'
+                        self.store.update_notification(notification['id'],result_kind)
+                        try:self.telegram.edit_message_text(sender,notification['message_id'],self.notification_text(result_kind),{'inline_keyboard':[]})
                         except ProviderError:pass
                         changed=True
             elif authorized and isinstance(data,str) and data.startswith('v1c:'):
@@ -4074,6 +4217,8 @@ class AgentService:
                                                   public_page_scope=lambda:self.public_page_boundary(config)['urls'],
                                                   memory_request=owner_memory_request,inherited_provenance=set(turn_provenance)|shown_sources,calendar=self.calendar_for(job),calendar_owner=self.connector_owner_id(job),current_packages=self.runtime_packages,
                                                   budget=self.work_budget(job['id']),
+                                                  # #656: the owner-logged-in browser profile and its per-step approvals.
+                                                  browser=self.browser_profile.driver_factory(job['id']),browser_approvals=self.browser_approvals_for(job),
                                                   **self.work_lookup_options(job,prompt))
                         work_capabilities[0]=capabilities
                         work_sources|=capabilities.private_provenance
@@ -4094,6 +4239,9 @@ class AgentService:
                         except Exception as exc:
                             self.record_turn_provenance(job['id'],status='failed',failure_class=type(exc).__name__,egress_taint=sorted(capabilities.private_provenance))
                             raise
+                        finally:
+                            # #656: the Work's browser session ends with the run, on this thread.
+                            capabilities.close_browser()
                         self.record_observed_tools(job['id'])
                         # Private reads during the run widen the egress guard;
                         # record the final set, not only the pre-run snapshot.

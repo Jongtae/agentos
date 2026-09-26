@@ -19,6 +19,12 @@ BUILTIN_ROLES={role['id']:{**role,'package_id':BUILTIN_MANIFEST['id']} for role 
 def schema(name,description,properties=None,required=None):
  return {'type':'function','function':{'name':name,'description':description,'parameters':{'type':'object','properties':properties or {},'required':required or [],'additionalProperties':False}}}
 STRING={'type':'string'}
+#: SEC-BROWSER-01 (#656): actions inside the owner-logged-in browser profile
+#: (``browser_session``).  ``effect`` is the model's declared class; the
+#: deterministic guard there never depends on it.
+BROWSER_ACTIONS=frozenset({'browser_open','browser_read','browser_find','browser_click','browser_type'})
+EFFECT={'type':'string','enum':['read','navigate','mutate','payment']}
+BROWSER_EFFECT_NOTE=' Declare effect: read (only looking), navigate (moving between pages), mutate (changes account state such as a cart or a form), payment (pays or enters card data; always needs owner approval). AgentOS refuses card/one-time-code/password fields and their form buttons without the owner\'s approval whatever the label says.'
 DEFINITIONS=[
  schema('web_search','Search public web snippets. Use for current public information, not local files. Never include credentials or private file contents in search terms.',{'query':STRING},['query']),
  schema('public_page_read','Read one anonymous public HTTP(S) page as bounded text. Use only for a user-supplied public URL; no login, cookies, JavaScript, private destinations or mutations.',{'url':STRING},['url']),
@@ -36,6 +42,11 @@ DEFINITIONS=[
  schema('save_memory','Save or correct one explicitly owner-authorized memory item. Use a stable short key; correction supersedes the prior value.',{'memory_key':STRING,'content':STRING},['memory_key','content']),
  schema('list_memory','Read current explicitly saved owner memory items. Do not infer or create memory without explicit owner request.'),
  schema('list_agents','List available specialist agents and their roles.'),
+ schema('browser_open','Open a URL in the owner\'s own logged-in browser profile and return the page state: bounded visible text and a numbered list of interactive elements. Use for sites where the owner is signed in (shopping carts, account pages); public_page_read is enough for anonymous pages. A login_required state means the owner must log in first; never enter credentials.'+BROWSER_EFFECT_NOTE,{'url':STRING,'effect':EFFECT},['url','effect']),
+ schema('browser_read','Return the current page state of the owner\'s browser session again (visible text and numbered interactive elements), for example after the page changed.'),
+ schema('browser_find','Find visible text on the current browser page. Returns the matching lines and interactive elements. Use it to confirm the right item or price before acting.',{'text':STRING},['text']),
+ schema('browser_click','Click one interactive element of the current browser page. target is the element number from the page state or its exact visible name. Returns the resulting page state.'+BROWSER_EFFECT_NOTE,{'target':STRING,'effect':EFFECT},['target','effect']),
+ schema('browser_type','Type text into one field of the current browser page (replacing its content). target is the element number or its visible name. Returns the resulting page state. Never type passwords, card numbers or one-time codes.'+BROWSER_EFFECT_NOTE,{'target':STRING,'text':STRING,'effect':EFFECT},['target','text','effect']),
  schema('delegate_agent','Give a bounded task to a registered specialist. Pass relevant context explicitly. Separate model execution returns a report; specialists cannot recursively delegate or write notes.',{'agent_id':STRING,'task':STRING},['agent_id','task']),
 ]
 
@@ -215,7 +226,8 @@ def owner_covers(value,owner_words,whole=True):
 PRIVATE_PROVENANCE={'find_files':'connected-document','read_file':'connected-document',
                     'list_notes':'personal-space','list_memory':'owner-memory',
                     'save_memory':'owner-memory','list_roots':'owner-folder-names',
-                    'calendar_query':'owner-calendar'}
+                    'calendar_query':'owner-calendar',
+                    **{action:'owner-browser-session' for action in BROWSER_ACTIONS}}
 UNATTRIBUTED_PROVENANCE='unattributed-tool-evidence'
 # The conversational window each label belongs to.  This is the seam #448
 # decides: it asks whether taint derived from the 16-message history window
@@ -238,7 +250,7 @@ UNATTRIBUTED_PROVENANCE='unattributed-tool-evidence'
 PROVENANCE_WINDOW={'connected-document':'turn','connected-drive-file':'turn',
                    'personal-space':'turn','owner-memory':'turn','owner-context-inbox':'turn',
                    'owner-folder-names':'turn','owner-calendar':'turn',
-                   'owner-mail':'turn','owner-settings':'turn',
+                   'owner-mail':'turn','owner-settings':'turn','owner-browser-session':'turn',
                    UNATTRIBUTED_PROVENANCE:'turn','conversation-history':'history'}
 EGRESS_TAINT_WINDOWS=frozenset({'turn','history'})
 DELEGATED_PREFIX='delegated:'
@@ -361,6 +373,7 @@ def history_provenance(store, rows, tools=None, document_jobs=()):
 SOURCE_NAMES={'connected-document':'연결 문서','connected-drive-file':'Google Drive 파일','personal-space':'저장된 메모',
               'owner-memory':'저장된 기억','owner-context-inbox':'선택한 개인 컨텍스트','owner-folder-names':'연결 폴더 이름',
               'owner-calendar':'캘린더 일정','owner-mail':'메일 정보','owner-settings':'설정 정보',
+              'owner-browser-session':'로그인한 브라우저 페이지',
               'conversation-history':'이전 대화','unrecorded':'출처 기록이 없는 이전 대화',
               UNATTRIBUTED_PROVENANCE:'출처를 확인하지 못한 도구 결과'}
 DESTINATION_NAMES={'web_search':'웹 검색어로 전송할 수 없습니다','weather':'날씨 조회 지역명으로 전송할 수 없습니다',
@@ -1120,7 +1133,9 @@ def work_stop_requested(store, job_id):
 #: whose every failed attempt is one of these may still succeed after a later
 #: read recovers (#606 owner Q2); the service's parking guard reuses the set.
 EFFECT_FREE_READS=frozenset({'list_roots','find_files','read_file','list_notes','list_memory','calendar_query',
-                             'web_search','public_page_read','weather','list_agents','bounded_public_research'})
+                             'web_search','public_page_read','weather','list_agents','bounded_public_research',
+                             # A navigation or read in the owner's browser session (#656): no form is submitted.
+                             'browser_open','browser_read','browser_find'})
 
 #: #605 refusals that are policy outcomes, never transient (#607 AX-06).
 PUBLIC_TASK_POLICY_TEXTS=frozenset({*PUBLIC_TASK_NO_JUDGMENT.values(),PUBLIC_TASK_LOOKUP_LIMIT,PUBLIC_TASK_STATE_UNAVAILABLE,
@@ -1228,7 +1243,7 @@ def outcome_from_events(rows, tools=None):
  return ('partial' if advanced else 'failed'),refusals
 
 class Capabilities:
- def __init__(self,store,adapter,config,key,job_id,record,readonly=False,network=None,document_access=True,packages=None,allowed_tools=None,document_context=False,public_page_scope=None,memory_approval=None,inherited_provenance=(),calendar=None,calendar_owner=None,memory_request=None,current_packages=None,lookup_sources=None,lookup_hint='',lookup_sensitivity=None,lookup_restrictive=False,delegated=False,inherited_excluded=(),lookup_state=None,budget=None):
+ def __init__(self,store,adapter,config,key,job_id,record,readonly=False,network=None,document_access=True,packages=None,allowed_tools=None,document_context=False,public_page_scope=None,memory_approval=None,inherited_provenance=(),calendar=None,calendar_owner=None,memory_request=None,current_packages=None,lookup_sources=None,lookup_hint='',lookup_sensitivity=None,lookup_restrictive=False,delegated=False,inherited_excluded=(),lookup_state=None,budget=None,browser=None,browser_approvals=None):
   # #606 T1: shared with a delegated specialist, spent in `execute`.
   # Without an injected budget (the MCP bridge process) the durable Stop
   # request is the stop signal.
@@ -1285,6 +1300,13 @@ class Capabilities:
   self.lookup_state=lookup_state if lookup_state is not None else {'cache':{},'calls':0,'withheld':[],'explicit_spent':False}
   # Route-specific, truthful next step appended to a public-egress refusal.
   self.lookup_hint=lookup_hint
+  # #656: a zero-argument driver factory for the owner-logged-in browser
+  # profile, or None: then the browser tools are not offered at all.  The
+  # session itself is created on first use (`browser_session`) and closed by
+  # the route that built this object (`close_browser`).  `browser_approvals`
+  # is the owner's per-step approval surface (consume/request); the model
+  # never holds a token.
+  self.browser=browser;self.browser_approvals=browser_approvals;self._browser_session=None
   self.memo={}
   # One set, two writers: `document_context` is the history-window source and
   # `EvidenceLog` adds a label for every private tool result stored in this
@@ -1294,7 +1316,33 @@ class Capabilities:
   if document_context:self.private_provenance.add('conversation-history')
   self.evidence=EvidenceLog(self.private_provenance)
  def definitions(self):
-  return action_definitions(self.tools,self.allowed_tools,self.readonly)
+  return action_definitions(self.tools,self.offered_tools(),self.readonly)
+ def offered_tools(self):
+  """Allowed tool ids minus the browser tools when no profile is registered (#656)."""
+  if self.browser is not None:return self.allowed_tools
+  return {tool_id for tool_id in self.allowed_tools if (self.tools.get(tool_id) or {}).get('host_action') not in BROWSER_ACTIONS}
+ def browser_session(self):
+  """This Work's browser session, created on first use (#656)."""
+  if self._browser_session is None:
+   from .browser_session import BrowserSession
+   self._browser_session=BrowserSession(self.browser,work_id=self.job_id,budget=self.budget,excluded=self._browser_excluded,
+                                        approvals=self.browser_approvals)
+  return self._browser_session
+ def close_browser(self):
+  session,self._browser_session=self._browser_session,None
+  if session is not None:session.close()
+ def _browser_excluded(self):
+  """``(values, blocked)`` the browser snapshot redactor compares page text against.
+
+  The same exclusion a public lookup applies (#605): values this Work wrote
+  to a private store, writes proposed in the current batch, values inherited
+  from a parent, terms withheld so far and the durable withheld digests.
+  """
+  excluded=[*self.written_private,*self.pending_writes,*self.inherited_excluded,*self.lookup_state.get('withheld',[])]
+  if self.lookup_sources is not None:
+   try:excluded=[*self.lookup_sources()['excluded'],*excluded]
+   except Exception:pass
+  return excluded,self._withheld_check()
  def roots(self):
   # Filesystem state can change while this Capabilities object is alive. Recheck
   # each use so replacing a granted directory with a symlink cannot reuse a stale
@@ -1874,6 +1922,16 @@ class Capabilities:
    scope=self.page_scope()
    if not scope:raise ValueError('소유자가 승인한 공개 페이지 범위가 없습니다. 먼저 정확한 주소와 조회 매개변수를 승인하세요.')
    return self._read_network({'tool':name,'url':args['url'],'approved_urls':sorted(scope)})
+  if name in BROWSER_ACTIONS:
+   # #656: the owner-logged-in browser profile.  Mediation and the payment
+   # guard live in `browser_session`; this branch only routes the call and
+   # labels the Work's context with the private source it read from.
+   if self.browser is None:
+    from .browser_session import UNAVAILABLE_TEXT
+    raise ToolError(UNAVAILABLE_TEXT,'needs_setup',requires='browser-profile')
+   result=self.browser_session().run(name,args)
+   if result.get('state')=='login_required':return result
+   return self._from_private('owner-browser-session',result)
   if name.startswith('calendar_'):
    # J4. The model may READ the calendar and may DRAFT a change; it may not
    # apply one. `CalendarConnector.execute` needs a one-time approval token
@@ -2142,6 +2200,9 @@ def withheld_effect(name,result):
  if name=='calendar_query' and result.get('needs_setup') is True:
   # #606 T5: nothing was read, so a model's schedule claim is unsupported.
   return Withheld(result.get('next_step') or CALENDAR_UNCONFIGURED,advanced=False)
+ if name in BROWSER_ACTIONS and result.get('state')=='login_required':
+  # #656: the profile holds no session for this page; nothing was acted on.
+  return Withheld(result.get('next_step') or '이 페이지는 로그인이 필요합니다.',advanced=False)
  if result.get('refused_because'):
   return Withheld(MEMORY_REFUSALS.get(result['refused_because'],
                                       '소유자 확인이 필요해 기억 후보로 보관했습니다. 승인 후 저장할 수 있습니다.'),
@@ -2230,6 +2291,12 @@ def _evidence_detail(name,result):
  if name=='list_notes':return {'note_count':len(result.get('notes',[]))}
  if name=='delegate_agent':return {'agent_id':result.get('agent_id'),'model':result.get('model'),'report_characters':len(result.get('report',''))}
  if name=='list_agents':return {'agent_count':len(result.get('agents',[]))}
+ if name in BROWSER_ACTIONS:
+  # #656: the mediated page state only, without its text: a URL without
+  # query/fragment, the title, the element count and what was redacted.
+  return {'state':result.get('state'),'url':result.get('url'),'title':result.get('title'),
+          'element_count':len(result.get('elements',[])),'characters':len(result.get('text','')),
+          'redacted_values':int(result.get('redacted_values') or 0),'found':result.get('found')}
  return {'keys':sorted(result)[:10]}
 
 #: AgentOS's own words when a tool ran and nothing describes its result.  It
@@ -2297,6 +2364,10 @@ def _fallback_text(name, result, sources):
   return '찾은 파일:\n'+('\n'.join('- '+str(f.get('path')) for f in files[:12] if isinstance(f,dict)) or '일치하는 파일이 없습니다.')
  if name=='read_file' and isinstance(result,dict):return f"{result.get('path','요청한 파일')}을 읽었습니다. 이어서 필요한 내용을 질문해 주세요."
  if name=='list_notes':return f"저장된 메모 {len(result.get('notes',[]))}개를 확인했습니다."
+ if name in BROWSER_ACTIONS and isinstance(result,dict):
+  if result.get('state')=='login_required':return str(result.get('next_step') or '이 페이지는 로그인이 필요합니다.')
+  if name=='browser_find':return '페이지에서 텍스트를 찾았습니다.' if result.get('found') else '페이지에서 해당 텍스트를 찾지 못했습니다.'
+  return f"브라우저 페이지를 확인했습니다: {result.get('title') or result.get('url') or ''}".rstrip(': ')
  if name=='list_agents':return '사용 가능한 전문 에이전트를 확인했습니다.'
  if name=='delegate_agent' and isinstance(result,dict):return str(result.get('report') or '전문 에이전트가 보고서를 반환하지 않았습니다.')
  return FALLBACK_UNDESCRIBED
@@ -2431,10 +2502,14 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
     validated=True
     cache_key=json.dumps([name,args],sort_keys=True)
     attempts[cache_key]=attempts.get(cache_key,0)+1;attempt=attempts[cache_key]
-    if attempt>1:raise ToolError('같은 도구 요청은 현재 작업에서 한 번만 실행합니다. 결과를 사용하거나 새 요청을 보내 주세요.','duplicate_call')
+    # #656: a browser call reads or changes page state, so the same call may run again.
+    stateful=capabilities.tools[name]['host_action'] in BROWSER_ACTIONS
+    if attempt>1 and not stateful:raise ToolError('같은 도구 요청은 현재 작업에서 한 번만 실행합니다. 결과를 사용하거나 새 요청을 보내 주세요.','duplicate_call')
     record(name,'running',json.dumps({'scope':scope,'call_id':call['id'],'attempt':attempt,'host_action':capabilities.tools[name]['host_action'],'arguments':args},ensure_ascii=False))
-    if cache_key not in capabilities.memo:capabilities.memo[cache_key]=capabilities.execute(name,args)
-    result=capabilities.memo[cache_key]
+    if stateful:result=capabilities.execute(name,args)
+    else:
+     if cache_key not in capabilities.memo:capabilities.memo[cache_key]=capabilities.execute(name,args)
+     result=capabilities.memo[cache_key]
     executions.append((name,result))
     if name in ('find_files','read_file','list_notes','list_memory','save_memory','calendar_query')+CALENDAR_DRAFT_TOOLS:capabilities.evidence.append({'tool':name,'result':result})
     invalid_calls.discard(name)

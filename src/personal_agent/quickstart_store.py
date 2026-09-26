@@ -582,6 +582,51 @@ class QuickStore:
                        (owner_key,work_key,candidate_id,approval['token_hash']))
             return result
 
+    # -- browser step approvals (SEC-BROWSER-01 #656) ------------------------
+    #
+    # The same exact-approval row and check as Memory candidates
+    # (`_exact_approval`): one token, hashed at rest, bound to this owner,
+    # this Work, the action, the page URL digest (source_digest) and the
+    # target element digest (subject_id), consumed once.  The token itself
+    # stays in the owner's private store row the service keeps; the model
+    # never receives it.
+    BROWSER_STEP_ACTION='browser-step'
+
+    def issue_browser_step_approval(self, owner_id, work_id, action, page_digest, target_digest, ttl=600, now=None):
+        """Mint the one-time approval of one guarded browser step for this owner and Work."""
+        if not isinstance(action,str) or not action.startswith('browser_'):raise ValueError('승인 대상을 확인하세요.')
+        if any(not isinstance(value,str) or len(value)!=64 for value in (page_digest,target_digest)):raise ValueError('승인 내용을 확인하세요.')
+        if isinstance(ttl,bool) or not isinstance(ttl,(int,float)) or not 1<=ttl<=900:raise ValueError('승인 유효 시간을 확인하세요.')
+        created=time.time() if now is None else float(now);token=secrets.token_urlsafe(32)
+        owner_key=self._memory_binding(owner_id);work_key=self._work_binding(work_id)
+        token_hash=self._exact_memory_token_hash(token)
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            # One live approval per (owner, Work, step): a fresh decision replaces an unspent one.
+            db.execute("UPDATE memory_approvals SET state='revoked',memory_key='' WHERE owner_key=? AND work_key=? AND action=? AND subject_id=? AND state='issued'",
+                       (owner_key,work_key,self.BROWSER_STEP_ACTION,target_digest))
+            db.execute('''INSERT INTO memory_approvals
+                          (token_hash,owner_key,work_key,action,subject_id,memory_key,source_digest,
+                           content_digest,created,expires,state,result_id)
+                          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
+                       (token_hash,owner_key,work_key,self.BROWSER_STEP_ACTION,target_digest,action,page_digest,
+                        target_digest,created,created+ttl,'issued',None))
+        return {'approval_token':token,'action':action,'page_digest':page_digest,'target_digest':target_digest,
+                'expires_at':created+ttl,'state':'issued'}
+
+    def consume_browser_step_approval(self, owner_id, work_id, action, page_digest, target_digest, approval_token, now=None):
+        """Spend the approval of exactly this step once; any mismatch is the same refusal."""
+        observed=time.time() if now is None else float(now)
+        token_hash=self._exact_memory_token_lookup(approval_token)
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            approval=self._exact_approval(db,token_hash,owner_id,work_id,self.BROWSER_STEP_ACTION,target_digest,
+                                          action,page_digest,target_digest,observed)
+            if approval['state']=='consumed':raise ValueError('이미 사용한 승인입니다.')
+            db.execute("UPDATE memory_approvals SET state='consumed',result_id=? WHERE token_hash=? AND state='issued'",
+                       (work_id,approval['token_hash']))
+        return {'consumed':True,'action':action}
+
     def reject_memory_candidate(self, owner_id, work_id, candidate_id, content_digest, now=None):
         owner_key=self._memory_binding(owner_id);work_key=self._work_binding(work_id)
         with self.db() as db:

@@ -782,6 +782,14 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                         return self.reply(400,{'error':'Open AgentOS on its local address to approve a calendar change.'})
                     try:return self.reply(200,service.calendar_draft_request(body))
                     except ValueError as exc:return self.reply(400,{'error':str(exc)})
+                if path in ('/api/browser/login','/api/browser/approval'):
+                    # #656: a headed window on this Mac, and the approval of a
+                    # guarded step in the owner's session: owner session, loopback only.
+                    if self.public_host():return self.reply(403,{'error':'이 작업은 이 기기에서만 할 수 있습니다.'})
+                    try:
+                        if path=='/api/browser/login':return self.reply(200,service.open_browser_for_login(body))
+                        return self.reply(200,service.browser_step_decision(body))
+                    except ValueError as exc:return self.reply(400,{'error':str(exc)})
                 if path=='/api/context-inbox/telegram-policy':return self.reply(200,service.set_context_telegram_policy(body))
                 # #626: current-context privacy control (use/timezone/clear only).
                 if path=='/api/current-context':return self.reply(200,service.set_current_context(body))
@@ -878,6 +886,28 @@ def _write_local_oauth_secret_file(parser, target, values, label):
     except OSError as exc:
         parser.error(f'Could not create the owner-only {label} secret file: '+str(exc))
     print(f'Created owner-only local {label} credential file.',flush=True)
+
+
+def browser_login_main(argv):
+    """Open the owner's persistent browser profile in a headed window for manual login (#656).
+
+    The window belongs to the owner: AgentOS navigates to the address and
+    types nothing.  The command returns when every page of the window is
+    closed.  While the AgentOS service is running, prefer the same action in
+    Settings; Chromium allows one process per profile directory.
+    """
+    from .browser_session import BrowserProfile, INSTALL_HINT
+    parser=argparse.ArgumentParser(prog='agentos browser-login',description='Open the AgentOS browser profile for manual login.')
+    parser.add_argument('--url',required=True,help='The site to log in to (http or https).')
+    parser.add_argument('--data',default=os.environ.get('AGENTOS_DATA',str(Path.home()/'.local/share/agentos')))
+    args=parser.parse_args(argv)
+    os.umask(0o077)
+    profile=BrowserProfile(QuickStore(args.data).private/'browser-profile')
+    if not profile.available():
+        parser.exit(2,f'브라우저 기능이 설치되어 있지 않습니다: {INSTALL_HINT}\n')
+    receipt=profile.open_for_login(args.url,wait=True)
+    print(json.dumps(receipt,ensure_ascii=False,sort_keys=True))
+    return 0 if receipt.get('state') in ('opened','closed') else 1
 
 
 def drive_config_main(argv):
@@ -1004,6 +1034,8 @@ def main():
         return gmail_config_main(sys.argv[2:])
     if len(sys.argv)>1 and sys.argv[1]=='service':
         return service_main(sys.argv[2:])
+    if len(sys.argv)>1 and sys.argv[1]=='browser-login':
+        return browser_login_main(sys.argv[2:])
     if len(sys.argv)>1 and sys.argv[1]=='guide':
         guide=argparse.ArgumentParser(description='Show credential-free AgentOS onboarding and recovery guidance.')
         guide.add_argument('--data',default=os.environ.get('AGENTOS_DATA',str(Path.home()/'.local/share/agentos')))

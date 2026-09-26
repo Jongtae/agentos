@@ -16,6 +16,10 @@ dependencies = ["pypdf>=5.0", "python-docx>=1.1", "openpyxl>=3.1", "cryptography
 
 [project.optional-dependencies]
 schema-validation = ["jsonschema[format]>=4.23"]
+# browser: SEC-BROWSER-01 #656 owner-logged-in browser profile (Apache-2.0,
+# Microsoft-maintained). Imported lazily; the owner also runs
+# `playwright install chromium`. Without it the browser tools are not offered.
+browser = ["playwright>=1.47,<2"]
 
 [project.scripts]
 agentos = "personal_agent.quickstart:main"

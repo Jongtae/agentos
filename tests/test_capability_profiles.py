@@ -113,7 +113,7 @@ class DeclaredProfileLimits(unittest.TestCase):
         self.assertEqual(CLI_PROFILES[BOUNDED_PROFILE]['limitation'],
                          'the CLI may read host files outside AgentOS provenance '
                          '(verified: codex sandbox -P :read-only, codex-cli 0.153.4); '
-                         'Codex exec rules in CODEX_HOME are ignored (--ignore-rules)')
+                         'Codex exec rules in CODEX_HOME, allow and forbidden, are ignored (--ignore-rules)')
         self.assertEqual(CLI_PROFILES[ISOLATED_PROFILE]['trust'], 'isolated-restricted')
         for profile in CLI_PROFILES.values():
             self.assertNotIn('gate_qualified', profile, 'no dead qualification flag')

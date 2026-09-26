@@ -75,7 +75,7 @@ _ISOLATED = 'isolation-restricted-profile'
 #: trusted-local-worker risk; strict read isolation is #616 AGENCY-ISOLATION-01.
 TRUSTED_LOCAL_LIMITATION = ('the CLI may read host files outside AgentOS provenance '
                             '(verified: codex sandbox -P :read-only, codex-cli 0.153.4); '
-                            'Codex exec rules in CODEX_HOME are ignored (--ignore-rules)')
+                            'Codex exec rules in CODEX_HOME, allow and forbidden, are ignored (--ignore-rules)')
 
 #: The verified limitation of the strict-isolated profile (#616).  Observed
 #: with no-model process tests that drive the exact argv through a real

@@ -1006,6 +1006,24 @@ class ProcessLevelQualification(unittest.TestCase):
                   argv_edit=lambda argv: self._without(argv, ('--ignore-rules',)))
         self.assertTrue(target.exists(), 'the "always allow" rule ran touch outside the read-only sandbox')
 
+    def test_codex_trusted_local_forbidden_prefix_rule_is_not_a_read_boundary(self):
+        """#637 thread: what --ignore-rules gives up.  Without the flag an
+        owner "forbidden" rule rejects its exact prefix, but another reader
+        gets the same file under the read-only sandbox; with the flag the rule
+        is not loaded.  The read limitation is the declared one either way."""
+        binary = self._codex(tested=False)
+        rules = self.root / 'codex-home' / 'rules' / 'default.rules'
+        rules.write_text('prefix_rule(pattern=["cat"], decision="forbidden")\n')
+        canary = self.store.root / 'FAKE-STORE-CANARY.txt'
+        shell = lambda cmd: {'name': 'exec_command', 'arguments': {'cmd': cmd, 'login': False}}
+        script = lambda: [shell(f'cat {canary}'), shell(f'head -n 1 {canary}'), {'message': 'qualification finished'}]
+        loaded, _ = self._run('codex', binary, _ScriptedModel('responses', script()), BOUNDED_PROFILE,
+                              argv_edit=lambda argv: self._without(argv, ('--ignore-rules',)))
+        self.assertNotIn('fake-store-canary-616', loaded[0], 'the forbidden prefix itself is rejected')
+        self.assertIn('fake-store-canary-616', loaded[1], 'another reader is not')
+        ignored, _ = self._run('codex', binary, _ScriptedModel('responses', script()), BOUNDED_PROFILE)
+        self.assertIn('fake-store-canary-616', ignored[0], 'with --ignore-rules the owner rule is not loaded')
+
     def test_codex_in_product_qualification_uses_the_real_cli(self):
         binary = self._codex()
         result = self._adapter('codex', binary).qualify_strict('codex', store_root=self.store.root)

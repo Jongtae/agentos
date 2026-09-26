@@ -1,5 +1,9 @@
 # AgentOS contribution workflow
 
+## Current-context adoption — #625 (2026-09-26)
+
+For the selected single-owner current-state scope, read [Current context contract](docs/current-context-contract.en.md) and [Implementer playbook](docs/current-context-implementation.en.md). This selectively adopts #383 observation/time/current-state principles, not background Attention or multi-person collaboration. The plan is existing #605 → #606 → #607 → #626 input/time → #627 current-state consumption → #608/#512/#513; #625 is the immediate documentation adoption. Existing #616 and other independently directed work are preserved. Current-context claims remain unimplemented until those children deliver. Earlier blanket #383 deferrals do not exclude these two explicitly selected slices. #612 unit-test-first verification and concrete reuse still govern; no extra evaluator, graph platform or per-tick model calls. The new source-time, retention, inference/disclosure defaults and migration/test details are canonical in the two linked documents rather than duplicated here.
+
 ## Unit-test-first verification and concrete reuse — #612
 
 Owner-approved 2026-09-25 amendment to #600/#602. Follow the [execution contract](docs/assistant-execution-contract.en.md) and [delivery/ownership](docs/assistant-execution-delivery.en.md). This replaces the earlier blanket baseline/mutation/trace-packet, all-profile three-trial model evaluation and 90% score requirements. Root `delivery-plan.yaml` still owns goal selection, order and authority; its older qualification prose and linked historical evaluation targets do not reinstate the superseded blanket verification workload. No new coordinator or runtime plan mirror.

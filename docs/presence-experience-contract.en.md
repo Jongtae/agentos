@@ -1,5 +1,9 @@
 # Personal AgentOS Presence Experience Contract
 
+## Current-context adoption — #625 (2026-09-26)
+
+For the selected single-owner current-state scope, read [Current context contract](current-context-contract.en.md) and [Implementer playbook](current-context-implementation.en.md). This selectively adopts #383 observation/time/current-state principles, not background Attention or multi-person collaboration. The plan is existing #605 → #606 → #607 → #626 input/time → #627 current-state consumption → #608/#512/#513; #625 is the immediate documentation adoption. Existing #616 and other independently directed work are preserved. Current-context claims remain unimplemented until those children deliver. Earlier blanket #383 deferrals do not exclude these two explicitly selected slices. #612 unit-test-first verification and concrete reuse still govern; no extra evaluator, graph platform or per-tick model calls. The new source-time, retention, inference/disclosure defaults and migration/test details are canonical in the two linked documents rather than duplicated here.
+
 ## Execution integration refinement — AGENCY #600
 
 Presence requires useful action, not only natural projection. The [execution contract](assistant-execution-contract.en.md) and [delivery/ownership](assistant-execution-delivery.en.md) add actual tool reachability, safe context composition, typed recovery and separate model/installed-owner qualification. Reuse #597/#598 and #581. #512 can run fixture baselines early; final convergence follows #608 and cannot promote missing/xfail/stale or fixture-only evidence. No authority to weaken grants, privacy guards or uncertain-effect handling follows from this refinement.

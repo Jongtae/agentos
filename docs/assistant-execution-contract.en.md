@@ -1,5 +1,9 @@
 # Goal-directed assistant execution contract
 
+## Current-context adoption — #625 (2026-09-26)
+
+For the selected single-owner current-state scope, read [Current context contract](current-context-contract.en.md) and [Implementer playbook](current-context-implementation.en.md). This selectively adopts #383 observation/time/current-state principles, not background Attention or multi-person collaboration. The plan is existing #605 → #606 → #607 → #626 input/time → #627 current-state consumption → #608/#512/#513; #625 is the immediate documentation adoption. Existing #616 and other independently directed work are preserved. Current-context claims remain unimplemented until those children deliver. Earlier blanket #383 deferrals do not exclude these two explicitly selected slices. #612 unit-test-first verification and concrete reuse still govern; no extra evaluator, graph platform or per-tick model calls. The new source-time, retention, inference/disclosure defaults and migration/test details are canonical in the two linked documents rather than duplicated here.
+
 ## Status and authority
 
 Owner-directed on 2026-09-25; cost/reuse amendment [#612](https://github.com/Jongtae/agentos/issues/612) supersedes the blanket verification policy introduced by #602. Integration parent: [#600](https://github.com/Jongtae/agentos/issues/600); specification and gate infrastructure: [#601](https://github.com/Jongtae/agentos/issues/601). This is the normative execution/acceptance refinement for the finite AGENCY track within PRESENCE-01, not a replacement kernel, second active coordinator or shipped-capability claim. [Delivery and ownership](assistant-execution-delivery.en.md) defines the work breakdown. GitHub owns execution status; repository-root `delivery-plan.yaml` owns selection/dependencies. The retired runtime plan mirror must not be recreated.

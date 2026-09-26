@@ -1,5 +1,9 @@
 # Personal AgentOS Architecture
 
+## Current-context adoption — #625 (2026-09-26)
+
+For the selected single-owner current-state scope, read [Current context contract](current-context-contract.en.md) and [Implementer playbook](current-context-implementation.en.md). This selectively adopts #383 observation/time/current-state principles, not background Attention or multi-person collaboration. The plan is existing #605 → #606 → #607 → #626 input/time → #627 current-state consumption → #608/#512/#513; #625 is the immediate documentation adoption. Existing #616 and other independently directed work are preserved. Current-context claims remain unimplemented until those children deliver. Earlier blanket #383 deferrals do not exclude these two explicitly selected slices. #612 unit-test-first verification and concrete reuse still govern; no extra evaluator, graph platform or per-tick model calls. The new source-time, retention, inference/disclosure defaults and migration/test details are canonical in the two linked documents rather than duplicated here.
+
 ## Current execution refinement
 
 For #600, the [Assistant execution contract](assistant-execution-contract.en.md) specifies ordinary goals → existing run_agent/qualified CLI loops → AgentOS broker → authorized context → goal-level Evidence, without another state store. Its [delivery/ownership contract](assistant-execution-delivery.en.md) takes precedence over historical activation suggestions below. Capability parity means actual qualified invocations, not identical prompts/declarations. Shipped status remains evidence-bound.

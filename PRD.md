@@ -1,5 +1,9 @@
 # Personal AgentOS — useful personal AI under owner control
 
+## Current-context adoption — #625 (2026-09-26)
+
+For the selected single-owner current-state scope, read [Current context contract](docs/current-context-contract.en.md) and [Implementer playbook](docs/current-context-implementation.en.md). This selectively adopts #383 observation/time/current-state principles, not background Attention or multi-person collaboration. The plan is existing #605 → #606 → #607 → #626 input/time → #627 current-state consumption → #608/#512/#513; #625 is the immediate documentation adoption. Existing #616 and other independently directed work are preserved. Current-context claims remain unimplemented until those children deliver. Earlier blanket #383 deferrals do not exclude these two explicitly selected slices. #612 unit-test-first verification and concrete reuse still govern; no extra evaluator, graph platform or per-tick model calls. The new source-time, retention, inference/disclosure defaults and migration/test details are canonical in the two linked documents rather than duplicated here.
+
 ## Goal-directed execution refinement — 2026-09-25
 
 The [Assistant execution contract](docs/assistant-execution-contract.en.md) makes actual useful action, not avoidance of negative wording, a product requirement under #600. Existing allowed capabilities must be discovered/invoked, observed and safely repaired across qualified routes. A declaration, semantic seam, mock transcript or zero CLI exit is not proof. [Delivery ownership](docs/assistant-execution-delivery.en.md) separates specification, implementation, integration and exact installed-build qualification. No product-ready claim follows from this specification; historical scope below remains historical.

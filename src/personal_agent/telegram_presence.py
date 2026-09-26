@@ -40,8 +40,8 @@ import time
 from dataclasses import dataclass, field
 
 from .conversation_handoff import (FOLLOWUP_CANCEL, FOLLOWUP_CORRECTION, FOLLOWUP_REFERENCE, FOLLOWUP_RETRY,
-                                   INTENT_CONVERSATION, INTENT_GREETING, INTENT_KNOWLEDGE, INTENT_MAIL_SEARCH,
-                                   INTENT_NOTE_LIST, INTENT_RESEARCH, INTENT_WORKSPACE_SEARCH)
+                                   INTENT_CONVERSATION, INTENT_DRIVE_READ, INTENT_GREETING, INTENT_KNOWLEDGE,
+                                   INTENT_MAIL_SEARCH, INTENT_NOTE_LIST, INTENT_RESEARCH, INTENT_WORKSPACE_SEARCH)
 
 # --- typed presentation vocabulary -------------------------------------------
 
@@ -103,7 +103,7 @@ REACTION_FOR_SEMANTICS = {
 #: settings change), an ambiguity, an unsupported capability, a command -
 #: gets no reaction, so a reaction can never be read as "done".
 _ACKNOWLEDGED_INTENTS = frozenset({INTENT_CONVERSATION, INTENT_RESEARCH, INTENT_KNOWLEDGE, INTENT_WORKSPACE_SEARCH,
-                                   INTENT_NOTE_LIST, INTENT_MAIL_SEARCH, INTENT_GREETING})
+                                   INTENT_NOTE_LIST, INTENT_MAIL_SEARCH, INTENT_DRIVE_READ, INTENT_GREETING})
 
 #: DecisionEngine follow-up relation -> semantic class.  A retry is only
 #: acknowledged (it may fail again); a correction is "okay, changing it";

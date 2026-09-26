@@ -19,12 +19,13 @@ from personal_agent.quickstart_service import AgentService, TELEGRAM_RESULT_PREV
 from personal_agent.quickstart import make_handler, configured_service, local_drive_secret_values
 from personal_agent.drive_web_oauth import DriveWebOAuthHandoff, EncryptedDriveSecretStore
 from personal_agent.connector_contract import CONNECTOR_STATE_KEY, PENDING_WORK_KEY, ConnectorState
-from personal_agent.conversation_handoff import CONVERSATION_RESUME_KEY
+from personal_agent.conversation_handoff import CONVERSATION_RESUME_KEY, INTENT_CALENDAR_CREATE, INTENT_DRIVE_READ
 from personal_agent.decision import OUTCOME_DECIDED, FixtureDecisionEngine, SelectionDecision, fixture_confidence
 from personal_agent.gmail import GMAIL_CONNECTOR_ID, GMAIL_READONLY_SCOPE, GmailError
 from cryptography.fernet import Fernet
 from personal_agent.providers import ModelAdapter, ProviderError
 from personal_agent.file_workspace import FileWorkspace
+from scripted_capability_need import capability_need_engine
 
 
 VALIDATION = Path(__file__).resolve().parents[1] / 'scripts' / 'validation'
@@ -282,6 +283,8 @@ class QuickstartTests(unittest.TestCase):
 
     def test_drive_request_without_local_capability_never_falls_through_to_model(self):
         self.model(); self.assertTrue(self.service.test_model()['ok']); self.calls.clear()
+        # #672: the Drive need is the DecisionEngine's judgment, scripted here.
+        self.service.use_decision_engine(capability_need_engine({'구글 드라이브 연결해 보자':INTENT_DRIVE_READ}))
         self.store.enqueue('구글 드라이브 연결해 보자','drive-not-configured',channel='telegram:g',chat_id=123)
         self.assertTrue(self.service.run_one())
         job=self.store.jobs()[0]
@@ -300,6 +303,7 @@ class QuickstartTests(unittest.TestCase):
         service.drive_read=lambda _url,_body,_headers:b'private selected Drive plan body'
         service.save_model({'provider':'ollama','endpoint':'http://127.0.0.1:11434','model':'test-model'})
         self.assertTrue(service.test_model()['ok']); self.calls.clear()
+        service.use_decision_engine(capability_need_engine({'구글 드라이브 파일을 요약해줘':INTENT_DRIVE_READ}))
         job_id=self.store.enqueue('구글 드라이브 파일을 요약해줘','selected-drive',channel='telegram:g',chat_id=123)
         self.assertTrue(service.run_one())
         self.assertEqual(self.store.job(job_id)['status'],'succeeded')
@@ -1467,6 +1471,8 @@ class GmailConnectorWiringTests(unittest.TestCase):
         connector would ever release.  That is why Calendar is left out.
         """
         service=self.configured()
+        # #672: a calendar create is selected by the capability-need judgment.
+        service.use_decision_engine(capability_need_engine({self.CALENDAR_REQUEST:INTENT_CALENDAR_CREATE}))
         job_id=self.enqueue(self.CALENDAR_REQUEST)
         self.assertTrue(service.run_one())
         job=self.store.job(job_id)

@@ -38,6 +38,8 @@ from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
 from personal_agent.subscription_engines import SubscriptionEngines
+from personal_agent.conversation_handoff import INTENT_DRIVE_READ
+from scripted_capability_need import capability_need_engine
 
 # Every outgoing query below is this one laundered string.  It shares no token
 # with any private material in this file, so a lexical scan of the outgoing
@@ -155,6 +157,8 @@ class WorkerProvenanceDeclarationTests(unittest.TestCase):
         drive.select_files(123, [{'id': 'picked', 'name': 'plan.txt'}])
         self.service.drive_web_oauth = drive
         self.service.drive_read = lambda _url, _body, _headers: DRIVE_SECRET.encode('utf-8')
+        # #672: the Drive need is the DecisionEngine's judgment, scripted here.
+        self.service.use_decision_engine(capability_need_engine({'구글 드라이브 파일을 요약해줘': INTENT_DRIVE_READ}))
         job = self.store.enqueue('구글 드라이브 파일을 요약해줘', 'drive-provenance',
                                  channel='telegram:g', chat_id=123)
         self.assertTrue(self.service.run_one())

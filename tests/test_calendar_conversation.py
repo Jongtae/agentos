@@ -2,9 +2,10 @@
 
 "내일 오후 3시에 치과 일정 잡아줘" ends in exactly one of: a question for the
 one missing detail, or an exact preview whose effect waits for the owner's
-explicit "승인".  Interpretation is by literal rules; no model is consulted;
-nothing reaches the provider before the approval, and the approval executes
-exactly once.
+explicit "승인".  That a turn is a calendar create is the DecisionEngine's
+``capability-need`` judgment (#672), scripted here per utterance; the title,
+date and time are read by literal rules; nothing reaches the provider before
+the approval, and the approval executes exactly once.
 
 Evidence class: fixture provider and service fixture.  No live Google call.
 """
@@ -22,15 +23,26 @@ from personal_agent.calendar_conversation import (CANCELLED, CREATED, DROPPED_NO
                                                   STATE_KEY, is_approval, is_cancel, parse_event,
                                                   resolve_local_timezone)
 from personal_agent.connector_contract import _owner_key, ConnectorRegistry, ConnectorState, _owner_key
+from personal_agent.conversation_handoff import INTENT_CALENDAR_CREATE
 from personal_agent.google_calendar import CALENDAR_WRITE_SCOPE, GoogleCalendarError
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
+from scripted_capability_need import capability_need_engine
 
 ZONE = 'Asia/Seoul'
 #: Tuesday 2026-09-22 10:00 KST.
 NOW = datetime(2026, 9, 22, 10, 0, tzinfo=ZoneInfo(ZONE))
 MODEL_ROUTE_ERROR = '설정에서 모델 또는 구독 엔진을 먼저 연결하세요.'
+#: The fresh create requests these tests send.  The scripted DecisionEngine
+#: judges exactly these to need ``calendar-create``; every other turn is
+#: judged to need nothing, so it reaches the draft only as a pending draft's
+#: follow-up.
+CALENDAR_REQUESTS = ('내일 오후 3시에 치과 일정 잡아줘', '금요일 오전 10시 팀 회의 일정 잡아줘',
+                     'schedule a meeting with the vendor tomorrow at 3pm', '내일 오후 3시에 치과 검진 일정 잡아줘',
+                     '금요일 약속 하나 등록해줘', 'add a calendar event for friday', '토요일 오전 9시 운동 일정 잡아줘',
+                     '치과 일정 잡아줘', '내일 오후 5시에 치과 일정 잡아줘',
+                     'book a dentist appointment tomorrow at 3pm for 30 minutes')
 
 
 class Provider:
@@ -147,6 +159,8 @@ class ConversationTestCase(unittest.TestCase):
                                     connector_registry=self.registry, calendar=self.calendar)
         self.service.calendar_conversation.now = lambda: self.clock[0]
         self.service.calendar_conversation._timezone = ZONE
+        self.calendar_requests = {text: INTENT_CALENDAR_CREATE for text in CALENDAR_REQUESTS}
+        self.service.use_decision_engine(capability_need_engine(self.calendar_requests))
         self.keys = itertools.count()
         self.connect(self.OWNER)
 
@@ -571,7 +585,7 @@ class CorrectionCancelRestartTests(ConversationTestCase):
 
     def test_an_ambiguous_utterance_still_clarifies_and_keeps_the_draft(self):
         self.say('내일 오후 3시에 치과 일정 잡아줘')
-        job = self.say('내일 회의 일정 잡고 작업공간에 저장한 자료도 찾아줘')
+        job = self.say('작업공간에 저장한 파일 열어주고 메모해줘')
         self.assertIn('아무 작업도 실행하지 않았습니다', job['response'])
         self.assertIsNotNone(self.pending())
         self.assertEqual(self.provider.calls, [])
@@ -579,11 +593,14 @@ class CorrectionCancelRestartTests(ConversationTestCase):
 
 class ModelAuthorityTests(unittest.TestCase):
     def test_a_model_suggestion_still_cannot_select_calendar_create(self):
-        from personal_agent.conversation_handoff import INTENT_AMBIGUOUS, INTENT_CALENDAR_CREATE, IntentClassifier
-        decision = IntentClassifier().classify('내일 회의 일정 잡고 작업공간에 저장한 자료도 찾아줘',
+        from personal_agent.conversation_handoff import INTENT_AMBIGUOUS, IntentClassifier
+        # No rule produces a calendar candidate any more (#672), so a
+        # suggestion naming it is not among AgentOS's options to narrow.
+        decision = IntentClassifier().classify('작업공간에 저장한 파일 열어주고 메모해줘',
                                                model_suggestion={'intent': INTENT_CALENDAR_CREATE})
         self.assertEqual(decision.intent, INTENT_AMBIGUOUS)
-        self.assertEqual(decision.model_suggestion['reason'], 'consequential-intent')
+        self.assertEqual(decision.model_suggestion['state'], 'rejected')
+        self.assertEqual(decision.model_suggestion['reason'], 'not-a-deterministic-candidate')
 
 
 if __name__ == '__main__':  # pragma: no cover
@@ -599,6 +616,7 @@ class ReadmeHeroTurnsTests(ConversationTestCase):
         import sys
         from pathlib import Path as _P
         sys.path.insert(0, str(_P(__file__).resolve().parents[1] / 'scripts'))
+        self.calendar_requests[turns[0]] = INTENT_CALENDAR_CREATE
         job = self.say(turns[0])
         self.assertIn('15:00 – 16:00', job['response'])
         self.assertIn(title, job['response'])

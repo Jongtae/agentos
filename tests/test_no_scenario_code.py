@@ -33,7 +33,8 @@ Anything else the scan finds must be listed in ``CLASSIFIED``, keyed by
 ``(module, literal)`` with its classification and reason, so every exception
 is reviewable in one place.  A new hit fails; a listed entry that no longer
 exists fails too, so the list cannot go stale.  ``open-finding`` entries are
-pre-existing branches reported by #660 and deliberately left unfixed here.
+pre-existing branches reported by #660 and deliberately left unfixed here;
+#672 resolved the three it reported, so none is listed now.
 """
 import ast
 import re
@@ -89,16 +90,10 @@ CLASSIFIED = {
         'allowed', 'connector registry identity of the owner-connected Calendar capability'),
     ('quickstart_service.py', 'google-calendar-write'): (
         'allowed', 'connector registry identity of the owner-connected Calendar write grant'),
-    ('conversation_handoff.py', 'book'): (
-        'open-finding', '_CALENDAR_VERBS cue list of the deterministic calendar-create rule (_rule_calendar): '
-                        'English verb "book (a meeting)", not the book category, but still a keyword rule that '
-                        'classifies the request type before the model'),
-    ('conversation_handoff.py', 'google it'): (
-        'open-finding', '_RESEARCH_CUES cue list of the deterministic research rule (_rule_research): names a '
-                        'provider as a verb and classifies the request type by keyword'),
-    ('quickstart_service.py', 'google drive'): (
-        'open-finding', 'AgentService.requests_drive_access: keyword rule ("google drive"/"드라이브" plus verbs) '
-                        'that classifies a request as a Drive request and offers the Drive connection'),
+    # #672 removed the three open findings #660 listed here ("book" in
+    # _CALENDAR_VERBS, "google it" in _RESEARCH_CUES, "google drive" in
+    # AgentService.requests_drive_access); calendar create and Drive read are
+    # now the DecisionEngine's capability-need judgment, research the loop's.
 }
 
 
@@ -263,8 +258,8 @@ class NoScenarioCodeTests(unittest.TestCase):
         self.assertFalse(names & set(ALLOWED_MODULES))
         for module in ALLOWED_MODULES:
             self.assertTrue((SRC / module).is_file(), module)
-        self.assertEqual({classification for classification, _reason in CLASSIFIED.values()},
-                         {'allowed', 'open-finding'})
+        self.assertLessEqual({classification for classification, _reason in CLASSIFIED.values()},
+                             {'allowed', 'open-finding'})
 
     def test_tokens_start_words(self):
         self.assertEqual(scenario_tokens('https://www.kyobobook.co.kr/cart'), ['cart', 'kyobo'])

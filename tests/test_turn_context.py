@@ -13,6 +13,8 @@ from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
 from personal_agent.subscription_engines import SubscriptionEngines
+from personal_agent.conversation_handoff import INTENT_DRIVE_READ
+from scripted_capability_need import capability_need_engine
 
 
 class _Caps:
@@ -427,7 +429,8 @@ class DestinationScopedHistory(unittest.TestCase):
                                     subscription_engines=SubscriptionEngines(finder=lambda _: '/runtime/cli', clock=lambda: 1),
                                     execution_adapter=self.engine,
                                     drive_web_oauth=SimpleNamespace(status=lambda: {'state': 'connected'}))
-        self.service.requests_drive_access = lambda prompt: 'drive' in prompt
+        # #672: the Drive need is the DecisionEngine's judgment, scripted for this request.
+        self.service.use_decision_engine(capability_need_engine({'summarize my drive file': INTENT_DRIVE_READ}))
         self.service.selected_drive_context = lambda chat_id: 'DRIVE-SECRET contents'
         self.service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
 

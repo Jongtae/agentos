@@ -383,6 +383,35 @@ class AgentService:
             return memory.reject_candidate(owner_id,work_ref,candidate_id,digest)
         raise ValueError('검토된 기억 후보 요청을 확인하세요.')
 
+    #: The Work identity a Settings profile write is recorded under (#658).
+    #: It is an owner operation from the local surface, not a conversation Work.
+    PROFILE_SETTINGS_WORK='owner-settings-profile'
+
+    def memory_profile_request(self, body, owner_id='local-owner'):
+        """The owner's Settings list / add / correct path for ``profile.*`` Memory (#658).
+
+        Profile facts are ordinary canonical Memory rows under the
+        ``profile.`` key namespace; this surface adds no store and no policy.
+        ``remember`` is the explicit owner operation ``MemoryService.remember``
+        already defines: the owner typed the key and the value here, so the
+        write is canonical and the same key supersedes its prior value (an
+        edit).  Deletion stays on ``DELETE /api/personal-space/memories/<id>``
+        with the existing forget semantics.  Only the key *shape* is checked
+        deterministically; what counts as a profile fact is the owner's (or,
+        in conversation, the model's) choice.
+
+        ``NO_EGRESS_GUARD`` for the same reason as ``memory_candidate_request``:
+        an owner-authenticated local request with no model turn and no public
+        destination.  Do not reuse from a conversation turn.
+        """
+        if not isinstance(body,dict):raise ValueError('프로필 요청을 확인하세요.')
+        memory=MemoryService(self.store,private_read_sink=MemoryService.NO_EGRESS_GUARD)
+        operation=body.get('operation','list')
+        if operation=='list':return dict(memory.profile_memories(owner_id))
+        if operation=='remember':
+            return memory.remember_profile(owner_id,self.PROFILE_SETTINGS_WORK,body.get('memory_key'),body.get('content'))
+        raise ValueError('프로필 요청을 확인하세요.')
+
     # -- decision provider (PRESENCE-DEC-01 / #417) --------------------------
     def decision_route(self):
         """The configured decision provider as ``(config, key)``, or None.

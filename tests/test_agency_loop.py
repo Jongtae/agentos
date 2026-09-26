@@ -15,10 +15,14 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from personal_agent.agent_runtime import (BUDGET_CODES, WORK_STOP_KEEP, WORK_STOP_KEY, WORK_STOPPED, Capabilities, ToolError, WorkBudget,
+from personal_agent.agent_runtime import (BUDGET_CODES, GOAL_NOT_CLAIMED, GOAL_NOT_SHOWN, GOAL_UNJUDGED, WORK_STOP_KEEP,
+                                          WORK_STOP_KEY, WORK_STOPPED, Capabilities, ToolError, WorkBudget,
                                           outcome_from_events, recovered, render_turn_prompt, run_agent,
                                           turn_context)
 from personal_agent.bounded_execution import ExecutionResult
+from personal_agent.conversation_handoff import ConversationJudgments
+from personal_agent.conversation_projection import report_statement, terminal_text
+from personal_agent.decision import OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine, fixture_confidence
 from personal_agent.providers import ModelAdapter, ProviderError
 from personal_agent.quickstart_service import AgentService, subscription_public_lookup_query
 from personal_agent.quickstart_store import QuickStore
@@ -44,6 +48,46 @@ def call(ident, name, **args):
     return {'id': ident, 'function': {'name': name, 'arguments': json.dumps(args, ensure_ascii=False)}}
 
 
+def finish(ident, *refs, summary='끝났습니다.', status='done', **extra):
+    """A scripted SEC-LOOP-01 (#657) completion claim naming the tool call ids ``refs``."""
+    return {'tool_calls': [call(ident, 'finish', status=status, evidence_refs=list(refs), summary=summary, **extra)]}
+
+
+def finish_observed(ident, summary='끝났습니다.', status='done', **extra):
+    """A scripted completion claim citing every ``ref`` the model was shown.
+
+    For routes whose provider assigns the tool call ids (the refs are then
+    only known from the tool results the loop returned).
+    """
+    def build(body):
+        refs = []
+        for message in body.get('messages', []):
+            if message.get('role') != 'tool':continue
+            try:ref = json.loads(message.get('content') or '{}').get('ref')
+            except (AttributeError, ValueError):ref = None
+            if ref:refs.append(ref)
+        return finish(ident, *refs, summary=summary, status=status, **extra)
+    return build
+
+
+def goal_engine(answer=True):
+    """A DecisionEngine that answers only the completion judgment (#657).
+
+    ``answer`` is True/False, None (unavailable) or a callable of the
+    judgment's facts.  Every other purpose stays unavailable, as it is on an
+    installation without a decision provider.
+    """
+    def judge(context, proposition):
+        if context.purpose != 'goal-reached':return None
+        value = answer(context.facts) if callable(answer) else answer
+        return None if value is None else BinaryDecision(OUTCOME_DECIDED, bool(value), fixture_confidence())
+    return FixtureDecisionEngine(judge=judge)
+
+
+def judgments(answer=True):
+    return ConversationJudgments(goal_engine(answer))
+
+
 class Script:
     """A compatible-API transport answering from a list of scripted messages."""
 
@@ -54,6 +98,7 @@ class Script:
     def __call__(self, url, body, headers=None, timeout=60):
         self.bodies.append(json.loads(json.dumps(body)))  # the loop mutates its message list
         message = self.messages.pop(0) if self.messages else {'content': '끝났습니다.'}
+        if callable(message):message = message(body)
         return {'choices': [{'message': message}]}
 
 
@@ -100,12 +145,14 @@ class LoopUnitTests(unittest.TestCase):
     def test_recovery_after_an_effect_free_read_failure_succeeds_and_keeps_the_failure(self):
         script = Script({'tool_calls': [call('1', 'weather', city='Seongnam', country='KR')]},
                         {'tool_calls': [call('2', 'web_search', query='Seongnam weather tomorrow')]},
-                        {'content': '내일 성남은 22°C입니다.'})
-        caps = self.caps(script)
+                        finish('3', '2', summary='내일 성남은 22°C입니다.'))
+        caps = self.caps(script, judgments=judgments(True))
         result = run_agent(caps.adapter, CFG, '', [{'role': 'user', 'content': '내일 성남 날씨'}], '', caps, self.record)
         self.assertEqual(result.outcome, 'succeeded')
-        # The failed attempt reached the model as a typed observation and stays in the log.
-        observation = json.loads(script.bodies[1]['messages'][-1]['content'])
+        # The failed attempt reached the model as a typed observation and stays
+        # in the log; #657 follows it with one "different path" turn.
+        observation = json.loads(script.bodies[1]['messages'][-2]['content'])
+        self.assertIn('Path check', script.bodies[1]['messages'][-1]['content'])
         self.assertEqual(observation, {'error': NOT_FOUND, 'code': 'tool_failed', 'retry': 'permanent', 'effect': 'none'})
         self.assertEqual([row['code'] for row in self.failed()], ['tool_failed'])
 
@@ -265,11 +312,14 @@ class OwnerEntryPointTests(unittest.TestCase):
     def test_a_empty_rule_read_is_rejudged_by_the_loop(self):
         for route in self.CHANNELS:
             with self.subTest(route=route[0]):
+                question = '저장된 기록에서 여권 번호를 찾지 못했습니다. 어디에 적어 두셨는지 알려 주시겠어요?'
                 script = Script({'tool_calls': [call('1', 'list_notes')]},
-                                {'content': '저장된 기록에서 여권 번호를 찾지 못했습니다. 어디에 적어 두셨는지 알려 주시겠어요?'})
+                                finish_observed('f', status='needs_owner', summary=question))
                 row, failed = self.run_turn('내 기록에서 여권 번호 찾아줘', script, Network(), route)
-                self.assertEqual(row['status'], 'succeeded')
+                # #657: asking the owner is not the goal reached; the question reaches the owner.
+                self.assertEqual(row['status'], 'partial')
                 self.assertIn('찾지 못했습니다', row['response'])
+                self.assertIn('확인이 필요한 질문: ' + question, row['owner_cause'])
                 self.assertEqual(failed, [])
                 # Re-judgment: the loop saw AgentOS's observation, not a handler payload.
                 sent = script.bodies[0]['messages'][-1]['content']
@@ -292,7 +342,7 @@ class OwnerEntryPointTests(unittest.TestCase):
             with self.subTest(route=route[0]):
                 script = Script({'tool_calls': [call('1', 'weather', city='Seongnam', country='KR')]},
                                 {'tool_calls': [call('2', 'weather', city='Seongnam-si', country='KR')]},
-                                {'content': '내일(2026-09-27, Asia/Seoul) 성남은 최저 14°C, 최고 22°C입니다.'})
+                                finish_observed('f', summary='내일(2026-09-27, Asia/Seoul) 성남은 최저 14°C, 최고 22°C입니다.'))
                 network = Network()
                 calls = []
                 def weather_after_one_miss(plan, original=network.execute):
@@ -300,7 +350,7 @@ class OwnerEntryPointTests(unittest.TestCase):
                     if plan['tool'] == 'weather' and len(calls) > 1:return FORECAST
                     return original(plan)
                 network.execute = weather_after_one_miss
-                row, failed = self.run_turn('내일 성남 날씨 알려줘', script, network, route)
+                row, failed = self.run_turn('내일 성남 날씨 알려줘', script, network, route, engine=goal_engine(True))
                 self.assertEqual(row['status'], 'succeeded')
                 self.assertIn('2026-09-27', row['response'])
                 self.assertEqual([event['trace']['code'] for event in failed], ['tool_failed'])
@@ -324,8 +374,9 @@ class OwnerEntryPointTests(unittest.TestCase):
         store = self._store
         return [row['content'] for row in store.history() if row.get('job_id') == job_id and row['role'] == 'assistant']
 
-    def run_turn(self, text, script, network, route):
+    def run_turn(self, text, script, network, route, engine=None):
         service, store = self.service(script, network)
+        if engine is not None:service.use_decision_engine(engine)
         self._store = store
         job = store.enqueue(text, f'agency-{route[0]}', **route[1])
         self.assertTrue(service.run_one())
@@ -333,6 +384,248 @@ class OwnerEntryPointTests(unittest.TestCase):
         failed = [event for event in store.task_events(job) if event['status'] == 'failed' and event['tool'] != 'model']
         return row, failed
 
+
+
+class ProviderNetwork:
+    """A public wire whose search answer depends on the provider the model chose."""
+
+    def __init__(self, answers):
+        self.answers, self.plans = answers, []
+
+    def execute(self, plan):
+        self.plans.append(plan)
+        provider = plan.get('provider') or 'default'
+        rows = self.answers[provider]
+        return {'tool': 'web_search', 'query': plan['query'], 'provider': provider, 'retrieved_at': 1,
+                'results': rows, 'sources': [row['url'] for row in rows]}
+
+
+UNRELATED = [{'title': 'Leadership seminar tickets', 'url': 'https://events.example/seminar', 'snippet': 'Sat 10am'}]
+MATCHING = [{'title': 'When Leaders Make the Difference (2nd edition)', 'url': 'https://books.example/item/42',
+             'snippet': 'Author A. Writer, hardcover'}]
+
+
+class AlternativesAndCompletionTests(unittest.TestCase):
+    """SEC-LOOP-01 (#657): different paths after a failed one; `succeeded` only on observed evidence.
+
+    Evidence class: model-free.  The model transport is scripted and the
+    completion judgment is a fixture DecisionEngine; `run_agent`,
+    `Capabilities` and `ConversationJudgments.goal_reached` run unchanged.
+    """
+
+    REQUEST = [{'role': 'user', 'content': '"When Leaders Make the Difference" 책 찾아줘'}]
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.store = QuickStore(Path(tmp.name) / 'data')
+        self.events = []
+
+    def record(self, tool, status, detail):
+        self.events.append((tool, status, detail))
+
+    def run_script(self, script, network=None, answer=True, **kwargs):
+        caps = Capabilities(self.store, ModelAdapter(script), CFG, '', 'job', self.record,
+                            network=network or Network(), judgments=judgments(answer) if answer != 'none' else None,
+                            **kwargs)
+        return run_agent(caps.adapter, CFG, '', self.REQUEST, '', caps, self.record), caps
+
+    def failed_codes(self):
+        return [json.loads(detail).get('code') for tool, status, detail in self.events
+                if status == 'failed' and tool != 'model']
+
+    def concluded(self):
+        rows = [json.loads(detail) for tool, status, detail in self.events if (tool, status) == ('model', 'concluded')]
+        self.assertEqual(len(rows), 1)
+        return rows[0]
+
+    @staticmethod
+    def tool_reply(body, ident):
+        return next(json.loads(m['content']) for m in body['messages'] if m.get('tool_call_id') == ident)
+
+    def test_irrelevant_results_then_the_same_search_is_refused_and_a_provider_switch_runs(self):
+        network = ProviderNetwork({'default': UNRELATED, 'other': MATCHING})
+        script = Script({'tool_calls': [call('1', 'web_search', query='When Leaders Make the Difference')]},
+                        # The model repeats the same path: case and spacing do not make it new.
+                        {'tool_calls': [call('2', 'web_search', query='  when leaders   make the DIFFERENCE ')]},
+                        {'tool_calls': [call('3', 'web_search', query='When Leaders Make the Difference', provider='other')]},
+                        finish('f', '3', summary='2판 하드커버를 찾았습니다: https://books.example/item/42'))
+        result, _caps = self.run_script(script, network)
+        self.assertEqual(result.outcome, 'succeeded')
+        # The repeat never reached the wire; the switched provider did.
+        self.assertEqual([plan.get('provider') for plan in network.plans], [None, 'other'])
+        self.assertEqual(self.failed_codes(), ['repeat_path'])
+        refusal = self.tool_reply(script.bodies[2], '2')
+        self.assertEqual((refusal['code'], refusal['retry']), ('repeat_path', 'permanent'))
+        # The failed path earned one explicit "different path" turn.
+        self.assertEqual(script.bodies[2]['messages'][-1]['role'], 'system')
+        self.assertIn('Path check', script.bodies[2]['messages'][-1]['content'])
+        # Evidence: one alternative, its kind, and the claim with its ref.
+        self.assertEqual(result.alternatives, [{'kind': 'provider_switch', 'action': 'web_search'}])
+        running = [json.loads(detail) for tool, status, detail in self.events if status == 'running']
+        self.assertEqual([row.get('alternative') for row in running], [None, 'provider_switch'])
+        self.assertEqual(self.concluded()['alternatives_tried'], {'count': 1, 'kinds': {'provider_switch': 1}})
+        self.assertEqual(self.concluded()['claim'], {'status': 'done', 'evidence_refs': ['3']})
+        self.assertEqual(self.concluded()['judgment'], 'yes')
+
+    def test_a_rewritten_query_is_a_different_path(self):
+        network = ProviderNetwork({'default': MATCHING})
+        script = Script({'tool_calls': [call('1', 'web_search', query='leaders difference book')]},
+                        {'tool_calls': [call('2', 'web_search', query='leaders difference book', locale='ko-KR')]},
+                        {'tool_calls': [call('3', 'web_search', query='"When Leaders Make the Difference"')]},
+                        finish('f', '3'))
+        result, _caps = self.run_script(script, network)
+        self.assertEqual(len(network.plans), 3)
+        self.assertEqual(self.failed_codes(), [])
+        self.assertEqual(result.outcome, 'succeeded')
+
+    def test_a_tool_that_succeeds_without_showing_the_goal_never_succeeds(self):
+        # The search "works" but only lists an unrelated event; the model says done anyway.
+        network = ProviderNetwork({'default': UNRELATED})
+        shown = lambda facts: 'books.example/item' in facts['observations']
+        script = Script({'tool_calls': [call('1', 'web_search', query='When Leaders Make the Difference')]},
+                        finish('f1', '1', summary='찾았습니다.'),
+                        finish('f2', '1', summary='찾았습니다.'))
+        result, _caps = self.run_script(script, network, answer=shown)
+        self.assertEqual(result.outcome, 'partial')
+        # The first "not shown" answer returned the claim once so another path could be taken.
+        self.assertEqual(self.tool_reply(script.bodies[2], 'f1')['code'], 'goal_not_observed')
+        self.assertIn(GOAL_NOT_SHOWN, result.report['unknown'])
+        self.assertEqual(self.concluded()['judgment'], 'no')
+
+    def test_a_plain_reply_after_tools_is_checked_once_and_never_succeeds_without_a_claim(self):
+        network = ProviderNetwork({'default': MATCHING})
+        script = Script({'tool_calls': [call('1', 'web_search', query='When Leaders Make the Difference')]},
+                        {'content': '장바구니에 담았습니다.'},
+                        {'content': '네, 완료했습니다.'})
+        result, _caps = self.run_script(script, network)
+        self.assertIn('Completion check', script.bodies[2]['messages'][-1]['content'])
+        self.assertEqual(result.outcome, 'partial')
+        # The answer stays the draft the check followed; nothing claimed it.
+        self.assertTrue(result.content.startswith('장바구니에 담았습니다.'))
+        self.assertIn(GOAL_NOT_CLAIMED, result.report['unknown'])
+        self.assertIsNone(self.concluded()['claim'])
+
+    def test_a_claim_citing_a_failed_or_unknown_observation_is_rejected(self):
+        script = Script({'tool_calls': [call('1', 'weather', city='Seongnam', country='KR')]},
+                        {'tool_calls': [call('2', 'web_search', query='Seongnam weather tomorrow')]},
+                        finish('f1', '1', summary='내일 22°C입니다.'),
+                        finish('f2', 'nope', summary='내일 22°C입니다.'),
+                        finish('f3', '2', summary='내일 22°C입니다.'))
+        result, _caps = self.run_script(script)
+        self.assertEqual(self.tool_reply(script.bodies[3], 'f1')['code'], 'failed_ref')
+        self.assertEqual(self.tool_reply(script.bodies[4], 'f2')['code'], 'unknown_ref')
+        self.assertEqual(result.outcome, 'succeeded')
+        rejected = [json.loads(detail)['code'] for tool, status, detail in self.events if status == 'claim_rejected']
+        self.assertEqual(rejected, ['failed_ref', 'unknown_ref'])
+        # The failed weather read stays in the Evidence and the report.
+        self.assertEqual(self.failed_codes(), ['tool_failed'])
+        self.assertEqual(result.report['failed'], [['weather', NOT_FOUND]])
+
+    def test_a_done_claim_without_evidence_is_rejected(self):
+        script = Script({'tool_calls': [call('1', 'list_notes')]},
+                        finish('f1', summary='없습니다.'),
+                        finish('f2', '1', summary='저장된 메모가 없습니다.'))
+        result, _caps = self.run_script(script)
+        self.assertEqual(self.tool_reply(script.bodies[2], 'f1')['code'], 'no_evidence')
+        self.assertEqual(result.outcome, 'succeeded')
+
+    def test_no_decision_engine_is_partial_and_says_completion_is_unknown(self):
+        for answer in ('none', None):
+            with self.subTest(answer=answer):
+                self.events.clear()
+                script = Script({'tool_calls': [call('1', 'web_search', query='When Leaders Make the Difference')]},
+                                finish('f', '1', summary='찾았습니다.'))
+                result, _caps = self.run_script(script, ProviderNetwork({'default': MATCHING}), answer=answer)
+                self.assertEqual(result.outcome, 'partial')
+                self.assertEqual(result.content.split('\n\n')[0], '찾았습니다.')
+                self.assertIn(GOAL_UNJUDGED, result.report['unknown'])
+                self.assertEqual(self.concluded()['judgment'], 'unavailable')
+
+    def test_needs_owner_is_partial_and_carries_its_question(self):
+        script = Script({'tool_calls': [call('1', 'list_notes')]},
+                        finish('f', '1', status='needs_owner', summary='여권 번호를 어디에 적어 두셨나요?'))
+        result, _caps = self.run_script(script)
+        self.assertEqual(result.outcome, 'partial')
+        self.assertEqual(result.report['question'], '여권 번호를 어디에 적어 두셨나요?')
+        # requested / observed / failed / unknown stay separate fields of one typed report.
+        self.assertEqual(result.report['requested'], self.REQUEST[0]['content'])
+        self.assertEqual(result.report['observed'], ['저장된 메모 0개를 확인했습니다.'])
+        self.assertEqual(result.report['failed'], [])
+        self.assertIn('확인이 필요한 질문: 여권 번호를 어디에 적어 두셨나요?', report_statement(result.report))
+
+    def test_alternative_nudges_are_bounded_by_the_work_budget(self):
+        cities = ('Seongnam', 'Seongnam-si', 'Sungnam', 'Bundang')
+        script = Script(*[{'tool_calls': [call(str(i), 'weather', city=city, country='KR')]} for i, city in enumerate(cities)],
+                        {'content': '찾지 못했습니다.'})
+        budget = WorkBudget()
+        result, _caps = self.run_script(script, budget=budget)
+        nudges = [m for m in script.bodies[-1]['messages'] if m['role'] == 'system' and m['content'].startswith('Path check')]
+        self.assertEqual((len(nudges), budget.nudges_used), (2, 2))
+        self.assertEqual(result.outcome, 'failed')
+        # Each different city after a failure is a recorded route change.
+        self.assertEqual(self.concluded()['alternatives_tried']['count'], 3)
+
+    def test_a_missing_authority_is_not_nudged_toward_another_path(self):
+        script = Script({'tool_calls': [call('1', 'calendar_draft_create', summary='x', start='a', end='b', timezone='z')]},
+                        {'content': '캘린더 연결이 필요합니다.'})
+        self.run_script(script)
+        self.assertFalse(any(m['role'] == 'system' and m['content'].startswith('Path check')
+                             for m in script.bodies[-1]['messages']))
+
+    def test_finish_is_loop_internal_and_never_offered_to_a_cli_bridge(self):
+        caps = Capabilities(self.store, None, CFG, '', 'job', self.record, network=Network())
+        self.assertNotIn('finish', {row['function']['name'] for row in caps.definitions()})
+        script = Script({'content': '안녕하세요.'}, {'content': '안녕하세요.'})
+        result, _caps = self.run_script(script)
+        self.assertIn('finish', {row['function']['name'] for row in script.bodies[0]['tools']})
+        # Ordinary conversation: no tool ran, nothing to claim, no judgment asked.
+        self.assertEqual(result.outcome, 'succeeded')
+        self.assertFalse([row for row in self.events if row[1] == 'concluded'])
+
+
+class AgencyReportEntryPointTests(unittest.TestCase):
+    """#657: the owner report states requested / observed / failed / unknown / next separately."""
+
+    CHANNELS = OwnerEntryPointTests.CHANNELS
+    service = OwnerEntryPointTests.service
+    run_turn = OwnerEntryPointTests.run_turn
+
+    def test_a_partial_finish_reaches_the_owner_as_a_typed_report(self):
+        route = self.CHANNELS[1]
+        script = Script({'tool_calls': [call('1', 'weather', city='Seongnam', country='KR')]},
+                        {'tool_calls': [call('2', 'web_search', query='Seongnam weather tomorrow')]},
+                        finish_observed('f', status='partial', summary='내일 성남은 22°C로 보입니다.',
+                                        unknown=['내일 강수 확률'], next='날씨 예보 페이지를 열어 강수 확률을 확인하기'))
+        row, failed = self.run_turn('내일 성남 날씨랑 비 올 확률 알려줘', script, Network(), route)
+        self.assertEqual(row['status'], 'partial')
+        self.assertEqual([event['trace']['code'] for event in failed], ['tool_failed'])
+        bubble = terminal_text(row['response'], row['owner_cause'], 'partial', verified=row['owner_verified'])
+        # One bubble, in order: the truth header, what was observed (AgentOS's
+        # rendering of the search result), what failed, what stayed unknown,
+        # and the proposed next step.
+        parts = ['일부 단계만 완료했습니다.', '확인된 부분:', 'https://weather.example/seongnam',
+                 '날씨 조회: ' + NOT_FOUND, '확인하지 못한 부분: 내일 강수 확률',
+                 '다음 단계 제안: 날씨 예보 페이지를 열어 강수 확률을 확인하기']
+        positions = [bubble.find(part) for part in parts]
+        self.assertNotIn(-1, positions, bubble)
+        self.assertEqual(positions, sorted(positions), bubble)
+        # The model's own sentence is not presented as observed.
+        self.assertNotIn('22°C로 보입니다', bubble)
+        with self._store.db() as db:
+            concluded = [json.loads(detail) for (detail,) in db.execute(
+                "SELECT detail FROM tool_events WHERE job_id=? AND tool='model' AND status='concluded'", (row['id'],))]
+        self.assertEqual(concluded[0]['claim']['status'], 'partial')
+        self.assertEqual(len(concluded[0]['claim']['evidence_refs']), 1)
+        self.assertEqual(concluded[0]['alternatives_tried'], {'count': 1, 'kinds': {'route_change': 1}})
+
+    def test_a_judged_done_finish_succeeds_through_the_service(self):
+        route = self.CHANNELS[0]
+        script = Script({'tool_calls': [call('1', 'web_search', query='Seongnam weather tomorrow')]},
+                        finish_observed('f', summary='내일 성남은 22°C입니다.'))
+        row, _failed = self.run_turn('내일 성남 날씨', script, Network(), route, engine=goal_engine(True))
+        self.assertEqual(row['status'], 'succeeded')
+        self.assertTrue(row['response'].startswith('내일 성남은 22°C입니다.'))
 
 
 class CalendarReadHandoffTests(unittest.TestCase):

@@ -141,6 +141,12 @@ unreachable, the runtime badge says 연결 끊김 and the count clears.
   sentence in a top banner, never the browser's `TypeError` text.
 - **Destructive confirmation.** Two steps in place, with a cancel and a one-line
   consequence. Nothing is sent before the second press.
+- **Dialogs (#619).** A chooser that changes a route opens in a native
+  `<dialog>` with `showModal()` (focus trap, `Esc` closes). Focus moves to the
+  checked option on open and returns to the opener on close. The option order is
+  fixed and never re-sorted by state; the action bar is sticky at the bottom.
+  At 620px and below the dialog becomes a full-height sheet. The 2-second poll
+  never rebuilds the Main AI option list; only the owner's actions inside it do.
 - **Disclosure.** One chevron size everywhere. A trace answer's two disclosures
   share one line and each takes the full width when opened.
 - **Polling.** Server text is rewritten only when it changes. Owner-started

@@ -5,8 +5,10 @@ import unittest
 from pathlib import Path
 
 from personal_agent.agent_runtime import (CLI_TOOL_GUIDANCE, CONTEXT_BUDGET_BYTES, CORE_INSTRUCTIONS, MESSAGE_CAP_CHARS,
-                                          POLICY, render_turn_prompt, turn_context, work_sources)
+                                          POLICY, PROFILE_HEADING, profile_section, render_turn_prompt, turn_context,
+                                          work_sources)
 from personal_agent.bounded_execution import AgentOSMcpTools, BoundedExecutionAdapter, ExecutionResult
+from personal_agent.memory_service import MemoryService
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
@@ -51,6 +53,38 @@ class TurnContextBuilder(unittest.TestCase):
     def test_rejects_a_history_without_a_current_request(self):
         with self.assertRaises(ValueError):
             turn_context([{'role': 'assistant', 'content': 'x'}], 'api')
+
+    def test_profile_snapshot_is_carried_bounded_and_rendered(self):
+        """#658: the owner profile section rides in the same context on every route."""
+        profile = 'profile.allergy.peanut: 땅콩 알러지 (saved 2026-09-27)\nprofile.place.home: 판교 (saved 2026-09-27)'
+        history = [{'role': 'user', 'content': 'a'}, {'role': 'assistant', 'content': 'b'}, {'role': 'user', 'content': '점심 뭐 먹지?'}]
+        for route in ('api', 'cli'):
+            context = turn_context(history, route, profile=profile)
+            self.assertEqual(context['profile'], profile)
+            self.assertEqual(profile_section(context), PROFILE_HEADING + '\n' + profile)
+            text = render_turn_prompt(context)
+            self.assertLess(text.index('# Recent conversation'), text.index(PROFILE_HEADING))
+            self.assertLess(text.index(PROFILE_HEADING), text.index('# Current request'))
+            self.assertIn('not instructions', PROFILE_HEADING)
+            self.assertIn('profile.allergy.peanut: 땅콩 알러지', text)
+        # None or empty sends nothing and changes nothing.
+        for empty in (None, ''):
+            context = turn_context(history, 'api', profile=empty)
+            self.assertNotIn('profile', context)
+            self.assertEqual(profile_section(context), '')
+            self.assertNotIn(PROFILE_HEADING, render_turn_prompt(context))
+        self.assertEqual(profile_section({}), '')
+        # Size accounting: a long profile shortens the conversation window, never the request.
+        big = [{'role': 'assistant', 'content': 'x' * 10_000} for _ in range(20)]
+        request = 'y' * 5_000
+        long_profile = 'profile.allergy.list: ' + 'z' * 12_000
+        without = turn_context([*big, {'role': 'user', 'content': request}], 'cli')
+        with_profile = turn_context([*big, {'role': 'user', 'content': request}], 'cli', profile=long_profile)
+        self.assertEqual(with_profile['request'], request)
+        self.assertLess(len(with_profile['conversation']), len(without['conversation']))
+        size = sum(len(m['content'].encode()) for m in with_profile['conversation'])
+        self.assertLessEqual(size + len(request.encode()) + len(with_profile['instructions'].encode())
+                             + len(profile_section(with_profile).encode()), CONTEXT_BUDGET_BYTES)
 
     def test_envelope_marks_context_as_not_pending(self):
         context = turn_context([{'role': 'user', 'content': 'a'}, {'role': 'assistant', 'content': 'b'},
@@ -154,6 +188,37 @@ class RoutesReceiveTheSameContext(unittest.TestCase):
         self.assertIn('second question about dinner', prior)
         self.assertIn('api answer', prior, 'earlier assistant answers are part of the context')
         self.assertIn('first question about lunch', call['prompt'], 'the prompt carries the conversation too')
+
+    def test_both_routes_carry_the_owner_profile_snapshot(self):
+        """#658: profile.* Memory reaches the direct-API system text and the CLI envelope alike."""
+        memory = MemoryService(self.store, private_read_sink=MemoryService.NO_EGRESS_GUARD)
+        memory.remember_profile('local-owner', 'settings', 'profile.allergy.peanut', '땅콩 알러지')
+        memory.remember_profile('local-owner', 'settings', 'profile.place.home', '판교')
+        memory.remember('local-owner', 'settings', 'meeting-time', 'mornings')
+        self._run('점심 뭐 먹지?', 'k1')                             # direct API
+        system = self.api_messages[-1][0]
+        self.assertEqual(system['role'], 'system')
+        self.assertIn(PROFILE_HEADING, system['content'])
+        self.assertIn('profile.allergy.peanut: 땅콩 알러지 (saved ', system['content'])
+        self.assertIn('profile.place.home: 판교', system['content'])
+        self.assertNotIn('meeting-time', system['content'], 'only the profile namespace is carried')
+        self.assertTrue(system['content'].startswith(CORE_INSTRUCTIONS), 'the section is appended, not a replacement')
+        self.service.connect_subscription_engine({'engine': 'claude-code', 'officially_authenticated': True})
+        self._run('저녁은?', 'k2')                                   # CLI route
+        call = self.engine.calls[-1]
+        self.assertIn('profile.allergy.peanut: 땅콩 알러지', call['context']['profile'])
+        self.assertEqual(call['context']['profile'].split('\n')[0].split(':')[0], 'profile.allergy.peanut', 'key order')
+        self.assertIn(PROFILE_HEADING, call['prompt'])
+        self.assertLess(call['prompt'].index(PROFILE_HEADING), call['prompt'].index('# Current request'))
+        self.assertNotIn('meeting-time', call['prompt'])
+
+    def test_no_profile_rows_means_no_profile_section(self):
+        self._run('hello', 'k1')
+        self.assertNotIn(PROFILE_HEADING, self.api_messages[-1][0]['content'])
+        self.service.connect_subscription_engine({'engine': 'claude-code', 'officially_authenticated': True})
+        self._run('hello again', 'k2')
+        self.assertNotIn('profile', self.engine.calls[-1]['context'])
+        self.assertNotIn(PROFILE_HEADING, self.engine.calls[-1]['prompt'])
 
     def test_document_rows_stay_excluded_on_the_cli_route(self):
         self._run('secret document summary request', 'doc')
@@ -526,6 +591,33 @@ class PriorAssistantEgressDecision(_RouteFixture):
         self._service(self._search_model)
         self._turns('search the web for today news')
         self.assertEqual(self._outbound('web_search'), [{'tool': 'web_search', 'query': 'today news'}])
+
+    def _profile(self):
+        MemoryService(self.store, private_read_sink=MemoryService.NO_EGRESS_GUARD).remember_profile(
+            'local-owner', 'settings', 'profile.allergy.peanut', 'PEANUT-ALLERGY-XYZ')
+
+    def test_api_profile_in_context_does_not_close_public_search(self):
+        """#658 pilot posture: the profile section is context, not an egress taint.
+
+        Probe C needs the allergies and a public search in one turn.  The
+        snapshot is read with NO_EGRESS_GUARD by decision (see
+        ``AgentService.owner_profile_snapshot``), so the lookup still goes
+        out - and the profile value itself is not what is sent.
+        """
+        self._service(self._search_model)
+        self._profile()
+        self._turns('search the web for today news')
+        self.assertIn(PROFILE_HEADING, self.requests[-1]['messages'][0]['content'])
+        self.assertEqual(self._outbound('web_search'), [{'tool': 'web_search', 'query': 'today news'}])
+        self.assertNotIn('PEANUT-ALLERGY-XYZ', json.dumps(self.network.plans))
+
+    def test_cli_profile_in_context_does_not_close_public_search(self):
+        self._service(cli=True)
+        self._profile()
+        self._turns('search the web for today news')
+        self.assertEqual(len(self._outbound('web_search')), 1)
+        self.assertEqual(self.engine.refusals, [])
+        self.assertNotIn('PEANUT-ALLERGY-XYZ', json.dumps(self.network.plans))
 
     def test_finding_cli_benign_prior_answer_closes_public_search(self):
         """Fixed by #605 (AX-04); was an ``expectedFailure`` baseline from #603.

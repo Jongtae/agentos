@@ -28,8 +28,10 @@ import subprocess
 import unittest
 from pathlib import Path
 
+from personal_agent.agent_runtime import API_TOOL_GUIDANCE, DEFINITIONS
+from personal_agent.conversation_handoff import MEMORY_REQUEST_PROPOSITION
 from personal_agent.decision import OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine, fixture_confidence
-from personal_agent.memory_service import MemoryService
+from personal_agent.memory_service import PROFILE_KEY_GUIDANCE, MemoryService
 from test_pa1_memory_candidate_owner_path import _OwnerSurface
 
 WEB = Path(__file__).resolve().parents[1] / 'src' / 'personal_agent' / 'web'
@@ -44,6 +46,30 @@ def judging(answer):
             return None
         return BinaryDecision(OUTCOME_DECIDED, answer, fixture_confidence())
     return FixtureDecisionEngine(judge=judge)
+
+
+class ProfileJudgmentAndGuidance(unittest.TestCase):
+    """What the model is told; the judgment itself stays the model's."""
+
+    def test_the_memory_proposition_covers_asserted_first_person_facts_and_excludes_hedged_ones(self):
+        """#658: one clause, for the judge, not a regex.  A scripted fixture
+        cannot show how a live judge reads it; this pins the text that is
+        sent."""
+        self.assertIn('in the first person and without hedging', MEMORY_REQUEST_PROPOSITION)
+        self.assertIn('an allergy or dietary restriction', MEMORY_REQUEST_PROPOSITION)
+        self.assertIn('where they live or work', MEMORY_REQUEST_PROPOSITION)
+        self.assertIn('even without the word "remember"', MEMORY_REQUEST_PROPOSITION)
+        self.assertIn('hedged, uncertain or hypothetical rather than asserted', MEMORY_REQUEST_PROPOSITION)
+        self.assertIn('This judgment does not write anything.', MEMORY_REQUEST_PROPOSITION)
+
+    def test_save_memory_and_the_tool_guidance_name_the_profile_namespace(self):
+        [save_memory] = [tool['function'] for tool in DEFINITIONS if tool['function']['name'] == 'save_memory']
+        self.assertIn(PROFILE_KEY_GUIDANCE, save_memory['description'])
+        self.assertIn('profile.allergy.peanut', save_memory['description'])
+        self.assertEqual(sorted(save_memory['parameters']['properties']), ['content', 'memory_key'],
+                         'no new argument: the model already chooses memory_key')
+        self.assertIn('"profile." memory_key', API_TOOL_GUIDANCE)
+        self.assertIn('owner profile section', API_TOOL_GUIDANCE)
 
 
 class ProfileFactsInConversation(_OwnerSurface):

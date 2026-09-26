@@ -503,9 +503,14 @@ MAIL_QUERY_MAX_TERMS = 12
 _TERM_ENDINGS = ('한테서', '에게서', '한테', '께서', '께')
 MEMORY_REQUEST_PROPOSITION = ('The owner\'s latest message explicitly instructs the assistant to remember, keep '
                               'in mind or not forget a specific fact, value or preference that the owner states in '
-                              'that same message, for later conversations. It is false when the owner asks the '
+                              'that same message, for later conversations. It is also true when the owner asserts, '
+                              'in the first person and without hedging, a durable fact about themselves or their '
+                              'household for the assistant to use from now on - an allergy or dietary restriction, '
+                              'a food or product preference, where they live or work, a store or service they '
+                              'prefer - even without the word "remember". It is false when the owner asks the '
                               'assistant not to remember something, when there is no stated value to keep (a '
-                              'casual remark or a generic "don\'t forget"), when they ask for a note, file or '
+                              'casual remark or a generic "don\'t forget"), when the statement is hedged, '
+                              'uncertain or hypothetical rather than asserted, when they ask for a note, file or '
                               'reminder instead, or when it is unclear. This judgment does not write anything.')
 UNSUPPORTED_JUDGMENT_UNAVAILABLE = ('요청을 안전하게 구분할 판단 기능을 사용할 수 없어 메일을 검색하거나 다른 처리를 하지 않았습니다. '
                                    '메일을 찾으려는 요청이라면 검색할 내용을 다시 구체적으로 적어 주세요.')

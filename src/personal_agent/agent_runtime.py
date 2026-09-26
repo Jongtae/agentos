@@ -592,8 +592,20 @@ class Capabilities:
   # Raises when this Work is no longer running or its request row changed.
   intent=self.public_intent()
   if not isinstance(intent,str) or not intent.strip():raise ValueError(PUBLIC_TASK_UNRESOLVED)
-  child=Capabilities(self.store,self.adapter,self.config,self.key,self.job_id,self.record,True,self.network,False,self.packages,{tool_id},
+  # The parent's own tool event is the one record of this lookup (it carries
+  # `composed_by`); the child keeps only its model events, which show the
+  # arguments actually composed, so one outbound call is never counted twice.
+  def record(tool,status,detail):
+   if tool=='model':self.record(tool,status,detail)
+  child=Capabilities(self.store,self.adapter,self.config,self.key,self.job_id,record,True,self.network,False,self.packages,{tool_id},
                      public_page_scope=self.public_page_scope,current_packages=self.current_packages)
+  # One invocation per public task, enforced by host code rather than by the
+  # instructions: any further attempt is refused before it reaches the tool.
+  invoked=[];execute=child.execute
+  def once(name,args):
+   if invoked:raise ValueError('별도 공개 조회는 한 번만 실행합니다.')
+   invoked.append(name);return execute(name,args)
+  child.execute=once
   request=intent[:MESSAGE_CAP_CHARS]
   # The one admissible source record besides the request: the exact public
   # pages the owner approved for this model (`public_page_scope`).  They are
@@ -601,7 +613,7 @@ class Capabilities:
   if action=='public_page_read' and self.public_page_scope:
    request+='\n\nOwner-approved public pages (the only addresses public_page_read accepts): '+', '.join(sorted(self.public_page_scope))
   result=run_agent(self.adapter,self.config,self.key,[{'role':'user','content':request}],
-                   PUBLIC_TASK_INSTRUCTIONS,child,self.record,scope='public-task')
+                   PUBLIC_TASK_INSTRUCTIONS,child,record,scope='public-task')
   if child.private_provenance:raise ValueError(egress_refusal(action,child.private_provenance))
   observed=[value for value in child.memo.values() if isinstance(value,dict)]
   if not observed:

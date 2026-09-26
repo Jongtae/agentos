@@ -171,6 +171,28 @@ class DecisionTable(unittest.TestCase):
         self.assertEqual(len(self.wire.plans), 1)
         self.assertEqual(sum(1 for body in self.model.bodies if body['messages'][-1]['role'] == 'user'), 1)
 
+    def test_the_public_task_is_limited_to_one_invocation_by_host_code(self):
+        """Review P1 on #622: the instruction is not the limit."""
+        def greedy(url, body, headers=None, timeout=60):
+            self.model.bodies.append(body)
+            if body['messages'][-1]['role'] == 'tool':
+                return answer('done')
+            return {'choices': [{'message': {'content': None, 'tool_calls': [
+                {'id': 'a', 'type': 'function', 'function': {'name': 'web_search', 'arguments': '{"query": "one"}'}},
+                {'id': 'b', 'type': 'function', 'function': {'name': 'web_search', 'arguments': '{"query": "two"}'}}]}}]}
+        caps = Capabilities(self.store, ModelAdapter(greedy), CFG, '', 'job-1', lambda *e: self.records.append(e),
+                            network=self.wire, inherited_provenance={'connected-document'},
+                            public_intent=lambda: 'search one and two')
+        caps.execute('web_search', {'query': PRIVATE})
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': 'one'}])
+
+    def test_one_lookup_is_recorded_once(self):
+        """Review P2 on #622: only the model events of the public task are recorded, not a second tool event."""
+        caps = self.caps(('connected-document',), '오늘 뉴스 검색해줘')
+        caps.execute('web_search', {'query': PRIVATE})
+        self.assertEqual({event[0] for event in self.records}, {'model'})
+        self.assertIn('오늘 뉴스', json.dumps([e[2] for e in self.records], ensure_ascii=False))
+
     def test_a_stale_or_revoked_binding_fails_closed_before_any_model_call(self):
         def revoked():
             raise ValueError('이 작업은 더 이상 실행 중이 아니어서 공개 조회를 실행하지 않았습니다.')

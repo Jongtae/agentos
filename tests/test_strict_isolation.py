@@ -1019,7 +1019,8 @@ class ProcessLevelQualification(unittest.TestCase):
         script = lambda: [shell(f'cat {canary}'), shell(f'head -n 1 {canary}'), {'message': 'qualification finished'}]
         loaded, _ = self._run('codex', binary, _ScriptedModel('responses', script()), BOUNDED_PROFILE,
                               argv_edit=lambda argv: self._without(argv, ('--ignore-rules',)))
-        self.assertNotIn('fake-store-canary-616', loaded[0], 'the forbidden prefix itself is rejected')
+        self.assertNotIn('fake-store-canary-616', loaded[0])
+        self.assertIn('Rejected', loaded[0], 'the forbidden rule itself rejected the prefix')
         self.assertIn('fake-store-canary-616', loaded[1], 'another reader is not')
         ignored, _ = self._run('codex', binary, _ScriptedModel('responses', script()), BOUNDED_PROFILE)
         self.assertIn('fake-store-canary-616', ignored[0], 'with --ignore-rules the owner rule is not loaded')

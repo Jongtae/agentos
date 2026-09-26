@@ -72,8 +72,12 @@ answers['/api/connections/google/revocations']={pending_provider_revocations:[]}
  assert(!effectsText.includes('Picker'),'the Drive-only effect is not claimed for Gmail');
 
  // Confirm sends exactly the preview's confirmation once and shows the receipt's own words.
- answers['/api/connections/google/disconnect']=receipt();refreshes=0;
- await ctx.confirmGoogleDisconnect($('google-disconnect-confirm'));
+ // While the request is out the dialog cannot be dismissed (취소 disabled, Esc prevented), so the receipt is never discarded.
+ let finish;answers['/api/connections/google/disconnect']=()=>new Promise(resolve=>{finish=()=>resolve(receipt());});refreshes=0;
+ const pending=ctx.confirmGoogleDisconnect($('google-disconnect-confirm'));
+ assert($('google-disconnect-cancel').disabled,'취소 is disabled in flight');let prevented=false;dialog.oncancel({preventDefault(){prevented=true;}});assert(prevented,'Esc is prevented in flight');
+ $('google-disconnect-cancel').onclick();assert(dialog.open,'the dialog stays open in flight');
+ finish();await pending;assert(!$('google-disconnect-cancel').disabled,'dismissal returns with the receipt');
  same(calls.at(-2),{path:'/api/connections/google/disconnect',body:{connector_id:'google-gmail-read',confirmation:'c1'}});
  assert.equal(calls.at(-1).path,'/api/connections/google/revocations','pending revocations are reloaded after the receipt');
  assert.equal(refreshes,1);assert.equal(text('google-disconnect-title'),'Google Gmail 연결을 해제했습니다');assert.equal(focused,$('google-disconnect-title'),'focus moves to the result');

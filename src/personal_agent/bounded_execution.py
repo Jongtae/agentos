@@ -69,6 +69,9 @@ _ISOLATED = 'isolation-restricted-profile'
 #: route only; a CLI worker never holds a handle to that session.
 _BROWSER = 'browser-profile-not-bound-to-cli-route'
 _BROWSER_ACTIONS = ('browser_open', 'browser_read', 'browser_find', 'browser_click', 'browser_type')
+#: #659: accepting a preparation needs the host's DecisionEngine and its
+#: Telegram acceptance surface, which a CLI bridge process does not hold.
+_PREPARATIONS = 'owner-preparations-not-bound-to-cli-route'
 
 #: The verified limitation of the trusted-local profile (owner decision on
 #: #604).  The CLI's own built-in tools can read local host files that AgentOS
@@ -144,6 +147,7 @@ CLI_PROFILES = {
             'save_memory': _MEMORY, 'list_memory': _MEMORY,
             'list_agents': _SPECIALISTS, 'delegate_agent': _SPECIALISTS,
             **{action: _BROWSER for action in _BROWSER_ACTIONS},
+            'schedule_preparation': _PREPARATIONS,
         },
         # No AgentOS-mediated live run of this catalog has been observed.
         # Reference versions are the argv shapes recorded from each CLI's own
@@ -163,7 +167,7 @@ CLI_PROFILES = {
             'bounded_public_research', 'save_note', 'weather', 'web_search', 'public_page_read',
             'find_files', 'read_file', 'list_roots', 'calendar_query', 'calendar_draft_create',
             'calendar_draft_update', 'calendar_draft_cancel', 'save_memory', 'list_memory',
-            'list_agents', 'delegate_agent', 'propose_current_state', *_BROWSER_ACTIONS)},
+            'list_agents', 'delegate_agent', 'propose_current_state', 'schedule_preparation', *_BROWSER_ACTIONS)},
         # Pinned in Dockerfile.engine; a test keeps the two in step.
         'runtimes': {'codex': {'pinned_version': '0.153.4', 'live_tested_version': None}},
     },
@@ -186,6 +190,7 @@ CLI_PROFILES = {
             'save_memory': _MEMORY, 'list_memory': _MEMORY,
             'list_agents': _SPECIALISTS, 'delegate_agent': _SPECIALISTS,
             **{action: _BROWSER for action in _BROWSER_ACTIONS},
+            'schedule_preparation': _PREPARATIONS,
         },
         # Only these exact CLI versions passed the process-level tests; any
         # other version is refused until requalified (no silent downgrade).

@@ -512,6 +512,16 @@ MEMORY_REQUEST_PROPOSITION = ('The owner\'s latest message explicitly instructs 
                               'casual remark or a generic "don\'t forget"), when the statement is hedged, '
                               'uncertain or hypothetical rather than asserted, when they ask for a note, file or '
                               'reminder instead, or when it is unclear. This judgment does not write anything.')
+#: SEC-ATTN-01 (#659): is the owner's own message the acceptance of this preparation?
+PREPARATION_REQUEST_PROPOSITION = ('The owner\'s latest message itself asks the assistant to remind them of something, or '
+                                   'to prepare or look something up for them ahead of a later time or on a repeating '
+                                   'schedule, and the proposed preparation matches that request: its kind, its goal, its '
+                                   'time (as the owner stated it, or derived from what the owner referred to, such as '
+                                   'shortly before an event the owner asked to be reminded of) and its repetition (none '
+                                   'unless the owner asked for one). It is false when the owner only asks something to be '
+                                   'answered now, when the assistant would be offering the preparation on its own '
+                                   'initiative, when the time or repetition differs from what the owner asked, or when it '
+                                   'is unclear. This judgment schedules nothing.')
 #: SEC-LOOP-01 (#657): does what the environment showed satisfy the request?
 GOAL_REACHED_PROPOSITION = ('The observations - results that tools actually returned while working on the owner\'s '
                             'request - show that the request has been fulfilled: every part the request asks for is '
@@ -662,6 +672,21 @@ class ConversationJudgments:
         """
         context = DecisionContext('explicit-memory-request', {'owner_message': utterance})
         decision = self.engine.judge(context, MEMORY_REQUEST_PROPOSITION)
+        verdict = self.policy.binary(decision)
+        return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
+                        source=decision.confidence.provider or decision.outcome)
+
+    def explicit_preparation_request(self, utterance, proposal):
+        """Is ``utterance`` the owner's own request for ``proposal`` (#659)?
+
+        Judgment only, over the owner's message and a one-line summary of the
+        proposed preparation.  A yes lets AgentOS schedule it as accepted by
+        the owner's request; no / unavailable keeps it a proposal the owner
+        accepts explicitly (Telegram button or Settings).
+        """
+        context = DecisionContext('explicit-preparation-request', {'owner_message': utterance,
+                                                                   'proposed_preparation': proposal})
+        decision = self.engine.judge(context, PREPARATION_REQUEST_PROPOSITION)
         verdict = self.policy.binary(decision)
         return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
                         source=decision.confidence.provider or decision.outcome)

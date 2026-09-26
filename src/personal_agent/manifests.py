@@ -6,8 +6,10 @@ HOST_ACTIONS={'web_search','public_page_read','bounded_public_research','weather
               # SEC-BROWSER-01 (#656): the owner-logged-in browser profile.
               'browser_open','browser_read','browser_find','browser_click','browser_type',
               # CONTEXT-STATE-01 (#627): a revisable current-state hypothesis.
-              'propose_current_state'}
-WRITE_ACTIONS={'save_note','save_memory','delegate_agent','calendar_draft_create','calendar_draft_update','calendar_draft_cancel','browser_click','browser_type','propose_current_state'}
+              'propose_current_state',
+              # SEC-ATTN-01 (#659): an owner-accepted preparation (reminder/prepare).
+              'schedule_preparation'}
+WRITE_ACTIONS={'save_note','save_memory','delegate_agent','calendar_draft_create','calendar_draft_update','calendar_draft_cancel','browser_click','browser_type','propose_current_state','schedule_preparation'}
 #: #627: declared host actions ``Capabilities.offered_tools`` offers only while
 #: the owner has current context on.  Off, every route's surface is exactly the
 #: pre-#627 one; the declarations (CLI profiles, Settings, the Claude

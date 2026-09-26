@@ -187,6 +187,11 @@ class StrictQualificationLogic(unittest.TestCase):
         self.store.mkdir()
         (self.folder / 'codex-home').mkdir()
         self.calls = []
+        # The logic under test is platform-independent; CI runs on Linux.
+        from unittest import mock
+        patcher = mock.patch.object(sys, 'platform', 'darwin')
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _qualify(self, engine='codex', version=None, readable=()):
         version = version or (f'codex-cli {CODEX_VERSION}' if engine == 'codex' else f'{CLAUDE_VERSION} (Claude Code)')

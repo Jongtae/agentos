@@ -17,7 +17,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from personal_agent.agent_runtime import Capabilities, provenance_window, run_agent
+from personal_agent.agent_runtime import Capabilities, provenance_window, run_agent, work_sources
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
@@ -534,11 +534,15 @@ class ServiceProvenanceTests(unittest.TestCase):
             return {'message': {'content': '정리했습니다.'}}
 
         self.service = AgentService(self.store, ModelAdapter(transport), transport)
+        self.plans = []
+        self.service.local_tools = type('Wire', (), {'execute': lambda _self, plan: self.plans.append(plan) or {
+            'tool': plan['tool'], 'query': plan.get('query', ''), 'results': [], 'sources': [], 'retrieved_at': 1}})()
         self.service.save_model({'provider': 'ollama', 'endpoint': 'http://127.0.0.1:11434',
                                  'model': 'test-model', 'api_key': ''})
         self.assertTrue(self.service.test_model()['ok'])
 
-    def test_summarize_splices_the_notes_in_and_closes_public_search(self):
+    def test_summarize_splices_the_notes_in_and_the_search_goes_out(self):
+        """#654 pilot posture: the note listing is private provenance, and the worker's query still goes out."""
         self.store.enqueue('/note 병원 예약은 목요일 오후 3시', 'note')
         self.service.run_one()
         self.store.enqueue('/summarize', 'summary')
@@ -547,11 +551,11 @@ class ServiceProvenanceTests(unittest.TestCase):
         # The notes really were put in the model's prompt for this turn.
         self.assertTrue(any('병원 예약' in message.get('content', '')
                             for message in self.bodies[-1]['messages']))
-        # The model asked for a public search anyway, and was refused.
+        # The model asked for a public search; the query (sharing no value
+        # this Work wrote) went out, and the Work recorded its private source.
         self.assertTrue(self.searched)
-        refusals = [event for event in self.store.task_events(job['id'])
-                    if event['tool'] == 'web_search' and event['status'] == 'failed']
-        self.assertTrue(refusals, '/summarize left web_search open')
+        self.assertEqual(self.plans, [{'tool': 'web_search', 'query': LAUNDERED}])
+        self.assertIn('personal-space', work_sources(self.store, job['id']))
 
 
 if __name__ == '__main__':

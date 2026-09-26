@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from personal_agent.agent_runtime import (CLI_TOOL_GUIDANCE, CONTEXT_BUDGET_BYTES, CORE_INSTRUCTIONS, MESSAGE_CAP_CHARS,
-                                          POLICY, render_turn_prompt, turn_context)
+                                          POLICY, render_turn_prompt, turn_context, work_sources)
 from personal_agent.bounded_execution import AgentOSMcpTools, BoundedExecutionAdapter, ExecutionResult
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService
@@ -179,10 +179,9 @@ class _ProbingEngine:
         self.taint.append(tools.capabilities.private_egress_provenance())
         try:
             if self.taint[-1]:
-                # A query made of note words only: nothing in it is permitted
-                # for a public lookup, so nothing leaves (#605).
-                tools.call('web_search', {'query': 'PRIVATE-XYZ'})
-        except Exception as exc:  # the refusal is what we assert on
+                # #654: a tainted Work still sends the worker's query.
+                tools.call('web_search', {'query': 'today news'})
+        except Exception as exc:  # a refusal, if any, is what we assert on
             self.web_search_error.append(str(exc))
         return ExecutionResult('engine answer', engine, 0)
 
@@ -198,6 +197,8 @@ class CrossTurnEgressGuard(unittest.TestCase):
         self.service = AgentService(self.store, adapter=ModelAdapter(lambda *a: {'choices': [{'message': {'content': 'x'}}]}),
                                     subscription_engines=SubscriptionEngines(finder=lambda _: '/runtime/cli', clock=lambda: 1),
                                     execution_adapter=self.engine)
+        self.network = _PublicNetwork()
+        self.service.local_tools = self.network
         self.service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
 
     def _run(self, text, key):
@@ -208,15 +209,15 @@ class CrossTurnEgressGuard(unittest.TestCase):
         self._run('hello there', 'k1')
         self.assertEqual(self.engine.taint[-1], [])
 
-    def test_a_prior_note_listing_closes_cli_web_search(self):
+    def test_a_prior_note_listing_taints_the_cli_work_but_does_not_close_web_search(self):
         self._run('/note PRIVATE-XYZ', 'n1')
         self._run('/notes', 'n2')
         self._run('search the web for today news', 'k3')
         # #605: the label names the earlier Work's actual source.
         self.assertIn('history:personal-space', self.engine.taint[-1])
-        self.assertEqual(len(self.engine.web_search_error), 1, 'the CLI web_search call is refused')
-        self.assertIn('개인 자료는 공개 조회에 보내지 않으므로', self.engine.web_search_error[0])
-        self.assertNotIn('연결 문서', self.engine.web_search_error[0])
+        # #654: the lookup goes out anyway (minus excluded values, none here).
+        self.assertEqual(self.engine.web_search_error, [])
+        self.assertEqual(self.network.plans, [{'tool': 'web_search', 'query': 'today news'}])
 
 
 
@@ -270,20 +271,19 @@ class BridgeProcessEgressGuard(unittest.TestCase):
         provenance = [part.split('=', 1)[1] for part in args if part.startswith('--provenance=')]
         return provenance, captured['replies'][-1], network_calls
 
-    def test_prior_private_answer_closes_web_search_in_the_real_bridge(self):
-        provenance, reply, network_calls = self._service_turns(['/note PRIVATE-XYZ', '/notes', 'search the web for today news'],
-                                                               query='PRIVATE-XYZ today news')
+    def test_prior_private_answer_taint_reaches_the_real_bridge_and_the_lookup_goes_out(self):
+        provenance, reply, network_calls = self._service_turns(['/note PRIVATE-XYZ', '/notes', 'search the web for today news'])
         self.assertIn('history:personal-space', provenance, 'the adapter forwards the taint to the bridge process')
-        # #605: the bridge composes the lookup from permitted words only.
+        # #654: the bridge sends the worker's query minus excluded values.
         self.assertIn('result', reply)
         self.assertEqual(network_calls, [{'tool': 'web_search', 'query': 'today news'}])
 
     def test_same_turn_note_summary_provenance_now_reaches_the_bridge(self):
         provenance, reply, network_calls = self._service_turns(['/note PRIVATE-XYZ', '/summarize'])
         self.assertIn('personal-space', provenance, 'same-turn provenance was never forwarded before this change')
-        # #607: a refusal is a typed MCP tool-result error (or a protocol error).
-        self.assertTrue('error' in reply or reply.get('result', {}).get('isError'))
-        self.assertEqual(network_calls, [])
+        # #654: the same-turn private source no longer closes the lookup.
+        self.assertIn('result', reply)
+        self.assertEqual(network_calls, [{'tool': 'web_search', 'query': 'today news'}])
 
     def test_positive_control_first_turn_reaches_the_network_stub(self):
         provenance, reply, network_calls = self._service_turns(['hello there'])
@@ -537,16 +537,17 @@ class PriorAssistantEgressDecision(_RouteFixture):
         self.assertEqual(self.engine.refusals, [])
         self.assertEqual(len(self._outbound('web_search')), 1)
 
-    def test_finding_api_prior_private_answer_does_not_close_public_search(self):
-        """Fixed by #605 (AX-04); was an ``expectedFailure`` baseline from #603.
-        Under-restriction on the API route: a note listing answered earlier
-        stayed in the visible history untainted, so a model-composed query
-        carrying it reached the public search host."""
+    def test_api_prior_private_answer_is_recorded_and_the_composed_query_goes_out(self):
+        """#603 finding, fixed by #605 (AX-04) and reopened by the #654 pilot
+        posture: a note listing answered earlier is recorded as this Work's
+        history-window source, and a model-composed query that carries it
+        goes out minus excluded values (the earlier Work's note is not one).
+        The hardening program owns any stricter treatment."""
         self._service(self._search_model)
         self._turns('/note PRIVATE-XYZ', '/notes', 'search the web for it')
         self.assertTrue(self.requests, 'the scripted model was consulted')
-        self.assertFalse([plan for plan in self._outbound('web_search') if 'PRIVATE-XYZ' in plan['query']],
-                         self.network.plans)
+        self.assertEqual(len(self._outbound('web_search')), 1)
+        self.assertIn('personal-space', work_sources(self.store, self.store.jobs()[0]['id']))
 
 if __name__ == '__main__':
     unittest.main()

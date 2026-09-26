@@ -449,29 +449,36 @@ class BoundedProfileHostInvocation(unittest.TestCase):
                 "SELECT tool,detail FROM tool_events WHERE job_id=? AND status=?", (self.job, status))}
 
     def test_a_recorded_private_read_under_a_package_alias_taints_too(self):
-        """Re-review P3: rehydration is keyed on the host action, not the built-in name."""
+        """Re-review P3: rehydration is keyed on the host action, not the built-in name.
+
+        Since #654 the taint no longer closes a public lookup (the worker's
+        query goes out minus excluded values); it is still rehydrated as the
+        Work's private provenance.
+        """
         with self.store.db() as db:
             db.execute("INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)",
                        (self.job, "my_notes", "succeeded",
                         json.dumps({"scope": "x", "host_action": "list_notes"}), 1))
-        replies = self._serve([self._call(2, "web_search", {"query": "granted private note"})])
-        self.assertTrue(_refused(replies[2]))
-        self.assertEqual(self.searches, [])
+        self.assertIn("personal-space", mcp_bridge._recorded_private_sources(self.store, self.job))
+        replies = self._serve([self._call(2, "web_search", {"query": "today news"})])
+        self.assertIn("result", replies[2])
+        self.assertEqual(self.searches, ["today news"])
 
     def test_private_taint_survives_a_second_bridge_process_for_the_same_work(self):
-        """Review P2: a restarted bridge rehydrates taint from this Work's own events."""
+        """Review P2: a restarted bridge rehydrates taint from this Work's own events (#654: and still serves lookups)."""
         first = self._serve([self._call(2, "list_notes", {})])
         self.assertIn("result", first[2])
+        self.assertIn("personal-space", mcp_bridge._recorded_private_sources(self.store, self.job))
         second = self._serve([
-            self._call(2, "weather", {"city": "granted private note"}),
-            self._call(3, "web_search", {"query": "granted private note"}),
-            self._call(4, "bounded_public_research", {"mode": "travel_plan", "query": "granted private note"}),
+            self._call(2, "weather", {"city": "Daejeon", "country": "KR"}),
+            self._call(3, "web_search", {"query": "today news"}),
         ])
-        for ident in (2, 3, 4):
-            self.assertTrue(_refused(second[ident]))
-        self.assertEqual((self.searches, self.weather, self.opened), ([], [], []))
-        # Allowed control: another running Work of the same store is not tainted.
+        for ident in (2, 3):
+            self.assertIn("result", second[ident])
+        self.assertEqual((self.searches, self.weather), (["today news"], [{"city": "Daejeon", "country": "KR"}]))
+        # Another running Work of the same store carries no taint of its own.
         other = _running_work(self.store, "another turn")
+        self.assertEqual(mcp_bridge._recorded_private_sources(self.store, other), set())
         self.assertIn("result", self._serve([self._call(2, "web_search", {"query": "today news"})], job=other)[2])
 
     def test_an_unlisted_tool_name_is_not_stored_verbatim(self):
@@ -502,35 +509,33 @@ class BoundedProfileHostInvocation(unittest.TestCase):
         self.assertTrue(_refused(stale[2]), "a Work that ended cannot keep calling")
         self.assertEqual(self.weather, [])
 
-    def test_private_provenance_still_closes_every_public_destination(self):
+    def test_private_provenance_no_longer_closes_public_destinations(self):
+        """#654 pilot posture: a private context sends the worker's query minus excluded values."""
         replies = self._serve([
             self._call(2, "weather", {"city": "Daejeon"}),
             self._call(3, "web_search", {"query": "q"}),
-            self._call(4, "bounded_public_research", {"mode": "travel_plan", "query": "q"}),
-            self._call(5, "list_notes", {}),
+            self._call(4, "list_notes", {}),
         ], provenance=["personal-space"])
         for ident in (2, 3, 4):
-            self.assertTrue(_refused(replies[ident]))
-        self.assertIn("result", replies[5], "the granted private read still works")
-        self.assertEqual((self.searches, self.weather, self.opened), ([], [], []))
+            self.assertIn("result", replies[ident])
+        self.assertEqual((self.searches, self.weather), (["q"], [{"city": "Daejeon", "country": ""}]))
 
-    def test_a_private_read_in_the_same_bridge_session_closes_the_new_public_reads(self):
-        """Same-Work provenance: after list_notes, weather and research are refused."""
+    def test_a_private_read_in_the_same_bridge_session_keeps_the_public_reads_open(self):
+        """Same-Work provenance: after list_notes, weather and search still go out (#654)."""
         replies = self._serve([
             self._call(2, "list_notes", {}),
             self._call(3, "weather", {"city": "Daejeon"}),
-            self._call(4, "bounded_public_research", {"mode": "travel_plan", "query": "q"}),
+            self._call(4, "web_search", {"query": "q"}),
         ])
-        self.assertIn("result", replies[2])
-        self.assertTrue(_refused(replies[3]))
-        self.assertTrue(_refused(replies[4]))
-        self.assertEqual((self.searches, self.weather, self.opened), ([], [], []))
+        for ident in (2, 3, 4):
+            self.assertIn("result", replies[ident])
+        self.assertEqual((self.searches, self.weather), (["q"], [{"city": "Daejeon", "country": ""}]))
 
 
 class BridgeErrorMapping(unittest.TestCase):
     """What the CLI receives when a bridged AgentOS call does not succeed."""
 
-    def _serve(self, requests, provenance=(), network=None):
+    def _serve(self, requests, provenance=(), network=None, before=None):
         import contextlib
         import io
         from unittest import mock
@@ -540,6 +545,8 @@ class BridgeErrorMapping(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         store = QuickStore(Path(tmp.name) / "state")
         job = _running_work(store)
+        if before:
+            before(store, job)
         calls = []
 
         def execute(_self, plan):
@@ -570,10 +577,10 @@ class BridgeErrorMapping(unittest.TestCase):
         self.assertIn("result", replies[1])
         self.assertEqual([plan["tool"] for plan in calls], ["web_search"])
 
-    def test_a_tainted_search_is_refused_before_the_network(self):
-        """Denied control: the refusal itself is correct; only its mapping is the finding."""
-        replies, calls = self._serve([self._call(1, "web_search", {"query": "today news"})],
-                                     provenance=["personal-space"])
+    def test_a_search_of_only_excluded_values_is_refused_before_the_network(self):
+        """Denied control: a query made only of a value this Work saved to Memory is refused (#654 keeps N4)."""
+        replies, calls = self._serve([self._call(1, "web_search", {"query": "today news"})], provenance=["personal-space"],
+                                     before=lambda store, job: store.save_memory_candidate(job, "news", "today news", work_id=job))
         self.assertTrue(_refused(replies[1]))
         self.assertEqual(calls, [])
 

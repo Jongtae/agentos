@@ -56,6 +56,7 @@ from urllib.request import Request, build_opener, HTTPCookieProcessor, HTTPRedir
 
 from cryptography.fernet import Fernet
 
+from personal_agent.agent_runtime import work_sources
 from personal_agent.connector_contract import CONNECTOR_STATE_KEY, ConnectorState
 from personal_agent.decision import (OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine, SelectionDecision,
                                      fixture_confidence)
@@ -432,7 +433,7 @@ class FirstUseEndToEndAcceptance(unittest.TestCase):
         draft = {'provider': 'compatible', 'endpoint': endpoint,
                  'model': 'test-model', 'api_key': key}
         tested = self.web('/api/model/test', draft)
-        self.assertTrue(tested['ok'])
+        self.assertTrue(tested['ok'], tested)
         self.web('/api/model', {**draft, 'test_proof': tested['test_proof']})
 
     # -- the acceptance ---------------------------------------------------
@@ -657,22 +658,22 @@ class FirstUseEndToEndAcceptance(unittest.TestCase):
             self.assertEqual(self.store.job(reuse)['status'], 'succeeded')
             self.assertIn('9월 출장 정리.md', self.store.job(reuse)['response'])
 
-        with self.subTest('negative: private document history closes public egress'):
-            # An integration property no child suite could show, because it
-            # only exists once both halves run in one conversation: reading
-            # the owner's connected folder marks the Work as a document job,
-            # and while that job is inside the history window the worker's own
-            # arguments never reach a public destination.  Since #605 AgentOS
-            # composes the lookup from words permitted for it -- the owner's
-            # request, not the document -- so a query built from the document
-            # ("출장 계획 초안 ...") leaves only the owner's own words.
+        with self.subTest('private document history is recorded and no longer closes public egress (#654)'):
+            # Reading the owner's connected folder marks the Work as a
+            # document job, and the later Work inside the history window
+            # records that source.  Until #654 AgentOS composed the lookup
+            # from the owner's own words only; under the pilot posture the
+            # worker's query goes out as composed, minus values this Work
+            # wrote to a private store (none here).  Stricter treatment of
+            # document-derived words belongs to the hardening program.
             before = list(self.network.plans)
             self.model_plan = [('web_search', '{"query": "출장 계획 초안 숙소 가격"}')]
             leak = self.says(19, '웹에서 그 출장 숙소 가격도 찾아봐')
             self.drain()
-            self.assertEqual(self.network.plans[len(before):], [{'tool': 'web_search', 'query': '출장 숙소 가격'}])
-            self.assertNotIn('초안', json.dumps(self.network.plans, ensure_ascii=False))
             self.model_plan = []
+            self.assertEqual(self.network.plans[len(before):], [{'tool': 'web_search', 'query': '출장 계획 초안 숙소 가격'}])
+            self.assertEqual(self.store.job(leak)['status'], 'succeeded')
+            self.assertIn('connected-document', work_sources(self.store, leak))
 
         with self.subTest('an install without Calendar credentials refuses cleanly'):
             # This harness builds a service with no Calendar credential, and

@@ -5,12 +5,13 @@ No model, provider, network, credential or owner data is used.  Every test
 asserts the *actual* outbound arguments that reached the fake public
 transport (or that none did), not merely the absence of one secret sentinel.
 
-What remains after #654 is deterministic only: saved or written private
-values are redacted in every spelling, a private context (a private document
-or store shares the Work) is composed from owner-worded permitted text with
-one attempt per destination, the document-sharing grant and the provenance
-refusals hold.  No per-request sensitivity judgment, per-Work lookup cap or
-`/search` requirement exists on either route.
+What remains after #654 is deterministic only: the worker's query goes out
+as composed, in a clean and in a private context alike (a private document or
+store sharing the Work), minus saved or written private values in every
+spelling; the document-sharing grant and the provenance refusals hold.  No
+per-request sensitivity judgment, owner-worded composition, word cap, fixed
+order, one-attempt memo, per-Work lookup cap or `/search` requirement exists
+on either route.
 """
 import contextlib
 import io
@@ -23,8 +24,8 @@ from unittest import mock
 
 from personal_agent import mcp_bridge
 from personal_agent.agent_runtime import (ENGINE_UNMEDIATED, HISTORY_PREFIX, LOOKUP_QUERY_MAX, OWNER_CONVERSATION,
-                                          PUBLIC_TASK_PLACE, PUBLIC_TASK_UNRESOLVED, WORK_SOURCES_KEY, Capabilities,
-                                          egress_refusal, history_provenance, run_agent, work_sources)
+                                          PUBLIC_TASK_UNRESOLVED, WORK_SOURCES_KEY, Capabilities, egress_refusal,
+                                          history_provenance, run_agent, work_sources)
 from personal_agent.bounded_execution import ExecutionResult
 from personal_agent.decision import FixtureDecisionEngine
 from personal_agent.local_tools import LocalTools
@@ -114,20 +115,21 @@ class DecisionTable(unittest.TestCase):
          'web_search', {'query': PRIVATE}, [], '이전 대화의 저장된 메모'),
         ('unrecorded history refuses without a resolver', (HISTORY_PREFIX + 'unrecorded',), None, (),
          'weather', {'city': PRIVATE}, [], '출처 기록이 없는 이전 대화'),
-        ('private word dropped, owner words sent', NOTES, ['병원 검색해줘'], (),
-         'web_search', {'query': f'{PRIVATE} 병원'}, [{'tool': 'web_search', 'query': '병원'}], None),
-        ('earlier region is permitted context (성남)', NOTES, ['성남에 있어', '여기 병원 찾아줘'], (),
+        ('private context sends the worker query as composed (#654)', NOTES, ['병원 검색해줘'], (),
+         'web_search', {'query': '분당 병원 hospital clinic'}, [{'tool': 'web_search', 'query': '분당 병원 hospital clinic'}], None),
+        ('a value this Work wrote is excluded in a private context', NOTES, ['성남에 있어', '여기 병원 찾아줘'], [PRIVATE],
          'web_search', {'query': f'성남 병원 {PRIVATE}'}, [{'tool': 'web_search', 'query': '성남 병원'}], None),
         ('passport number written to Memory is excluded even though the owner typed it', ('owner-memory',),
          [f'여권번호 {PASSPORT} 기억해 두고 병원 검색해줘'], [PASSPORT],
          'web_search', {'query': f'병원 {PASSPORT}'}, [{'tool': 'web_search', 'query': '병원'}], None),
-        ('nothing permitted remains: ask, send nothing', NOTES, ['그거 검색해줘'], (),
+        ('nothing remains after the exclusion: ask, send nothing', NOTES, ['그거 검색해줘'], [PRIVATE],
          'web_search', {'query': PRIVATE}, [], PUBLIC_TASK_UNRESOLVED),
-        ('AI-composed place name is not the owner wording', ('connected-document',), ['나는 대전에 있어'], (),
-         'weather', {'city': 'Daejeon', 'country': 'KR'}, [], PUBLIC_TASK_PLACE),
-        ('owner-worded place is sent; AI-composed country is dropped', ('connected-document',), ['나는 대전에 있어'], (),
-         'weather', {'city': '대전', 'country': 'KR'}, [{'tool': 'weather', 'city': '대전'}], None),
-        ('a longer private word does not ride on a permitted stem', NOTES, ['성남에 있어 병원 찾아줘'], (),
+        ('private context: a transliterated place and validated country go out (#654)', ('connected-document',),
+         ['나는 대전에 있어'], (), 'weather', {'city': 'Daejeon', 'country': 'KR'},
+         [{'tool': 'weather', 'city': 'Daejeon', 'country': 'KR'}], None),
+        ('private context: a country that is not an ISO-2 code is omitted', ('connected-document',), ['나는 대전에 있어'], (),
+         'weather', {'city': '대전', 'country': 'Korea'}, [{'tool': 'weather', 'city': '대전'}], None),
+        ('a saved value inside a longer word is withheld', NOTES, ['성남에 있어 병원 찾아줘'], ['정신과'],
          'web_search', {'query': '성남정신과 병원'}, [{'tool': 'web_search', 'query': '병원'}], None),
         ('approved page in the current scope', ('owner-calendar',), [], (),
          'public_page_read', {'url': URL}, [{'tool': 'public_page_read', 'url': URL, 'approved_urls': [URL]}], None),
@@ -153,7 +155,7 @@ class DecisionTable(unittest.TestCase):
                 self.assertEqual(self.wire.plans, outbound)
 
     def test_research_query_is_composed_the_same_way(self):
-        caps = self.caps(self.NOTES, ['노트북 비교해줘'])
+        caps = self.caps(self.NOTES, ['노트북 비교해줘'], [PRIVATE])
         with mock.patch.object(Capabilities, '_research', lambda self, mode, query: {'query': query, 'mode': mode, 'sources': []}):
             result = caps.execute('bounded_public_research', {'mode': 'product', 'query': f'노트북 {PRIVATE}'})
         self.assertEqual(result['sent'], {'query': '노트북', 'mode': 'product'})
@@ -184,19 +186,29 @@ class DecisionTable(unittest.TestCase):
             tainted.execute('public_page_read', {'url': URL})
         self.assertEqual(len(self.wire.plans), 1, 'the read before revocation is not undone, and none follows it')
 
-    def test_budget_holds_after_failure_and_after_success(self):
-        """F3: one network attempt per destination per Work, recorded before the request."""
+    def test_a_private_context_may_look_up_again_with_another_query(self):
+        """#654: no one-attempt memo; alternatives after a failure or a first result are sent, not replayed."""
         self.wire.fail = True
         caps = self.caps(self.NOTES, ['병원 검색 뉴스'])
-        for query in ('병원', '뉴스', '병원 뉴스'):
-            with self.assertRaises((ValueError, ProviderError)):
-                caps.execute('web_search', {'query': query})
-        self.assertEqual(len(self.wire.plans), 1)
-        self.wire.fail = False; self.wire.plans.clear()
-        ok = self.caps(self.NOTES, ['병원 검색 뉴스'])
-        first = ok.execute('web_search', {'query': '병원'})
-        self.assertIs(ok.execute('web_search', {'query': '뉴스'}), first)
-        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}])
+        with self.assertRaises(ProviderError):
+            caps.execute('web_search', {'query': '병원'})
+        self.wire.fail = False
+        first = caps.execute('web_search', {'query': '성남 병원'})
+        second = caps.execute('web_search', {'query': '분당 약국 pharmacy'})
+        self.assertIsNot(second, first)
+        self.assertEqual(second['sent'], {'query': '분당 약국 pharmacy'})
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}, {'tool': 'web_search', 'query': '성남 병원'},
+                                           {'tool': 'web_search', 'query': '분당 약국 pharmacy'}])
+        # No durable one-attempt claim was recorded for the Work.
+        with self.store.db() as db:
+            requested = db.execute("SELECT COUNT(*) FROM tool_events WHERE job_id=? AND status='requested'", (caps.job_id,)).fetchone()[0]
+        self.assertEqual(requested, 0)
+
+    def test_a_private_document_in_the_work_does_not_restrict_a_rewritten_query(self):
+        """#654: a worker rewrite with new words (translation, synonyms, provider keywords) goes out minus excluded values."""
+        caps = self.caps(('connected-document',), ['성남 병원 찾아줘'], [SECRET_ID])
+        caps.execute('web_search', {'query': f'Seongnam hospital clinic 병원 site:example.org {SECRET_ID}'})
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': 'Seongnam hospital clinic 병원 site:example.org'}])
 
     def test_a_stale_binding_or_disabled_package_fails_closed_before_egress(self):
         def stale():
@@ -215,7 +227,7 @@ class DecisionTable(unittest.TestCase):
     def test_a_package_alias_is_governed_by_its_host_action(self):
         packages = runtime_packages([{'version': 1, 'id': 'news', 'enabled': True, 'roles': [],
                                       'tools': [{'id': 'news_search', 'host_action': 'web_search', 'mode': 'read_only'}]}])
-        self.caps(self.NOTES, ['병원 찾아줘'], packages=packages).execute('news_search', {'query': f'{PRIVATE} 병원'})
+        self.caps(self.NOTES, ['병원 찾아줘'], [PRIVATE], packages=packages).execute('news_search', {'query': f'{PRIVATE} 병원'})
         self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}])
 
     def test_a_delegated_specialist_never_composes_a_lookup(self):
@@ -351,52 +363,42 @@ class ServiceComposition(unittest.TestCase):
         self.assertEqual(self.cli_refusals, [])
         self.assertEqual(multi_selections(engine), [], 'no lookup sensitivity judgment is asked')
 
-    def test_region_from_earlier_conversation_is_used_without_re_asking(self):
-        """"성남에 있어" -> "여기 병원 찾아줘" after private work: the region is kept, the note is not."""
-        self.api(self.worker(lambda request, prior: f'성남 병원 {PRIVATE}'))
+    def test_a_private_document_in_the_work_sends_the_worker_rewrite(self):
+        """#654: after a note listing, the worker's rewritten query with new words goes out as composed."""
+        self.api(self.worker(lambda request, prior: 'Seongnam hospital 성남 병원 추천'))
         self.turns(f'/note {PRIVATE}', '/notes', '성남에 있어', '여기 병원 찾아줘')
-        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '성남 병원'}])
-
-    def test_passport_remembered_earlier_never_enters_the_search(self):
-        """"여권번호를 기억해 둬" -> "병원 검색해줘"."""
-        self.api(self.worker(lambda request, prior: f'병원 {PASSPORT}'))
-        self.turns(f'여권번호 {PASSPORT} 기억해 둬', '병원 검색해줘')
-        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}])
-
-    def test_the_prior_private_answer_does_not_reach_search(self):
-        self.api(self.worker(lambda request, prior: (prior[-1] if prior else 'news')[:80]))
-        self.turns(f'/note {PRIVATE}', '/notes', '그거 검색해줘')
-        self.assertEqual(self.wire.plans, [])
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': 'Seongnam hospital 성남 병원 추천'}])
 
     def test_cli_host_read_reply_taints_the_next_cli_work(self):
         """F1: a trusted-local CLI reply may carry unmediated host reads."""
-        self.cli(lambda request: ('web_search', {'query': f'{PRIVATE} news'}) if 'search' in request else None)
+        self.cli(lambda request: ('web_search', {'query': 'today news'}) if 'search' in request else None)
         self.turns('read my file', 'search the web for news')
         record = self.store.config(WORK_SOURCES_KEY, {})[self.store.jobs()[-1]['id']]
         self.assertIn(ENGINE_UNMEDIATED, record)
-        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': 'news'}])
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': 'today news'}])
 
     def test_cli_host_read_reply_taints_a_later_api_work_route_switch(self):
         self.cli(lambda request: None)
         self.turns('read my file')
         self.store.put('subscription_engine', {})  # the owner switches to the direct-API route
-        self.api(self.worker(lambda request, prior: prior[-1][:80]))
+        self.api(self.worker(lambda request, prior: 'today news'))
         self.turns('그거 검색해줘')
         self.assertEqual(self.store.jobs()[0]['provider'], 'compatible', 'the second Work ran on the API route')
-        self.assertEqual(self.wire.plans, [])
+        self.assertIn(ENGINE_UNMEDIATED, self.store.config(WORK_SOURCES_KEY, {})[self.store.jobs()[-1]['id']])
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': 'today news'}], 'the lookup still goes out (#654)')
 
     def test_cli_first_turn_is_not_tainted_by_its_own_label(self):
         self.cli(lambda request: ('web_search', {'query': 'today news'}))
         self.turns('hello there')
         self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': 'today news'}])
 
-    def test_cli_unrecorded_legacy_history_keeps_its_text_out(self):
-        self.cli(lambda request: ('web_search', {'query': f'{PRIVATE} news'}))
+    def test_cli_unrecorded_legacy_history_does_not_block_the_lookup(self):
+        self.cli(lambda request: ('web_search', {'query': 'today news'}))
         with self.store.db() as db:
             db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',
                        ('assistant', PRIVATE, 'http', 0, None, 'legacy-job'))
         self.turns('search news')
-        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': 'news'}])
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': 'today news'}])
 
 
 class BridgeRehydration(unittest.TestCase):
@@ -424,9 +426,9 @@ class BridgeRehydration(unittest.TestCase):
             mcp_bridge.serve(str(store.root), job, [])
         return plans, [json.loads(line) for line in out.getvalue().splitlines() if line.strip()][-1]
 
-    def test_a_bridge_without_argv_labels_rehydrates_and_composes_from_permitted_words(self):
-        plans, reply = self.serve([OWNER_CONVERSATION, HISTORY_PREFIX + 'personal-space'], f'{PRIVATE} today news')
-        self.assertEqual(plans, [{'tool': 'web_search', 'query': 'today news'}])
+    def test_a_bridge_without_argv_labels_rehydrates_and_sends_the_lookup(self):
+        plans, reply = self.serve([OWNER_CONVERSATION, HISTORY_PREFIX + 'personal-space'], 'today news headlines')
+        self.assertEqual(plans, [{'tool': 'web_search', 'query': 'today news headlines'}])
         self.assertIn('result', reply)
 
     def test_the_cli_unmediated_label_does_not_taint_its_own_work(self):
@@ -450,7 +452,7 @@ TAG_ID = ''.join(chr(0xE0000 + ord(ch)) for ch in SECRET_ID)  # invisible Unicod
 
 
 class Redaction(unittest.TestCase):
-    """Deterministic redaction of saved/written values and the private-context rules (#605, kept by #654)."""
+    """Deterministic redaction of saved/written values (#605 N4, kept by #654) on the one composition path."""
 
     NOTES = (HISTORY_PREFIX + 'personal-space',)
     SAVED = [f'여권번호 {SECRET_ID}']
@@ -493,13 +495,13 @@ class Redaction(unittest.TestCase):
                 self.caps((), ['검색해줘']).execute('web_search', {'query': query})
                 self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': sent}])
 
-    def test_clean_words_are_deduplicated_but_not_capped_or_counted(self):
+    def test_words_are_neither_deduplicated_reordered_capped_nor_counted(self):
         words = [f'w{index}' for index in range(20)]
         caps = self.caps((), ['검색해줘'], work='w-clean')
         for turn in range(8):  # more than the removed six-per-Work cap
-            caps.execute('web_search', {'query': 'a b a B ' + ' '.join(words)})
+            caps.execute('web_search', {'query': 'b a B a ' + ' '.join(words)})
         self.assertEqual(len(self.wire.plans), 8)
-        self.assertEqual(self.wire.plans[-1]['query'].split(), ['a', 'b', *words])
+        self.assertEqual(self.wire.plans[-1]['query'].split(), ['b', 'a', 'B', 'a', *words])
         self.assertIsNone(self.store.config('work_lookup_state:w-clean', None), 'no durable per-Work lookup row')
 
     def test_a_query_is_cut_only_at_the_provider_limit(self):
@@ -520,54 +522,18 @@ class Redaction(unittest.TestCase):
                 self.assertEqual(self.wire.plans, [{'tool': 'weather', 'city': 'Daejeon'}],
                                  'not an ISO 3166-1 alpha-2 code (P3-1): omitted')
 
-    # -- private context: owner wording, dedupe, order, cap, one attempt
-    def test_private_weather_keeps_owner_wording_only(self):
-        with self.assertRaisesRegex(ValueError, '지역명은 소유자가'):
-            self.caps(('connected-document',), ['나는 대전에 있어']).execute('weather', {'city': 'Daejeon', 'country': 'KR'})
-        self.assertEqual(self.wire.plans, [])
+    # -- private context: the same composition, several lookups, a restarted bridge gets another attempt
+    def test_a_private_context_weather_place_goes_out_as_composed(self):
+        self.caps(('connected-document',), ['분당구 정자동 날씨 알려줘']).execute('weather', {'city': 'Jeongja-dong, Bundang', 'country': 'kr'})
+        self.assertEqual(self.wire.plans, [{'tool': 'weather', 'city': 'Jeongja-dong, Bundang', 'country': 'KR'}])
 
-    def test_private_weather_city_follows_the_private_rules(self):
-        self.caps(('connected-document',), ['분당구 정자동 날씨 알려줘']).execute('weather', {'city': '정자동 분당구 정자동'})
-        self.assertEqual(self.wire.plans, [{'tool': 'weather', 'city': '분당구 정자동'}])
-
-    def test_n1_a_word_extending_a_permitted_word_sends_only_the_permitted_word(self):
-        for proposal in ('병원이혼 병원소송 근처우울', '병원ab 병원cd'):
-            with self.subTest(proposal):
-                self.wire.plans.clear()
-                self.caps(self.NOTES, ['병원 찾아줘']).execute('web_search', {'query': proposal})
-                self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}])
-
-    def test_n5_words_are_deduplicated_ordered_by_permitted_text_and_capped(self):
-        earlier, current = '성남에 있어', '여기 병원 찾아줘 내과 소아과 치과 안과 피부과 정형외과 한의원'
-        self.caps(self.NOTES, [earlier, current]).execute(
-            'web_search', {'query': '한의원 병원 성남 병원 성남 치과 안과 내과 소아과 피부과 정형외과'})
-        sent = self.wire.plans[0]['query'].split()
-        self.assertEqual(sent, ['성남', '병원', '내과', '소아과', '치과', '안과', '피부과', '정형외과'])
-
-    def test_f3_the_attempt_is_durable_across_a_restarted_bridge(self):
+    def test_a_restarted_bridge_may_look_up_again_after_a_failure(self):
         self.wire.fail = True
-        with self.assertRaises((ValueError, ProviderError)):
+        with self.assertRaises(ProviderError):
             self.caps(self.NOTES, ['병원 뉴스'], work='f3').execute('web_search', {'query': '병원'})
         self.wire.fail = False
-        with self.assertRaisesRegex(ValueError, '이미 한 번 시도'):
-            self.caps(self.NOTES, ['병원 뉴스'], work='f3').execute('web_search', {'query': '뉴스'})  # a new process
-        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}])
-
-    def test_r8_two_bridge_processes_claim_one_attempt(self):
-        import threading
-        results, barrier = [], threading.Barrier(8)
-
-        def claim():
-            caps = Capabilities(QuickStore(self.path), None, CFG, '', 'job-1', lambda *e: None, network=self.wire)
-            barrier.wait()
-            results.append(caps._claim_attempt('web_search', 'web_search'))
-
-        threads = [threading.Thread(target=claim) for _ in range(8)]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join()
-        self.assertEqual(sorted(results), [False] * 7 + [True])
+        self.caps(self.NOTES, ['병원 뉴스'], work='f3').execute('web_search', {'query': '뉴스'})  # a new process
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}, {'tool': 'web_search', 'query': '뉴스'}])
 
     def test_r9_audit_appends_from_two_processes_are_not_lost(self):
         import threading
@@ -589,9 +555,8 @@ class Redaction(unittest.TestCase):
         typed = '이혼소송 강남 변호사 "상담 비용"'
         caps = self.caps((), [f'/search {typed}'])
         result = caps.execute('web_search', {'query': typed})
-        self.assertTrue(result['explicit_owner_query'])
-        again = caps.execute('web_search', {'query': typed})  # no once-per-Work claim since #654
-        self.assertTrue(again['explicit_owner_query'])
+        self.assertEqual(result['sent'], {'query': typed})
+        caps.execute('web_search', {'query': typed})  # no once-per-Work claim since #654
         self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': typed}] * 2)
         self.assertIsNone(self.store.config(f'work_lookup_state:{caps.job_id}', None))
 
@@ -873,7 +838,7 @@ class BridgeWrites(unittest.TestCase):
                 if 'keep' in request:
                     bridge(job_id, 'save_note', {'content': f'{SECRET_ID} 병원'})
                 elif '검색' in request:
-                    bridge(job_id, 'web_search', {'query': f'{SECRET_ID} 병원'})
+                    bridge(job_id, 'web_search', {'query': '병원 예약'})
                 return ExecutionResult('engine answer', engine, 0)
 
         service = AgentService(self.store, adapter=ModelAdapter(lambda *a, **k: answer()),
@@ -885,7 +850,7 @@ class BridgeWrites(unittest.TestCase):
         for index, text in enumerate((f'please keep {SECRET_ID} 병원 for me', '병원 검색해줘')):
             self.store.enqueue(text, f'k{index}')
             self.assertTrue(service.run_one())
-        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}])
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원 예약'}])
         first = self.store.jobs()[-1]
         self.assertEqual(first['provider'], 'subscription', 'the note was saved by the CLI through the bridge')
         self.assertIn('personal-space', work_sources(self.store, first['id']))

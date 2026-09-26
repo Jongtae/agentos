@@ -31,7 +31,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from cryptography.fernet import Fernet
 
-from personal_agent.agent_runtime import PUBLIC_TASK_UNRESOLVED
+from personal_agent.agent_runtime import work_sources
 from personal_agent.bounded_execution import ExecutionError, ExecutionResult
 from personal_agent.drive_web_oauth import DriveWebOAuthHandoff, EncryptedDriveSecretStore
 from personal_agent.providers import ModelAdapter
@@ -129,12 +129,12 @@ class WorkerProvenanceDeclarationTests(unittest.TestCase):
         self.assertTrue(self.service.run_one())
         # The reference text really was spliced into this turn's prompt.
         self.assertIn(WORKSPACE_SECRET, self.prompt_text())
-        # ...and the public call the model then made was refused, even though
-        # its query shares no token with the reference text.
+        # ...the Work declares the source, and (#654) the public call the model
+        # then made goes out: its query carries no value this Work wrote.
+        self.assertIn('connected-document', work_sources(self.store, job))
         self.assertTrue(self.searched, 'the model never attempted a public search')
-        self.assertTrue(self.failed(job, 'web_search'),
-                        'the workspace-summary turn left web_search open')
-        self.assertEqual(self.egress.plans, [])
+        self.assertEqual(self.failed(job, 'web_search'), [])
+        self.assertEqual(self.egress.plans, [{'tool': 'web_search', 'query': LAUNDERED}])
 
     # -- 2. the Picker-selected Drive file --------------------------------
 
@@ -159,10 +159,10 @@ class WorkerProvenanceDeclarationTests(unittest.TestCase):
                                  channel='telegram:g', chat_id=123)
         self.assertTrue(self.service.run_one())
         self.assertIn(DRIVE_SECRET, self.prompt_text())
+        self.assertIn('connected-drive-file', work_sources(self.store, job))
         self.assertTrue(self.searched, 'the model never attempted a public search')
-        self.assertTrue(self.failed(job, 'web_search'),
-                        'the selected-Drive turn left web_search open')
-        self.assertEqual(self.egress.plans, [])
+        self.assertEqual(self.failed(job, 'web_search'), [])
+        self.assertEqual(self.egress.plans, [{'tool': 'web_search', 'query': LAUNDERED}])
 
     # -- 3. the owner context inbox ---------------------------------------
 
@@ -182,10 +182,10 @@ class WorkerProvenanceDeclarationTests(unittest.TestCase):
         self.store.attach_context(job, [item['id']], self.service.context_assistant_id())
         self.assertTrue(self.service.run_one())
         self.assertIn(CONTEXT_SECRET, self.prompt_text())
+        self.assertIn('owner-context-inbox', work_sources(self.store, job))
         self.assertTrue(self.searched, 'the model never attempted a public search')
-        self.assertTrue(self.failed(job, 'web_search'),
-                        'the context-inbox turn left web_search open')
-        self.assertEqual(self.egress.plans, [])
+        self.assertEqual(self.failed(job, 'web_search'), [])
+        self.assertEqual(self.egress.plans, [{'tool': 'web_search', 'query': LAUNDERED}])
 
     # -- 4. the subscription-engine capabilities --------------------------
 
@@ -196,8 +196,8 @@ class WorkerProvenanceDeclarationTests(unittest.TestCase):
         `Capabilities.execute` directly: `run_agent` is not in this path, so
         the evidence list is empty while the engine holds the owner's notes.
         `/summarize` is used because the subscription branch refuses a
-        workspace summary outright, and the refusal is observed on the real
-        facade the worker handed to the engine.
+        workspace summary outright.  Since #654 the facade sends the query
+        (no value this Work wrote is in it) and the Work records the source.
         """
         class Adapter:
             def __init__(self):
@@ -228,15 +228,13 @@ class WorkerProvenanceDeclarationTests(unittest.TestCase):
         self.assertTrue(service.run_one())
         # The notes really were spliced into the engine prompt for this turn.
         self.assertIn(NOTE_SECRET, adapter.prompt or '')
-        # ...and the engine's public call through the AgentOS facade was
-        # refused, not by argument validation: since #605 a private context
-        # sends only words permitted for the lookup, and no word of the
-        # laundered query is in the owner's request.
-        self.assertFalse(adapter.searched)
-        self.assertIn(PUBLIC_TASK_UNRESOLVED, adapter.refusal or '')
-        self.assertEqual(self.egress.plans, [])
-        self.assertTrue(self.failed(job, 'subscription_engine'),
-                        'the refused engine turn was not recorded as failed')
+        # ...the engine's public call through the AgentOS facade went out
+        # (#654), and the Work carries the notes as its private provenance.
+        self.assertTrue(adapter.searched)
+        self.assertIsNone(adapter.refusal)
+        self.assertEqual(self.egress.plans, [{'tool': 'web_search', 'query': LAUNDERED}])
+        self.assertIn('personal-space', work_sources(self.store, job))
+        self.assertEqual(self.failed(job, 'subscription_engine'), [])
 
 
 if __name__ == '__main__':

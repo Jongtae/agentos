@@ -57,6 +57,7 @@ import json
 import secrets
 import threading
 import time
+from contextlib import nullcontext
 from typing import Callable
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
@@ -216,6 +217,10 @@ class _Connection:
         self.marker = marker  # callable -> opaque revision marker
         self.disconnect = disconnect  # callable(stash) -> parked work ids to end
         self.residual = lambda: False  # callable -> an unreachable active row remains
+        # The connector's own authorization lock: holding it keeps an OAuth
+        # completion from committing between a retry's state check and send.
+        self.lifecycle = nullcontext
+        self.authorizing = lambda: False  # an authorization is mid-flight
 
     def slot(self) -> str:
         return f"{REVOCATION_SLOT}:{self.connector_id}"
@@ -282,6 +287,7 @@ def registry_connection(connector_id, label, holder, owners, *, write=None):
         disconnect,
     )
     connection.residual = residual
+    connection.lifecycle = lambda: holder.oauth_lock
     return connection
 
 
@@ -292,7 +298,9 @@ def drive_connection(label, drive):
         job = drive.disconnect(stash)
         return [job] if job else []
 
-    return _Connection(
+    from .drive_web_oauth import LIFECYCLE_LOCK
+
+    connection = _Connection(
         "google-drive-read",
         label,
         drive.store,
@@ -300,6 +308,9 @@ def drive_connection(label, drive):
         drive.revision_marker,
         disconnect,
     )
+    connection.lifecycle = lambda: LIFECYCLE_LOCK
+    connection.authorizing = drive.authorization_in_progress
+    return connection
 
 
 # -- the owner-facing operation ---------------------------------------------
@@ -427,11 +438,15 @@ class GoogleConnectionRevoker:
 
     def retry(self, connector_id) -> dict:
         connection = self._connection(connector_id)
-        if not connection.credentials():
-            raise _refuse("nothing_to_retry")
-        if connection.state() in ("connected", "reauth_required"):
-            raise _refuse("reconnected")
-        return self._revoke(connection, local_credentials="deleted", retry=True)
+        # Order: revoker lock -> connector authorization lock, the same order
+        # disconnect uses. Under both, no OAuth completion can commit between
+        # the reconnect check below and the revocation it guards.
+        with _LOCK, connection.lifecycle():
+            if not connection.credentials():
+                raise _refuse("nothing_to_retry")
+            if connection.state() in ("connected", "reauth_required") or connection.authorizing():
+                raise _refuse("reconnected")
+            return self._revoke(connection, local_credentials="deleted", retry=True)
 
     def pending_revocations(self) -> list:
         return [{"connector_id": c.connector_id, "label": c.label, "since": c.pending().get("since")}

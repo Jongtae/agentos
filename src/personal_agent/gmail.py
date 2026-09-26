@@ -390,6 +390,10 @@ def _parsed_mime_header(name: str, value: str):
 class GmailConnector:
     """Minimum-authority Gmail OAuth, bounded search, and explicit body read."""
 
+    #: Held by ``complete_oauth`` from state check through token commit;
+    #: provider-revocation retry (#588) holds it so no completion interleaves.
+    oauth_lock = _OAUTH_LOCK
+
     def __init__(
         self,
         store,

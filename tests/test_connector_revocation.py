@@ -249,6 +249,49 @@ class UnreachableGoogleTests(RevocationTestCase):
         self.assertIs(self.gmail_state(), ConnectorState.CONNECTED)
 
 
+class CodexRaceTests(RevocationTestCase):
+    """Codex review on #644: in-flight callback and retry/reconnect races."""
+
+    def test_a_drive_callback_mid_exchange_cannot_reconnect_after_disconnect(self):
+        offer = self.drive.begin(42)
+        state = parse_qs(urlsplit(offer['button']['url']).query)['state'][0]
+
+        def exchange(request):
+            self.disconnect('google-drive-read')  # owner disconnects while Google answers
+            return {'access_token': 'late-access', 'refresh_token': 'late-refresh',
+                    'scope': DRIVE_FILE, 'expires_in': 3600}
+
+        with self.assertRaises(DriveWebOAuthError):
+            self.drive.complete({'state': state, 'code': 'c'}, 42, exchange)
+        self.assertEqual(self.drive.effective_status()['state'], 'disconnected')
+        self.assertNotIn('late-access', json.dumps(self.drive.store.secret('drive_web_oauth_tokens')))
+
+    def test_drive_retry_is_refused_while_an_authorization_is_in_flight(self):
+        self.connect_drive()
+        self.google.answers = [OSError('down')]
+        self.disconnect('google-drive-read')
+        self.drive.begin(42)
+        sent = len(self.google.requests)
+        with self.assertRaisesRegex(ValueError, '새 연결까지 끊길 수'):
+            self.service.retry_google_revocation({'connector_id': 'google-drive-read'})
+        self.assertEqual(len(self.google.requests), sent)
+
+    def test_retry_holds_the_connector_authorization_lock_while_sending(self):
+        self.connect_gmail()
+        self.google.answers = [OSError('down')]
+        self.disconnect()
+        held = []
+
+        def google(url, body, headers):
+            acquired = self.gmail.oauth_lock._is_owned()
+            held.append(acquired)
+            return (200, b'')
+
+        self.service.google_revoke_transport = google
+        self.service.retry_google_revocation({'connector_id': GMAIL_CONNECTOR_ID})
+        self.assertEqual(held, [True])
+
+
 class ConfirmationTests(RevocationTestCase):
     def preview(self, session=SESSION):
         return self.service.google_disconnect_preview({'connector_id': GMAIL_CONNECTOR_ID}, session)

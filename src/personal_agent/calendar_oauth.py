@@ -457,6 +457,10 @@ def calendar_transport(
 class CalendarOAuth:
     """Minimum-authority Google Calendar OAuth for two independent grants."""
 
+    #: Held by ``complete_oauth``/``refresh`` through token commit;
+    #: provider-revocation retry (#588) holds it so no completion interleaves.
+    oauth_lock = _OAUTH_LOCK
+
     def __init__(
         self,
         store,

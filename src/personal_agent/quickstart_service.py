@@ -51,6 +51,7 @@ from .conversation_handoff import (CONNECTOR_LABELS, JUDGMENT_YES,
                                    ConversationFocus,
                                    ConversationHandoffError, IntentClassifier,
                                    INTENT_AMBIGUOUS, INTENT_CALENDAR_CREATE, AUTHORITY_RULE, INTENT_LABELS,
+                                   IntentDecision,
                                    INTENT_GREETING, INTENT_KNOWLEDGE,
                                    INTENT_MAIL_SEARCH, INTENT_NOTE_CREATE, INTENT_NOTE_LIST, INTENT_DRIVE_READ,
                                    INTENT_SETTINGS,
@@ -275,7 +276,7 @@ class AgentService:
         self.decision_engine=RoutedDecisionEngine(self.decision_routes.engine)
         # #619: the Main AI (Work route) chooser and per-provider API keys.
         self.main_ai=MainAiRoutes(self)
-        self.decision_judge=ConversationJudgments(self.decision_engine)
+        self.decision_judge=ConversationJudgments(self.decision_engine,redactor=self.redact_judgment_text)
         self.intent_classifier=IntentClassifier(workspace_search=workspace_search_request,judge=self.decision_judge)
         # Owner-facing projection of blocked turns (#510). The projected
         # transcript row is also the durable Telegram delivery source.
@@ -718,6 +719,19 @@ class AgentService:
         # #627: one pass shared with the CLI bridge's location-ref resolution.
         return redact_known_secrets(self.store,text)
 
+    def redact_judgment_text(self, text, private=True):
+        """Text as it may reach a DecisionEngine judgment (#672 review).
+
+        The stored secrets' literal values and credential shapes, plus - with
+        ``private`` and while a Work is being processed - the values that Work
+        saved to a private store (the #605 exclusion set).  Deterministic, no
+        judgment.
+        """
+        work_id=getattr(self,'current_work_id',None)
+        if private and work_id:
+            return self.scrub_work_text(work_id,text)
+        return self._redact_known_secrets(text)
+
     def _redact_provenance(self, text):
         # Adopt the existing redaction: the stored secrets' literal values, the
         # adapter's credential patterns, then the owner-visible path mask.
@@ -814,7 +828,7 @@ class AgentService:
     def use_decision_engine(self, engine):
         """Replace the engine behind both consumers (tests, later providers)."""
         self.decision_engine=engine
-        self.decision_judge=ConversationJudgments(engine)
+        self.decision_judge=ConversationJudgments(engine,redactor=self.redact_judgment_text)
         self.intent_classifier=IntentClassifier(workspace_search=workspace_search_request,judge=self.decision_judge)
 
     def classify_intent(self, prompt, model_suggestion=None, calendar_pending=None, owner_id=None):
@@ -3382,6 +3396,57 @@ class AgentService:
             return {**result,'resume_refused':exc.reason}
         return {**result,'work_id':resumed['work_id'],'scheduled':resumed['scheduled']}
 
+    #: A judged capability a parked Work keeps across its connection resume
+    #: (#672 review).  Only the capability id, the Work whose message is the
+    #: utterance, and a digest of that utterance are kept - never its text.
+    JUDGED_RESUME_KEY='judged_resume_intents'
+    RESUMABLE_JUDGED_INTENTS=frozenset({INTENT_CALENDAR_CREATE,INTENT_DRIVE_READ})
+    PARKED_STATUSES=('awaiting_connection','awaiting_drive','queued','running')
+
+    @staticmethod
+    def _utterance_digest(text):
+        return hashlib.sha256(str(text).encode('utf-8')).hexdigest()
+
+    def remember_judged_intent(self, job_id, decision, prompt_work_id, prompt):
+        """Keep a parked Work's judged calendar/Drive capability for its resume.
+
+        The resumed Work then runs what was judged the first time instead of
+        asking the DecisionEngine again, whose second answer could be
+        unavailable or different and silently drop the promised draft/read.
+        """
+        if decision.intent not in self.RESUMABLE_JUDGED_INTENTS or 'judgment:capability-need' not in decision.cues:
+            return
+        rows=self.store.config(self.JUDGED_RESUME_KEY,{})
+        rows=rows if isinstance(rows,dict) else {}
+        # Bounded: rows of Work no longer waiting for (or running after) a resume go.
+        rows={key:row for key,row in rows.items()
+              if key!=job_id and (self.store.job(key) or {}).get('status') in self.PARKED_STATUSES}
+        rows[job_id]={'intent':decision.intent,'prompt_work_id':prompt_work_id,
+                      'digest':self._utterance_digest(prompt)}
+        self.store.put(self.JUDGED_RESUME_KEY,rows)
+
+    def resumed_judged_intent(self, job):
+        """``(prompt, decision)`` persisted for this exact resumed Work, else None.
+
+        Consumed once; parking again persists it again.  The utterance is read
+        back from the referenced Work and must match the stored digest.
+        """
+        rows=self.store.config(self.JUDGED_RESUME_KEY,{})
+        if not isinstance(rows,dict) or job['id'] not in rows:
+            return None
+        row=rows.pop(job['id'])
+        self.store.put(self.JUDGED_RESUME_KEY,rows)
+        if not isinstance(row,dict) or row.get('intent') not in self.RESUMABLE_JUDGED_INTENTS:
+            return None
+        source=self.store.job(row.get('prompt_work_id')) if isinstance(row.get('prompt_work_id'),str) else None
+        prompt=str((source or {}).get('message') or '').strip()
+        if not prompt or not hmac.compare_digest(self._utterance_digest(prompt),str(row.get('digest',''))):
+            return None
+        decision=IntentDecision(row['intent'],AUTHORITY_RULE,
+                                argument=prompt if row['intent']==INTENT_CALENDAR_CREATE else None,
+                                cues=('judgment:capability-need','resumed-judgment'))
+        return prompt,row['prompt_work_id'],decision
+
     def drive_read_prerequisite(self, job):
         """Check the Drive connection for one ``drive-read`` Work; park it when missing.
 
@@ -4085,8 +4150,17 @@ class AgentService:
             try:
                 owner_prompt=job['message'].strip()
                 prompt=owner_prompt
+                #: The Work whose message is `prompt` (a retry replays another's).
+                prompt_work_id=job['id']
                 connector_owner=self.connector_owner_id(job)
-                continuity=self.continuity_relation(owner_prompt,connector_owner,current_work_id=job['id'])
+                # #672 review: a Work resumed after its connection runs the
+                # capability judged when it parked; it is neither re-judged
+                # nor re-related to another Work.
+                resumed=self.resumed_judged_intent(job)
+                resumed_decision=None
+                if resumed:
+                    prompt,prompt_work_id,resumed_decision=resumed
+                continuity=None if resumed else self.continuity_relation(owner_prompt,connector_owner,current_work_id=job['id'])
                 if continuity:
                     relation,previous=continuity['relation'],continuity['previous']
                     self.present_turn(job,relation=relation)
@@ -4102,6 +4176,7 @@ class AgentService:
                         if not allowed:
                             return self.complete_continuity_turn(job,reason)
                         prompt=source['message'].strip()
+                        prompt_work_id=source['id']
                     elif relation==FOLLOWUP_CANCEL:
                         cancelled,response=self.cancel_focused_work(previous,connector_owner)
                         self.record_continuity(job['id'],previous['id'],relation,
@@ -4125,7 +4200,7 @@ class AgentService:
                 # said it literally or an AgentOS rule derived it; a
                 # DecisionEngine answer can only pick among AgentOS-declared
                 # candidates (#417) and reaches no other branch here.
-                decision=self.classify_intent(prompt,owner_id=connector_owner)
+                decision=resumed_decision or self.classify_intent(prompt,owner_id=connector_owner)
                 # A pending calendar draft claims cue-free follow-ups ("치과",
                 # "오후 4시", "승인").  Anything it does not recognise as its
                 # own - and any other intent - drops the draft, says so, and
@@ -4157,7 +4232,7 @@ class AgentService:
                 # the first time it ran.
                 parked=self.resume_index.parked_for(connector_owner) if self.resume_index else ()
                 if parked and not (decision.intent==INTENT_CALENDAR_CREATE and decision.continuation) \
-                        and not self._answered_before(job['id']) \
+                        and not resumed and not self._answered_before(job['id']) \
                         and self.decision_judge.parked_work_withdrawn(prompt,parked).outcome==JUDGMENT_YES:
                     self.supersede_pending_handoffs(job['id'],owner_id=connector_owner)
                 # Prerequisite detection runs before `decision.executes` is
@@ -4166,6 +4241,7 @@ class AgentService:
                 # detail they would only discover was useless afterwards.
                 guidance=self.connection_handoff(job,decision)
                 if guidance is not None:
+                    self.remember_judged_intent(job['id'],decision,prompt_work_id,prompt)
                     self.record_work_sources(job['id'],work_sources)
                     guidance=calendar_notice+guidance
                     with self.store.db() as db:
@@ -4266,6 +4342,7 @@ class AgentService:
                     # The selected files are read into this turn below and the
                     # model loop answers; a missing connection parks the Work.
                     if self.drive_read_prerequisite(job):
+                        self.remember_judged_intent(job['id'],decision,prompt_work_id,prompt)
                         self.record_work_sources(job['id'],work_sources)
                         return True
                     handled=False

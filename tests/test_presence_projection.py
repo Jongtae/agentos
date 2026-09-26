@@ -443,7 +443,10 @@ class UnsupportedCapabilityTests(ProjectionTestCase):
         engine = self.judged({})
         request = '내 메일에서 HIV 검사 결과 찾아줘'
         self.service.classify_intent(request)
-        facts = engine.asked[-1][1].facts
+        # The unsupported-action boundary is asked over cues only.  (#672
+        # review: the capability-need judgment now sees rule-claimed turns
+        # too, secret-redacted, so a second part is never hidden.)
+        [facts] = [item[1].facts for item in engine.asked if item[1].purpose == 'unsupported-capability']
         self.assertIn('메일', facts['owner_message'])
         self.assertNotIn('HIV', facts['owner_message'])
         self.assertNotIn('검사', facts['owner_message'])
@@ -452,7 +455,10 @@ class UnsupportedCapabilityTests(ProjectionTestCase):
         engine = self.judged({})
         request = '내 메일로 보낼 PIN 4832를 메모해 둬'
         self.service.classify_intent(request)
-        self.assertEqual(engine.asked, [], 'local note with mail/action words must not reach any judgment')
+        # #672 review: the local note never reaches the mail boundary judgment;
+        # only the capability-need judgment is asked (secret-redacted).
+        self.assertEqual([item[1].purpose for item in engine.asked], ['capability-need'],
+                         'local note with mail/action words must not reach the mail boundary judgment')
 
     def test_mail_action_followup_uses_content_free_recent_mail_focus(self):
         engine = self.judged({'최근 메일 검색 reply': 'mail-send'})
@@ -472,8 +478,9 @@ class UnsupportedCapabilityTests(ProjectionTestCase):
         metadata = self.service.classify_intent('메일 제목 읽어줘')
         self.assertEqual(body.intent, INTENT_UNSUPPORTED)
         self.assertEqual(metadata.intent, 'mail-search')
-        self.assertIn('mail-body', engine.asked[-2][1].facts['owner_message'])
-        self.assertIn('mail-metadata', engine.asked[-1][1].facts['owner_message'])
+        boundary = [item[1] for item in engine.asked if item[1].purpose == 'unsupported-capability']
+        self.assertIn('mail-body', boundary[-2].facts['owner_message'])
+        self.assertIn('mail-metadata', boundary[-1].facts['owner_message'])
 
     def test_mixed_calendar_and_unsupported_mail_action_executes_neither(self):
         # #672: no calendar word rule competes any more; the mail-send part is

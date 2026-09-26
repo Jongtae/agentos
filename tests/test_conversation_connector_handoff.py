@@ -12,6 +12,7 @@ exactly-once cases are driven by actually firing the duplicate rather than by
 asserting a counter nobody incremented.
 """
 import hashlib
+import json
 import tempfile
 import unittest
 
@@ -28,7 +29,7 @@ from personal_agent.conversation_handoff import (CONVERSATION_RESUME_KEY, Connec
                                                  INTENT_CALENDAR_CREATE, INTENT_MAIL_SEARCH,
                                                  IntentClassifier, SUPERSEDED_WORK_ERROR)
 from personal_agent.decision import (OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine,
-                                     SelectionDecision, fixture_confidence)
+                                     SelectionDecision, UnavailableDecisionEngine, fixture_confidence)
 from personal_agent.gmail import (GMAIL_CONNECTOR, GMAIL_CONNECTOR_ID, GMAIL_READONLY_SCOPE,
                                   EncryptedGmailSecretStore, GmailConnector)
 from personal_agent.providers import ModelAdapter
@@ -867,6 +868,45 @@ class PrerequisiteAndGuidanceTests(HandoffTestCase):
         drafts = self.store.config('calendar_create', {})
         self.assertEqual([row['state'] for row in drafts.values()], ['awaiting-approval'])
         self.assertEqual(calls, [], 'a resumed create request must not reach the provider')
+
+    def _resume_after_the_engine_changes(self, engine):
+        """#672 review: the resumed Work runs what was judged when it parked."""
+        calls = []
+
+        class Provider:
+            def create(self, payload, key):
+                calls.append(payload)
+                return {'id': 'never', 'version': '"x"'}
+
+        self.service.calendar = CalendarConnector(self.store, Provider(), registry=self.registry)
+        self.service.calendar_conversation._timezone = 'Asia/Seoul'
+        job_id = self.park(CALENDAR_REQUEST)
+        self.assertIn(job_id, self.store.config(AgentService.JUDGED_RESUME_KEY, {}))
+        self.assertNotIn(CALENDAR_REQUEST, json.dumps(self.store.config(AgentService.JUDGED_RESUME_KEY, {}),
+                                                      ensure_ascii=False), 'only a digest of the words is kept')
+        # The second judgment would now be unavailable, or different.
+        self.service.use_decision_engine(engine)
+        self.connect_calendar_write()
+        self.service.resume_connector_work(CALENDAR_WRITE_CONNECTOR_ID, OWNER, (CALENDAR_WRITE_SCOPE,))
+        self.assertEqual(self.drain(), 1)
+        job = self.store.job(job_id)
+        self.assertEqual(job['status'], 'succeeded')
+        self.assertIn('팀 회의', job['response'])
+        self.assertIn('15:00 – 16:00', job['response'])
+        self.assertEqual([row['state'] for row in self.store.config('calendar_create', {}).values()],
+                         ['awaiting-approval'])
+        self.assertEqual(calls, [])
+        self.assertNotIn(job_id, self.store.config(AgentService.JUDGED_RESUME_KEY, {}), 'consumed once')
+        return engine
+
+    def test_a_resumed_calendar_work_keeps_its_judgment_when_the_engine_is_unavailable(self):
+        self._resume_after_the_engine_changes(UnavailableDecisionEngine())
+
+    def test_a_resumed_calendar_work_is_not_judged_again(self):
+        engine = self._resume_after_the_engine_changes(FixtureDecisionEngine(
+            choose=lambda context, candidates, question: SelectionDecision(
+                OUTCOME_DECIDED, 'none-of-these', candidates, fixture_confidence())))
+        self.assertFalse([item for item in engine.asked if item[1].purpose == 'capability-need'])
 
     def test_calendar_resume_without_a_configured_connector_says_so(self):
         """With the specs registered but no connector object, the honest next

@@ -311,6 +311,11 @@ UNSUPPORTED_CAPABILITY_TEXT = {
 #: to the DecisionEngine.  The engine selects among these keys only, so it
 #: can never mint an intent.  Adding an offered capability here is product
 #: work with its own connector/Grant path, not a phrase list.
+#: A judgment key, not an intent: the turn asks for more than one task and
+#: at least one needs a declared capability (#672 review).  AgentOS then runs
+#: nothing and names the parts, so no part is silently dropped.
+SEVERAL_TASKS = 'several-tasks'
+
 #: ``calendar-create`` and ``drive-read`` were matched on request words
 #: before #672 ("book", "google drive"); they are judged here instead.
 CAPABILITY_NEEDS = {
@@ -320,6 +325,8 @@ CAPABILITY_NEEDS = {
                              "assistant only drafts it and the owner approves the exact preview"),
     INTENT_DRIVE_READ: ("read, search or summarize files in the owner's own Google Drive, or connect "
                         "Google Drive to do that"),
+    SEVERAL_TASKS: ("more than one task in this one message where at least one of them needs one of the "
+                    "other listed capabilities, for example creating a calendar event and also saving a note"),
     **UNSUPPORTED_CAPABILITIES,
 }
 
@@ -493,7 +500,8 @@ UNSUPPORTED_QUESTION = ('Is the owner asking the assistant to do one of these th
 CAPABILITY_NEED_QUESTION = ('Does answering the owner\'s message require one of these assistant capabilities: '
                             + '; '.join(f'{key} = {label}' for key, label in CAPABILITY_NEEDS.items())
                             + '? Choose a capability only when the owner is asking for exactly that on their own '
-                            'account, whatever words they use. Choose none-of-these for ordinary conversation, '
+                            'account, whatever words they use; choose several-tasks when the message also asks '
+                            'for something else. Choose none-of-these for ordinary conversation, '
                             'general knowledge, public web research, notes, reading or changing existing calendar '
                             'events, local files, something they only mention, or when it is unclear. This '
                             'judgment does not authorize any action.')
@@ -558,17 +566,55 @@ class ConversationJudgments:
 
     Builds a ``DecisionContext``, asks the engine, and applies
     ``DecisionPolicy``. Swapping the engine changes no authority semantics.
+
+    Every context is built by :meth:`_context`, which passes each fact through
+    ``redactor(text, private)`` first (#672 review, pilot boundary 1: secrets
+    never enter a model prompt).  The service supplies the redactor - the
+    stored secrets' literal values and credential shapes, and with
+    ``private`` the current Work's saved private values - so this module never
+    imports the service.  As for the completion judgment (#657
+    ``goal_judgment``), the owner's own words (``OWNER_FACTS``) have only
+    secrets removed: the values a Work saved came from them, and removing
+    those would change the question asked.  Credential-shaped tokens are
+    removed even with no redactor, and a failing redactor withholds the fact
+    rather than sending it unredacted.
     """
 
-    def __init__(self, engine=None, policy=None):
+    #: Facts that are the owner's own words.
+    OWNER_FACTS = frozenset({'owner_message', 'owner_request', 'terms'})
+
+    def __init__(self, engine=None, policy=None, redactor=None):
         self.engine = engine or UnavailableDecisionEngine()
         self.policy = policy or DecisionPolicy()
+        self.redactor = redactor
+
+    def redact(self, text, private=True):
+        """``text`` as it may reach the decision engine (deterministic, no judgment)."""
+        from .bounded_execution import SECRET_PATTERN
+        text = str(text or '')
+        try:
+            if self.redactor is not None:
+                text = str(self.redactor(text, private=private))
+        except Exception:
+            return '[redacted]'
+        return SECRET_PATTERN.sub('[redacted]', text)
+
+    def _context(self, purpose, facts, *, uncut=None, **options):
+        """The one ``DecisionContext`` builder: every fact redacted first.
+
+        ``uncut`` names one owner-authored fact whose length widens the bound
+        instead of being cut (#657 ``goal-reached``).
+        """
+        facts = {label: self.redact(value, private=label not in self.OWNER_FACTS) for label, value in facts.items()}
+        if uncut is not None:
+            options['max_chars'] = MAX_CONTEXT_CHARS + len(facts[uncut])
+        return DecisionContext(purpose, facts, **options)
 
     def parked_work_withdrawn(self, utterance, parked_connectors):
         """Does ``utterance`` withdraw the owner's request(s) parked for
         ``parked_connectors``?  Unavailable/unknown keeps them parked."""
         labels = ', '.join(CONNECTOR_LABELS.get(c) or LOCAL_AUTHORITY_LABELS.get(c, c) for c in parked_connectors)
-        context = DecisionContext('parked-work-withdrawal',
+        context = self._context('parked-work-withdrawal',
                                   {'waiting_connection': labels, 'owner_message': utterance})
         decision = self.engine.judge(context, WITHDRAWAL_PROPOSITION)
         verdict = self.policy.binary(decision)
@@ -580,7 +626,7 @@ class ConversationJudgments:
         ``value`` is its key on yes; a confident none-of-these is no."""
         # `utterance` is a minimized cue summary assembled by IntentClassifier,
         # never the owner's raw mail query or surrounding private text.
-        context = DecisionContext('unsupported-capability', {'owner_message': utterance})
+        context = self._context('unsupported-capability', {'owner_message': utterance})
         decision = self.engine.choose(context, tuple(UNSUPPORTED_CAPABILITIES), UNSUPPORTED_QUESTION)
         choice = self.policy.selection(decision)
         if choice is not None:
@@ -596,7 +642,7 @@ class ConversationJudgments:
         sees only the current short utterance plus prior intent/status; the
         selected relation still passes deterministic execution gates later.
         """
-        context = DecisionContext('conversation-followup', {
+        context = self._context('conversation-followup', {
             'owner_message': utterance,
             'previous_intent': previous_intent or '',
             'previous_status': previous_status or '',
@@ -618,7 +664,7 @@ class ConversationJudgments:
         stays on the ordinary conversation route.  The context is the one
         short owner utterance only - no history, Memory, files or mail.
         """
-        context = DecisionContext('capability-need', {'owner_message': utterance})
+        context = self._context('capability-need', {'owner_message': utterance})
         decision = self.engine.choose(context, tuple(CAPABILITY_NEEDS), CAPABILITY_NEED_QUESTION)
         choice = self.policy.selection(decision)
         if choice is not None:
@@ -635,7 +681,7 @@ class ConversationJudgments:
         owner's word.  ``value`` is the index on yes.
         """
         labels = tuple(f'term-{index}' for index in range(1, len(terms) + 1))
-        context = DecisionContext('mail-query-term', {
+        context = self._context('mail-query-term', {
             'owner_message': utterance,
             'terms': '; '.join(f'{label} = {term}' for label, term in zip(labels, terms)),
         })
@@ -659,9 +705,9 @@ class ConversationJudgments:
         this context's bound is widened by exactly its length.
         """
         request = str(request or '')
-        context = DecisionContext('goal-reached', {'owner_request': request, 'observations': observations,
-                                                   'failed_steps': failed_steps or 'none'}, work_id=work_id,
-                                  max_chars=MAX_CONTEXT_CHARS + len(request))
+        context = self._context('goal-reached', {'owner_request': request, 'observations': observations,
+                                                 'failed_steps': failed_steps or 'none'}, work_id=work_id,
+                                uncut='owner_request')
         decision = self.engine.judge(context, GOAL_REACHED_PROPOSITION)
         verdict = self.policy.binary(decision)
         return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
@@ -676,7 +722,7 @@ class ConversationJudgments:
         decide whether a proposed write is canonical or a MemoryCandidate.
         No / unavailable issues nothing, so any write stays a candidate.
         """
-        context = DecisionContext('explicit-memory-request', {'owner_message': utterance})
+        context = self._context('explicit-memory-request', {'owner_message': utterance})
         decision = self.engine.judge(context, MEMORY_REQUEST_PROPOSITION)
         verdict = self.policy.binary(decision)
         return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
@@ -690,7 +736,7 @@ class ConversationJudgments:
         the owner's request; no / unavailable keeps it a proposal the owner
         accepts explicitly (Telegram button or Settings).
         """
-        context = DecisionContext('explicit-preparation-request', {'owner_message': utterance,
+        context = self._context('explicit-preparation-request', {'owner_message': utterance,
                                                                    'proposed_preparation': proposal})
         decision = self.engine.judge(context, PREPARATION_REQUEST_PROPOSITION)
         verdict = self.policy.binary(decision)
@@ -778,6 +824,13 @@ SETTINGS_READ_FORM = '/settings'
 KNOWLEDGE_CLARIFICATION = '개인 공간에서 무엇을 찾을지 두 글자 이상으로 알려 주세요.'
 NOTE_CLARIFICATION = '무엇을 기록할지 내용을 함께 적어 주세요.'
 MAIL_CLARIFICATION = '메일에서 무엇을 찾을지 두 글자 이상으로 알려 주세요.'
+#: A turn that asks for several tasks at once (#672 review): nothing runs, so
+#: no part is done while another is silently dropped.
+MIXED_TASKS_PREFIX = '이 요청에 여러 작업이 함께 들어 있습니다: '
+MIXED_TASKS_SUFFIX = ('. 일부만 처리하고 나머지를 빠뜨리지 않도록 아무 작업도 실행하지 않았습니다. '
+                      '한 번에 하나씩 다시 말씀해 주세요.')
+MIXED_TASKS_CLARIFICATION = ('이 요청에 여러 작업이 함께 들어 있습니다. 일부만 처리하고 나머지를 빠뜨리지 않도록 '
+                             '아무 작업도 실행하지 않았습니다. 한 번에 하나씩 다시 말씀해 주세요.')
 
 
 class _Candidate:
@@ -1008,6 +1061,17 @@ class IntentClassifier:
                                clarification=UNSUPPORTED_JUDGMENT_UNAVAILABLE),
                 candidates, model_suggestion)
 
+        # #672 review: a local rule no longer hides the rest of the turn.  Unless
+        # a pending calendar draft owns follow-ups, a turn a rule claimed is
+        # still asked which declared capability it needs; one the rules did
+        # not find makes the turn mixed, and a mixed turn runs nothing.
+        if candidates and not (focus or {}).get('calendar_pending'):
+            judged = self._judged_capability(text)
+            if judged is not None and (judged.intent == INTENT_AMBIGUOUS
+                                       or judged.intent not in {item.intent for item in candidates}):
+                # No suggestion may narrow a mixed turn to one of its parts.
+                return self._with_suggestion(self._mixed(candidates, judged), (), model_suggestion)
+
         if len(candidates) == 1:
             decision = self._single(candidates[0])
         elif candidates:
@@ -1039,6 +1103,16 @@ class IntentClassifier:
                               cues=tuple(cue for item in candidates for cue in item.cues),
                               clarification=AMBIGUOUS_PREFIX + labels + AMBIGUOUS_SUFFIX)
 
+    @staticmethod
+    def _mixed(candidates, judged):
+        """The rules' candidates plus a judged capability they did not find."""
+        options = tuple(dict.fromkeys([*(item.intent for item in candidates),
+                                       *(() if judged.intent == INTENT_AMBIGUOUS else (judged.intent,))]))
+        labels = ', '.join(INTENT_LABELS.get(option, option) for option in options)
+        return IntentDecision(INTENT_AMBIGUOUS, AUTHORITY_RULE, alternatives=options,
+                              cues=(*(cue for item in candidates for cue in item.cues), *judged.cues),
+                              clarification=MIXED_TASKS_PREFIX + labels + MIXED_TASKS_SUFFIX)
+
     def _fallback(self, text, lowered, focus_intent, correction, calendar_pending=False):
         """No capability rule fired: stay on the ordinary conversation route.
 
@@ -1064,11 +1138,14 @@ class IntentClassifier:
         return IntentDecision(INTENT_CONVERSATION, AUTHORITY_DEFAULT)
 
     def _judged_capability(self, text):
-        """Ask the DecisionEngine whether a cue-free turn needs a declared capability.
+        """Ask the DecisionEngine whether a turn needs a declared capability.
 
-        Reached only when no local rule claimed the turn, so notes, settings,
-        private searches and a pending calendar draft's follow-ups are never
-        sent.  A yes selects an AgentOS-declared candidate; the argument is
+        Asked for every turn that is not an explicit form or a pending
+        calendar draft's follow-up (#672 review): a rule-claimed turn is asked
+        too, so a part the rules did not see makes it mixed instead of being
+        dropped.  The owner text is redacted by ``ConversationJudgments``
+        before it reaches the engine.  A yes selects an AgentOS-declared
+        candidate (``several-tasks`` yields the mixed-turn clarification); the argument is
         the owner's own words (``_judged_mail_query``, or the utterance for a
         calendar draft), never text the engine produced.  Unavailable, unsure
         or none-of-these returns ``None`` and the turn stays on conversation,
@@ -1096,6 +1173,8 @@ class IntentClassifier:
             return IntentDecision(INTENT_CALENDAR_CREATE, AUTHORITY_RULE, argument=text, cues=cues)
         if need.value == INTENT_DRIVE_READ:
             return IntentDecision(INTENT_DRIVE_READ, AUTHORITY_RULE, cues=cues)
+        if need.value == SEVERAL_TASKS:
+            return IntentDecision(INTENT_AMBIGUOUS, AUTHORITY_RULE, cues=cues, clarification=MIXED_TASKS_CLARIFICATION)
         if need.value in UNSUPPORTED_CAPABILITY_TEXT:
             return IntentDecision(INTENT_UNSUPPORTED, AUTHORITY_RULE, argument=need.value, cues=cues,
                                   clarification=UNSUPPORTED_CAPABILITY_TEXT[need.value])

@@ -20,9 +20,11 @@ from pathlib import Path
 
 from personal_agent import conversation_handoff
 from personal_agent.conversation_handoff import (AUTHORITY_DEFAULT, AUTHORITY_RULE, CAPABILITY_NEEDS,
-                                                 INTENT_CALENDAR_CREATE, INTENT_CONVERSATION,
-                                                 INTENT_DRIVE_READ, ConversationJudgments, IntentClassifier)
-from personal_agent.decision import UnavailableDecisionEngine
+                                                 INTENT_AMBIGUOUS, INTENT_CALENDAR_CREATE, INTENT_CONVERSATION,
+                                                 INTENT_DRIVE_READ, INTENT_NOTE_CREATE, MIXED_TASKS_CLARIFICATION,
+                                                 SEVERAL_TASKS, ConversationJudgments, IntentClassifier)
+from personal_agent.decision import (OUTCOME_DECIDED, FixtureDecisionEngine, SelectionDecision,
+                                     UnavailableDecisionEngine, fixture_confidence)
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService, workspace_search_request
 from personal_agent.quickstart_store import QuickStore
@@ -97,20 +99,30 @@ class JudgedCapabilityTests(unittest.TestCase):
 
 
 class _DriveOffer:
-    """The Drive handoff seam: disconnected, and it records the offer it makes."""
+    """The Drive handoff seam: records the offer it makes and resumes the parked Work."""
 
     def __init__(self):
         self.begun = []
+        self.state = 'disconnected'
+        self.pending = None
 
     def status(self):
-        return {'state': 'disconnected'}
+        return {'state': self.state}
 
     effective_status = status
 
     def begin(self, owner, job_id):
         self.begun.append((owner, job_id))
+        self.pending = job_id
         return {'message': 'Google Drive 연결이 필요합니다.',
                 'button': {'text': 'Google Drive 연결하기', 'url': 'https://connect.example.test/drive'}}
+
+    def select_files(self, owner, files):
+        return {'state': 'files-selected', 'files': files}
+
+    def consume_pending_job(self, owner):
+        job_id, self.pending = self.pending, None
+        return job_id
 
 
 class ServiceRouteTests(unittest.TestCase):
@@ -199,6 +211,140 @@ class ServiceRouteTests(unittest.TestCase):
         self.assertEqual(row['status'], 'succeeded')
         self.assertEqual(self.drive.begun, [])
         self.assertFalse(any('reply_markup' in body for body in self.telegram))
+
+
+    # -- #672 review: a parked Drive Work keeps its judgment ---------------------
+    def test_a_resumed_drive_work_reads_its_files_without_a_second_judgment(self):
+        row = self.run_turn(DRIVE_REQUEST, {DRIVE_REQUEST: INTENT_DRIVE_READ})
+        self.assertEqual(row['status'], 'awaiting_drive')
+        # After parking the engine is unavailable; the resumed Work must not need it.
+        self.service.use_decision_engine(UnavailableDecisionEngine())
+        self.drive.state = 'connected'
+        self.service.selected_drive_context = lambda owner: '[선택 파일: 회의 자료]\nDRIVE-BODY 예산 3억'
+        self.service.select_drive_files(42, [{'id': 'picked'}])
+        self.assertEqual(self.store.job(row['id'])['status'], 'queued')
+        self.script += [{'content': '회의 자료 요약입니다.'}] * 2
+        self.assertTrue(self.service.run_one())
+        self.assertEqual(self.store.job(row['id'])['status'], 'succeeded')
+        self.assertIn('DRIVE-BODY', self.bodies[0]['messages'][-1]['content'])
+
+    # -- #672 review: mixed turns never drop a part silently --------------------
+    def assertMixed(self, row, *labels):
+        self.assertEqual(row['status'], 'succeeded')
+        self.assertIn('아무 작업도 실행하지 않았습니다', row['response'])
+        for label in labels:
+            self.assertIn(label, row['response'])
+        self.assertEqual(self.store.notes(), [], 'no part ran, so none was done while another was dropped')
+        self.assertEqual(self.store.config('calendar_create', {}), {})
+        self.assertEqual(self.store.config('calendar_conversation', {}), {})
+        self.assertEqual(self.bodies, [], 'no model turn ran either')
+
+    def test_schedule_a_meeting_and_save_a_note_runs_neither_and_names_the_turn_mixed(self):
+        text = 'schedule a meeting and save a note'
+        row = self.run_turn(text, {text: SEVERAL_TASKS})
+        self.assertEqual(row['response'], MIXED_TASKS_CLARIFICATION)
+        self.assertMixed(row)
+
+    def test_a_calendar_part_next_to_a_note_rule_is_not_dropped(self):
+        text = '내일 오후 3시 팀 회의 일정 잡고 회의 안건 메모해줘'
+        row = self.run_turn(text, {text: INTENT_CALENDAR_CREATE})
+        self.assertMixed(row, '메모 기록', '일정 만들기')
+
+    def test_a_drive_part_next_to_a_note_rule_is_not_dropped(self):
+        text = '구글 드라이브 파일 요약해서 메모해줘'
+        row = self.run_turn(text, {text: INTENT_DRIVE_READ})
+        self.assertMixed(row, '메모 기록', 'Google Drive 파일 읽기')
+        self.assertEqual(self.drive.begun, [])
+
+    def test_summarize_my_drive_file_and_save_the_result_reaches_the_loop_with_both_parts(self):
+        # No local rule claims it; the judged Drive read routes the whole turn to
+        # the Work loop with the selected file, where the save tools are offered.
+        text = 'summarize my Drive file and save the result'
+        self.drive.state = 'connected'
+        self.service.selected_drive_context = lambda owner: '[선택 파일: plan]\nDRIVE-BODY plan'
+        self.script += [{'content': '요약했습니다.'}] * 2
+        row = self.run_turn(text, {text: INTENT_DRIVE_READ})
+        self.assertEqual(row['status'], 'succeeded')
+        sent = self.bodies[0]['messages'][-1]['content']
+        self.assertIn('save the result', sent)
+        self.assertIn('DRIVE-BODY', sent)
+        self.assertIn('save_note', [tool['function']['name'] for tool in self.bodies[0]['tools']])
+
+    # -- #672 review: owner text is redacted before any judgment ---------------
+    def test_a_stored_secret_in_a_calendar_request_never_reaches_the_engine(self):
+        secret = 'zebra-violet-4417-quartz'
+        self.store.secret('decision_jev_key', secret)
+        text = f'내일 오후 3시에 치과 일정 잡아줘 비밀번호 {secret} sk-ant-abcdefghijklmnopqrstuvwxyz0123'
+        engine = capability_need_engine({})
+        self.service.use_decision_engine(engine)
+        job = self.store.enqueue(text, 'secret-turn', channel='telegram:g', chat_id=42)
+        self.script += [{'content': '네.'}] * 2
+        self.assertTrue(self.service.run_one())
+        asked = [item[1] for item in engine.asked]
+        self.assertTrue(asked, 'the capability judgment was asked')
+        for context in asked:
+            rendered = context.render()
+            self.assertNotIn(secret, rendered)
+            self.assertNotIn('sk-ant-abcdefghijklmnopqrstuvwxyz0123', rendered)
+        need = next(context for context in asked if context.purpose == 'capability-need')
+        self.assertIn('치과 일정 잡아줘', need.facts['owner_message'])
+        self.assertIn('[redacted]', need.facts['owner_message'])
+        self.assertEqual(self.store.job(job)['status'], 'succeeded')
+
+
+class JudgmentRedactionTests(unittest.TestCase):
+    """The one context builder redacts every fact (#672 review)."""
+
+    def test_every_fact_passes_the_redactor_owner_words_without_work_values(self):
+        seen = []
+
+        def redactor(text, private=True):
+            seen.append((text, private))
+            return text.replace('SAVED', '[redacted]')
+
+        engine = FixtureDecisionEngine()
+        judge = ConversationJudgments(engine, redactor=redactor)
+        judge.explicit_preparation_request('내일 아침 SAVED 알려줘', 'remind about SAVED')
+        [(_kind, context, _proposition)] = engine.asked
+        # Owner words: stored secrets only (like #657's goal judgment); anything
+        # else: the Work's saved private values too.
+        self.assertEqual(dict((text, private) for text, private in seen),
+                         {'내일 아침 SAVED 알려줘': False, 'remind about SAVED': True})
+        self.assertEqual(context.facts['proposed_preparation'], 'remind about [redacted]')
+
+    def test_credential_shapes_go_without_a_redactor_and_a_failing_redactor_withholds(self):
+        engine = FixtureDecisionEngine()
+        ConversationJudgments(engine).capability_need('token sk-ant-abcdefghijklmnopqrstuvwxyz0123 일정')
+        self.assertNotIn('sk-ant-abcdefghijklmnopqrstuvwxyz0123', engine.asked[-1][1].facts['owner_message'])
+
+        def broken(text, private=True):
+            raise RuntimeError('redactor down')
+
+        ConversationJudgments(engine, redactor=broken).capability_need('내일 일정 잡아줘')
+        self.assertEqual(engine.asked[-1][1].facts['owner_message'], '[redacted]')
+
+
+class MixedJudgmentTests(unittest.TestCase):
+    def test_a_judged_capability_the_rules_also_found_is_not_mixed(self):
+        text = '메일에서 예산 관련 내용 찾아줘'
+        engine = FixtureDecisionEngine(choose=lambda context, candidates, question: SelectionDecision(
+            OUTCOME_DECIDED, 'mail-search' if context.purpose == 'capability-need' else 'none-of-these',
+            candidates, fixture_confidence()))
+        self.assertEqual(classifier(engine).classify(text).intent, 'mail-search')
+
+    def test_a_pending_draft_follow_up_is_never_judged(self):
+        engine = capability_need_engine({'오후 4시 메모해줘': INTENT_CALENDAR_CREATE})
+        decision = classifier(engine).classify('오후 4시 메모해줘', focus={'calendar_pending': True})
+        self.assertEqual(decision.intent, INTENT_NOTE_CREATE)
+        self.assertEqual(capability_asks(engine), [])
+
+    def test_a_mixed_turn_cannot_be_narrowed_by_a_suggestion(self):
+        text = '내일 오후 3시 팀 회의 일정 잡고 회의 안건 메모해줘'
+        decision = classifier(capability_need_engine({text: INTENT_CALENDAR_CREATE})).classify(
+            text, model_suggestion={'intent': INTENT_NOTE_CREATE})
+        self.assertEqual(decision.intent, INTENT_AMBIGUOUS)
+        self.assertEqual(set(decision.alternatives), {INTENT_NOTE_CREATE, INTENT_CALENDAR_CREATE})
+        self.assertEqual(decision.model_suggestion['state'], 'rejected')
 
 
 if __name__ == '__main__':  # pragma: no cover

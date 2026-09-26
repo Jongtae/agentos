@@ -49,6 +49,10 @@ def capability_asks(engine):
     return [item[1] for item in engine.asked if item[0] == 'choose' and item[1].purpose == 'capability-need']
 
 
+def capability_messages(engine):
+    return [context.facts['owner_message'] for context in capability_asks(engine)]
+
+
 class CapabilityNeedTests(unittest.TestCase):
     def test_a_cue_free_mail_read_is_routed_by_the_judgment_with_one_of_the_owners_words(self):
         engine = choosing({'집주인한테 답장 왔어?': INTENT_MAIL_SEARCH,
@@ -109,17 +113,24 @@ class CapabilityNeedTests(unittest.TestCase):
             with self.subTest(engine=engine):
                 self.assertEqual(classifier(engine).classify(text).intent, INTENT_CONVERSATION)
 
-    def test_locally_claimed_turns_are_never_sent_to_the_engine(self):
+    def test_explicit_forms_draft_follow_ups_and_long_texts_are_never_sent_to_the_engine(self):
         engine = choosing({})
         judged = classifier(engine)
-        self.assertEqual(judged.classify('집주인 연락처 메모해줘').intent, INTENT_NOTE_CREATE)
         self.assertEqual(judged.classify('/notes').intent, 'note-list')
+        self.assertEqual(judged.classify('/note 집주인 연락처').intent, INTENT_NOTE_CREATE)
         # A pending calendar draft claims cue-free follow-ups without a judgment.
         self.assertEqual(judged.classify('오후 4시', focus={'calendar_pending': True}).intent,
                          INTENT_CALENDAR_CREATE)
         # A long pasted text is answered by conversation, not sent to the judgment too.
         self.assertEqual(judged.classify('가' * (CAPABILITY_JUDGMENT_MAX_CHARS + 1)).intent, INTENT_CONVERSATION)
         self.assertEqual(capability_asks(engine), [])
+
+    def test_a_rule_claimed_turn_is_asked_too_so_another_part_is_not_hidden(self):
+        # #672 review: a note rule claims the turn, but the judgment is still
+        # asked; none-of-these leaves the rule's decision unchanged.
+        engine = choosing({})
+        self.assertEqual(classifier(engine).classify('집주인 연락처 메모해줘').intent, INTENT_NOTE_CREATE)
+        self.assertEqual(capability_messages(engine), ['집주인 연락처 메모해줘'])
 
 
 class ExplicitMemoryRequestTests(unittest.TestCase):

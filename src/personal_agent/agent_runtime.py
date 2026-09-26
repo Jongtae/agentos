@@ -237,14 +237,136 @@ UNATTRIBUTED_PROVENANCE='unattributed-tool-evidence'
 PROVENANCE_WINDOW={'connected-document':'turn','connected-drive-file':'turn',
                    'personal-space':'turn','owner-memory':'turn','owner-context-inbox':'turn',
                    'owner-folder-names':'turn','owner-calendar':'turn',
+                   'owner-mail':'turn','owner-settings':'turn',
                    UNATTRIBUTED_PROVENANCE:'turn','conversation-history':'history'}
 EGRESS_TAINT_WINDOWS=frozenset({'turn','history'})
 DELEGATED_PREFIX='delegated:'
 
+# --- Per-Work source provenance (#605) --------------------------------------
+#
+# The history-window source used to be decided from the message *role* on the
+# CLI route (any earlier assistant answer closed public egress, so a greeting
+# did) and from the file-workspace job list on the API route (so an earlier
+# `/notes` answer stayed open and its text could be put in a search query).
+# Neither is provenance.  Every Work now records, before model use, the
+# sources that entered its context -- this turn's spliced/read sources and the
+# sources of every earlier Work whose messages it was shown -- and a later Work
+# reads those records for exactly the messages it is shown.  Because a reply is
+# labelled with everything its worker saw, a summary, repetition or paraphrase
+# of private material keeps the label across later turns and restarts.
+#
+# A Work with no record (every Work before #605, or one whose record could not
+# be written) is `unrecorded`: it closes public destinations.  Migration never
+# guesses that old material was public.
+#
+# Owner-typed conversation is recorded as `owner-conversation` and is NOT
+# relabelled public.  Its window, `owner`, is deliberately outside
+# EGRESS_TAINT_WINDOWS: within a Work the owner directs, the owner's own
+# earlier chat is not a private *store*, and closing it would close every
+# second-turn lookup (the #603 greeting finding).  Tightening that is a change
+# to EGRESS_TAINT_WINDOWS alone.  A separate public task (below) never receives
+# earlier owner text at all.
+HISTORY_PREFIX='history:'
+OWNER_CONVERSATION='owner-conversation'
+UNRECORDED_PROVENANCE='unrecorded'
+PROVENANCE_WINDOW[OWNER_CONVERSATION]='owner'
+PROVENANCE_WINDOW[UNRECORDED_PROVENANCE]='history'
+WORK_SOURCES_KEY='work_source_provenance'
+WORK_SOURCES_LIMIT=400
+
+def base_label(label):
+ """A provenance label without its delegated/history route prefixes."""
+ label=str(label)
+ while True:
+  for prefix in (DELEGATED_PREFIX,HISTORY_PREFIX):
+   if label.startswith(prefix):label=label[len(prefix):];break
+  else:return label
+
 def provenance_window(label):
  """Which conversational window a provenance label -- inherited or not -- came from."""
- base=label[len(DELEGATED_PREFIX):] if label.startswith(DELEGATED_PREFIX) else label
- return PROVENANCE_WINDOW.get(base,'turn')
+ label=str(label)
+ if label.startswith(DELEGATED_PREFIX):label=label[len(DELEGATED_PREFIX):]
+ if label.startswith(HISTORY_PREFIX):
+  base=base_label(label)
+  # An earlier Work's source is history-window whatever it was in that Work;
+  # only owner conversation keeps its own (non-refusing) window.
+  return 'owner' if base==OWNER_CONVERSATION else 'history'
+ return PROVENANCE_WINDOW.get(label,'turn')
+
+def recorded_private_sources(store, job_id, tools=None):
+ """Private-source labels a Work's own successful tool events already carry.
+
+ Every successful private read is a durable ``tool_events`` row, so this
+ survives a restart and a second MCP bridge process.  Labels are keyed on the
+ *host action*: the recorded ``host_action`` and the tool id's declared action
+ in ``tools`` (any one suffices), so a package alias of a private read taints
+ exactly like the built-in.
+ """
+ with store.db() as db:
+  rows=db.execute("SELECT tool, detail FROM tool_events WHERE job_id=? AND status='succeeded'",(job_id,)).fetchall()
+ labels=set()
+ for tool,detail in rows:
+  try:recorded=json.loads(detail or '{}').get('host_action')
+  except (ValueError,AttributeError):recorded=None
+  # Union, not precedence: any reading that names a private read taints.
+  for action in (recorded,(tools or {}).get(tool,{}).get('host_action'),tool):
+   if isinstance(action,str) and action in PRIVATE_PROVENANCE:labels.add(PRIVATE_PROVENANCE[action])
+ return labels
+
+def work_source_records(store):
+ rows=store.config(WORK_SOURCES_KEY,{})
+ return rows if isinstance(rows,dict) else {}
+
+def work_sources(store, job_id, tools=None, records=None, document_jobs=()):
+ """Base source labels of one Work, or ``{'unrecorded'}`` when it has no record.
+
+ The stored record (written before model use) is unioned with the Work's
+ durable tool events and the file-workspace document-job list, so a record
+ can only be widened by what actually happened, never narrowed.
+ """
+ records=work_source_records(store) if records is None else records
+ if not isinstance(job_id,str) or not job_id or not isinstance(records.get(job_id),list):
+  labels={UNRECORDED_PROVENANCE}
+ else:
+  labels={base_label(label) for label in records[job_id]}|recorded_private_sources(store,job_id,tools)
+ if job_id in set(document_jobs or ()):labels.add('connected-document')
+ return labels
+
+def history_provenance(store, rows, tools=None, document_jobs=()):
+ """History-window labels for exactly the earlier messages a Work is shown."""
+ records=work_source_records(store);labels=set()
+ for row in rows:
+  labels|=work_sources(store,row.get('job_id'),tools,records,document_jobs)
+ return {HISTORY_PREFIX+label for label in labels}
+
+#: Owner-facing names for a refusal.  A refusal names the source that closed
+#: the destination; it used to blame connected documents whatever the source.
+SOURCE_NAMES={'connected-document':'연결 문서','connected-drive-file':'Google Drive 파일','personal-space':'저장된 메모',
+              'owner-memory':'저장된 기억','owner-context-inbox':'선택한 개인 컨텍스트','owner-folder-names':'연결 폴더 이름',
+              'owner-calendar':'캘린더 일정','owner-mail':'메일 정보','owner-settings':'설정 정보',
+              'conversation-history':'이전 대화','unrecorded':'출처 기록이 없는 이전 대화',
+              UNATTRIBUTED_PROVENANCE:'출처를 확인하지 못한 도구 결과'}
+DESTINATION_NAMES={'web_search':'웹 검색어로 전송할 수 없습니다','weather':'날씨 조회 지역명으로 전송할 수 없습니다',
+                   'public_page_read':'공개 페이지 조회에 사용할 수 없습니다','bounded_public_research':'공개 조사에 사용할 수 없습니다'}
+
+def egress_refusal(action, labels, hint=''):
+ """A truthful refusal: which sources closed which public destination."""
+ names=[]
+ for label in sorted(labels):
+  base=base_label(label);name=SOURCE_NAMES.get(base,'확인되지 않은 개인 자료')
+  if provenance_window(label)=='history' and base not in ('conversation-history','unrecorded'):name='이전 대화의 '+name
+  if name not in names:names.append(name)
+ text=f"{', '.join(names)}에서 나온 내용이 이 작업 문맥에 있어 {DESTINATION_NAMES.get(action,'공개 조회에 사용할 수 없습니다')}."
+ return text+(' '+hint if hint else '')
+
+#: Public destinations a separate public task may serve after private work.
+PUBLIC_TASK_ACTIONS=frozenset({'web_search','weather','public_page_read','bounded_public_research'})
+PUBLIC_TASK_INSTRUCTIONS='''This is a separate AgentOS public lookup. You see only the owner's current request; there is no earlier conversation, note, file, memory or other private material here. Call the one offered tool at most once, using only terms the request itself states. If the request does not itself say what to look up (for example it refers to "it", "that" or earlier material), call no tool and reply with one short question asking what to look up.'''
+#: The truthful next step on the CLI route, which has no separate public task:
+#: the only public path there that never sees the conversation is AgentOS's own
+#: preflight of an explicit request (`subscription_public_lookup_query`).
+CLI_LOOKUP_HINT="대화 내용 없이 따로 조회하려면 '/search 검색어'처럼 검색어를 직접 적어 보내 주세요."
+PUBLIC_TASK_UNRESOLVED='현재 요청만으로는 공개 조회할 내용을 정할 수 없습니다. 이전 대화의 개인 자료는 공개 조회에 쓰지 않으므로, 조회할 내용(검색어, 도시 등)을 요청에 직접 적어 주세요.'
 
 class EvidenceLog(list):
  """Tool evidence that records the provenance of everything put into it.
@@ -296,7 +418,7 @@ def check_arguments(parameters,args):
  return args
 
 class Capabilities:
- def __init__(self,store,adapter,config,key,job_id,record,readonly=False,network=None,document_access=True,packages=None,allowed_tools=None,document_context=False,public_page_scope=None,memory_approval=None,inherited_provenance=(),calendar=None,calendar_owner=None,memory_request=None,current_packages=None):
+ def __init__(self,store,adapter,config,key,job_id,record,readonly=False,network=None,document_access=True,packages=None,allowed_tools=None,document_context=False,public_page_scope=None,memory_approval=None,inherited_provenance=(),calendar=None,calendar_owner=None,memory_request=None,current_packages=None,public_intent=None,lookup_hint=''):
   self.store,self.adapter,self.config,self.key=store,adapter,config,key
   self.job_id,self.record,self.readonly=job_id,record,readonly
   self.network=network or LocalTools()
@@ -323,6 +445,13 @@ class Capabilities:
   # Discovery happened when this Work was built; a package disabled, removed
   # or re-declared since then must not keep its tool reachable.
   self.current_packages=current_packages
+  # #605: a zero-argument resolver of the owner's current request, supplied
+  # by host code at Work start and rechecked on each call, or None.  When set,
+  # a public destination proposed from a private context is served by a
+  # separate public task that sees only that request (see `_public_task`).
+  self.public_intent=public_intent
+  # Route-specific, truthful next step appended to a public-egress refusal.
+  self.lookup_hint=lookup_hint
   self.memo={}
   # One set, two writers: `document_context` is the history-window source and
   # `EvidenceLog` adds a label for every private tool result stored in this
@@ -437,6 +566,51 @@ class Capabilities:
   propagated; passing ``{'turn'}`` models the per-turn outcome exactly.
   """
   return sorted(label for label in self.private_provenance if provenance_window(label) in windows)
+ def _public_task(self,tool_id,action):
+  """Serve a public destination proposed from a private context, or refuse.
+
+  The proposing worker's arguments are never used: they were composed in a
+  context holding private material, and no scan of them could prove
+  otherwise.  Instead AgentOS builds a fresh minimal context *before* any
+  private material can enter it -- the owner's current request, resolved by
+  host code and rechecked here (``public_intent``), and nothing else: no
+  earlier turn, no evidence, no summary, no instructions from the parent --
+  and lets a separate run with exactly one public tool compose the call.
+  Its result returns to the parent as untrusted public evidence.
+
+  What reaches each destination is therefore no more than an untainted
+  first-turn request with the same words could already send.  Budget: one
+  public task per destination per Work; a repeated proposal gets the same
+  observed result, so the choice of *when* to propose cannot become a
+  channel of more than one call per destination.
+  """
+  labels=self.private_egress_provenance()
+  if self.public_intent is None or self.adapter is None or action not in PUBLIC_TASK_ACTIONS:
+   raise ValueError(egress_refusal(action,labels,self.lookup_hint))
+  key=json.dumps(['agentos-public-task',action])
+  if key in self.memo:return self.memo[key]
+  # Raises when this Work is no longer running or its request row changed.
+  intent=self.public_intent()
+  if not isinstance(intent,str) or not intent.strip():raise ValueError(PUBLIC_TASK_UNRESOLVED)
+  child=Capabilities(self.store,self.adapter,self.config,self.key,self.job_id,self.record,True,self.network,False,self.packages,{tool_id},
+                     public_page_scope=self.public_page_scope,current_packages=self.current_packages)
+  request=intent[:MESSAGE_CAP_CHARS]
+  # The one admissible source record besides the request: the exact public
+  # pages the owner approved for this model (`public_page_scope`).  They are
+  # an owner authorization, not private-derived material.
+  if action=='public_page_read' and self.public_page_scope:
+   request+='\n\nOwner-approved public pages (the only addresses public_page_read accepts): '+', '.join(sorted(self.public_page_scope))
+  result=run_agent(self.adapter,self.config,self.key,[{'role':'user','content':request}],
+                   PUBLIC_TASK_INSTRUCTIONS,child,self.record,scope='public-task')
+  if child.private_provenance:raise ValueError(egress_refusal(action,child.private_provenance))
+  observed=[value for value in child.memo.values() if isinstance(value,dict)]
+  if not observed:
+   if getattr(result,'outcome','succeeded')=='failed':raise ValueError('대화 내용 없이 따로 공개 조회를 실행했지만 결과를 받지 못했습니다.')
+   raise ValueError(PUBLIC_TASK_UNRESOLVED)
+  value={**observed[0],'composed_by':'agentos-public-task','public_task_inputs':['owner-current-request'],
+         'note':'AgentOS ran this lookup as a separate public task from the owner request only; the proposed arguments were not sent.'}
+  self.memo[key]=value
+  return value
  def execute(self,name,args):
   tool=self.tools.get(name)
   if not tool or name not in self.allowed_tools:raise ValueError('활성 패키지에 선언되지 않은 도구입니다.')
@@ -447,12 +621,12 @@ class Capabilities:
    except Exception:current=None
    if current is None or current['host_action']!=tool['host_action']:
     raise ValueError('이 도구는 작업 시작 후 비활성화되었거나 선언이 바뀌어 실행하지 않았습니다. 새 요청으로 다시 시도해 주세요.')
-  name=tool['host_action']
+  tool_id,name=name,tool['host_action']
   if name=='web_search':
-   if self.private_egress_provenance():raise ValueError('연결 문서에서 읽은 내용은 웹 검색어로 전송할 수 없습니다. 문서와 무관한 공개 검색어로 새 요청을 보내 주세요.')
+   if self.private_egress_provenance():return self._public_task(tool_id,name)
    return self.network.execute({'tool':name,**args})
   if name=='public_page_read':
-   if self.private_egress_provenance():raise ValueError('연결 문서 내용과 함께 공개 페이지를 조회할 수 없습니다. 문서와 무관한 요청으로 다시 보내 주세요.')
+   if self.private_egress_provenance():return self._public_task(tool_id,name)
    if not self.public_page_scope:raise ValueError('소유자가 승인한 공개 페이지 범위가 없습니다. 먼저 정확한 주소와 조회 매개변수를 승인하세요.')
    return self.network.execute({'tool':name,'url':args['url'],'approved_urls':list(self.public_page_scope)})
   if name.startswith('calendar_'):
@@ -500,7 +674,7 @@ class Capabilities:
    # This is a public destination and takes the same refusal as the others.
    # It is deliberately checked before the mode/query validation below, so a
    # tainted context cannot learn anything from the shape of the error.
-   if self.private_egress_provenance():raise ValueError('연결 문서에서 읽은 내용으로는 공개 조사를 실행할 수 없습니다. 문서와 무관한 주제로 새 요청을 보내 주세요.')
+   if self.private_egress_provenance():return self._public_task(tool_id,name)
    # Egress goes through `self.network`, not through a reader this branch
    # builds, so the injected transport the tests already fake stays the single
    # place anything reaches the wire.
@@ -553,20 +727,12 @@ class Capabilities:
    # `validate_public_query` cannot see where the text came from, and its own
    # docstring says so and forbids citing it as a private-egress control.
    #
-   # The guarantee this branch can honestly make is TURN-SCOPED. The
-   # provenance refusal above proves no private source entered *this* Work's
-   # context, so the model composed the query from this turn's public task
-   # input. It does not reach back through the conversation:
-   # `document_context` is driven by `file_workspace_document_jobs`, which is
-   # written for workspace-summary and Gmail turns (not Drive) and NOT for a
-   # model-driven `read_file` or `list_notes`. So a private read in an
-   # earlier turn leaves the secret in the visible history with no taint, and
-   # a later turn can put a query derived from it on the wire.
-   #
-   # That gap is pre-existing and identical for `web_search` -- review
-   # reproduced both through the real worker -- so it is not opened here, and
-   # it is not closed here either. It is the seam #448 covers. What matters
-   # for this line is that the claim above is scoped to what it can prove.
+   # The guarantee this branch can make: the provenance check above proves no
+   # private source entered this Work's context -- neither this turn's reads
+   # nor, since #605, the recorded sources of any earlier message the worker
+   # was shown (unrecorded history counts as private).  It was TURN-SCOPED
+   # before #605, when an earlier `/notes` or model-driven read left the
+   # visible history untainted on the direct-API route.
    result=PublicResearch(search,_Reader()).run(args['mode'],args['query'],query_source='public_task_input')
    # A URL that was contacted and then failed appears in `read_failures` but
    # not in `sources`, so before this it reached the network and left no
@@ -580,7 +746,7 @@ class Capabilities:
    # the two above. It sat unguarded between them: the provenance model knew
    # the context was private and this branch never asked, which falsified the
    # very property `test_private_provenance_egress` asserts.
-   if self.private_egress_provenance():raise ValueError('연결 문서에서 읽은 내용은 날씨 조회 지역명으로 전송할 수 없습니다. 문서와 무관한 지역명으로 새 요청을 보내 주세요.')
+   if self.private_egress_provenance():return self._public_task(tool_id,name)
    return self.network.execute({'tool':name,**args})
   # Folder basenames are owner-private: `이혼소송_2026` is a fact about the
   # owner's life, not a public string, and independent review put one
@@ -815,6 +981,9 @@ def _evidence_detail(name,result):
   # every host a failed research read reached.
   if result.get('attempted_urls'):summary['attempted_urls']=result['attempted_urls'][:8]
   if result.get('read_failures'):summary['read_failures']=[row.get('url') for row in result['read_failures'][:8] if isinstance(row,dict)]
+  # #605: the owner-visible record says the call was composed by a separate
+  # public task, not from the arguments the proposing worker wrote.
+  if result.get('composed_by')=='agentos-public-task':summary['composed_by']='agentos-public-task'
   return summary
  if name=='find_files':
   return {'file_count':len(result.get('files',[])),'files':[{'root_id':f.get('root_id'),'path':f.get('path')} for f in result.get('files',[])[:12] if isinstance(f,dict)]}

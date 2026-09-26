@@ -11,7 +11,9 @@ import time
 import hashlib
 from urllib.parse import urlsplit
 from .local_tools import LocalTools, normalize_public_url
-from .agent_runtime import Capabilities, run_agent, AGENTS, evidence_summary, turn_context, render_turn_prompt
+from .agent_runtime import (Capabilities, run_agent, AGENTS, evidence_summary, turn_context, render_turn_prompt,
+                            CLI_LOOKUP_HINT, OWNER_CONVERSATION, WORK_SOURCES_KEY, WORK_SOURCES_LIMIT, base_label,
+                            history_provenance)
 from .plugins import PluginRegistry
 from .providers import NOT_REPORTED, ModelAdapter, ProviderError, request_json, validate_model
 from .decision import DEFAULT_DECISION_PROVIDER, RoutedDecisionEngine
@@ -701,6 +703,8 @@ class AgentService:
         return False,'이전 요청은 이미 실행 중이거나 끝난 상태라 여기서 취소하지 않았습니다.'
 
     def complete_continuity_turn(self, job, response):
+        # AgentOS-authored continuity text read from no private store (#605).
+        self.record_work_sources(job['id'],{OWNER_CONVERSATION})
         with self.store.db() as db:
             db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',
                        ('assistant',response,job['channel'],time.time(),job.get('workspace_id'),job['id']))
@@ -1462,6 +1466,42 @@ class AgentService:
         files.configure(body.get('references',[]),body.get('workspace',''))
         self.store.put('document_sharing',{})
         return files.projection()
+
+    def record_work_sources(self, job_id, labels):
+        """Widen one Work's durable source record (#605); never narrows it.
+
+        Written before model use and again after the run, so a restart, a
+        second bridge process and every later Work that is shown this Work's
+        messages read the same sources.  A failed write leaves the Work
+        unrecorded, which later Works treat as restrictive.
+        """
+        try:
+            with self.lock:
+                rows=self.store.config(WORK_SOURCES_KEY,{})
+                rows=rows if isinstance(rows,dict) else {}
+                current=rows.pop(job_id,None)
+                merged=set(current if isinstance(current,list) else [])|{str(label) for label in labels if str(label).strip()}
+                rows[job_id]=sorted(merged)
+                while len(rows)>WORK_SOURCES_LIMIT:rows.pop(next(iter(rows)))
+                self.store.put(WORK_SOURCES_KEY,rows)
+        except Exception:
+            LOG.warning('work source provenance could not be recorded job=%s',job_id)
+
+    def public_composition_enabled(self):
+        """Rollback switch for #605: ``{'mode': 'restrictive'}`` disables it.
+
+        Restrictive mode offers no separate public task and treats every
+        earlier message shown to a worker as unrecorded, which is stricter than
+        either route was before #605.  It never re-enables anything.
+        """
+        return (self.store.config('egress_composition',{}) or {}).get('mode')!='restrictive'
+
+    def shown_history_provenance(self, rows, document_jobs):
+        """History-window labels for the earlier messages a worker is actually shown."""
+        if not rows:return set()
+        if not self.public_composition_enabled():return {'conversation-history'}
+        tools={tool['id']:tool for package in self.runtime_packages() for tool in package['tools']}
+        return history_provenance(self.store,rows,tools,document_jobs)
 
     def record_file_workspace_document_job(self, job_id):
         rows=self.store.config('file_workspace_document_jobs',[])
@@ -3266,6 +3306,9 @@ class AgentService:
             #: effect could not be observed (#598 I1).
             unknown_statement=None
             calendar_notice=''
+            # #605: the sources that enter this Work's context, recorded with
+            # its reply.  Each branch adds a source *before* reading it.
+            work_sources={OWNER_CONVERSATION}
             try:
                 owner_prompt=job['message'].strip()
                 prompt=owner_prompt
@@ -3346,6 +3389,7 @@ class AgentService:
                 # detail they would only discover was useless afterwards.
                 guidance=self.connection_handoff(job,decision)
                 if guidance is not None:
+                    self.record_work_sources(job['id'],work_sources)
                     guidance=calendar_notice+guidance
                     with self.store.db() as db:
                         db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('assistant',guidance,job['channel'],time.time(),job.get('workspace_id'),job['id']))
@@ -3360,14 +3404,17 @@ class AgentService:
                 elif decision.intent==INTENT_GREETING:
                     response='개인 AgentOS에 연결되었습니다. 하고 싶은 일을 자연스럽게 적어 주세요. 웹과 Telegram은 같은 대화 기록을 사용합니다.'
                 elif decision.intent==INTENT_KNOWLEDGE:
+                    work_sources.add('connected-document')
                     result=self.personal_knowledge_request({'query':decision.argument}, owner_id=owner, channel=job['channel'])
                     response='\n'.join(f"{row['source']} · {row['excerpt']}" for row in result.get('results',[])) or result['response']
                     outcome='succeeded' if result['state'] in ('completed','empty') else 'failed'
                 elif decision.intent==INTENT_SETTINGS:
+                    work_sources.add('owner-settings')
                     result=self.conversation_settings_request({'operation':'text','text':decision.argument},
                                                               owner_id=owner, channel=job['channel'])
                     response=self.settings_response(result)
                 elif decision.intent==INTENT_CALENDAR_CREATE:
+                    work_sources.add('owner-calendar')
                     if self.calendar_for_owner(connector_owner) is None:
                         raise ValueError(ConnectorHandoff.unavailable(CALENDAR_WRITE_CONNECTOR_ID))
                     def calendar_evidence(tool,status,detail):
@@ -3390,6 +3437,7 @@ class AgentService:
                 elif decision.intent==INTENT_MAIL_SEARCH:
                     if self.gmail is None:
                         raise ValueError(ConnectorHandoff.unavailable(GMAIL_CONNECTOR_ID))
+                    work_sources.add('owner-mail')
                     results=self.gmail.search(self.connector_owner_id(job),decision.argument,max_results=10)
                     response='\n'.join(f"{row.subject} · {row.sender} · {row.date}" for row in results) or '조건에 맞는 메일을 찾지 못했습니다.'
                     # Subject/sender/date are private mail metadata.  They are
@@ -3401,18 +3449,21 @@ class AgentService:
                     # subscription engine would otherwise receive it.
                     self.record_file_workspace_document_job(job['id'])
                 elif decision.intent==INTENT_WORKSPACE_SEARCH:
+                    work_sources.add('connected-document')
                     results=FileWorkspace(self.store).search(decision.argument)
                     if not results: response='현재 원본과 일치하는 저장 결과를 찾지 못했습니다.'
                     else:
                         response='\n\n'.join(f"저장 결과: {item['path']}\n{item['content']}" for item in results)
                         self.record_file_workspace_document_job(job['id'])
                 elif decision.intent==INTENT_NOTE_CREATE:
+                    work_sources.add('personal-space')
                     note=decision.argument or ''
                     if not note.strip():raise ValueError('기록할 내용을 입력하세요.')
                     with self.store.db() as db:
                         db.execute('INSERT OR IGNORE INTO notes VALUES (?,?,?)',(job['id'],note,time.time()))
                     response='메모를 저장했습니다. /notes로 확인하거나 /summarize로 정리할 수 있습니다.'
                 elif decision.intent==INTENT_NOTE_LIST:
+                    work_sources.add('personal-space')
                     response='\n\n'.join(n['content'] for n in self.store.notes()) or '저장된 메모가 없습니다. /note 내용으로 기록해 보세요.'
                 else:
                     # One route snapshot per Work: a later owner switch applies
@@ -3427,6 +3478,10 @@ class AgentService:
                     # Earlier replies of failed/partial/interrupted Work carry
                     # their outcome into the model's context (#494).
                     history=[context_message(m) for m in stored_history]
+                    # The stored rows behind `history`, index for index, so the
+                    # sources of exactly the messages a worker is shown can be
+                    # read from their Works' records (#605).
+                    history_rows=list(stored_history)
                     if continuity and continuity['relation']==FOLLOWUP_RETRY and history:
                         # The owner-visible transcript keeps the actual
                         # follow-up ("retry that"). The worker gets the
@@ -3504,6 +3559,7 @@ class AgentService:
                     # survives that filter and can safely receive this exact
                     # prepared payload again afterward.
                     prepared_latest=history[-1] if history else None
+                    work_sources|=turn_provenance
                     def record(tool,status,detail):
                         with self.store.db() as db:
                             db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',(job['id'],tool,status,detail,time.time()))
@@ -3512,6 +3568,7 @@ class AgentService:
                     subscription=route_snapshot
                     if document_history and (boundary['requires_approval'] or subscription.get('id')):
                         history=[context_message(message) for message in stored_history if message.get('job_id') not in document_jobs]
+                        history_rows=[message for message in stored_history if message.get('job_id') not in document_jobs]
                         if prepared_latest and history:
                             history[-1]=prepared_latest
                     original_record=record
@@ -3539,7 +3596,7 @@ class AgentService:
                         capabilities=Capabilities(self.store,None,{},'',job['id'],record,network=self.local_tools,
                                                   document_access=False,packages=self.runtime_packages(),
                                                   allowed_tools=allowed_tools,inherited_provenance=turn_provenance,
-                                                  current_packages=self.runtime_packages)
+                                                  current_packages=self.runtime_packages,lookup_hint=CLI_LOOKUP_HINT)
                         # Use the same owner-approved request payload prepared
                         # for the local model path.  In particular, /summarize
                         # must send notes, never only the command literal.
@@ -3569,16 +3626,17 @@ class AgentService:
                             # fail a previously valid turn; the event records it.
                             engine_context={**engine_context,'conversation':[],'mode':'bare-request'}
                             engine_prompt,adapter_context=current_request,None
-                        # Earlier AgentOS answers can carry private material (note
-                        # lists, summaries, knowledge excerpts, Drive or inbox
-                        # answers) whose provenance is not persisted per turn.
-                        # Once any of them is in the CLI context, close the
-                        # CLI's own public egress for this Work, exactly as the
-                        # API route does for document history.  The AgentOS
-                        # preflight lookup above ran first, from this turn's
-                        # raw request only.  Finer per-turn provenance is #448.
-                        if any(message['role']=='assistant' for message in engine_context['conversation']):
-                            capabilities.private_provenance.add('conversation-history')
+                        # #605: the sources of exactly the earlier messages this
+                        # CLI is shown, read from their Works' records.  An
+                        # unrecorded earlier Work closes public egress; a
+                        # greeting no longer does.  The AgentOS preflight lookup
+                        # above ran first, from this turn's raw request only.
+                        shown=engine_context['conversation']
+                        capabilities.private_provenance.update(
+                            self.shown_history_provenance(history_rows[:-1][-len(shown):] if shown else [],document_jobs))
+                        work_sources|=capabilities.private_provenance
+                        # Recorded before model use: the bridge process rehydrates it.
+                        self.record_work_sources(job['id'],work_sources)
                         mode=profile_status(facade.PROFILE)['mode']
                         # Record exactly what reached the CLI: bounded Claude Code
                         # gets the instructions as their own argv element, and the
@@ -3594,7 +3652,7 @@ class AgentService:
                             capability_limitation=profile_status(facade.PROFILE)['limitation'],
                             instructions=engine_context['instructions'] if adapter_context is not None else '',
                             instructions_channel='append-system-prompt' if separate else ('prompt' if adapter_context is not None else 'not sent (bare request)'),
-                            private_sources=set(turn_provenance)|set(capabilities.private_provenance),
+                            private_sources=set(turn_provenance)|{base_label(label) for label in capabilities.private_provenance},
                             route='subscription',engine=subscription['id'],mode=mode,status='sent',
                             context_mode=engine_context.get('mode','shared-context'),instructions_version=engine_context.get('version'),
                             context_messages=len(engine_context['conversation']),egress_taint=sorted(capabilities.private_provenance))
@@ -3631,6 +3689,7 @@ class AgentService:
                         # Private reads during the run widen the egress guard;
                         # record the final set, not only the pre-run snapshot.
                         self.record_turn_provenance(job['id'],egress_taint=sorted(capabilities.private_provenance))
+                        work_sources|=capabilities.private_provenance
                         if not isolated and result.exit_code==0 and (self.store.config('engine_login',{}) or {}).get(subscription['id'],{}).get('state')!='signed-in':
                             self._remember_engine_login(subscription['id'],'signed-in','run')
                         response,provider,model=result.content,'subscription',result.engine
@@ -3646,15 +3705,33 @@ class AgentService:
                         checked=self.store.config('model_test',{})
                         if checked.get('runtime_model'):
                             runtime_config['model']=checked['runtime_model']
-                        capabilities=Capabilities(self.store,self.adapter,runtime_config,key,job['id'],record,network=self.local_tools,document_access=not boundary['requires_approval'],packages=self.runtime_packages(),document_context=document_history and not boundary['requires_approval'],public_page_scope=self.public_page_boundary(config)['urls'],memory_request=owner_memory_request,inherited_provenance=turn_provenance,calendar=self.calendar_for(job),calendar_owner=self.connector_owner_id(job),current_packages=self.runtime_packages)
+                        api_context=turn_context(history,'api')
+                        # #605: the sources of exactly the earlier messages this
+                        # worker is shown replace the file-workspace job-list
+                        # flag (`document_context`), which missed an earlier
+                        # `/notes`, memory or model-driven read.
+                        shown=api_context['conversation']
+                        shown_sources=self.shown_history_provenance(history_rows[:-1][-len(shown):] if shown else [],document_jobs)
+                        def public_intent(bound=job['message'],intent=prompt):
+                            # Host-captured owner request for a separate public
+                            # task, rechecked on each use: this Work must still be
+                            # running with its original request row.
+                            current=self.store.job(job['id']) or {}
+                            if current.get('status')!='running' or current.get('message')!=bound:
+                                raise ValueError('이 작업은 더 이상 실행 중이 아니어서 공개 조회를 실행하지 않았습니다.')
+                            return intent
+                        capabilities=Capabilities(self.store,self.adapter,runtime_config,key,job['id'],record,network=self.local_tools,document_access=not boundary['requires_approval'],packages=self.runtime_packages(),public_page_scope=self.public_page_boundary(config)['urls'],memory_request=owner_memory_request,inherited_provenance=set(turn_provenance)|shown_sources,calendar=self.calendar_for(job),calendar_owner=self.connector_owner_id(job),current_packages=self.runtime_packages,
+                                                  public_intent=public_intent if self.public_composition_enabled() else None)
+                        work_sources|=capabilities.private_provenance
+                        # Recorded before model use.
+                        self.record_work_sources(job['id'],work_sources)
                         # Evidence that the direct route was attempted, even if the
                         # provider fails before any response event.
                         record('model','requested',json.dumps({'provider':runtime_config.get('provider'),'model':runtime_config.get('model')},ensure_ascii=False))
-                        api_context=turn_context(history,'api')
                         self.record_turn_sent(job['id'],sent=render_turn_prompt(api_context),instructions=api_context['instructions'],
                             instructions_channel='system-message',build=self.build,
                             exposed_tools=[tool['function']['name'] for tool in capabilities.definitions()],
-                            private_sources=set(turn_provenance)|set(capabilities.private_provenance)|({'connected-document'} if workspace_request or document_history else set()),
+                            private_sources=set(turn_provenance)|{base_label(label) for label in capabilities.private_provenance}|({'connected-document'} if workspace_request or document_history else set()),
                             route='direct-api',provider=runtime_config.get('provider'),status='sent',
                             requested_model=runtime_config.get('model'),instructions_version=api_context.get('version'),
                             context_messages=len(api_context['conversation']),egress_taint=sorted(capabilities.private_provenance))
@@ -3667,6 +3744,7 @@ class AgentService:
                         # Private reads during the run widen the egress guard;
                         # record the final set, not only the pre-run snapshot.
                         self.record_turn_provenance(job['id'],egress_taint=sorted(capabilities.private_provenance))
+                        work_sources|=capabilities.private_provenance
                         outcome=getattr(result,'outcome','succeeded')
                         # Calls that ran incomplete name their cause like refusals do (#494).
                         refusals.extend(getattr(result,'incomplete',()) or ())
@@ -3700,6 +3778,7 @@ class AgentService:
                     if context_sources and '컨텍스트:' not in response:
                         response+='\n\n컨텍스트 출처:\n'+'\n'.join(context_sources)
                 response=calendar_notice+response
+                self.record_work_sources(job['id'],work_sources)
                 with self.store.db() as db:
                     db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('assistant',response,job['channel'],time.time(),job.get('workspace_id'),job['id']))
                     cause=self._failure_cause(refusals) if outcome in ('failed','partial') else None
@@ -3726,6 +3805,9 @@ class AgentService:
                     transcript=calendar_notice+self.projection.blocked_reply(self.connector_owner_id(job),exc.kind,response)
                 else:
                     transcript=calendar_notice+'이 요청은 완료하지 못했습니다: '+response
+                # Tool reads of a failed run are also read back from its
+                # durable tool events; this records what was declared so far.
+                self.record_work_sources(job['id'],work_sources)
                 with self.store.db() as db:
                     db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id,delivery_projection) VALUES (?,?,?,?,?,?,?)',('assistant',transcript,job['channel'],time.time(),job.get('workspace_id'),job['id'],'blocked-turn' if isinstance(exc,BlockedTurn) else None))
                     db.execute("UPDATE jobs SET status='failed',error=?,delivery=? WHERE id=?",(response,'pending' if job['chat_id'] else 'none',job['id']))

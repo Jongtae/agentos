@@ -56,6 +56,7 @@ from urllib.request import Request, build_opener, HTTPCookieProcessor, HTTPRedir
 
 from cryptography.fernet import Fernet
 
+from personal_agent.agent_runtime import PUBLIC_TASK_INSTRUCTIONS
 from personal_agent.connector_contract import CONNECTOR_STATE_KEY, ConnectorState
 from personal_agent.decision import (OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine, SelectionDecision,
                                      fixture_confidence)
@@ -234,6 +235,7 @@ class FirstUseEndToEndAcceptance(unittest.TestCase):
         # The scripted half of the model fixture.  Empty means "answer with
         # text"; a list means "ask for these tools in order, then answer".
         self.model_plan = []
+        self.public_tasks = []
         self.model_text = MODEL_ANSWER
         # Two failure switches the owner's world can flip under the product:
         # Google rejecting a stored credential, and Telegram not answering a
@@ -280,6 +282,20 @@ class FirstUseEndToEndAcceptance(unittest.TestCase):
             # back, so the script survives the retry turn `run_agent` injects
             # when a first reply carries no tool call.
             done = len([message for message in body['messages'] if message.get('role') == 'tool'])
+            if body['messages'][0].get('content', '').endswith(PUBLIC_TASK_INSTRUCTIONS):
+                # A #605 separate public task sees only the owner's request
+                # (plus approved page addresses).  Like a real model, this
+                # fixture can only replay a scripted call whose arguments that
+                # input itself states; otherwise it answers without a tool.
+                self.public_tasks.append(body)
+                request = body['messages'][1]['content']
+                if done < len(self.model_plan) and all(
+                        str(value) in request for value in json.loads(self.model_plan[done][1]).values()):
+                    name, arguments = self.model_plan[done]
+                    return {'choices': [{'message': {'tool_calls': [
+                        {'id': f'public-{done}', 'type': 'function',
+                         'function': {'name': name, 'arguments': arguments}}]}}]}
+                return {'choices': [{'message': {'content': self.model_text}}]}
             if done < len(self.model_plan):
                 name, arguments = self.model_plan[done]
                 return {'choices': [{'message': {'tool_calls': [
@@ -661,15 +677,22 @@ class FirstUseEndToEndAcceptance(unittest.TestCase):
             # An integration property no child suite could show, because it
             # only exists once both halves run in one conversation: reading
             # the owner's connected folder marks the Work as a document job,
-            # and while that job is inside the history window the runtime
-            # refuses web search and page reads outright.  The order of two
-            # ordinary owner requests therefore changes what is allowed, and
-            # the safe direction is the one enforced here.
+            # and while that job is inside the history window the worker's own
+            # public calls are closed.  Since #605 the worker's proposal goes
+            # to a separate public task that sees only the owner's request, so
+            # a query built from the document ("출장 계획 초안 ...") cannot be
+            # reproduced and nothing is sent.
             before = list(self.network.plans)
-            self.model_plan = [('web_search', '{"query": "출장 숙소 가격"}')]
+            self.model_plan = [('web_search', '{"query": "출장 계획 초안 숙소 가격"}')]
             leak = self.says(19, '웹에서 그 출장 숙소 가격도 찾아봐')
             self.drain()
             self.assertEqual(self.store.job(leak)['status'], 'failed')
+            # #605: the worker's query was discarded; the separate public task
+            # saw only the owner's current request, never the document.
+            self.assertTrue(self.public_tasks)
+            self.assertEqual(self.public_tasks[-1]['messages'][1],
+                             {'role': 'user', 'content': '웹에서 그 출장 숙소 가격도 찾아봐'})
+            self.assertNotIn('출장 계획 초안', json.dumps(self.public_tasks, ensure_ascii=False))
             # Nothing reached the egress layer, so nothing could be exfiltrated.
             self.assertEqual(self.network.plans, before)
             self.assertNotIn('출장 계획 초안',

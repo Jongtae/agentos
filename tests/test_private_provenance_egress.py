@@ -329,7 +329,9 @@ class RoutingSiteProvenanceTests(unittest.TestCase):
         self.assertEqual(facade.evidence, [], 'precondition: the old flag is blind here')
         with self.assertRaises(ValueError) as refused:
             facade.execute('public_page_read', {'url': url})
-        self.assertIn('연결 문서', str(refused.exception))
+        # #605: the refusal names the source that actually closed it.
+        self.assertIn('저장된 메모', str(refused.exception))
+        self.assertNotIn('연결 문서', str(refused.exception))
 
         child = self.caps(public_page_scope=scope,
                           inherited_provenance={'delegated:connected-document'})

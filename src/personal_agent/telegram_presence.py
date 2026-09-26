@@ -255,53 +255,83 @@ def _escape(text):
     return html.escape(text, quote=False)
 
 
-def _leaf(text):
-    # An unmatched marker is left as written: a literal ``**`` is better
-    # than silently changing what the answer says.
-    return _escape(text)
+#: Telegram nesting rule (Bot API "Formatting options"): bold and italic may
+#: contain links, but no entity may contain ``code``/``pre`` or sit inside one.
+#: Code and link spans are therefore cut out first and replaced by
+#: placeholders, so emphasis delimiters around them still pair up (#581 live
+#: discrepancy: ``**[title](url)**`` and ``**`cmd`**`` used to leak ``**``).
+_SPAN_OPEN, _SPAN_CLOSE = '\ue000', '\ue001'
+_SPAN_REF = re.compile(_SPAN_OPEN + r'(\d+)' + _SPAN_CLOSE)
+_EMPTY_EMPHASIS = re.compile(r'<(b|i)></\1>')
 
 
-def _italic(text):
+def _leaf(text, spans=(), stack=()):
+    """Escape a text leaf and put back its code/link spans.
+
+    ``stack`` is the emphasis open around this leaf.  A code span closes it
+    and reopens it afterwards, because Telegram rejects emphasis containing
+    code.  An unmatched marker is left as written: a literal ``**`` is
+    better than silently changing what the answer says.
+    """
+    out, pos = [], 0
+    for match in _SPAN_REF.finditer(text):
+        out.append(_escape(text[pos:match.start()]))
+        kind, value = spans[int(match.group(1))]
+        if kind == 'code':
+            out.append(''.join(f'</{tag}>' for tag in reversed(stack)) + '<code>' + _escape(value) + '</code>'
+                       + ''.join(f'<{tag}>' for tag in stack))
+        else:
+            label, url = value
+            out.append('<a href="' + html.escape(url, quote=True) + '">' + _escape(label) + '</a>')
+        pos = match.end()
+    out.append(_escape(text[pos:]))
+    return ''.join(out)
+
+
+def _italic(text, spans, stack):
     out, pos = [], 0
     for match in _ITALIC.finditer(text):
-        out.append(_leaf(text[pos:match.start()]))
-        out.append('<i>' + _leaf(match.group(1)) + '</i>')
+        out.append(_leaf(text[pos:match.start()], spans, stack))
+        if 'i' in stack:
+            out.append(_leaf(match.group(1), spans, stack))
+        else:
+            out.append('<i>' + _leaf(match.group(1), spans, stack + ('i',)) + '</i>')
         pos = match.end()
-    out.append(_leaf(text[pos:]))
+    out.append(_leaf(text[pos:], spans, stack))
     return ''.join(out)
 
 
-def _bold(text, in_bold=False):
+def _bold(text, spans, stack):
     out, pos = [], 0
     for match in _BOLD.finditer(text):
-        out.append(_italic(text[pos:match.start()]))
-        inner = _italic(match.group(1))
+        out.append(_italic(text[pos:match.start()], spans, stack))
         # Telegram entities of one type are not nested: inside an already
         # bold span (a heading) the delimiters are consumed without a tag.
-        out.append(inner if in_bold else '<b>' + inner + '</b>')
+        if 'b' in stack:
+            out.append(_italic(match.group(1), spans, stack))
+        else:
+            out.append('<b>' + _italic(match.group(1), spans, stack + ('b',)) + '</b>')
         pos = match.end()
-    out.append(_italic(text[pos:]))
-    return ''.join(out)
-
-
-def _links(text, in_bold=False):
-    out, pos = [], 0
-    for match in _LINK.finditer(text):
-        out.append(_bold(text[pos:match.start()], in_bold))
-        out.append('<a href="' + html.escape(match.group(2), quote=True) + '">' + _leaf(match.group(1)) + '</a>')
-        pos = match.end()
-    out.append(_bold(text[pos:], in_bold))
+    out.append(_italic(text[pos:], spans, stack))
     return ''.join(out)
 
 
 def _spans(text, in_bold=False):
-    out, pos = [], 0
-    for match in _CODE.finditer(text):
-        out.append(_links(text[pos:match.start()], in_bold))
-        out.append('<code>' + _escape(match.group(1)) + '</code>')
-        pos = match.end()
-    out.append(_links(text[pos:], in_bold))
-    return ''.join(out)
+    """Inline code, links and emphasis for one line, as valid Telegram HTML."""
+    spans = []
+
+    def cut(kind):
+        def replace(match):
+            spans.append((kind, match.group(1) if kind == 'code' else (match.group(1), match.group(2))))
+            return f'{_SPAN_OPEN}{len(spans) - 1}{_SPAN_CLOSE}'
+        return replace
+
+    # Strip the placeholder characters from the source so a model can never
+    # forge a span reference; they are private-use code points with no text.
+    text = text.replace(_SPAN_OPEN, '').replace(_SPAN_CLOSE, '')
+    text = _CODE.sub(cut('code'), text)
+    text = _LINK.sub(cut('link'), text)
+    return _bold(text, spans, ('b',) if in_bold else ())
 
 
 def _lines(text):
@@ -336,7 +366,13 @@ def render_telegram_html(text):
         out.append('<pre>' + _escape(match.group(1).rstrip('\n')) + '</pre>')
         pos = match.end()
     out.append(_lines(text[pos:]))
-    return ''.join(out)
+    rendered = ''.join(out)
+    # Closing emphasis around a code span can leave empty pairs; drop them.
+    while True:
+        cleaned = _EMPTY_EMPHASIS.sub('', rendered)
+        if cleaned == rendered:
+            return rendered
+        rendered = cleaned
 
 
 # --- Telegram addressing ----------------------------------------------------------

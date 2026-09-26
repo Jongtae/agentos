@@ -47,6 +47,7 @@ from personal_agent.bounded_execution import (
     profile_actions,
     route_unavailable,
 )
+from personal_agent.agent_runtime import PUBLIC_TASK_NO_JUDGMENT
 from personal_agent.decision import OUTCOME_DECIDED, DecisionContext
 from personal_agent.decision_adapters import (CODEX_DECISION_CONFIG, SubscriptionCliDecisionEngine, codex_disable_plan,
                                               parse_codex_features)
@@ -814,6 +815,15 @@ def populate_codex_home(home, store_root):
     (home / 'config.toml').write_text('sandbox_mode = "danger-full-access"\napproval_policy = "never"\n')
 
 
+#: The owner's request in the qualification Work is ``/search PUBLIC_QUERY``.
+PUBLIC_QUERY = 'public query'
+#: #605: with no sensitivity judgment configured, AgentOS withholds the
+#: worker-composed weather city (the request names none) and returns its
+#: fixed owner-visible text; the call still reached the bridge and was recorded.
+WEATHER_WITHHELD = json.dumps(PUBLIC_TASK_NO_JUDGMENT['unavailable'])[1:-1]
+BRIDGED_EVENTS = [('web_search', 'succeeded'), ('weather', 'failed'), ('list_notes', 'succeeded')]
+
+
 #: Tools Codex may still offer under strict: the AgentOS bridge namespace,
 #: the MCP resource helpers (the bridge serves no resources) and the
 #: non-interactive user-input request.  No shell, file, image or web tool.
@@ -836,7 +846,9 @@ class ProcessLevelQualification(unittest.TestCase):
         (self.store.root / 'FAKE-STORE-CANARY.txt').write_text('fake-store-canary-616\n')
         with self.store.db() as db:
             db.execute("INSERT INTO notes VALUES ('n1','fake-note-616',1)")
-        self.job = self.store.enqueue('qualification', 'q-' + uuid.uuid4().hex)
+        # An owner-typed `/search` (#605 D1) so the bridged search is sent as
+        # typed and reaches the stubbed network without a sensitivity judgment.
+        self.job = self.store.enqueue(f'/search {PUBLIC_QUERY}', 'q-' + uuid.uuid4().hex)
         with self.store.db() as db:
             db.execute("UPDATE jobs SET status='running' WHERE id=?", (self.job,))
         self.home_canary = Path.home() / f'.agentos-616-home-canary-{uuid.uuid4().hex}.txt'
@@ -926,7 +938,7 @@ class ProcessLevelQualification(unittest.TestCase):
         model = _ScriptedModel('responses', [
             {'name': 'exec_command', 'arguments': {'cmd': f'cat {self.store.root / "FAKE-STORE-CANARY.txt"}', 'login': False}},
             {'name': 'view_image', 'arguments': {'path': str(self.store.root / 'FAKE-STORE-CANARY.txt')}},
-            {'name': 'web_search', 'namespace': 'mcp__agentos', 'arguments': {'query': 'public query'}},
+            {'name': 'web_search', 'namespace': 'mcp__agentos', 'arguments': {'query': PUBLIC_QUERY}},
             {'name': 'weather', 'namespace': 'mcp__agentos', 'arguments': {'city': 'Daejeon'}},
             {'name': 'list_notes', 'namespace': 'mcp__agentos', 'arguments': {}},
             {'message': 'qualification finished'}])
@@ -935,9 +947,10 @@ class ProcessLevelQualification(unittest.TestCase):
         self.assertIn('unsupported call', shell)
         self.assertIn('unsupported call', image)
         self.assertIn('stub-search-616', search)
-        self.assertIn('stub-weather-616', weather)
+        self.assertIn(WEATHER_WITHHELD, weather)
+        self.assertNotIn('stub-weather-616', weather)
         self.assertIn('fake-note-616', notes)
-        self.assertEqual(events, [('web_search', 'succeeded'), ('weather', 'succeeded'), ('list_notes', 'succeeded')])
+        self.assertEqual(events, BRIDGED_EVENTS)
         offered = {tool.get('name') or tool.get('type') for tool in model.offered_tools()}
         self.assertLessEqual(offered, STRICT_CODEX_TOOLS, offered)
         context = json.dumps([request['body'] for request in model.requests])
@@ -1001,7 +1014,7 @@ class ProcessLevelQualification(unittest.TestCase):
     def _claude_script(self):
         return [{'tool': 'Read', 'input': {'file_path': str(self.store.root / 'FAKE-STORE-CANARY.txt')}},
                 {'tool': 'Bash', 'input': {'command': f'cat {self.home_canary}'}},
-                {'tool': 'mcp__agentos__web_search', 'input': {'query': 'public query'}},
+                {'tool': 'mcp__agentos__web_search', 'input': {'query': PUBLIC_QUERY}},
                 {'tool': 'mcp__agentos__weather', 'input': {'city': 'Daejeon'}},
                 {'tool': 'mcp__agentos__list_notes', 'input': {}},
                 {'message': 'qualification finished'}]
@@ -1022,9 +1035,10 @@ class ProcessLevelQualification(unittest.TestCase):
             self.assertIn('No such tool available', denied)
             self.assertNotIn('canary-616', denied)
         self.assertIn('stub-search-616', search)
-        self.assertIn('stub-weather-616', weather)
+        self.assertIn(WEATHER_WITHHELD, weather)
+        self.assertNotIn('stub-weather-616', weather)
         self.assertIn('fake-note-616', notes)
-        self.assertEqual(events, [('web_search', 'succeeded'), ('weather', 'succeeded'), ('list_notes', 'succeeded')])
+        self.assertEqual(events, BRIDGED_EVENTS)
         self.assertEqual(sorted(tool['name'] for tool in model.offered_tools()),
                          sorted(f'mcp__agentos__{action}' for action in profile_actions(STRICT_PROFILE)),
                          'no built-in tool is offered at all')
@@ -1033,7 +1047,7 @@ class ProcessLevelQualification(unittest.TestCase):
     def _claude_trusted_script(self):
         return [{'tool': 'Read', 'input': {'file_path': str(self.store.root / 'FAKE-STORE-CANARY.txt')}},
                 {'tool': 'Bash', 'input': {'command': f'cat {self.home_canary}'}},
-                {'tool': 'mcp__agentos__web_search', 'input': {'query': 'public query'}},
+                {'tool': 'mcp__agentos__web_search', 'input': {'query': PUBLIC_QUERY}},
                 {'tool': 'mcp__agentos__weather', 'input': {'city': 'Daejeon'}},
                 {'tool': 'mcp__agentos__list_notes', 'input': {}},
                 {'tool': 'Read', 'input': {'file_path': 'agentos-mcp.json'}},

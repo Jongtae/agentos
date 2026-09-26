@@ -313,12 +313,17 @@ class DriveWebOAuthHandoff:
         summarize its returned content in memory, but must not place it in
         status/audit/configuration records or relay payloads.
         """
+        # The enforcing owner/selection check, not redundancy: nothing below
+        # re-checks that ``telegram_owner_id`` owns the Picker selection or
+        # that ``file_id`` is in it.  Without it another owner could read the
+        # selected file, and an unpicked id would fail only by accident.
         self.assert_selected(telegram_owner_id, file_id)
         # Defence in depth.  ``assert_selected`` above already reaches the
-        # credential gate through ``_connected``, so this is redundant today --
-        # deliberately, because this is the one place a raw access token is
-        # handed to an outbound transport, and a refactor that drops the
-        # selection check would otherwise take the credential check with it.
+        # credential gate through ``_connected``, so this credential check is
+        # redundant today -- deliberately, because this is the one place a raw
+        # access token is handed to an outbound transport, and a refactor that
+        # drops the selection check would otherwise take the credential check
+        # with it.
         tokens = self._authorized_tokens()
         if not callable(transport):
             raise DriveWebOAuthError("An owner-local Drive transport is required.")

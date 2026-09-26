@@ -30,6 +30,12 @@ from personal_agent.quickstart_store import QuickStore
 BRIDGES = (mcp_bridge, isolated_engine_mcp_bridge)
 
 
+
+def _refused(reply):
+    """#607 AX-06: a refusal is a protocol error or a typed MCP tool-result error."""
+    return "error" in reply or bool((reply.get("result") or {}).get("isError"))
+
+
 class ProtocolVersionRegistryTests(unittest.TestCase):
     def test_registry_handshake_set_is_the_reviewed_one(self):
         """Pin the registry the bridges were reviewed against.
@@ -246,7 +252,7 @@ class ExposedToolWireBoundary(unittest.TestCase):
         """Denied control: invocation never exceeds exposure."""
         replies = self._wire({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
                               "params": {"name": "read_file", "arguments": {"root_id": "r", "path": "a.md"}}})
-        self.assertIn("error", replies[2])
+        self.assertTrue(_refused(replies[2]))
 
     def test_the_bridge_refuses_calls_once_its_work_is_no_longer_running(self):
         """#604: discovery grants nothing; a finished or foreign Work cannot act.
@@ -260,14 +266,16 @@ class ExposedToolWireBoundary(unittest.TestCase):
         list_notes = {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "list_notes", "arguments": {}}}
         after = self._run_bridge(args, (INIT, {"jsonrpc": "2.0", "id": 3, "method": "tools/list"}, list_notes))
         self.assertIn("tools", after[3]["result"], "listing is still answered")
-        self.assertIn("error", after[2], "a finished Work is refused")
+        self.assertTrue(_refused(after[2]), "a finished Work is refused")
         foreign = list(args)
         foreign[foreign.index("--job") + 1] = "not-a-work-of-this-store"
-        self.assertIn("error", self._run_bridge(foreign, (INIT, list_notes))[2])
+        self.assertTrue(_refused(self._run_bridge(foreign, (INIT, list_notes))[2]))
         with self.store.db() as db:
             failed = [json.loads(row[0]) for row in db.execute(
                 "SELECT detail FROM tool_events WHERE tool='list_notes' AND status='failed'")]
-        self.assertTrue(failed and all(set(detail) == {"scope", "error"} for detail in failed),
+        # #607: the refusal is typed (code/retry/effect) and still carries no arguments.
+        self.assertTrue(failed and all(set(detail) <= {"scope", "error", "host_action", "code", "retry", "effect"}
+                                       and detail["code"] == "stopped" for detail in failed),
                         "the refusal is recorded with a reason and no arguments")
 
     def test_finding_listed_tools_are_not_valid_mcp_wire_tools(self):
@@ -424,7 +432,7 @@ class BoundedProfileHostInvocation(unittest.TestCase):
         self.assertIn("granted private note", [note["content"] for note in self._value(replies[5])["notes"]])
         with self.store.db() as db:
             events = [tuple(row) for row in db.execute(
-                "SELECT tool,status FROM tool_events WHERE job_id=? ORDER BY id", (self.job,))]
+                "SELECT tool,status FROM tool_events WHERE job_id=? AND status!='running' ORDER BY id", (self.job,))]
         self.assertEqual(events, [("weather", "succeeded"), ("web_search", "succeeded"),
                                   ("bounded_public_research", "succeeded"), ("list_notes", "succeeded")])
         # Review P1: the success trace carries the direct route's redacted
@@ -449,7 +457,7 @@ class BoundedProfileHostInvocation(unittest.TestCase):
                        (self.job, "my_notes", "succeeded",
                         json.dumps({"scope": "x", "host_action": "list_notes"}), 1))
         replies = self._serve([self._call(2, "web_search", {"query": "granted private note"})])
-        self.assertIn("error", replies[2])
+        self.assertTrue(_refused(replies[2]))
         self.assertEqual(self.searches, [])
 
     def test_private_taint_survives_a_second_bridge_process_for_the_same_work(self):
@@ -462,7 +470,7 @@ class BoundedProfileHostInvocation(unittest.TestCase):
             self._call(4, "bounded_public_research", {"mode": "travel_plan", "query": "granted private note"}),
         ])
         for ident in (2, 3, 4):
-            self.assertIn("error", second[ident])
+            self.assertTrue(_refused(second[ident]))
         self.assertEqual((self.searches, self.weather, self.opened), ([], [], []))
         # Allowed control: another running Work of the same store is not tainted.
         other = _running_work(self.store, "another turn")
@@ -471,7 +479,7 @@ class BoundedProfileHostInvocation(unittest.TestCase):
     def test_an_unlisted_tool_name_is_not_stored_verbatim(self):
         """Review P3: a CLI-chosen unknown name becomes 'unlisted' in the event store."""
         replies = self._serve([self._call(2, "run_shell; rm -rf ~ " + "x" * 200, {})])
-        self.assertIn("error", replies[2])
+        self.assertTrue(_refused(replies[2]))
         with self.store.db() as db:
             tools = [row[0] for row in db.execute("SELECT tool FROM tool_events WHERE job_id=?", (self.job,))]
         self.assertEqual(tools, ["unlisted"])
@@ -488,12 +496,12 @@ class BoundedProfileHostInvocation(unittest.TestCase):
         replies = self._serve(cases)
         for ident in range(2, 7):
             with self.subTest(case=ident):
-                self.assertIn("error", replies[ident])
+                self.assertTrue(_refused(replies[ident]))
         self.assertEqual((self.searches, self.weather, self.opened), ([], [], []))
         with self.store.db() as db:
             db.execute("UPDATE jobs SET status='succeeded' WHERE id=?", (self.job,))
         stale = self._serve([self._call(2, "weather", {"city": "Daejeon"})])
-        self.assertIn("error", stale[2], "a Work that ended cannot keep calling")
+        self.assertTrue(_refused(stale[2]), "a Work that ended cannot keep calling")
         self.assertEqual(self.weather, [])
 
     def test_private_provenance_still_closes_every_public_destination(self):
@@ -504,7 +512,7 @@ class BoundedProfileHostInvocation(unittest.TestCase):
             self._call(5, "list_notes", {}),
         ], provenance=["personal-space"])
         for ident in (2, 3, 4):
-            self.assertIn("error", replies[ident])
+            self.assertTrue(_refused(replies[ident]))
         self.assertIn("result", replies[5], "the granted private read still works")
         self.assertEqual((self.searches, self.weather, self.opened), ([], [], []))
 
@@ -516,8 +524,8 @@ class BoundedProfileHostInvocation(unittest.TestCase):
             self._call(4, "bounded_public_research", {"mode": "travel_plan", "query": "q"}),
         ])
         self.assertIn("result", replies[2])
-        self.assertIn("error", replies[3])
-        self.assertIn("error", replies[4])
+        self.assertTrue(_refused(replies[3]))
+        self.assertTrue(_refused(replies[4]))
         self.assertEqual((self.searches, self.weather, self.opened), ([], [], []))
 
 
@@ -569,7 +577,7 @@ class BridgeErrorMapping(unittest.TestCase):
         """Denied control: the refusal itself is correct; only its mapping is the finding."""
         replies, calls = self._serve([self._call(1, "web_search", {"query": "today news"})],
                                      provenance=["personal-space"])
-        self.assertIn("error", replies[1])
+        self.assertTrue(_refused(replies[1]))
         self.assertEqual(calls, [])
 
     def _failure_signatures(self):
@@ -581,23 +589,20 @@ class BridgeErrorMapping(unittest.TestCase):
         ], provenance=["conversation-history"])
         return {ident: json.dumps(reply.get("error") or reply.get("result"), sort_keys=True) for ident, reply in replies.items()}
 
-    @unittest.expectedFailure
     def test_finding_distinct_failures_collapse_into_one_protocol_error(self):
-        """Owner #607 (AX-06).  Defect layer: ``mcp_bridge.serve`` except-branch.
+        """Fixed by #607 (AX-06); was an ``expectedFailure`` finding.
 
-        Policy denial, invalid arguments, an unexposed tool and an unsupported
-        method all become ``-32602 'AgentOS MCP request rejected.'``, so the
-        CLI cannot tell a recoverable argument error from a denial.
+        Policy denial is a typed tool-result error; invalid arguments, an
+        unexposed tool and an unsupported method are distinct protocol errors.
         """
         signatures = self._failure_signatures()
         self.assertEqual(sorted(signatures), [1, 2, 3, 4])
         self.assertEqual(len(set(signatures.values())), 4, signatures)
 
-    @unittest.expectedFailure
     def test_finding_a_transient_network_failure_ends_the_bridge(self):
-        """Owner #607 (AX-06).  Defect layer: ``mcp_bridge.serve`` catches only
-        ValueError/ExecutionError/TypeError, so a ProviderError from the public
-        read escapes the loop: the call gets no reply and later requests none.
+        """Fixed by #607 (AX-06); was an ``expectedFailure`` finding: a
+        ProviderError from the public read escaped the loop, so the call got no
+        reply and later requests none.  It is now a typed tool-result error.
         """
         from personal_agent.providers import ProviderError
 

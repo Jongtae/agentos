@@ -159,8 +159,10 @@ class ProviderToolProtocolTests(unittest.TestCase):
    caps=Capabilities(store,adapter,CFG,'','job',lambda *a:None,network=BrokenNetwork())
    result=run_agent(adapter,CFG,'',[{'role':'user','content':'search'}],'',caps,lambda *a:events.append(a))
   self.assertEqual(result.outcome,'failed')
-  self.assertEqual(len(calls),1)
-  failed=[json.loads(e[2]) for e in events if e[0]=='web_search' and e[1]=='failed']
+  # #607: one bounded transient retry inside the first call; the identical
+  # second call is still refused before the network.
+  self.assertEqual(len(calls),2)
+  failed=[json.loads(e[2]) for e in events if e[0]=='web_search' and e[1]=='failed' and 'attempt' in json.loads(e[2])]
   self.assertEqual([e['attempt'] for e in failed],[1,2])
   self.assertIn('한 번만 실행',failed[-1]['error'])
  def test_trace_evidence_keeps_file_content_out_of_event_store(self):

@@ -14,7 +14,7 @@ from .local_tools import LocalTools, normalize_public_url
 from .agent_runtime import (Capabilities, run_agent, AGENTS, evidence_summary, turn_context, render_turn_prompt,
                             CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, OWNER_CONVERSATION, lookup_sources, WORK_SOURCES_KEY, WORK_SOURCES_LIMIT, base_label,
                             history_provenance, WorkBudget, EFFECT_FREE_READS, explicit_search_query, outcome_from_events,
-                            WORK_STOP_KEY, WORK_STOP_KEEP, work_stop_requested)
+                            WORK_STOP_KEY, WORK_STOP_KEEP, work_stop_requested, WorkLedger, goal_summary, work_source_records)
 from .plugins import PluginRegistry
 from .providers import NOT_REPORTED, ModelAdapter, ProviderError, request_json, validate_model
 from .decision import DEFAULT_DECISION_PROVIDER, RoutedDecisionEngine
@@ -648,6 +648,12 @@ class AgentService:
             return False,'이전 요청이 개인 문서 내용을 사용해 자동으로 다시 실행하지 않았습니다.'
         if self.store.task_artifacts(previous['id']):
             return False,'이전 요청에 이미 저장된 결과가 있어 자동으로 다시 실행하지 않았습니다.'
+        # #594 item 1 (#607): a settings change, or a trusted-local CLI turn
+        # that could act outside AgentOS's mediated tools, may have changed
+        # state that no tool event records; it is never replayed blindly.
+        sources=work_source_records(self.store).get(previous['id'])
+        if isinstance(sources,list) and ({'owner-settings',ENGINE_UNMEDIATED}&set(sources)):
+            return False,'이전 요청이 설정 변경 또는 AgentOS가 중개하지 않은 엔진 작업을 포함해 자동으로 다시 실행하지 않았습니다.'
         effectful={'save_note','save_memory','delegate_agent',
                    'calendar_draft_create','calendar_draft_update','calendar_draft_cancel'}
         for event in events:
@@ -688,15 +694,19 @@ class AgentService:
             current=parent
         return None
 
-    def record_continuity(self, job_id, previous_id, relation, *, executed=False, reason=None, source_work_id=None):
-        self.store.link_work_relation(job_id,previous_id,relation)
+    def record_continuity(self, job_id, previous_id, relation, *, executed=False, reason=None, source_work_id=None, db=None):
         detail={'relation':relation,'related_work_id':previous_id,'executed':bool(executed)}
         if source_work_id and source_work_id!=previous_id:
             detail['source_work_id']=source_work_id
         if reason:detail['reason']=reason
-        with self.store.db() as db:
-            db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
-                       (job_id,'conversation_continuity','succeeded',json.dumps(detail,ensure_ascii=False),time.time()))
+        if db is None:
+            with self.store.db() as conn:
+                conn.execute('BEGIN IMMEDIATE')
+                return self.record_continuity(job_id,previous_id,relation,executed=executed,reason=reason,
+                                              source_work_id=source_work_id,db=conn)
+        self.store.link_work_relation(job_id,previous_id,relation,db=db)
+        db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                   (job_id,'conversation_continuity','succeeded',json.dumps(detail,ensure_ascii=False),time.time()))
 
     def cancel_focused_work(self, previous, connector_owner):
         """Cancel only the focused Work through an existing safe boundary."""
@@ -1825,7 +1835,10 @@ class AgentService:
         return (self.store.job(job_id) or {}).get('status')=='cancelled'
 
     def work_budget(self, job_id):
-        return WorkBudget(stop=lambda:self.work_stopped(job_id))
+        # #607 AX-10: attempts and the deadline are one durable row shared
+        # with the CLI's MCP bridge process serving the same Work.  Each host
+        # run (including a resumed parked Work) starts one fresh budget.
+        return WorkBudget(stop=lambda:self.work_stopped(job_id),ledger=WorkLedger(self.store,job_id,fresh=True))
 
     #: Rule-matched natural-language reads whose empty or unclear result is
     #: re-judged by the Work model loop (#606 T4, owner Q1).  Mail is not a
@@ -1848,6 +1861,24 @@ class AgentService:
             return True
         config=self.store.config('model',{})
         return bool(config) and self.model_ready(config)
+
+    def work_goal(self, job_id, capabilities, outcome):
+        """Attempts versus the goal, from this Work's durable events (#607 AX-07).
+
+        A recovered attempt is not the goal outcome: the record keeps how many
+        attempts ran and failed, which tools left their part unresolved, and
+        whether an effect is unknown, next to the Work's own outcome.
+        """
+        try:
+            with self.store.db() as db:
+                rows=db.execute('SELECT tool,status,detail FROM tool_events WHERE job_id=? ORDER BY id',(job_id,)).fetchall()
+            summary=goal_summary([(row['tool'],row['status'],row['detail']) for row in rows],
+                                 getattr(capabilities,'tools',None))
+            summary['outcome']=outcome
+            if self._work_has_unknown_effect(job_id):summary['effect']='unknown'
+            return summary
+        except Exception:
+            return None
 
     def cli_work_outcome(self, job_id, tools):
         """``(outcome, refusals)`` of a CLI Work from its own tool events (#606 T3)."""
@@ -2515,8 +2546,11 @@ class AgentService:
                 return None,'이미 다시 시도를 요청했습니다.'
             task_id=self.store.enqueue(source['message'],key,f'telegram:{generation}',sender,db=db)
             self.telegram_turns.record_source(task_id,sender,self.telegram_turns.source(job['id']),db=db)
-        self.record_continuity(task_id,job['id'],FOLLOWUP_RETRY,executed=True,
-                               source_work_id=source['id'] if source['id']!=job['id'] else None)
+            # #594 item 2 (#607): the retry, its relation and its continuity
+            # record commit together, so a crash cannot leave a retry that
+            # `_already_retried` does not see.
+            self.record_continuity(task_id,job['id'],FOLLOWUP_RETRY,executed=True,
+                                   source_work_id=source['id'] if source['id']!=job['id'] else None,db=db)
         return task_id,None
 
     def connector_connect_url(self, connector_id):
@@ -4063,6 +4097,7 @@ class AgentService:
                     observed=verified_portion(verified_parts) if outcome=='partial' else None
                     db.execute("UPDATE jobs SET status=?,response=?,error=?,provider=?,model=?,delivery=?,owner_cause=?,owner_verified=? WHERE id=?",
                                (outcome,response,cause,provider,model,'pending' if job['chat_id'] else 'none',spoken,observed,job['id']))
+                self.record_turn_provenance(job['id'],goal=self.work_goal(job['id'],work_capabilities[0],outcome))
             except (ValueError,ProviderError,ExecutionError,OSError) as exc:
                 resolved_blocker=False
                 response=str(exc)
@@ -4084,8 +4119,12 @@ class AgentService:
                 self.record_work_sources(job['id'],work_sources|set(getattr(work_capabilities[0],'private_provenance',()) or ()))
                 with self.store.db() as db:
                     db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id,delivery_projection) VALUES (?,?,?,?,?,?,?)',('assistant',transcript,job['channel'],time.time(),job.get('workspace_id'),job['id'],'blocked-turn' if isinstance(exc,BlockedTurn) else None))
-                    db.execute("UPDATE jobs SET status='failed',error=?,delivery=? WHERE id=?",(response,'pending' if job['chat_id'] else 'none',job['id']))
-                outcome='failed'
+                    # #607: a run that failed (or was stopped / timed out) after an
+                    # action whose effect is unknown is not a plain failure: the
+                    # unknown effect stays visible and retry refuses to replay it.
+                    outcome='unknown' if self._work_has_unknown_effect(job['id']) else 'failed'
+                    db.execute("UPDATE jobs SET status=?,error=?,delivery=? WHERE id=?",(outcome,response,'pending' if job['chat_id'] else 'none',job['id']))
+                self.record_turn_provenance(job['id'],goal=self.work_goal(job['id'],work_capabilities[0],outcome))
             self.update_task_card(job,outcome)
             if resolved_blocker:
                 self.projection.clear(self.connector_owner_id(job))

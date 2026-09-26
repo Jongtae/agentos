@@ -987,13 +987,15 @@ def check_arguments(parameters,args):
  if any(not isinstance(v,str) for v in args.values()):raise ValueError('도구 인수는 문자열이어야 합니다.')
  return args
 
-# --- One Work's shared loop budget (#606 T1) ---------------------------------
+# --- One Work's shared loop budget (#606 T1, #607 AX-10) --------------------
 #
 # The same counters bound the direct-API loop, a delegated specialist (which
 # shares its parent's budget object) and the CLI broker, because attempts are
-# spent inside `Capabilities.execute`, which every route calls.  Process kill,
-# typed deadline_exceeded, transient retry and unknown-effect reconciliation
-# stay with #607 (bounded_execution / mcp_bridge).
+# spent inside `Capabilities.execute`, which every route calls.  #607: the
+# attempt count and the deadline are also kept in one durable per-Work row
+# (`WorkLedger`), so the host and a separate CLI bridge process spend ONE
+# budget, and `bounded_execution` kills the CLI process group on Stop or at
+# the deadline.
 WORK_MODEL_TURNS=9
 WORK_TOOL_ATTEMPTS=12
 WORK_DEADLINE_SECONDS=600
@@ -1002,7 +1004,8 @@ WORK_DEADLINE='이 작업의 처리 시간 한도에 도달해 다음 단계를 
 WORK_TURNS_EXHAUSTED=f'이 작업의 모델 호출 한도({WORK_MODEL_TURNS}회)에 도달해 더 진행하지 않았습니다.'
 WORK_ATTEMPTS_EXHAUSTED=f'이 작업의 도구 실행 한도({WORK_TOOL_ATTEMPTS}회)에 도달해 더 실행하지 않았습니다.'
 #: Codes that end the Work's remaining steps; never a recoverable read failure.
-BUDGET_CODES=frozenset({'stopped','deadline','turn_budget','attempt_budget'})
+#: ``deadline`` is the pre-#607 spelling kept for older events.
+BUDGET_CODES=frozenset({'stopped','deadline','deadline_exceeded','turn_budget','attempt_budget'})
 
 class ToolError(ValueError):
  """A tool refusal with a stable ``code`` and, when known, the authority it ``requires`` (#606 T2).
@@ -1013,21 +1016,84 @@ class ToolError(ValueError):
  def __init__(self,message,code,requires=None):
   super().__init__(message);self.code=code;self.requires=requires
 
+#: One durable row per Work: ``{"attempts": n, "deadline": wall-clock}``.
+WORK_LEDGER_KEY='work_budget'
+
+class WorkLedger:
+ """The durable half of one Work's budget, shared by every process serving it (#607 AX-10).
+
+ Adapts #605's per-Work durable claim row (``_update_state``): one config
+ row per Work, changed in one ``BEGIN IMMEDIATE`` transaction, so the host
+ and its CLI's MCP bridge cannot both spend the last attempt.  The first
+ opener (the host, before the CLI starts) fixes the wall-clock deadline; a
+ later opener inherits it.  ``fresh=True`` (the host starting a run) starts
+ a new budget: a parked Work resumed later is a new bounded run, exactly as
+ its in-memory #606 budget was, and never inherits a long-expired deadline.
+ A store error fails closed for spending.
+ """
+ def __init__(self,store,job_id,*,seconds=WORK_DEADLINE_SECONDS,wall=time.time,fresh=False):
+  self.store,self.job_id,self.wall=store,job_id,wall
+  self.key=f'{WORK_LEDGER_KEY}:{job_id}'
+  try:self.deadline=self._change(lambda row:None,open_seconds=seconds,fresh=fresh)['deadline']
+  except Exception:self.deadline=wall()+seconds
+ def _change(self,change,open_seconds=None,fresh=False):
+  with self.store.db() as db:
+   db.execute('BEGIN IMMEDIATE')
+   found=None if fresh else db.execute('SELECT value FROM config WHERE key=?',(self.key,)).fetchone()
+   row=json.loads(found[0]) if found else None
+   if row is None:
+    row={'attempts':0,'deadline':self.wall()+(open_seconds or WORK_DEADLINE_SECONDS)}
+    # Rows of Works that are no longer queued/running are finished budgets.
+    db.execute("DELETE FROM config WHERE key LIKE ? AND substr(key,?) NOT IN "
+               "(SELECT id FROM jobs WHERE status IN ('queued','running'))",(WORK_LEDGER_KEY+':%',len(WORK_LEDGER_KEY)+2))
+   if not isinstance(row,dict) or not isinstance(row.get('attempts'),int) or not isinstance(row.get('deadline'),(int,float)):
+    raise ValueError('corrupt work budget')
+   result=change(row)
+   db.execute('INSERT INTO config VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(self.key,json.dumps(row)))
+   return {**row,'result':result}
+ def expired(self):
+  return self.wall()>=self.deadline
+ def remaining(self):
+  return self.deadline-self.wall()
+ def spend(self,limit):
+  """Count one attempt unless ``limit`` were already spent by any process."""
+  def change(row):
+   if row['attempts']>=limit:return False
+   row['attempts']+=1;return True
+  try:return bool(self._change(change)['result'])
+  except Exception:return False
+ def used(self):
+  try:return self._change(lambda row:None)['attempts']
+  except Exception:return None
+
 class WorkBudget:
  """Model turns, tool attempts, a deadline and the owner's Stop for one Work.
 
  ``clock`` is injectable (tests use a fake); ``stop`` is a zero-argument
- callable answering whether the owner stopped or cancelled this Work.
+ callable answering whether the owner stopped or cancelled this Work.  An
+ optional ``ledger`` (``WorkLedger``) makes attempts and the deadline shared
+ with the other processes serving the same Work (#607 AX-10).
  """
- def __init__(self,*,turns=WORK_MODEL_TURNS,attempts=WORK_TOOL_ATTEMPTS,seconds=WORK_DEADLINE_SECONDS,clock=time.monotonic,stop=None):
-  self.turns,self.attempts,self.clock,self.stop=turns,attempts,clock,stop
+ def __init__(self,*,turns=WORK_MODEL_TURNS,attempts=WORK_TOOL_ATTEMPTS,seconds=WORK_DEADLINE_SECONDS,clock=time.monotonic,stop=None,ledger=None):
+  self.turns,self.attempts,self.clock,self.stop,self.ledger=turns,attempts,clock,stop,ledger
   self.deadline=clock()+seconds;self.turns_used=0;self.attempts_used=0
- def check(self):
+ def interrupted(self):
+  """``'stopped'``, ``'deadline_exceeded'`` or None, without raising (polled while a CLI runs)."""
   if self.stop is not None:
    try:stopped=bool(self.stop())
    except Exception:stopped=False
-   if stopped:raise ToolError(WORK_STOPPED,'stopped')
-  if self.clock()>=self.deadline:raise ToolError(WORK_DEADLINE,'deadline')
+   if stopped:return 'stopped'
+  if self.clock()>=self.deadline or (self.ledger is not None and self.ledger.expired()):return 'deadline_exceeded'
+  return None
+ def remaining(self):
+  """Seconds left before the Work's (shared) deadline."""
+  left=self.deadline-self.clock()
+  if self.ledger is not None:left=min(left,self.ledger.remaining())
+  return left
+ def check(self):
+  reason=self.interrupted()
+  if reason=='stopped':raise ToolError(WORK_STOPPED,'stopped')
+  if reason:raise ToolError(WORK_DEADLINE,'deadline_exceeded')
  def spend_turn(self):
   self.check()
   if self.turns_used>=self.turns:raise ToolError(WORK_TURNS_EXHAUSTED,'turn_budget')
@@ -1035,6 +1101,8 @@ class WorkBudget:
  def spend_attempt(self):
   self.check()
   if self.attempts_used>=self.attempts:raise ToolError(WORK_ATTEMPTS_EXHAUSTED,'attempt_budget')
+  if self.ledger is not None and not self.ledger.spend(self.attempts):
+   raise ToolError(WORK_ATTEMPTS_EXHAUSTED,'attempt_budget')
   self.attempts_used+=1
 
 #: Durable Stop requests of running Works, so a separate process serving the
@@ -1054,6 +1122,41 @@ def work_stop_requested(store, job_id):
 EFFECT_FREE_READS=frozenset({'list_roots','find_files','read_file','list_notes','list_memory','calendar_query',
                              'web_search','public_page_read','weather','list_agents','bounded_public_research'})
 
+#: #605 refusals that are policy outcomes, never transient (#607 AX-06).
+PUBLIC_TASK_POLICY_TEXTS=frozenset({*PUBLIC_TASK_NO_JUDGMENT.values(),PUBLIC_TASK_LOOKUP_LIMIT,PUBLIC_TASK_STATE_UNAVAILABLE,
+                                   *(text+PUBLIC_TASK_SEARCH_HINT for text in PUBLIC_TASK_NO_JUDGMENT.values())})
+#: Public network reads that may be retried once after a transient failure.
+NETWORK_READS=frozenset({'web_search','public_page_read','weather'})
+TRANSIENT_READ_TEXT='공개 조회가 일시적인 네트워크 오류로 실패해 한 번 다시 시도했습니다.'
+TRANSIENT_FAILURE_TEXT='도구 실행이 일시적인 연결 오류로 실패했습니다.'
+
+def classify_failure(exc,action=None):
+ """``(code, retry, effect)`` of one failed tool attempt (#607 AX-06).
+
+ ``retry`` is ``transient`` (an effect-free read may be retried once within
+ the shared budget), ``permanent`` (re-plan; never the same call),
+ ``needs_setup`` (owner connection/grant), ``budget`` (the Work's Stop,
+ deadline or caps) or ``never`` (an effect may have happened: reconcile, do
+ not replay).  ``effect`` is ``none`` or ``unknown``; a typed ``effect``
+ attribute (Calendar errors) wins.  Nothing here grants a retry to a write.
+ """
+ code=getattr(exc,'code',None)
+ if getattr(exc,'effect',None)=='unknown':return 'effect_unknown','never','unknown'
+ if not code and isinstance(exc,ValueError):
+  # AgentOS's own fixed #605 refusals: the owner must supply words, or policy held.
+  text=str(exc)
+  if text in (PUBLIC_TASK_UNRESOLVED,PUBLIC_TASK_PLACE):code='input_required'
+  elif text in PUBLIC_TASK_POLICY_TEXTS:code='policy_denied'
+ if code in BUDGET_CODES:return code,'budget','none'
+ if code=='needs_setup':return code,'needs_setup','none'
+ if isinstance(code,str) and code:return code,'permanent','none'
+ status=getattr(exc,'status',None) if isinstance(exc,ProviderError) else None
+ transient=(isinstance(exc,(TimeoutError,ConnectionError)) or (isinstance(exc,OSError) and not isinstance(exc,FileNotFoundError))
+            or (isinstance(exc,ProviderError) and (status in (None,'timeout',429) or (isinstance(status,int) and status>=500))))
+ if transient:
+  return 'transient_failure',('transient' if action in EFFECT_FREE_READS else 'permanent'),'none'
+ return ('provider_error' if isinstance(exc,ProviderError) else 'tool_failed'),'permanent','none'
+
 def recovered(trail):
  """Whether a Work with failed attempts recovered to a fully satisfied result.
 
@@ -1070,14 +1173,8 @@ def recovered(trail):
  if any(state=='failed' and action not in EFFECT_FREE_READS for action,state in trail):return False
  return any(state=='succeeded' and action in EFFECT_FREE_READS for action,state in trail[failures[-1]+1:])
 
-def outcome_from_events(rows, tools=None):
- """``(outcome, refusals)`` of a Work derived from its durable tool events (#606 T3).
-
- Used where the worker is a CLI: its exit code says the process ended, not
- that the request was satisfied.  ``rows`` are ``(tool, status, detail)`` in
- order.  A failed call, a withheld effect or an incomplete result keeps the
- outcome down unless ``recovered`` holds; unknown effects are the caller's.
- """
+def event_trail(rows, tools=None):
+ """``(trail, refusals)`` of the attempts in a Work's durable tool events."""
  trail=[];refusals=[]
  for tool,status,detail in rows:
   if tool in ('model','subscription_engine','local_authority','conversation_continuity') or status not in ('succeeded','failed'):continue
@@ -1095,6 +1192,36 @@ def outcome_from_events(rows, tools=None):
   elif any(label in INCOMPLETE_QUALIFIERS for label in evidence.get('qualifiers') or ()):
    trail.append((action,'incomplete'))
   else:trail.append((action,'succeeded'))
+ return trail,refusals
+
+def goal_summary(rows, tools=None):
+ """Attempts versus obligations for one Work (#607 AX-07), from its durable tool events.
+
+ ``attempts``/``failed_attempts`` count what ran; ``recovered`` says a later
+ effect-free read made up for earlier failures; ``unresolved`` names the
+ host actions whose part stayed withheld, incomplete, cut off or failed
+ without recovery.  It never marks the goal satisfied by itself: the Work's
+ outcome remains the caller's truthful rule.
+ """
+ trail,_refusals=event_trail(rows,tools)
+ failed=[index for index,(_action,state) in enumerate(trail) if state!='succeeded']
+ fixed=recovered(trail)
+ # A failed action stays unresolved unless the same action later succeeded.
+ retried={action for index,(action,state) in enumerate(trail) if state=='failed'
+          and not any(later==(action,'succeeded') for later in trail[index+1:])}
+ unresolved=sorted({action for action,state in trail if state in ('withheld','incomplete','exhausted')}|
+                   (set() if fixed else retried))
+ return {'attempts':len(trail),'failed_attempts':len(failed),'recovered':fixed,'unresolved':unresolved,'effect':'none'}
+
+def outcome_from_events(rows, tools=None):
+ """``(outcome, refusals)`` of a Work derived from its durable tool events (#606 T3).
+
+ Used where the worker is a CLI: its exit code says the process ended, not
+ that the request was satisfied.  ``rows`` are ``(tool, status, detail)`` in
+ order.  A failed call, a withheld effect or an incomplete result keeps the
+ outcome down unless ``recovered`` holds; unknown effects are the caller's.
+ """
+ trail,refusals=event_trail(rows,tools)
  if all(state=='succeeded' for _action,state in trail) or recovered(trail):return 'succeeded',refusals
  advanced=any(state in ('succeeded','incomplete') for _action,state in trail) or any(
   state=='withheld' and action in CALENDAR_DRAFT_TOOLS for action,state in trail)
@@ -1552,7 +1679,7 @@ class Capabilities:
   private=self.lookup_private()
   labels=self.private_egress_provenance()
   if private and (self.lookup_sources is None or self.lookup_restrictive or self.delegated):
-   raise ValueError(egress_refusal(action,labels or sorted(self.written_labels) or [UNATTRIBUTED_PROVENANCE],self.lookup_hint))
+   raise ToolError(egress_refusal(action,labels or sorted(self.written_labels) or [UNATTRIBUTED_PROVENANCE],self.lookup_hint),'policy_denied')
   if self.lookup_sources is None:return None  # no resolver and a clean context: the caller's own path
   key=json.dumps(['agentos-public-task',action])
   if private and key in self.memo:
@@ -1628,7 +1755,7 @@ class Capabilities:
    if action=='bounded_public_research':
     value=self._research(plan['mode'],plan['query'])
    else:
-    value=self.network.execute(plan)
+    value=self._read_network(plan)
   except (ValueError,TypeError,OSError,ProviderError) as exc:
    if private:self.memo[key]=exc
    raise
@@ -1644,7 +1771,7 @@ class Capabilities:
   # builds, so the injected transport the tests already fake stays the single
   # place anything reaches the wire.
   from .research import PublicResearch
-  def search(query):return self.network.execute({'tool':'web_search','query':query})
+  def search(query):return self._read_network({'tool':'web_search','query':query})
   attempted=[]
   class _Reader:
    # `PublicResearch` reads URLs its own search returned, self-approving
@@ -1677,7 +1804,7 @@ class Capabilities:
     attempted.append(url)
     scope=list(approved_urls or [url])
     try:
-     return self.network.execute({'tool':'public_page_read','url':url,'approved_urls':scope})
+     return self._read_network({'tool':'public_page_read','url':url,'approved_urls':scope})
     except ValueError as exc:
      # The shared reader refuses a redirect that leaves the approved set,
      # and here the approved set is the single search result. That refusal
@@ -1703,6 +1830,27 @@ class Capabilities:
   # and recorded nothing. Every address this Work actually contacted is
   # carried out for the tool event.
   return {**result,'attempted_urls':list(attempted)}
+ def _read_network(self,plan):
+  """One public network read, retried once after a transient failure (#607).
+
+  Only effect-free public reads (``NETWORK_READS``) and only from a clean
+  context: #605's one-attempt-per-destination rule for private contexts is
+  unchanged.  The failed attempt stays in the durable tool events with its
+  typed code, and the retry spends one attempt of the shared Work budget
+  (so Stop, the deadline and the caps still apply).  Secret-bearing
+  exception text is never recorded: the event carries a fixed text.
+  """
+  try:return self.network.execute(plan)
+  except (ValueError,TypeError,OSError,ProviderError) as exc:
+   code,retry,_effect=classify_failure(exc,plan.get('tool'))
+   if retry!='transient' or plan.get('tool') not in NETWORK_READS:raise
+   try:private=self.lookup_private()
+   except Exception:private=True
+   if private:raise
+   self.record(plan['tool'],'failed',json.dumps({'scope':'transient-retry','host_action':plan['tool'],'code':code,
+                                                 'retry':retry,'effect':'none','error':TRANSIENT_READ_TEXT},ensure_ascii=False))
+   self.budget.spend_attempt()
+   return self.network.execute(plan)
  def execute(self,name,args):
   tool=self.tools.get(name)
   if not tool or name not in self.allowed_tools:raise ValueError('활성 패키지에 선언되지 않은 도구입니다.')
@@ -1719,13 +1867,13 @@ class Capabilities:
   if name=='web_search':
    composed=self._public_task(tool_id,name,args)
    if composed is not None:return composed
-   return self.network.execute({'tool':name,**args})
+   return self._read_network({'tool':name,**args})
   if name=='public_page_read':
    composed=self._public_task(tool_id,name,args)
    if composed is not None:return composed
    scope=self.page_scope()
    if not scope:raise ValueError('소유자가 승인한 공개 페이지 범위가 없습니다. 먼저 정확한 주소와 조회 매개변수를 승인하세요.')
-   return self.network.execute({'tool':name,'url':args['url'],'approved_urls':sorted(scope)})
+   return self._read_network({'tool':name,'url':args['url'],'approved_urls':sorted(scope)})
   if name.startswith('calendar_'):
    # J4. The model may READ the calendar and may DRAFT a change; it may not
    # apply one. `CalendarConnector.execute` needs a one-time approval token
@@ -1802,7 +1950,7 @@ class Capabilities:
    # very property `test_private_provenance_egress` asserts.
    composed=self._public_task(tool_id,name,args)
    if composed is not None:return composed
-   return self.network.execute({'tool':name,**args})
+   return self._read_network({'tool':name,**args})
   # Folder basenames are owner-private: `이혼소송_2026` is a fact about the
   # owner's life, not a public string, and independent review put one
   # straight into a web_search query from an otherwise clean context. Less
@@ -2177,10 +2325,17 @@ def _batch_write_labels(calls,tools):
   if action in PRIVATE_WRITE_PROVENANCE:labels.add(PRIVATE_WRITE_PROVENANCE[action])
  return labels
 
-def _error_observation(exc,validated):
- """The tool message a failed call returns to the model: text, a stable code, and ``requires`` when known (#606 T2)."""
- code=getattr(exc,'code',None) or ('invalid_call' if not validated else 'provider_error' if isinstance(exc,ProviderError) else 'tool_failed')
- observation={'error':str(exc),'code':code}
+def _error_observation(exc,validated,action=None):
+ """The tool message a failed call returns to the model (#606 T2, #607 AX-06).
+
+ Text, a stable code, the retry class, the effect and ``requires`` when
+ known.  An untyped transport failure gets AgentOS's fixed text, never the
+ exception's own (which may carry a URL or credential).
+ """
+ if not validated:return {'error':str(exc),'code':getattr(exc,'code',None) or 'invalid_call','retry':'permanent','effect':'none'}
+ code,retry,effect=classify_failure(exc,action)
+ text=TRANSIENT_FAILURE_TEXT if code=='transient_failure' and not isinstance(exc,(ProviderError,ToolError)) else str(exc)
+ observation={'error':text,'code':code,'retry':retry,'effect':effect}
  if getattr(exc,'requires',None):observation['requires']=exc.requires
  return observation
 
@@ -2311,10 +2466,10 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
      else:trail.append((action,'succeeded'))
      record(name,'succeeded',json.dumps(trace,ensure_ascii=False))
    except (ValueError,TypeError,AttributeError,OSError,ProviderError) as exc:
-    result=_error_observation(exc,validated)
+    action=(capabilities.tools.get(name) or {}).get('host_action',name) if validated else None
+    result=_error_observation(exc,validated,action)
     if validated:
      failed=True
-     action=(capabilities.tools.get(name) or {}).get('host_action',name)
      # Failed attempts stay in the durable tool events and the trail (#606 T2).
      trail.append((action,'exhausted' if result['code'] in BUDGET_CODES else 'failed'))
     else:invalid_calls.add(name if isinstance(name,str) else 'unknown')

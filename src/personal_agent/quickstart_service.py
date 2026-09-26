@@ -25,7 +25,8 @@ from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_U
                                       TELEGRAM_RESULT_PREVIEW_CHARS, TERMINAL_FAILED_HEADER,
                                       TERMINAL_INTERRUPTED_HEADER, TERMINAL_NEXT_ACTION, TERMINAL_PARTIAL_HEADER,
                                       TERMINAL_UNVERIFIED_MARKER, BlockedTurn, ConversationProjection, context_message,
-                                      owner_cause, terminal_text, turn_qualifier, verified_portion)
+                                      owner_cause, report_statement, terminal_text, turn_qualifier,
+                                      verified_portion)
 from .subscription_engines import SubscriptionEngines
 from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, StrictIsolatedAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult, MAX_PROMPT_BYTES, SECRET_PATTERN, BOUNDED_PROFILE, HOST_CLI_PROFILES, STRICT_PROFILE, profile_actions, profile_status, route_unavailable
 from .isolated_engine_gateway import EngineGatewayError
@@ -3669,6 +3670,8 @@ class AgentService:
             context_approval_needed=[False]
             refusals=[]
             verified_parts=[]
+            #: #657: the direct route's typed requested/observed/failed/unknown/next report.
+            agency_report=None
             #: The effect owner's own statement when this Work's consequential
             #: effect could not be observed (#598 I1).
             unknown_statement=None
@@ -4125,6 +4128,8 @@ class AgentService:
                                                   public_page_scope=lambda:self.public_page_boundary(config)['urls'],
                                                   memory_request=owner_memory_request,inherited_provenance=set(turn_provenance)|shown_sources,calendar=self.calendar_for(job),calendar_owner=self.connector_owner_id(job),current_packages=self.runtime_packages,
                                                   budget=self.work_budget(job['id']),
+                                                  # #657: completion is judged from observations.
+                                                  judgments=self.decision_judge,
                                                   **self.work_lookup_options(job,prompt))
                         work_capabilities[0]=capabilities
                         work_sources|=capabilities.private_provenance
@@ -4158,6 +4163,7 @@ class AgentService:
                         # Calls that ran incomplete name their cause like refusals do (#494).
                         refusals.extend(getattr(result,'incomplete',()) or ())
                         verified_parts.extend(getattr(result,'verified',()) or ())
+                        agency_report=getattr(result,'report',None)
                         response,provider,model=result.content,result.provider,result.model
                         resolved_blocker=outcome=='succeeded'
                         # run_agent records NOT_REPORTED when the response names no
@@ -4203,6 +4209,11 @@ class AgentService:
                     # #598: the conversation reads the cause in owner words and,
                     # for a partial Work, the portion its typed Evidence supports.
                     spoken=owner_cause([(tool,self._redact_reason(reason)) for tool,reason in refusals]) if outcome in ('failed','partial') else None
+                    # #657: what stayed unverified and the proposed next step follow the failed steps.
+                    statement=report_statement(agency_report) if outcome in ('failed','partial') else None
+                    if statement:
+                        statement=self._redact_reason(statement) or statement
+                        spoken='\n'.join(part for part in (spoken,statement) if part)
                     if outcome=='unknown':
                         cause=spoken=unknown_statement or None
                     observed=verified_portion(verified_parts) if outcome=='partial' else None

@@ -110,6 +110,42 @@ def owner_cause(steps):
     return (TERMINAL_UNFINISHED_LABEL + ' — ' + ' · '.join(entries[:3]))[:400]
 
 
+#: SEC-LOOP-01 (#657): the report lines after the failed steps.
+REPORT_STATED_FAILED_LABEL = '진행하지 못한 점:'
+REPORT_UNKNOWN_LABEL = '확인하지 못한 부분:'
+REPORT_NEXT_LABEL = '다음 단계 제안:'
+REPORT_QUESTION_LABEL = '확인이 필요한 질문:'
+REPORT_STATEMENT_CHARS = 1200
+
+
+def report_statement(report):
+    """The unknown / next part of a run's typed report (#657), or ``None``.
+
+    ``report`` is ``agent_runtime.agency_report``: requested, observed
+    (rendered as the verified portion), failed (tool failures are rendered by
+    ``owner_cause``; only the worker's own ``assistant`` statements appear
+    here), unknown, the one question a ``needs_owner`` finish asks, and next.
+    Nothing here says a step completed.
+    """
+    if not isinstance(report, dict):
+        return None
+    lines = []
+    stated = [str(reason).strip() for tool, reason in report.get('failed') or ()
+              if tool == 'assistant' and str(reason or '').strip()]
+    if stated:
+        lines.append(REPORT_STATED_FAILED_LABEL + ' ' + ' · '.join(stated))
+    unknown = [str(item).strip() for item in report.get('unknown') or () if str(item or '').strip()]
+    if unknown:
+        lines.append(REPORT_UNKNOWN_LABEL + ' ' + ' · '.join(unknown))
+    question = str(report.get('question') or '').strip()
+    if question:
+        lines.append(REPORT_QUESTION_LABEL + ' ' + question)
+    step = str(report.get('next') or '').strip()
+    if step:
+        lines.append(REPORT_NEXT_LABEL + ' ' + step)
+    return '\n'.join(lines)[:REPORT_STATEMENT_CHARS] if lines else None
+
+
 def verified_portion(parts):
     """Join AgentOS-rendered verified parts into one bounded block, or ``None``."""
     text = '\n\n'.join(part.strip() for part in parts or () if isinstance(part, str) and part.strip())

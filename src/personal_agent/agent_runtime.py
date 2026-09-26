@@ -439,29 +439,25 @@ LOOKUP_JUDGMENTS_PER_WORK=6
 #: further one widens the channel), and at most LOOKUP_CLEAN_WORD_CAP
 #: distinct words per lookup.
 LOOKUP_CLEAN_PER_WORK=6
-#: Bounds of the durable withheld digests (#605 P3): characters of one value
-#: hashed, the longest span hashed, and entries kept per Work.
-LOOKUP_DIGEST_SPAN=8
+#: The canonical skeleton (#605 root cause, see ``lookup_skeleton``): a
+#: fragment of a written/withheld value is at least 4 units, a Hangul
+#: syllable, CJK ideograph or kana counting 2 and a letter, digit or bare jamo
+#: counting 1 (two syllables, two ideographs, four letters or four digits).
+LOOKUP_FRAGMENT_UNITS=4
+#: Durable digest bounds: skeleton characters of one value hashed, the longest
+#: substring hashed, and the longest outbound window compared with fragments.
+LOOKUP_SKELETON_VALUE_MAX=64
+LOOKUP_SKELETON_SPAN_MAX=16
+LOOKUP_FRAGMENT_CHARS_MAX=10
 #: Withheld values kept per Work (one judgment can withhold every judged term
 #: of each allowed judgment) and digests kept per Work.  Past the digest cap
 #: the row is marked overflowing and nothing more is admissible (fail closed).
 LOOKUP_DIGEST_ENTRIES=72
 LOOKUP_DIGEST_TOTAL=4096
-#: Hangul compared on jamo (#605 owner scope): at least this many jamo, so a
-#: jamo-level match spans more than one bare syllable; spans hashed up to 8.
-LOOKUP_JAMO_MIN=5
-LOOKUP_JAMO_SPAN=8
-#: A written/withheld value found INSIDE an outbound word or joined run
-#: (``김철수님``, ``mrkimchulsoo``) is withheld when it has at least 2
-#: characters of Hangul/CJK/kana or 3 of any other script (P1-A, P2-B), up to
-#: LOOKUP_CONTAIN_MAX characters (LOOKUP_JAMO_CONTAIN_MAX jamo) for the durable
-#: digest check.
-LOOKUP_CONTAIN_MAX=32
-LOOKUP_JAMO_CONTAIN_MAX=48
 #: The durable per-Work state rows kept in all; past it no new Work can record
 #: state and its lookups are refused (fail closed, P3-F).
 LOOKUP_STATE_ROWS_MAX=1000
-PUBLIC_TASK_STATE_UNAVAILABLE='이 작업의 공개 조회 기록을 저장할 수 없어 공개 조회를 하지 않았습니다. 잠시 뒤 새 요청으로 다시 보내 주세요.'
+PUBLIC_TASK_STATE_UNAVAILABLE='이 작업의 공개 조회 기록(저장한 값과 가린 값)을 저장하거나 읽지 못해 공개 조회를 하지 않았습니다. 기록 공간이 가득 찼거나 저장소 오류가 있어, 다시 보내도 같은 결과일 수 있습니다.'
 #: Clean-context bounds on what a worker's own words can carry (#605 scope):
 #: distinct words per lookup, characters per word, characters per query.
 LOOKUP_CLEAN_WORD_CAP=12
@@ -681,116 +677,110 @@ def _right_attached(gap):
  return gap[spaces[-1]+1:] if spaces else ''
 
 #: Longest joined span (characters) compared against withheld/written words.
-LOOKUP_SPAN_MAX=32
-
-def _script_class(ch):
- """Coarse script of one normalised character, for splitting mixed tokens (``kim철수``)."""
- if ch.isdigit():return 'd'
+def _is_hangul(ch):
  code=ord(ch)
- if 0xAC00<=code<=0xD7AF or 0x1100<=code<=0x11FF or 0x3130<=code<=0x318F:return 'h'
- if 0x3040<=code<=0x30FF:return 'k'
- if 0x3400<=code<=0x9FFF or 0xF900<=code<=0xFAFF:return 'c'
- return 'l'
+ return 0xAC00<=code<=0xD7AF or 0x1100<=code<=0x11FF or 0x3130<=code<=0x318F
 
-def lookup_pieces(text):
- """``[(token, piece)]`` of a string: each normalised token split into same-script runs."""
- out=[]
- for token in lookup_words(text):
-  start=0
-  for index in range(1,len(token)+1):
-   if index==len(token) or _script_class(token[index])!=_script_class(token[start]):
-    out.append((token,token[start:index]));start=index
+def _is_ideograph(ch):
+ code=ord(ch)
+ return 0x3040<=code<=0x30FF or 0x3400<=code<=0x9FFF or 0xF900<=code<=0xFAFF
+
+def lookup_skeleton_groups(text):
+ """The canonical skeleton of ``text`` as ``[(characters, units)]`` groups (#605).
+
+ One pipeline for written/withheld values and outbound text: ``lookup_norm``
+ (NFKD with combining marks removed, NFKC, stroke-letter fold, every Unicode
+ digit value as ASCII, casefold); every Hangul syllable, compatibility or
+ conjoining jamo decomposed into one jamo alphabet (trailing and cluster
+ finals as leading consonants, ``jamo_key``); every character that is not a
+ letter or digit -- spaces, punctuation, zero-width and other separators --
+ dropped.  A Hangul syllable, CJK ideograph or kana is one group of 2 units;
+ any other letter, digit or bare jamo one group of 1 unit.
+ """
+ groups=[]
+ for ch in lookup_norm(text):
+  if _is_hangul(ch):
+   key=jamo_key(ch)
+   if key:groups.append((key,2 if 0xAC00<=ord(ch)<=0xD7AF else 1))
+  elif ch.isalnum():
+   groups.append((ch,2 if _is_ideograph(ch) else 1))
+ return groups
+
+def lookup_skeleton(text):
+ return ''.join(chars for chars,_units in lookup_skeleton_groups(text))
+
+def _units(skeleton):
+ return sum(2 if _is_ideograph(ch) else 1 for ch in skeleton)
+
+def lookup_fragments(value):
+ """The minimal fragments of a value's skeleton: from each group, the shortest
+ run of whole groups of at least LOOKUP_FRAGMENT_UNITS units (two syllables,
+ two ideographs, four letters or four digits)."""
+ groups=lookup_skeleton_groups(value);out=set()
+ for start in range(len(groups)):
+  chars,units='',0
+  for end in range(start,len(groups)):
+   chars+=groups[end][0];units+=groups[end][1]
+   if units>=LOOKUP_FRAGMENT_UNITS:out.add(chars);break
  return out
 
-def _contain_min(ch):
- return 2 if _script_class(ch) in ('h','c','k') else 3
-
 def lookup_text_violations(text, excluded, blocked=None):
- """Tokens of an outbound string that match a written or withheld value (#605).
+ """The normalised tokens of an outbound string that carry a written or withheld value (#605).
 
- ``text`` is compared in ``lookup_norm`` form.  A token is withheld when:
+ The whole outbound value is reduced to one canonical skeleton
+ (``lookup_skeleton``) with every skeleton position mapped to its token, and
+ every token overlapping one of these is withheld:
 
- * it matches a written/withheld word (``owner_said``) or its digit run is
-   part of one (N4/R7), or the durable per-Work withheld set says so;
- * it takes part in a run of adjacent same-script pieces -- joined with no
-   separator, up to LOOKUP_SPAN_MAX characters, 2+ characters, not digits
-   only -- that is a substring of a written or withheld word, also after NFC
-   recomposition of spaced jamo (``ㅇ ㅣ ㅅ ㅜ`` is ``이수``) and on the jamo
-   key (``ㄱㅣㅁㅊㅓㄹㅅㅜ``) with at least LOOKUP_JAMO_MIN jamo (P2-D, P2-C);
- * a written or withheld value (2+ Hangul/CJK/kana or 3+ other characters)
-   occurs INSIDE the pieces joined without separators, or its jamo key
-   (LOOKUP_JAMO_MIN+ jamo) inside their jamo key: ``김철수님``,
-   ``mrkimchulsoo``, ``기ᄆ처ᄅ수님`` (P1-A, P2-B).  Only the pieces that
-   overlap the occurrence are withheld.
+ * a fragment of a written/withheld value (``lookup_fragments``) anywhere in
+   the skeleton -- which includes the whole value: ``김철수님``, ``KIM 철수님``,
+   ``ㄱㅣㅁㅊㅓㄹㅅㅜ``, ``ㅇ ㅣ 수님``, ``mrkimchulsoo``, ``M1234-5678``;
+ * a run of adjacent tokens whose skeleton (LOOKUP_FRAGMENT_UNITS+ units) is
+   part of a written/withheld value: ``김 철``+``ㅊㅓ`` of ``김철수``;
+ * a token whose skeleton equals a written/withheld value, or that
+   ``owner_said`` matches.
 
- This over-blocks: an outbound word of 2+ characters inside a written or
- withheld word, and an outbound word containing one, are withheld too.  The
- digit runs of the whole string with separators removed are checked as well
- (``M123 456 78``).  Returns ``(bad tokens, digits_joined)``.
+ Across processes the same checks run on keyed digests (``blocked``).  This
+ over-blocks: any outbound word carrying two syllables, two ideographs, four
+ letters or four digits of a written or withheld value is withheld.
  """
+ tokens=_MEMORY_WORD.findall(unicodedata.normalize('NFKC',str(text or '')))
+ norms=[lookup_norm(token) for token in tokens]
  excluded_words=[word for value in excluded for word in lookup_words(value)]
- excluded_jamo=[key for key in (jamo_key(word) for word in excluded_words) if len(key)>=LOOKUP_JAMO_MIN]
- contained=[word for word in excluded_words if word and not word.isdigit() and len(word)>=_contain_min(word[0])]
- runs=value_digit_runs(excluded)
- bad=set()
- for word in lookup_words(text):
-  if (excluded_words and owner_said(word,excluded_words)) or _digits_inside(word,runs) or (blocked and blocked.word(word)):
-   bad.add(word)
- pieces=lookup_pieces(text)
- if excluded_words or blocked:
-  for start in range(len(pieces)):
-   joined=''
-   for end in range(start,len(pieces)):
-    joined+=pieces[end][1]
-    if len(joined)>LOOKUP_SPAN_MAX:break
-    if len(joined)<2 or joined.isdigit():continue
-    composed=unicodedata.normalize('NFC',joined)
-    if any(form in word for form in {joined,composed} for word in excluded_words) \
-       or (blocked and (blocked.span(joined) or (len(composed)>=2 and blocked.span(composed)))):
-     bad.update(token for token,_piece in pieces[start:end+1]);continue
-    key=jamo_key(joined)
-    if len(key)>=LOOKUP_JAMO_MIN and all(_script_class(ch)=='h' for ch in joined) \
-       and (any(key in word_key for word_key in excluded_jamo) or (blocked and blocked.jamo(key))):
-     bad.update(token for token,_piece in pieces[start:end+1])
-  # A value inside the outbound pieces (joined without separators).
-  concat='';owner=[];jamo='';jamo_owner=[]
-  for index,(_token,piece) in enumerate(pieces):
-   concat+=piece;owner.extend([index]*len(piece))
-   key=jamo_key(piece);jamo+=key;jamo_owner.extend([index]*len(key))
-  def mark(where,first,last):
-   bad.update(pieces[index][0] for index in set(where[first:last]))
-  for word in contained:
-   at=concat.find(word)
-   while at>=0:mark(owner,at,at+len(word));at=concat.find(word,at+1)
-  for word_key in excluded_jamo:
-   at=jamo.find(word_key)
-   while at>=0:mark(jamo_owner,at,at+len(word_key));at=jamo.find(word_key,at+1)
-  if blocked:
-   for first,last in blocked.inside(concat):mark(owner,first,last)
-   for first,last in blocked.inside_jamo(jamo):mark(jamo_owner,first,last)
- joined_runs=value_digit_runs([text])
- digits_joined=any(len(value)>=MIN_PARTIAL_DIGITS and value in run for run in joined_runs for value in runs) \
-     or any(len(run)>=MIN_PARTIAL_DIGITS and run in value for run in joined_runs for value in runs) \
-     or bool(blocked and any(blocked.digits(run) for run in joined_runs))
- return bad,digits_joined
+ bad={norm for norm in norms if excluded_words and owner_said(norm,excluded_words)}
+ skeletons=[lookup_skeleton(token) for token in tokens]
+ whole=''.join(skeletons);owner=[index for index,skeleton in enumerate(skeletons) for _ in skeleton]
+ def mark(first,last):bad.update(norms[index] for index in set(owner[first:last]))
+ values={lookup_skeleton(word) for word in excluded_words}-{''}
+ fragments={fragment for word in excluded_words for fragment in lookup_fragments(word)}
+ for fragment in fragments:
+  at=whole.find(fragment)
+  while at>=0:mark(at,at+len(fragment));at=whole.find(fragment,at+1)
+ if blocked:
+  for first,last in blocked.fragments_in(whole):mark(first,last)
+ for start in range(len(tokens)):
+  run='';first=len(''.join(skeletons[:start]))
+  for end in range(start,len(tokens)):
+   run+=skeletons[end]
+   if len(run)>LOOKUP_SKELETON_VALUE_MAX:break
+   if run in values or (_units(run)>=LOOKUP_FRAGMENT_UNITS and any(run in value for value in values)) \
+      or (blocked and blocked.run(run)):
+    mark(first,first+len(run))
+ return bad
 
 def finalize_lookup_text(value, kept, excluded, blocked=None, *, joined=False, max_length=LOOKUP_CLEAN_QUERY_MAX):
  """Build the outbound string and re-check it; withhold whatever still matches.
 
  ``joined`` builds the string from the kept words joined by single spaces (a
- private context); otherwise ``rebuild_lookup_value``.  A token that matches
- is removed and the string rebuilt; when only a cross-token digit run
- matches, every digit-bearing token is removed.  Returns ``(text, removed)``;
- ``text`` is '' when nothing admissible remains.
+ private context); otherwise ``rebuild_lookup_value``.  The worker's own
+ string is checked first, so a word removed earlier cannot hide the
+ neighbour it was split from; the final string is checked again after every
+ rebuild.  Returns ``(text, removed)``; ``text`` is '' when nothing
+ admissible remains.
  """
  rows=list(kept);removed=0
- # The worker's own string is checked first: a word removed earlier (for
- # example by the durable withheld set) must not hide the neighbour it was
- # split from (``김 철수`` -> ``김``, P2-D).
- bad,digits_joined=lookup_text_violations(value,excluded,blocked)
- if bad or digits_joined:
-  keep=[row for row in rows if lookup_norm(row['word']) not in bad
-        and not (digits_joined and _MEMORY_DIGITS.search(row['word']))]
+ bad=lookup_text_violations(value,excluded,blocked)
+ if bad:
+  keep=[row for row in rows if lookup_norm(row['word']) not in bad]
   removed+=len(rows)-len(keep);rows=keep
  for _ in range(4):
   text=' '.join(row['word'] for row in rows) if joined else rebuild_lookup_value(value,rows)
@@ -800,68 +790,46 @@ def finalize_lookup_text(value, kept, excluded, blocked=None, *, joined=False, m
    while rows and len(' '.join(row['word'] for row in rows) if joined else rebuild_lookup_value(value,rows))>max_length:
     rows=rows[:-1];removed+=1
    continue
-  bad,digits_joined=lookup_text_violations(text,excluded,blocked)
-  if not bad and not digits_joined:return text,removed
-  keep=[row for row in rows if lookup_norm(row['word']) not in bad
-        and not (digits_joined and _MEMORY_DIGITS.search(row['word']))]
+  bad=lookup_text_violations(text,excluded,blocked)
+  if not bad:return text,removed
+  keep=[row for row in rows if lookup_norm(row['word']) not in bad]
   removed+=len(rows)-len(keep);rows=keep
  return '',removed+len(rows)
 
 class _WithheldDigests:
- """Checks outbound words, spans, jamo and digit runs against keyed digests (#605 P3, P2-D)."""
+ """The skeleton checks of ``lookup_text_violations`` on keyed digests (#605 P3).
+
+ Digest kinds: ``t`` a whole value skeleton, ``f`` its fragments, ``s`` its
+ substrings of LOOKUP_FRAGMENT_UNITS+ units up to LOOKUP_SKELETON_SPAN_MAX
+ characters.  Cost per check of an outbound skeleton of n characters (n is at
+ most about 3 x 120, or 3 x 500 for an explicit ``/search``, jamo counting
+ one each): at most 9n fragment-window digests and, per token run, at most
+ LOOKUP_SKELETON_VALUE_MAX / LOOKUP_SKELETON_SPAN_MAX window digests.
+ """
  def __init__(self,capabilities,digests):
   self.capabilities,self.digests=capabilities,digests
  def _has(self,kind,text):
   return self.capabilities._digest(kind,text) in self.digests
- def _windows(self,kind,text,width):
-  if len(text)<=width:return self._has(kind,text)
-  return all(self._has(kind,text[i:i+width]) for i in range(len(text)-width+1))
- def span(self,text):
-  """``text`` (normalised, 2+ characters) is a substring of a withheld word."""
-  return self._windows('s',text,LOOKUP_DIGEST_SPAN)
- def jamo(self,key):
-  """``key`` (LOOKUP_JAMO_MIN+ jamo) is part of a withheld word's jamo key."""
-  return self._windows('j',key,LOOKUP_JAMO_SPAN)
- def digits(self,run):
-  """``run`` equals a withheld digit run, or shares a MIN_PARTIAL_DIGITS window with one."""
-  run=lookup_norm(run)
-  return self._has('d',run) or any(self._has('d',run[i:i+MIN_PARTIAL_DIGITS]) for i in range(len(run)-MIN_PARTIAL_DIGITS+1))
- def inside(self,text):
-  """``(first, last)`` of every whole withheld value found inside ``text``.
-
-  Every substring of 2/3..LOOKUP_CONTAIN_MAX characters is hashed and tested
-  against the whole-value digests: at most 31 digests per character of the
-  (bounded) outbound text.
-  """
+ def fragments_in(self,whole):
   found=[]
-  for first in range(len(text)):
-   low=_contain_min(text[first])
-   for last in range(first+low,min(len(text),first+LOOKUP_CONTAIN_MAX)+1):
-    piece=text[first:last]
-    if not piece.isdigit() and self._has('t',piece):found.append((first,last))
+  for first in range(len(whole)):
+   for last in range(first+2,min(len(whole),first+LOOKUP_FRAGMENT_CHARS_MAX)+1):
+    if self._has('f',whole[first:last]):found.append((first,last))
   return found
- def inside_jamo(self,key):
-  """``(first, last)`` of every whole withheld jamo key found inside ``key``."""
-  found=[]
-  for first in range(len(key)):
-   for last in range(first+LOOKUP_JAMO_MIN,min(len(key),first+LOOKUP_JAMO_CONTAIN_MAX)+1):
-    if self._has('J',key[first:last]):found.append((first,last))
-  return found
+ def run(self,run):
+  if self._has('t',run):return True
+  if _units(run)<LOOKUP_FRAGMENT_UNITS:return False
+  width=LOOKUP_SKELETON_SPAN_MAX
+  if len(run)<=width:return self._has('s',run)
+  return all(self._has('s',run[i:i+width]) for i in range(len(run)-width+1))
  def word(self,word):
-  word=lookup_norm(word)
-  if self._has('t',word):return True
-  if len(word)>=2 and not word.isdigit() and self.span(word):return True
-  key=jamo_key(word)
-  if len(key)>=LOOKUP_JAMO_MIN and self.jamo(key):return True
-  return any(self.digits(run) for run in _MEMORY_DIGITS.findall(word))
+  skeleton=lookup_skeleton(word)
+  return bool(skeleton) and (self.run(skeleton) or bool(self.fragments_in(skeleton)))
 
 class _BlockEverything:
  """A corrupt or overflowing durable withheld set: nothing is admissible (fail closed)."""
- def inside(self,text):return [(0,len(text))] if text else []
- def inside_jamo(self,key):return [(0,len(key))] if key else []
- def span(self,text):return True
- def jamo(self,key):return True
- def digits(self,run):return True
+ def fragments_in(self,whole):return [(0,len(whole))] if whole else []
+ def run(self,run):return True
  def word(self,word):return True
 
 def explicit_search_query(message):

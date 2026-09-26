@@ -241,6 +241,18 @@ class PresentationFailureTests(NativePresenceTestCase):
                 self.assertEqual(len(self.sends()), 1)
                 self.assertEqual(self.methods()[-1], 'sendMessage')
 
+    def test_a_refused_presence_call_is_logged_without_telegram_detail(self):
+        self.connect_model()
+        self.store.secret('telegram_token', '123:SECRET-TOKEN')
+        self.failing = {'setMessageReaction': TelegramRejected(400, 'Bad Request: REACTION_INVALID owner-text')}
+        with self.assertLogs('personal_agent.service', 'INFO') as logs:
+            job, _ = self.turn('오늘 저녁은 뭐해 먹을까?')
+        self.assertEqual(job['delivery'], 'sent')
+        [line] = [line for line in logs.output if 'telegram presence' in line]
+        self.assertIn('set_message_reaction failed: TelegramRejected status=400', line)
+        for secret in ('REACTION_INVALID', 'owner-text', 'SECRET-TOKEN', '저녁'):
+            self.assertNotIn(secret, line)
+
     def test_unsupported_draft_falls_back_to_typing(self):
         self.connect_model()
         self.failing = {'sendMessageDraft': ProviderError('method not found')}

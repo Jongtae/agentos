@@ -2050,7 +2050,11 @@ class AgentService:
             getattr(self.telegram,method)(*args,**kwargs)
             return True
         except Exception as exc:  # presentation only; see the block comment above
-            LOG.debug('telegram presence %s failed: %s',method,type(exc).__name__)
+            # INFO, so the owner-private log can tell a Telegram refusal of a
+            # reaction/typing/draft apart from code that never sent it (#581
+            # live discrepancy).  Only the method, error class and Telegram
+            # status code are logged - never the description, text or token.
+            LOG.info('telegram presence %s failed: %s status=%s',method,type(exc).__name__,getattr(exc,'status',None))
             return False
 
     def present_turn(self, job, *, relation=None, decision=None):

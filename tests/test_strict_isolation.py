@@ -30,6 +30,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from personal_agent.bounded_execution import (
+    BASELINE_READABLE_ROOTS,
     BOUNDED_PROFILE,
     CLI_PROFILES,
     CODEX_STRICT_PERMISSIONS,
@@ -275,6 +276,13 @@ class StrictQualificationLogic(unittest.TestCase):
         (self.folder / 'codex-home').mkdir()
         self.calls = []
         _pinned_platform(self)
+        # tempfile lives under /tmp on Linux CI; the baseline-readable
+        # refusal has its own test with the real list.
+        from unittest import mock
+        from personal_agent import bounded_execution
+        patcher = mock.patch.object(bounded_execution, 'BASELINE_READABLE_ROOTS', ('/nonexistent-baseline-root',))
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _runner(self, version, readable=(), stuck=()):
         def runner(argv, **kwargs):
@@ -338,6 +346,12 @@ class StrictQualificationLogic(unittest.TestCase):
         self.assertIsNone(result['disabled_features'])
 
     def test_a_runtime_root_the_baseline_keeps_readable_fails_before_any_process(self):
+        from unittest import mock
+        from personal_agent import bounded_execution
+        self.assertEqual(BASELINE_READABLE_ROOTS, ('/tmp', '/private/tmp', '/var/tmp', '/private/var/tmp'))
+        patcher = mock.patch.object(bounded_execution, 'BASELINE_READABLE_ROOTS', BASELINE_READABLE_ROOTS)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         for root in ('/tmp/agentos-runs', '/private/var/tmp/agentos-runs', '/var/tmp'):
             with self.subTest(root=root):
                 self.calls.clear()

@@ -29,23 +29,31 @@ STRING={'type':'string'}
 BROWSER_ACTIONS=frozenset({'browser_open','browser_read','browser_find','browser_click','browser_type'})
 EFFECT={'type':'string','enum':['read','navigate','mutate','payment']}
 #: The argument recorded as a length placeholder, per host action: typed
-#: browser text (#656), a proposed current-state value (#627), which the
-#: owner may have phrased around a secret before the host redacts it, and a
-#: preparation goal (#659, stored redacted and read back in Settings).
-REDACTED_ARGUMENTS={'browser_type':'text','propose_current_state':'value','schedule_preparation':'goal'}
-def recorded_arguments(action,args):
+#: browser text (#656) and a proposed current-state value (#627), which the
+#: owner may have phrased around a secret before the host redacts it.
+REDACTED_ARGUMENTS={'browser_type':'text','propose_current_state':'value'}
+#: #659: the argument recorded with only stored secrets, credential shapes and
+#: saved private values removed (``Capabilities.judgment_text``): a
+#: preparation goal is owner text the owner reads back, not a secret.
+#: Without a redactor it falls back to the length placeholder.
+SCRUBBED_ARGUMENTS={'schedule_preparation':'goal'}
+def recorded_arguments(action,args,redact=None):
  """Tool-call arguments as AgentOS may record or project them (#656).
 
  ``browser_type`` text can be a password, a card number or a one-time code,
  and is recorded before the payment guard runs, so it is replaced by a
  length placeholder at every recording point; nothing else changes.
+ ``redact`` (#659) scrubs a ``SCRUBBED_ARGUMENTS`` field instead.
  """
- field=REDACTED_ARGUMENTS.get(action)
+ field=REDACTED_ARGUMENTS.get(action) or SCRUBBED_ARGUMENTS.get(action)
  if field is None or not isinstance(args,dict) or field not in args:return args
  text=args.get(field)
+ if action in SCRUBBED_ARGUMENTS and redact is not None and isinstance(text,str):
+  try:return {**args,field:str(redact(text))}
+  except Exception:pass
  return {**args,field:f'[가림: {len(text)}자]' if isinstance(text,str) else '[가림]'}
 
-def recorded_calls(calls,tools):
+def recorded_calls(calls,tools,redact=None):
  """The model's tool calls with ``recorded_arguments`` applied to each (#656)."""
  if not isinstance(calls,list):return calls
  out=[]
@@ -55,9 +63,9 @@ def recorded_calls(calls,tools):
    action=(tools.get(function.get('name')) or {}).get('host_action')
   except AttributeError:
    out.append(call);continue
-  if action not in REDACTED_ARGUMENTS:
+  if action not in REDACTED_ARGUMENTS and action not in SCRUBBED_ARGUMENTS:
    out.append(call);continue
-  try:arguments=json.dumps(recorded_arguments(action,json.loads(function.get('arguments','{}'))),ensure_ascii=False)
+  try:arguments=json.dumps(recorded_arguments(action,json.loads(function.get('arguments','{}')),redact),ensure_ascii=False)
   except (TypeError,ValueError):arguments='[가림]'
   out.append({**call,'function':{**function,'arguments':arguments}})
  return out
@@ -794,6 +802,21 @@ def _work_draft_values(store, events, tools=None):
   if isinstance(payload,dict):values.extend(str(value) for value in payload.values() if isinstance(value,str))
  return values
 
+def work_written_values(store, job_id, tools=None):
+ """The values one Work wrote to a private store: Memory candidates, notes
+ and calendar drafts (#605).  The lookup exclusion set; also removed from a
+ prepared answer before it is kept for later turns (#659)."""
+ import hashlib
+ with store.db() as db:
+  written=[row['content'] for row in db.execute('SELECT content FROM memory_candidates WHERE work_key=?',(store._work_binding(job_id),))]
+  # A note this Work saved: `/note` stores it under the Work id, `save_note`
+  # under sha256(Work id + content).  Survives a restarted bridge (#605 N2).
+  for row in db.execute('SELECT id,content FROM notes'):
+   if row['id']==job_id or row['id']==hashlib.sha256((job_id+str(row['content'])).encode()).hexdigest():written.append(row['content'])
+  events=db.execute("SELECT tool,detail FROM tool_events WHERE job_id=? AND status='succeeded'",(job_id,)).fetchall()
+ written.extend(_work_draft_values(store,events,tools))
+ return written
+
 def lookup_sources(store, job_id, tools=None, history=15):
  """Permitted and excluded text for one public lookup of a running Work.
 
@@ -806,7 +829,6 @@ def lookup_sources(store, job_id, tools=None, history=15):
  `여권번호를 기억해 둬` case, including when it shares the request with the
  lookup.  Raises when the Work is no longer running (the binding).
  """
- import hashlib
  job=store.job(job_id) if isinstance(job_id,str) and job_id else None
  if not job or job.get('status')!='running':
   raise ValueError('이 작업은 더 이상 실행 중이 아니어서 공개 조회를 실행하지 않았습니다.')
@@ -814,13 +836,7 @@ def lookup_sources(store, job_id, tools=None, history=15):
   first=db.execute("SELECT MIN(id) AS id FROM messages WHERE job_id=?",(job_id,)).fetchone()
   before=first['id'] if first and first['id'] is not None else 1<<62
   rows=[dict(row) for row in db.execute('SELECT role,content,job_id FROM messages WHERE id<? ORDER BY id DESC LIMIT ?',(before,history))]
-  written=[row['content'] for row in db.execute('SELECT content FROM memory_candidates WHERE work_key=?',(store._work_binding(job_id),))]
-  # A note this Work saved: `/note` stores it under the Work id, `save_note`
-  # under sha256(Work id + content).  Survives a restarted bridge (#605 N2).
-  for row in db.execute('SELECT id,content FROM notes'):
-   if row['id']==job_id or row['id']==hashlib.sha256((job_id+str(row['content'])).encode()).hexdigest():written.append(row['content'])
-  events=db.execute("SELECT tool,detail FROM tool_events WHERE job_id=? AND status='succeeded'",(job_id,)).fetchall()
- written.extend(_work_draft_values(store,events,tools))
+ written=work_written_values(store,job_id,tools)
  records=work_source_records(store);permitted=[];cache={}
  for row in reversed(rows):
   jid=row.get('job_id')
@@ -1745,6 +1761,11 @@ class Capabilities:
    # owner's own message already is that acceptance (DecisionEngine).
    if self.preparations is None or self.delegated:
     raise ToolError('이 경로에서는 준비를 예약할 수 없습니다.','needs_setup',requires='owner-preparations')
+   # The Work's saved private values leave the goal before it is stored (the
+   # service also removes stored secrets), as for a current-state value.
+   if isinstance(args.get('goal'),str) and args['goal']:
+    from .browser_session import redact_private_values
+    args={**args,'goal':redact_private_values(args['goal'],self._browser_excluded())[0]}
    return self.preparations(args)
   # Folder basenames are owner-private: `이혼소송_2026` is a fact about the
   # owner's life, not a public string, and independent review put one
@@ -2521,7 +2542,7 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
   if actual and active_config.get('model')=='openrouter/free' and actual!='openrouter/free':active_config['model']=actual
   actual=actual or NOT_REPORTED
   calls=message.get('tool_calls') or []
-  record('model','responded',json.dumps({'scope':scope,'model':actual,'requested_model':requested,'tool_calls':recorded_calls(calls,capabilities.tools),'has_text':bool(message.get('content'))},ensure_ascii=False))
+  record('model','responded',json.dumps({'scope':scope,'model':actual,'requested_model':requested,'tool_calls':recorded_calls(calls,capabilities.tools,getattr(capabilities,'judgment_text',None)),'has_text':bool(message.get('content'))},ensure_ascii=False))
   if not calls and not successful and not failed and not checked_direct:
    checked_direct=True
    messages.append(message)
@@ -2613,7 +2634,7 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
     kind=alternative_kind(action,keyed,last_search,bool(trail) and trail[-1][1] in ('failed','incomplete'))
     if action in SEARCH_BACKED_ACTIONS:last_search=keyed
     # #656: typed browser text is replaced before this (or any) record.
-    running={'scope':scope,'call_id':call['id'],'attempt':attempt,'host_action':action,'arguments':recorded_arguments(action,args)}
+    running={'scope':scope,'call_id':call['id'],'attempt':attempt,'host_action':action,'arguments':recorded_arguments(action,args,getattr(capabilities,'judgment_text',None))}
     if kind:
      alternatives.append({'kind':kind,'action':action});running['alternative']=kind
     record(name,'running',json.dumps(running,ensure_ascii=False))

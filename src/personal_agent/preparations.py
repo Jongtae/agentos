@@ -75,7 +75,7 @@ PREPARED_LEGEND = ('Each item is an answer AgentOS prepared earlier because the 
 TABLE_SQL = '''
 CREATE TABLE IF NOT EXISTS preparations(id TEXT PRIMARY KEY, owner TEXT NOT NULL, kind TEXT NOT NULL, goal_text TEXT NOT NULL,
     due_at REAL NOT NULL, timezone TEXT NOT NULL, recurrence TEXT, channel TEXT NOT NULL, state TEXT NOT NULL,
-    last_run_job_id TEXT, last_outcome TEXT, prepared_result_ref TEXT, prepared_at REAL, created_from TEXT,
+    last_run_job_id TEXT, last_outcome TEXT, prepared_result_ref TEXT, prepared_at REAL, prepared_text TEXT, created_from TEXT,
     accepted_by TEXT, created_at REAL NOT NULL, updated_at REAL NOT NULL);
 CREATE INDEX IF NOT EXISTS preparations_state_due ON preparations(state, due_at);
 '''
@@ -303,7 +303,7 @@ class Preparations:
                 raise PreparationRefusal('too_many')
             row = {'id': uuid.uuid4().hex[:16], 'owner': owner, 'kind': kind, 'goal_text': goal, 'due_at': due_at,
                    'timezone': timezone, 'recurrence': recurrence, 'channel': channel, 'state': state,
-                   'last_run_job_id': None, 'last_outcome': None, 'prepared_result_ref': None, 'prepared_at': None,
+                   'last_run_job_id': None, 'last_outcome': None, 'prepared_result_ref': None, 'prepared_at': None, 'prepared_text': None,
                    'created_from': created_from, 'accepted_by': accepted_by, 'created_at': now, 'updated_at': now}
             db.execute(f"INSERT INTO preparations({','.join(row)}) VALUES ({','.join('?' * len(row))})", tuple(row.values()))
             return row
@@ -416,8 +416,17 @@ class Preparations:
                             'channel': channel.split(':', 1)[0]}), now))
             return job_id
 
-    def settle(self, row, now):
-        """Record one finished run and schedule the next slot, if any."""
+    def settle(self, row, now, scrub=None):
+        """Record one finished run and schedule the next slot, if any.
+
+        A prepared answer is kept as ``scrub(job)`` - the service removes the
+        Work's saved private values and stored secrets - never raw.
+        """
+        answer = None
+        if row['kind'] == KIND_PREPARE:
+            finished = self.store.job(row['last_run_job_id']) if row.get('last_run_job_id') else None
+            if finished and finished['status'] in ('succeeded', 'partial'):
+                answer = scrub(finished) if scrub is not None else str(finished.get('response') or '')
         with self.store.db() as db:
             db.execute('BEGIN IMMEDIATE')
             current = db.execute('SELECT * FROM preparations WHERE id=?', (row['id'],)).fetchone()
@@ -430,8 +439,8 @@ class Preparations:
                 return None
             outcome = run_outcome(current['kind'], job)
             updates = {'last_outcome': outcome, 'updated_at': now}
-            if current['kind'] == KIND_PREPARE and job and job['status'] in ('succeeded', 'partial'):
-                updates.update(prepared_result_ref=job['id'], prepared_at=now)
+            if current['kind'] == KIND_PREPARE and job and job['status'] in ('succeeded', 'partial') and answer is not None:
+                updates.update(prepared_result_ref=job['id'], prepared_at=now, prepared_text=answer)
             following = next_due(current['due_at'], current['timezone'], current['recurrence'], now)
             if following is None:
                 updates['state'] = outcome
@@ -452,7 +461,8 @@ class Preparations:
         """Prepared answers younger than ``fresh_seconds``, newest first."""
         with self.store.db() as db:
             return [dict(row) for row in db.execute(
-                'SELECT p.id, p.goal_text, p.timezone, p.recurrence, p.prepared_at, j.id AS job_id, j.status, j.response '
+                'SELECT p.id, p.goal_text, p.timezone, p.recurrence, p.prepared_at, j.id AS job_id, j.status, '
+                'p.prepared_text AS response '
                 "FROM preparations p JOIN jobs j ON j.id=p.prepared_result_ref WHERE p.kind='prepare' "
                 'AND p.prepared_at>=? AND j.id IS NOT ? ORDER BY p.prepared_at DESC LIMIT ?',
                 (now - fresh_seconds, exclude_job, SECTION_MAX_ITEMS))]

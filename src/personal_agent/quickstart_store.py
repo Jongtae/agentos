@@ -59,6 +59,8 @@ class QuickStore:
             ''')
             # SEC-ATTN-01 (#659): owner-accepted preparations, one indexed tick query.
             db.executescript(PREPARATIONS_TABLE_SQL)
+            if 'prepared_text' not in {row['name'] for row in db.execute('PRAGMA table_info(preparations)')}:
+                db.execute('ALTER TABLE preparations ADD COLUMN prepared_text TEXT')
             columns={row['name'] for row in db.execute('PRAGMA table_info(messages)')}
             if 'workspace_id' not in columns: db.execute('ALTER TABLE messages ADD COLUMN workspace_id TEXT')
             if 'job_id' not in columns: db.execute('ALTER TABLE messages ADD COLUMN job_id TEXT')

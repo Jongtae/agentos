@@ -506,17 +506,27 @@ class CancelTests(_Case):
 
 
 class SecretTests(_Case):
-    def test_a_secret_in_goal_text_or_result_never_reaches_logs_or_evidence(self):
+    PASSPORT = 'M12345678'
+
+    def capture_logs(self):
+        """Every record of the service and runtime loggers, whatever other tests configured."""
         records = []
         handler = logging.Handler(logging.DEBUG)
         handler.emit = records.append
-        root = logging.getLogger()
-        previous = root.level
-        root.addHandler(handler)
-        root.setLevel(logging.DEBUG)
-        self.addCleanup(root.removeHandler, handler)
-        self.addCleanup(root.setLevel, previous)
+        previous_disable = logging.root.manager.disable
+        logging.disable(logging.NOTSET)
+        self.addCleanup(logging.disable, previous_disable)
+        for name in ('', 'personal_agent', 'personal_agent.service'):
+            logger = logging.getLogger(name)
+            level = logger.level
+            logger.addHandler(handler)
+            logger.setLevel(logging.DEBUG)
+            self.addCleanup(logger.removeHandler, handler)
+            self.addCleanup(logger.setLevel, level)
+        return records
 
+    def test_a_secret_in_goal_text_or_result_never_reaches_logs_or_evidence(self):
+        records = self.capture_logs()
         self.script = [{'content': None, 'tool_calls': [call('1', 'schedule_preparation', kind='reminder',
                                                              goal=f'토큰 {SECRET} 갱신하기', due=self.due_iso(600))]},
                        finish('f', '1', summary='예약했습니다.')]
@@ -539,11 +549,42 @@ class SecretTests(_Case):
             events = ' '.join(row['detail'] or '' for row in db.execute('SELECT detail FROM tool_events'))
             stored = json.dumps([dict(row) for row in db.execute('SELECT * FROM preparations')], ensure_ascii=False)
         self.assertNotIn(SECRET, events)
-        self.assertIn('[가림:', events, 'the call record keeps only the goal length')
+        self.assertIn('토큰 [redacted] 갱신하기', events, 'the call record keeps the goal with the secret removed')
         self.assertNotIn(SECRET, stored)
         section = self.service.prepared_text({'id': 'next'})
         self.assertIn(prepared['id'], section)
         self.assertNotIn(SECRET, section)
+
+    def test_a_goal_without_a_secret_is_recorded_as_written(self):
+        self.script = [{'content': None, 'tool_calls': [call('1', 'schedule_preparation', kind='reminder',
+                                                             goal='치과 예약 10시', due=self.due_iso(600))]},
+                       finish('f', '1', summary='예약했습니다.')]
+        job = self.web_turn('10분 뒤에 치과 예약 알려줘')
+        running = [e['trace'] for e in self.store.task_events(job) if e['status'] == 'running']
+        self.assertEqual(running[0]['arguments']['goal'], '치과 예약 10시')
+
+    def test_saved_private_values_leave_the_goal_and_the_prepared_answer(self):
+        """The Work's own private-store writes (#605 exclusion set) are removed before storage."""
+        self.script = [{'content': None, 'tool_calls': [
+                           call('1', 'save_note', content='여권번호 ' + self.PASSPORT),
+                           call('2', 'schedule_preparation', kind='reminder', goal=f'여권 {self.PASSPORT} 챙기기',
+                                due=self.due_iso(600))]},
+                       finish('f', '1', '2', summary='저장하고 예약했습니다.')]
+        self.web_turn(f'여권번호는 {self.PASSPORT}야. 10분 뒤에 여권 챙기라고 알려줘')
+        [reminder] = self.rows()
+        self.assertNotIn(self.PASSPORT, reminder['goal_text'])
+
+        row = self.scheduled(goal='여행 준비물 정리', seconds=900)
+        self.now += 1000
+        self.tick()
+        self.script = [{'content': None, 'tool_calls': [call('1', 'save_note', content='비자번호 V7654321')]},
+                       finish('f', '1', summary='비자번호 V7654321 을 메모했고 준비물은 여권, 충전기입니다.')]
+        self.service.run_one()
+        self.tick()
+        current = self.service.preparations.get(row['id'])
+        self.assertIn('충전기', current['prepared_text'])
+        self.assertNotIn('V7654321', current['prepared_text'])
+        self.assertNotIn('V7654321', self.service.prepared_text({'id': 'next'}))
 
 
 class SurfaceTests(unittest.TestCase):
@@ -559,6 +600,10 @@ class SurfaceTests(unittest.TestCase):
                                                     {'schedule_preparation'}))
         self.assertEqual(schema['function']['parameters']['required'], ['kind', 'goal', 'due'])
         self.assertIn('proposal the owner accepts', schema['function']['description'])
+        # Scrubbed with the Work's redactor; without one, only the length.
+        scrub = lambda text: text.replace('token-1', '[redacted]')
+        self.assertEqual(recorded_arguments('schedule_preparation', {'goal': '갱신 token-1', 'kind': 'reminder'}, scrub)['goal'],
+                         '갱신 [redacted]')
         self.assertEqual(recorded_arguments('schedule_preparation', {'goal': 'abc', 'kind': 'reminder'})['goal'], '[가림: 3자]')
 
 

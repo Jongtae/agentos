@@ -12,7 +12,7 @@ import hashlib
 from urllib.parse import urlsplit
 from .local_tools import LocalTools, normalize_public_url
 from .agent_runtime import (Capabilities, ToolError, run_agent, AGENTS, evidence_summary, turn_context, render_turn_prompt,
-                            MEMORY_OWNER, context_sections, CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, OWNER_CONVERSATION, lookup_sources, WORK_SOURCES_KEY, WORK_SOURCES_LIMIT, base_label,
+                            MEMORY_OWNER, context_sections, CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, OWNER_CONVERSATION, lookup_sources, work_written_values, WORK_SOURCES_KEY, WORK_SOURCES_LIMIT, base_label,
                             history_provenance, WorkBudget, EFFECT_FREE_READS, explicit_search_query, outcome_from_events,
                             WORK_STOP_KEY, WORK_STOP_KEEP, work_stop_requested, WorkLedger, goal_summary, work_source_records)
 from .plugins import PluginRegistry
@@ -495,7 +495,7 @@ class AgentService:
         for row in rows:
             try:
                 if row['state']==prep.STATE_RUNNING:
-                    settled=self.preparations.settle(row,now)
+                    settled=self.preparations.settle(row,now,scrub=self.scrub_prepared_answer)
                     if settled:LOG.info('preparation settled id=%s outcome=%s next=%s',row['id'],settled['last_outcome'],settled['state'])
                     continue
                 cfg=self.store.config('telegram',{})
@@ -507,6 +507,18 @@ class AgentService:
             except Exception as exc:
                 LOG.warning('preparation tick failed id=%s kind=%s',row['id'],type(exc).__name__)
         return True
+
+    def scrub_prepared_answer(self, job):
+        """A prepared answer as it may be kept for later turns (#659).
+
+        The values the preparation's Work wrote to a private store (the #605
+        lookup exclusion set) and stored secrets / credential shapes are
+        removed before it is stored; deterministic, no judgment.
+        """
+        from .browser_session import redact_private_values
+        tools={tool['id']:tool for package in self.runtime_packages() for tool in package['tools']}
+        text,_count=redact_private_values(str(job.get('response') or ''),work_written_values(self.store,job['id'],tools))
+        return self._redact_known_secrets(text)
 
     def queue_preparation_proposal(self, job):
         """Offer this Work's unaccepted preparations to the paired owner once (#659)."""

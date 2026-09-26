@@ -748,6 +748,9 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 if path=='/api/main-ai/activate':return self.reply(200,service.activate_main_ai(body))
                 if path=='/api/main-ai/check':return self.reply(200,service.check_main_ai(body))
                 if path=='/api/main-ai/key':return self.reply(200,service.save_main_ai_key(body))
+                # #655: web search provider keys and the default the model falls back to.
+                if path=='/api/search-providers/key':return self.reply(200,service.save_search_provider_key(body))
+                if path=='/api/search-providers/default':return self.reply(200,service.set_search_provider_default(body))
                 # #616: explicit owner choice of the host-CLI trust profile.
                 if path=='/api/subscription-engines/isolation':return self.reply(200,service.select_subscription_isolation(body))
                 # DecisionEngine route (#580): explicit owner actions, separate from the Work route above.

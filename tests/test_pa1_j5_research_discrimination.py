@@ -210,7 +210,7 @@ class ResearchDiscriminationTests(unittest.TestCase):
         runtime = (package / 'agent_runtime.py').read_text(encoding='utf-8')
         # #605 moved the research run into `Capabilities._research`, shared by
         # the clean branch and the admissible public lookup; scan that body.
-        branch = runtime[runtime.index(" def _research(self,mode,query):"):
+        branch = runtime[runtime.index(" def _research(self,mode,query,provider=None,locale=None):"):
                          runtime.index(" def execute(self,name,args):")]
         self.assertIn('network.execute', branch)
         for verb in ('POST', 'PUT', 'PATCH', 'DELETE', 'data='):

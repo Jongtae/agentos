@@ -388,6 +388,23 @@ class UnknownEffectTests(unittest.TestCase):
                 self.assertIn('설정 변경', reason)
 
 
+class BridgeSavedItemEvidenceTests(unittest.TestCase):
+    def test_a_bridged_saved_note_records_its_exact_item_id(self):
+        """#594 item 9: the CLI route's saved-note Evidence links the exact item."""
+        store, _ = _store(self)
+        job = _running(store, '메모 저장해줘')
+        request = json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call',
+                              'params': {'name': 'save_note', 'arguments': {'content': '우유 사기'}}}) + '\n'
+        out = io.StringIO()
+        with mock.patch.object(sys, 'stdin', io.StringIO(request)), mock.patch.object(sys, 'stdout', out):
+            mcp_bridge.serve(str(store.root), job)
+        saved = json.loads(json.loads(out.getvalue())['result']['content'][0]['text'])
+        events = [(e['tool'], e['status'], e['trace']) for e in store.task_events(job)]
+        self.assertEqual([event[:2] for event in events], [('save_note', 'running'), ('save_note', 'succeeded')])
+        self.assertEqual(events[1][2]['evidence'], {'saved': True, 'id': saved['id']})
+        self.assertNotIn('우유', json.dumps(events, ensure_ascii=False), 'no note content in the event')
+
+
 class RetryAtomicityTests(unittest.TestCase):
     def test_retry_enqueue_and_relation_commit_together(self):
         """#594 item 2: a failure while linking leaves no orphan retry Work."""

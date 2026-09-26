@@ -283,7 +283,8 @@ class BridgeProcessEgressGuard(unittest.TestCase):
     def test_same_turn_note_summary_provenance_now_reaches_the_bridge(self):
         provenance, reply, network_calls = self._service_turns(['/note PRIVATE-XYZ', '/summarize'])
         self.assertIn('personal-space', provenance, 'same-turn provenance was never forwarded before this change')
-        self.assertIn('error', reply)
+        # #607: a refusal is a typed MCP tool-result error (or a protocol error).
+        self.assertTrue('error' in reply or reply.get('result', {}).get('isError'))
         self.assertEqual(network_calls, [])
 
     def test_positive_control_first_turn_reaches_the_network_stub(self):

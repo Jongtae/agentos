@@ -137,17 +137,14 @@ class BingRssProvider:
     destination = 'www.bing.com'
 
     def search(self, query, *, kind='web', locale=None, limit=RESULT_LIMIT, opener=None):
+        params = {'format': 'rss', 'q': query}
+        # The market comes only from the model's ``locale``; nothing is
+        # inferred from the query's script (the pre-#655 Hangul rule is gone).
         language, region = split_locale(locale)
         if language:
-            market = f'{language}-{region}' if region else language
-        else:
-            # The pre-#655 request default of this keyless provider, kept
-            # unchanged: it sets Bing's market for the query, not which
-            # provider answers.  A model that wants another market passes
-            # ``locale``.
-            korean = bool(re.search('[가-힣]', query))
-            market, language = ('ko-KR', 'ko') if korean else ('en-US', 'en')
-        url = 'https://www.bing.com/search?' + urlencode({'format': 'rss', 'q': query, 'mkt': market, 'setlang': language})
+            params['mkt'] = f'{language}-{region}' if region else language
+            params['setlang'] = language
+        url = 'https://www.bing.com/search?' + urlencode(params)
         raw = fetch(url, {}, opener)
         try:
             root = ET.fromstring(raw)

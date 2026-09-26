@@ -16,8 +16,6 @@ from urllib.parse import parse_qs, urlsplit
 
 from personal_agent.agent_runtime import Capabilities, action_definitions, classify_failure, evidence_summary
 from personal_agent.bounded_execution import ExecutionResult
-from personal_agent.conversation_handoff import LOOKUP_WITHHOLD_QUESTION, ConversationJudgments
-from personal_agent.decision import OUTCOME_DECIDED, FixtureDecisionEngine, SelectionSetDecision, fixture_confidence
 from personal_agent.local_tools import LocalTools
 from personal_agent.manifests import runtime_packages
 from personal_agent.portable_state import export_owner_state
@@ -89,15 +87,19 @@ class ProviderParsing(unittest.TestCase):
         self.assertEqual(rows, [{'title': 'Leaders and differences', 'url': 'https://example.org/leaders',
                                  'snippet': 'When leaders make a difference.', 'provider': 'bing'},
                                 {'title': 'Second', 'url': 'http://example.org/second', 'snippet': 'd2', 'provider': 'bing'}])
-        sent = query_of(opener.requests[0]['url'])
-        self.assertEqual((sent['format'], sent['q'], sent['mkt'], sent['setlang']), ('rss', 'leaders', 'en-US', 'en'))
+        self.assertEqual(query_of(opener.requests[0]['url']), {'format': 'rss', 'q': 'leaders'})
         self.assertNotIn('X-Naver-Client-Id', opener.requests[0]['headers'])
 
-    def test_bing_market_follows_the_model_locale_when_given(self):
-        opener = Opener()
-        BingRssProvider().search('leaders', locale='ko-KR', opener=opener)
-        sent = query_of(opener.requests[0]['url'])
-        self.assertEqual((sent['mkt'], sent['setlang']), ('ko-KR', 'ko'))
+    def test_bing_market_comes_only_from_the_model_locale_never_from_the_script(self):
+        for query in ('leaders', '리더는 언제 차이를 만들어내는가'):
+            with self.subTest(query=query):
+                opener = Opener()
+                BingRssProvider().search(query, opener=opener)
+                self.assertEqual(query_of(opener.requests[0]['url']), {'format': 'rss', 'q': query})
+                opener = Opener()
+                BingRssProvider().search(query, locale='ko-KR', opener=opener)
+                sent = query_of(opener.requests[0]['url'])
+                self.assertEqual((sent['mkt'], sent['setlang']), ('ko-KR', 'ko'))
 
     def test_naver_web_strips_tags_and_entities_and_sends_its_headers(self):
         opener = Opener()
@@ -271,14 +273,6 @@ class Wire:
                 'sources': ['https://example.org/']}
 
 
-def judged_ordinary(message, terms):
-    def choose_many(context, candidates, question):
-        if question != LOOKUP_WITHHOLD_QUESTION:
-            return None
-        return SelectionSetDecision(OUTCOME_DECIDED, [], candidates, fixture_confidence(1.0))
-    return ConversationJudgments(FixtureDecisionEngine(choose_many=choose_many)).lookup_term_sensitivity(message, terms)
-
-
 class CapabilitiesPath(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
@@ -300,7 +294,7 @@ class CapabilitiesPath(unittest.TestCase):
     def test_the_selectors_ride_along_the_composed_lookup_and_are_recorded_as_sent(self):
         wire = Wire()
         caps = Capabilities(self.store, None, CFG, '', 'job-2', self.record, network=wire,
-                            lookup_sources=lambda: {'permitted': ['leaders'], 'excluded': []}, lookup_sensitivity=judged_ordinary)
+                            lookup_sources=lambda: {'permitted': ['leaders'], 'excluded': []})
         result = caps.execute('web_search', {'query': 'leaders', 'provider': 'brave', 'locale': 'en-US'})
         self.assertEqual(wire.plans, [{'tool': 'web_search', 'query': 'leaders', 'provider': 'brave', 'locale': 'en-US'}])
         self.assertEqual(result['sent'], {'query': 'leaders', 'provider': 'brave', 'locale': 'en-US'})
@@ -309,7 +303,7 @@ class CapabilitiesPath(unittest.TestCase):
     def test_omitted_selectors_leave_the_plan_unchanged(self):
         wire = Wire()
         caps = Capabilities(self.store, None, CFG, '', 'job-3', self.record, network=wire,
-                            lookup_sources=lambda: {'permitted': ['leaders'], 'excluded': []}, lookup_sensitivity=judged_ordinary)
+                            lookup_sources=lambda: {'permitted': ['leaders'], 'excluded': []})
         caps.execute('web_search', {'query': 'leaders'})
         self.assertEqual(wire.plans, [{'tool': 'web_search', 'query': 'leaders'}])
 

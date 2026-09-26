@@ -248,12 +248,8 @@ class AdapterParityTests(Temp):
             with self.subTest(route=name):
                 result = qualify(engine, stop_on_failure=False)
                 self.assertEqual(result['suite_version'], SUITE_VERSION)
-                if name == 'jev':
-                    # Jev's API has no multi-selection type, so it cannot serve
-                    # the #605 lookup judgment and does not qualify for it.
-                    self.assertEqual([row['case'] for row in result['results'] if not row['passed']],
-                                     ['lookup-withholds-the-identifier'])
-                    continue
+                # #654: the #605 lookup judgment case is gone, so the Jev route
+                # (no multi-selection type) qualifies like every other route.
                 self.assertTrue(result['qualified'], (name, result['results']))
                 self.assertEqual([row['case'] for row in result['results']], list(CASE_IDS))
 

@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from lookup_judgment import ordinary_lookup_judgment
 from personal_agent import bounded_execution
 from personal_agent.bounded_execution import (
     AgentOSMcpTools,
@@ -269,6 +270,7 @@ class EngineFailureDiagnosticsTests(unittest.TestCase):
         self.assertEqual(argv[-1], 'hello')
 
 
+@ordinary_lookup_judgment
 class SubscriptionServiceTests(unittest.TestCase):
     def test_selected_subscription_engine_runs_through_bounded_adapter(self):
         class Adapter:

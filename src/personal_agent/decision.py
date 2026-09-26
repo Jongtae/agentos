@@ -40,6 +40,10 @@ NON_ANSWERS = frozenset({OUTCOME_UNAVAILABLE, OUTCOME_TIMEOUT, OUTCOME_MALFORMED
 #: channel for history, Memory or documents.
 MAX_CONTEXT_CHARS = 6000
 
+#: ``DecisionConfidence.engine`` of a route that cannot answer ``choose_many``
+#: (the Jev API has no multi-selection type), so callers can say so truthfully.
+MULTI_SELECTION_UNSUPPORTED = 'multi-selection-unsupported'
+
 #: The selection candidate a provider may pick to say "none of these".
 NO_CANDIDATE = 'none-of-these'
 
@@ -124,6 +128,16 @@ class SelectionDecision(_Decision):
         self.choice = choice if outcome == OUTCOME_DECIDED else None
 
 
+class SelectionSetDecision(_Decision):
+    """Which of the declared candidates apply (zero or more)."""
+    __slots__ = ('choices', 'candidates')
+
+    def __init__(self, outcome, choices=None, candidates=(), confidence=None):
+        super().__init__(outcome, confidence)
+        self.candidates = tuple(candidates)
+        self.choices = frozenset(choices or ()) if outcome == OUTCOME_DECIDED else None
+
+
 class ScoreDecision(_Decision):
     __slots__ = ('score', 'scale')
 
@@ -150,6 +164,14 @@ class DecisionEngine:
     def score(self, context, question, scale=(0, 1)):
         """Rate ``context`` against ``question`` on ``scale``.  -> ScoreDecision"""
         raise NotImplementedError
+
+    def choose_many(self, context, candidates, question):
+        """Which of ``candidates`` (zero or more) answer ``question``?
+        -> SelectionSetDecision.  An engine that cannot answer a multi-selection
+        says so: the default is an explicit non-answer marked
+        ``MULTI_SELECTION_UNSUPPORTED``, never a guess."""
+        return SelectionSetDecision(OUTCOME_UNAVAILABLE, candidates=candidates,
+                                    confidence=DecisionConfidence(engine=MULTI_SELECTION_UNSUPPORTED))
 
 
 class UnavailableDecisionEngine(DecisionEngine):
@@ -186,6 +208,9 @@ class RoutedDecisionEngine(DecisionEngine):
     def score(self, context, question, scale=(0, 1)):
         return self.resolve().score(context, question, scale)
 
+    def choose_many(self, context, candidates, question):
+        return self.resolve().choose_many(context, candidates, question)
+
 
 class FixtureDecisionEngine(DecisionEngine):
     """Scripted answers for tests and fixture-backed acceptance.
@@ -195,8 +220,8 @@ class FixtureDecisionEngine(DecisionEngine):
     test double for a provider, not a production fallback.
     """
 
-    def __init__(self, judge=None, choose=None, score=None):
-        self._judge, self._choose, self._score = judge, choose, score
+    def __init__(self, judge=None, choose=None, score=None, choose_many=None):
+        self._judge, self._choose, self._score, self._choose_many = judge, choose, score, choose_many
         self.asked = []
 
     def judge(self, context, proposition):
@@ -213,6 +238,11 @@ class FixtureDecisionEngine(DecisionEngine):
         self.asked.append(('score', context, question, scale))
         result = self._score(context, question, scale) if self._score else None
         return result if result is not None else ScoreDecision(OUTCOME_UNAVAILABLE, scale=scale)
+
+    def choose_many(self, context, candidates, question):
+        self.asked.append(('choose_many', context, tuple(candidates), question))
+        result = self._choose_many(context, candidates, question) if self._choose_many else None
+        return result if result is not None else SelectionSetDecision(OUTCOME_UNAVAILABLE, candidates=candidates)
 
 
 def fixture_confidence(probability=1.0):
@@ -246,6 +276,19 @@ class DecisionPolicy:
         if not decision.decided or decision.answer is None or not self._confident(decision, self.binary_threshold):
             return 'unknown'
         return 'yes' if decision.answer else 'no'
+
+    def selection_set(self, decision):
+        """The chosen subset (possibly empty) when decided with enough
+        confidence and every choice is a declared candidate, else None."""
+        if not decision.decided or decision.choices is None or not self._confident(decision, self.selection_threshold):
+            return None
+        if not decision.choices <= set(decision.candidates):
+            return None
+        return frozenset(decision.choices)
+
+    def confident_binary(self, decision):
+        """True when a decided answer met the binary threshold."""
+        return decision.decided and self._confident(decision, self.binary_threshold)
 
     def selection(self, decision):
         """The chosen candidate, or None (including an explicit none-of-these)."""
@@ -323,6 +366,22 @@ class SchemaDecisionEngine(DecisionEngine):
             and low <= d.get('score') <= high)
         return ScoreDecision(outcome, data.get('score'), (low, high), confidence)
 
+    def choose_many(self, context, candidates, question):
+        options = [*dict.fromkeys(str(c) for c in candidates)]
+        schema = {'type': 'object', 'additionalProperties': False,
+                  # No `uniqueItems`: not every structured-output transport
+                  # accepts it; uniqueness is checked after parsing below.
+                  'properties': {'choices': {'type': 'array', 'items': {'type': 'string', 'enum': options},
+                                             'maxItems': len(options)},
+                                 'confidence': {'type': 'number', 'minimum': 0, 'maximum': 1}},
+                  'required': ['choices', 'confidence']}
+        outcome, data, confidence = self._ask(
+            context, 'choose_many',
+            f'Question: {question}\nList every candidate that applies (possibly none) from: {", ".join(options)}',
+            schema, lambda d: isinstance(d.get('choices'), list) and all(c in options for c in d['choices'])
+            and len(set(d['choices'])) == len(d['choices']))
+        return SelectionSetDecision(outcome, data.get('choices'), candidates, confidence)
+
     def _ask(self, context, kind, question, schema, valid):  # pragma: no cover - interface
         raise NotImplementedError
 
@@ -336,7 +395,7 @@ class SchemaDecisionEngine(DecisionEngine):
             return OUTCOME_MALFORMED
         return OUTCOME_DECIDED
 
-    _ANSWER_FIELD = {'judge': 'answer', 'choose': 'choice', 'score': 'score'}
+    _ANSWER_FIELD = {'judge': 'answer', 'choose': 'choice', 'score': 'score', 'choose_many': 'choices'}
 
     def _done(self, context, kind, outcome, data, confidence, started, failure=''):
         confidence.elapsed_seconds = round(self.now() - started, 3)

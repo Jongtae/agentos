@@ -56,6 +56,7 @@ from urllib.request import Request, build_opener, HTTPCookieProcessor, HTTPRedir
 
 from cryptography.fernet import Fernet
 
+from lookup_judgment import ordinary_lookup_judgment
 from personal_agent.connector_contract import CONNECTOR_STATE_KEY, ConnectorState
 from personal_agent.decision import (OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine, SelectionDecision,
                                      fixture_confidence)
@@ -207,6 +208,10 @@ class _FakeEgress:
         raise AssertionError('unexpected egress plan: ' + str(plan))
 
 
+# #605 R1/R4: the first-use install is exercised as if its DecisionEngine
+# judged every lookup term ordinary; the judgment is tested in
+# tests/test_public_private_composition.py.
+@ordinary_lookup_judgment
 class FirstUseEndToEndAcceptance(unittest.TestCase):
     """One clean-store first-use walk through the shipped boundaries."""
 
@@ -661,19 +666,17 @@ class FirstUseEndToEndAcceptance(unittest.TestCase):
             # An integration property no child suite could show, because it
             # only exists once both halves run in one conversation: reading
             # the owner's connected folder marks the Work as a document job,
-            # and while that job is inside the history window the runtime
-            # refuses web search and page reads outright.  The order of two
-            # ordinary owner requests therefore changes what is allowed, and
-            # the safe direction is the one enforced here.
+            # and while that job is inside the history window the worker's own
+            # arguments never reach a public destination.  Since #605 AgentOS
+            # composes the lookup from words permitted for it -- the owner's
+            # request, not the document -- so a query built from the document
+            # ("출장 계획 초안 ...") leaves only the owner's own words.
             before = list(self.network.plans)
-            self.model_plan = [('web_search', '{"query": "출장 숙소 가격"}')]
+            self.model_plan = [('web_search', '{"query": "출장 계획 초안 숙소 가격"}')]
             leak = self.says(19, '웹에서 그 출장 숙소 가격도 찾아봐')
             self.drain()
-            self.assertEqual(self.store.job(leak)['status'], 'failed')
-            # Nothing reached the egress layer, so nothing could be exfiltrated.
-            self.assertEqual(self.network.plans, before)
-            self.assertNotIn('출장 계획 초안',
-                             json.dumps(self.network.plans, ensure_ascii=False))
+            self.assertEqual(self.network.plans[len(before):], [{'tool': 'web_search', 'query': '출장 숙소 가격'}])
+            self.assertNotIn('초안', json.dumps(self.network.plans, ensure_ascii=False))
             self.model_plan = []
 
         with self.subTest('an install without Calendar credentials refuses cleanly'):

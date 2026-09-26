@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from lookup_judgment import ordinary_lookup_judgment
 from personal_agent.agent_runtime import (CLI_TOOL_GUIDANCE, CONTEXT_BUDGET_BYTES, CORE_INSTRUCTIONS, MESSAGE_CAP_CHARS,
                                           POLICY, render_turn_prompt, turn_context)
 from personal_agent.bounded_execution import AgentOSMcpTools, BoundedExecutionAdapter, ExecutionResult
@@ -179,7 +180,9 @@ class _ProbingEngine:
         self.taint.append(tools.capabilities.private_egress_provenance())
         try:
             if self.taint[-1]:
-                tools.call('web_search', {'query': 'today news'})
+                # A query made of note words only: nothing in it is permitted
+                # for a public lookup, so nothing leaves (#605).
+                tools.call('web_search', {'query': 'PRIVATE-XYZ'})
         except Exception as exc:  # the refusal is what we assert on
             self.web_search_error.append(str(exc))
         return ExecutionResult('engine answer', engine, 0)
@@ -210,15 +213,19 @@ class CrossTurnEgressGuard(unittest.TestCase):
         self._run('/note PRIVATE-XYZ', 'n1')
         self._run('/notes', 'n2')
         self._run('search the web for today news', 'k3')
-        self.assertIn('conversation-history', self.engine.taint[-1])
+        # #605: the label names the earlier Work's actual source.
+        self.assertIn('history:personal-space', self.engine.taint[-1])
         self.assertEqual(len(self.engine.web_search_error), 1, 'the CLI web_search call is refused')
+        self.assertIn('개인 자료는 공개 조회에 보내지 않으므로', self.engine.web_search_error[0])
+        self.assertNotIn('연결 문서', self.engine.web_search_error[0])
 
 
 
+@ordinary_lookup_judgment
 class BridgeProcessEgressGuard(unittest.TestCase):
     """Re-review of #574: the taint must reach the separate MCP bridge process the CLI actually calls."""
 
-    def _service_turns(self, turns):
+    def _service_turns(self, turns, query='today news'):
         import io, contextlib, sys
         from unittest import mock
         from personal_agent import mcp_bridge
@@ -234,7 +241,7 @@ class BridgeProcessEgressGuard(unittest.TestCase):
         network_calls = []
         requests = '\n'.join(json.dumps(r) for r in [
             {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {}},
-            {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call', 'params': {'name': 'web_search', 'arguments': {'query': 'today news'}}},
+            {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call', 'params': {'name': 'web_search', 'arguments': {'query': query}}},
         ]) + '\n'
 
         def runner(argv, **kwargs):
@@ -266,10 +273,12 @@ class BridgeProcessEgressGuard(unittest.TestCase):
         return provenance, captured['replies'][-1], network_calls
 
     def test_prior_private_answer_closes_web_search_in_the_real_bridge(self):
-        provenance, reply, network_calls = self._service_turns(['/note PRIVATE-XYZ', '/notes', 'search the web for today news'])
-        self.assertIn('conversation-history', provenance, 'the adapter forwards the taint to the bridge process')
-        self.assertIn('error', reply, 'the bridge refuses web_search')
-        self.assertEqual(network_calls, [], 'no public request left the machine')
+        provenance, reply, network_calls = self._service_turns(['/note PRIVATE-XYZ', '/notes', 'search the web for today news'],
+                                                               query='PRIVATE-XYZ today news')
+        self.assertIn('history:personal-space', provenance, 'the adapter forwards the taint to the bridge process')
+        # #605: the bridge composes the lookup from permitted words only.
+        self.assertIn('result', reply)
+        self.assertEqual(network_calls, [{'tool': 'web_search', 'query': 'today news'}])
 
     def test_same_turn_note_summary_provenance_now_reaches_the_bridge(self):
         provenance, reply, network_calls = self._service_turns(['/note PRIVATE-XYZ', '/summarize'])
@@ -352,7 +361,7 @@ class OversizeRequestKeepsWorking(DestinationScopedHistory):
 # owned by later AGENCY children (#604 bindings, #605 context/egress).  They
 # are not repaired here; an unexpected pass fails the suite so the owning
 # change removes the marker.  #604 fixed and un-marked the CLI weather binding;
-# the #605 findings remain expected failures.
+# #605 fixed and un-marked both prior-assistant egress findings.
 
 class _PublicNetwork:
     """Stands in for LocalTools' public reads; records every outbound plan."""
@@ -435,6 +444,7 @@ def _answer(text='answer'):
     return {'choices': [{'message': {'content': text}}]}
 
 
+@ordinary_lookup_judgment
 class MissingWeatherBinding(_RouteFixture):
     """AX-S01 shape: an authorized prior city, then a rain question (no city/weather keyword pair)."""
 
@@ -444,6 +454,8 @@ class MissingWeatherBinding(_RouteFixture):
         if last['role'] == 'tool':
             return _answer('대전은 지금 1.2mm 비가 옵니다.')
         if last['role'] == 'user' and '비' in last['content']:
+            # #605 R2: in a clean context the worker's transliteration and a
+            # validated ISO-2 country code are sent after the lookup judgment.
             return _tool_call('weather', {'city': 'Daejeon', 'country': 'KR'})
         return _answer()
 
@@ -473,13 +485,15 @@ class MissingWeatherBinding(_RouteFixture):
                         f'offered={self.engine.offered[-1]} outbound={self.network.plans}')
 
 
+@ordinary_lookup_judgment
 class PriorAssistantEgressDecision(_RouteFixture):
     """Which earlier assistant messages close public egress, per route.
 
-    Defect layer for both findings: the decision is taken from the message
-    *role* (CLI: any assistant message -> ``conversation-history``) or from the
-    file-workspace job list (API), not from the provenance of the source that
-    produced the earlier answer.
+    Defect layer for both findings (#603): the decision was taken from the
+    message *role* (CLI: any assistant message -> ``conversation-history``) or
+    from the file-workspace job list (API), not from the provenance of the
+    source that produced the earlier answer.  #605 reads each earlier Work's
+    recorded sources for exactly the messages a worker is shown.
     """
 
     @staticmethod
@@ -499,11 +513,16 @@ class PriorAssistantEgressDecision(_RouteFixture):
         self.assertEqual(self.engine.refusals, [])
 
     def test_cli_prior_note_listing_closes_public_search(self):
-        """Denied control (CLI): a private note listing in history keeps egress closed."""
+        """Denied control (CLI): a private note listing in history never reaches search.
+
+        Since #605 the owner's own words still do: AgentOS composes the
+        lookup from text permitted for it, so the ordinary query goes out and
+        the note does not.
+        """
         self._service(cli=True)
         self._turns('/note PRIVATE-XYZ', '/notes', 'search the web for today news')
-        self.assertEqual(self._outbound('web_search'), [])
-        self.assertEqual(len(self.engine.refusals), 1)
+        self.assertEqual(self._outbound('web_search'), [{'tool': 'web_search', 'query': 'today news'}])
+        self.assertNotIn('PRIVATE-XYZ', json.dumps(self.network.plans))
 
     def test_api_first_turn_reaches_public_search(self):
         """Allowed control (API)."""
@@ -511,23 +530,21 @@ class PriorAssistantEgressDecision(_RouteFixture):
         self._turns('search the web for today news')
         self.assertEqual(self._outbound('web_search'), [{'tool': 'web_search', 'query': 'today news'}])
 
-    @unittest.expectedFailure
     def test_finding_cli_benign_prior_answer_closes_public_search(self):
-        """Owner #605 (AX-04).  Over-restriction: a greeting answer is not
-        private material, yet ``run_one`` taints the CLI Work with
-        ``conversation-history`` and the refusal text blames connected
-        documents that were never read."""
+        """Fixed by #605 (AX-04); was an ``expectedFailure`` baseline from #603.
+        Over-restriction: a greeting answer is not private material, yet
+        ``run_one`` tainted the CLI Work with ``conversation-history`` and the
+        refusal text blamed connected documents that were never read."""
         self._service(cli=True)
         self._turns('hello there', 'search the web for today news')
         self.assertEqual(self.engine.refusals, [])
         self.assertEqual(len(self._outbound('web_search')), 1)
 
-    @unittest.expectedFailure
     def test_finding_api_prior_private_answer_does_not_close_public_search(self):
-        """Owner #605 (AX-04).  Under-restriction on the API route: a note
-        listing answered earlier stays in the visible history untainted, so a
-        model-composed query carrying it reaches the public search host (the
-        pre-existing gap documented at ``Capabilities.execute``)."""
+        """Fixed by #605 (AX-04); was an ``expectedFailure`` baseline from #603.
+        Under-restriction on the API route: a note listing answered earlier
+        stayed in the visible history untainted, so a model-composed query
+        carrying it reached the public search host."""
         self._service(self._search_model)
         self._turns('/note PRIVATE-XYZ', '/notes', 'search the web for it')
         self.assertTrue(self.requests, 'the scripted model was consulted')

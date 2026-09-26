@@ -36,6 +36,7 @@ Core contracts use provider-neutral names. The conceptual model includes:
 
 - **DecisionContext** — minimal, attributable Work-scoped state supplied for a bounded question.
 - **SelectionDecision<T>** — selection among declared candidates.
+- **SelectionSetDecision<T>** — zero or more of the declared candidates (`choose_many`, #605: which terms of a public lookup to withhold). An engine that cannot answer one returns an explicit non-answer; the Jev route does not offer it and answers unavailable.
 - **ScoreDecision** — evaluation against a declared scale or rubric.
 - **BinaryDecision** — bounded yes/no judgment with confidence/probability.
 - **DecisionConfidence** — confidence/probability (calibration is measured per provider, not assumed) plus available provenance/telemetry.
@@ -62,6 +63,12 @@ interface DecisionEngine {
     context: DecisionContext,
     proposition: string,
   ): Promise<BinaryDecision>;
+
+  choose_many<T>(
+    context: DecisionContext,
+    candidates: readonly T[],
+    question: string,
+  ): Promise<SelectionSetDecision<T>>;
 }
 ```
 
@@ -219,7 +226,7 @@ When no route has been chosen, the #417 default applies unchanged. Every route r
 
 ### Qualification suite
 
-`decision_qualification.py`, `SUITE_VERSION = decision-qualification/1`, all cases must pass. Cases run through the production caller (`ConversationJudgments`) or `DecisionEngine.choose` + `DecisionPolicy`: retry after failed Work, correction, reference, a new topic is not a follow-up, an ambiguous referent abstains, declared-candidate selection, no invented candidate, parked-request withdrawal, and failed/partial/unknown projections that must not be upgraded. Contexts are synthetic. A provider failure is a failed case, never a pass. Changing any case requires a new suite version.
+`decision_qualification.py`, `SUITE_VERSION = decision-qualification/2` (#605 added the `lookup-withholds-the-identifier` case, which exercises `choose_many`; `/1` qualifications recorded earlier stay as historical evidence), all cases must pass. Cases run through the production caller (`ConversationJudgments`) or `DecisionEngine.choose` + `DecisionPolicy`: retry after failed Work, correction, reference, a new topic is not a follow-up, an ambiguous referent abstains, declared-candidate selection, no invented candidate, parked-request withdrawal, and failed/partial/unknown projections that must not be upgraded. Contexts are synthetic. A provider failure is a failed case, never a pass. Changing any case requires a new suite version.
 
 ### Authority and threat model
 

@@ -21,6 +21,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from lookup_judgment import ordinary_lookup_judgment
 from personal_agent.agent_runtime import (DELEGATE_FAILED, FALLBACK_UNDESCRIBED, QUALIFIER_NOTES,
                                           evidence_qualifiers, fallback_response, evidence_summary, turn_context)
 from personal_agent.calendar import CALENDAR_SPEC, CALENDAR_WRITE_SPEC, CalendarConnector
@@ -313,6 +314,7 @@ class ResearchNet:
                 'content': 'Model A headphones. Shipping fee is 3,000 KRW for all domestic orders.'}
 
 
+@ordinary_lookup_judgment
 class IncompleteEvidenceOutcomeTests(TruthIntegrityTestCase):
     """Incomplete Evidence makes the Work `partial` even when the model writes text.
 

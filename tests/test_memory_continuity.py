@@ -148,7 +148,7 @@ class MemoryContinuityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             store=QuickStore(Path(tmp)/'state'); caps=Capabilities(store,None,{},'','job',lambda *args:None)
             caps.execute('list_memory',{})
-            with self.assertRaisesRegex(ValueError,'공개 검색어'):
+            with self.assertRaisesRegex(ValueError,'웹 검색어로 전송할 수 없습니다'):
                 caps.execute('web_search',{'query':'memory content'})
 
     def test_memory_service_read_blocks_public_egress_in_the_same_turn(self):
@@ -168,9 +168,9 @@ class MemoryContinuityTests(unittest.TestCase):
             self.assertEqual(listed['memories'][0]['content'],'afternoons')
             self.assertTrue(listed['private_content_included'])
             self.assertTrue(listed['egress_guard_armed'])
-            with self.assertRaisesRegex(ValueError,'공개 검색어'):
+            with self.assertRaisesRegex(ValueError,'웹 검색어로 전송할 수 없습니다'):
                 caps.execute('web_search',{'query':'memory content'})
-            with self.assertRaisesRegex(ValueError,'연결 문서 내용과 함께'):
+            with self.assertRaisesRegex(ValueError,'공개 페이지 조회에 사용할 수 없습니다'):
                 caps.execute('public_page_read',{'url':'https://example.invalid/'})
 
     def test_memory_service_inspect_also_arms_the_public_egress_guard(self):
@@ -179,7 +179,7 @@ class MemoryContinuityTests(unittest.TestCase):
             caps=Capabilities(store,None,{},'','job',lambda *args:None)
             service=MemoryService(store,private_read_sink=caps.evidence.append)
             self.assertTrue(service.inspect_memory('local-owner',saved['id'])['egress_guard_armed'])
-            with self.assertRaisesRegex(ValueError,'공개 검색어'):
+            with self.assertRaisesRegex(ValueError,'웹 검색어로 전송할 수 없습니다'):
                 caps.execute('web_search',{'query':'memory content'})
 
     def test_memory_service_cannot_be_wired_without_an_explicit_egress_decision(self):

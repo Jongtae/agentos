@@ -13,10 +13,17 @@ import time
 
 from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS, LATEST_HANDSHAKE_VERSION
 
-from .agent_runtime import PRIVATE_PROVENANCE, Capabilities, evidence_summary
+from .agent_runtime import (CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, PUBLIC_TASK_NO_JUDGMENT, PUBLIC_TASK_SEARCH_HINT,
+                            Capabilities, evidence_summary, lookup_sources,
+                            recorded_private_sources, work_source_records)
 from .bounded_execution import AgentOSMcpTools, ExecutionError, profile_actions, redact_reason
 from .local_tools import LocalTools
 from .quickstart_store import QuickStore
+
+
+#: AgentOS's own fixed lookup-refusal texts (#605 D2): safe to return verbatim.
+_OWNER_VISIBLE_REFUSALS = frozenset({*PUBLIC_TASK_NO_JUDGMENT.values(),
+                                     *(text + PUBLIC_TASK_SEARCH_HINT for text in PUBLIC_TASK_NO_JUDGMENT.values())})
 
 
 def negotiated_protocol_version(offered):
@@ -65,33 +72,70 @@ def _work_running(store, job_id):
 
 
 def _recorded_private_sources(store, job_id, tools=None):
-    """Private-source labels this Work's own tool events already carry.
+    """Private-source labels this Work already carries in durable state.
 
     Taint used to live only in one bridge process: a second bridge started for
     the same running Work (a CLI restarting its MCP server) received only the
     argv ``--provenance`` labels and forgot a ``list_notes`` the first one had
-    served.  Every successful private read is a durable ``tool_events`` row,
-    so the bridge rehydrates from it on start and before every call.  Labels
-    are keyed on the *host action*: the recorded ``host_action``
-    and the tool id's declared action in ``tools`` (any one suffices), so a package alias of a
-    private read taints exactly like the built-in.
+    served.  The bridge rehydrates on start and before every call from the
+    Work's successful ``tool_events`` (``recorded_private_sources``) and, since
+    #605, from the Work's source record written before model use, which also
+    carries the history-window sources the Work was shown.  A missing record
+    adds nothing here: the host always passes the same labels on argv.
     """
-    with store.db() as db:
-        rows = db.execute("SELECT tool, detail FROM tool_events WHERE job_id=? AND status='succeeded'", (job_id,)).fetchall()
-    labels = set()
-    for tool, detail in rows:
-        try:
-            recorded = json.loads(detail or '{}').get('host_action')
-        except (ValueError, AttributeError):
-            recorded = None
-        # Union, not precedence: any reading that names a private read taints.
-        for action in (recorded, (tools or {}).get(tool, {}).get('host_action'), tool):
-            if isinstance(action, str) and action in PRIVATE_PROVENANCE:
-                labels.add(PRIVATE_PROVENANCE[action])
+    labels = recorded_private_sources(store, job_id, tools)
+    record = work_source_records(store).get(job_id)
+    if isinstance(record, list):
+        # A CLI's unmediated-read label concerns its *reply* for later Works,
+        # not this Work's own inputs (#605 F1).
+        labels |= {str(label) for label in record if str(label).strip() and str(label) != ENGINE_UNMEDIATED}
     return labels
 
 
-def serve(data, job_id, provenance=()):
+def _lookup_sources(store, job_id):
+    """The same permitted-text resolver the host uses (#605)."""
+    return lambda: lookup_sources(store, job_id)
+
+
+def _restrictive(store):
+    return (store.config('egress_composition', {}) or {}).get('mode') == 'restrictive'
+
+
+def _lookup_sensitivity(store, job_id):
+    """The host's DecisionEngine judgment path (#605 N3), built on first use.
+
+    The bridge has no service of its own, so the first lookup that would send
+    words of the owner's current message builds one ``AgentService`` over the
+    same store and asks its ``decision_judge`` -- the same route, context
+    bounds and audit as the host.  Any failure is an unavailable judgment,
+    which ``Capabilities`` answers with its fail-safe policy.
+    """
+    built = {}
+
+    def judge(message, terms):
+        if 'judge' not in built:
+            from .conversation_handoff import JUDGMENT_UNAVAILABLE, Judgment
+            from .decision_routes import ROUTE_SUBSCRIPTION_CLI
+            from .quickstart_service import AgentService
+            service = AgentService(store)
+            service.current_work_id = job_id
+            route = service.decision_routes.active()
+            if route and route.get('transport') == ROUTE_SUBSCRIPTION_CLI:
+                # #605 D3: a subscription-CLI decision route cannot run inside
+                # the CLI's restricted bridge environment (no CLI home, bare
+                # PATH).  Fail closed with the truthful reason instead of
+                # attempting it; a host round trip is #629 (not activated).
+                built['judge'] = None
+                built['refusal'] = Judgment(JUDGMENT_UNAVAILABLE, source='bridge-cli-route')
+            else:
+                built['judge'] = service.decision_judge
+        if built['judge'] is None:
+            return built['refusal']
+        return built['judge'].lookup_term_sensitivity(message, terms)
+    return judge
+
+
+def serve(data, job_id, provenance=(), judge=None):
     store = QuickStore(data)
     def record(tool, status, detail):
         with store.db() as db:
@@ -100,7 +144,9 @@ def serve(data, job_id, provenance=()):
     # schemas come from Capabilities.definitions(), never a bridge-local list.
     capabilities = Capabilities(store, None, {}, '', job_id, record, network=LocalTools(), document_access=False,
                                 allowed_tools=set(profile_actions(AgentOSMcpTools.PROFILE)),
-                                inherited_provenance=_provenance(provenance))
+                                inherited_provenance=_provenance(provenance), lookup_hint=CLI_LOOKUP_HINT,
+                                lookup_sources=_lookup_sources(store, job_id), lookup_restrictive=_restrictive(store),
+                                lookup_sensitivity=judge or _lookup_sensitivity(store, job_id))
     capabilities.private_provenance.update(_recorded_private_sources(store, job_id, capabilities.tools))
     tools = AgentOSMcpTools(capabilities)
     for line in sys.stdin:
@@ -125,6 +171,12 @@ def serve(data, job_id, provenance=()):
                     # Redacted recovery metadata: the reason, never the arguments.
                     record(listed, 'failed',
                            json.dumps({'scope':'subscription-mcp-bridge','error':redact_reason(str(exc))}, ensure_ascii=False))
+                    if str(exc) in _OWNER_VISIBLE_REFUSALS:
+                        # #605 D2/D3: AgentOS's own fixed refusal text reaches the
+                        # CLI as a tool error, so the owner is told the true reason.
+                        if ident is not None:
+                            _send({'jsonrpc':'2.0','id':ident,'result':{'content':[{'type':'text','text':str(exc)}],'isError':True}})
+                        continue
                     raise
                 # The same redacted Evidence the direct route records
                 # (sources, attempted/failed URLs, counts), never the payload.

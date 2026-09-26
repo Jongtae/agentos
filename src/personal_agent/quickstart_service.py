@@ -13,7 +13,8 @@ from urllib.parse import urlsplit
 from .local_tools import LocalTools, normalize_public_url
 from .agent_runtime import (Capabilities, run_agent, AGENTS, evidence_summary, turn_context, render_turn_prompt,
                             CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, OWNER_CONVERSATION, lookup_sources, WORK_SOURCES_KEY, WORK_SOURCES_LIMIT, base_label,
-                            history_provenance)
+                            history_provenance, WorkBudget, EFFECT_FREE_READS, explicit_search_query, outcome_from_events,
+                            WORK_STOP_KEY, WORK_STOP_KEEP, work_stop_requested)
 from .plugins import PluginRegistry
 from .providers import NOT_REPORTED, ModelAdapter, ProviderError, request_json, validate_model
 from .decision import DEFAULT_DECISION_PROVIDER, RoutedDecisionEngine
@@ -44,7 +45,7 @@ from .conversation_handoff import (CONNECTOR_LABELS, JUDGMENT_YES,
                                    ConnectorHandoff,
                                    ConversationFocus,
                                    ConversationHandoffError, IntentClassifier,
-                                   INTENT_AMBIGUOUS, INTENT_CALENDAR_CREATE,
+                                   INTENT_AMBIGUOUS, INTENT_CALENDAR_CREATE, AUTHORITY_RULE, INTENT_LABELS,
                                    INTENT_GREETING, INTENT_KNOWLEDGE,
                                    INTENT_MAIL_SEARCH, INTENT_NOTE_CREATE, INTENT_NOTE_LIST,
                                    INTENT_SETTINGS,
@@ -163,32 +164,23 @@ def workspace_search_request(prompt):
     return None
 
 # Subscription CLIs do not receive AgentOS credentials, local paths, or an
-# MCP transport.  AgentOS can still perform a narrowly identified *public*
-# lookup before execution and provide its bounded evidence to the CLI.
-# Do not derive a query from arbitrary prose: that could relay private text.
+# MCP transport.  AgentOS still serves the owner's explicit `/search <query>`
+# before execution (#605 D1) and provides its bounded evidence to the CLI.
+# #606 T3: the earlier lexical city-and-weather preflight is removed; an
+# ordinary request reaches the CLI's own tool loop through the broker.
 _SUBSCRIPTION_SECRET = re.compile(r'(?:api[ _-]?key|password|token|secret|비밀번호|토큰|키)', re.I)
-_SUBSCRIPTION_CITY_WEATHER = re.compile(r'([가-힣]{2,12}(?:시|군|구))[^\n]{0,80}(?:날씨|기온)|(?:날씨|기온)[^\n]{0,80}([가-힣]{2,12}(?:시|군|구))')
 
 
 def subscription_public_lookup_query(prompt):
-    """Return a deliberately public lookup query, or None.
+    """The owner's explicit ``/search`` query for the CLI preflight, or None.
 
-    Only an explicit /search request or a Korean city-and-weather request is
-    eligible.  The full conversation is never used as a search term.
+    No query is ever derived from prose: the full conversation is never used
+    as a search term.
     """
-    if not isinstance(prompt, str):
-        return None
-    text = prompt.strip()
-    if text.startswith('/search '):
-        query = text[8:].strip()
-        if 1 <= len(query) <= 500 and not _SUBSCRIPTION_SECRET.search(query):
-            return query
-        return None
-    matched = _SUBSCRIPTION_CITY_WEATHER.search(text)
-    if not matched:
-        return None
-    city = next((value for value in matched.groups() if value), None)
-    return f'{city} 날씨' if city else None
+    query = explicit_search_query(prompt) if isinstance(prompt, str) else None
+    if query and len(query) <= 500 and not _SUBSCRIPTION_SECRET.search(query):
+        return query
+    return None
 
 
 def subscription_public_evidence(result):
@@ -1744,6 +1736,10 @@ class AgentService:
             return None
         if not self.connector_handoff.known(connector_id):
             raise ValueError(ConnectorHandoff.unavailable(connector_id))
+        return self._park_for_connector(job,connector_id)
+
+    def _park_for_connector(self, job, connector_id):
+        """Park one Work for one unmet connector and return the guidance, or None when ready."""
         owner_id=self.connector_owner_id(job)
         result=self.connector_handoff.prerequisite(owner_id,connector_id)
         if result is None:
@@ -1760,6 +1756,75 @@ class AgentService:
         # where to go.  The URL is this connector's own start route, so it is
         # never invented and never names a port this process did not bind.
         return self.connector_handoff.guidance(result,self.connector_connect_url(connector_id))
+
+    #: Connectors a model-chosen read may be parked for (#606 T5).  Mail is
+    #: not a loop tool (owner Q3), so only the calendar read is listed.
+    PARKABLE_READ_CONNECTORS=frozenset({CALENDAR_CONNECTOR_ID})
+
+    def connector_read_need(self, capabilities, job_id):
+        """The declared connector a read-only turn found missing, or None.
+
+        Keyed on the typed tool result (``needs_setup`` + ``requires``) and
+        guarded exactly like ``local_authority_need``: only a Work whose every
+        attempt was a read may be parked and resumed.
+        """
+        if not self.connector_handoff or not self.attempted_only_reads(job_id):return None
+        for result in capabilities.memo.values():
+            if (isinstance(result,dict) and result.get('needs_setup') is True
+                    and result.get('requires') in self.PARKABLE_READ_CONNECTORS
+                    and self.connector_handoff.known(result['requires'])):
+                return result['requires']
+        return None
+
+    def park_for_connector_read(self, job, connector_id, notice=''):
+        """Park a read-only Work for one connection; one durable resume, like a pre-run handoff."""
+        guidance=self._park_for_connector(job,connector_id)
+        if guidance is None:
+            return False
+        guidance=notice+guidance
+        with self.store.db() as db:
+            db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('assistant',guidance,job['channel'],time.time(),job.get('workspace_id'),job['id']))
+            db.execute("UPDATE jobs SET status='awaiting_connection',response=?,error=NULL,delivery=? WHERE id=?",(guidance,'pending' if job['chat_id'] else 'none',job['id']))
+        self.update_task_card(job,'awaiting_connection')
+        return True
+
+    def work_stopped(self, job_id):
+        """Did the owner Stop or cancel this running Work (#606 T1)?"""
+        state=self.presence.get(job_id)
+        if (state is not None and state.stopped) or work_stop_requested(self.store,job_id):
+            return True
+        return (self.store.job(job_id) or {}).get('status')=='cancelled'
+
+    def work_budget(self, job_id):
+        return WorkBudget(stop=lambda:self.work_stopped(job_id))
+
+    #: Rule-matched natural-language reads whose empty or unclear result is
+    #: re-judged by the Work model loop (#606 T4, owner Q1).  Mail is not a
+    #: loop tool; notes/calendar/settings are writes or stateful and stay terminal.
+    RULE_FALLTHROUGH_INTENTS=frozenset({INTENT_KNOWLEDGE,INTENT_WORKSPACE_SEARCH})
+    RULE_FALLTHROUGH_NOTE=('\n\n[AgentOS observation, not an owner instruction] AgentOS first tried "{label}" for this '
+                           'request and {what}. Re-plan from this: choose another available tool, answer directly, or, '
+                           'when the missing piece is the owner\'s information (place, date, branch, which item), ask '
+                           'the owner one short question. Do not guess it and do not repeat the same lookup.')
+
+    def rule_fallthrough(self, decision):
+        """Whether a natural-language rule decision may fall through to the model loop.
+
+        Only when a Work model loop can actually run: with no usable AI route
+        the handler's own truthful answer is kept instead of a setup blocker.
+        """
+        if decision.authority!=AUTHORITY_RULE or decision.intent not in self.RULE_FALLTHROUGH_INTENTS:
+            return False
+        if (self.store.config('subscription_engine',{}) or {}).get('id'):
+            return True
+        config=self.store.config('model',{})
+        return bool(config) and self.model_ready(config)
+
+    def cli_work_outcome(self, job_id, tools):
+        """``(outcome, refusals)`` of a CLI Work from its own tool events (#606 T3)."""
+        with self.store.db() as db:
+            rows=db.execute('SELECT tool,status,detail FROM tool_events WHERE job_id=? ORDER BY id',(job_id,)).fetchall()
+        return outcome_from_events([(row['tool'],row['status'],row['detail']) for row in rows],tools)
 
     def cancel_superseded_work(self, work_ids, notify=True):
         """Cancel parked Work whose resume path a newer request replaced.
@@ -1873,9 +1938,7 @@ class AgentService:
 
     #: Host actions that only read.  A turn that ran anything else is never
     #: parked, because resuming it would repeat that effect.
-    LOCAL_PARK_READ_ONLY=frozenset({'list_roots','find_files','read_file','list_notes','list_memory','calendar_query',
-                                   'web_search','public_page_read','weather','list_agents',
-                                   'bounded_public_research'})
+    LOCAL_PARK_READ_ONLY=EFFECT_FREE_READS
     LOCAL_PICKER_PROMPTS={LOCAL_FOLDER_READ:'AgentOS가 읽기만 할 폴더를 선택하세요.',
                           LOCAL_REFERENCE_READ:'AgentOS가 정리할 원본으로 읽기만 할 폴더를 선택하세요.',
                           LOCAL_RESULT_WRITE:'AgentOS가 새 결과 파일만 만들 폴더를 선택하세요.'}
@@ -2321,8 +2384,10 @@ class AgentService:
         return shown
 
     STOP_CANCELLED_TEXT='요청을 멈췄어요. 이 요청은 실행하지 않았습니다.'
-    STOP_RUNNING_TEXT=('표시는 멈췄지만 이미 실행 중인 작업이라 중간에 취소하지 못했어요. '
-                       '작업은 계속되고, 끝나면 실제 결과를 그대로 알려드릴게요.')
+    # #606 T1: a running Work checks Stop before its next model turn or tool
+    # call; a step already under way finishes and is not undone.
+    STOP_RUNNING_TEXT=('멈춤 요청을 받았어요. 이미 진행 중인 단계는 되돌리지 못하지만 다음 단계는 실행하지 않아요. '
+                       '끝나면 실제 결과를 그대로 알려드릴게요.')
 
     def ingest_stop(self, stopped, generation):
         """Reconcile Telegram's Stop on a draft with real Work state.
@@ -2356,6 +2421,9 @@ class AgentService:
                 self.presence.pop(job['id'],None)
                 text=self.STOP_CANCELLED_TEXT
             elif current and current['status']=='running':
+                # #606 T1: durable, so the CLI's separate MCP bridge process
+                # refuses its next call too, not only this process's loop.
+                self.store.append_config_list(WORK_STOP_KEY,job['id'],WORK_STOP_KEEP)
                 text=self.STOP_RUNNING_TEXT
             else:
                 return 'finished'
@@ -3436,7 +3504,19 @@ class AgentService:
                         db.execute("UPDATE jobs SET status='awaiting_connection',response=?,error=NULL,delivery=? WHERE id=?",(guidance,'pending' if job['chat_id'] else 'none',job['id']))
                     self.update_task_card(job,'awaiting_connection')
                     return True
-                if not decision.executes:
+                # #606 T4: a natural-language rule-matched read that needs
+                # clarification or finds nothing is re-judged by the Work
+                # model loop (not re-run): the loop gets the observation, never
+                # the handler's private result, and no DecisionEngine call is
+                # added.  Explicit forms, approvals, parked/retry/cancel and
+                # calendar-pending state stay terminal.
+                handled=True;fallthrough_note=None
+                if not decision.executes and self.rule_fallthrough(decision):
+                    handled=False
+                    fallthrough_note=self.RULE_FALLTHROUGH_NOTE.format(
+                        label=INTENT_LABELS.get(decision.intent,decision.intent),
+                        what='could not tell what to look for')
+                elif not decision.executes:
                     # Ambiguous, missing a required detail, or a consequential
                     # effect that was only inferred.  Answer the owner and
                     # invoke nothing.
@@ -3448,6 +3528,10 @@ class AgentService:
                     result=self.personal_knowledge_request({'query':decision.argument}, owner_id=owner, channel=job['channel'])
                     response='\n'.join(f"{row['source']} · {row['excerpt']}" for row in result.get('results',[])) or result['response']
                     outcome='succeeded' if result['state'] in ('completed','empty') else 'failed'
+                    if result['state']=='empty' and self.rule_fallthrough(decision):
+                        handled=False;response=''
+                        fallthrough_note=self.RULE_FALLTHROUGH_NOTE.format(
+                            label=INTENT_LABELS[INTENT_KNOWLEDGE],what='found no matching saved item')
                 elif decision.intent==INTENT_SETTINGS:
                     work_sources.add('owner-settings')
                     result=self.conversation_settings_request({'operation':'text','text':decision.argument},
@@ -3491,7 +3575,11 @@ class AgentService:
                 elif decision.intent==INTENT_WORKSPACE_SEARCH:
                     work_sources.add('connected-document')
                     results=FileWorkspace(self.store).search(decision.argument)
-                    if not results: response='현재 원본과 일치하는 저장 결과를 찾지 못했습니다.'
+                    if not results and self.rule_fallthrough(decision):
+                        handled=False
+                        fallthrough_note=self.RULE_FALLTHROUGH_NOTE.format(
+                            label=INTENT_LABELS[INTENT_WORKSPACE_SEARCH],what='found no matching saved workspace result')
+                    elif not results: response='현재 원본과 일치하는 저장 결과를 찾지 못했습니다.'
                     else:
                         response='\n\n'.join(f"저장 결과: {item['path']}\n{item['content']}" for item in results)
                         self.record_file_workspace_document_job(job['id'])
@@ -3506,6 +3594,8 @@ class AgentService:
                     work_sources.add('personal-space')
                     response='\n\n'.join(n['content'] for n in self.store.notes()) or '저장된 메모가 없습니다. /note 내용으로 기록해 보세요.'
                 else:
+                    handled=False
+                if not handled:
                     # One route snapshot per Work: a later owner switch applies
                     # to new Work and never redirects this request mid-turn.
                     with self.lock:
@@ -3529,6 +3619,8 @@ class AgentService:
                         # latest prompt; no private result/tool payload is
                         # copied through ConversationFocus.
                         history[-1]={'role':'user','content':prompt}
+                    if fallthrough_note and history:
+                        history[-1]={'role':'user','content':history[-1]['content']+fallthrough_note}
                     # Provenance for material this turn splices straight into
                     # the prompt.  None of the four branches below leaves a
                     # `Capabilities.evidence` entry or sets `document_context`
@@ -3636,7 +3728,8 @@ class AgentService:
                         capabilities=Capabilities(self.store,None,{},'',job['id'],record,network=self.local_tools,
                                                   document_access=False,packages=self.runtime_packages(),
                                                   allowed_tools=allowed_tools,inherited_provenance=turn_provenance,
-                                                  current_packages=self.runtime_packages,**self.work_lookup_options(job,prompt,CLI_LOOKUP_HINT))
+                                                  current_packages=self.runtime_packages,budget=self.work_budget(job['id']),
+                                                  **self.work_lookup_options(job,prompt,CLI_LOOKUP_HINT))
                         work_capabilities[0]=capabilities
                         # Use the same owner-approved request payload prepared
                         # for the local model path.  In particular, /summarize
@@ -3738,7 +3831,13 @@ class AgentService:
                         if not isolated and result.exit_code==0 and (self.store.config('engine_login',{}) or {}).get(subscription['id'],{}).get('state')!='signed-in':
                             self._remember_engine_login(subscription['id'],'signed-in','run')
                         response,provider,model=result.content,'subscription',result.engine
-                        resolved_blocker=result.exit_code==0
+                        # #606 T3: a zero exit says the CLI ended, not that the
+                        # request was satisfied; the Work's own events decide.
+                        outcome,cli_refusals=self.cli_work_outcome(job['id'],capabilities.tools)
+                        refusals.extend(cli_refusals)
+                        if self._work_has_unknown_effect(job['id']):
+                            outcome='unknown';unknown_statement=response
+                        resolved_blocker=result.exit_code==0 and outcome=='succeeded'
                     else:
                         if not config:raise BlockedTurn(BLOCKER_NO_AI_ROUTE,'설정에서 모델 또는 구독 엔진을 먼저 연결하세요. 모델 없이도 /note와 /notes는 사용할 수 있습니다.')
                         if workspace_request and boundary['requires_approval']:
@@ -3762,6 +3861,7 @@ class AgentService:
                                                   # during this Work refuses a read that starts afterwards.
                                                   public_page_scope=lambda:self.public_page_boundary(config)['urls'],
                                                   memory_request=owner_memory_request,inherited_provenance=set(turn_provenance)|shown_sources,calendar=self.calendar_for(job),calendar_owner=self.connector_owner_id(job),current_packages=self.runtime_packages,
+                                                  budget=self.work_budget(job['id']),
                                                   **self.work_lookup_options(job,prompt))
                         work_capabilities[0]=capabilities
                         work_sources|=capabilities.private_provenance
@@ -3805,6 +3905,14 @@ class AgentService:
                             self.record_work_sources(job['id'],work_sources|capabilities.private_provenance)
                             self.record_turn_provenance(job['id'],status='setup-required')
                             return self.park_for_local_authority(job,local_need,calendar_notice)
+                        # #606 T5: a calendar read with no calendar connection is
+                        # parked once for the existing connector handoff.
+                        connector_need=self.connector_read_need(capabilities,job['id'])
+                        if connector_need:
+                            self.record_work_sources(job['id'],work_sources|capabilities.private_provenance)
+                            self.record_turn_provenance(job['id'],status='setup-required')
+                            if self.park_for_connector_read(job,connector_need,calendar_notice):
+                                return True
                     if workspace_request:
                         saved=FileWorkspace(self.store).save(job['id'],workspace_request['title'],response,workspace_request['sources'])
                         # The file name is owner language; the result id is an internal

@@ -28,6 +28,7 @@ from personal_agent.conversation_handoff import (FOLLOWUP_CANCEL, FOLLOWUP_CORRE
                                                  TelegramRejected, telegram_request_json)
 from personal_agent.conversation_projection import TERMINAL_FAILED_HEADER
 from personal_agent.decision import OUTCOME_DECIDED, FixtureDecisionEngine, SelectionDecision, fixture_confidence
+from personal_agent.agent_runtime import WORK_STOPPED
 from personal_agent.providers import ModelAdapter, ProviderError
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
@@ -435,13 +436,16 @@ class StopTests(NativePresenceTestCase):
         self.assertEqual(outcomes, ['running'])
         self.assertEqual(self.methods().count('sendMessageDraft'), 1, 'no draft after Stop')
         self.assertNotIn('sendChatAction', self.methods())
-        self.assertEqual(job['status'], 'succeeded', 'running Work was not cancelled and says so')
+        # #606 T1: Stop is checked before the next model turn or tool call, so
+        # the running Work ends there and its one real result says why.
+        self.assertEqual(job['status'], 'failed', 'Stop ended the Work before its next step')
         notice, answer = self.sends()
         self.assertEqual(notice['text'], AgentService.STOP_RUNNING_TEXT)
-        self.assertIn('취소하지 못했어요', notice['text'])
+        self.assertIn('다음 단계는 실행하지 않아요', notice['text'])
         self.assertNotIn('취소했', notice['text'])
         self.assertEqual(notice['reply_parameters']['message_id'], message_id)
-        self.assertEqual(answer['text'], self.text, 'the real result is still delivered once')
+        self.assertIn(WORK_STOPPED, answer['text'], 'the real result is still delivered once')
+        self.assertNotIn(self.text, answer['text'])
 
     def test_stop_after_an_effect_was_recorded_still_does_not_claim_cancellation(self):
         self.connect_model()
@@ -455,7 +459,9 @@ class StopTests(NativePresenceTestCase):
         self.during_model = think
         job, _ = self.turn('메모 남기고 정리해줘')
         self.assertEqual(outcomes, ['running'])
-        self.assertEqual(self.store.job(job['id'])['status'], 'succeeded')
+        # #606 T1: the next step does not run; the recorded effect is not undone
+        # and nothing claims the request was never executed.
+        self.assertEqual(self.store.job(job['id'])['status'], 'failed')
         self.assertFalse(any('멈췄어요. 이 요청은 실행하지' in body['text'] for body in self.sends()))
 
     def test_a_repeated_stop_update_sends_one_notice(self):

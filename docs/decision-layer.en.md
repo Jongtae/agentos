@@ -301,6 +301,8 @@ Evidence class for #597: deterministic tests with fixture DecisionEngines. The d
 
 AGENCY-EGRESS-01 / #605 added a third judgment point, **lookup term sensitivity** (`ConversationJudgments.lookup_term_sensitivity`, purpose `public-lookup-sensitivity`, the `choose_many` envelope), asked before a public lookup that carried words of the owner's current message. **Removed by SEC-PILOT-01 / [#654](https://github.com/Jongtae/agentos/issues/654)** under the pilot posture: no per-request judgment precedes a public lookup on either route, and the qualification case that probed it is gone (`decision-qualification/3`). Deterministic redaction of saved private values remains in `agent_runtime`.
 
+SEC-ATTN-01 / #659 adds **explicit preparation request** (`ConversationJudgments.explicit_preparation_request`, purpose `explicit-preparation-request`, the `judge` envelope). It is asked only when the model calls `schedule_preparation` in a Work whose prompt is the owner's own stored message and which no preparation started; the context is that message and a one-line summary of the proposed preparation (kind, local due time, repetition, goal). A yes schedules the preparation as accepted by the owner's request; no or unavailable keeps it a proposal the owner accepts with the Telegram button or in Settings. It never authorizes an effect beyond the Grants the preparation's Work has when it runs. Evidence class: deterministic tests with a fixture DecisionEngine (`tests/test_preparations.py`); no live-provider accuracy is claimed.
+
 ## Staged implementation
 
 ### Stage A — contract (done in #417)

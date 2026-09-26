@@ -12,6 +12,7 @@ from . import folder_grants
 from .manifests import BUILTIN_MANIFEST, runtime_packages
 
 AGENTS={role['id']:{key:value for key,value in role.items() if key!='id'} for role in BUILTIN_MANIFEST['roles']}
+BUILTIN_TOOLS={tool['id']:tool['host_action'] for tool in BUILTIN_MANIFEST['tools']}
 
 def schema(name,description,properties=None,required=None):
  return {'type':'function','function':{'name':name,'description':description,'parameters':{'type':'object','properties':properties or {},'required':required or [],'additionalProperties':False}}}
@@ -438,8 +439,11 @@ class Capabilities:
  def execute(self,name,args):
   tool=self.tools.get(name)
   if not tool or name not in self.allowed_tools:raise ValueError('활성 패키지에 선언되지 않은 도구입니다.')
-  if self.current_packages is not None:
-   current=next((item for package in self.current_packages() for item in package['tools'] if item['id']==name),None)
+  if self.current_packages is not None and BUILTIN_TOOLS.get(name)!=tool['host_action']:
+   # Built-in tools cannot be disabled, so only package tools are rechecked;
+   # an unreadable/invalid registry refuses package tools, never built-ins.
+   try:current=next((item for package in self.current_packages() for item in package['tools'] if item['id']==name),None)
+   except Exception:current=None
    if current is None or current['host_action']!=tool['host_action']:
     raise ValueError('이 도구는 작업 시작 후 비활성화되었거나 선언이 바뀌어 실행하지 않았습니다. 새 요청으로 다시 시도해 주세요.')
   name=tool['host_action']
@@ -627,8 +631,9 @@ class Capabilities:
    if not agent:raise ValueError('활성 전문 에이전트를 선택하세요.')
    # #604: a role whose package was disabled, removed or re-declared since
    # discovery is refused, exactly as a stale tool is.
-   if self.current_packages is not None:
-    current=next((role for package in self.current_packages() if package['id']==agent['package_id'] for role in package['roles'] if role['id']==args['agent_id']),None)
+   if self.current_packages is not None and agent['package_id']!='builtin':
+    try:current=next((role for package in self.current_packages() if package['id']==agent['package_id'] for role in package['roles'] if role['id']==args['agent_id']),None)
+    except Exception:current=None
     if current is None or {**current,'package_id':agent['package_id']}!=agent:
      raise ValueError('이 전문 에이전트는 작업 시작 후 비활성화되었거나 선언이 바뀌어 실행하지 않았습니다. 새 요청으로 다시 시도해 주세요.')
    if not args['task'].strip() or len(args['task'])>12000:raise ValueError('위임할 작업은 1~12000자로 입력하세요.')

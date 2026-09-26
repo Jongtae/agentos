@@ -21,7 +21,7 @@ from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_U
                                       TERMINAL_UNVERIFIED_MARKER, BlockedTurn, ConversationProjection, context_message,
                                       owner_cause, terminal_text, turn_qualifier, verified_portion)
 from .subscription_engines import SubscriptionEngines
-from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult, MAX_PROMPT_BYTES, SECRET_PATTERN, CLI_PROFILES, profile_actions, route_unavailable
+from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult, MAX_PROMPT_BYTES, SECRET_PATTERN, profile_actions, profile_status, route_unavailable
 from .isolated_engine_gateway import EngineGatewayError
 from .service_control import build_identity
 from .isolated_mcp_proxy import IsolatedMcpProxy, TaskCapabilityRegistry
@@ -722,9 +722,7 @@ class AgentService:
 
     def subscription_execution_profile(self):
         """The CLI capability profile, read from its one declaration (#604)."""
-        profile=(ReadOnlyAgentOSMcpTools if self.isolated_engine_adapter else AgentOSMcpTools).PROFILE
-        return {'mode':profile,'tools':list(profile_actions(profile)),'unavailable':route_unavailable(profile),
-                'qualification':CLI_PROFILES[profile]['qualification']}
+        return profile_status((ReadOnlyAgentOSMcpTools if self.isolated_engine_adapter else AgentOSMcpTools).PROFILE)
 
     def settings(self):
         with self.lock:
@@ -3476,6 +3474,7 @@ class AgentService:
                         self.record_turn_sent(job['id'],sent=sent if separate else engine_prompt,
                             exposed_tools=[tool.get('name') for tool in offered],build=self.build,
                             capability_profile=facade.PROFILE,unavailable_tools=route_unavailable(facade.PROFILE),
+                            capability_gate_qualified=profile_status(facade.PROFILE)['gate_qualified'],
                             instructions=engine_context['instructions'] if adapter_context is not None else '',
                             instructions_channel='append-system-prompt' if separate else ('prompt' if adapter_context is not None else 'not sent (bare request)'),
                             private_sources=set(turn_provenance)|set(capabilities.private_provenance),

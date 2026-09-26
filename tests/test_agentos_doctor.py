@@ -217,9 +217,10 @@ def test_declared_profile_limits_are_reported_as_limits_not_missing_bindings(tmp
     """#604: an approval bound to another provider is a route limit, not incapability."""
     report = installation(fake_install(tmp_path))
     routes = report["routes"]
-    assert {"weather", "web_search"} <= set(routes["bounded-cli-mcp"])
+    assert "web_search" in routes["bounded-cli-mcp"]
     assert routes["declared_limits"]["bounded-cli-mcp"] == {
-        "public_page_read": "owner-page-approval-bound-to-direct-api-model"}
+        "public_page_read": "owner-page-approval-bound-to-direct-api-model",
+        "weather": "gated-cli-built-in-reads-not-mediated-by-agentos"}
     assert set(routes["declared_limits"]["isolated-cli-mcp"]) == {"weather", "web_search", "public_page_read"}
     assert not [item for item in report["findings"]
                 if isinstance(item, dict) and "missing-public-read-binding" in item]

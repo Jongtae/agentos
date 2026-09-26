@@ -13,7 +13,7 @@ import time
 
 from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS, LATEST_HANDSHAKE_VERSION
 
-from .agent_runtime import Capabilities
+from .agent_runtime import PRIVATE_PROVENANCE, Capabilities, evidence_summary
 from .bounded_execution import AgentOSMcpTools, ExecutionError, profile_actions, redact_reason
 from .local_tools import LocalTools
 from .quickstart_store import QuickStore
@@ -56,8 +56,26 @@ def _work_running(store, job_id):
     ``running``.  A finished, interrupted or foreign Work id is refused, so a
     bridge that outlives its turn cannot keep acting for it.
     """
+    # Time-of-check bound: the check runs before each call, so a Work that
+    # ends *during* a call may still see that one in-flight call finish.  It
+    # is bounded by that call's own deadlines (search 15 s, weather 10 s + 15 s,
+    # each research page read 12 s) and no further call starts.
     job = store.job(job_id) if isinstance(job_id, str) and job_id else None
     return bool(job) and job.get('status') == 'running'
+
+
+def _recorded_private_sources(store, job_id):
+    """Private-source labels this Work's own tool events already carry.
+
+    Taint used to live only in one bridge process: a second bridge started for
+    the same running Work (a CLI restarting its MCP server) received only the
+    argv ``--provenance`` labels and forgot a ``list_notes`` the first one had
+    served.  Every successful private read is a durable ``tool_events`` row,
+    so the bridge rehydrates from it on start and before every call.
+    """
+    with store.db() as db:
+        rows = db.execute("SELECT DISTINCT tool FROM tool_events WHERE job_id=? AND status='succeeded'", (job_id,)).fetchall()
+    return {PRIVATE_PROVENANCE[row[0]] for row in rows if row[0] in PRIVATE_PROVENANCE}
 
 
 def serve(data, job_id, provenance=()):
@@ -67,9 +85,10 @@ def serve(data, job_id, provenance=()):
             db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)', (job_id,tool,status,detail,time.time()))
     # #604: the Work's allowed actions are the bounded CLI profile; names and
     # schemas come from Capabilities.definitions(), never a bridge-local list.
-    tools = AgentOSMcpTools(Capabilities(store, None, {}, '', job_id, record, network=LocalTools(), document_access=False,
-                                         allowed_tools=set(profile_actions(AgentOSMcpTools.PROFILE)),
-                                         inherited_provenance=_provenance(provenance)))
+    capabilities = Capabilities(store, None, {}, '', job_id, record, network=LocalTools(), document_access=False,
+                                allowed_tools=set(profile_actions(AgentOSMcpTools.PROFILE)),
+                                inherited_provenance=_provenance(provenance) | _recorded_private_sources(store, job_id))
+    tools = AgentOSMcpTools(capabilities)
     for line in sys.stdin:
         try:
             request = json.loads(line)
@@ -81,16 +100,23 @@ def serve(data, job_id, provenance=()):
             elif method == 'tools/list': result = {'tools': tools.definitions()}
             elif method == 'tools/call':
                 params = request.get('params', {}); name = params.get('name')
+                # A CLI-chosen name is stored only when it is an offered tool.
+                listed = name if isinstance(name, str) and name in capabilities.allowed_tools else 'unlisted'
                 try:
                     if not _work_running(store, job_id):
                         raise ExecutionError('이 작업은 더 이상 실행 중이 아니어서 도구를 실행하지 않았습니다.')
+                    capabilities.private_provenance.update(_recorded_private_sources(store, job_id))
                     value = tools.call(name, params.get('arguments', {}))
                 except (ValueError, ExecutionError, TypeError) as exc:
                     # Redacted recovery metadata: the reason, never the arguments.
-                    record(str(name)[:80] if isinstance(name, str) else 'unknown', 'failed',
+                    record(listed, 'failed',
                            json.dumps({'scope':'subscription-mcp-bridge','error':redact_reason(str(exc))}, ensure_ascii=False))
                     raise
-                record(name, 'succeeded', json.dumps({'scope':'subscription-mcp-bridge'}, ensure_ascii=False))
+                # The same redacted Evidence the direct route records
+                # (sources, attempted/failed URLs, counts), never the payload.
+                host_action = capabilities.tools[name]['host_action']
+                record(name, 'succeeded', json.dumps({'scope':'subscription-mcp-bridge','host_action':host_action,
+                                                       'evidence':evidence_summary(host_action, value)}, ensure_ascii=False))
                 result = {'content':[{'type':'text','text':json.dumps(value, ensure_ascii=False)}]}
             elif method == 'notifications/initialized': continue
             else: raise ExecutionError('Unsupported MCP request.')

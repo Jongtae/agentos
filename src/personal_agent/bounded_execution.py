@@ -61,12 +61,29 @@ _CALENDAR = 'calendar-connector-not-bound-to-cli-route'
 _MEMORY = 'owner-memory-not-bound-to-cli-route'
 _SPECIALISTS = 'specialists-require-direct-api-model'
 _ISOLATED = 'isolation-restricted-profile'
+# Owner decision on #604 (review of #615): the CLI's own built-in tools can
+# read local owner data that AgentOS never sees, so AgentOS records no taint
+# for it.  A no-model probe of `codex sandbox -P :read-only` (the policy behind
+# `codex exec --sandbox read-only`, Codex 0.153.4) read a fake owner store, a
+# home file and the turn directory; network and writes were blocked.  Claude
+# Code 2.1.280 documents that its file tools may read outside the working
+# directory unless `--restricted` is used.  Adding more public-egress actions
+# on top of that is gated until a verified isolation keeps the CLI's built-in
+# reads inside what AgentOS mediates.
+_UNMEDIATED_READS = 'gated-cli-built-in-reads-not-mediated-by-agentos'
 
 CLI_PROFILES = {
     'bounded-agentos-mcp': {
         # Public reads the native route has by default, one owner-private read
         # and the explicit note write, all under the unchanged guards.
         'actions': ('bounded_public_research', 'list_notes', 'save_note', 'weather', 'web_search'),
+        # Implemented but offered only once this profile's isolation is
+        # qualified (docs/assistant-execution-contract.en.md: new binding paths
+        # start disabled behind per-profile flags).  Default OFF keeps the
+        # restrictive pre-#604 public surface.  `web_search` predates #604 and
+        # stays; it carries the same combination, recorded in the PR.
+        'gated': {'bounded_public_research': _UNMEDIATED_READS, 'weather': _UNMEDIATED_READS},
+        'gate_qualified': False,
         # Approvals bound to the direct-API model fingerprint are not carried to
         # another provider: doing so would silently change the data destination.
         'unavailable': {
@@ -104,13 +121,29 @@ CLI_PROFILES = {
 BOUNDED_PROFILE, ISOLATED_PROFILE = 'bounded-agentos-mcp', 'isolated-agentos-mcp'
 
 
+def _gated(profile):
+    declared = CLI_PROFILES[profile]
+    return {} if declared.get('gate_qualified') else dict(declared.get('gated') or {})
+
+
 def profile_actions(profile):
-    return tuple(CLI_PROFILES[profile]['actions'])
+    """The actions a CLI profile offers now: declared actions minus gated ones."""
+    gated = _gated(profile)
+    return tuple(action for action in CLI_PROFILES[profile]['actions'] if action not in gated)
 
 
 def route_unavailable(profile):
     """Declared reasons for every action a CLI profile does not offer."""
-    return dict(CLI_PROFILES[profile]['unavailable'])
+    return {**CLI_PROFILES[profile]['unavailable'], **_gated(profile)}
+
+
+def profile_status(profile):
+    """What Settings and provenance show about one profile."""
+    declared = CLI_PROFILES[profile]
+    return {'mode': profile, 'tools': list(profile_actions(profile)), 'unavailable': route_unavailable(profile),
+            'qualification': declared['qualification'],
+            'gated_actions': sorted(declared.get('gated') or {}),
+            'gate_qualified': bool(declared.get('gate_qualified'))}
 
 
 def mcp_tool(definition, mode=None):

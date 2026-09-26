@@ -96,6 +96,16 @@ A deliberately restricted isolation profile can be separately offered with expli
 
 Use the existing packages/manifests and broker as the single binding source. Do not revive the retired Settings CapabilityRegistry as a second live connection database. Native, stdio MCP and isolated MCP must derive from the same action contract. Prove description, actual serialization, actual host invocation, Evidence and returned observation on every advertised profile; equal tool-list text is insufficient.
 
+**#604 profile record (owner decision).** `bounded_execution.CLI_PROFILES` is the single declaration of CLI route profiles. The bounded CLI profile implements `weather` and `bounded_public_research` but gates them **off** by default (`gate_qualified: False`). The reason is that the CLI's own built-in tools can read local owner data that AgentOS neither mediates nor taints. That makes more public egress on this route unsafe until isolation is verified. `web_search`, `list_notes` and `save_note` keep their pre-#604 availability, and `web_search` carries the same residual combination.
+
+No-model local evidence, recorded 2026-09-26 with a fake store only:
+
+- Codex 0.153.4 `codex sandbox -P :read-only`, the built-in profile behind `exec --sandbox read-only`: it could read the fake store, a home file and the turn directory. Network and writes were blocked.
+- A Codex permissions profile with filesystem `:minimal=read` plus the turn directory only, passed with `-c`: store and home reads were blocked, while the turn directory and the system interpreter remained usable. Whether the Codex MCP server process is confined too, and whether the bridge still works under that profile, has **not** been observed. Observing it needs a `codex exec` run.
+- Claude Code 2.1.280: there is no local runner for its file tools. Its `--help` states that `--restricted` removes code-running tools and WebFetch and confines file tools to the working directories. AgentOS does not pass that flag today, and none of this is locally verified.
+
+The gate may open for an engine only after a no-model probe of that engine's exact AgentOS argv shows three things: the fake store is unreadable, the turn directory is readable, and a bridge call still works.
+
 ## Public/private information flow
 
 A public lookup is still an external disclosure. Owner-authored text can contain credentials or private material. Permission to send content to one AI provider is not permission to send it to search/weather or another provider. Semantic confidence, sensitivity labels and model-authored sanitization are not Grants.

@@ -232,7 +232,8 @@ class ExposedToolWireBoundary(unittest.TestCase):
     def test_listed_local_tools_are_invocable_through_the_real_bridge(self):
         """Positive control: exposure and host invocation agree for local tools."""
         names = [tool["name"] for tool in self._listed()]
-        self.assertEqual(names, ["bounded_public_research", "list_notes", "save_note", "weather", "web_search"])
+        # Default profile: weather/bounded_public_research are gated (#604 owner decision).
+        self.assertEqual(names, ["list_notes", "save_note", "web_search"])
         replies = self._wire(
             {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
              "params": {"name": "save_note", "arguments": {"content": "wire note"}}},
@@ -338,6 +339,13 @@ class BoundedProfileHostInvocation(unittest.TestCase):
     ]
 
     def setUp(self):
+        from unittest import mock
+        from personal_agent.bounded_execution import CLI_PROFILES
+        # These tests exercise the gated bindings, so the gate is open here;
+        # test_gated_bindings_are_refused_by_default covers the shipped default.
+        gate = mock.patch.dict(CLI_PROFILES["bounded-agentos-mcp"], {"gate_qualified": True})
+        gate.start()
+        self.addCleanup(gate.stop)
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.store = QuickStore(Path(tmp.name) / "state")
@@ -425,6 +433,60 @@ class BoundedProfileHostInvocation(unittest.TestCase):
                 "SELECT tool,status FROM tool_events WHERE job_id=? ORDER BY id", (self.job,))]
         self.assertEqual(events, [("weather", "succeeded"), ("web_search", "succeeded"),
                                   ("bounded_public_research", "succeeded"), ("list_notes", "succeeded")])
+        # Review P1: the success trace carries the direct route's redacted
+        # Evidence -- every contacted URL, failed reads and sources, no payload.
+        traces = self._traces("succeeded")
+        self.assertEqual(traces["bounded_public_research"]["evidence"]["attempted_urls"],
+                         ["https://example.com/a", "https://example.com/b"])
+        self.assertEqual(traces["bounded_public_research"]["evidence"]["read_failures"], ["https://example.com/b"])
+        self.assertEqual(traces["weather"]["evidence"]["sources"], ["https://open-meteo.com/"])
+        self.assertEqual(traces["list_notes"]["evidence"], {"note_count": 1})
+        self.assertNotIn("granted private note", json.dumps(traces, ensure_ascii=False))
+
+    def _traces(self, status):
+        with self.store.db() as db:
+            return {row[0]: json.loads(row[1]) for row in db.execute(
+                "SELECT tool,detail FROM tool_events WHERE job_id=? AND status=?", (self.job, status))}
+
+    def test_gated_bindings_are_refused_by_default(self):
+        from unittest import mock
+        from personal_agent.bounded_execution import CLI_PROFILES
+        with mock.patch.dict(CLI_PROFILES["bounded-agentos-mcp"], {"gate_qualified": False}):
+            replies = self._serve([
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+                self._call(3, "weather", {"city": "Daejeon"}),
+                self._call(4, "bounded_public_research", {"mode": "travel_plan", "query": "q"}),
+                self._call(5, "web_search", {"query": "today news"}),
+            ])
+        self.assertEqual([tool["name"] for tool in replies[2]["result"]["tools"]], ["list_notes", "save_note", "web_search"])
+        self.assertIn("error", replies[3])
+        self.assertIn("error", replies[4])
+        self.assertIn("result", replies[5], "the pre-#604 surface is unchanged")
+        self.assertEqual((self.weather, self.opened, self.searches), ([], [], ["today news"]))
+
+    def test_private_taint_survives_a_second_bridge_process_for_the_same_work(self):
+        """Review P2: a restarted bridge rehydrates taint from this Work's own events."""
+        first = self._serve([self._call(2, "list_notes", {})])
+        self.assertIn("result", first[2])
+        second = self._serve([
+            self._call(2, "weather", {"city": "granted private note"}),
+            self._call(3, "web_search", {"query": "granted private note"}),
+            self._call(4, "bounded_public_research", {"mode": "travel_plan", "query": "granted private note"}),
+        ])
+        for ident in (2, 3, 4):
+            self.assertIn("error", second[ident])
+        self.assertEqual((self.searches, self.weather, self.opened), ([], [], []))
+        # Allowed control: another running Work of the same store is not tainted.
+        other = _running_work(self.store, "another turn")
+        self.assertIn("result", self._serve([self._call(2, "web_search", {"query": "today news"})], job=other)[2])
+
+    def test_an_unlisted_tool_name_is_not_stored_verbatim(self):
+        """Review P3: a CLI-chosen unknown name becomes 'unlisted' in the event store."""
+        replies = self._serve([self._call(2, "run_shell; rm -rf ~ " + "x" * 200, {})])
+        self.assertIn("error", replies[2])
+        with self.store.db() as db:
+            tools = [row[0] for row in db.execute("SELECT tool FROM tool_events WHERE job_id=?", (self.job,))]
+        self.assertEqual(tools, ["unlisted"])
 
     def test_out_of_scope_self_approving_and_stale_calls_are_refused_before_the_network(self):
         cases = [

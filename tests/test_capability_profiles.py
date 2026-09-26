@@ -9,6 +9,7 @@ import re
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from personal_agent import isolated_engine_mcp_bridge
 from personal_agent.agent_runtime import DEFINITIONS, Capabilities, check_arguments
@@ -47,8 +48,23 @@ class _Network:
                 'location': {'name': plan.get('city')}}
 
 
+def qualified_gate():
+    """Test-only: the bounded profile as it would be once its isolation qualifies."""
+    return mock.patch.dict(CLI_PROFILES[BOUNDED_PROFILE], {'gate_qualified': True})
+
+
+GATED = ('bounded_public_research', 'weather')
+
+
 class _Store(unittest.TestCase):
+    #: Classes that exercise the gated bindings themselves run with the gate open.
+    QUALIFIED = False
+
     def setUp(self):
+        if self.QUALIFIED:
+            gate = qualified_gate()
+            gate.start()
+            self.addCleanup(gate.stop)
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.store = QuickStore(Path(tmp.name) / 'state')
@@ -66,6 +82,7 @@ class _Store(unittest.TestCase):
 
 class OneActionSource(_Store):
     """Native schemas and MCP tools/list derive from the same definitions."""
+    QUALIFIED = True
 
     def test_every_profile_tool_is_the_native_definition_on_the_mcp_wire(self):
         for profile, facade in FACADES.items():
@@ -141,6 +158,8 @@ ARGUMENT_CASES = (
 
 
 class ArgumentConversion(_Store):
+    QUALIFIED = True
+
     def test_native_and_mcp_accept_and_refuse_the_same_arguments(self):
         tools = AgentOSMcpTools(self.caps())
         for name, arguments, accepted in ARGUMENT_CASES:
@@ -263,8 +282,49 @@ class SettingsProjection(_Store):
     def test_settings_describe_the_same_profile_the_route_serves(self):
         from personal_agent.quickstart_service import AgentService
         profile = AgentService(self.store).settings()['subscription_execution']
-        self.assertEqual(profile, {'mode': BOUNDED_PROFILE, 'tools': list(profile_actions(BOUNDED_PROFILE)),
-                                   'unavailable': route_unavailable(BOUNDED_PROFILE), 'qualification': 'unqualified'})
+        self.assertEqual(profile, {'mode': BOUNDED_PROFILE, 'tools': ['list_notes', 'save_note', 'web_search'],
+                                   'unavailable': route_unavailable(BOUNDED_PROFILE), 'qualification': 'unqualified',
+                                   'gated_actions': list(GATED), 'gate_qualified': False})
+        for action in GATED:
+            self.assertEqual(profile['unavailable'][action], 'gated-cli-built-in-reads-not-mediated-by-agentos')
+
+
+class QualificationGate(_Store):
+    """Owner decision on #604: the new public-egress bindings default OFF."""
+
+    def test_gated_bindings_are_off_by_default_and_refused(self):
+        self.assertFalse(CLI_PROFILES[BOUNDED_PROFILE]['gate_qualified'])
+        self.assertEqual(profile_actions(BOUNDED_PROFILE), ('list_notes', 'save_note', 'web_search'))
+        tools = AgentOSMcpTools(self.caps())
+        self.assertEqual([t['name'] for t in tools.definitions()], ['list_notes', 'save_note', 'web_search'])
+        for name, arguments in (('weather', {'city': 'Daejeon'}),
+                                ('bounded_public_research', {'mode': 'travel_plan', 'query': 'q'})):
+            with self.subTest(tool=name), self.assertRaises(ExecutionError):
+                tools.call(name, arguments)
+        self.assertEqual(self.network.plans, [])
+        self.assertEqual(set(CLI_PROFILES[BOUNDED_PROFILE]['actions']) - set(profile_actions(BOUNDED_PROFILE)), set(GATED),
+                         'implemented, not removed')
+
+    def test_a_qualified_gate_offers_them(self):
+        with qualified_gate():
+            tools = AgentOSMcpTools(self.caps())
+            self.assertEqual([t['name'] for t in tools.definitions()], sorted(CLI_PROFILES[BOUNDED_PROFILE]['actions']))
+            tools.call('weather', {'city': 'Daejeon'})
+            self.assertNotIn('weather', route_unavailable(BOUNDED_PROFILE))
+        self.assertEqual(self.network.plans, [{'tool': 'weather', 'city': 'Daejeon'}])
+
+    def test_an_invalid_plugin_registry_refuses_package_tools_but_not_built_ins(self):
+        """Review P3: a broken manifest must not make every call raise."""
+        def broken():
+            raise ValueError('invalid manifest')
+        caps = self.caps(packages=[{'id': 'builtin', 'enabled': True, 'tools': [
+            {'id': 'web_search', 'host_action': 'web_search', 'mode': 'read_only'},
+            {'id': 'news_search', 'host_action': 'web_search', 'mode': 'read_only'}], 'roles': []}],
+            current_packages=broken)
+        caps.execute('web_search', {'query': 'q'})
+        with self.assertRaisesRegex(ValueError, '비활성화'):
+            caps.execute('news_search', {'query': 'q'})
+        self.assertEqual(len(self.network.plans), 1)
 
 
 class IsolatedRejectionsAfterDiscovery(_Store):

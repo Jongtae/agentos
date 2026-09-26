@@ -4,6 +4,7 @@ import ipaddress
 import codecs
 from contextlib import contextmanager
 import multiprocessing
+import math
 import re
 import socket
 import ssl
@@ -505,15 +506,26 @@ class LocalTools:
         place=places[0]
         if len({(p.get('country_code'),p.get('admin1')) for p in places})>1:
             raise ValueError('같은 이름의 지역이 여러 곳입니다. 국가와 지역을 더 구체적으로 알려 주세요: '+', '.join(str(p.get('name'))+' '+str(p.get('admin1',''))+' '+str(p.get('country','')) for p in places[:3]))
-        args={'latitude':place['latitude'],'longitude':place['longitude'],'current':'temperature_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m','daily':'temperature_2m_max,temperature_2m_min,precipitation_probability_max','forecast_days':3,'timezone':'auto'}
+        return self.forecast(place['latitude'],place['longitude'],{k:place.get(k) for k in ('name','country','admin1','latitude','longitude')})
+
+    def forecast(self, latitude, longitude, location=None):
+        """The Open-Meteo forecast request and serialization shared by the city
+        path and a resolved location ref (#627): same endpoint, parameters,
+        timeout, timestamps and model-derived scope."""
+        for value,limit in ((latitude,90),(longitude,180)):
+            if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or not -limit<=value<=limit:
+                raise ValueError('날씨를 조회할 위치가 올바르지 않습니다.')
+        args={'latitude':latitude,'longitude':longitude,'current':'temperature_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m','daily':'temperature_2m_max,temperature_2m_min,precipitation_probability_max','forecast_days':3,'timezone':'auto'}
         url='https://api.open-meteo.com/v1/forecast?'+urlencode(args)
         data=request_json(url,None,timeout=15)
-        return {'tool':'weather','location':{k:place.get(k) for k in ('name','country','admin1','latitude','longitude')},'retrieved_at':time.time(),'forecast':data,'sources':[url,'https://open-meteo.com/'],'scope':'Open-Meteo model-derived current weather and three-day forecast; report units and timestamps.'}
+        location=dict(location or {'name':None,'latitude':latitude,'longitude':longitude})
+        return {'tool':'weather','location':location,'retrieved_at':time.time(),'forecast':data,'sources':[url,'https://open-meteo.com/'],'scope':'Open-Meteo model-derived current weather and three-day forecast; report units and timestamps.'}
 
     def execute(self, plan):
         if plan.get('tool')=='web_search':
             return self.search(plan.get('query'),provider=plan.get('provider'),kind=plan.get('kind'),locale=plan.get('locale'))
         if plan.get('tool')=='public_page_read':return self.page_reader.read(plan.get('url'),plan.get('approved_urls'))
+        if plan.get('tool')=='weather' and 'latitude' in plan:return self.forecast(plan.get('latitude'),plan.get('longitude'))
         if plan.get('tool')=='weather':return self.weather(plan.get('city'),plan.get('country',''))
         raise ValueError('지원하지 않는 조회 도구입니다.')
 
@@ -526,7 +538,8 @@ def weather_answer(result):
     """
     f=result['forecast'];c=f['current'];u=f['current_units'];p=result['location']
     timezone=f.get('timezone','')
-    lines=[f"{p['name']}, {p.get('admin1','')}, {p.get('country','')} 날씨",
+    place=', '.join(str(part) for part in (p.get('name') or '요청한 위치',p.get('admin1'),p.get('country')) if part)
+    lines=[f"{place} 날씨",
            f"기준 시각: {c['time']} ({timezone})",
            f"기온: {c['temperature_2m']} {u['temperature_2m']}",
            f"체감 온도: {c['apparent_temperature']} {u['apparent_temperature']}",
@@ -545,4 +558,12 @@ def weather_answer(result):
             row=f"- {day}: 최저 {low} {units.get('temperature_2m_min','')} / 최고 {high} {units.get('temperature_2m_max','')}".rstrip()
             if rain is not None:row+=f", 강수 확률 {rain}{units.get('precipitation_probability_max','')}"
             lines.append(row)
+    basis=result.get('location_source') if isinstance(result.get('location_source'),dict) else None
+    if basis and basis.get('kind') in ('current_position_report','live_position_report'):
+        # #627: a shared position is sender-reported, not verified GPS.
+        lines.append(f"위치 기준: {int(basis.get('age_seconds') or 0)//60}분 전에 보내 주신 위치(검증된 GPS가 아님)")
+    elif basis and basis.get('kind')=='profile_place_anchor':
+        lines.append('위치 기준: 저장된 장소(측정한 현재 위치가 아님)')
+    elif basis:
+        lines.append('위치 기준: 공유한 장소(현재 위치가 아님)')
     return ('\n'.join(lines)+"\nOpen-Meteo 기상 모델 기반 현재 날씨와 예보입니다.\n\n조회 출처:\n"+'\n'.join(result['sources']))

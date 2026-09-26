@@ -30,7 +30,9 @@ class _Capabilities:
     def execute(self, name, arguments): self.calls.append((name, arguments)); return {'ok': True}
 
 
-BOUNDED_NAMES = ['bounded_public_research', 'list_notes', 'save_note', 'weather', 'web_search']
+# The fixture's definitions are ungated: #627's propose_current_state is a
+# declared profile action (Capabilities offers it only while context is on).
+BOUNDED_NAMES = ['bounded_public_research', 'list_notes', 'propose_current_state', 'save_note', 'weather', 'web_search']
 
 
 class BoundedExecutionTests(unittest.TestCase):
@@ -305,7 +307,8 @@ class SubscriptionServiceTests(unittest.TestCase):
             job=store.enqueue('do work','subscription-test')
             self.assertTrue(service.run_one())
             self.assertEqual(adapter.call[0], 'codex')
-            self.assertEqual(adapter.call[2], BOUNDED_NAMES)
+            # The real service route with current context off (#627): no gated action.
+            self.assertEqual(adapter.call[2], [name for name in BOUNDED_NAMES if name != 'propose_current_state'])
             self.assertEqual(store.job(job)['response'], 'engine answer')
 
     def test_summary_regression_sends_approved_notes_to_subscription_engine(self):

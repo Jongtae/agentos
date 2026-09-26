@@ -139,6 +139,7 @@ class StrictLaunchArguments(unittest.TestCase):
         trusted = self.adapter.command('claude-code', '/runtime/claude', 'prompt', self.config, 'instructions')
         strict = self.adapter.command('claude-code', '/runtime/claude', 'prompt', self.config, 'instructions', profile=STRICT_PROFILE)
         allow = ['--allowedTools', 'mcp__agentos__bounded_public_research,mcp__agentos__list_notes,'
+                                   'mcp__agentos__propose_current_state,'
                                    'mcp__agentos__save_note,mcp__agentos__weather,mcp__agentos__web_search']
         # #623: both pre-approve exactly the same bridge tools; strict also
         # removes every built-in tool.

@@ -587,6 +587,112 @@ class SecretTests(_Case):
         self.assertNotIn('V7654321', self.service.prepared_text({'id': 'next'}))
 
 
+class PreparationScopeTests(_Case):
+    """PR #671 review: a preparation's Work sees its origin and goal only, and
+    persists nothing unscrubbed; a proposal message accepts only what it shows."""
+
+    ORIGIN = '매일 점심 후보 준비해 줘 ORIGIN-MARK'
+    UNRELATED = '어제 병원 검사 결과 이야기 UNRELATED-MARK'
+
+    def origin_then_unrelated(self):
+        self.script = [{'content': None, 'tool_calls': [call('1', 'schedule_preparation', kind='prepare', goal='점심 후보 3곳 준비',
+                                                             due=self.due_iso(600), recurrence='daily')]},
+                       finish('f', '1', summary='매일 준비할게요.')]
+        origin = self.web_turn(self.ORIGIN)
+        [row] = self.rows()
+        self.assertEqual((row['state'], row['created_from']), ('scheduled', origin))
+        self.script = [{'content': '그랬군요.'}]
+        self.web_turn(self.UNRELATED)
+        self.now += 700
+        self.assertTrue(self.tick())
+        return row
+
+    def test_direct_route_preparation_work_sees_only_its_origin_and_goal(self):
+        self.origin_then_unrelated()
+        seen = []
+        self.script = [lambda body: seen.append(json.loads(json.dumps(body['messages']))) or {'content': '후보: 국수집'}]
+        self.assertTrue(self.service.run_one())
+        sent = json.dumps(seen[0], ensure_ascii=False)
+        self.assertIn('ORIGIN-MARK', sent)
+        self.assertIn('점심 후보 3곳 준비', sent)
+        self.assertNotIn('UNRELATED-MARK', sent)
+        self.assertEqual([m['role'] for m in seen[0][1:]], ['user', 'user'])
+
+    def test_cli_route_preparation_work_sees_only_its_origin_and_goal(self):
+        from personal_agent.bounded_execution import ExecutionResult
+        from personal_agent.subscription_engines import SubscriptionEngines
+        prompts = []
+
+        class Engine:
+            def execute(self_, engine, prompt, tools, **kwargs):
+                prompts.append(prompt)
+                return ExecutionResult('준비했습니다.', engine, 0)
+
+        self.service = AgentService(self.store, ModelAdapter(self._model), self._telegram, execution_adapter=Engine(),
+                                    subscription_engines=SubscriptionEngines(finder=lambda _: '/runtime/cli', clock=lambda: 1))
+        self.service.preparations.clock = lambda: self.now
+        self.service.use_decision_engine(self.judge)
+        self.service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
+        origin = self.web_turn(self.ORIGIN)
+        self.web_turn(self.UNRELATED)
+        row = self.service.preparations.create(kind='prepare', goal='점심 후보 3곳 준비', due_at=self.now + 60,
+                                               timezone='Asia/Seoul', recurrence=None, channel='web', created_from=origin,
+                                               state=prep.STATE_SCHEDULED, accepted_by=prep.ACCEPTED_OWNER_SETTINGS)
+        self.now += 120
+        self.assertTrue(self.tick())
+        prompts.clear()
+        self.assertTrue(self.service.run_one())
+        [prompt] = prompts
+        self.assertIn('ORIGIN-MARK', prompt)
+        self.assertIn('점심 후보 3곳 준비', prompt)
+        self.assertNotIn('UNRELATED-MARK', prompt)
+        self.assertEqual(len(self.runs(row['id'])), 1)
+
+    def test_a_secret_in_a_preparation_answer_is_never_persisted_or_replayed(self):
+        self.origin_then_unrelated()
+        # The same reply to the loop's one execution check.
+        self.script = [{'content': f'후보: 국수집 (키 {SECRET})'}] * 2
+        self.assertTrue(self.service.run_one())
+        [run] = [job for job in self.store.jobs() if (job['request_key'] or '').startswith(prep.REQUEST_KEY_PREFIX)]
+        self.assertIn('국수집', run['response'])
+        self.assertNotIn(SECRET, run['response'])
+        with self.store.db() as db:
+            stored = ' '.join(row['content'] for row in db.execute('SELECT content FROM messages'))
+        self.assertIn('국수집', stored)
+        self.assertNotIn(SECRET, stored)
+        self.tick()
+        seen = []
+        self.script = [lambda body: seen.append(json.loads(json.dumps(body['messages']))) or {'content': '좋아요.'}]
+        self.web_turn('점심 뭐 먹지?')
+        replay = json.dumps(seen[0], ensure_ascii=False)
+        self.assertIn('국수집', replay, 'the earlier answer is in the next turn')
+        self.assertNotIn(SECRET, replay)
+
+    def test_accept_schedules_only_the_proposals_the_message_showed(self):
+        self.service.use_decision_engine(engine(preparation=False))
+        self.script = [{'content': '알겠습니다.'}]
+        work = self.receive('여러 가지 준비해 줘')
+        for index in range(12):
+            self.service.preparations.create(kind='prepare', goal=f'P{index:02d}Q ' + '긴 준비 목표 ' * 60, due_at=self.now + 3600 + index,
+                                             timezone='Asia/Seoul', recurrence=None, channel='web', created_from=work,
+                                             state=prep.STATE_PROPOSED)
+        self.service.queue_preparation_proposal(self.store.job(work))
+        self.service.deliver_one()
+        self.service.deliver_notification()
+        proposal = self.sends()[-1]
+        self.assertLessEqual(len(proposal['text']), prep.PROPOSAL_TEXT_LIMIT)
+        self.assertIn('설정 > 준비해 둔 일', proposal['text'])
+        shown = [row for row in self.rows() if row['goal_text'][:4] in proposal['text']]
+        self.assertTrue(0 < len(shown) < 12)
+        with self.store.db() as db:
+            notification = dict(db.execute("SELECT * FROM telegram_notifications WHERE job_id=? AND kind='preparation_proposed'",
+                                           (work,)).fetchone())
+        self.tap(f"p7p:{notification['id']}:accept", notification['message_id'])
+        states = {row['goal_text'][:4]: row['state'] for row in self.rows()}
+        self.assertEqual({key for key, state in states.items() if state == 'scheduled'}, {row['goal_text'][:4] for row in shown})
+        self.assertEqual(sum(state == 'proposed' for state in states.values()), 12 - len(shown))
+
+
 class SurfaceTests(unittest.TestCase):
     def test_the_tool_is_offered_only_where_the_service_wired_it(self):
         with tempfile.TemporaryDirectory() as tmp:

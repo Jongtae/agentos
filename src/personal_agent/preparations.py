@@ -264,6 +264,35 @@ def proposal_summary(row):
     return f"[{kind}] {local_text(row['due_at'], row['timezone'])}{repeat} — {row['goal_text']}"
 
 
+PROPOSAL_HEADER = '다음 준비를 예약할까요? 수락하면 정해진 때에 실행합니다.'
+#: One Telegram proposal message stays well under Telegram's 4096 characters.
+PROPOSAL_TEXT_LIMIT = 3500
+
+
+def proposal_page(rows):
+    """``(shown, remaining)``: the proposals one Telegram message offers.
+
+    Rows are taken in order while their lines fit ``PROPOSAL_TEXT_LIMIT``;
+    the rest are only counted (the owner accepts them in Settings).  The
+    message's buttons are bound to ``digest(shown)``, never to rows it did
+    not show.
+    """
+    shown, size = [], len(PROPOSAL_HEADER) + 120  # room for the "more in Settings" line
+    for row in rows:
+        size += 1 + len(proposal_summary(row))
+        if shown and size > PROPOSAL_TEXT_LIMIT:
+            break
+        shown.append(row)
+    return shown, len(rows) - len(shown)
+
+
+def proposal_text(shown, remaining):
+    text = PROPOSAL_HEADER + '\n' + '\n'.join(proposal_summary(row) for row in shown)
+    if remaining:
+        text += f'\n그 밖의 제안 {remaining}개는 이 메시지로 수락되지 않습니다. 설정 > 준비해 둔 일에서 확인하고 수락할 수 있습니다.'
+    return text
+
+
 def digest(rows):
     """The exact set of proposals one Telegram message offers."""
     material = json.dumps(sorted((row['id'], row['kind'], row['goal_text'], row['due_at'], row.get('recurrence'))

@@ -515,19 +515,47 @@ class AgentService:
         lookup exclusion set) and stored secrets / credential shapes are
         removed before it is stored; deterministic, no judgment.
         """
+        return self.scrub_work_text(job['id'],job.get('response'))
+
+    def scrub_work_text(self, work_id, text):
+        """``text`` with Work ``work_id``'s saved private values and stored secrets removed (#659)."""
         from .browser_session import redact_private_values
         tools={tool['id']:tool for package in self.runtime_packages() for tool in package['tools']}
-        text,_count=redact_private_values(str(job.get('response') or ''),work_written_values(self.store,job['id'],tools))
+        text,_count=redact_private_values(str(text or ''),work_written_values(self.store,work_id,tools))
         return self._redact_known_secrets(text)
+
+    def preparation_history(self, job):
+        """The only conversation a preparation's Work is shown (#659).
+
+        Structural, not semantic: a Work started by a preparation (its
+        request key) sees the Work that created the preparation - its owner
+        request, scrubbed - and the accepted goal, never the unrelated
+        conversation that happened since.  Profile, current context and
+        prepared answers still arrive as the usual turn_context sections.
+        """
+        rows=[]
+        row=self.preparations.get(prep.preparation_of(job.get('request_key')))
+        origin=self.store.job(row['created_from']) if row and row.get('created_from') else None
+        if origin and origin.get('message'):
+            rows.append({'role':'user','content':self.scrub_work_text(origin['id'],origin['message']),
+                         'job_id':origin['id'],'channel':origin.get('channel'),'qualifier':None})
+        rows.append({'role':'user','content':job['message'],'job_id':job['id'],'channel':job.get('channel'),'qualifier':None})
+        return rows
 
     def queue_preparation_proposal(self, job):
         """Offer this Work's unaccepted preparations to the paired owner once (#659)."""
         rows=self.preparations.proposed_from(job['id'])
-        if rows:self.queue_notification(job,'preparation_proposed',fingerprint=prep.digest(rows))
+        if rows:self.queue_notification(job,'preparation_proposed',fingerprint=prep.digest(prep.proposal_page(rows)[0]))
 
-    def preparation_proposal_text(self, rows):
-        lines=[prep.proposal_summary(row) for row in rows]
-        return ('다음 준비를 예약할까요? 수락하면 정해진 때에 실행합니다.\n'+'\n'.join(lines))[:3500]
+    def offered_proposals(self, notification):
+        """The exact proposals a proposal message shows, or [] if they changed (#659).
+
+        Recomputed from the Work's current proposals; the buttons act only
+        when the rendered set still has the digest the message was queued with.
+        """
+        shown,remaining=prep.proposal_page(self.preparations.proposed_from(notification['job_id']))
+        if not shown or prep.digest(shown)!=notification['fingerprint']:return [],0
+        return shown,remaining
 
     @staticmethod
     def preparation_reply_prefix(job):
@@ -3581,8 +3609,8 @@ class AgentService:
                 ]]}
             elif notification['kind']=='preparation_proposed':
                 # #659: the exact proposals of one Work; changed since -> not offered.
-                proposals=self.preparations.proposed_from(notification['job_id'])
-                if not proposals or prep.digest(proposals)!=notification['fingerprint']:
+                proposals,remaining=self.offered_proposals(notification)
+                if not proposals:
                     self.store.update_notification(notification['id'],'cancelled')
                     return True
                 reply_markup={'inline_keyboard':[[
@@ -3590,7 +3618,7 @@ class AgentService:
                     {'text':'예약 안 함','callback_data':f"p7p:{notification['id']}:deny"},
                 ]]}
             try:
-                text=(self.preparation_proposal_text(proposals) if notification['kind']=='preparation_proposed' else
+                text=(prep.proposal_text(proposals,remaining) if notification['kind']=='preparation_proposed' else
                       LOCAL_DOCUMENT_APPROVAL_TEXT if notification['kind']=='approval_needed'
                       and self.document_resume_eligible(notification.get('job_id'))
                       else self.browser_step_prompt(notification.get('job_id')) if notification['kind']=='browser_approval_needed'
@@ -3832,11 +3860,11 @@ class AgentService:
                 parts=data.split(':')
                 if len(parts)==3 and parts[2] in ('accept','deny'):
                     notification=self.store.notification(parts[1])
-                    proposals=self.preparations.proposed_from(notification['job_id']) if notification else []
+                    # Only the rows this message rendered (digest of the shown page).
+                    proposals=self.offered_proposals(notification)[0] if notification else []
                     exact=(notification and notification['kind']=='preparation_proposed' and notification['state']=='sent'
                            and notification['generation']==generation and notification['chat_id']==sender
-                           and notification['message_id']==message.get('message_id') and proposals
-                           and notification['fingerprint']==prep.digest(proposals))
+                           and notification['message_id']==message.get('message_id') and proposals)
                     if exact:
                         for row in proposals:
                             if parts[2]=='accept':self.preparations.accept(row['id'],prep.ACCEPTED_OWNER_BUTTON)
@@ -4229,7 +4257,9 @@ class AgentService:
                         config=self.store.config('model',{})
                         key=self.store.secret('model_key')
                         route_snapshot=self.store.config('subscription_engine',{})
-                    stored_history=self.store.history()[-16:]
+                    # #659: a preparation's Work sees its own origin and goal only.
+                    stored_history=(self.preparation_history(job) if prep.preparation_of(job.get('request_key'))
+                                    else self.store.history()[-16:])
                     document_jobs=set(self.store.config('file_workspace_document_jobs',[]))
                     document_history=any(message.get('job_id') in document_jobs for message in stored_history)
                     # Earlier replies of failed/partial/interrupted Work carry
@@ -4588,6 +4618,10 @@ class AgentService:
                     if context_sources and '컨텍스트:' not in response:
                         response+='\n\n컨텍스트 출처:\n'+'\n'.join(context_sources)
                 response=calendar_notice+response
+                # #659: a preparation's answer is kept and replayed into later
+                # turns, so it is scrubbed before it is persisted anywhere.
+                scrub=(lambda text:self.scrub_work_text(job['id'],text) if text else text) if prep.preparation_of(job.get('request_key')) else (lambda text:text)
+                response=scrub(response)
                 self.record_work_sources(job['id'],work_sources)
                 with self.store.db() as db:
                     db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('assistant',response,job['channel'],time.time(),job.get('workspace_id'),job['id']))
@@ -4603,6 +4637,7 @@ class AgentService:
                     if outcome=='unknown':
                         cause=spoken=unknown_statement or None
                     observed=verified_portion(verified_parts) if outcome=='partial' else None
+                    cause,spoken,observed=scrub(cause),scrub(spoken),scrub(observed)
                     db.execute("UPDATE jobs SET status=?,response=?,error=?,provider=?,model=?,delivery=?,owner_cause=?,owner_verified=? WHERE id=?",
                                (outcome,response,cause,provider,model,'pending' if job['chat_id'] else 'none',spoken,observed,job['id']))
                 self.record_turn_provenance(job['id'],goal=self.work_goal(job['id'],work_capabilities[0],outcome))
@@ -4621,6 +4656,9 @@ class AgentService:
                     transcript=calendar_notice+self.projection.blocked_reply(self.connector_owner_id(job),exc.kind,response)
                 else:
                     transcript=calendar_notice+'이 요청은 완료하지 못했습니다: '+response
+                if prep.preparation_of(job.get('request_key')):
+                    # #659: see the success path; nothing unscrubbed is persisted.
+                    response,transcript=self.scrub_work_text(job['id'],response),self.scrub_work_text(job['id'],transcript)
                 # Tool reads of a failed run are also read back from its
                 # durable tool events; this records what was declared so far
                 # plus the run-time labels of a worker that had started.

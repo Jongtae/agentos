@@ -168,7 +168,8 @@ class DecisionTable(unittest.TestCase):
         for order in ((search, memory), (memory, search)):
             with self.subTest([c['function']['name'] for c in order]):
                 self.wire.plans.clear()
-                replies = [calls(*order), answer()]
+                # #657: a plain answer after tools is checked once for a completion claim.
+                replies = [calls(*order), answer(), answer()]
                 caps = self.caps((), [request])
                 run_agent(ModelAdapter(lambda *a, **k: replies.pop(0)), CFG, '', [{'role': 'user', 'content': request}],
                           '', caps, lambda *e: None)
@@ -238,17 +239,19 @@ class DecisionTable(unittest.TestCase):
             bodies.append(body)
             names = [tool['function']['name'] for tool in body['tools']]
             last = body['messages'][-1]
+            # #657: a failed path is followed by a system "Path check" turn.
             if 'delegate_agent' in names:
-                return answer('parent done') if last['role'] == 'tool' else calls(tool_call(
+                return answer('parent done') if last['role'] in ('tool', 'system') else calls(tool_call(
                     'delegate_agent', {'agent_id': 'researcher', 'task': '병원 검색'}))
-            return answer('report') if last['role'] == 'tool' else calls(tool_call('web_search', {'query': '병원'}, 'c1'))
+            return answer('report') if last['role'] in ('tool', 'system') else calls(tool_call('web_search', {'query': '병원'}, 'c1'))
 
         caps = Capabilities(self.store, ModelAdapter(transport), CFG, '', 'job-1', lambda *a: None, network=self.wire,
                             inherited_provenance=set(self.NOTES), lookup_sources=lambda: {'permitted': ['병원 검색'], 'excluded': []})
         run_agent(ModelAdapter(transport), CFG, '', [{'role': 'user', 'content': 'go'}], '', caps, lambda *a: None)
         self.assertEqual(self.wire.plans, [])
         child = [body for body in bodies if 'delegate_agent' not in [t['function']['name'] for t in body['tools']]]
-        self.assertIn('이전 대화의 저장된 메모', json.loads(child[-1]['messages'][-1]['content'])['error'])
+        refusal = next(json.loads(m['content']) for m in child[-1]['messages'] if m['role'] == 'tool')
+        self.assertIn('이전 대화의 저장된 메모', refusal['error'])
 
     def test_the_refusal_names_every_actual_source(self):
         text = egress_refusal('weather', {'owner-calendar', HISTORY_PREFIX + 'personal-space', 'delegated:owner-memory'})
@@ -353,7 +356,8 @@ class ServiceComposition(unittest.TestCase):
         self.turns(BOOK_REQUEST)
         self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': BOOK_QUERY}])
         self.assertEqual(multi_selections(engine), [], 'no lookup sensitivity judgment is asked')
-        self.assertEqual(self.store.jobs()[0]['status'], 'succeeded')
+        # #657: the worker claimed no completion and no engine judged one, so the Work is not `succeeded`.
+        self.assertEqual(self.store.jobs()[0]['status'], 'partial')
 
     def test_cli_route_sends_a_book_title_request_as_the_worker_composed_it(self):
         engine = FixtureDecisionEngine()
@@ -771,13 +775,15 @@ class PilotPostureEndToEnd(unittest.TestCase):
         service = self.api(self.steps([('web_search', {'query': '성남 병원'})]))
         job = self.turn(service, '성남 병원 찾아줘')
         self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '성남 병원'}])
-        self.assertEqual(job['status'], 'succeeded')
+        # #657: the search went out at once; with no DecisionEngine to judge a
+        # completion the Work stays `partial`, never `succeeded`.
+        self.assertEqual(job['status'], 'partial')
 
     def test_api_route_explicit_search_still_goes_out_as_typed(self):
         service = self.api(self.steps([('web_search', {'query': '성남 병원'})]))
         job = self.turn(service, '/search 성남 병원')
         self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '성남 병원'}])
-        self.assertEqual(job['status'], 'succeeded')
+        self.assertEqual(job['status'], 'partial')
 
     def test_cli_route_without_an_engine_sends_the_request_at_once(self):
         service, refusals = self.cli(('web_search', {'query': '성남 병원'}))

@@ -43,6 +43,8 @@ class ProjectionTestCase(unittest.TestCase):
         self.outbound = []      # ('send'|'edit', text) in the order the owner would see them
         self.text = '완료했습니다.'
         self.plan = []
+        # #657: when set, the model ends a tool-using turn with a finish claim citing every result it was shown.
+        self.claim = False
         self.update_id = 100
 
         def transport(url, body=None, headers=None, timeout=60):
@@ -65,6 +67,12 @@ class ProjectionTestCase(unittest.TestCase):
                 name, arguments = self.plan.pop(0)
                 return {'message': {'content': '', 'tool_calls': [
                     {'id': f'call-{len(self.plan)}', 'function': {'name': name, 'arguments': arguments}}]}}
+            refs = [json.loads(m['content']).get('ref') for m in body.get('messages', [])
+                    if m.get('role') == 'tool' and str(m.get('content', '')).startswith('{')]
+            if self.claim and any(refs):
+                return {'message': {'content': '', 'tool_calls': [
+                    {'id': 'finish', 'function': {'name': 'finish', 'arguments': {
+                        'status': 'done', 'evidence_refs': [ref for ref in refs if ref], 'summary': self.text}}}]}}
             return {'message': {'content': self.text}}
 
         self.transport, self.model_transport = transport, model
@@ -149,6 +157,10 @@ class LongWorkTests(ProjectionTestCase):
         self.plan = [('web_search', {'query': '제주 항공권'}), ('web_search', {'query': '제주 숙소'}),
                      ('web_search', {'query': '제주 렌터카'})]
         self.text = '항공권, 숙소, 렌터카를 비교한 결과입니다.'
+        # #657: the comparison is claimed from the three results and judged fulfilled.
+        from test_agency_loop import goal_engine
+        self.claim = True
+        self.service.use_decision_engine(goal_engine(True))
         job_id = self.receive('제주 여행 준비 자료 조사해줘')
         self.assertEqual(self.outbound, [], 'nothing is said when the request arrives')
         # The Work is still waiting after the acknowledgement delay (the worker was busy).

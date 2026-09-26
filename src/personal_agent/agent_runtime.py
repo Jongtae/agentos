@@ -2266,13 +2266,13 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
     check_arguments(spec,args)
     validated=True
     action=capabilities.tools[name]['host_action']
+    cache_key=json.dumps([name,args],sort_keys=True)
+    attempts[cache_key]=attempts.get(cache_key,0)+1;attempt=attempts[cache_key]
     # #657: the same path with the same input is refused, not re-run.
     path=path_key(action,args,page)
     if path is not None:
      if path in paths:raise ToolError(REPEAT_PATH_TEXT,'repeat_path')
      paths.add(path)
-    cache_key=json.dumps([name,args],sort_keys=True)
-    attempts[cache_key]=attempts.get(cache_key,0)+1;attempt=attempts[cache_key]
     if attempt>1:raise ToolError('같은 도구 요청은 현재 작업에서 한 번만 실행합니다. 결과를 사용하거나 새 요청을 보내 주세요.','duplicate_call')
     kind=alternative_kind(action,args,last_search,bool(trail) and trail[-1][1] in ('failed','incomplete'))
     if action in SEARCH_BACKED_ACTIONS:last_search=args

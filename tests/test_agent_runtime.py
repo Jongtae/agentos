@@ -4,6 +4,7 @@ from personal_agent.agent_runtime import Capabilities,run_agent
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
 from personal_agent.providers import ModelAdapter
+from test_agency_loop import finish,judgments
 CFG={'provider':'compatible','endpoint':'https://openrouter.ai/api/v1','model':'openrouter/free'}
 class GeneralRuntimeTests(unittest.TestCase):
  def setUp(self):
@@ -56,7 +57,7 @@ class GeneralRuntimeTests(unittest.TestCase):
    elif count==2:
     hit=json.loads(b['messages'][-1]['content'])['files'][0];name,args='read_file',{'root_id':hit['root_id'],'path':hit['path']}
    else:
-    self.assertIn('October 12',b['messages'][-1]['content']);return {'choices':[{'message':{'content':'October 12'}}]}
+    self.assertIn('October 12',b['messages'][-1]['content']);return {'choices':[{'message':finish('f','2',summary='October 12')}]}
    return {'choices':[{'message':{'tool_calls':[{'id':str(count),'function':{'name':name,'arguments':json.dumps(args)}}]}}]}
   result=run_agent(ModelAdapter(transport),CFG,'',[{'role':'user','content':'Aurora 출시일을 파일에서 찾아줘'}],'',self.caps,lambda *a:None)
   self.assertIn('October 12',result.content)
@@ -105,7 +106,7 @@ class ProviderToolProtocolTests(unittest.TestCase):
   def transport(url,body,headers):
    seen.append(body['model'])
    if len(seen)==1:return {'model':'selected/model:free','choices':[{'message':{'tool_calls':[{'id':'a','function':{'name':'list_agents','arguments':'{}'}}]}}]}
-   return {'model':'selected/model:free','choices':[{'message':{'content':'done'}}]}
+   return {'model':'selected/model:free','choices':[{'message':finish('f','a',summary='done')}]}
   with tempfile.TemporaryDirectory() as folder:
    store=QuickStore(Path(folder));adapter=ModelAdapter(transport)
    caps=Capabilities(store,adapter,CFG,'','job',lambda *a:None)
@@ -126,7 +127,7 @@ class ProviderToolProtocolTests(unittest.TestCase):
    if len(seen)==2:raise ProviderError('rate limited',status=429)
    self.assertEqual(body['model'],'openrouter/free')
    self.assertEqual(body['messages'][-1]['role'],'tool')
-   return {'model':'other/model:free','choices':[{'message':{'content':'saved'}}]}
+   return {'model':'other/model:free','choices':[{'message':finish('f','a',summary='saved')}]}
   with tempfile.TemporaryDirectory() as folder:
    store=QuickStore(Path(folder));adapter=ModelAdapter(transport)
    caps=Capabilities(store,adapter,CFG,'','job',lambda *a:None)
@@ -138,10 +139,10 @@ class ProviderToolProtocolTests(unittest.TestCase):
    nonlocal count
    count+=1
    if count<3:return {'choices':[{'message':{'tool_calls':[{'id':str(count),'function':{'name':'list_agents','arguments':'{"bad":"key"}' if count==1 else '{}'}}]}}]}
-   return {'choices':[{'message':{'content':'done'}}]}
+   return {'choices':[{'message':finish('f','2',summary='done')}]}
   with tempfile.TemporaryDirectory() as folder:
    store=QuickStore(Path(folder));adapter=ModelAdapter(transport)
-   caps=Capabilities(store,adapter,CFG,'','job',lambda *a:None)
+   caps=Capabilities(store,adapter,CFG,'','job',lambda *a:None,judgments=judgments(True))
    result=run_agent(adapter,CFG,'',[{'role':'user','content':'list agents'}],'',caps,lambda *a:events.append(a))
    self.assertEqual(result.outcome,'succeeded')
    self.assertIn(('list_agents','failed'),[(e[0],e[1]) for e in events])
@@ -160,11 +161,11 @@ class ProviderToolProtocolTests(unittest.TestCase):
    result=run_agent(adapter,CFG,'',[{'role':'user','content':'search'}],'',caps,lambda *a:events.append(a))
   self.assertEqual(result.outcome,'failed')
   # #607: one bounded transient retry inside the first call; the identical
-  # second call is still refused before the network.
+  # second call is still refused before the network (#657: as a repeated path).
   self.assertEqual(len(calls),2)
   failed=[json.loads(e[2]) for e in events if e[0]=='web_search' and e[1]=='failed' and 'attempt' in json.loads(e[2])]
   self.assertEqual([e['attempt'] for e in failed],[1,2])
-  self.assertIn('한 번만 실행',failed[-1]['error'])
+  self.assertEqual(failed[-1]['code'],'repeat_path')
  def test_trace_evidence_keeps_file_content_out_of_event_store(self):
   events=[];count=[0]
   def transport(url,body,headers):

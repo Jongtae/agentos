@@ -73,6 +73,9 @@ class _OwnerSurface(unittest.TestCase):
         # in order, then answer".
         self.model_plan = []
         self.model_text = MODEL_ANSWER
+        # #657: when set, the model ends a tool-using turn with a finish
+        # claim citing every result it was shown, instead of plain text.
+        self.model_claim = False
 
         self.service = self.boot()
         self.base = self.serve(self.service)
@@ -98,6 +101,13 @@ class _OwnerSurface(unittest.TestCase):
                 return {'choices': [{'message': {'tool_calls': [
                     {'id': f'call-{done}', 'type': 'function',
                      'function': {'name': name, 'arguments': arguments}}]}}]}
+            refs = [json.loads(m['content']).get('ref') for m in body['messages']
+                    if m.get('role') == 'tool' and str(m.get('content', '')).startswith('{')]
+            if self.model_claim and any(refs):
+                return {'choices': [{'message': {'tool_calls': [
+                    {'id': 'finish', 'type': 'function', 'function': {'name': 'finish', 'arguments': json.dumps(
+                        {'status': 'done', 'evidence_refs': [ref for ref in refs if ref], 'summary': self.model_text},
+                        ensure_ascii=False)}}]}}]}
             return {'choices': [{'message': {'content': self.model_text}}]}
         raise AssertionError('unexpected outbound call: ' + url)
 
@@ -654,6 +664,10 @@ class RefusedRunShowsItsCause(_OwnerSurface):
         self.model_plan = [('list_notes', json.dumps({'unsupported': 'argument'})),
                            ('list_notes', '{}')]
         self.model_text = MODEL_ANSWER
+        # #657: the corrected read is claimed and judged as the request fulfilled.
+        self.model_claim = True
+        from test_agency_loop import goal_engine
+        self.service.use_decision_engine(goal_engine(True))
         job = self.store.job(self.ask('메모 목록을 정리해 줘'))
         self.model_plan = []
 

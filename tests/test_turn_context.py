@@ -560,7 +560,9 @@ class MissingWeatherBinding(_RouteFixture):
     def _weather_model(messages):
         last = messages[-1]
         if last['role'] == 'tool':
-            return _answer('대전은 지금 1.2mm 비가 옵니다.')
+            # #657: the answer is a completion claim citing the observation.
+            return _tool_call('finish', {'status': 'done', 'evidence_refs': [json.loads(last['content'])['ref']],
+                                         'summary': '대전은 지금 1.2mm 비가 옵니다.'})
         if last['role'] == 'user' and '비' in last['content']:
             # #605 R2: in a clean context the worker's transliteration and a
             # validated ISO-2 country code are sent (no judgment since #654).

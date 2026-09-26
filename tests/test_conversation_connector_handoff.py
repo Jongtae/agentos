@@ -25,7 +25,7 @@ from personal_agent.connector_contract import (PENDING_WORK_KEY, ConnectorContra
                                                ResumeState)
 from personal_agent.conversation_handoff import (CONVERSATION_RESUME_KEY, ConnectorHandoff,
                                                  ConversationHandoffError, ConversationJudgments,
-                                                 INTENT_MAIL_SEARCH,
+                                                 INTENT_CALENDAR_CREATE, INTENT_MAIL_SEARCH,
                                                  IntentClassifier, SUPERSEDED_WORK_ERROR)
 from personal_agent.decision import (OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine,
                                      SelectionDecision, fixture_confidence)
@@ -44,6 +44,9 @@ GMAIL_SCOPES = (GMAIL_READONLY_SCOPE,)
 
 MAIL_REQUEST = '메일에서 예산 관련 내용 찾아줘'
 CALENDAR_REQUEST = '내일 오후 3시에 팀 회의 일정 잡아줘'
+#: #672: a calendar create is selected by the DecisionEngine's
+#: ``capability-need`` judgment, scripted here for exactly these requests.
+CALENDAR_REQUESTS = (CALENDAR_REQUEST, '내일 오후 3시에 치과 일정 잡아줘')
 
 #: A request may itself contain a secret.  This one is used to prove the
 #: pending resume reference never becomes a second place it is stored.
@@ -105,6 +108,9 @@ class HandoffTestCase(unittest.TestCase):
     def none_unsupported(context, candidates, question):
         if context.purpose == 'unsupported-capability':
             return SelectionDecision(OUTCOME_DECIDED, 'none-of-these', candidates,
+                                     fixture_confidence())
+        if context.purpose == 'capability-need' and context.facts.get('owner_message') in CALENDAR_REQUESTS:
+            return SelectionDecision(OUTCOME_DECIDED, INTENT_CALENDAR_CREATE, candidates,
                                      fixture_confidence())
 
     def judge_withdrawal(self, *withdrawing):

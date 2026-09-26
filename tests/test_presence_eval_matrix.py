@@ -69,6 +69,10 @@ OWNER = f'telegram:{CHAT}'
 ZONE = 'Asia/Seoul'
 #: Tuesday 2026-09-22 10:00 KST: a fixed clock for Calendar previews.
 CAL_NOW = datetime(2026, 9, 22, 10, 0, tzinfo=ZoneInfo(ZONE)).timestamp()
+#: The calendar create requests the scripted DecisionEngine judges to need
+#: ``calendar-create`` (#672: no request word selects it).
+CALENDAR_REQUESTS = ('내일 오후 3시에 치과 일정 잡아줘', 'book a dentist appointment tomorrow at 3pm for 30 minutes',
+                     '금요일 오전 9시 스탠드업 30분 일정 등록해줘', '다음 주 화요일 10시 반 병원 예약 일정 추가해줘')
 PRESENCE_METHODS = ('setMessageReaction', 'sendChatAction', 'sendRichMessageDraft', 'sendMessageDraft')
 #: Administrative lifecycle phrasing that must never be a routine bubble.
 LIFECYCLE_CHATTER = ('처리 중입니다', '처리가 끝났습니다', '요청을 받았습니다', '작업을 시작', '작업이 완료',
@@ -141,6 +145,9 @@ class PresenceEval(unittest.TestCase):
         self.relations = {}         # owner utterance -> follow-up relation the fixture engine judges
         self.withdrawals = set()    # owner utterances the fixture engine judges as withdrawing parked work
         self.remember_requests = set()  # owner utterances the fixture engine judges as explicit remember requests
+        # #672: owner utterance -> capability the fixture engine's capability-need
+        # judgment selects.  A calendar create is chosen only by this judgment.
+        self.capability_needs = {text: 'calendar-create' for text in CALENDAR_REQUESTS}
         self.picked = None          # what the fixture macOS folder dialog returns
         # #657: when set, the model ends a tool-using turn with a finish claim
         # citing every result it was shown; `goal_reached` is the fixture's
@@ -201,6 +208,9 @@ class PresenceEval(unittest.TestCase):
         def choose(context, candidates, question):
             if context.purpose == 'conversation-followup':
                 answer = self.relations.get(context.facts.get('owner_message'), 'none-of-these')
+                return SelectionDecision(OUTCOME_DECIDED, answer, candidates, fixture_confidence())
+            if context.purpose == 'capability-need':
+                answer = self.capability_needs.get(context.facts.get('owner_message'), 'none-of-these')
                 return SelectionDecision(OUTCOME_DECIDED, answer, candidates, fixture_confidence())
             return SelectionDecision(OUTCOME_DECIDED, 'none-of-these', candidates, fixture_confidence())
 

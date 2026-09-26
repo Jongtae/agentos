@@ -87,8 +87,9 @@ class CapabilityNeedTests(unittest.TestCase):
         [asked] = [item for item in engine.asked if item[0] == 'choose']
         self.assertEqual(asked[2], tuple(CAPABILITY_NEEDS))
         # An undeclared answer (e.g. an intent the engine invented) is not a selection.
+        # (``calendar-create`` became a declared candidate in #672; a note write is not one.)
         rogue = FixtureDecisionEngine(choose=lambda context, candidates, question: SelectionDecision(
-            OUTCOME_DECIDED, INTENT_CALENDAR_CREATE, candidates, fixture_confidence()))
+            OUTCOME_DECIDED, 'note-create', candidates, fixture_confidence()))
         self.assertEqual(classifier(rogue).classify('did the landlord write back to me?').intent,
                          INTENT_CONVERSATION)
 

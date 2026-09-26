@@ -245,6 +245,12 @@ INTENT_NOTE_CREATE = 'note-create'
 INTENT_NOTE_LIST = 'note-list'
 INTENT_CALENDAR_CREATE = 'calendar-create'
 INTENT_MAIL_SEARCH = 'mail-search'
+#: Read the owner's Picker-selected Google Drive files into this turn, or
+#: hand off the Drive connection first (#672: judged, not matched on words).
+INTENT_DRIVE_READ = 'drive-read'
+#: No longer produced by routing (#672: the Work model loop chooses web
+#: search itself).  Kept so a conversation focus or decision recorded before
+#: that change still reads as a continuable conversation-route intent.
 INTENT_RESEARCH = 'research'
 INTENT_CONVERSATION = 'conversation'
 INTENT_AMBIGUOUS = 'ambiguous'
@@ -280,6 +286,7 @@ INTENT_LABELS = {
     INTENT_NOTE_LIST: '메모 목록',
     INTENT_CALENDAR_CREATE: '일정 만들기',
     INTENT_MAIL_SEARCH: '메일 찾기',
+    INTENT_DRIVE_READ: 'Google Drive 파일 읽기',
     INTENT_RESEARCH: '웹 조사',
     INTENT_CONVERSATION: '대화로 답하기',
     INTENT_UNSUPPORTED: '제공하지 않는 기능',
@@ -304,9 +311,15 @@ UNSUPPORTED_CAPABILITY_TEXT = {
 #: to the DecisionEngine.  The engine selects among these keys only, so it
 #: can never mint an intent.  Adding an offered capability here is product
 #: work with its own connector/Grant path, not a phrase list.
+#: ``calendar-create`` and ``drive-read`` were matched on request words
+#: before #672 ("book", "google drive"); they are judged here instead.
 CAPABILITY_NEEDS = {
     INTENT_MAIL_SEARCH: ("search or check the owner's own mailbox (Gmail) for a received message, "
                          "for example whether someone wrote, replied or sent something"),
+    INTENT_CALENDAR_CREATE: ("put a new event, meeting or appointment on the owner's own calendar; the "
+                             "assistant only drafts it and the owner approves the exact preview"),
+    INTENT_DRIVE_READ: ("read, search or summarize files in the owner's own Google Drive, or connect "
+                        "Google Drive to do that"),
     **UNSUPPORTED_CAPABILITIES,
 }
 
@@ -345,10 +358,6 @@ _WORKSPACE_CUES = ('작업공간', '워크스페이스', '저장한 결과', '�
 _WORKSPACE_VERBS = ('찾아', '찾을', '검색', '열어', '보여', '가져와', '불러와', '다시 써', '재사용',
                     'open', 'show', 'find', 'search', 'pull up', 'reuse', 'get')
 
-_CALENDAR_OBJECTS = ('일정', '미팅', '회의', '약속', 'calendar', 'meeting', 'appointment', 'event')
-_CALENDAR_VERBS = ('잡아', '잡을', '잡고', '잡아줘', '만들어', '등록', '추가', '넣어', '예약',
-                   'create', 'add', 'book', 'schedule', 'set up', 'put')
-
 # Mail is a read.  The object cues below never pair with a send/reply verb,
 # so "메일 보내줘" cannot become a mailbox read: it matches no rule and stays
 # on the ordinary conversation route.  Sending mail is not a capability this
@@ -364,10 +373,6 @@ _MAIL_CONTENT_KINDS = {
     'body': ('본문', '내용', '전체 내용', '원문', 'body', 'content', 'full message'),
     'metadata': ('제목', '보낸 사람', '발신자', '날짜', 'subject', 'sender', 'date'),
 }
-
-_RESEARCH_CUES = ('웹에서', '웹 검색', '인터넷', '온라인', '검색해', '찾아봐', '조사해', '알아봐', '최신 정보',
-                  'web search', 'search the web', 'look up', 'research', 'find out', 'online',
-                  'latest news', 'google it')
 
 # A note is written when the owner says "write it down", not when the owner
 # says "remember" - whether a turn asks AgentOS to remember something is the
@@ -487,10 +492,11 @@ UNSUPPORTED_QUESTION = ('Is the owner asking the assistant to do one of these th
                         'choose none-of-these.')
 CAPABILITY_NEED_QUESTION = ('Does answering the owner\'s message require one of these assistant capabilities: '
                             + '; '.join(f'{key} = {label}' for key, label in CAPABILITY_NEEDS.items())
-                            + '? Choose that capability only when the owner is asking about their own mail, '
-                            'whatever words they use. Choose none-of-these for ordinary conversation, general '
-                            'knowledge, public web research, notes, calendar, files, a mail they only mention, '
-                            'or when it is unclear. This judgment does not authorize any action.')
+                            + '? Choose a capability only when the owner is asking for exactly that on their own '
+                            'account, whatever words they use. Choose none-of-these for ordinary conversation, '
+                            'general knowledge, public web research, notes, reading or changing existing calendar '
+                            'events, local files, something they only mention, or when it is unclear. This '
+                            'judgment does not authorize any action.')
 MAIL_QUERY_TERM_QUESTION = ('The owner is asking about their own mail. Which one of the listed terms, all taken from '
                             'the owner\'s message, best identifies the mail to look for - its sender, organisation '
                             'or subject? Choose none-of-these if no listed term identifies it. This judgment does '
@@ -913,22 +919,6 @@ class IntentClassifier:
             return _Candidate(INTENT_MAIL_SEARCH, None, (*objects, *verbs), MAIL_CLARIFICATION)
         return _Candidate(INTENT_MAIL_SEARCH, query, (*objects, *verbs))
 
-    def _rule_calendar(self, text, lowered):
-        """Recognise a create request; the utterance itself is the argument.
-
-        Title, date and time are read from it by ``calendar_conversation``'s
-        literal rules, so nothing is extracted or persisted here.
-        """
-        objects = _cue_hits(text, lowered, _CALENDAR_OBJECTS)
-        verbs = _cue_hits(text, lowered, _CALENDAR_VERBS)
-        if objects and verbs:
-            return _Candidate(INTENT_CALENDAR_CREATE, text, (*objects, *verbs))
-        return None
-
-    def _rule_research(self, text, lowered):
-        cues = _cue_hits(text, lowered, _RESEARCH_CUES)
-        return _Candidate(INTENT_RESEARCH, None, cues) if cues else None
-
     def has_local_candidate(self, text):
         """Whether deterministic capability routing already owns this utterance.
 
@@ -946,7 +936,7 @@ class IntentClassifier:
             return True
         return any(rule(value,lowered) is not None for rule in (
             self._rule_knowledge,self._rule_settings,self._rule_workspace,
-            self._rule_note,self._rule_calendar,self._rule_mail,
+            self._rule_note,self._rule_mail,
         ))
 
     # -- decision assembly ---------------------------------------------------
@@ -967,8 +957,7 @@ class IntentClassifier:
         correction = _cue_hits(text, lowered, _CORRECTION_CUES)
         candidates = []
         for rule in (self._rule_knowledge, self._rule_settings,
-                     self._rule_workspace, self._rule_note, self._rule_calendar,
-                     self._rule_mail):
+                     self._rule_workspace, self._rule_note, self._rule_mail):
             found = rule(text, lowered)
             if found is not None:
                 candidates.append(found)
@@ -1069,21 +1058,22 @@ class IntentClassifier:
         judged = self._judged_capability(text)
         if judged is not None:
             return judged
-        research = self._rule_research(text, lowered)
-        if research is not None:
-            # Research shares the conversation route, so it never competes for
-            # ambiguity; it is named only so the decision is legible.
-            return IntentDecision(INTENT_RESEARCH, AUTHORITY_RULE, cues=research.cues)
+        # Public web research is the ordinary conversation route: the Work
+        # model loop chooses ``web_search`` / ``bounded_public_research``
+        # itself, so no word in the request selects it (#672).
         return IntentDecision(INTENT_CONVERSATION, AUTHORITY_DEFAULT)
 
     def _judged_capability(self, text):
         """Ask the DecisionEngine whether a cue-free turn needs a declared capability.
 
         Reached only when no local rule claimed the turn, so notes, settings,
-        private searches and calendar drafts are never sent.  A yes selects
-        an AgentOS-declared candidate; the argument is one of the owner's own
-        words (``_judged_mail_query``), never text the engine produced.  Unavailable, unsure or
-        none-of-these returns ``None`` and the turn stays on conversation.
+        private searches and a pending calendar draft's follow-ups are never
+        sent.  A yes selects an AgentOS-declared candidate; the argument is
+        the owner's own words (``_judged_mail_query``, or the utterance for a
+        calendar draft), never text the engine produced.  Unavailable, unsure
+        or none-of-these returns ``None`` and the turn stays on conversation,
+        where the Work model loop chooses its own tools; no word list stands
+        in for the judgment (#672).
         """
         if not eligible_for_capability_judgment(text):
             return None
@@ -1099,6 +1089,13 @@ class IntentClassifier:
                 # the whole question being sent to Gmail as a query.
                 return IntentDecision(INTENT_MAIL_SEARCH, AUTHORITY_RULE, cues=cues, clarification=MAIL_CLARIFICATION)
             return IntentDecision(INTENT_MAIL_SEARCH, AUTHORITY_RULE, argument=query, cues=cues)
+        if need.value == INTENT_CALENDAR_CREATE:
+            # The utterance is the argument, as it always was: title, date
+            # and time are read by ``CalendarConversation``, which ends in a
+            # draft and an exact preview; only the owner's approval executes.
+            return IntentDecision(INTENT_CALENDAR_CREATE, AUTHORITY_RULE, argument=text, cues=cues)
+        if need.value == INTENT_DRIVE_READ:
+            return IntentDecision(INTENT_DRIVE_READ, AUTHORITY_RULE, cues=cues)
         if need.value in UNSUPPORTED_CAPABILITY_TEXT:
             return IntentDecision(INTENT_UNSUPPORTED, AUTHORITY_RULE, argument=need.value, cues=cues,
                                   clarification=UNSUPPORTED_CAPABILITY_TEXT[need.value])

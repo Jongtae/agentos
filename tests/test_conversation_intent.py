@@ -17,7 +17,7 @@ from personal_agent.capabilities import CapabilityRegistry
 from personal_agent.conversation_handoff import (AUTHORITY_DEFAULT, AUTHORITY_OWNER, AUTHORITY_RULE,
                                                  CONSEQUENTIAL_INTENTS, INTENT_AMBIGUOUS,
                                                  INTENT_CALENDAR_CREATE,
-                                                 INTENT_CONVERSATION, INTENT_GREETING,
+                                                 INTENT_CONVERSATION, INTENT_DRIVE_READ, INTENT_GREETING,
                                                  INTENT_KNOWLEDGE, INTENT_NOTE_CREATE,
                                                  INTENT_NOTE_LIST,
                                                  INTENT_RESEARCH, INTENT_SETTINGS,
@@ -27,6 +27,7 @@ from personal_agent.conversation_handoff import (AUTHORITY_DEFAULT, AUTHORITY_OW
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService, workspace_search_request
 from personal_agent.quickstart_store import QuickStore
+from scripted_capability_need import capability_need_engine
 
 
 def classifier():
@@ -62,16 +63,17 @@ PARAPHRASES = {
         ("what's connected?", '/settings'),
         ('pause the calendar connection', 'pause the calendar connection'),
     ),
-    INTENT_RESEARCH: (
-        ('웹에서 최신 환율 찾아줘', None),
-        ('인터넷에서 조사해줘', None),
-        ('look up the latest exchange rate', None),
-        ('search the web for vendor reviews', None),
-    ),
 }
 
-#: Recognised from ordinary prose.  What it reaches is a draft with an exact
-#: preview; the effect waits for the owner's explicit approval of that preview.
+#: Public web research has no routing rule (#672): these stay on the ordinary
+#: conversation route, where the Work model loop chooses its search tools.
+RESEARCH_PARAPHRASES = ('웹에서 최신 환율 찾아줘', '인터넷에서 조사해줘',
+                        'look up the latest exchange rate', 'search the web for vendor reviews')
+
+#: Reached from ordinary prose only through the DecisionEngine's
+#: ``capability-need`` judgment (#672), scripted below for exactly these.
+#: What it reaches is a draft with an exact preview; the effect waits for the
+#: owner's explicit approval of that preview.
 CALENDAR_PARAPHRASES = ('내일 오후 3시에 팀 회의 일정 잡아줘', '금요일 약속 하나 등록해줘',
                         'schedule a meeting with the vendor tomorrow',
                         'add a calendar event for friday')
@@ -198,10 +200,13 @@ class ConsequentialEffectTests(unittest.TestCase):
         self.classifier = classifier()
 
     def test_a_recognised_calendar_request_is_consequential_and_carries_the_utterance(self):
+        judged = IntentClassifier(workspace_search=workspace_search_request, judge=ConversationJudgments(
+            capability_need_engine({text: INTENT_CALENDAR_CREATE for text in CALENDAR_PARAPHRASES})))
         for text in CALENDAR_PARAPHRASES:
             with self.subTest(text=text):
-                decision = self.classifier.classify(text)
+                decision = judged.classify(text)
                 self.assertEqual(decision.intent, INTENT_CALENDAR_CREATE)
+                self.assertEqual(decision.cues, ('judgment:capability-need',))
                 self.assertTrue(decision.consequential)
                 self.assertEqual(decision.authority, AUTHORITY_RULE)
                 # It may proceed - as far as a draft.  The utterance is the
@@ -234,8 +239,8 @@ class ConsequentialEffectTests(unittest.TestCase):
 
     def test_an_ambiguous_utterance_resolves_to_a_clarification_and_no_action(self):
         cases = (
-            ('내일 회의 일정 잡고 작업공간에 저장한 자료도 찾아줘',
-             (INTENT_WORKSPACE_SEARCH, INTENT_CALENDAR_CREATE)),
+            ('작업공간에 저장한 파일 열어주고 메모해줘',
+             (INTENT_WORKSPACE_SEARCH, INTENT_NOTE_CREATE)),
             ('개인 공간의 저장한 파일 찾아줘',
              (INTENT_KNOWLEDGE, INTENT_WORKSPACE_SEARCH)),
         )
@@ -286,10 +291,13 @@ class ModelAuthorityTests(unittest.TestCase):
         self.assertEqual(decision.model_suggestion['state'], 'rejected')
 
     def test_a_suggestion_cannot_select_a_consequential_intent(self):
-        decision = self.classifier.classify('내일 회의 일정 잡고 작업공간에 저장한 자료도 찾아줘',
+        # No rule produces a calendar candidate (#672), so a suggestion naming
+        # one is never among AgentOS's options to narrow.
+        decision = self.classifier.classify('작업공간에 저장한 파일 열어주고 메모해줘',
                                             model_suggestion={'intent': INTENT_CALENDAR_CREATE})
         self.assertEqual(decision.intent, INTENT_AMBIGUOUS)
-        self.assertEqual(decision.model_suggestion['reason'], 'consequential-intent')
+        self.assertEqual(decision.model_suggestion['state'], 'rejected')
+        self.assertEqual(decision.model_suggestion['reason'], 'not-a-deterministic-candidate')
 
     def test_a_suggestion_naming_a_non_candidate_is_recorded_and_rejected(self):
         decision = self.classifier.classify(self.ambiguous,
@@ -473,13 +481,13 @@ class ServiceRoutingTests(unittest.TestCase):
         self.assertEqual(self.store.config('settings_change_drafts', {}), {})
 
     def test_research_paraphrases_stay_on_the_conversation_route(self):
-        for text, _ in PARAPHRASES[INTENT_RESEARCH]:
+        for text in RESEARCH_PARAPHRASES:
             with self.subTest(text=text):
                 self.assertConversationRoute(self.run_one(text))
 
     # -- safety -------------------------------------------------------------
     def test_an_ambiguous_utterance_triggers_no_consequential_action(self):
-        job = self.run_one('내일 회의 일정 잡고 작업공간에 저장한 자료도 찾아줘')
+        job = self.run_one('작업공간에 저장한 파일 열어주고 메모해줘')
         self.assertEqual(job['status'], 'succeeded')
         self.assertIn('아무 작업도 실행하지 않았습니다', job['response'])
         self.assertEqual(self.store.config('personal_assistant_evidence', []), [])
@@ -488,6 +496,8 @@ class ServiceRoutingTests(unittest.TestCase):
     def test_a_natural_calendar_request_without_a_connector_refuses_and_creates_nothing(self):
         # This service has no Calendar connector at all.  The refusal names
         # the reason; it neither asks about the event nor drafts anything.
+        self.service.use_decision_engine(capability_need_engine(
+            {text: INTENT_CALENDAR_CREATE for text in CALENDAR_PARAPHRASES}))
         for text in CALENDAR_PARAPHRASES:
             with self.subTest(text=text):
                 job = self.run_one(text)
@@ -504,9 +514,10 @@ class ServiceRoutingTests(unittest.TestCase):
         self.assertEqual(self.store.config('personal_assistant_evidence', []), [])
 
     def test_drive_prose_keeps_reaching_the_shipped_picker_path(self):
-        # The conversation route's own Drive preflight answers, exactly as it
-        # did before this unit.  The orchestrator's unwired Drive seam - the
-        # WU4 subject - is not reached.
+        # The Drive preflight answers, exactly as it did before this unit,
+        # once the DecisionEngine judges the turn a Drive read (#672).  The
+        # orchestrator's unwired Drive seam - the WU4 subject - is not reached.
+        self.service.use_decision_engine(capability_need_engine({'구글 드라이브 파일을 요약해줘': INTENT_DRIVE_READ}))
         job = self.run_one('구글 드라이브 파일을 요약해줘')
         self.assertEqual(job['status'], 'failed')
         self.assertIn('Google Drive capability is not configured locally', job['error'])

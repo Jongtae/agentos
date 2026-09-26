@@ -11,6 +11,8 @@ from personal_agent.drive_web_oauth import DRIVE_FILE, PENDING_KEY, TOKEN_KEY, E
 from personal_agent.quickstart_store import QuickStore
 from personal_agent.quickstart_service import AgentService
 from personal_agent.providers import ProviderError
+from personal_agent.conversation_handoff import INTENT_DRIVE_READ
+from scripted_capability_need import capability_need_engine
 
 
 class DriveWebOAuthTests(unittest.TestCase):
@@ -183,7 +185,10 @@ class DriveWebOAuthTests(unittest.TestCase):
         self.store.secret("telegram_token", "test-token")
         self.store.put("telegram", {"enabled": True, "generation": "g", "user_id": 42, "cursor": 0})
         service = AgentService(self.store, telegram_transport=transport, drive_web_oauth=self.flow)
+        # #672: the Drive need is the DecisionEngine's judgment, asked when the Work runs.
+        service.use_decision_engine(capability_need_engine({"내 구글 드라이브에서 자료를 찾아줘": INTENT_DRIVE_READ}))
         service.ingest_update({"update_id": 1, "message": {"from": {"id": 42}, "chat": {"id": 42, "type": "private"}, "text": "내 구글 드라이브에서 자료를 찾아줘"}}, "g")
+        self.assertTrue(service.run_one())
         sent = next(body for _url, body in calls if "reply_markup" in body and "Google Drive 연결하기" in str(body["reply_markup"]))
         self.assertEqual(sent["text"], "Google Drive 연결이 필요합니다. 선택한 파일만 읽을 수 있으며 전체 Drive 검색은 하지 않습니다.")
         self.assertTrue(sent["reply_markup"]["inline_keyboard"][0][0]["url"].startswith("https://"))
@@ -228,9 +233,14 @@ class DriveWebOAuthTests(unittest.TestCase):
         self.store.secret("telegram_token", "test-token")
         self.store.put("telegram", {"enabled": True, "generation": "g", "user_id": 42, "cursor": 0})
         service=AgentService(self.store, telegram_transport=transport, drive_web_oauth=self.flow)
+        service.use_decision_engine(capability_need_engine({"구글 드라이브 연결해 보자": INTENT_DRIVE_READ}))
         service.ingest_update({"update_id": 1, "message": {"from": {"id": 42}, "chat": {"id": 42, "type": "private"}, "text": "구글 드라이브 연결해 보자"}}, "g")
         job=self.store.jobs()[0]
-        self.assertEqual(job["status"], "awaiting_drive")
+        # #672: ingest matches no request words; the Work is queued like any other.
+        self.assertEqual(job["status"], "queued")
+        self.assertFalse(any("reply_markup" in body for body in calls))
+        self.assertTrue(service.run_one())
+        self.assertEqual(self.store.job(job["id"])["status"], "awaiting_drive")
         state=parse_qs(urlparse(next(body for body in calls if "reply_markup" in body)["reply_markup"]["inline_keyboard"][0][0]["url"]).query)["state"][0]
         service.complete_drive_web_oauth({"state": state, "code": "code"}, 42, lambda _request: {"access_token": "token", "scope": DRIVE_FILE})
         service.select_drive_files(42, [{"id": "picked"}])

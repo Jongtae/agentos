@@ -67,6 +67,10 @@ from personal_agent.quickstart_store import QuickStore
 
 #: Owner turns the fixture DecisionEngine judges as explicit remember requests (#597).
 OWNER_MEMORY_REQUESTS = frozenset({'내 회의 시간 선호를 기억해 줘: 오전이 좋아', '아니 오후가 좋아. 회의 시간 선호를 저장해 줘'})
+#: The calendar create requests the fixture DecisionEngine judges to need
+#: ``calendar-create`` (#672).
+CALENDAR_REQUESTS = frozenset({'내일 오후 3시에 팀 회의 일정 잡아줘', '모레 오전 10시에 병원 예약 일정 잡아줘',
+                               '다음 주 금요일 저녁 식사 일정 잡아줘'})
 
 #: What this acceptance does and does not establish, per #386 journey.  It is
 #: deliberately part of the test file rather than prose in an issue comment,
@@ -339,9 +343,14 @@ class FirstUseEndToEndAcceptance(unittest.TestCase):
         # #597: whether a turn explicitly asks to remember a value is the
         # DecisionEngine's judgment; the fixture answers it for the owner
         # phrasings below and a confident "no" for everything else.
+        # #672: a calendar create is selected only by the capability-need
+        # judgment; the fixture selects it for exactly CALENDAR_REQUESTS.
         service.use_decision_engine(FixtureDecisionEngine(choose=lambda context,candidates,question:
             SelectionDecision(OUTCOME_DECIDED,'none-of-these',candidates,fixture_confidence())
-            if context.purpose == 'unsupported-capability' else None,
+            if context.purpose == 'unsupported-capability' else
+            SelectionDecision(OUTCOME_DECIDED,'calendar-create',candidates,fixture_confidence())
+            if context.purpose == 'capability-need' and context.facts.get('owner_message') in CALENDAR_REQUESTS
+            else None,
             judge=lambda context,proposition:
             BinaryDecision(OUTCOME_DECIDED,context.facts.get('owner_message') in OWNER_MEMORY_REQUESTS,
                            fixture_confidence())

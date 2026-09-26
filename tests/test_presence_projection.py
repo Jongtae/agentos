@@ -476,12 +476,16 @@ class UnsupportedCapabilityTests(ProjectionTestCase):
         self.assertIn('mail-metadata', engine.asked[-1][1].facts['owner_message'])
 
     def test_mixed_calendar_and_unsupported_mail_action_executes_neither(self):
-        engine = self.judged({})
+        # #672: no calendar word rule competes any more; the mail-send part is
+        # the unsupported-capability judgment's, over the minimized cue summary,
+        # and the truthful boundary answer executes nothing - no draft either.
+        engine = self.judged({'메일 이메일 보내': 'mail-send'})
         decision = self.service.classify_intent('내일 오후 3시 회의를 예약하고 참석자에게 이메일 보내줘')
-        self.assertEqual(decision.intent, 'ambiguous')
+        self.assertEqual(decision.intent, INTENT_UNSUPPORTED)
         self.assertFalse(decision.executes)
-        self.assertIn('메일은 보내지 않으며', decision.clarification)
-        self.assertEqual(engine.asked, [])
+        self.assertEqual(decision.clarification, UNSUPPORTED_CAPABILITY_TEXT['mail-send'])
+        self.assertEqual([item[1].facts for item in engine.asked], [{'owner_message': '메일 이메일 보내'}])
+        self.assertEqual(self.store.config('calendar_create', {}), {})
 
 
     def test_a_none_of_these_judgment_leaves_the_cues_to_decide(self):

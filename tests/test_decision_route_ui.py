@@ -55,7 +55,7 @@ const base=(active,extra={})=>({decision_route:{active,suite_version:'decision-q
  const method=rowTitled('사용 방식');assert.equal(stateOf(method).textContent,'대화 해석에 사용 중');assert(stateOf(method).className.endsWith('active'));
  assert(method.textContent.includes('OpenAI API · gpt-4o-mini'));assert(method.textContent.includes('전송 대상: api.openai.com'));
  assert(!box().textContent.includes('현재 사용 중'),'the decision route is never presented as the current Work AI');
- assert(box().textContent.includes('여기서 바꿔도 작업 실행 AI는 바뀌지 않습니다'),'the role boundary is stated');
+ assert(box().textContent.includes('여기서 바꿔도 기본 AI는 바뀌지 않습니다'),'the role boundary is stated');
  const jevRow=rowTitled('Jev (TypeSafe) · jev-latest');assert.equal(stateOf(jevRow).textContent,'키 필요');assert(jevRow.textContent.includes('api.typesafe.ai'));
  assert.equal(stateOf(rowTitled('구독 AI · Codex')).textContent,'선택 가능','configured-but-inactive is distinct from active');
  assert.equal(stateOf(rowTitled('구독 AI · Claude Code')).textContent,'설치 안 됨');

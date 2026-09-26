@@ -203,11 +203,12 @@ console.log(JSON.stringify({checks:40}));
 
     def test_model_apply_has_one_explicit_test_and_credential_revision(self):
         app = (ROOT / 'src/personal_agent/web/app.js').read_text()
-        apply_body = app[app.index("$('model-form').onsubmit"):app.index('function renderExecutionConnection')]
-        self.assertNotIn("api('/api/model/test'", apply_body)
-        self.assertIn('credential_revision', app)
-        self.assertIn('modelGuard.test', app)
-        self.assertIn('modelGuard.apply', app)
+        # #619: one explicit 확인하고 사용 request probes and switches; no
+        # separate test→apply step remains on the chooser path.
+        apply_body = app[app.index("function applyAiChoice("):app.index('function openJudgmentChooser(')]
+        self.assertEqual(apply_body.count("api('"), 1)
+        self.assertIn("api('/api/main-ai/activate',body)", apply_body)
+        self.assertNotIn("/api/model/test", app)
         self.assertIn("method||(body===undefined?'GET':'POST')", app)
         # #562: deletion is bound to the one item on screen and asks twice.
         deletion = app[app.index("function itemDeleteActions("):app.index("function renderCandidateItem(")]
@@ -220,7 +221,8 @@ console.log(JSON.stringify({checks:40}));
         self.assertEqual(load.count("api("), 1)
         self.assertIn("'/api/personal-space/items/'", load)
         self.assertIn('if(taskDetailInflight.has(id))return taskDetailInflight.get(id)', app)
-        self.assertEqual(app.count("invalidateModelDraft(t('연결 결과가 바뀌었습니다. 적용 전에 다시 테스트하세요.'))"), 2)
+        # #619: both OpenRouter completion paths only save the key and re-read.
+        self.assertEqual(app.count("await openRouterSaved()") + app.count("void openRouterSaved()"), 2)
 
     def test_project_detail_and_result_save_actions_remain_available(self):
         app = (ROOT / 'src/personal_agent/web/app.js').read_text()
@@ -236,10 +238,8 @@ console.log(JSON.stringify({checks:40}));
     def test_oauth_refresh_and_file_drafts_have_independent_stale_guards(self):
         app = (ROOT / 'src/personal_agent/web/app.js').read_text()
         self.assertIn('if(refreshing){refreshQueued=true;return;}', app)
-        self.assertIn('requestedModelRevision===modelLoadRevision', app)
         self.assertIn('if(refreshQueued){refreshQueued=false;void refresh();}', app)
-        self.assertGreaterEqual(app.count('invalidateModelLoad()'), 4)
-        hydration = app[app.index('if(!modelLoaded){if(requestedModelRevision'):app.index("$('task-refresh-state').textContent=t('방금 확인')")]
+        hydration = app[app.index('if(requestedRootsRevision===rootsLoadRevision)'):app.index("$('task-refresh-state').textContent=t('방금 확인')")]
         for draft in ('root-path-input', 'workspace-reference-input', 'file-workspace-path'):
             self.assertNotIn(f"$('{draft}').value", hydration)
         self.assertIn('if(requestedRootsRevision===rootsLoadRevision)renderRootList(', hydration)
@@ -326,7 +326,7 @@ console.log(JSON.stringify({checks:40}));
             self.assertNotIn(retired, app)
         self.assertIn('id="connector-controls"', html)
         self.assertIn("$('brand-home').onclick", app)
-        self.assertIn("setError('active-ai-feedback',error)", app)
+        self.assertIn("aiFeedback(error.message,true)", app)
         self.assertIn('각 Telegram 작업마다 공유 승인이 필요합니다.', app)
 
     def test_browser_fixture_and_exact_runner_transcript_are_checked_in(self):

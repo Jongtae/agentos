@@ -17,61 +17,93 @@ class Element {
  set id(value){this._id=value;ids.set(value,this);} get id(){return this._id;}
  set textContent(value){this._text=String(value);this.children=[];} get textContent(){return this._text+this.children.map(node=>typeof node==='string'?node:node.textContent).join('');}
  append(...nodes){this.children.push(...nodes);} replaceChildren(...nodes){this._text='';this.children=[];this.append(...nodes);}
- setAttribute(key,value){this.attrs[key]=value;}
+ setAttribute(key,value){this.attrs[key]=value;} focus(){} get isConnected(){return true;}
+ get classList(){const node=this;return {toggle(name,on){node._cls=Boolean(on);},add(){},remove(){},contains:()=>Boolean(node._cls)};}
  querySelector(selector){return descendants(this).find(node=>selector[0]==='.'?node.className.split(' ').includes(selector.slice(1)):node.tag===selector)||null;}
 }
 function descendants(node){return node.children.flatMap(child=>typeof child==='string'?[]:[child,...descendants(child)]);}
-for(const id of ['active-ai','telegram-current','telegram-change','telegram-form','telegram-status','telegram-feedback','telegram-submit','disconnect','new-pair','telegram-pair','connector-controls'])new Element('div').id=id;
+for(const id of ['active-ai','ai-chooser-list','ai-chooser-consequence','ai-chooser-feedback','ai-chooser-apply','telegram-current','telegram-change','telegram-form','telegram-status','telegram-feedback','telegram-submit','disconnect','new-pair','telegram-pair','connector-controls'])new Element('div').id=id;
 const $=id=>ids.get(id),document={getElementById:$,createElement:tag=>new Element(tag)};
 const part=(start,end)=>app.slice(app.indexOf(start),app.indexOf(end));
 const source=part('const LANGUAGES=','function normalizeEndpoint(')+
  part('function element(', 'function setError(')+
  part('const providers=', 'let claimed=')+
  part('function renderExecutionConnection(', 'function renderSubscriptionEngines(')+
+ part('const DECISION_TRANSPORT_LABEL=','function decisionFailedSuffix(')+part('function decisionActiveTitle(','function decisionCheckText(')+
  part('function renderTelegram(', "$('telegram-change').onclick");
 const calls=[];let refreshes=0,failRoute=false;
 const ctx={document,$,telegramDraftOpen:false,console,api:async(path,body)=>{calls.push({path,body});if(failRoute)throw new Error('switch refused');return {};},refresh:async()=>{refreshes++;},busy:async(button,fn)=>fn(),setError:(id,error)=>{$(id).textContent=error?.message||String(error||'');},setFeedback:(id,text)=>{$(id).textContent=text||'';}};
 vm.createContext(ctx);vm.runInContext(source,ctx);vm.runInContext("setLanguage('ko')",ctx);
 const buttonIn=id=>descendants($(id)).find(node=>node.tag==='button');
-const settings={model:{provider:'ollama',endpoint:'http://127.0.0.1:11434',model:'stored-api-model'},model_ready:true,subscription_engines:{selected:'codex',engines:[{id:'codex',name:'Codex',installed:true,connected:true}]}};
-ctx.renderExecutionConnection(settings);const routeButton=buttonIn('active-ai');ctx.renderExecutionConnection(JSON.parse(JSON.stringify(settings)));
-assert.equal(buttonIn('active-ai'),routeButton,'unchanged AI polling preserves the focused action node');
-assert($( 'active-ai').textContent.includes('모델 정보 미제공'),'active CLI does not inherit the inactive API model identity');
-assert($('active-ai').textContent.includes('Ollama'),'provider title remains provider-specific');
-const buttonsIn=id=>descendants($(id)).filter(node=>node.tag==='button');
-const useApi=buttonsIn('active-ai').find(node=>node.textContent==='이 연결 사용');
-assert(useApi,'a verified direct API offers an explicit switch');
-assert($('active-ai').textContent.includes('설정됨 · 현재 사용 안 함'),'a configured, verified but inactive API is not called available or in use');
+// #619: one Main AI card with a subordinate Judgment AI line; the chooser keeps a fixed order.
+const dialog=new Element('dialog');dialog.id='ai-chooser';dialog.open=false;dialog.showModal=()=>{dialog.open=true;};dialog.close=()=>{dialog.open=false;dialog.onclose&&dialog.onclose();};
+const api=(id,extra={})=>({id,kind:'api',name:{openai:'OpenAI',anthropic:'Anthropic',openrouter:'OpenRouter'}[id],destination:{openai:'api.openai.com',anthropic:'api.anthropic.com',openrouter:'openrouter.ai'}[id],model:'m-'+id,key:{saved:false,saved_at:null,pending:false},check:null,...extra});
+const sub=(id,extra={})=>({id,kind:'subscription',name:{codex:'Codex','claude-code':'Claude Code'}[id],destination:{codex:'OpenAI (Codex 구독 계정)','claude-code':'Anthropic (Claude Code 구독 계정)'}[id],installed:true,login:{state:'signed-in',checked_at:1700000000},credential:false,check:null,...extra});
+const routesFor=(overrides={})=>['codex','claude-code','openai','anthropic','openrouter'].map(id=>overrides[id]||(id==='codex'||id==='claude-code'?sub(id):api(id)));
+const follow={openai:{available:true,model:'gpt-4o-mini',destination:'api.openai.com'},anthropic:{available:true,model:'claude-haiku-4-5',destination:'api.anthropic.com'},openrouter:{available:true,model:'openai/gpt-4o-mini',destination:'openrouter.ai'},'claude-code':{available:true,model:'haiku',destination:'Anthropic (Claude Code 구독 계정)'},codex:{available:false,reason:'Codex는 따라갈 수 없습니다.'}};
+const settingsFor=(current,overrides={},decision={})=>({model:{provider:'anthropic',endpoint:'https://api.anthropic.com',model:'m-anthropic'},model_ready:true,subscription_engines:{selected:['codex','claude-code'].includes(current)?current:'',engines:[]},
+ main_ai:{current,order:['codex','claude-code','openai','anthropic','openrouter'],routes:routesFor(overrides),last_check:{state:'ok',checked_at:1700000000}},
+ decision_route:{mode:'follow_main',main:current,follow:follow[current]||{available:false,reason:'-'},follow_candidates:follow,active:{transport:'direct_api',source:'follow',requested_model:'claude-haiku-4-5',destination:'api.anthropic.com',available:true},...decision}});
+const rowsOf=()=>descendants($('active-ai')).filter(node=>node.className.startsWith('settings-row')&&node.tag==='div'&&node.className.split(' ')[0]==='settings-row');
+const titles=()=>descendants($('active-ai')).filter(node=>node.className==='settings-row-title').map(node=>node.textContent);
+const buttonsIn=id=>descendants($(id)).filter(node=>node.tag==='button');const same=(a,b,m)=>assert.equal(JSON.stringify(a),JSON.stringify(b),m);
 const currentCount=()=>descendants($('active-ai')).filter(node=>node.className==='settings-state active'&&node.textContent==='현재 사용 중').length;
+let settings=settingsFor('anthropic',{anthropic:api('anthropic',{key:{saved:true,saved_at:1700000000,pending:false}})});
+ctx.renderExecutionConnection(settings);const changeButton=buttonsIn('active-ai').find(node=>node.textContent==='변경');ctx.renderExecutionConnection(JSON.parse(JSON.stringify(settings)));
+assert.equal(buttonsIn('active-ai').find(node=>node.textContent==='변경'),changeButton,'unchanged AI polling preserves the focused action node');
+same(titles(),['Anthropic · API','판단 AI (대화 해석)'],'exactly one Main AI card with a subordinate Judgment AI line');
 assert.equal(currentCount(),1,'exactly one current route');
-assert.equal(descendants($('active-ai')).find(node=>node.className==='settings-row-title').textContent,'Codex','the current route is listed first');
-assert(!$('active-ai').textContent.includes('직접 API를 설정하거나 테스트해도'),'dense precedence prose is gone');
+assert($('active-ai').textContent.includes('기본 AI와 같은 계정의 가벼운 모델 (claude-haiku-4-5)'),'the Judgment AI line names its light model');
+assert($('active-ai').textContent.includes('전송 대상: api.anthropic.com'),'destinations stay on the scan path');
+assert.equal(descendants($('active-ai')).filter(node=>node.tag==='details').length,1,'no per-row disclosures; one card-level 기술 세부 정보');
+assert(!$('active-ai').textContent.includes('다른 선택지'),'no second list of routes on the card');
 (async()=>{
- await useApi.onclick({currentTarget:useApi});
- assert.equal(JSON.stringify(calls),JSON.stringify([{path:'/api/ai-route',body:{route:'direct-api'}}]));assert.equal(refreshes,1);
- failRoute=true;await useApi.onclick({currentTarget:useApi});
- assert.equal(refreshes,1,'a refused switch does not claim a new route');
- assert.equal($('active-ai-feedback').textContent,'switch refused');
- failRoute=false;await useApi.onclick({currentTarget:useApi});assert.equal($('active-ai-feedback').textContent,'','a new attempt clears the stale refusal');
- ctx.renderExecutionConnection({...settings,model_ready:false});
- assert(!buttonsIn('active-ai').some(node=>node.textContent==='이 연결 사용'),'an unverified API cannot be selected');
- assert(buttonsIn('active-ai').some(node=>node.textContent==='연결 확인'));
- assert($('active-ai').textContent.includes('확인 필요'),'unverified saved API shows the attention state');assert($('active-ai').textContent.includes('저장돼 있지만 확인되지 않았습니다'),'configured is stated separately from verified');
- ctx.renderExecutionConnection({...settings,subscription_engines:{selected:'',engines:settings.subscription_engines.engines.map(e=>({...e,connected:false}))}});
- assert.equal(currentCount(),1,'direct API is the one current route once selected');
- assert.equal(descendants($('active-ai')).find(node=>node.className==='settings-row-title').textContent,'Ollama');
- ctx.renderExecutionConnection({...settings,subscription_engines:{selected:'',engines:settings.subscription_engines.engines}});
- const back=buttonsIn('active-ai').find(node=>node.textContent==='이 CLI 사용');assert(back,'switching back to a CLI is offered in the same list with a verb label');
- calls.length=0;await back.onclick({currentTarget:back});
- assert.equal(JSON.stringify(calls),JSON.stringify([{path:'/api/subscription-engines/connect',body:{engine:'codex',officially_authenticated:true}}]));
- ctx.renderExecutionConnection({model:{},model_ready:false,subscription_engines:{selected:'',engines:[]}});
- assert.equal(currentCount(),0);assert($('active-ai').textContent.includes('사용할 AI 연결이 설정되지 않았습니다'));
- ctx.renderExecutionConnection({...settings,subscription_engines:{selected:'codex',engines:[{id:'codex',name:'Codex',installed:false,connected:true}]}});
+ // 확인 re-probes without switching.
+ const check=buttonsIn('active-ai').find(node=>node.textContent==='확인');await check.onclick({currentTarget:check});
+ same(calls.pop(),{path:'/api/main-ai/check',body:{}});
+ // The chooser opens as a modal dialog with the fixed order, whatever is current.
+ ctx.openAiChooser(changeButton);assert(dialog.open,'the chooser is a modal <dialog>');
+ const order=()=>descendants($('ai-chooser-list')).filter(node=>node.tag==='input'&&node.type==='radio').map(node=>node.value);
+ same(order(),['codex','claude-code','openai','anthropic','openrouter']);
+ const radio=id=>descendants($('ai-chooser-list')).find(node=>node.tag==='input'&&node.type==='radio'&&node.value===id);
+ assert(radio('anthropic').checked,'the current Main AI is preselected');
+ // A saved key is 저장됨 · date; never an input or a partial value.
+ const anthropicRow=descendants($('ai-chooser-list')).find(node=>node.className==='chooser-row'&&node.textContent.includes('Anthropic'));
+ assert(anthropicRow.textContent.includes('키 저장됨 ·'),'saved key shows 저장됨 · date');
+ assert(!descendants(anthropicRow).some(node=>node.tag==='input'&&node.type==='password'),'no key input while a key is saved');
+ assert(descendants(anthropicRow).some(node=>node.tag==='button'&&node.textContent==='바꾸기')&&descendants(anthropicRow).some(node=>node.tag==='button'&&node.textContent==='지우기'));
+ // A provider without a key cannot be chosen until a key is saved.
+ assert(radio('openai').disabled,'no key, not selectable');
+ // Selecting another route never re-sorts; the consequence lists both destinations.
+ radio('claude-code').onchange();same(order(),['codex','claude-code','openai','anthropic','openrouter'],'switching the selection does not reorder');
+ assert($('ai-chooser-consequence').textContent.includes('기본 AI 전송 대상: Anthropic (Claude Code 구독 계정)'));
+ assert($('ai-chooser-consequence').textContent.includes('판단 AI도 함께 바뀝니다 → haiku'));
+ radio('codex').onchange();assert($('ai-chooser-consequence').textContent.includes('따라갈 수 없어 설정 안 됨이 됩니다'),'Codex: follow is unavailable with the reason');
+ // 확인하고 사용: one request; failure stays in the dialog and changes nothing.
+ failRoute=true;await ctx.applyAiChoice($('ai-chooser-apply'));
+ same(calls.pop(),{path:'/api/main-ai/activate',body:{route:'codex'}});
+ assert(dialog.open,'a refused switch keeps the chooser open');assert.equal($('ai-chooser-feedback').textContent,'switch refused');
+ failRoute=false;refreshes=0;await ctx.applyAiChoice($('ai-chooser-apply'));
+ assert(!dialog.open,'a passed switch closes the chooser');assert.equal(refreshes,1);
+ // Key entry: 키 입력 opens a password field in place; saving never activates.
+ ctx.openAiChooser(changeButton);const keyButton=descendants($('ai-chooser-list')).find(node=>node.tag==='button'&&node.textContent==='키 입력');keyButton.onclick({currentTarget:keyButton});
+ const keyForm=descendants($('ai-chooser-list')).find(node=>node.tag==='form'&&node.className==='chooser-key');const keyInput=descendants(keyForm).find(node=>node.tag==='input');
+ assert.equal(keyInput.type,'password');keyInput.value='sk-synthetic';calls.length=0;await keyForm.onsubmit({preventDefault(){}});
+ same(calls,[{path:'/api/main-ai/key',body:{provider:'openai',key:'sk-synthetic'}}],'saving a key is its own request and never activates');
+ dialog.close();
+ // Needs-attention states stay on the card.
+ ctx.renderExecutionConnection(settingsFor('anthropic',{},{active:{transport:'off',source:'follow',available:false},follow_check:{state:'failed',failure:'auth'}}));
+ assert.equal(currentCount(),0,'a route without a saved key is not presented as in use');
+ assert($('active-ai').textContent.includes('저장된 API 키가 없어 요청이 실패합니다'));
+ assert($('active-ai').textContent.includes('기본 AI를 따라 gpt-4o-mini을(를) 쓰려면 확인이 필요합니다')||$('active-ai').textContent.includes('쓰려면 확인이 필요합니다'),'a failed judgment probe is shown as needing attention');
+ ctx.renderExecutionConnection(settingsFor('codex',{},{follow:follow.codex,active:{transport:'off',source:'follow',available:false}}));
+ assert($('active-ai').textContent.includes('기본 AI를 따라갈 수 없습니다: Codex는 따라갈 수 없습니다.'),'Codex shows why the Judgment AI is not set');
+ ctx.renderExecutionConnection(settingsFor('codex',{codex:sub('codex',{installed:false})}));
  assert($('active-ai').textContent.includes('선택한 CLI를 찾지 못했습니다'));assert.equal(currentCount(),0,'a missing CLI is not presented as in use');
- ctx.renderExecutionConnection({...settings,model_ready:false,subscription_engines:{selected:'',engines:[]}});
- assert($('active-ai').textContent.includes('연결 확인이 필요합니다'));assert.equal(currentCount(),0,'an unverified current API is not presented as in use');
- ctx.renderExecutionConnection({...settings,subscription_engines:{selected:'retired-engine',engines:settings.subscription_engines.engines}});
- assert($('active-ai').textContent.includes('선택된 연결을 이 컴퓨터에서 확인할 수 없습니다'),'an unknown selection is surfaced');
+ ctx.renderExecutionConnection({...settingsFor('other'),model:{provider:'ollama',endpoint:'http://127.0.0.1:11434',model:'llama'},main_ai:{...settingsFor('other').main_ai,other:{provider:'ollama',model:'llama',destination:'http://127.0.0.1:11434'}}});
+ assert($('active-ai').textContent.includes('확인 필요')&&$('active-ai').textContent.includes('변경 목록에 없습니다'),'an existing Ollama route renders truthfully');
+ ctx.renderExecutionConnection(settingsFor(''));
+ assert.equal(currentCount(),0);assert($('active-ai').textContent.includes('작업을 실행할 AI가 없습니다'));
 })().catch(error=>{console.error(error);process.exit(1);});
 ctx.renderTelegram({telegram:{enabled:true,paired:true,username:'fixture'},telegram_status:{message:'ok'}});
 const telegramButton=buttonIn('telegram-current');ctx.renderTelegram({telegram:{enabled:true,paired:true,username:'fixture'},telegram_status:{message:'ok'}});
@@ -97,13 +129,6 @@ for(const [connector,name,label,kind,action] of matrix){
 }
 ctx.renderConnectors([matrix[5][0]]);assert($('connector-controls').textContent.includes('Telegram에서 Google Drive'),'Drive explains where a connection starts');assert($('connector-controls').textContent.includes('세부 상태: expired'),'the raw Drive handoff state stays inspectable');
 ctx.renderConnectors([]);assert($('connector-controls').textContent.includes('연결할 수 있는 Google 서비스가 없습니다'));
-// Subscription CLI idle states: "사용 가능" only after an observed login.
-for(const [login,label] of [['signed-in','사용 가능'],['unchecked','로그인 확인 전'],['token-saved','로그인 확인 전'],['unknown','확인 필요'],['signed-out','로그인 안 됨']]){
- ctx.renderExecutionConnection({model:{},model_ready:false,subscription_engines:{selected:'',engines:[{id:'codex',name:'Codex',installed:true,connected:true,login:{state:login}}]}});
- assert.equal(stateOf(descendants($('active-ai')).find(node=>node.className==='settings-row')).textContent,label,`CLI login ${login}`);}
-ctx.renderExecutionConnection({model:{provider:'openai',endpoint:'https://api.openai.com/v1',model:'m'},model_ready:true,subscription_engines:{selected:'codex',engines:[{id:'codex',name:'Codex',installed:true,connected:true,login:{state:'signed-in'}}]},decision_model:{provider:'openai',model:'gpt-4o-mini'}});
-assert($('active-ai').textContent.includes('대화 해석(판단 엔진) 역할: openai gpt-4o-mini'),'the decision engine is role-labelled in technical detail');
-assert.equal(descendants($('active-ai')).filter(node=>node.className==='settings-state active').length,1,'the decision engine is never a second current route');
 assert(app.includes("'ArrowLeft','ArrowRight'"),'settings tabs handle horizontal arrow keys');
 console.log('settings DOM regressions passed');
 """
@@ -122,19 +147,17 @@ def test_settings_uses_goal_oriented_owner_language():
     assert "현재 상태를 먼저 확인" in HTML
 
 
-def test_model_flow_tests_exact_draft_before_apply_and_requires_new_destination_key():
-    assert "api('/api/model/test',value)" in APP
-    assert "modelGuard.test" in APP
-    assert "modelGuard.apply" in APP
-    assert "credential_revision" in APP
-    assert "apply-model" in HTML
-    assert "require_key" in APP
+def test_ai_chooser_switches_in_one_explicit_request():
+    # #619 AC5: 확인하고 사용 probes and switches; keys are saved separately.
+    assert "api('/api/main-ai/activate',body)" in APP
+    assert "api('/api/main-ai/key'" in APP
+    assert "/api/model/test" not in APP
+    assert 'id="ai-chooser-apply" class="primary" type="button">확인하고 사용<' in HTML
 
 
 def test_refresh_does_not_replace_active_editing_surfaces():
     assert "contextDraftDirty" in APP
     assert "if(!contextDraftDirty" in APP
-    assert "if(!modelLoaded)" in APP
     assert "telegramDraftOpen" in APP
     assert "if(!telegramDraftOpen)" in APP
 

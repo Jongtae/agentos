@@ -28,11 +28,11 @@ STRING={'type':'string'}
 #: deterministic guard there never depends on it.
 BROWSER_ACTIONS=frozenset({'browser_open','browser_read','browser_find','browser_click','browser_type'})
 EFFECT={'type':'string','enum':['read','navigate','mutate','payment']}
-#: The one argument each action's call record keeps only the length of:
-#: ``browser_type`` text (#656) and a preparation goal (#659, owner text that
-#: is stored redacted and read back in Settings).
-RECORD_MASKED_FIELDS={'browser_type':'text','schedule_preparation':'goal'}
-
+#: The argument recorded as a length placeholder, per host action: typed
+#: browser text (#656), a proposed current-state value (#627), which the
+#: owner may have phrased around a secret before the host redacts it, and a
+#: preparation goal (#659, stored redacted and read back in Settings).
+REDACTED_ARGUMENTS={'browser_type':'text','propose_current_state':'value','schedule_preparation':'goal'}
 def recorded_arguments(action,args):
  """Tool-call arguments as AgentOS may record or project them (#656).
 
@@ -40,9 +40,8 @@ def recorded_arguments(action,args):
  and is recorded before the payment guard runs, so it is replaced by a
  length placeholder at every recording point; nothing else changes.
  """
- if not isinstance(args,dict):return args
- field=RECORD_MASKED_FIELDS.get(action)
- if field is None:return args
+ field=REDACTED_ARGUMENTS.get(action)
+ if field is None or not isinstance(args,dict) or field not in args:return args
  text=args.get(field)
  return {**args,field:f'[가림: {len(text)}자]' if isinstance(text,str) else '[가림]'}
 
@@ -56,13 +55,15 @@ def recorded_calls(calls,tools):
    action=(tools.get(function.get('name')) or {}).get('host_action')
   except AttributeError:
    out.append(call);continue
-  if action not in RECORD_MASKED_FIELDS:
+  if action not in REDACTED_ARGUMENTS:
    out.append(call);continue
   try:arguments=json.dumps(recorded_arguments(action,json.loads(function.get('arguments','{}'))),ensure_ascii=False)
   except (TypeError,ValueError):arguments='[가림]'
   out.append({**call,'function':{**function,'arguments':arguments}})
  return out
 
+#: #627: a lookup whose only terms were withdrawn current-context location text.
+CONTEXT_WITHDRAWN_TEXT='이 조회에 들어 있던 현재 맥락 위치·장소를 소유자가 멈추거나 지웠거나 바뀌어서 보내지 않았습니다. 남은 검색어가 없으니 소유자에게 지역을 한 번 물어보세요.'
 BROWSER_EFFECT_NOTE=' Declare effect: read (only looking), navigate (moving between pages), mutate (changes account state such as a cart or a form), payment (pays or enters card data; always needs owner approval). AgentOS refuses card/one-time-code/password fields and their form buttons without the owner\'s approval whatever the label says.'
 #: #655: actions whose one public search takes the model's provider/locale.
 SEARCH_BACKED_ACTIONS=frozenset({'web_search','bounded_public_research'})
@@ -88,7 +89,7 @@ DEFINITIONS=[
  schema('calendar_draft_update','Draft a change to one existing event and return an exact preview for the owner to approve. Requires the event_id and event_version returned by calendar_query. Does not apply the change.',{'event_id':STRING,'event_version':STRING,'summary':STRING,'start':STRING,'end':STRING,'timezone':STRING,'location':STRING,'description':STRING},['event_id','event_version']),
  schema('calendar_draft_cancel','Draft the cancellation of one existing event and return an exact preview for the owner to approve. Requires the event_id and event_version returned by calendar_query. Does not cancel anything.',{'event_id':STRING,'event_version':STRING},['event_id','event_version']),
  schema('weather',WEATHER_DESCRIPTION,{'city':STRING,'country':STRING,'location_ref':STRING}),
- schema('propose_current_state',PROPOSE_CURRENT_STATE_DESCRIPTION,{'predicate':{'type':'string','enum':['current_place','work_mode','availability_hint']},'value':STRING,'place_ref':STRING,'source':STRING,'until':STRING,'supersedes':STRING},['predicate','value']),
+ schema('propose_current_state',PROPOSE_CURRENT_STATE_DESCRIPTION,{'predicate':{'type':'string','enum':['current_place','work_mode','availability_hint']},'value':STRING,'place_ref':STRING,'source':STRING,'until':STRING,'supersedes':STRING},['predicate']),
  schema('schedule_preparation',SCHEDULE_PREPARATION_DESCRIPTION,{'kind':{'type':'string','enum':['reminder','prepare']},'goal':STRING,'due':STRING,'timezone':STRING,'recurrence':{'type':'string','enum':['daily','weekdays','weekly']},'delivery':{'type':'string','enum':['send','keep']}},['kind','goal','due']),
  schema('list_roots','List folders explicitly connected by the user. Never assume filesystem access.'),
  schema('find_files','Search names and content in supported documents inside connected folders. Returns relative paths and source locations; call read_file to inspect evidence before answering.',{'query':STRING},['query']),
@@ -1244,6 +1245,15 @@ class Capabilities:
    from .current_context import CurrentContext
    self._current_context=CurrentContext(self.store)
   return self._current_context
+ def withdrawn_context(self):
+  """Exact location strings this Work was shown whose source is no longer valid (#627).
+
+  Deterministic: `CurrentContext.withdrawn_strings`.  An unreadable record
+  refuses the lookup rather than letting withdrawn text through.
+  """
+  if not hasattr(self.store,'db'):return []
+  try:return self.current_context().withdrawn_strings(self.job_id)
+  except Exception:raise ToolError('현재 맥락 상태를 확인하지 못해 이 조회를 보내지 않았습니다. 잠시 후 다시 시도하거나 지역을 직접 알려 주세요.','context_unverified') from None
  def source_revision(self,action,args):
   """The resolved source revision a ``weather(location_ref)`` call is keyed on, or None (#627)."""
   if action!='weather' or not isinstance(args,dict) or 'location_ref' not in args:return None
@@ -1466,7 +1476,10 @@ class Capabilities:
   labels=self.private_egress_provenance()
   if private and (self.lookup_sources is None or self.delegated):
    raise ToolError(egress_refusal(action,labels or sorted(self.written_labels) or [UNATTRIBUTED_PROVENANCE],self.lookup_hint),'policy_denied')
-  if self.lookup_sources is None:return None  # no resolver and a clean context: the caller's own path
+  # #627 (#670 review): location text a snapshot showed this Work whose
+  # source was paused, cleared or superseded since is removed before dispatch.
+  withdrawn=self.withdrawn_context() if action!='public_page_read' else []
+  if self.lookup_sources is None and not withdrawn:return None  # no resolver and a clean context: the caller's own path
   if action=='public_page_read':
    # The address is fixed by the owner's approval, not composed from the
    # conversation; the current approval is the whole check.
@@ -1475,8 +1488,10 @@ class Capabilities:
    if args.get('url') not in scope:raise ValueError('소유자가 현재 승인한 공개 페이지 주소가 아니어서 조회하지 않았습니다.')
    plan={'tool':action,'url':args['url'],'approved_urls':sorted(scope)};dropped=0
   else:
-   sources=self.lookup_sources()  # raises when the Work binding no longer holds
-   excluded=[*sources['excluded'],*self.written_private,*self.pending_writes,*self.inherited_excluded]
+   # raises when the Work binding no longer holds
+   sources=self.lookup_sources() if self.lookup_sources is not None else {'excluded':[]}
+   excluded=[*sources['excluded'],*self.written_private,*self.pending_writes,*self.inherited_excluded,*withdrawn]
+   unresolved=ToolError(CONTEXT_WITHDRAWN_TEXT,'context_withdrawn') if withdrawn else ValueError(PUBLIC_TASK_UNRESOLVED)
    if action=='weather' and 'latitude' in args:
     # #627: coordinates the broker resolved from an admitted location ref;
     # numbers, not composed text, so nothing can be excluded from them.
@@ -1486,12 +1501,12 @@ class Capabilities:
     fields=[('city',args.get('city',''))]
     if country.upper() in ISO_COUNTRY_CODES:fields.append(('country',country.upper()))
     texts,withheld=self._compose(fields,excluded)
-    if not texts['city']:raise ValueError(PUBLIC_TASK_UNRESOLVED)
+    if not texts['city']:raise unresolved
     plan={'tool':action,'city':texts['city']};dropped=withheld['city']
     if texts.get('country'):plan['country']=texts['country'].upper()
    else:
     texts,withheld=self._compose([('query',args.get('query',''))],excluded)
-    if not texts['query']:raise ValueError(PUBLIC_TASK_UNRESOLVED)
+    if not texts['query']:raise unresolved
     plan={'tool':'web_search' if action=='web_search' else action,'query':texts['query']}
     dropped=withheld['query']
     if action=='bounded_public_research':plan['mode']=args.get('mode')
@@ -1718,7 +1733,12 @@ class Capabilities:
    return result
   if name=='propose_current_state':
    # #627: a revisable hypothesis in the owner's current-context store,
-   # validated by the host; never canonical Memory, never profile.*.
+   # validated by the host; never canonical Memory, never profile.*.  The
+   # Work's saved private values are removed from the value first (the store
+   # also removes stored secrets), as for a lookup (#670 review).
+   if isinstance(args.get('value'),str) and args['value']:
+    from .browser_session import redact_private_values
+    args={**args,'value':redact_private_values(args['value'],self._browser_excluded())[0]}
    return self.current_context().propose(self.job_id,args)
   if name=='schedule_preparation':
    # #659: a proposal the owner accepts; the service decides whether the

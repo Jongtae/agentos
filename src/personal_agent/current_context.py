@@ -110,6 +110,7 @@ REFUSALS = {
     'invalid_interval': 'until은 today, now 또는 오프셋이 있는 RFC3339 시각이어야 하며, 지금 이후이고 근거로부터 24시간 이내여야 합니다.',
     'invalid_place_ref': 'place_ref는 현재 맥락의 obs: 위치 참조 또는 저장된 profile:place. 장소여야 합니다.',
     'invalid_supersedes': '고칠 가설(state:)을 찾지 못했거나, 소유자 메시지 근거 없이 다른 가설을 대체하려 했습니다.',
+    'source_stale': '근거 위치가 15분 넘게 지난 마지막 위치라 현재 장소로 기록하지 않았습니다. 소유자에게 지금 위치를 한 번 물어보세요.',
 }
 
 
@@ -334,7 +335,10 @@ class CurrentContext:
         predicate = args.get('predicate')
         if predicate not in PREDICATES:
             raise refusal('unsupported_predicate')
-        value = ' '.join(str(args.get('value') or '').split())
+        # Pilot boundary 1: a stored secret or credential shape never becomes
+        # a stored or returned hypothesis value (the caller also removes the
+        # Work's saved private values, ``Capabilities``).
+        value = ' '.join(redact_known_secrets(self.store, args.get('value') or '').split())
         if predicate == 'work_mode' and value not in WORK_MODES:
             raise refusal('invalid_value')
         if len(value) > VALUE_CHARS or (not value and not args.get('place_ref')):
@@ -372,11 +376,20 @@ class CurrentContext:
                           and self._place_anchor('profile.' + place_ref[len(PROFILE_PREFIX):])):
                     raise refusal('invalid_place_ref')
             until = parse_until(args.get('until'), predicate, kind, source['at'], settings['timezone'], now)
-            if kind == 'source_report':
-                row = self._observation(db, scope, epoch, source_arg[len(OBS_PREFIX):], now)
-                if row['valid_until'] is None or row['valid_until'] <= now:
-                    raise refusal('source_unavailable')
-                until = min(until, row['valid_until'])
+            # A claim derived from an observation - as its source or as the
+            # place it names - never outlives that observation's own validity,
+            # whatever its kind; a stale position cannot found a current place.
+            for ref in {source_arg if source['ref'].startswith(OBS_PREFIX) else None, place_ref}:
+                if not (isinstance(ref, str) and ref.startswith(OBS_PREFIX)):
+                    continue
+                row = self._observation(db, scope, epoch, ref[len(OBS_PREFIX):], now)
+                if row['source_kind'] in POSITION_KINDS:
+                    if row['valid_until'] is None or row['valid_until'] <= now:
+                        if predicate == 'current_place' or ref == source_arg:
+                            raise refusal('source_stale')
+                        continue
+                    until = min(until, row['valid_until'])
+                until = min(until, row['expires_at'])
             effective_from = min(source['at'], now)
             new = {'predicate': predicate, 'value': value, 'place_ref': place_ref, 'effective_from': effective_from,
                    'end': until}
@@ -558,8 +571,70 @@ class CurrentContext:
             ranked.pop()
 
     def render(self, job_id=None, now=None):
+        """The section text for one Work; records what location text it exposed."""
         body = self.snapshot(job_id, now)
+        if body and job_id:
+            self._record_exposures(job_id, body, self.now() if now is None else now)
         return render(body) if body else None
+
+    # --- exposed location text (finding on #670) ----------------------------
+
+    def _record_exposures(self, job_id, body, now):
+        """Remember, per Work, the exact location strings this snapshot showed
+        the worker and the source revision each came from, so a lookup
+        dispatched after a pause, clear or correction can withdraw them."""
+        rows = []
+        by_id = {'obs:' + e['id']: e for e in self.observations.usable(now=now, job_id=job_id)}
+        for item in body.get('locations', []):
+            entry = by_id.get(item['ref'])
+            if entry is None:
+                continue
+            lat, lon = item['approx'].split(',')
+            strings = [item['approx'], f'{lat}, {lon}', f'{lat} {lon}', lat, lon]
+            if item.get('label'):
+                strings.append(item['label'])
+            rows.append((item['ref'], str(entry['revision']), strings))
+        for item in body.get('anchors', []):
+            rows.append((item['ref'], str(self.ref_revision(item['ref'])), [item['label']]))
+        for item in body.get('hypotheses', []):
+            if item['predicate'] == 'current_place' and item.get('value'):
+                rows.append((item['ref'], '1', [item['value']]))
+        with self.store.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            for ref, revision, strings in rows:
+                db.execute('INSERT OR REPLACE INTO current_context_exposures VALUES (?,?,?,?,?)',
+                           (job_id, ref, revision, json.dumps(sorted({s for s in strings if s.strip()}),
+                                                              ensure_ascii=False), now))
+
+    def withdrawn_strings(self, job_id, now=None):
+        """Exposed location strings of this Work whose source is no longer valid.
+
+        Deterministic, no judgment: a context source (observation or
+        hypothesis) is withdrawn when context is paused or cleared, the source
+        expired or was re-paired away, or its revision changed; a saved-place
+        anchor when its Memory row was deleted or corrected (canonical Memory
+        is not paused with current context).  A string a still-valid source
+        also carries stays usable.
+        """
+        now = self.now() if now is None else now
+        with self.store.db() as db:
+            rows = db.execute('SELECT source_ref, revision, strings_json FROM current_context_exposures WHERE job_id=?',
+                              (job_id,)).fetchall()
+        if not rows:
+            return []
+        usable = {'obs:' + e['id']: str(e['revision']) for e in self.observations.usable(now=now, job_id=job_id)}
+        live = {STATE_PREFIX + c['id'] for c in self.hypotheses(now)}
+        valid, gone = set(), set()
+        for row in rows:
+            ref, strings = row['source_ref'], json.loads(row['strings_json'])
+            if ref.startswith(OBS_PREFIX):
+                ok = usable.get(ref) == row['revision']
+            elif ref.startswith(STATE_PREFIX):
+                ok = ref in live
+            else:
+                ok = str(self.ref_revision(ref)) == row['revision']
+            (valid if ok else gone).update(strings)
+        return sorted(gone - valid)
 
     def status(self, now=None):
         """#626 status plus the live hypotheses the owner can inspect."""

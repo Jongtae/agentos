@@ -374,6 +374,91 @@ class ExpiryAndControls(ContextCase):
         self.assertEqual(redact_known_secrets(self.store, 'x opaque-telegram-value-123'), 'x [redacted]')
 
 
+class ReviewFindings(ContextCase):
+    """#670 review: stale observations, CLI empty value, secrets and consent copy."""
+
+    def test_every_obs_derived_claim_is_capped_at_the_observation_and_stale_is_refused(self):
+        self.enable()
+        ref = self.live()
+        job, _ = self.request('여기야')
+        inferred = self.propose(job, predicate='availability_hint', value='외출 중', source=ref, until='today')
+        self.assertTrue(inferred['recorded'])
+        self.assertLessEqual(self.claims()[-1]['effective_until'], self.now + FRESHNESS_SECONDS)
+        stated = self.propose(job, predicate='current_place', value='', place_ref=ref, until='today')
+        self.assertLessEqual(self.claims()[-1]['effective_until'], self.now + FRESHNESS_SECONDS,
+                             'an owner statement naming a position is capped by it too')
+        self.assertTrue(stated['recorded'])
+        self.now += FRESHNESS_SECONDS + 1
+        for args in ({'source': ref, 'place_ref': ref}, {'place_ref': ref}):
+            with self.subTest(args=args):
+                refused = self.propose(job, predicate='current_place', value='', until='today', **args)
+                self.assertEqual(refused['reason'], 'source_stale')
+        venue = self.venue()
+        place = self.propose(job, predicate='current_place', value='', source=venue, place_ref=venue)
+        self.assertEqual(place['kind'], 'inferred', 'a shared place is never a position report')
+
+    def test_an_empty_value_with_a_place_ref_works_through_the_cli_facade(self):
+        from personal_agent.agent_runtime import Capabilities
+        from personal_agent.bounded_execution import AgentOSMcpTools, profile_actions
+        self.enable()
+        ref = self.live()
+        job, _ = self.request('나 여기야')
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='running' WHERE id=?", (job,))
+        caps = Capabilities(self.store, None, {}, '', job, lambda *a: None, document_access=False,
+                            allowed_tools=set(profile_actions(AgentOSMcpTools.PROFILE)), current_context=self.context)
+        result = AgentOSMcpTools(caps).call('propose_current_state',
+                                            {'predicate': 'current_place', 'value': '', 'place_ref': ref})
+        self.assertTrue(result['recorded'], result)
+        refused = AgentOSMcpTools(caps).call('propose_current_state', {'predicate': 'current_place', 'value': ''})
+        self.assertEqual(refused['reason'], 'invalid_value', 'a value or a place_ref is still required')
+
+    def test_a_stored_secret_never_becomes_a_hypothesis_value(self):
+        self.enable()
+        self.store.secret('telegram_token', 'opaque-telegram-value-123')
+        job, _ = self.request('회의 중')
+        result = self.propose(job, predicate='availability_hint', value='회의 opaque-telegram-value-123 sk-abcdefghijkl')
+        self.assertEqual(result['value'], '회의 [redacted] [redacted]')
+        self.assertNotIn('opaque-telegram-value-123', json.dumps(self.claims(), ensure_ascii=False))
+        self.assertNotIn('opaque-telegram-value-123', self.context.render(job))
+
+    def test_recorded_arguments_hide_the_proposed_value(self):
+        from personal_agent.agent_runtime import recorded_arguments, recorded_calls
+        args = {'predicate': 'availability_hint', 'value': 'secret words'}
+        self.assertEqual(recorded_arguments('propose_current_state', args)['value'], '[가림: 12자]')
+        calls = [{'id': 'c1', 'function': {'name': 'propose_current_state', 'arguments': json.dumps(args)}}]
+        tools = {'propose_current_state': {'host_action': 'propose_current_state'}}
+        self.assertNotIn('secret words', json.dumps(recorded_calls(calls, tools)))
+
+    def test_withdrawn_strings_follow_pause_correction_and_anchor_changes(self):
+        self.enable()
+        self.anchors()
+        ref = self.live()
+        job, _ = self.request('근처')
+        self.context.render(job)
+        self.assertEqual(self.context.withdrawn_strings(job), [], 'every exposed source still valid')
+        self.now += 60
+        self.message_id -= 0
+        with self.store.db() as db:
+            db.execute('UPDATE context_observations SET source_revision=source_revision+1')
+        self.assertIn('37.57,126.98', self.context.withdrawn_strings(job), 'a corrected point withdraws the old text')
+        self.assertNotIn('합정', self.context.withdrawn_strings(job))
+        self.memory.remember_profile(PROFILE_OWNER, 'settings', 'profile.place.home', '망원')
+        self.assertIn('합정', self.context.withdrawn_strings(job), 'a corrected anchor withdraws its old label')
+        self.assertNotIn('판교', self.context.withdrawn_strings(job))
+        self.assertTrue(ref)
+
+    def test_the_settings_consent_copy_says_what_is_sent(self):
+        root = Path(__file__).resolve().parents[1] / 'src' / 'personal_agent' / 'web'
+        html = (root / 'index.html').read_text()
+        app = (root / 'app.js').read_text()
+        self.assertNotIn('아직 답변에는 사용하지 않습니다', html)
+        self.assertNotIn('not used in answers yet', app)
+        self.assertIn('AI에게 보내는 요청에 포함되고', html)
+        self.assertIn('included in requests to the AI', app)
+        self.assertIn('pause or clear it at any time', app)
+
+
 class Snapshot(ContextCase):
     """S2: bounded, source-qualified, and absent when off."""
 

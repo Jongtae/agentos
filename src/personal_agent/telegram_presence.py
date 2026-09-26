@@ -282,6 +282,9 @@ def _leaf(text, spans=(), stack=()):
                        + ''.join(f'<{tag}>' for tag in stack))
         else:
             label, url = value
+            # A link may not contain a code entity, so code inside its label
+            # is restored as plain text.
+            label = _SPAN_REF.sub(lambda ref: spans[int(ref.group(1))][1], label)
             out.append('<a href="' + html.escape(url, quote=True) + '">' + _escape(label) + '</a>')
         pos = match.end()
     out.append(_escape(text[pos:]))
@@ -322,6 +325,8 @@ def _spans(text, in_bold=False):
 
     def cut(kind):
         def replace(match):
+            if kind == 'link' and _SPAN_REF.search(match.group(2)):
+                return match.group(0)  # code inside a URL: not a link
             spans.append((kind, match.group(1) if kind == 'code' else (match.group(1), match.group(2))))
             return f'{_SPAN_OPEN}{len(spans) - 1}{_SPAN_CLOSE}'
         return replace

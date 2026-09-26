@@ -877,6 +877,18 @@ class EmphasisAroundSpansWireTests(unittest.TestCase):
         self.assertEqual(visible(render_telegram_html('**`a`** **`b`**')), 'a b')
         self.assertEqual(visible(render_telegram_html('*`i`* 와 **[l](https://l.test)**')), 'i 와 l')
 
+    def test_code_inside_a_link_is_restored_never_a_placeholder(self):
+        # Review P2: a code span inside a link label or URL must not leak U+E000/U+E001.
+        self.assertEqual(render_telegram_html('[run `foo` now](https://example.com)'),
+                         '<a href="https://example.com">run foo now</a>')
+        self.assertEqual(render_telegram_html('**[run `foo`](https://example.com)**'),
+                         '<b><a href="https://example.com">run foo</a></b>')
+        self.assertEqual(render_telegram_html('[x](https://a.test/`y`)'), '[x](https://a.test/<code>y</code>)')
+        for text in ('[run `foo` now](https://example.com)', '[x](https://a.test/`y`)', '[`a`](https://a.test) `b`'):
+            with self.subTest(text=text):
+                rendered = render_telegram_html(text)
+                self.assertNotRegex(rendered, '[\ue000\ue001]')
+
 
 class ChannelWireTests(unittest.TestCase):
     def test_presence_method_bodies_follow_bot_api_10_3(self):

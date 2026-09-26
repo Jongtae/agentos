@@ -103,14 +103,18 @@ Use the existing packages/manifests and broker as the single binding source. Do 
 **#604 profile record (owner decision, [#604](https://github.com/Jongtae/agentos/issues/604)).** `bounded_execution.CLI_PROFILES` is the single declaration of CLI route profiles.
 
 - **Profiles.** The subscription CLI route is the explicitly named **`trusted-local`** profile. It offers `web_search`, `weather`, `bounded_public_research`, `list_notes` and `save_note` under the unchanged AgentOS guards. The isolated sidecar profile stays restricted to `list_notes`.
-- **Declared limitation.** The `trusted-local` declaration, Settings, provenance and the doctor all state the same verified limitation: "the CLI may read host files outside AgentOS provenance (verified: codex sandbox -P :read-only, codex-cli 0.153.4)".
+- **Declared limitation.** The `trusted-local` declaration, Settings, provenance and the doctor all state the same limitation, per CLI: "the CLI may read host files outside AgentOS provenance (verified: codex sandbox -P :read-only, codex-cli 0.153.4); Claude Code 2.1.280 -p denied the tested store and home reads, a Write and WebFetch and could read its turn directory (observed); managed settings could allow more (documented only)". The Claude Code clause replaced an unobserved "may read outside the working directory" statement ([#623](https://github.com/Jongtae/agentos/issues/623)).
+- **Claude Code bridge tools (#623).** The `trusted-local` Claude Code argv passes the official `--allowedTools` rule naming exactly the profile's bridge tools (`mcp__agentos__<action>` for each declared action; no server-wide rule, no wildcard, no built-in tool). The strict profile reuses the same allowlist. Without it, `-p` denied every bridge call ("haven't granted"). No-model process tests of the exact argv on 2.1.280, with a loopback scripted model and a fake store, show three things (`tests/test_strict_isolation.py::ProcessLevelQualification::test_claude_trusted_local_*`, opt-in `AGENTOS_CLI_QUALIFICATION=1`):
+  - Every declared bridge call reaches AgentOS, whose own guards decide the outcome.
+  - A bridge tool left out of the allowlist is still denied.
+  - The built-in tools are unchanged: the store read, the home `cat`, a `Write` and WebFetch are denied, and the turn directory stays readable.
 - **Accepted risk.** The owner explicitly accepts this trusted-local-worker risk. Strict read isolation is [#616](https://github.com/Jongtae/agentos/issues/616) AGENCY-ISOLATION-01, ordered after #604 and before #605.
 
 No-model local evidence, recorded 2026-09-26 with a fake store only:
 
 - Codex 0.153.4 `codex sandbox -P :read-only`, the built-in profile behind `exec --sandbox read-only`: it could read the fake store, a home file and the turn directory. Network and writes were blocked.
 - A Codex permissions profile with filesystem `:minimal=read` plus the turn directory only, passed with `-c`: store and home reads were blocked, while the turn directory and the system interpreter remained usable. Whether the Codex MCP server process is confined too, and whether the bridge still works under that profile, has **not** been observed. Observing it needs a `codex exec` run. This is input to #616.
-- Claude Code 2.1.280: there is no local runner for its file tools. Its `--help` states that `--restricted` removes code-running tools and WebFetch and confines file tools to the working directories. AgentOS does not pass that flag today, and none of this is locally verified.
+- Claude Code 2.1.280: there is no local runner for its file tools. Its `--help` states that `--restricted` removes code-running tools and WebFetch and confines file tools to the working directories. AgentOS does not pass that flag on `trusted-local`. The later #623 process tests observed its `-p` permission layer directly (see above).
 
 **#616 strict-isolated profile record ([#616](https://github.com/Jongtae/agentos/issues/616), AX-15).** `strict-isolated` is a separate host-CLI profile in `bounded_execution.CLI_PROFILES`. It offers the same actions through the same stdio bridge as `trusted-local`. Only the CLI launch differs:
 

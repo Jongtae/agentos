@@ -33,6 +33,7 @@ GENERATION = 'g1'
 SEOUL_POINT = {'latitude': 37.566512, 'longitude': 126.978031, 'horizontal_accuracy': 10}
 ADMITTED = {'tool': 'weather', 'latitude': 37.57, 'longitude': 126.98}
 PASSPORT = 'M12345678'
+SECRET = 'opaque-telegram-value-123'
 
 
 def snapshot_in(text):
@@ -48,6 +49,12 @@ def lunch_or_weather(snapshot, request):
     if snapshot is None:
         return []
     anchors = {item['ref']: item['label'] for item in snapshot.get('anchors', [])}
+    if '근처' in request:
+        # The worker copies the snapshot's coordinates into its own query text.
+        here = next(item['approx'] for item in snapshot.get('locations', []))
+        return [('web_search', {'query': here if '만' in request else here + ' 근처 점심'})]
+    if '비밀' in request:
+        return [('propose_current_state', {'predicate': 'availability_hint', 'value': '회의 중 ' + SECRET})]
     if '재택' in request:
         home = next(ref for ref in anchors if ref.endswith('.home'))
         return [('propose_current_state', {'predicate': 'work_mode', 'value': 'remote', 'place_ref': home,
@@ -290,6 +297,50 @@ class _ConsumptionCase:
         [plan] = self.outbound('web_search')
         self.assertIn('합정', plan['query'])
         self.assertNotIn(PASSPORT, json.dumps(self.network.plans))
+
+    def test_pausing_after_the_snapshot_withdraws_copied_coordinates(self):
+        """#670 review P1: text the worker copied from the snapshot is withdrawn at dispatch."""
+        self.enable()
+        self.message_id += 1
+        self.share_live_location()
+        self.before_dispatch = lambda: self.service.set_current_context({'enabled': False})
+        self.turn('근처 점심 찾아줘')
+        [plan] = self.outbound('web_search')
+        self.assertEqual(plan['query'], '근처 점심')
+        self.assertNotIn('37.57', json.dumps(self.network.plans))
+        self.assertNotIn('126.98', json.dumps(self.network.plans))
+
+    def test_a_still_valid_source_is_left_untouched(self):
+        self.enable()
+        self.message_id += 1
+        self.share_live_location()
+        self.turn('근처 점심 찾아줘')
+        self.assertEqual([plan['query'] for plan in self.outbound('web_search')], ['37.57,126.98 근처 점심'])
+
+    def test_clearing_leaves_nothing_to_search_and_refuses_typed(self):
+        self.enable()
+        self.message_id += 1
+        self.share_live_location()
+        self.before_dispatch = lambda: self.service.set_current_context({'clear': True})
+        self.turn('근처만 찾아줘')
+        self.assertEqual(self.outbound('web_search'), [])
+        self.assertEqual(self.results[-1]['code'], 'context_withdrawn')
+
+    def test_a_secret_in_a_proposed_value_is_stored_nowhere(self):
+        """#670 review P1: redacted before it is stored, returned, recorded or shown."""
+        self.store.secret('telegram_token', SECRET)
+        self.enable()
+        job = self.turn('비밀 회의야')
+        [result] = [item for item in self.results if 'recorded' in item]
+        self.assertTrue(result['recorded'])
+        self.assertNotIn(SECRET, json.dumps(result, ensure_ascii=False))
+        with self.store.db() as db:
+            tables = [row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+            dump = json.dumps([[dict(row) for row in db.execute(f'SELECT * FROM "{table}"')] for table in tables],
+                              ensure_ascii=False, default=str)
+        self.assertNotIn(SECRET, dump, 'no table row holds it (claims, tool events, provenance, jobs)')
+        self.assertNotIn(SECRET, self.service.current_state.render(job) or '')
+        self.assertNotIn(SECRET, json.dumps(self.service.current_state.status(), ensure_ascii=False))
 
     def test_context_off_is_the_old_text_flow(self):
         """CT-18: no section, no proposal tool, no lookup from context."""

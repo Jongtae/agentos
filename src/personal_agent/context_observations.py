@@ -66,6 +66,9 @@ CLAIMS_DDL = '''
               revision INTEGER NOT NULL, supersedes TEXT, state TEXT NOT NULL, created_by_work TEXT, created REAL NOT NULL);
             CREATE INDEX IF NOT EXISTS current_state_claims_use
               ON current_state_claims(owner_key, context_epoch, state, expires_at);
+            CREATE TABLE IF NOT EXISTS current_context_exposures(
+              job_id TEXT NOT NULL, source_ref TEXT NOT NULL, revision TEXT NOT NULL, strings_json TEXT NOT NULL,
+              created REAL NOT NULL, PRIMARY KEY(job_id, source_ref));
 '''
 
 DEFAULT_SETTINGS = {'version': POLICY_VERSION, 'enabled': False, 'epoch': 0, 'cutoff': 0.0, 'timezone': ''}
@@ -120,6 +123,12 @@ def _live_period(location):
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         return None
     return value
+
+
+def _drop_finished_exposures(db):
+    """Exposed location text is kept only while its Work can still dispatch."""
+    db.execute("DELETE FROM current_context_exposures WHERE job_id NOT IN "
+               "(SELECT id FROM jobs WHERE status IN ('queued','running','awaiting_approval'))")
 
 
 def owner_key(owner_id):
@@ -216,6 +225,8 @@ class ContextObservations:
                 settings['cutoff'] = max(settings['cutoff'], now)
                 db.execute('DELETE FROM context_observations')
                 db.execute('DELETE FROM current_state_claims')
+                # Kept only for Works still in flight, which must withdraw them.
+                _drop_finished_exposures(db)
                 db.execute("UPDATE context_location_requests SET state='cleared' WHERE state='pending'")
             self._put(db, settings)
         return self.status()
@@ -242,6 +253,7 @@ class ContextObservations:
     def prune(self, db, now):
         db.execute('DELETE FROM context_observations WHERE expires_at<=?', (now,))
         db.execute('DELETE FROM current_state_claims WHERE expires_at<=?', (now,))
+        _drop_finished_exposures(db)
         db.execute("UPDATE context_location_requests SET state='expired' WHERE state='pending' AND expires<=?", (now,))
 
     @staticmethod

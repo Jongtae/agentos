@@ -11,8 +11,8 @@ import time
 import hashlib
 from urllib.parse import urlsplit
 from .local_tools import LocalTools, normalize_public_url
-from .agent_runtime import (Capabilities, run_agent, AGENTS, evidence_summary, turn_context, render_turn_prompt,
-                            MEMORY_OWNER, context_sections, CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, OWNER_CONVERSATION, lookup_sources, WORK_SOURCES_KEY, WORK_SOURCES_LIMIT, base_label,
+from .agent_runtime import (Capabilities, ToolError, run_agent, AGENTS, evidence_summary, turn_context, render_turn_prompt,
+                            MEMORY_OWNER, context_sections, CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, OWNER_CONVERSATION, lookup_sources, work_written_values, WORK_SOURCES_KEY, WORK_SOURCES_LIMIT, base_label,
                             history_provenance, WorkBudget, EFFECT_FREE_READS, explicit_search_query, outcome_from_events,
                             WORK_STOP_KEY, WORK_STOP_KEEP, work_stop_requested, WorkLedger, goal_summary, work_source_records)
 from .plugins import PluginRegistry
@@ -64,6 +64,8 @@ from . import local_folder_picker
 # PRESENCE-TG-01 / #581: native Telegram presence (reaction, typing, draft, anchor).
 from .context_observations import ContextObservations
 from .current_context import CurrentContext, KNOWN_SECRET_NAMES, redact_known_secrets
+# SEC-ATTN-01 (#659): owner-accepted preparations (reminders, prepared answers).
+from . import preparations as prep
 from .browser_session import BrowserProfile, binding_digest
 from .telegram_presence import (CONTROL_DETAILS, CONTROL_RETRY, THINKING_DRAFT_TEXT, WAIT_CHAT_ACTION, WAIT_DRAFT, PresenceTiming,
                                 TelegramTurnAddressing, WaitState, draft_id_for, render_telegram_html,
@@ -243,6 +245,8 @@ class AgentService:
         self.context_observations=ContextObservations(store)
         # #627: hypotheses, snapshot and location refs over the same tables.
         self.current_state=CurrentContext(store,self.context_observations)
+        # #659: owner-accepted preparations, run by the existing work loop.
+        self.preparations=prep.Preparations(store)
         self.presence_timing=PresenceTiming()
         self.presence={}
         self.subscription_engines=subscription_engines or SubscriptionEngines()
@@ -415,6 +419,179 @@ class AgentService:
             LOG.warning('current context snapshot unavailable job=%s',job.get('id'))
             return None
 
+    # -- SEC-ATTN-01 (#659): owner-accepted preparations ------------------------
+
+    def prepared_text(self, job):
+        """The bounded "Prepared for you" section for this Work, or None (#659).
+
+        Fresh answers of owner-accepted ``prepare`` preparations, stored
+        secrets redacted.  A failure here never blocks the turn.
+        """
+        try:
+            now=self.preparations.clock()
+            rows=self.preparations.fresh(now,exclude_job=job.get('id'))
+            return prep.render_prepared(rows,now,self._redact_known_secrets) if rows else None
+        except Exception:
+            LOG.warning('prepared answers unavailable job=%s',job.get('id'))
+            return None
+
+    def preparation_scheduler(self, job, prompt):
+        """The ``schedule_preparation`` handler bound to one Work (#659).
+
+        The row is ``scheduled`` only when the owner's own message for this
+        Work is judged (DecisionEngine) to ask for exactly this preparation.
+        Otherwise - no engine, a no, a retried or replayed prompt, or a Work
+        that a preparation itself started - it stays ``proposed`` until the
+        owner accepts it with the Telegram button or in Settings.
+        """
+        def schedule(args):
+            now=self.preparations.clock()
+            try:
+                kind=args.get('kind')
+                if kind not in prep.KINDS:raise prep.PreparationRefusal('invalid_kind')
+                # Pilot boundary 1: a stored secret never becomes goal text.
+                goal=prep.normalize_goal(self._redact_known_secrets(args.get('goal')))
+                zone_name=self.context_observations.settings().get('timezone') or ''
+                due_at,timezone=prep.parse_due(args.get('due'),args.get('timezone') or '',zone_name,now)
+                recurrence=prep.normalize_recurrence(args.get('recurrence'))
+            except prep.PreparationRefusal as exc:
+                raise ToolError(str(exc),exc.code) from None
+            channel=prep.CHANNEL_TELEGRAM if kind==prep.KIND_REMINDER or args.get('delivery')=='send' else prep.CHANNEL_WEB
+            summary=prep.proposal_summary({'kind':kind,'goal_text':goal,'due_at':due_at,'timezone':timezone,'recurrence':recurrence})
+            own_request=(isinstance(prompt,str) and prompt==job.get('message')
+                         and prep.preparation_of(job.get('request_key')) is None)
+            accepted=own_request and self.decision_judge.explicit_preparation_request(prompt,summary).outcome==JUDGMENT_YES
+            try:
+                row=self.preparations.create(kind=kind,goal=goal,due_at=due_at,timezone=timezone,recurrence=recurrence,
+                                             channel=channel,created_from=job['id'],
+                                             state=prep.STATE_SCHEDULED if accepted else prep.STATE_PROPOSED,
+                                             accepted_by=prep.ACCEPTED_OWNER_REQUEST if accepted else None)
+            except prep.PreparationRefusal as exc:
+                raise ToolError(str(exc),exc.code) from None
+            LOG.info('preparation %s id=%s work=%s kind=%s',row['state'],row['id'],job['id'],kind)
+            scheduled=row['state']==prep.STATE_SCHEDULED
+            when=prep.local_text(row['due_at'],row['timezone'])
+            label='알림' if kind==prep.KIND_REMINDER else '준비'
+            return {'preparation_id':row['id'],'kind':kind,'state':row['state'],'scheduled':scheduled,
+                    'requires_owner_acceptance':row['state']==prep.STATE_PROPOSED,
+                    'due':prep.iso(row['due_at'],row['timezone']),'due_local':when,'now_local':prep.local_text(now,row['timezone']),
+                    'recurrence':row['recurrence'] or 'none','delivery':'send' if row['channel']==prep.CHANNEL_TELEGRAM else 'keep',
+                    'accepted_by':row['accepted_by'],
+                    'next_step':(f'{when}에 {label}을 예약했습니다. 설정 > 준비해 둔 일에서 취소할 수 있습니다.' if scheduled else
+                                 f'{when} {label}을 제안했습니다. 소유자가 수락해야 예약됩니다(Telegram의 수락 버튼 또는 설정 > 준비해 둔 일).')}
+        return schedule
+
+    def run_due_preparation(self, now=None):
+        """One tick of owner-accepted preparations (#659).
+
+        One indexed query.  Nothing due: no model, no network, no Telegram
+        call.  A due slot is claimed together with its Work (``Preparations.start``);
+        a finished run is settled and its recurrence advanced.  Delivery is the
+        existing ``deliver_one``, so a slot is sent at most once.
+        """
+        now=self.preparations.clock() if now is None else now
+        rows=self.preparations.due(now)
+        if not rows:return False
+        for row in rows:
+            try:
+                if row['state']==prep.STATE_RUNNING:
+                    settled=self.preparations.settle(row,now,scrub=self.scrub_prepared_answer)
+                    if settled:LOG.info('preparation settled id=%s outcome=%s next=%s',row['id'],settled['last_outcome'],settled['state'])
+                    continue
+                cfg=self.store.config('telegram',{})
+                send=(row['channel']==prep.CHANNEL_TELEGRAM and cfg.get('enabled') and isinstance(cfg.get('user_id'),int)
+                      and cfg.get('generation'))
+                work_id=self.preparations.start(row,channel=f"telegram:{cfg['generation']}" if send else 'web',
+                                                chat_id=cfg['user_id'] if send else None,now=now)
+                if work_id:LOG.info('preparation started id=%s work=%s kind=%s',row['id'],work_id,row['kind'])
+            except Exception as exc:
+                LOG.warning('preparation tick failed id=%s kind=%s',row['id'],type(exc).__name__)
+        return True
+
+    def scrub_prepared_answer(self, job):
+        """A prepared answer as it may be kept for later turns (#659).
+
+        The values the preparation's Work wrote to a private store (the #605
+        lookup exclusion set) and stored secrets / credential shapes are
+        removed before it is stored; deterministic, no judgment.
+        """
+        return self.scrub_work_text(job['id'],job.get('response'))
+
+    def scrub_work_text(self, work_id, text):
+        """``text`` with Work ``work_id``'s saved private values and stored secrets removed (#659)."""
+        from .browser_session import redact_private_values
+        tools={tool['id']:tool for package in self.runtime_packages() for tool in package['tools']}
+        text,_count=redact_private_values(str(text or ''),work_written_values(self.store,work_id,tools))
+        return self._redact_known_secrets(text)
+
+    def preparation_history(self, job):
+        """The only conversation a preparation's Work is shown (#659).
+
+        Structural, not semantic: a Work started by a preparation (its
+        request key) sees the Work that created the preparation - its owner
+        request, scrubbed - and the accepted goal, never the unrelated
+        conversation that happened since.  Profile, current context and
+        prepared answers still arrive as the usual turn_context sections.
+        """
+        rows=[]
+        row=self.preparations.get(prep.preparation_of(job.get('request_key')))
+        origin=self.store.job(row['created_from']) if row and row.get('created_from') else None
+        if origin and origin.get('message'):
+            rows.append({'role':'user','content':self.scrub_work_text(origin['id'],origin['message']),
+                         'job_id':origin['id'],'channel':origin.get('channel'),'qualifier':None})
+        rows.append({'role':'user','content':job['message'],'job_id':job['id'],'channel':job.get('channel'),'qualifier':None})
+        return rows
+
+    def queue_preparation_proposal(self, job):
+        """Offer this Work's unaccepted preparations to the paired owner once (#659)."""
+        rows=self.preparations.proposed_from(job['id'])
+        if rows:self.queue_notification(job,'preparation_proposed',fingerprint=prep.digest(prep.proposal_page(rows)[0]))
+
+    def offered_proposals(self, notification):
+        """The exact proposals a proposal message shows, or [] if they changed (#659).
+
+        Recomputed from the Work's current proposals; the buttons act only
+        when the rendered set still has the digest the message was queued with.
+        """
+        shown,remaining=prep.proposal_page(self.preparations.proposed_from(notification['job_id']))
+        if not shown or prep.digest(shown)!=notification['fingerprint']:return [],0
+        return shown,remaining
+
+    @staticmethod
+    def preparation_reply_prefix(job):
+        """A prepared answer says what it was prepared for; a reminder needs nothing."""
+        if prep.preparation_of(job.get('request_key')) is None or job.get('model')=='preparation':return ''
+        goal=str(job.get('message') or '')
+        return f"미리 준비한 결과입니다 ({goal[:120]}{'…' if len(goal)>120 else ''}).\n\n"
+
+    def preparations_status(self):
+        """The Settings 준비해 둔 일 list: owner's own view (#659)."""
+        rows=[]
+        for row in self.preparations.rows():
+            last=str(row.get('last_response') or '')
+            rows.append({'id':row['id'],'kind':row['kind'],'goal':row['goal_text'],'state':row['state'],
+                         'due':row['due_at'],'due_local':prep.local_text(row['due_at'],row['timezone']),
+                         'timezone':row['timezone'],'recurrence':row['recurrence'],'delivery':'send' if row['channel']==prep.CHANNEL_TELEGRAM else 'keep',
+                         'accepted_by':row['accepted_by'],'last_outcome':row['last_outcome'],'last_work_id':row['last_run_job_id'],
+                         'last_status':row.get('last_status'),'last_delivery':row.get('last_delivery'),
+                         'last_result':last[:280]+('…' if len(last)>280 else ''),'prepared_at':row['prepared_at'],
+                         'created_at':row['created_at']})
+        return {'preparations':rows}
+
+    def preparation_request(self, body):
+        """Owner Settings operations on one preparation: list, accept, cancel, delete (#659)."""
+        if not isinstance(body,dict):raise ValueError('준비 요청을 확인하세요.')
+        operation=body.get('operation')
+        if operation=='list':return self.preparations_status()
+        preparation_id=body.get('id')
+        if not isinstance(preparation_id,str) or not preparation_id:raise ValueError('준비를 선택하세요.')
+        if operation=='accept':self.preparations.accept(preparation_id,prep.ACCEPTED_OWNER_SETTINGS)
+        elif operation=='cancel':self.preparations.cancel(preparation_id)
+        elif operation=='delete':self.preparations.delete(preparation_id)
+        else:raise ValueError('지원하지 않는 준비 작업입니다.')
+        LOG.info('preparation %s id=%s by owner settings',operation,preparation_id)
+        return self.preparations_status()
+
     def owner_profile_snapshot(self):
         """The bounded ``profile.*`` snapshot text every turn context carries (#658).
 
@@ -583,7 +760,9 @@ class AgentService:
                                            'owner-mail','owner-settings','unrecorded','unattributed-tool-evidence',
                                            'conversation-history','engine-unmediated-read',
                                            # #627: the current-context snapshot (locations, hypotheses).
-                                           'owner-current-context'})
+                                           'owner-current-context',
+                                           # #659: the "Prepared for you" section (earlier prepared answers).
+                                           'owner-preparations'})
 
     def record_turn_sent(self, job_id, *, sent, instructions, instructions_channel, private_sources=(), **fields):
         """Record what a turn sent; computed inside the guard so it can never break the turn."""
@@ -3390,7 +3569,9 @@ class AgentService:
                 'denied':'문서 공유를 허용하지 않았습니다.',
                 'browser_approval_needed':BROWSER_APPROVAL_PROMPT,
                 'browser_approved':'이 단계를 승인했습니다. 요청을 한 번만 이어서 처리합니다.',
-                'browser_denied':'이 단계를 허용하지 않았습니다. 요청은 여기서 멈춥니다.'}.get(kind,'AgentOS 상태 알림')
+                'browser_denied':'이 단계를 허용하지 않았습니다. 요청은 여기서 멈춥니다.',
+                'preparation_accepted':'준비를 예약했습니다. 설정 > 준비해 둔 일에서 취소할 수 있습니다.',
+                'preparation_denied':'준비를 예약하지 않았습니다.'}.get(kind,'AgentOS 상태 알림')
 
     def queue_notification(self, job, kind, fingerprint=None):
         cfg=self.store.config('telegram',{})
@@ -3426,8 +3607,19 @@ class AgentService:
                     {'text':'이 단계 승인','callback_data':f"p7w:{notification['id']}:approve"},
                     {'text':'허용 안 함','callback_data':f"p7w:{notification['id']}:deny"},
                 ]]}
+            elif notification['kind']=='preparation_proposed':
+                # #659: the exact proposals of one Work; changed since -> not offered.
+                proposals,remaining=self.offered_proposals(notification)
+                if not proposals:
+                    self.store.update_notification(notification['id'],'cancelled')
+                    return True
+                reply_markup={'inline_keyboard':[[
+                    {'text':'수락','callback_data':f"p7p:{notification['id']}:accept"},
+                    {'text':'예약 안 함','callback_data':f"p7p:{notification['id']}:deny"},
+                ]]}
             try:
-                text=(LOCAL_DOCUMENT_APPROVAL_TEXT if notification['kind']=='approval_needed'
+                text=(prep.proposal_text(proposals,remaining) if notification['kind']=='preparation_proposed' else
+                      LOCAL_DOCUMENT_APPROVAL_TEXT if notification['kind']=='approval_needed'
                       and self.document_resume_eligible(notification.get('job_id'))
                       else self.browser_step_prompt(notification.get('job_id')) if notification['kind']=='browser_approval_needed'
                       else self.notification_text(notification['kind']))
@@ -3656,6 +3848,29 @@ class AgentService:
                     if exact:
                         decision=self._decide_browser_step(notification['job_id'],parts[2]=='approve')
                         result_kind='browser_approved' if decision.get('approved') else 'browser_denied'
+                        self.store.update_notification(notification['id'],result_kind)
+                        try:self.telegram.edit_message_text(sender,notification['message_id'],self.notification_text(result_kind),{'inline_keyboard':[]})
+                        except ProviderError:pass
+                        changed=True
+            elif authorized and isinstance(data,str) and data.startswith('p7p:'):
+                # #659: the owner's explicit yes/no for one Work's proposed
+                # preparations.  Exact: this notification, sent, this chat
+                # and message, and the proposals are still exactly the set
+                # the message offered (fingerprint).
+                parts=data.split(':')
+                if len(parts)==3 and parts[2] in ('accept','deny'):
+                    notification=self.store.notification(parts[1])
+                    # Only the rows this message rendered (digest of the shown page).
+                    proposals=self.offered_proposals(notification)[0] if notification else []
+                    exact=(notification and notification['kind']=='preparation_proposed' and notification['state']=='sent'
+                           and notification['generation']==generation and notification['chat_id']==sender
+                           and notification['message_id']==message.get('message_id') and proposals)
+                    if exact:
+                        for row in proposals:
+                            if parts[2]=='accept':self.preparations.accept(row['id'],prep.ACCEPTED_OWNER_BUTTON)
+                            else:self.preparations.cancel(row['id'])
+                        result_kind='preparation_accepted' if parts[2]=='accept' else 'preparation_denied'
+                        LOG.info('preparation %s by owner button work=%s count=%s',parts[2],notification['job_id'],len(proposals))
                         self.store.update_notification(notification['id'],result_kind)
                         try:self.telegram.edit_message_text(sender,notification['message_id'],self.notification_text(result_kind),{'inline_keyboard':[]})
                         except ProviderError:pass
@@ -4042,7 +4257,9 @@ class AgentService:
                         config=self.store.config('model',{})
                         key=self.store.secret('model_key')
                         route_snapshot=self.store.config('subscription_engine',{})
-                    stored_history=self.store.history()[-16:]
+                    # #659: a preparation's Work sees its own origin and goal only.
+                    stored_history=(self.preparation_history(job) if prep.preparation_of(job.get('request_key'))
+                                    else self.store.history()[-16:])
                     document_jobs=set(self.store.config('file_workspace_document_jobs',[]))
                     document_history=any(message.get('job_id') in document_jobs for message in stored_history)
                     # Earlier replies of failed/partial/interrupted Work carry
@@ -4190,7 +4407,8 @@ class AgentService:
                         # same bounded recent conversation as the direct-API route.
                         # #627: the same current-context snapshot as the direct route.
                         engine_context=turn_context([*history[:-1],{'role':'user','content':current_request}],'cli',
-                                                    current_context=self.current_context_text(job),profile=self.owner_profile_snapshot())
+                                                    current_context=self.current_context_text(job),profile=self.owner_profile_snapshot(),
+                                                    prepared=self.prepared_text(job))
                         engine_prompt=render_turn_prompt(engine_context)
                         adapter_context=engine_context
                         # Bounded Claude Code gets the instructions as a separate
@@ -4237,7 +4455,8 @@ class AgentService:
                             # record keeps size/digest only. Provenance label for the
                             # record, not for capabilities (lookups stay open).
                             private_sources=set(turn_provenance)|{base_label(label) for label in capabilities.private_provenance}|({'owner-memory'} if engine_context.get('profile') else set())
-                                            |({'owner-current-context'} if engine_context.get('current_context') else set()),
+                                            |({'owner-current-context'} if engine_context.get('current_context') else set())
+                                            |({'owner-preparations'} if engine_context.get('prepared') else set()),
                             route='subscription',engine=subscription['id'],mode=mode,status='sent',
                             context_mode=engine_context.get('mode','shared-context'),instructions_version=engine_context.get('version'),
                             context_messages=len(engine_context['conversation']),egress_taint=sorted(capabilities.private_provenance))
@@ -4296,7 +4515,8 @@ class AgentService:
                         checked=self.store.config('model_test',{})
                         if checked.get('runtime_model'):
                             runtime_config['model']=checked['runtime_model']
-                        api_context=turn_context(history,'api',current_context=self.current_context_text(job),profile=self.owner_profile_snapshot())
+                        api_context=turn_context(history,'api',current_context=self.current_context_text(job),profile=self.owner_profile_snapshot(),
+                                                 prepared=self.prepared_text(job))
                         # #605: the sources of exactly the earlier messages this
                         # worker is shown replace the file-workspace job-list
                         # flag (`document_context`), which missed an earlier
@@ -4312,6 +4532,8 @@ class AgentService:
                                                   # #656: the owner-logged-in browser profile and its per-step approvals.
                                                   browser=self.browser_profile.driver_factory(job['id']),browser_approvals=self.browser_approvals_for(job),
                                                   current_context=self.current_state,
+                                                  # #659: owner-accepted preparations (proposal or owner-request acceptance).
+                                                  preparations=self.preparation_scheduler(job,prompt),
                                                   # #657: completion is judged from observations.
                                                   judgments=self.decision_judge,
                                                   # Pilot boundary 1: stored secrets never reach the judgment.
@@ -4331,7 +4553,9 @@ class AgentService:
                                             # #658: see the CLI route - record-only label for the profile section.
                                             |({'owner-memory'} if api_context.get('profile') else set())
                                             # #627: record-only label for the current-context section.
-                                            |({'owner-current-context'} if api_context.get('current_context') else set()),
+                                            |({'owner-current-context'} if api_context.get('current_context') else set())
+                                            # #659: record-only label for the prepared answers section.
+                                            |({'owner-preparations'} if api_context.get('prepared') else set()),
                             route='direct-api',provider=runtime_config.get('provider'),status='sent',
                             requested_model=runtime_config.get('model'),instructions_version=api_context.get('version'),
                             context_messages=len(api_context['conversation']),egress_taint=sorted(capabilities.private_provenance))
@@ -4394,6 +4618,10 @@ class AgentService:
                     if context_sources and '컨텍스트:' not in response:
                         response+='\n\n컨텍스트 출처:\n'+'\n'.join(context_sources)
                 response=calendar_notice+response
+                # #659: a preparation's answer is kept and replayed into later
+                # turns, so it is scrubbed before it is persisted anywhere.
+                scrub=(lambda text:self.scrub_work_text(job['id'],text) if text else text) if prep.preparation_of(job.get('request_key')) else (lambda text:text)
+                response=scrub(response)
                 self.record_work_sources(job['id'],work_sources)
                 with self.store.db() as db:
                     db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('assistant',response,job['channel'],time.time(),job.get('workspace_id'),job['id']))
@@ -4409,6 +4637,7 @@ class AgentService:
                     if outcome=='unknown':
                         cause=spoken=unknown_statement or None
                     observed=verified_portion(verified_parts) if outcome=='partial' else None
+                    cause,spoken,observed=scrub(cause),scrub(spoken),scrub(observed)
                     db.execute("UPDATE jobs SET status=?,response=?,error=?,provider=?,model=?,delivery=?,owner_cause=?,owner_verified=? WHERE id=?",
                                (outcome,response,cause,provider,model,'pending' if job['chat_id'] else 'none',spoken,observed,job['id']))
                 self.record_turn_provenance(job['id'],goal=self.work_goal(job['id'],work_capabilities[0],outcome))
@@ -4427,6 +4656,9 @@ class AgentService:
                     transcript=calendar_notice+self.projection.blocked_reply(self.connector_owner_id(job),exc.kind,response)
                 else:
                     transcript=calendar_notice+'이 요청은 완료하지 못했습니다: '+response
+                if prep.preparation_of(job.get('request_key')):
+                    # #659: see the success path; nothing unscrubbed is persisted.
+                    response,transcript=self.scrub_work_text(job['id'],response),self.scrub_work_text(job['id'],transcript)
                 # Tool reads of a failed run are also read back from its
                 # durable tool events; this records what was declared so far
                 # plus the run-time labels of a worker that had started.
@@ -4446,6 +4678,8 @@ class AgentService:
                 self.mark_document_resume(job)
                 self.queue_notification(job,'approval_needed')
             if context_approval_needed[0]:self.queue_notification(job,'context_approval_needed')
+            # #659: preparations this Work proposed wait for the owner's yes.
+            self.queue_preparation_proposal(job)
             # The result delivery below is the one terminal Telegram bubble.
             # Do not append a second generic completion notification.
             return True
@@ -4472,6 +4706,8 @@ class AgentService:
             # technical ``error`` remains the Task-detail record.
             text=blocked or self.telegram_result_text(job['response'],job.get('owner_cause') or job['error'],job.get('status'),
                                                       verified=job.get('owner_verified'))
+            # #659: a prepared answer arrives without an owner turn; say what it is for.
+            text=self.preparation_reply_prefix(job)+text
             # #581: one durable reply, valid Telegram HTML (no leaked `**`),
             # anchored to the owner turn only when that clarifies it, with
             # bounded recovery controls only when the turn did not succeed.
@@ -4539,6 +4775,8 @@ class AgentService:
         self.recover_interrupted_work()
         def work():
             while not self.stop.is_set():
+                # #659: one indexed query; nothing due costs no model or network call.
+                self.run_due_preparation()
                 self.run_one()
                 self.deliver_one()
                 self.deliver_notification()

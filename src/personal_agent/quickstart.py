@@ -626,6 +626,9 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             if path=='/api/personal-space/profile':
                 # #658: current ``profile.*`` Memory rows for the Settings 프로필 group.
                 return self.reply(200,service.memory_profile_request({'operation':'list'}))
+            if path=='/api/preparations':
+                # #659: the Settings 준비해 둔 일 list.
+                return self.reply(200,service.preparation_request({'operation':'list'}))
             if path=='/api/calendar/drafts':
                 # The owner's own surface. A draft the model proposed is
                 # inert until the owner approves and applies it here.
@@ -784,6 +787,9 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 if path=='/api/personal-space/profile/request':
                     # #658: an explicit owner write of one profile fact (add or correct).
                     return self.reply(200,service.memory_profile_request(body))
+                if path=='/api/preparations/request':
+                    # #659: the owner accepts, cancels or deletes one preparation.
+                    return self.reply(200,service.preparation_request(body))
                 if path=='/api/calendar/drafts/request':
                     # See the GET above: this one applies a real external
                     # effect, so loopback only.

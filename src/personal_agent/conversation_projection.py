@@ -61,6 +61,8 @@ TOOL_LABELS = {
     'browser_open': '브라우저 페이지 열기', 'browser_read': '브라우저 페이지 읽기', 'browser_find': '브라우저 페이지에서 찾기', 'browser_click': '브라우저에서 누르기', 'browser_type': '브라우저에 입력',
     # CONTEXT-STATE-01 (#627): a revisable hypothesis about today's situation.
     'propose_current_state': '현재 상황 기록',
+    # SEC-ATTN-01 (#659): an owner-accepted reminder or preparation.
+    'schedule_preparation': '준비 예약',
 }
 #: A tool this catalogue does not name (for example an AgentPackage tool).
 TOOL_LABEL_FALLBACK = '도구 실행'

@@ -60,7 +60,7 @@ from .conversation_handoff import (LOCAL_AUTHORITY_KIND, LOCAL_AUTHORITY_LABELS,
                                    local_authority_handoff, local_refusal_text, LOCAL_RESUME_TTL_SECONDS)
 from . import local_folder_picker
 # PRESENCE-TG-01 / #581: native Telegram presence (reaction, typing, draft, anchor).
-from .telegram_presence import (CONTROL_DETAILS, CONTROL_RETRY, WAIT_CHAT_ACTION, WAIT_DRAFT, PresenceTiming,
+from .telegram_presence import (CONTROL_DETAILS, CONTROL_RETRY, THINKING_DRAFT_TEXT, WAIT_CHAT_ACTION, WAIT_DRAFT, PresenceTiming,
                                 TelegramTurnAddressing, WaitState, draft_id_for, render_telegram_html,
                                 reply_controls_markup, turn_gesture, without_consumed)
 LOCAL_RESUMED_KEY='local_authority_resumed_jobs'
@@ -2397,7 +2397,7 @@ class AgentService:
                 if surface==WAIT_DRAFT:
                     if state.draft_at is not None and now-state.draft_at<self.presence_timing.draft_refresh:
                         continue
-                    if self._presence_call('send_message_draft',job['chat_id'],draft_id_for(job['id']),'',can_stop=True):
+                    if self._send_thinking_draft(job,state):
                         state.draft_at=now
                         state.shown.add(WAIT_DRAFT)
                         shown.append((job['id'],WAIT_DRAFT))
@@ -2411,6 +2411,20 @@ class AgentService:
                             state.shown.add(WAIT_CHAT_ACTION)
                             shown.append((job['id'],WAIT_CHAT_ACTION))
         return shown
+
+    def _send_thinking_draft(self, job, state):
+        """One Stop-able draft: Telegram's dedicated thinking block first.
+
+        A client/server that refuses the rich draft gets the plain empty-text
+        `sendMessageDraft` placeholder from then on; both use the same
+        `draft_id`, so Stop maps back to the Work either way.
+        """
+        draft_id=draft_id_for(job['id'])
+        if not state.rich_draft_failed:
+            if self._presence_call('send_rich_message_draft',job['chat_id'],draft_id,THINKING_DRAFT_TEXT,can_stop=True):
+                return True
+            state.rich_draft_failed=True
+        return self._presence_call('send_message_draft',job['chat_id'],draft_id,'',can_stop=True)
 
     STOP_CANCELLED_TEXT='요청을 멈췄어요. 이 요청은 실행하지 않았습니다.'
     # #606 T1: a running Work checks Stop before its next model turn or tool

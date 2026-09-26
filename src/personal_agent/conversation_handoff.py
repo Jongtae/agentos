@@ -176,6 +176,18 @@ class TelegramChannel:
             body['can_stop'] = True
         return self.call('sendMessageDraft', body, timeout=TELEGRAM_PRESENCE_TIMEOUT)
 
+    def send_rich_message_draft(self, chat_id, draft_id, thinking_text, can_stop=True):
+        """Show an ephemeral rich draft holding only a "Thinking…" block.
+
+        The block is `InputRichBlockThinking` (`<tg-thinking>`), which Bot API
+        10.3 allows only in `sendRichMessageDraft`.
+        """
+        body = {'chat_id': chat_id, 'draft_id': draft_id,
+                'rich_message': {'blocks': [{'type': 'thinking', 'text': thinking_text}]}}
+        if can_stop:
+            body['can_stop'] = True
+        return self.call('sendRichMessageDraft', body, timeout=TELEGRAM_PRESENCE_TIMEOUT)
+
     def get_updates(self, offset, timeout=5, allowed_updates=None, limit=20):
         """Long-poll only the update kinds this conversation actually handles."""
         kinds = TELEGRAM_POLL_UPDATE_KINDS if allowed_updates is None else allowed_updates

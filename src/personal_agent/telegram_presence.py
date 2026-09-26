@@ -60,10 +60,15 @@ REACTION_SEMANTICS = (SEMANTIC_ACKNOWLEDGE, SEMANTIC_AGREE, SEMANTIC_CELEBRATE, 
 WAIT_NONE = 'none'
 WAIT_CHAT_ACTION = 'chat_action'
 WAIT_DRAFT = 'draft'
-#: Declared so the vocabulary matches #581; not produced today.  AgentOS
-#: routes return one finished answer rather than a token stream, so a rich
-#: draft would carry nothing a plain "Thinking…" draft does not.
+#: Declared so the vocabulary matches #581.  The draft surface is sent as a
+#: rich draft carrying only Telegram's dedicated "Thinking…" block (see
+#: THINKING_DRAFT_TEXT); it is still reported as WAIT_DRAFT.
 WAIT_RICH_DRAFT = 'rich_draft'
+#: Text of the `InputRichBlockThinking` block sent with `sendRichMessageDraft`
+#: (Bot API 10.3).  The empty-text `sendMessageDraft` placeholder animates on
+#: Telegram Desktop but renders as a blank bubble on the owner's iOS client
+#: (#581 live check, 2026-09-26); the dedicated thinking block names the wait.
+THINKING_DRAFT_TEXT = '생각 중…'
 
 ANCHOR_NONE = 'none'
 ANCHOR_OWNER_MESSAGE = 'owner_message'
@@ -201,6 +206,7 @@ class WaitState:
     chat_action_at: float = None
     draft_at: float = None
     draft_failed: bool = False
+    rich_draft_failed: bool = False
     stopped: bool = False
     shown: set = field(default_factory=set)
 

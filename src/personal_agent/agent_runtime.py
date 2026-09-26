@@ -359,14 +359,88 @@ def egress_refusal(action, labels, hint=''):
  text=f"{', '.join(names)}에서 나온 내용이 이 작업 문맥에 있어 {DESTINATION_NAMES.get(action,'공개 조회에 사용할 수 없습니다')}."
  return text+(' '+hint if hint else '')
 
-#: Public destinations a separate public task may serve after private work.
+#: Public destinations an admissible public lookup may serve after private work.
 PUBLIC_TASK_ACTIONS=frozenset({'web_search','weather','public_page_read','bounded_public_research'})
-PUBLIC_TASK_INSTRUCTIONS='''This is a separate AgentOS public lookup. You see only the owner's current request; there is no earlier conversation, note, file, memory or other private material here. Call the one offered tool at most once, using only terms the request itself states. If the request does not itself say what to look up (for example it refers to "it", "that" or earlier material), call no tool and reply with one short question asking what to look up.'''
-#: The truthful next step on the CLI route, which has no separate public task:
-#: the only public path there that never sees the conversation is AgentOS's own
-#: preflight of an explicit request (`subscription_public_lookup_query`).
+#: The truthful next step when no admissible lookup is available (rollback
+#: mode): the only public path that never sees the conversation is AgentOS's
+#: own preflight of an explicit request (`subscription_public_lookup_query`).
 CLI_LOOKUP_HINT="대화 내용 없이 따로 조회하려면 '/search 검색어'처럼 검색어를 직접 적어 보내 주세요."
-PUBLIC_TASK_UNRESOLVED='현재 요청만으로는 공개 조회할 내용을 정할 수 없습니다. 이전 대화의 개인 자료는 공개 조회에 쓰지 않으므로, 조회할 내용(검색어, 도시 등)을 요청에 직접 적어 주세요.'
+PUBLIC_TASK_UNRESOLVED='요청과 대화에서 공개 조회에 보낼 수 있는 내용이 남지 않았습니다. 개인 자료는 공개 조회에 보내지 않으므로, 조회할 내용(검색어, 도시 등)을 요청에 직접 적어 주세요.'
+PUBLIC_TASK_PLACE='지역명은 소유자가 대화에 적은 표기 그대로 보내야 합니다(번역하거나 새로 만든 지역명은 보내지 않습니다). 대화에 적힌 지역명으로 다시 요청하거나, 지역을 알려 달라고 물어 주세요.'
+#: A trusted-local CLI can read host files AgentOS never labels (#604/#616).
+#: Its reply is therefore recorded with this history-window label so a later
+#: Work never treats that reply as permitted public context.  It is not added
+#: to the Work's own guard (the bridge skips it on rehydration).
+ENGINE_UNMEDIATED='engine-unmediated-read'
+PROVENANCE_WINDOW[ENGINE_UNMEDIATED]='history'
+SOURCE_NAMES[ENGINE_UNMEDIATED]='CLI가 AgentOS 밖에서 읽었을 수 있는 내용'
+#: Labels that do not stop an owner-typed message from being permitted
+#: lookup context: they concern what the worker saw or said afterwards.
+_OWNER_TEXT_NEUTRAL=frozenset({OWNER_CONVERSATION,ENGINE_UNMEDIATED})
+
+def _lookup_word_covered(word,words):
+ """Is one outbound lookup word taken from permitted text?
+
+ Stricter than `owner_said` (memory coverage): a digit-bearing word must
+ match exactly (`owner_said`'s digit rule), and otherwise the word must equal
+ a permitted word, be a prefix of one, or extend one by at most a two-
+ character particle -- so `성남에` covers `성남` but `성남` does not cover
+ `성남정신과`, and `Daejeon` is not covered by `대전`.
+ """
+ if _MEMORY_DIGITS.search(word):return owner_said(word,words)
+ for permitted in words:
+  if word==permitted:return True
+  if len(word)>=2 and permitted.startswith(word):return True
+  if len(permitted)>=2 and word.startswith(permitted) and len(word)-len(permitted)<=2:return True
+ return False
+
+def lookup_sources(store, job_id, tools=None, history=15):
+ """Permitted and excluded text for one public lookup of a running Work.
+
+ Permitted: the owner's current request, earlier owner messages whose Work
+ read or wrote no private store (inherited history taint and a CLI's
+ unmediated reads concern the reply, not what the owner typed), and earlier
+ assistant replies whose Work saw nothing but owner conversation.  Excluded:
+ values this Work wrote to a private store (Memory candidates) -- the
+ `여권번호를 기억해 둬` case, including when it shares the request with
+ the lookup.  Raises when the Work is no longer running (the binding).
+ """
+ job=store.job(job_id) if isinstance(job_id,str) and job_id else None
+ if not job or job.get('status')!='running':
+  raise ValueError('이 작업은 더 이상 실행 중이 아니어서 공개 조회를 실행하지 않았습니다.')
+ with store.db() as db:
+  first=db.execute("SELECT MIN(id) AS id FROM messages WHERE job_id=?",(job_id,)).fetchone()
+  before=first['id'] if first and first['id'] is not None else 1<<62
+  rows=[dict(row) for row in db.execute('SELECT role,content,job_id FROM messages WHERE id<? ORDER BY id DESC LIMIT ?',(before,history))]
+  written=[row['content'] for row in db.execute('SELECT content FROM memory_candidates WHERE work_key=?',(store._work_binding(job_id),))]
+ records=work_source_records(store);permitted=[job.get('message') or ''];cache={}
+ for row in reversed(rows):
+  jid=row.get('job_id')
+  if jid not in cache:
+   labels=work_sources(store,jid,tools,records)
+   raw=records.get(jid) if isinstance(jid,str) else None
+   # Sources the Work itself read or wrote (not inherited through history).
+   direct=({str(label) for label in raw if not str(label).startswith(HISTORY_PREFIX)}|recorded_private_sources(store,jid,tools)
+           if isinstance(raw,list) else {UNRECORDED_PROVENANCE})
+   cache[jid]=(labels,direct)
+  labels,direct=cache[jid]
+  if row.get('role')=='user' and direct<=_OWNER_TEXT_NEUTRAL:permitted.append(row['content'])
+  elif row.get('role')=='assistant' and labels<={OWNER_CONVERSATION}:permitted.append(row['content'])
+ return {'permitted':permitted,'excluded':written}
+
+def admissible_value(value, permitted_words, excluded_words, whole=False):
+ """The words of ``value`` that may leave, and how many were dropped.
+
+ ``whole`` is for a value that cannot be partly sent (a place name): any
+ dropped word refuses the whole value.
+ """
+ kept=[];dropped=0
+ for match in _MEMORY_WORD.finditer(str(value or '')):
+  word=match.group(0).casefold()
+  if _lookup_word_covered(word,permitted_words) and not (excluded_words and owner_said(word,excluded_words)):kept.append(match.group(0))
+  else:dropped+=1
+ if whole and dropped:return None,dropped
+ return ' '.join(kept),dropped
 
 class EvidenceLog(list):
  """Tool evidence that records the provenance of everything put into it.
@@ -418,13 +492,14 @@ def check_arguments(parameters,args):
  return args
 
 class Capabilities:
- def __init__(self,store,adapter,config,key,job_id,record,readonly=False,network=None,document_access=True,packages=None,allowed_tools=None,document_context=False,public_page_scope=None,memory_approval=None,inherited_provenance=(),calendar=None,calendar_owner=None,memory_request=None,current_packages=None,public_intent=None,lookup_hint=''):
+ def __init__(self,store,adapter,config,key,job_id,record,readonly=False,network=None,document_access=True,packages=None,allowed_tools=None,document_context=False,public_page_scope=None,memory_approval=None,inherited_provenance=(),calendar=None,calendar_owner=None,memory_request=None,current_packages=None,lookup_sources=None,lookup_hint=''):
   self.store,self.adapter,self.config,self.key=store,adapter,config,key
   self.job_id,self.record,self.readonly=job_id,record,readonly
   self.network=network or LocalTools()
   self.document_access=document_access
   self.document_context=document_context
-  self.public_page_scope=None if public_page_scope is None else frozenset(public_page_scope)
+  # A zero-argument resolver (read on every use, #605 F4) or a fixed set.
+  self.public_page_scope=public_page_scope if public_page_scope is None or callable(public_page_scope) else frozenset(public_page_scope)
   self.memory_approval=memory_approval
   # #597: a zero-argument resolver that asks, once and only when a write is
   # proposed, whether the owner explicitly requested a memory in this Work;
@@ -445,11 +520,15 @@ class Capabilities:
   # Discovery happened when this Work was built; a package disabled, removed
   # or re-declared since then must not keep its tool reachable.
   self.current_packages=current_packages
-  # #605: a zero-argument resolver of the owner's current request, supplied
-  # by host code at Work start and rechecked on each call, or None.  When set,
-  # a public destination proposed from a private context is served by a
-  # separate public task that sees only that request (see `_public_task`).
-  self.public_intent=public_intent
+  # #605: a zero-argument resolver of the text permitted for a public lookup
+  # of this Work (`lookup_sources`), rechecking the Work binding on each call,
+  # or None.  When set, a public destination proposed from a private context
+  # is composed by AgentOS from permitted words only (see `_public_task`).
+  self.lookup_sources=lookup_sources
+  # Values this Work wrote to a private store in-process, and the private
+  # writes proposed alongside the current tool batch (`run_agent`): never
+  # admissible as public lookup words.
+  self.written_private=[];self.pending_writes=[]
   # Route-specific, truthful next step appended to a public-egress refusal.
   self.lookup_hint=lookup_hint
   self.memo={}
@@ -566,63 +645,141 @@ class Capabilities:
   propagated; passing ``{'turn'}`` models the per-turn outcome exactly.
   """
   return sorted(label for label in self.private_provenance if provenance_window(label) in windows)
- def _public_task(self,tool_id,action):
+ def page_scope(self):
+  """The owner-approved public pages *now* (#605 F4): a scope revoked during
+  this Work refuses a page read that starts afterwards.  An in-flight or
+  completed read is not undone."""
+  scope=self.public_page_scope
+  if callable(scope):
+   try:scope=scope()
+   except Exception:scope=()
+  return frozenset(scope or ())
+ def _public_task(self,tool_id,action,args):
   """Serve a public destination proposed from a private context, or refuse.
 
-  The proposing worker's arguments are never used: they were composed in a
-  context holding private material, and no scan of them could prove
-  otherwise.  Instead AgentOS builds a fresh minimal context *before* any
-  private material can enter it -- the owner's current request, resolved by
-  host code and rechecked here (``public_intent``), and nothing else: no
-  earlier turn, no evidence, no summary, no instructions from the parent --
-  and lets a separate run with exactly one public tool compose the call.
-  Its result returns to the parent as untrusted public evidence.
+  AgentOS composes the outbound arguments itself from the worker's proposal,
+  keeping only words that come from text permitted for this lookup
+  (`lookup_sources`: the owner's current request, earlier owner messages and
+  owner-conversation-only replies) and never words this Work wrote to a
+  private store.  Nothing else of the conversation, and no private material,
+  is passed; the worker cannot add a word that is not already in permitted
+  text, so its proposal is a selection, not a redaction AgentOS trusts.  An
+  unnecessary private word is dropped rather than asked about; when nothing
+  admissible remains, or a place name is not the owner's own wording, the
+  worker gets a question to ask instead.  The checked arguments are exactly
+  the transmitted arguments.
 
-  What reaches each destination is therefore no more than an untainted
-  first-turn request with the same words could already send.  Budget: one
-  public task per destination per Work; a repeated proposal gets the same
-  observed result, so the choice of *when* to propose cannot become a
-  channel of more than one call per destination.
+  Budget: one network attempt per destination per Work, recorded *before*
+  the request, so a repeated proposal after success or failure gets the
+  first outcome and never another request (#605 F3).
   """
   labels=self.private_egress_provenance()
-  if self.public_intent is None or self.adapter is None or action not in PUBLIC_TASK_ACTIONS:
+  if self.lookup_sources is None or action not in PUBLIC_TASK_ACTIONS:
    raise ValueError(egress_refusal(action,labels,self.lookup_hint))
   key=json.dumps(['agentos-public-task',action])
-  if key in self.memo:return self.memo[key]
-  # Raises when this Work is no longer running or its request row changed.
-  intent=self.public_intent()
-  if not isinstance(intent,str) or not intent.strip():raise ValueError(PUBLIC_TASK_UNRESOLVED)
-  # The parent's own tool event is the one record of this lookup (it carries
-  # `composed_by`); the child keeps only its model events, which show the
-  # arguments actually composed, so one outbound call is never counted twice.
-  def record(tool,status,detail):
-   if tool=='model':self.record(tool,status,detail)
-  child=Capabilities(self.store,self.adapter,self.config,self.key,self.job_id,record,True,self.network,False,self.packages,{tool_id},
-                     public_page_scope=self.public_page_scope,current_packages=self.current_packages)
-  # One invocation per public task, enforced by host code rather than by the
-  # instructions: any further attempt is refused before it reaches the tool.
-  invoked=[];execute=child.execute
-  def once(name,args):
-   if invoked:raise ValueError('별도 공개 조회는 한 번만 실행합니다.')
-   invoked.append(name);return execute(name,args)
-  child.execute=once
-  request=intent[:MESSAGE_CAP_CHARS]
-  # The one admissible source record besides the request: the exact public
-  # pages the owner approved for this model (`public_page_scope`).  They are
-  # an owner authorization, not private-derived material.
-  if action=='public_page_read' and self.public_page_scope:
-   request+='\n\nOwner-approved public pages (the only addresses public_page_read accepts): '+', '.join(sorted(self.public_page_scope))
-  result=run_agent(self.adapter,self.config,self.key,[{'role':'user','content':request}],
-                   PUBLIC_TASK_INSTRUCTIONS,child,record,scope='public-task')
-  if child.private_provenance:raise ValueError(egress_refusal(action,child.private_provenance))
-  observed=[value for value in child.memo.values() if isinstance(value,dict)]
-  if not observed:
-   if getattr(result,'outcome','succeeded')=='failed':raise ValueError('대화 내용 없이 따로 공개 조회를 실행했지만 결과를 받지 못했습니다.')
-   raise ValueError(PUBLIC_TASK_UNRESOLVED)
-  value={**observed[0],'composed_by':'agentos-public-task','public_task_inputs':['owner-current-request'],
-         'note':'AgentOS ran this lookup as a separate public task from the owner request only; the proposed arguments were not sent.'}
+  if key in self.memo:
+   earlier=self.memo[key]
+   if isinstance(earlier,Exception):raise ValueError(str(earlier))
+   return earlier
+  if action=='public_page_read':
+   # The address is fixed by the owner's approval, not composed from the
+   # conversation; the current approval is the whole check.
+   scope=self.page_scope()
+   if args.get('url') not in scope:raise ValueError('소유자가 현재 승인한 공개 페이지 주소가 아니어서 조회하지 않았습니다.')
+   plan={'tool':action,'url':args['url'],'approved_urls':sorted(scope)};dropped=0
+  else:
+   sources=self.lookup_sources()  # raises when the Work binding no longer holds
+   permitted=[word for text in sources['permitted'] for word in memory_words(text)]
+   excluded=[word for text in [*sources['excluded'],*self.written_private,*self.pending_writes] for word in memory_words(text)]
+   if action=='weather':
+    city,dropped=admissible_value(args.get('city',''),permitted,excluded,whole=True)
+    if not city:raise ValueError(PUBLIC_TASK_PLACE)
+    plan={'tool':action,'city':city}
+    country,_=admissible_value(args.get('country',''),permitted,excluded,whole=True)
+    if country:plan['country']=country
+   else:
+    query,dropped=admissible_value(args.get('query',''),permitted,excluded)
+    if not query:raise ValueError(PUBLIC_TASK_UNRESOLVED)
+    plan={'tool':'web_search' if action=='web_search' else action,'query':query}
+    if action=='bounded_public_research':plan['mode']=args.get('mode')
+  sent={k:v for k,v in plan.items() if k!='tool'}
+  self.memo[key]=RuntimeError('이 작업에서는 이 공개 조회를 이미 한 번 시도했습니다.')
+  try:
+   if action=='bounded_public_research':
+    value=self._research(plan['mode'],plan['query'])
+   else:
+    value=self.network.execute(plan)
+  except (ValueError,TypeError,OSError,ProviderError) as exc:
+   self.memo[key]=exc;raise
+  value={**value,'composed_by':'agentos-public-task','sent':sent,'excluded_terms':dropped,
+         'note':'AgentOS sent only the listed arguments, taken from text permitted for this public lookup.'}
   self.memo[key]=value
   return value
+ def _research(self,mode,query):
+  """One bounded public research run (J5); egress only through `self.network`."""
+  # Egress goes through `self.network`, not through a reader this branch
+  # builds, so the injected transport the tests already fake stays the single
+  # place anything reaches the wire.
+  from .research import PublicResearch
+  def search(query):return self.network.execute({'tool':'web_search','query':query})
+  attempted=[]
+  class _Reader:
+   # `PublicResearch` reads URLs its own search returned, self-approving
+   # each.  State the delta precisely, because an earlier version of this
+   # comment did not and independent review was right to reject it:
+   #
+   # * The mode allowlist and the three-page cap bound HOW MUCH is read.
+   #   Neither bounds WHICH page: the query is model-authored, goes to the
+   #   search provider verbatim, and the first three results are read in
+   #   provider order.  `mode` is a label on the output, not a filter on
+   #   the query.
+   # * The owner-approved `public_page_scope` is NOT preserved here.  And
+   #   `AgentService.public_page_boundary` returns an empty list unless the
+   #   owner has explicitly approved URLs for the current model
+   #   fingerprint, so on a default install `public_page_read` never
+   #   succeeds.  This branch therefore gives the model its FIRST
+   #   model-directed full-page read, enabled by default.  That is the real
+   #   permission delta; "one more public destination" understated it.
+   # * What does hold: SSRF and normalisation are the shared reader's
+   #   (private/metadata hosts denied, DNS pinned, no https->http
+   #   downgrade, charset and size bounded), exfiltration within a Work is
+   #   closed by the provenance refusal above in either order, and the
+   #   specialist roles do not get this tool.
+   #
+   # The residual risk is prompt injection steering non-egress behaviour
+   # from attacker-controlled page text.  Page content is already carried
+   # as untrusted evidence, and this does not change that.
+   @staticmethod
+   def read(url,approved_urls=None):
+    attempted.append(url)
+    scope=list(approved_urls or [url])
+    try:
+     return self.network.execute({'tool':'public_page_read','url':url,'approved_urls':scope})
+    except ValueError as exc:
+     # The shared reader refuses a redirect that leaves the approved set,
+     # and here the approved set is the single search result. That refusal
+     # is the boundary working -- research must not follow a result to a
+     # host the search did not return -- but the reader's message names an
+     # owner-approved scope, and there is none on this path. An owner would
+     # go looking for an approval setting that has nothing to do with it.
+     if '승인한 공개 페이지 범위를 벗어난' in str(exc):
+      raise ValueError('검색 결과 주소가 다른 주소로 이동해 조사 대상에서 제외했습니다. 소유자 승인 범위와는 무관합니다.') from None
+     raise
+  # `query_source` is a caller *guarantee*, not an observation:
+  # `validate_public_query` cannot see where the text came from, and its own
+  # docstring says so and forbids citing it as a private-egress control.
+  #
+  # The guarantee the callers make (#605): either no private source entered
+  # this Work's context -- this turn's reads or the recorded sources of any
+  # earlier message the worker was shown -- or `_public_task` composed
+  # `query` from words permitted for this lookup only.
+  result=PublicResearch(search,_Reader()).run(mode,query,query_source='public_task_input')
+  # A URL that was contacted and then failed appears in `read_failures` but
+  # not in `sources`, so before this it reached the network and left no
+  # owner-visible record at all -- and if every read failed, the call raised
+  # and recorded nothing. Every address this Work actually contacted is
+  # carried out for the tool event.
+  return {**result,'attempted_urls':list(attempted)}
  def execute(self,name,args):
   tool=self.tools.get(name)
   if not tool or name not in self.allowed_tools:raise ValueError('활성 패키지에 선언되지 않은 도구입니다.')
@@ -635,12 +792,13 @@ class Capabilities:
     raise ValueError('이 도구는 작업 시작 후 비활성화되었거나 선언이 바뀌어 실행하지 않았습니다. 새 요청으로 다시 시도해 주세요.')
   tool_id,name=name,tool['host_action']
   if name=='web_search':
-   if self.private_egress_provenance():return self._public_task(tool_id,name)
+   if self.private_egress_provenance() or self.pending_writes:return self._public_task(tool_id,name,args)
    return self.network.execute({'tool':name,**args})
   if name=='public_page_read':
-   if self.private_egress_provenance():return self._public_task(tool_id,name)
-   if not self.public_page_scope:raise ValueError('소유자가 승인한 공개 페이지 범위가 없습니다. 먼저 정확한 주소와 조회 매개변수를 승인하세요.')
-   return self.network.execute({'tool':name,'url':args['url'],'approved_urls':list(self.public_page_scope)})
+   if self.private_egress_provenance() or self.pending_writes:return self._public_task(tool_id,name,args)
+   scope=self.page_scope()
+   if not scope:raise ValueError('소유자가 승인한 공개 페이지 범위가 없습니다. 먼저 정확한 주소와 조회 매개변수를 승인하세요.')
+   return self.network.execute({'tool':name,'url':args['url'],'approved_urls':sorted(scope)})
   if name.startswith('calendar_'):
    # J4. The model may READ the calendar and may DRAFT a change; it may not
    # apply one. `CalendarConnector.execute` needs a one-time approval token
@@ -683,82 +841,18 @@ class Capabilities:
    # and was reachable from nothing in `src/`, so the acceptance was asserting
    # two strings the fixture itself had scripted.
    #
-   # This is a public destination and takes the same refusal as the others.
-   # It is deliberately checked before the mode/query validation below, so a
+   # This is a public destination and takes the same composition as the
+   # others (#605).  It is checked before the mode/query validation, so a
    # tainted context cannot learn anything from the shape of the error.
-   if self.private_egress_provenance():return self._public_task(tool_id,name)
-   # Egress goes through `self.network`, not through a reader this branch
-   # builds, so the injected transport the tests already fake stays the single
-   # place anything reaches the wire.
-   from .research import PublicResearch
-   def search(query):return self.network.execute({'tool':'web_search','query':query})
-   attempted=[]
-   class _Reader:
-    # `PublicResearch` reads URLs its own search returned, self-approving
-    # each.  State the delta precisely, because an earlier version of this
-    # comment did not and independent review was right to reject it:
-    #
-    # * The mode allowlist and the three-page cap bound HOW MUCH is read.
-    #   Neither bounds WHICH page: the query is model-authored, goes to the
-    #   search provider verbatim, and the first three results are read in
-    #   provider order.  `mode` is a label on the output, not a filter on
-    #   the query.
-    # * The owner-approved `public_page_scope` is NOT preserved here.  And
-    #   `AgentService.public_page_boundary` returns an empty list unless the
-    #   owner has explicitly approved URLs for the current model
-    #   fingerprint, so on a default install `public_page_read` never
-    #   succeeds.  This branch therefore gives the model its FIRST
-    #   model-directed full-page read, enabled by default.  That is the real
-    #   permission delta; "one more public destination" understated it.
-    # * What does hold: SSRF and normalisation are the shared reader's
-    #   (private/metadata hosts denied, DNS pinned, no https->http
-    #   downgrade, charset and size bounded), exfiltration within a Work is
-    #   closed by the provenance refusal above in either order, and the
-    #   specialist roles do not get this tool.
-    #
-    # The residual risk is prompt injection steering non-egress behaviour
-    # from attacker-controlled page text.  Page content is already carried
-    # as untrusted evidence, and this does not change that.
-    @staticmethod
-    def read(url,approved_urls=None):
-     attempted.append(url)
-     scope=list(approved_urls or [url])
-     try:
-      return self.network.execute({'tool':'public_page_read','url':url,'approved_urls':scope})
-     except ValueError as exc:
-      # The shared reader refuses a redirect that leaves the approved set,
-      # and here the approved set is the single search result. That refusal
-      # is the boundary working -- research must not follow a result to a
-      # host the search did not return -- but the reader's message names an
-      # owner-approved scope, and there is none on this path. An owner would
-      # go looking for an approval setting that has nothing to do with it.
-      if '승인한 공개 페이지 범위를 벗어난' in str(exc):
-       raise ValueError('검색 결과 주소가 다른 주소로 이동해 조사 대상에서 제외했습니다. 소유자 승인 범위와는 무관합니다.') from None
-      raise
-   # `query_source` is a caller *guarantee*, not an observation:
-   # `validate_public_query` cannot see where the text came from, and its own
-   # docstring says so and forbids citing it as a private-egress control.
-   #
-   # The guarantee this branch can make: the provenance check above proves no
-   # private source entered this Work's context -- neither this turn's reads
-   # nor, since #605, the recorded sources of any earlier message the worker
-   # was shown (unrecorded history counts as private).  It was TURN-SCOPED
-   # before #605, when an earlier `/notes` or model-driven read left the
-   # visible history untainted on the direct-API route.
-   result=PublicResearch(search,_Reader()).run(args['mode'],args['query'],query_source='public_task_input')
-   # A URL that was contacted and then failed appears in `read_failures` but
-   # not in `sources`, so before this it reached the network and left no
-   # owner-visible record at all -- and if every read failed, the call raised
-   # and recorded nothing. Every address this Work actually contacted is
-   # carried out for the tool event.
-   return {**result,'attempted_urls':list(attempted)}
+   if self.private_egress_provenance() or self.pending_writes:return self._public_task(tool_id,name,args)
+   return self._research(args['mode'],args['query'])
   if name=='weather':
    # `weather` sends `name=<city>` - an arbitrary 100-character string - to a
    # third-party geocoding host, so it is a public destination exactly like
    # the two above. It sat unguarded between them: the provenance model knew
    # the context was private and this branch never asked, which falsified the
    # very property `test_private_provenance_egress` asserts.
-   if self.private_egress_provenance():return self._public_task(tool_id,name)
+   if self.private_egress_provenance() or self.pending_writes:return self._public_task(tool_id,name,args)
    return self.network.execute({'tool':name,**args})
   # Folder basenames are owner-private: `이혼소송_2026` is a fact about the
   # owner's life, not a public string, and independent review put one
@@ -786,6 +880,9 @@ class Capabilities:
   if name=='save_note':
    content=args['content'].strip()
    if not content or len(content)>12000:raise ValueError('메모는 1~12000자로 입력하세요.')
+   # #605: a note is a private store; what this Work writes to it is never
+   # a public lookup word, and the Work now holds private-store material.
+   self.written_private.append(content);self.private_provenance.add('personal-space')
    import hashlib
    note_id=hashlib.sha256((self.job_id+content).encode()).hexdigest()
    with self.store.db() as db:db.execute('INSERT OR IGNORE INTO notes VALUES (?,?,?)',(note_id,content,time.time()))
@@ -794,6 +891,7 @@ class Capabilities:
    # Every model-proposed write becomes a value-scoped MemoryCandidate first.
    # Only a write the owner's own request covers is then accepted through the
    # owner's exact-approval path; everything else stays pending for them.
+   self.written_private.append(args['content'])
    candidate=self.store.save_memory_candidate(self.job_id,args['memory_key'],args['content'])
    refusal=self.memory_write_refusal(candidate['memory_key'],candidate['content'])
    if refusal is None:
@@ -995,7 +1093,9 @@ def _evidence_detail(name,result):
   if result.get('read_failures'):summary['read_failures']=[row.get('url') for row in result['read_failures'][:8] if isinstance(row,dict)]
   # #605: the owner-visible record says the call was composed by a separate
   # public task, not from the arguments the proposing worker wrote.
-  if result.get('composed_by')=='agentos-public-task':summary['composed_by']='agentos-public-task'
+  if result.get('composed_by')=='agentos-public-task':
+   # A count, never the dropped words themselves.
+   summary.update(composed_by='agentos-public-task',excluded_terms=int(result.get('excluded_terms') or 0))
   return summary
  if name=='find_files':
   return {'file_count':len(result.get('files',[])),'files':[{'root_id':f.get('root_id'),'path':f.get('path')} for f in result.get('files',[])[:12] if isinstance(f,dict)]}
@@ -1084,6 +1184,21 @@ def _fallback_text(name, result, sources):
  if name=='delegate_agent' and isinstance(result,dict):return str(result.get('report') or '전문 에이전트가 보고서를 반환하지 않았습니다.')
  return FALLBACK_UNDESCRIBED
 
+#: Host actions that write owner text into a private store.
+PRIVATE_WRITE_ACTIONS=('save_note','save_memory')
+
+def _batch_private_writes(calls,tools):
+ """The contents of private-store writes proposed in one tool-call batch."""
+ values=[]
+ for call in calls if isinstance(calls,list) else []:
+  try:
+   function=call.get('function',{});name=function.get('name')
+   if (tools.get(name) or {}).get('host_action') not in PRIVATE_WRITE_ACTIONS:continue
+   args=json.loads(function.get('arguments','{}'))
+   values.extend(str(value) for value in args.values() if isinstance(value,str))
+  except (AttributeError,TypeError,ValueError):continue
+ return values
+
 def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'):
  messages=[{'role':'system','content':POLICY+'\n'+system},*history]
  definitions=capabilities.definitions();specs={d['function']['name']:d['function']['parameters'] for d in definitions}
@@ -1133,6 +1248,9 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
   ids=[c.get('id') for c in calls if isinstance(c,dict)]
   if len(ids)!=len(calls) or any(not isinstance(i,str) or not i for i in ids) or len(set(ids))!=len(ids):raise ProviderError('도구 호출 식별자가 올바르지 않습니다.')
   messages.append(message)
+  # #605: private-store writes proposed in this same batch are known before
+  # any call runs, so a lookup listed first cannot carry their values.
+  capabilities.pending_writes=_batch_private_writes(calls,capabilities.tools)
   for call in calls:
    count+=1;name='unknown';validated=False;attempt=0;args={}
    try:

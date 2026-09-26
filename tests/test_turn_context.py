@@ -179,7 +179,9 @@ class _ProbingEngine:
         self.taint.append(tools.capabilities.private_egress_provenance())
         try:
             if self.taint[-1]:
-                tools.call('web_search', {'query': 'today news'})
+                # A query made of note words only: nothing in it is permitted
+                # for a public lookup, so nothing leaves (#605).
+                tools.call('web_search', {'query': 'PRIVATE-XYZ'})
         except Exception as exc:  # the refusal is what we assert on
             self.web_search_error.append(str(exc))
         return ExecutionResult('engine answer', engine, 0)
@@ -213,7 +215,7 @@ class CrossTurnEgressGuard(unittest.TestCase):
         # #605: the label names the earlier Work's actual source.
         self.assertIn('history:personal-space', self.engine.taint[-1])
         self.assertEqual(len(self.engine.web_search_error), 1, 'the CLI web_search call is refused')
-        self.assertIn('저장된 메모', self.engine.web_search_error[0])
+        self.assertIn('개인 자료는 공개 조회에 보내지 않으므로', self.engine.web_search_error[0])
         self.assertNotIn('연결 문서', self.engine.web_search_error[0])
 
 
@@ -221,7 +223,7 @@ class CrossTurnEgressGuard(unittest.TestCase):
 class BridgeProcessEgressGuard(unittest.TestCase):
     """Re-review of #574: the taint must reach the separate MCP bridge process the CLI actually calls."""
 
-    def _service_turns(self, turns):
+    def _service_turns(self, turns, query='today news'):
         import io, contextlib, sys
         from unittest import mock
         from personal_agent import mcp_bridge
@@ -237,7 +239,7 @@ class BridgeProcessEgressGuard(unittest.TestCase):
         network_calls = []
         requests = '\n'.join(json.dumps(r) for r in [
             {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {}},
-            {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call', 'params': {'name': 'web_search', 'arguments': {'query': 'today news'}}},
+            {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call', 'params': {'name': 'web_search', 'arguments': {'query': query}}},
         ]) + '\n'
 
         def runner(argv, **kwargs):
@@ -269,10 +271,12 @@ class BridgeProcessEgressGuard(unittest.TestCase):
         return provenance, captured['replies'][-1], network_calls
 
     def test_prior_private_answer_closes_web_search_in_the_real_bridge(self):
-        provenance, reply, network_calls = self._service_turns(['/note PRIVATE-XYZ', '/notes', 'search the web for today news'])
+        provenance, reply, network_calls = self._service_turns(['/note PRIVATE-XYZ', '/notes', 'search the web for today news'],
+                                                               query='PRIVATE-XYZ today news')
         self.assertIn('history:personal-space', provenance, 'the adapter forwards the taint to the bridge process')
-        self.assertIn('error', reply, 'the bridge refuses web_search')
-        self.assertEqual(network_calls, [], 'no public request left the machine')
+        # #605: the bridge composes the lookup from permitted words only.
+        self.assertIn('result', reply)
+        self.assertEqual(network_calls, [{'tool': 'web_search', 'query': 'today news'}])
 
     def test_same_turn_note_summary_provenance_now_reaches_the_bridge(self):
         provenance, reply, network_calls = self._service_turns(['/note PRIVATE-XYZ', '/summarize'])
@@ -503,11 +507,16 @@ class PriorAssistantEgressDecision(_RouteFixture):
         self.assertEqual(self.engine.refusals, [])
 
     def test_cli_prior_note_listing_closes_public_search(self):
-        """Denied control (CLI): a private note listing in history keeps egress closed."""
+        """Denied control (CLI): a private note listing in history never reaches search.
+
+        Since #605 the owner's own words still do: AgentOS composes the
+        lookup from text permitted for it, so the ordinary query goes out and
+        the note does not.
+        """
         self._service(cli=True)
         self._turns('/note PRIVATE-XYZ', '/notes', 'search the web for today news')
-        self.assertEqual(self._outbound('web_search'), [])
-        self.assertEqual(len(self.engine.refusals), 1)
+        self.assertEqual(self._outbound('web_search'), [{'tool': 'web_search', 'query': 'today news'}])
+        self.assertNotIn('PRIVATE-XYZ', json.dumps(self.network.plans))
 
     def test_api_first_turn_reaches_public_search(self):
         """Allowed control (API)."""

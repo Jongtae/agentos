@@ -31,6 +31,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from cryptography.fernet import Fernet
 
+from personal_agent.agent_runtime import PUBLIC_TASK_UNRESOLVED
 from personal_agent.bounded_execution import ExecutionError, ExecutionResult
 from personal_agent.drive_web_oauth import DriveWebOAuthHandoff, EncryptedDriveSecretStore
 from personal_agent.providers import ModelAdapter
@@ -228,9 +229,11 @@ class WorkerProvenanceDeclarationTests(unittest.TestCase):
         # The notes really were spliced into the engine prompt for this turn.
         self.assertIn(NOTE_SECRET, adapter.prompt or '')
         # ...and the engine's public call through the AgentOS facade was
-        # refused by the provenance guard, not by argument validation.
+        # refused, not by argument validation: since #605 a private context
+        # sends only words permitted for the lookup, and no word of the
+        # laundered query is in the owner's request.
         self.assertFalse(adapter.searched)
-        self.assertIn(REFUSAL, adapter.refusal or '')
+        self.assertIn(PUBLIC_TASK_UNRESOLVED, adapter.refusal or '')
         self.assertEqual(self.egress.plans, [])
         self.assertTrue(self.failed(job, 'subscription_engine'),
                         'the refused engine turn was not recorded as failed')

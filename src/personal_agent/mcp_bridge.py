@@ -13,8 +13,8 @@ import time
 
 from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS, LATEST_HANDSHAKE_VERSION
 
-from .agent_runtime import (CLI_LOOKUP_HINT, Capabilities, evidence_summary, recorded_private_sources,
-                            work_source_records)
+from .agent_runtime import (CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, Capabilities, evidence_summary, lookup_sources,
+                            recorded_private_sources, work_source_records)
 from .bounded_execution import AgentOSMcpTools, ExecutionError, profile_actions, redact_reason
 from .local_tools import LocalTools
 from .quickstart_store import QuickStore
@@ -80,8 +80,17 @@ def _recorded_private_sources(store, job_id, tools=None):
     labels = recorded_private_sources(store, job_id, tools)
     record = work_source_records(store).get(job_id)
     if isinstance(record, list):
-        labels |= {str(label) for label in record if str(label).strip()}
+        # A CLI's unmediated-read label concerns its *reply* for later Works,
+        # not this Work's own inputs (#605 F1).
+        labels |= {str(label) for label in record if str(label).strip() and str(label) != ENGINE_UNMEDIATED}
     return labels
+
+
+def _lookup_sources(store, job_id):
+    """The same permitted-text resolver the host uses (#605), or None in restrictive mode."""
+    if (store.config('egress_composition', {}) or {}).get('mode') == 'restrictive':
+        return None
+    return lambda: lookup_sources(store, job_id)
 
 
 def serve(data, job_id, provenance=()):
@@ -93,7 +102,8 @@ def serve(data, job_id, provenance=()):
     # schemas come from Capabilities.definitions(), never a bridge-local list.
     capabilities = Capabilities(store, None, {}, '', job_id, record, network=LocalTools(), document_access=False,
                                 allowed_tools=set(profile_actions(AgentOSMcpTools.PROFILE)),
-                                inherited_provenance=_provenance(provenance), lookup_hint=CLI_LOOKUP_HINT)
+                                inherited_provenance=_provenance(provenance), lookup_hint=CLI_LOOKUP_HINT,
+                                lookup_sources=_lookup_sources(store, job_id))
     capabilities.private_provenance.update(_recorded_private_sources(store, job_id, capabilities.tools))
     tools = AgentOSMcpTools(capabilities)
     for line in sys.stdin:

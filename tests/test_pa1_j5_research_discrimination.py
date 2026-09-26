@@ -208,8 +208,10 @@ class ResearchDiscriminationTests(unittest.TestCase):
             with self.subTest(module='local_tools.PublicPageReader', verb=verb):
                 self.assertNotIn(verb, page_reader)
         runtime = (package / 'agent_runtime.py').read_text(encoding='utf-8')
-        branch = runtime[runtime.index("if name=='bounded_public_research':"):
-                         runtime.index("if name=='weather':")]
+        # #605 moved the research run into `Capabilities._research`, shared by
+        # the clean branch and the admissible public lookup; scan that body.
+        branch = runtime[runtime.index(" def _research(self,mode,query):"):
+                         runtime.index(" def execute(self,name,args):")]
         self.assertIn('network.execute', branch)
         for verb in ('POST', 'PUT', 'PATCH', 'DELETE', 'data='):
             with self.subTest(module='agent_runtime._Reader', verb=verb):

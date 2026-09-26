@@ -315,6 +315,19 @@ class CT04ReferenceTests(ContextInputCase):
         self.assertEqual(['place_reference'] * 3, kinds)
         self.assertEqual(['reference'] * 3, [entry['freshness'] for entry in self.service.context_observations.usable()])
 
+    def test_pin_sent_before_the_prompt_or_via_a_bot_is_not_its_answer(self):
+        self.enable()
+        sent_before = int(self.now)
+        self.now += 120
+        job = self.store.enqueue('여기 날씨', 'tg:g1:1', f'telegram:{GENERATION}', CHAT)
+        self.service.request_current_location(job, '위치를 보내 주세요.')
+        self.message_id += 1
+        self.update({'message_id': self.message_id, 'location': POINT, 'date': sent_before})
+        self.pin(via_bot={'id': 1, 'is_bot': True})
+        self.assertEqual(['place_reference', 'place_reference'], [row['source_kind'] for row in self.rows()])
+        self.pin()
+        self.assertEqual('current_position_report', self.rows()[-1]['source_kind'])
+
 
 class CT05ValidationTests(ContextInputCase):
     def test_invalid_numbers_and_ranges_are_rejected(self):

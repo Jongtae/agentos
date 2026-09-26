@@ -495,3 +495,9 @@ details.technical details>summary{color:var(--muted)}
 .chooser-model{display:grid;gap:var(--sp-1)}
 .chooser-consequence{display:grid;gap:var(--sp-1);margin:0;font-size:var(--fs-2)}
 @media(max-width:620px){.settings-dialog{width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;margin:0;border:0;border-radius:0}.dialog-body{padding:var(--sp-4)}}
+/* #588 Google 연결 해제: preview effects and the receipt, grouped as stops / kept / result. */
+.disconnect-effects{display:grid;gap:var(--sp-3);min-height:3rem}
+.disconnect-effects-group h3{margin:0 0 var(--sp-1);font-size:var(--fs-2);font-weight:600;color:var(--muted)}
+.disconnect-effects-group ul{display:grid;gap:var(--sp-1);margin:0;padding-left:1.25rem}
+.effect-line.ok::marker{color:var(--ok)}
+.effect-line.attention{font-weight:600}

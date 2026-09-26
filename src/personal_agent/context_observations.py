@@ -49,8 +49,10 @@ MAX_MESSAGE_ID = 2 ** 53
 LABEL_CHARS = 200
 EDITED_TEXT_CHARS = 4000
 POSITION_KINDS = ('current_position_report', 'live_position_report')
+#: Someone else's place (a forward or an inline bot's result), never the
+#: owner's present position.
 FORWARD_FIELDS = ('forward_origin', 'forward_date', 'forward_from', 'forward_from_chat',
-                  'forward_sender_name', 'forward_from_message_id')
+                  'forward_sender_name', 'forward_from_message_id', 'via_bot')
 
 DEFAULT_SETTINGS = {'version': POLICY_VERSION, 'enabled': False, 'epoch': 0, 'cutoff': 0.0, 'timezone': ''}
 
@@ -290,8 +292,10 @@ class ContextObservations:
     @staticmethod
     def _consume_request(db, chat_id, generation, epoch, sent_at, now):
         row = db.execute("SELECT * FROM context_location_requests WHERE state='pending' AND chat_id=? AND generation=? "
-                         'AND context_epoch=? AND expires>? AND created<=? ORDER BY created DESC LIMIT 1',
-                         (chat_id, generation, epoch, now, sent_at + CLOCK_SKEW_SECONDS)).fetchone()
+                         'AND context_epoch=? AND expires>? AND created<? ORDER BY created DESC LIMIT 1',
+                         # A point sent before the prompt existed is not its
+                         # answer (Telegram dates are whole seconds).
+                         (chat_id, generation, epoch, now, sent_at + 1)).fetchone()
         if not row:
             return None
         db.execute("UPDATE context_location_requests SET state='consumed' WHERE id=?", (row['id'],))
@@ -437,11 +441,13 @@ class ContextObservations:
         job = db.execute('SELECT id,source_edited_at FROM jobs WHERE source_message_key=?', (key,)).fetchone()
         if not job:
             return 'ignored:unknown_source'
-        if job['source_edited_at'] is None or observed_at > job['source_edited_at']:
-            db.execute('UPDATE jobs SET source_edited_at=? WHERE id=?', (observed_at, job['id']))
         if observed_at < settings['cutoff']:
             # A late replay of an edit made before pause/clear stays out.
             return 'rejected:before_cutoff'
+        if job['source_edited_at'] is None or observed_at > job['source_edited_at']:
+            db.execute('UPDATE jobs SET source_edited_at=? WHERE id=?', (observed_at, job['id']))
+        if observed_at + RETENTION_SECONDS <= now:
+            return 'rejected:expired'
         owner = owner_key(owner_id)
         existing = db.execute('SELECT * FROM context_observations WHERE owner_key=? AND generation=? '
                               'AND context_epoch=? AND source_key=?',
@@ -452,7 +458,7 @@ class ContextObservations:
         # derived from the old wording is invalidated) but no text is kept.
         payload = {'time_uncertain': uncertain,
                    'text': message['text'][:EDITED_TEXT_CHARS] if settings['enabled'] else None}
-        expires_at = max(observed_at, now) + RETENTION_SECONDS
+        expires_at = observed_at + RETENTION_SECONDS
         if existing:
             db.execute('UPDATE context_observations SET source_revision=source_revision+1,revision_at=?,'
                        'revision_update_id=?,observed_at=?,received_at=?,expires_at=?,payload_json=? WHERE id=?',

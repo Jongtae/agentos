@@ -10,6 +10,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -484,6 +485,60 @@ def failure_details(engine_id, stdout, stderr, prompt=None):
         tail = [line for line in (stderr or '')[-8000:].splitlines() if line.strip()]
         message = tail[-1] if tail else ''
     return status, redact_reason(message, prompt)
+
+
+#: How often a running CLI is checked for the owner's Stop (#607 AX-10).
+STOP_POLL_SECONDS = 0.25
+ENGINE_STOPPED = '소유자가 멈춤을 요청해 구독 엔진 실행과 그 하위 프로세스를 종료했습니다.'
+
+
+class EngineInterrupted(Exception):
+    """The CLI's process group was killed because the Work was stopped or ran out of time."""
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def kill_process_group(process):
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        process.kill()
+
+
+def bounded_run(runner, argv, *, cwd, env, timeout, interrupted=None):
+    """Run one CLI with no shell in its own process group.
+
+    With the real ``subprocess.run`` a timeout kills the whole group, so the
+    native binary behind a wrapper script (Codex's ``codex.js``) and a CLI's
+    MCP bridge child are not left running.  #607: ``interrupted`` is polled
+    while the CLI runs; when it answers (the owner's Stop, the Work's shared
+    deadline) the group is killed at once and ``EngineInterrupted`` carries
+    the reason.  An injected test runner receives ``start_new_session=True``.
+    """
+    if runner is not subprocess.run:
+        return runner(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                      timeout=timeout, shell=False, start_new_session=True)
+    process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True, shell=False, start_new_session=True)
+    deadline = time.monotonic() + timeout
+    while True:
+        left = deadline - time.monotonic()
+        wait = min(STOP_POLL_SECONDS, left) if interrupted else left
+        try:
+            stdout, stderr = process.communicate(timeout=max(0.01, wait))
+            return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+        except subprocess.TimeoutExpired:
+            try:
+                reason = interrupted() if interrupted else None
+            except Exception:
+                reason = None
+            if reason or time.monotonic() >= deadline:
+                kill_process_group(process)
+                process.communicate()
+                if reason:
+                    raise EngineInterrupted(reason) from None
+                raise subprocess.TimeoutExpired(argv, timeout) from None
 
 
 @dataclass(frozen=True)
@@ -1032,18 +1087,40 @@ class BoundedExecutionAdapter:
                                          '설정에서 다시 검증하거나 다른 실행 프로필을 선택하세요.',
                                          failure_class='isolation-unqualified',
                                          reason=f'stale: {", ".join(stale) or "version"}; observed version {version or "unknown"}')
+            # #607 AX-10: the CLI gets at most the Work's remaining shared
+            # budget, and the owner's Stop kills its process group mid-run.
+            budget = getattr(tools.capabilities, 'budget', None)
+            timeout = MAX_TIMEOUT_SECONDS
+            if budget is not None and hasattr(budget, 'remaining'):
+                timeout = max(1, min(MAX_TIMEOUT_SECONDS, int(budget.remaining())))
+            interrupted = getattr(budget, 'interrupted', None)
             started = time.monotonic()
             LOG.info('engine turn started engine=%s profile=%s', engine_id, profile)
             argv = self.command(engine_id, binary, prompt, config, instructions, profile=profile, disabled_features=disabled)
             run_meta = {'argv': display_argv(argv, prompt, instructions), 'requested_model': None}
             try:
-                completed = self.runner(argv, cwd=run_dir,
-                                        env=env, stdin=subprocess.DEVNULL, capture_output=True,
-                                        text=True, timeout=MAX_TIMEOUT_SECONDS, shell=False)
+                if self.runner is subprocess.run:
+                    completed = bounded_run(self.runner, argv, cwd=run_dir, env=env, timeout=timeout,
+                                            interrupted=interrupted)
+                else:
+                    completed = self.runner(argv, cwd=run_dir,
+                                            env=env, stdin=subprocess.DEVNULL, capture_output=True,
+                                            text=True, timeout=timeout, shell=False)
+            except EngineInterrupted as exc:
+                elapsed_ms = int((time.monotonic() - started) * 1000)
+                LOG.warning('engine turn interrupted engine=%s reason=%s', engine_id, exc.reason)
+                if exc.reason == 'stopped':
+                    raise ExecutionError(ENGINE_STOPPED, failure_class='stopped',
+                                         meta={**run_meta, 'duration_ms': elapsed_ms}) from None
+                raise ExecutionError('이 작업의 처리 시간 한도에 도달해 구독 엔진 실행과 그 하위 프로세스를 종료했습니다.',
+                                     failure_class='deadline_exceeded', meta={**run_meta, 'duration_ms': elapsed_ms}) from None
             except subprocess.TimeoutExpired as exc:
-                LOG.warning('engine turn timed out engine=%s after=%ss', engine_id, MAX_TIMEOUT_SECONDS)
-                raise ExecutionError(f'구독 엔진이 {MAX_TIMEOUT_SECONDS}초 안에 응답하지 않았습니다.',
-                                     failure_class='timeout', meta={**run_meta, 'duration_ms': MAX_TIMEOUT_SECONDS * 1000}) from exc
+                LOG.warning('engine turn timed out engine=%s after=%ss', engine_id, timeout)
+                # A Work whose shared deadline, not the CLI cap, ended the run
+                # is typed deadline_exceeded (#607); both kill the group.
+                failure_class = 'deadline_exceeded' if timeout < MAX_TIMEOUT_SECONDS else 'timeout'
+                raise ExecutionError(f'구독 엔진이 {timeout}초 안에 응답하지 않아 실행과 그 하위 프로세스를 종료했습니다.',
+                                     failure_class=failure_class, meta={**run_meta, 'duration_ms': timeout * 1000}) from exc
             except OSError as exc:
                 LOG.warning('engine turn could not start engine=%s error=%s', engine_id, type(exc).__name__)
                 raise ExecutionError('구독 엔진 CLI를 실행하지 못했습니다.', failure_class='start-failed') from exc

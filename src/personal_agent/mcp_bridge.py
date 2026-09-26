@@ -14,9 +14,10 @@ import time
 from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS, LATEST_HANDSHAKE_VERSION
 
 from .agent_runtime import (CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, PUBLIC_TASK_LOOKUP_LIMIT, PUBLIC_TASK_NO_JUDGMENT,
-                            PUBLIC_TASK_SEARCH_HINT, PUBLIC_TASK_STATE_UNAVAILABLE,
-                            Capabilities, evidence_summary, lookup_sources,
-                            recorded_private_sources, work_source_records)
+                            PUBLIC_TASK_SEARCH_HINT, PUBLIC_TASK_STATE_UNAVAILABLE, TRANSIENT_FAILURE_TEXT,
+                            Capabilities, ToolError, WorkBudget, WorkLedger, classify_failure, evidence_summary,
+                            lookup_sources, recorded_private_sources, work_source_records, work_stop_requested)
+from .providers import ProviderError
 from .bounded_execution import AgentOSMcpTools, ExecutionError, profile_actions, redact_reason
 from .local_tools import LocalTools
 from .quickstart_store import QuickStore
@@ -136,6 +137,51 @@ def _lookup_sensitivity(store, job_id):
     return judge
 
 
+#: The Work this bridge serves has ended; a typed tool error, not a protocol one.
+WORK_NOT_RUNNING = '이 작업은 더 이상 실행 중이 아니어서 도구를 실행하지 않았습니다.'
+#: Returned for an untyped tool failure whose own text is not AgentOS's.
+TOOL_FAILED_TEXT = 'AgentOS 도구가 이 요청을 처리하지 못했습니다. 다른 방법을 고르거나 소유자에게 필요한 정보를 물어보세요.'
+
+
+#: #605 policy refusals name private-source categories; the CLI gets a fixed
+#: text and the owner reads the exact reason from the Work's own record.
+POLICY_DENIED_TEXT = '개인 자료가 이 작업 문맥에 있어 AgentOS가 이 공개 조회를 허용하지 않았습니다. 같은 조회를 반복하지 마세요.'
+
+
+class _Rejected(ExecutionError):
+    """A JSON-RPC protocol error with its own code and fixed message (#607 AX-06)."""
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.rpc = {'code': code, 'message': message}
+
+
+def tool_error_result(exc, action):
+    """An MCP tool-result error carrying #607's typed recovery metadata.
+
+    Normal tool failures are tool results (``isError``), not JSON-RPC protocol
+    errors, so the CLI can tell a transient read failure from a denial, a
+    setup need, the Work's Stop/deadline or an unknown effect.  The text is
+    AgentOS's own: a typed ``ToolError`` or #605 refusal verbatim, a fixed
+    text otherwise (an exception's own text may quote a URL or credential).
+    """
+    code, retry, effect = classify_failure(exc, action)
+    if str(exc) in _OWNER_VISIBLE_REFUSALS or code == 'input_required':
+        # #605 D2/D3: AgentOS's own fixed texts reach the CLI verbatim.
+        text = str(exc)
+    elif code == 'policy_denied':
+        text = POLICY_DENIED_TEXT
+    elif isinstance(exc, ToolError):
+        text = str(exc)
+    elif code == 'transient_failure':
+        text = TRANSIENT_FAILURE_TEXT
+    else:
+        text = TOOL_FAILED_TEXT
+    typed = {'code': code, 'retry': retry, 'effect': effect}
+    if getattr(exc, 'requires', None):
+        typed['requires'] = exc.requires
+    return {'content': [{'type': 'text', 'text': text}], 'structuredContent': typed, 'isError': True}, typed
+
+
 def serve(data, job_id, provenance=(), judge=None):
     store = QuickStore(data)
     def record(tool, status, detail):
@@ -147,7 +193,11 @@ def serve(data, job_id, provenance=(), judge=None):
                                 allowed_tools=set(profile_actions(AgentOSMcpTools.PROFILE)),
                                 inherited_provenance=_provenance(provenance), lookup_hint=CLI_LOOKUP_HINT,
                                 lookup_sources=_lookup_sources(store, job_id), lookup_restrictive=_restrictive(store),
-                                lookup_sensitivity=judge or _lookup_sensitivity(store, job_id))
+                                lookup_sensitivity=judge or _lookup_sensitivity(store, job_id),
+                                # #607 AX-10: the same durable attempt count and
+                                # deadline as the host serving this Work.
+                                budget=WorkBudget(stop=lambda: work_stop_requested(store, job_id),
+                                                  ledger=WorkLedger(store, job_id)))
     capabilities.private_provenance.update(_recorded_private_sources(store, job_id, capabilities.tools))
     tools = AgentOSMcpTools(capabilities)
     for line in sys.stdin:
@@ -163,22 +213,37 @@ def serve(data, job_id, provenance=(), judge=None):
                 params = request.get('params', {}); name = params.get('name')
                 # A CLI-chosen name is stored only when it is an offered tool.
                 listed = name if isinstance(name, str) and name in capabilities.allowed_tools else 'unlisted'
+                action = (capabilities.tools.get(listed) or {}).get('host_action') if listed != 'unlisted' else None
+                if listed == 'unlisted' or name not in tools._offered():
+                    record(listed, 'failed', json.dumps({'scope':'subscription-mcp-bridge','code':'unknown_tool','retry':'permanent',
+                                                         'effect':'none','error':'Unknown AgentOS MCP tool.'}))
+                    raise _Rejected(-32602, 'Unknown AgentOS MCP tool.')
                 try:
                     if not _work_running(store, job_id):
-                        raise ExecutionError('이 작업은 더 이상 실행 중이 아니어서 도구를 실행하지 않았습니다.')
+                        raise ToolError(WORK_NOT_RUNNING, 'stopped')
                     capabilities.private_provenance.update(_recorded_private_sources(store, job_id, capabilities.tools))
+                    if action:
+                        # #607: a call is durably in flight before it runs, so a
+                        # crash mid-call leaves an attempted (possibly effectful)
+                        # action that retry/resume refuse to replay blindly.
+                        record(listed, 'running', json.dumps({'scope':'subscription-mcp-bridge','host_action':action}, ensure_ascii=False))
                     value = tools.call(name, params.get('arguments', {}))
-                except (ValueError, ExecutionError, TypeError) as exc:
-                    # Redacted recovery metadata: the reason, never the arguments.
+                except ExecutionError as exc:
+                    # Invalid arguments stay a protocol error (MCP: invalid
+                    # params).  Redacted: the reason, never the arguments.
                     record(listed, 'failed',
-                           json.dumps({'scope':'subscription-mcp-bridge','error':redact_reason(str(exc))}, ensure_ascii=False))
-                    if str(exc) in _OWNER_VISIBLE_REFUSALS:
-                        # #605 D2/D3: AgentOS's own fixed refusal text reaches the
-                        # CLI as a tool error, so the owner is told the true reason.
-                        if ident is not None:
-                            _send({'jsonrpc':'2.0','id':ident,'result':{'content':[{'type':'text','text':str(exc)}],'isError':True}})
-                        continue
-                    raise
+                           json.dumps({'scope':'subscription-mcp-bridge','code':'invalid_arguments','retry':'permanent','effect':'none',
+                                       'error':redact_reason(str(exc))}, ensure_ascii=False))
+                    raise _Rejected(-32602, 'Invalid AgentOS MCP tool arguments.') from None
+                except (ValueError, TypeError, OSError, ProviderError) as exc:
+                    # #607 AX-06: a normal tool failure is a typed tool result.
+                    result, typed = tool_error_result(exc, action)
+                    record(listed, 'failed',
+                           json.dumps({'scope':'subscription-mcp-bridge', **({'host_action':action} if action else {}), **typed,
+                                       'error':redact_reason(str(exc))}, ensure_ascii=False))
+                    if ident is not None:
+                        _send({'jsonrpc':'2.0','id':ident,'result':result})
+                    continue
                 # The same redacted Evidence the direct route records
                 # (sources, attempted/failed URLs, counts), never the payload.
                 host_action = capabilities.tools[name]['host_action']
@@ -186,11 +251,12 @@ def serve(data, job_id, provenance=(), judge=None):
                                                        'evidence':evidence_summary(host_action, value)}, ensure_ascii=False))
                 result = {'content':[{'type':'text','text':json.dumps(value, ensure_ascii=False)}]}
             elif method == 'notifications/initialized': continue
-            else: raise ExecutionError('Unsupported MCP request.')
+            else: raise _Rejected(-32601, 'Method not found.')
             if ident is not None: _send({'jsonrpc':'2.0','id':ident,'result':result})
         except (ValueError, ExecutionError, TypeError) as exc:
             if isinstance(locals().get('request'),dict) and request.get('id') is not None:
-                _send({'jsonrpc':'2.0','id':request['id'],'error':{'code':-32602,'message':'AgentOS MCP request rejected.'}})
+                error = getattr(exc, 'rpc', None) or {'code':-32602,'message':'AgentOS MCP request rejected.'}
+                _send({'jsonrpc':'2.0','id':request['id'],'error':error})
 
 
 if __name__ == '__main__':

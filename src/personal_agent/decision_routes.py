@@ -217,9 +217,13 @@ class DecisionRoutes:
         must not reach judgments before 확인하고 사용 (#643 review P2-1), and
         the Work and the Judgment AI always use the same account.
         """
-        if self.service.main_ai.current() != main_id or api_route_of(self.store.config('model', {})) != main_id:
-            return ''
-        return self.store.secret('model_key') or ''
+        # One consistent snapshot: a Main AI switch writes `model` and
+        # `model_key` under the same lock, so a key never pairs with another
+        # provider's endpoint mid-switch (#643 review).
+        with self.service.lock:
+            if self.service.main_ai.current() != main_id or api_route_of(self.store.config('model', {})) != main_id:
+                return ''
+            return self.store.secret('model_key') or ''
 
     def _follow_resolve(self, route):
         """``(config, key)`` of a follow row: the Main AI's probed key, read live.

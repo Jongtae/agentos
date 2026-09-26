@@ -2579,12 +2579,29 @@ class AgentService:
     # `retry_google_revocation` while `google_revocations()` lists a row.
     GOOGLE_DISCONNECTED_WORK_TEXT='연결을 해제해서 이 요청은 이어서 처리하지 않았습니다. 필요하면 다시 연결한 뒤 요청해 주세요.'
 
+    CONNECTOR_OWNERS_KEY='connector_owner_identities'
+
+    def _remember_connector_owner(self, owner):
+        """Record an identity a Google authorization completed under.
+
+        Disconnect must reach it later even after Telegram is unpaired or
+        re-paired, when it is no longer derivable from current config.
+        """
+        known=self.store.config(self.CONNECTOR_OWNERS_KEY,[])
+        known=known if isinstance(known,list) else []
+        if isinstance(owner,str) and owner not in known:
+            self.store.put(self.CONNECTOR_OWNERS_KEY,[*known,owner][-50:])
+
     def _connector_owner_candidates(self):
         """Every connector owner identity this install can hold a row under."""
         owners=['local-owner']
         telegram=self.store.config('telegram',{})
         if isinstance(telegram,dict) and telegram.get('user_id') is not None:
             owners.insert(0,f"telegram:{telegram['user_id']}")
+        known=self.store.config(self.CONNECTOR_OWNERS_KEY,[])
+        for owner in known if isinstance(known,list) else []:
+            if isinstance(owner,str) and owner not in owners:
+                owners.append(owner)
         return owners
 
     def google_revocation(self):
@@ -2785,6 +2802,7 @@ class AgentService:
         # returned HTTP 400 telling the owner it had failed.
         parked=bool(self.connector_handoff and self.connector_handoff.record(connector_id))
         result=self.calendar_oauth.complete_oauth(owner,callback,self.calendar_token_exchange)
+        self._remember_connector_owner(owner)
         connector_id=result.get('connector_id') or connector_id
         granted=tuple(result.get('granted_scopes') or ())
         if not parked:
@@ -2816,6 +2834,7 @@ class AgentService:
         parked=bool(self.connector_handoff and self.connector_handoff.record(GMAIL_CONNECTOR_ID))
         try:
             status=self.gmail.complete_oauth(owner,dict(callback),self.gmail_token_exchange)
+            self._remember_connector_owner(owner)
         except GmailError as exc:
             if parked and exc.reason in GMAIL_PROVEN_CALLBACK_REASONS:
                 try:

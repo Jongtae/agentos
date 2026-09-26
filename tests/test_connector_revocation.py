@@ -103,6 +103,8 @@ class ProviderRequestTests(RevocationTestCase):
             with self.subTest(expected=expected):
                 self.assertEqual(revocation.revoke_google_token({'access_token': 'a'}, FakeGoogle(answer)), expected)
         self.assertEqual(revocation.revoke_google_token(None, self.google), revocation.NOT_ATTEMPTED)
+        refused = FakeGoogle(revocation.DestinationRefused('refused'))
+        self.assertEqual(revocation.revoke_google_token({'access_token': 'a'}, refused), revocation.NOT_ATTEMPTED)
         self.assertEqual(self.google.requests, [])
 
     def test_production_transport_refuses_every_other_destination(self):
@@ -163,6 +165,38 @@ class GmailDisconnectTests(RevocationTestCase):
         receipt = self.disconnect()
         self.assertEqual(receipt['provider_revocation'], 'not_attempted')
         self.assertIs(self.gmail_state(), ConnectorState.BLOCKED)
+
+
+class FormerTelegramOwnerTests(RevocationTestCase):
+    """Independent-review P1: a row under an unpaired chat must be reached or reported."""
+
+    def unpair(self):
+        cfg = dict(self.store.config('telegram', {}))
+        cfg.update(enabled=False, user_id=None)
+        self.store.put('telegram', cfg)
+
+    def test_an_owner_recorded_at_authorization_is_disconnected_after_unpairing(self):
+        self.gmail.begin_oauth(OWNER)
+        pending = self.encrypted.secret('gmail_oauth_pending:' + __import__('hashlib').sha256(OWNER.encode()).hexdigest())
+        self.service.gmail_token_exchange = lambda request: {
+            'access_token': 'fixture-access', 'refresh_token': 'fixture-refresh',
+            'expires_in': 7_200, 'scope': GMAIL_SCOPES[0]}
+        self.service.complete_gmail_connection({'state': pending['state'], 'code': 'c'})
+        self.assertIs(self.gmail_state(), ConnectorState.CONNECTED)
+        self.unpair()
+        receipt = self.disconnect()
+        self.assertEqual(receipt['local_access'], 'stopped')
+        self.assertEqual(receipt['provider_revocation'], 'revoked')
+        self.assertIs(self.gmail_state(), ConnectorState.DISCONNECTED)
+
+    def test_an_unreachable_owner_is_never_reported_as_stopped(self):
+        self.connect_gmail()  # authorized outside the recorded completion route
+        self.unpair()
+        receipt = self.disconnect()
+        self.assertEqual(receipt['local_access'], 'incomplete')
+        self.assertIn('모두 해제하지 못했습니다', receipt['message'])
+        audit = self.store.config(revocation.AUDIT_KEY, [])
+        self.assertEqual(audit[-1]['local_access'], 'incomplete')
 
 
 class UnreachableGoogleTests(RevocationTestCase):

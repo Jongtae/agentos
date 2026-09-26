@@ -108,6 +108,10 @@ def _refuse(reason: str) -> RevocationError:
     return RevocationError(reason, REFUSALS[reason])
 
 
+class DestinationRefused(ValueError):
+    """Raised before anything is sent: the request provably never left."""
+
+
 def _digest(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
@@ -131,7 +135,7 @@ def google_revoke_transport(opener=None, timeout: float = 15):
 
     def transport(url, body, headers):
         if not permitted(url):
-            raise ValueError("revocation destination refused")
+            raise DestinationRefused("revocation destination refused")
         try:
             with guarded(Request(url, body, headers, method="POST"), timeout=timeout) as response:
                 return response.status, response.read(4096)
@@ -151,6 +155,8 @@ def revoke_google_tokens(credentials, transport) -> tuple[str, list]:
     for credential in credentials or []:
         outcome = revoke_google_token(credential, transport)
         if outcome == NOT_ATTEMPTED:
+            if credential:
+                remaining.append(credential)  # never sent: keep it for a retry
             continue
         outcomes.append(outcome)
         if outcome not in CONFIRMED_OUTCOMES:
@@ -180,6 +186,8 @@ def revoke_google_token(credential: dict | None, transport) -> str:
         return UNCONFIRMED
     try:
         status, payload = transport(url, body.encode(), headers)
+    except DestinationRefused:
+        return NOT_ATTEMPTED
     except Exception:
         # No provider answer: the request may or may not have reached Google.
         # Never chain the exception: it can carry the request body.
@@ -207,6 +215,7 @@ class _Connection:
         self.state = state  # callable -> current owner-visible state
         self.marker = marker  # callable -> opaque revision marker
         self.disconnect = disconnect  # callable(stash) -> parked work ids to end
+        self.residual = lambda: False  # callable -> an unreachable active row remains
 
     def slot(self) -> str:
         return f"{REVOCATION_SLOT}:{self.connector_id}"
@@ -247,7 +256,24 @@ def registry_connection(connector_id, label, holder, owners, *, write=None):
             holder.disconnect(owner, stash, **kwargs)
         return []
 
-    return _Connection(
+    def residual():
+        """Rows still active under an identity this install could not name.
+
+        Registry rows are keyed by a hashed owner, so an identity that was
+        never recorded cannot be disconnected here; it must at least never
+        be reported as stopped.
+        """
+        try:
+            rows = holder.registry._rows()
+        except Exception:
+            return True
+        reached = {hashlib.sha256(owner.encode()).hexdigest() for owner in owners()}
+        return any(isinstance(by_connector, dict) and isinstance(by_connector.get(connector_id), dict)
+                   and by_connector[connector_id].get("state") in ("connected", "reauth_required")
+                   and owner_key not in reached
+                   for owner_key, by_connector in rows.items())
+
+    connection = _Connection(
         connector_id,
         label,
         holder.store,
@@ -255,6 +281,8 @@ def registry_connection(connector_id, label, holder, owners, *, write=None):
         lambda: "|".join(f"{row.get('state')}:{row.get('connection_revision')}" for row in statuses()),
         disconnect,
     )
+    connection.residual = residual
+    return connection
 
 
 def drive_connection(label, drive):
@@ -382,13 +410,26 @@ class GoogleConnectionRevoker:
             parked = connection.disconnect(stash)
         if self.on_disconnected:
             self.on_disconnected(connection.connector_id, parked)
-        return self._revoke(connection, local_credentials="deleted" if stashed.get("credential") else "none_stored")
+        receipt = self._revoke(connection, local_credentials="deleted" if stashed.get("credential") else "none_stored")
+        if connection.residual():
+            receipt.update(local_access="incomplete", message=(
+                f"{connection.label} 연결 중 이 기기에서 확인할 수 없는 소유자(예: 이전에 연결했던 Telegram 계정)로 "
+                "남아 있는 연결이 있어 모두 해제하지 못했습니다. 이 연결은 아직 사용될 수 있습니다. "
+                "Google 계정의 타사 앱 액세스에서 AgentOS 권한을 직접 제거해 주세요."))
+            self._audit_residual(connection)
+        return receipt
+
+    def _audit_residual(self, connection):
+        audit = self.store.config(AUDIT_KEY, [])
+        if isinstance(audit, list) and audit:
+            audit[-1] = {**audit[-1], "local_access": "incomplete"}
+            self.store.put(AUDIT_KEY, audit)
 
     def retry(self, connector_id) -> dict:
         connection = self._connection(connector_id)
         if not connection.credentials():
             raise _refuse("nothing_to_retry")
-        if connection.state() == "connected":
+        if connection.state() in ("connected", "reauth_required"):
             raise _refuse("reconnected")
         return self._revoke(connection, local_credentials="deleted", retry=True)
 

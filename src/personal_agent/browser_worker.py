@@ -1265,7 +1265,8 @@ class Worker:
         self.emit({'event': 'hidden'})
 
     def op_state(self, ident, command, timeout):
-        self.reply(ident, visible=bool(self.window.isVisible()))
+        # #765: ``navigations`` is a count of main-frame navigations (never a URL).
+        self.reply(ident, visible=bool(self.window.isVisible()), navigations=self.landed)
 
     def _all_types(self):
         return self.WebKit.WKWebsiteDataStore.allWebsiteDataTypes()

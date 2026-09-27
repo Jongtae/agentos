@@ -4196,13 +4196,13 @@ class AgentService:
                 final=shown='expired'
             self._put_browser_login(work_id,{**row,'state':final,'cause':shown,'closed_at':time.time()})
         if final=='resuming':
-            # #749: the owner signed in to this site through the window (its sign-in cookies changed).
-            self._record_owner_signin(row.get('host'),row.get('cookies_before'))
             with self.store.db() as db:
                 db.execute('BEGIN IMMEDIATE')
                 resumed=db.execute("UPDATE jobs SET status='queued',error=NULL,delivery='none' WHERE id=? AND status IN ('failed','partial')",(work_id,)).rowcount==1
             final=shown='resumed' if resumed else 'not_resumed'
             self._put_browser_login(work_id,{**row,'state':final,'cause':shown,'closed_at':time.time()})
+            # #749: the owner signed in to this site through the window (its sign-in cookies changed).
+            self._record_owner_signin(row.get('host'),row.get('cookies_before'))
         self._finish_login_notification(work_id,shown)
         return final
 

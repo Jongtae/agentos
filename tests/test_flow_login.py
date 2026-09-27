@@ -372,15 +372,24 @@ class LoginHarness(unittest.TestCase):
     def settle(self, job_id, now=None):
         """One work-loop pass, then the window's own thread settling the login (nothing waits for it)."""
         self.service.process_browser_logins(now=now)
-        self.assertTrue(wait_until(lambda: self.state(job_id) not in ('offered', 'closing')), self.state(job_id))
+        self.assertTrue(wait_until(lambda: self.state(job_id) not in ('offered', 'closing', 'resuming')), self.state(job_id))
+        self.assertTrue(wait_until(lambda: self.notice_done(job_id)), 'the window thread finished telling the owner')
         return self.state(job_id)
+
+    def notice_done(self, job_id):
+        """The settle's owner message is out: the login prompt left 'sent'/'queued' (edited or cancelled)."""
+        with self.store.db() as db:
+            rows = db.execute("SELECT state FROM telegram_notifications WHERE job_id=? AND kind='browser_login_needed'",
+                              (job_id,)).fetchall()
+        return all(row['state'] not in ('sent', 'queued') for row in rows)
 
     def owner_closes(self, job_id, logged_in=True):
         """The owner (after signing in, unless ``logged_in`` is False) closes the login window (the worker's close event)."""
         if logged_in:
             self.window().login()
         self.window().closed = True
-        self.assertTrue(wait_until(lambda: self.state(job_id) not in ('offered', 'closing')), self.state(job_id))
+        self.assertTrue(wait_until(lambda: self.state(job_id) not in ('offered', 'closing', 'resuming')), self.state(job_id))
+        self.assertTrue(wait_until(lambda: self.notice_done(job_id)), 'the window thread finished telling the owner')
 
     def failed_errors(self, job_id):
         with self.store.db() as db:
@@ -765,7 +774,7 @@ class LoginPromptAndThreads(LoginHarness):
         job_id, _prompt, _buttons, notification = self.login_work()
         self.owner_closes(job_id)
         self.assertEqual(self.state(job_id), 'resumed')
-        self.assertEqual(list(self.store.config(BROWSER_OWNER_SIGNINS_KEY, {})), ['fixture.test'])
+        self.assertTrue(wait_until(lambda: list(self.store.config(BROWSER_OWNER_SIGNINS_KEY, {})) == ['fixture.test']))
         # A later Work meets the site's login page again: the owner is asked without the note.
         with self.store.db() as db:
             db.execute("UPDATE jobs SET status='succeeded' WHERE id=?", (job_id,))

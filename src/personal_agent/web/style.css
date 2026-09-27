@@ -262,6 +262,15 @@ details.technical details>summary{color:var(--muted)}
 .settings-nav button:hover{background:rgba(255,255,255,.6);border-color:transparent}
 .settings-nav button[aria-selected="true"]{background:var(--surface);color:var(--ink);font-weight:600;border-color:var(--line);box-shadow:0 1px 1px rgba(20,25,35,.05)}
 .settings-pane{max-width:760px;padding-top:var(--sp-3)}
+@media(min-width:1041px){
+ .settings-layout{grid-template-columns:172px minmax(0,1fr);gap:var(--sp-6);align-items:start}
+ .settings-nav{display:grid;align-content:start;gap:2px;width:auto;max-width:none;padding:0;border-radius:0;background:transparent}
+ .settings-nav button{justify-content:flex-start;min-height:38px;padding:0 12px;border:1px solid transparent;background:transparent;text-align:left;white-space:normal}
+ .settings-nav button:hover{background:var(--surface-2);border-color:transparent}
+ .settings-nav button[aria-selected="true"]{position:relative;background:var(--surface);border-color:var(--line);box-shadow:none}
+ .settings-nav button[aria-selected="true"]::before{content:"";position:absolute;top:7px;bottom:7px;left:-1px;width:2px;border-radius:1px;background:var(--accent)}
+ .settings-pane{padding-top:0}
+}
 .settings-pane>h2{margin:0 0 4px}
 .settings-pane>h2+p{margin:0 0 var(--sp-4);color:var(--muted)}
 .settings-section{margin-top:var(--sp-6)}

@@ -322,6 +322,8 @@ class ServiceComposition(unittest.TestCase):
         if engine is not None:
             self.service.use_decision_engine(engine)
         self.service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
+        # #701: these checks exercise the bridge web_search, which a native-search turn no longer offers.
+        self.service.cli_native_search = lambda *args: (False, 'private_turn')
 
     def turns(self, *texts):
         for text in texts:
@@ -769,6 +771,8 @@ class PilotPostureEndToEnd(unittest.TestCase):
                                execution_adapter=Cli())
         service.local_tools = wire
         service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
+        # #701: these checks exercise the bridge web_search, which a native-search turn no longer offers.
+        service.cli_native_search = lambda *args: (False, 'private_turn')
         return service, refusals
 
     def test_api_route_without_an_engine_sends_the_request_at_once(self):

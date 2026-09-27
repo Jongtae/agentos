@@ -65,9 +65,11 @@ _CALENDAR = 'calendar-connector-not-bound-to-cli-route'
 _MEMORY = 'owner-memory-not-bound-to-cli-route'
 _SPECIALISTS = 'specialists-require-direct-api-model'
 _ISOLATED = 'isolation-restricted-profile'
-#: #656: the owner-logged-in browser profile is served on the host's direct
-#: route only; a CLI worker never holds a handle to that session.
-_BROWSER = 'browser-profile-not-bound-to-cli-route'
+#: #656/#701: the owner-logged-in browser profile is served on the host's
+#: direct route and, through the AgentOS service (``cli_browser_relay``), on
+#: the trusted-local CLI route.  A CLI worker never holds a handle to that
+#: session; the strict-isolated and isolated profiles never offer it.
+_BROWSER = 'browser-profile-served-on-trusted-local-route-only'
 _BROWSER_ACTIONS = ('browser_open', 'browser_read', 'browser_find', 'browser_click', 'browser_type')
 #: #659: accepting a preparation needs the host's DecisionEngine and its
 #: Telegram acceptance surface, which a CLI bridge process does not hold.
@@ -136,7 +138,11 @@ CLI_PROFILES = {
         'limitation': TRUSTED_LOCAL_LIMITATION,
         # Public reads the native route has by default, one owner-private read
         # and the explicit note write, all under the unchanged AgentOS guards.
-        'actions': ('bounded_public_research', 'list_notes', 'propose_current_state', 'save_note', 'weather', 'web_search'),
+        # #701: the five browser tools, executed by the AgentOS service's own
+        # BrowserSession (mediation, payment guard, approvals, budget) and
+        # relayed by the bridge; offered only while the profile is available.
+        'actions': ('bounded_public_research', 'list_notes', 'propose_current_state', 'save_note', 'weather', 'web_search',
+                    *_BROWSER_ACTIONS),
         # Approvals bound to the direct-API model fingerprint are not carried to
         # another provider: doing so would silently change the data destination.
         'unavailable': {
@@ -146,7 +152,6 @@ CLI_PROFILES = {
             'calendar_draft_update': _CALENDAR, 'calendar_draft_cancel': _CALENDAR,
             'save_memory': _MEMORY, 'list_memory': _MEMORY,
             'list_agents': _SPECIALISTS, 'delegate_agent': _SPECIALISTS,
-            **{action: _BROWSER for action in _BROWSER_ACTIONS},
             'schedule_preparation': _PREPARATIONS,
         },
         # No AgentOS-mediated live run of this catalog has been observed.
@@ -179,8 +184,8 @@ CLI_PROFILES = {
         'mode': 'bounded-agentos-mcp',
         'trust': 'strict-isolated',
         'limitation': STRICT_ISOLATED_LIMITATION,
-        # The bridge serves the bounded action set (mcp_bridge.serve); a test
-        # keeps these identical so the bridge needs no profile argument.
+        # The bridge is told its profile (``--profile``, #701): the trusted-local
+        # set without the browser tools, which this profile never offers.
         'actions': ('bounded_public_research', 'list_notes', 'propose_current_state', 'save_note', 'weather', 'web_search'),
         'unavailable': {
             'public_page_read': _API_BOUND_PAGES,
@@ -254,17 +259,25 @@ def strict_launch_arguments(engine_id, disabled_features=()):
     raise ExecutionError('지원하는 구독 엔진을 선택하세요.')
 
 
-def native_search_withheld():
-    """Bridge actions a turn with the CLI's own web search never offers (#678 P1).
+#: #701: bridge actions the CLI's own web search replaces on a native-search
+#: turn, so the model searches with Codex's or Claude's own tool instead.
+NATIVE_SEARCH_REPLACED = frozenset({'web_search', 'bounded_public_research'})
 
-    Every action whose result carries owner-private provenance
-    (``agent_runtime.PRIVATE_PROVENANCE``: notes, Memory, documents, folder
-    names, calendar, browser session).  The CLI writes its own search queries,
-    which AgentOS cannot compose or redact, so a turn that may search natively
-    cannot read those sources mid-turn.
+
+def native_search_withheld():
+    """Bridge actions a turn with the CLI's own web search never offers (#678 P1, #701).
+
+    Every owner-private *store* read (``agent_runtime.PRIVATE_PROVENANCE``:
+    notes, Memory, documents, folder names, calendar): the CLI writes its own
+    search queries, which AgentOS cannot compose or redact, so a turn that
+    may search natively cannot read those stores mid-turn.  The browser tools
+    stay (#701, owner decision in the issue): their output is mediated before
+    it reaches the CLI, and native search stays as the pre-turn gate decided.
+    The bridge's own public search tools are withheld too
+    (``NATIVE_SEARCH_REPLACED``): the CLI's own search is preferred.
     """
-    from .agent_runtime import PRIVATE_PROVENANCE
-    return frozenset(PRIVATE_PROVENANCE)
+    from .agent_runtime import BROWSER_ACTIONS, PRIVATE_PROVENANCE
+    return (frozenset(PRIVATE_PROVENANCE) - BROWSER_ACTIONS) | NATIVE_SEARCH_REPLACED
 
 
 def turn_actions(profile, native_search=False):
@@ -702,6 +715,12 @@ class AgentOSMcpTools:
     PROFILE = BOUNDED_PROFILE
     #: #678: set for a turn that may use the CLI's own web search; private reads are then not offered.
     native_search = False
+    #: #701: why the CLI's own web search is off for this turn (a ``NATIVE_REASONS`` key), or ''.
+    native_search_reason = ''
+    #: #701: the service-side browser relay's address (a directory) for this turn, or None.
+    browser_relay = None
+    #: #701: in the bridge process, the client that forwards browser calls to the service.
+    relay = None
 
     def __init__(self, capabilities, native_search=False):
         self.capabilities = capabilities
@@ -712,11 +731,32 @@ class AgentOSMcpTools:
         return {definition['function']['name']: definition for definition in self.capabilities.definitions()
                 if definition['function']['name'] in allowed}
 
+    def _search_note(self):
+        """#701: the sentence a search-off CLI turn adds to the bridge search tools.
+
+        It names why the CLI's own search is off and that the providers listed
+        in the description answer instead; a provider's own caveat comes from
+        the provider (``describe_options``), never from a branch here.
+        """
+        if self.native_search or not self.native_search_reason:
+            return ''
+        from .search_providers import NATIVE_REASONS
+        why = NATIVE_REASONS.get(self.native_search_reason, '')
+        return (" The CLI's own web search is off for this turn" + (f' ({why})' if why else '')
+                + '; this tool answers with the providers listed above.')
+
     def definitions(self):
         # Fresh JSON-compatible copies: callers must not mutate the contract.
+        from .agent_runtime import SEARCH_BACKED_ACTIONS
         tools = getattr(self.capabilities, 'tools', {}) or {}
-        return [mcp_tool(definition, (tools.get(name) or {}).get('mode'))
-                for name, definition in sorted(self._offered().items())]
+        note = self._search_note()
+        listed = []
+        for name, definition in sorted(self._offered().items()):
+            tool = mcp_tool(definition, (tools.get(name) or {}).get('mode'))
+            if note and (tools.get(name) or {}).get('host_action') in SEARCH_BACKED_ACTIONS:
+                tool['description'] += note
+            listed.append(tool)
+        return listed
 
     def call(self, name, arguments):
         if not isinstance(arguments, dict):
@@ -732,6 +772,13 @@ class AgentOSMcpTools:
             raise ExecutionError('허용하지 않은 AgentOS MCP 도구 또는 인수입니다.') from None
         if any(not arguments[field].strip() for field in parameters['required']):
             raise ExecutionError('MCP 도구의 필수 문자열 인수가 비어 있습니다.')
+        # #701: in the bridge process a browser tool runs in the AgentOS
+        # service (its one BrowserSession, profile lock, approvals, budget and
+        # mediation); the bridge only forwards the validated call.
+        from .agent_runtime import BROWSER_ACTIONS
+        host_action = ((getattr(self.capabilities, 'tools', {}) or {}).get(name) or {}).get('host_action')
+        if host_action in BROWSER_ACTIONS and self.relay is not None:
+            return self.relay.call(name, arguments)
         # Capabilities is AgentOS-owned and applies its normal validation,
         # document boundary, egress, evidence and idempotency rules.
         return self.capabilities.execute(name, arguments)
@@ -1224,6 +1271,9 @@ class BoundedExecutionAdapter:
             profile = getattr(tools, 'PROFILE', BOUNDED_PROFILE)
             # #678: a native-search turn's bridge never serves private reads.
             native_search = bool(getattr(tools, 'native_search', False)) and profile == BOUNDED_PROFILE
+            # #701: only the trusted-local route is ever given the service's browser relay.
+            relay = getattr(tools, 'browser_relay', None) if profile == BOUNDED_PROFILE else None
+            search_off = str(getattr(tools, 'native_search_reason', '') or '') if not native_search else ''
             # Both supported CLIs receive this per-turn bridge configuration.
             # The engine gets no store handle; the bridge alone owns validated
             # access to the AgentOS tool facade.
@@ -1236,7 +1286,11 @@ class BoundedExecutionAdapter:
                          # private-source provenance so its public egress closes
                          # exactly as the in-process Capabilities would.
                          *[f'--provenance={label}' for label in sorted(getattr(tools.capabilities, 'private_provenance', ()) or ())],
-                         *(['--native-search'] if native_search else [])],
+                         # #701: the bridge serves exactly this route's profile.
+                         f'--profile={profile}',
+                         *(['--native-search'] if native_search else []),
+                         *([f'--search-off-reason={search_off}'] if search_off else []),
+                         *([f'--browser-relay={relay}'] if relay else [])],
             }}}, ensure_ascii=False), encoding='utf-8')
             env = self.environment(engine_id, binary, run_dir)
             disabled = ()

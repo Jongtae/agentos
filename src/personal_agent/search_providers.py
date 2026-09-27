@@ -244,6 +244,8 @@ class BingRssProvider:
     """The keyless Bing RSS read; offered only when the owner switched it on (#678)."""
     id = 'bing'
     label = 'Bing web search (RSS; enabled by the owner for personal, non-commercial use)'
+    #: #701: what the model should know before relying on it (observed on owner Works).
+    caveat = 'results can be poor or off-topic for Korean and other non-English queries'
     kinds = ('web',)
     destination = 'www.bing.com'
 
@@ -664,6 +666,10 @@ class ProviderRegistry:
         except Exception:
             pass
 
+    def recorded_native(self, route, fingerprint):
+        """The remembered native-search observation of ``route`` (Settings, #701), or None."""
+        return self._recorded(route, fingerprint)
+
     def _recorded(self, route, fingerprint):
         try:
             row = self._read_status().get(route)
@@ -743,7 +749,8 @@ class ProviderRegistry:
             for kind in provider.kinds:
                 label = getattr(provider, 'kind_labels', {}).get(kind, provider.label)
                 rows.append({'id': option_id(provider.id, kind), 'provider': provider.id, 'kind': kind,
-                             'label': label, 'destination': provider.destination})
+                             'label': label, 'destination': provider.destination,
+                             **({'caveat': provider.caveat} if getattr(provider, 'caveat', '') else {})})
         return rows
 
     def default(self):
@@ -851,7 +858,9 @@ def describe_options(options, default, unavailable_reason=''):
     when the connected AI's own search cannot run, why and what else exists;
     it never says which provider to prefer.
     """
-    listed = '; '.join(f"{row['id']} = {row['label']}" for row in options)
+    # #701: a provider's own caveat (a class attribute, never a branch here) is named with it.
+    listed = '; '.join(f"{row['id']} = {row['label']}" + (f" ({row['caveat']})" if row.get('caveat') else '')
+                       for row in options)
     text = f' Providers configured by the owner: {listed}.' if listed else ' No search provider is configured.'
     if default:
         text += f' When provider is omitted, {default} is used.'

@@ -214,16 +214,18 @@ class RoutesReceiveTheSameContext(unittest.TestCase):
         self.assertLess(call['prompt'].index(PROFILE_HEADING), call['prompt'].index('# Current request'))
         self.assertNotIn('meeting-time', call['prompt'])
 
-    def test_a_profile_value_equal_to_a_stored_secret_is_redacted_and_the_record_keeps_no_text(self):
-        """#664 review P1/P2: pilot boundary 1 holds for profile text, and the
-        turn record withholds the profile like any other Memory-bearing prompt.
+    def test_a_profile_value_equal_to_a_stored_secret_is_redacted_and_the_record_keeps_no_secret(self):
+        """#664 review P1/P2: pilot boundary 1 holds for profile text; #701: the
+        local turn record now keeps the redacted envelope.
 
         The owner may type anything into a profile value.  A value equal to a
         stored secret is replaced by the existing deterministic pass before
         the section is built - on both routes - while the benign row still
-        reaches the model.  The recorded envelope carries size/digest only,
-        and nothing here closes the public lookup (see the _RouteFixture
-        tests for that half).
+        reaches the model.  Under the pilot posture (#701) the profile section
+        no longer withholds the local record: the envelope is stored after the
+        same deterministic redaction, so the owner can inspect what was sent,
+        and it never holds the secret.  Nothing here closes the public lookup
+        (see the _RouteFixture tests for that half).
         """
         secret = 'opaque-telegram-value-123'
         self.store.secret('telegram_token', secret)
@@ -242,9 +244,9 @@ class RoutesReceiveTheSameContext(unittest.TestCase):
         self.assertIn('[redacted]', system)
         self.assertIn('땅콩 알러지', system)
         api_record = self.store.turn_provenance(api_job)
-        self.assertIn('owner-memory', api_record['prompt_withheld'])
-        self.assertTrue(api_record['prompt_envelope'].startswith('[not stored: this turn included'))
-        self.assertNotIn('땅콩', json.dumps(api_record, ensure_ascii=False), 'the record holds size/digest only')
+        self.assertNotIn('prompt_withheld', api_record)
+        self.assertIn('땅콩 알러지', api_record['prompt_envelope'], 'the local record keeps what was sent')
+        self.assertNotIn(secret, json.dumps(api_record, ensure_ascii=False), 'but never the stored secret')
 
         self.service.connect_subscription_engine({'engine': 'claude-code', 'officially_authenticated': True})
         cli_job = self.store.enqueue('저녁은?', 'k2')                          # CLI route
@@ -255,9 +257,9 @@ class RoutesReceiveTheSameContext(unittest.TestCase):
         self.assertIn('[redacted]', call['context']['profile'])
         self.assertIn('땅콩 알러지', call['prompt'])
         cli_record = self.store.turn_provenance(cli_job)
-        self.assertIn('owner-memory', cli_record['prompt_withheld'])
-        self.assertTrue(cli_record['prompt_envelope'].startswith('[not stored: this turn included'))
-        self.assertNotIn('땅콩', json.dumps(cli_record, ensure_ascii=False))
+        self.assertNotIn('prompt_withheld', cli_record)
+        self.assertIn('땅콩 알러지', cli_record['prompt_envelope'])
+        self.assertNotIn(secret, json.dumps(cli_record, ensure_ascii=False))
 
     def test_no_profile_rows_means_no_profile_section(self):
         self._run('hello', 'k1')
@@ -533,6 +535,9 @@ class _RouteFixture(unittest.TestCase):
         self.service.local_tools = self.network
         if cli:
             self.service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
+            # #701: a native-search turn no longer offers the bridge web_search (the
+            # CLI's own search replaces it); these egress checks run search-off turns.
+            self.service.cli_native_search = lambda *args: (False, 'private_turn')
         else:
             self.store.put('model', self.CONFIG)
             self.store.put('model_test', {'ok': True, 'tools_ok': True, 'time': 9999999999,
@@ -660,7 +665,7 @@ class PriorAssistantEgressDecision(_RouteFixture):
         self.assertIn(PROFILE_HEADING, self.requests[-1]['messages'][0]['content'])
         self.assertEqual(self._outbound('web_search'), [{'tool': 'web_search', 'query': 'today news'}])
         self.assertNotIn('PEANUT-ALLERGY-XYZ', json.dumps(self.network.plans))
-        self._record_withholds_the_profile()
+        self._record_keeps_the_redacted_envelope()
 
     def test_cli_profile_in_context_does_not_close_public_search(self):
         self._service(cli=True)
@@ -669,15 +674,15 @@ class PriorAssistantEgressDecision(_RouteFixture):
         self.assertEqual(len(self._outbound('web_search')), 1)
         self.assertEqual(self.engine.refusals, [])
         self.assertNotIn('PEANUT-ALLERGY-XYZ', json.dumps(self.network.plans))
-        self._record_withholds_the_profile()
+        self._record_keeps_the_redacted_envelope()
 
-    def _record_withholds_the_profile(self):
-        """#664 review P2: the record keeps size/digest, the lookup still went out."""
+    def _record_keeps_the_redacted_envelope(self):
+        """#664 review P2, amended by #701: the lookup still went out and the local
+        record keeps the (redacted) envelope; the profile no longer withholds it."""
         [job] = self.store.jobs()
         record = self.store.turn_provenance(job['id'])
-        self.assertIn('owner-memory', record['prompt_withheld'])
-        self.assertTrue(record['prompt_envelope'].startswith('[not stored: this turn included'))
-        self.assertNotIn('PEANUT-ALLERGY-XYZ', json.dumps(record))
+        self.assertNotIn('prompt_withheld', record)
+        self.assertIn('PEANUT-ALLERGY-XYZ', record['prompt_envelope'])
 
     def test_finding_cli_benign_prior_answer_closes_public_search(self):
         """Fixed by #605 (AX-04); was an ``expectedFailure`` baseline from #603.

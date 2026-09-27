@@ -12,6 +12,16 @@ Owner decisions after re-analysis:
 
 The Capabilities table below is superseded where it names Naver; its Browser action row is updated for #680. In the pilot posture, Brave remains an optional key and Bing RSS an explicit opt-in.
 
+## Amendment — #701 (2026-09-27)
+
+SEC-CLI-01 makes the loop work on the owner's subscription CLI route (Codex or Claude Code, trusted-local profile):
+- **Legacy provenance.** Works recorded before #605 are classified once from durable signals only (private tool events, the document-job list, context attachments, saved notes, the notes-summary command, turn records, whether a model produced the reply). A clean one is recorded as owner conversation; any private signal keeps it unrecorded. No judgment about text.
+- **Native-search gate (owner decision on #701).** The #678 gate reads only what the shown messages' own Works read themselves: their own private tool events, spliced sources, document jobs and context attachments, not the inherited `history:*` chain. A Work that read notes blocks the CLI's own search only while its messages are in the shown 16-message window; this turn's own splices still block. Mediated browser output (`owner-browser-session`) does not block the gate, consistent with the browser tools staying on native-search turns. The #605 inheritance rule, including the browser-session label, is unchanged for public-lookup composition and turn-record storage.
+- **Search.** On a turn where the CLI's own web search is on, the bridge's `web_search` and `bounded_public_research` are not offered, so the CLI's own search answers. When it is off, the bridge search tools say why and name each provider's own caveat.
+- **Browser.** The five browser tools are offered on the trusted-local CLI route. The bridge only relays each call to the AgentOS service, which runs it through the same `BrowserSession` as the direct route: mediation, the label-independent payment guard, approvals, budget, repeat key, loopback refusal, the one profile lock and the encrypted jar are unchanged. The strict-isolated and isolated profiles never offer them. On a native-search turn the browser tools stay; the pre-turn gate alone decides native search.
+- **Turn records.** The local prompt envelope is kept after deterministic redaction of the Work's lookup-exclusion set (its Memory candidates, notes and calendar drafts), stored secret values and credential shapes. Profile values have no identifier marker and are kept as sent. Only a turn that carried a private store (notes, documents, Drive, context inbox, Memory reads, calendar, the browser session and the other native-search-blocking sources) keeps size and digest only. Turn records stay out of export and backup.
+- **Settings** shows, per Main AI route, whether its own web search and the browser tools are available, and why not (including a CLI that is not installed or not signed in).
+
 ## Status and purpose
 
 This is the canonical product and execution contract for the **SECRETARY-01** program, activated by the owner on 2026-09-26 through [GOV-SECRETARY-01 #653](https://github.com/Jongtae/agentos/issues/653). It distills the owner's product specification, preserved as [research](research/secretary-agency-spec-2026-09-26.ko.md), and the owner decisions recorded in #653.

@@ -32,7 +32,8 @@ class _Capabilities:
 
 # The fixture's definitions are ungated: #627's propose_current_state is a
 # declared profile action (Capabilities offers it only while context is on).
-BOUNDED_NAMES = ['bounded_public_research', 'list_notes', 'propose_current_state', 'save_note', 'weather', 'web_search']
+BOUNDED_NAMES = ['bounded_public_research', 'browser_click', 'browser_find', 'browser_open', 'browser_read', 'browser_type',
+                 'list_notes', 'propose_current_state', 'save_note', 'weather', 'web_search']
 
 
 class BoundedExecutionTests(unittest.TestCase):
@@ -343,15 +344,21 @@ class SubscriptionServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             store=QuickStore(Path(folder)/'data')
             engines=SubscriptionEngines(finder=lambda _: '/runtime/codex', clock=lambda:1)
-            adapter=Adapter(); service=AgentService(store, subscription_engines=engines, execution_adapter=adapter)
+            # #701: a registered browser profile (a launcher that is never started here).
+            from personal_agent.browser_session import BrowserProfile
+            adapter=Adapter(); service=AgentService(store, subscription_engines=engines, execution_adapter=adapter,
+                                                    browser_profile=BrowserProfile(Path(folder)/'browser', launcher=lambda d, h: None))
             service.connect_subscription_engine({'engine':'codex','officially_authenticated':True})
             job=store.enqueue('do work','subscription-test')
             self.assertTrue(service.run_one())
             self.assertEqual(adapter.call[0], 'codex')
             # The real service route with current context off (#627): no gated action.
             # #678 P1: this clean turn may use the CLI's own web search, so no
-            # private-read bridge tool (list_notes) is offered to it.
-            self.assertEqual(adapter.call[2], [name for name in BOUNDED_NAMES if name not in ('propose_current_state', 'list_notes')])
+            # private-read bridge tool (list_notes) is offered to it; #701: nor the
+            # bridge's own search tools, which the CLI's search replaces.  The
+            # browser tools stay (served by this service through the relay).
+            self.assertEqual(adapter.call[2], [name for name in BOUNDED_NAMES if name not in
+                                               ('propose_current_state', 'list_notes', 'web_search', 'bounded_public_research')])
             self.assertEqual(store.job(job)['response'], 'engine answer')
 
     def test_summary_regression_sends_approved_notes_to_subscription_engine(self):

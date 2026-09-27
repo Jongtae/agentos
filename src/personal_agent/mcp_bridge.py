@@ -17,7 +17,9 @@ from .agent_runtime import (CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, TRANSIENT_FAILUR
                             Capabilities, ToolError, WorkBudget, WorkLedger, classify_failure, evidence_summary,
                             lookup_sources, recorded_private_sources, work_source_records, work_stop_requested)
 from .providers import ProviderError
-from .bounded_execution import AgentOSMcpTools, ExecutionError, profile_actions, redact_reason, turn_actions  # noqa: F401
+from .bounded_execution import (AgentOSMcpTools, BOUNDED_PROFILE, HOST_CLI_PROFILES, STRICT_PROFILE, ExecutionError,  # noqa: F401
+                                profile_actions, redact_reason, turn_actions)
+from .cli_browser_relay import RelayClient, unused_browser_factory
 from .local_tools import LocalTools
 from .search_providers import ProviderRegistry
 from .quickstart_store import QuickStore
@@ -132,7 +134,18 @@ def tool_error_result(exc, action):
     return {'content': [{'type': 'text', 'text': text}], 'structuredContent': typed, 'isError': True}, typed
 
 
-def serve(data, job_id, provenance=(), native_search=False):
+def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROFILE, browser_relay=None,
+          search_off_reason=''):
+    """Serve one Work's AgentOS tools over stdio for the route profile the host named (#701).
+
+    ``profile`` is ``trusted-local`` or ``strict-isolated``; anything else
+    serves the strict set.  ``browser_relay`` (trusted-local only) is the
+    service's relay directory: the browser tools are then listed and every
+    browser call is executed by the service (``cli_browser_relay``); without
+    it no browser tool is offered.
+    """
+    profile = profile if profile in HOST_CLI_PROFILES else STRICT_PROFILE
+    relay = RelayClient(browser_relay) if browser_relay and profile == BOUNDED_PROFILE else None
     store = QuickStore(data)
     def record(tool, status, detail):
         with store.db() as db:
@@ -141,7 +154,9 @@ def serve(data, job_id, provenance=(), native_search=False):
     # schemas come from Capabilities.definitions(), never a bridge-local list.
     capabilities = Capabilities(store, None, {}, '', job_id, record, network=LocalTools(providers=ProviderRegistry.from_store(store)), document_access=False,
                                 # #678 P1: a turn that may search natively gets no private read.
-                                allowed_tools=set(turn_actions(AgentOSMcpTools.PROFILE, native_search)),
+                                allowed_tools=set(turn_actions(profile, native_search and profile == BOUNDED_PROFILE)),
+                                # #701: a placeholder that lists the browser tools; their calls go to the service.
+                                browser=unused_browser_factory if relay is not None else None,
                                 inherited_provenance=_provenance(provenance), lookup_hint=CLI_LOOKUP_HINT,
                                 lookup_sources=_lookup_sources(store, job_id),
                                 # #607 AX-10: the same durable attempt count and
@@ -149,7 +164,10 @@ def serve(data, job_id, provenance=(), native_search=False):
                                 budget=WorkBudget(stop=lambda: work_stop_requested(store, job_id),
                                                   ledger=WorkLedger(store, job_id)))
     capabilities.private_provenance.update(_recorded_private_sources(store, job_id, capabilities.tools))
-    tools = AgentOSMcpTools(capabilities, native_search=native_search)
+    tools = AgentOSMcpTools(capabilities, native_search=native_search and profile == BOUNDED_PROFILE)
+    tools.PROFILE = profile
+    tools.relay = relay
+    tools.native_search_reason = str(search_off_reason or '')
     for line in sys.stdin:
         try:
             request = json.loads(line)
@@ -213,4 +231,12 @@ if __name__ == '__main__':
     parser=argparse.ArgumentParser(); parser.add_argument('--data',required=True); parser.add_argument('--job',required=True)
     parser.add_argument('--provenance',action='append',default=[])
     parser.add_argument('--native-search',action='store_true')
-    args=parser.parse_args(); serve(args.data, args.job, args.provenance, native_search=args.native_search)
+    # #701: the host names the route profile (absent: the historical trusted-local set, as the
+    # doctor's probe runs it; unknown: the strict set).  Only a service-created relay, handed to a
+    # trusted-local bridge, ever lists a browser tool.
+    parser.add_argument('--profile',default=BOUNDED_PROFILE)
+    parser.add_argument('--search-off-reason',default='')
+    parser.add_argument('--browser-relay',default=None)
+    args=parser.parse_args()
+    serve(args.data, args.job, args.provenance, native_search=args.native_search, profile=args.profile,
+          browser_relay=args.browser_relay, search_off_reason=args.search_off_reason)

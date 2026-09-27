@@ -4001,12 +4001,21 @@ class AgentService:
         landed=ascii_host(landed) if landed else None
         shown=registrable_domain(landed) if landed else None
         current=self._browser_login(work_id) or {}
-        stored=self._owner_signed_in(shown or current.get('site') or registrable_domain(current.get('host')))
+        requested=current.get('site') or registrable_domain(current.get('host'))
+        stored=self._owner_signed_in(shown or requested)
+        # #762: a site that sends its login to another site (a separate sign-in domain) is signed in
+        # there.  Its stored sign-in cookies now (after the window saved what the landing set, before
+        # the owner could act) are the baseline a sign-in there is evidenced against.
+        # Only after a successful save there (review P2-1): otherwise the landing's own cookies would read
+        # as a sign-in at close.  No baseline is no evidence from the landed site.
+        landed_before=(self._login_cookie_marks({'host':landed})
+                       if shown and shown!=requested and self.browser_profile.login_window_landed_saved(window) else None)
         with self.lock:
             row=self._browser_login(work_id)
             if not row or row.get('state')!='opening' or row.get('nonce')!=nonce:return
             self._put_browser_login(work_id,{**row,'state':'offered','window':window,'landed_host':landed,
-                                             'landed_site':shown,'stored_session':stored})
+                                             'landed_site':shown,'stored_session':stored,
+                                             'landed_cookies_before':landed_before})
         job=self.store.job(work_id)
         if job:self._arm_login_notification(job,nonce)
 
@@ -4056,8 +4065,20 @@ class AgentService:
         applies): a cookie that was already expired, or expired while the
         window was open, and that the close therefore dropped, is not a login.
         """
-        before,after=row.get('cookies_before'),self._login_cookie_marks(row)
-        if not isinstance(before,dict) or after is None:return False
+        return self._cookie_set_changed(row.get('host'),row.get('cookies_before')) or \
+            self._cookie_set_changed(row.get('landed_host'),row.get('landed_cookies_before'))
+
+    def _cookie_set_changed(self, host, before):
+        """Whether ``host``'s site's unexpired sign-in cookies differ from ``before`` (#709/#762).
+
+        #762: the requested host, and the host the login window landed on
+        when that is another site (a separate sign-in domain), are each
+        compared against their own baseline; either change is a sign-in.
+        No baseline (never recorded, or the jar was unreadable) is no evidence.
+        """
+        if not host or not isinstance(before,dict):return False
+        after=self._login_cookie_marks({'host':host})
+        if after is None:return False
         now=after['at']
         return unexpired(before.get('marks'),now)!=unexpired(after['marks'],now)
 
@@ -4203,6 +4224,8 @@ class AgentService:
             self._put_browser_login(work_id,{**row,'state':final,'cause':shown,'closed_at':time.time()})
             # #749: the owner signed in to this site through the window (its sign-in cookies changed).
             self._record_owner_signin(row.get('host'),row.get('cookies_before'))
+            if isinstance(row.get('landed_cookies_before'),dict):
+                self._record_owner_signin(row.get('landed_host'),row['landed_cookies_before'])
         self._finish_login_notification(work_id,shown)
         return final
 

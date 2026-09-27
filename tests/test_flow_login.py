@@ -935,6 +935,103 @@ class LoginPromptAndThreads(LoginHarness):
         self.assertEqual(self.store.job(job_id)['status'], self.ended)
 
 
+class RedirectedSignIn(LoginHarness):
+    """#762: a login completed only on the separate sign-in site the window landed on resumes the Work."""
+
+    SSO = 'https://login.sso.test/auth?client=fixture&state=opaque'
+
+    def page_cookie(self, name, value):
+        return {'name': name, 'value': value, 'domain': 'sso.test', 'path': '/', 'expires': time.time() + 3600,
+                'secure': True, 'http_only': True, 'same_site': None}
+
+    def redirected_work(self, landing_sets=None):
+        holds = {'lands_on': self.SSO}
+        if landing_sets:
+            holds['sites'] = {'sso.test': [self.page_cookie('csrf', 'landing-set')]}
+        self.window_holds = holds
+        return self.login_work()
+
+    def test_a_sign_in_only_on_the_landed_site_resumes_the_work_once(self):
+        job_id, _prompt, _buttons, notification = self.redirected_work()
+        row = self.service._browser_login(job_id)
+        self.assertEqual((row['landed_site'], row['site']), ('sso.test', 'fixture.test'))
+        self.assertIsInstance(row['landed_cookies_before'], dict)
+        self.window().login('sso.test')        # the requested site's cookies never change
+        self.owner_closes(job_id, logged_in=False)   # (no second sign-in on the requested site)
+        self.assertEqual((self.state(job_id), self.store.job(job_id)['status']), ('resumed', 'queued'))
+        self.assertTrue(wait_until(lambda: 'sso.test' in self.store.config(BROWSER_OWNER_SIGNINS_KEY, {})))
+        self.assertNotIn('fixture.test', self.store.config(BROWSER_OWNER_SIGNINS_KEY, {}), 'only the site that changed')
+        self.assertNotIn('session-', flat(self.service._browser_login(job_id)), 'keyed digests only, never a cookie value')
+        self.assertNotIn('session-', flat(self.store.config(BROWSER_OWNER_SIGNINS_KEY, {})))
+        # Resumed exactly once: a later 로그인 완료 does nothing.
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='partial' WHERE id=?", (job_id,))
+        self.tap(f"p7l:{notification['id']}:done", notification['message_id'])
+        self.service.process_browser_logins()
+        self.assertEqual(self.store.job(job_id)['status'], 'partial')
+
+    def test_what_the_landing_page_itself_set_is_not_a_sign_in(self):
+        # The sign-in site sets a CSRF cookie on load; the window saves it before the owner can act.
+        job_id, _prompt, _buttons, _notification = self.redirected_work(landing_sets=True)
+        self.owner_closes(job_id, logged_in=False)
+        self.assertEqual(self.state(job_id), 'not_logged_in')
+        self.assertEqual(self.store.job(job_id)['status'], self.ended)
+        self.assertEqual(self.store.config(BROWSER_OWNER_SIGNINS_KEY, {}), {})
+
+    def test_a_sign_in_on_the_landed_site_after_its_landing_cookie_resumes(self):
+        job_id, _prompt, _buttons, _notification = self.redirected_work(landing_sets=True)
+        self.window().sites = {'sso.test': [self.page_cookie('csrf', 'landing-set'), self.page_cookie('sid', 'session-sso')]}
+        self.owner_closes(job_id, logged_in=False)
+        self.assertEqual((self.state(job_id), self.store.job(job_id)['status']), ('resumed', 'queued'))
+
+    def test_done_after_a_landed_sign_in_resumes_and_skip_does_not(self):
+        job_id, _prompt, _buttons, notification = self.redirected_work()
+        self.window().login('sso.test')
+        self.tap(f"p7l:{notification['id']}:done", notification['message_id'])
+        self.assertEqual(self.settle(job_id), 'resumed')
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='succeeded' WHERE id=?", (job_id,))
+        self.window_holds = {'lands_on': self.SSO}
+        self.scripts = self.login_script()
+        later = self.receive('다시 확인해줘')
+        self.assertTrue(self.service.run_one())
+        self.shown(later)
+        self.window().login('sso.test')
+        self.service._request_login_decision(later, self.service._browser_login(later)['nonce'], 'skip')
+        self.assertEqual(self.settle(later), 'skipped')
+
+    def test_a_failed_save_after_the_landing_gives_the_landed_site_no_say(self):
+        # Review P2-1: the landing set a cookie and the save right after it failed, so the jar still
+        # predates the landing; that cookie must not read as a sign-in at close.
+        self.window_holds = {'lands_on': self.SSO, 'sites': {'sso.test': [self.page_cookie('csrf', 'landing-set')]},
+                             'fail_export': True}
+        job_id, _prompt, _buttons, _notification = self.login_work()
+        self.assertIsNone(self.service._browser_login(job_id)['landed_cookies_before'])
+        self.window().fail_export = False
+        self.owner_closes(job_id, logged_in=False)
+        self.assertEqual(self.state(job_id), 'not_logged_in')
+        self.assertEqual(self.store.job(job_id)['status'], self.ended)
+
+    def test_a_same_site_redirect_keeps_the_requested_site_rule(self):
+        self.window_holds = {'lands_on': 'https://accounts.fixture.test/login'}
+        job_id, _prompt, _buttons, _notification = self.login_work()
+        self.assertIsNone(self.service._browser_login(job_id)['landed_cookies_before'], 'one site: one baseline')
+        self.owner_closes(job_id)
+        self.assertEqual(self.state(job_id), 'resumed')
+
+    def test_no_landed_baseline_is_no_evidence(self):
+        # An unreadable jar at the landing (or a row from before #762) gives the landed site no say.
+        self.assertFalse(self.service._cookie_set_changed('login.sso.test', None))
+        self.assertFalse(self.service._cookie_set_changed(None, {'at': 0, 'marks': []}))
+        job_id, _prompt, _buttons, _notification = self.redirected_work()
+        row = self.service._browser_login(job_id)
+        self.service._put_browser_login(job_id, {**row, 'landed_cookies_before': None})
+        self.window().login('sso.test')
+        self.owner_closes(job_id, logged_in=False)
+        self.assertEqual(self.state(job_id), 'not_logged_in')
+        self.assertEqual(self.store.job(job_id)['status'], self.ended)
+
+
 class LoginThroughTheCliBridge(_BridgeHarness):
     """The same in-flow login on the trusted-local CLI route: the bridge relays, the service asks."""
 

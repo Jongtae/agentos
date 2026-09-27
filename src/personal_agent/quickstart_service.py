@@ -69,6 +69,7 @@ from .current_context import CurrentContext, KNOWN_SECRET_NAMES, redact_known_se
 # SEC-ATTN-01 (#659): owner-accepted preparations (reminders, prepared answers).
 from . import preparations as prep
 from .browser_session import BrowserProfile, binding_digest
+from .browser_jar import unexpired
 from .cli_browser_relay import BrowserRelay
 from .telegram_presence import (CONTROL_DETAILS, CONTROL_RETRY, THINKING_DRAFT_TEXT, WAIT_CHAT_ACTION, WAIT_DRAFT, PresenceTiming,
                                 TelegramTurnAddressing, WaitState, draft_id_for, render_telegram_html,
@@ -3553,7 +3554,7 @@ class AgentService:
         # Offered before the window can close, so an owner who closes it at once is still heard.
         # The site's stored sign-in cookies before the window: a login is evidenced by their change.
         now=time.time()
-        row={**row,'cookies_before':self._login_cookie_digest(row)}
+        row={**row,'cookies_before':self._login_cookie_marks(row)}
         self._put_browser_login(job['id'],{**row,'state':'offered','window':None,'offered_at':now,
                                            'deadline':now+BROWSER_LOGIN_SECONDS})
         try:
@@ -3575,17 +3576,28 @@ class AgentService:
             self._arm_login_notification(job,row['nonce'])
         return True
 
-    def _login_cookie_digest(self, row):
-        """A keyed digest of the login host's stored sign-in cookies (never a value), or None when unreadable."""
-        digest=self.browser_profile.site_digest(row.get('host'))
-        if digest is None:return None
+    def _login_cookie_marks(self, row):
+        """``{'at': jar time, 'marks': [[keyed digest, expires], ...]}`` of the login host's stored
+        sign-in cookies (never a value), or None when the jar cannot be read."""
+        read=self.browser_profile.site_cookie_marks(row.get('host'))
+        if read is None:return None
+        marks,now=read
         secret=self.store.secret('browser_step_secret',create=lambda:secrets.token_hex(32)).encode()
-        return hmac.new(secret,('login-cookies|'+digest).encode(),hashlib.sha256).hexdigest()
+        keyed=lambda digest:hmac.new(secret,('login-cookie|'+digest).encode(),hashlib.sha256).hexdigest()
+        return {'at':now,'marks':[[keyed(digest),expires] for digest,expires in marks]}
 
     def _login_cookies_changed(self, row):
-        """Whether the site's stored sign-in cookies changed while its login window was open (#709)."""
-        after=self._login_cookie_digest(row)
-        return after is not None and row.get('cookies_before') is not None and after!=row['cookies_before']
+        """Whether the site's unexpired sign-in cookies changed while its login window was open (#709).
+
+        Both readings are compared at the close's jar time over the unexpired
+        cookies only (``browser_jar.unexpired``, the rule the worker import
+        applies): a cookie that was already expired, or expired while the
+        window was open, and that the close therefore dropped, is not a login.
+        """
+        before,after=row.get('cookies_before'),self._login_cookie_marks(row)
+        if not isinstance(before,dict) or after is None:return False
+        now=after['at']
+        return unexpired(before.get('marks'),now)!=unexpired(after['marks'],now)
 
     def _arm_login_notification(self, job, nonce):
         """Queue the optional Telegram prompt for this login (a Work asked again re-arms its row)."""

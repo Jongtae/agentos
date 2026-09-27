@@ -277,24 +277,32 @@ class CookieJar:
                 return
             self._write({'sites': sites})
 
-    def site_digest(self, host):
-        """A digest of the stored sign-in cookies of the site(s) ``host`` belongs to (#709).
+    def site_cookie_marks(self, host):
+        """``(marks, now)`` for the stored sign-in cookies of the site(s) ``host`` belongs to (#709).
 
-        Covers each cookie's site, name, domain, path and value (not its
-        expiry), so a new or changed sign-in changes it and an untouched
-        session does not.  Never returns a value.  Raises ``JarError`` when
-        the jar exists but cannot be read.
+        ``marks`` is one ``(digest, expires)`` per stored cookie: the digest
+        covers the cookie's site, name, domain, path and value (never its
+        expiry) and never returns a value.  ``now`` is this jar's clock, the
+        same clock ``import_rows`` uses to drop expired rows, so two readings
+        are compared over exactly the unexpired cookies (``unexpired``) a
+        worker was given and could keep.  Raises ``JarError`` when the jar
+        exists but cannot be read.
         """
         host = str(host or '').lower().rstrip('.')
         with self._lock:
             sites = self._read()['sites']
-        rows = []
+            now = self.clock()
+        marks = []
         for site, entry in sites.items():
             if not isinstance(entry, dict) or not (host == site or host.endswith('.' + site) or site.endswith('.' + host)):
                 continue
-            rows.extend([site, str(row.get('name')), str(row.get('domain')), str(row.get('path')), str(row.get('value'))]
-                        for row in entry.get('cookies') or [] if isinstance(row, dict))
-        return hashlib.sha256(json.dumps(sorted(rows), separators=(',', ':')).encode()).hexdigest()
+            for row in entry.get('cookies') or []:
+                if not isinstance(row, dict):
+                    continue
+                identity = [site, str(row.get('name')), str(row.get('domain')), str(row.get('path')), str(row.get('value'))]
+                expires = row.get('expires') if isinstance(row.get('expires'), (int, float)) else None
+                marks.append((hashlib.sha256(json.dumps(identity, separators=(',', ':')).encode()).hexdigest(), expires))
+        return marks, now
 
     def cached_sites(self):
         """``(state, sites)`` without touching the Keychain, or None when the file changed since it was read."""
@@ -340,3 +348,8 @@ class CookieJar:
 def _index(payload):
     return {site: {'cookies': len(entry.get('cookies') or []), 'last_used': entry.get('last_used')}
             for site, entry in (payload.get('sites') or {}).items() if isinstance(entry, dict)}
+
+
+def unexpired(marks, now):
+    """The cookie digests of ``marks`` still unexpired at ``now``: the rule ``CookieJar.import_rows`` applies."""
+    return frozenset(digest for digest, expires in marks or () if not (isinstance(expires, (int, float)) and expires <= now))

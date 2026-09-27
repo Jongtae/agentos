@@ -1468,11 +1468,11 @@ class BrowserProfile:
         return {'state': 'closed' if wait else 'opened', 'url': page_reference(url), 'message': LOGIN_WINDOW_TEXT,
                 'window': window_id}
 
-    def site_digest(self, host):
-        """The jar's digest of ``host``'s stored sign-in cookies, or None when it cannot be read (#709)."""
+    def site_cookie_marks(self, host):
+        """``(marks, now)`` of ``host``'s stored sign-in cookies (``CookieJar.site_cookie_marks``), or None when unreadable (#709)."""
         try:
             with self._jar_lock:
-                return self.jar.site_digest(host)
+                return self.jar.site_cookie_marks(host)
         except Exception:
             return None
 

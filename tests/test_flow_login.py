@@ -219,20 +219,32 @@ def wait_until(condition, seconds=5.0):
     return condition()
 
 
-class SiteCookieDigest(unittest.TestCase):
-    def test_a_login_changes_the_site_digest_and_an_expiry_refresh_does_not(self):
+class SiteCookieMarks(unittest.TestCase):
+    def test_a_login_changes_the_unexpired_set_and_an_expiry_refresh_or_expired_row_does_not(self):
+        from personal_agent.browser_jar import unexpired
         with tempfile.TemporaryDirectory() as folder:
             jar = memory_jar(folder)
-            empty = jar.site_digest('accounts.example.org')
-            row = {'name': 'sid', 'value': 'v1', 'domain': '.example.org', 'path': '/', 'expires': 100}
-            jar.save_export({'example.org': [row], 'other.org': [{**row, 'domain': 'other.org'}]})
-            signed_in = jar.site_digest('accounts.example.org')
+            clock = [1000.0]
+            jar.clock = lambda: clock[0]
+
+            def reading(host='accounts.example.org'):
+                marks, now = jar.site_cookie_marks(host)
+                return unexpired(marks, now)
+            empty = reading()
+            row = {'name': 'sid', 'value': 'v1', 'domain': '.example.org', 'path': '/', 'expires': 5000}
+            other = {**row, 'domain': 'other.org'}
+            jar.save_export({'example.org': [row], 'other.org': [other]})
+            signed_in = reading()
             self.assertNotEqual(signed_in, empty)
-            self.assertNotIn('v1', signed_in)
-            jar.save_export({'example.org': [{**row, 'expires': 200}], 'other.org': [{**row, 'domain': 'other.org'}]})
-            self.assertEqual(jar.site_digest('accounts.example.org'), signed_in, 'an expiry refresh is not a login')
-            jar.save_export({'example.org': [row], 'other.org': [{**row, 'domain': 'other.org', 'value': 'v2'}]})
-            self.assertEqual(jar.site_digest('example.org'), signed_in, 'another site does not count')
+            self.assertNotIn('v1', flat(jar.site_cookie_marks('example.org')[0]))
+            jar.save_export({'example.org': [{**row, 'expires': 9000}], 'other.org': [other]})
+            self.assertEqual(reading(), signed_in, 'an expiry refresh is not a login')
+            jar.save_export({'example.org': [{**row, 'expires': 9000}], 'other.org': [{**other, 'value': 'v2'}]})
+            self.assertEqual(reading('example.org'), signed_in, 'another site does not count')
+            # An expired row is not part of the set, exactly as the worker import drops it.
+            jar.save_export({'example.org': [{**row, 'expires': 9000}, {**row, 'name': 'old', 'expires': 10}],
+                             'other.org': [other]})
+            self.assertEqual(reading(), signed_in)
 
 
 class LoginHarness(unittest.TestCase):
@@ -560,6 +572,22 @@ class InFlowLogin(LoginHarness):
         self.tap(f"p7l:{notification['id']}:done", notification['message_id'])
         self.assertEqual(self.service.process_browser_logins(), [])
         self.assertEqual(self.store.job(job_id)['status'], 'partial', 'resumed once only')
+
+    def test_an_expired_cookie_dropped_by_an_untouched_close_is_not_a_login(self):
+        from personal_agent.browser_jar import JAR_NAME
+        jar = self.profile.jar
+        live = {'name': 'keep', 'value': 'still-valid', 'domain': 'fixture.test', 'path': '/', 'expires': time.time() + 86400,
+                'secure': True, 'http_only': True, 'same_site': None}
+        stale = {**live, 'name': 'old', 'value': 'long-gone', 'expires': time.time() - 60}
+        jar.save_export({'fixture.test': [live, stale]})
+        self.assertTrue((Path(self.tmp.name) / 'profile' / JAR_NAME).is_file())
+        job_id, _prompt, _buttons, _notification = self.login_work()
+        # The window was given only the unexpired cookie and the owner signed in nowhere:
+        # the close exports exactly that, so the jar loses the expired row.
+        self.window().sites = {'fixture.test': [live]}
+        self.owner_closes(job_id, logged_in=False)
+        self.assertEqual(self.state(job_id), 'not_logged_in', 'the dropped expired row is not a login')
+        self.assertEqual(self.store.job(job_id)['status'], self.ended)
 
     def test_done_with_no_cookie_change_does_not_resume(self):
         job_id, _prompt, _buttons, notification = self.login_work()

@@ -90,9 +90,27 @@ class MainAiRouteTests(unittest.TestCase):
         self.store = self.service.store
 
     def _service(self):
-        return AgentService(QuickStore(self.root), adapter=ModelAdapter(self.transport),
-                            subscription_engines=SubscriptionEngines(finder=lambda _: '/runtime/cli', clock=lambda: 1),
-                            execution_adapter=_Engine())
+        service = AgentService(QuickStore(self.root), adapter=ModelAdapter(self.transport),
+                               subscription_engines=SubscriptionEngines(finder=lambda _: '/runtime/cli', clock=lambda: 1),
+                               execution_adapter=_Engine())
+        # #685: the claimed qualification job runs synchronously in the test.
+        service.decision_routes.spawn = lambda run: run()
+        return service
+
+    def _activate(self, body):
+        """The Main AI switch, then one work-loop tick of the queued qualification (#685).
+
+        The switch itself returns before any qualification call; the job's
+        result stands in for the former synchronous ``judgment``.
+        """
+        result = self.service.activate_main_ai(body)
+        if result['judgment']['state'] != 'queued':
+            return result
+        self.assertEqual(result['decision_route']['qualification']['state'], 'queued')
+        self.assertTrue(self.service.run_due_qualification())
+        job = self.service.decision_routes.qualification()
+        return {**result, 'judgment': job.get('result') or {'state': job['state'], 'failure': job.get('failure')},
+                'decision_route': self.service.decision_routes.status(), 'job': job}
 
     def _save(self, provider, key):
         return self.service.save_main_ai_key({'provider': provider, 'key': key})
@@ -141,7 +159,7 @@ class MainAiRouteTests(unittest.TestCase):
     def test_confirm_and_use_probes_then_switches_work_and_judgment(self):
         self.service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
         self._save('anthropic', ANTHROPIC_KEY)
-        result = self.service.activate_main_ai({'route': 'anthropic'})
+        result = self._activate({'route': 'anthropic'})
         self.assertEqual(self.service.main_ai.current(), 'anthropic')
         self.assertEqual(self.store.secret('model_key'), ANTHROPIC_KEY)
         self.assertTrue(self.service.model_ready())
@@ -155,12 +173,12 @@ class MainAiRouteTests(unittest.TestCase):
 
     def test_failed_probe_keeps_previous_main_and_judgment(self):
         self._save('openai', OPENAI_KEY)
-        self.service.activate_main_ai({'route': 'openai'})
+        self._activate({'route': 'openai'})
         judgment_before = self.store.config('decision_route')
         self._save('anthropic', ANTHROPIC_KEY)
         self.transport.refuse.add('api.anthropic.com')
         with self.assertRaisesRegex(MainAiError, '그대로'):
-            self.service.activate_main_ai({'route': 'anthropic'})
+            self._activate({'route': 'anthropic'})
         self.assertEqual(self.service.main_ai.current(), 'openai')
         self.assertEqual(self.store.secret('model_key'), OPENAI_KEY)
         self.assertEqual(self.store.config('decision_route'), judgment_before)
@@ -169,13 +187,13 @@ class MainAiRouteTests(unittest.TestCase):
 
     def test_missing_key_is_refused_without_a_call(self):
         with self.assertRaisesRegex(MainAiError, '키'):
-            self.service.activate_main_ai({'route': 'openrouter'})
+            self._activate({'route': 'openrouter'})
         self.assertEqual(self.transport.calls, [])
 
     def test_removing_the_active_key_needs_attention_without_fallback(self):
         self._save('openai', OPENAI_KEY)
         self._save('anthropic', ANTHROPIC_KEY)
-        self.service.activate_main_ai({'route': 'openai'})
+        self._activate({'route': 'openai'})
         self._save('openai', '')
         self.assertEqual(self.service.main_ai.current(), 'openai')
         self.assertFalse(self.service.model_ready())
@@ -187,7 +205,7 @@ class MainAiRouteTests(unittest.TestCase):
     def test_a_newly_saved_key_reaches_neither_work_nor_judgment_before_confirm(self):
         # #643 review P2-1: the Judgment AI uses the Main AI's probed key.
         self._save('openai', OPENAI_KEY)
-        self.service.activate_main_ai({'route': 'openai'})
+        self._activate({'route': 'openai'})
         self._save('openai', 'sk-fixture-openai-NEW')
         self.assertTrue(self.service.main_ai.status()['routes'][2]['key']['pending'])
         before = len(self.transport.calls)
@@ -198,7 +216,7 @@ class MainAiRouteTests(unittest.TestCase):
 
     def test_pending_and_inactive_provider_keys_are_redacted_from_provenance(self):
         self._save('openai', OPENAI_KEY)
-        self.service.activate_main_ai({'route': 'openai'})
+        self._activate({'route': 'openai'})
         self._save('openai', 'pending-fixture-openai-0002')   # saved, not confirmed
         self._save('anthropic', ANTHROPIC_KEY)              # inactive provider
         self.store.secret('api_key:openrouter', 'or-fixture-openrouter-0001')
@@ -211,7 +229,7 @@ class MainAiRouteTests(unittest.TestCase):
     def test_check_reprobes_current_without_switching(self):
         self._save('openai', OPENAI_KEY)
         self._save('anthropic', ANTHROPIC_KEY)
-        self.service.activate_main_ai({'route': 'openai'})
+        self._activate({'route': 'openai'})
         before = len(self.transport.calls)
         status = self.service.check_main_ai()['main_ai']
         self.assertEqual(status['current'], 'openai')
@@ -222,15 +240,21 @@ class MainAiRouteTests(unittest.TestCase):
     # -- AC7 no fallback on a failed judgment probe -------------------------------
     def test_failed_follow_probe_leaves_judgment_needing_attention(self):
         self._save('openai', OPENAI_KEY)
-        self.service.activate_main_ai({'route': 'openai'})
+        self._activate({'route': 'openai'})
         self._save('anthropic', ANTHROPIC_KEY)
         self.transport.refuse_decide.add('api.anthropic.com')
-        result = self.service.activate_main_ai({'route': 'anthropic'})
+        result = self._activate({'route': 'anthropic'})
         self.assertEqual(self.service.main_ai.current(), 'anthropic')
         self.assertEqual(result['judgment']['state'], 'attention')
+        # #685: the previous row stays until a qualification passes; resolved
+        # for the previous Main AI, it is stale and answers nothing.
         row = self.store.config('decision_route')
-        self.assertEqual((row['mode'], row['main'], row['transport']), (MODE_FOLLOW, 'anthropic', 'off'))
+        self.assertEqual((row['mode'], row['main'], row['transport']), (MODE_FOLLOW, 'openai', 'direct_api'))
+        self.assertEqual((result['job']['state'], result['job']['failure']), ('failed', 'no-qualified-candidate'))
         self.assertFalse(result['decision_route']['active']['available'])
+        effective = result['decision_route']['effective']
+        self.assertEqual(effective['state'], 'attention')
+        self.assertIn('적격 모델 없음', effective['text'])
         # No judgment reaches OpenAI (the previous route) or any other host.
         calls = len(self.transport.calls)
         decision = self.service.decision_engine.choose(DecisionContext('p', {'a': 'b'}), ('x', 'y'), 'q')
@@ -239,7 +263,7 @@ class MainAiRouteTests(unittest.TestCase):
 
     def test_stale_follow_row_is_unavailable_after_a_legacy_switch(self):
         self._save('openai', OPENAI_KEY)
-        self.service.activate_main_ai({'route': 'openai'})
+        self._activate({'route': 'openai'})
         # A legacy/other path switches the Work route without re-resolving.
         self.service.connect_subscription_engine({'engine': 'claude-code', 'officially_authenticated': True})
         self.assertIsInstance(self.service.decision_routes.engine(), UnavailableDecisionEngine)
@@ -250,7 +274,7 @@ class MainAiRouteTests(unittest.TestCase):
     def test_explicit_judgment_is_not_changed_by_a_main_switch(self):
         self._save('anthropic', ANTHROPIC_KEY)
         self.store.put('decision_route', {'transport': 'off'})
-        result = self.service.activate_main_ai({'route': 'anthropic'})
+        result = self._activate({'route': 'anthropic'})
         self.assertEqual(result['judgment']['state'], 'unchanged')
         self.assertEqual(self.store.config('decision_route'), {'transport': 'off'})
         self.assertEqual(result['decision_route']['mode'], 'off')
@@ -258,9 +282,9 @@ class MainAiRouteTests(unittest.TestCase):
     # -- AC8 (#679): Codex is followed under the strict profile ---------------------
     def test_codex_main_is_followable_and_a_failed_strict_check_needs_attention(self):
         self._save('openai', OPENAI_KEY)
-        self.service.activate_main_ai({'route': 'openai'})
+        self._activate({'route': 'openai'})
         calls = len(self.transport.calls)
-        result = self.service.activate_main_ai({'route': 'codex'})
+        result = self._activate({'route': 'codex'})
         self.assertEqual(self.service.main_ai.current(), 'codex')
         route = result['decision_route']
         self.assertTrue(route['follow']['available'])
@@ -282,19 +306,19 @@ class MainAiRouteTests(unittest.TestCase):
             seen.append((body, extra))
             raise DecisionRouteError('fixture: not qualified')
         self.service.decision_routes._activate_cli = fake_cli
-        result = self.service.activate_main_ai({'route': 'claude-code'})
+        result = self._activate({'route': 'claude-code'})
         # No explicit candidates: activation qualifies the ranked list
         # (haiku, then sonnet), filtered by its own capability check.
         self.assertEqual(seen, [({'engine': 'claude-code', 'model_policy': 'lowest_qualified'},
                                  {'mode': MODE_FOLLOW, 'main': 'claude-code'})])
         self.assertEqual(result['judgment']['state'], 'attention')
-        self.assertEqual(self.store.config('decision_route')['transport'], 'off')
+        self.assertIsNone(self.store.config('decision_route'), 'the previous (default) route is kept (#685)')
         self.assertEqual(result['decision_route']['follow']['candidates'], ['haiku', 'sonnet'])
 
     # -- #679: API follow defaults are the cheapest qualified ranked model --------
     def test_openai_follow_defaults_to_the_cheapest_qualified_model(self):
         self._save('openai', OPENAI_KEY)
-        result = self.service.activate_main_ai({'route': 'openai'})
+        result = self._activate({'route': 'openai'})
         active = result['decision_route']['active']
         self.assertEqual((active['model_policy'], active['requested_model'], active['destination']),
                          ('lowest_qualified', 'gpt-4o-mini', 'api.openai.com'))
@@ -307,22 +331,22 @@ class MainAiRouteTests(unittest.TestCase):
     def test_openai_follow_tries_the_next_ranked_model_only_when_the_first_fails(self):
         self._save('openai', OPENAI_KEY)
         self.transport.careless.add('gpt-4o-mini')
-        active = self.service.activate_main_ai({'route': 'openai'})['decision_route']['active']
+        active = self._activate({'route': 'openai'})['decision_route']['active']
         self.assertEqual(active['requested_model'], 'gpt-6-luna')
         self.transport.careless.add('gpt-6-luna')
         self.store.put('decision_route', None)
-        result = self.service.activate_main_ai({'route': 'openai'})
+        result = self._activate({'route': 'openai'})
         self.assertEqual((result['judgment']['state'], result['judgment']['failure']), ('attention', 'no-qualified-candidate'))
-        self.assertEqual(self.store.config('decision_route')['transport'], 'off', 'no other model, key or route')
+        self.assertIsNone(self.store.config('decision_route'), 'no other model, key or route (#685: row unchanged)')
 
     def test_anthropic_follow_defaults_to_haiku(self):
         self._save('anthropic', ANTHROPIC_KEY)
-        active = self.service.activate_main_ai({'route': 'anthropic'})['decision_route']['active']
+        active = self._activate({'route': 'anthropic'})['decision_route']['active']
         self.assertEqual((active['model_policy'], active['requested_model']), ('lowest_qualified', 'claude-haiku-4-5'))
 
     def test_explicit_follow_failure_keeps_previous_judgment(self):
         self._save('openai', OPENAI_KEY)
-        self.service.activate_main_ai({'route': 'openai'})
+        self._activate({'route': 'openai'})
         self.store.put('decision_route', {'transport': 'off'})
         self.transport.refuse_decide.add('api.openai.com')
         with self.assertRaises(DecisionRouteError):
@@ -331,7 +355,7 @@ class MainAiRouteTests(unittest.TestCase):
 
     # -- #679: the Work route passes the owner's CLI model -------------------------
     def test_subscription_main_model_is_saved_shown_and_passed_to_work(self):
-        status = self.service.activate_main_ai({'route': 'codex', 'model': 'gpt-5.6-luna'})['main_ai']
+        status = self._activate({'route': 'codex', 'model': 'gpt-5.6-luna'})['main_ai']
         codex = next(row for row in status['routes'] if row['id'] == 'codex')
         self.assertEqual(codex['model'], 'gpt-5.6-luna')
         self.assertIn('~/.codex/config.toml', codex['model_note'], 'Settings says the owner config model is not used')
@@ -340,7 +364,7 @@ class MainAiRouteTests(unittest.TestCase):
         self.assertTrue(self.service.run_one())
         self.assertEqual(self.service.execution_adapter.kwargs[-1].get('model'), 'gpt-5.6-luna')
         # An empty model clears the choice: the CLI's own default, no --model.
-        self.service.activate_main_ai({'route': 'codex', 'model': ''})
+        self._activate({'route': 'codex', 'model': ''})
         self.assertEqual(self.service.main_ai.subscription_model('codex'), '')
         self.store.enqueue('do more work', 'work-model-2')
         self.assertTrue(self.service.run_one())
@@ -364,7 +388,7 @@ class MainAiRouteTests(unittest.TestCase):
                 self.calls.append(kwargs)
                 return 'isolated answer'
         # A Work model saved before isolation was configured.
-        self.service.activate_main_ai({'route': 'codex', 'model': 'gpt-5.6-luna'})
+        self._activate({'route': 'codex', 'model': 'gpt-5.6-luna'})
         isolated = Isolated()
         service = AgentService(self.store, adapter=ModelAdapter(self.transport),
                                subscription_engines=SubscriptionEngines(finder=lambda _: '/runtime/cli', clock=lambda: 1),
@@ -393,9 +417,9 @@ class MainAiRouteTests(unittest.TestCase):
             sidecar._validate({'prompt': 'p', 'engine_id': 'codex', 'token': 't', 'task_id': 'j', 'model': 'gpt-5.6-luna'})
 
     def test_a_malformed_work_model_changes_nothing(self):
-        self.service.activate_main_ai({'route': 'claude-code', 'model': 'sonnet'})
+        self._activate({'route': 'claude-code', 'model': 'sonnet'})
         with self.assertRaisesRegex(MainAiError, '그대로'):
-            self.service.activate_main_ai({'route': 'codex', 'model': '--dangerously-bypass-approvals-and-sandbox'})
+            self._activate({'route': 'codex', 'model': '--dangerously-bypass-approvals-and-sandbox'})
         self.assertEqual(self.service.main_ai.current(), 'claude-code')
         self.assertEqual(self.service.main_ai.subscription_model('claude-code'), 'sonnet')
         self.assertEqual(self.service.main_ai.subscription_model('codex'), '')

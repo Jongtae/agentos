@@ -7,9 +7,10 @@ Evidence classes, named separately:
   guard, generic login_required detection, budget/timeouts, tool schemas,
   the loop end to end with a scripted model, the service approval surfaces
   (Telegram buttons, web decision) and the secret-free durable records;
-* integration (model-free, real Playwright driver, skipped cleanly when the
-  optional extra or Chromium is absent): a local ``http.server`` fixture site
-  driven product page -> 장바구니 -> cart page.
+* integration (model-free, the real embedded WebKit worker, #680): in
+  ``tests/test_browser_webkit.py``, macOS with PyObjC only, against the
+  ``http.server`` fixture site defined here (product page -> 장바구니 -> cart
+  page).
 
 No site, provider or category is named in ``src``; the fixture below is the
 test's own.
@@ -900,9 +901,14 @@ class ServiceTests(unittest.TestCase):
     def test_settings_status_and_login_window(self):
         status = self.service.settings()['browser']
         self.assertTrue(status['available'])
-        self.assertIsNone(status['install_hint'])
-        self.assertFalse(status['profile_exists'])
-        self.assertIsNone(status['last_login_at'])
+        self.assertIsNone(status['unavailable_reason'])
+        self.assertNotIn('install_hint', status, 'no browser install is ever suggested (#680)')
+        self.assertEqual(status['sessions'], [])
+        self.assertEqual(status['storage']['what'], 'site-sign-in-cookies')
+        self.assertEqual(status['storage']['key_service'], 'personal-agentos.browser-jar')
+        self.assertFalse(status['storage']['sent_to_ai'])
+        self.assertEqual(status['storage']['state'], 'empty')
+        self.assertEqual(status['google_note'], bs.GOOGLE_NOTE)
         self.assertEqual(status['pending_steps'], [])
         with self.assertRaises(ValueError):
             self.service.open_browser_for_login({'url': ''})
@@ -926,14 +932,42 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(len([e for e in self.driver_log if e[0] in ('type', 'snapshot', 'click')]), 0,
                          'the login window is never read or typed into')
 
-    def test_unavailable_profile_offers_no_tools_and_an_install_hint(self):
-        profile = bs.BrowserProfile(Path(self.tmp.name) / 'p2', launcher=None, available=lambda: False)
-        service = AgentService(self.store, self.service.adapter, self.service.telegram_transport, browser_profile=profile)
-        status = service.browser_status()
-        self.assertFalse(status['available'])
-        self.assertEqual(status['install_hint'], bs.INSTALL_HINT)
-        self.assertIsNone(profile.driver_factory('w'))
-        self.assertEqual(service.open_browser_for_login({'url': ORIGIN + '/x'})['state'], 'unavailable')
+    def test_unavailable_platform_offers_no_tools_and_a_typed_refusal(self):
+        from unittest import mock
+        profile = bs.BrowserProfile(Path(self.tmp.name) / 'p2', launcher=None)
+        with mock.patch.object(bs, 'webkit_unavailable_reason', lambda *a, **k: 'platform'):
+            self.service.browser_profile = profile
+            status = self.service.browser_status()
+            self.assertFalse(status['available'])
+            self.assertEqual(status['unavailable_reason'], 'platform')
+            self.assertEqual(status['message'], bs.PLATFORM_TEXT)
+            self.assertNotIn('install_hint', status)
+            self.assertNotIn('storage', status, 'nothing is read from the jar where the engine cannot run')
+            self.assertIsNone(profile.driver_factory('w'))
+            receipt = self.service.open_browser_for_login({'url': ORIGIN + '/x'})
+            self.assertEqual((receipt['state'], receipt['reason']), ('unavailable', 'platform'))
+            # A Work is offered no browser tool, so a browser goal cannot claim success.
+            script = Script({'tool_calls': [call('1', 'browser_open', url=ORIGIN + '/product', effect='navigate')]},
+                            {'content': '브라우저를 쓸 수 없습니다.'})
+            self.scripts = [script]
+            job_id = self.receive('상품 페이지 열어줘')
+            self.assertTrue(self.service.run_one())
+            offered = {t.get('function', {}).get('name') for t in script.bodies[0].get('tools', [])}
+            self.assertFalse(offered & BROWSER_ACTIONS)
+            self.assertNotEqual(self.store.job(job_id)['status'], 'succeeded')
+            self.assertEqual(self.drivers, [])
+        with mock.patch.object(bs, 'webkit_unavailable_reason', lambda *a, **k: 'dependency'):
+            self.assertEqual(profile.status()['message'], bs.DEPENDENCY_TEXT)
+        # A browser call that reaches the runtime anyway is the typed refusal, not a setup hint.
+        caps = Capabilities(self.store, None, {}, '', 'w', lambda *a: None, browser_unavailable=bs.PLATFORM_TEXT)
+        with self.assertRaises(ToolError) as caught:
+            caps.execute('browser_open', {'url': ORIGIN + '/product', 'effect': 'navigate'})
+        self.assertEqual(caught.exception.code, 'browser_unavailable_platform')
+        self.assertEqual(str(caught.exception), bs.PLATFORM_TEXT)
+        self.assertEqual(bs.webkit_unavailable_reason(platform='linux'), 'platform')
+        self.assertEqual(bs.webkit_unavailable_reason(platform='win32'), 'platform')
+        self.assertEqual(bs.webkit_unavailable_reason(platform='darwin', find_spec=lambda name: None), 'dependency')
+        self.assertIsNone(bs.webkit_unavailable_reason(platform='darwin', find_spec=lambda name: object()))
 
     def test_durable_records_never_carry_page_secrets(self):
         self.scripts = [Script({'tool_calls': [call('1', 'browser_open', url=ORIGIN + '/account', effect='read')]},
@@ -994,25 +1028,32 @@ class HttpAndCliTests(unittest.TestCase):
             self.assertEqual(error.exception.code, 400)
             receipt = request('/api/browser/login', {'url': ORIGIN + '/login'})
             self.assertEqual(receipt['state'], 'opened')
+            with self.assertRaises(HTTPError) as error:
+                request('/api/browser/sessions/delete', {'site': ''})
+            self.assertEqual(error.exception.code, 400)
+            self.assertEqual(request('/api/browser/sessions/delete', {'site': 'fixture.test'}),
+                             {'deleted': False, 'site': 'fixture.test'})
         finally:
             server.shutdown()
             thread.join()
             server.server_close()
 
-    def test_cli_login_refuses_without_the_extra_and_opens_with_it(self):
+    def test_cli_login_refuses_off_macos_and_opens_the_window_on_it(self):
         from unittest import mock
         from personal_agent import quickstart
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        with mock.patch.object(bs, 'playwright_available', lambda: False):
+        with mock.patch.object(bs, 'webkit_unavailable_reason', lambda *a, **k: 'platform'), \
+             mock.patch('sys.stderr') as err:
             with self.assertRaises(SystemExit) as caught:
                 quickstart.browser_login_main(['--url', ORIGIN + '/login', '--data', tmp.name])
             self.assertEqual(caught.exception.code, 2)
+        self.assertIn('macOS', ''.join(str(c.args[0]) for c in err.write.call_args_list))
         class ClosedByOwner(FakeDriver):
             def is_open(self):
                 return False   # the owner closed the window at once
-        with mock.patch.object(bs, 'playwright_launcher', lambda d, h: ClosedByOwner()), \
-             mock.patch.object(bs, 'playwright_available', lambda: True), \
+        with mock.patch.object(bs.BrowserProfile, '_launch_webkit', lambda self, d, h: ClosedByOwner()), \
+             mock.patch.object(bs, 'webkit_unavailable_reason', lambda *a, **k: None), \
              mock.patch('sys.stdout') as out:
             code = quickstart.browser_login_main(['--url', ORIGIN + '/login', '--data', tmp.name])
         self.assertEqual(code, 0)
@@ -1020,20 +1061,7 @@ class HttpAndCliTests(unittest.TestCase):
         self.assertIn('"state": "closed"', printed)
 
 
-# ---------------------------------------------------------------- integration (real driver)
-
-def _chromium_available():
-    if not bs.playwright_available():
-        return False
-    try:
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            browser.close()
-        return True
-    except Exception:
-        return False
-
+# ---------------------------------------------------------------- fixture site (served to the real WebKit worker, #680)
 
 class FixtureHandler(BaseHTTPRequestHandler):
     def _send(self, body, status=200):
@@ -1059,66 +1087,6 @@ class FixtureHandler(BaseHTTPRequestHandler):
 
     def log_message(self, *args):
         pass
-
-
-@unittest.skipUnless(_chromium_available(), 'Playwright with Chromium is not installed (optional browser extra)')
-class PlaywrightIntegrationTests(unittest.TestCase):
-    """Evidence class: model-free integration with the real driver against a local fixture site."""
-
-    def setUp(self):
-        self.server = ThreadingHTTPServer(('127.0.0.1', 0), FixtureHandler)
-        self.server.posts = []
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
-        self.addCleanup(self.server.shutdown)
-        self.origin = f'http://127.0.0.1:{self.server.server_address[1]}'
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-
-    def test_product_page_cart_button_and_cart_page_through_the_real_driver(self):
-        profile = bs.BrowserProfile(Path(self.tmp.name) / 'profile', headless=True)
-        approvals = Approvals()
-        sess = bs.BrowserSession(profile.driver_factory('work-int'), work_id='work-int', approvals=approvals,
-                                 excluded=lambda: [PASSPORT])
-        try:
-            page = sess.open({'url': self.origin + '/product', 'effect': 'navigate'})
-            self.assertEqual(page['state'], 'page')
-            self.assertIn('세탁세제 3L', page['text'])
-            self.assertIn(bs.REDACTED, page['text'], 'the saved value is redacted by the real snapshot too')
-            self.assertNotIn('숨김 링크', [row['name'] for row in page['elements']])
-            self.assertTrue(sess.find({'text': '12,900'})['found'])
-            cart = sess.click({'target': '장바구니', 'effect': 'mutate'})
-            self.assertEqual(cart['title'], '장바구니')
-            self.assertIn('세탁세제 3L × 1', cart['text'])
-            self.assertEqual(self.server.posts, ['/cart'])
-            # The account page: rendered token, password and one-time code never leave the driver.
-            account = sess.open({'url': self.origin + '/account', 'effect': 'read'})
-            for secret in (PASSWORD, OTP, TOKEN):
-                self.assertNotIn(secret, flat(account))
-            # The checkout form: the guard holds against the real DOM as well.
-            sess.open({'url': self.origin + '/checkout', 'effect': 'navigate'})
-            with self.assertRaises(ToolError) as caught:
-                sess.type({'target': '카드번호', 'text': '4111', 'effect': 'navigate'})
-            self.assertEqual(caught.exception.code, 'approval_required')
-            with self.assertRaises(ToolError):
-                sess.click({'target': '결제하기', 'effect': 'mutate'})
-            self.assertEqual(self.server.posts, ['/cart'], 'no payment form was submitted')
-            # Compound autocomplete tokens are classified by their field token on the real DOM too.
-            compound = sess.open({'url': self.origin + '/checkout-compound', 'effect': 'navigate'})
-            for secret in ('4242424242424242', '987', '246810'):
-                self.assertNotIn(secret, flat(compound))
-            with self.assertRaises(ToolError):
-                sess.click({'target': '주문하기', 'effect': 'navigate'})
-            # Title, path and link userinfo are mediated.
-            reset = sess.open({'url': self.origin + '/reset/' + PASSPORT, 'effect': 'read'})
-            for secret in (PASSPORT, 'hunter2', 'abcDEF123456secret'):
-                self.assertNotIn(secret, flat(reset))
-            self.assertEqual(self.server.posts, ['/cart'])
-            login = sess.open({'url': self.origin + '/login', 'effect': 'navigate'})
-            self.assertEqual(login['state'], 'login_required')
-        finally:
-            sess.close()
-        self.assertTrue(any((Path(self.tmp.name) / 'profile').iterdir()), 'the persistent profile exists')
-        self.assertEqual(profile.status()['in_use'], False)
 
 
 if __name__ == '__main__':

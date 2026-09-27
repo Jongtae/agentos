@@ -1168,7 +1168,7 @@ def outcome_from_events(rows, tools=None):
  return ('partial' if advanced else 'failed'),refusals
 
 class Capabilities:
- def __init__(self,store,adapter,config,key,job_id,record,readonly=False,network=None,document_access=True,packages=None,allowed_tools=None,document_context=False,public_page_scope=None,memory_approval=None,inherited_provenance=(),calendar=None,calendar_owner=None,memory_request=None,current_packages=None,lookup_sources=None,lookup_hint='',delegated=False,inherited_excluded=(),budget=None,browser=None,browser_approvals=None,judgments=None,secret_redactor=None,current_context=None,preparations=None):
+ def __init__(self,store,adapter,config,key,job_id,record,readonly=False,network=None,document_access=True,packages=None,allowed_tools=None,document_context=False,public_page_scope=None,memory_approval=None,inherited_provenance=(),calendar=None,calendar_owner=None,memory_request=None,current_packages=None,lookup_sources=None,lookup_hint='',delegated=False,inherited_excluded=(),budget=None,browser=None,browser_approvals=None,browser_unavailable=None,judgments=None,secret_redactor=None,current_context=None,preparations=None):
   # #606 T1: shared with a delegated specialist, spent in `execute`.
   # Without an injected budget (the MCP bridge process) the durable Stop
   # request is the stop signal.
@@ -1221,6 +1221,10 @@ class Capabilities:
   # is the owner's per-step approval surface (consume/request); the model
   # never holds a token.
   self.browser=browser;self.browser_approvals=browser_approvals;self._browser_session=None
+  # #680: why this computer cannot run the embedded engine (owner-readable
+  # text), or None.  A browser call then ends in the typed refusal
+  # `browser_unavailable_platform` instead of a setup hint.
+  self.browser_unavailable=browser_unavailable
   # #627: the owner's current context (`current_context.CurrentContext`) for
   # location refs and state proposals, or None: then it is built from this
   # store on first use (the CLI's MCP bridge process has only the store).
@@ -1667,7 +1671,8 @@ class Capabilities:
    # guard live in `browser_session`; this branch only routes the call and
    # labels the Work's context with the private source it read from.
    if self.browser is None:
-    from .browser_session import UNAVAILABLE_TEXT
+    from .browser_session import UNAVAILABLE_CODE,UNAVAILABLE_TEXT
+    if self.browser_unavailable:raise ToolError(self.browser_unavailable,UNAVAILABLE_CODE)
     raise ToolError(UNAVAILABLE_TEXT,'needs_setup',requires='browser-profile')
    result=self.browser_session().run(name,args)
    if result.get('state')=='login_required':return result

@@ -695,6 +695,307 @@ class PreparationScopeTests(_Case):
         self.assertEqual(sum(state == 'proposed' for state in states.values()), 12 - len(shown))
 
 
+# --- SEC-ATTN-02 (#719): watching until a deadline, telling only when needed ---
+
+def watch_engine(verdicts, preparation=False):
+    """Scripted ``watch-notification`` verdicts (True/False/None=unavailable), in order."""
+    verdicts = list(verdicts)
+
+    def judge(context, proposition):
+        if context.purpose == 'goal-reached':
+            return BinaryDecision(OUTCOME_DECIDED, True, fixture_confidence())
+        if context.purpose == 'explicit-preparation-request':
+            return BinaryDecision(OUTCOME_DECIDED, preparation, fixture_confidence())
+        if context.purpose == 'watch-notification':
+            verdict = verdicts.pop(0) if verdicts else None
+            return None if verdict is None else BinaryDecision(OUTCOME_DECIDED, verdict, fixture_confidence())
+        return None
+    return FixtureDecisionEngine(judge=judge)
+
+
+class _WatchCase(_Case):
+    EVERY = 600
+
+    def watch(self, *, runs=None, span=3600, delivery=prep.DELIVERY_WHEN_NEEDED, goal='출발 시각을 앞당겨야 하는지 확인'):
+        """An accepted watch: every 10 minutes from one minute from now for ``span`` seconds."""
+        due = self.now + 60
+        every, end, max_runs = prep.normalize_window(self.EVERY // 60, datetime.fromtimestamp(due + span, SEOUL).isoformat(),
+                                                     runs, due, 'Asia/Seoul', self.now)
+        return self.service.preparations.create(kind='prepare', goal=goal, due_at=due, timezone='Asia/Seoul', recurrence=None,
+                                                channel='telegram', created_from='settings', state=prep.STATE_SCHEDULED,
+                                                accepted_by=prep.ACCEPTED_OWNER_SETTINGS, window=(every, end, max_runs),
+                                                delivery_mode=delivery)
+
+    def run_slot(self, answer):
+        """Advance to the row's slot, start it, let the worker answer, settle, deliver."""
+        row = self.service.preparations.get(self.watched['id'])
+        self.now = max(self.now, row['due_at']) + 1
+        self.assertTrue(self.tick())
+        self.script = [{'content': answer}] * 2  # the loop asks once more after a bare answer
+        self.assertTrue(self.service.run_one())
+        self.service.deliver_one()
+        self.assertTrue(self.tick())  # settle: the decision
+        self.service.deliver_notification()
+        return self.service.preparations.get(self.watched['id'])
+
+    def watch_asks(self):
+        return [item[1] for item in self.judge.asked if item[0] == 'judge' and item[1].purpose == 'watch-notification']
+
+
+class WindowTests(_WatchCase):
+    def setUp(self):
+        super().setUp()
+        self.judge = watch_engine([False] * 50)
+        self.service.use_decision_engine(self.judge)
+
+    def test_the_window_is_bounded_by_its_slots_max_runs_and_limits(self):
+        due = self.now + 60
+        until = lambda seconds: datetime.fromtimestamp(due + seconds, SEOUL).isoformat()
+        self.assertEqual(prep.normalize_window(10, until(3600), None, due, 'Asia/Seoul', self.now), (600, due + 3600, 7))
+        self.assertEqual(prep.normalize_window('10', until(3600), 3, due, 'Asia/Seoul', self.now)[2], 3)
+        self.assertEqual(prep.normalize_window(5, until(86400), None, due, 'Asia/Seoul', self.now)[2], prep.MAX_WINDOW_RUNS)
+        for every, span, runs in ((4, 3600, None), (721, 3600, None), (10, 0, None), (10, -600, None),
+                                  (10, 86400 + 60, None), (True, 3600, None), (10, 3600, 0), (10, 3600, 49)):
+            with self.assertRaises(prep.PreparationRefusal, msg=(every, span, runs)):
+                prep.normalize_window(every, until(span), runs, due, 'Asia/Seoul', self.now)
+        with self.assertRaises(prep.PreparationRefusal):
+            self.service.preparations.create(kind='reminder', goal='x', due_at=due, timezone='Asia/Seoul', recurrence=None,
+                                             channel='telegram', created_from='w', state=prep.STATE_SCHEDULED,
+                                             delivery_mode=prep.DELIVERY_WHEN_NEEDED)
+
+    def test_a_watch_runs_at_most_max_runs_then_stops(self):
+        self.watched = self.watch(runs=3)
+        for index in range(3):
+            row = self.run_slot(f'확인 {index}: 아직 괜찮습니다.')
+        self.assertEqual((row['state'], row['run_count']), ('delivered', 3))
+        for _ in range(12):
+            self.now += self.EVERY
+            self.assertFalse(self.tick(), 'no fourth run inside the window')
+        self.assertEqual(len(self.runs(row['id'])), 3)
+        events = [e['trace'] for run in self.runs(row['id']) for e in self.store.task_events(run['id'])
+                  if e['tool'] == 'preparation' and 'run' in e['trace']]
+        self.assertEqual([(e['run'], e['max_runs']) for e in events], [(1, 3), (2, 3), (3, 3)])
+
+    def test_a_watch_stops_at_its_deadline(self):
+        self.watched = self.watch(span=1800)  # slots at +0, +10, +20, +30 minutes
+        slots = []
+        while self.service.preparations.get(self.watched['id'])['state'] == 'scheduled':
+            slots.append(self.service.preparations.get(self.watched['id'])['due_at'])
+            row = self.run_slot('아직 괜찮습니다.')
+        end = self.watched['window_end']
+        self.assertEqual(len(slots), 4)
+        self.assertTrue(all(slot <= end for slot in slots))
+        self.assertEqual(row['state'], 'delivered')
+        self.now = end + 7200
+        self.assertFalse(self.tick())
+        self.assertEqual(len(self.runs(row['id'])), 4)
+
+    def test_a_window_missed_while_down_expires_without_running(self):
+        self.watched = self.watch(span=1800)
+        self.now = self.watched['window_end'] + prep.PAST_GRACE_SECONDS + 1
+        self.assertTrue(self.tick())
+        self.assertEqual(self.service.preparations.get(self.watched['id'])['state'], prep.STATE_EXPIRED)
+        self.assertEqual((self.runs(self.watched['id']), self.model_calls), ([], []))
+        self.assertFalse(self.tick())
+
+    def test_missed_slots_run_once_then_the_next_slot_after_now(self):
+        self.watched = self.watch(span=3600)
+        first = self.watched['due_at']
+        self.now = first + 3 * self.EVERY + 5  # three slots missed while down
+        self.assertTrue(self.tick())
+        self.script = [{'content': '아직 괜찮습니다.'}] * 2
+        self.assertTrue(self.service.run_one())
+        self.assertTrue(self.tick())
+        row = self.service.preparations.get(self.watched['id'])
+        self.assertEqual((row['state'], row['due_at'], row['run_count']), ('scheduled', first + 4 * self.EVERY, 1))
+
+    def test_a_tick_with_nothing_due_makes_no_model_or_judgment_call(self):
+        self.watched = self.watch()
+        for _ in range(50):
+            self.assertFalse(self.tick())
+            self.now += 1
+        self.assertEqual((self.model_calls, self.telegram, self.store.jobs(), self.watch_asks()), ([], [], [], []))
+
+
+class SilentDeliveryTests(_WatchCase):
+    def use(self, verdicts):
+        self.judge = watch_engine(verdicts)
+        self.service.use_decision_engine(self.judge)
+
+    def notifications(self):
+        return [text for text in self.texts() if text.startswith('지켜보던 일에서 알려 드립니다')]
+
+    def test_quiet_runs_send_nothing_and_notify_sends_once_per_new_decision(self):
+        self.use([False, True, True])
+        self.watched = self.watch()
+        row = self.run_slot('지금은 평소와 같습니다. 예정대로 출발하면 됩니다.')
+        self.assertEqual((row['last_decision'], row['last_decision_reason']), ('quiet', prep.REASON_JUDGED_NOT_NEEDED))
+        self.assertEqual(self.telegram, [], 'a quiet run sends nothing, not even a typing indicator')
+        [run] = self.runs(row['id'])
+        self.assertEqual((run['channel'], run['chat_id'], run['delivery'], run['status']), ('web', None, 'none', 'succeeded'))
+        self.assertIn(run['id'], [job['id'] for job in self.store.jobs()], 'a quiet run stays in 작업 현황')
+        settled = [e['trace'] for e in self.store.task_events(run['id']) if e['tool'] == 'preparation' and 'decision' in e['trace']]
+        self.assertEqual([(e['decision'], e['reason'], e['notification_queued']) for e in settled],
+                         [('quiet', prep.REASON_JUDGED_NOT_NEEDED, False)])
+        self.assertNotIn('평소와', json.dumps(settled, ensure_ascii=False), 'Evidence records the decision, not the answer')
+
+        row = self.run_slot('정체가 시작됐습니다. 20분 일찍 출발하세요.')
+        self.assertEqual((row['last_decision'], row['last_decision_reason']), ('notify', prep.REASON_JUDGED_NEEDED))
+        [sent] = self.notifications()
+        self.assertIn('20분 일찍 출발하세요', sent)
+        self.assertIn('p7q:', json.dumps(self.sends()[-1]['reply_markup']))
+        self.service.deliver_notification()
+        self.service.deliver_one()
+        self.assertEqual(len(self.sends()), 1, 'exactly one message for this decision')
+
+        # The same result again: quiet without asking the judgment.
+        asked = len(self.watch_asks())
+        row = self.run_slot('정체가 시작됐습니다.  20분 일찍 출발하세요.')
+        self.assertEqual((row['last_decision'], row['last_decision_reason']), ('quiet', prep.REASON_UNCHANGED))
+        self.assertEqual(len(self.watch_asks()), asked)
+        self.assertEqual(len(self.notifications()), 1)
+
+        # A new situation the judgment says is new: one more message.
+        row = self.run_slot('정체가 더 심해졌습니다. 40분 일찍 출발하세요.')
+        self.assertEqual(row['last_decision'], 'notify')
+        self.assertEqual(len(self.notifications()), 2)
+        last = self.watch_asks()[-1]
+        self.assertEqual(set(last.facts), {'watch_goal', 'run_result', 'last_notification'})
+        self.assertIn('20분 일찍', last.facts['last_notification'], 'the judgment sees what the owner was last told')
+        self.assertEqual(last.facts['watch_goal'], '출발 시각을 앞당겨야 하는지 확인')
+
+    def test_a_notification_survives_a_restart_and_is_sent_once(self):
+        self.use([True])
+        self.watched = self.watch()
+        row = self.service.preparations.get(self.watched['id'])
+        self.now = row['due_at'] + 1
+        self.tick()
+        self.script = [{'content': '지금 출발하세요.'}] * 2
+        self.service.run_one()
+        self.tick()  # settled and queued in one transaction, not yet sent
+        restarted = self.make_service()
+        restarted.recover_interrupted_work()
+        for _ in range(3):
+            restarted.deliver_notification()
+            self.tick(restarted)
+        self.assertEqual(len(self.notifications()), 1)
+
+    def test_without_a_judgment_the_result_is_sent_once_then_kept_quiet(self):
+        self.use([None, None, None])
+        self.watched = self.watch()
+        self.assertEqual(self.run_slot('상황 A')['last_decision_reason'], prep.REASON_UNJUDGED)
+        self.assertEqual(self.run_slot('상황 B')['last_decision_reason'], prep.REASON_UNJUDGED_REPEAT)
+        self.assertEqual(self.run_slot('상황 C')['last_decision'], 'quiet')
+        self.assertEqual(len(self.notifications()), 1)
+
+    def test_a_run_without_a_result_is_quiet_and_asks_nothing(self):
+        self.use([True])
+        self.watched = self.watch()
+        row = self.service.preparations.get(self.watched['id'])
+        self.now = row['due_at'] + 1
+        self.tick()
+        [run] = self.runs(row['id'])
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='failed',response=NULL,error='x',delivery='none' WHERE id=?", (run['id'],))
+        self.tick()
+        row = self.service.preparations.get(row['id'])
+        self.assertEqual((row['last_decision'], row['last_decision_reason'], row['state']),
+                         ('quiet', prep.REASON_RUN_FAILED, 'scheduled'))
+        self.assertEqual((self.watch_asks(), self.telegram), ([], []))
+
+    def test_the_owner_stops_a_watch_from_its_notification(self):
+        self.use([True])
+        self.watched = self.watch()
+        self.run_slot('지금 출발하세요.')
+        with self.store.db() as db:
+            notification = dict(db.execute('SELECT * FROM telegram_notifications WHERE kind=?', (prep.NOTIFY_KIND,)).fetchone())
+        self.tap(f"p7q:{notification['id']}:stop", notification['message_id'] + 1)
+        self.assertEqual(self.service.preparations.get(self.watched['id'])['state'], 'scheduled', 'another message stops nothing')
+        self.tap(f"p7q:{notification['id']}:stop", notification['message_id'])
+        self.assertEqual(self.service.preparations.get(self.watched['id'])['state'], 'cancelled')
+        self.assertIn('editMessageReplyMarkup', [method for method, _body in self.telegram])
+        self.now += 3 * 3600
+        self.assertFalse(self.tick())
+        self.assertEqual(len(self.runs(self.watched['id'])), 1)
+
+    def test_a_notification_queued_before_a_cancel_is_not_sent(self):
+        self.use([True])
+        self.watched = self.watch()
+        row = self.service.preparations.get(self.watched['id'])
+        self.now = row['due_at'] + 1
+        self.tick()
+        self.script = [{'content': '지금 출발하세요.'}] * 2
+        self.service.run_one()
+        self.tick()
+        self.service.preparation_request({'operation': 'cancel', 'id': row['id']})
+        self.service.deliver_notification()
+        self.assertEqual(self.notifications(), [])
+
+    def test_the_judgment_is_a_bounded_proposition_not_a_rule(self):
+        from personal_agent.conversation_handoff import WATCH_NOTIFY_PROPOSITION
+        engine_ = watch_engine([True])
+        judged = ConversationJudgments(engine_).watch_notification_needed('목표', '결과', None, work_id='w')
+        self.assertEqual(judged.outcome, 'yes')
+        [(_kind, context, proposition)] = engine_.asked
+        self.assertEqual(proposition, WATCH_NOTIFY_PROPOSITION)
+        self.assertEqual(context.facts['last_notification'], 'none')
+
+
+class WatchAcceptanceTests(_WatchCase):
+    def propose_watch(self, preparation):
+        self.judge = watch_engine([], preparation=preparation)
+        self.service.use_decision_engine(self.judge)
+        self.script = [{'content': None, 'tool_calls': [call('1', 'schedule_preparation', kind='prepare',
+                                                             goal='출발 시각을 앞당겨야 하는지 확인', due=self.due_iso(600),
+                                                             every_minutes='10', until=self.due_iso(600 + 7200), max_runs='6',
+                                                             delivery='when_needed')]},
+                       {'content': '7시부터 10분마다 확인하고 필요할 때만 알려 드릴게요.'}]
+        work = self.receive('9시 전에 출발 시간 당겨야 하면 알려줘')
+        [row] = self.rows()
+        [result] = [json.loads(m['content']) for m in self.model_calls[-1]['messages'] if m['role'] == 'tool']
+        return work, row, result
+
+    def test_a_watch_is_proposed_and_accepted_with_the_existing_flow(self):
+        work, row, result = self.propose_watch(preparation=False)
+        self.assertEqual((row['state'], row['recurrence'], row['every_seconds'], row['max_runs'], row['delivery_mode']),
+                         ('proposed', prep.RECURRENCE_WINDOW, 600, 6, 'when_needed'))
+        self.assertEqual((result['every_minutes'], result['max_runs'], result['delivery']), (10, 6, 'when_needed'))
+        self.service.deliver_one()
+        self.service.deliver_notification()
+        proposal = self.sends()[-1]['text']
+        self.assertIn('10분마다', proposal)
+        self.assertIn('최대 6회', proposal)
+        self.assertIn('알려야 할 때만', proposal)
+        with self.store.db() as db:
+            notification = dict(db.execute("SELECT * FROM telegram_notifications WHERE job_id=? AND kind='preparation_proposed'",
+                                           (work,)).fetchone())
+        self.tap(f"p7p:{notification['id']}:accept", notification['message_id'])
+        self.assertEqual(self.service.preparations.get(row['id'])['state'], 'scheduled')
+        listed = self.service.preparations_status()['preparations'][0]
+        self.assertEqual((listed['every_minutes'], listed['max_runs'], listed['run_count'], listed['delivery']),
+                         (10, 6, 0, 'when_needed'))
+        self.assertIn('Asia/Seoul', listed['until_local'])
+
+    def test_the_owners_own_request_schedules_it(self):
+        _work, row, _result = self.propose_watch(preparation=True)
+        self.assertEqual((row['state'], row['accepted_by']), ('scheduled', 'owner-request'))
+
+    def test_bad_windows_are_refused_to_the_model(self):
+        self.judge = watch_engine([], preparation=True)
+        self.service.use_decision_engine(self.judge)
+        self.script = [{'content': None, 'tool_calls': [
+            call('1', 'schedule_preparation', kind='prepare', goal='확인', due=self.due_iso(600), every_minutes='1',
+                 until=self.due_iso(1200)),
+            call('2', 'schedule_preparation', kind='reminder', goal='확인', due=self.due_iso(600), delivery='when_needed'),
+            call('3', 'schedule_preparation', kind='prepare', goal='확인', due=self.due_iso(600), recurrence='daily',
+                 every_minutes='10', until=self.due_iso(1200))]}, {'content': '예약하지 못했습니다.'}]
+        self.receive('확인해줘')
+        results = [m['content'] for m in self.model_calls[-1]['messages'] if m['role'] == 'tool']
+        self.assertEqual(len(results), 3)
+        self.assertTrue(all('every_minutes' in text or 'when_needed' in text for text in results), results)
+        self.assertEqual(self.rows(), [])
+
+
 class SurfaceTests(unittest.TestCase):
     def test_the_tool_is_offered_only_where_the_service_wired_it(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -763,6 +1064,17 @@ const press=async(label)=>{const button=descendants(rows()[0]).find(n=>n.tag==='
  ctx.rows=[{id:'p2',kind:'reminder',goal:'치과',state:'running',due_local:'x',recurrence:null,delivery:'send',last_result:''}];
  await ctx.loadPreparations();
  assert.deepEqual(buttons(rows()[0]),['취소'],'a running preparation can be cancelled, not deleted');
+ // #719: a watch shows its window, bound, delivery and last typed decision; Settings cancels it.
+ ctx.rows=[{id:'p3',kind:'prepare',goal:'출발 확인',state:'scheduled',due_local:'D',recurrence:'window',every_minutes:10,until_local:'U',max_runs:6,run_count:2,delivery:'when_needed',last_decision:'quiet',last_decision_reason:'judged-not-needed',last_result:''}];
+ await ctx.loadPreparations();
+ assert.equal(texts(rows()[0],'settings-row-description')[0],'미리 준비 · 10분마다 U까지 · 2/6회 실행 · D 예정 · 알려야 할 때만 Telegram으로 알림 · 마지막 실행: 조용히 넘어감 (알릴 일이 없다고 판단)');
+ assert.deepEqual(buttons(rows()[0]),['취소','삭제']);
+ await press('취소');
+ assert.equal(JSON.stringify(calls.at(-1).body),JSON.stringify({operation:'cancel',id:'p3'}));
+ vm.runInContext("setLanguage('en')",ctx);ctx.rows=[{...ctx.rows[0],state:'expired',last_decision:'notify',last_decision_reason:'judged-needed'}];
+ await ctx.loadPreparations();
+ assert.equal(texts(rows()[0],'settings-row-description')[0],'Prepare ahead · Every 10 min until U · 2/6 runs · D · Telegram only when you need to know · Last run: notified (judged you need to know)');
+ assert.deepEqual(texts(rows()[0],'settings-state neutral'),['Window closed']);
  console.log('ok');
 })().catch(error=>{console.error(error);process.exit(1);});
 """

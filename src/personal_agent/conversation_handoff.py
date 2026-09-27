@@ -538,6 +538,14 @@ PREPARATION_REQUEST_PROPOSITION = ('The owner\'s latest message itself asks the 
                                    'answered now, when the assistant would be offering the preparation on its own '
                                    'initiative, when the time or repetition differs from what the owner asked, or when it '
                                    'is unclear. This judgment schedules nothing.')
+#: SEC-ATTN-02 (#719): does one run of an owner-accepted watch need to reach the owner now?
+WATCH_NOTIFY_PROPOSITION = ('The owner accepted a standing watch with the goal shown and asked to be told only when '
+                            'it matters. This run\'s result shows something the goal asks the owner to be told about '
+                            'or to act on now, and it is new compared with the last notification the owner received '
+                            '(a changed situation or a different action). It is false when the result says nothing '
+                            'needs the owner\'s attention yet, when it only repeats what the last notification already '
+                            'said, when the run could not observe what the goal needs, or when it is unclear. This '
+                            'judgment sends nothing.')
 #: SEC-LOOP-01 (#657): does what the environment showed satisfy the request?
 GOAL_REACHED_PROPOSITION = ('The observations - results that tools actually returned while working on the owner\'s '
                             'request - show that the request has been fulfilled: every part the request asks for is '
@@ -770,6 +778,22 @@ class ConversationJudgments:
         context = self._context('explicit-preparation-request', {'owner_message': utterance,
                                                                    'proposed_preparation': proposal})
         decision = self.engine.judge(context, PREPARATION_REQUEST_PROPOSITION)
+        verdict = self.policy.binary(decision)
+        return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
+                        source=decision.confidence.provider or decision.outcome)
+
+    def watch_notification_needed(self, goal, result, last_notified, work_id=None):
+        """Should this watch run's ``result`` reach the owner now (#719)?
+
+        One ``judge`` call over the accepted goal, the run's result and the
+        last notification sent for this watch; the caller bounds the texts.
+        A yes is ``notify``, a no is ``quiet``; unavailable is left to the
+        caller's typed fallback.
+        """
+        context = self._context('watch-notification', {'watch_goal': goal or '', 'run_result': result or '',
+                                                       'last_notification': last_notified or 'none'},
+                                work_id=work_id)
+        decision = self.engine.judge(context, WATCH_NOTIFY_PROPOSITION)
         verdict = self.policy.binary(decision)
         return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
                         source=decision.confidence.provider or decision.outcome)

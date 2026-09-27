@@ -3,3 +3,4 @@ agentos/
 __pycache__/
 *.pyc
 .runtime/
+*.egg-info/

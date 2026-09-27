@@ -119,6 +119,9 @@ NATIVE_REASONS = {
     'refused': 'CLI가 자체 웹 검색을 쓸 수 없다고 답했습니다',
     'strict_profile': '엄격 격리 실행 프로필에서는 CLI 자체 웹 검색을 켜지 않습니다',
     'private_turn': '이 작업에는 개인 자료가 포함돼 CLI 자체 웹 검색을 켜지 않았습니다',
+    # #710: the orchestrator's per-request tool choice for this attempt.
+    'orchestrated_private_tools': '이번 시도에는 개인 자료를 읽는 도구가 선택되어 CLI 자체 웹 검색을 켜지 않았습니다',
+    'orchestrated_no_search': '이번 시도의 작업 계획에 웹 검색이 선택되지 않아 CLI 자체 웹 검색을 켜지 않았습니다',
 }
 #: Per-call billing the owner should know about, per API route (Settings).
 NATIVE_COSTS = {

@@ -14,7 +14,6 @@ import signal
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 
 from .manifests import CONTEXT_GATED_ACTIONS  # noqa: F401 (#627: re-exported for route checks)
@@ -300,16 +299,32 @@ def native_search_withheld():
     return (frozenset(PRIVATE_PROVENANCE) - BROWSER_ACTIONS) | NATIVE_SEARCH_REPLACED
 
 
-def turn_actions(profile, native_search=False):
-    """The bridge actions one turn offers: the profile's, minus private reads when native search is on."""
+def turn_actions(profile, native_search=False, only=None):
+    """The bridge actions one turn offers: the profile's, minus private reads when native search is on.
+
+    ``only`` (#710) is the orchestrator's validated per-request subset, or
+    None for the profile's usual set.  It can only narrow the set.
+    """
     actions = profile_actions(profile)
     if native_search:
         withheld = native_search_withheld()
         actions = tuple(action for action in actions if action not in withheld)
+    if only is not None:
+        actions = tuple(action for action in actions if action in only)
     return actions
 
 
-def claude_bridge_allowlist(profile, native_search=False):
+def private_read_actions():
+    """Bridge actions that read an owner-private store (#710).
+
+    The CLI's own web search is never on in a turn that offers one of these
+    (``native_search_withheld``); the orchestrator's per-request tool choice
+    uses the same set to turn that search off when it selects one.
+    """
+    return native_search_withheld() - NATIVE_SEARCH_REPLACED
+
+
+def claude_bridge_allowlist(profile, native_search=False, only=None):
     """Claude Code's official ``--allowedTools`` rule for exactly the
     profile's AgentOS bridge tools (#623).
 
@@ -319,7 +334,7 @@ def claude_bridge_allowlist(profile, native_search=False):
     profile does not declare stays denied, and no built-in tool (Read, Bash,
     WebFetch, ...) is named, so their permission behaviour is unchanged.
     """
-    return ['--allowedTools', ','.join(f'mcp__agentos__{action}' for action in turn_actions(profile, native_search))]
+    return ['--allowedTools', ','.join(f'mcp__agentos__{action}' for action in turn_actions(profile, native_search, only))]
 
 
 _VERSION_PATTERNS = {'codex': re.compile(r'^codex-cli (\d+\.\d+\.\d+)\s*$'),
@@ -749,34 +764,88 @@ def kill_process_group(process):
         process.kill()
 
 
-class _StreamedOutput:
-    """Read a running process's stdout line by line (#718), stderr whole.
+#: After the process group is killed, how long a streamed run may still drain
+#: its pipes before they are closed (a descendant outside the group may hold them).
+KILL_DRAIN_SECONDS = 2.0
 
-    The collected text is exactly what ``communicate`` would have returned,
-    so ``cli_metadata`` and the result parsing are unchanged; ``on_line`` only
-    sees each line earlier.
+
+class _StreamedOutput:
+    """``Popen.communicate`` for a binary-pipe process, with stdout seen line by line (#718).
+
+    Single-threaded and non-blocking (``selectors``): every read is bounded
+    by the caller's timeout, so a descendant that keeps stdout/stderr open
+    after the CLI exits can never hold the run past its deadline or Stop -
+    ``communicate`` raises ``subprocess.TimeoutExpired`` exactly as
+    ``Popen.communicate(timeout=...)`` does, and ``close`` releases the pipes.
+    The returned text is decoded the way text-mode ``communicate`` decodes
+    (locale encoding, universal newlines), so ``cli_metadata`` and the result
+    parsing are unchanged; ``on_line`` only sees each stdout line earlier.
     """
     def __init__(self, process, on_line):
-        self.stdout, self.stderr = [], []
+        import locale
+        import selectors
+        self.process, self.on_line = process, on_line
+        self.encoding = locale.getpreferredencoding(False)
+        self.stdout, self.stderr, self.partial = bytearray(), bytearray(), bytearray()
+        self.selector = selectors.DefaultSelector()
+        for stream in (process.stdout, process.stderr):
+            os.set_blocking(stream.fileno(), False)
+            self.selector.register(stream.fileno(), selectors.EVENT_READ, stream is process.stdout)
 
-        def pump():
-            for line in process.stdout:
-                self.stdout.append(line)
+    def _line(self, raw):
+        try:
+            self.on_line(raw.decode(self.encoding, 'replace').replace('\r\n', '\n'))
+        except Exception:  # presentation must never fail the run
+            pass
+
+    def _read(self, fd, is_stdout):
+        try:
+            chunk = os.read(fd, 65536)
+        except (BlockingIOError, InterruptedError):
+            return
+        if not chunk:
+            self.selector.unregister(fd)
+            if is_stdout and self.partial:
+                self._line(bytes(self.partial))
+                self.partial.clear()
+            return
+        if not is_stdout:
+            self.stderr += chunk
+            return
+        self.stdout += chunk
+        self.partial += chunk
+        while True:
+            end = self.partial.find(b'\n')
+            if end < 0:
+                break
+            self._line(bytes(self.partial[:end + 1]))
+            del self.partial[:end + 1]
+
+    def _text(self, data):
+        return bytes(data).decode(self.encoding).replace('\r\n', '\n').replace('\r', '\n')
+
+    def communicate(self, timeout):
+        """Both pipes at EOF and the process exited within ``timeout``, or ``TimeoutExpired``."""
+        end = time.monotonic() + max(0.0, timeout)
+        while self.selector.get_map():
+            left = end - time.monotonic()
+            if left <= 0:
+                raise subprocess.TimeoutExpired(self.process.args, timeout)
+            for key, _events in self.selector.select(left):
+                self._read(key.fd, key.data)
+        self.process.wait(timeout=max(0.0, end - time.monotonic()) or 0.01)
+        return self._text(self.stdout), self._text(self.stderr)
+
+    def close(self):
+        """Stop reading and close both pipes (after a kill)."""
+        try:
+            self.selector.close()
+        finally:
+            for stream in (self.process.stdout, self.process.stderr):
                 try:
-                    on_line(line)
-                except Exception:  # presentation must never fail the run
+                    stream.close()
+                except OSError:
                     pass
-
-        def drain():
-            self.stderr.append(process.stderr.read())
-        self.threads = [threading.Thread(target=pump, daemon=True), threading.Thread(target=drain, daemon=True)]
-        for thread in self.threads:
-            thread.start()
-
-    def finish(self):
-        for thread in self.threads:
-            thread.join()
-        return ''.join(self.stdout), ''.join(self.stderr)
 
 
 def bounded_run(runner, argv, *, cwd, env, timeout, interrupted=None, on_line=None):
@@ -794,8 +863,10 @@ def bounded_run(runner, argv, *, cwd, env, timeout, interrupted=None, on_line=No
     if runner is not subprocess.run:
         return runner(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
                       timeout=timeout, shell=False, start_new_session=True)
+    # #718: a streamed run reads binary pipes itself (``_StreamedOutput``); the
+    # other path is unchanged.
     process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, text=True, shell=False, start_new_session=True)
+                               stderr=subprocess.PIPE, text=on_line is None, shell=False, start_new_session=True)
     streamed = _StreamedOutput(process, on_line) if on_line is not None else None
     deadline = time.monotonic() + timeout
     while True:
@@ -803,10 +874,14 @@ def bounded_run(runner, argv, *, cwd, env, timeout, interrupted=None, on_line=No
         wait = min(STOP_POLL_SECONDS, left) if interrupted else left
         try:
             if streamed is not None:
-                process.wait(timeout=max(0.01, wait))
-                stdout, stderr = streamed.finish()
+                # Bounded like ``communicate``: a descendant holding the pipes
+                # open after the CLI exits keeps this raising until Stop or the
+                # deadline kills the group below.
+                stdout, stderr = streamed.communicate(max(0.01, wait))
             else:
                 stdout, stderr = process.communicate(timeout=max(0.01, wait))
+            if streamed is not None:
+                streamed.close()
             return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
         except subprocess.TimeoutExpired:
             try:
@@ -816,8 +891,19 @@ def bounded_run(runner, argv, *, cwd, env, timeout, interrupted=None, on_line=No
             if reason or time.monotonic() >= deadline:
                 kill_process_group(process)
                 if streamed is not None:
-                    process.wait()
-                    streamed.finish()
+                    # The group is gone; a descendant that left it may still
+                    # hold the pipes, so draining is bounded and the pipes are
+                    # closed either way.
+                    try:
+                        streamed.communicate(KILL_DRAIN_SECONDS)
+                    except subprocess.TimeoutExpired:
+                        pass
+                    finally:
+                        streamed.close()
+                    try:
+                        process.wait(timeout=KILL_DRAIN_SECONDS)
+                    except subprocess.TimeoutExpired:
+                        pass
                 else:
                     process.communicate()
                 if reason:
@@ -851,13 +937,15 @@ class AgentOSMcpTools:
     relay = None
     #: #718: the service's live-progress sink for the CLI's own steps during this turn, or None.
     progress = None
+    #: #710: the orchestrator's validated tool subset for this turn, or None (the profile's set).
+    only = None
 
     def __init__(self, capabilities, native_search=False):
         self.capabilities = capabilities
         self.native_search = bool(native_search)
 
     def _offered(self):
-        allowed = set(turn_actions(self.PROFILE, self.native_search and self.PROFILE == BOUNDED_PROFILE))
+        allowed = set(turn_actions(self.PROFILE, self.native_search and self.PROFILE == BOUNDED_PROFILE, self.only))
         return {definition['function']['name']: definition for definition in self.capabilities.definitions()
                 if definition['function']['name'] in allowed}
 
@@ -1033,7 +1121,7 @@ class BoundedExecutionAdapter:
         return {'state': 'unknown', 'detail': 'unparsed status'}
 
     def command(self, engine_id, binary, prompt, mcp_config, instructions='', profile=BOUNDED_PROFILE,
-                disabled_features=(), model=None, native_search=False):
+                disabled_features=(), model=None, native_search=False, only=None):
         """The argv of one Work turn.
 
         ``native_search`` (#678) lets the trusted-local turn use the CLI's own
@@ -1099,10 +1187,11 @@ class BoundedExecutionAdapter:
             elif native_search:
                 # Only WebSearch among the built-in tools, pre-approved by its exact name.
                 # The private-read bridge tools are neither listed nor pre-approved (#678 P1).
-                allow = claude_bridge_allowlist(BOUNDED_PROFILE, native_search=True)
-                argv += ['--tools', CLAUDE_NATIVE_SEARCH_TOOL, allow[0], allow[1] + ',' + CLAUDE_NATIVE_SEARCH_TOOL]
+                allow = claude_bridge_allowlist(BOUNDED_PROFILE, native_search=True, only=only)
+                argv += ['--tools', CLAUDE_NATIVE_SEARCH_TOOL, allow[0], ','.join(filter(None, (allow[1], CLAUDE_NATIVE_SEARCH_TOOL)))]
             else:
-                argv += claude_bridge_allowlist(BOUNDED_PROFILE)
+                # #710: only the orchestrator's subset is pre-approved when it chose one.
+                argv += claude_bridge_allowlist(BOUNDED_PROFILE, only=only)
             return argv
         raise ExecutionError('지원하는 구독 엔진을 선택하세요.')
 
@@ -1412,6 +1501,9 @@ class BoundedExecutionAdapter:
             # #701: only the trusted-local route is ever given the service's browser relay.
             relay = getattr(tools, 'browser_relay', None) if profile == BOUNDED_PROFILE else None
             search_off = str(getattr(tools, 'native_search_reason', '') or '') if not native_search else ''
+            # #710: the orchestrator's per-request subset narrows what the bridge offers.
+            only = getattr(tools, 'only', None)
+            only = None if only is None else frozenset(str(name) for name in only)
             # Both supported CLIs receive this per-turn bridge configuration.
             # The engine gets no store handle; the bridge alone owns validated
             # access to the AgentOS tool facade.
@@ -1428,6 +1520,7 @@ class BoundedExecutionAdapter:
                          f'--profile={profile}',
                          *(['--native-search'] if native_search else []),
                          *([f'--search-off-reason={search_off}'] if search_off else []),
+                         *([f'--only={",".join(sorted(only))}'] if only is not None else []),
                          *([f'--browser-relay={relay}'] if relay else [])],
             }}}, ensure_ascii=False), encoding='utf-8')
             env = self.environment(engine_id, binary, run_dir)
@@ -1469,7 +1562,7 @@ class BoundedExecutionAdapter:
             LOG.info('engine turn started engine=%s profile=%s', engine_id, profile)
             # #678: the facade says whether this turn may use the CLI's own web search.
             argv = self.command(engine_id, binary, prompt, config, instructions, profile=profile, disabled_features=disabled,
-                                model=model or None, native_search=native_search)
+                                model=model or None, native_search=native_search, only=only)
             run_meta = {'argv': display_argv(argv, prompt, instructions), 'requested_model': model or None}
             try:
                 if self.runner is subprocess.run:

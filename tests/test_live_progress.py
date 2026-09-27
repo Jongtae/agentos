@@ -164,6 +164,30 @@ class StepLineTests(unittest.TestCase):
         self.assertEqual(draft_step(events, live), ('날씨 확인 중', False))
 
 
+class OrchestratedAttemptLineTests(unittest.TestCase):
+    """#710/#718: each planned attempt announces itself, then its own steps follow."""
+
+    def planned(self, text, created):
+        return {'tool': 'orchestrator', 'status': 'planned', 'created': created, 'trace': {'attempt': 1, 'text': text}}
+
+    def test_each_attempt_shows_its_planned_text_then_its_steps(self):
+        events = [self.planned('1번째 시도: Codex · 기본 모델 — 공개 검색이 필요', 1.0)]
+        self.assertEqual(draft_step(events), ('1번째 시도: Codex · 기본 모델 — 공개 검색이 필요', False))
+        events += [running('web_search', {'action': 'web_search', 'query': '환율'}, 'c1', created=2.0)]
+        self.assertEqual(draft_step(events), ('웹 검색 중: 환율', False))
+        events += [finished('web_search', 'c1', created=3.0),
+                   {'tool': 'orchestrator', 'status': 'evaluated', 'created': 4.0, 'trace': {'text': '목표 미달'}}]
+        self.assertEqual(draft_step(events), (BETWEEN_STEPS_TEXT, False), 'an evaluation is not a step')
+        events += [self.planned('2번째 시도: Claude Code · 기본 모델 — 다른 경로', 5.0)]
+        self.assertEqual(draft_step(events), ('2번째 시도: Claude Code · 기본 모델 — 다른 경로', False))
+
+    def test_a_fallback_attempt_announces_nothing_and_long_text_is_cut(self):
+        events = [{'tool': 'orchestrator', 'status': 'fallback', 'created': 1.0, 'trace': {'text': '기본 AI로 진행'}}]
+        self.assertEqual(draft_step(events), (THINKING_DRAFT_TEXT, False))
+        text, _ = draft_step([self.planned('가' * 200, 1.0)])
+        self.assertLessEqual(len(text), 80)
+
+
 class LiveCliParsingTests(unittest.TestCase):
     def test_codex_and_claude_search_items_are_read_as_they_stream(self):
         self.assertEqual(live_native_search_steps('codex', {'type': 'item.started', 'item': {
@@ -227,6 +251,85 @@ class CliStreamingTests(unittest.TestCase):
             bounded_run(subprocess.run, [str(script)], cwd=root, env=dict(os.environ), timeout=30,
                         interrupted=lambda: flag[0] if flag else None, on_line=lambda line: None)
         self.assertLess(time.monotonic() - started, 10)
+
+
+LINGERING_CLI = '''#!{python}
+import json, os, subprocess, sys
+# A descendant that inherits stdout/stderr and keeps them open after the CLI exits.
+child = subprocess.Popen([{python!r}, "-c", "import os, time; {setsid}time.sleep(60)"])
+open({marker!r}, "w").write(str(child.pid))
+print(json.dumps({{"type": "item.completed", "item": {{"id": "m1", "type": "agent_message", "text": "done"}}}}))
+sys.stdout.flush()
+os._exit(0)
+'''
+
+
+def _gone(pid, seconds=5):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+class LingeringDescendantTests(unittest.TestCase):
+    """PR #722 P1: a descendant holding the pipes never blocks the deadline or Stop."""
+
+    def lingering(self, escape=False):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        marker = root / 'child.pid'
+        script = root / 'fake-cli'
+        script.write_text(LINGERING_CLI.format(python=sys.executable, marker=str(marker),
+                                               setsid='os.setsid(); ' if escape else ''))
+        script.chmod(0o755)
+
+        def cleanup():
+            if marker.exists():
+                try:
+                    os.kill(int(marker.read_text()), 9)
+                except (ProcessLookupError, ValueError):
+                    pass
+        self.addCleanup(cleanup)
+        return root, script, marker
+
+    def test_the_deadline_kills_the_group_when_a_child_holds_stdout(self):
+        root, script, marker = self.lingering()
+        seen = []
+        started = time.monotonic()
+        with self.assertRaises(subprocess.TimeoutExpired):
+            bounded_run(subprocess.run, [str(script)], cwd=root, env=dict(os.environ), timeout=2,
+                        on_line=seen.append)
+        self.assertLess(time.monotonic() - started, 2 + 5, 'bounded by the deadline, not by the child')
+        self.assertEqual(len(seen), 1, 'the line the CLI wrote was still streamed')
+        self.assertTrue(_gone(int(marker.read_text())), 'the lingering child is killed with the group')
+
+    def test_stop_while_draining_kills_the_group(self):
+        root, script, marker = self.lingering()
+        flag = []
+        threading.Timer(0.8, lambda: flag.append('stopped')).start()
+        started = time.monotonic()
+        from personal_agent.bounded_execution import EngineInterrupted
+        with self.assertRaises(EngineInterrupted) as caught:
+            bounded_run(subprocess.run, [str(script)], cwd=root, env=dict(os.environ), timeout=60,
+                        interrupted=lambda: flag[0] if flag else None, on_line=lambda line: None)
+        self.assertEqual(caught.exception.reason, 'stopped')
+        self.assertLess(time.monotonic() - started, 8)
+        self.assertTrue(_gone(int(marker.read_text())))
+
+    def test_a_descendant_outside_the_group_cannot_hold_the_run_after_the_kill(self):
+        # It left the process group, so the kill misses it; draining is bounded
+        # and the pipes are closed rather than waited on forever.
+        root, script, marker = self.lingering(escape=True)
+        started = time.monotonic()
+        with self.assertRaises(subprocess.TimeoutExpired):
+            bounded_run(subprocess.run, [str(script)], cwd=root, env=dict(os.environ), timeout=2,
+                        on_line=lambda line: None)
+        self.assertLess(time.monotonic() - started, 2 + 8)
 
 
 class _TelegramCase(unittest.TestCase):

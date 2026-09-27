@@ -192,11 +192,17 @@ class JarDriver(FakeDriver):
     def __init__(self, log=None):
         super().__init__(log=log)
         self.fail_export = False
+        self.sites = {}
+
+    def login(self, site='fixture.test'):
+        """The owner signs in by hand in this window: the site now holds a new session cookie."""
+        self.sites = {site: [{'name': 'sid', 'value': 'session-' + str(time.time_ns()), 'domain': site, 'path': '/',
+                              'expires': None, 'secure': True, 'http_only': True, 'same_site': None}]}
 
     def cookies_export(self):
         if self.fail_export:
             raise RuntimeError('export failed')
-        return {}, []
+        return dict(self.sites), []
 
 
 def memory_jar(directory):
@@ -211,6 +217,34 @@ def wait_until(condition, seconds=5.0):
             return True
         time.sleep(0.02)
     return condition()
+
+
+class SiteCookieMarks(unittest.TestCase):
+    def test_a_login_changes_the_unexpired_set_and_an_expiry_refresh_or_expired_row_does_not(self):
+        from personal_agent.browser_jar import unexpired
+        with tempfile.TemporaryDirectory() as folder:
+            jar = memory_jar(folder)
+            clock = [1000.0]
+            jar.clock = lambda: clock[0]
+
+            def reading(host='accounts.example.org'):
+                marks, now = jar.site_cookie_marks(host)
+                return unexpired(marks, now)
+            empty = reading()
+            row = {'name': 'sid', 'value': 'v1', 'domain': '.example.org', 'path': '/', 'expires': 5000}
+            other = {**row, 'domain': 'other.org'}
+            jar.save_export({'example.org': [row], 'other.org': [other]})
+            signed_in = reading()
+            self.assertNotEqual(signed_in, empty)
+            self.assertNotIn('v1', flat(jar.site_cookie_marks('example.org')[0]))
+            jar.save_export({'example.org': [{**row, 'expires': 9000}], 'other.org': [other]})
+            self.assertEqual(reading(), signed_in, 'an expiry refresh is not a login')
+            jar.save_export({'example.org': [{**row, 'expires': 9000}], 'other.org': [{**other, 'value': 'v2'}]})
+            self.assertEqual(reading('example.org'), signed_in, 'another site does not count')
+            # An expired row is not part of the set, exactly as the worker import drops it.
+            jar.save_export({'example.org': [{**row, 'expires': 9000}, {**row, 'name': 'old', 'expires': 10}],
+                             'other.org': [other]})
+            self.assertEqual(reading(), signed_in)
 
 
 class LoginHarness(unittest.TestCase):
@@ -299,8 +333,10 @@ class LoginHarness(unittest.TestCase):
     def state(self, job_id):
         return (self.service._browser_login(job_id) or {}).get('state')
 
-    def owner_closes(self, job_id):
-        """The owner closes the login window (the worker's close event)."""
+    def owner_closes(self, job_id, logged_in=True):
+        """The owner (after signing in, unless ``logged_in`` is False) closes the login window (the worker's close event)."""
+        if logged_in:
+            self.window().login()
         self.window().closed = True
         self.assertTrue(wait_until(lambda: self.state(job_id) not in ('offered', 'closing')), self.state(job_id))
 
@@ -364,6 +400,7 @@ class InFlowLogin(LoginHarness):
 
     def test_telegram_done_is_settled_by_the_work_loop_and_resumes_once(self):
         job_id, _prompt, _buttons, notification = self.login_work()
+        self.window().login()
         self.tap(f"p7l:{notification['id']}:done", notification['message_id'])
         self.assertEqual(self.state(job_id), 'closing')
         self.assertFalse(self.window().closed, 'the poll thread never closes the window itself')
@@ -434,6 +471,7 @@ class InFlowLogin(LoginHarness):
         self.assertEqual(self.store.job(job_id)['status'], self.ended)
         self.assertEqual(self.state(job_id), 'offered')
         self.assertFalse(self.window().closed)
+        self.window().login()
         self.tap(f"p7l:{notification['id']}:done", message_id)
         self.service.process_browser_logins()
         self.assertEqual(self.store.job(job_id)['status'], 'queued')
@@ -455,6 +493,7 @@ class InFlowLogin(LoginHarness):
             self.service.browser_login_decision({'work_id': job_id, 'decision': 'maybe'})
         with self.assertRaises(ValueError):
             self.service.browser_login_decision({'work_id': 'other', 'decision': 'done'})
+        self.window().login()
         self.assertEqual(self.service.browser_login_decision({'work_id': job_id, 'decision': 'done'}),
                          {'work_id': job_id, 'state': 'closing', 'intent': 'resume'})
         with self.assertRaises(ValueError):
@@ -515,6 +554,53 @@ class InFlowLogin(LoginHarness):
         self.owner_closes(job_id)
         self.assertEqual(self.store.job(job_id)['status'], 'queued')
 
+    def test_closing_the_window_without_a_login_does_not_resume_and_a_later_login_page_asks_again(self):
+        job_id, _prompt, _buttons, notification = self.login_work()
+        self.owner_closes(job_id, logged_in=False)
+        self.assertEqual(self.state(job_id), 'not_logged_in')
+        self.assertEqual(self.store.job(job_id)['status'], self.ended, 'no cookie changed: not a login')
+        self.assertEqual(self.edits()[-1]['text'], BROWSER_LOGIN_RESULT_TEXT['skipped'])
+        self.ask_again(job_id, notification)
+
+    def test_closing_the_window_after_a_login_resumes_once(self):
+        job_id, _prompt, _buttons, notification = self.login_work()
+        self.owner_closes(job_id)
+        self.assertEqual((self.state(job_id), self.store.job(job_id)['status']), ('resumed', 'queued'))
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='partial' WHERE id=?", (job_id,))
+        self.window().login()
+        self.tap(f"p7l:{notification['id']}:done", notification['message_id'])
+        self.assertEqual(self.service.process_browser_logins(), [])
+        self.assertEqual(self.store.job(job_id)['status'], 'partial', 'resumed once only')
+
+    def test_an_expired_cookie_dropped_by_an_untouched_close_is_not_a_login(self):
+        from personal_agent.browser_jar import JAR_NAME
+        jar = self.profile.jar
+        live = {'name': 'keep', 'value': 'still-valid', 'domain': 'fixture.test', 'path': '/', 'expires': time.time() + 86400,
+                'secure': True, 'http_only': True, 'same_site': None}
+        stale = {**live, 'name': 'old', 'value': 'long-gone', 'expires': time.time() - 60}
+        jar.save_export({'fixture.test': [live, stale]})
+        self.assertTrue((Path(self.tmp.name) / 'profile' / JAR_NAME).is_file())
+        job_id, _prompt, _buttons, _notification = self.login_work()
+        # The window was given only the unexpired cookie and the owner signed in nowhere:
+        # the close exports exactly that, so the jar loses the expired row.
+        self.window().sites = {'fixture.test': [live]}
+        self.owner_closes(job_id, logged_in=False)
+        self.assertEqual(self.state(job_id), 'not_logged_in', 'the dropped expired row is not a login')
+        self.assertEqual(self.store.job(job_id)['status'], self.ended)
+
+    def test_done_with_no_cookie_change_does_not_resume(self):
+        job_id, _prompt, _buttons, notification = self.login_work()
+        self.tap(f"p7l:{notification['id']}:done", notification['message_id'])
+        self.service.process_browser_logins()
+        self.assertTrue(self.window().closed)
+        self.assertEqual(self.state(job_id), 'not_logged_in')
+        self.assertEqual(self.store.job(job_id)['status'], self.ended)
+        self.assertEqual(BROWSER_LOGIN_RESULT_TEXT['no_session'], '로그인 세션이 저장되지 않아 요청을 이어서 처리하지 않았습니다.')
+        self.assertEqual(self.edits()[-1]['text'], BROWSER_LOGIN_RESULT_TEXT['no_session'])
+        # The row keeps a keyed digest of the site's cookies, never a cookie value.
+        self.assertNotIn('session-', flat(self.service._browser_login(job_id)))
+
     def test_no_prompt_when_the_window_cannot_open(self):
         with mock.patch.object(self.profile, 'open_for_login', return_value={'state': 'busy', 'message': bs.BUSY_TEXT}):
             self.scripts = self.login_script()
@@ -567,6 +653,7 @@ class LoginThroughTheCliBridge(_BridgeHarness):
         notification = self.store.notification(prompt[0]['reply_markup']['inline_keyboard'][0][0]['callback_data'].split(':')[1])
         tap = {'id': 'cb', 'from': {'id': CHAT_BRIDGE}, 'data': f"p7l:{notification['id']}:done",
                'message': {'message_id': notification['message_id'], 'chat': {'id': CHAT_BRIDGE, 'type': 'private'}}}
+        self.drivers[1].login()
         self.service.ingest_callback(tap, GENERATION_BRIDGE)
         self.service.process_browser_logins()
         self.assertEqual(self.store.job(self.job)['status'], 'queued')
@@ -617,8 +704,13 @@ class LoginFixtureHandler(BaseHTTPRequestHandler):
         pass
 
 
+# Real WebKit windows and real Keychain items open on the owner's screen, so these
+# tests run only when explicitly requested: AGENTOS_REAL_BROWSER_TESTS=1.
+REAL_BROWSER_TESTS = __import__('os').environ.get('AGENTOS_REAL_BROWSER_TESTS') == '1'
+
+
 def _webkit_ready():
-    return bs.webkit_unavailable_reason() is None
+    return REAL_BROWSER_TESTS and bs.webkit_unavailable_reason() is None
 
 
 def _serve(test):

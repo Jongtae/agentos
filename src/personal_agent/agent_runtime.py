@@ -2133,12 +2133,22 @@ def prepared_section(context):
  prepared=context.get('prepared') if isinstance(context,dict) else None
  return PREPARED_HEADING+'\n'+prepared if prepared else ''
 
-def context_sections(context):
- """The profile, current-context and prepared sections the direct-API route
- appends to its system text: the same sections ``render_turn_prompt`` gives a CLI."""
- return '\n\n'.join(part for part in (profile_section(context),current_context_section(context),prepared_section(context)) if part)
+#: #710: the orchestrator's brief for one attempt.  Model-written guidance for
+#: the worker; the owner's current request stays the authority.
+BRIEF_HEADING='# Brief for this attempt (from AgentOS orchestration; the current request is the owner\'s own words and takes precedence)'
 
-def turn_context(history,route,current_context=None,profile=None,prepared=None,native_search=False):
+def brief_section(context):
+ """The rendered orchestration brief of a turn context, or '' (#710)."""
+ brief=context.get('brief') if isinstance(context,dict) else None
+ return BRIEF_HEADING+'\n'+brief if brief else ''
+
+def context_sections(context):
+ """The profile, current-context, prepared and brief sections the direct-API
+ route appends to its system text: the same sections ``render_turn_prompt`` gives a CLI."""
+ return '\n\n'.join(part for part in (profile_section(context),current_context_section(context),prepared_section(context),
+                                     brief_section(context)) if part)
+
+def turn_context(history,route,current_context=None,profile=None,prepared=None,native_search=False,brief=None):
  """The one Work-scoped turn context every route receives (#569).
 
  ``history`` is the prepared transcript whose last item is the current
@@ -2164,6 +2174,10 @@ def turn_context(history,route,current_context=None,profile=None,prepared=None,n
  ``native_search`` (#678, CLI route only) adds the one sentence that lets
  the CLI use its own web search in this turn, which the launch arguments
  then enable; without it the guidance is unchanged.
+
+ ``brief`` (#710) is the orchestrator's brief for this attempt (goal and
+ completion criteria), counted against the same budget; None or empty
+ sends nothing and changes nothing.
  """
  items=[{'role':m['role'],'content':str(m.get('content') or '')} for m in (history or []) if m.get('role') in ('user','assistant')]
  if not items or items[-1]['role']!='user':raise ValueError('turn context needs a current user request')
@@ -2178,6 +2192,8 @@ def turn_context(history,route,current_context=None,profile=None,prepared=None,n
  if current:budget-=len(CURRENT_CONTEXT_HEADING.encode())+len(current.encode())+2
  prepared=str(prepared or '')
  if prepared:budget-=len(PREPARED_HEADING.encode())+len(prepared.encode())+2
+ brief=str(brief or '')
+ if brief:budget-=len(BRIEF_HEADING.encode())+len(brief.encode())+2
  prior=[]
  for message in reversed(items[:-1][-(CONTEXT_MESSAGES-1):]):
   text=message['content']
@@ -2190,6 +2206,7 @@ def turn_context(history,route,current_context=None,profile=None,prepared=None,n
  if profile:context['profile']=profile
  if current:context['current_context']=current
  if prepared:context['prepared']=prepared
+ if brief:context['brief']=brief
  return context
 
 def render_turn_prompt(context,*,include_instructions=True):
@@ -2202,6 +2219,7 @@ def render_turn_prompt(context,*,include_instructions=True):
  if context.get('profile'):parts.append(profile_section(context))
  if context.get('current_context'):parts.append(current_context_section(context))
  if context.get('prepared'):parts.append(prepared_section(context))
+ if context.get('brief'):parts.append(brief_section(context))
  parts.append('# Current request\n'+context['request'])
  return '\n\n'.join(parts)
 
@@ -2761,6 +2779,8 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
   result.incomplete=incomplete
   result.verified=verified
   result.alternatives=list(alternatives)
+  # #710: the completion judgment this run concluded with (yes/no/unavailable, or None when none was asked).
+  result.judgment=judgment
   question=claim['summary'] if claim is not None and claim['status']=='needs_owner' and result.outcome!='succeeded' else None
   result.report=agency_report(goal,verified,[*failures,*stated],unknown,(claim or {}).get('next') or None,question)
   if trail:

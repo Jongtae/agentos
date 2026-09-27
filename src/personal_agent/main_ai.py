@@ -71,6 +71,15 @@ CLI_NOT_INSTALLED_TEXT = '이 컴퓨터에서 CLI를 찾지 못해 실행할 수
 CLI_SIGNED_OUT_TEXT = 'CLI가 로그인되어 있지 않아 실행할 수 없습니다'
 
 
+#: #710: the probe fields ``model_ready`` reads; no response text is kept.
+VERIFIED_TEST_FIELDS = ('ok', 'tools_ok', 'fingerprint', 'time', 'provider', 'model', 'runtime_model')
+
+
+def verified_test(record):
+    """The content-free part of a successful Work-route probe (#710)."""
+    return {key: record.get(key) for key in VERIFIED_TEST_FIELDS if isinstance(record, dict) and key in record}
+
+
 def key_slot(provider_id):
     return f'api_key:{provider_id}'
 
@@ -369,7 +378,10 @@ class MainAiRoutes:
             # given for the previous one (same rule as save_model).
             self.store.put('document_sharing', {})
             self.store.put('public_page_sharing', {})
-        self._record_check(route_id, {'state': 'ok'})
+        # #710: the verified config and its tool-call probe stay with this
+        # route's check, so the orchestrator may offer the route as a worker
+        # after the owner switches the Main AI elsewhere (key unchanged since).
+        self._record_check(route_id, {'state': 'ok', 'config': config, 'test': verified_test(record)})
 
     def check(self):
         """확인: re-probe the current Main AI.  Never switches."""
@@ -383,6 +395,16 @@ class MainAiRoutes:
         else:
             result = self.service.test_model()
             if current in API_ROUTES:
-                self._record_check(current, {'state': 'ok' if result['ok'] else 'failed',
-                                             'failure': (result.get('error') or '')[:300]})
+                record = {'state': 'ok' if result['ok'] else 'failed', 'failure': (result.get('error') or '')[:300]}
+                # #710 review: a passing recheck keeps the verified config and the
+                # probe's content-free fields, so the route stays offerable as a
+                # worker after a later Main AI switch.  Only when the probed key is
+                # the route's saved key: a replaced key waiting for 확인하고 사용 is
+                # not the one that passed.
+                config, test = self.store.config('model', {}) or {}, self.store.config('model_test')
+                probed = self.store.secret('model_key') or ''
+                if result['ok'] and api_route_of(config) == current and isinstance(test, dict) \
+                        and probed and self.store.secret(key_slot(current)) == probed:
+                    record.update(config=dict(config), test=verified_test(test))
+                self._record_check(current, record)
         return {'main_ai': self.status()}

@@ -244,6 +244,8 @@ details.technical details>summary{color:var(--muted)}
 .stack{display:grid;gap:var(--sp-3);margin:var(--sp-4) 0}
 .stack>button,.stack>.button-row{justify-self:start}
 .workspace-browser{display:grid;grid-template-columns:minmax(200px,.7fr) minmax(0,1.3fr);gap:var(--sp-4);margin-left:16px}
+.workspace-browser.empty{grid-template-columns:minmax(0,1fr)}
+.workspace-browser .detail[hidden]{display:none}
 .workspace-row{display:grid;grid-template-columns:minmax(0,1fr);justify-content:stretch;position:relative;gap:4px;width:100%;text-align:left;justify-items:start;white-space:normal;padding:10px 12px;border:0;border-bottom:1px solid var(--line);border-radius:0;font-weight:400}
 .workspace-row:last-child{border-bottom:0}
 .workspace-row span{font-size:var(--fs-1);color:var(--muted)}

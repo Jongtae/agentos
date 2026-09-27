@@ -219,8 +219,9 @@ class ServiceProvenance(unittest.TestCase):
         service.execution_adapter.execute = execute
         service.run_one()
         selected = self._selected(service)
-        # #597: the turn's own capability-need judgment is linked to it as well.
-        self.assertEqual([row['purpose'] for row in selected['decisions']], ['capability-need', 'presence'])
+        # #597: the turn's own capability-need judgment is linked to it as well,
+        # and #710's orchestration plan call (unavailable here) too.
+        self.assertEqual([row['purpose'] for row in selected['decisions']], ['capability-need', 'work-orchestration', 'presence'])
         self.assertNotIn('raw', selected['decisions'][-1], 'only the summary fields are exposed')
         # #559: the content-free declared answer is shown; the probability is not.
         self.assertEqual(selected['decisions'][-1]['answer'], 'retry')

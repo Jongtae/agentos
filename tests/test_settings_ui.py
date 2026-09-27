@@ -177,7 +177,6 @@ def test_settings_uses_goal_oriented_owner_language():
     assert "외부 연결" in HTML
     assert "내 기록" not in HTML
     assert "AI가 찾아볼 폴더" in HTML
-    assert "정리 결과 만들기" in HTML
     assert "결과 저장 폴더" in HTML
     assert "<textarea id=\"root-paths\"" not in HTML
     assert "프로젝트는 대화와 결과" in HTML

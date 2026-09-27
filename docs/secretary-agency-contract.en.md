@@ -30,6 +30,10 @@ SEC-SEARCH-03, by owner direction under the pilot posture (#705; runtime-only sc
 - **Accepted egress change.** Private material from earlier turns that the CLI is shown can now appear in the CLI model's own search queries to that provider. AgentOS does not compose or redact those queries. This weakens the #678 boundary by owner direction and takes independent review.
 - **Unchanged.** The private-read bridge tools (`list_notes` and the other private-store reads) are still not offered on a native-search turn, so the model cannot read a store and search in the same turn. Notes reach a CLI turn as an explicit splice (`/summarize`) or through a search-off turn's `list_notes`, and search is off for that turn only. Stored secrets never enter prompts. The #605 inheritance rule is unchanged for AgentOS-composed third-party lookups (Bing, Brave) and for turn-record storage.
 
+## Amendment — #710 (2026-09-27)
+
+ORCH-01 (Constitution C16): for each Work the Judgment AI returns one validated plan choosing the worker (a configured, verified Main AI route) and model, the brief (goal, selected context sections, completion criteria) and optionally a tool subset; after the attempt the existing `goal_reached` judgment evaluates it and the orchestrator may re-delegate at most twice within the Work budget, never after an effect. Without a usable plan the default Main AI runs the raw request as before. The "Roles" below now include this orchestration step; see [Decision Layer — Orchestration](decision-layer.en.md#orchestration-orch-01--710).
+
 ## Status and purpose
 
 This is the canonical product and execution contract for the **SECRETARY-01** program, activated by the owner on 2026-09-26 through [GOV-SECRETARY-01 #653](https://github.com/Jongtae/agentos/issues/653). It distills the owner's product specification, preserved as [research](research/secretary-agency-spec-2026-09-26.ko.md), and the owner decisions recorded in #653.

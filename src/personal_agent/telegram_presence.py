@@ -42,6 +42,7 @@ from dataclasses import dataclass, field
 from .conversation_handoff import (FOLLOWUP_CANCEL, FOLLOWUP_CORRECTION, FOLLOWUP_REFERENCE, FOLLOWUP_RETRY,
                                    INTENT_CONVERSATION, INTENT_DRIVE_READ, INTENT_GREETING, INTENT_KNOWLEDGE,
                                    INTENT_MAIL_SEARCH, INTENT_NOTE_LIST, INTENT_RESEARCH, INTENT_WORKSPACE_SEARCH)
+from .orchestrator import EVENT_TOOL, PLANNED
 
 # --- typed presentation vocabulary -------------------------------------------
 
@@ -86,6 +87,11 @@ THINKING_DRAFT_TEXT = '생각 중…'
 BETWEEN_STEPS_TEXT = '결과를 살펴보는 중…'
 #: Any other tool kind.
 DEFAULT_STEP_TEXT = '도구 실행 중'
+#: #710: the orchestrator's planned-attempt event (``orchestrator.EVENT_TOOL`` /
+#: ``PLANNED``), whose ``text`` announces the attempt, cut to this length.
+ORCHESTRATION_TOOL = EVENT_TOOL
+ORCHESTRATION_PLANNED = PLANNED
+ANNOUNCE_MAX = 80
 #: Host action -> (line with the observed target, line without one).  The
 #: target placeholder is ``{host}`` or ``{query}``.
 FALLBACK_STEP_LINES = {
@@ -126,6 +132,8 @@ def step_line(step, last_host=None):
     """
     if not isinstance(step, dict) or step.get('approval'):
         return None
+    if isinstance(step.get('announce'), str) and step['announce'].strip():
+        return step['announce'].strip()
     status = step.get('status')
     if isinstance(status, str) and status.strip():
         return status.strip()
@@ -157,6 +165,14 @@ def draft_step(events, live=None):
     for event in events or ():
         trace = event.get('trace') if isinstance(event.get('trace'), dict) else {}
         step = trace.get('step')
+        if event.get('tool') == ORCHESTRATION_TOOL:
+            # #710/#718: a planned attempt announces itself until its first
+            # observed step (the orchestrator's own redacted text).
+            text = ' '.join(str(trace.get('text') or '').split())
+            if event.get('status') == ORCHESTRATION_PLANNED and text:
+                cut = text if len(text) <= ANNOUNCE_MAX else text[:ANNOUNCE_MAX - 1] + '…'
+                current = (event.get('created') or 0, ORCHESTRATION_TOOL, None, {'announce': cut}, last_host)
+            continue
         if event.get('status') == 'running' and isinstance(step, dict):
             seen = True
             current = (event.get('created') or 0, event.get('tool'), trace.get('call_id'), step,

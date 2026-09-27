@@ -7,6 +7,7 @@ import multiprocessing
 import math
 import re
 import socket
+import sys
 import ssl
 import threading
 import time
@@ -48,20 +49,42 @@ def _resolver_process(send_connection, host, port):
         send_connection.close()
 
 
-def _bounded_system_resolver(host, port, *, type=socket.SOCK_STREAM, timeout):
+def resolver_start_method(platform=None, methods=None):
+    """The ``multiprocessing`` start method of the resolver process (#735).
+
+    ``fork`` only where the system resolver is fork-safe.  On macOS Python's
+    own default is ``spawn`` because system libraries may start threads and a
+    forked child can crash inside them (Python docs, ``multiprocessing``,
+    changed in 3.8); a resolver child that crashed there left the caller with
+    a closed pipe.
+    """
+    platform=sys.platform if platform is None else platform
+    methods=multiprocessing.get_all_start_methods() if methods is None else methods
+    if platform!='darwin' and 'fork' in methods:
+        return 'fork'
+    return 'spawn' if 'spawn' in methods else methods[0]
+
+
+def _bounded_system_resolver(host, port, *, type=socket.SOCK_STREAM, timeout, target=None):
     del type
     if timeout <= 0:
         raise TimeoutError('resolver deadline exhausted')
-    methods=multiprocessing.get_all_start_methods()
-    context=multiprocessing.get_context('fork' if 'fork' in methods else methods[0])
+    context=multiprocessing.get_context(resolver_start_method())
     receive,send=context.Pipe(duplex=False)
-    process=context.Process(target=_resolver_process,args=(send,host,port),daemon=True)
+    process=context.Process(target=target or _resolver_process,args=(send,host,port),daemon=True)
     started=time.monotonic();process.start();send.close()
     try:
         remaining=timeout-(time.monotonic()-started)
         if remaining <= 0 or not receive.poll(remaining):
             raise TimeoutError('resolver deadline exhausted')
-        ok,payload=receive.recv()
+        try:
+            ok,payload=receive.recv()
+        except (EOFError,OSError):
+            # #735: the child ended without an answer (it crashed or was
+            # killed).  That is a failed resolution of this host - an OSError
+            # every caller already types - never an EOFError that no caller
+            # handles and that ended the whole MCP bridge process.
+            raise OSError('resolver failed: the resolver process ended without an answer') from None
         if not ok:
             raise OSError(f'resolver failed: {payload}')
         return payload

@@ -853,6 +853,37 @@ class DecisionRoutes:
             record['bundled_models'] = self._codex_bundled_models(run, binary)
         return record
 
+    #: #735: the installed Codex binary's listed models, keyed by its fingerprint.
+    BUNDLED_CACHE = 'codex_bundled_models'
+
+    def bundled_models(self, engine_id):
+        """The model ids the installed CLI bundles and lists, or None when unknown (#735).
+
+        Codex only: ``codex debug models --bundled`` (local, no network, an
+        empty per-call CODEX_HOME; the plain form is never run), cached per
+        binary fingerprint so it runs once per installed CLI.  Other engines
+        have no machine-readable listing (None).
+        """
+        if engine_id != 'codex' or self.service.isolated_engine_adapter:
+            return None
+        binary = self.service.execution_adapter.finder(CLI_BINARIES['codex'])
+        fingerprint = cli_fingerprint(binary)
+        if not fingerprint:
+            return None
+        cached = self.store.config(self.BUNDLED_CACHE, {})
+        if isinstance(cached, dict) and cached.get('fingerprint') == fingerprint and isinstance(cached.get('models'), list):
+            return list(cached['models'])
+        try:
+            rows = self._with_local_run('codex', binary, lambda run: self._codex_bundled_models(run, binary))
+        except DecisionRouteError:
+            rows = None
+        if rows is None:
+            return None
+        models = [row['id'] for row in rows if row.get('visible')]
+        with self.service.lock:
+            self.store.put(self.BUNDLED_CACHE, {'fingerprint': fingerprint, 'models': models, 'checked_at': self.clock()})
+        return models
+
     @staticmethod
     def _codex_bundled_models(run, binary):
         """The installed binary's own model catalogue, or None (#679).

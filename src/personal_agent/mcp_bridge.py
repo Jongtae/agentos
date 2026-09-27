@@ -136,6 +136,20 @@ def tool_error_result(exc, action):
     return {'content': [{'type': 'text', 'text': text}], 'structuredContent': typed, 'isError': True}, typed
 
 
+def unexpected_error_result(exc, action):
+    """The typed tool result of an exception no tool layer maps (#735).
+
+    Its class name only, never its text (it may quote a URL or credential).
+    An effect-free read failed with no effect; any other action may have
+    acted before it failed, so its effect is unknown and it is never replayed.
+    """
+    from .agent_runtime import EFFECT_FREE_READS
+    read = action in EFFECT_FREE_READS
+    typed = {'code': 'tool_failed', 'retry': 'permanent' if read else 'never', 'effect': 'none' if read else 'unknown',
+             'exception': type(exc).__name__}
+    return {'content': [{'type': 'text', 'text': TOOL_FAILED_TEXT}], 'structuredContent': typed, 'isError': True}, typed
+
+
 def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROFILE, browser_relay=None,
           search_off_reason='', only=None):
     """Serve one Work's AgentOS tools over stdio for the route profile the host named (#701).
@@ -219,6 +233,19 @@ def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROF
                     record(listed, 'failed',
                            json.dumps({'scope':'subscription-mcp-bridge', **({'host_action':action} if action else {}), **typed,
                                        'error':redact_reason(str(exc))}, ensure_ascii=False))
+                    if ident is not None:
+                        _send({'jsonrpc':'2.0','id':ident,'result':result})
+                    continue
+                except Exception as exc:
+                    # #735: any other exception inside one call (an EOFError from a
+                    # helper process, an HTTP-library error type no layer maps) is a
+                    # typed failure of that call.  It used to end the bridge
+                    # process: the CLI saw its MCP connection close mid-call and
+                    # the Work recorded only a call that never completed.
+                    result, typed = unexpected_error_result(exc, action)
+                    record(listed, 'failed',
+                           json.dumps({'scope':'subscription-mcp-bridge', **({'host_action':action} if action else {}), **typed,
+                                       'error':redact_reason(TOOL_FAILED_TEXT)}, ensure_ascii=False))
                     if ident is not None:
                         _send({'jsonrpc':'2.0','id':ident,'result':result})
                     continue

@@ -853,7 +853,7 @@ class BoundedExecutionAdapter:
         return {'state': 'unknown', 'detail': 'unparsed status'}
 
     def command(self, engine_id, binary, prompt, mcp_config, instructions='', profile=BOUNDED_PROFILE,
-                disabled_features=(), native_search=False):
+                disabled_features=(), model=None, native_search=False):
         """The argv of one Work turn.
 
         ``native_search`` (#678) lets the trusted-local turn use the CLI's own
@@ -867,6 +867,13 @@ class BoundedExecutionAdapter:
         """
         if profile not in HOST_CLI_PROFILES:
             raise ExecutionError('지원하지 않는 구독 엔진 실행 프로필입니다.')
+        # #679: the owner's Main AI model for this CLI, as the CLI's own
+        # documented `--model` flag (one argv element; the shape is checked).
+        # None: the CLI's own default for this isolated invocation.
+        from .decision_adapters import valid_model_id
+        if model is not None and not valid_model_id(model):
+            raise ExecutionError('모델 이름 형식을 확인하세요.', failure_class='invalid-configuration')
+        model_args = ['--model', model] if model else []
         strict = profile == STRICT_PROFILE
         native_search = bool(native_search) and not strict
         if engine_id == 'codex':
@@ -883,16 +890,18 @@ class BoundedExecutionAdapter:
             sandbox = (strict_launch_arguments('codex', disabled_features) if strict
                        else ['--sandbox', 'read-only', '--ignore-rules',
                              '-c', 'web_search="live"' if native_search else 'web_search="disabled"'])
+            # --ignore-user-config also drops the owner's config.toml model, so
+            # the owner's Main AI model choice is passed explicitly (#679).
             return [binary, 'exec', '--json', *sandbox, '--skip-git-repo-check',
                     '--ignore-user-config', '--ephemeral',
                     '-c', f'mcp_servers.agentos.command={json.dumps(sys.executable)}',
-                    '-c', f'mcp_servers.agentos.args={json.dumps(bridge["args"])}', prompt]
+                    '-c', f'mcp_servers.agentos.args={json.dumps(bridge["args"])}', *model_args, prompt]
         if engine_id == 'claude-code':
             # #570: stream-json (which requires --verbose with -p) reports the
             # session model and each tool_use; its last line is the same result
             # record that `json` prints, so answer parsing is unchanged.
             argv = [binary, '-p', prompt, '--output-format', 'stream-json', '--verbose',
-                    '--strict-mcp-config', '--mcp-config', str(mcp_config)]
+                    '--strict-mcp-config', '--mcp-config', str(mcp_config), *model_args]
             if instructions:
                 # #569: AgentOS instructions travel as a system-prompt addition,
                 # the conversation and request as the prompt.
@@ -1189,7 +1198,7 @@ class BoundedExecutionAdapter:
             raise ExecutionError('엔진 응답에 최종 텍스트 결과가 없습니다.')
         return content[:24_000]
 
-    def execute(self, engine_id, prompt, tools, *, context=None):
+    def execute(self, engine_id, prompt, tools, *, context=None, model=None):
         instructions = ''
         if context and engine_id == 'claude-code':
             # Claude Code accepts a system-prompt addition; send the shared
@@ -1268,8 +1277,8 @@ class BoundedExecutionAdapter:
             LOG.info('engine turn started engine=%s profile=%s', engine_id, profile)
             # #678: the facade says whether this turn may use the CLI's own web search.
             argv = self.command(engine_id, binary, prompt, config, instructions, profile=profile, disabled_features=disabled,
-                                native_search=native_search)
-            run_meta = {'argv': display_argv(argv, prompt, instructions), 'requested_model': None}
+                                model=model or None, native_search=native_search)
+            run_meta = {'argv': display_argv(argv, prompt, instructions), 'requested_model': model or None}
             try:
                 if self.runner is subprocess.run:
                     completed = bounded_run(self.runner, argv, cwd=run_dir, env=env, timeout=timeout,

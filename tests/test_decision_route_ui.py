@@ -32,7 +32,9 @@ const source=part('const LANGUAGES=','function normalizeEndpoint(')+part('const 
  part('function element(','function setError(')+part('const DECISION_TRANSPORT_LABEL=','function openMobileDetail(');
 const calls=[];let refreshes=0,failNext=null;
 const ctx={document,$,console,safeTime:()=>'T',
- api:async(path,body)=>{calls.push({path,body});if(failNext){const error=failNext;failNext=null;throw error;}return {model_override:true};},
+ api:async(path,body)=>{calls.push({path,body});if(failNext){const error=failNext;failNext=null;throw error;}
+  if(path.startsWith('/api/decision-route/models'))return {route:'codex',source:'codex debug models --bundled',models:[{id:'gpt-5.6-luna',efforts:['low','medium'],rank:1,label:'목록에 있음(검증 전)'},{id:'gpt-5.5',efforts:['low'],rank:null,label:'목록에 있음(검증 전)'}]};
+  return {model_override:true};},
  refresh:async()=>{refreshes++;},busy:async(button,fn)=>fn(),
  setError:(id,error)=>{$(id).textContent=error?.message||String(error||'');},setFeedback:(id,text)=>{$(id).textContent=text||'';}};
 vm.createContext(ctx);vm.runInContext(source,ctx);vm.runInContext("setLanguage('ko')",ctx);
@@ -42,7 +44,8 @@ const rowTitled=title=>rows().find(row=>descendants(row).some(node=>node.classNa
 const stateOf=row=>descendants(row).find(node=>node.className.startsWith('settings-state'));
 const button=(row,label)=>descendants(row).find(node=>node.tag==='button'&&node.textContent===label);
 const engines=(selection='unchecked')=>[
- {id:'codex',name:'Codex',installed:true,login:'signed-in',model_selection:selection,destination:'OpenAI (Codex 구독 계정)',isolated_deployment:false},
+ {id:'codex',name:'Codex',installed:true,login:'signed-in',model_selection:selection,destination:'OpenAI (Codex 구독 계정)',isolated_deployment:false,
+  ranked_models:['gpt-5.6-luna','gpt-5.6-terra'],model_efforts:{'gpt-5.6-luna':['low','medium'],'gpt-5.6-terra':['low']}},
  {id:'claude-code',name:'Claude Code',installed:false,login:'unchecked',model_selection:'unchecked',destination:'Anthropic (Claude Code 구독 계정)',isolated_deployment:false}];
 const base=(active,extra={})=>({decision_route:{active,suite_version:'decision-qualification/1',
  direct_api:{configured:true,model:'gpt-4o-mini',destination:'api.openai.com'},jev:{configured:false,model:'jev-latest',destination:'api.typesafe.ai'},
@@ -70,15 +73,40 @@ const base=(active,extra={})=>({decision_route:{active,suite_version:'decision-q
  assert.deepEqual(JSON.parse(JSON.stringify(calls)),[{path:'/api/decision-route/credential',body:{transport:'jev',key:'ts-key',model:'jev-latest'}}]);
  assert(!calls.some(call=>call.path==='/api/decision-route/activate'),'saving never activates');
  assert($('decision-route-feedback').textContent.includes('아직 대화 해석 경로는 바뀌지 않았습니다'));
- // Subscription AI: before the CLI's model flag is verified only the engine default is offered.
+ // #679: the default is the cheapest qualified model (ranked list prefilled), even before the model flag was
+ // checked (activation checks it); the engine default is offered but never preselected.
  calls.length=0;box().dataset.state='';ctx.renderDecisionRoute(base({transport:'direct_api',source:'default',destination:'api.openai.com'}));
  let codex=rowTitled('구독 AI · Codex');await button(codex,'사용').onclick({currentTarget:button(codex,'사용')});
  let form=descendants(rowTitled('구독 AI · Codex')).find(node=>node.tag==='form');
- let radios=descendants(form).filter(node=>node.tag==='input'&&node.type==='radio').map(node=>node.value);
- assert.deepEqual(radios,['engine_default'],'explicit / lowest_qualified are not offered before verification');
+ let radios=descendants(form).filter(node=>node.tag==='input'&&node.type==='radio');
+ assert.deepEqual(radios.map(node=>node.value),['lowest_qualified','explicit','engine_default']);
+ assert.equal(radios.find(node=>node.checked).value,'lowest_qualified','engine_default (Opus for Claude Code) is not preselected');
  assert(descendants(form).some(node=>node.tag==='button'&&node.textContent==='모델 지정 지원 확인'));
+ assert(form.textContent.includes('모델 목록은 새로고침을 눌렀을 때만 가져옵니다.'));
+ assert(!calls.some(call=>call.path.startsWith('/api/decision-route/models')),'no model list on render');
  await form.onsubmit({preventDefault(){}});
- assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))),{path:'/api/decision-route/activate',body:{transport:'subscription_cli',engine:'codex',model_policy:'engine_default'}});
+ assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))),{path:'/api/decision-route/activate',body:{transport:'subscription_cli',engine:'codex',model_policy:'lowest_qualified',candidates:'gpt-5.6-luna, gpt-5.6-terra'}});
+ // 모델 목록 새로고침 is the only thing that lists models; entries are labelled as unverified.
+ codex=rowTitled('구독 AI · Codex');await button(codex,'사용').onclick({currentTarget:button(codex,'사용')});
+ form=descendants(rowTitled('구독 AI · Codex')).find(node=>node.tag==='form');
+ const refreshModels=descendants(form).find(node=>node.tag==='button'&&node.textContent==='모델 목록 새로고침');
+ await refreshModels.onclick({currentTarget:refreshModels});
+ assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))),{path:'/api/decision-route/models?route=codex'});
+ form=descendants(rowTitled('구독 AI · Codex')).find(node=>node.tag==='form');
+ const options=descendants(form).filter(node=>node.tag==='option'&&node.value.startsWith('gpt'));
+ assert(options.some(node=>node.textContent==='gpt-5.6-luna · 목록에 있음(검증 전)'),'a listed model is not called verified');
+ assert(form.textContent.includes('2개 모델이 목록에 있습니다 (codex debug models --bundled)'));
+ radios=descendants(form).filter(node=>node.tag==='input'&&node.type==='radio');radios.forEach(node=>{node.checked=node.value==='explicit';});
+ const modelInput=descendants(form).find(node=>node.tag==='input'&&node.type==='text'&&node.attrs['aria-label']==='직접 선택할 모델 이름');
+ modelInput.value='gpt-5.6-luna';modelInput.oninput();
+ const effortSelect=descendants(form).find(node=>node.tag==='select');
+ assert.deepEqual(descendants(effortSelect).map(node=>node.value),['','low','medium'],'only the efforts that model supports');
+ effortSelect.value='medium';failNext=new Error('모델을 확인하지 못했습니다. 현재 대화 해석 경로는 그대로 유지됩니다.');
+ await form.onsubmit({preventDefault(){}});
+ assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1).body)),{transport:'subscription_cli',engine:'codex',model_policy:'explicit',model:'gpt-5.6-luna',effort:'medium'});
+ assert($('decision-route-feedback').textContent.includes('그대로 유지'),'a failed qualification keeps the previous route and says why');
+ modelInput.value='haiku';modelInput.oninput();assert(effortSelect.disabled,'no effort choice where the model has none');
+ ctx.openDecisionChooser('');
  // Unsupported: still only the engine default, with the limitation stated.
  box().dataset.state='';ctx.renderDecisionRoute(base({transport:'direct_api',source:'default',destination:'api.openai.com'},{selection:'unsupported'}));
  codex=rowTitled('구독 AI · Codex');await button(codex,'사용').onclick({currentTarget:button(codex,'사용')});
@@ -92,7 +120,7 @@ const base=(active,extra={})=>({decision_route:{active,suite_version:'decision-q
  const inputs=descendants(form).filter(node=>node.tag==='input');
  assert.deepEqual(inputs.filter(node=>node.type==='radio').map(node=>node.value),['lowest_qualified','explicit','engine_default']);
  inputs.find(node=>node.value==='engine_default').checked=false;inputs.find(node=>node.value==='lowest_qualified').checked=true;
- inputs.filter(node=>node.type==='text')[1].value=' tiny, small ';
+ inputs.filter(node=>node.type==='text')[0].value=' tiny, small ';
  failNext=new Error('후보 모델 중 적격성 검사를 통과한 모델이 없습니다. 현재 대화 해석 경로는 그대로 유지됩니다.');const before=refreshes;
  await form.onsubmit({preventDefault(){}});
  assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1).body)),{transport:'subscription_cli',engine:'codex',model_policy:'lowest_qualified',candidates:'tiny, small'});
@@ -105,7 +133,7 @@ const base=(active,extra={})=>({decision_route:{active,suite_version:'decision-q
   destination:'OpenAI (Codex 구독 계정)',cli_version:'codex-cli 0.153.4',qualification:{suite_version:'decision-qualification/1',model:'small'}},
   {selection:'supported',route:{subscription_cli:engines('supported').map(e=>e.id==='codex'?{...e,check:{state:'active',observed_model:'not reported',checked_at:1}}:e)}}));
  assert.equal(stateOf(rowTitled('구독 엔진')).textContent,'Codex');
- const policyRow=rowTitled('판단 모델');assert.equal(stateOf(policyRow).textContent,'자동 · 적합한 가벼운 모델');
+ const policyRow=rowTitled('판단 모델');assert.equal(stateOf(policyRow).textContent,'자동 · 가장 저렴한 적격 모델');
  assert(policyRow.textContent.includes('요청 모델: small'),'the requested model is named, not presented as observed');
  assert(!rowTitled('구독 AI · Codex'),'the active engine is not listed again as another choice');
  assert(rowTitled('구독 AI · Claude Code'));
@@ -151,6 +179,30 @@ const base=(active,extra={})=>({decision_route:{active,suite_version:'decision-q
  assert.equal(stateOf(refused).textContent,'사용할 수 없음');assert(stateOf(refused).className.endsWith('attention'));
  assert(refused.textContent.includes('도구 기능을 모두 끌 수 없어')&&refused.textContent.includes('unified_exec'),'the reason is named');
  assert(button(refused,'다시 확인'),'a re-check stays available after a CLI update');assert(!button(refused,'사용'));
+ // #679: the direct API model is chosen from the (refreshed) list or typed, and qualified before use.
+ box().dataset.state='';ctx.openDecisionChooser('');calls.length=0;
+ ctx.renderDecisionRoute(base({transport:'jev',source:'owner',requested_model:'jev-latest',available:true,destination:'api.typesafe.ai'},
+  {route:{direct_api:{configured:true,model:'gpt-4o-mini',destination:'api.openai.com',ranked_models:['gpt-4o-mini','gpt-6-luna']}}}));
+ const openai=rowTitled('OpenAI API · gpt-4o-mini');await button(openai,'모델 선택').onclick({currentTarget:button(openai,'모델 선택')});
+ const directForm=descendants(rowTitled('OpenAI API · gpt-4o-mini')).find(node=>node.tag==='form');
+ assert(directForm.textContent.includes('gpt-4o-mini → gpt-6-luna'),'the cheapest-first default is named');
+ assert(!descendants(directForm).some(node=>node.tag==='select'),'no effort choice for the API route');
+ descendants(directForm).find(node=>node.tag==='input'&&node.type==='text').value='gpt-6-luna';
+ await directForm.onsubmit({preventDefault(){}});
+ assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))),{path:'/api/decision-route/activate',body:{transport:'direct_api',model:'gpt-6-luna'}});
+ // #679: the #417 default says it is a fallback and why, instead of reading as "follow Main AI".
+ box().dataset.state='';ctx.openDecisionChooser('');
+ ctx.renderDecisionRoute(base({transport:'direct_api',source:'default',requested_model:'gpt-4o-mini',destination:'api.openai.com',available:true},
+  {route:{effective:{state:'fallback',template:'구독 판단을 쓸 수 없어 OpenAI API({model})를 쓰는 중: {reason}',params:{model:'gpt-4o-mini'},
+   reason_template:'기본 AI({main})를 따르는 구독 판단을 아직 확인하지 않았습니다. 확인을 누르면 가장 저렴한 모델부터 검증합니다.',reason_params:{main:'Codex'},destination:'api.openai.com'}}}));
+ assert(rowTitled('사용 방식').textContent.includes('구독 판단을 쓸 수 없어 OpenAI API(gpt-4o-mini)를 쓰는 중: 기본 AI(Codex)를 따르는 구독 판단을 아직 확인하지 않았습니다.'));
+ // An active strict Codex route states the profile, effort and a non-empty instruction file (size only).
+ box().dataset.state='';
+ ctx.renderDecisionRoute(base({transport:'subscription_cli',source:'owner',engine:'codex',model_policy:'lowest_qualified',requested_model:'gpt-5.6-luna',effort:'low',available:true,
+  destination:'OpenAI (Codex 구독 계정)',strict_profile:{version:'0.153.4',platform:'darwin'},instruction_files_present:[{file:'AGENTS.md',bytes:120}]}));
+ assert(rowTitled('구독 엔진').textContent.includes('엄격 격리'));assert(rowTitled('구독 엔진').textContent.includes('AGENTS.md (120 B)'));
+ assert(rowTitled('판단 모델').textContent.includes('추론 강도: low'));
+ assert(all().find(node=>node.tag==='details').textContent.includes('엄격 격리 검증: 0.153.4 · darwin'));
  // Off is an explicit owner choice.
  box().dataset.state='';
  ctx.renderDecisionRoute(base({transport:'direct_api',source:'owner',destination:'api.openai.com',available:true},

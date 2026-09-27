@@ -634,60 +634,63 @@ class DecisionRoutes:
         ``state`` is ``active`` (a route is in use), ``fallback`` (the #417
         default OpenAI API answers although the Judgment AI is meant to follow
         the Main AI - said out loud, never silent), ``attention`` (nothing
-        answers until the owner acts) or ``off``.  Read-only; no call.
+        answers until the owner acts) or ``off``.  ``template``/``params``
+        (and ``reason_template``/``reason_params``) let Settings translate
+        the sentence; ``text`` is the Korean rendering.  Read-only; no call.
         """
         main_name = ROUTE_NAMES.get(main, main or '-')
         model = active.get('requested_model') or ''
+
+        def said(state, template, reason=('', {}), **params):
+            reason_template, reason_params = reason
+            reason_text = reason_template.format(**reason_params) if reason_template else ''
+            return {'state': state, 'transport': active.get('transport') or 'none', 'model': model,
+                    'destination': active.get('destination') or '', 'template': template, 'params': params,
+                    'reason_template': reason_template, 'reason_params': reason_params, 'reason': reason_text,
+                    'text': template.format(**params, reason=reason_text)}
+
         verified = '검증됨' if active.get('qualification') else '확인됨'
         if route is not None and route.get('transport') == ROUTE_OFF and route.get('mode') != MODE_FOLLOW:
-            return {'state': 'off', 'transport': ROUTE_OFF, 'model': '', 'reason': '',
-                    'text': '판단 AI를 쓰지 않습니다. 판단이 필요한 기능은 건너뜁니다.'}
+            return said('off', '판단 AI를 쓰지 않습니다. 판단이 필요한 기능은 건너뜁니다.')
         if active.get('source') == 'default':
-            if active.get('transport') != ROUTE_DIRECT_API:
-                reason = follow.get('reason') or '판단 AI가 아직 확인되지 않았습니다.'
-                return {'state': 'attention', 'transport': 'none', 'model': '', 'reason': reason,
-                        'text': f'판단 AI를 쓸 수 없어 판단이 필요한 기능은 건너뜁니다: {reason}'}
             if follow.get('available') and follow.get('transport') == ROUTE_SUBSCRIPTION_CLI:
-                reason = f'기본 AI({main_name})를 따르는 구독 판단이 아직 확인되지 않았습니다. 확인을 누르면 가장 저렴한 모델부터 검증합니다.'
+                reason = ('기본 AI({main})를 따르는 구독 판단을 아직 확인하지 않았습니다. 확인을 누르면 가장 저렴한 모델부터 검증합니다.',
+                          {'main': main_name})
             elif follow.get('available'):
-                reason = f'기본 AI({main_name})를 따르는 판단 AI가 아직 확인되지 않았습니다.'
+                reason = ('기본 AI({main})를 따르는 판단 AI를 아직 확인하지 않았습니다.', {'main': main_name})
             else:
-                reason = follow.get('reason') or '기본 AI를 따라갈 수 없습니다.'
-            subscription = main in CLI_BINARIES
-            prefix = '구독 판단을 쓸 수 없어' if subscription else '판단 AI를 아직 확인하지 않아'
-            return {'state': 'fallback', 'transport': ROUTE_DIRECT_API, 'model': model,
-                    'destination': active.get('destination') or '', 'reason': reason,
-                    'text': f'{prefix} OpenAI API({model})를 쓰는 중: {reason}'}
+                reason = (follow.get('reason') or '기본 AI를 따라갈 수 없습니다.', {})
+            if active.get('transport') != ROUTE_DIRECT_API:
+                return said('attention', '판단 AI를 쓸 수 없어 판단이 필요한 기능은 건너뜁니다: {reason}', reason)
+            template = ('구독 판단을 쓸 수 없어 OpenAI API({model})를 쓰는 중: {reason}' if main in CLI_BINARIES
+                        else '판단 AI를 아직 확인하지 않아 OpenAI API({model})를 쓰는 중: {reason}')
+            return said('fallback', template, reason, model=model)
         if active.get('source') == 'follow':
             if active.get('available'):
-                return {'state': 'active', 'transport': active.get('transport'), 'model': model,
-                        'destination': active.get('destination') or '', 'reason': 'follow',
-                        'text': f'기본 AI({main_name})를 따라가는 중 — {model or "기본 모델"}, {verified}'}
+                return said('active', '기본 AI({main})를 따라가는 중 — {model}, {verified}',
+                            main=main_name, model=model or '-', verified=verified)
             if active.get('stale'):
-                reason = f'기본 AI가 {main_name}(으)로 바뀌어 판단 AI를 다시 확인해야 합니다.'
+                reason = ('기본 AI가 {main}(으)로 바뀌어 판단 AI를 다시 확인해야 합니다.', {'main': main_name})
             elif active.get('transport') == ROUTE_OFF:
-                failure = (follow_check or {}).get('failure') or active.get('failure') or ''
-                reason = f'기본 AI({main_name})를 따르는 판단 AI 확인에 실패했습니다' + (f' ({failure}).' if failure else '.')
+                reason = ('기본 AI({main})를 따르는 판단 AI 확인에 실패했습니다.', {'main': main_name})
             elif active.get('requalification_needed'):
-                reason = 'CLI가 바뀌어 다시 확인해야 합니다.'
+                reason = ('CLI가 바뀌어 다시 확인해야 합니다.', {})
             else:
-                reason = '판단 AI를 지금 쓸 수 없습니다.'
-            return {'state': 'attention', 'transport': active.get('transport'), 'model': model, 'reason': reason,
-                    'text': f'판단 AI를 쓰지 못하는 중: {reason} 다른 경로로 자동 전환하지 않습니다.'}
+                reason = ('판단 AI를 지금 쓸 수 없습니다.', {})
+            return said('attention', '판단 AI를 쓰지 못하는 중: {reason} 다른 경로로 자동 전환하지 않습니다.', reason)
         # Explicitly chosen (따로 지정).
-        label = {ROUTE_DIRECT_API: f'{"OpenAI" if active.get("provider") == "openai" else active.get("provider") or "API"} API',
-                 ROUTE_JEV: 'Jev (TypeSafe)',
-                 ROUTE_SUBSCRIPTION_CLI: ENGINE_NAMES.get(active.get('engine'), active.get('engine') or '-')}.get(
-            active.get('transport'), active.get('transport') or '-')
+        transport = active.get('transport')
+        label = ({ROUTE_DIRECT_API: 'OpenAI API' if active.get('provider') == 'openai' else 'API', ROUTE_JEV: 'Jev (TypeSafe)',
+                  ROUTE_SUBSCRIPTION_CLI: ENGINE_NAMES.get(active.get('engine'), active.get('engine') or '-')}
+                 .get(transport, transport or '-'))
         if active.get('available') is False:
-            reason = ('CLI가 바뀌어 다시 확인해야 합니다.' if active.get('requalification_needed')
-                      else '엄격 격리 검증이 필요합니다.' if active.get('strict_profile_unqualified')
-                      else '연결 정보가 없거나 확인이 필요합니다.')
-            return {'state': 'attention', 'transport': active.get('transport'), 'model': model, 'reason': reason,
-                    'text': f'따로 지정한 판단 AI({label})를 쓰지 못하는 중: {reason} 다른 경로로 자동 전환하지 않습니다.'}
-        return {'state': 'active', 'transport': active.get('transport'), 'model': model,
-                'destination': active.get('destination') or '', 'reason': 'owner',
-                'text': f'따로 지정한 판단 AI를 쓰는 중: {label} — {model or "기본 모델"}, {verified}'}
+            reason = (('CLI가 바뀌어 다시 확인해야 합니다.' if active.get('requalification_needed')
+                       else '엄격 격리 검증이 필요합니다.' if active.get('strict_profile_unqualified')
+                       else '연결 정보가 없거나 확인이 필요합니다.'), {})
+            return said('attention', '따로 지정한 판단 AI({label})를 쓰지 못하는 중: {reason} 다른 경로로 자동 전환하지 않습니다.',
+                        reason, label=label)
+        return said('active', '따로 지정한 판단 AI를 쓰는 중: {label} — {model}, {verified}', label=label,
+                    model=model or '기본 모델', verified=verified)
 
     def _model_lists(self):
         rows = self.store.config('decision_model_lists', {})

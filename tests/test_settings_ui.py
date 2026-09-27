@@ -98,12 +98,41 @@ assert(!$('active-ai').textContent.includes('다른 선택지'),'no second list 
  assert($('active-ai').textContent.includes('기본 AI를 따라 gpt-4o-mini을(를) 쓰려면 확인이 필요합니다')||$('active-ai').textContent.includes('쓰려면 확인이 필요합니다'),'a failed judgment probe is shown as needing attention');
  ctx.renderExecutionConnection(settingsFor('codex',{},{follow:follow.codex,active:{transport:'off',source:'follow',available:false}}));
  assert($('active-ai').textContent.includes('기본 AI를 따라갈 수 없습니다: Codex는 따라갈 수 없습니다.'),'Codex shows why the Judgment AI is not set');
+ // #679: the server's effective route is what the card says - a fallback is named as one, with its reason.
+ const codexFollow={available:true,transport:'subscription_cli',model:'gpt-5.6-luna',candidates:['gpt-5.6-luna','gpt-5.6-terra'],destination:'OpenAI (Codex 구독 계정)'};
+ ctx.renderExecutionConnection(settingsFor('codex',{},{follow:codexFollow,active:{transport:'direct_api',source:'default',requested_model:'gpt-4o-mini',destination:'api.openai.com',available:true},
+  effective:{state:'fallback',transport:'direct_api',model:'gpt-4o-mini',destination:'api.openai.com',template:'구독 판단을 쓸 수 없어 OpenAI API({model})를 쓰는 중: {reason}',params:{model:'gpt-4o-mini'},
+   reason_template:'기본 AI({main})를 따르는 구독 판단을 아직 확인하지 않았습니다. 확인을 누르면 가장 저렴한 모델부터 검증합니다.',reason_params:{main:'Codex'}}}));
+ assert($('active-ai').textContent.includes('구독 판단을 쓸 수 없어 OpenAI API(gpt-4o-mini)를 쓰는 중: 기본 AI(Codex)를 따르는 구독 판단을 아직 확인하지 않았습니다.'),'no silent API fallback');
+ assert($('active-ai').textContent.includes('대체 경로 사용 중'));assert($('active-ai').textContent.includes('전송 대상: api.openai.com'));
+ const followCheck=buttonsIn('active-ai').find(node=>node.dataset.focusKey==='judgment-check');assert(followCheck,'확인 re-resolves the follow route from the card');
+ await followCheck.onclick({currentTarget:followCheck});same(calls.pop(),{path:'/api/decision-route/activate',body:{transport:'follow_main'}});
+ ctx.renderExecutionConnection(settingsFor('codex',{},{follow:codexFollow,active:{transport:'subscription_cli',source:'follow',engine:'codex',requested_model:'gpt-5.6-luna',available:true,destination:'OpenAI (Codex 구독 계정)'},
+  effective:{state:'active',transport:'subscription_cli',model:'gpt-5.6-luna',destination:'OpenAI (Codex 구독 계정)',template:'기본 AI({main})를 따라가는 중 — {model}, {verified}',params:{main:'Codex',model:'gpt-5.6-luna',verified:'검증됨'}}}));
+ assert($('active-ai').textContent.includes('기본 AI(Codex)를 따라가는 중 — gpt-5.6-luna, 검증됨'));
+ assert(!buttonsIn('active-ai').some(node=>node.dataset.focusKey==='judgment-check'),'an active route offers no re-check on the card');
  ctx.renderExecutionConnection(settingsFor('codex',{codex:sub('codex',{installed:false})}));
  assert($('active-ai').textContent.includes('선택한 CLI를 찾지 못했습니다'));assert.equal(currentCount(),0,'a missing CLI is not presented as in use');
  ctx.renderExecutionConnection({...settingsFor('other'),model:{provider:'ollama',endpoint:'http://127.0.0.1:11434',model:'llama'},main_ai:{...settingsFor('other').main_ai,other:{provider:'ollama',model:'llama',destination:'http://127.0.0.1:11434'}}});
  assert($('active-ai').textContent.includes('확인 필요')&&$('active-ai').textContent.includes('변경 목록에 없습니다'),'an existing Ollama route renders truthfully');
  ctx.renderExecutionConnection(settingsFor(''));
  assert.equal(currentCount(),0);assert($('active-ai').textContent.includes('작업을 실행할 AI가 없습니다'));
+ // #679: the Work model for a subscription CLI is shown, chosen in the chooser and sent with 확인하고 사용.
+ const note='AgentOS는 Codex 개인 설정을 격리하므로 ~/.codex/config.toml의 모델은 쓰지 않습니다. 비워 두면 CLI 기본 모델을 씁니다.';
+ calls.length=0;
+ ctx.renderExecutionConnection(settingsFor('codex',{codex:sub('codex',{model:'gpt-5.6-luna',model_note:note})},{model_lists:{codex:{models:[{id:'gpt-5.6-luna'},{id:'gpt-5.6-terra'}]}}}));
+ assert($('active-ai').textContent.includes('작업 모델: gpt-5.6-luna'),'the Work model is visible on the card');
+ assert($('active-ai').textContent.includes('~/.codex/config.toml의 모델은 쓰지 않습니다'),'the ignored owner config is stated');
+ ctx.openAiChooser(changeButton);
+ const workModel=descendants($('ai-chooser-list')).find(node=>node.tag==='input'&&node.name==='main-ai-model');
+ assert(workModel,'the selected subscription route offers a model field');assert.equal(workModel.value,'gpt-5.6-luna');
+ assert(descendants($('ai-chooser-list')).some(node=>node.tag==='option'&&node.value==='gpt-5.6-terra'),'suggestions come from a refreshed list');
+ workModel.value='gpt-5.6-terra';workModel.oninput();
+ await ctx.applyAiChoice($('ai-chooser-apply'));
+ same(calls.find(call=>call.path==='/api/main-ai/activate'),{path:'/api/main-ai/activate',body:{route:'codex',model:'gpt-5.6-terra'}});
+ assert(!calls.some(call=>String(call.path).startsWith('/api/decision-route/models')),'no model list is fetched by rendering or choosing');
+ ctx.renderExecutionConnection(settingsFor('claude-code',{'claude-code':sub('claude-code',{model:''})}));
+ assert($('active-ai').textContent.includes('작업 모델: CLI 기본값'));
 })().catch(error=>{console.error(error);process.exit(1);});
 ctx.renderTelegram({telegram:{enabled:true,paired:true,username:'fixture'},telegram_status:{message:'ok'}});
 const telegramButton=buttonIn('telegram-current');ctx.renderTelegram({telegram:{enabled:true,paired:true,username:'fixture'},telegram_status:{message:'ok'}});

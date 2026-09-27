@@ -5766,9 +5766,10 @@ class AgentService:
                             outcome,agency_report=shortfall
                             resolved_blocker=False
                     elif subscription.get('id') and owner_question and outcome in ('failed','partial') and not agency_report:
-                        # #753: already short (for example a failed tool); the question still reaches the owner.
-                        shortfall=self.cli_shortfall(job['id'],attempt_start,prompt,OWNER_NEEDED,response)
-                        if shortfall is not None:agency_report=shortfall[1]
+                        # #753: already short (for example a failed tool, internal-state calls
+                        # included); the outcome stays and the question still reaches the owner.
+                        from .agent_runtime import agency_report as question_report
+                        agency_report=question_report(prompt,[],[],[],None,response)
                     # Said once when working orchestration fell back to the default Main AI.
                     if orchestration is not None and orchestration.notice:
                         response=response.rstrip()+'\n\n'+orchestration.notice

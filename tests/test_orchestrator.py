@@ -1014,6 +1014,22 @@ class OwnerQuestion(Harness):
         self.assertEqual(row['status'], 'failed')
         self.assertIn(REPORT_QUESTION_LABEL + ' ' + question, row['owner_cause'])
 
+    def test_a_question_after_a_failed_internal_state_call_still_reaches_the_owner(self):
+        """#754 review: a failed internal-state call leaves the attempt short; the question is still reported."""
+        from personal_agent.agent_runtime import INTERNAL_STATE_ACTIONS
+        from personal_agent.conversation_projection import REPORT_QUESTION_LABEL
+        internal = sorted(INTERNAL_STATE_ACTIONS)[0]
+        question = '지금 어디에 계신가요?'
+
+        def failing(tools):
+            tools.capabilities.record(internal, 'failed', json.dumps({'host_action': internal, 'error': 'x'}))
+        self.engine.before = failing
+        self.engine.answers = [question]
+        self.script([plan('codex', 'Answer.')], goals=[False], owner_inputs=[True])
+        _job, row = self.run_work('얼마나 걸려?')
+        self.assertEqual(row['status'], 'failed')
+        self.assertIn(REPORT_QUESTION_LABEL + ' ' + question, row['owner_cause'])
+
     def test_a_question_after_only_internal_state_keeps_its_outcome(self):
         """#753: AgentOS-internal state actions are not a tool run, as on the direct route."""
         from personal_agent.agent_runtime import INTERNAL_STATE_ACTIONS

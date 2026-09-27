@@ -659,6 +659,22 @@ class WorkerGuardLogicTests(unittest.TestCase):
         worker.op_release_submit(3, {'form': reported}, 5)
         self.assertEqual(worker.failed[-1], (3, 'submit_changed'), 'released at most once')
 
+    def test_a_submit_cancelled_after_a_timed_out_step_keeps_its_hold_id(self):
+        # #700 review P2-5: re-queued under the page's own hold id, so its release still matches.
+        bw, worker = self.worker()
+        worker.run = lambda body, arguments, done, world=None: done(
+            {'cancelled': {'id': 'page-hold', 'dom': 0, 'method': 'post', 'action': 'https://shop.test/pay',
+                           'page': 'https://shop.test/c', 'state': 's'}}, None)
+        worker.finish_input(9)   # the step already answered (timeout): not pending
+        self.assertEqual(worker.cancelled['id'], 'page-hold')
+        self.assertEqual(worker.take_cancelled()['action'], 'https://shop.test/pay')
+        self.assertEqual(worker.held['id'], 'page-hold')
+
+    def test_a_refused_destination_record_carries_no_query(self):
+        from personal_agent import browser_worker as bw
+        self.assertEqual(bw.destination_record('https://u:p@shop.test/s?q=4111#x', 'GET'),
+                         {'dom': -1, 'method': 'get', 'action': 'https://shop.test/s'})
+
     def test_the_page_wrapper_is_not_installed_while_the_owner_signs_in(self):
         bw, worker = self.worker()
         added = []
@@ -692,7 +708,7 @@ class WorkerGuardLogicTests(unittest.TestCase):
         worker.AppHelper = type('AppHelper', (), {'callLater': staticmethod(lambda seconds, fn: later.append(fn))})
         answers = []
         worker.check_form_navigation('https://shop.test/pay', 'POST', answers.append)
-        self.assertEqual(worker.ran[-1][:2], (bw.FORM_NAVIGATION_SCRIPT, {'url': 'https://shop.test/pay', 'method': 'POST'}))
+        self.assertEqual(worker.ran[-1][:2], (bw.FORM_NAVIGATION_SCRIPT, {'url': 'https://shop.test/pay', 'method': 'POST', 'frame': False}))
         self.assertEqual(worker.deciding, 1, 'a click waits for this decision')
         worker.ran[-1][2]({'allow': False, 'cancelled': {'id': 'n1', 'dom': 0, 'method': 'post',
                                                          'action': 'https://shop.test/pay', 'page': 'p', 'state': 's'}}, None)
@@ -865,7 +881,11 @@ class SessionFixtureHandler(FixtureHandler):
                 <label>카드번호 <input type="text" autocomplete="cc-number" name="card"></label>
                 <input type="hidden" name="amount" value="12900"></form>
               <form id="couponForm" action="/coupon" method="post"><input type="hidden" name="coupon" value="SAVE"></form>
+              <form id="sinkForm" action="/pay" method="post" target="sink">
+                <label>카드 <input type="text" autocomplete="cc-number" name="card"></label></form>
+              <iframe name="sink" src="about:blank"></iframe>
               <div role="button" onclick="''' + native.format('payForm') + '''">다른 창 결제</div>
+              <div role="button" onclick="''' + native.format('sinkForm') + '''">숨은 창 결제</div>
               <div role="button" onclick="''' + native.format('couponForm') + '''">다른 창 쿠폰</div>
               </body></html>''')
         if path == '/trusted':
@@ -1163,6 +1183,13 @@ class WebKitIntegrationTests(unittest.TestCase):
             self.assertEqual((record['dom'], record['method']), (0, 'post'))
             self.assertTrue(record['action'].endswith('/pay'))
             self.assertEqual(self.server.posts, [], 'no POST')
+            # #700 review P2-2: the same, aimed at an iframe of the page.
+            worker.goto(self.origin + '/checkout-realm', 10)
+            index = next(row['index'] for row in worker.snapshot()['elements'] if row['name'] == '숨은 창 결제')
+            with self.assertRaises(ToolError) as caught:
+                worker.click(index, 10)
+            self.assertEqual((caught.exception.code, caught.exception.cancelled_form['dom']), ('approval_required', 2))
+            self.assertEqual(self.server.posts, [], 'no POST into the frame either')
             # An ordinary form submitted the same way still goes.
             worker.goto(self.origin + '/checkout-realm', 10)
             index = next(row['index'] for row in worker.snapshot()['elements'] if row['name'] == '다른 창 쿠폰')

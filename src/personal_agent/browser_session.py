@@ -663,7 +663,15 @@ class BrowserSession:
             raise ValueError('effect는 read, navigate, mutate, payment 중 하나여야 합니다.')
         return effect
 
-    def _guard(self, binding, description, required):
+    def _submit_approval_issued(self):
+        """The owner approved a cancelled payment-form submit of this Work that is not yet released (#700)."""
+        issued = getattr(self.approvals, 'issued_action', None)
+        try:
+            return callable(issued) and issued() == 'browser_submit'
+        except Exception:
+            return False
+
+    def _guard(self, binding, description, required, holdable=False):
         """Refuse a guarded step unless an exact owner approval is consumed now.
 
         ``required`` is AgentOS's own classification of the target, or the
@@ -673,10 +681,18 @@ class BrowserSession:
         approval was consumed: only then does the worker let a submit of the
         target's payment form through (#700).  An unguarded step still spends
         an approval the owner gave for exactly it.
+
+        ``holdable``: the step is guarded only because it presses a control of
+        a payment form, so the only guarded effect it can have is that form's
+        submit, which the worker cancels and holds.  While the owner's approval
+        of a cancelled submit is issued and unspent, such a step runs without
+        an allowance instead of asking for itself (which would replace that
+        approval): the submit it makes is held and released only when it is
+        exactly the approved form in the approved state (#700 review).
         """
         if self.approvals.consume(binding):
             return True
-        if required:
+        if required and not (holdable and self._submit_approval_issued()):
             self._refuse(binding, description)
         return False
 
@@ -755,7 +771,8 @@ class BrowserSession:
         key = target_key(element)
         binding = step_binding(self.work_id, 'browser_click', snapshot['_page'], key, key, self._state_of(snapshot, element))
         description = f"'{element.get('name') or element.get('role')}' 버튼 누르기"
-        approved = self._guard(binding, description, element['submit_guarded'] or effect == 'payment')
+        approved = self._guard(binding, description, element['submit_guarded'] or effect == 'payment',
+                               holdable=element['submit_guarded'])
         before = page_reference(snapshot.get('url'))
         answer = self._input(lambda timeout: self._driver().click(element['index'], timeout, approved=approved),
                              description)

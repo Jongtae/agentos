@@ -172,8 +172,9 @@ def draft_step(events, live=None):
             # #710/#718/#740: a re-delegated attempt announces itself until its
             # first observed step, without the plan's reasoning.
             attempt = trace.get('attempt')
-            if event.get('status') == ORCHESTRATION_PLANNED and isinstance(attempt, int) and attempt > 1:
-                current = (event.get('created') or 0, ORCHESTRATION_TOOL, None, {'announce': RETRY_STEP_TEXT}, last_host)
+            if event.get('status') == ORCHESTRATION_PLANNED and isinstance(attempt, int):
+                current = ((event.get('created') or 0, ORCHESTRATION_TOOL, None, {'announce': RETRY_STEP_TEXT}, last_host)
+                           if attempt > 1 else None)
             continue
         if event.get('status') == 'running' and isinstance(step, dict):
             seen = True

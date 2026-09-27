@@ -565,6 +565,10 @@ class Orchestration:
         #: The evaluation of the last attempt when no further attempt followed
         #: (the caller keeps a CLI Work judged short from being stored as succeeded).
         self.terminal = None
+        #: #740 review P1: the last evaluation was OWNER_NEEDED because the worker's
+        #: answer asks the owner (not an approval need); the caller stores that
+        #: CLI Work the way the direct route stores a ``needs_owner`` finish.
+        self.owner_question = False
 
     # -- the plan call --------------------------------------------------------
     def _redact(self, text, private=True):
@@ -584,10 +588,10 @@ class Orchestration:
         except Exception:
             return False
 
-    def _interrupted(self):
-        """Whether the owner stopped this Work (or its budget cannot say)."""
+    def _stopped(self):
+        """Whether the owner stopped this Work or its deadline passed (or its budget cannot say)."""
         try:
-            return self.budget is not None and self.budget.interrupted() is not None
+            return self.budget is not None and (self.budget.interrupted() is not None or self.budget.remaining() <= 0)
         except Exception:
             return True
 
@@ -796,9 +800,11 @@ class Orchestration:
         except Exception:
             return UNJUDGED
         verdict = getattr(judged, 'outcome', None)
+        self.owner_question = False
         if verdict == 'no' and self.owner_input_needed(answer):
             # #740: the worker asked the owner for what the request needs; another
             # worker cannot supply it, so the question is the reply.
+            self.owner_question = True
             return OWNER_NEEDED
         return REACHED if verdict == 'yes' else NOT_REACHED if verdict == 'no' else UNJUDGED
 
@@ -809,11 +815,12 @@ class Orchestration:
         answer, asked only after ``goal_reached`` said no.  A question the
         request or the conversation already answers is not needed; unavailable
         or unsure is no, so the attempt stays short.  It decides what the owner
-        receives, not whether another attempt runs, so only an owner Stop
-        skips it (the deadline was checked before ``goal_reached``).
+        receives, not whether another attempt runs, so it is skipped only after
+        an owner Stop or once the deadline has passed, not when the time left is
+        merely short of another attempt.
         """
         judge = getattr(self.judgments, 'owner_input_needed', None)
-        if judge is None or not str(answer or '').strip() or self._interrupted():
+        if judge is None or not str(answer or '').strip() or self._stopped():
             return False
         try:
             judged = judge(self.request, self.conversation[-CONVERSATION_CHARS:],

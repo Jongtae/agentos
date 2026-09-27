@@ -185,6 +185,12 @@ class OrchestratedAttemptLineTests(unittest.TestCase):
         events += [running('weather', {'action': 'weather'}, 'c2', created=6.0)]
         self.assertEqual(draft_step(events), ('날씨 확인 중', False), 'the retry line gives way to its steps')
 
+    def test_a_first_attempt_after_an_earlier_step_shows_the_thinking_draft(self):
+        """Review P3: attempt 1 planned after a preflight step closes that step's line."""
+        events = [running('web_search', {'action': 'web_search', 'query': 'q'}, 'c0', created=0.5),
+                  self.planned(1, '1번째 시도: Codex · 기본 모델 — 이유', 1.0)]
+        self.assertEqual(draft_step(events), (BETWEEN_STEPS_TEXT, False))
+
     def test_a_fallback_attempt_announces_nothing(self):
         events = [{'tool': 'orchestrator', 'status': 'fallback', 'created': 1.0, 'trace': {'text': '기본 AI로 진행'}}]
         self.assertEqual(draft_step(events), (THINKING_DRAFT_TEXT, False))

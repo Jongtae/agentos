@@ -33,8 +33,8 @@ from .subscription_engines import SubscriptionEngines
 from .bounded_execution import TOOL_INCOMPLETE, TOOL_INCOMPLETE_TEXT, incomplete_bridge_calls
 from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, StrictIsolatedAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult, MAX_PROMPT_BYTES, BOUNDED_PROFILE, HOST_CLI_PROFILES, STRICT_PROFILE, private_read_actions, profile_actions, profile_status, route_unavailable
 from .orchestrator import model_refused, remember_model_refusal
-from .orchestrator import (EVENT_TOOL as ORCHESTRATION_EVENT, NOT_JUDGED, NOT_REACHED, UNJUDGED, WORKER_FAILED,
-                           Orchestration, worker_catalogue)
+from .orchestrator import (EVENT_TOOL as ORCHESTRATION_EVENT, NOT_JUDGED, NOT_REACHED, OWNER_NEEDED, UNJUDGED,
+                           WORKER_FAILED, Orchestration, worker_catalogue)
 from .isolated_engine_gateway import EngineGatewayError
 from .service_control import build_identity
 from .isolated_mcp_proxy import IsolatedMcpProxy, TaskCapabilityRegistry
@@ -2468,8 +2468,9 @@ class AgentService:
         #740: rows are no longer withheld by their Work's source labels.  The
         Judgment AI is an owner-configured AI (pilot posture, #653), and a
         follow-up planned without the conversation it continues loses what it
-        refers to.  Every fact is still redacted by ``Orchestration._redact``
-        before the plan call.  The current request is not part of the excerpt.
+        refers to.  Every fact still passes ``Orchestration._redact`` (stored
+        secrets and the current Work's saved private values) before the plan
+        call.  The current request is not part of the excerpt.
         """
         document_jobs=set(document_jobs or ())
         return [row for row in (rows or [])[:-1]
@@ -2500,19 +2501,34 @@ class AgentService:
                              sections={**sections,'history':len(earlier)},budget=budget,record=event,state=state,
                              pinned=pinned,work_id=job['id'])
 
-    def cli_shortfall(self, job_id, since, request, evaluation):
+    def cli_shortfall(self, job_id, since, request, evaluation, answer=''):
         """``(outcome, report)`` of a CLI attempt whose goal was judged not shown or not judgeable (#710 review).
 
         Not reached: ``partial`` when the attempt observed a successful tool
         result, else ``failed``; unjudged: ``partial``.  The report states the
         unknown the way the direct route's completion rule does (#657).
+
+        Owner question (#740 review P1): the direct route's ``needs_owner``
+        rule.  An attempt that called no tool outside AgentOS-internal state is
+        ordinary conversation: None, the Work keeps ``succeeded`` and the
+        question is the reply.  Otherwise ``partial``/``failed`` as above, with
+        the worker's answer as the report's one question.
         """
-        from .agent_runtime import GOAL_NOT_SHOWN, GOAL_UNJUDGED, agency_report
+        from .agent_runtime import GOAL_NOT_SHOWN, GOAL_UNJUDGED, INTERNAL_STATE_ACTIONS, agency_report
         with self.store.db() as db:
-            rows=db.execute("SELECT tool FROM tool_events WHERE job_id=? AND id>? AND status='succeeded'",(job_id,since or 0)).fetchall()
-        observed=any(row['tool'] not in ('model','subscription_engine',ORCHESTRATION_EVENT) for row in rows)
+            rows=db.execute("SELECT tool,status,detail FROM tool_events WHERE job_id=? AND id>? AND status IN ('running','succeeded','failed')",
+                            (job_id,since or 0)).fetchall()
+        rows=[row for row in rows if row['tool'] not in ('model','subscription_engine',ORCHESTRATION_EVENT)]
+        observed=any(row['status']=='succeeded' for row in rows)
         if evaluation==UNJUDGED:
             return 'partial',agency_report(request,[],[],[GOAL_UNJUDGED],None)
+        if evaluation==OWNER_NEEDED:
+            def action(row):
+                try:data=json.loads(row['detail'] or '{}')
+                except (TypeError,ValueError):data={}
+                return (data.get('host_action') if isinstance(data,dict) else None) or row['tool']
+            if not any(action(row) not in INTERNAL_STATE_ACTIONS for row in rows):return None
+            return ('partial' if observed else 'failed'),agency_report(request,[],[],[],None,question=answer)
         return ('partial' if observed else 'failed'),agency_report(request,[],[],[GOAL_NOT_SHOWN],None)
 
     @staticmethod
@@ -5675,10 +5691,18 @@ class AgentService:
                         refusals.clear();verified_parts.clear();agency_report=None;unknown_statement=None
                     # #710 review P1: a CLI attempt the orchestrator judged short and did not
                     # re-delegate (limit, budget, no new plan) is never stored as succeeded.
+                    # #740: a worker's needed question follows the direct route's needs_owner rule.
+                    owner_question=orchestration is not None and orchestration.terminal==OWNER_NEEDED and orchestration.owner_question
                     if subscription.get('id') and outcome=='succeeded' and orchestration is not None \
-                            and orchestration.terminal in (NOT_REACHED,UNJUDGED):
-                        outcome,agency_report=self.cli_shortfall(job['id'],attempt_start,prompt,orchestration.terminal)
-                        resolved_blocker=False
+                            and (orchestration.terminal in (NOT_REACHED,UNJUDGED) or owner_question):
+                        shortfall=self.cli_shortfall(job['id'],attempt_start,prompt,orchestration.terminal,answer=response)
+                        if shortfall is not None:
+                            outcome,agency_report=shortfall
+                            resolved_blocker=False
+                    elif subscription.get('id') and owner_question and outcome in ('failed','partial') and not agency_report:
+                        # Already short (a failed tool): the question still reaches the owner.
+                        shortfall=self.cli_shortfall(job['id'],attempt_start,prompt,OWNER_NEEDED,answer=response)
+                        if shortfall is not None:agency_report=shortfall[1]
                     # Said once when working orchestration fell back to the default Main AI.
                     if orchestration is not None and orchestration.notice:
                         response=response.rstrip()+'\n\n'+orchestration.notice

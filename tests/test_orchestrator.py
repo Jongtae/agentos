@@ -990,6 +990,51 @@ class OwnerQuestion(Harness):
         self.assertIn(question, context.facts['worker_answer'])
         self.assertIn('PLAIN-EARLIER', context.facts['recent_conversation'])
 
+    def test_a_question_after_a_tool_ran_is_stored_like_a_direct_route_needs_owner_finish(self):
+        """Review P1: an attempt that called a tool is never stored as succeeded on a question;
+        partial when a tool result was observed, failed otherwise, with the answer as the report's question."""
+        from personal_agent.conversation_projection import REPORT_QUESTION_LABEL
+        question = '두 결과 중 어느 쪽으로 할까요?'
+
+        def search(tools):
+            tools.capabilities.record('web_search', 'succeeded',
+                                      json.dumps({'host_action': 'web_search', 'evidence': {'sources': ['https://a.test']}}))
+        self.engine.before = search
+        self.engine.answers = [question]
+        self.script([plan('codex', 'Answer.')], goals=[False], owner_questions=[True])
+        job, row = self.run_work('찾아줘')
+        self.assertEqual(self.events(job, 'evaluated')[-1][1]['stop'], 'owner')
+        self.assertEqual(row['status'], 'partial')
+        self.assertIn(REPORT_QUESTION_LABEL + ' ' + question, row['owner_cause'])
+        self.assertNotIn(GOAL_NOT_SHOWN, row['owner_cause'])
+
+        def failing(tools):
+            tools.capabilities.record('web_search', 'failed', json.dumps({'host_action': 'web_search', 'error': 'x'}))
+        self.engine.before = failing
+        self.engine.answers = [question]
+        self.script([plan('codex', 'Answer.')], goals=[False], owner_questions=[True])
+        _job, row = self.run_work('다시 찾아줘')
+        self.assertEqual(row['status'], 'failed')
+        self.assertIn(question, row['owner_cause'])
+
+    def test_an_owner_stop_skips_the_owner_input_judgment(self):
+        from personal_agent.orchestrator import OWNER_NEEDED as _OWNER, NOT_REACHED as _NOT
+        stopped = mock.Mock(interrupted=lambda: 'stop', remaining=lambda: 300, turns=4, turns_used=0)
+        judged = mock.Mock(outcome='yes')
+        judgments = mock.Mock(goal_reached=lambda *a, **k: mock.Mock(outcome='no'),
+                              owner_input_needed=mock.Mock(return_value=judged))
+        orchestration = Orchestration(judgments, Catalogue([], {}, ''), request='r', budget=None)
+        self.assertEqual(orchestration.evaluate_answer('어디서요?', ''), _OWNER)
+        self.assertTrue(orchestration.owner_question)
+        orchestration.budget = stopped
+        self.assertFalse(orchestration.owner_input_needed('어디서요?'))
+        orchestration.budget = mock.Mock(interrupted=lambda: None, remaining=lambda: 0)
+        self.assertFalse(orchestration.owner_input_needed('어디서요?'), 'the deadline has passed')
+        orchestration.budget = None
+        judgments.owner_input_needed.return_value = mock.Mock(outcome='no')
+        self.assertEqual(orchestration.evaluate_answer('어디서요?', ''), _NOT)
+        self.assertFalse(orchestration.owner_question)
+
     def test_an_unneeded_question_is_still_redelegated(self):
         self.engine.answers = ['어디에서 출발하시나요?']
         self.script([plan('codex', 'Answer.'), plan('openai', 'Resolve it from the conversation.')],

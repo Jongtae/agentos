@@ -116,15 +116,19 @@ CASE_IDS = tuple(case_id for case_id, _run in CASES)
 assert NO_CANDIDATE not in _PROJECTION_CANDIDATES and JUDGMENT_UNAVAILABLE
 
 
-def qualify(engine, *, policy=None, stop_on_failure=True):
+def qualify(engine, *, policy=None, stop_on_failure=True, checkpoint=None):
     """Run the suite against one engine; return a content-free result record.
 
     ``stop_on_failure`` bounds the calls (and cost) spent on a candidate
-    that already cannot qualify.
+    that already cannot qualify.  ``checkpoint(case_id, index)`` (#685) is
+    called before each case, outside the per-case failure capture, so a
+    background job can record progress and stop between cases by raising.
     """
     policy = policy or DecisionPolicy()
     results = []
-    for case_id, run in CASES:
+    for index, (case_id, run) in enumerate(CASES):
+        if checkpoint is not None:
+            checkpoint(case_id, index)
         try:
             passed, outcome = run(engine, policy)
         except Exception as exc:  # an adapter bug is a failed case, not a pass

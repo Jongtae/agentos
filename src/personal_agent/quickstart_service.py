@@ -763,6 +763,17 @@ class AgentService:
     def save_decision_route_credential(self, body):
         return self.decision_routes.save_credential(body)
 
+    def run_due_qualification(self):
+        """One work-loop tick of the background Judgment AI qualification (#685)."""
+        try:
+            return self.decision_routes.run_due_qualification()
+        except Exception as exc:  # noqa: BLE001 - never stop the work loop
+            LOG.warning('judgment qualification dispatch failed: %s',type(exc).__name__)
+            return False
+
+    def cancel_decision_qualification(self, _body=None):
+        return self.decision_routes.cancel_qualification()
+
     # -- Main AI (기본 AI) chooser (#619) -------------------------------------
     def activate_main_ai(self, body):
         return self.main_ai.activate(body)
@@ -5976,10 +5987,14 @@ class AgentService:
 
     def start(self):
         self.recover_interrupted_work()
+        # #685: a Judgment AI qualification cut off by the restart is requeued once or fails as interrupted.
+        self.decision_routes.recover_qualification()
         def work():
             while not self.stop.is_set():
                 # #659: one indexed query; nothing due costs no model or network call.
                 self.run_due_preparation()
+                # #685: a queued Judgment AI qualification starts off this thread; nothing queued is a config read.
+                self.run_due_qualification()
                 self.run_one()
                 self.deliver_one()
                 self.deliver_notification()

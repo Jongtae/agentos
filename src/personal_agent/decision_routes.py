@@ -305,6 +305,9 @@ class DecisionRoutes:
         self._checkpoint = None
         #: Whether the running job may still commit (checked under service.lock), or None.
         self._job_live = None
+        #: True while a background job (not an explicit activation) holds
+        #: ``_activating``; written under ``service.lock``.
+        self._job_holds_lock = False
         self.jev_transport = jev_transport
         # The bounded HTTP transport for the explicit API model-list refresh.
         self.models_transport = models_transport or request_json
@@ -576,17 +579,19 @@ class DecisionRoutes:
                             key=lambda row: row.get('queued_at') or 0)
         if not queued or not self._activating.acquire(blocking=False):
             return False
+        with self.service.lock:
+            self._job_holds_lock = True
         try:
             # Only a job still queued is claimed: a cancel between the read
             # above and this update wins (review P2).
             claimed = self._update_job(queued[0]['option'], queued[0]['id'], expect=JOB_QUEUED, state=JOB_RUNNING,
                                        started_at=self.clock(), step=None)
             if not claimed:
-                self._activating.release()
+                self._release_job_lock()
                 return False
             self.spawn(lambda: self._run_job(claimed))
         except BaseException:
-            self._release_quietly()
+            self._release_job_lock()
             raise
         return True
 
@@ -602,6 +607,11 @@ class DecisionRoutes:
         if 'route_rev' in row:
             return self._route_rev() == row.get('route_rev')
         return self.mode() == MODE_FOLLOW
+
+    def _release_job_lock(self):
+        with self.service.lock:
+            self._job_holds_lock = False
+        self._release_quietly()
 
     def _release_quietly(self):
         try:
@@ -654,7 +664,7 @@ class DecisionRoutes:
             return finish(JOB_PASSED, result={'state': 'active'})
         finally:
             self._checkpoint = self._job_live = None
-            self._release_quietly()
+            self._release_job_lock()
 
     def _latest_failure(self, main_id):
         """The failure code the qualification just recorded (follow or CLI check row)."""
@@ -1300,7 +1310,20 @@ class DecisionRoutes:
         if main not in FOLLOW_CANDIDATES:
             self._fail(f'{MODE_FOLLOW}:{main}', 'follow-unsupported',
                        FOLLOW_UNAVAILABLE.get(main, FOLLOW_UNAVAILABLE['other']))
-        self.queue_qualification(main, explicit=True)
+        # Review (#761): an explicit activation still running would commit
+        # after this request and supersede it, so it is refused like every
+        # other concurrent activation.  A background job holding the lock is
+        # fine: the request queues (a same-route running job is replaced).
+        if self._activating.acquire(blocking=False):
+            try:
+                self.queue_qualification(main, explicit=True)
+            finally:
+                self._activating.release()
+        else:
+            with self.service.lock:
+                if not self._job_holds_lock:
+                    raise DecisionRouteError('이미 대화 해석 경로를 확인하고 있습니다. 끝난 뒤 다시 시도하세요.')
+                self.queue_qualification(main, explicit=True)
         return self.status()
 
     def _activate(self, body):

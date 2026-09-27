@@ -411,6 +411,38 @@ class ExplicitFollowJobTests(JobFixture):
         self.assertEqual(self.store.config('decision_route')['transport'], 'off')
         self.assertEqual(self.judgments(), [])
 
+    def test_a_follow_request_is_refused_while_an_explicit_activation_runs(self):
+        # Review (#761): the older activation would commit first and supersede it.
+        service = self.service()
+        self.claude_main()
+        routes = service.decision_routes
+        self.assertTrue(routes._activating.acquire(blocking=False))  # an explicit activation in flight
+        try:
+            with self.assertRaisesRegex(DecisionRouteError, '이미'):
+                service.activate_decision_route({'transport': MODE_FOLLOW})
+        finally:
+            routes._activating.release()
+        self.assertIsNone(self.store.config(QUALIFICATION_JOBS))
+
+    def test_a_follow_request_while_a_background_job_runs_is_queued(self):
+        service = self.service()
+        self.claude_main()
+        first = service.activate_decision_route({'transport': MODE_FOLLOW})['qualification']
+        queued = []
+        original = service.decision_routes._job_checkpoint
+
+        def checkpoint(job, model, case_id, index):
+            if index == 1 and not queued:
+                queued.append(service.activate_decision_route({'transport': MODE_FOLLOW})['qualification'])
+            original(job, model, case_id, index)
+        service.decision_routes._job_checkpoint = checkpoint
+        service.run_due_qualification()
+        self.assertNotEqual(queued[0]['id'], first['id'], 'the running job of this route is replaced')
+        self.assertEqual(self.job(service)['state'], JOB_QUEUED)
+        service.decision_routes._job_checkpoint = original
+        self.assertTrue(service.run_due_qualification())
+        self.assertEqual(self.store.config('decision_route')['mode'], MODE_FOLLOW)
+
     def test_cheap_refusals_stay_synchronous(self):
         service = self.service()
         with self.assertRaisesRegex(DecisionRouteError, '기본 AI가 아직 없어'):

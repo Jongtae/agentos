@@ -790,6 +790,9 @@ def worker_environment(base=None):
     base = os.environ if base is None else base
     env = {name: base[name] for name in WORKER_ENVIRONMENT if base.get(name)}
     env.setdefault('PATH', '/usr/bin:/bin')
+    if env.get('PYTHONPATH'):
+        # The worker runs in the profile's folder: a relative entry would name another directory (#709 review).
+        env['PYTHONPATH'] = os.pathsep.join(os.path.abspath(entry) for entry in env['PYTHONPATH'].split(os.pathsep) if entry)
     return env
 
 
@@ -802,6 +805,8 @@ WORKER_QUIT_SECONDS = 5
 LOGIN_OPEN_SECONDS = 45
 #: #709: how long closing a login window waits for its save and release.
 LOGIN_CLOSE_SECONDS = 20
+#: #709: how many closed login windows' outcomes a profile remembers.
+LOGIN_WINDOWS_KEPT = 16
 #: #709: the longest a ``browser_open``/``browser_read`` waits for a
 #: client-rendered page's content to settle (``browser_worker.op_settle``).
 RENDER_SETTLE_SECONDS = 4.0
@@ -1117,8 +1122,9 @@ class BrowserProfile:
         self._live = None
         self._suppressed = set()
         self._login_thread = None
-        # (window id, stop event) of the last login window opened (#709).
-        self._login_window = None
+        # Login windows this process opened: id -> stop flag, closed event,
+        # close reason and whether the final save succeeded (#709).
+        self._login_windows = {}
         # What the running worker was given from the jar (#680 review P2-3):
         # sites imported, or why the import failed (then nothing is saved).
         self._imported = set()
@@ -1374,7 +1380,7 @@ class BrowserProfile:
         return result
 
     # -- the owner's login window ------------------------------------------------------
-    def open_for_login(self, url, wait=False, seconds=None):
+    def open_for_login(self, url, wait=False, seconds=None, on_closed=None):
         """Show the worker window at ``url`` for the owner to log in by hand.
 
         AgentOS navigates to ``url`` and does nothing else: no typing, no
@@ -1382,6 +1388,12 @@ class BrowserProfile:
         exported into the encrypted jar while it is open and when the owner
         closes it (or after ``seconds``, by default ``LOGIN_WINDOW_SECONDS``,
         or when ``close_login_window`` is called with the returned ``window``).
+
+        #709: once the window has closed, its cookies were saved and the
+        profile was released, ``on_closed(window, reason, saved)`` is called
+        on the window's thread.  ``reason`` is ``owner`` (the owner closed the
+        window), ``closed`` (``close_login_window``), ``timeout`` or
+        ``failed``; ``saved`` is whether the final save into the jar succeeded.
         """
         if not self.available():
             return {'state': 'unavailable', 'reason': self.unavailable_reason(), 'message': self.unavailable_message()}
@@ -1395,13 +1407,19 @@ class BrowserProfile:
         except ToolError:
             return {'state': 'busy', 'message': BUSY_TEXT}
         opened = threading.Event()
-        stop = threading.Event()
         window_id = secrets.token_hex(8)
-        self._login_window = (window_id, stop)
+        # The flag a programmatic close sets before it stops the loop, so an
+        # owner's close is never confused with it (#709).
+        record = {'stop': threading.Event(), 'done': threading.Event(), 'reason': None, 'saved': False}
+        self._login_windows[window_id] = record
+        for stale in list(self._login_windows)[:-LOGIN_WINDOWS_KEPT]:
+            self._login_windows.pop(stale, None)
+        stop = record['stop']
         lifetime = LOGIN_WINDOW_SECONDS if seconds is None else max(1.0, min(float(seconds), LOGIN_WINDOW_SECONDS))
         failure = []
         def window():
             driver = None
+            reason = 'failed'
             try:
                 self.profile_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
                 driver = self.launcher(self.profile_dir, False)
@@ -1419,17 +1437,26 @@ class BrowserProfile:
                     if self.clock() - saved >= LOGIN_SAVE_SECONDS:
                         self._save(driver)
                         saved = self.clock()
+                reason = 'closed' if stop.is_set() else 'timeout' if self.clock() >= deadline else 'owner'
             except Exception as exc:
                 failure.append(type(exc).__name__)
             finally:
+                stored = False
                 if driver is not None:
-                    self._save(driver)
+                    stored = bool(self._save(driver))
                     try:
                         driver.close()
                     except Exception:
                         pass
                 self._release()
+                record['reason'], record['saved'] = reason, stored and not failure
+                record['done'].set()
                 opened.set()
+                if on_closed is not None:
+                    try:
+                        on_closed(window_id, reason, record['saved'])
+                    except Exception:
+                        pass
         self._login_thread = threading.Thread(target=window, name='agentos-browser-login', daemon=True)
         self._login_thread.start()
         if wait:
@@ -1441,23 +1468,33 @@ class BrowserProfile:
         return {'state': 'closed' if wait else 'opened', 'url': page_reference(url), 'message': LOGIN_WINDOW_TEXT,
                 'window': window_id}
 
+    def login_window_known(self, window):
+        """Whether ``window`` is a login window this process opened (a restart forgets every one)."""
+        return bool(window) and window in self._login_windows
+
+    def login_window_outcome(self, window):
+        """``(reason, saved)`` once ``window`` has closed, saved and released; None while it is open or unknown."""
+        record = self._login_windows.get(window) if window else None
+        if record is None or not record['done'].is_set():
+            return None
+        return record['reason'], bool(record['saved'])
+
     def close_login_window(self, window, timeout=LOGIN_CLOSE_SECONDS):
         """Close the login window ``open_for_login`` returned as ``window``, and wait for it (#709).
 
-        Only that window: another login window is left alone.  Its cookies are
-        saved into the jar and the profile is released before this returns
-        True; False when that window is not the open one (already closed,
-        replaced) or did not finish closing in ``timeout`` seconds.
+        Only that window: another login window is left alone.  Returns True
+        only when that window has closed (now, or earlier by the owner), its
+        final cookie save into the jar succeeded and the profile was
+        released.  False when this process never opened it (a restart), it
+        did not finish closing in ``timeout`` seconds, or the save failed.
         """
-        current = self._login_window
-        if not window or current is None or current[0] != window:
+        record = self._login_windows.get(window) if window else None
+        if record is None:
             return False
-        current[1].set()
-        thread = self._login_thread
-        if thread is not None and thread is not threading.current_thread():
-            thread.join(timeout)
-            return not thread.is_alive()
-        return True
+        record['stop'].set()
+        if not record['done'].wait(timeout):
+            return False
+        return bool(record['saved'])
 
 
 def _generation(driver):

@@ -228,15 +228,19 @@ BROWSER_LOGIN_SECONDS=600
 BROWSER_LOGIN_KEEP_SECONDS=86400
 #: What the model reads for a login_required page when the owner will be asked in-flow.
 BROWSER_LOGIN_OFFERED_TEXT=('이 페이지는 로그인이 필요합니다. 이 실행이 끝나면 AgentOS가 이 Mac에 로그인 창을 열고 소유자에게 '
-                            '로그인을 요청합니다. 소유자가 로그인하고 "로그인 완료"를 누르면 이 요청을 한 번 이어서 처리합니다. '
+                            '로그인을 요청합니다. 소유자가 로그인하고 창을 닫으면 이 요청을 한 번 이어서 처리합니다. '
                             '비밀번호는 입력하지 말고, 지금까지 확인한 내용으로 이번 답을 마치세요.')
-BROWSER_LOGIN_PROMPT=('{host} 로그인이 필요합니다. 이 Mac에 열린 AgentOS 로그인 창에서 직접 로그인한 뒤 "로그인 완료"를 '
-                      '누르면 요청을 한 번 이어서 처리합니다. "건너뛰기"를 누르면 지금까지의 결과로 마칩니다. '
+BROWSER_LOGIN_PROMPT=('{host} 로그인이 필요합니다. 이 Mac에 열린 AgentOS 로그인 창에서 직접 로그인한 뒤 창을 닫거나 '
+                      '"로그인 완료"를 누르면 요청을 한 번 이어서 처리합니다. "건너뛰기"를 누르면 지금까지의 결과로 마칩니다. '
                       '10분 안에 응답이 없으면 창을 닫습니다. AgentOS는 로그인 창의 입력 내용을 보지 않습니다.')
 BROWSER_LOGIN_RESULT_TEXT={'resumed':'로그인 창을 닫고 요청을 한 번 이어서 처리합니다.',
                            'skipped':'로그인을 건너뛰었습니다. 요청은 지금까지의 결과로 마칩니다.',
                            'expired':'로그인 요청 시간이 지나 창을 닫았습니다. 요청은 지금까지의 결과로 마칩니다.',
-                           'not_resumed':'로그인 창을 닫았지만 요청을 이어서 처리할 수 없는 상태입니다. 다시 요청해 주세요.'}
+                           'not_resumed':'로그인 창을 닫았지만 요청을 이어서 처리할 수 없는 상태입니다. 다시 요청해 주세요.',
+                           'close_failed':('로그인 창을 닫고 로그인 세션을 저장했는지 확인하지 못해 요청을 이어서 처리하지 '
+                                           '않았습니다. 다시 요청하면 필요할 때 로그인을 다시 요청합니다.')}
+#: #709: a Work whose last login ended this way may be asked again at the next login page.
+BROWSER_LOGIN_REASK_STATES=('expired','unavailable')
 
 class AgentService:
     def __init__(self, store, adapter=None, telegram_transport=None, subscription_engines=None, execution_adapter=None,
@@ -3486,13 +3490,18 @@ class AgentService:
     # A browser step that lands on a login page records one request for its
     # Work (``browser_approvals_for(job).login_required``).  The Work's run
     # holds the browser profile, so the window is shown only after the run
-    # released it (``offer_browser_login``); the owner then logs in by hand in
-    # that window and answers 로그인 완료 / 건너뛰기 (Telegram ``p7l:`` or the
-    # web decision).  로그인 완료 closes the window (its cookies go into the
-    # encrypted jar and the profile is released) and re-queues this exact Work
-    # once by compare-and-set.  건너뛰기 or ``BROWSER_LOGIN_SECONDS`` without an
-    # answer closes the window and leaves the Work as it ended (partial).
-    # AgentOS never types into or reads the login window.
+    # released it (``offer_browser_login``); the owner logs in by hand in that
+    # window.  **Closing the window is the decision**: once it closed, its
+    # cookies were saved into the encrypted jar and the profile was released,
+    # the Work is re-queued once by compare-and-set.  Telegram 로그인 완료 /
+    # 건너뛰기 (``p7l:``) and the web decision are optional: they mark the row
+    # and the work loop (``process_browser_logins``, never a poll or HTTP
+    # thread) closes the window and settles it.  A window that could not be
+    # closed and saved (or that a restart forgot) expires the row instead: the
+    # Work is not re-queued, the owner is told once, and the next login page
+    # may ask again.  ``BROWSER_LOGIN_SECONDS`` without a decision closes the
+    # window and leaves the Work as it ended.  AgentOS never types into or
+    # reads the login window.
     def browser_login_requests(self):
         rows=self.store.config(BROWSER_LOGINS_KEY,{})
         return rows if isinstance(rows,dict) else {}
@@ -3511,8 +3520,9 @@ class AgentService:
     def _request_browser_login(self, job, url):
         """Record that this Work needs the owner's login at ``url``; returns the model-facing text or None.
 
-        Once per Work: a Work already asked (in any state) is not asked again,
-        and nothing is recorded when this computer cannot show the window.
+        A Work is asked again only after its last login expired or its window
+        could not open; one that is waiting, was resumed or was skipped is not.
+        Nothing is recorded when this computer cannot show the window.
         """
         try:
             parts=urlsplit(str(url or ''))
@@ -3523,7 +3533,8 @@ class AgentService:
             return None
         target=url if '[가림]' not in url else f'{parts.scheme}://{parts.netloc}/'
         with self.lock:
-            if self._browser_login(job['id']) is not None:return None
+            existing=self._browser_login(job['id'])
+            if existing is not None and existing.get('state') not in BROWSER_LOGIN_REASK_STATES:return None
             self._put_browser_login(job['id'],{'work_id':job['id'],'url':target,'host':host,
                                                'state':'requested','requested_at':time.time(),
                                                'nonce':secrets.token_hex(16)})
@@ -3532,96 +3543,175 @@ class AgentService:
     def offer_browser_login(self, job):
         """After a Work's run: show the login window it asked for and ask the owner (#709).
 
-        Returns True when the window opened and the owner was asked.  A
-        window that cannot open (another holder, no engine) records the row
-        as ``unavailable``; the Work keeps its ended state.
+        Returns True when the window opened.  A window that cannot open
+        (another holder, no engine) records the row as ``unavailable``; the
+        Work keeps its ended state.
         """
         row=self._browser_login(job['id'])
         if not row or row.get('state')!='requested':return False
+        # Offered before the window can close, so an owner who closes it at once is still heard.
+        now=time.time()
+        self._put_browser_login(job['id'],{**row,'state':'offered','window':None,'offered_at':now,
+                                           'deadline':now+BROWSER_LOGIN_SECONDS})
         try:
-            opened=self.browser_profile.open_for_login(row['url'],seconds=BROWSER_LOGIN_SECONDS)
+            opened=self.browser_profile.open_for_login(row['url'],seconds=BROWSER_LOGIN_SECONDS,
+                                                       on_closed=self._browser_login_window_closed)
         except (ValueError,OSError):
             opened={'state':'failed'}
-        now=time.time()
         if not isinstance(opened,dict) or opened.get('state')!='opened':
-            self._put_browser_login(job['id'],{**row,'state':'unavailable','closed_at':now})
+            self._put_browser_login(job['id'],{**row,'state':'unavailable','closed_at':time.time()})
             LOG.info('browser login window not shown work=%s state=%s',job['id'],opened.get('state') if isinstance(opened,dict) else None)
             return False
-        self._put_browser_login(job['id'],{**row,'state':'offered','window':opened.get('window'),'offered_at':now,
-                                           'deadline':now+BROWSER_LOGIN_SECONDS})
-        self.queue_notification(job,'browser_login_needed',fingerprint=row['nonce'])
+        with self.lock:
+            current=self._browser_login(job['id']) or {}
+            if current.get('state')=='offered' and current.get('nonce')==row['nonce']:
+                self._put_browser_login(job['id'],{**current,'window':opened.get('window')})
+        # Settle a window the owner already closed while it was being recorded.
+        self._reconcile_browser_login(job['id'])
+        if (self._browser_login(job['id']) or {}).get('state')=='offered':
+            self._arm_login_notification(job,row['nonce'])
         return True
+
+    def _arm_login_notification(self, job, nonce):
+        """Queue the optional Telegram prompt for this login (a Work asked again re-arms its row)."""
+        self.queue_notification(job,'browser_login_needed',fingerprint=nonce)
+        with self.store.db() as db:
+            db.execute("UPDATE telegram_notifications SET fingerprint=?,state='queued',message_id=NULL,created=? "
+                       "WHERE job_id=? AND kind='browser_login_needed' AND fingerprint!=? AND state NOT IN ('queued','sending')",
+                       (nonce,time.time(),job['id'],nonce))
 
     def browser_login_prompt(self, work_id):
         row=self._browser_login(work_id) or {}
         return BROWSER_LOGIN_PROMPT.format(host=row.get('host') or '이 사이트')
 
     def browser_login_decision(self, body):
-        """The owner's web decision on one offered login: ``done`` resumes once, ``skip`` finishes."""
+        """The owner's optional web decision on one offered login: ``done`` resumes once, ``skip`` finishes.
+
+        The work loop closes the window and settles it; this only records the decision.
+        """
         if not isinstance(body,dict) or not isinstance(body.get('work_id'),str) or body.get('decision') not in ('done','skip'):
             raise ValueError('로그인 요청과 결정을 확인하세요.')
         row=self._browser_login(body['work_id'])
         if not row or row.get('state')!='offered':raise ValueError('로그인을 기다리는 요청이 없습니다.')
-        return self._decide_browser_login(body['work_id'],row['nonce'],body['decision']=='done')
+        return self._request_login_decision(body['work_id'],row['nonce'],'resume' if body['decision']=='done' else 'skip')
 
-    def _decide_browser_login(self, work_id, nonce, resume, reason=None):
-        """Finish one offered login exactly once: close its window, then resume or leave the Work.
-
-        The row moves out of ``offered`` under the service lock (compared on
-        its nonce), so a second tap, a stale message or a race with the
-        timeout finds nothing to do.  The window is closed (cookies saved,
-        profile released) before the Work is re-queued, so the resumed run
-        can hold the profile.
-        """
+    def _request_login_decision(self, work_id, nonce, intent):
+        """Mark one offered login for the work loop to close and settle; the first decision wins."""
         with self.lock:
             row=self._browser_login(work_id)
             if not row or row.get('state')!='offered' or not hmac.compare_digest(str(row.get('nonce','')),str(nonce or '')):
-                return {'resumed':False,'work_id':work_id,'state':None}
-            final=reason or ('resumed' if resume else 'skipped')
-            self._put_browser_login(work_id,{**row,'state':final,'closed_at':time.time()})
-        self.browser_profile.close_login_window(row.get('window'))
-        resumed=False
-        if resume:
+                return {'work_id':work_id,'state':None}
+            self._put_browser_login(work_id,{**row,'state':'closing','intent':intent,'decided_at':time.time()})
+        return {'work_id':work_id,'state':'closing','intent':intent}
+
+    def _browser_login_window_closed(self, window, reason, saved):
+        """``BrowserProfile.open_for_login``'s ``on_closed``: the window closed, was saved and released."""
+        for work_id,row in list(self.browser_login_requests().items()):
+            if isinstance(row,dict) and window and row.get('window')==window:
+                self._reconcile_browser_login(work_id)
+
+    def _reconcile_browser_login(self, work_id, now=None):
+        """Settle one waiting login from what its window did (#709).  Returns the final state or None.
+
+        * a window this process does not know (a restart) -> ``expired``;
+        * a decision was recorded -> close the window now, then settle it;
+        * the owner closed the window -> resume (only if its cookies were saved);
+        * the window timed out or failed, or the deadline passed -> ``expired``.
+        """
+        now=time.time() if now is None else now
+        row=self._browser_login(work_id)
+        if not row or row.get('state') not in ('offered','closing') or not row.get('window'):return None
+        window,nonce=row['window'],row.get('nonce')
+        if not self.browser_profile.login_window_known(window):
+            return self._settle_browser_login(work_id,nonce,'expire',closed=False)
+        if row['state']=='closing':
+            closed=self.browser_profile.close_login_window(window)
+            return self._settle_browser_login(work_id,nonce,row.get('intent'),closed=closed)
+        outcome=self.browser_profile.login_window_outcome(window)
+        if outcome is None:
+            if now<float(row.get('deadline') or 0):return None
+            closed=self.browser_profile.close_login_window(window)
+            return self._settle_browser_login(work_id,nonce,'expire',closed=closed)
+        reason,saved=outcome
+        if reason=='owner':
+            return self._settle_browser_login(work_id,nonce,'resume',closed=saved)
+        return self._settle_browser_login(work_id,nonce,'expire',closed=saved and reason=='timeout')
+
+    def _settle_browser_login(self, work_id, nonce, intent, closed):
+        """Finish one login exactly once.  Only a closed and saved window resumes the Work.
+
+        The row leaves ``offered``/``closing`` under the service lock (compared
+        on its nonce), so a second tap, a stale message, the owner's close and
+        the timeout race to one outcome.  ``resume`` re-queues this exact Work
+        once by compare-and-set; when the window could not be closed and saved
+        the row expires instead (``close_failed``) and the Work is not re-queued.
+        """
+        with self.lock:
+            row=self._browser_login(work_id)
+            if not row or row.get('state') not in ('offered','closing') or not hmac.compare_digest(str(row.get('nonce','')),str(nonce or '')):
+                return None
+            if not closed and intent in ('resume','expire'):
+                final,shown='expired','close_failed'
+            elif intent=='resume':
+                final=shown='resuming'
+            elif intent=='skip':
+                final=shown='skipped'
+            else:
+                final=shown='expired'
+            self._put_browser_login(work_id,{**row,'state':final,'cause':shown,'closed_at':time.time()})
+        if final=='resuming':
             with self.store.db() as db:
                 db.execute('BEGIN IMMEDIATE')
                 resumed=db.execute("UPDATE jobs SET status='queued',error=NULL,delivery='none' WHERE id=? AND status IN ('failed','partial')",(work_id,)).rowcount==1
-            if not resumed:
-                final='not_resumed'
-                self._put_browser_login(work_id,{**row,'state':final,'closed_at':time.time()})
-        self._finish_login_notification(work_id,final)
-        return {'resumed':resumed,'work_id':work_id,'state':final}
+            final=shown='resumed' if resumed else 'not_resumed'
+            self._put_browser_login(work_id,{**row,'state':final,'cause':shown,'closed_at':time.time()})
+        self._finish_login_notification(work_id,shown)
+        return final
 
-    def _finish_login_notification(self, work_id, final):
-        """Replace the prompt's buttons with the outcome, or cancel a prompt not sent yet."""
+    def _finish_login_notification(self, work_id, shown):
+        """Tell the owner the outcome once: edit the Telegram prompt, cancel an unsent one, or (for a
+        login that expired unanswered with no prompt shown) leave one line in the conversation."""
         with self.store.db() as db:
             note=db.execute("SELECT * FROM telegram_notifications WHERE job_id=? AND kind='browser_login_needed'",(work_id,)).fetchone()
-        if not note:return
-        note=dict(note)
-        if note['state']=='queued':
-            self.store.update_notification(note['id'],'cancelled');return
-        if note['state']!='sent':return
-        self.store.update_notification(note['id'],'browser_login_'+final)
-        if isinstance(note.get('message_id'),int) and note['message_id']>0:
-            try:self.telegram.edit_message_text(note['chat_id'],note['message_id'],BROWSER_LOGIN_RESULT_TEXT.get(final,''),{'inline_keyboard':[]})
-            except ProviderError:pass
+        note=dict(note) if note else None
+        row=self._browser_login(work_id) or {}
+        if note and note['fingerprint']==row.get('nonce') and note['state']=='sent':
+            self.store.update_notification(note['id'],'browser_login_'+shown)
+            if isinstance(note.get('message_id'),int) and note['message_id']>0:
+                try:self.telegram.edit_message_text(note['chat_id'],note['message_id'],BROWSER_LOGIN_RESULT_TEXT.get(shown,''),{'inline_keyboard':[]})
+                except ProviderError:pass
+            return
+        if note and note['fingerprint']==row.get('nonce') and note['state']=='queued':
+            self.store.update_notification(note['id'],'cancelled')
+        if shown in ('expired','close_failed'):
+            job=self.store.job(work_id)
+            if job:
+                with self.store.db() as db:
+                    db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',
+                               ('assistant',BROWSER_LOGIN_RESULT_TEXT[shown],job['channel'],time.time(),job.get('workspace_id'),work_id))
 
-    def expire_browser_logins(self, now=None):
-        """Close logins the owner did not answer in time; prune old rows (#709).  Cheap: one config read."""
+    def process_browser_logins(self, now=None):
+        """The work loop's pass over in-flow logins (#709).  Cheap: one config read when none waits.
+
+        Closes windows for recorded decisions, settles windows that closed,
+        expires the ones past their deadline or forgotten by a restart, and
+        prunes finished rows after a day.  Returns the Work ids settled.
+        """
         now=time.time() if now is None else now
         rows=self.browser_login_requests()
         if not rows:return []
-        expired=[]
+        settled=[]
         for work_id,row in list(rows.items()):
             if not isinstance(row,dict):continue
-            if row.get('state')=='offered' and now>=float(row.get('deadline') or 0):
-                if self._decide_browser_login(work_id,row.get('nonce'),False,reason='expired').get('state')=='expired':
-                    expired.append(work_id)
-            elif row.get('state')=='requested' and now-float(row.get('requested_at') or 0)>=BROWSER_LOGIN_SECONDS:
+            state=row.get('state')
+            if state in ('offered','closing'):
+                if self._reconcile_browser_login(work_id,now=now):settled.append(work_id)
+            elif state=='requested' and now-float(row.get('requested_at') or 0)>=BROWSER_LOGIN_SECONDS:
                 # The run that asked never finished (a restart): nothing to show.
-                self._put_browser_login(work_id,{**row,'state':'expired','closed_at':now})
-            elif row.get('state') not in ('requested','offered') and now-float(row.get('closed_at') or 0)>=BROWSER_LOGIN_KEEP_SECONDS:
+                self._put_browser_login(work_id,{**row,'state':'expired','cause':'expired','closed_at':now})
+            elif state not in ('requested','offered','closing','resuming') and now-float(row.get('closed_at') or 0)>=BROWSER_LOGIN_KEEP_SECONDS:
                 self._put_browser_login(work_id,None)
-        return expired
+        return settled
 
     def calendar_for(self, job):
         """The Calendar connector bound to this Work's owner, or None."""
@@ -4311,7 +4401,8 @@ class AgentService:
                            and notification['message_id']==message.get('message_id') and row
                            and row.get('state')=='offered' and notification['fingerprint']==row.get('nonce'))
                     if exact:
-                        decided=self._decide_browser_login(notification['job_id'],row['nonce'],parts[2]=='done')
+                        # The work loop closes the window and settles it (never this poll thread).
+                        decided=self._request_login_decision(notification['job_id'],row['nonce'],'resume' if parts[2]=='done' else 'skip')
                         changed=decided.get('state') is not None
             elif authorized and isinstance(data,str) and data.startswith('p7p:'):
                 # #659: the owner's explicit yes/no for one Work's proposed
@@ -5319,8 +5410,8 @@ class AgentService:
                 self.run_one()
                 self.deliver_one()
                 self.deliver_notification()
-                # #709: close in-flow logins the owner did not answer in time.
-                self.expire_browser_logins()
+                # #709: close and settle in-flow logins (decisions, owner closes, timeouts).
+                self.process_browser_logins()
                 self.stop.wait(.3)
         def poll():
             while not self.stop.is_set():

@@ -10,22 +10,25 @@ Evidence classes, named separately:
   driver; ``clip_keeping_links``;
 * model-free service integration (fake page driver, fake Telegram transport,
   scripted model): a login page during a Work shows the login window after
-  the run released the profile and asks the owner with ``p7l:`` buttons;
-  로그인 완료 resumes that Work exactly once, 건너뛰기 and the timeout close
-  the window and leave the Work partial, stale or foreign callbacks are
-  refused, a Work is asked once; a scripted loop whose report carries a long
-  public link keeps it whole in the owner's bubble;
+  the run released the profile; the owner closing it resumes that Work
+  exactly once (a web-started Work too, with no Telegram message), and the
+  optional ``p7l:`` 로그인 완료 / 건너뛰기 and the web decision are settled
+  by the work loop; the timeout, a failed save and a restart never resume
+  (the row expires and a later login page asks again); stale or foreign
+  callbacks are refused; a scripted loop whose report carries a long public
+  link keeps it whole in the owner's bubble;
 * macOS + PyObjC integration (the real WebKit worker and a fixture site):
   a page that renders its text after load is read after it rendered, and the
   in-flow login through the real CLI bridge: the window shows, the session
-  made in it is saved, 로그인 완료 resumes the Work, and the resumed run is
-  signed in.
+  made in it is saved, closing the window resumes the Work, and the resumed
+  run is signed in.
 
 The Codex key and values were verified separately against the installed CLI
 (0.153.4) with an empty ``CODEX_HOME`` (parse only; see the PR).  No live
 model, CLI or owner credential is used.
 """
 import json
+import os
 import tempfile
 import threading
 import time
@@ -141,6 +144,11 @@ class RenderSettle(unittest.TestCase):
         plain = bs.BrowserSession(lambda: FakeDriver(), work_id='w').open({'url': ORIGIN + '/product', 'effect': 'read'})
         self.assertEqual(plain['state'], 'page')
 
+    def test_the_worker_gets_an_absolute_pythonpath(self):
+        env = bs.worker_environment({'PATH': '/usr/bin', 'PYTHONPATH': 'src' + os.pathsep + '/abs/lib', 'SECRET': 'x'})
+        self.assertEqual(env['PYTHONPATH'].split(os.pathsep), [os.path.abspath('src'), '/abs/lib'])
+        self.assertNotIn('SECRET', env)
+
     def test_the_settle_never_outlasts_the_work_budget(self):
         class Budget:
             def check(self):
@@ -178,6 +186,33 @@ class LinksStayWhole(unittest.TestCase):
 
 # ---------------------------------------------------------------- in-flow login (fake driver, fake Telegram)
 
+class JarDriver(FakeDriver):
+    """The fake page driver with a cookie export, so a closing window's save into the jar can succeed or fail."""
+
+    def __init__(self, log=None):
+        super().__init__(log=log)
+        self.fail_export = False
+
+    def cookies_export(self):
+        if self.fail_export:
+            raise RuntimeError('export failed')
+        return {}, []
+
+
+def memory_jar(directory):
+    from personal_agent.browser_jar import JAR_NAME, CookieJar, MemoryKey
+    return CookieJar(Path(directory) / JAR_NAME, MemoryKey())
+
+
+def wait_until(condition, seconds=5.0):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        time.sleep(0.02)
+    return condition()
+
+
 class LoginHarness(unittest.TestCase):
     """One Telegram owner, the direct scripted model route and the fake page driver."""
 
@@ -205,11 +240,13 @@ class LoginHarness(unittest.TestCase):
             return self.scripts[0](url, body, headers, timeout)
 
         def launcher(profile_dir, headless):
-            driver = FakeDriver(log=self.driver_log)
+            driver = JarDriver(log=self.driver_log)
             self.drivers.append(driver)
             return driver
 
-        self.profile = bs.BrowserProfile(Path(self.tmp.name) / 'profile', launcher=launcher)
+        self.transport, self.model, self.launcher = transport, model, launcher
+        self.profile = bs.BrowserProfile(Path(self.tmp.name) / 'profile', launcher=launcher,
+                                         jar=memory_jar(Path(self.tmp.name) / 'profile'))
         self.service = AgentService(self.store, ModelAdapter(model), transport, browser_profile=self.profile)
         self.service.save_model({'provider': 'compatible', 'endpoint': 'https://example.test/v1', 'model': 'test-model', 'api_key': 'k'})
         self.assertTrue(self.service.test_model()['ok'])
@@ -218,8 +255,8 @@ class LoginHarness(unittest.TestCase):
         self.addCleanup(self.close_windows)
 
     def close_windows(self):
-        for row in self.service.browser_login_requests().values():
-            self.profile.close_login_window(row.get('window'))
+        for driver in self.drivers:
+            driver.closed = True
 
     def receive(self, text):
         self.update_id += 1
@@ -232,10 +269,17 @@ class LoginHarness(unittest.TestCase):
         self.service.ingest_callback({'id': 'cb', 'from': {'id': sender}, 'data': data,
                                       'message': {'message_id': message_id, 'chat': {'id': sender, 'type': 'private'}}}, GENERATION)
 
+    def login_script(self):
+        return [Script({'tool_calls': [call('1', 'browser_open', url=ORIGIN + '/login', effect='navigate')]},
+                       {'content': '로그인이 필요합니다.'})]
+
+    def prompts(self):
+        return [body for method, body in self.calls if method == 'sendMessage' and body.get('reply_markup')
+                and 'p7l:' in flat(body['reply_markup'])]
+
     def login_work(self):
         """A Work whose browser step lands on a login page, run once and its prompt delivered."""
-        self.scripts = [Script({'tool_calls': [call('1', 'browser_open', url=ORIGIN + '/login', effect='navigate')]},
-                               {'content': '로그인이 필요합니다.'})]
+        self.scripts = self.login_script()
         job_id = self.receive('계정 페이지 확인해줘')
         self.assertTrue(self.service.run_one())
         #: How the run ended (nothing advanced: failed; something did: partial); the login keeps it.
@@ -243,15 +287,22 @@ class LoginHarness(unittest.TestCase):
         self.assertIn(self.ended, ('failed', 'partial'))
         self.service.deliver_one()
         self.assertTrue(self.service.deliver_notification())
-        prompts = [body for method, body in self.calls if method == 'sendMessage' and body.get('reply_markup')
-                   and 'p7l:' in flat(body['reply_markup'])]
+        prompts = self.prompts()
         self.assertEqual(len(prompts), 1)
-        buttons = prompts[0]['reply_markup']['inline_keyboard'][0]
+        buttons = prompts[-1]['reply_markup']['inline_keyboard'][0]
         notification = self.store.notification(buttons[0]['callback_data'].split(':')[1])
-        return job_id, prompts[0], buttons, notification
+        return job_id, prompts[-1], buttons, notification
 
     def window(self):
-        return self.drivers[1]
+        return self.drivers[-1]
+
+    def state(self, job_id):
+        return (self.service._browser_login(job_id) or {}).get('state')
+
+    def owner_closes(self, job_id):
+        """The owner closes the login window (the worker's close event)."""
+        self.window().closed = True
+        self.assertTrue(wait_until(lambda: self.state(job_id) not in ('offered', 'closing')), self.state(job_id))
 
     def failed_errors(self, job_id):
         with self.store.db() as db:
@@ -262,9 +313,14 @@ class LoginHarness(unittest.TestCase):
     def edits(self):
         return [body for method, body in self.calls if method == 'editMessageText']
 
+    def conversation(self, job_id):
+        with self.store.db() as db:
+            return [row['content'] for row in db.execute("SELECT content FROM messages WHERE job_id=? AND role='assistant' ORDER BY id",
+                                                         (job_id,))]
+
 
 class InFlowLogin(LoginHarness):
-    def test_the_login_window_opens_after_the_run_and_done_resumes_the_work_once(self):
+    def test_closing_the_login_window_resumes_the_work_once(self):
         job_id, prompt, buttons, notification = self.login_work()
         job = self.store.job(job_id)
         self.assertIn(job['status'], ('failed', 'partial'), 'a run that reached a login page did not finish')
@@ -280,55 +336,84 @@ class InFlowLogin(LoginHarness):
                          [f"p7l:{notification['id']}:done", f"p7l:{notification['id']}:skip"])
         self.assertIn('fixture.test', prompt['text'])
         self.assertNotIn('/login', prompt['text'], 'the prompt names the host, not the page')
-        self.tap(f"p7l:{notification['id']}:done", notification['message_id'])
+        self.owner_closes(job_id)
+        self.assertEqual(self.state(job_id), 'resumed')
         self.assertEqual(self.store.job(job_id)['status'], 'queued')
-        self.assertTrue(self.window().closed, 'the window closed before the Work was re-queued')
         self.assertFalse(self.service.browser_status()['login_window_open'])
         self.assertFalse(self.profile.status()['in_use'])
         self.assertEqual(self.store.notification(notification['id'])['state'], 'browser_login_resumed')
         self.assertEqual(self.edits()[-1]['text'], BROWSER_LOGIN_RESULT_TEXT['resumed'])
         self.assertEqual(self.edits()[-1]['reply_markup'], {'inline_keyboard': []})
         self.assertEqual(self.service.browser_status()['pending_logins'], [])
-        # A second tap (or a race with the timeout) does nothing: resumed exactly once.
+        # A later 로그인 완료 or 건너뛰기, or the timeout, does nothing: resumed exactly once.
         with self.store.db() as db:
             db.execute("UPDATE jobs SET status='partial' WHERE id=?", (job_id,))
         self.tap(f"p7l:{notification['id']}:done", notification['message_id'])
-        self.assertEqual(self.service.expire_browser_logins(now=time.time() + BROWSER_LOGIN_SECONDS + 1), [])
+        self.tap(f"p7l:{notification['id']}:skip", notification['message_id'])
+        self.assertEqual(self.service.process_browser_logins(now=time.time() + BROWSER_LOGIN_SECONDS + 1), [])
         self.assertEqual(self.store.job(job_id)['status'], 'partial')
+        self.assertEqual(self.state(job_id), 'resumed')
         with self.store.db() as db:
             db.execute("UPDATE jobs SET status='queued' WHERE id=?", (job_id,))
-        # The resumed run reaches the page; the login window never read or typed anything.
+        # The resumed run reaches the page; nothing was ever submitted in the login window.
         self.scripts = [Script({'tool_calls': [call('1', 'browser_open', url=ORIGIN + '/product', effect='read')]},
                                {'content': '확인했습니다.'})]
         self.assertTrue(self.service.run_one())
         self.assertIn(self.store.job(job_id)['status'], ('succeeded', 'partial'))
-        self.assertEqual(self.window().posts, [], 'nothing was submitted in the login window')
+        self.assertEqual(self.drivers[1].posts, [], 'nothing was submitted in the login window')
 
-    def test_skip_closes_the_window_and_leaves_the_work_partial(self):
+    def test_telegram_done_is_settled_by_the_work_loop_and_resumes_once(self):
+        job_id, _prompt, _buttons, notification = self.login_work()
+        self.tap(f"p7l:{notification['id']}:done", notification['message_id'])
+        self.assertEqual(self.state(job_id), 'closing')
+        self.assertFalse(self.window().closed, 'the poll thread never closes the window itself')
+        self.assertEqual(self.store.job(job_id)['status'], self.ended)
+        self.assertEqual(self.service.process_browser_logins(), [job_id])
+        self.assertTrue(self.window().closed)
+        self.assertEqual(self.store.job(job_id)['status'], 'queued')
+        self.assertEqual(self.state(job_id), 'resumed')
+        self.assertEqual(self.edits()[-1]['text'], BROWSER_LOGIN_RESULT_TEXT['resumed'])
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='partial' WHERE id=?", (job_id,))
+        self.tap(f"p7l:{notification['id']}:done", notification['message_id'])
+        self.assertEqual(self.service.process_browser_logins(), [])
+        self.assertEqual(self.store.job(job_id)['status'], 'partial')
+
+    def test_skip_closes_the_window_and_leaves_the_work_as_it_ended(self):
         job_id, _prompt, _buttons, notification = self.login_work()
         self.tap(f"p7l:{notification['id']}:skip", notification['message_id'])
+        self.service.process_browser_logins()
         self.assertEqual(self.store.job(job_id)['status'], self.ended)
         self.assertTrue(self.window().closed)
-        self.assertEqual(self.service._browser_login(job_id)['state'], 'skipped')
+        self.assertEqual(self.state(job_id), 'skipped')
         self.assertEqual(self.edits()[-1]['text'], BROWSER_LOGIN_RESULT_TEXT['skipped'])
         self.tap(f"p7l:{notification['id']}:done", notification['message_id'])
+        self.service.process_browser_logins()
         self.assertEqual(self.store.job(job_id)['status'], self.ended, 'a stale 로그인 완료 after skip is refused')
 
-    def test_no_answer_in_time_closes_the_window_and_leaves_the_work_partial(self):
+    def test_no_answer_in_time_closes_the_window_and_does_not_resume(self):
         job_id, _prompt, _buttons, notification = self.login_work()
-        self.assertEqual(self.service.expire_browser_logins(now=time.time() + 5), [], 'not yet')
+        self.assertEqual(self.service.process_browser_logins(now=time.time() + 5), [], 'not yet')
         self.assertFalse(self.window().closed)
-        self.assertEqual(self.service.expire_browser_logins(now=time.time() + BROWSER_LOGIN_SECONDS + 1), [job_id])
+        self.assertEqual(self.service.process_browser_logins(now=time.time() + BROWSER_LOGIN_SECONDS + 1), [job_id])
         self.assertTrue(self.window().closed)
         self.assertEqual(self.store.job(job_id)['status'], self.ended)
-        self.assertEqual(self.service._browser_login(job_id)['state'], 'expired')
+        self.assertEqual(self.state(job_id), 'expired')
         self.assertEqual(self.store.notification(notification['id'])['state'], 'browser_login_expired')
         self.assertEqual(self.edits()[-1]['text'], BROWSER_LOGIN_RESULT_TEXT['expired'])
         self.tap(f"p7l:{notification['id']}:done", notification['message_id'])
+        self.service.process_browser_logins()
         self.assertEqual(self.store.job(job_id)['status'], self.ended)
         # Finished rows are pruned a day later.
-        self.service.expire_browser_logins(now=time.time() + 2 * 86400)
+        self.service.process_browser_logins(now=time.time() + 2 * 86400)
         self.assertIsNone(self.service._browser_login(job_id))
+
+    def test_the_window_timing_out_on_its_own_is_not_an_owner_close(self):
+        job_id, _prompt, _buttons, _notification = self.login_work()
+        with mock.patch.object(self.profile, 'login_window_outcome', return_value=('timeout', True)):
+            self.service.process_browser_logins()
+        self.assertEqual(self.state(job_id), 'expired')
+        self.assertEqual(self.store.job(job_id)['status'], self.ended)
 
     def test_a_stale_foreign_or_malformed_callback_is_refused(self):
         job_id, _prompt, _buttons, notification = self.login_work()
@@ -342,47 +427,105 @@ class InFlowLogin(LoginHarness):
         row = self.service._browser_login(job_id)
         self.service._put_browser_login(job_id, {**row, 'nonce': 'another'})
         self.tap(f"p7l:{notification['id']}:done", message_id)
-        self.assertEqual(self.store.job(job_id)['status'], self.ended)
-        self.assertFalse(self.window().closed)
         self.service._put_browser_login(job_id, row)
         # Another callback kind cannot answer it either.
         self.tap(f"p7w:{notification['id']}:approve", message_id)
+        self.service.process_browser_logins()
         self.assertEqual(self.store.job(job_id)['status'], self.ended)
-        self.assertEqual(self.service._browser_login(job_id)['state'], 'offered')
+        self.assertEqual(self.state(job_id), 'offered')
+        self.assertFalse(self.window().closed)
         self.tap(f"p7l:{notification['id']}:done", message_id)
+        self.service.process_browser_logins()
         self.assertEqual(self.store.job(job_id)['status'], 'queued')
 
-    def test_a_work_is_asked_once_and_the_web_decision_answers_too(self):
+    def test_a_web_started_work_resumes_when_the_window_closes_with_no_telegram_message(self):
+        self.scripts = self.login_script()
+        job_id = self.store.enqueue('계정 페이지 확인해줘', 'web-login')
+        self.assertTrue(self.service.run_one())
+        self.assertEqual(self.state(job_id), 'offered')
+        self.owner_closes(job_id)
+        self.assertEqual(self.store.job(job_id)['status'], 'queued')
+        while self.service.deliver_notification():
+            pass
+        self.assertEqual([body for method, body in self.calls if method in ('sendMessage', 'editMessageText')], [])
+
+    def test_the_web_decision_is_optional_and_settled_by_the_work_loop(self):
         job_id, _prompt, _buttons, _notification = self.login_work()
         with self.assertRaises(ValueError):
             self.service.browser_login_decision({'work_id': job_id, 'decision': 'maybe'})
         with self.assertRaises(ValueError):
             self.service.browser_login_decision({'work_id': 'other', 'decision': 'done'})
         self.assertEqual(self.service.browser_login_decision({'work_id': job_id, 'decision': 'done'}),
-                         {'resumed': True, 'work_id': job_id, 'state': 'resumed'})
+                         {'work_id': job_id, 'state': 'closing', 'intent': 'resume'})
         with self.assertRaises(ValueError):
             self.service.browser_login_decision({'work_id': job_id, 'decision': 'done'})
-        # The resumed run meets the login page again: it is not asked a second time.
-        self.scripts = [Script({'tool_calls': [call('1', 'browser_open', url=ORIGIN + '/login', effect='navigate')]},
-                               {'content': '여전히 로그인이 필요합니다.'})]
+        self.service.process_browser_logins()
+        self.assertEqual(self.store.job(job_id)['status'], 'queued')
+        # The resumed run meets the login page again: a resumed login is not asked a second time.
+        self.scripts = self.login_script()
         self.assertTrue(self.service.run_one())
         self.assertEqual(self.failed_errors(job_id)[-1], bs.LOGIN_REQUIRED_TEXT)
         self.assertEqual(len(self.drivers), 3, 'no second login window')
-        self.assertEqual(self.service._browser_login(job_id)['state'], 'resumed')
+        self.assertEqual(self.state(job_id), 'resumed')
+
+    def test_a_window_whose_cookies_could_not_be_saved_expires_and_a_later_login_page_asks_again(self):
+        job_id, _prompt, _buttons, notification = self.login_work()
+        self.window().fail_export = True
+        self.owner_closes(job_id)
+        self.assertEqual(self.state(job_id), 'expired')
+        self.assertEqual(self.service._browser_login(job_id)['cause'], 'close_failed')
+        self.assertEqual(self.store.job(job_id)['status'], self.ended, 'never re-queued without the new session')
+        self.assertEqual(self.edits()[-1]['text'], BROWSER_LOGIN_RESULT_TEXT['close_failed'])
+        self.assertEqual(len([edit for edit in self.edits() if edit['text'] == BROWSER_LOGIN_RESULT_TEXT['close_failed']]), 1,
+                         'the owner is told once')
+        self.ask_again(job_id, notification)
+
+    def test_a_restart_while_offered_expires_the_login_and_a_later_login_page_asks_again(self):
+        job_id, _prompt, _buttons, notification = self.login_work()
+        old_window = self.window()
+        # The service restarts: a new profile knows none of the old process's windows.
+        self.profile = bs.BrowserProfile(Path(self.tmp.name) / 'profile', launcher=self.launcher,
+                                         jar=memory_jar(Path(self.tmp.name) / 'profile'))
+        self.service = AgentService(self.store, ModelAdapter(self.model), self.transport, browser_profile=self.profile)
+        old_window.closed = True
+        self.assertEqual(self.service.process_browser_logins(), [job_id])
+        self.assertEqual(self.state(job_id), 'expired')
+        self.assertEqual(self.store.job(job_id)['status'], self.ended)
+        self.assertEqual(self.edits()[-1]['text'], BROWSER_LOGIN_RESULT_TEXT['close_failed'])
+        # A 로그인 완료 on the old prompt cannot resume it either.
+        self.tap(f"p7l:{notification['id']}:done", notification['message_id'])
+        self.service.process_browser_logins()
+        self.assertEqual(self.store.job(job_id)['status'], self.ended)
+        self.ask_again(job_id, notification)
+
+    def ask_again(self, job_id, old):
+        """The Work runs again and meets a login page: the owner is asked again, on a fresh prompt."""
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='queued' WHERE id=?", (job_id,))
+        self.scripts = self.login_script()
+        self.assertTrue(self.service.run_one())
+        self.assertEqual(self.failed_errors(job_id)[-1], BROWSER_LOGIN_OFFERED_TEXT)
+        self.assertEqual(self.state(job_id), 'offered')
+        self.assertTrue(self.service.deliver_notification())
+        fresh = self.store.notification(old['id'])
+        self.assertEqual(fresh['state'], 'sent')
+        self.assertNotEqual(fresh['message_id'], old['message_id'], 'a new message; the old one no longer binds')
+        self.tap(f"p7l:{old['id']}:done", old['message_id'])
+        self.assertEqual(self.state(job_id), 'offered')
+        self.owner_closes(job_id)
+        self.assertEqual(self.store.job(job_id)['status'], 'queued')
 
     def test_no_prompt_when_the_window_cannot_open(self):
         with mock.patch.object(self.profile, 'open_for_login', return_value={'state': 'busy', 'message': bs.BUSY_TEXT}):
-            self.scripts = [Script({'tool_calls': [call('1', 'browser_open', url=ORIGIN + '/login', effect='navigate')]},
-                                   {'content': '로그인이 필요합니다.'})]
+            self.scripts = self.login_script()
             job_id = self.receive('계정 페이지 확인해줘')
             self.assertTrue(self.service.run_one())
-        self.ended = 'failed'
         self.service.deliver_one()
         while self.service.deliver_notification():
             pass
         self.assertFalse([body for method, body in self.calls if 'p7l:' in flat(body or {})])
-        self.assertEqual(self.service._browser_login(job_id)['state'], 'unavailable')
-        self.assertEqual(self.store.job(job_id)['status'], self.ended)
+        self.assertEqual(self.state(job_id), 'unavailable')
+        self.assertEqual(self.store.job(job_id)['status'], 'failed')
 
     def test_a_long_public_link_in_the_report_reaches_the_owner_whole(self):
         link = 'https://example.org/items/' + 'x' * 230 + '?page=2'
@@ -401,11 +544,17 @@ class InFlowLogin(LoginHarness):
 class LoginThroughTheCliBridge(_BridgeHarness):
     """The same in-flow login on the trusted-local CLI route: the bridge relays, the service asks."""
 
+    def make_profile(self, launcher):
+        def jar_launcher(profile_dir, headless):
+            driver = JarDriver(log=self.driver_log)
+            self.drivers.append(driver)
+            return driver
+        return bs.BrowserProfile(self.tmp / 'profile', launcher=jar_launcher, jar=memory_jar(self.tmp / 'profile'))
+
     def test_a_cli_turn_that_meets_a_login_page_is_partial_and_resumes_once(self):
         replies = self.wire(_call(2, 'browser_open', url=ORIGIN + '/login', effect='navigate'),
                             text='계정 페이지 확인해줘', telegram=True)
-        self.addCleanup(lambda: [self.profile.close_login_window(row.get('window'))
-                                 for row in self.service.browser_login_requests().values()])
+        self.addCleanup(lambda: [setattr(driver, 'closed', True) for driver in self.drivers])
         result = _value(replies[2])
         self.assertEqual((result['state'], result['next_step']), ('login_required', BROWSER_LOGIN_OFFERED_TEXT))
         job = self.store.job(self.job)
@@ -419,11 +568,13 @@ class LoginThroughTheCliBridge(_BridgeHarness):
         tap = {'id': 'cb', 'from': {'id': CHAT_BRIDGE}, 'data': f"p7l:{notification['id']}:done",
                'message': {'message_id': notification['message_id'], 'chat': {'id': CHAT_BRIDGE, 'type': 'private'}}}
         self.service.ingest_callback(tap, GENERATION_BRIDGE)
+        self.service.process_browser_logins()
         self.assertEqual(self.store.job(self.job)['status'], 'queued')
         self.assertTrue(self.drivers[1].closed)
         replies = self.rerun(_call(2, 'browser_open', url=ORIGIN + '/product', effect='read'))
         self.assertEqual(_value(replies[2])['state'], 'page')
         self.service.ingest_callback(tap, GENERATION_BRIDGE)
+        self.service.process_browser_logins()
         self.assertNotEqual(self.store.job(self.job)['status'], 'queued', 'the same tap never resumes it again')
 
 
@@ -514,7 +665,7 @@ class RealWorkerInFlowLogin(_BridgeHarness):
         profile.allow_origins_for_tests(self.fixture)
         return profile
 
-    def test_the_window_shows_the_owner_logs_in_and_done_resumes_a_signed_in_run(self):
+    def test_the_window_shows_the_owner_logs_in_and_closing_it_resumes_a_signed_in_run(self):
         origin = 'http://' + self.fixture
         original = bs.BrowserSession.__init__
 
@@ -534,14 +685,12 @@ class RealWorkerInFlowLogin(_BridgeHarness):
             self.assertTrue(self.service.deliver_notification())
             prompt = [body for method, body in self.calls if method == 'sendMessage' and 'p7l:' in flat(body.get('reply_markup'))]
             self.assertEqual(len(prompt), 1)
-            notification_id = prompt[0]['reply_markup']['inline_keyboard'][0][0]['callback_data'].split(':')[1]
-            notification = self.store.notification(notification_id)
-            # The owner signs in by hand in that window (here: the fixture's session page in the same window).
+            # The owner signs in by hand in that window (here: the fixture's session page in the same
+            # window), then closes it: the worker's own close event (hidden) is the decision.
             self.profile._live.goto(origin + '/session-start', 10)
-            self.service.ingest_callback({'id': 'cb', 'from': {'id': CHAT_BRIDGE}, 'data': f'p7l:{notification_id}:done',
-                                          'message': {'message_id': notification['message_id'],
-                                                      'chat': {'id': CHAT_BRIDGE, 'type': 'private'}}}, GENERATION_BRIDGE)
-            self.assertEqual(self.store.job(self.job)['status'], 'queued')
+            self.profile._live.hide()
+            self.assertTrue(wait_until(lambda: self.store.job(self.job)['status'] == 'queued', 20))
+            self.assertEqual(self.service._browser_login(self.job)['state'], 'resumed')
             self.assertFalse(self.profile.status()['login_window_open'])
             self.assertFalse(self.profile.status()['in_use'])
             self.assertEqual([row['site'] for row in self.profile.status()['sessions']], ['127.0.0.1'],

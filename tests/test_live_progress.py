@@ -30,8 +30,8 @@ from personal_agent.subscription_engines import SubscriptionEngines
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
-from personal_agent.telegram_presence import (BETWEEN_STEPS_TEXT, DEFAULT_STEP_TEXT, THINKING_DRAFT_TEXT, PresenceTiming,
-                                              draft_id_for, draft_step, step_line)
+from personal_agent.telegram_presence import (BETWEEN_STEPS_TEXT, DEFAULT_STEP_TEXT, RETRY_STEP_TEXT, THINKING_DRAFT_TEXT,
+                                              PresenceTiming, draft_id_for, draft_step, step_line)
 
 CHAT = 4242
 GENERATION = 'g1'
@@ -165,27 +165,29 @@ class StepLineTests(unittest.TestCase):
 
 
 class OrchestratedAttemptLineTests(unittest.TestCase):
-    """#710/#718: each planned attempt announces itself, then its own steps follow."""
+    """#710/#718/#740: a re-delegated attempt announces itself without the plan's reasoning."""
 
-    def planned(self, text, created):
-        return {'tool': 'orchestrator', 'status': 'planned', 'created': created, 'trace': {'attempt': 1, 'text': text}}
+    def planned(self, attempt, text, created):
+        return {'tool': 'orchestrator', 'status': 'planned', 'created': created, 'trace': {'attempt': attempt, 'text': text}}
 
-    def test_each_attempt_shows_its_planned_text_then_its_steps(self):
-        events = [self.planned('1번째 시도: Codex · 기본 모델 — 공개 검색이 필요', 1.0)]
-        self.assertEqual(draft_step(events), ('1번째 시도: Codex · 기본 모델 — 공개 검색이 필요', False))
+    def test_attempts_never_show_the_plan_text_and_a_retry_is_announced_generically(self):
+        events = [self.planned(1, '1번째 시도: Codex · 기본 모델 — 현재 위치가 없어 추가 확인이 필요', 1.0)]
+        self.assertEqual(draft_step(events), (THINKING_DRAFT_TEXT, False), 'the first attempt announces nothing')
         events += [running('web_search', {'action': 'web_search', 'query': '환율'}, 'c1', created=2.0)]
         self.assertEqual(draft_step(events), ('웹 검색 중: 환율', False))
         events += [finished('web_search', 'c1', created=3.0),
                    {'tool': 'orchestrator', 'status': 'evaluated', 'created': 4.0, 'trace': {'text': '목표 미달'}}]
         self.assertEqual(draft_step(events), (BETWEEN_STEPS_TEXT, False), 'an evaluation is not a step')
-        events += [self.planned('2번째 시도: Claude Code · 기본 모델 — 다른 경로', 5.0)]
-        self.assertEqual(draft_step(events), ('2번째 시도: Claude Code · 기본 모델 — 다른 경로', False))
+        events += [self.planned(2, '2번째 시도: Claude Code · 기본 모델 — 다른 경로', 5.0)]
+        text, _ = draft_step(events)
+        self.assertEqual(text, RETRY_STEP_TEXT)
+        self.assertNotIn('다른 경로', text)
+        events += [running('weather', {'action': 'weather'}, 'c2', created=6.0)]
+        self.assertEqual(draft_step(events), ('날씨 확인 중', False), 'the retry line gives way to its steps')
 
-    def test_a_fallback_attempt_announces_nothing_and_long_text_is_cut(self):
+    def test_a_fallback_attempt_announces_nothing(self):
         events = [{'tool': 'orchestrator', 'status': 'fallback', 'created': 1.0, 'trace': {'text': '기본 AI로 진행'}}]
         self.assertEqual(draft_step(events), (THINKING_DRAFT_TEXT, False))
-        text, _ = draft_step([self.planned('가' * 200, 1.0)])
-        self.assertLessEqual(len(text), 80)
 
 
 class LiveCliParsingTests(unittest.TestCase):

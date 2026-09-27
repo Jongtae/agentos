@@ -88,10 +88,13 @@ BETWEEN_STEPS_TEXT = '결과를 살펴보는 중…'
 #: Any other tool kind.
 DEFAULT_STEP_TEXT = '도구 실행 중'
 #: #710: the orchestrator's planned-attempt event (``orchestrator.EVENT_TOOL`` /
-#: ``PLANNED``), whose ``text`` announces the attempt, cut to this length.
+#: ``PLANNED``).  #740: a re-delegated attempt is announced with this line
+#: only; the plan's worker, model and reason stay in the Work's Evidence
+#: (작업 현황), never in the conversation.  The first attempt announces
+#: nothing: the draft stays THINKING_DRAFT_TEXT until its first step.
 ORCHESTRATION_TOOL = EVENT_TOOL
 ORCHESTRATION_PLANNED = PLANNED
-ANNOUNCE_MAX = 80
+RETRY_STEP_TEXT = '다른 방법으로 다시 해보는 중…'
 #: Host action -> (line with the observed target, line without one).  The
 #: target placeholder is ``{host}`` or ``{query}``.
 FALLBACK_STEP_LINES = {
@@ -166,12 +169,11 @@ def draft_step(events, live=None):
         trace = event.get('trace') if isinstance(event.get('trace'), dict) else {}
         step = trace.get('step')
         if event.get('tool') == ORCHESTRATION_TOOL:
-            # #710/#718: a planned attempt announces itself until its first
-            # observed step (the orchestrator's own redacted text).
-            text = ' '.join(str(trace.get('text') or '').split())
-            if event.get('status') == ORCHESTRATION_PLANNED and text:
-                cut = text if len(text) <= ANNOUNCE_MAX else text[:ANNOUNCE_MAX - 1] + '…'
-                current = (event.get('created') or 0, ORCHESTRATION_TOOL, None, {'announce': cut}, last_host)
+            # #710/#718/#740: a re-delegated attempt announces itself until its
+            # first observed step, without the plan's reasoning.
+            attempt = trace.get('attempt')
+            if event.get('status') == ORCHESTRATION_PLANNED and isinstance(attempt, int) and attempt > 1:
+                current = (event.get('created') or 0, ORCHESTRATION_TOOL, None, {'announce': RETRY_STEP_TEXT}, last_host)
             continue
         if event.get('status') == 'running' and isinstance(step, dict):
             seen = True

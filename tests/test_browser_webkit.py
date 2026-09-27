@@ -490,7 +490,8 @@ class DriverProtocolTests(unittest.TestCase):
         self.assertEqual(ops[1]['timeout'], 7.0)
         # The full descriptor the guard classified, and the guard's payment tokens.
         self.assertEqual(ops[3]['expect'], {'tag': 'button', 'type': 'submit', 'autocomplete': '', 'name': 'Go',
-                                            'in_form': False, 'payment_form': False})
+                                            'own_text': '', 'label_name': '', 'ancestor_text': '', 'in_form': False,
+                                            'payment_form': False})
         self.assertEqual(ops[3]['tokens'], sorted(bs.PAYMENT_AUTOCOMPLETE))
         self.assertEqual(ops[4]['expect'], ops[3]['expect'])
         self.assertEqual((ops[3]['approved'], ops[4]['approved']), (False, False), 'unapproved unless the session says so')
@@ -887,6 +888,22 @@ class SessionFixtureHandler(FixtureHandler):
                               + self.server.agentos_origin + '/\')">AgentOS 열기</button>'
                               + '<form action="' + self.server.agentos_origin + '/api/browser/approval" method="post">'
                               + '<button type="submit">승인 보내기</button></form></body></html>')
+        if path == '/one-click-names':
+            # Review of #763 P1/P2: names from aria-labelledby, a child image's alt, a role that
+            # hides the button, and a neutral child inside a pay link; no card field anywhere.
+            return self._send('''<html><head><title>이름</title></head><body>
+              <form action="/order" method="post"><span id="lbl">Place your order</span>
+                <input type="submit" name="placeOrder1" value="" aria-labelledby="lbl" style="width:80px;height:20px"></form>
+              <a href="/order" onclick="return true"><img alt="Buy now" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" width="40" height="20"></a>
+              <form action="/order" method="post"><input type="submit" value="Pay now" role="none"></form>
+              <a href="/order">Card <span role="button">Details</span> ₩12,900 결제하기</a>
+              <a href="/reviews">Best laptops to buy in 2026, compared</a>
+              <a href="#" onclick="return false">Purchase this song for $0.99</a>
+              <div onclick="void 0">Our plans and a long description you can subscribe to later on.
+                Every plan includes the same features, support hours and storage, and the differences are only in
+                how many people can share one account and how long the history is kept for each of them.
+                <span role="button">Read more</span></div>
+              </body></html>''')
         if path == '/checkout-realm':
             # #700 item 2 repro: the native submit of a fresh iframe's prototype bypasses the page-world wrapper.
             native = ("var f=document.createElement('iframe');document.body.appendChild(f);"
@@ -899,8 +916,8 @@ class SessionFixtureHandler(FixtureHandler):
               <form id="sinkForm" action="/pay" method="post" target="sink">
                 <label>카드 <input type="text" autocomplete="cc-number" name="card"></label></form>
               <iframe name="sink" src="about:blank"></iframe>
-              <div role="button" onclick="''' + native.format('payForm') + '''">다른 창 결제</div>
-              <div role="button" onclick="''' + native.format('sinkForm') + '''">숨은 창 결제</div>
+              <div role="button" onclick="''' + native.format('payForm') + '''">다른 창 진행</div>
+              <div role="button" onclick="''' + native.format('sinkForm') + '''">숨은 창 진행</div>
               <div role="button" onclick="''' + native.format('couponForm') + '''">다른 창 쿠폰</div>
               </body></html>''')
         if path == '/checkout-bound':
@@ -911,14 +928,14 @@ class SessionFixtureHandler(FixtureHandler):
                 <label>카드번호 <input type="text" autocomplete="cc-number" name="card"></label>
                 <input type="hidden" name="amount" id="amount" value="12900">
                 <input type="hidden" name="token" id="token" value="">
-                <button type="button" onclick="document.getElementById('amount').value='99999';payA.submit()">금액 바꿔 결제</button>
-                <button type="button" onclick="document.getElementById('token').value='tok_1';payA.submit()">토큰 넣고 결제</button>
+                <button type="button" onclick="document.getElementById('amount').value='99999';payA.submit()">금액 바꿔 진행</button>
+                <button type="button" onclick="document.getElementById('token').value='tok_1';payA.submit()">토큰 넣고 진행</button>
                 <button type="submit" id="elsewhere" formaction="/pay-elsewhere" style="display:none">다른 곳</button></form>
               <form id="sinkForm" action="/pay" method="post" target="sink">
                 <label>카드 <input type="text" autocomplete="cc-number" name="card"></label></form>
               <iframe name="sink" src="about:blank"></iframe>
-              <div role="button" onclick="document.getElementById('elsewhere').click()">다른 곳 결제</div>
-              <div role="button" onclick="sinkForm.requestSubmit();setTimeout(function(){sinkForm.requestSubmit()},3000)">두 번 결제</div>
+              <div role="button" onclick="document.getElementById('elsewhere').click()">다른 곳 진행</div>
+              <div role="button" onclick="sinkForm.requestSubmit();setTimeout(function(){sinkForm.requestSubmit()},3000)">두 번 진행</div>
               </body></html>''')
         if path == '/trusted':
             return self._send('''<html><head><title>입력</title></head><body>
@@ -1104,7 +1121,7 @@ class WebKitIntegrationTests(unittest.TestCase):
             span = next(row for row in sess.last['_elements'] if row['tag'] == 'span')
             self.assertTrue(span['submit_guarded'], 'the real snapshot reports the label control form')
             # (a) the span inside <label for=paybtn>, (b) payForm.submit() and requestSubmit() from a div.
-            for target in ('빠른 구매', '바로 결제', '요청 결제'):
+            for target in ('빠른 구매', '바로 진행', '요청 진행'):
                 refused(target)
                 self.assertEqual(self.server.posts, [], target)
                 self.assertEqual(sess.read()['title'], '빠른 결제', 'the page stayed')
@@ -1114,7 +1131,7 @@ class WebKitIntegrationTests(unittest.TestCase):
             self.assertEqual(sess.click({'target': '쿠폰 적용', 'effect': 'mutate'})['title'], '쿠폰')
             self.assertEqual(self.server.posts, ['/coupon', '/coupon'])
             # The owner's approval of the refused step lets exactly that step submit, once.
-            for target in ('바로 결제', '빠른 구매'):
+            for target in ('바로 진행', '빠른 구매'):
                 sess.open({'url': page_url, 'effect': 'navigate'})
                 approvals.issued.append(bs.binding_digest(refused(target)))
                 self.assertEqual(sess.click({'target': number(target), 'effect': 'mutate'})['title'], '결제 완료')
@@ -1122,7 +1139,7 @@ class WebKitIntegrationTests(unittest.TestCase):
             self.assertEqual(self.server.posts, ['/coupon', '/coupon', '/pay', '/pay'])
             # The approval was spent by its one step: the guard is whole again.
             sess.open({'url': page_url, 'effect': 'navigate'})
-            refused('바로 결제')
+            refused('바로 진행')
         finally:
             sess.close()
         self.assertEqual(self.server.posts, ['/coupon', '/coupon', '/pay', '/pay'])
@@ -1166,7 +1183,7 @@ class WebKitIntegrationTests(unittest.TestCase):
             self.assertIn(bs.CANCELLED_NOTE, description)
             return binding
         try:
-            for target in ('나중에 결제', '확인 후 결제'):
+            for target in ('나중에 진행', '확인 후 진행'):
                 refused_eventually(target)
                 self.assertEqual(self.server.posts, [], target)
             # Ordinary forms still submit, by a timer after the step and by a script in it.
@@ -1178,7 +1195,7 @@ class WebKitIntegrationTests(unittest.TestCase):
             self.assertEqual(sess.click({'target': '쿠폰 바로 적용', 'effect': 'mutate'})['title'], '쿠폰')
             self.assertEqual(self.server.posts, ['/coupon', '/coupon'])
             # P2-3: the handler changed the form and its own text before submitting ...
-            binding = refused_eventually('메모 후 결제')
+            binding = refused_eventually('메모 후 진행')
             changed = sess.read()
             self.assertIn('처리 중', [row.get('value') for row in changed['elements']])
             # ... and the repeated step on the changed page (#700 item 4), not reopened, still
@@ -1189,11 +1206,11 @@ class WebKitIntegrationTests(unittest.TestCase):
             self.assertEqual(self.server.posts, ['/coupon', '/coupon', '/pay'], 'the approved step posted exactly once')
             # #700 P2-2: an approved async checkout (validate, then submit after the step) is
             # released when its deferred submit is cancelled again, not asked again.
-            binding = refused_eventually('확인 후 결제')
+            binding = refused_eventually('확인 후 진행')
             approvals.issued.append(bs.binding_digest(binding))
             asked = len(approvals.requests)
             sess.open({'url': page_url, 'effect': 'navigate'})
-            sess.click({'target': '확인 후 결제', 'effect': 'mutate'})
+            sess.click({'target': '확인 후 진행', 'effect': 'mutate'})
             time.sleep(2.5)
             self.assertEqual(sess.read()['title'], '결제 완료')
             self.assertEqual((len(approvals.requests), approvals.issued), (asked, []))
@@ -1212,19 +1229,19 @@ class WebKitIntegrationTests(unittest.TestCase):
             # An approved press whose handler changes an amount that was already set: held and asked.
             sess.open({'url': page_url, 'effect': 'navigate'})
             with self.assertRaises(ToolError):
-                sess.click({'target': '금액 바꿔 결제', 'effect': 'mutate'})
+                sess.click({'target': '금액 바꿔 진행', 'effect': 'mutate'})
             approvals.issued.append(bs.binding_digest(approvals.requests[-1][0]))
             with self.assertRaises(ToolError) as caught:
-                sess.click({'target': '금액 바꿔 결제', 'effect': 'mutate'})
+                sess.click({'target': '금액 바꿔 진행', 'effect': 'mutate'})
             self.assertEqual(caught.exception.code, 'approval_required')
             self.assertEqual(approvals.requests[-1][0]['action'], 'browser_submit', 'the changed payload is asked for')
             self.assertEqual(self.server.posts, [])
             # An approved press whose handler only fills in an empty hidden token goes ahead.
             sess.open({'url': page_url, 'effect': 'navigate'})
             with self.assertRaises(ToolError):
-                sess.click({'target': '토큰 넣고 결제', 'effect': 'mutate'})
+                sess.click({'target': '토큰 넣고 진행', 'effect': 'mutate'})
             approvals.issued.append(bs.binding_digest(approvals.requests[-1][0]))
-            self.assertEqual(sess.click({'target': '토큰 넣고 결제', 'effect': 'mutate'})['title'], '결제 완료')
+            self.assertEqual(sess.click({'target': '토큰 넣고 진행', 'effect': 'mutate'})['title'], '결제 완료')
             self.assertEqual(self.server.posts, ['/pay'])
         finally:
             sess.close()
@@ -1232,7 +1249,7 @@ class WebKitIntegrationTests(unittest.TestCase):
         try:
             # A held submit is recorded, and released, where its submitter's formaction sends it.
             worker.goto(page_url, 10)
-            index = next(row['index'] for row in worker.snapshot()['elements'] if row['name'] == '다른 곳 결제')
+            index = next(row['index'] for row in worker.snapshot()['elements'] if row['name'] == '다른 곳 진행')
             with self.assertRaises(ToolError) as caught:
                 worker.click(index, 10)
             self.assertTrue(caught.exception.cancelled_form['action'].endswith('/pay-elsewhere'))
@@ -1241,7 +1258,7 @@ class WebKitIntegrationTests(unittest.TestCase):
             # One approval, one submit: the page's second submit (into a frame, so the page
             # stays) within the window is cancelled and reported, not let through.
             worker.goto(page_url, 10)
-            index = next(row['index'] for row in worker.snapshot()['elements'] if row['name'] == '두 번 결제')
+            index = next(row['index'] for row in worker.snapshot()['elements'] if row['name'] == '두 번 진행')
             with self.assertRaises(ToolError) as caught:
                 worker.click(index, 10)
             worker.release_submit(caught.exception.cancelled_form, 10)
@@ -1251,12 +1268,64 @@ class WebKitIntegrationTests(unittest.TestCase):
         finally:
             worker.close()
 
+    def test_one_click_commit_controls_need_approval_through_the_real_worker(self):
+        """#758: no card field anywhere; the real snapshot names the label's control, the session refuses first."""
+        approvals = Approvals()
+        sess = bs.BrowserSession(self.profile.driver_factory('work-758'), work_id='work-758', approvals=approvals, steps=40,
+                                 allowed_origins_for_tests=(self.fixture,))
+        try:
+            sess.open({'url': self.origin + '/one-click', 'effect': 'navigate'})
+            rows = sess.last['_elements']
+            # The <label for=buyBtn> names the button itself "빠른 진행" (accessible name):
+            # its own text "Buy now" still marks it, and the label's span forwards to it.
+            committing = [row for row in rows if row['commit']]
+            self.assertEqual(sorted(row['tag'] for row in committing), ['a', 'button', 'div', 'span'])
+            self.assertFalse(next(row for row in rows if row['name'] == '구매후기')['commit'])
+            for row in committing:
+                with self.assertRaises(ToolError) as caught:
+                    sess.click({'target': str(row['n']), 'effect': 'mutate'})
+                self.assertEqual(caught.exception.code, 'approval_required', row['name'])
+            self.assertEqual(self.server.posts, [])
+            self.assertEqual(sess.click({'target': '담기', 'effect': 'mutate'})['title'], '담음')
+            sess.open({'url': self.origin + '/one-click', 'effect': 'navigate'})
+            button = next(row for row in sess.last['_elements'] if row['tag'] == 'button' and row['commit'])
+            approvals.issued.append(bs.binding_digest(approvals.requests[[row['tag'] for row in committing].index('button')][0]))
+            self.assertEqual(sess.click({'target': str(button['n']), 'effect': 'mutate'})['title'], '주문 완료')
+            self.assertEqual(self.server.posts, ['/add', '/order'])
+        finally:
+            sess.close()
+
+    def test_accessible_names_images_hidden_roles_and_children_of_pay_controls_are_classified(self):
+        """Review of #763: aria-labelledby, a descendant image's alt, role=none, a child of a pay link."""
+        sess = bs.BrowserSession(self.profile.driver_factory('work-758b'), work_id='work-758b', approvals=Approvals(),
+                                 steps=40, allowed_origins_for_tests=(self.fixture,))
+        try:
+            sess.open({'url': self.origin + '/one-click-names', 'effect': 'navigate'})
+            rows = sess.last['_elements']
+            self.assertIn('Place your order', [row['name'] for row in rows], 'aria-labelledby names the input')
+            flagged = {row['name']: row['commit'] for row in rows}
+            self.assertEqual(flagged.get('Place your order'), True)
+            self.assertTrue(any(row['commit'] and row['tag'] == 'a' and 'Details' not in row['name'] for row in rows),
+                            'the image-only pay link')
+            self.assertEqual(flagged.get('Pay now'), True, 'role=none on a submit input')
+            self.assertEqual(flagged.get('Details'), True, 'a child of a pay link')
+            self.assertFalse(next(row for row in rows if row['name'].startswith('Best laptops'))['commit'])
+            self.assertEqual(flagged.get('Purchase this song for $0.99'), True, 'a styled link that runs a script')
+            self.assertEqual(flagged.get('Read more'), False, "a wrapper's long text is content")
+            for row in [row for row in rows if row['commit']]:
+                with self.assertRaises(ToolError) as caught:
+                    sess.click({'target': str(row['n']), 'effect': 'mutate'})
+                self.assertEqual(caught.exception.code, 'approval_required', row['name'])
+            self.assertEqual(self.server.posts, [])
+        finally:
+            sess.close()
+
     def test_a_native_submit_from_another_realm_is_refused_as_a_navigation(self):
         """#700 item 2: a fresh iframe's unwrapped ``HTMLFormElement.prototype.submit`` on the payment form."""
         worker = bs.WebKitWorkerDriver('p', cwd=self.tmp.name, allowed_origins_for_tests=(self.fixture,))
         try:
             worker.goto(self.origin + '/checkout-realm', 10)
-            index = next(row['index'] for row in worker.snapshot()['elements'] if row['name'] == '다른 창 결제')
+            index = next(row['index'] for row in worker.snapshot()['elements'] if row['name'] == '다른 창 진행')
             with self.assertRaises(ToolError) as caught:
                 worker.click(index, 10)
             self.assertEqual(caught.exception.code, 'approval_required')
@@ -1266,7 +1335,7 @@ class WebKitIntegrationTests(unittest.TestCase):
             self.assertEqual(self.server.posts, [], 'no POST')
             # #700 review P2-2: the same, aimed at an iframe of the page.
             worker.goto(self.origin + '/checkout-realm', 10)
-            index = next(row['index'] for row in worker.snapshot()['elements'] if row['name'] == '숨은 창 결제')
+            index = next(row['index'] for row in worker.snapshot()['elements'] if row['name'] == '숨은 창 진행')
             with self.assertRaises(ToolError) as caught:
                 worker.click(index, 10)
             self.assertEqual((caught.exception.code, caught.exception.cancelled_form['dom']), ('approval_required', 2))
@@ -1278,7 +1347,7 @@ class WebKitIntegrationTests(unittest.TestCase):
             self.assertEqual(self.server.posts, ['/coupon'])
             # The owner's approval of that form in that state releases the held submit.
             worker.goto(self.origin + '/checkout-realm', 10)
-            index = next(row['index'] for row in worker.snapshot()['elements'] if row['name'] == '다른 창 결제')
+            index = next(row['index'] for row in worker.snapshot()['elements'] if row['name'] == '다른 창 진행')
             with self.assertRaises(ToolError) as caught:
                 worker.click(index, 10)
             self.assertEqual(worker.release_submit(caught.exception.cancelled_form, 10), {'navigated': True})
@@ -1291,7 +1360,7 @@ class WebKitIntegrationTests(unittest.TestCase):
         worker = bs.WebKitWorkerDriver('p', cwd=self.tmp.name, allowed_origins_for_tests=(self.fixture,))
 
         def scripted_pay():
-            return next(row['index'] for row in worker.snapshot()['elements'] if row['name'] == '바로 결제')
+            return next(row['index'] for row in worker.snapshot()['elements'] if row['name'] == '바로 진행')
         try:
             worker.show(page_url, 10)
             worker.click(scripted_pay(), 10)   # the owner acting in their own window: not guarded

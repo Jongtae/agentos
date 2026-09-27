@@ -94,13 +94,13 @@ PAGES = {
       <form id="couponForm" action="/coupon" method="post"><label>쿠폰 <input type="text" name="coupon"></label>
         <button type="submit">쿠폰 적용</button></form>
       <label for="paybtn"><span role="button">빠른 구매</span></label>
-      <div role="button" onclick="payForm.submit()">바로 결제</div>
-      <div role="button" onclick="payForm.requestSubmit()">요청 결제</div>
+      <div role="button" onclick="payForm.submit()">바로 진행</div>
+      <div role="button" onclick="payForm.requestSubmit()">요청 진행</div>
       <div role="button" onclick="couponForm.submit()">쿠폰 바로 적용</div>
-      <div role="button" onclick="setTimeout(() => payForm.submit(), 1500)">나중에 결제</div>
-      <div role="button" onclick="fetch('/validate').then(() => new Promise((ok) => setTimeout(ok, 800))).then(() => payForm.requestSubmit())">확인 후 결제</div>
+      <div role="button" onclick="setTimeout(() => payForm.submit(), 1500)">나중에 진행</div>
+      <div role="button" onclick="fetch('/validate').then(() => new Promise((ok) => setTimeout(ok, 800))).then(() => payForm.requestSubmit())">확인 후 진행</div>
       <div role="button" onclick="setTimeout(() => couponForm.submit(), 1500)">나중에 쿠폰</div>
-      <div role="button" onclick="document.getElementById('who').value = '처리 중'; this.textContent = '처리 중…'; payForm.submit()">메모 후 결제</div>
+      <div role="button" onclick="document.getElementById('who').value = '처리 중'; this.textContent = '처리 중…'; payForm.submit()">메모 후 진행</div>
       </body></html>''',
     # #698 P1-2: two identical payment forms; the label points at the first ...
     '/checkout-twins': '''<html><head><title>빠른 결제</title></head><body><h1>빠른 결제</h1>
@@ -121,6 +121,18 @@ PAGES = {
         <label>카드번호 <input type="text" autocomplete="cc-number" name="card"></label>
         <input type="hidden" name="amount" value="990000"></form>
       </body></html>''',
+    # #758: a stored payment method (no card field anywhere) behind controls named for a purchase.
+    '/one-click': '''<html><head><title>원클릭</title></head><body><h1>세제 3L</h1><p>12,900원</p>
+      <form action="/add" method="post"><button type="submit">담기</button></form>
+      <form action="/order" method="post"><button type="submit" id="buyBtn">Buy now</button></form>
+      <a href="/order" role="button">바로구매</a>
+      <div role="button" onclick="fetch('/charge', {method: 'POST'})">Pay ₩12,900</div>
+      <label for="buyBtn"><span role="button">빠른 진행</span></label>
+      <a href="/reviews">구매후기</a>
+      </body></html>''',
+    '/order': '<html><head><title>주문 완료</title></head><body><h1>주문 완료</h1></body></html>',
+    '/add': '<html><head><title>담음</title></head><body><h1>담았습니다</h1></body></html>',
+    '/reviews': '<html><head><title>후기</title></head><body><h1>후기</h1></body></html>',
     '/validate': '<html><head><title>확인</title></head><body>ok</body></html>',
     '/reset/' + PASSPORT:'''<html><head><title>Reset token=abcDEF123456secret</title></head><body><h1>재설정</h1>
       <a href="https://owner:hunter2@fixture.test/reset/''' + PASSPORT + '''?code=1#x">다시 열기</a>
@@ -232,6 +244,11 @@ class _PageParser(HTMLParser):
         for element in self.elements:
             control = self.control(element)
             element['label_form'] = control['form'] if control else None
+            element['own_text'] = ' '.join(filter(None, [element['name'], element['sent'] if element['tag'] == 'input'
+                                                         and element['type'] in ('submit', 'button') else '']))
+            pressable = lambda e: e['role'] not in ('textbox', 'combobox', 'checkbox', 'radio') and e['tag'] not in ('select', 'textarea')
+            element['label_name'] = (control['name'] + ' | ' + control['name']) if control and pressable(control) else ''
+            element['ancestor_text'], element['pressable'], element['context'] = '', pressable(element), ''
         private = ('hidden', 'action', 'html_id', 'onclick', 'label', 'sent')
         elements = [{k: v for k, v in e.items() if k not in private} for e in self.elements if not e['hidden']]
         forms = [{'id': form['id'], 'text': '\n'.join(form.get('texts', [])), **self.record(form)} for form in self.forms]
@@ -696,7 +713,7 @@ class ForwardedSubmitTests(unittest.TestCase):
         self.assertTrue(bs.forwards_to_payment_form(elements[2], bs.payment_forms(elements)))
 
     def test_a_scripted_submit_of_the_payment_form_is_refused_by_the_driver_and_asks_the_owner(self):
-        for target in ('바로 결제', '요청 결제'):
+        for target in ('바로 진행', '요청 진행'):
             binding = self.refused(target)
             # #700: bound to the cancelled form and what it would send, not to the step.
             self.assertEqual((binding['action'], binding['page_digest'], binding['target_digest']),
@@ -721,7 +738,7 @@ class ForwardedSubmitTests(unittest.TestCase):
         # The label's span is refused before the page (a click binding): the approved click
         # carries the allowance.  The scripted div's submit is cancelled and held (a submit
         # binding): the approved form in that state is released by the worker (#700).
-        for target, action, approved in (('바로 결제', 'browser_submit', False), ('빠른 구매', 'browser_click', True)):
+        for target, action, approved in (('바로 진행', 'browser_submit', False), ('빠른 구매', 'browser_click', True)):
             binding = self.refused(target)
             self.assertEqual(binding['action'], action)
             self.approvals.issued.append(bs.binding_digest(binding))
@@ -766,7 +783,7 @@ class ForwardedSubmitTests(unittest.TestCase):
 
     def test_a_changed_non_card_value_of_the_payment_form_asks_again(self):
         # Review P1-2: the label's span and the scripted div sit outside the form.
-        for target in ('빠른 구매', '바로 결제'):
+        for target in ('빠른 구매', '바로 진행'):
             approvals = Approvals(self.approved_binding(target))
             sess, driver = session(approvals=approvals, steps=40)
             sess.open({'url': ORIGIN + '/checkout-forwarded', 'effect': 'navigate'})
@@ -853,21 +870,21 @@ class ForwardedSubmitTests(unittest.TestCase):
         # value) and its own text, then submits.  The approval is bound to what the
         # submit sends, so the repeated step matches whether or not the page was reloaded.
         before = self.sess.last['_states']
-        binding = self.refused('메모 후 결제')
+        binding = self.refused('메모 후 진행')
         self.assertEqual(binding['action'], 'browser_submit')
         changed = self.sess.read()
         self.assertIn('처리 중', [row.get('value') for row in changed['elements']], 'the handler changed the form')
         self.assertNotEqual(self.sess.last['_states'], before, 'a binding to the pre-click page would no longer match')
         self.approvals.issued.append(bs.binding_digest(binding))
         # The same run repeats the step on the changed page: it matches.
-        page = self.sess.click({'target': '메모 후 결제', 'effect': 'mutate'})
+        page = self.sess.click({'target': '메모 후 진행', 'effect': 'mutate'})
         self.assertEqual(page['title'], '결제 완료')
         self.assertEqual((self.approvals.issued, self.driver.posts), ([], [('post', '/pay')]))
         # A resumed run that opens the page again matches too.
         approvals = Approvals(binding)
         sess, driver = session(approvals=approvals, steps=40)
         sess.open({'url': ORIGIN + '/checkout-forwarded', 'effect': 'navigate'})
-        self.assertEqual(sess.click({'target': '메모 후 결제', 'effect': 'mutate'})['title'], '결제 완료')
+        self.assertEqual(sess.click({'target': '메모 후 진행', 'effect': 'mutate'})['title'], '결제 완료')
         self.assertEqual((approvals.issued, driver.posts), ([], [('post', '/pay')]))
 
     def test_a_hidden_amount_is_part_of_the_submitted_state(self):
@@ -905,7 +922,7 @@ class ForwardedSubmitTests(unittest.TestCase):
         self.assertEqual(self.driver.posts, [])
 
     def test_a_release_the_worker_refuses_fails_typed_and_spends_the_approval(self):
-        binding = self.refused('바로 결제')
+        binding = self.refused('바로 진행')
         self.approvals.issued.append(bs.binding_digest(binding))
         self.driver.hold(1)
         self.driver.held = dict(self.driver.held, state='changed')   # the page's held submit changed since
@@ -913,6 +930,99 @@ class ForwardedSubmitTests(unittest.TestCase):
             self.sess.read()
         self.assertEqual(caught.exception.code, 'target_unavailable')
         self.assertEqual((self.approvals.issued, self.driver.posts), ([], []))
+
+
+class CommitControlTests(unittest.TestCase):
+    """#758: a press whose control commits a purchase needs approval with no card field on the page."""
+
+    def test_commitment_signals_across_languages_and_what_they_leave_out(self):
+        for name in ('Buy now', 'Pay ₩12,900', 'Pay with Apple Pay', 'Place your order', 'Complete purchase',
+                     'Confirm order', 'Order now', 'Subscribe', 'Donate', 'Start your free trial', 'Send money',
+                     'Top up', 'Express checkout', '결제하기', '바로구매', '주문하기', '구매 확정', '12,900원 결제',
+                     '간편결제', '송금하기', '충전하기', '購入手続きへ', '注文を確定する', '支払う', '立即购买',
+                     '提交订单', '付款'):
+            self.assertTrue(bs.commit_name(name), name)
+        # Review of #763: more phrasings, and text a page disguises with full-width or zero-width characters.
+        for name in ('Order', 'Order • $23.50', 'Buy protection plan', 'Start subscription', 'Send $20', 'Upgrade now',
+                     '결제 12,000원', '결제 (12,000원)', '구독 시작하기', '정기결제 시작', '立即订购', '立即訂購',
+                     'Ｂｕｙ ｎｏｗ', 'Bu\u200by now', '결\u200b제하기'):
+            self.assertTrue(bs.commit_name(name), name)
+        for name in ('Purchase history', 'Payment methods', 'Add to wishlist', 'Buying guide', 'Checkout', 'Order history',
+                     '구매후기', '주문내역', '결제수단 변경', '담기', '購入履歴', '支払い方法', '決済方法', '支付方式', '支付宝',
+                     '', None, 'Continue'):
+            self.assertFalse(bs.commit_name(name), name)
+        # A bare verb in a long link title is an article, not a control; in a short one it counts.
+        self.assertFalse(bs.commit_name('Best laptops to buy in 2026', link=True))
+        self.assertTrue(bs.commit_name('Buy now', link=True))
+        self.assertTrue(bs.commit_name('Place your order and track it later from your account', link=True))
+        self.assertTrue(bs.commit_control({'role': 'button', 'tag': 'div', 'name': 'Pay now'}))
+        self.assertTrue(bs.commit_control({'role': 'link', 'tag': 'a', 'name': '바로구매'}))
+        self.assertFalse(bs.commit_control({'role': 'textbox', 'tag': 'input', 'name': 'Buy now', 'pressable': False}),
+                         'a field commits nothing')
+        self.assertTrue(bs.commit_control({'role': 'none', 'tag': 'input', 'type': 'submit', 'name': 'placeOrder1',
+                                           'own_text': 'Place order', 'pressable': True}), 'any role: its own text')
+        self.assertTrue(bs.commit_control({'role': 'button', 'tag': 'span', 'name': '빠른 진행',
+                                           'label_name': 'Continue | Buy now'}), 'a label forwarding to it')
+        self.assertTrue(bs.commit_control({'role': 'button', 'tag': 'span', 'name': 'Details',
+                                           'ancestor_text': 'Card | Buy now ₩12,900'}), 'inside it: the press bubbles')
+        self.assertFalse(bs.commit_control({'role': 'checkbox', 'tag': 'input', 'name': 'x', 'pressable': False,
+                                            'label_name': ''}))
+        # Review of 0008f29: a styled link that runs a script is a button; a wrapper's long text
+        # is content (only a phrase there counts); a pay control a few wrappers up still counts.
+        song = {'role': 'link', 'tag': 'a', 'name': 'Purchase this song for $0.99', 'pressable': True}
+        self.assertTrue(bs.commit_control({**song, 'nav_link': False}))
+        self.assertFalse(bs.commit_control({**song, 'nav_link': True}))
+        wrapper = 'Our plans. ' + 'A long description of every plan and what it includes. ' * 4
+        self.assertFalse(bs.commit_control({'role': 'button', 'tag': 'span', 'name': 'Read more',
+                                            'ancestor_text': 'Subscribe now | ' + wrapper + 'Subscribe now'}),
+                         'an app-root wrapper: its name is cut, its own text shows its length')
+        self.assertTrue(bs.commit_control({'role': 'button', 'tag': 'span', 'name': 'i',
+                                           'ancestor_text': 'Plan | Purchase annual plan for $99/yr'}), 'a control-sized parent')
+        self.assertTrue(bs.commit_control({'role': 'button', 'tag': 'span', 'name': 'Details',
+                                           'ancestor_text': 'Card | Card view || Buy now | Buy now'}))
+
+    def test_one_click_controls_need_approval_before_the_page_and_ordinary_ones_run(self):
+        approvals = Approvals()
+        sess, driver = session(approvals=approvals, steps=40)
+        sess.open({'url': ORIGIN + '/one-click', 'effect': 'navigate'})
+        for target in ('Buy now', '바로구매', 'Pay ₩12,900', '빠른 진행'):
+            with self.assertRaises(ToolError) as caught:
+                sess.click({'target': target, 'effect': 'mutate'})
+            self.assertEqual((caught.exception.code, caught.exception.requires), ('approval_required', 'browser-step-approval'))
+        self.assertEqual([entry for entry in driver.log if entry[0] == 'click'], [], 'refused before the page')
+        self.assertEqual(len(approvals.requests), 4)
+        self.assertTrue(approvals.requests[3][1].startswith("결제 신호 'Buy now'"), 'the owner reads what the label forwards to')
+
+    def test_a_changed_purchase_text_or_price_is_another_approval(self):
+        # #763 review (Codex): a neutral name ("Continue") whose button value says "Buy $10":
+        # the approval binds that text, so "Buy $1000" on the resumed run asks again.
+        page = """<html><head><title>곡</title></head><body><form action="/order" method="post">
+          <input type="submit" aria-label="Continue" value="Buy $10"></form></body></html>"""
+        pages = {**PAGES, '/song': page}
+        approvals = Approvals()
+        sess, driver = session(FakeDriver(pages), approvals=approvals)
+        sess.open({'url': ORIGIN + '/song', 'effect': 'navigate'})
+        with self.assertRaises(ToolError):
+            sess.click({'target': 'Continue', 'effect': 'mutate'})
+        self.assertIn('Buy $10', approvals.requests[-1][1])
+        approvals.issue(approvals.requests[-1][0])
+        driver.pages = {**PAGES, '/song': page.replace('Buy $10', 'Buy $1000')}
+        with self.assertRaises(ToolError):
+            sess.click({'target': 'Continue', 'effect': 'mutate'})
+        self.assertEqual((len(approvals.issued), driver.posts), (1, []), 'the approval of $10 is not spent on $1000')
+        driver.pages = pages
+        self.assertEqual(sess.click({'target': 'Continue', 'effect': 'mutate'})['title'], '주문 완료')
+
+    def test_a_form_post_refused_between_steps_is_reported_to_the_model(self):
+        sess, driver = session()
+        sess.open({'url': ORIGIN + '/one-click', 'effect': 'navigate'})
+        original = driver.snapshot
+        driver.snapshot = lambda: {**original(), 'refused_submit': True}
+        # The click's own first snapshot reads the report; the result the model sees carries it.
+        page = sess.run('browser_click', {'target': '담기', 'effect': 'mutate'})
+        self.assertEqual(page['submit_refused'], bs.SUBMIT_REFUSED_TEXT)
+        driver.snapshot = original
+        self.assertNotIn('submit_refused', sess.run('browser_read', {}))
 
 
 # ---------------------------------------------------------------- login, budget, targets

@@ -197,25 +197,42 @@ const formRecord = (form) => ({dom: Array.prototype.indexOf.call(documentForms.c
   action: cut(String(formAction.call(form) || location.href), 2000)});
 const sameForm = (a, b) => !!a && !!b && a.dom === b.dom && a.method === b.method && a.action === b.action;
 // What a submit of the form sends (#700): the name and value of every control the
-// submission includes (hidden inputs too), in order, then the form's visible text.
-// A credential, card or code value is never part of it, only its name.
+// submission includes (hidden inputs too, whole values), in order, JSON-encoded so no
+// two payloads read the same, then the form's visible text.  A credential, card or
+// code value is never part of it, only its name.
 const secretField = (el) => typeOf(el) === 'password' || SECRET_TOKENS.includes(fieldToken(el));
 const NOT_SENT = ['submit', 'image', 'reset', 'button'];
-const formState = (form, submitter) => { const rows = [];
+const controlRows = (form, submitter) => { const rows = [];
   for (const el of Array.from(formControls.call(form))) {
     const name = attr(el, 'name'), tag = el.tagName.toLowerCase(), type = typeOf(el);
     if (!name || !['input', 'select', 'textarea', 'button'].includes(tag) || el.matches(':disabled')) continue;
     if (tag === 'button' || NOT_SENT.includes(type)) {
-      if (el === submitter) rows.push(cut(name, 200) + '=' + cut(el.value, 500));
+      if (el === submitter) rows.push([well(name), well(el.value), 'submitter']);
       continue;
     }
     if ((type === 'checkbox' || type === 'radio') && !el.checked) continue;
-    const value = secretField(el) ? '<guarded>' : type === 'file' ? '<file>'
-      : tag === 'select' ? Array.from(el.selectedOptions).map((option) => cut(option.value, 500)).join(',') : cut(el.value, 500);
-    rows.push(cut(name, 200) + '=' + value);
+    const value = secretField(el) ? ['<guarded>'] : type === 'file' ? ['<file>']
+      : tag === 'select' ? Array.from(el.selectedOptions).map((option) => well(option.value)) : well(el.value);
+    rows.push([well(name), value, type === 'hidden' ? 'hidden' : 'shown']);
   }
-  return cut(rows.join('\n'), 20000) + '\n\u001e' + cut(textOf.call(form) || '', 6000); };
-const allows = (g, record) => !!g.allow && Date.now() <= g.allow.until && g.allow.forms.some((f) => sameForm(f, record));
+  return rows; };
+const formState = (form, submitter) =>
+  JSON.stringify({controls: controlRows(form, submitter), text: cut(textOf.call(form) || '', 6000)});
+// What an approval's allowance holds a form to (#700 review): the values the owner saw
+// (every shown control) and every hidden value that was already set.  A hidden value
+// the page fills in later (a payment token) is not part of it; a changed amount is.
+const approvedState = (form) => { const rows = controlRows(form, null);
+  return {shown: JSON.stringify(rows.filter((row) => row[2] === 'shown')),
+    fixed: rows.filter((row) => row[2] === 'hidden' && row[1] !== '').map((row) => JSON.stringify(row))}; };
+const keeps = (entry, form) => { const now = approvedState(form);
+  return now.shown === entry.state.shown && entry.state.fixed.every((row) => now.fixed.includes(row)); };
+// An allowance names forms, each with the state it is held to, and ends at ``until``
+// or after the first submit of one of them that goes ahead (``spent``).
+const allowFor = (forms, until) => ({forms: forms.map((form) => ({record: formRecord(form), state: approvedState(form)})),
+  until, spent: false});
+const allows = (g, form) => { const a = g.allow; if (!a || a.spent || Date.now() > a.until) return null;
+  const record = formRecord(form);
+  return a.forms.some((entry) => sameForm(entry.record, record) && keeps(entry, form)) ? a : null; };
 // A submit the guard let through (``payment``: of a payment form, by an allowance):
 // the form-submission navigation it starts is not refused.  ``effective`` is where
 // the submit goes: a submitter's ``formaction``/``formmethod`` override the form's.
@@ -225,8 +242,9 @@ const effective = (form, submitter) => { const record = formRecord(form);
   if (submitter && submitter.hasAttribute('formaction')) record.action = cut(String(submitter.formAction), 2000);
   if (submitter && submitter.hasAttribute('formmethod')) record.method = cut(String(submitter.formMethod).toLowerCase(), 16);
   return record; };
+// A held submit is recorded where it would go (the submitter's overrides included).
 const hold = (g, form, submitter, kind) => {
-  const record = {...formRecord(form), id: Math.random().toString(36).slice(2) + Date.now().toString(36),
+  const record = {...effective(form, submitter), id: Math.random().toString(36).slice(2) + Date.now().toString(36),
     page: cut(location.href, 2000), state: formState(form, submitter)};
   g.held = {id: record.id, form: new WeakRef(form), submitter: submitter ? new WeakRef(submitter) : null, kind,
     state: record.state, record: {dom: record.dom, method: record.method, action: record.action}};
@@ -238,11 +256,19 @@ const armSubmitGuard = () => { const s = state(); if (s.submitListening) return;
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) return;
     try {
-      if (!holdsPayment(form)) { vet(g, effective(form, event.submitter || null), false); return; }
-      const record = formRecord(form);
-      if (allows(g, record)) { vet(g, record); return; }
+      const submitter = event.submitter || null;
+      if (!holdsPayment(form)) { vet(g, effective(form, submitter), false); return; }
+      const allowance = allows(g, form);
+      if (allowance) {
+        vet(g, effective(form, submitter));
+        // Spent once the submit goes ahead: at once for ``form.submit()``, after the
+        // event for a ``submit`` event no page handler prevented.
+        if (event.type === %(signal)s) allowance.spent = true;
+        else setTimeout(() => { if (!event.defaultPrevented) allowance.spent = true; }, 0);
+        return;
+      }
       event.preventDefault(); event.stopImmediatePropagation();
-      hold(g, form, event.submitter || null, event.type === %(signal)s ? 'signal' : 'event');
+      hold(g, form, submitter, event.type === %(signal)s ? 'signal' : 'event');
     } catch (error) { event.preventDefault(); event.stopImmediatePropagation(); } };   // fail closed
   window.addEventListener('submit', cancel, true);
   window.addEventListener(%(signal)s, cancel, true); };
@@ -340,7 +366,7 @@ if (approved === true) {
     forms = Array.from(new Set(shown.filter((field) => paymentField(field, GUARD_TOKENS)).map(formOf)))
       .filter((form) => form instanceof HTMLFormElement);
   }
-  s.allow = {forms: forms.map(formRecord), until: Date.now() + lasts};
+  s.allow = allowFor(forms, Date.now() + lasts);
 }
 const tag = el.tagName.toLowerCase();
 return JSON.stringify({x, y, editable: el.isContentEditable || tag === 'textarea' ||
@@ -387,16 +413,17 @@ const s = state(), h = s.held;
 if (s.off || !h || h.id !== id) return JSON.stringify({error: 'submit_changed'});
 const form = h.form.deref(), submitter = h.submitter ? h.submitter.deref() : null;
 if (!form || !form.isConnected) return JSON.stringify({error: 'submit_changed'});
-const record = formRecord(form);
-if (!sameForm(record, h.record) || formState(form, h.kind === 'event' ? submitter : null) !== h.state)
+const use = h.kind === 'event' && submitter && submitter.isConnected && submitter.form === form ? submitter : null;
+if (h.submitter && !use) return JSON.stringify({error: 'submit_changed'});
+if (!sameForm(effective(form, use), h.record) || formState(form, use) !== h.state)
   return JSON.stringify({error: 'submit_changed'});
 s.held = null;
-s.allow = {forms: [record], until: Date.now() + WINDOW_MS};
+s.allow = allowFor([form], Date.now() + WINDOW_MS);
 if (h.kind === 'event') {
-  const use = submitter && submitter.isConnected && submitter.form === form ? submitter : undefined;
-  FORM.requestSubmit.call(form, use);
+  FORM.requestSubmit.call(form, use || undefined);
 } else {
-  vet(s, record);
+  vet(s, effective(form, null));
+  s.allow.spent = true;
   FORM.submit.call(form);
 }
 return JSON.stringify({ok: true});
@@ -420,14 +447,17 @@ const verb = String(method || 'get').toLowerCase(), target = bare(url);
 const forms = Array.from(documentForms.call(document)).filter((form) => { const record = formRecord(form);
   return record.method === verb && bare(record.action) === target && holdsPayment(form); });
 if (!forms.length) return JSON.stringify({allow: true});
-const now = Date.now(), records = forms.map(formRecord);
-// A payment form the guard let through (and its redirects), or, just now, an
-// ordinary form that submits to the same place.
-if ((s.vetted || []).some((v) => v.payment ? now - v.t <= VETTED_MS && records.some((record) => sameForm(record, v))
-    : now - v.t <= ORDINARY_MS && v.method === verb && bare(v.action) === target))
+const now = Date.now();
+// A submit the guard let through to this place just before: a payment form's (used
+// once), or an ordinary form's.
+const passed = (s.vetted || []).find((v) => v.method === verb && bare(v.action) === target &&
+  now - v.t <= (v.payment ? VETTED_MS : ORDINARY_MS));
+if (passed) {
+  if (passed.payment) s.vetted = s.vetted.filter((v) => v !== passed);
   return JSON.stringify({allow: true});
-const covered = records.find((record) => allows(s, record));
-if (covered) { vet(s, covered); return JSON.stringify({allow: true}); }
+}
+const covered = forms.find((form) => allows(s, form));
+if (covered) { allows(s, covered).spent = true; return JSON.stringify({allow: true}); }
 // Hold the form most likely submitted: one aimed where the navigation goes (a frame or not).
 const aimed = (form) => { const t = String(attr(form, 'target') || '').toLowerCase();
   const own = !t || ['_self', '_top', '_parent', '_blank'].includes(t); return frame === true ? !own : own; };

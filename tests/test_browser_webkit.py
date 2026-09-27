@@ -903,6 +903,23 @@ class SessionFixtureHandler(FixtureHandler):
               <div role="button" onclick="''' + native.format('sinkForm') + '''">숨은 창 결제</div>
               <div role="button" onclick="''' + native.format('couponForm') + '''">다른 창 쿠폰</div>
               </body></html>''')
+        if path == '/checkout-bound':
+            # #700 review (Codex): an approval's allowance is held to the approved payload,
+            # spent by one submit, and a held submit is recorded where its submitter sends it.
+            return self._send('''<html><head><title>묶인 결제</title></head><body>
+              <form id="payA" action="/pay" method="post"><p>결제 금액 12,900원</p>
+                <label>카드번호 <input type="text" autocomplete="cc-number" name="card"></label>
+                <input type="hidden" name="amount" id="amount" value="12900">
+                <input type="hidden" name="token" id="token" value="">
+                <button type="button" onclick="document.getElementById('amount').value='99999';payA.submit()">금액 바꿔 결제</button>
+                <button type="button" onclick="document.getElementById('token').value='tok_1';payA.submit()">토큰 넣고 결제</button>
+                <button type="submit" id="elsewhere" formaction="/pay-elsewhere" style="display:none">다른 곳</button></form>
+              <form id="sinkForm" action="/pay" method="post" target="sink">
+                <label>카드 <input type="text" autocomplete="cc-number" name="card"></label></form>
+              <iframe name="sink" src="about:blank"></iframe>
+              <div role="button" onclick="document.getElementById('elsewhere').click()">다른 곳 결제</div>
+              <div role="button" onclick="sinkForm.requestSubmit();setTimeout(function(){sinkForm.requestSubmit()},3000)">두 번 결제</div>
+              </body></html>''')
         if path == '/trusted':
             return self._send('''<html><head><title>입력</title></head><body>
               <button type="button" onclick="document.getElementById('r').textContent='click trusted='+event.isTrusted">누르기</button>
@@ -1184,6 +1201,55 @@ class WebKitIntegrationTests(unittest.TestCase):
         finally:
             sess.close()
         self.assertEqual(self.server.posts, ['/coupon', '/coupon', '/pay', '/pay'])
+
+    def test_an_allowance_is_held_to_its_payload_spent_once_and_a_held_submit_goes_where_it_was_going(self):
+        """#700 review (Codex): payload-bound, one submit per approval, submitter overrides bound."""
+        page_url = self.origin + '/checkout-bound'
+        approvals = Approvals()
+        sess = bs.BrowserSession(self.profile.driver_factory('work-700c'), work_id='work-700c', approvals=approvals, steps=40,
+                                 allowed_origins_for_tests=(self.fixture,))
+        try:
+            # An approved press whose handler changes an amount that was already set: held and asked.
+            sess.open({'url': page_url, 'effect': 'navigate'})
+            with self.assertRaises(ToolError):
+                sess.click({'target': '금액 바꿔 결제', 'effect': 'mutate'})
+            approvals.issued.append(bs.binding_digest(approvals.requests[-1][0]))
+            with self.assertRaises(ToolError) as caught:
+                sess.click({'target': '금액 바꿔 결제', 'effect': 'mutate'})
+            self.assertEqual(caught.exception.code, 'approval_required')
+            self.assertEqual(approvals.requests[-1][0]['action'], 'browser_submit', 'the changed payload is asked for')
+            self.assertEqual(self.server.posts, [])
+            # An approved press whose handler only fills in an empty hidden token goes ahead.
+            sess.open({'url': page_url, 'effect': 'navigate'})
+            with self.assertRaises(ToolError):
+                sess.click({'target': '토큰 넣고 결제', 'effect': 'mutate'})
+            approvals.issued.append(bs.binding_digest(approvals.requests[-1][0]))
+            self.assertEqual(sess.click({'target': '토큰 넣고 결제', 'effect': 'mutate'})['title'], '결제 완료')
+            self.assertEqual(self.server.posts, ['/pay'])
+        finally:
+            sess.close()
+        worker = bs.WebKitWorkerDriver('p', cwd=self.tmp.name, allowed_origins_for_tests=(self.fixture,))
+        try:
+            # A held submit is recorded, and released, where its submitter's formaction sends it.
+            worker.goto(page_url, 10)
+            index = next(row['index'] for row in worker.snapshot()['elements'] if row['name'] == '다른 곳 결제')
+            with self.assertRaises(ToolError) as caught:
+                worker.click(index, 10)
+            self.assertTrue(caught.exception.cancelled_form['action'].endswith('/pay-elsewhere'))
+            worker.release_submit(caught.exception.cancelled_form, 10)
+            self.assertEqual(self.server.posts, ['/pay', '/pay-elsewhere'])
+            # One approval, one submit: the page's second submit (into a frame, so the page
+            # stays) within the window is cancelled and reported, not let through.
+            worker.goto(page_url, 10)
+            index = next(row['index'] for row in worker.snapshot()['elements'] if row['name'] == '두 번 결제')
+            with self.assertRaises(ToolError) as caught:
+                worker.click(index, 10)
+            worker.release_submit(caught.exception.cancelled_form, 10)
+            time.sleep(3.5)
+            self.assertIsNotNone(worker.snapshot().get('cancelled_submit'), 'the second submit was cancelled')
+            self.assertEqual(self.server.posts, ['/pay', '/pay-elsewhere', '/pay'])
+        finally:
+            worker.close()
 
     def test_a_native_submit_from_another_realm_is_refused_as_a_navigation(self):
         """#700 item 2: a fresh iframe's unwrapped ``HTMLFormElement.prototype.submit`` on the payment form."""

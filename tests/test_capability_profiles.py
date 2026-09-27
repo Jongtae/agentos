@@ -11,7 +11,8 @@ import unittest
 from pathlib import Path
 
 from personal_agent import isolated_engine_mcp_bridge
-from personal_agent.agent_runtime import (BROWSER_ACTIONS, DEFINITIONS, STATUS_ARGUMENT, STATUS_SCHEMA, Capabilities,
+from personal_agent.agent_runtime import (BROWSER_ACTIONS, BROWSER_SESSION_NOTE, DEFINITIONS, STATUS_ARGUMENT, STATUS_SCHEMA,
+                                          Capabilities,
                                           check_arguments)
 from personal_agent.bounded_execution import (
     BOUNDED_PROFILE,
@@ -109,6 +110,22 @@ class OneActionSource(_Store):
                 self.assertNotIn('MCP_TOOLS', source)
                 self.assertNotIn('LIST_NOTES_TOOL', source)
                 self.assertNotRegex(source, r"['\"](?:input_schema|inputSchema)['\"]\s*:\s*\{")
+
+    def test_browser_capable_workers_are_told_the_owner_cannot_see_the_session(self):
+        """#739: one generic handoff statement reaches every worker offered the browser.
+
+        The API model reads the native definition; a CLI worker reads the same
+        text on the trusted-local MCP wire.  No site, cart or category wording
+        selects it, and no cookie value is part of any tool description.
+        """
+        self.assertIn('The owner cannot see this browser session', BROWSER_SESSION_NOTE)
+        self.assertIn("work from the owner's own browser", BROWSER_SESSION_NOTE)
+        self.assertIn('exists only in this session, say so plainly', BROWSER_SESSION_NOTE)
+        self.assertIn(BROWSER_SESSION_NOTE, NATIVE['browser_open']['description'])
+        wire = {tool['name']: tool for tool in AgentOSMcpTools(self.caps(browser=lambda: None)).definitions()}
+        self.assertIn(BROWSER_SESSION_NOTE, wire['browser_open']['description'])
+        static = {tool['name']: tool for tool in profile_mcp_tools(BOUNDED_PROFILE)}
+        self.assertIn(BROWSER_SESSION_NOTE, static['browser_open']['description'])
 
 
 class DeclaredProfileLimits(unittest.TestCase):

@@ -213,6 +213,9 @@ def subscription_public_evidence(result):
 
 
 #: Retry refusal for a Work whose external effect was not observed (#447/#598).
+#: #730: said before the answer when the current message ran instead of replaying a Work whose effect is unknown.
+UNKNOWN_EFFECT_RAN_CURRENT_NOTICE=('이전 요청의 외부 결과가 불확실해 그 요청은 다시 실행하지 않았습니다. '
+                                   '중복으로 만들어질 수 있으니 실제 결과를 확인해 주세요. 이번 메시지는 새 요청으로 처리했습니다.')
 UNKNOWN_EFFECT_RETRY_REFUSAL=('이전 요청의 외부 결과가 불확실해 자동으로 다시 실행하지 않았습니다. '
                               '중복으로 만들어질 수 있으니 먼저 실제 결과를 확인해 주세요.')
 
@@ -221,6 +224,9 @@ UNKNOWN_EFFECT_RETRY_REFUSAL=('이전 요청의 외부 결과가 불확실해 �
 BROWSER_REQUESTS_KEY='browser_step_requests'
 #: #680: when the legacy plaintext Playwright profile was deleted (Settings shows it).
 BROWSER_LEGACY_KEY='browser_legacy_profile_removed_at'
+#: #730: the continuity relation of a Work judged a retry whose old request was
+#: not safe to replay: the owner's current message ran instead, as a fresh Work.
+RETRY_REFUSED_RAN_CURRENT='retry-refused-ran-current'
 BROWSER_APPROVAL_PROMPT='결제 단계는 승인이 필요합니다. 승인하면 이 요청을 한 번만 이어서 처리하고, 승인한 단계 하나만 실행합니다.'
 #: #709: owner-private config row of in-flow login requests, by Work id.  At
 #: most one per Work: a row stays (resumed/skipped/expired) until it is pruned.
@@ -1149,7 +1155,14 @@ class AgentService:
             current=parent
         return None
 
-    def record_continuity(self, job_id, previous_id, relation, *, executed=False, reason=None, source_work_id=None, db=None):
+    def record_continuity(self, job_id, previous_id, relation, *, executed=False, reason=None, source_work_id=None, db=None,
+                          link_kind=None):
+        """Link this Work to the previous one and record the continuity Evidence.
+
+        ``link_kind`` is the stored Work relation when it differs from the
+        recorded ``relation`` (#730: ``retry-refused-ran-current`` is stored
+        as a ``reference``, since the new message ran and nothing replayed).
+        """
         detail={'relation':relation,'related_work_id':previous_id,'executed':bool(executed)}
         if source_work_id and source_work_id!=previous_id:
             detail['source_work_id']=source_work_id
@@ -1158,8 +1171,8 @@ class AgentService:
             with self.store.db() as conn:
                 conn.execute('BEGIN IMMEDIATE')
                 return self.record_continuity(job_id,previous_id,relation,executed=executed,reason=reason,
-                                              source_work_id=source_work_id,db=conn)
-        self.store.link_work_relation(job_id,previous_id,relation,db=db)
+                                              source_work_id=source_work_id,db=conn,link_kind=link_kind)
+        self.store.link_work_relation(job_id,previous_id,link_kind or relation,db=db)
         db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
                    (job_id,'conversation_continuity','succeeded',json.dumps(detail,ensure_ascii=False),time.time()))
 
@@ -4835,13 +4848,23 @@ class AgentService:
                         if allowed and not source:
                             allowed=False
                             reason='이전 요청의 재시도 연결 기록을 확인할 수 없어 자동으로 다시 실행하지 않았습니다.'
-                        self.record_continuity(job['id'],previous['id'],relation,
-                                               executed=allowed,reason=reason,
-                                               source_work_id=source['id'] if source else None)
-                        if not allowed:
-                            return self.complete_continuity_turn(job,reason)
-                        prompt=source['message'].strip()
-                        prompt_work_id=source['id']
+                        if allowed:
+                            self.record_continuity(job['id'],previous['id'],relation,executed=True,
+                                                   source_work_id=source['id'])
+                            prompt=source['message'].strip()
+                            prompt_work_id=source['id']
+                        else:
+                            # #730: the refusal protects only against replaying the old
+                            # request blindly.  The owner's new message is itself an
+                            # instruction: it runs as this fresh Work with its normal
+                            # context (the worker sees the history and decides), under the
+                            # same approvals and effect guards.  The old request is never
+                            # replayed, and the refusal is Evidence, not the answer.
+                            self.record_continuity(job['id'],previous['id'],RETRY_REFUSED_RAN_CURRENT,
+                                                   executed=False,reason=reason,link_kind=FOLLOWUP_REFERENCE)
+                            if reason==UNKNOWN_EFFECT_RETRY_REFUSAL:
+                                # The owner still needs to check the earlier uncertain effect.
+                                calendar_notice=UNKNOWN_EFFECT_RAN_CURRENT_NOTICE+'\n\n'
                     elif relation==FOLLOWUP_CANCEL:
                         cancelled,response=self.cancel_focused_work(previous,connector_owner)
                         self.record_continuity(job['id'],previous['id'],relation,
@@ -4879,9 +4902,9 @@ class AgentService:
                     # draft itself (``handle(fresh=True)`` says so); anything
                     # else drops it here.
                     if decision.intent!=INTENT_CALENDAR_CREATE and self.calendar_conversation.clear(connector_owner):
-                        calendar_notice=CALENDAR_DROPPED_NOTICE+'\n\n'
+                        calendar_notice+=CALENDAR_DROPPED_NOTICE+'\n\n'
                 elif decision.intent not in (INTENT_CALENDAR_CREATE,INTENT_AMBIGUOUS) and self.calendar_conversation.has_pending(connector_owner):
-                    if self.calendar_conversation.clear(connector_owner):calendar_notice=CALENDAR_DROPPED_NOTICE+'\n\n'
+                    if self.calendar_conversation.clear(connector_owner):calendar_notice+=CALENDAR_DROPPED_NOTICE+'\n\n'
                 self.conversation_focus.record(decision,job['id'])
                 self.present_turn(job,decision=decision)
                 owner=f"channel:{job['channel']}:{job.get('chat_id') or 'local'}"

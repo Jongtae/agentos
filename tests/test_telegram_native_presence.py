@@ -357,7 +357,11 @@ class FailedTurnTests(NativePresenceTestCase):
             db.execute('UPDATE jobs SET created=0 WHERE id=?', (typed,))
         self.service.run_one()
         self.service.deliver_one()
-        self.assertIn('이미 한 번 다시 시도했습니다', self.store.job(typed)['response'])
+        # #730: the typed turn does not replay the failure a second time; it runs as its own Work.
+        [continuity] = [e for e in self.store.task_events(typed) if e['tool'] == 'conversation_continuity']
+        self.assertEqual(continuity['trace']['relation'], 'retry-refused-ran-current')
+        self.assertFalse(continuity['trace']['executed'])
+        self.assertIn('이미 한 번 다시 시도했습니다', continuity['trace']['reason'])
         # The tapped retry itself still runs once.
         self.model_error = None
         self.service.run_one()

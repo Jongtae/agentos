@@ -25,11 +25,12 @@ Verified capability sources (recorded, not assumed; see
 docs/decision-layer.en.md "DecisionEngine routes"):
 
 * Codex CLI 0.153.4 ``codex exec --help``: ``--json``, ``--ignore-user-config``,
-  ``--ephemeral``, ``--sandbox read-only``, ``--output-schema FILE``,
-  ``-m/--model``, ``--disable FEATURE``.
+  ``--ephemeral``, ``--output-schema FILE``, ``-m/--model``,
+  ``--disable FEATURE``, ``-c key=value`` (the #616 permissions profile and
+  ``model_reasoning_effort``); ``codex debug models --bundled`` (#679).
 * Claude Code 2.1.280 ``claude --help``: ``-p``, ``--output-format json``,
   ``--json-schema``, ``--tools ""``, ``--strict-mcp-config``,
-  ``--no-session-persistence``, ``--system-prompt``, ``--model``.
+  ``--no-session-persistence``, ``--system-prompt``, ``--model``, ``--effort``.
 * TypeSafe HTTP API reference (docs.typesafe.ai/api): request
   ``{state, model, questions}``, answers keyed by question id, response
   ``model`` reports the versioned model that answered.
@@ -46,7 +47,7 @@ import tempfile
 import time
 
 from .bounded_execution import (ExecutionError, bounded_run, cli_metadata, failure_details, is_not_signed_in,  # noqa: F401
-                                kill_process_group)
+                                kill_process_group, strict_launch_arguments)
 from .decision import (DECISION_SYSTEM, MAX_CONTEXT_CHARS, NO_CANDIDATE, OUTCOME_CANCELLED,
                        OUTCOME_DECIDED, OUTCOME_MALFORMED, OUTCOME_REJECTED, OUTCOME_TIMEOUT,
                        OUTCOME_UNAVAILABLE, ROUTE_JEV, ROUTE_SUBSCRIPTION_CLI, BinaryDecision,
@@ -148,6 +149,18 @@ def valid_model_id(value):
     return isinstance(value, str) and bool(MODEL_ID.match(value))
 
 
+#: Reasoning-effort names either CLI accepts (#679): Claude Code 2.1.280
+#: ``--effort`` lists low, medium, high, xhigh, max; Codex's bundled model
+#: metadata (``codex debug models --bundled``, 0.153.4) lists the same names
+#: plus ``ultra`` for some models.  Which level a *model* supports is checked
+#: by the route (decision_routes.supported_efforts) before one is passed.
+EFFORT_LEVELS = ('low', 'medium', 'high', 'xhigh', 'max', 'ultra')
+
+
+def valid_effort(value):
+    return value in EFFORT_LEVELS
+
+
 class SubscriptionCliDecisionEngine(SchemaDecisionEngine):
     """One judgment per isolated, tool-less subscription-CLI invocation.
 
@@ -164,13 +177,15 @@ class SubscriptionCliDecisionEngine(SchemaDecisionEngine):
 
     def __init__(self, execution, engine_id, *, model=None, model_policy='engine_default',
                  timeout=CLI_DECISION_TIMEOUT_SECONDS, audit=None, now=time.time, guard=None,
-                 codex_disabled_features=None):
+                 codex_disabled_features=None, effort=None):
         super().__init__(audit=audit, now=now)
         if engine_id not in CLI_BINARIES:
             raise ValueError('지원하는 구독 엔진을 선택하세요.')
         if model is not None and not valid_model_id(model):
             raise ValueError('모델 이름 형식을 확인하세요.')
-        self.execution, self.engine_id, self.model = execution, engine_id, model
+        if effort is not None and not valid_effort(effort):
+            raise ValueError('추론 강도를 확인하세요.')
+        self.execution, self.engine_id, self.model, self.effort = execution, engine_id, model, effort
         self.model_policy, self.timeout, self.guard = model_policy, timeout, guard
         # Codex fails closed without the disable plan from a capability check.
         self.codex_disabled_features = (tuple(codex_disabled_features) if codex_disabled_features is not None
@@ -179,14 +194,23 @@ class SubscriptionCliDecisionEngine(SchemaDecisionEngine):
 
     def argv(self, binary, prompt, schema_path, schema):
         if self.engine_id == 'codex':
-            # --ignore-rules: no CODEX_HOME execpolicy rule can allow a
-            # command outside the sandbox (#616 review P1, reused; #624).
-            argv = [binary, 'exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check',
-                    '--ignore-user-config', '--ignore-rules', '--ephemeral', '--output-schema', str(schema_path)]
-            for key, value in CODEX_DECISION_CONFIG:
-                argv += ['-c', f'{key}={value}']
-            for feature in self.codex_disabled_features or ():
-                argv += ['--disable', feature]
+            # #679: a judgment runs under the #616 strict-isolated launch
+            # arguments, reused as-is: the Codex permissions profile (the
+            # platform `:minimal` set and the per-call directory, read-only; no
+            # network for sandboxed commands; the store, home and CODEX_HOME
+            # denied) replaces `--sandbox read-only`, which could read the home
+            # folder (TRUSTED_LOCAL_LIMITATION).  It also carries
+            # --ignore-rules (no CODEX_HOME execpolicy rule can allow a command
+            # outside the sandbox, #616 review P1 / #624), the decision-route
+            # instruction overrides (CODEX_DECISION_CONFIG) and one --disable
+            # per non-allowlisted feature from the verified plan.  An empty or
+            # unverified plan raises ExecutionError (no judgment runs).
+            argv = [binary, 'exec', '--json', *strict_launch_arguments('codex', self.codex_disabled_features),
+                    '--skip-git-repo-check', '--ignore-user-config', '--ephemeral', '--output-schema', str(schema_path)]
+            if self.effort:
+                # Official config key; the level was checked against the
+                # model's bundled metadata by the route.
+                argv += ['-c', f'model_reasoning_effort="{self.effort}"']
             if self.model:
                 argv += ['--model', self.model]
             return argv + [prompt]
@@ -198,6 +222,8 @@ class SubscriptionCliDecisionEngine(SchemaDecisionEngine):
                 '--system-prompt', DECISION_SYSTEM]
         if self.model:
             argv += ['--model', self.model]
+        if self.effort:
+            argv += ['--effort', self.effort]
         return argv
 
     def _identity(self):
@@ -243,7 +269,11 @@ class SubscriptionCliDecisionEngine(SchemaDecisionEngine):
                 return done(OUTCOME_UNAVAILABLE, failure='auth')
             if self.engine_id == 'claude-code':
                 env = {**env, **CLAUDE_DECISION_ENV}
-            argv = self.argv(binary, prompt, schema_path, schema)
+            try:
+                argv = self.argv(binary, prompt, schema_path, schema)
+            except ExecutionError:
+                # The strict launch refused the stored feature plan.
+                return done(OUTCOME_UNAVAILABLE, failure='capability-unchecked')
             try:
                 completed = bounded_run(self.execution.runner, argv, cwd=run_dir, env=env, timeout=self.timeout)
             except subprocess.TimeoutExpired:

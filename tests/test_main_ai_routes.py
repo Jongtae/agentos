@@ -18,6 +18,8 @@ from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
 from personal_agent.subscription_engines import SubscriptionEngines
+from personal_agent.decision_qualification import CASE_IDS
+from test_decision_routes import careless, oracle, parse_prompt, schema_answer
 
 OPENAI_KEY = 'sk-fixture-openai-0001'
 ANTHROPIC_KEY = 'ak-fixture-anthropic-0001'
@@ -30,6 +32,7 @@ class Transport:
         self.calls = []
         self.refuse = set()  # hostnames that answer HTTP 401
         self.refuse_decide = set()  # hostnames that answer the probe but not a judgment
+        self.careless = set()  # models that answer every judgment carelessly (never qualify, #679)
 
     def __call__(self, url, body, headers=None, timeout=60):
         from urllib.parse import urlsplit
@@ -44,7 +47,13 @@ class Transport:
         if name == 'decide' and host in self.refuse_decide:
             raise ProviderError('HTTP 401', status=401)
         if name == 'decide':
-            arguments = {'choice': 'retry', 'confidence': 0.9}
+            # #679: the Judgment AI is qualified with the synthetic suite, so
+            # judgments are answered by the shared fixture oracle.
+            last = body['messages'][-1]['content']
+            text = last if isinstance(last, str) else ' '.join(part.get('text', '') for part in last)
+            schema = tools[0]['function']['parameters'] if 'function' in tools[0] else tools[0]['input_schema']
+            purpose, facts = parse_prompt(text)
+            arguments = schema_answer(schema, purpose, facts, careless if body.get('model') in self.careless else oracle)
         elif name:
             arguments = {}
         if url.endswith('/v1/messages'):
@@ -244,21 +253,27 @@ class MainAiRouteTests(unittest.TestCase):
         self.assertEqual(self.store.config('decision_route'), {'transport': 'off'})
         self.assertEqual(result['decision_route']['mode'], 'off')
 
-    # -- AC8 Codex cannot be followed ----------------------------------------------
-    def test_codex_main_makes_follow_unavailable_with_reason(self):
+    # -- AC8 (#679): Codex is followed under the strict profile ---------------------
+    def test_codex_main_is_followable_and_a_failed_strict_check_needs_attention(self):
         self._save('openai', OPENAI_KEY)
         self.service.activate_main_ai({'route': 'openai'})
+        calls = len(self.transport.calls)
         result = self.service.activate_main_ai({'route': 'codex'})
         self.assertEqual(self.service.main_ai.current(), 'codex')
-        self.assertEqual(result['judgment']['failure'], 'follow-unsupported')
         route = result['decision_route']
-        self.assertFalse(route['follow']['available'])
-        self.assertIn('Codex', route['follow']['reason'])
+        self.assertTrue(route['follow']['available'])
+        self.assertEqual((route['follow']['transport'], route['follow']['model_policy'], route['follow']['candidates']),
+                         ('subscription_cli', 'lowest_qualified', ['gpt-6-luna', 'gpt-5.6-luna', 'gpt-5.6-terra']))
+        # The fake execution adapter here cannot run the strict qualification:
+        # the follow row needs attention, and nothing falls back to OpenAI.
+        self.assertEqual(result['judgment']['state'], 'attention')
         self.assertFalse(route['active']['available'])
-        with self.assertRaises(DecisionRouteError):
-            self.service.activate_decision_route({'transport': MODE_FOLLOW})
+        self.assertEqual(route['effective']['state'], 'attention')
+        decision = self.service.decision_engine.choose(DecisionContext('p', {'a': 'b'}), ('x', 'y'), 'q')
+        self.assertNotEqual(decision.outcome, OUTCOME_DECIDED)
+        self.assertEqual(len(self.transport.calls), calls, 'no judgment reached api.openai.com')
 
-    def test_claude_code_follow_uses_lowest_qualified_light_candidate(self):
+    def test_claude_code_follow_uses_the_ranked_cheapest_first_list(self):
         seen = []
 
         def fake_cli(body, extra=None):
@@ -266,10 +281,42 @@ class MainAiRouteTests(unittest.TestCase):
             raise DecisionRouteError('fixture: not qualified')
         self.service.decision_routes._activate_cli = fake_cli
         result = self.service.activate_main_ai({'route': 'claude-code'})
-        self.assertEqual(seen, [({'engine': 'claude-code', 'model_policy': 'lowest_qualified', 'candidates': ['haiku']},
+        # No explicit candidates: activation qualifies the ranked list
+        # (haiku, then sonnet), filtered by its own capability check.
+        self.assertEqual(seen, [({'engine': 'claude-code', 'model_policy': 'lowest_qualified'},
                                  {'mode': MODE_FOLLOW, 'main': 'claude-code'})])
         self.assertEqual(result['judgment']['state'], 'attention')
         self.assertEqual(self.store.config('decision_route')['transport'], 'off')
+        self.assertEqual(result['decision_route']['follow']['candidates'], ['haiku', 'sonnet'])
+
+    # -- #679: API follow defaults are the cheapest qualified ranked model --------
+    def test_openai_follow_defaults_to_the_cheapest_qualified_model(self):
+        self._save('openai', OPENAI_KEY)
+        result = self.service.activate_main_ai({'route': 'openai'})
+        active = result['decision_route']['active']
+        self.assertEqual((active['model_policy'], active['requested_model'], active['destination']),
+                         ('lowest_qualified', 'gpt-4o-mini', 'api.openai.com'))
+        self.assertEqual(active['qualification']['model'], 'gpt-4o-mini')
+        judged = [call for call in self.transport.calls if call['model'] == 'gpt-4o-mini']
+        self.assertGreaterEqual(len(judged), len(CASE_IDS), 'the full suite, not a single probe')
+        self.assertFalse(any(call['model'] == 'gpt-6-luna' for call in self.transport.calls))
+        self.assertEqual(result['decision_route']['effective']['text'], '기본 AI(OpenAI API)를 따라가는 중 — gpt-4o-mini, 검증됨')
+
+    def test_openai_follow_tries_the_next_ranked_model_only_when_the_first_fails(self):
+        self._save('openai', OPENAI_KEY)
+        self.transport.careless.add('gpt-4o-mini')
+        active = self.service.activate_main_ai({'route': 'openai'})['decision_route']['active']
+        self.assertEqual(active['requested_model'], 'gpt-6-luna')
+        self.transport.careless.add('gpt-6-luna')
+        self.store.put('decision_route', None)
+        result = self.service.activate_main_ai({'route': 'openai'})
+        self.assertEqual((result['judgment']['state'], result['judgment']['failure']), ('attention', 'no-qualified-candidate'))
+        self.assertEqual(self.store.config('decision_route')['transport'], 'off', 'no other model, key or route')
+
+    def test_anthropic_follow_defaults_to_haiku(self):
+        self._save('anthropic', ANTHROPIC_KEY)
+        active = self.service.activate_main_ai({'route': 'anthropic'})['decision_route']['active']
+        self.assertEqual((active['model_policy'], active['requested_model']), ('lowest_qualified', 'claude-haiku-4-5'))
 
     def test_explicit_follow_failure_keeps_previous_judgment(self):
         self._save('openai', OPENAI_KEY)

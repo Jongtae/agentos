@@ -620,6 +620,11 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 if self.public_host():return self.reply(403,{'error':'이 작업은 이 기기에서만 할 수 있습니다.'})
                 return self.reply(200,service.google_revocations())
             if path=='/api/settings':return self.reply(200,service.conversation_settings_request({'operation':'read'}))
+            if path=='/api/decision-route/models':
+                # #679: the explicit 모델 목록 새로고침 button only; Settings
+                # never calls this on open.  Listed is not verified.
+                try:return self.reply(200,service.list_decision_models(parse_qs(parts.query).get('route',[''])[0]))
+                except ValueError as error:return self.reply(400,{'error':str(error)})
             if path=='/api/personal-knowledge':return self.reply(200,service.personal_knowledge_request({'query':parse_qs(parts.query).get('query',[''])[0]}, channel='local-companion'))
             if path=='/api/personal-space/memory-candidates':
                 return self.reply(200,service.memory_candidate_request({'operation':'list'}))

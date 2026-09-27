@@ -15,7 +15,8 @@ import types
 import unittest
 from pathlib import Path
 
-from personal_agent.bounded_execution import BoundedExecutionAdapter
+from personal_agent.bounded_execution import (CODEX_STRICT_PERMISSIONS, CODEX_STRICT_TABLE, BoundedExecutionAdapter,
+                                              strict_allowed_features)
 from personal_agent.conversation_handoff import ConversationJudgments, JUDGMENT_YES
 from personal_agent.decision import (NO_CANDIDATE, OUTCOME_CANCELLED, OUTCOME_DECIDED, OUTCOME_MALFORMED,
                                      OUTCOME_REJECTED, OUTCOME_TIMEOUT, OUTCOME_UNAVAILABLE, DecisionContext,
@@ -24,7 +25,7 @@ from personal_agent.decision_adapters import (CODEX_DECISION_CONFIG, JEV_ENDPOIN
                                               SubscriptionCliDecisionEngine, bounded_run, codex_disable_plan,
                                               parse_codex_features)
 from personal_agent.decision_qualification import CASE_IDS, SUITE_VERSION, qualify
-from personal_agent.decision_routes import CODEX_INSTRUCTION_FILES_QUALIFIED, DecisionRouteError
+from personal_agent.decision_routes import CODEX_INSTRUCTION_FILES_QUALIFIED, RANKED_MODELS, DecisionRouteError
 from personal_agent.providers import ModelAdapter, ProviderError
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
@@ -155,6 +156,18 @@ def features_listing(disabled=(), features=CODEX_FEATURES):
                      for name, stage, enabled in features)
 
 
+#: A `codex debug models --bundled` shape (codex-cli 0.153.4): no gpt-6-luna.
+def bundled_listing(slugs=('gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.4-mini')):
+    levels = [{'effort': level, 'description': level} for level in ('low', 'medium', 'high', 'xhigh', 'max')]
+    return json.dumps({'models': [{'slug': slug, 'display_name': slug, 'default_reasoning_level': 'medium',
+                                   'supported_reasoning_levels': levels,
+                                   'visibility': 'hide' if slug == 'gpt-5.4-mini' else 'list'} for slug in slugs]})
+
+
+#: A fake native CLI: the ELF magic the strict profile requires of the executable (#616).
+FAKE_NATIVE = b'\x7fELF fake native cli\n'
+
+
 class CliRunner:
     """A fake `subprocess.run` for the two official CLIs.
 
@@ -163,10 +176,15 @@ class CliRunner:
     """
 
     def __init__(self, judges=None, *, help_text=None, fail=None, logged_in=True, claude_model='claude-fixture-small',
-                 features=CODEX_FEATURES, ignore_disable=()):
-        self.judges = judges or {None: oracle}
+                 features=CODEX_FEATURES, ignore_disable=(), bundled=None, readable=()):
+        # By default the engine default and every ranked candidate (#679) judge well.
+        self.judges = judges or {None: oracle, **{model: oracle for route in ('codex', 'claude-code')
+                                                  for model in RANKED_MODELS[route]}}
         self.help_text, self.fail, self.logged_in, self.claude_model = help_text or {}, fail, logged_in, claude_model
         self.features, self.ignore_disable = features, ignore_disable
+        self.bundled = bundled_listing() if bundled is None else bundled
+        # Paths Codex's own sandbox runner would (wrongly) let a command read.
+        self.readable = {Path(path) for path in readable}
         self.calls = []
 
     def __call__(self, argv, cwd=None, env=None, stdin=None, capture_output=None, text=None, timeout=None, shell=None,
@@ -184,6 +202,14 @@ class CliRunner:
         if argv[1:3] == ['features', 'list']:
             disabled = {argv[i + 1] for i, part in enumerate(argv) if part == '--disable'} - set(self.ignore_disable)
             return done(features_listing(disabled, self.features))
+        if argv[1:3] == ['debug', 'models']:
+            assert '--bundled' in argv, 'a plain `codex debug models` rewrites the shared models_cache.json'
+            return done(self.bundled) if self.bundled else done('', 1, 'unknown subcommand')
+        if argv[1] == 'sandbox':
+            # `codex sandbox ... -P <profile> -- /bin/ls <target>`: the turn
+            # directory is readable, anything else is denied unless listed.
+            target = Path(argv[-1])
+            return done('', 0 if target == Path(cwd) or target in self.readable else 1)
         if argv[1:3] == ['login', 'status']:
             return done('Logged in using ChatGPT' if self.logged_in else 'Not logged in', 0 if self.logged_in else 1)
         if argv[1:3] == ['auth', 'status']:
@@ -208,7 +234,8 @@ class CliRunner:
                                 'modelUsage': {self.claude_model: {'inputTokens': 5}}}))
 
 
-PLAN = codex_disable_plan(parse_codex_features(features_listing()))
+#: #679: the strict profile's plan (`unified_exec` may stay; `shell_tool` is off).
+PLAN = codex_disable_plan(parse_codex_features(features_listing()), strict_allowed_features())
 
 
 def cli_adapter(runner, root, finder=None):
@@ -298,16 +325,23 @@ class SubscriptionCliTests(Temp):
         for flag in ('--ignore-user-config', '--ignore-rules', '--ephemeral', '--skip-git-repo-check', '--output-schema',
                      '--json'):
             self.assertIn(flag, argv)
-        self.assertEqual(argv[argv.index('--sandbox') + 1], 'read-only')
+        # #679: the #616 strict permissions profile replaces the read-only
+        # sandbox, which could read the home folder; never both.
+        self.assertNotIn('--sandbox', argv)
+        self.assertNotIn('read-only', argv)
         disabled = [argv[i + 1] for i, part in enumerate(argv) if part == '--disable']
         self.assertEqual(sorted(disabled), ['apps', 'artifact', 'browser_use', 'memories', 'multi_agent', 'shell_tool',
-                                            'unified_exec', 'view_image', 'web_search_request'],
-                         'every listed non-removed feature outside the allowlist, whatever its default')
+                                            'view_image', 'web_search_request'],
+                         'every listed non-removed feature outside the strict allowlist, whatever its default')
+        self.assertIn('shell_tool', disabled, 'no command tool is offered')
+        self.assertNotIn('unified_exec', disabled, 'accepted under the strict profile (cannot be disabled on 0.153.4)')
         self.assertIn('artifact', disabled, 'a feature off by default is still disabled (P3-a)')
         self.assertNotIn('personality', disabled)
         self.assertNotIn('sqlite', disabled, 'removed features are no-ops and are not passed')
         overrides = [argv[i + 1] for i, part in enumerate(argv) if part == '-c']
-        self.assertEqual(overrides, [f'{key}={value}' for key, value in CODEX_DECISION_CONFIG])
+        self.assertEqual(overrides, [f'default_permissions="{CODEX_STRICT_PERMISSIONS}"', CODEX_STRICT_TABLE,
+                                     *[f'{key}={value}' for key, value in CODEX_DECISION_CONFIG]])
+        self.assertIn('network={enabled=false}', CODEX_STRICT_TABLE)
         self.assertIn('web_search="disabled"', overrides)
         self.assertIn('project_doc_max_bytes=0', overrides)
         self.assertTrue(call['start_new_session'], 'the CLI runs in its own process group')
@@ -472,25 +506,49 @@ class JevTests(Temp):
 
 
 # --- service: selection, persistence, independence ----------------------------
-class ServiceRouteSelectionTests(Temp):
+def strict_fixture(case):
+    """#679: Codex activation runs the #616 strict qualification (no model).
+
+    It needs a native-looking binary, the tested platform (CI runs on Linux)
+    and a runtime root outside Codex's baseline-readable paths (tempfile is
+    under /tmp on Linux); the same pins the #616 unit tests use.
+    """
+    import sys
+    from unittest import mock
+    from personal_agent import bounded_execution
+    for patcher in (mock.patch.object(sys, 'platform', 'darwin'),
+                    mock.patch.object(bounded_execution, 'BASELINE_READABLE_ROOTS', ('/nonexistent-baseline-root',))):
+        patcher.start()
+        case.addCleanup(patcher.stop)
+    folder = Path(case.root) / 'bin'
+    folder.mkdir(exist_ok=True)
+    for name in ('codex', 'claude'):
+        (folder / name).write_bytes(FAKE_NATIVE)
+    return lambda name: str(folder / name) if name in ('codex', 'claude') else None
+
+
+class ServiceFixture(Temp):
+    def setUp(self):
+        super().setUp()
+        self.finder = strict_fixture(self)
+
     def service(self, runner=None, jev=None, openai=None, finder=None):
         self.store = QuickStore(self.root) if not hasattr(self, 'store') else self.store
         self.runner = runner or CliRunner()
         self.openai = openai or OpenAITransport()
         self.jev = jev or JevTransport()
-        finder = finder or (lambda name: f'/fixture/bin/{name}')
+        finder = finder or self.finder
         service = AgentService(self.store, ModelAdapter(self.openai), self.openai,
                                subscription_engines=SubscriptionEngines(finder=finder),
                                execution_adapter=cli_adapter(self.runner, self.root, finder=finder))
         service.decision_routes.jev_transport = self.jev
-        # Fixture only: treat the fixture CLI version as instruction-file
-        # qualified so the other activation paths stay testable (#624).
-        service.decision_routes.codex_instruction_qualified = frozenset({'0.153.4'})
         return service
 
     def judge(self, service):
         return service.decision_judge.followup_relation('다시 해봐', 'research', 'failed')
 
+
+class ServiceRouteSelectionTests(ServiceFixture):
     def test_opening_settings_calls_no_model_and_runs_no_cli(self):
         service = self.service(runner=CliRunner(fail=lambda e, a: self.fail('ran a CLI')))
         self.store.secret('decision_jev_key', JEV_KEY)
@@ -526,9 +584,12 @@ class ServiceRouteSelectionTests(Temp):
         status = service.settings()['decision_route']
         self.assertEqual(status['active']['transport'], 'none', 'the pre-#580 default is unchanged')
         self.assertTrue(status['direct_api']['configured'], 'the saved key makes the route selectable')
-        service.activate_decision_route({'transport': 'direct_api'})
-        self.assertEqual(len(self.openai.calls), 1, 'the explicit activation sends one probe')
+        status = service.activate_decision_route({'transport': 'direct_api'})
+        self.assertEqual(len(self.openai.calls), len(CASE_IDS),
+                         'the explicit activation runs the synthetic qualification suite (#679), nothing else')
         self.assertEqual(self.store.config('decision_model')['model'], 'gpt-4o-mini')
+        self.assertEqual((status['active']['model_policy'], status['active']['requested_model']),
+                         ('lowest_qualified', 'gpt-4o-mini'), 'the cheapest ranked candidate qualified first')
         self.assertEqual(self.judge(service).value, 'retry')
 
     def test_concurrent_activations_are_serialised(self):
@@ -546,7 +607,7 @@ class ServiceRouteSelectionTests(Temp):
 
     def test_codex_tool_surface_is_an_allowlist_that_fails_closed(self):
         cases = (
-            ('a feature that cannot be disabled', CliRunner(ignore_disable=('unified_exec',)), 'tool-features-enabled'),
+            ('a feature that cannot be disabled', CliRunner(ignore_disable=('shell_tool',)), 'tool-features-enabled'),
             ('an unknown stage', CliRunner(features=CODEX_FEATURES + (('mystery_tool', 'beta', True),)), 'unverified'),
         )
         for label, runner, surface in cases:
@@ -560,7 +621,7 @@ class ServiceRouteSelectionTests(Temp):
                 codex = next(e for e in service.settings()['decision_route']['subscription_cli'] if e['id'] == 'codex')
                 self.assertEqual(codex['tool_surface'], surface, 'Settings shows why Codex was refused')
                 if surface == 'tool-features-enabled':
-                    self.assertIn('unified_exec', codex['tool_surface_detail'])
+                    self.assertIn('shell_tool', codex['tool_surface_detail'])
                 self.assertEqual(codex['check']['failure'], 'tool-surface-unverified')
                 self.assertFalse(any('exec' in call['argv'] and '--help' not in call['argv'] for call in runner.calls),
                                  'no judgment runs on an unverified tool surface')
@@ -569,8 +630,9 @@ class ServiceRouteSelectionTests(Temp):
         route = service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'codex'})['active']
         self.assertEqual(route['codex_disabled_features'], PLAN)
         listing = [call['argv'] for call in self.runner.calls if call['argv'][1:3] == ['features', 'list']]
-        self.assertEqual(len(listing), 2, 'listed, then re-listed with the disables to verify')
-        self.assertEqual(self.runner.calls[-1]['argv'].count('--disable'), len(PLAN))
+        self.assertEqual(len(listing), 4, 'listed, then re-listed with the disables - by the capability check and '
+                                          'again by the #616 strict qualification')
+        self.assertEqual([argv.count('--disable') for argv in listing], [0, len(PLAN), 0, len(PLAN)])
         self.assertTrue(all(call['env']['CODEX_HOME'] != str(Path(self.root) / 'codex-home')
                             for call in self.runner.calls if call['argv'][1:3] == ['features', 'list']),
                         'the listing uses an empty CODEX_HOME, i.e. the defaults --ignore-user-config runs with')
@@ -689,11 +751,12 @@ class ServiceRouteSelectionTests(Temp):
             self.assertIn(phrase, doc)
 
     def test_codex_is_refused_until_its_instruction_files_are_qualified(self):
-        # #624: no Codex version is qualified in the product; activation fails
-        # closed before any judgment even when the tool surface passes.
+        # #624/#679: only 0.153.4 (the harness-checked version, owner pilot
+        # relaxation) is qualified; any other version fails closed before any
+        # judgment even when the tool surface passes.
+        self.assertEqual(CODEX_INSTRUCTION_FILES_QUALIFIED, frozenset({'0.153.4'}))
         service = self.service()
-        service.decision_routes.codex_instruction_qualified = CODEX_INSTRUCTION_FILES_QUALIFIED
-        self.assertEqual(CODEX_INSTRUCTION_FILES_QUALIFIED, frozenset())
+        service.decision_routes.codex_instruction_qualified = frozenset({'0.160.0'})
         with self.assertRaises(DecisionRouteError):
             service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'codex'})
         self.assertIsNone(self.store.config('decision_route'))
@@ -711,7 +774,7 @@ class ServiceRouteSelectionTests(Temp):
         service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'codex'})
         self.assertTrue(service.decision_routes.status()['active']['available'])
         calls = len(self.runner.calls)
-        service.decision_routes.codex_instruction_qualified = CODEX_INSTRUCTION_FILES_QUALIFIED
+        service.decision_routes.codex_instruction_qualified = frozenset({'0.160.0'})
         active = service.decision_routes.status()['active']
         self.assertTrue(active['instruction_files_unqualified'])
         self.assertFalse(active['available'])
@@ -784,15 +847,14 @@ class ServiceRouteSelectionTests(Temp):
 
     def test_a_changed_cli_binary_requires_requalification(self):
         binary = Path(self.root) / 'bin' / 'codex'
-        binary.parent.mkdir()
-        binary.write_text('v1')
+        binary.write_bytes(FAKE_NATIVE + b'v1')
         finder = lambda name: str(binary) if name == 'codex' else None
         service = self.service(runner=CliRunner({'small': oracle}), finder=finder)
         service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'codex',
                                          'model_policy': 'explicit', 'model': 'small'})
         self.assertEqual(self.judge(service).value, 'retry')
         self.assertTrue(service.settings()['decision_route']['active']['available'])
-        binary.write_text('version two, different size')
+        binary.write_bytes(FAKE_NATIVE + b'version two, different size')
         active = service.settings()['decision_route']['active']
         self.assertEqual((active['available'], active['requalification_needed']), (False, True),
                          'Settings shows the same requalification state the runtime guard enforces')
@@ -803,8 +865,7 @@ class ServiceRouteSelectionTests(Temp):
 
     def test_engine_default_is_also_bound_to_the_checked_binary(self):
         binary = Path(self.root) / 'bin' / 'claude'
-        binary.parent.mkdir()
-        binary.write_text('v1')
+        binary.write_bytes(FAKE_NATIVE + b'v1')
         finder = lambda name: str(binary) if name == 'claude' else None
         service = self.service(finder=finder)
         service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'claude-code'})
@@ -846,6 +907,302 @@ class ServiceRouteSelectionTests(Temp):
             with self.subTest(body=body), self.assertRaises(ValueError):
                 service.save_decision_route_credential(body)
         self.assertIsNone(self.store.config('decision_route'))
+
+
+# --- SEC-JUDGE-01 / #679: cheapest-first defaults, strict Codex, model lists ----
+class JudgmentModelTests(ServiceFixture):
+    """Evidence class: unit tests with fake CLIs/transports only (no live model)."""
+
+    def main(self, engine_id):
+        self.store.put('subscription_engine', {'id': engine_id, 'connected_at': 1,
+                                               'authentication': 'owner-confirmed-official-login'})
+
+    def judgments(self, engine_name):
+        return [call['argv'] for call in self.runner.calls
+                if os.path.basename(call['argv'][0]) == engine_name
+                and ('--output-schema' in call['argv'] or '--json-schema' in call['argv'])]
+
+    @staticmethod
+    def model_of(argv):
+        return argv[argv.index('--model') + 1] if '--model' in argv else None
+
+    def test_codex_follow_defaults_to_the_cheapest_bundled_qualified_model_under_the_strict_profile(self):
+        service = self.service()
+        self.main('codex')
+        status = service.activate_decision_route({'transport': 'follow_main'})
+        active = status['active']
+        self.assertEqual((active['source'], active['transport'], active['engine']), ('follow', 'subscription_cli', 'codex'))
+        self.assertEqual((active['model_policy'], active['requested_model'], active['effort']),
+                         ('lowest_qualified', 'gpt-5.6-luna', 'low'),
+                         'gpt-6-luna is ranked first but codex-cli 0.153.4 does not bundle it')
+        self.assertTrue(active['available'])
+        self.assertEqual(active['strict_profile']['platform'], 'darwin')
+        self.assertIn('protected-directory-denied', active['strict_profile']['checks'])
+        tried = {self.model_of(argv) for argv in self.judgments('codex')}
+        self.assertEqual(tried, {'gpt-5.6-luna'}, 'no dearer model once the cheapest qualified')
+        argv = self.judgments('codex')[-1]
+        self.assertIn('model_reasoning_effort="low"', argv)
+        self.assertNotIn('--sandbox', argv)
+        self.assertIn(f'default_permissions="{CODEX_STRICT_PERMISSIONS}"', argv)
+        self.assertEqual(status['effective']['state'], 'active')
+        self.assertEqual(status['effective']['text'], '기본 AI(Codex)를 따라가는 중 — gpt-5.6-luna, 검증됨')
+        calls = len(self.runner.calls)
+        self.assertEqual(self.judge(service).value, 'retry')
+        self.assertEqual(self.model_of(self.runner.calls[-1]['argv']), 'gpt-5.6-luna')
+        self.assertEqual(len(self.runner.calls), calls + 1)
+
+    def test_a_newer_codex_that_bundles_gpt_6_luna_makes_it_the_default(self):
+        service = self.service(runner=CliRunner(bundled=bundled_listing(('gpt-6-luna', 'gpt-5.6-luna', 'gpt-5.6-terra'))))
+        self.main('codex')
+        active = service.activate_decision_route({'transport': 'follow_main'})['active']
+        self.assertEqual(active['requested_model'], 'gpt-6-luna')
+        self.assertEqual(RANKED_MODELS['codex'], ('gpt-6-luna', 'gpt-5.6-luna', 'gpt-5.6-terra'))
+
+    def test_claude_code_follow_defaults_to_haiku_and_sends_no_effort_it_does_not_support(self):
+        service = self.service()
+        self.main('claude-code')
+        active = service.activate_decision_route({'transport': 'follow_main'})['active']
+        self.assertEqual((active['requested_model'], active['effort']), ('haiku', None))
+        self.assertTrue(all('--effort' not in argv for argv in self.judgments('claude')))
+
+    def test_claude_code_falls_to_sonnet_with_low_effort_only_when_haiku_does_not_qualify(self):
+        service = self.service(runner=CliRunner({None: oracle, 'haiku': careless, 'sonnet': oracle}))
+        self.main('claude-code')
+        status = service.activate_decision_route({'transport': 'follow_main'})
+        self.assertEqual((status['active']['requested_model'], status['active']['effort']), ('sonnet', 'low'))
+        argv = self.judgments('claude')[-1]
+        self.assertEqual(argv[argv.index('--effort') + 1], 'low')
+        check = next(e for e in status['subscription_cli'] if e['id'] == 'claude-code')['check']
+        self.assertEqual([(row['model'], row['qualified']) for row in check['candidates']],
+                         [('haiku', False), ('sonnet', True)], 'cheapest first; the next only after a failure')
+
+    def test_separate_mode_defaults_to_lowest_qualified_with_the_ranked_list(self):
+        service = self.service()
+        status = service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'claude-code'})
+        self.assertEqual((status['active']['source'], status['active']['model_policy'], status['active']['requested_model']),
+                         ('owner', 'lowest_qualified', 'haiku'))
+        engines = {e['id']: e for e in status['subscription_cli']}
+        self.assertEqual(engines['claude-code']['ranked_models'], ['haiku', 'sonnet'])
+        self.assertEqual(engines['codex']['ranked_models'], ['gpt-6-luna', 'gpt-5.6-luna', 'gpt-5.6-terra'],
+                         'no bundled listing recorded yet: the whole ranked list, the qualification decides')
+        self.assertFalse(any(self.model_of(argv) is None for argv in self.judgments('claude')),
+                         'the engine default (Opus for Claude Code) is never the silent default')
+
+    def test_a_denied_home_read_is_required_before_any_codex_judgment(self):
+        # The #616 strict qualification: Codex's own sandbox runner must refuse
+        # the home folder under the exact permissions profile.
+        runner = CliRunner(readable=(Path.home(),))
+        service = self.service(runner=runner)
+        with self.assertRaises(DecisionRouteError) as raised:
+            service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'codex'})
+        self.assertIn('엄격 격리', str(raised.exception))
+        self.assertIn('그대로 유지', str(raised.exception))
+        self.assertIsNone(self.store.config('decision_route'))
+        check = service.decision_routes._checks()['subscription_cli:codex']
+        self.assertEqual((check['failure'], check['detail']), ('strict-profile-unqualified', 'protected-directory-denied'))
+        probes = [call['argv'] for call in runner.calls if call['argv'][1] == 'sandbox']
+        self.assertIn(str(Path.home()), [argv[-1] for argv in probes])
+        for argv in probes:
+            self.assertEqual(argv[4:8], ['-c', CODEX_STRICT_TABLE, '-P', CODEX_STRICT_PERMISSIONS])
+        self.assertEqual(self.judgments('codex'), [], 'no judgment runs without a passed strict qualification')
+
+    def test_a_stored_codex_route_without_a_strict_qualification_makes_no_call(self):
+        service = self.service()
+        service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'codex'})
+        route = self.store.config('decision_route')
+        # A route stored before #679 (or moved to another OS) has no strict record.
+        self.store.put('decision_route', {key: value for key, value in route.items() if key != 'strict_profile'})
+        calls = len(self.runner.calls)
+        self.assertEqual(self.judge(service).outcome, 'unavailable')
+        self.assertEqual(len(self.runner.calls), calls)
+        self.assertEqual(self.store.config('decision_audit')[-1]['failure'], 'strict-profile-unqualified')
+        self.assertFalse(service.decision_routes.status()['active']['available'])
+        # A plan that still disables nothing verified (or keeps a strict-allowed
+        # feature in the plan) is refused by the strict launch itself.
+        engine = SubscriptionCliDecisionEngine(cli_adapter(CliRunner(), self.root), 'codex',
+                                               codex_disabled_features=['apps', 'unified_exec'])
+        self.assertEqual(engine.judge(DecisionContext('x', {'m': 'a'}), 'p').outcome, OUTCOME_UNAVAILABLE)
+        self.assertEqual(engine.last_failure, 'capability-unchecked')
+        self.assertEqual(engine.execution.runner.calls, [])
+
+    def test_codex_instruction_files_are_warned_by_size_never_read(self):
+        (Path(self.root) / 'codex-home').mkdir(exist_ok=True)
+        (Path(self.root) / 'codex-home' / 'AGENTS.md').write_text('OWNER-PRIVATE-INSTRUCTION-CANARY\n')
+        service = self.service()
+        status = service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'codex'})
+        self.assertEqual(status['active']['instruction_files_present'], [{'file': 'AGENTS.md', 'bytes': 33}])
+        self.assertNotIn('OWNER-PRIVATE-INSTRUCTION-CANARY', json.dumps(status, ensure_ascii=False))
+        stored = [path for path in Path(self.root).rglob('*')
+                  if path.is_file() and 'codex-home' not in path.parts and b'OWNER-PRIVATE-INSTRUCTION-CANARY' in path.read_bytes()]
+        self.assertEqual(stored, [], 'the content is never copied into AgentOS state')
+
+    def test_changing_the_model_runs_the_full_qualification_and_keeps_the_previous_route_on_failure(self):
+        service = self.service(runner=CliRunner({None: oracle, 'haiku': oracle, 'sonnet': careless}))
+        service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'claude-code'})
+        before = self.store.config('decision_route')
+        calls = len(self.judgments('claude'))
+        with self.assertRaises(DecisionRouteError) as raised:
+            service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'claude-code',
+                                             'model_policy': 'explicit', 'model': 'sonnet', 'effort': 'medium'})
+        self.assertIn('그대로 유지', str(raised.exception))
+        self.assertEqual(self.store.config('decision_route'), before, 'the previous route is kept')
+        sonnet = [argv for argv in self.judgments('claude')[calls:] if self.model_of(argv) == 'sonnet']
+        self.assertGreater(len(sonnet), 1, 'a model change is qualified with the suite, not one probe')
+        self.assertTrue(all(argv[argv.index('--effort') + 1] == 'medium' for argv in sonnet))
+        check = service.decision_routes._checks()['subscription_cli:claude-code']
+        self.assertEqual((check['failure'], check['requested_model']), ('not-qualified', 'sonnet'))
+        good = self.service(runner=CliRunner({None: oracle, 'haiku': oracle, 'sonnet': oracle}))
+        status = good.activate_decision_route({'transport': 'subscription_cli', 'engine': 'claude-code',
+                                               'model_policy': 'explicit', 'model': 'sonnet', 'effort': 'medium'})
+        self.assertEqual((status['active']['requested_model'], status['active']['effort']), ('sonnet', 'medium'))
+        self.assertEqual(status['active']['qualification']['suite_version'], SUITE_VERSION)
+
+    def test_an_effort_the_model_does_not_support_is_refused_before_any_call(self):
+        service = self.service()
+        with self.assertRaises(DecisionRouteError):
+            service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'claude-code',
+                                             'model_policy': 'explicit', 'model': 'haiku', 'effort': 'low'})
+        with self.assertRaises(ValueError):
+            service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'codex', 'effort': 'extreme'})
+        self.assertEqual(self.judgments('claude') + self.judgments('codex'), [])
+        codex = next(e for e in service.settings()['decision_route']['subscription_cli'] if e['id'] == 'codex')
+        self.assertEqual(codex['model_efforts'], {'gpt-6-luna': [], 'gpt-5.6-luna': [], 'gpt-5.6-terra': []},
+                         'efforts come only from a recorded bundled listing')
+
+    def test_direct_api_model_choice_is_qualified_and_keeps_the_destination(self):
+        service = self.service()
+        service.save_decision_route_credential({'transport': 'direct_api', 'key': OPENAI_KEY})
+        status = service.activate_decision_route({'transport': 'direct_api', 'model': 'gpt-6-luna'})
+        self.assertEqual((status['active']['model_policy'], status['active']['requested_model']), ('explicit', 'gpt-6-luna'))
+        self.assertEqual(status['direct_api']['destination'], 'api.openai.com')
+        self.assertEqual(self.store.config('decision_model')['model'], 'gpt-6-luna')
+        self.judge(service)
+        self.assertEqual(self.store.config('decision_audit')[-1]['requested_model'], 'gpt-6-luna')
+        before = self.store.config('decision_route')
+        self.openai.judge = careless
+        with self.assertRaises(DecisionRouteError):
+            service.activate_decision_route({'transport': 'direct_api', 'model': 'gpt-4o-mini'})
+        self.assertEqual(self.store.config('decision_route'), before)
+
+    # -- honest display ----------------------------------------------------------
+    def test_settings_name_the_route_actually_in_use_and_never_a_silent_fallback(self):
+        service = self.service()
+        self.store.put('model', {'provider': 'openai', 'endpoint': 'https://api.openai.com/v1', 'model': 'gpt-5'})
+        self.store.secret('model_key', OPENAI_KEY)
+        self.main('codex')
+        status = service.settings()['decision_route']
+        self.assertEqual((status['mode'], status['active']['source']), ('follow_main', 'default'))
+        effective = status['effective']
+        self.assertEqual((effective['state'], effective['transport'], effective['model']),
+                         ('fallback', 'direct_api', 'gpt-4o-mini'))
+        self.assertTrue(effective['text'].startswith('구독 판단을 쓸 수 없어 OpenAI API(gpt-4o-mini)를 쓰는 중: '),
+                        effective['text'])
+        self.assertIn('Codex', effective['text'])
+        self.assertEqual(self.openai.calls + self.runner.calls, [], 'reading Settings calls nothing')
+        # The judgment that answers is exactly the one Settings names.
+        self.judge(service)
+        self.assertEqual(self.store.config('decision_audit')[-1]['requested_model'], 'gpt-4o-mini')
+        service.activate_decision_route({'transport': 'follow_main'})
+        effective = service.settings()['decision_route']['effective']
+        self.assertEqual((effective['state'], effective['text']), ('active', '기본 AI(Codex)를 따라가는 중 — gpt-5.6-luna, 검증됨'))
+        # A Main AI switch the Judgment AI was not re-resolved for: attention, not a fallback.
+        self.main('claude-code')
+        effective = service.settings()['decision_route']['effective']
+        self.assertEqual(effective['state'], 'attention')
+        self.assertIn('다른 경로로 자동 전환하지 않습니다', effective['text'])
+        service.activate_decision_route({'transport': 'off'})
+        self.assertEqual(service.settings()['decision_route']['effective']['state'], 'off')
+
+    def test_with_no_route_and_no_key_settings_say_judgments_are_skipped(self):
+        service = self.service()
+        self.main('codex')
+        effective = service.settings()['decision_route']['effective']
+        self.assertEqual(effective['state'], 'attention')
+        self.assertIn('건너뜁니다', effective['text'])
+
+    # -- model lists (explicit refresh only) ------------------------------------
+    def test_codex_model_list_uses_only_the_bundled_catalogue_in_an_empty_codex_home(self):
+        service = self.service()
+        service.settings()
+        self.assertEqual(self.runner.calls, [], 'opening Settings lists nothing')
+        result = service.list_decision_models('codex')
+        self.assertEqual([row['id'] for row in result['models']], ['gpt-5.6-luna', 'gpt-5.6-terra'],
+                         'ranked first, hidden models are not offered')
+        self.assertEqual({row['label'] for row in result['models']}, {'목록에 있음(검증 전)'})
+        self.assertEqual(result['models'][0]['efforts'], ['low', 'medium', 'high', 'xhigh', 'max'])
+        listings = [call for call in self.runner.calls if call['argv'][1:3] == ['debug', 'models']]
+        self.assertEqual([call['argv'][1:] for call in listings], [['debug', 'models', '--bundled']])
+        owner_home = str(Path(self.root) / 'codex-home')
+        self.assertTrue(all(call['env']['CODEX_HOME'] != owner_home for call in listings))
+        self.assertFalse((Path(self.root) / 'codex-home' / 'models_cache.json').exists())
+        self.assertIsNone(self.store.config('decision_route'), 'listing never activates')
+        self.assertEqual(service.settings()['decision_route']['model_lists']['codex']['models'], result['models'])
+
+    def test_no_code_path_runs_a_plain_codex_debug_models(self):
+        import re
+        source = '\n'.join((Path(__file__).resolve().parents[1] / 'src' / 'personal_agent' / name).read_text()
+                           for name in ('decision_routes.py', 'decision_adapters.py', 'bounded_execution.py',
+                                        'quickstart_service.py', 'main_ai.py'))
+        for match in re.finditer(r"'debug', 'models'([^\]]*)\]", source):
+            self.assertIn("'--bundled'", match.group(1), match.group(0))
+
+    def test_claude_code_model_list_is_the_documented_aliases_without_a_subprocess(self):
+        service = self.service()
+        result = service.list_decision_models('claude-code')
+        self.assertEqual([row['id'] for row in result['models']], ['haiku', 'sonnet', 'opus'])
+        self.assertEqual(result['models'][0]['efforts'], [], 'Haiku 4.5 takes no effort setting')
+        self.assertEqual(self.runner.calls, [])
+
+    def test_api_model_lists_use_the_official_endpoint_and_show_only_ranked_models(self):
+        service = self.service()
+        seen = []
+
+        def transport(url, body, headers=None, timeout=60):
+            seen.append({'url': url, 'body': body, 'headers': dict(headers or {})})
+            if 'anthropic' in url:
+                return {'data': [{'id': 'claude-haiku-4-5-20251001'}, {'id': 'claude-opus-5'}]}
+            return {'data': [{'id': 'gpt-5'}, {'id': 'gpt-6-luna'}, {'id': 'gpt-4o-mini'}]}
+        service.decision_routes.models_transport = transport
+        with self.assertRaises(DecisionRouteError):
+            service.list_decision_models('openai')
+        self.assertEqual(seen, [], 'no key, no request')
+        self.store.secret('api_key:openai', OPENAI_KEY)
+        self.store.secret('api_key:anthropic', 'ak-fixture-anthropic-0001')
+        result = service.list_decision_models('openai')
+        self.assertEqual([row['id'] for row in result['models']], ['gpt-4o-mini', 'gpt-6-luna'])
+        self.assertEqual((seen[-1]['url'], seen[-1]['body'], seen[-1]['headers']['Authorization']),
+                         ('https://api.openai.com/v1/models', None, 'Bearer ' + OPENAI_KEY))
+        result = service.list_decision_models('anthropic')
+        self.assertEqual([row['id'] for row in result['models']], ['claude-haiku-4-5'])
+        self.assertEqual(seen[-1]['url'], 'https://api.anthropic.com/v1/models')
+        self.assertEqual(seen[-1]['headers']['anthropic-version'], '2023-06-01')
+        self.assertNotIn(OPENAI_KEY, json.dumps(service.settings()))
+        self.assertEqual(self.openai.calls, [], 'no model call to list models')
+        for route in ('jev', 'shell', ''):
+            with self.subTest(route=route), self.assertRaises(ValueError):
+                service.list_decision_models(route)
+
+    def test_a_failed_model_list_keeps_the_route(self):
+        service = self.service()
+        service.activate_decision_route({'transport': 'off'})
+
+        def refuse(url, body, headers=None, timeout=60):
+            raise ProviderError('HTTP 401', status=401)
+        service.decision_routes.models_transport = refuse
+        self.store.secret('api_key:openai', OPENAI_KEY)
+        with self.assertRaises(DecisionRouteError) as raised:
+            service.list_decision_models('openai')
+        self.assertIn('401', str(raised.exception))
+        self.assertEqual(self.store.config('decision_route')['transport'], 'off')
+
+    def test_the_models_endpoint_is_a_get_that_settings_never_calls(self):
+        server = (Path(__file__).resolve().parents[1] / 'src' / 'personal_agent' / 'quickstart.py').read_text()
+        get = server[server.index('def do_GET'):server.index('def do_DELETE')]
+        post = server[server.index('def do_POST'):]
+        self.assertIn("path=='/api/decision-route/models'", get)
+        self.assertLess(get.index('if not self.auth():return'), get.index("/api/decision-route/models"),
+                        'the list needs an owner session')
+        self.assertNotIn('/api/decision-route/models', post)
 
 
 if __name__ == '__main__':

@@ -706,6 +706,10 @@ class AgentService:
         engine=body.get('engine','') if isinstance(body,dict) else ''
         return self.decision_routes.check_cli_capabilities(engine)
 
+    def list_decision_models(self, route):
+        """#679: 모델 목록 새로고침 - explicit owner action only, never on page open."""
+        return self.decision_routes.list_models(route)
+
     # -- turn provenance (#570) ------------------------------------------------
     #: Stored secrets whose literal values are removed from any text AgentOS
     #: records or sends on the owner's behalf.

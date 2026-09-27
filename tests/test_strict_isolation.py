@@ -1163,10 +1163,10 @@ class CodexDecisionInstructionFiles(unittest.TestCase):
 
     The exact ``SubscriptionCliDecisionEngine`` argv against the real
     ``codex exec`` and the loopback scripted model; the only argv additions are
-    the fake provider's endpoint settings.  Activation is bypassed on purpose
-    (on 0.153.4 it is refused because ``unified_exec`` cannot be disabled):
-    this pins the instruction-file behaviour a future qualification must
-    re-check, it does not qualify the route.  No owner profile or model.
+    the fake provider's endpoint settings.  Activation is bypassed on purpose:
+    this pins the instruction-file behaviour behind
+    ``CODEX_INSTRUCTION_FILES_QUALIFIED`` (0.153.4, #679) and, since #679, the
+    strict-isolated profile a judgment runs under.  No owner profile or model.
     """
 
     def setUp(self):
@@ -1182,14 +1182,18 @@ class CodexDecisionInstructionFiles(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=self.root) as empty:
             listing = subprocess.run([binary, 'features', 'list'], cwd=empty, capture_output=True, text=True, timeout=30,
                                      env={'HOME': empty, 'CODEX_HOME': empty, 'PATH': f'{Path(binary).parent}:/usr/bin:/bin'})
-        self.plan = codex_disable_plan(parse_codex_features(listing.stdout))
+        # #679: the strict profile's plan (shell_tool off, unified_exec allowed).
+        self.plan = codex_disable_plan(parse_codex_features(listing.stdout), strict_allowed_features())
         self.argv = None
 
-    def _decide(self):
-        model = _ScriptedModel('responses', [{'message': json.dumps({'choice': 'retry', 'confidence': 0.9})}])
+    def _decide(self, script=None, argv_edit=None):
+        model = _ScriptedModel('responses', script or [{'message': json.dumps({'choice': 'retry', 'confidence': 0.9})}])
+        self.model = model
 
         def runner(argv, **kwargs):
             argv, env = list(argv), dict(kwargs['env'])
+            if argv_edit:
+                argv = argv_edit(argv)
             at = argv.index('exec') + 1
             argv[at:at] = ['-c', 'model_provider="fake"', '-c', 'model="fake-model"', '-c',
                            f'model_providers.fake={{name="fake", base_url="http://127.0.0.1:{model.port}/v1", '
@@ -1215,6 +1219,8 @@ class CodexDecisionInstructionFiles(unittest.TestCase):
         self.assertEqual((decision.outcome, decision.choice), (OUTCOME_DECIDED, 'retry'), self.failure)
         for flag in ('--ignore-user-config', '--ignore-rules'):
             self.assertIn(flag, self.argv)
+        self.assertNotIn('--sandbox', self.argv, '#679: the strict permissions profile, not read-only')
+        self.assertIn(f'default_permissions="{CODEX_STRICT_PERMISSIONS}"', self.argv)
         self.assertIn('project_doc_max_bytes=0', self.argv)
         for canary in ('SKILL-CANARY-616', 'canary-skill-616', 'PLUGIN-CANARY-616'):
             self.assertNotIn(canary, context)
@@ -1233,6 +1239,33 @@ class CodexDecisionInstructionFiles(unittest.TestCase):
             self.assertNotIn(canary, context)
         self.assertNotIn('# AGENTS.md instructions', context)
         self.assertNotIn('<INSTRUCTIONS>', context)
+
+    def test_a_judgment_under_the_strict_profile_cannot_read_the_home_folder(self):
+        """#679: even if a shell were re-offered (test-only argv edit), the
+        judgment's permissions profile denies the home folder and the store; the
+        plain `--sandbox read-only` it replaces could read them
+        (TRUSTED_LOCAL_LIMITATION)."""
+        canary = Path.home() / f'.agentos-679-home-canary-{uuid.uuid4().hex}.txt'
+        canary.write_text('fake-home-canary-679\n')
+        self.addCleanup(canary.unlink)
+        store_canary = self.root / 'store' / 'FAKE-STORE-CANARY.txt'
+        store_canary.write_text('fake-store-canary-679\n')
+        shell = lambda cmd: {'name': 'exec_command', 'arguments': {'cmd': cmd, 'login': False}}
+        script = [shell(f'cat {canary}'), shell(f'cat {store_canary}'),
+                  {'message': json.dumps({'choice': 'retry', 'confidence': 0.9})}]
+        without_shell_disable = lambda argv: ProcessLevelQualification._without(argv, ('--disable', 'shell_tool'))
+        decision, context = self._decide(script, argv_edit=without_shell_disable)
+        results = self.model.tool_results()
+        self.assertGreaterEqual(len(results), 2, results)
+        for denied in results[:2]:
+            self.assertIn('Operation not permitted', denied)
+        self.assertNotIn('fake-home-canary-679', context)
+        self.assertNotIn('fake-store-canary-679', context)
+        # Unedited, no command tool is offered at all.
+        _decision, _context = self._decide([shell(f'cat {canary}'),
+                                            {'message': json.dumps({'choice': 'retry', 'confidence': 0.9})}])
+        self.assertIn('unsupported call', self.model.tool_results()[0])
+        self.assertNotIn('fake-home-canary-679', _context)
 
 
 if __name__ == '__main__':

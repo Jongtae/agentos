@@ -94,9 +94,9 @@ Object.assign(I18N["ja"],{"AI 설정":"AI 設定","작업에서 사용하는 AI�
 Object.assign(I18N["en"],{"AI 설정":"AI settings","작업에서 사용하는 AI입니다. 현재 선택과 상태가 여기에 표시됩니다.":"Choose the AI used for work. Its current selection and status appear here.","작업에 사용할 AI를 선택하면 시작할 수 있습니다.":"Choose an AI to run work.","선택되지 않음":"Not selected","대화 이해 AI는 기본 AI가 선택되면 기본 경로로 사용됩니다.":"The conversation-understanding AI follows the Main AI once one is selected.","기본 AI 대기":"Waiting for Main AI","기본 AI가 아직 없습니다.":"No Main AI is selected yet.","설정 › AI에서 로그인 상태를 확인하세요.":"Check sign-in under Settings › AI.","AI 설정 열기":"Open AI settings","기본 AI 선택":"Choose a Main AI","사용할 AI를 고르고, 각 행에서 구독 로그인을 확인하거나 API 키를 준비하세요. 아래 확인을 통과한 뒤에만 기본 AI가 바뀝니다.":"Choose an AI, then use its row to check sign-in or prepare an API key. The Main AI changes only after the final check succeeds.","후속 요청이나 가리키는 대상을 이해할 때 쓰는 AI입니다. 기본값은 기본 AI를 따라갑니다.":"The AI used to understand follow-up requests and references. By default, it follows the Main AI."});
 Object.assign(I18N["zh-CN"],{"AI 설정":"AI 设置","작업에서 사용하는 AI입니다. 현재 선택과 상태가 여기에 표시됩니다.":"选择执行工作的 AI；此处显示当前选择和状态。","작업에 사용할 AI를 선택하면 시작할 수 있습니다.":"请选择一个执行工作的 AI。","선택되지 않음":"尚未选择","대화 이해 AI는 기본 AI가 선택되면 기본 경로로 사용됩니다.":"选择主要 AI 后，对话理解 AI 将默认使用该 AI。","기본 AI 대기":"等待主要 AI","기본 AI가 아직 없습니다.":"尚未选择主要 AI。","설정 › AI에서 로그인 상태를 확인하세요.":"请在“设置 › AI”中检查登录状态。","AI 설정 열기":"打开 AI 设置","기본 AI 선택":"选择主要 AI","사용할 AI를 고르고, 각 행에서 구독 로그인을 확인하거나 API 키를 준비하세요. 아래 확인을 통과한 뒤에만 기본 AI가 바뀝니다.":"先选择 AI，再通过对应行检查订阅登录或准备 API 密钥。最后的检查通过后才会切换主要 AI。","후속 요청이나 가리키는 대상을 이해할 때 쓰는 AI입니다. 기본값은 기본 AI를 따라갑니다.":"用于理解后续请求和指代内容的 AI，默认使用主要 AI。"});
 Object.assign(I18N["ja"],{"AI 설정":"AI 設定","작업에서 사용하는 AI입니다. 현재 선택과 상태가 여기에 표시됩니다.":"作業に使う AI を選びます。現在の選択と状態をここに表示します。","작업에 사용할 AI를 선택하면 시작할 수 있습니다.":"作業に使う AI を選択してください。","선택되지 않음":"未選択","대화 이해 AI는 기본 AI가 선택되면 기본 경로로 사용됩니다.":"メイン AI を選択すると、会話理解 AI は既定でその AI に従います。","기본 AI 대기":"メイン AI 待ち","기본 AI가 아직 없습니다.":"メイン AI がまだ選択されていません。","설정 › AI에서 로그인 상태를 확인하세요.":"設定 › AI でログイン状態を確認してください。","AI 설정 열기":"AI 設定を開く","기본 AI 선택":"メイン AI を選択","사용할 AI를 고르고, 각 행에서 구독 로그인을 확인하거나 API 키를 준비하세요. 아래 확인을 통과한 뒤에만 기본 AI가 바뀝니다.":"AI を選び、各行からサインイン確認または API キーの準備を行います。最後の確認に成功するとメイン AI が切り替わります。","후속 요청이나 가리키는 대상을 이해할 때 쓰는 AI입니다. 기본값은 기본 AI를 따라갑니다.":"フォローアップや指示対象の理解に使う AI です。既定ではメイン AI に従います。"});
-Object.assign(I18N["en"],{"모델 저장":"Save model","모델을 저장했습니다. 아직 대화 해석 경로는 바뀌지 않았습니다.":"Model saved. The conversation interpretation route has not changed yet."});
-Object.assign(I18N["zh-CN"],{"모델 저장":"保存模型","모델을 저장했습니다. 아직 대화 해석 경로는 바뀌지 않았습니다.":"已保存模型。对话解读路径尚未改变。"});
-Object.assign(I18N["ja"],{"모델 저장":"モデルを保存","모델을 저장했습니다. 아직 대화 해석 경로는 바뀌지 않았습니다.":"モデルを保存しました。会話の解釈経路はまだ変わっていません。"});
+Object.assign(I18N["en"],{"저장한 모델 사용":"Use saved model","{count}개 모델이 목록에 있습니다 ({source}). 목록에 있어도 계정에서 쓸 수 있는지는 사용을 누를 때 확인 판단 한 번으로 확인합니다.":"{count} models are listed ({source}). Being listed does not mean your account can use it; Use sends one check judgment first.","모델 저장":"Save model","모델을 저장했습니다. 아직 대화 해석 경로는 바뀌지 않았습니다.":"Model saved. The conversation interpretation route has not changed yet."});
+Object.assign(I18N["zh-CN"],{"저장한 모델 사용":"使用已保存的模型","{count}개 모델이 목록에 있습니다 ({source}). 목록에 있어도 계정에서 쓸 수 있는지는 사용을 누를 때 확인 판단 한 번으로 확인합니다.":"列表中有 {count} 个模型（{source}）。在列表中不代表账户可以使用；按“使用”时会先发送一次确认判断。","모델 저장":"保存模型","모델을 저장했습니다. 아직 대화 해석 경로는 바뀌지 않았습니다.":"已保存模型。对话解读路径尚未改变。"});
+Object.assign(I18N["ja"],{"저장한 모델 사용":"保存したモデルを使用","{count}개 모델이 목록에 있습니다 ({source}). 목록에 있어도 계정에서 쓸 수 있는지는 사용을 누를 때 확인 판단 한 번으로 확인합니다.":"{count} 件のモデルが一覧にあります（{source}）。一覧にあってもアカウントで使えるとは限りません。「使用」を押すと確認の判断を一度送ります。","모델 저장":"モデルを保存","모델을 저장했습니다. 아직 대화 해석 경로는 바뀌지 않았습니다.":"モデルを保存しました。会話の解釈経路はまだ変わっていません。"});
 // I18N-CATALOG-END
 let currentLanguage='en',TIME_MINUTE,TIME_CLOCK,TIME_ABSOLUTE,TIME_RELATIVE,TIME_DAY,TIME_YEAR;
 function t(source,vars){let text=String(source??'');if(currentLanguage!=='ko'){const entry=I18N[currentLanguage]?.[text];if(entry!==undefined)text=entry;}if(vars)text=text.replace(/\{(\w+)\}/g,(match,key)=>key in vars?String(vars[key]):match);return text;}
@@ -570,7 +570,7 @@ function decisionKeyForm(transport,withModel,removable=false){const form=element
 const decisionModelLists={};
 function decisionModelList(routeId){return decisionModelLists[routeId]||decisionSettings?.decision_route?.model_lists?.[routeId]||null;}
 function decisionModelRefresh(routeId){return settingsAction(t('모델 목록 새로고침'),event=>busy(event.currentTarget,async()=>{setError('decision-route-feedback','');setFeedback('decision-route-feedback',t('모델 목록을 가져오는 중… 판단 AI는 바뀌지 않습니다.'));try{decisionModelLists[routeId]=await api('/api/decision-route/models',{route:routeId});setFeedback('decision-route-feedback',t('모델 목록을 가져왔습니다. 목록에 있어도 사용 전에 적격성 검사를 합니다.'));$('decision-route').dataset.state='';renderDecisionRoute(decisionSettings);}catch(error){setError('decision-route-feedback',error);}}));}
-function decisionModelPicker(routeId,ranked,efforts,withEffort=true){
+function decisionModelPicker(routeId,ranked,efforts,withEffort=true,listedKey='{count}개 모델이 목록에 있습니다 ({source}). 목록에 있어도 계정에서 쓸 수 있는지는 확인 후 사용에서 적격성 검사로 확인합니다.'){
  // A free-text model name with the refreshed list (or the ranked defaults) as suggestions, and the effort
  // levels that model supports. Returns {nodes, model(), effort()}.
  const list=decisionModelList(routeId),entries=list?.models||[],input=element('input');input.type='text';input.autocomplete='off';input.spellcheck=false;input.setAttribute('aria-label',t('직접 선택할 모델 이름'));
@@ -580,7 +580,7 @@ function decisionModelPicker(routeId,ranked,efforts,withEffort=true){
  const effort=element('select');effort.setAttribute('aria-label',t('추론 강도'));
  const fill=()=>{const levels=levelsFor(input.value.trim()),previous=effort.value;effort.replaceChildren();const auto=element('option',levels.length?t('기본 (지원하면 low)'):t('이 모델은 추론 강도 설정 없음'));auto.value='';effort.append(auto);for(const level of levels){const option=element('option',level);option.value=level;effort.append(option);}effort.value=levels.includes(previous)?previous:'';effort.disabled=!levels.length;};
  input.oninput=fill;fill();
- const listed=list?t('{count}개 모델이 목록에 있습니다 ({source}). 목록에 있어도 계정에서 쓸 수 있는지는 확인 후 사용에서 적격성 검사로 확인합니다.',{count:entries.length,source:list.source||'-'}):t('모델 목록은 새로고침을 눌렀을 때만 가져옵니다.');
+ const listed=list?t(listedKey,{count:entries.length,source:list.source||'-'}):t('모델 목록은 새로고침을 눌렀을 때만 가져옵니다.');
  const effortNodes=withEffort?[element('span',t('추론 강도'),'settings-technical-line'),effort]:[];
  return {nodes:[element('span',t('직접 선택할 모델 이름'),'settings-technical-line'),input,datalist,...effortNodes,element('span',listed,'settings-technical-line'),decisionModelRefresh(routeId)],model:()=>input.value.trim(),effort:()=>withEffort?effort.value:'',input,effortSelect:effort};}
 function decisionPolicyForm(engine){const form=element('form',undefined,'engine-token');form.append(element('span',t('판단 모델'),'settings-technical-line'));const name='decision-policy-'+engine.id,supported=engine.model_selection!=='unsupported',choices=[['engine_default',t('구독 AI 기본 모델')]];
@@ -602,10 +602,13 @@ function decisionDirectModelForm(direct){const form=element('form',undefined,'en
  const submit=element('button',t('확인 후 사용'),'small');submit.type='submit';form.append(element('span',t('사용 전에 개인 정보가 없는 적격성 검사 질문을 보냅니다. 통과하지 못하면 지금 경로를 그대로 둡니다.'),'settings-technical-line'),submit);
  form.onsubmit=event=>{event.preventDefault();const model=picker.model();return decisionActivate(model?{transport:'direct_api',model}:{transport:'direct_api'},submit);};
  return form;}
+// #609: Jev activation sends one probe judgment (not the qualification suite), so its listing says so.
+// Keep the literal in t() form for the catalogue check: t('{count}개 모델이 목록에 있습니다 ({source}). 목록에 있어도 계정에서 쓸 수 있는지는 사용을 누를 때 확인 판단 한 번으로 확인합니다.')
+const JEV_LISTED_TEXT='{count}개 모델이 목록에 있습니다 ({source}). 목록에 있어도 계정에서 쓸 수 있는지는 사용을 누를 때 확인 판단 한 번으로 확인합니다.';
 // #609: Jev's model is chosen from TypeSafe's own list (모델 목록 새로고침, never on page open); saving only stores it.
 function decisionJevModelForm(jev){const form=element('form',undefined,'engine-token');const current=jev.model||'jev-latest';
  form.append(element('span',t('Jev 모델'),'settings-technical-line'));
- const picker=decisionModelPicker('jev',['jev-latest'],{},false);picker.input.value=current;form.append(...picker.nodes);
+ const picker=decisionModelPicker('jev',['jev-latest'],{},false,JEV_LISTED_TEXT);picker.input.value=current;form.append(...picker.nodes);
  const submit=element('button',t('모델 저장'),'small');submit.type='submit';form.append(element('span',t('저장만 합니다. 대화 해석에 쓰려면 저장 후 사용을 따로 누르세요.'),'settings-technical-line'),submit);
  form.onsubmit=event=>{event.preventDefault();return busy(submit,async()=>{setError('decision-route-feedback','');try{await api('/api/decision-route/credential',{transport:'jev',model:picker.model()||'jev-latest'});decisionChooser='';setFeedback('decision-route-feedback',t('모델을 저장했습니다. 아직 대화 해석 경로는 바뀌지 않았습니다.'));$('decision-route').dataset.state='';await refresh();}catch(error){setError('decision-route-feedback',error);}});};
  return form;}
@@ -619,7 +622,9 @@ function renderDecisionRoute(settings){
  const direct=route.direct_api||{},methodActions=element('div',undefined,'settings-inline-confirm');
  // The active direct route keeps its key manageable here, since it is not listed again below.
  if(own==='direct_api')methodActions.append(settingsAction(direct.has_decision_key?t('키 변경'):t('전용 키 설정'),()=>openDecisionChooser('direct_api')),settingsAction(t('모델 선택'),()=>openDecisionChooser('direct_api:model')));
- const jev=route.jev||{};if(own==='jev')methodActions.append(settingsAction(t('키 변경'),()=>openDecisionChooser('jev')),settingsAction(t('모델 선택'),()=>openDecisionChooser('jev:model')));
+ const jev=route.jev||{};if(own==='jev'){methodActions.append(settingsAction(t('키 변경'),()=>openDecisionChooser('jev')),settingsAction(t('모델 선택'),()=>openDecisionChooser('jev:model')));
+  // A saved model differing from the active one is applied only by an explicit, checked 사용 (review P2).
+  if(jev.configured&&(jev.model||'jev-latest')!==(active.requested_model||'jev-latest'))methodActions.append(settingsAction(t('저장한 모델 사용'),event=>decisionActivate({transport:'jev'},event.currentTarget)));}
  if(!['none','off'].includes(transport))methodActions.append(settingsAction(t('끄기'),event=>decisionActivate({transport:'off'},event.currentTarget)));
  const requalify=active.requalification_needed?' '+t('CLI가 바뀌어 다시 확인해야 합니다. 판단 모델에서 변경을 눌러 다시 확인하세요.'):'';
  box.append(settingsRow(t('사용 방식'),decisionActiveTitle(active)+' — '+activeDescription+requalify,activeState[0],activeState[1],methodActions.children.length?methodActions:null,

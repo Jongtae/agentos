@@ -4572,7 +4572,10 @@ class AgentService:
                                     self.isolated_mcp_registry.revoke(token)
                                 result=ExecutionResult(content,subscription['id'],0)
                             else:
-                                result=self.execution_adapter.execute(subscription['id'],engine_prompt,facade(capabilities,**facade_options),context=adapter_context)
+                                # #679: the owner's Main AI model for this CLI (none: the CLI's own default).
+                                work_model=self.main_ai.subscription_model(subscription['id'])
+                                result=self.execution_adapter.execute(subscription['id'],engine_prompt,facade(capabilities,**facade_options),context=adapter_context,
+                                                                      **({'model':work_model} if work_model else {}))
                         except (ExecutionError,EngineGatewayError) as exc:
                             diagnostics=exc.diagnostics() if isinstance(exc,ExecutionError) else {}
                             self.record_turn_provenance(job['id'],status='failed',failure_class=diagnostics.get('failure_class'),egress_taint=sorted(capabilities.private_provenance),

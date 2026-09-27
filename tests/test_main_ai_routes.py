@@ -69,9 +69,11 @@ class Transport:
 class _Engine:
     def __init__(self):
         self.calls = 0
+        self.kwargs = []
 
-    def execute(self, engine, prompt, tools, **_kwargs):
+    def execute(self, engine, prompt, tools, **kwargs):
         self.calls += 1
+        self.kwargs.append(dict(kwargs))
         return ExecutionResult('engine answer', engine, 0)
 
     def login_status(self, engine_id, binary=None):
@@ -326,6 +328,31 @@ class MainAiRouteTests(unittest.TestCase):
         with self.assertRaises(DecisionRouteError):
             self.service.activate_decision_route({'transport': MODE_FOLLOW})
         self.assertEqual(self.store.config('decision_route'), {'transport': 'off'})
+
+    # -- #679: the Work route passes the owner's CLI model -------------------------
+    def test_subscription_main_model_is_saved_shown_and_passed_to_work(self):
+        status = self.service.activate_main_ai({'route': 'codex', 'model': 'gpt-5.6-luna'})['main_ai']
+        codex = next(row for row in status['routes'] if row['id'] == 'codex')
+        self.assertEqual(codex['model'], 'gpt-5.6-luna')
+        self.assertIn('~/.codex/config.toml', codex['model_note'], 'Settings says the owner config model is not used')
+        self.assertEqual(next(row for row in status['routes'] if row['id'] == 'claude-code')['model_note'], '')
+        self.store.enqueue('do work', 'work-model-1')
+        self.assertTrue(self.service.run_one())
+        self.assertEqual(self.service.execution_adapter.kwargs[-1].get('model'), 'gpt-5.6-luna')
+        # An empty model clears the choice: the CLI's own default, no --model.
+        self.service.activate_main_ai({'route': 'codex', 'model': ''})
+        self.assertEqual(self.service.main_ai.subscription_model('codex'), '')
+        self.store.enqueue('do more work', 'work-model-2')
+        self.assertTrue(self.service.run_one())
+        self.assertNotIn('model', self.service.execution_adapter.kwargs[-1])
+
+    def test_a_malformed_work_model_changes_nothing(self):
+        self.service.activate_main_ai({'route': 'claude-code', 'model': 'sonnet'})
+        with self.assertRaisesRegex(MainAiError, '그대로'):
+            self.service.activate_main_ai({'route': 'codex', 'model': '--dangerously-bypass-approvals-and-sandbox'})
+        self.assertEqual(self.service.main_ai.current(), 'claude-code')
+        self.assertEqual(self.service.main_ai.subscription_model('claude-code'), 'sonnet')
+        self.assertEqual(self.service.main_ai.subscription_model('codex'), '')
 
     # -- AC9 / AC11 --------------------------------------------------------------
     def test_existing_ollama_config_renders_truthfully_and_is_not_offered(self):

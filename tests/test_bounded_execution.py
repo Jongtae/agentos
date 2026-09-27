@@ -118,6 +118,47 @@ class BoundedExecutionTests(unittest.TestCase):
             self.assertIn('Bridge note',replies[-1]['result']['content'][0]['text'])
             with store.db() as db: self.assertEqual(db.execute("SELECT status FROM tool_events WHERE job_id=? AND tool='list_notes' ORDER BY id DESC",(job,)).fetchone()[0],'succeeded')
 
+    def test_work_route_passes_the_owners_model_on_both_clis(self):
+        # #679: --ignore-user-config drops the owner's ~/.codex/config.toml
+        # model, so the Main AI model is passed as the CLI's own --model.
+        with tempfile.TemporaryDirectory() as folder:
+            config = Path(folder) / 'agentos-mcp.json'
+            config.write_text(json.dumps({'mcpServers': {'agentos': {'command': 'python3', 'args': ['-m', 'x']}}}))
+            adapter = BoundedExecutionAdapter(finder=lambda name: '/runtime/' + name)
+            codex = adapter.command('codex', '/runtime/codex', 'prompt', config, model='gpt-5.6-luna')
+            self.assertEqual(codex[-3:], ['--model', 'gpt-5.6-luna', 'prompt'], 'the prompt stays the last argument')
+            self.assertIn('--ignore-user-config', codex)
+            default = adapter.command('codex', '/runtime/codex', 'prompt', config)
+            self.assertNotIn('--model', default, 'no model: the CLI default, as before')
+            strict = adapter.command('codex', '/runtime/codex', 'prompt', config, profile='strict-isolated',
+                                     disabled_features=['apps', 'shell_tool'], model='gpt-5.6-luna')
+            self.assertEqual(strict[-3:], ['--model', 'gpt-5.6-luna', 'prompt'])
+            claude = adapter.command('claude-code', '/runtime/claude', 'prompt', config, 'instructions', model='sonnet')
+            self.assertEqual(claude[claude.index('--model') + 1], 'sonnet')
+            self.assertEqual(claude[-2], '--allowedTools', 'the variadic --allowedTools stays last')
+            for bad in ('--dangerously-bypass-approvals-and-sandbox', 'a b', 'x;y'):
+                with self.subTest(bad=bad), self.assertRaises(ExecutionError):
+                    adapter.command('codex', '/runtime/codex', 'prompt', config, model=bad)
+
+    def test_the_requested_work_model_is_recorded_for_provenance(self):
+        seen = {}
+
+        class Done:
+            returncode = 0
+            stdout = json.dumps({'item': {'type': 'agent_message', 'text': 'bounded result'}})
+
+        def runner(argv, **kwargs):
+            seen['argv'] = argv
+            return Done()
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); profile = root / 'profile'; profile.mkdir()
+            adapter = BoundedExecutionAdapter(finder=lambda _: '/bin/codex', runner=runner, runtime_root=root / 'turns',
+                                              codex_home=profile)
+            result = adapter.execute('codex', 'hello', AgentOSMcpTools(_Capabilities()), model='gpt-5.6-luna')
+        self.assertEqual(seen['argv'][-3:-1], ['--model', 'gpt-5.6-luna'])
+        self.assertEqual(result.meta['requested_model'], 'gpt-5.6-luna')
+        self.assertIn('--model', result.meta['argv'])
+
     def test_default_engine_run_directory_is_owner_local_and_private(self):
         adapter=BoundedExecutionAdapter()
         self.assertEqual(adapter.runtime_root, Path.home()/'.local/share/agentos/engine-runs')

@@ -1399,6 +1399,15 @@ def event_trail(rows, tools=None):
   else:trail.append((action,'succeeded'))
  return trail,refusals
 
+def state_change_short(trail):
+ """Whether a state-changing action - anything outside the effect-free reads
+ and internal-state actions - failed, was withheld or left incomplete without
+ the same action succeeding later (#752).  Then an answer may claim an action
+ that did not happen, and a goal verdict does not upgrade the Work."""
+ reads=EFFECT_FREE_READS|INTERNAL_STATE_ACTIONS|{'delegate_agent'}
+ return any(state in ('failed','withheld','incomplete') and action not in reads
+            and (action,'succeeded') not in trail[index+1:] for index,(action,state) in enumerate(trail))
+
 def goal_summary(rows, tools=None):
  """Attempts versus obligations for one Work (#607 AX-07), from its durable tool events.
 
@@ -2359,7 +2368,10 @@ def evidence_qualifiers(result):
  return found
 
 #: Qualifiers that make a call that ran count as incomplete for the Work outcome.
-INCOMPLETE_QUALIFIERS=('truncated','partial')
+#: #752: ``truncated`` (a bounded view of a long page or result list) is not
+#: one: whether the part read was enough is the goal judgment's; it stays an
+#: Evidence qualifier.
+INCOMPLETE_QUALIFIERS=('partial',)
 
 #: What AgentOS says in its own voice about a qualified result it summarises.
 QUALIFIER_NOTES={

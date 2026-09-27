@@ -25,7 +25,8 @@ from personal_agent.agent_runtime import (DELEGATE_FAILED, FALLBACK_UNDESCRIBED,
                                           evidence_qualifiers, fallback_response, evidence_summary, turn_context)
 from personal_agent.calendar import CALENDAR_SPEC, CALENDAR_WRITE_SPEC, CalendarConnector
 from personal_agent.connector_contract import ConnectorRegistry, ConnectorState
-from personal_agent.conversation_projection import (CONTEXT_QUALIFIER, TERMINAL_PARTIAL_HEADER,
+from personal_agent.conversation_projection import (CONTEXT_QUALIFIER, TERMINAL_ANSWER_LABEL, TERMINAL_ANSWER_WITHHELD,
+                                                    TERMINAL_PARTIAL_HEADER,
                                                     context_message, qualify_transcript)
 from personal_agent.google_calendar import CALENDAR_READ_SCOPE, CALENDAR_WRITE_SCOPE
 from personal_agent.providers import ModelAdapter
@@ -176,13 +177,18 @@ class TranscriptQualificationTests(TruthIntegrityTestCase):
                                     workspace_id=workspace['id'])
         self.service.run_one()
         home = self.assistant_row(job_id, self.service.home()['conversation'])
-        project = self.assistant_row(job_id, self.store.workspace_detail(workspace['id'])['messages'])
+        project = self.assistant_row(job_id, self.service.workspace(workspace['id'])['messages'])
+        # #752: the calendar write was withheld for approval, so the claim of it is
+        # withheld on both views alike; the qualifier still says partial.
         for row in (home, project):
-            self.assertIn(CLAIM, row['content'])
+            self.assertEqual(row['content'], TERMINAL_ANSWER_WITHHELD)
             self.assertEqual(row['qualifier']['outcome'], 'partial')
         # The task card uses the same typed qualifier, so the surfaces agree.
         self.assertEqual(self.card(job_id)['qualifier']['outcome'], 'partial')
-        # A partial result saved to the project keeps its outcome too.
+        # A withheld claim never becomes a saved project result.
+        with self.assertRaises(ValueError):
+            self.service.save_workspace_result(workspace['id'], {'job_id': job_id})
+        # A partial result saved at the store level keeps its outcome too.
         saved = self.store.save_workspace_result(workspace['id'], job_id)
         self.assertEqual(saved['results'][0]['qualifier']['outcome'], 'partial')
 
@@ -339,7 +345,9 @@ class IncompleteEvidenceOutcomeTests(TruthIntegrityTestCase):
 
     def assert_partial_and_qualified(self, job, bubble, claim):
         self.assertEqual(job['status'], 'partial', job.get('error'))
-        self.assertNotIn(claim, bubble)
+        # #752: only reads fell short, so the reply follows the truth header, labelled.
+        self.assertTrue(bubble.startswith(TERMINAL_PARTIAL_HEADER), bubble[:60])
+        self.assertLess(bubble.index(TERMINAL_ANSWER_LABEL), bubble.index(claim))
         row = self.assistant_row(job['id'])
         self.assertIn(claim, row['content'], 'the reply is preserved')
         self.assertEqual(row['qualifier']['outcome'], 'partial')
@@ -351,14 +359,16 @@ class IncompleteEvidenceOutcomeTests(TruthIntegrityTestCase):
         self.assertEqual(len(earlier), 1)
         self.assertTrue(earlier[0]['content'].startswith(CONTEXT_QUALIFIER.format(outcome='partial')))
 
-    def test_a_capped_search_with_no_hits_and_a_reply_is_partial(self):
+    def test_a_capped_search_is_qualified_evidence_not_an_incomplete_call(self):
+        """#752: a capped search is a bounded view; the goal judgment decides the Work, not the cap."""
         # 501 non-matching files: the 500-file visit cap stops the search with no hits.
         self.connect_folder({f'note-{index}.txt': '회의 메모' for index in range(501)})
         self.plan = [('find_files', {'query': '급여'})]
         self.text = '급여 파일은 없습니다.'
-        job, bubble = self.ask('급여 파일 찾아줘')
-        self.assertIn(QUALIFIER_NOTES['truncated'], job['error'])
-        self.assert_partial_and_qualified(job, bubble, self.text)
+        job, _bubble = self.ask('급여 파일 찾아줘')
+        event = [row for row in self.store.task_events(job['id']) if row['tool'] == 'find_files'][-1]
+        self.assertIn('truncated', event['trace']['evidence']['qualifiers'], 'the cap stays recorded')
+        self.assertNotIn(QUALIFIER_NOTES['truncated'], job.get('error') or '')
 
     def test_research_with_unread_pages_and_a_reply_is_partial(self):
         self.service.local_tools = ResearchNet()
@@ -445,7 +455,9 @@ class DelegationOutcomeTests(TruthIntegrityTestCase):
         self.assertEqual(job['status'], 'failed')
         self.assertIn(DELEGATE_FAILED, job['error'])
         self.assertNotIn(TERMINAL_PARTIAL_HEADER, bubble)
-        self.assertNotIn('정리했습니다', bubble)
+        # #752: only a read failed, so the answer follows the failure, labelled.
+        self.assertLess(bubble.index(job['owner_cause']), bubble.index(TERMINAL_ANSWER_LABEL))
+        self.assertLess(bubble.index(TERMINAL_ANSWER_LABEL), bubble.index('정리했습니다'))
         # Diagnostic material stays inspectable without upgrading the outcome.
         card = self.card(job['id'])
         self.assertEqual(card['qualifier']['outcome'], 'failed')

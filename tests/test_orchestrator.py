@@ -1302,3 +1302,88 @@ class TurnContextBrief(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class GoalDecidesOutcome(Harness):
+    """#752: the goal judgment decides a CLI Work's outcome, not its intermediate steps."""
+
+    @staticmethod
+    def step(tools, action, status, **detail):
+        tools.capabilities.record(action, status, json.dumps({'host_action': action, **detail}))
+
+    def test_a_reached_goal_after_an_effect_succeeds_despite_step_failures(self):
+        def work(tools):
+            self.step(tools, 'browser_open', 'succeeded', evidence={'qualifiers': ['truncated']})
+            self.step(tools, 'browser_click', 'failed', code='target_not_found', effect='none', error='없음. 목록: 1 · 2')
+            self.step(tools, 'browser_click', 'succeeded', evidence={})
+            self.step(tools, 'weather', 'failed', code='transient_failure')
+        self.engine.before = work
+        self.engine.answers = ['추천 상품 네 가지와 링크입니다.']
+        self.script([plan('codex', 'Answer.'), plan('openai', 'Other path.')], goals=[True])
+        job, row = self.run_work('어디서 살 수 있을까?')
+        self.assertEqual(len(self.engine.turns), 1, 'no re-delegation after an effect')
+        last = self.events(job, 'evaluated')[-1][1]
+        self.assertEqual((last['outcome'], last['stop']), ('reached', 'reached'))
+        self.assertEqual(row['status'], 'succeeded')
+        self.assertFalse(row['owner_cause'])
+        self.assertEqual(row['response'], '추천 상품 네 가지와 링크입니다.')
+
+    def test_a_goal_not_shown_after_an_effect_stays_short(self):
+        def work(tools):
+            self.step(tools, 'browser_click', 'succeeded', evidence={})
+            self.step(tools, 'weather', 'failed', code='transient_failure')
+        self.engine.before = work
+        self.script([plan('codex', 'Answer.')], goals=[False])
+        job, row = self.run_work('해줘')
+        self.assertEqual(self.events(job, 'evaluated')[-1][1]['stop'], 'effect')
+        self.assertEqual(row['status'], 'partial')
+
+    def test_an_unknown_effect_is_never_judged(self):
+        def work(tools):
+            self.step(tools, 'browser_click', 'failed', code='tool_incomplete', effect='unknown')
+        self.engine.before = work
+        self.script([plan('codex', 'Answer.')], goals=[True])
+        job, row = self.run_work('해줘')
+        self.assertEqual(self.events(job, 'evaluated')[-1][1]['outcome'], 'not_judged')
+        self.assertEqual(self.goals, [True], 'no goal judgment was asked')
+        self.assertNotEqual(row['status'], 'succeeded')
+
+    def test_a_reached_verdict_never_outranks_a_failed_state_changing_action(self):
+        """#752 review: a refused click or write with no later success keeps the Work short."""
+        for code in ('approval_required', 'tool_failed'):
+            with self.subTest(code=code):
+                def work(tools, code=code):
+                    self.step(tools, 'browser_click', 'succeeded', evidence={})
+                    self.step(tools, 'browser_type', 'failed', code=code, effect='none')
+                    self.step(tools, 'browser_read', 'succeeded', evidence={})
+                self.engine.before = work
+                self.script([plan('codex', 'Answer.')], goals=[True])
+                job, row = self.run_work('주문해줘', key=f'short-{code}')
+                self.assertEqual(self.events(job, 'evaluated')[-1][1]['outcome'], 'reached')
+                self.assertEqual(row['status'], 'partial')
+
+    def test_a_pending_browser_approval_blocks_the_upgrade(self):
+        from personal_agent.quickstart_service import BROWSER_REQUESTS_KEY
+        def work(tools):
+            self.step(tools, 'browser_click', 'succeeded', evidence={})
+            self.step(tools, 'weather', 'failed', code='transient_failure')
+            self.store.put(BROWSER_REQUESTS_KEY, {tools.capabilities.job_id: {'state': 'requested', 'action': 'browser_click'}})
+        self.engine.before = work
+        self.script([plan('codex', 'Answer.')], goals=[True])
+        _job, row = self.run_work('결제해줘')
+        self.assertEqual(row['status'], 'partial', 'approving the step must still resume this Work (C14)')
+
+    def test_a_reached_goal_is_not_demoted_by_a_login_page_and_asks_no_login(self):
+        from personal_agent.quickstart_service import BROWSER_LOGINS_KEY
+        def work(tools):
+            self.step(tools, 'browser_open', 'succeeded', evidence={'state': 'login_required'})
+            self.store.put(BROWSER_LOGINS_KEY, {tools.capabilities.job_id: {
+                'work_id': tools.capabilities.job_id, 'url': 'https://login.test/', 'host': 'login.test',
+                'state': 'requested', 'requested_at': 1.0}})
+            self.step(tools, 'weather', 'failed', code='transient_failure')
+        self.engine.before = work
+        self.script([plan('codex', 'Answer.')], goals=[True])
+        with mock.patch.object(self.service, 'offer_browser_login') as offer:
+            job, row = self.run_work('찾아줘')
+        self.assertEqual(row['status'], 'succeeded')
+        offer.assert_not_called()

@@ -458,19 +458,22 @@ def destination_refusal(url, allowed_origins=(), resolver=None):
     return None
 
 
-def click_settled(elapsed, quiet, loading, started, landed):
+def click_settled(elapsed, quiet, loading, started, landed, deciding=False):
     """Whether a click's effects have landed (#736).  Pure; the worker polls it.
 
     ``elapsed``: seconds since the press; ``quiet``: seconds the view has not
     been loading (None while loading); ``started``: a main-frame navigation
     was allowed since the press; ``landed``: such a navigation committed or
-    failed since then.  A started navigation is waited for until it lands; a
-    click that starts none is given ``CLICK_NAVIGATION_GRACE_SECONDS`` to start
-    one.  ``CLICK_SETTLE_SECONDS`` bounds every wait.
+    failed since then; ``deciding``: a main-frame navigation policy decision
+    is still pending (its destination is being resolved, up to
+    ``RESOLVE_SECONDS``).  A pending decision or a started navigation is
+    waited for until it lands; a click that starts none is given
+    ``CLICK_NAVIGATION_GRACE_SECONDS`` to start one.  ``CLICK_SETTLE_SECONDS``
+    bounds every wait.
     """
     if elapsed >= CLICK_SETTLE_SECONDS:
         return True
-    if loading or quiet is None or quiet < SETTLE_QUIET_SECONDS:
+    if deciding or loading or quiet is None or quiet < SETTLE_QUIET_SECONDS:
         return False
     if started:
         return landed
@@ -503,6 +506,7 @@ class Worker:
         self.hosts = set()         # hosts of committed main-frame navigations in this worker's life
         self.main_navigations = 0  # main-frame navigations allowed so far (#736)
         self.landed = 0            # main-frame navigations committed or failed so far (#736)
+        self.deciding = 0          # main-frame policy decisions still resolving their destination (#736 review)
         self.resolved = {}         # url origin -> refusal code or None (this worker's life)
         self.app = AppKit.NSApplication.sharedApplication()
         self.app.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)   # no Dock icon
@@ -596,7 +600,7 @@ class Worker:
                 quiet_since[0] = now
             started = self.main_navigations > navigations
             quiet = None if quiet_since[0] is None else now - quiet_since[0]
-            if click_settled(now - started_at, quiet, loading, started, self.landed > landed):
+            if click_settled(now - started_at, quiet, loading, started, self.landed > landed, self.deciding > 0):
                 finish(started)
                 return
             self.AppHelper.callLater(POLL_SECONDS, poll)
@@ -703,11 +707,17 @@ class Worker:
         if key in self.resolved:
             return decision(self.resolved[key] is None)
         answered = []
+        # #736 review: a click waits while a main-frame decision is resolving
+        # its destination, so a slow resolver is never mistaken for "no navigation".
+        if main_frame:
+            self.deciding += 1
 
         def answer(refusal):
             if answered:
                 return
             answered.append(True)
+            if main_frame:
+                self.deciding -= 1
             self.resolved[key] = refusal
             decision(refusal is None)
 

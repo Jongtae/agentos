@@ -70,9 +70,11 @@ for line in sys.stdin:
         # #736, as the real worker's settle_click: a click that starts a navigation a
         # moment later (a script timer) or asks for a new window (loaded into this
         # view) answers only once that navigation has landed, with navigated=true.
-        if command.get('index') == 3 and page['url'].endswith(('/delayed', '/popup')):
-            time.sleep(0.2)
-            page['url'] = page['url'].rsplit('/', 1)[0] + ('/landed' if page['url'].endswith('/delayed') else '/opened')
+        # ``/lateresolve``: the navigation's destination check (DNS) takes longer than the
+        # click grace; the real worker waits while that policy decision is pending.
+        if command.get('index') == 3 and page['url'].endswith(('/delayed', '/popup', '/lateresolve')):
+            time.sleep(1.5 if page['url'].endswith('/lateresolve') else 0.2)
+            page['url'] = page['url'].rsplit('/', 1)[0] + ('/opened' if page['url'].endswith('/popup') else '/landed')
             emit({'id': ident, 'ok': True, 'navigated': True})
         elif command.get('index') == 7:
             emit({'id': ident, 'ok': False, 'error': 'target_obscured'})

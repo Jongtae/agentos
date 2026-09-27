@@ -863,6 +863,10 @@ def kill_process_group(process):
 KILL_DRAIN_SECONDS = 2.0
 
 
+class StreamLimitExceeded(Exception):
+    """The CLI's combined stdout and stderr passed ``MAX_STREAM_BYTES`` while being read (#736 review)."""
+
+
 class _StreamedOutput:
     """``Popen.communicate`` for a binary-pipe process, with stdout seen line by line (#718).
 
@@ -875,10 +879,10 @@ class _StreamedOutput:
     (locale encoding, universal newlines), so ``cli_metadata`` and the result
     parsing are unchanged; ``on_line`` only sees each stdout line earlier.
     """
-    def __init__(self, process, on_line):
+    def __init__(self, process, on_line, limit=None):
         import locale
         import selectors
-        self.process, self.on_line = process, on_line
+        self.process, self.on_line, self.limit = process, on_line, limit
         self.encoding = locale.getpreferredencoding(False)
         self.stdout, self.stderr, self.partial = bytearray(), bytearray(), bytearray()
         self.selector = selectors.DefaultSelector()
@@ -887,6 +891,8 @@ class _StreamedOutput:
             self.selector.register(stream.fileno(), selectors.EVENT_READ, stream is process.stdout)
 
     def _line(self, raw):
+        if self.on_line is None:
+            return
         try:
             self.on_line(raw.decode(self.encoding, 'replace').replace('\r\n', '\n'))
         except Exception:  # presentation must never fail the run
@@ -905,8 +911,15 @@ class _StreamedOutput:
             return
         if not is_stdout:
             self.stderr += chunk
+        else:
+            self.stdout += chunk
+        # #736 review: the whole-stream bound is enforced while reading, on
+        # both pipes and whatever the exit code, so a runaway CLI is stopped
+        # as soon as it passes the bound instead of after it exits.
+        if self.limit is not None and len(self.stdout) + len(self.stderr) > self.limit:
+            raise StreamLimitExceeded()
+        if not is_stdout:
             return
-        self.stdout += chunk
         self.partial += chunk
         while True:
             end = self.partial.find(b'\n')
@@ -952,30 +965,42 @@ def bounded_run(runner, argv, *, cwd, env, timeout, interrupted=None, on_line=No
     deadline) the group is killed at once and ``EngineInterrupted`` carries
     the reason.  An injected test runner receives ``start_new_session=True``.
     #718: ``on_line`` receives each stdout line while the CLI runs (live
-    progress); the returned output is unchanged.
+    progress); the returned output is unchanged.  #736 review: every run reads
+    its binary pipes itself (``_StreamedOutput``) and is killed, with the named
+    ``STREAM_TOO_LARGE`` error, as soon as its combined output passes
+    ``MAX_STREAM_BYTES``.
     """
     if runner is not subprocess.run:
         return runner(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
                       timeout=timeout, shell=False, start_new_session=True)
-    # #718: a streamed run reads binary pipes itself (``_StreamedOutput``); the
-    # other path is unchanged.
     process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, text=on_line is None, shell=False, start_new_session=True)
-    streamed = _StreamedOutput(process, on_line) if on_line is not None else None
+                               stderr=subprocess.PIPE, shell=False, start_new_session=True)
+    streamed = _StreamedOutput(process, on_line, limit=MAX_STREAM_BYTES)
+    try:
+        return _bounded_wait(process, streamed, argv, timeout, interrupted)
+    except StreamLimitExceeded:
+        kill_process_group(process)
+        streamed.close()
+        try:
+            process.wait(timeout=KILL_DRAIN_SECONDS)
+        except subprocess.TimeoutExpired:
+            pass
+        LOG.warning('engine output passed the stream bound; process group killed')
+        raise ExecutionError(STREAM_TOO_LARGE, failure_class='invalid-output') from None
+
+
+def _bounded_wait(process, streamed, argv, timeout, interrupted):
+    """``bounded_run``'s wait loop over one streamed process (Stop, deadline and the kill drain)."""
     deadline = time.monotonic() + timeout
     while True:
         left = deadline - time.monotonic()
         wait = min(STOP_POLL_SECONDS, left) if interrupted else left
         try:
-            if streamed is not None:
-                # Bounded like ``communicate``: a descendant holding the pipes
-                # open after the CLI exits keeps this raising until Stop or the
-                # deadline kills the group below.
-                stdout, stderr = streamed.communicate(max(0.01, wait))
-            else:
-                stdout, stderr = process.communicate(timeout=max(0.01, wait))
-            if streamed is not None:
-                streamed.close()
+            # Bounded like ``communicate``: a descendant holding the pipes
+            # open after the CLI exits keeps this raising until Stop or the
+            # deadline kills the group below.
+            stdout, stderr = streamed.communicate(max(0.01, wait))
+            streamed.close()
             return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
         except subprocess.TimeoutExpired:
             try:
@@ -984,22 +1009,19 @@ def bounded_run(runner, argv, *, cwd, env, timeout, interrupted=None, on_line=No
                 reason = None
             if reason or time.monotonic() >= deadline:
                 kill_process_group(process)
-                if streamed is not None:
-                    # The group is gone; a descendant that left it may still
-                    # hold the pipes, so draining is bounded and the pipes are
-                    # closed either way.
-                    try:
-                        streamed.communicate(KILL_DRAIN_SECONDS)
-                    except subprocess.TimeoutExpired:
-                        pass
-                    finally:
-                        streamed.close()
-                    try:
-                        process.wait(timeout=KILL_DRAIN_SECONDS)
-                    except subprocess.TimeoutExpired:
-                        pass
-                else:
-                    process.communicate()
+                # The group is gone; a descendant that left it may still
+                # hold the pipes, so draining is bounded and the pipes are
+                # closed either way.
+                try:
+                    streamed.communicate(KILL_DRAIN_SECONDS)
+                except (subprocess.TimeoutExpired, StreamLimitExceeded):
+                    pass
+                finally:
+                    streamed.close()
+                try:
+                    process.wait(timeout=KILL_DRAIN_SECONDS)
+                except subprocess.TimeoutExpired:
+                    pass
                 if reason:
                     raise EngineInterrupted(reason) from None
                 raise subprocess.TimeoutExpired(argv, timeout) from None

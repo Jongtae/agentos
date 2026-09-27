@@ -18,6 +18,7 @@ import urllib.error
 from unittest import mock
 import tempfile
 import time
+import traceback
 import unittest
 from pathlib import Path
 
@@ -29,7 +30,7 @@ from personal_agent.conversation_handoff import (FOLLOWUP_CANCEL, FOLLOWUP_CORRE
 from personal_agent.conversation_projection import TERMINAL_FAILED_HEADER
 from personal_agent.decision import OUTCOME_DECIDED, FixtureDecisionEngine, SelectionDecision, fixture_confidence
 from personal_agent.agent_runtime import WORK_STOPPED
-from personal_agent.providers import ModelAdapter, ProviderError
+from personal_agent.providers import ModelAdapter, ProviderError, request_json
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
 from personal_agent.telegram_presence import (REACTION_FOR_SEMANTICS, REACTION_SEMANTICS, TELEGRAM_REACTION_EMOJI,
@@ -793,6 +794,39 @@ class TelegramErrorEnvelopeTests(unittest.TestCase):
                         telegram_request_json('https://api.telegram.org/botX/sendMessage', {'a': 1})
                 self.assertNotIsInstance(caught.exception, TelegramRejected)
                 self.assertEqual(len(opened), 1, 'never a second request')
+
+    def test_the_http_status_not_the_body_error_code_classifies_a_refusal(self):
+        """#594 item 3: a body claiming 400 on another 4xx status is not an entity-parse refusal."""
+        opener, _ = self.opener(self.http_error(
+            403, b'{"ok":false,"error_code":400,"description":"Bad Request: can\'t parse entities"}'))
+        with mock.patch('personal_agent.conversation_handoff._build_opener', return_value=opener):
+            result = telegram_request_json('https://api.telegram.org/botX/sendMessage', {'a': 1})
+        self.assertEqual(result['error_code'], 403)
+        channel = TelegramChannel(lambda: lambda *a, **k: result, lambda: 'X')
+        with self.assertRaises(TelegramRejected) as caught:
+            channel.send_message(1, 'x')
+        self.assertFalse(caught.exception.entity_parse_error)
+
+    def test_a_bot_token_in_the_failed_url_never_reaches_a_formatted_traceback(self):
+        """#594 item 4: the HTTPError (whose URL carries the token) is not a shown cause or context."""
+        token = '123456:SECRET-bot-token'
+        url = f'https://api.telegram.org/bot{token}/sendMessage'
+        errors = (urllib.error.HTTPError(url, 500, 'err', {}, io.BytesIO(b'{"ok":false}')),
+                  urllib.error.HTTPError(url, 401, 'err', {}, io.BytesIO(b'not json')),
+                  urllib.error.URLError(f'failed {url}'))
+        for call, seam in ((telegram_request_json, 'personal_agent.conversation_handoff._build_opener'),
+                           (request_json, 'personal_agent.providers.build_opener')):
+            for error in errors:
+                with self.subTest(call=call.__name__, error=type(error).__name__):
+                    opener, _ = self.opener(error)
+                    with mock.patch(seam, return_value=opener), self.assertRaises(ProviderError) as caught:
+                        call(url, {'a': 1})
+                    raised = caught.exception
+                    self.assertIsNone(raised.__cause__)
+                    self.assertTrue(raised.__suppress_context__)
+                    shown = ''.join(traceback.format_exception(type(raised), raised, raised.__traceback__))
+                    self.assertNotIn(token, shown)
+                    self.assertNotIn(token, str(raised))
 
     def test_success_body_is_parsed(self):
         opener, _ = self.opener()

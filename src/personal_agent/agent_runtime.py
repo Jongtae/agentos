@@ -596,6 +596,8 @@ def legacy_work_sources(store, job_id, tools=None, document_jobs=()):
  model or CLI produced its reply.  Clean is
  ``{owner-conversation}`` plus ``engine-unmediated-read`` for a subscription
  CLI turn (its CLI could read host files AgentOS never labels, #605 F1).
+ A Work the pre-#672 Drive literal matches, with no turn record, also
+ carries ``connected-drive-file`` (#703), so it is private, not clean.
  """
  if not isinstance(job_id,str) or not job_id:return None
  job=store.job(job_id)
@@ -603,7 +605,6 @@ def legacy_work_sources(store, job_id, tools=None, document_jobs=()):
  if job_id in set(document_jobs or ()):return None
  if recorded_private_sources(store,job_id,tools):return None
  if str(job.get('message') or '').strip() in NOTES_SUMMARY_COMMANDS:return None
- if legacy_drive_splice(store,job_id):return None
  with store.db() as db:
   if db.execute('SELECT 1 FROM context_job_attachments WHERE job_id=?',(job_id,)).fetchone():return None
   if db.execute('SELECT 1 FROM notes WHERE id=?',(job_id,)).fetchone():return None
@@ -622,6 +623,9 @@ def legacy_work_sources(store, job_id, tools=None, document_jobs=()):
   if seen-_RECORD_ONLY_LABELS:return None
  labels={OWNER_CONVERSATION}
  if 'subscription_engine' in tools_seen:labels.add(ENGINE_UNMEDIATED)
+ # #703: a pre-#570 Drive splice is labelled as a #570+ Work records it, so the
+ # Work and everything shown it stay private under that store's own label.
+ if legacy_drive_splice(store,job_id):labels.add('connected-drive-file')
  return labels
 
 def backfill_work_sources(store, tools=None, document_jobs=(), keep_messages=100, window=None, corrected_before=None):
@@ -691,8 +695,11 @@ def backfill_work_sources(store, tools=None, document_jobs=(), keep_messages=100
    # A preparation's Work is shown its origin Work's owner request, not the
    # recent window (#659): its history is never resolved or widened from it.
    preparation=preparation_of(work.get('request_key'))
-   if HISTORY_PREFIX+UNRECORDED_PROVENANCE in labels and UNRECORDED_PROVENANCE not in inherited and not preparation:
-    labels=(labels-{HISTORY_PREFIX+UNRECORDED_PROVENANCE})|history
+   if HISTORY_PREFIX+UNRECORDED_PROVENANCE in labels and not preparation:
+    # Resolved: the unknown is replaced by what the span carried.  Not
+    # resolved: it stays, and the span's known labels are added beside it.
+    if UNRECORDED_PROVENANCE not in inherited:labels=(labels-{HISTORY_PREFIX+UNRECORDED_PROVENANCE})|history
+    else:labels|=history
    created=work.get('created')
    if (corrected_before is not None and not preparation
        and not (isinstance(created,(int,float)) and created>=corrected_before)):

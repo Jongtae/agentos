@@ -294,6 +294,7 @@ class BackfillSpanAndDriveSplices(unittest.TestCase):
         records = self.store.config(WORK_SOURCES_KEY, {})
         self.assertIn(legacy, records)
         self.assertIn(HISTORY_PREFIX + 'unrecorded', records[parked], 'never narrowed from the window before its first message only')
+        self.assertIn(HISTORY_PREFIX + ENGINE_UNMEDIATED, records[parked], 'known span labels are kept beside the unknown')
 
     def test_a_normal_work_keeps_the_version_1_window(self):
         clean = [_legacy_work(self.store, f'질문 {n}', f'답 {n}', created=self.base + n) for n in range(3)]
@@ -306,13 +307,21 @@ class BackfillSpanAndDriveSplices(unittest.TestCase):
         drive = _legacy_work(self.store, '드라이브 파일 요약해줘', 'DRIVE-SUMMARY', created=self.base)
         english = _legacy_work(self.store, 'Summarize my Google Drive file', 'DRIVE', created=self.base + 1)
         mention = _legacy_work(self.store, '드라이브 가자', '좋아요', created=self.base + 2)
-        self.assertIsNone(legacy_work_sources(self.store, drive))
-        self.assertIsNone(legacy_work_sources(self.store, english))
+        spliced = {OWNER_CONVERSATION, ENGINE_UNMEDIATED, 'connected-drive-file'}
+        self.assertEqual(legacy_work_sources(self.store, drive), spliced)
+        self.assertEqual(legacy_work_sources(self.store, english), spliced)
         self.assertEqual(legacy_work_sources(self.store, mention), {OWNER_CONVERSATION, ENGINE_UNMEDIATED},
                          'the historical literal needed both a Drive name and a read word')
+        later = _legacy_work(self.store, '고마워', '천만에요', created=self.base + 3)
+        self.service.backfill_legacy_work_sources()
+        records = self.store.config(WORK_SOURCES_KEY, {})
+        self.assertIn('connected-drive-file', records[drive])
+        self.assertIn(HISTORY_PREFIX + 'connected-drive-file', records[later], 'what it was shown stays private too')
+        self.assertIn('connected-drive-file', inherited_private(history_provenance(self.store, [{'job_id': drive}])))
         # A #570 turn record is authoritative: it names a Drive splice when one happened.
-        self.store.put_turn_provenance(drive, {'prompt_withheld': None, 'egress_taint': []})
-        self.assertEqual(legacy_work_sources(self.store, drive), {OWNER_CONVERSATION, ENGINE_UNMEDIATED})
+        self.store.put_turn_provenance(mention, {'prompt_withheld': None, 'egress_taint': []})
+        self.store.put_turn_provenance(english, {'prompt_withheld': None, 'egress_taint': []})
+        self.assertEqual(legacy_work_sources(self.store, english), {OWNER_CONVERSATION, ENGINE_UNMEDIATED})
 
     def test_an_executed_retry_of_a_drive_request_stays_private(self):
         drive = _legacy_work(self.store, '드라이브 파일 읽어줘', 'failed', created=self.base)
@@ -320,11 +329,12 @@ class BackfillSpanAndDriveSplices(unittest.TestCase):
                              events=(('conversation_continuity', 'succeeded',
                                       {'relation': 'retry', 'related_work_id': drive, 'executed': True}),
                                      ('subscription_engine', 'succeeded', {})))
-        self.assertIsNone(legacy_work_sources(self.store, retry), 'the retry ran the earlier Drive request as its prompt')
+        self.assertIn('connected-drive-file', legacy_work_sources(self.store, retry),
+                      'the retry ran the earlier Drive request as its prompt')
         self.service.backfill_legacy_work_sources()
         records = self.store.config(WORK_SOURCES_KEY, {})
-        self.assertNotIn(drive, records)
-        self.assertNotIn(retry, records)
+        self.assertIn('connected-drive-file', records[drive])
+        self.assertIn('connected-drive-file', records[retry])
 
     def test_a_store_backfilled_by_version_1_is_widened_never_narrowed(self):
         """Records version 1 wrote from the short window or without the Drive literal are corrected."""

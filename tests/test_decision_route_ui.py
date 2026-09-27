@@ -91,7 +91,7 @@ const base=(active,extra={})=>({decision_route:{active,suite_version:'decision-q
  form=descendants(rowTitled('구독 AI · Codex')).find(node=>node.tag==='form');
  const refreshModels=descendants(form).find(node=>node.tag==='button'&&node.textContent==='모델 목록 새로고침');
  await refreshModels.onclick({currentTarget:refreshModels});
- assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))),{path:'/api/decision-route/models?route=codex'});
+ assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))),{path:'/api/decision-route/models',body:{route:'codex'}},'a POST (review P2-2)');
  form=descendants(rowTitled('구독 AI · Codex')).find(node=>node.tag==='form');
  const options=descendants(form).filter(node=>node.tag==='option'&&node.value.startsWith('gpt'));
  assert(options.some(node=>node.textContent==='gpt-5.6-luna · 목록에 있음(검증 전)'),'a listed model is not called verified');

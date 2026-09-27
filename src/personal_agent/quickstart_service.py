@@ -4561,6 +4561,12 @@ class AgentService:
                             'context_mode':engine_context.get('mode','shared-context')}))
                         try:
                             if isolated:
+                                # #679: the sidecar's closed contract carries no model; a Work
+                                # model stored before isolation was configured is refused, not
+                                # silently replaced by the CLI default.
+                                if self.main_ai.subscription_model(subscription['id']):
+                                    raise ExecutionError('격리 런타임 배포는 작업 모델 지정을 지원하지 않습니다. 설정에서 작업 모델을 비우거나 격리 없이 실행하세요.',
+                                                         failure_class='invalid-configuration')
                                 tools=ReadOnlyAgentOSMcpTools(capabilities)
                                 token=self.isolated_engine_adapter.issue_task_token(
                                     prompt=engine_prompt, engine_id=subscription['id'], task_id=job['id'])

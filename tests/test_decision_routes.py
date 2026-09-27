@@ -142,7 +142,7 @@ CODEX_HELP = ('Usage: codex exec [OPTIONS] [PROMPT]\n -c, --config <key=value>\n
               ' --disable <FEATURE>\n --sandbox <MODE>\n')
 CLAUDE_HELP = (' -p, --print\n --output-format <format>\n --json-schema <schema>\n --tools <tools...>\n'
                ' --strict-mcp-config\n --setting-sources <sources>\n --restricted\n --no-session-persistence\n'
-               ' --system-prompt <prompt>\n --model <model>\n')
+               ' --system-prompt <prompt>\n --model <model>\n --effort <level>\n')
 #: A `codex features list` shape (name, stage, enabled), as printed by 0.153.4.
 CODEX_FEATURES = (('apps', 'stable', True), ('auth_elicitation', 'stable', True), ('browser_use', 'stable', True),
                   ('memories', 'stable', False), ('multi_agent', 'stable', True), ('personality', 'stable', True),
@@ -183,6 +183,7 @@ class CliRunner:
         self.help_text, self.fail, self.logged_in, self.claude_model = help_text or {}, fail, logged_in, claude_model
         self.features, self.ignore_disable = features, ignore_disable
         self.bundled = bundled_listing() if bundled is None else bundled
+        self.version = 'codex-cli 0.153.4'
         # Paths Codex's own sandbox runner would (wrongly) let a command read.
         self.readable = {Path(path) for path in readable}
         self.calls = []
@@ -198,7 +199,7 @@ class CliRunner:
         if '--help' in argv:
             return done(self.help_text.get(engine, CODEX_HELP if engine == 'codex' else CLAUDE_HELP))
         if '--version' in argv:
-            return done('codex-cli 0.153.4' if engine == 'codex' else '2.1.280 (Claude Code)')
+            return done(self.version if engine == 'codex' else '2.1.280 (Claude Code)')
         if argv[1:3] == ['features', 'list']:
             disabled = {argv[i + 1] for i, part in enumerate(argv) if part == '--disable'} - set(self.ignore_disable)
             return done(features_listing(disabled, self.features))
@@ -949,7 +950,9 @@ class JudgmentModelTests(ServiceFixture):
         calls = len(self.runner.calls)
         self.assertEqual(self.judge(service).value, 'retry')
         self.assertEqual(self.model_of(self.runner.calls[-1]['argv']), 'gpt-5.6-luna')
-        self.assertEqual(len(self.runner.calls), calls + 1)
+        self.assertEqual([call['argv'][1:] for call in self.runner.calls[calls:-1]], [['--version']],
+                         'one local --version check (as the strict Work route does), then the judgment')
+        self.assertEqual(len(self.runner.calls), calls + 2)
 
     def test_a_newer_codex_that_bundles_gpt_6_luna_makes_it_the_default(self):
         service = self.service(runner=CliRunner(bundled=bundled_listing(('gpt-6-luna', 'gpt-5.6-luna', 'gpt-5.6-terra'))))
@@ -1056,6 +1059,41 @@ class JudgmentModelTests(ServiceFixture):
                                                'model_policy': 'explicit', 'model': 'sonnet', 'effort': 'medium'})
         self.assertEqual((status['active']['requested_model'], status['active']['effort']), ('sonnet', 'medium'))
         self.assertEqual(status['active']['qualification']['suite_version'], SUITE_VERSION)
+
+    def test_claude_code_without_an_effort_flag_gets_none_and_the_reason_is_recorded(self):
+        # Review P2-3: --effort only when the CLI's own --help declares it.
+        help_text = CLAUDE_HELP.replace(' --effort <level>\n', '')
+        service = self.service(runner=CliRunner({None: oracle, 'haiku': careless, 'sonnet': oracle},
+                                                help_text={'claude-code': help_text}))
+        status = service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'claude-code',
+                                                  'model_policy': 'explicit', 'model': 'sonnet', 'effort': 'medium'})
+        self.assertEqual((status['active']['requested_model'], status['active']['effort'], status['active']['effort_note']),
+                         ('sonnet', None, 'effort-flag-missing'))
+        self.assertFalse(any('--effort' in argv for argv in self.judgments('claude')))
+        self.assertFalse(self.store.config('decision_cli_capabilities')['claude-code']['effort_flag'])
+        check = next(e for e in status['subscription_cli'] if e['id'] == 'claude-code')['check']
+        self.assertEqual(check['effort_note'], 'effort-flag-missing')
+
+    def test_model_ids_and_bundled_listings_are_parsed_strictly(self):
+        from personal_agent.decision_adapters import valid_model_id
+        from personal_agent.decision_routes import parse_bundled_models
+        self.assertTrue(valid_model_id('gpt-5.6-luna'))
+        for bad in ('gpt-5.6-luna\n', 'haiku\n', ' haiku', None, 5):
+            with self.subTest(bad=bad):
+                self.assertFalse(valid_model_id(bad))
+        for text in ('', 'null', '[]', '{"models": 5}', '{"models": null}', 'not json', None, b'\xff'):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                parse_bundled_models(text)
+        odd = json.dumps({'models': [{'slug': 'a-model', 'supported_reasoning_levels': 5},
+                                     {'slug': 'b-model', 'supported_reasoning_levels': 'low'},
+                                     {'slug': 'c-model', 'supported_reasoning_levels': [{'effort': {'x': 1}}, 'low', {'effort': 'low'}]},
+                                     'not-a-row', {'slug': 'bad\nslug'}]})
+        self.assertEqual(parse_bundled_models(odd), [{'id': 'a-model', 'efforts': [], 'visible': False},
+                                                     {'id': 'b-model', 'efforts': [], 'visible': False},
+                                                     {'id': 'c-model', 'efforts': ['low'], 'visible': False}])
+        service = self.service(runner=CliRunner(bundled='{"models": [{"slug": "x", "supported_reasoning_levels": 7}'))
+        self.assertIsNone(service.check_decision_cli_capabilities({'engine': 'codex'})['bundled_models'],
+                          'an unreadable listing is a clean "no listing", not a crash')
 
     def test_an_effort_the_model_does_not_support_is_refused_before_any_call(self):
         service = self.service()
@@ -1195,14 +1233,94 @@ class JudgmentModelTests(ServiceFixture):
         self.assertIn('401', str(raised.exception))
         self.assertEqual(self.store.config('decision_route')['transport'], 'off')
 
-    def test_the_models_endpoint_is_a_get_that_settings_never_calls(self):
-        server = (Path(__file__).resolve().parents[1] / 'src' / 'personal_agent' / 'quickstart.py').read_text()
-        get = server[server.index('def do_GET'):server.index('def do_DELETE')]
-        post = server[server.index('def do_POST'):]
-        self.assertIn("path=='/api/decision-route/models'", get)
-        self.assertLess(get.index('if not self.auth():return'), get.index("/api/decision-route/models"),
-                        'the list needs an owner session')
-        self.assertNotIn('/api/decision-route/models', post)
+    def test_the_models_endpoint_is_a_same_origin_post_with_a_session(self):
+        # Review P2-2: listing runs a CLI or sends a saved key to its provider.
+        import threading
+        from http.cookiejar import CookieJar
+        from http.server import ThreadingHTTPServer
+        from urllib.error import HTTPError
+        from urllib.request import HTTPCookieProcessor, Request, build_opener
+        from personal_agent.quickstart import make_handler
+        service = self.service()
+        server = ThreadingHTTPServer(('127.0.0.1', 0), make_handler(service))
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        client = build_opener(HTTPCookieProcessor(CookieJar()))
+        url = 'http://127.0.0.1:' + str(server.server_port)
+        same = {'Origin': url}
+
+        def post(path, body, headers=None, method='POST'):
+            request = Request(url + path, data=json.dumps(body).encode() if method == 'POST' else None, method=method,
+                              headers={'Content-Type': 'application/json', **(headers or {})})
+            with client.open(request, timeout=5) as response:
+                return json.load(response)
+        try:
+            with self.assertRaises(HTTPError) as refused:
+                post('/api/decision-route/models', {'route': 'claude-code'}, same)
+            self.assertEqual(refused.exception.code, 401, 'an owner session is required')
+            post('/api/claim', {'password': 'long-password-test'})
+            for label, headers in (('cross-origin', {'Origin': 'https://evil.test'}), ('no Origin', {}),
+                                   ('other port', {'Origin': 'http://127.0.0.1:1'})):
+                with self.subTest(label), self.assertRaises(HTTPError) as refused:
+                    post('/api/decision-route/models', {'route': 'claude-code'}, headers)
+                self.assertEqual(refused.exception.code, 403)
+            self.assertIsNone(self.store.config('decision_model_lists'), 'a refused request lists nothing')
+            with self.assertRaises(HTTPError) as refused:
+                post('/api/decision-route/models?route=claude-code', {}, same, method='GET')
+            self.assertEqual(refused.exception.code, 404, 'no GET form with side effects')
+            result = post('/api/decision-route/models', {'route': 'claude-code'}, same)
+            self.assertEqual([row['id'] for row in result['models']], ['haiku', 'sonnet', 'opus'])
+            with self.assertRaises(HTTPError) as refused:
+                post('/api/decision-route/models', {'route': 'shell'}, same)
+            self.assertEqual(refused.exception.code, 400)
+        finally:
+            server.shutdown()
+            thread.join()
+            server.server_close()
+        app = (Path(__file__).resolve().parents[1] / 'src' / 'personal_agent' / 'web' / 'app.js').read_text()
+        self.assertIn("api('/api/decision-route/models',{route:routeId})", app)
+
+    # -- #679 review P1: the strict record is re-checked before every judgment ----
+    def strict_route(self):
+        service = self.service()
+        service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'codex'})
+        strict = self.store.config('decision_route')['strict_profile']
+        for key in ('binding', 'binary_sha256', 'native_sha256', 'version'):
+            self.assertTrue(strict.get(key), key)
+        self.assertEqual(self.judge(service).value, 'retry', 'the untouched record lets judgments run')
+        return service
+
+    def assert_blocked(self, service, why):
+        calls = len(self.runner.calls)
+        self.assertEqual(self.judge(service).outcome, 'unavailable', why)
+        self.assertEqual(self.store.config('decision_audit')[-1]['failure'], 'requalification-needed', why)
+        self.assertFalse(any('--output-schema' in call['argv'] for call in self.runner.calls[calls:]), why)
+
+    def test_a_changed_native_binary_digest_blocks_the_judgment(self):
+        service = self.strict_route()
+        route = self.store.config('decision_route')
+        route['strict_profile']['native_sha256'] = '0' * 64
+        self.store.put('decision_route', route)
+        self.assert_blocked(service, 'same path, size and mtime but other bytes')
+        self.assertEqual(service.decision_routes.status()['active']['strict_profile'].keys() & {'binding', 'native_sha256'},
+                         set(), 'Settings gets the summary, not the binding paths and digests')
+
+    def test_changed_paths_block_the_judgment(self):
+        for key in ('runtime_root', 'store', 'home', 'codex_home', 'native_binary', 'platform'):
+            with self.subTest(key=key):
+                service = self.strict_route()
+                route = self.store.config('decision_route')
+                route['strict_profile']['binding'][key] = '/elsewhere/' + key
+                self.store.put('decision_route', route)
+                self.assert_blocked(service, key)
+                self.assertTrue(service.decision_routes.status()['active']['requalification_needed'])
+
+    def test_a_changed_cli_version_blocks_the_judgment(self):
+        service = self.strict_route()
+        self.runner.version = 'codex-cli 0.158.0'
+        self.assert_blocked(service, 'an upgraded CLI under the same path and digest record needs requalification')
+        self.runner.version = 'garbled'
+        self.assert_blocked(service, 'an unreadable version is not the qualified one')
 
 
 if __name__ == '__main__':

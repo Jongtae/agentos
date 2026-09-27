@@ -346,6 +346,52 @@ class MainAiRouteTests(unittest.TestCase):
         self.assertTrue(self.service.run_one())
         self.assertNotIn('model', self.service.execution_adapter.kwargs[-1])
 
+    def test_the_isolated_sidecar_takes_no_work_model_so_it_is_hidden_refused_and_never_ignored(self):
+        # #679 review P1: the sidecar's closed contract (prompt, engine, bearer,
+        # task id) carries no model; nothing may silently drop the owner's choice.
+        from personal_agent.isolated_mcp_proxy import TaskCapabilityRegistry
+        from personal_agent.isolated_engine_sidecar import IsolatedEngineSidecar, SidecarError
+
+        class Isolated:
+            def __init__(self):
+                self.calls = []
+
+            def issue_task_token(self, **kwargs):
+                import secrets
+                return secrets.token_urlsafe(32)
+
+            def execute(self, **kwargs):
+                self.calls.append(kwargs)
+                return 'isolated answer'
+        # A Work model saved before isolation was configured.
+        self.service.activate_main_ai({'route': 'codex', 'model': 'gpt-5.6-luna'})
+        isolated = Isolated()
+        service = AgentService(self.store, adapter=ModelAdapter(self.transport),
+                               subscription_engines=SubscriptionEngines(finder=lambda _: '/runtime/cli', clock=lambda: 1),
+                               execution_adapter=_Engine(), isolated_engine_adapter=isolated,
+                               isolated_mcp_registry=TaskCapabilityRegistry())
+        codex = next(row for row in service.main_ai.status()['routes'] if row['id'] == 'codex')
+        self.assertFalse(codex['model_selectable'])
+        self.assertEqual(codex['model'], 'gpt-5.6-luna', 'the stored choice stays visible')
+        self.assertIn('격리 런타임', codex['model_note'])
+        job = self.store.enqueue('do work', 'isolated-work-model')
+        service.run_one()
+        self.assertEqual(isolated.calls, [], 'the Work is refused, not run on the CLI default')
+        self.assertEqual(self.store.job(job)['status'], 'failed')
+        self.assertIn('작업 모델', self.store.job(job)['error'] or '')
+        with self.assertRaisesRegex(MainAiError, '격리 런타임'):
+            service.activate_main_ai({'route': 'codex', 'model': 'gpt-5.6-terra'})
+        service.activate_main_ai({'route': 'codex', 'model': ''})
+        self.assertEqual(service.main_ai.subscription_model('codex'), '')
+        second = self.store.enqueue('do more work', 'isolated-work-model-2')
+        service.run_one()
+        self.assertEqual(len(isolated.calls), 1, self.store.job(second))
+        self.assertNotIn('model', isolated.calls[0])
+        # The sidecar itself still refuses any extra request field.
+        sidecar = IsolatedEngineSidecar('http://engine-callback.invalid/mcp')
+        with self.assertRaises(SidecarError):
+            sidecar._validate({'prompt': 'p', 'engine_id': 'codex', 'token': 't', 'task_id': 'j', 'model': 'gpt-5.6-luna'})
+
     def test_a_malformed_work_model_changes_nothing(self):
         self.service.activate_main_ai({'route': 'claude-code', 'model': 'sonnet'})
         with self.assertRaisesRegex(MainAiError, '그대로'):

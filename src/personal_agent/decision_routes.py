@@ -199,8 +199,15 @@ def supported_efforts(engine_id, model, capability=None):
 
 
 def parse_bundled_models(text):
-    """``[{id, efforts, visible}]`` from ``codex debug models --bundled``; ValueError otherwise."""
-    data = json.loads(text or '')
+    """``[{id, efforts, visible}]`` from ``codex debug models --bundled``; ValueError otherwise.
+
+    Any unexpected shape (a non-list level set, a non-object row) is a clean
+    ValueError, never a TypeError from deep inside the listing (review P3).
+    """
+    try:
+        data = json.loads(text or '')
+    except (TypeError, ValueError) as exc:
+        raise ValueError('unreadable bundled model listing') from exc
     rows = data.get('models') if isinstance(data, dict) else None
     if not isinstance(rows, list):
         raise ValueError('unexpected bundled model listing')
@@ -209,9 +216,11 @@ def parse_bundled_models(text):
         slug = row.get('slug') if isinstance(row, dict) else None
         if not valid_model_id(slug):
             continue
-        levels = [level.get('effort') for level in row.get('supported_reasoning_levels') or ()
-                  if isinstance(level, dict)]
-        models.append({'id': slug, 'efforts': [level for level in levels if valid_effort(level)],
+        levels = row.get('supported_reasoning_levels')
+        if not isinstance(levels, list):
+            levels = []
+        efforts = [level.get('effort') for level in levels if isinstance(level, dict)]
+        models.append({'id': slug, 'efforts': [level for level in efforts if valid_effort(level)],
                        'visible': row.get('visibility') == 'list'})
     if not models:
         raise ValueError('empty bundled model listing')
@@ -336,6 +345,8 @@ class DecisionRoutes:
                 # qualification on this platform (a route stored before #679,
                 # or moved to another OS, has none).
                 return 'strict-profile-unqualified'
+            if engine_id == 'codex' and self._codex_strict_stale(route):
+                return 'requalification-needed'
             return ''
 
         effort = route.get('effort') if valid_effort(route.get('effort')) else None
@@ -493,7 +504,45 @@ class DecisionRoutes:
     @staticmethod
     def _codex_strict_recorded(route):
         strict = route.get('strict_profile')
-        return isinstance(strict, dict) and strict.get('platform') == sys.platform
+        return (isinstance(strict, dict) and strict.get('platform') == sys.platform
+                and isinstance(strict.get('binding'), dict))
+
+    def _codex_strict_stale(self, route):
+        """Why a stored strict qualification no longer describes this judgment, or [].
+
+        Exactly the checks the strict Work route runs before each turn
+        (``BoundedExecutionAdapter.execute``, #616 review N2): the binding
+        (platform, resolved launcher and native binary with their
+        fingerprints, home, engine runtime root, owner store, CODEX_HOME), the
+        launcher and native sha256 digests, and the version the CLI reports
+        for ``--version`` in the AgentOS environment (one local, model-free
+        subprocess), which must be a tested version equal to the qualified one.
+        """
+        from .bounded_execution import CLI_PROFILES, STRICT_PROFILE
+        execution = self.service.execution_adapter
+        strict = route.get('strict_profile') or {}
+        declared = CLI_PROFILES[STRICT_PROFILE]['runtimes']['codex']
+        binary = execution.finder(CLI_BINARIES['codex'])
+        check = getattr(execution, 'strict_binding_mismatch', None)
+        if not binary or not callable(check):
+            return ['binding']
+        stale = list(check('codex', strict, self.store.root, binary))
+        if not stale:
+            current = execution.strict_digests('codex', binary)
+            stale += [key for key, value in current.items() if not value or value != strict.get(key)]
+        if stale:
+            return stale
+        if sys.platform not in declared['tested_platforms']:
+            return ['platform']
+        execution.runtime_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with tempfile.TemporaryDirectory(dir=execution.runtime_root, prefix='decision-version-') as folder:
+            try:
+                version = execution.runtime_version('codex', binary, Path(folder))
+            except Exception:  # noqa: BLE001 - any failure is "not the qualified version"
+                version = None
+        if version is None or version not in declared['tested_versions'] or version != strict.get('version'):
+            return ['version']
+        return []
 
     def _first_qualified(self, candidates, make_engine):
         """Run ``qualify()`` on each candidate in order; ``(model, result, tried)``.
@@ -538,7 +587,15 @@ class DecisionRoutes:
         codex = route.get('engine') == 'codex'
         unqualified = codex and not self._codex_instructions_qualified(route)
         strict_missing = codex and not self._codex_strict_recorded(route)
-        return dict(destination=CLI_DESTINATIONS.get(route.get('engine'), ''),
+        if codex and not strict_missing and not requalify:
+            # Local stats only (no subprocess, no hashing): the binding the
+            # judgment-time guard also checks.
+            check = getattr(self.service.execution_adapter, 'strict_binding_mismatch', None)
+            requalify = bool(callable(check) and check('codex', route.get('strict_profile'), self.store.root))
+        strict = route.get('strict_profile')
+        shown = ({key: strict.get(key) for key in ('version', 'platform', 'checked_at', 'checks')}
+                 if isinstance(strict, dict) else strict)
+        return dict(destination=CLI_DESTINATIONS.get(route.get('engine'), ''), strict_profile=shown,
                     requalification_needed=requalify, instruction_files_unqualified=unqualified,
                     strict_profile_unqualified=strict_missing,
                     available=bool(engine and engine['installed'] and engine['login'] != 'signed-out'
@@ -770,6 +827,8 @@ class DecisionRoutes:
         missing = [flag for flag in REQUIRED_FLAGS[engine_id] if not has_flag(help_text, flag)]
         record = {'version': ' '.join(version_out.split())[:80], 'isolation_flags': not missing,
                   'missing_flags': missing, 'model_override': has_flag(help_text, MODEL_FLAG),
+                  # Claude Code's own `--effort` flag (Codex uses its `-c` config key).
+                  'effort_flag': has_flag(help_text, '--effort') if engine_id == 'claude-code' else None,
                   'fingerprint': cli_fingerprint(binary), 'checked_at': self.clock(), 'source': 'cli --help'}
         if engine_id == 'codex' and not missing:
             record.update(self._codex_tool_surface(run, binary))
@@ -953,8 +1012,13 @@ class DecisionRoutes:
             self._fail(option, 'strict-profile-unqualified',
                        f'Codex 판단용 엄격 격리 검증을 통과하지 못했습니다({result.get("reason") or "unknown"}).',
                        detail=str(result.get('reason') or '')[:160])
+        # The complete record, as the strict Work route stores it
+        # (quickstart_service.select_subscription_isolation): the binding and
+        # both digests are re-checked before every judgment.
         return {'version': result.get('version'), 'platform': sys.platform, 'checked_at': self.clock(),
                 'checks': [check.get('check') for check in result.get('checks') or ()],
+                'binding': result.get('binding'), 'binary_sha256': result.get('binary_sha256'),
+                'native_sha256': result.get('native_sha256'),
                 'disabled_features': list(result['disabled_features'])}
 
     def _codex_instruction_files(self):
@@ -1024,8 +1088,15 @@ class DecisionRoutes:
                 'fingerprint': capability['fingerprint'], 'cli_version': capability['version'],
                 **codex_extra, **(extra or {})}
         warning = {'instruction_files_present': codex_extra['instruction_files_present']} if codex_extra else {}
+        # Claude Code gets `--effort` only when its own --help declares it
+        # (review P2-3); otherwise nothing is sent and the reason is recorded.
+        effort_omitted = engine_id == 'claude-code' and not capability.get('effort_flag')
+        if effort_omitted:
+            base['effort_note'] = warning['effort_note'] = 'effort-flag-missing'
 
         def effort_for(model):
+            if effort_omitted:
+                return None
             levels = supported_efforts(engine_id, model, capability)
             wanted = requested_effort or DEFAULT_EFFORT
             return wanted if wanted in levels else None
@@ -1045,7 +1116,7 @@ class DecisionRoutes:
             model = body.get('model')
             if not valid_model_id(model):
                 raise DecisionRouteError('사용할 모델 이름을 입력하세요.')
-            if requested_effort and effort_for(model) != requested_effort:
+            if requested_effort and not effort_omitted and effort_for(model) != requested_effort:
                 raise DecisionRouteError(f'모델 {model}은(는) 추론 강도 {requested_effort}를 지원한다고 확인되지 않았습니다.')
             candidates = [model]
         else:

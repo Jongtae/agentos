@@ -133,6 +133,14 @@ assert(!$('active-ai').textContent.includes('다른 선택지'),'no second list 
  assert(!calls.some(call=>String(call.path).startsWith('/api/decision-route/models')),'no model list is fetched by rendering or choosing');
  ctx.renderExecutionConnection(settingsFor('claude-code',{'claude-code':sub('claude-code',{model:''})}));
  assert($('active-ai').textContent.includes('작업 모델: CLI 기본값'));
+ // #679 review P1: the isolated sidecar takes no model - no field, and 확인하고 사용 clears a stored one.
+ const isolatedNote='격리 런타임 배포는 작업 모델 지정을 지원하지 않아 CLI 기본 모델을 씁니다.';
+ ctx.renderExecutionConnection(settingsFor('codex',{codex:sub('codex',{model:'gpt-5.6-luna',model_selectable:false,model_note:isolatedNote})}));
+ assert($('active-ai').textContent.includes(isolatedNote));
+ ctx.openAiChooser(changeButton);calls.length=0;
+ assert(!descendants($('ai-chooser-list')).some(node=>node.tag==='input'&&node.name==='main-ai-model'),'no model field on an isolated route');
+ await ctx.applyAiChoice($('ai-chooser-apply'));
+ same(calls.find(call=>call.path==='/api/main-ai/activate'),{path:'/api/main-ai/activate',body:{route:'codex',model:''}});
 })().catch(error=>{console.error(error);process.exit(1);});
 ctx.renderTelegram({telegram:{enabled:true,paired:true,username:'fixture'},telegram_status:{message:'ok'}});
 const telegramButton=buttonIn('telegram-current');ctx.renderTelegram({telegram:{enabled:true,paired:true,username:'fixture'},telegram_status:{message:'ok'}});

@@ -146,7 +146,8 @@ def codex_still_enabled(rows, allowed=CODEX_ALLOWED_ENABLED_FEATURES):
 
 
 def valid_model_id(value):
-    return isinstance(value, str) and bool(MODEL_ID.match(value))
+    # fullmatch: `$` alone would also accept a trailing newline (review P3).
+    return isinstance(value, str) and bool(MODEL_ID.fullmatch(value))
 
 
 #: Reasoning-effort names either CLI accepts (#679): Claude Code 2.1.280

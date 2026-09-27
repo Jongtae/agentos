@@ -14,6 +14,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 from .manifests import CONTEXT_GATED_ACTIONS  # noqa: F401 (#627: re-exported for route checks)
@@ -331,17 +332,21 @@ def profile_status(profile):
             'unavailable': route_unavailable(profile)}
 
 
-def mcp_tool(definition, mode=None):
+def mcp_tool(definition, mode=None, profile=None):
     """Project one native function definition onto the MCP ``Tool`` wire shape.
 
     Field names are the MCP wire aliases (``inputSchema``), checked against the
     adopted ``mcp_types.Tool`` in tests/test_mcp_bridge_protocol.py.  The
     manifest ``mode`` becomes the ``readOnlyHint`` annotation; it is a hint to
-    the client and authorizes nothing.
+    the client and authorizes nothing.  #718: the isolated profile's proxy
+    forwards only argument-less calls, so its tools do not offer ``status``.
     """
     function = definition['function']
     tool = {'name': function['name'], 'description': function['description'],
             'inputSchema': json.loads(json.dumps(function['parameters']))}
+    if profile == ISOLATED_PROFILE:
+        from .agent_runtime import STATUS_ARGUMENT
+        tool['inputSchema'].get('properties', {}).pop(STATUS_ARGUMENT, None)
     if mode in ('read_only', 'bounded_write'):
         tool['annotations'] = {'readOnlyHint': mode == 'read_only'}
     return tool
@@ -356,7 +361,7 @@ def profile_mcp_tools(profile):
     from .agent_runtime import action_definitions
     from .manifests import runtime_packages
     tools = {tool['id']: tool for package in runtime_packages([]) for tool in package['tools']}
-    return [mcp_tool(definition, tools[definition['function']['name']]['mode'])
+    return [mcp_tool(definition, tools[definition['function']['name']]['mode'], profile)
             for definition in action_definitions(tools, profile_actions(profile))]
 
 
@@ -547,6 +552,69 @@ def native_searches(engine_id, records):
     if engine_id == 'claude-code':
         return _claude_searches(records)[:MAX_NATIVE_SEARCHES]
     return []
+
+
+def live_native_search_steps(engine_id, record):
+    """The CLI's own web-search steps one streamed record reports, while the run is live (#718).
+
+    The same official event shapes ``native_searches`` reads after the run:
+    Codex ``item.started``/``item.updated``/``item.completed`` of an item with
+    ``type == 'web_search'``; Claude Code an assistant ``tool_use`` named
+    ``WebSearch`` (running) and the user record's ``tool_result`` for it
+    (done).  Returns ``[{'id', 'state': 'running'|'done', 'query'}]``; the
+    query is the CLI's own, unredacted - the consumer redacts it exactly as
+    the recorded event.  Nothing here is Evidence: the durable events are
+    still written from ``cli_metadata`` after the run.
+    """
+    if not isinstance(record, dict):
+        return []
+    if engine_id == 'codex':
+        item = record.get('item')
+        kind = record.get('type')
+        if kind not in ('item.started', 'item.updated', 'item.completed') or not isinstance(item, dict) \
+                or item.get('type') != 'web_search':
+            return []
+        action = item.get('action') if isinstance(item.get('action'), dict) else {}
+        queries = [value for value in [item.get('query'), action.get('query'), *(action.get('queries') or [])]
+                   if isinstance(value, str) and value.strip()]
+        return [{'id': str(item.get('id') or '')[:80], 'state': 'done' if kind == 'item.completed' else 'running',
+                 'query': queries[0][:200] if queries else ''}]
+    if engine_id == 'claude-code':
+        message = record.get('message') if isinstance(record.get('message'), dict) else {}
+        content = message.get('content') if isinstance(message.get('content'), list) else []
+        steps = []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            if record.get('type') == 'assistant' and part.get('type') == 'tool_use' and part.get('name') == CLAUDE_NATIVE_SEARCH_TOOL:
+                query = part.get('input', {}).get('query') if isinstance(part.get('input'), dict) else None
+                steps.append({'id': str(part.get('id') or '')[:80], 'state': 'running',
+                              'query': query[:200] if isinstance(query, str) else ''})
+            elif record.get('type') == 'user' and part.get('type') == 'tool_result':
+                steps.append({'id': str(part.get('tool_use_id') or '')[:80], 'state': 'done', 'query': ''})
+        return steps
+    return []
+
+
+def live_progress_reader(engine_id, progress):
+    """A per-line stdout callback that hands each live native-search step to ``progress`` (#718).
+
+    Presentation only: a malformed line, an oversized line or a failing
+    ``progress`` never affects the run or its final output.
+    """
+    def on_line(line):
+        if len(line) > MAX_OUTPUT_BYTES:
+            return
+        try:
+            record = json.loads(line)
+        except ValueError:
+            return
+        for step in live_native_search_steps(engine_id, record):
+            try:
+                progress(step)
+            except Exception:  # presentation must never fail the run
+                LOG.debug('live progress sink failed', exc_info=False)
+    return on_line
 AUTH_HINT = '엔진 로그인이 필요합니다. 설정 › AI 연결에서 로그인을 확인하세요.'
 
 
@@ -662,7 +730,37 @@ def kill_process_group(process):
         process.kill()
 
 
-def bounded_run(runner, argv, *, cwd, env, timeout, interrupted=None):
+class _StreamedOutput:
+    """Read a running process's stdout line by line (#718), stderr whole.
+
+    The collected text is exactly what ``communicate`` would have returned,
+    so ``cli_metadata`` and the result parsing are unchanged; ``on_line`` only
+    sees each line earlier.
+    """
+    def __init__(self, process, on_line):
+        self.stdout, self.stderr = [], []
+
+        def pump():
+            for line in process.stdout:
+                self.stdout.append(line)
+                try:
+                    on_line(line)
+                except Exception:  # presentation must never fail the run
+                    pass
+
+        def drain():
+            self.stderr.append(process.stderr.read())
+        self.threads = [threading.Thread(target=pump, daemon=True), threading.Thread(target=drain, daemon=True)]
+        for thread in self.threads:
+            thread.start()
+
+    def finish(self):
+        for thread in self.threads:
+            thread.join()
+        return ''.join(self.stdout), ''.join(self.stderr)
+
+
+def bounded_run(runner, argv, *, cwd, env, timeout, interrupted=None, on_line=None):
     """Run one CLI with no shell in its own process group.
 
     With the real ``subprocess.run`` a timeout kills the whole group, so the
@@ -671,18 +769,25 @@ def bounded_run(runner, argv, *, cwd, env, timeout, interrupted=None):
     while the CLI runs; when it answers (the owner's Stop, the Work's shared
     deadline) the group is killed at once and ``EngineInterrupted`` carries
     the reason.  An injected test runner receives ``start_new_session=True``.
+    #718: ``on_line`` receives each stdout line while the CLI runs (live
+    progress); the returned output is unchanged.
     """
     if runner is not subprocess.run:
         return runner(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
                       timeout=timeout, shell=False, start_new_session=True)
     process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, text=True, shell=False, start_new_session=True)
+    streamed = _StreamedOutput(process, on_line) if on_line is not None else None
     deadline = time.monotonic() + timeout
     while True:
         left = deadline - time.monotonic()
         wait = min(STOP_POLL_SECONDS, left) if interrupted else left
         try:
-            stdout, stderr = process.communicate(timeout=max(0.01, wait))
+            if streamed is not None:
+                process.wait(timeout=max(0.01, wait))
+                stdout, stderr = streamed.finish()
+            else:
+                stdout, stderr = process.communicate(timeout=max(0.01, wait))
             return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
         except subprocess.TimeoutExpired:
             try:
@@ -691,7 +796,11 @@ def bounded_run(runner, argv, *, cwd, env, timeout, interrupted=None):
                 reason = None
             if reason or time.monotonic() >= deadline:
                 kill_process_group(process)
-                process.communicate()
+                if streamed is not None:
+                    process.wait()
+                    streamed.finish()
+                else:
+                    process.communicate()
                 if reason:
                     raise EngineInterrupted(reason) from None
                 raise subprocess.TimeoutExpired(argv, timeout) from None
@@ -721,6 +830,8 @@ class AgentOSMcpTools:
     browser_relay = None
     #: #701: in the bridge process, the client that forwards browser calls to the service.
     relay = None
+    #: #718: the service's live-progress sink for the CLI's own steps during this turn, or None.
+    progress = None
 
     def __init__(self, capabilities, native_search=False):
         self.capabilities = capabilities
@@ -752,7 +863,7 @@ class AgentOSMcpTools:
         note = self._search_note()
         listed = []
         for name, definition in sorted(self._offered().items()):
-            tool = mcp_tool(definition, (tools.get(name) or {}).get('mode'))
+            tool = mcp_tool(definition, (tools.get(name) or {}).get('mode'), self.PROFILE)
             if note and (tools.get(name) or {}).get('host_action') in SEARCH_BACKED_ACTIONS:
                 tool['description'] += note
             listed.append(tool)
@@ -764,7 +875,10 @@ class AgentOSMcpTools:
         definition = self._offered().get(name) if isinstance(name, str) else None
         if definition is None:
             raise ExecutionError('허용하지 않은 AgentOS MCP 도구 또는 인수입니다.')
-        from .agent_runtime import check_arguments
+        from .agent_runtime import check_arguments, split_status
+        # #718: the optional status is display text; the bridge records it on
+        # the running event and nothing here reads it.
+        arguments, _status = split_status(arguments)
         parameters = definition['function']['parameters']
         try:
             check_arguments(parameters, arguments)
@@ -1335,8 +1449,11 @@ class BoundedExecutionAdapter:
             run_meta = {'argv': display_argv(argv, prompt, instructions), 'requested_model': model or None}
             try:
                 if self.runner is subprocess.run:
+                    # #718: the facade's live-progress sink (set by the service), if any.
+                    progress = getattr(tools, 'progress', None)
                     completed = bounded_run(self.runner, argv, cwd=run_dir, env=env, timeout=timeout,
-                                            interrupted=interrupted)
+                                            interrupted=interrupted,
+                                            on_line=live_progress_reader(engine_id, progress) if callable(progress) else None)
                 else:
                     completed = self.runner(argv, cwd=run_dir,
                                             env=env, stdin=subprocess.DEVNULL, capture_output=True,

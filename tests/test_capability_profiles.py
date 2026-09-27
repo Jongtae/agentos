@@ -11,7 +11,8 @@ import unittest
 from pathlib import Path
 
 from personal_agent import isolated_engine_mcp_bridge
-from personal_agent.agent_runtime import BROWSER_ACTIONS, DEFINITIONS, Capabilities, check_arguments
+from personal_agent.agent_runtime import (BROWSER_ACTIONS, DEFINITIONS, STATUS_ARGUMENT, STATUS_SCHEMA, Capabilities,
+                                          check_arguments)
 from personal_agent.bounded_execution import (
     BOUNDED_PROFILE,
     CLI_PROFILES,
@@ -82,7 +83,12 @@ class OneActionSource(_Store):
                 self.assertEqual([tool['name'] for tool in listed], sorted(profile_actions(profile)))
                 for tool in listed:
                     native = NATIVE[tool['name']]
-                    self.assertEqual(tool['inputSchema'], native['parameters'])
+                    # #718: every tool also takes the optional display status,
+                    # except on the isolated profile (argument-less proxy).
+                    expected = native['parameters']
+                    if profile != ISOLATED_PROFILE:
+                        expected = {**expected, 'properties': {**expected['properties'], STATUS_ARGUMENT: STATUS_SCHEMA}}
+                    self.assertEqual(tool['inputSchema'], expected)
                     self.assertEqual(tool['description'], native['description'])
                     self.assertNotIn('input_schema', tool)
                 self.assertEqual(listed, profile_mcp_tools(profile), 'live Capabilities and static projection agree')

@@ -15,7 +15,8 @@ from .agent_runtime import (Capabilities, ToolError, run_agent, AGENTS, evidence
                             MEMORY_OWNER, context_sections, CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, OWNER_CONVERSATION, lookup_sources, work_written_values, WORK_SOURCES_KEY, WORK_SOURCES_LIMIT, base_label,
                             history_provenance, WorkBudget, EFFECT_FREE_READS, explicit_search_query, outcome_from_events,
                             WORK_STOP_KEY, WORK_STOP_KEEP, work_stop_requested, WorkLedger, goal_summary, work_source_records,
-                            backfill_work_sources, NOTES_SUMMARY_COMMANDS, WORK_SOURCES_BACKFILL_KEY, WORK_SOURCES_BACKFILL_VERSION)
+                            backfill_work_sources, NOTES_SUMMARY_COMMANDS, WORK_SOURCES_BACKFILL_KEY, WORK_SOURCES_BACKFILL_VERSION,
+                            progress_step)
 from .plugins import PluginRegistry
 from .providers import NOT_REPORTED, ModelAdapter, ProviderError, request_json, validate_model
 from .decision import DEFAULT_DECISION_PROVIDER, RoutedDecisionEngine
@@ -70,8 +71,8 @@ from .current_context import CurrentContext, KNOWN_SECRET_NAMES, redact_known_se
 from . import preparations as prep
 from .browser_session import BrowserProfile, binding_digest
 from .cli_browser_relay import BrowserRelay
-from .telegram_presence import (CONTROL_DETAILS, CONTROL_RETRY, THINKING_DRAFT_TEXT, WAIT_CHAT_ACTION, WAIT_DRAFT, PresenceTiming,
-                                TelegramTurnAddressing, WaitState, draft_id_for, render_telegram_html,
+from .telegram_presence import (BETWEEN_STEPS_TEXT, CONTROL_DETAILS, CONTROL_RETRY, THINKING_DRAFT_TEXT, WAIT_CHAT_ACTION, WAIT_DRAFT, PresenceTiming,
+                                TelegramTurnAddressing, WaitState, draft_id_for, draft_step, render_telegram_html,
                                 reply_controls_markup, turn_gesture, without_consumed)
 LOCAL_RESUMED_KEY='local_authority_resumed_jobs'
 LOCAL_DOCUMENT_RESUME_KEY='local_authority_document_resume_jobs'
@@ -260,6 +261,8 @@ class AgentService:
         self.preparations=prep.Preparations(store)
         self.presence_timing=PresenceTiming()
         self.presence={}
+        # #718: the CLI's own streamed step per running Work (presentation only, never persisted).
+        self.live_steps={}
         self.subscription_engines=subscription_engines or SubscriptionEngines()
         # The Claude Code token is read from the secret store per run and
         # handed to that CLI only as CLAUDE_CODE_OAUTH_TOKEN (#571).
@@ -2864,10 +2867,20 @@ class AgentService:
                                                           durable_surface=self.store.task_card(job['id']) is not None,
                                                           draft_available=not state.draft_failed)
                 if surface==WAIT_DRAFT:
-                    if state.draft_at is not None and now-state.draft_at<self.presence_timing.draft_refresh:
+                    # #718: the draft names the observed step in flight.  A
+                    # changed line is shown at most once per step_refresh and
+                    # always as the latest; an unchanged one per draft_refresh.
+                    since=None if state.draft_at is None else now-state.draft_at
+                    if since is not None and since<self.presence_timing.step_refresh:
                         continue
-                    if self._send_thinking_draft(job,state):
+                    text=self._draft_step_text(job,state)
+                    if text is None:
+                        continue  # a payment/approval step: the approval prompt is the only surface
+                    if since is not None and text==state.draft_text and since<self.presence_timing.draft_refresh:
+                        continue
+                    if self._send_thinking_draft(job,state,text):
                         state.draft_at=now
+                        state.draft_text=text
                         state.shown.add(WAIT_DRAFT)
                         shown.append((job['id'],WAIT_DRAFT))
                         continue
@@ -2881,19 +2894,60 @@ class AgentService:
                             shown.append((job['id'],WAIT_CHAT_ACTION))
         return shown
 
-    def _send_thinking_draft(self, job, state):
+    def _send_thinking_draft(self, job, state, text=THINKING_DRAFT_TEXT):
         """One Stop-able draft: Telegram's dedicated thinking block first.
 
-        A client/server that refuses the rich draft gets the plain empty-text
-        `sendMessageDraft` placeholder from then on; both use the same
+        A client/server that refuses the rich draft gets the plain
+        `sendMessageDraft` from then on - the empty-text placeholder before
+        the first step, the step line (#718) after; both use the same
         `draft_id`, so Stop maps back to the Work either way.
         """
         draft_id=draft_id_for(job['id'])
         if not state.rich_draft_failed:
-            if self._presence_call('send_rich_message_draft',job['chat_id'],draft_id,THINKING_DRAFT_TEXT,can_stop=True):
+            if self._presence_call('send_rich_message_draft',job['chat_id'],draft_id,text,can_stop=True):
                 return True
             state.rich_draft_failed=True
-        return self._presence_call('send_message_draft',job['chat_id'],draft_id,'',can_stop=True)
+        return self._presence_call('send_message_draft',job['chat_id'],draft_id,'' if text==THINKING_DRAFT_TEXT else text,can_stop=True)
+
+    #: Notification kinds whose prompt is the Work's only surface while pending (#718).
+    APPROVAL_NOTIFICATIONS=('approval_needed','context_approval_needed','browser_approval_needed')
+
+    def _draft_step_text(self, job, state):
+        """The draft line for running Work from its observed steps (#718), or None.
+
+        None while an approval prompt is pending or the step in flight is a
+        payment step: the existing approval prompt is then the only surface.
+        A step line was redacted when it was recorded; it passes this Work's
+        saved-value and stored-secret redaction again before display.
+        """
+        if any(row['kind'] in self.APPROVAL_NOTIFICATIONS and row['state'] in ('queued','sent')
+               for row in self.store.task_notifications(job['id'])):
+            return None
+        text,approval=draft_step(self.store.task_events(job['id']),self.live_steps.get(job['id']))
+        if approval:return None
+        if text in (THINKING_DRAFT_TEXT,BETWEEN_STEPS_TEXT):return text
+        if state.scrubbed is None or state.scrubbed[0]!=text:
+            try:shown=' '.join(str(self.scrub_work_text(job['id'],text)).split())
+            except Exception:shown=BETWEEN_STEPS_TEXT  # never show a line that could not be redacted
+            state.scrubbed=(text,shown or BETWEEN_STEPS_TEXT)
+        return state.scrubbed[1]
+
+    def _observe_cli_step(self, job_id, step):
+        """Keep the CLI's own streamed web-search step for the draft (#718); presentation only.
+
+        The query is redacted exactly as the durable event later records it
+        (`record_cli_native_searches`) and bounded like any step target.  A
+        completion closes only the step it names.
+        """
+        if not isinstance(step,dict):return
+        if step.get('state')=='running':
+            query=self._redact_provenance(str(step.get('query') or ''))[:200]
+            self.live_steps[job_id]={'at':time.time(),'running':True,'id':step.get('id'),
+                                     'step':progress_step('web_search',{'query':query} if query else {},None,self._redact_provenance)}
+        else:
+            live=self.live_steps.get(job_id)
+            if live and live.get('running') and live.get('id')==step.get('id'):
+                self.live_steps[job_id]={**live,'at':time.time(),'running':False}
 
     STOP_CANCELLED_TEXT='요청을 멈췄어요. 이 요청은 실행하지 않았습니다.'
     # #606 T1: a running Work checks Stop before its next model turn or tool
@@ -4792,6 +4846,8 @@ class AgentService:
                                 served=facade(capabilities,**facade_options)
                                 served.native_search=native_search
                                 served.native_search_reason=native_reason or ''
+                                # #718: the CLI's own search items update the draft while it runs.
+                                served.progress=lambda step,work_id=job['id']:self._observe_cli_step(work_id,step)
                                 # #701: the browser tools run here, in this service, for exactly
                                 # this turn; the bridge only relays them.
                                 relay=None
@@ -4805,6 +4861,7 @@ class AgentService:
                                     result=self.execution_adapter.execute(subscription['id'],engine_prompt,served,context=adapter_context,
                                                                           **({'model':work_model} if work_model else {}))
                                 finally:
+                                    self.live_steps.pop(job['id'],None)
                                     if relay is not None:relay.close()
                                     # The Work's browser session ends with the run (as on the direct route).
                                     capabilities.close_browser()

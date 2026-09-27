@@ -22,6 +22,10 @@ SEC-CLI-01 makes the loop work on the owner's subscription CLI route (Codex or C
 - **Turn records.** The local prompt envelope is kept after deterministic redaction of the Work's lookup-exclusion set (its Memory candidates, notes and calendar drafts), stored secret values and credential shapes. Profile values have no identifier marker and are kept as sent. Only a turn that carried a private store (notes, documents, Drive, context inbox, Memory reads, calendar, the browser session and the other native-search-blocking sources) keeps size and digest only. Turn records stay out of export and backup.
 - **Settings** shows, per Main AI route, whether its own web search and the browser tools are available, and why not (including a CLI that is not installed or not signed in).
 
+## Amendment — #710 (2026-09-27)
+
+ORCH-01 (Constitution C16): for each Work the Judgment AI returns one validated plan choosing the worker (a configured, verified Main AI route) and model, the brief (goal, selected context sections, completion criteria) and optionally a tool subset; after the attempt the existing `goal_reached` judgment evaluates it and the orchestrator may re-delegate at most twice within the Work budget, never after an effect. Without a usable plan the default Main AI runs the raw request as before. The "Roles" below now include this orchestration step; see [Decision Layer — Orchestration](decision-layer.en.md#orchestration-orch-01--710).
+
 ## Status and purpose
 
 This is the canonical product and execution contract for the **SECRETARY-01** program, activated by the owner on 2026-09-26 through [GOV-SECRETARY-01 #653](https://github.com/Jongtae/agentos/issues/653). It distills the owner's product specification, preserved as [research](research/secretary-agency-spec-2026-09-26.ko.md), and the owner decisions recorded in #653.

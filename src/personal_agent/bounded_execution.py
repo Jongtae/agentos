@@ -280,16 +280,32 @@ def native_search_withheld():
     return (frozenset(PRIVATE_PROVENANCE) - BROWSER_ACTIONS) | NATIVE_SEARCH_REPLACED
 
 
-def turn_actions(profile, native_search=False):
-    """The bridge actions one turn offers: the profile's, minus private reads when native search is on."""
+def turn_actions(profile, native_search=False, only=None):
+    """The bridge actions one turn offers: the profile's, minus private reads when native search is on.
+
+    ``only`` (#710) is the orchestrator's validated per-request subset, or
+    None for the profile's usual set.  It can only narrow the set.
+    """
     actions = profile_actions(profile)
     if native_search:
         withheld = native_search_withheld()
         actions = tuple(action for action in actions if action not in withheld)
+    if only is not None:
+        actions = tuple(action for action in actions if action in only)
     return actions
 
 
-def claude_bridge_allowlist(profile, native_search=False):
+def private_read_actions():
+    """Bridge actions that read an owner-private store (#710).
+
+    The CLI's own web search is never on in a turn that offers one of these
+    (``native_search_withheld``); the orchestrator's per-request tool choice
+    uses the same set to turn that search off when it selects one.
+    """
+    return native_search_withheld() - NATIVE_SEARCH_REPLACED
+
+
+def claude_bridge_allowlist(profile, native_search=False, only=None):
     """Claude Code's official ``--allowedTools`` rule for exactly the
     profile's AgentOS bridge tools (#623).
 
@@ -299,7 +315,7 @@ def claude_bridge_allowlist(profile, native_search=False):
     profile does not declare stays denied, and no built-in tool (Read, Bash,
     WebFetch, ...) is named, so their permission behaviour is unchanged.
     """
-    return ['--allowedTools', ','.join(f'mcp__agentos__{action}' for action in turn_actions(profile, native_search))]
+    return ['--allowedTools', ','.join(f'mcp__agentos__{action}' for action in turn_actions(profile, native_search, only))]
 
 
 _VERSION_PATTERNS = {'codex': re.compile(r'^codex-cli (\d+\.\d+\.\d+)\s*$'),
@@ -721,13 +737,15 @@ class AgentOSMcpTools:
     browser_relay = None
     #: #701: in the bridge process, the client that forwards browser calls to the service.
     relay = None
+    #: #710: the orchestrator's validated tool subset for this turn, or None (the profile's set).
+    only = None
 
     def __init__(self, capabilities, native_search=False):
         self.capabilities = capabilities
         self.native_search = bool(native_search)
 
     def _offered(self):
-        allowed = set(turn_actions(self.PROFILE, self.native_search and self.PROFILE == BOUNDED_PROFILE))
+        allowed = set(turn_actions(self.PROFILE, self.native_search and self.PROFILE == BOUNDED_PROFILE, self.only))
         return {definition['function']['name']: definition for definition in self.capabilities.definitions()
                 if definition['function']['name'] in allowed}
 
@@ -900,7 +918,7 @@ class BoundedExecutionAdapter:
         return {'state': 'unknown', 'detail': 'unparsed status'}
 
     def command(self, engine_id, binary, prompt, mcp_config, instructions='', profile=BOUNDED_PROFILE,
-                disabled_features=(), model=None, native_search=False):
+                disabled_features=(), model=None, native_search=False, only=None):
         """The argv of one Work turn.
 
         ``native_search`` (#678) lets the trusted-local turn use the CLI's own
@@ -961,10 +979,11 @@ class BoundedExecutionAdapter:
             elif native_search:
                 # Only WebSearch among the built-in tools, pre-approved by its exact name.
                 # The private-read bridge tools are neither listed nor pre-approved (#678 P1).
-                allow = claude_bridge_allowlist(BOUNDED_PROFILE, native_search=True)
-                argv += ['--tools', CLAUDE_NATIVE_SEARCH_TOOL, allow[0], allow[1] + ',' + CLAUDE_NATIVE_SEARCH_TOOL]
+                allow = claude_bridge_allowlist(BOUNDED_PROFILE, native_search=True, only=only)
+                argv += ['--tools', CLAUDE_NATIVE_SEARCH_TOOL, allow[0], ','.join(filter(None, (allow[1], CLAUDE_NATIVE_SEARCH_TOOL)))]
             else:
-                argv += claude_bridge_allowlist(BOUNDED_PROFILE)
+                # #710: only the orchestrator's subset is pre-approved when it chose one.
+                argv += claude_bridge_allowlist(BOUNDED_PROFILE, only=only)
             return argv
         raise ExecutionError('지원하는 구독 엔진을 선택하세요.')
 
@@ -1274,6 +1293,9 @@ class BoundedExecutionAdapter:
             # #701: only the trusted-local route is ever given the service's browser relay.
             relay = getattr(tools, 'browser_relay', None) if profile == BOUNDED_PROFILE else None
             search_off = str(getattr(tools, 'native_search_reason', '') or '') if not native_search else ''
+            # #710: the orchestrator's per-request subset narrows what the bridge offers.
+            only = getattr(tools, 'only', None)
+            only = None if only is None else frozenset(str(name) for name in only)
             # Both supported CLIs receive this per-turn bridge configuration.
             # The engine gets no store handle; the bridge alone owns validated
             # access to the AgentOS tool facade.
@@ -1290,6 +1312,7 @@ class BoundedExecutionAdapter:
                          f'--profile={profile}',
                          *(['--native-search'] if native_search else []),
                          *([f'--search-off-reason={search_off}'] if search_off else []),
+                         *([f'--only={",".join(sorted(only))}'] if only is not None else []),
                          *([f'--browser-relay={relay}'] if relay else [])],
             }}}, ensure_ascii=False), encoding='utf-8')
             env = self.environment(engine_id, binary, run_dir)
@@ -1331,7 +1354,7 @@ class BoundedExecutionAdapter:
             LOG.info('engine turn started engine=%s profile=%s', engine_id, profile)
             # #678: the facade says whether this turn may use the CLI's own web search.
             argv = self.command(engine_id, binary, prompt, config, instructions, profile=profile, disabled_features=disabled,
-                                model=model or None, native_search=native_search)
+                                model=model or None, native_search=native_search, only=only)
             run_meta = {'argv': display_argv(argv, prompt, instructions), 'requested_model': model or None}
             try:
                 if self.runner is subprocess.run:

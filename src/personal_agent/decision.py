@@ -47,6 +47,10 @@ MULTI_SELECTION_UNSUPPORTED = 'multi-selection-unsupported'
 #: The selection candidate a provider may pick to say "none of these".
 NO_CANDIDATE = 'none-of-these'
 
+#: ``DecisionConfidence.engine`` of a route that cannot answer ``structured``
+#: (#710: the Jev API has no free-form structured answer type).
+STRUCTURED_UNSUPPORTED = 'structured-unsupported'
+
 
 class DecisionContext:
     """The minimal, attributable facts one bounded question is asked over.
@@ -146,6 +150,20 @@ class SelectionSetDecision(_Decision):
         self.choices = frozenset(choices or ()) if outcome == OUTCOME_DECIDED else None
 
 
+class StructuredDecision(_Decision):
+    """One answer shaped by a caller-declared JSON schema (#710).
+
+    ``data`` is the parsed object without the provider's ``confidence``;
+    only a ``decided`` outcome carries it.  What the fields mean, and whether
+    they may be acted on, is the caller's deterministic validation.
+    """
+    __slots__ = ('data',)
+
+    def __init__(self, outcome, data=None, confidence=None):
+        super().__init__(outcome, confidence)
+        self.data = dict(data) if outcome == OUTCOME_DECIDED and isinstance(data, dict) else None
+
+
 class ScoreDecision(_Decision):
     __slots__ = ('score', 'scale')
 
@@ -180,6 +198,15 @@ class DecisionEngine:
         ``MULTI_SELECTION_UNSUPPORTED``, never a guess."""
         return SelectionSetDecision(OUTCOME_UNAVAILABLE, candidates=candidates,
                                     confidence=DecisionConfidence(engine=MULTI_SELECTION_UNSUPPORTED))
+
+    def structured(self, context, question, schema, valid=None):
+        """One answer shaped by ``schema`` (a JSON-schema object whose
+        properties the caller declares; ``confidence`` is added by the
+        adapter).  -> StructuredDecision.  ``valid`` is an optional shape
+        check over the parsed object.  An engine that cannot answer says so:
+        the default is an explicit non-answer marked ``STRUCTURED_UNSUPPORTED``.
+        """
+        return StructuredDecision(OUTCOME_UNAVAILABLE, confidence=DecisionConfidence(engine=STRUCTURED_UNSUPPORTED))
 
 
 class UnavailableDecisionEngine(DecisionEngine):
@@ -219,6 +246,13 @@ class RoutedDecisionEngine(DecisionEngine):
     def choose_many(self, context, candidates, question):
         return self.resolve().choose_many(context, candidates, question)
 
+    def structured(self, context, question, schema, valid=None):
+        engine = self.resolve()
+        method = getattr(engine, 'structured', None)
+        if method is None:
+            return DecisionEngine.structured(self, context, question, schema, valid)
+        return method(context, question, schema, valid)
+
 
 class FixtureDecisionEngine(DecisionEngine):
     """Scripted answers for tests and fixture-backed acceptance.
@@ -228,8 +262,9 @@ class FixtureDecisionEngine(DecisionEngine):
     test double for a provider, not a production fallback.
     """
 
-    def __init__(self, judge=None, choose=None, score=None, choose_many=None):
+    def __init__(self, judge=None, choose=None, score=None, choose_many=None, structured=None):
         self._judge, self._choose, self._score, self._choose_many = judge, choose, score, choose_many
+        self._structured = structured
         self.asked = []
 
     def judge(self, context, proposition):
@@ -251,6 +286,16 @@ class FixtureDecisionEngine(DecisionEngine):
         self.asked.append(('choose_many', context, tuple(candidates), question))
         result = self._choose_many(context, candidates, question) if self._choose_many else None
         return result if result is not None else SelectionSetDecision(OUTCOME_UNAVAILABLE, candidates=candidates)
+
+    def structured(self, context, question, schema, valid=None):
+        # A fixture without a structured script is an engine that cannot
+        # answer one; it is not recorded in ``asked`` (#710), so scripts
+        # written for the other judgments see exactly the calls they did.
+        if self._structured is None:
+            return DecisionEngine.structured(self, context, question, schema, valid)
+        self.asked.append(('structured', context, question, schema))
+        result = self._structured(context, question, schema)
+        return result if result is not None else StructuredDecision(OUTCOME_UNAVAILABLE)
 
 
 def fixture_confidence(probability=1.0):
@@ -297,6 +342,16 @@ class DecisionPolicy:
     def confident_binary(self, decision):
         """True when a decided answer met the binary threshold."""
         return decision.decided and self._confident(decision, self.binary_threshold)
+
+    def structured(self, decision):
+        """The answered object when decided with enough confidence, else None (#710).
+
+        Uses the selection threshold: a structured answer is a choice among
+        declared options plus text the caller validates.
+        """
+        if not decision.decided or decision.data is None or not self._confident(decision, self.selection_threshold):
+            return None
+        return dict(decision.data)
 
     def selection(self, decision):
         """The chosen candidate, or None (including an explicit none-of-these)."""
@@ -390,6 +445,23 @@ class SchemaDecisionEngine(DecisionEngine):
             and len(set(d['choices'])) == len(d['choices']))
         return SelectionSetDecision(outcome, data.get('choices'), candidates, confidence)
 
+    def structured(self, context, question, schema, valid=None):
+        # The caller's object schema plus the confidence every answer carries.
+        properties = dict(schema.get('properties') or {})
+        properties['confidence'] = {'type': 'number', 'minimum': 0, 'maximum': 1}
+        required = [*[name for name in schema.get('required') or () if name != 'confidence'], 'confidence']
+        declared = {'type': 'object', 'additionalProperties': False, 'properties': properties, 'required': required}
+        names = set(properties)
+
+        def shape(data):
+            if set(data) - names or any(name not in data for name in required):
+                return False
+            answer = {key: value for key, value in data.items() if key != 'confidence'}
+            return bool(valid(answer)) if valid else True
+        outcome, data, confidence = self._ask(context, 'structured', f'Question: {question}', declared, shape)
+        answer = {key: value for key, value in data.items() if key != 'confidence'}
+        return StructuredDecision(outcome, answer, confidence)
+
     def _ask(self, context, kind, question, schema, valid):  # pragma: no cover - interface
         raise NotImplementedError
 
@@ -403,7 +475,10 @@ class SchemaDecisionEngine(DecisionEngine):
             return OUTCOME_MALFORMED
         return OUTCOME_DECIDED
 
-    _ANSWER_FIELD = {'judge': 'answer', 'choose': 'choice', 'score': 'score', 'choose_many': 'choices'}
+    #: The decided value an audit record keeps.  A ``structured`` answer
+    #: (#710) may carry owner-derived text, so none of it is kept.
+    _ANSWER_FIELD = {'judge': 'answer', 'choose': 'choice', 'score': 'score', 'choose_many': 'choices',
+                     'structured': None}
 
     def _done(self, context, kind, outcome, data, confidence, started, failure=''):
         confidence.elapsed_seconds = round(self.now() - started, 3)
@@ -423,7 +498,8 @@ def audit_record(context, kind, outcome, data, confidence, at, failure=''):
     which model policy; the requested and observed model stay separate and
     an unreported model is recorded as ``not reported``.
     """
-    answer = data.get(_ANSWER_FIELD[kind]) if outcome == OUTCOME_DECIDED and isinstance(data, dict) else None
+    field = _ANSWER_FIELD.get(kind)
+    answer = data.get(field) if field and outcome == OUTCOME_DECIDED and isinstance(data, dict) else None
     record = {'at': at, 'kind': kind, 'purpose': context.purpose, 'outcome': outcome,
               'answer': answer,
               'confidence': confidence.probability, 'provider': confidence.provider,

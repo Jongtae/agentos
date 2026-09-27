@@ -781,6 +781,64 @@ class HttpSurfaceTests(HandoffTestCase):
         self.assertEqual(status, 409)
         self.assertEqual(replay['reason'], 'no_pending_work')
 
+    #: #594 item 10: what a tunnel adds when it forwards to the loopback port.
+    TUNNEL_HEADERS = (
+        ('Forwarded', 'for=198.51.100.7;proto=https;host=phone.example'),  # RFC 7239
+        ('X-Forwarded-For', '198.51.100.7'),        # ngrok, Tailscale Serve, cloudflared
+        ('X-Forwarded-Host', 'phone.example'),      # ngrok
+        ('X-Forwarded-Proto', 'https'),             # Cloudflare, ngrok
+        ('X-Real-IP', '198.51.100.7'),              # nginx-style proxies
+        ('Via', '1.1 tunnel'),                      # RFC 9110 section 7.6.3
+        ('CF-Connecting-IP', '198.51.100.7'),       # Cloudflare Tunnel
+        ('CF-Ray', '8a1b2c3d4e5f-ICN'),             # Cloudflare Tunnel
+        ('True-Client-IP', '198.51.100.7'),         # Cloudflare/Akamai
+        ('Tailscale-User-Login', 'owner@example.com'),  # Tailscale Serve
+        ('Tailscale-Funnel-Request', '?1'),         # Tailscale Funnel
+        ('ngrok-skip-browser-warning', '1'),        # ngrok
+    )
+
+    def test_a_tunnel_that_rewrites_host_to_loopback_is_not_this_mac(self):
+        job_id, _ = self.park_read()
+        base, session = self.serve()
+        contracts = self.folder('contracts')
+        # A direct request with the loopback Host is this Mac.
+        status, listing = self.call(base, '/api/folder-requests', session)
+        self.assertEqual(status, 200)
+        self.assertTrue(listing['local_surface'])
+        handoff = listing['requests'][0]['handoff_id']
+        for name, value in self.TUNNEL_HEADERS:
+            with self.subTest(header=name):
+                relayed = {**session, 'Host': base.split('//', 1)[1], name: value}
+                status, listing = self.call(base, '/api/folder-requests', relayed)
+                self.assertEqual(status, 200)
+                self.assertFalse(listing['local_surface'])
+                for action, body in (('select', {'handoff_id': handoff, 'path': str(contracts)}),
+                                     ('approve', {'handoff_id': handoff})):
+                    status, reply = self.call(base, f'/api/folder-requests/{action}', relayed, body)
+                    self.assertEqual(status, 403)
+                    self.assertIn('Mac에서 계속', reply['error'])
+                # A "this device only" route refuses the relayed request too.
+                status, _reply = self.call(base, '/api/connections/google/revocations', relayed)
+                self.assertEqual(status, 403)
+        self.assertEqual(self.roots(), [])
+        self.assertEqual(self.job(job_id)['status'], 'awaiting_connection')
+
+    def test_a_relayed_request_cannot_take_the_passwordless_local_login(self):
+        self.park_read()
+        base, _session = self.serve()
+        self.store.put('local_access', True)
+        for headers in ({'Host': MOBILE_HOST}, {'X-Forwarded-For': '198.51.100.7'},
+                        {'CF-Connecting-IP': '198.51.100.7'}, {'Forwarded': 'for=198.51.100.7'}):
+            with self.subTest(headers=headers):
+                status, reply = self.call(base, '/api/local-login', headers, {})
+                self.assertEqual(status, 403)
+                self.assertNotIn('ok', reply)
+                status, state = self.call(base, '/api/status', headers)
+                self.assertEqual(status, 200)
+                self.assertFalse(state['local_access'])
+        status, reply = self.call(base, '/api/local-login', {}, {})
+        self.assertEqual((status, reply), (200, {'ok': True}))
+
     def test_an_unauthenticated_caller_is_refused(self):
         self.park_read()
         base, _session = self.serve()

@@ -48,6 +48,26 @@ from cryptography.x509.oid import NameOID
 WEB=Path(__file__).parent/'web'
 ISOLATED_MCP_PATH='/internal/isolated-engine/mcp'
 
+#: #594 item 10: request headers that only a proxy or tunnel adds.  A browser
+#: on this Mac talking to the loopback port sends none of them, so their
+#: presence means the request was relayed and is not "this Mac, reached
+#: directly".  RFC 7239 ``Forwarded``, RFC 9110 ``Via``, the de-facto
+#: ``X-Forwarded-*`` / ``X-Real-IP`` family (ngrok, Tailscale Serve, nginx,
+#: Caddy), and the vendor families of the common tunnels: Cloudflare Tunnel
+#: (``CF-Connecting-IP``, ``CF-Ray``, ``CF-Visitor``, ``Cf-Warp-Tag-Id`` ...),
+#: Akamai/Cloudflare ``True-Client-IP`` and Tailscale Serve/Funnel
+#: (``Tailscale-User-*``, ``Tailscale-Funnel-Request``).
+PROXY_HEADERS=frozenset({'forwarded','via','x-real-ip','true-client-ip','client-ip','cdn-loop'})
+PROXY_HEADER_PREFIXES=('x-forwarded-','cf-','tailscale-','ngrok-')
+
+
+def relayed_request(headers):
+    """True when any proxy/tunnel forwarding header is present (fail closed)."""
+    for name in headers.keys():
+        name=name.strip().lower()
+        if name in PROXY_HEADERS or name.startswith(PROXY_HEADER_PREFIXES):return True
+    return False
+
 
 def local_oauth_secret_values(store, path_value, required, label):
     """Load owner-local connector credentials without putting them in process args.
@@ -473,8 +493,30 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             self.reply(401,{'error':'로그인이 필요합니다.'})
             return False
 
+        def loopback_server(self):
+            return self.server.server_address[0] in ('127.0.0.1', '::1')
+
         def local_setup(self):
-            return self.server.server_address[0] in ('127.0.0.1', '::1') and self.client_address[0] in ('127.0.0.1', '::1')
+            """This Mac, reached directly: the passwordless/owner-local trust root.
+
+            Loopback server and loopback client are not enough, because every
+            tunnel (cloudflared, ngrok, Tailscale Serve/Funnel, ssh -R) also
+            connects from loopback.  #594 item 10: a configured public tunnel
+            host or any proxy forwarding header makes the request relayed, and a
+            relayed request is never local, whatever its Host says.
+            """
+            return (self.loopback_server() and self.client_address[0] in ('127.0.0.1', '::1')
+                    and not self.public_host() and not relayed_request(self.headers))
+
+        def tunneled(self):
+            """A request that must be refused by "this device only" routes.
+
+            The configured public tunnel host, or, on a loopback-bound server, a
+            request carrying proxy forwarding headers (a tunnel that rewrote Host
+            to ``localhost:<port>``).  A non-loopback deployment behind its own
+            reverse proxy keeps its previous behaviour.
+            """
+            return self.public_host() or (self.loopback_server() and relayed_request(self.headers))
 
         def valid_host(self):
             # #680 review P1-2: the embedded browser marks every request with a
@@ -492,12 +534,14 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             return self.headers.get('Host','').lower() in public_hosts
 
         def owner_local_surface(self):
-            """This Mac, reached directly: loopback server, loopback client, no tunnel host.
+            """This Mac, reached directly: loopback server and client, no tunnel.
 
-            A tunnel forwards from loopback too, so the Host check is what keeps a
-            phone on the public address from choosing or approving a Mac folder.
+            A tunnel forwards from loopback too.  The Host check alone trusted a
+            header a tunnel may rewrite to ``localhost:<port>``, so ``local_setup``
+            also refuses any proxy forwarding header (#594 item 10).  This keeps a
+            phone on a tunnel from choosing or approving a Mac folder.
             """
-            return self.local_setup() and not self.public_host()
+            return self.local_setup()
 
         def cookie(self,token,max_age=86400):
             secure='; Secure' if os.environ.get('AGENTOS_SECURE_COOKIE')=='1' or public_hosts else ''
@@ -545,7 +589,7 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 # callback it is never anonymous, and a tunnel host is refused
                 # because the callback can only ever return to loopback.
                 if not self.auth():return
-                if self.public_host():
+                if self.tunneled():
                     return self.reply(400,b'Open AgentOS on its local address to connect Gmail.','text/plain; charset=utf-8')
                 try:return self.redirect(service.begin_gmail_connection()['authorization_url'])
                 except (AttributeError, ValueError, KeyError):
@@ -558,7 +602,7 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 # consumed before the code is inspected - exactly as the Drive
                 # callback above is protected.  One message for every failure,
                 # so a guess learns nothing about configuration or state.
-                if self.public_host():
+                if self.tunneled():
                     return self.reply(400,b'Gmail connection could not be completed. Return to Telegram and request a new link.','text/plain; charset=utf-8')
                 try:
                     callback={key:values[0] for key,values in parse_qs(parts.query).items()}
@@ -574,7 +618,7 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 # write are separate connectors and the owner authorizes each
                 # deliberately -- there is no path that turns one into both.
                 if not self.auth():return
-                if self.public_host():
+                if self.tunneled():
                     return self.reply(400,b'Open AgentOS on its local address to connect Google Calendar.','text/plain; charset=utf-8')
                 grant=parse_qs(parts.query).get('grant',['read'])[0]
                 try:return self.redirect(service.begin_calendar_connection(grant)['authorization_url'])
@@ -587,7 +631,7 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 # Authority is the owner-bound, HMAC-signed, single-use state,
                 # which also carries which of the two grants is completing.
                 # One message for every failure, so a guess learns nothing.
-                if self.public_host():
+                if self.tunneled():
                     return self.reply(400,b'Google Calendar connection could not be completed. Start the connection again from AgentOS.','text/plain; charset=utf-8')
                 try:
                     callback={key:values[0] for key,values in parse_qs(parts.query).items()}
@@ -623,7 +667,7 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             if path.startswith('/api/tasks/'):
                 return self.reply(200,service.task_progress(path.rsplit('/',1)[-1]))
             if path=='/api/connections/google/revocations':
-                if self.public_host():return self.reply(403,{'error':'이 작업은 이 기기에서만 할 수 있습니다.'})
+                if self.tunneled():return self.reply(403,{'error':'이 작업은 이 기기에서만 할 수 있습니다.'})
                 return self.reply(200,service.google_revocations())
             if path=='/api/settings':return self.reply(200,service.conversation_settings_request({'operation':'read'}))
             if path=='/api/personal-knowledge':return self.reply(200,service.personal_knowledge_request({'query':parse_qs(parts.query).get('query',[''])[0]}, channel='local-companion'))
@@ -645,7 +689,7 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 # real calendar event, and it is the first route in this
                 # server that does. Every other Calendar route already
                 # refuses a tunnel host and this should not be the exception.
-                if self.public_host():
+                if self.tunneled():
                     return self.reply(400,{'error':'Open AgentOS on its local address to review calendar drafts.'})
                 try:return self.reply(200,service.calendar_draft_request({'operation':'list'}))
                 except ValueError as exc:return self.reply(400,{'error':str(exc)})
@@ -813,7 +857,7 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 if path=='/api/calendar/drafts/request':
                     # See the GET above: this one applies a real external
                     # effect, so loopback only.
-                    if self.public_host():
+                    if self.tunneled():
                         return self.reply(400,{'error':'Open AgentOS on its local address to approve a calendar change.'})
                     try:return self.reply(200,service.calendar_draft_request(body))
                     except ValueError as exc:return self.reply(400,{'error':str(exc)})
@@ -821,7 +865,7 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                     # #656: a headed window on this Mac, and the approval of a
                     # guarded step in the owner's session; #680: deleting saved
                     # sign-in sessions.  Owner session, loopback only.
-                    if self.public_host():return self.reply(403,{'error':'이 작업은 이 기기에서만 할 수 있습니다.'})
+                    if self.tunneled():return self.reply(403,{'error':'이 작업은 이 기기에서만 할 수 있습니다.'})
                     try:
                         if path=='/api/browser/login':return self.reply(200,service.open_browser_for_login(body))
                         if path=='/api/browser/sessions/delete':return self.reply(200,service.delete_browser_sessions(body))
@@ -843,7 +887,7 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 if path in GOOGLE_DISCONNECT_PATHS:
                     # CONNECTOR-REVOKE-01 #588: owner-session only, and never
                     # through a public tunnel host, like the connect routes.
-                    if self.public_host():return self.reply(403,{'error':'이 작업은 이 기기에서만 할 수 있습니다.'})
+                    if self.tunneled():return self.reply(403,{'error':'이 작업은 이 기기에서만 할 수 있습니다.'})
                     if path=='/api/connections/google/disconnect/preview':
                         return self.reply(200,service.google_disconnect_preview(body,self.token()))
                     if path=='/api/connections/google/disconnect':

@@ -35,6 +35,9 @@ TERMINAL_UNKNOWN_EFFECT = ('외부 결과를 확인할 수 없습니다. 실제 
 #: #752: opens the AI's own answer in a failed/partial bubble, after the truth
 #: header and what did not complete.  The owner reads the answer, labelled.
 TERMINAL_ANSWER_LABEL = 'AI 답변 (위 부분은 확인되지 않았어요):'
+#: #752 review: what the web shows in place of a withheld answer.
+TERMINAL_ANSWER_WITHHELD = ('실행되지 않은 동작을 주장할 수 있어 AI 답변을 표시하지 않습니다. '
+                            '상세에서 실행 기록을 확인하세요.')
 #: #752: one tool reason in the owner's bubble: its first sentence, bounded.
 #: The full model-facing text stays in the Work record (상세).
 OWNER_REASON_CHARS = 120

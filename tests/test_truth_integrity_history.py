@@ -25,7 +25,8 @@ from personal_agent.agent_runtime import (DELEGATE_FAILED, FALLBACK_UNDESCRIBED,
                                           evidence_qualifiers, fallback_response, evidence_summary, turn_context)
 from personal_agent.calendar import CALENDAR_SPEC, CALENDAR_WRITE_SPEC, CalendarConnector
 from personal_agent.connector_contract import ConnectorRegistry, ConnectorState
-from personal_agent.conversation_projection import (CONTEXT_QUALIFIER, TERMINAL_ANSWER_LABEL, TERMINAL_PARTIAL_HEADER,
+from personal_agent.conversation_projection import (CONTEXT_QUALIFIER, TERMINAL_ANSWER_LABEL, TERMINAL_ANSWER_WITHHELD,
+                                                    TERMINAL_PARTIAL_HEADER,
                                                     context_message, qualify_transcript)
 from personal_agent.google_calendar import CALENDAR_READ_SCOPE, CALENDAR_WRITE_SCOPE
 from personal_agent.providers import ModelAdapter
@@ -176,13 +177,18 @@ class TranscriptQualificationTests(TruthIntegrityTestCase):
                                     workspace_id=workspace['id'])
         self.service.run_one()
         home = self.assistant_row(job_id, self.service.home()['conversation'])
-        project = self.assistant_row(job_id, self.store.workspace_detail(workspace['id'])['messages'])
+        project = self.assistant_row(job_id, self.service.workspace(workspace['id'])['messages'])
+        # #752: the calendar write was withheld for approval, so the claim of it is
+        # withheld on both views alike; the qualifier still says partial.
         for row in (home, project):
-            self.assertIn(CLAIM, row['content'])
+            self.assertEqual(row['content'], TERMINAL_ANSWER_WITHHELD)
             self.assertEqual(row['qualifier']['outcome'], 'partial')
         # The task card uses the same typed qualifier, so the surfaces agree.
         self.assertEqual(self.card(job_id)['qualifier']['outcome'], 'partial')
-        # A partial result saved to the project keeps its outcome too.
+        # A withheld claim never becomes a saved project result.
+        with self.assertRaises(ValueError):
+            self.service.save_workspace_result(workspace['id'], {'job_id': job_id})
+        # A partial result saved at the store level keeps its outcome too.
         saved = self.store.save_workspace_result(workspace['id'], job_id)
         self.assertEqual(saved['results'][0]['qualifier']['outcome'], 'partial')
 

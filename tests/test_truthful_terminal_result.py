@@ -260,6 +260,16 @@ class WithheldAnswerTests(TerminalResultTestCase):
         self.assertTrue(bubble.endswith(TERMINAL_NEXT_ACTION), bubble)
         self.assertNotIn(TERMINAL_ANSWER_LABEL, bubble)
         self.assertNotIn('기억해 두었습니다', bubble)
+        # #752 review: the web reads no withheld answer either - not in the jobs it
+        # renders tasks from, nor in the conversation transcript.
+        from personal_agent.conversation_projection import TERMINAL_ANSWER_WITHHELD
+        [served] = [row for row in self.service.owner_jobs(self.store.jobs()) if row['id'] == job['id']]
+        self.assertIsNone(served['response'])
+        self.assertTrue(served['answer_withheld'])
+        transcript = [row['content'] for row in self.service.home()['conversation'] if row.get('job_id') == job['id']
+                      and row.get('role') == 'assistant']
+        self.assertTrue(transcript)
+        self.assertEqual(set(transcript), {TERMINAL_ANSWER_WITHHELD})
         # The web card agrees: no result is offered.
         card = self.card(job)
         self.assertEqual(card['status_label'], '확인 필요')
@@ -276,6 +286,8 @@ class WithheldAnswerTests(TerminalResultTestCase):
         self.assertFalse(self.service.answer_withheld(job))
         self.assertTrue(self.card(job)['result_available'])
         self.assertIn(TERMINAL_ANSWER_LABEL, bubble)
+        [served] = [row for row in self.service.owner_jobs(self.store.jobs()) if row['id'] == job['id']]
+        self.assertEqual(served['response'], self.text, 'the web keeps a read-only failure answer')
 
 
 class SucceededTurnTests(TerminalResultTestCase):

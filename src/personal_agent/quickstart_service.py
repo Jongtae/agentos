@@ -25,7 +25,7 @@ from .main_ai import MainAiRoutes
 from .search_providers import (SEARCH_FAILED_TEXT, ProviderRegistry, SearchProviderSettings, public_http_url)
 from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_UNVERIFIED, BLOCKER_NO_AI_ROUTE,
                                       TELEGRAM_RESULT_PREVIEW_CHARS, TERMINAL_FAILED_HEADER,
-                                      TERMINAL_INTERRUPTED_HEADER, TERMINAL_NEXT_ACTION, TERMINAL_PARTIAL_HEADER,
+                                      TERMINAL_ANSWER_WITHHELD, TERMINAL_INTERRUPTED_HEADER, TERMINAL_NEXT_ACTION, TERMINAL_PARTIAL_HEADER,
                                       BlockedTurn, ConversationProjection, context_message,
                                       owner_cause, report_statement, terminal_text, turn_qualifier,
                                       verified_portion)
@@ -1459,7 +1459,7 @@ class AgentService:
         else:
             state='ready';next_action='메모는 바로 남길 수 있어요. 대화가 필요할 때 AI를 연결하세요.'
         tg=self.store.config('telegram', {})
-        conversation=self.store.history()
+        conversation=self.owner_messages(self.store.history())
         workspaces=self.store.workspaces()
         return {'state':state,'next_action':next_action,'active_jobs':active,
                 'conversation':conversation,'model_connected':bool(model_ready or subscription),
@@ -1744,7 +1744,11 @@ class AgentService:
     def workspace(self, workspace_id):
         item=self.store.workspace_detail(workspace_id)
         if not item:raise ValueError('작업공간을 찾을 수 없습니다.')
-        return item
+        return self.owner_workspace(item)
+
+    def owner_workspace(self, item):
+        """A project view with withheld answers replaced, as in the conversation (#752 review)."""
+        return {**item,'messages':self.owner_messages(item.get('messages') or [])} if isinstance(item,dict) else item
 
     def update_workspace(self, workspace_id, body):
         if not isinstance(body,dict):raise ValueError('작업공간 정보를 확인하세요.')
@@ -1752,7 +1756,10 @@ class AgentService:
 
     def save_workspace_result(self, workspace_id, body):
         if not isinstance(body,dict):raise ValueError('저장할 결과를 확인하세요.')
-        return self.store.save_workspace_result(workspace_id,body.get('job_id',''))
+        job=self.store.job(body.get('job_id','')) if isinstance(body.get('job_id'),str) else None
+        # #752 review: a withheld answer never becomes a saved project result.
+        if job and self.answer_withheld(job):raise ValueError('실행되지 않은 동작을 주장할 수 있는 답변은 저장할 수 없습니다.')
+        return self.owner_workspace(self.store.save_workspace_result(workspace_id,body.get('job_id','')))
 
     def context_inbox(self):
         from .context_inbox import ContextInbox
@@ -2493,6 +2500,16 @@ class AgentService:
             return False
         from .agent_runtime import state_change_short
         return state_change_short(self.work_trail(job['id']))
+
+    def owner_jobs(self, jobs):
+        """Work rows as the web reads them: a withheld answer is removed (#752 review)."""
+        return [{**job,'response':None,'answer_withheld':True} if self.answer_withheld(job) else job for job in jobs]
+
+    def owner_messages(self, messages):
+        """Transcript rows as the web reads them: a withheld answer is replaced by a notice (#752 review)."""
+        withheld={job['id'] for job in self.store.jobs() if self.answer_withheld(job)}
+        return [{**row,'content':TERMINAL_ANSWER_WITHHELD} if row.get('role')=='assistant' and row.get('job_id') in withheld
+                else row for row in messages]
 
     def goal_upgrade_allowed(self, job_id):
         """Whether a ``reached`` goal verdict may make a partial/failed CLI Work succeeded (#752 review).

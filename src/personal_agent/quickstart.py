@@ -672,8 +672,9 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             if path.startswith('/api/workspaces/'):
                 return self.reply(200,service.workspace(path.rsplit('/',1)[-1]))
             if path=='/api/state':
-                jobs=store.jobs()
-                return self.reply(200,{'settings':service.settings(),'messages':store.history(),'jobs':jobs,'notes':store.notes(),'tool_events':store.recent_tool_events(),'evidence':{job['id']:store.evidence_summary(job['id']) for job in jobs if job['status'] in ('succeeded','partial')},'healthy':service.healthy()})
+                # #752 review: a withheld answer is kept off the web as it is off Telegram.
+                jobs=service.owner_jobs(store.jobs())
+                return self.reply(200,{'settings':service.settings(),'messages':service.owner_messages(store.history()),'jobs':jobs,'notes':store.notes(),'tool_events':store.recent_tool_events(),'evidence':{job['id']:store.evidence_summary(job['id']) for job in jobs if job['status'] in ('succeeded','partial')},'healthy':service.healthy()})
             if path=='/api/onboarding':return self.reply(200,service.onboarding())
             self.reply(404,{'error':'경로를 찾을 수 없습니다.'})
 

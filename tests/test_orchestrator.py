@@ -167,8 +167,10 @@ class Harness(unittest.TestCase):
         return tuple(tool for tool in self.codex_tools() if tool not in SEARCH_TOOLS)
 
     def no_private(self):
-        """The other kept shape: the private-read tools removed."""
-        return tuple(tool for tool in self.codex_tools() if tool != 'list_notes')
+        """The other kept shape: the private-read tools removed (#774: Memory and calendar reads included)."""
+        from personal_agent.orchestrator import worker_catalogue
+        private = set(worker_catalogue(self.service).worker('codex')['private_tools'])
+        return tuple(tool for tool in self.codex_tools() if tool not in private)
 
     def events(self, job, status=None):
         with self.store.db() as db:
@@ -517,7 +519,7 @@ class ToolsAndReplan(Harness):
     def test_only_the_two_separation_shapes_survive_validation(self):
         """#735 (Work a8e6aa7b): every one-tool subset became the full toolset."""
         cases = {('bounded_public_research',): 'shape', ('web_search',): 'shape', ('list_notes',): 'shape',
-                 ('weather', 'web_search'): 'shape', ('calendar_query',): 'not_offered'}
+                 ('weather', 'web_search'): 'shape', ('read_file',): 'not_offered'}
         for tools, why in cases.items():
             with self.subTest(tools=tools):
                 self.engine.turns.clear()
@@ -529,7 +531,7 @@ class ToolsAndReplan(Harness):
             with self.subTest(kept=tools):
                 self.engine.turns.clear()
                 self.script([plan('codex', 'Answer.', tools=tools)], goals=[True])
-                job, _row = self.run_work('알려줘', key=f'kept-{tools}')
+                job, _row = self.run_work('알려줘', key=f'kept-{len(tools)}-{hash(tools) & 0xffff}')
                 self.assertEqual(self.engine.turns[0]['only'], sorted(tools))
                 self.assertIsNone(self.events(job, 'planned')[0][1]['tools_replaced'])
 
@@ -1387,3 +1389,99 @@ class GoalDecidesOutcome(Harness):
             job, row = self.run_work('찾아줘')
         self.assertEqual(row['status'], 'succeeded')
         offer.assert_not_called()
+
+
+class OwnerStateOnTheCliRoute(Harness):
+    """#774: the trusted-local CLI turn reaches Memory, preparations and the calendar through the service."""
+
+    def test_a_cli_turn_schedules_a_preparation_through_the_service(self):
+        from datetime import datetime, timedelta, timezone
+        due = (datetime.now(timezone.utc) + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M:%S+00:00')
+        seen = {}
+
+        def work(tools):
+            seen['offered'] = sorted(tools._offered())
+            try:
+                seen['result'] = tools.call('schedule_preparation', {
+                'kind': 'reminder', 'goal': '출발 시간입니다.', 'due': due, 'timezone': 'Asia/Seoul'})
+            except Exception as exc:
+                seen['result'] = f'{type(exc).__name__}: {exc} {getattr(exc, "code", "")}'
+        self.engine.before = work
+        self.script([plan('codex', 'Remind the owner.')], goals=[True])
+        job, _row = self.run_work('오후 4시 반에 출발하라고 알려줘')
+        # A native-search turn offers the relayed writes; private reads stay apart from web search (#678).
+        for name in ('schedule_preparation', 'calendar_draft_create'):
+            self.assertIn(name, seen['offered'])
+        with self.store.db() as db:
+            rows = db.execute('SELECT goal_text,state FROM preparations').fetchall()
+        self.assertEqual([row['goal_text'] for row in rows], ['출발 시간입니다.'], seen.get('result'))
+
+    def test_a_cli_memory_write_without_an_explicit_request_stays_a_candidate(self):
+        """#597's gate holds on the relayed path: no owner request, so a MemoryCandidate, never canonical Memory."""
+        self.assertIn('save_memory', self.no_search())
+        self.engine.before = lambda tools: tools.call('save_memory', {'memory_key': 'profile.place.home',
+                                                                      'content': '성남 백현동'})
+        # The orchestrator keeps Memory apart from web search by choosing the no-search subset (#735).
+        self.script([plan('codex', 'Answer.', tools=self.no_search())], goals=[True])
+        self.run_work('백현동에서 출발해')
+        with self.store.db() as db:
+            memories = db.execute('SELECT count(*) FROM memories').fetchone()[0]
+            candidates = db.execute("SELECT content FROM memory_candidates WHERE state='pending'").fetchall()
+        self.assertEqual(memories, 0)
+        self.assertEqual([row['content'] for row in candidates], ['성남 백현동'])
+
+
+class HostRelayRouting(unittest.TestCase):
+    """#774: the relay serves browser and owner-state tools, and nothing else."""
+
+    def test_the_relay_forwards_owner_state_calls_and_refuses_others(self):
+        from personal_agent.cli_browser_relay import BrowserRelay, RelayClient
+
+        class Tools:
+            def __init__(self):
+                self.calls = []
+                self.capabilities = type('C', (), {'tools': {
+                    'schedule_preparation': {'host_action': 'schedule_preparation'},
+                    'save_memory': {'host_action': 'save_memory'},
+                    'web_search': {'host_action': 'web_search'}}})()
+
+            def call(self, name, arguments):
+                self.calls.append(name)
+                return {'ok': name}
+        tools = Tools()
+        relay = BrowserRelay(tools)
+        try:
+            client = RelayClient(relay.address)
+            self.assertEqual(client.call('schedule_preparation', {'kind': 'reminder'}), {'ok': 'schedule_preparation'})
+            self.assertEqual(client.call('save_memory', {'memory_key': 'k', 'content': 'v'}), {'ok': 'save_memory'})
+            with self.assertRaises(Exception):
+                client.call('web_search', {'query': 'x'})
+            self.assertEqual(tools.calls, ['schedule_preparation', 'save_memory'])
+        finally:
+            relay.close()
+
+    def test_the_bridge_facade_forwards_owner_state_calls_to_the_relay(self):
+        from personal_agent.bounded_execution import AgentOSMcpTools
+
+        class Relay:
+            def __init__(self):
+                self.calls = []
+
+            def call(self, name, arguments):
+                self.calls.append(name)
+                return {'relayed': name}
+
+        class Capabilities:
+            tools = {'save_memory': {'host_action': 'save_memory'}}
+
+            def definitions(self):
+                return [{'function': {'name': 'save_memory', 'parameters': {
+                    'type': 'object', 'properties': {'memory_key': {'type': 'string'}, 'content': {'type': 'string'}},
+                    'required': ['memory_key', 'content'], 'additionalProperties': False}}}]
+
+            def execute(self, name, arguments):
+                raise AssertionError('an owner-state call must not run in the bridge')
+        facade = AgentOSMcpTools(Capabilities())
+        facade.relay = Relay()
+        self.assertEqual(facade.call('save_memory', {'memory_key': 'k', 'content': 'v'}), {'relayed': 'save_memory'})
+        self.assertEqual(facade.relay.calls, ['save_memory'])

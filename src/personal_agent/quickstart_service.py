@@ -5620,6 +5620,14 @@ class AgentService:
                                                           'browser_approvals':self.browser_approvals_for(job),
                                                           'browser_unavailable':self.browser_profile.unavailable_message()}
                                                          if cli_browser else {}),
+                                                      # #774: the owner-state actions the trusted-local bridge relays run
+                                                      # here under the direct route's gates: #597 memory approval, the
+                                                      # calendar connector and its previews, #659 preparation acceptance.
+                                                      **({'memory_request':owner_memory_request,'calendar':self.calendar_for(job),
+                                                          'calendar_owner':self.connector_owner_id(job),
+                                                          'preparations':self.preparation_scheduler(job,prompt),
+                                                          'judgments':self.decision_judge,'secret_redactor':self._redact_known_secrets}
+                                                         if cli_browser else {}),
                                                       **self.work_lookup_options(job,prompt,CLI_LOOKUP_HINT))
                             work_capabilities[0]=capabilities
                             # Use the same owner-approved request payload prepared
@@ -5765,10 +5773,13 @@ class AgentService:
                                     # #701: the browser tools run here, in this service, for exactly
                                     # this turn; the bridge only relays them.
                                     relay=None
-                                    if cli_browser and capabilities.browser is not None:
+                                    if cli_browser:
                                         try:
                                             relay=BrowserRelay(served)
                                             served.browser_relay=relay.address
+                                            # #774: the relay serves the owner-state tools too; browser tools
+                                            # are listed only while the browser profile is available.
+                                            served.relay_browser=capabilities.browser is not None
                                         except OSError:
                                             LOG.warning('cli browser relay could not start job=%s',job['id'])
                                     try:

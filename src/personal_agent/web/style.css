@@ -487,19 +487,20 @@ details.technical details>summary{color:var(--muted)}
 .decision-choice{display:flex;align-items:center;gap:8px;min-height:32px;font-size:var(--fs-2)}
 .decision-choice input{margin:0}
 
-/* AI route settings: show the Work route first and keep its dependent judgment route quieter. */
+/* AI route settings: show Main AI first and nest the dependent Judgment AI line inside the same card. */
 .ai-settings-intro{border:0;padding:8px 0 4px}
-.ai-route-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(220px,1fr);gap:12px;align-items:start;margin-top:10px}
-.ai-route-card{grid-template-columns:minmax(0,1fr) auto;gap:10px 12px;align-content:start;align-items:start;min-width:0;margin:0;padding:16px;border:1px solid var(--line);border-radius:var(--r-2);background:var(--surface)}
-.ai-route-card-main{border-top:3px solid var(--accent);padding-top:14px}
-.ai-route-card-main[data-route-state="unconfigured"]>.settings-state{display:none}
-.ai-route-card .settings-row-main{grid-column:1;grid-row:1}
-.ai-route-card>.settings-state{grid-column:2;grid-row:1;justify-self:end}
-.ai-route-card .settings-row-actions{grid-column:1/-1;grid-row:2;justify-content:flex-start}
-.ai-route-card-judgment{grid-template-columns:minmax(0,1fr);gap:10px;background:var(--surface-2)}
-.ai-route-card-judgment>.settings-state,.ai-route-card-judgment .settings-row-main,.ai-route-card-judgment .settings-row-actions{grid-column:1;grid-row:auto;justify-self:start}
-.ai-route-card-judgment .settings-row-title{font-size:var(--fs-2)}
-.ai-route-card-judgment .settings-row-description{max-width:68ch}
+.ai-route-card{margin-top:10px;border:1px solid var(--line);border-top:3px solid var(--accent);border-radius:var(--r-2);background:var(--surface);overflow:hidden}
+.ai-route-main{grid-template-columns:minmax(0,1fr) auto;gap:8px 16px;align-items:start;padding:16px;border:0;border-bottom:1px solid var(--line)}
+.ai-route-main .settings-row-main{grid-column:1;grid-row:1}
+.ai-route-main>.settings-state{grid-column:2;grid-row:1;justify-self:end}
+.ai-route-main .settings-row-actions{grid-column:1/-1;grid-row:2;justify-content:flex-start}
+.ai-route-main[data-route-state="unconfigured"]>.settings-state{display:none}
+.ai-route-judgment{grid-template-columns:minmax(0,1fr) auto;gap:8px 12px;margin:10px 12px 12px 24px;padding:12px;border:0;border-left:2px solid var(--line-strong);border-radius:var(--r-1);background:var(--surface-2)}
+.ai-route-judgment .settings-row-main{grid-column:1;grid-row:1}
+.ai-route-judgment>.settings-state{grid-column:2;grid-row:1;justify-self:end}
+.ai-route-judgment .settings-row-actions{grid-column:1/-1;grid-row:2;justify-content:flex-start}
+.ai-route-judgment .settings-row-title{font-size:var(--fs-2)}
+.ai-route-judgment .settings-row-description{max-width:68ch}
 .settings-dialog{width:min(640px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:0;border:1px solid var(--line-strong);border-radius:12px;background:var(--surface);color:var(--ink);overscroll-behavior:contain}
 .settings-dialog::backdrop{background:rgb(15 23 42 / .4)}
 .dialog-body{display:grid;gap:var(--sp-3);padding:var(--sp-5)}
@@ -522,8 +523,7 @@ details.technical details>summary{color:var(--muted)}
 .chooser-key input{flex:1 1 220px;min-width:0}
 .chooser-model{display:grid;gap:var(--sp-1)}
 .chooser-consequence{display:grid;gap:var(--sp-1);margin:0;font-size:var(--fs-2)}
-@media(max-width:760px){.ai-route-grid{grid-template-columns:minmax(0,1fr)}.ai-route-card-judgment{grid-template-columns:minmax(0,1fr) auto}.ai-route-card-judgment>.settings-state{grid-column:2;grid-row:1;justify-self:end}.ai-route-card-judgment .settings-row-main{grid-column:1;grid-row:1}.ai-route-card-judgment .settings-row-actions{grid-column:1/-1;grid-row:2}}
-@media(max-width:620px){.ai-route-card{grid-template-columns:minmax(0,1fr);padding:12px}.ai-route-card .settings-row-main,.ai-route-card>.settings-state,.ai-route-card .settings-row-actions{grid-column:1;grid-row:auto;justify-self:start}.ai-route-card-judgment{grid-template-columns:minmax(0,1fr)}.chooser-row{grid-template-columns:minmax(0,1fr);align-items:start}.chooser-row>.chooser-actions{grid-column:1;grid-row:auto;justify-content:flex-start}.settings-dialog{width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;margin:0;border:0;border-radius:0}.dialog-body{padding:var(--sp-4)}}
+@media(max-width:620px){.ai-route-main{grid-template-columns:minmax(0,1fr) auto;padding:12px}.ai-route-judgment{grid-template-columns:minmax(0,1fr);margin:10px 8px 8px 14px;padding:10px}.ai-route-judgment .settings-row-main,.ai-route-judgment>.settings-state,.ai-route-judgment .settings-row-actions{grid-column:1;grid-row:auto;justify-self:start}.chooser-row{grid-template-columns:minmax(0,1fr);align-items:start}.chooser-row>.chooser-actions{grid-column:1;grid-row:auto;justify-content:flex-start}.settings-dialog{width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;margin:0;border:0;border-radius:0}.dialog-body{padding:var(--sp-4)}}
 #ai-chooser .dialog-body{max-height:calc(100dvh - 34px);overflow:auto;overscroll-behavior:contain}
 #ai-chooser-list{padding-bottom:calc(var(--sp-4) + 56px)}
 @media(max-width:620px){#ai-chooser .dialog-body{max-height:100dvh}}

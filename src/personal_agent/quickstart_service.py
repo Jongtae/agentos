@@ -2519,19 +2519,26 @@ class AgentService:
         Not reached: ``partial`` when the attempt observed a successful tool
         result, else ``failed``; unjudged: ``partial``.  The report states the
         unknown the way the direct route's completion rule does (#657).
-        Owner needed (#740), as the direct route's ``needs_owner`` finish: an
-        attempt that ran a tool is ``partial`` with ``answer`` as the report's
-        question; one that ran none is ordinary conversation and keeps its outcome.
+        Owner needed (#740, #753), as the direct route's ``needs_owner`` finish
+        (``run_agent.conclude``): an attempt that called no tool outside
+        AgentOS-internal state (``INTERNAL_STATE_ACTIONS``) is ordinary
+        conversation and keeps its outcome (None); otherwise ``partial`` when a
+        tool result was observed, else ``failed``, with ``answer`` as the
+        report's question.
         """
-        from .agent_runtime import GOAL_NOT_SHOWN, GOAL_UNJUDGED, agency_report
+        from .agent_runtime import GOAL_NOT_SHOWN, GOAL_UNJUDGED, INTERNAL_STATE_ACTIONS, agency_report
         with self.store.db() as db:
-            rows=db.execute("SELECT tool FROM tool_events WHERE job_id=? AND id>? AND status IN ('succeeded','failed')",(job_id,since or 0)).fetchall()
-        ran=any(row['tool'] not in ('model','subscription_engine',ORCHESTRATION_EVENT) for row in rows)
+            rows=db.execute("SELECT tool,status,detail FROM tool_events WHERE job_id=? AND id>? AND status IN ('running','succeeded','failed')",
+                            (job_id,since or 0)).fetchall()
+        rows=[row for row in rows if row['tool'] not in ('model','subscription_engine',ORCHESTRATION_EVENT)]
+        observed=any(row['status']=='succeeded' for row in rows)
         if evaluation==OWNER_NEEDED:
-            return ('partial',agency_report(request,[],[],[],None,answer)) if ran else None
-        with self.store.db() as db:
-            rows=db.execute("SELECT tool FROM tool_events WHERE job_id=? AND id>? AND status='succeeded'",(job_id,since or 0)).fetchall()
-        observed=any(row['tool'] not in ('model','subscription_engine',ORCHESTRATION_EVENT) for row in rows)
+            def action(row):
+                try:data=json.loads(row['detail'] or '{}')
+                except (TypeError,ValueError):data={}
+                return (data.get('host_action') if isinstance(data,dict) else None) or row['tool']
+            if not any(action(row) not in INTERNAL_STATE_ACTIONS for row in rows):return None
+            return ('partial' if observed else 'failed'),agency_report(request,[],[],[],None,answer)
         if evaluation==UNJUDGED:
             return 'partial',agency_report(request,[],[],[GOAL_UNJUDGED],None)
         return ('partial' if observed else 'failed'),agency_report(request,[],[],[GOAL_NOT_SHOWN],None)
@@ -5750,13 +5757,18 @@ class AgentService:
                         refusals.clear();verified_parts.clear();agency_report=None;unknown_statement=None
                     # #710 review P1: a CLI attempt the orchestrator judged short and did not
                     # re-delegate (limit, budget, no new plan) is never stored as succeeded.
+                    owner_question=(orchestration is not None and orchestration.terminal==OWNER_NEEDED
+                                    and not (approval_needed[0] or context_approval_needed[0]))
                     if subscription.get('id') and outcome=='succeeded' and orchestration is not None \
-                            and (orchestration.terminal in (NOT_REACHED,UNJUDGED)
-                                 or (orchestration.terminal==OWNER_NEEDED and not (approval_needed[0] or context_approval_needed[0]))):
+                            and (orchestration.terminal in (NOT_REACHED,UNJUDGED) or owner_question):
                         shortfall=self.cli_shortfall(job['id'],attempt_start,prompt,orchestration.terminal,response)
                         if shortfall is not None:
                             outcome,agency_report=shortfall
                             resolved_blocker=False
+                    elif subscription.get('id') and owner_question and outcome in ('failed','partial') and not agency_report:
+                        # #753: already short (for example a failed tool); the question still reaches the owner.
+                        shortfall=self.cli_shortfall(job['id'],attempt_start,prompt,OWNER_NEEDED,response)
+                        if shortfall is not None:agency_report=shortfall[1]
                     # Said once when working orchestration fell back to the default Main AI.
                     if orchestration is not None and orchestration.notice:
                         response=response.rstrip()+'\n\n'+orchestration.notice

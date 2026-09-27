@@ -999,6 +999,35 @@ class OwnerQuestion(Harness):
         self.assertNotIn(GOAL_NOT_SHOWN, row['owner_cause'] or '')
         self.assertIn('어느 쪽으로 할까요?', json.dumps(self.store.job(job), ensure_ascii=False))
 
+    def test_a_question_after_a_failed_tool_is_failed_and_still_reaches_the_owner(self):
+        """#753: an attempt already short from a failed tool keeps the question in its report."""
+        from personal_agent.conversation_projection import REPORT_QUESTION_LABEL
+        question = '어느 날짜로 할까요?'
+
+        def failing(tools):
+            tools.capabilities.record('web_search', 'failed', json.dumps({'host_action': 'web_search', 'error': 'x'}))
+        self.engine.before = failing
+        self.engine.answers = [question]
+        self.script([plan('codex', 'Answer.')], goals=[False], owner_inputs=[True])
+        job, row = self.run_work('찾아줘')
+        self.assertEqual(self.events(job, 'evaluated')[-1][1]['outcome'], 'owner_needed')
+        self.assertEqual(row['status'], 'failed')
+        self.assertIn(REPORT_QUESTION_LABEL + ' ' + question, row['owner_cause'])
+
+    def test_a_question_after_only_internal_state_keeps_its_outcome(self):
+        """#753: AgentOS-internal state actions are not a tool run, as on the direct route."""
+        from personal_agent.agent_runtime import INTERNAL_STATE_ACTIONS
+        internal = sorted(INTERNAL_STATE_ACTIONS)[0]
+
+        def bookkeeping(tools):
+            tools.capabilities.record(internal, 'succeeded', json.dumps({'host_action': internal}))
+        self.engine.before = bookkeeping
+        self.engine.answers = ['어디에서 출발하시나요?']
+        self.script([plan('codex', 'Answer.')], goals=[False], owner_inputs=[True])
+        _job, row = self.run_work('얼마나 걸려?')
+        self.assertEqual(row['status'], 'succeeded')
+        self.assertEqual(row['response'], '어디에서 출발하시나요?')
+
     def test_a_raising_or_unavailable_owner_input_judgment_keeps_the_attempt_short(self):
         for owner_inputs in ([], [RuntimeError('down')]):
             with self.subTest(owner_inputs=owner_inputs):

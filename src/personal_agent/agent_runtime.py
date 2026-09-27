@@ -56,7 +56,10 @@ def recorded_arguments(action,args,redact=None):
  return {**args,field:f'[가림: {len(text)}자]' if isinstance(text,str) else '[가림]'}
 
 def recorded_calls(calls,tools,redact=None):
- """The model's tool calls with ``recorded_arguments`` applied to each (#656)."""
+ """The model's tool calls with ``recorded_arguments`` applied to each (#656).
+
+ #718: a call's ``status`` is recorded only in its bounded, redacted form.
+ """
  if not isinstance(calls,list):return calls
  out=[]
  for call in calls:
@@ -65,12 +68,94 @@ def recorded_calls(calls,tools,redact=None):
    action=(tools.get(function.get('name')) or {}).get('host_action')
   except AttributeError:
    out.append(call);continue
-  if action not in REDACTED_ARGUMENTS and action not in SCRUBBED_ARGUMENTS:
+  try:
+   parsed=function.get('arguments','{}')
+   parsed=json.loads(parsed) if isinstance(parsed,str) else parsed
+  except (TypeError,ValueError):parsed=None
+  has_status=isinstance(parsed,dict) and STATUS_ARGUMENT in parsed
+  if action not in REDACTED_ARGUMENTS and action not in SCRUBBED_ARGUMENTS and not has_status:
    out.append(call);continue
-  try:arguments=json.dumps(recorded_arguments(action,json.loads(function.get('arguments','{}')),redact),ensure_ascii=False)
+  try:
+   if not isinstance(parsed,dict):raise ValueError
+   rest,status=split_status(parsed)
+   recorded=recorded_arguments(action,rest,redact)
+   if has_status:
+    step=progress_step(action,parsed,status,redact)
+    recorded={**recorded,STATUS_ARGUMENT:step.get('status') or '[가림]'}
+   arguments=json.dumps(recorded,ensure_ascii=False)
   except (TypeError,ValueError):arguments='[가림]'
   out.append({**call,'function':{**function,'arguments':arguments}})
  return out
+
+# --- SEC-PROGRESS-01 (#718): what a running call may show the owner ---------
+#
+# Every model-facing tool accepts one optional ``status``: a short sentence the
+# model writes about what this call is doing.  The model writes the wording
+# (Constitution C16); AgentOS only validates, bounds and redacts it and records
+# it on the call's own ``running`` event.  Nothing else reads it: it is removed
+# from the arguments before validation, caching, repeat keys and execution.
+STATUS_ARGUMENT='status'
+STATUS_MAX=40
+#: Input longer than this is cut before redaction (a status is one sentence).
+_STATUS_INPUT_MAX=400
+STATUS_SCHEMA={'type':'string','description':'Optional. One short sentence (at most 40 characters) in the owner\'s language saying what this call is doing. The owner sees it only while the call runs. Never put credentials, card numbers, one-time codes or text you type into it.'}
+#: The observed argument a fallback line may name, per argument (#718): a URL
+#: shows only its host, a search only its query.
+_TARGET_URL='url'
+_TARGET_QUERY='query'
+_TARGET_MAX=40
+
+def split_status(args):
+ """``(arguments without status, status)`` - the runtime never reads the status otherwise (#718)."""
+ if not isinstance(args,dict) or STATUS_ARGUMENT not in args:return args,None
+ return {key:value for key,value in args.items() if key!=STATUS_ARGUMENT},args[STATUS_ARGUMENT]
+
+def _bounded_text(value,limit,redact=None):
+ """One line of display text: printable, redacted, then cut to ``limit`` characters."""
+ if not isinstance(value,str):return None
+ text=' '.join(''.join(ch if ch.isprintable() else ' ' for ch in value[:_STATUS_INPUT_MAX]).split())
+ if not text:return None
+ from .bounded_execution import SECRET_PATTERN
+ try:text=str(redact(text)) if redact is not None else text
+ except Exception:return None
+ text=' '.join(SECRET_PATTERN.sub('[redacted]',text).split())
+ if not text:return None
+ return text if len(text)<=limit else text[:limit-1]+'…'
+
+def bounded_status(value,redact=None):
+ """The model's status as it may be shown: at most ``STATUS_MAX`` characters, redacted (#718)."""
+ return _bounded_text(value,STATUS_MAX,redact)
+
+def progress_step(action,args,status=None,redact=None):
+ """The display record of one running call (#718), stored on its ``running`` event.
+
+ ``status`` is the model's wording, kept only when valid after redaction.
+ ``target`` is taken from the observed arguments for the generic fallback
+ line: the host of a ``url`` or the ``query`` of a search.  Typed browser
+ text never appears: a ``browser_type`` call keeps no model status (it could
+ echo what was typed) and its text is never a target.  A payment step is
+ marked ``approval``: its only owner-facing surface is the approval prompt.
+ """
+ step={'action':str(action or '')[:60]}
+ args=args if isinstance(args,dict) else {}
+ if args.get('effect')=='payment':
+  step['approval']=True
+  return step
+ if action not in REDACTED_ARGUMENTS:
+  text=bounded_status(status,redact)
+  if text:step['status']=text
+ url=args.get(_TARGET_URL)
+ if isinstance(url,str) and url.strip():
+  from urllib.parse import urlsplit
+  try:host=urlsplit(url.strip()).hostname or ''
+  except ValueError:host=''
+  host=_bounded_text(host,_TARGET_MAX,redact)
+  if host:step['host']=host
+ query=args.get(_TARGET_QUERY)
+ if isinstance(query,str) and action not in REDACTED_ARGUMENTS:
+  query=_bounded_text(query,_TARGET_MAX,redact)
+  if query:step['query']=query
+ return step
 
 #: #627: a lookup whose only terms were withdrawn current-context location text.
 CONTEXT_WITHDRAWN_TEXT='이 조회에 들어 있던 현재 맥락 위치·장소를 소유자가 멈추거나 지웠거나 바뀌어서 보내지 않았습니다. 남은 검색어가 없으니 소유자에게 지역을 한 번 물어보세요.'
@@ -1026,6 +1111,8 @@ def action_definitions(tools,allowed,readonly=False,search_providers=None):
   if not tool or (readonly and tool['host_action'] in READONLY_EXCLUDED):continue
   source=next(d for d in DEFINITIONS if d['function']['name']==tool['host_action'])
   function={**source['function'],'name':tool_id}
+  # #718: every model-facing tool, on every route, takes the optional status.
+  function={**function,'parameters':{**function['parameters'],'properties':{**function['parameters']['properties'],STATUS_ARGUMENT:STATUS_SCHEMA}}}
   if tool['host_action'] in SEARCH_BACKED_ACTIONS and search_providers is not None:
    options=search_providers.options()
    # #678: with no configured option the parameter stays a string (an empty
@@ -2798,6 +2885,9 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
     if not isinstance(name,str):
      name='unknown';raise ValueError('도구 이름은 문자열이어야 합니다.')
     args=json.loads(function.get('arguments','{}'))
+    # #718: the status is display text only; it never reaches validation,
+    # the repeat/duplicate keys or the tool itself.
+    args,status=split_status(args)
     spec=specs.get(name)
     if not spec:raise ValueError('허용하지 않은 도구 또는 인수입니다.')
     check_arguments(spec,args)
@@ -2823,7 +2913,8 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
     kind=alternative_kind(action,keyed,last_search,bool(trail) and trail[-1][1] in ('failed','incomplete'))
     if action in SEARCH_BACKED_ACTIONS:last_search=keyed
     # #656: typed browser text is replaced before this (or any) record.
-    running={'scope':scope,'call_id':call['id'],'attempt':attempt,'host_action':action,'arguments':recorded_arguments(action,args,getattr(capabilities,'judgment_text',None))}
+    running={'scope':scope,'call_id':call['id'],'attempt':attempt,'host_action':action,'arguments':recorded_arguments(action,args,getattr(capabilities,'judgment_text',None)),
+             'step':progress_step(action,args,status,getattr(capabilities,'judgment_text',None))}
     if kind:
      alternatives.append({'kind':kind,'action':action});running['alternative']=kind
     record(name,'running',json.dumps(running,ensure_ascii=False))

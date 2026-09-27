@@ -540,10 +540,13 @@ PREPARATION_REQUEST_PROPOSITION = ('The owner\'s latest message itself asks the 
 GOAL_REACHED_PROPOSITION = ('The observations - results that tools actually returned while working on the owner\'s '
                             'request - show that the request has been fulfilled: every part the request asks for is '
                             'visible in them (for example the item listed after it was added, the found item matching '
-                            'what was asked, the requested information present and answering the question). It is '
-                            'false when a tool merely ran without an error, when the observations show something '
-                            'else or only part of the request, when a failed step was needed for it, or when it is '
-                            'unclear. Judge only from the observations and failed steps listed, not from any claim.')
+                            'what was asked, the requested information present and answering the question), and, '
+                            'when completion criteria are listed, each of them is met. It is false when a tool merely '
+                            'ran without an error, when the observations show something else or only part of the '
+                            'request or criteria, when a failed step was needed for it, when the answer rests on '
+                            'facts that change over time or depend on place and no observation sources them, or when '
+                            'it is unclear. Judge only from the observations and failed steps listed, not from any '
+                            'claim.')
 #: ORCH-04 (#740): is the worker's answer a question the owner must answer first?
 OWNER_INPUT_PROPOSITION = ('The worker\'s answer does not fulfil the owner\'s request because it asks the owner for '
                            'information or a decision the request needs - a missing detail, a choice between real '
@@ -702,7 +705,7 @@ class ConversationJudgments:
             return Judgment(JUDGMENT_NO, source=decision.confidence.provider or decision.outcome)
         return Judgment(JUDGMENT_UNAVAILABLE, source=decision.outcome)
 
-    def goal_reached(self, request, observations, failed_steps='', work_id=None):
+    def goal_reached(self, request, observations, failed_steps='', work_id=None, criteria=''):
         """Do the observed tool results satisfy the owner's ``request`` (#657)?
 
         One ``judge`` call over the owner's request, the observations a
@@ -713,9 +716,11 @@ class ConversationJudgments:
         this context's bound is widened by exactly its length.
         """
         request = str(request or '')
-        context = self._context('goal-reached', {'owner_request': request, 'observations': observations,
-                                                 'failed_steps': failed_steps or 'none'}, work_id=work_id,
-                                uncut='owner_request')
+        facts = {'owner_request': request, 'observations': observations, 'failed_steps': failed_steps or 'none'}
+        if criteria:
+            # #767: the orchestrator's completion criteria for this attempt.
+            facts['completion_criteria'] = criteria
+        context = self._context('goal-reached', facts, work_id=work_id, uncut='owner_request')
         decision = self.engine.judge(context, GOAL_REACHED_PROPOSITION)
         verdict = self.policy.binary(decision)
         return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,

@@ -140,12 +140,17 @@ QUESTION = (
     'worker and model and write the brief the worker receives; you do not do the work yourself. Choose an '
     'available worker whose capabilities and tools fit what the request needs; when several fit, prefer lower '
     'cost and latency. model is "" for the worker\'s default or one of the models listed for it. brief.goal says '
-    'what the worker must achieve, specific and self-contained, in the owner\'s language. The owner\'s request '
+    'what the worker must achieve, specific and self-contained, in the owner\'s language, at the level a capable '
+    'personal secretary would deliver for the owner\'s situation: the specific options or result, the current '
+    'facts they depend on from cited sources, and their fit to what the conversation says; when the answer depends '
+    'on facts that change over time or depend on place, the brief asks the worker to look them up and never rules '
+    'that out. The owner\'s request '
     'may continue recent_conversation: resolve what it refers to or leaves unsaid from that conversation and write '
     'it into brief.goal, and select history when the request continues it; do not brief the worker to ask the '
     'owner for something the conversation already says. brief.context lists only '
-    'the AgentOS context sections the worker needs; brief.completion_criteria lists observable results that show '
-    'the goal is met. tools_mode is "worker_default": the worker keeps its full offered toolset and chooses among '
+    'the AgentOS context sections the worker needs; brief.completion_criteria lists the observable specifics that '
+    'show the goal is met at that level (for example named options with their current facts and sources), not '
+    'only that an answer was given. tools_mode is "worker_default": the worker keeps its full offered toolset and chooses among '
     'the tools itself; tools is then [] and tools_reason "". The only subset AgentOS keeps is one that keeps '
     'private-read tools and web search apart: it removes either the private-read tools or the web-search tools '
     '(web_search, bounded_public_research) and nothing else, with tools_reason saying so; any other subset is '
@@ -786,8 +791,12 @@ class Orchestration:
             return NOT_JUDGED
         text = (f'The worker\'s final answer (model-stated, not an observation):\n{str(answer or "")[:1800]}\n\n'
                 f'Tool results AgentOS recorded for this attempt:\n{observations or "none"}')[:OBSERVATION_CHARS]
+        attempt = self.attempts[-1] if self.attempts else None
+        criteria = '\n'.join(f'- {item}' for item in (attempt.criteria if attempt is not None else ()))
         try:
-            judged = goal_reached(self.request, text, str(failed or '')[:FAILURE_CHARS], work_id=self.work_id)
+            # #767: judged against the brief's completion criteria too, not only the raw request.
+            judged = goal_reached(self.request, text, str(failed or '')[:FAILURE_CHARS], work_id=self.work_id,
+                                  criteria=criteria)
         except Exception:
             return UNJUDGED
         verdict = getattr(judged, 'outcome', None)

@@ -132,6 +132,7 @@ class Harness(unittest.TestCase):
         ``owner_inputs`` the #740 owner-input judgments asked after a goal judged no."""
         self.plans, self.goals, self.owner_inputs = list(plans), list(goals), list(owner_inputs)
         self.asked_owner_inputs = []
+        self.asked_goals = []
 
         def structured(context, question, schema):
             self.asked_plans.append((context, question, schema))
@@ -146,6 +147,8 @@ class Harness(unittest.TestCase):
                 if self.owner_inputs:
                     return BinaryDecision(OUTCOME_DECIDED, self.owner_inputs.pop(0), fixture_confidence())
                 return None
+            if context.purpose == 'goal-reached':
+                self.asked_goals.append(context)
             if context.purpose != 'goal-reached' or not self.goals:
                 return None
             return BinaryDecision(OUTCOME_DECIDED, self.goals.pop(0), fixture_confidence())
@@ -1387,3 +1390,29 @@ class GoalDecidesOutcome(Harness):
             job, row = self.run_work('찾아줘')
         self.assertEqual(row['status'], 'succeeded')
         offer.assert_not_called()
+
+
+class SecretaryStandard(Harness):
+    """#767: plan, evaluation and worker guidance hold answers to the secretary standard."""
+
+    def test_the_goal_judgment_reads_the_brief_completion_criteria(self):
+        self.script([plan('codex', 'Name options with current facts.',
+                          criteria=('names specific options', 'each option has a cited current fact'))], goals=[True])
+        self.run_work('추천해줘')
+        [context] = self.asked_goals
+        self.assertIn('names specific options', context.facts['completion_criteria'])
+        self.assertIn('each option has a cited current fact', context.facts['completion_criteria'])
+
+    def test_the_plan_question_and_worker_guidance_state_the_standard(self):
+        from personal_agent.agent_runtime import API_TOOL_GUIDANCE, CLI_TOOL_GUIDANCE, CORE_INSTRUCTIONS
+        from personal_agent.conversation_handoff import GOAL_REACHED_PROPOSITION
+        self.assertIn('capable personal secretary', QUESTION)
+        self.assertIn('never rules that out', QUESTION)
+        self.assertIn('not only that an answer was given', QUESTION)
+        self.assertIn('capable personal secretary', CORE_INSTRUCTIONS)
+        self.assertIn('look them up and cite the sources', CORE_INSTRUCTIONS)
+        for guidance in (API_TOOL_GUIDANCE, CLI_TOOL_GUIDANCE):
+            self.assertIn('ordinary conversation that needs no current facts', guidance)
+        self.assertIn('completion criteria are listed, each of them is met', GOAL_REACHED_PROPOSITION)
+        self.assertIn('no observation sources them', GOAL_REACHED_PROPOSITION)
+

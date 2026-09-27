@@ -70,7 +70,8 @@ for line in sys.stdin:
             emit({'id': ident, 'ok': False, 'error': 'target_obscured'})
         elif command.get('index') == 9 and command.get('approved') is not True:
             # As the real worker: the press submitted the payment form, which was cancelled (#698).
-            emit({'id': ident, 'ok': False, 'error': 'approval_required'})
+            emit({'id': ident, 'ok': False, 'error': 'approval_required',
+                  'form': {'dom': 0, 'method': 'post', 'action': 'https://shop.test/pay'}})
         else:
             emit({'id': ident, 'ok': True})
     elif op == 'type':

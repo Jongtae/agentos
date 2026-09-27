@@ -544,8 +544,11 @@ def _delegate_class():
 
         def webView_createWebViewWithConfiguration_forNavigationAction_windowFeatures_(self, view, config, action, features):
             # A link that asks for a new window opens in this one: one page, one session.
+            # Only http(s): a native load bypasses the page's own origin rules, so a
+            # page must never reach file:, data: or any other scheme through it.
             request = action.request()
-            if request is not None:
+            url = request.URL() if request is not None else None
+            if url is not None and str(url.scheme() or '').lower() in ('http', 'https'):
                 view.loadRequest_(request)
             return None
 

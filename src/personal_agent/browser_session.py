@@ -918,8 +918,8 @@ class BrowserProfile:
 
     def _save(self, driver):
         """Export the driver's cookies into the jar (never elsewhere).  A failure keeps the old jar."""
-        if not hasattr(driver, 'cookies_export'):
-            return False
+        if not hasattr(driver, 'cookies_export') or not _alive(driver):
+            return False   # a crashed worker has nothing new; never restart one just to export
         with self._jar_lock:
             try:
                 sites, hosts = driver.cookies_export()
@@ -956,7 +956,7 @@ class BrowserProfile:
             raise ValueError('삭제할 사이트를 지정하세요.')
         with self._jar_lock:
             live = self._live
-            if live is not None and hasattr(live, 'cookies_delete'):
+            if live is not None and hasattr(live, 'cookies_delete') and _alive(live):
                 try:
                     live.cookies_delete(site)
                 except Exception:
@@ -972,7 +972,7 @@ class BrowserProfile:
         """Delete the jar file and its Keychain key, and clear a running worker's store."""
         with self._jar_lock:
             live = self._live
-            if live is not None and hasattr(live, 'cookies_clear'):
+            if live is not None and hasattr(live, 'cookies_clear') and _alive(live):
                 try:
                     live.cookies_clear()
                 except Exception:
@@ -1039,6 +1039,14 @@ class BrowserProfile:
         if failure:
             return {'state': 'failed', 'message': FAILED_TEXT}
         return {'state': 'closed' if wait else 'opened', 'url': page_reference(url), 'message': LOGIN_WINDOW_TEXT}
+
+
+def _alive(driver):
+    alive = getattr(driver, 'alive', None)
+    try:
+        return bool(alive()) if callable(alive) else True
+    except Exception:
+        return False
 
 
 class _ReleasingDriver:

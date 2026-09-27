@@ -434,6 +434,10 @@ class SessionFixtureHandler(FixtureHandler):
         if path == '/whoami':
             present = value in (self.headers.get('Cookie') or '')
             return self._send(f'<html><head><title>계정 상태</title></head><body><p>{"세션 있음" if present else "세션 없음"}</p></body></html>')
+        if path == '/windows':
+            return self._send('''<html><head><title>새 창</title></head><body>
+              <a href="/cart" target="_blank">새 창 장바구니</a>
+              <a href="file:///etc/hosts" target="_blank">로컬 파일</a></body></html>''')
         if path == '/trusted':
             return self._send('''<html><head><title>입력</title></head><body>
               <button type="button" onclick="document.getElementById('r').textContent='click trusted='+event.isTrusted">누르기</button>
@@ -506,6 +510,13 @@ class WebKitIntegrationTests(unittest.TestCase):
             self.assertIn('click trusted=true', typed['text'])
             self.assertIn('input trusted=true', typed['text'])
             self.assertIn('안녕', [row.get('value') for row in typed['elements']])
+            # A new-window link opens in the same view; a page can never make it load a local file.
+            sess.open({'url': self.origin + '/windows', 'effect': 'navigate'})
+            local = sess.click({'target': '로컬 파일', 'effect': 'navigate'})
+            self.assertEqual(local['title'], '새 창')
+            self.assertTrue(local['url'].startswith(self.origin))
+            opened = sess.click({'target': '새 창 장바구니', 'effect': 'navigate'})
+            self.assertEqual(opened['title'], '장바구니')
         finally:
             sess.close()
         self.assertFalse(self.profile.status()['in_use'])

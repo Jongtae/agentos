@@ -116,6 +116,7 @@ class CookieJar:
         self.path, self.key, self.clock = Path(path), key, clock
         self._lock = threading.RLock()
         self._index = None   # cached {site: {'cookies': n, 'last_used': t}}: never values
+        self._index_stamp = None   # the file's (mtime_ns, size) the cache was read from
 
     # -- storage -------------------------------------------------------------
     def _cipher(self, create=False):
@@ -158,7 +159,7 @@ class CookieJar:
         finally:
             if tmp.exists():
                 tmp.unlink()
-        self._index = _index(payload)
+        self._index, self._index_stamp = _index(payload), self._stamp()
 
     # -- the owner-facing surface (no values) -----------------------------------
     def state(self):
@@ -172,9 +173,19 @@ class CookieJar:
                 return str(exc)
             return 'stored'
 
+    def _stamp(self):
+        try:
+            stat = self.path.stat()
+        except OSError:
+            return None
+        return (stat.st_mtime_ns, stat.st_size)
+
     def _load_index(self):
-        if self._index is None:
+        """Names, counts and times, decrypted once per file version (another process may write it)."""
+        stamp = self._stamp()
+        if self._index is None or stamp != self._index_stamp:
             self._index = _index(self._read())
+            self._index_stamp = stamp
         return self._index
 
     def sites(self):
@@ -245,7 +256,7 @@ class CookieJar:
             existed = self.path.is_file()
             if existed:
                 self.path.unlink()
-            self._index = None
+            self._index = self._index_stamp = None
             try:
                 self.key.delete()
             except JarError:

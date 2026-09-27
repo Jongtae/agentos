@@ -874,8 +874,13 @@ class NoBrowserOffStrictOrIsolated(unittest.TestCase):
 
 # ---------------------------------------------------------------- one real-worker run through the bridge
 
+# Real WebKit windows and real Keychain items open on the owner's screen, so these
+# tests run only when explicitly requested: AGENTOS_REAL_BROWSER_TESTS=1.
+REAL_BROWSER_TESTS = __import__('os').environ.get('AGENTOS_REAL_BROWSER_TESTS') == '1'
+
+
 def _webkit_ready():
-    return bs.webkit_unavailable_reason() is None
+    return REAL_BROWSER_TESTS and bs.webkit_unavailable_reason() is None
 
 
 @unittest.skipUnless(_webkit_ready(), 'embedded WebKit needs macOS with pyobjc-framework-WebKit')

@@ -78,6 +78,9 @@ NATIVE_RESULT_LIMIT = 8
 #: Searches one native sub-call may make, counted across ``pause_turn`` resumes.
 NATIVE_MAX_USES = 3
 NATIVE_CONTINUATIONS = 3
+#: Sequential requests one native sub-call may send: the first plus every
+#: ``pause_turn`` continuation (#729: the bridge tool timeout is derived from it).
+NATIVE_MAX_REQUESTS = NATIVE_CONTINUATIONS + 1
 #: Seconds for one native sub-call request, further capped by the Work's remaining time.
 NATIVE_TIMEOUT_SECONDS = 45
 #: A recorded availability whose time is this far in the future is not trusted (clock change).
@@ -498,7 +501,7 @@ class AiNativeProvider:
         user = {'role': 'user', 'content': prompt}
         headers = {'x-api-key': self.key, 'anthropic-version': '2023-06-01'}
         errors, results, data, assistant, used = [], 0, {}, [], 0
-        for _ in range(NATIVE_CONTINUATIONS + 1):
+        for _ in range(NATIVE_MAX_REQUESTS):
             # max_uses is counted across resumes: a paused turn may not start
             # a fresh allowance of searches.
             remaining = NATIVE_MAX_USES - used

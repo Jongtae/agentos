@@ -123,6 +123,15 @@ NEXT_TEXT = {
     STOP_REPLAN: '판단 AI가 새 계획을 내지 못해 더 맡기지 않았습니다.',
 }
 DEFAULT_MODEL_LABEL = '기본 모델'
+#: The evaluator's reason as the next plan call reads it (#729).
+EVALUATION_REASON = {
+    REACHED: 'the recorded observations showed the goal met',
+    NOT_REACHED: 'the recorded observations did not show the goal met',
+    UNJUDGED: 'the goal could not be judged',
+    OWNER_NEEDED: 'the owner\'s confirmation or information is needed',
+    WORKER_FAILED: 'the worker did not finish the attempt',
+    NOT_JUDGED: 'not judged: nothing more could follow',
+}
 
 #: The orchestration question.  Generic by construction: it names no request,
 #: site, provider or category (C16).
@@ -133,12 +142,16 @@ QUESTION = (
     'cost and latency. model is "" for the worker\'s default or one of the models listed for it. brief.goal says '
     'what the worker must achieve, specific and self-contained, in the owner\'s language; brief.context lists only '
     'the AgentOS context sections the worker needs; brief.completion_criteria lists observable results that show '
-    'the goal is met. tools_mode "worker_default" offers the worker its usual tools; "subset" offers exactly the '
-    'tools named in tools, taken from that worker\'s list. On a worker with its own web search, web_search means '
-    'that search; a private-read tool and the worker\'s own web search are never on in the same attempt, so '
-    'selecting a private-read tool turns that search off for the attempt. When earlier attempts are listed, they '
-    'did not meet the goal: change the brief, the worker, the model or the tools so the next attempt can, and do '
-    'not repeat an attempt unchanged. reason is one short line saying why this worker and brief fit.')
+    'the goal is met. tools_mode defaults to "worker_default": the worker keeps its full offered toolset and '
+    'chooses among the tools itself; tools is then [] and tools_reason "". Choose "subset" only when a stated '
+    'reason requires narrowing (for example keeping a private-read tool apart from the worker\'s own web search); '
+    'then tools names exactly the tools offered, taken from that worker\'s list, and tools_reason says why. The '
+    'tool_descriptions fact says what each tool does. On a worker with its own web search, web_search means that '
+    'search; a private-read tool and the worker\'s own web search are never on in the same attempt, so selecting a '
+    'private-read tool turns that search off for the attempt. When earlier attempts are listed, they did not meet '
+    'the goal: read what each one called, what failed or never completed and why it was judged short, then change '
+    'the worker, the model, the tools or the brief. A combination of worker, model and tools that already fell '
+    'short is refused. reason is one short line saying why this worker and brief fit.')
 PURPOSE = 'work-orchestration'
 
 
@@ -254,7 +267,8 @@ def worker_catalogue(service):
                         'private_tools': []})
         workers[-1]['private_tools'] = sorted(set(workers[-1]['tools']) & private)
         routes['other'] = {'kind': KIND_API, 'config': dict(config), 'key': key, 'test': None}
-    return Catalogue(workers, routes, current)
+    tools_by_id = {tool['id']: tool for package in service.runtime_packages() for tool in package['tools']}
+    return Catalogue(workers, routes, current, descriptions=tool_descriptions(tools_by_id))
 
 
 class Catalogue:
@@ -264,8 +278,10 @@ class Catalogue:
     is what the service needs to run one (never shown to a model).
     """
 
-    def __init__(self, workers, routes, default):
+    def __init__(self, workers, routes, default, descriptions=None):
         self.workers = [dict(worker) for worker in workers]
+        #: One declared line per tool id (#729), shown to the orchestrator once.
+        self.descriptions = dict(descriptions or {})
         self.routes = dict(routes)
         self.default = default if any(worker['id'] == default for worker in self.workers) else ''
 
@@ -276,6 +292,32 @@ class Catalogue:
         """Workers a plan may choose: every available one, or only the default when pinned."""
         rows = [worker for worker in self.workers if worker['available']]
         return [worker for worker in rows if worker['id'] == self.default] if pinned else rows
+
+
+def one_line_description(text, limit=180):
+    """The first sentence of a tool description, on one line (#729)."""
+    text = ' '.join(str(text or '').split())
+    end = text.find('. ')
+    return (text[:end + 1] if 0 < end < limit else text[:limit]).strip()
+
+
+def tool_descriptions(package_tools):
+    """``{tool id: one line}`` from the tools' own declared descriptions (#729).
+
+    ``package_tools`` maps tool ids to their manifest entries (``host_action``);
+    the text is the host action's model-facing description (``DEFINITIONS``),
+    never a line written here.
+    """
+    from .agent_runtime import DEFINITIONS
+    declared = {row['function']['name']: row['function'].get('description', '') for row in DEFINITIONS}
+    return {tool_id: one_line_description(declared.get((tool or {}).get('host_action'), ''))
+            for tool_id, tool in sorted(package_tools.items())}
+
+
+def render_tool_descriptions(workers, descriptions):
+    """One line per tool any offered worker has: what it does (data only)."""
+    names = sorted({tool for worker in workers for tool in worker['tools']})
+    return '\n'.join(f'- {name}: {descriptions.get(name) or "no description declared"}' for name in names) or 'none'
 
 
 def render_catalogue(workers):
@@ -308,8 +350,9 @@ def plan_schema(workers):
                           'required': ['goal', 'context', 'completion_criteria']},
                 'tools_mode': {'type': 'string', 'enum': [TOOLS_DEFAULT, TOOLS_SUBSET]},
                 'tools': {'type': 'array', 'items': item},
+                'tools_reason': {'type': 'string'},
                 'reason': {'type': 'string'}},
-            'required': ['worker', 'model', 'brief', 'tools_mode', 'tools', 'reason']}
+            'required': ['worker', 'model', 'brief', 'tools_mode', 'tools', 'tools_reason', 'reason']}
 
 
 def plan_shape(data):
@@ -320,7 +363,7 @@ def plan_shape(data):
             and isinstance(brief, dict) and isinstance(brief.get('goal'), str)
             and strings(brief.get('context')) and strings(brief.get('completion_criteria'))
             and data.get('tools_mode') in (TOOLS_DEFAULT, TOOLS_SUBSET) and strings(data.get('tools'))
-            and isinstance(data.get('reason'), str))
+            and isinstance(data.get('tools_reason'), str) and isinstance(data.get('reason'), str))
 
 
 # --- one attempt -------------------------------------------------------------
@@ -332,11 +375,12 @@ class Attempt:
     """
 
     __slots__ = ('number', 'worker', 'model', 'goal', 'criteria', 'sections', 'tools', 'reason', 'planned',
-                 'fallback', 'digest')
+                 'fallback', 'digest', 'tools_reason')
 
     def __init__(self, number, worker, *, model='', goal='', criteria=(), sections=SECTIONS, tools=None, reason='',
-                 planned=False, fallback=''):
+                 planned=False, fallback='', tools_reason=''):
         self.number, self.worker, self.model = number, worker, model
+        self.tools_reason = tools_reason
         self.goal, self.criteria, self.sections = goal, tuple(criteria), frozenset(sections)
         self.tools = None if tools is None else frozenset(tools)
         self.reason, self.planned, self.fallback = reason, planned, fallback
@@ -394,7 +438,9 @@ class Orchestration:
         self.state, self.pinned, self.work_id = state, pinned, work_id
         self.policy = policy or DecisionPolicy()
         self.attempts = []
-        self.history = []  # (attempt, evaluation, answer excerpt, failed steps)
+        self.history = []  # (attempt, evaluation, answer excerpt, factual summary)
+        #: Signatures (worker, model, tools) of attempts that fell short (#729).
+        self.failed = set()
         self.notice = ''
         self.orchestrated = False
         #: The evaluation of the last attempt when no further attempt followed
@@ -445,11 +491,13 @@ class Orchestration:
         if not self.history:
             return 'none'
         rows = []
-        for attempt, evaluation, answer, failed in self.history:
+        for attempt, evaluation, answer, summary in self.history:
             rows.append(f'attempt {attempt.number}: worker={attempt.worker} model={attempt.model or "default"} '
                         f'tools={"worker default" if attempt.tools is None else ", ".join(sorted(attempt.tools)) or "none"} '
-                        f'goal={one_line(attempt.goal, 300) or "the raw request"} evaluation={evaluation} '
-                        f'failed steps={one_line(failed, 300) or "none"} answer excerpt={one_line(answer, ANSWER_EXCERPT_CHARS)}')
+                        f'goal={one_line(attempt.goal, 300) or "the raw request"} '
+                        f'what happened={one_line(summary, 500) or "no tool was called"} '
+                        f'evaluation={evaluation} ({EVALUATION_REASON.get(evaluation, evaluation)}) '
+                        f'answer excerpt (model-stated)={one_line(answer, ANSWER_EXCERPT_CHARS)}')
         return '\n'.join(rows)[-ATTEMPTS_CHARS:]
 
     def _ask(self, candidates):
@@ -463,14 +511,16 @@ class Orchestration:
             return None, FALLBACK_BUDGET
         request = self._redact(self.request, private=False)
         workers = render_catalogue(candidates)
+        tools_text = render_tool_descriptions(candidates, getattr(self.catalogue, 'descriptions', {}))
         facts = {'owner_request': request,
                  'recent_conversation': self._redact(self.conversation[-CONVERSATION_CHARS:]) or 'none',
                  'context_sections': self._sections_text(),
                  'workers': workers,
+                 'tool_descriptions': tools_text,
                  'budget': self._budget_text(),
                  'previous_attempts': self._redact(self._attempts_text())}
         context = DecisionContext(PURPOSE, facts, work_id=self.work_id,
-                                  max_chars=MAX_CONTEXT_CHARS + len(request) + len(workers))
+                                  max_chars=MAX_CONTEXT_CHARS + len(request) + len(workers) + len(tools_text))
         try:
             decision = method(context, QUESTION, plan_schema(candidates), plan_shape)
         except Exception:
@@ -502,14 +552,28 @@ class Orchestration:
             return None, 'sections'
         criteria = [one_line(item, MAX_CRITERION_CHARS) for item in brief['completion_criteria'] if item.strip()][:MAX_CRITERIA]
         tools = None
+        tools_reason = one_line(data['tools_reason'], MAX_REASON_CHARS)
         if data['tools_mode'] == TOOLS_SUBSET:
             tools = frozenset(data['tools'])
             if not tools <= frozenset(worker['tools']):
                 return None, 'tools'
+            if not tools_reason:
+                # #729: the worker keeps its full toolset unless a reason says otherwise.
+                return None, 'tools_reason'
+        if self.signature(worker, model, tools) in self.failed:
+            # #729: a combination that already fell short is not tried again unchanged.
+            return None, 'repeat'
         if not self.budget_allows():
             return None, 'budget'
         return Attempt(number, worker['id'], model=model, goal=goal, criteria=criteria, sections=brief['context'],
-                       tools=tools, reason=one_line(data['reason'], MAX_REASON_CHARS), planned=True), ''
+                       tools=tools, reason=one_line(data['reason'], MAX_REASON_CHARS), planned=True,
+                       tools_reason=tools_reason if tools is not None else ''), ''
+
+    @staticmethod
+    def signature(worker, model, tools):
+        """Worker, effective model and effective tool set of an attempt (#729)."""
+        return (worker['id'], model or worker.get('default_model') or '',
+                frozenset(worker['tools']) if tools is None else frozenset(tools))
 
     # -- evidence -------------------------------------------------------------
     def _worker_label(self, attempt):
@@ -520,6 +584,7 @@ class Orchestration:
         self.record(PLANNED, {'attempt': attempt.number, 'worker': attempt.worker, 'model': attempt.model or None,
                               'brief_digest': attempt.digest, 'sections': sorted(attempt.sections),
                               'tools': None if attempt.tools is None else sorted(attempt.tools),
+                              'tools_reason': self._redact(attempt.tools_reason) or None,
                               'reason': self._redact(attempt.reason),
                               'text': f'{attempt.number}번째 시도: {self._worker_label(attempt)} — {self._redact(attempt.reason)}'})
 
@@ -581,7 +646,7 @@ class Orchestration:
             return UNJUDGED
         if not self.budget_allows():
             return NOT_JUDGED
-        text = (f'The worker\'s final answer (its own text):\n{str(answer or "")[:1800]}\n\n'
+        text = (f'The worker\'s final answer (model-stated, not an observation):\n{str(answer or "")[:1800]}\n\n'
                 f'Tool results AgentOS recorded for this attempt:\n{observations or "none"}')[:OBSERVATION_CHARS]
         try:
             judged = goal_reached(self.request, text, str(failed or '')[:FAILURE_CHARS], work_id=self.work_id)
@@ -599,6 +664,9 @@ class Orchestration:
         if not self.orchestrated:
             return None
         self.history.append((attempt, evaluation, answer, failed))
+        worker = self.catalogue.worker(attempt.worker)
+        if evaluation != REACHED and worker is not None:
+            self.failed.add(self.signature(worker, attempt.model, attempt.tools))
         if evaluation == REACHED:
             stop = STOP_REACHED
         elif evaluation == OWNER_NEEDED:
@@ -614,11 +682,11 @@ class Orchestration:
             stop = STOP_UNJUDGED
         else:
             stop = ''
-        following = None
+        following, invalid = None, ''
         if not stop:
             candidates = self.catalogue.available(self.pinned)
             data, failure = self._ask(candidates)
-            following, _invalid = (self.validate(data, candidates, len(self.attempts) + 1) if data is not None
+            following, invalid = (self.validate(data, candidates, len(self.attempts) + 1) if data is not None
                                    else (None, ''))
             if following is None:
                 stop = STOP_BUDGET if failure == FALLBACK_BUDGET else STOP_REPLAN
@@ -626,6 +694,7 @@ class Orchestration:
         self.record(EVALUATED, {'attempt': attempt.number, 'worker': attempt.worker, 'model': attempt.model or None,
                                 'brief_digest': attempt.digest or None, 'outcome': evaluation,
                                 'next': 'redelegate' if following is not None else 'stop', 'stop': stop or None,
+                                'invalid': (invalid or None) if not stop or stop == STOP_REPLAN else None,
                                 'text': ' '.join(part for part in (EVALUATED_TEXT[evaluation], after) if part)})
         if following is not None:
             self.attempts.append(following)

@@ -38,10 +38,13 @@ from personal_agent.subscription_engines import SubscriptionEngines
 OPENAI_KEY = 'sk-fixture-openai-0710'
 
 
-def plan(worker, goal, *, model='', context=SECTIONS, criteria=('the answer states it',), tools=None, reason='fits'):
+def plan(worker, goal, *, model='', context=SECTIONS, criteria=('the answer states it',), tools=None, reason='fits',
+         tools_reason=None):
     return {'worker': worker, 'model': model,
             'brief': {'goal': goal, 'context': list(context), 'completion_criteria': list(criteria)},
             'tools_mode': 'worker_default' if tools is None else 'subset', 'tools': list(tools or ()),
+            'tools_reason': ('only these tools are needed' if tools is not None else '') if tools_reason is None
+            else tools_reason,
             'reason': reason}
 
 
@@ -77,6 +80,7 @@ class Engine:
         self.answers = []
         self.before = None
         self.fail = []
+        self.meta = None
 
     def execute(self, engine, prompt, tools, **kwargs):
         offered = sorted(tools._offered())
@@ -88,7 +92,7 @@ class Engine:
             self.before(tools)
         if self.fail:
             raise self.fail.pop(0)
-        return ExecutionResult(self.answers.pop(0) if self.answers else 'cli answer', engine, 0)
+        return ExecutionResult(self.answers.pop(0) if self.answers else 'cli answer', engine, 0, self.meta)
 
     def login_status(self, engine_id, binary=None):
         return {'state': 'signed-in'}
@@ -229,7 +233,10 @@ class Redelegation(Harness):
         self.assertNotEqual(digests[0], digests[1])
 
     def test_at_most_two_redelegations(self):
-        self.script([plan('codex', f'Try path {n}.') for n in range(5)], goals=[False] * 5)
+        # #729: each re-plan must change the worker, model or tools.
+        self.script([plan('codex', f'Try path {n}.', model=model)
+                     for n, model in enumerate(('', 'gpt-5.6-luna', 'gpt-5.6-terra', 'haiku', 'sonnet'))],
+                    goals=[False] * 5)
         job, row = self.run_work('끝까지 해줘')
         self.assertEqual(len(self.engine.turns), 1 + MAX_REDELEGATIONS)
         self.assertEqual(len(self.asked_plans), 1 + MAX_REDELEGATIONS)
@@ -446,6 +453,195 @@ class PerRequestTools(Harness):
             mcp_bridge.serve(str(self.store.root), job, only=frozenset({'list_notes'}))
         replies = [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
         self.assertEqual([tool['name'] for tool in replies[1]['result']['tools']], ['list_notes'])
+
+
+class ToolsAndReplan(Harness):
+    """ORCH-02 (#729): full toolset by default, learning from failed attempts, the bridge timeout."""
+
+    def test_the_worker_keeps_its_full_toolset_unless_a_reason_narrows_it(self):
+        self.assertIn('defaults to "worker_default"', QUESTION)
+        self.script([plan('codex', 'Answer.')], goals=[True])
+        job, _row = self.run_work('알려줘')
+        [turn] = self.engine.turns
+        self.assertIsNone(turn['only'])
+        self.assertIn('weather', turn['offered'], 'the full offered toolset, not a subset')
+        context, _question, schema = self.asked_plans[0]
+        self.assertIn('tools_reason', schema['required'])
+        descriptions = context.facts['tool_descriptions']
+        self.assertIn('- bounded_public_research: ', descriptions)
+        self.assertIn('- list_notes: ', descriptions)
+        self.assertTrue(all(len(line) < 260 for line in descriptions.splitlines()), 'one line per tool')
+        self.assertIsNone(self.events(job, 'planned')[0][1]['tools_reason'])
+
+    def test_a_subset_without_a_stated_reason_is_refused(self):
+        self.script([plan('codex', 'Answer.', tools=('web_search',), tools_reason='')])
+        job, _row = self.run_work('알려줘')
+        [(status, detail)] = self.events(job)
+        self.assertEqual((status, detail['code'], detail['invalid']), ('fallback', 'plan_invalid', 'tools_reason'))
+
+    def test_a_subset_with_a_reason_is_kept_and_recorded(self):
+        self.script([plan('codex', 'Read the notes.', tools=('list_notes',), tools_reason='keep private reads apart')],
+                    goals=[True])
+        job, _row = self.run_work('메모 봐줘')
+        self.assertEqual(self.engine.turns[0]['only'], ['list_notes'])
+        self.assertEqual(self.events(job, 'planned')[0][1]['tools_reason'], 'keep private reads apart')
+
+    def test_a_replan_never_repeats_a_failed_combination_and_sees_the_incomplete_call(self):
+        def hang(tools):
+            # The bridge recorded the call as running; the CLI closed the connection before a result.
+            tools.capabilities.record('bounded_public_research', 'running', json.dumps(
+                {'scope': 'subscription-mcp-bridge', 'host_action': 'bounded_public_research'}))
+        self.engine.before = hang
+        subset = plan('codex', 'Research it.', tools=('bounded_public_research',))
+        self.script([subset, dict(subset)], goals=[False])
+        job, row = self.run_work('조사해줘')
+        self.assertEqual(len(self.engine.turns), 1, 'the identical combination was not run again')
+        last = self.events(job, 'evaluated')[-1][1]
+        self.assertEqual((last['stop'], last['invalid']), ('replan_failed', 'repeat'))
+        replan = self.asked_plans[1][0].facts['previous_attempts']
+        self.assertIn('tools called: bounded_public_research', replan)
+        self.assertIn('never completed (tool_incomplete): bounded_public_research', replan)
+        self.assertIn('did not show the goal met', replan)
+        with self.store.db() as db:
+            failed = [json.loads(r['detail']) for r in db.execute(
+                "SELECT detail FROM tool_events WHERE job_id=? AND tool='bounded_public_research' AND status='failed'", (job,))]
+        self.assertEqual([(item['code'], item['retry'], item['effect']) for item in failed],
+                         [('tool_incomplete', 'transient', 'none')])
+        self.assertNotEqual(row['status'], 'succeeded')
+
+    def test_a_changed_tool_set_is_allowed_after_a_failure(self):
+        self.script([plan('codex', 'Research it.', tools=('bounded_public_research',)), plan('codex', 'Use all tools.')],
+                    goals=[False, True])
+        job, row = self.run_work('조사해줘')
+        self.assertEqual(len(self.engine.turns), 2)
+        self.assertIsNone(self.engine.turns[1]['only'])
+        self.assertEqual(row['status'], 'succeeded')
+
+    def test_an_incomplete_effect_is_recorded_as_unknown(self):
+        def hang(tools):
+            tools.capabilities.record('save_note', 'running', json.dumps(
+                {'scope': 'subscription-mcp-bridge', 'host_action': 'save_note'}))
+        self.engine.before = hang
+        self.script([plan('codex', 'Save it.')], goals=[False])
+        job, row = self.run_work('처리해줘')
+        with self.store.db() as db:
+            [detail] = [json.loads(r['detail']) for r in db.execute(
+                "SELECT detail FROM tool_events WHERE job_id=? AND tool='save_note' AND status='failed'", (job,))]
+        self.assertEqual((detail['code'], detail['effect']), ('tool_incomplete', 'unknown'))
+        self.assertEqual(row['status'], 'unknown')
+
+    def test_goal_reached_sees_the_model_stated_answer_when_native_search_has_no_urls(self):
+        seen = []
+        self.engine.meta = {'native_searches': [{'id': 'n1', 'state': 'succeeded', 'queries': ['q'], 'results': []}]}
+        self.engine.answers = ['about forty minutes by car']
+        self.script([plan('codex', 'Answer it.'), plan('openai', 'Answer it another way.')])
+
+        def judge(context, proposition):
+            seen.append(dict(context.facts))
+            return BinaryDecision(OUTCOME_DECIDED, False, fixture_confidence())
+        self.service.decision_engine._judge = judge
+        self.run_work('얼마나 걸려?')
+        observations = seen[0]['observations']
+        self.assertIn("The worker's final answer (model-stated, not an observation):\nabout forty minutes by car",
+                      observations)
+        self.assertIn('"sources": []', observations)
+        self.assertIn('own web searches that reported no source URL: 1', self.asked_plans[1][0].facts['previous_attempts'])
+
+
+class BridgeTimeout(unittest.TestCase):
+    """#729: the agentos server's own tool-call timeout on the Codex argv (fake CLI)."""
+
+    def argv(self, engine='codex', budget=None, relay=False):
+        seen = {}
+
+        class Done:
+            returncode = 0
+            stdout = (json.dumps({'item': {'type': 'agent_message', 'text': 'ok'}}) if engine == 'codex'
+                      else json.dumps({'type': 'result', 'result': 'ok', 'is_error': False}))
+            stderr = ''
+
+        def runner(argv, **kwargs):
+            seen['argv'] = list(argv)
+            return Done()
+        with tempfile.TemporaryDirectory() as folder:
+            store = QuickStore(Path(folder) / 'state')
+            from personal_agent.agent_runtime import Capabilities
+            capabilities = Capabilities(store, None, {}, '', 'job', lambda *a: None, document_access=False,
+                                        **({'budget': budget} if budget else {}))
+            tools = AgentOSMcpTools(capabilities)
+            if relay:
+                tools.browser_relay = str(Path(folder) / 'relay')
+            adapter = BoundedExecutionAdapter(finder=lambda name: '/runtime/' + name, runner=runner,
+                                              runtime_root=Path(folder) / 'turns', codex_home=Path(folder))
+            adapter.execute(engine, 'hello', tools)
+        return seen['argv']
+
+    @staticmethod
+    def overrides(argv):
+        return [argv[index + 1] for index, value in enumerate(argv[:-1]) if value == '-c']
+
+    def test_codex_carries_the_verified_per_server_tool_timeout(self):
+        from personal_agent.bounded_execution import (BRIDGE_TOOL_MARGIN_SECONDS, CODEX_TOOL_TIMEOUT_KEY,
+                                                      MAX_TIMEOUT_SECONDS, bridge_tool_bound)
+        self.assertEqual(CODEX_TOOL_TIMEOUT_KEY, 'tool_timeout_sec')
+        timeouts = [value for value in self.overrides(self.argv()) if CODEX_TOOL_TIMEOUT_KEY in value]
+        research = bridge_tool_bound(['bounded_public_research'])
+        self.assertGreater(research, 60, 'longer than Codex\'s own default')
+        expected = min(MAX_TIMEOUT_SECONDS, research + BRIDGE_TOOL_MARGIN_SECONDS)
+        self.assertEqual(timeouts, [f'mcp_servers.agentos.tool_timeout_sec={expected}'], 'the agentos server only')
+
+    def test_the_timeout_is_capped_by_the_remaining_work_budget(self):
+        clock = [0.0]
+        budget = WorkBudget(clock=lambda: clock[0], seconds=45)
+        timeouts = [value for value in self.overrides(self.argv(budget=budget)) if 'tool_timeout_sec' in value]
+        self.assertEqual(timeouts, ['mcp_servers.agentos.tool_timeout_sec=45'])
+
+    def test_a_native_search_bound_covers_every_continuation_request(self):
+        """#729 review: an ai-native search may resend after pause_turn; each request has its own timeout."""
+        from personal_agent.bounded_execution import bridge_tool_bound
+        from personal_agent.local_tools import MAX_PAGE_SECONDS
+        from personal_agent.research import MAX_RESEARCH_PAGES
+        from personal_agent.search_providers import (NATIVE_CONTINUATIONS, NATIVE_MAX_REQUESTS, NATIVE_TIMEOUT_SECONDS,
+                                                     SEARCH_TIMEOUT_SECONDS)
+        self.assertEqual(NATIVE_MAX_REQUESTS, NATIVE_CONTINUATIONS + 1)
+        search = NATIVE_MAX_REQUESTS * NATIVE_TIMEOUT_SECONDS
+        self.assertGreater(search, SEARCH_TIMEOUT_SECONDS)
+        self.assertEqual(bridge_tool_bound(['web_search']), search)
+        self.assertEqual(bridge_tool_bound(['bounded_public_research']), search + MAX_RESEARCH_PAGES * MAX_PAGE_SECONDS)
+
+    def test_the_anthropic_search_sends_at_most_the_bounded_number_of_requests(self):
+        from personal_agent.search_providers import NATIVE_MAX_REQUESTS, AiNativeProvider, SearchProviderError
+        sent = []
+
+        def transport(url, body, headers, timeout):
+            sent.append(timeout)
+            # Always paused and never using a search: only the request cap ends it.
+            return {'type': 'message', 'stop_reason': 'pause_turn', 'content': [{'type': 'text', 'text': 'x'}]}
+        search = AiNativeProvider('anthropic', {'endpoint': 'https://api.anthropic.com', 'model': 'm'}, 'k', transport=transport)
+        with self.assertRaises(SearchProviderError):
+            search.search('q')  # nothing cited: an empty native search
+        self.assertEqual(len(sent), NATIVE_MAX_REQUESTS)
+
+    def test_the_longest_offered_tool_sets_the_bound(self):
+        from personal_agent.bounded_execution import bridge_tool_bound, bridge_tool_timeout
+        from personal_agent.cli_browser_relay import CALL_SECONDS
+        self.assertEqual(bridge_tool_bound(['list_notes', 'browser_click']), CALL_SECONDS)
+        self.assertEqual(bridge_tool_bound([]), 60)
+        self.assertEqual(bridge_tool_timeout(['browser_open'], 120), 120)
+        self.assertEqual(bridge_tool_timeout(['weather'], 600), 25 + 30)
+
+    def test_claude_code_argv_is_unchanged(self):
+        self.assertFalse([value for value in self.argv('claude-code') if 'tool_timeout_sec' in value])
+
+    def test_incomplete_bridge_calls_are_paired_by_tool(self):
+        from personal_agent.bounded_execution import incomplete_bridge_calls
+        bridge = lambda action: json.dumps({'scope': 'subscription-mcp-bridge', 'host_action': action})  # noqa: E731
+        rows = [('web_search', 'running', bridge('web_search')), ('web_search', 'succeeded', bridge('web_search')),
+                ('bounded_public_research', 'running', bridge('bounded_public_research')),
+                ('web_search', 'running', bridge('web_search')),
+                ('model', 'running', '{}'), ('weather', 'running', json.dumps({'scope': 'other'}))]
+        self.assertEqual(incomplete_bridge_calls(rows), [('bounded_public_research', 'bounded_public_research'),
+                                                         ('web_search', 'web_search')])
 
 
 class PlannerHistory(Harness):

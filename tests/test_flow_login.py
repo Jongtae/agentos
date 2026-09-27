@@ -1000,6 +1000,18 @@ class RedirectedSignIn(LoginHarness):
         self.service._request_login_decision(later, self.service._browser_login(later)['nonce'], 'skip')
         self.assertEqual(self.settle(later), 'skipped')
 
+    def test_a_failed_save_after_the_landing_gives_the_landed_site_no_say(self):
+        # Review P2-1: the landing set a cookie and the save right after it failed, so the jar still
+        # predates the landing; that cookie must not read as a sign-in at close.
+        self.window_holds = {'lands_on': self.SSO, 'sites': {'sso.test': [self.page_cookie('csrf', 'landing-set')]},
+                             'fail_export': True}
+        job_id, _prompt, _buttons, _notification = self.login_work()
+        self.assertIsNone(self.service._browser_login(job_id)['landed_cookies_before'])
+        self.window().fail_export = False
+        self.owner_closes(job_id, logged_in=False)
+        self.assertEqual(self.state(job_id), 'not_logged_in')
+        self.assertEqual(self.store.job(job_id)['status'], self.ended)
+
     def test_a_same_site_redirect_keeps_the_requested_site_rule(self):
         self.window_holds = {'lands_on': 'https://accounts.fixture.test/login'}
         job_id, _prompt, _buttons, _notification = self.login_work()

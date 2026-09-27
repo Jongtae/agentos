@@ -4006,7 +4006,10 @@ class AgentService:
         # #762: a site that sends its login to another site (a separate sign-in domain) is signed in
         # there.  Its stored sign-in cookies now (after the window saved what the landing set, before
         # the owner could act) are the baseline a sign-in there is evidenced against.
-        landed_before=self._login_cookie_marks({'host':landed}) if shown and shown!=requested else None
+        # Only after a successful save there (review P2-1): otherwise the landing's own cookies would read
+        # as a sign-in at close.  No baseline is no evidence from the landed site.
+        landed_before=(self._login_cookie_marks({'host':landed})
+                       if shown and shown!=requested and self.browser_profile.login_window_landed_saved(window) else None)
         with self.lock:
             row=self._browser_login(work_id)
             if not row or row.get('state')!='opening' or row.get('nonce')!=nonce:return

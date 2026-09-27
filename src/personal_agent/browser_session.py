@@ -49,6 +49,7 @@ import os
 import queue
 import shutil
 import re
+import secrets
 import subprocess
 import sys
 import threading
@@ -551,14 +552,58 @@ class BrowserSession:
         self._refuse(step_binding(self.work_id, 'browser_submit', self.last.get('_page'), identity, '', state),
                      '결제 양식 제출' + note)
 
+    def _settle(self):
+        """Let a page that renders its content after load finish rendering, bounded (#709).
+
+        Best effort and generic: a driver without ``settle`` (a test driver)
+        skips it, and a settle that fails or times out is not a failed step;
+        the snapshot reads whatever the page shows by then.
+        """
+        settle = getattr(self._driver(), 'settle', None)
+        if not callable(settle):
+            return
+        seconds = RENDER_SETTLE_SECONDS
+        if self.budget is not None:
+            try:
+                seconds = min(seconds, max(0.0, self.budget.remaining() - 1.0))
+            except Exception:
+                pass
+        if seconds <= 0:
+            return
+        try:
+            settle(seconds, self._timeout())
+        except ToolError:
+            raise
+        except Exception:
+            pass
+
     def _page_state(self, requested_url=None):
         snapshot = self._snapshot(requested_url)
         if snapshot['login_required']:
             # Generic (`login_form_present`): the profile holds no session for
             # this page.  Nothing else of the page is returned.
             return {'state': 'login_required', 'url': snapshot['url'], 'title': snapshot['title'],
-                    'needs_setup': True, 'requires': 'browser-login', 'next_step': LOGIN_REQUIRED_TEXT}
+                    'needs_setup': True, 'requires': 'browser-login',
+                    'next_step': self._offer_login(snapshot['url']) or LOGIN_REQUIRED_TEXT}
         return {'state': 'page', **public_view(snapshot)}
+
+    def _offer_login(self, url):
+        """Ask the owner to log in during this Work (#709), when the approvals surface can.
+
+        ``approvals.login_required(url)`` records the request; the service
+        shows the login window and asks the owner once this Work's run has
+        released the profile.  It returns the text the model reads instead
+        of the Settings pointer, or None.  Nothing is typed and nothing is
+        read from the login page.
+        """
+        offer = getattr(self.approvals, 'login_required', None)
+        if not callable(offer):
+            return None
+        try:
+            text = offer(url)
+        except Exception:
+            return None
+        return text if isinstance(text, str) and text else None
 
     @staticmethod
     def _effect(args):
@@ -634,11 +679,13 @@ class BrowserSession:
         self._guard(step_binding(self.work_id, 'browser_open', url, url, url), f'{_host(parts)} 페이지 열기',
                     effect == 'payment')
         self._call(lambda timeout: self._driver().goto(url, timeout))
+        self._settle()
         return self._page_state(requested_url=url)
 
     def read(self):
         self._require_page()
         self._spend_step()
+        self._settle()
         return self._page_state()
 
     def find(self, args):
@@ -753,6 +800,11 @@ WORKER_START_SECONDS = 30
 WORKER_GRACE_SECONDS = 5
 WORKER_QUIT_SECONDS = 5
 LOGIN_OPEN_SECONDS = 45
+#: #709: how long closing a login window waits for its save and release.
+LOGIN_CLOSE_SECONDS = 20
+#: #709: the longest a ``browser_open``/``browser_read`` waits for a
+#: client-rendered page's content to settle (``browser_worker.op_settle``).
+RENDER_SETTLE_SECONDS = 4.0
 LOGIN_SAVE_SECONDS = 15
 
 
@@ -951,6 +1003,10 @@ class WebKitWorkerDriver:
     def goto(self, url, timeout):
         self._request('navigate', timeout, url=url)
 
+    def settle(self, seconds, timeout):
+        """Wait, bounded by ``seconds``, until a client-rendered page's content stops changing (#709)."""
+        self._request('settle', timeout, seconds=seconds)
+
     def snapshot(self):
         page = self._request('snapshot', ACTION_TIMEOUT_SECONDS).get('page') or {}
         elements = [element for element in page.get('elements') or [] if isinstance(element, dict)]
@@ -1061,6 +1117,8 @@ class BrowserProfile:
         self._live = None
         self._suppressed = set()
         self._login_thread = None
+        # (window id, stop event) of the last login window opened (#709).
+        self._login_window = None
         # What the running worker was given from the jar (#680 review P2-3):
         # sites imported, or why the import failed (then nothing is saved).
         self._imported = set()
@@ -1316,13 +1374,14 @@ class BrowserProfile:
         return result
 
     # -- the owner's login window ------------------------------------------------------
-    def open_for_login(self, url, wait=False):
+    def open_for_login(self, url, wait=False, seconds=None):
         """Show the worker window at ``url`` for the owner to log in by hand.
 
         AgentOS navigates to ``url`` and does nothing else: no typing, no
         reading.  The window's title shows the host it is on.  Cookies are
         exported into the encrypted jar while it is open and when the owner
-        closes it (or after ``LOGIN_WINDOW_SECONDS``).
+        closes it (or after ``seconds``, by default ``LOGIN_WINDOW_SECONDS``,
+        or when ``close_login_window`` is called with the returned ``window``).
         """
         if not self.available():
             return {'state': 'unavailable', 'reason': self.unavailable_reason(), 'message': self.unavailable_message()}
@@ -1336,6 +1395,10 @@ class BrowserProfile:
         except ToolError:
             return {'state': 'busy', 'message': BUSY_TEXT}
         opened = threading.Event()
+        stop = threading.Event()
+        window_id = secrets.token_hex(8)
+        self._login_window = (window_id, stop)
+        lifetime = LOGIN_WINDOW_SECONDS if seconds is None else max(1.0, min(float(seconds), LOGIN_WINDOW_SECONDS))
         failure = []
         def window():
             driver = None
@@ -1349,10 +1412,10 @@ class BrowserProfile:
                 else:
                     driver.goto(url, ACTION_TIMEOUT_SECONDS)
                 opened.set()
-                deadline = self.clock() + LOGIN_WINDOW_SECONDS
+                deadline = self.clock() + lifetime
                 saved = self.clock()
-                while driver.is_open() and self.clock() < deadline:
-                    time.sleep(0.5)
+                while driver.is_open() and self.clock() < deadline and not stop.is_set():
+                    stop.wait(0.5)
                     if self.clock() - saved >= LOGIN_SAVE_SECONDS:
                         self._save(driver)
                         saved = self.clock()
@@ -1375,7 +1438,26 @@ class BrowserProfile:
             opened.wait(LOGIN_OPEN_SECONDS + WORKER_START_SECONDS + 5)
         if failure:
             return {'state': 'failed', 'message': FAILED_TEXT}
-        return {'state': 'closed' if wait else 'opened', 'url': page_reference(url), 'message': LOGIN_WINDOW_TEXT}
+        return {'state': 'closed' if wait else 'opened', 'url': page_reference(url), 'message': LOGIN_WINDOW_TEXT,
+                'window': window_id}
+
+    def close_login_window(self, window, timeout=LOGIN_CLOSE_SECONDS):
+        """Close the login window ``open_for_login`` returned as ``window``, and wait for it (#709).
+
+        Only that window: another login window is left alone.  Its cookies are
+        saved into the jar and the profile is released before this returns
+        True; False when that window is not the open one (already closed,
+        replaced) or did not finish closing in ``timeout`` seconds.
+        """
+        current = self._login_window
+        if not window or current is None or current[0] != window:
+            return False
+        current[1].set()
+        thread = self._login_thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout)
+            return not thread.is_alive()
+        return True
 
 
 def _generation(driver):

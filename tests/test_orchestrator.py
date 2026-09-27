@@ -985,6 +985,43 @@ class OwnerQuestion(Harness):
         self.assertEqual(outcomes[0], 'not_reached')
         self.assertEqual(len(self.asked_plans), 2, 'the attempt was re-delegated')
 
+    def test_a_question_after_a_tool_ran_is_partial_with_the_question_reported(self):
+        """Review P2: as the direct route's needs_owner finish, not a silent success."""
+        def search(tools):
+            tools.capabilities.record('web_search', 'succeeded',
+                                      json.dumps({'host_action': 'web_search', 'evidence': {'sources': ['https://a.test']}}))
+        self.engine.before = search
+        self.engine.answers = ['두 곳이 있어요. 어느 쪽으로 할까요?']
+        self.script([plan('codex', 'Answer.')], goals=[False], owner_inputs=[True])
+        job, row = self.run_work('찾아줘')
+        self.assertEqual(self.events(job, 'evaluated')[-1][1]['outcome'], 'owner_needed')
+        self.assertEqual(row['status'], 'partial')
+        self.assertNotIn(GOAL_NOT_SHOWN, row['owner_cause'] or '')
+        self.assertIn('어느 쪽으로 할까요?', json.dumps(self.store.job(job), ensure_ascii=False))
+
+    def test_a_raising_or_unavailable_owner_input_judgment_keeps_the_attempt_short(self):
+        for owner_inputs in ([], [RuntimeError('down')]):
+            with self.subTest(owner_inputs=owner_inputs):
+                self.engine.answers = ['어디서 출발하세요?']
+                engine = self.script([plan('codex', 'Answer.')], goals=[False])
+                if owner_inputs:
+                    self.service.decision_judge.owner_input_needed = mock.Mock(side_effect=owner_inputs[0])
+                job, row = self.run_work('얼마나 걸려?', key=f'raise-{len(owner_inputs)}')
+                self.assertEqual(self.events(job, 'evaluated')[-1][1]['outcome'], 'not_reached')
+                self.assertEqual(row['status'], 'failed')
+
+    def test_the_conversation_is_redacted_before_it_is_cut(self):
+        """Review P2: a cut landing inside a stored secret never leaves a fragment of it."""
+        self.engine.answers = ['키: ' + OPENAI_KEY + ' ' + 'Y' * 1490]
+        self.run_work('예전 질문')
+        self.engine.answers = ['출발 위치를 알려 주세요?']
+        self.script([plan('codex', 'Answer.')], goals=[False], owner_inputs=[True])
+        self.run_work('이어서')
+        excerpts = [self.asked_plans[-1][0].facts['recent_conversation'],
+                    self.asked_owner_inputs[-1].facts['recent_conversation']]
+        for excerpt in excerpts:
+            self.assertNotIn(OPENAI_KEY[-6:], excerpt)
+
     def test_a_goal_reached_attempt_asks_no_owner_input_judgment(self):
         self.script([plan('codex', 'Answer.')], goals=[True])
         self.run_work('질문')

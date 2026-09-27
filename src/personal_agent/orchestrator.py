@@ -632,7 +632,8 @@ class Orchestration:
         workers = render_catalogue(candidates)
         tools_text = render_tool_descriptions(candidates, getattr(self.catalogue, 'descriptions', {}))
         facts = {'owner_request': request,
-                 'recent_conversation': self._redact(self.conversation[-CONVERSATION_CHARS:]) or 'none',
+                 # Redacted before it is cut, so a cut never leaves part of a secret (#740 review).
+                 'recent_conversation': self._redact(self.conversation)[-CONVERSATION_CHARS:] or 'none',
                  'context_sections': self._sections_text(),
                  'workers': workers,
                  'tool_descriptions': tools_text,
@@ -804,14 +805,32 @@ class Orchestration:
         or unsure is no, so the attempt stays short.
         """
         judge = getattr(self.judgments, 'owner_input_needed', None)
-        if judge is None or not str(answer or '').strip() or not self.budget_allows():
+        if judge is None or not str(answer or '').strip() or not self.may_judge():
             return False
+        # Redacted before it is cut; the answer keeps its head and its tail, where a question usually is.
+        answer = self._redact(answer)
+        limit = ANSWER_EXCERPT_CHARS * 3
+        if len(answer) > limit:
+            answer = answer[:limit // 2] + ' … ' + answer[-limit // 2:]
         try:
-            judged = judge(self.request, self.conversation[-CONVERSATION_CHARS:],
-                           str(answer)[:ANSWER_EXCERPT_CHARS * 3], work_id=self.work_id)
+            judged = judge(self.request, self._redact(self.conversation)[-CONVERSATION_CHARS:], answer,
+                           work_id=self.work_id)
         except Exception:
             return False
         return getattr(judged, 'outcome', None) == 'yes'
+
+    def may_judge(self):
+        """Whether a judgment that can only end the Work may still be asked: not stopped, deadline not passed.
+
+        Unlike ``budget_allows`` it keeps no room for a further attempt (#740 review).
+        """
+        budget = self.budget
+        if budget is None:
+            return True
+        try:
+            return budget.interrupted() is None and budget.remaining() > 0
+        except Exception:
+            return False
 
     def next(self, attempt, evaluation, *, answer='', failed='', effect=False):
         """The next attempt after ``attempt`` was evaluated, or None (recorded either way).

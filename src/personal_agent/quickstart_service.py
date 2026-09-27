@@ -33,7 +33,7 @@ from .subscription_engines import SubscriptionEngines
 from .bounded_execution import TOOL_INCOMPLETE, TOOL_INCOMPLETE_TEXT, incomplete_bridge_calls
 from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, StrictIsolatedAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult, MAX_PROMPT_BYTES, BOUNDED_PROFILE, HOST_CLI_PROFILES, STRICT_PROFILE, private_read_actions, profile_actions, profile_status, route_unavailable
 from .orchestrator import model_refused, remember_model_refusal
-from .orchestrator import (EVENT_TOOL as ORCHESTRATION_EVENT, NOT_JUDGED, NOT_REACHED, UNJUDGED, WORKER_FAILED,
+from .orchestrator import (EVENT_TOOL as ORCHESTRATION_EVENT, NOT_JUDGED, NOT_REACHED, OWNER_NEEDED, UNJUDGED, WORKER_FAILED,
                            Orchestration, worker_catalogue)
 from .isolated_engine_gateway import EngineGatewayError
 from .service_control import build_identity
@@ -2500,14 +2500,23 @@ class AgentService:
                              sections={**sections,'history':len(earlier)},budget=budget,record=event,state=state,
                              pinned=pinned,work_id=job['id'])
 
-    def cli_shortfall(self, job_id, since, request, evaluation):
-        """``(outcome, report)`` of a CLI attempt whose goal was judged not shown or not judgeable (#710 review).
+    def cli_shortfall(self, job_id, since, request, evaluation, answer=''):
+        """``(outcome, report)`` of a CLI attempt whose goal was judged not shown or not judgeable (#710 review),
+        or None when the attempt keeps its own outcome.
 
         Not reached: ``partial`` when the attempt observed a successful tool
         result, else ``failed``; unjudged: ``partial``.  The report states the
         unknown the way the direct route's completion rule does (#657).
+        Owner needed (#740), as the direct route's ``needs_owner`` finish: an
+        attempt that ran a tool is ``partial`` with ``answer`` as the report's
+        question; one that ran none is ordinary conversation and keeps its outcome.
         """
         from .agent_runtime import GOAL_NOT_SHOWN, GOAL_UNJUDGED, agency_report
+        with self.store.db() as db:
+            rows=db.execute("SELECT tool FROM tool_events WHERE job_id=? AND id>? AND status IN ('succeeded','failed')",(job_id,since or 0)).fetchall()
+        ran=any(row['tool'] not in ('model','subscription_engine',ORCHESTRATION_EVENT) for row in rows)
+        if evaluation==OWNER_NEEDED:
+            return ('partial',agency_report(request,[],[],[],None,answer)) if ran else None
         with self.store.db() as db:
             rows=db.execute("SELECT tool FROM tool_events WHERE job_id=? AND id>? AND status='succeeded'",(job_id,since or 0)).fetchall()
         observed=any(row['tool'] not in ('model','subscription_engine',ORCHESTRATION_EVENT) for row in rows)
@@ -5676,9 +5685,12 @@ class AgentService:
                     # #710 review P1: a CLI attempt the orchestrator judged short and did not
                     # re-delegate (limit, budget, no new plan) is never stored as succeeded.
                     if subscription.get('id') and outcome=='succeeded' and orchestration is not None \
-                            and orchestration.terminal in (NOT_REACHED,UNJUDGED):
-                        outcome,agency_report=self.cli_shortfall(job['id'],attempt_start,prompt,orchestration.terminal)
-                        resolved_blocker=False
+                            and (orchestration.terminal in (NOT_REACHED,UNJUDGED)
+                                 or (orchestration.terminal==OWNER_NEEDED and not (approval_needed[0] or context_approval_needed[0]))):
+                        shortfall=self.cli_shortfall(job['id'],attempt_start,prompt,orchestration.terminal,response)
+                        if shortfall is not None:
+                            outcome,agency_report=shortfall
+                            resolved_blocker=False
                     # Said once when working orchestration fell back to the default Main AI.
                     if orchestration is not None and orchestration.notice:
                         response=response.rstrip()+'\n\n'+orchestration.notice

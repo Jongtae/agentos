@@ -1355,6 +1355,12 @@ class WebKitWorkerDriver:
             raise
         return message.get('url') if isinstance(message, dict) else None
 
+    def navigations(self):
+        """How many main-frame navigations this window committed or failed so far (#765): a count only,
+        never a URL.  Nothing is read from or typed into the page."""
+        count = self._request('state', ACTION_TIMEOUT_SECONDS).get('navigations')
+        return count if isinstance(count, int) and not isinstance(count, bool) else None
+
     def hide(self):
         self._request('hide', ACTION_TIMEOUT_SECONDS)
         self._visible = False
@@ -1743,6 +1749,9 @@ class BrowserProfile:
                 # #762: what the landing itself set (a sign-in domain's CSRF or anonymous cookies) is
                 # in the jar before the owner can act, so a later change there is the owner's doing.
                 record['landed_saved'] = bool(self._save(driver))
+                # #765: whether the owner navigated the window after its landing is login evidence
+                # alongside the cookies (a count only; AgentOS never reads or types into the page).
+                record['navigations'] = _navigations(driver)
                 opened.set()
                 if on_opened is not None:
                     try:
@@ -1762,6 +1771,8 @@ class BrowserProfile:
             finally:
                 stored = False
                 if driver is not None:
+                    after, before = _navigations(driver), record.get('navigations')
+                    record['navigated'] = after is not None and before is not None and after > before
                     stored = bool(self._save(driver))
                     try:
                         driver.close()
@@ -1807,6 +1818,12 @@ class BrowserProfile:
         record = self._login_windows.get(window) if window else None
         return bool(record and record.get('landed_saved'))
 
+    def login_window_navigated(self, window):
+        """Whether ``window``'s main frame navigated after its landing, before it closed (#765).
+        False when that was not observed (a crashed worker, a driver that cannot count)."""
+        record = self._login_windows.get(window) if window else None
+        return bool(record and record.get('navigated'))
+
     def login_window_outcome(self, window):
         """``(reason, saved)`` once ``window`` has closed, saved and released; None while it is open or unknown."""
         record = self._login_windows.get(window) if window else None
@@ -1837,6 +1854,18 @@ class BrowserProfile:
 def _generation(driver):
     """Which worker process a driver runs now (a restart is a new generation)."""
     return (id(driver), getattr(driver, 'starts', 0))
+
+
+def _navigations(driver):
+    """The driver's main-frame navigation count (#765), or None when it cannot say."""
+    count = getattr(driver, 'navigations', None)
+    if count is None or not _alive(driver):
+        return None
+    try:
+        count = count()
+    except Exception:
+        return None
+    return count if isinstance(count, int) and not isinstance(count, bool) else None
 
 
 def _alive(driver):

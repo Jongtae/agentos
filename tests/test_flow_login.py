@@ -197,6 +197,11 @@ class JarDriver(FakeDriver):
         self.sites = {}
         #: #716: a login window that is slow to show (``hold_goto``) or to save while closing (``hold_export``).
         self.hold_goto = self.hold_export = None
+        #: #765: main-frame navigations so far (the owner's form submissions and the sign-in's redirects).
+        self.navigated = 0
+
+    def navigations(self):
+        return self.navigated
 
     def goto(self, url, timeout):
         if self.hold_goto is not None:
@@ -209,6 +214,7 @@ class JarDriver(FakeDriver):
 
     def login(self, site='fixture.test'):
         """The owner signs in by hand in this window: the site now holds a new session cookie."""
+        self.navigated += 1
         self.sites = {site: [{'name': 'sid', 'value': 'session-' + str(time.time_ns()), 'domain': site, 'path': '/',
                               'expires': None, 'secure': True, 'http_only': True, 'same_site': None}]}
 
@@ -263,6 +269,27 @@ class SiteCookieMarks(unittest.TestCase):
             jar.save_export({'example.org': [{**row, 'expires': 9000}, {**row, 'name': 'old', 'expires': 10}],
                              'other.org': [other]})
             self.assertEqual(reading(), signed_in)
+
+    def test_the_identity_survives_a_value_rotation_and_a_new_cookie_has_a_new_one(self):
+        # #765: the identity covers site, name, domain and path, never the value.
+        from personal_agent.browser_jar import unexpired
+        with tempfile.TemporaryDirectory() as folder:
+            jar = memory_jar(folder)
+            row = {'name': 'sid', 'value': 'v1', 'domain': '.example.org', 'path': '/', 'expires': None}
+
+            def ids():
+                marks, now = jar.site_cookie_marks('example.org')
+                return frozenset(mark[2] for mark in marks), unexpired(marks, now)
+            jar.save_export({'example.org': [row]})
+            first, values = ids()
+            jar.save_export({'example.org': [{**row, 'value': 'v2'}]})
+            rotated, rotated_values = ids()
+            self.assertEqual(rotated, first, 'a rotated value keeps its identity')
+            self.assertNotEqual(rotated_values, values, 'and still changes the value marks')
+            jar.save_export({'example.org': [{**row, 'value': 'v2'}, {**row, 'name': 'auth', 'value': 'v3'}]})
+            self.assertGreater(ids()[0], first, 'a new name is a new identity')
+            self.assertNotIn('sid', flat(jar.site_cookie_marks('example.org')[0]), 'digests only, never a name')
+            self.assertNotIn('v2', flat(jar.site_cookie_marks('example.org')[0]))
 
 
 class LoginHarness(unittest.TestCase):
@@ -1021,8 +1048,8 @@ class RedirectedSignIn(LoginHarness):
 
     def test_no_landed_baseline_is_no_evidence(self):
         # An unreadable jar at the landing (or a row from before #762) gives the landed site no say.
-        self.assertFalse(self.service._cookie_set_changed('login.sso.test', None))
-        self.assertFalse(self.service._cookie_set_changed(None, {'at': 0, 'marks': []}))
+        self.assertEqual(self.service._signed_in_sites({'landed_host': 'login.sso.test', 'landed_cookies_before': None}), [])
+        self.assertEqual(self.service._signed_in_sites({'host': None, 'cookies_before': {'at': 0, 'marks': [], 'ids': []}}), [])
         job_id, _prompt, _buttons, _notification = self.redirected_work()
         row = self.service._browser_login(job_id)
         self.service._put_browser_login(job_id, {**row, 'landed_cookies_before': None})
@@ -1030,6 +1057,133 @@ class RedirectedSignIn(LoginHarness):
         self.owner_closes(job_id, logged_in=False)
         self.assertEqual(self.state(job_id), 'not_logged_in')
         self.assertEqual(self.store.job(job_id)['status'], self.ended)
+
+
+class SignInEvidence(LoginHarness):
+    """#765: a sign-in is an added cookie, not a rotated one; a rotation counts only after the owner navigated."""
+
+    SSO = RedirectedSignIn.SSO
+
+    def cookie(self, name, value, domain='fixture.test'):
+        return {'name': name, 'value': value, 'domain': domain, 'path': '/', 'expires': time.time() + 3600,
+                'secure': True, 'http_only': True, 'same_site': None}
+
+    def window_work(self, sites, lands_on=None):
+        """A Work whose login window holds ``sites`` from its landing on (saved before the owner can act)."""
+        holds = {'sites': sites}
+        if lands_on:
+            holds['lands_on'] = lands_on
+        self.window_holds = holds
+        return self.login_work()
+
+    def signins(self):
+        return self.store.config(BROWSER_OWNER_SIGNINS_KEY, {})
+
+    def test_a_cookie_whose_value_rotated_is_not_a_sign_in(self):
+        job_id, _prompt, _buttons, _notification = self.window_work({'fixture.test': [self.cookie('sid', 'stale-1')]})
+        # A script timer or background request rotates the cookie; the owner does nothing and closes.
+        self.window().sites = {'fixture.test': [self.cookie('sid', 'stale-2')]}
+        self.owner_closes(job_id, logged_in=False)
+        self.assertEqual(self.state(job_id), 'not_logged_in')
+        self.assertEqual(self.store.job(job_id)['status'], self.ended)
+        self.assertEqual(self.signins(), {})
+
+    def test_done_on_a_rotated_cookie_alone_does_not_resume(self):
+        job_id, _prompt, _buttons, notification = self.window_work({'fixture.test': [self.cookie('sid', 'stale-1')]})
+        self.window().sites = {'fixture.test': [self.cookie('sid', 'stale-2')]}
+        self.tap(f"p7l:{notification['id']}:done", notification['message_id'])
+        self.assertEqual(self.settle(job_id), 'not_logged_in')
+        self.assertEqual(self.edits()[-1]['text'], BROWSER_LOGIN_RESULT_TEXT['no_session'])
+
+    def test_an_added_cookie_is_a_sign_in(self):
+        job_id, _prompt, _buttons, _notification = self.window_work({'fixture.test': [self.cookie('csrf', 'page-1')]})
+        # No navigation observed (a sign-in in page script): the new session cookie alone is evidence.
+        self.window().sites = {'fixture.test': [self.cookie('csrf', 'page-2'), self.cookie('sid', 'session-new')]}
+        self.owner_closes(job_id, logged_in=False)
+        self.assertEqual((self.state(job_id), self.store.job(job_id)['status']), ('resumed', 'queued'))
+        self.assertTrue(wait_until(lambda: list(self.signins()) == ['fixture.test']))
+
+    def test_a_re_login_that_only_rotated_the_session_after_the_owner_navigated_resumes(self):
+        # A stale session the site rejected: signing in again replaces its value (a form post navigates).
+        job_id, _prompt, _buttons, _notification = self.window_work({'fixture.test': [self.cookie('sid', 'stale')]})
+        self.window().sites = {'fixture.test': [self.cookie('sid', 'session-fresh')]}
+        self.window().navigated += 1
+        self.owner_closes(job_id, logged_in=False)
+        self.assertEqual((self.state(job_id), self.store.job(job_id)['status']), ('resumed', 'queued'))
+        self.assertTrue(wait_until(lambda: list(self.signins()) == ['fixture.test']))
+
+    def test_a_cookie_the_landing_page_set_on_the_requested_site_is_not_a_sign_in(self):
+        # The requested site's baseline is re-read after the landing's own save, not taken before the window.
+        job_id, _prompt, _buttons, _notification = self.window_work({'fixture.test': [self.cookie('csrf', 'landing')]})
+        self.owner_closes(job_id, logged_in=False)
+        self.assertEqual(self.state(job_id), 'not_logged_in')
+        self.assertEqual(self.signins(), {})
+
+    def test_the_landed_site_is_recorded_only_by_its_own_evidence(self):
+        # Nit 2: the owner signed in on the requested site; the landed site's cookie merely rotated.
+        job_id, _prompt, _buttons, _notification = self.window_work(
+            {'sso.test': [self.cookie('csrf', 'landing', 'sso.test')]}, lands_on=self.SSO)
+        self.window().sites = {'sso.test': [self.cookie('csrf', 'rotated', 'sso.test')],
+                               'fixture.test': [self.cookie('sid', 'session-requested')]}
+        self.window().navigated += 1
+        self.owner_closes(job_id, logged_in=False)
+        self.assertEqual(self.state(job_id), 'resumed')
+        self.assertTrue(wait_until(lambda: 'fixture.test' in self.signins()))
+        self.assertEqual(list(self.signins()), ['fixture.test'], 'the rotated landed site is not recorded')
+
+    def settings_window(self, sites=None, lands_on=None):
+        holds = {}
+        if sites:
+            holds['sites'] = sites
+        if lands_on:
+            holds['lands_on'] = lands_on
+        self.window_holds = holds
+        self.drivers.append(JarDriver(log=[]))   # the holds apply to the next window
+        self.assertEqual(self.service.open_browser_for_login({'url': ORIGIN + '/login'})['state'], 'opening')
+        self.assertTrue(wait_until(lambda: self.service.browser_status()['settings_login']['state'] == 'opened'))
+        return self.drivers[-1]
+
+    def settings_closes(self, window):
+        window.closed = True
+        self.profile._login_thread.join(5)
+        self.assertFalse(self.profile._login_thread.is_alive())
+
+    def test_the_settings_window_records_a_sign_in_on_the_site_it_landed_on(self):
+        # Nit 3: the Settings path uses the in-flow rule and baselines, landed site included.
+        window = self.settings_window(sites={'sso.test': [self.cookie('csrf', 'landing', 'sso.test')]}, lands_on=self.SSO)
+        window.sites = {'sso.test': [self.cookie('csrf', 'landing', 'sso.test'), self.cookie('sid', 'session-sso', 'sso.test')]}
+        self.settings_closes(window)
+        self.assertEqual(list(self.signins()), ['sso.test'])
+        self.assertNotIn('session-sso', flat(self.signins()))
+
+    def test_the_settings_window_records_nothing_for_a_rotated_cookie_or_the_landing_cookie(self):
+        window = self.settings_window(sites={'fixture.test': [self.cookie('sid', 'stale-1')],
+                                             'sso.test': [self.cookie('csrf', 'landing', 'sso.test')]}, lands_on=self.SSO)
+        window.sites = {'fixture.test': [self.cookie('sid', 'stale-2')], 'sso.test': [self.cookie('csrf', 'landing', 'sso.test')]}
+        self.settings_closes(window)
+        self.assertEqual(self.signins(), {})
+
+    def test_no_cookie_name_or_value_reaches_a_log_a_row_or_a_record(self):
+        import logging
+        records = []
+        handler = logging.Handler(logging.DEBUG)
+        handler.emit = lambda record: records.append(record.getMessage())
+        root = logging.getLogger()
+        previous = root.level
+        root.addHandler(handler)
+        root.setLevel(logging.DEBUG)
+        self.addCleanup(root.setLevel, previous)
+        self.addCleanup(root.removeHandler, handler)
+        job_id, _prompt, _buttons, _notification = self.window_work(
+            {'sso.test': [self.cookie('landingname', 'landingvalue', 'sso.test')]}, lands_on=self.SSO)
+        self.window().sites = {'sso.test': [self.cookie('landingname', 'rotatedvalue', 'sso.test'),
+                                            self.cookie('sessionname', 'sessionvalue', 'sso.test')]}
+        self.owner_closes(job_id, logged_in=False)
+        self.assertEqual(self.state(job_id), 'resumed')
+        self.assertTrue(wait_until(lambda: 'sso.test' in self.signins()))
+        stored = flat(self.service._browser_login(job_id)) + flat(self.signins()) + '\n'.join(records)
+        for secret in ('landingname', 'landingvalue', 'rotatedvalue', 'sessionname', 'sessionvalue'):
+            self.assertNotIn(secret, stored)
 
 
 class LoginThroughTheCliBridge(_BridgeHarness):

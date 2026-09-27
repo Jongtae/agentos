@@ -209,6 +209,30 @@ const base=(active,extra={})=>({decision_route:{active,suite_version:'decision-q
   {route:{jev:{configured:true,model:'jev-latest',destination:'api.typesafe.ai',check:{state:'failed',failure:'auth',checked_at:1}}}}));
  const off=button(rowTitled('사용 방식'),'끄기');await off.onclick({currentTarget:off});
  assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))),{path:'/api/decision-route/activate',body:{transport:'off'}});
+ // #609: Jev's model comes from TypeSafe's own list on explicit refresh; saving it never activates, and an active
+ // Jev route applies a differing saved model only through an explicit, checked 사용.
+ box().dataset.state='';ctx.openDecisionChooser('');calls.length=0;
+ const jevActive=(saved)=>base({transport:'jev',source:'owner',requested_model:'jev-latest',available:true,destination:'api.typesafe.ai'},
+  {route:{jev:{configured:true,model:saved,destination:'api.typesafe.ai'}}});
+ ctx.renderDecisionRoute(jevActive('jev-latest'));
+ assert(!button(rowTitled('사용 방식'),'저장한 모델 사용'),'nothing to apply while the saved model is the active one');
+ assert.equal(calls.length,0,'rendering calls nothing');
+ box().dataset.state='';ctx.renderDecisionRoute(jevActive('jev-1.13.0'));
+ const applySaved=button(rowTitled('사용 방식'),'저장한 모델 사용');assert(applySaved,'a differing saved model can be applied');
+ await applySaved.onclick({currentTarget:applySaved});
+ assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))),{path:'/api/decision-route/activate',body:{transport:'jev'}});
+ calls.length=0;const pick=button(rowTitled('사용 방식'),'모델 선택');await pick.onclick({currentTarget:pick});
+ const jevForm=descendants(rowTitled('사용 방식')).find(node=>node.tag==='form');assert(jevForm,'the Jev model form opens in place');
+ assert(jevForm.textContent.includes('모델 목록은 새로고침을 눌렀을 때만 가져옵니다.'));
+ const jevModel=descendants(jevForm).find(node=>node.tag==='input'&&node.type==='text');assert.equal(jevModel.value,'jev-1.13.0');
+ const refreshJev=button(jevForm,'모델 목록 새로고침');await refreshJev.onclick({currentTarget:refreshJev});
+ assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))),{path:'/api/decision-route/models',body:{route:'jev'}});
+ const jevForm2=descendants(rowTitled('사용 방식')).find(node=>node.tag==='form');
+ assert(jevForm2.textContent.includes('확인 판단 한 번으로'),'Jev activation is a probe, not the qualification suite');
+ descendants(jevForm2).find(node=>node.tag==='input'&&node.type==='text').value='jev-1.12.0';calls.length=0;
+ await jevForm2.onsubmit({preventDefault(){}});
+ assert.deepEqual(JSON.parse(JSON.stringify(calls)),[{path:'/api/decision-route/credential',body:{transport:'jev',model:'jev-1.12.0'}}],'saving a model never activates');
+ assert($('decision-route-feedback').textContent.includes('아직 대화 해석 경로는 바뀌지 않았습니다'));
  // Technical provenance (#559): route/policy/requested/observed are separate facts.
  const facts=Object.fromEntries(ctx.decisionFacts({purpose:'conversation-followup',outcome:'decided',route:'subscription_cli',engine:'codex',model_policy:'explicit',requested_model:'small',observed_model:'not reported',elapsed_seconds:1.5},{relation:{kind:'retry',work_id:'w0'}}));
  assert.equal(facts['판단 경로'],'subscription_cli / codex');assert.equal(facts['모델 정책'],'explicit');assert.equal(facts['요청 모델'],'small');assert.equal(facts['관측 모델'],'보고되지 않음');

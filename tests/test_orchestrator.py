@@ -132,6 +132,7 @@ class Harness(unittest.TestCase):
         ``owner_inputs`` the #740 owner-input judgments asked after a goal judged no."""
         self.plans, self.goals, self.owner_inputs = list(plans), list(goals), list(owner_inputs)
         self.asked_owner_inputs = []
+        self.asked_goals = []
 
         def structured(context, question, schema):
             self.asked_plans.append((context, question, schema))
@@ -146,6 +147,8 @@ class Harness(unittest.TestCase):
                 if self.owner_inputs:
                     return BinaryDecision(OUTCOME_DECIDED, self.owner_inputs.pop(0), fixture_confidence())
                 return None
+            if context.purpose == 'goal-reached':
+                self.asked_goals.append(context)
             if context.purpose != 'goal-reached' or not self.goals:
                 return None
             return BinaryDecision(OUTCOME_DECIDED, self.goals.pop(0), fixture_confidence())
@@ -1536,3 +1539,55 @@ class RelayAuthority(Harness):
         self.service.connector_handoff = type('H', (), {'known': staticmethod(lambda cid: cid == 'google-calendar')})()
         self.service.attempted_only_reads = lambda job_id: True
         self.assertEqual(self.service.connector_read_need(tools.capabilities, 'job'), 'google-calendar')
+
+
+class SecretaryStandard(Harness):
+    """#767: plan, evaluation and worker guidance hold answers to the secretary standard."""
+
+    def test_the_goal_judgment_reads_the_brief_completion_criteria(self):
+        self.script([plan('codex', 'Name options with current facts.',
+                          criteria=('names specific options', 'each option has a cited current fact'))], goals=[True])
+        self.run_work('추천해줘')
+        [context] = self.asked_goals
+        self.assertIn('names specific options', context.facts['completion_criteria'])
+        self.assertIn('each option has a cited current fact', context.facts['completion_criteria'])
+
+    def test_the_plan_question_and_worker_guidance_state_the_standard(self):
+        from personal_agent.agent_runtime import API_TOOL_GUIDANCE, CLI_TOOL_GUIDANCE, CORE_INSTRUCTIONS
+        from personal_agent.conversation_handoff import GOAL_REACHED_PROPOSITION
+        self.assertIn('capable personal secretary', QUESTION)
+        self.assertIn('never rules that out', QUESTION)
+        self.assertIn('not only that an answer was given', QUESTION)
+        self.assertIn('capable personal secretary', CORE_INSTRUCTIONS)
+        self.assertIn('look them up and cite the sources', CORE_INSTRUCTIONS)
+        for guidance in (API_TOOL_GUIDANCE, CLI_TOOL_GUIDANCE):
+            self.assertIn('ordinary conversation that needs no current facts', guidance)
+        self.assertIn('completion criteria are listed, each of them is met', GOAL_REACHED_PROPOSITION)
+        self.assertIn('no observation sources them', GOAL_REACHED_PROPOSITION)
+
+    def test_a_direct_route_answer_short_of_the_criteria_is_re_delegated(self):
+        """#767 review P1: the direct route's ordinary-conversation success is held to the criteria."""
+        self.transport.answers = ['일반적인 조언입니다.']
+        self.engine.answers = ['구체적인 선택지와 출처입니다.']
+        self.script([plan('openai', 'Name options.', criteria=('names specific options with sources',)),
+                     plan('codex', 'Look them up.')], goals=[False, True])
+        job, row = self.run_work('추천해줘')
+        outcomes = [detail['outcome'] for _status, detail in self.events(job, 'evaluated')]
+        self.assertEqual(outcomes, ['not_reached', 'reached'])
+        self.assertEqual(len(self.engine.turns), 1, 'the second attempt ran')
+        self.assertEqual(row['status'], 'succeeded')
+        self.assertEqual(row['response'], '구체적인 선택지와 출처입니다.')
+        self.assertIn('names specific options with sources', self.asked_goals[0].facts['completion_criteria'])
+
+    def test_a_direct_route_answer_is_kept_when_the_criteria_judgment_is_unavailable(self):
+        self.transport.answers = ['답입니다.']
+        self.script([plan('openai', 'Answer.')], goals=[])
+        job, row = self.run_work('질문')
+        self.assertEqual(self.events(job, 'evaluated')[-1][1]['outcome'], 'reached')
+        self.assertEqual(row['status'], 'succeeded')
+
+    def test_an_owner_request_not_to_look_things_up_is_honoured_by_the_standard(self):
+        from personal_agent.agent_runtime import CORE_INSTRUCTIONS
+        self.assertIn('unless the owner asked you not to', CORE_INSTRUCTIONS)
+        self.assertIn('unless the owner asked not to look anything up', QUESTION)
+

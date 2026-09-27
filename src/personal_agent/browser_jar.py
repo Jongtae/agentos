@@ -280,9 +280,11 @@ class CookieJar:
     def site_cookie_marks(self, host):
         """``(marks, now)`` for the stored sign-in cookies of the site(s) ``host`` belongs to (#709).
 
-        ``marks`` is one ``(digest, expires)`` per stored cookie: the digest
-        covers the cookie's site, name, domain, path and value (never its
-        expiry) and never returns a value.  ``now`` is this jar's clock, the
+        ``marks`` is one ``(digest, expires, identity)`` per stored cookie: the
+        digest covers the cookie's site, name, domain, path and value (never
+        its expiry); ``identity`` covers the same but the value, so a cookie
+        whose value rotated keeps its identity and only a new cookie has a new
+        one (#765).  Neither returns a value.  ``now`` is this jar's clock, the
         same clock ``import_rows`` uses to drop expired rows, so two readings
         are compared over exactly the unexpired cookies (``unexpired``) a
         worker was given and could keep.  Raises ``JarError`` when the jar
@@ -299,9 +301,9 @@ class CookieJar:
             for row in entry.get('cookies') or []:
                 if not isinstance(row, dict):
                     continue
-                identity = [site, str(row.get('name')), str(row.get('domain')), str(row.get('path')), str(row.get('value'))]
+                identity = [site, str(row.get('name')), str(row.get('domain')), str(row.get('path'))]
                 expires = row.get('expires') if isinstance(row.get('expires'), (int, float)) else None
-                marks.append((hashlib.sha256(json.dumps(identity, separators=(',', ':')).encode()).hexdigest(), expires))
+                marks.append((_digest(identity + [str(row.get('value'))]), expires, _digest(identity)))
         return marks, now
 
     def cached_sites(self):
@@ -350,6 +352,13 @@ def _index(payload):
             for site, entry in (payload.get('sites') or {}).items() if isinstance(entry, dict)}
 
 
+def _digest(parts):
+    return hashlib.sha256(json.dumps(parts, separators=(',', ':')).encode()).hexdigest()
+
+
 def unexpired(marks, now):
-    """The cookie digests of ``marks`` still unexpired at ``now``: the rule ``CookieJar.import_rows`` applies."""
-    return frozenset(digest for digest, expires in marks or () if not (isinstance(expires, (int, float)) and expires <= now))
+    """The cookie digests of ``marks`` still unexpired at ``now``: the rule ``CookieJar.import_rows`` applies.
+
+    Each mark is ``(digest, expires, ...)``; anything after the expiry is ignored."""
+    return frozenset(mark[0] for mark in marks or ()
+                     if not (isinstance(mark[1], (int, float)) and mark[1] <= now))

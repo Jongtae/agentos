@@ -832,7 +832,7 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 if path=='/api/context-inbox/telegram-policy':return self.reply(200,service.set_context_telegram_policy(body))
                 # #626: current-context privacy control (use/timezone/clear only).
                 if path=='/api/current-context':return self.reply(200,service.set_current_context(body))
-                if path=='/api/documents/approval':return self.reply(200,service.set_document_approval(body))
+                if path=='/api/documents/approval':return self.reply(200,service.approve_document_sharing_from_settings(body))
                 if path=='/api/public-pages/approval':return self.reply(200,service.set_public_page_approval(body))
                 if path=='/api/model':return self.reply(200,service.save_model(body,strict=True))
                 if path=='/api/model/test':return self.reply(200,service.test_model(body or None,strict=True))

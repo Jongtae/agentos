@@ -116,7 +116,9 @@ assert(!$('active-ai').textContent.includes('다른 선택지'),'no second list 
  ctx.renderExecutionConnection({...settingsFor('other'),model:{provider:'ollama',endpoint:'http://127.0.0.1:11434',model:'llama'},main_ai:{...settingsFor('other').main_ai,other:{provider:'ollama',model:'llama',destination:'http://127.0.0.1:11434'}}});
  assert($('active-ai').textContent.includes('확인 필요')&&$('active-ai').textContent.includes('변경 목록에 없습니다'),'an existing Ollama route renders truthfully');
  ctx.renderExecutionConnection(settingsFor(''));
- assert.equal(currentCount(),0);assert($('active-ai').textContent.includes('선택 필요')&&$('active-ai').textContent.includes('작업을 실행할 AI가 없습니다. 변경에서 하나를 고르세요.'));
+ assert.equal(currentCount(),0);assert($('active-ai').textContent.includes('선택되지 않음')&&$('active-ai').textContent.includes('작업에 사용할 AI를 선택하면 시작할 수 있습니다.'));
+ ctx.renderExecutionConnection(settingsFor('',{},{effective:{state:'fallback',transport:'direct_api',model:'gpt-4o-mini',destination:'api.openai.com',template:'기본 경로로 OpenAI API({model})를 쓰는 중',params:{model:'gpt-4o-mini'}}}));
+ assert($('active-ai').textContent.includes('대체 경로 사용 중')&&$('active-ai').textContent.includes('전송 대상: api.openai.com'),'an effective Judgment AI fallback remains visible when Main AI is unset');
  // #679: the Work model for a subscription CLI is shown, chosen in the chooser and sent with 확인하고 사용.
  const note='AgentOS는 Codex 개인 설정을 격리하므로 ~/.codex/config.toml의 모델은 쓰지 않습니다. 비워 두면 CLI 기본 모델을 씁니다.';
  calls.length=0;
@@ -172,7 +174,8 @@ console.log('settings DOM regressions passed');
 
 
 def test_settings_uses_goal_oriented_owner_language():
-    assert "AI 연결" in HTML
+    assert "AI 설정" in HTML
+    assert ">AI</button>" in HTML
     assert "파일 · 저장" in HTML
     assert "외부 연결" in HTML
     assert "내 기록" not in HTML

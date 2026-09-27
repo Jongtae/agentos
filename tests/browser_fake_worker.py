@@ -52,7 +52,8 @@ for line in sys.stdin:
         page['url'] = url
         emit({'id': ident, 'ok': True, 'url': url})
     elif op == 'snapshot':
-        emit({'id': ident, 'ok': True, 'page': {'url': page['url'], 'title': 't', 'text': 'x', 'forms': [],
+        emit({'id': ident, 'ok': True, 'page': {'url': page['url'], 'title': 't', 'forms': [],
+                                                 'text': 'landed page' if page['url'].endswith(('/landed', '/opened')) else 'x',
                                                  'elements': [{'index': 3, 'role': 'button', 'name': 'Go', 'tag': 'button',
                                                                'type': 'submit', 'autocomplete': '', 'form': None,
                                                                'href': None, 'value': None, 'disabled': False},
@@ -66,7 +67,16 @@ for line in sys.stdin:
                                                                'type': '', 'autocomplete': '', 'form': None, 'label_form': 1,
                                                                'href': None, 'value': None, 'disabled': False}]}})
     elif op == 'click':
-        if command.get('index') == 7:
+        # #736, as the real worker's settle_click: a click that starts a navigation a
+        # moment later (a script timer) or asks for a new window (loaded into this
+        # view) answers only once that navigation has landed, with navigated=true.
+        # ``/lateresolve``: the navigation's destination check (DNS) takes longer than the
+        # click grace; the real worker waits while that policy decision is pending.
+        if command.get('index') == 3 and page['url'].endswith(('/delayed', '/popup', '/lateresolve')):
+            time.sleep(1.5 if page['url'].endswith('/lateresolve') else 0.2)
+            page['url'] = page['url'].rsplit('/', 1)[0] + ('/opened' if page['url'].endswith('/popup') else '/landed')
+            emit({'id': ident, 'ok': True, 'navigated': True})
+        elif command.get('index') == 7:
             emit({'id': ident, 'ok': False, 'error': 'target_obscured'})
         elif command.get('index') == 9 and command.get('approved') is not True:
             # As the real worker: the press submitted the payment form, which was cancelled (#698).

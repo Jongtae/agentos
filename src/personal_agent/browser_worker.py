@@ -337,6 +337,11 @@ return JSON.stringify({text: body ? (body.innerText || '').length : 0,
 
 WIDTH, HEIGHT = 1280, 900
 SETTLE_QUIET_SECONDS = 0.4
+#: #736: after a click, how long a navigation it may start (a script handler, a
+#: timer, a new-window request loaded into this view) is given to begin, and
+#: the longest the worker waits for a started navigation to commit.
+CLICK_NAVIGATION_GRACE_SECONDS = 1.0
+CLICK_SETTLE_SECONDS = 8.0
 #: #709: a client-rendered page is read once its visible content stops
 #: changing for ``RENDER_QUIET_SECONDS`` (and shows some text), or when
 #: ``RENDER_SETTLE_SECONDS`` have passed, whichever comes first.
@@ -453,6 +458,28 @@ def destination_refusal(url, allowed_origins=(), resolver=None):
     return None
 
 
+def click_settled(elapsed, quiet, loading, started, landed, deciding=False):
+    """Whether a click's effects have landed (#736).  Pure; the worker polls it.
+
+    ``elapsed``: seconds since the press; ``quiet``: seconds the view has not
+    been loading (None while loading); ``started``: a main-frame navigation
+    was allowed since the press; ``landed``: such a navigation committed or
+    failed since then; ``deciding``: a main-frame navigation policy decision
+    is still pending (its destination is being resolved, up to
+    ``RESOLVE_SECONDS``).  A pending decision or a started navigation is
+    waited for until it lands; a click that starts none is given
+    ``CLICK_NAVIGATION_GRACE_SECONDS`` to start one.  ``CLICK_SETTLE_SECONDS``
+    bounds every wait.
+    """
+    if elapsed >= CLICK_SETTLE_SECONDS:
+        return True
+    if deciding or loading or quiet is None or quiet < SETTLE_QUIET_SECONDS:
+        return False
+    if started:
+        return landed
+    return elapsed >= CLICK_NAVIGATION_GRACE_SECONDS
+
+
 def site_of(domain, sites):
     """The site (registrable domain from WebKit's data records) a cookie domain belongs to."""
     domain = str(domain or '').lower().lstrip('.')
@@ -477,6 +504,9 @@ class Worker:
         self.navigation = None     # (id, WKNavigation) the navigate op waits for
         self.blocked = 0           # main-frame navigations refused so far
         self.hosts = set()         # hosts of committed main-frame navigations in this worker's life
+        self.main_navigations = 0  # main-frame navigations allowed so far (#736)
+        self.landed = 0            # main-frame navigations committed or failed so far (#736)
+        self.deciding = 0          # main-frame policy decisions still resolving their destination (#736 review)
         self.resolved = {}         # url origin -> refusal code or None (this worker's life)
         self.app = AppKit.NSApplication.sharedApplication()
         self.app.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)   # no Dock icon
@@ -548,6 +578,34 @@ class Worker:
         self.view.callAsyncJavaScript_arguments_inFrame_inContentWorld_completionHandler_(
             body, arguments or {}, None, world or self.world, handler)
 
+    def settle_click(self, ident, finish):
+        """After a click: wait, bounded, for any navigation it started to land, then for quiet (#736).
+
+        ``finish(navigated)`` is called once; ``navigated`` is True when a
+        main-frame navigation (a same-view new-window load included) started
+        after the press.
+        """
+        started_at = time.monotonic()
+        navigations, landed = self.main_navigations, self.landed
+        quiet_since = [None]
+
+        def poll():
+            if ident not in self.pending:
+                return
+            now = time.monotonic()
+            loading = bool(self.view.isLoading())
+            if loading:
+                quiet_since[0] = None
+            elif quiet_since[0] is None:
+                quiet_since[0] = now
+            started = self.main_navigations > navigations
+            quiet = None if quiet_since[0] is None else now - quiet_since[0]
+            if click_settled(now - started_at, quiet, loading, started, self.landed > landed, self.deciding > 0):
+                finish(started)
+                return
+            self.AppHelper.callLater(POLL_SECONDS, poll)
+        self.AppHelper.callLater(POLL_SECONDS, poll)
+
     def settle(self, ident, finish):
         """Wait until no navigation is loading for a short quiet period, then ``finish``."""
         quiet_since = [None]
@@ -614,7 +672,7 @@ class Worker:
                 done(self.take_cancelled())
         self.run(STEP_END_SCRIPT, {}, ended)
 
-    def finish_input(self, ident, blocked_before=None, error=None):
+    def finish_input(self, ident, blocked_before=None, error=None, navigated=False):
         """Answer a click/type once its approval's allowance ended.
 
         A payment-form submit the guard cancelled answers ``approval_required``
@@ -632,7 +690,7 @@ class Worker:
                 return self.fail(ident, error)
             if blocked_before is not None and self.blocked > blocked_before:
                 return self.fail(ident, 'blocked_destination')
-            self.reply(ident)
+            self.reply(ident, **({'navigated': True} if navigated else {}))
         self.end_step(answer)
 
     # -- destinations ----------------------------------------------------------
@@ -649,11 +707,17 @@ class Worker:
         if key in self.resolved:
             return decision(self.resolved[key] is None)
         answered = []
+        # #736 review: a click waits while a main-frame decision is resolving
+        # its destination, so a slow resolver is never mistaken for "no navigation".
+        if main_frame:
+            self.deciding += 1
 
         def answer(refusal):
             if answered:
                 return
             answered.append(True)
+            if main_frame:
+                self.deciding -= 1
             self.resolved[key] = refusal
             decision(refusal is None)
 
@@ -814,8 +878,9 @@ class Worker:
                 if error is None and isinstance(value, dict) and value.get('error'):
                     return self.finish_input(ident, blocked_before, value['error'])
                 # A script error here means the click already navigated away (the
-                # page and its guards are gone), which the guards allowed.
-                self.settle(ident, lambda: self.finish_input(ident, blocked_before))
+                # page and its guards are gone), which the guards allowed.  #736:
+                # a navigation the click started (now or a moment later) lands first.
+                self.settle_click(ident, lambda navigated: self.finish_input(ident, blocked_before, navigated=navigated))
             self.run(VERIFY_CLICK_SCRIPT, {'nonce': nonce}, verified)
         self._locate(ident, command, click)
 
@@ -1027,9 +1092,12 @@ def _delegate_class():
                 handler(WebKit.WKNavigationActionPolicyAllow if allowed else WebKit.WKNavigationActionPolicyCancel)
                 if not allowed:
                     worker.navigation_refused(main_frame)
+                elif main_frame:
+                    worker.main_navigations += 1   # a click waits for it to land (#736)
             worker.decide(url, main_frame, decision)
 
         def webView_didCommitNavigation_(self, view, navigation):
+            self.worker.landed += 1
             url = view.URL()
             host = _host(url.absoluteString()) if url is not None else ''
             if host:
@@ -1045,6 +1113,7 @@ def _delegate_class():
             self.worker.navigation_finished(navigation, error)
 
         def webView_didFailProvisionalNavigation_withError_(self, view, navigation, error):
+            self.worker.landed += 1   # a navigation that never commits has landed too (#736)
             self.worker.navigation_finished(navigation, error)
 
         def webView_createWebViewWithConfiguration_forNavigationAction_windowFeatures_(self, view, config, action, features):

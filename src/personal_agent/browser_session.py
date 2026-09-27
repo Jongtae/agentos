@@ -77,7 +77,7 @@ ELEMENT_LIMIT = 80
 NAME_LIMIT = 120
 VALUE_LIMIT = 200
 FIND_LINES = 12
-STEPS_PER_WORK = 12
+STEPS_PER_WORK = 40
 ACTION_TIMEOUT_SECONDS = 20
 LOGIN_WINDOW_SECONDS = 1800
 REDACTED = '[가림]'
@@ -408,18 +408,40 @@ def public_view(snapshot):
     return {key: value for key, value in snapshot.items() if not key.startswith('_')}
 
 
+#: #736: how many of the current page's elements a ``target_not_found`` names, and how long each name may be.
+TARGET_HINT_ELEMENTS = 15
+TARGET_HINT_NAME = 40
+
+
+def element_hint(snapshot):
+    """The current page's first elements as ``number name`` (mediated names, bounded), or ''.
+
+    #736: returned with ``target_not_found`` so the model can pick a real
+    element in one step instead of reading the page again.
+    """
+    rows = [row for row in snapshot.get('elements') or [] if isinstance(row, dict) and row.get('n') is not None]
+    parts = []
+    for row in rows[:TARGET_HINT_ELEMENTS]:
+        name = ' '.join(str(row.get('name') or row.get('role') or '').split())[:TARGET_HINT_NAME]
+        parts.append(f"{row['n']} {name}".strip())
+    if not parts:
+        return ''
+    more = f' 외 {len(rows) - len(parts)}개' if len(rows) > len(parts) else ''
+    return ' 현재 페이지의 요소: ' + ' · '.join(parts) + more + '.'
+
+
 def resolve_target(snapshot, target):
     """The internal element ``target`` names: its list number or a visible-name match."""
     rows = snapshot.get('_elements') or []
     wanted = ' '.join(str(target or '').split())
     if not wanted:
-        raise ToolError('target을 입력하세요: 요소 번호 또는 보이는 이름입니다.', 'target_not_found')
+        raise ToolError('target을 입력하세요: 요소 번호 또는 보이는 이름입니다.' + element_hint(snapshot), 'target_not_found')
     if wanted.isdigit():
         number = int(wanted)
         for row in rows:
             if row['n'] == number:
                 return row
-        raise ToolError(f'요소 번호 {number}은(는) 현재 페이지 목록에 없습니다. browser_read로 목록을 다시 확인하세요.', 'target_not_found')
+        raise ToolError(f'요소 번호 {number}은(는) 현재 페이지 목록에 없습니다.' + element_hint(snapshot), 'target_not_found')
     key = wanted.casefold()
     exact = [row for row in rows if ' '.join(str(row.get('name') or '').split()).casefold() == key]
     if len(exact) == 1:
@@ -428,7 +450,8 @@ def resolve_target(snapshot, target):
     if len(partial) == 1:
         return partial[0]
     if not partial:
-        raise ToolError('일치하는 요소가 없습니다. browser_read의 요소 목록에 있는 번호나 이름을 사용하세요.', 'target_not_found')
+        raise ToolError('일치하는 요소가 없습니다. 요소 목록에 있는 번호나 이름을 사용하세요.' + element_hint(snapshot),
+                        'target_not_found')
     raise ToolError('여러 요소가 일치합니다: ' + ', '.join(f"{row['n']}" for row in partial[:8]) + '. 요소 번호로 지정하세요.',
                     'ambiguous_target')
 
@@ -644,7 +667,7 @@ class BrowserSession:
         """
         self._last_input = (binding, description)
         try:
-            self._call(operation)
+            return self._call(operation)
         except ToolError as exc:
             if exc.code == 'approval_required':
                 self._refuse(binding, description + cancelled_note(getattr(exc, 'cancelled_form', None)))
@@ -704,9 +727,16 @@ class BrowserSession:
         binding = step_binding(self.work_id, 'browser_click', snapshot['_page'], key, key, self._state_of(snapshot, element))
         description = f"'{element.get('name') or element.get('role')}' 버튼 누르기"
         approved = self._guard(binding, description, element['submit_guarded'] or effect == 'payment')
-        self._input(lambda timeout: self._driver().click(element['index'], timeout, approved=approved),
-                    binding, description)
-        return self._page_state()
+        before = page_reference(snapshot.get('url'))
+        answer = self._input(lambda timeout: self._driver().click(element['index'], timeout, approved=approved),
+                             binding, description)
+        # #736: the worker answers once any navigation the click started has
+        # committed; the content of the page it landed on is then settled too.
+        self._settle()
+        page = self._page_state()
+        if (isinstance(answer, dict) and answer.get('navigated')) or page_reference(page.get('url')) != before:
+            page['navigated'] = True
+        return page
 
     def type(self, args):
         effect = self._effect(args)
@@ -1038,8 +1068,12 @@ class WebKitWorkerDriver:
 
         Only then does the worker let one payment-form submit through, until
         the step answers; otherwise a cancelled one answers ``approval_required``.
+        Returns ``{'navigated': bool}``: whether the click started a main-frame
+        navigation (a same-view new-window load included) that the worker
+        waited for (#736).  No URL crosses here; the next snapshot is mediated.
         """
-        self._request('click', timeout, approved=approved is True, **self._target(index))
+        message = self._request('click', timeout, approved=approved is True, **self._target(index))
+        return {'navigated': bool(message.get('navigated'))}
 
     def type(self, index, text, timeout, approved=False):
         self._request('type', timeout, text=text, approved=approved is True, **self._target(index))

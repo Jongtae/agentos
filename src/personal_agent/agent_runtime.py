@@ -1147,7 +1147,7 @@ def check_arguments(parameters,args):
 # budget, and `bounded_execution` kills the CLI process group on Stop or at
 # the deadline.
 WORK_MODEL_TURNS=9
-WORK_TOOL_ATTEMPTS=12
+WORK_TOOL_ATTEMPTS=40
 WORK_DEADLINE_SECONDS=600
 WORK_STOPPED='소유자가 멈춤을 요청해 다음 단계를 실행하지 않았습니다.'
 WORK_DEADLINE='이 작업의 처리 시간 한도에 도달해 다음 단계를 실행하지 않았습니다.'

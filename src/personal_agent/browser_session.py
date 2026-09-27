@@ -184,6 +184,8 @@ COMMIT_VERBS = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (
 ))
 #: A name at most this long is a control's label, not an article or result title.
 COMMIT_SHORT = 24
+#: A pressable ancestor's text longer than this is a content wrapper, not a control (#758).
+ANCESTOR_TEXT_LIMIT = 200
 def _commit_text(text):
     """NFKC, without format characters (zero-width and the like a page could hide inside a word)."""
     text = unicodedata.normalize('NFKC', str(text or ''))
@@ -232,8 +234,8 @@ def _commit_match(element):
     """The text that makes a press a commitment (#758), or ''.
 
     Its own name and text (a bare verb on a navigating link only in a short name),
-    the control its label forwards to, and its pressable ancestors (a bare verb there
-    only in a short text: a wrapper's long text is content, not a control's label).
+    the control its label forwards to, and its pressable ancestors whose text is
+    control-sized (a longer one is a content wrapper).
     """
     if element.get('pressable', True):
         link = _is_link(element)
@@ -243,9 +245,15 @@ def _commit_match(element):
     for text in _text_parts(element.get('label_name')):
         if commit_name(text):
             return _commit_text(text)
-    for text in _text_parts(element.get('ancestor_text')):
-        if commit_name(text, link=True):
-            return _commit_text(text)
+    for ancestor in str(element.get('ancestor_text') or '').split(' || '):
+        # A pressable ancestor with a control-sized text is judged like a button; a long one
+        # (an app root or content wrapper with a click handler) is content, not a control.
+        parts = _text_parts(ancestor)
+        if any(len(_commit_text(text)) > ANCESTOR_TEXT_LIMIT for text in parts):
+            continue
+        for text in parts:
+            if commit_name(text):
+                return _commit_text(text)
     return ''
 
 
@@ -890,8 +898,11 @@ class BrowserSession:
             matched, context = element.get('detail') or ('', '')
             matched, context = scrub(matched, self._excluded())[0], scrub(context, self._excluded())[0]
             state += '\n\x1ecommit ' + matched + '\n' + context
-            if matched and matched != element.get('name'):
-                description += f' ({matched})'
+            # The purchase text leads, so the owner reads it within the stored label's 120 characters.
+            name = str(element.get('name') or element.get('role') or '')
+            description = f"'{name[:40]}' 버튼 누르기"
+            if matched and matched != name:
+                description = f"결제 신호 '{matched[:50]}' · " + description
             if context:
                 description += f' · {context[:80]}'
         binding = step_binding(self.work_id, 'browser_click', snapshot['_page'], key, key, state)

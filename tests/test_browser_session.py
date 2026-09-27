@@ -244,7 +244,8 @@ class _PageParser(HTMLParser):
         for element in self.elements:
             control = self.control(element)
             element['label_form'] = control['form'] if control else None
-            element['own_text'] = element['name'] or ''
+            element['own_text'] = ' '.join(filter(None, [element['name'], element['sent'] if element['tag'] == 'input'
+                                                         and element['type'] in ('submit', 'button') else '']))
             pressable = lambda e: e['role'] not in ('textbox', 'combobox', 'checkbox', 'radio') and e['tag'] not in ('select', 'textarea')
             element['label_name'] = (control['name'] + ' | ' + control['name']) if control and pressable(control) else ''
             element['ancestor_text'], element['pressable'], element['context'] = '', pressable(element), ''
@@ -971,12 +972,14 @@ class CommitControlTests(unittest.TestCase):
         song = {'role': 'link', 'tag': 'a', 'name': 'Purchase this song for $0.99', 'pressable': True}
         self.assertTrue(bs.commit_control({**song, 'nav_link': False}))
         self.assertFalse(bs.commit_control({**song, 'nav_link': True}))
+        wrapper = 'Our plans. ' + 'A long description of every plan and what it includes. ' * 4
         self.assertFalse(bs.commit_control({'role': 'button', 'tag': 'span', 'name': 'Read more',
-                                            'ancestor_text': 'Plans | Read more about our plans, then Subscribe to the newsletter'}))
-        self.assertTrue(bs.commit_control({'role': 'button', 'tag': 'span', 'name': 'Read more',
-                                           'ancestor_text': 'Plans | Read more about our plans and place your order today'}))
+                                            'ancestor_text': 'Subscribe now | ' + wrapper + 'Subscribe now'}),
+                         'an app-root wrapper: its name is cut, its own text shows its length')
+        self.assertTrue(bs.commit_control({'role': 'button', 'tag': 'span', 'name': 'i',
+                                           'ancestor_text': 'Plan | Purchase annual plan for $99/yr'}), 'a control-sized parent')
         self.assertTrue(bs.commit_control({'role': 'button', 'tag': 'span', 'name': 'Details',
-                                           'ancestor_text': 'Card | Card view | Buy now | Buy now'}))
+                                           'ancestor_text': 'Card | Card view || Buy now | Buy now'}))
 
     def test_one_click_controls_need_approval_before_the_page_and_ordinary_ones_run(self):
         approvals = Approvals()
@@ -988,21 +991,27 @@ class CommitControlTests(unittest.TestCase):
             self.assertEqual((caught.exception.code, caught.exception.requires), ('approval_required', 'browser-step-approval'))
         self.assertEqual([entry for entry in driver.log if entry[0] == 'click'], [], 'refused before the page')
         self.assertEqual(len(approvals.requests), 4)
-        self.assertIn('(Buy now)', approvals.requests[3][1], 'the owner reads what the label forwards to')
-        # Ordinary controls, and a history link that names a purchase, run without asking.
-        self.assertEqual(sess.click({'target': '담기', 'effect': 'mutate'})['title'], '담음')
-        sess.open({'url': ORIGIN + '/one-click', 'effect': 'navigate'})
-        self.assertEqual(sess.click({'target': '구매후기', 'effect': 'read'})['title'], '후기')
-        self.assertEqual(len(approvals.requests), 4)
-        # The owner's approval of exactly that press runs it once, with the step's allowance.
-        sess.open({'url': ORIGIN + '/one-click', 'effect': 'navigate'})
-        approvals.issue(approvals.requests[0][0])
-        self.assertEqual(sess.click({'target': 'Buy now', 'effect': 'mutate'})['title'], '주문 완료')
-        self.assertIs(driver.approved[-1], True)
-        sess.open({'url': ORIGIN + '/one-click', 'effect': 'navigate'})
+        self.assertTrue(approvals.requests[3][1].startswith("결제 신호 'Buy now'"), 'the owner reads what the label forwards to')
+
+    def test_a_changed_purchase_text_or_price_is_another_approval(self):
+        # #763 review (Codex): a neutral name ("Continue") whose button value says "Buy $10":
+        # the approval binds that text, so "Buy $1000" on the resumed run asks again.
+        page = """<html><head><title>곡</title></head><body><form action="/order" method="post">
+          <input type="submit" aria-label="Continue" value="Buy $10"></form></body></html>"""
+        pages = {**PAGES, '/song': page}
+        approvals = Approvals()
+        sess, driver = session(FakeDriver(pages), approvals=approvals)
+        sess.open({'url': ORIGIN + '/song', 'effect': 'navigate'})
         with self.assertRaises(ToolError):
-            sess.click({'target': 'Buy now', 'effect': 'mutate'})
-        self.assertEqual(driver.posts, [('post', '/add'), ('post', '/order')])
+            sess.click({'target': 'Continue', 'effect': 'mutate'})
+        self.assertIn('Buy $10', approvals.requests[-1][1])
+        approvals.issue(approvals.requests[-1][0])
+        driver.pages = {**PAGES, '/song': page.replace('Buy $10', 'Buy $1000')}
+        with self.assertRaises(ToolError):
+            sess.click({'target': 'Continue', 'effect': 'mutate'})
+        self.assertEqual((len(approvals.issued), driver.posts), (1, []), 'the approval of $10 is not spent on $1000')
+        driver.pages = pages
+        self.assertEqual(sess.click({'target': 'Continue', 'effect': 'mutate'})['title'], '주문 완료')
 
     def test_a_form_post_refused_between_steps_is_reported_to_the_model(self):
         sess, driver = session()

@@ -899,7 +899,9 @@ class SessionFixtureHandler(FixtureHandler):
               <a href="/order">Card <span role="button">Details</span> ₩12,900 결제하기</a>
               <a href="/reviews">Best laptops to buy in 2026, compared</a>
               <a href="#" onclick="return false">Purchase this song for $0.99</a>
-              <div onclick="void 0">Our plans and a long description you can subscribe to later on
+              <div onclick="void 0">Our plans and a long description you can subscribe to later on.
+                Every plan includes the same features, support hours and storage, and the differences are only in
+                how many people can share one account and how long the history is kept for each of them.
                 <span role="button">Read more</span></div>
               </body></html>''')
         if path == '/checkout-realm':

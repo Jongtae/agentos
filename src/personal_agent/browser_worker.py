@@ -210,7 +210,7 @@ const ancestorText = (el) => { const texts = []; let node = el.parentElement;
     if (buttonish(up)) texts.push(commitText(up));
     node = up.parentElement;
   }
-  return texts.join(' | '); };
+  return texts.join(' || '); };
 // What is around it (a product and its price), for the owner's approval prompt and binding.
 const contextOf = (el) => { let node = el.parentElement; const own = (el.innerText || '').length;
   for (let depth = 0; node && depth < 4; depth += 1, node = node.parentElement) {

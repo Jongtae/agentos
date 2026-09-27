@@ -762,6 +762,15 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 if path=='/api/decision-route/activate':return self.reply(200,service.activate_decision_route(body))
                 if path=='/api/decision-route/credential':return self.reply(200,service.save_decision_route_credential(body))
                 if path=='/api/decision-route/capabilities':return self.reply(200,service.check_decision_cli_capabilities(body))
+                if path=='/api/decision-route/models':
+                    # #679 (review P2-2): 모델 목록 새로고침 runs a CLI or sends
+                    # a saved key to its provider, so it is a POST and, beyond
+                    # the cross-origin refusal above, requires this page's own
+                    # Origin (browsers send it on every POST).  Settings never
+                    # calls it on open.  Listed is not verified.
+                    if urlsplit(origin or '').netloc!=self.headers.get('Host') or urlsplit(origin or '').scheme not in ('http','https'):
+                        return self.reply(403,{'error':'이 화면에서 직접 누른 요청만 모델 목록을 가져올 수 있습니다.'})
+                    return self.reply(200,service.list_decision_models(body.get('route','')))
                 if path=='/api/openrouter/models':return self.reply(200,service.free_models())
                 if path=='/api/ollama/models':return self.reply(200,service.local_models())
                 if path in ('/api/folder-requests/select','/api/folder-requests/approve','/api/folder-requests/deny'):

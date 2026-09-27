@@ -49,6 +49,20 @@ ENGINE_DESTINATIONS = {'codex': 'OpenAI (Codex 구독 계정)', 'claude-code': '
 KEY_META = 'api_keys'
 MIGRATED = 'api_keys_migrated'
 CHECKS = 'main_ai_checks'
+#: #679: the owner's Main AI model per subscription CLI (absent: the CLI's own
+#: default).  The Work route runs each CLI with its user configuration ignored
+#: (Codex `--ignore-user-config`, Claude Code `--setting-sources`/isolated
+#: HOME), so a model set in `~/.codex/config.toml` never reaches Work; this is
+#: the owner's explicit choice instead, passed as the CLI's `--model`.
+SUBSCRIPTION_MODELS = 'subscription_engine_models'
+#: Owner-visible note for the Codex model row.
+CODEX_CONFIG_NOTE = ('AgentOS는 Codex 개인 설정을 격리하므로 ~/.codex/config.toml의 모델은 쓰지 않습니다. '
+                     '비워 두면 CLI 기본 모델을 씁니다.')
+#: The isolated sidecar deployment has a closed request contract (prompt,
+#: engine, bearer, task id; `isolated_engine_sidecar._validate`) and a pinned
+#: CLI image, so it takes no model: the setting is hidden and refused there
+#: instead of being silently ignored (#679 review).
+ISOLATED_MODEL_NOTE = '격리 런타임 배포는 작업 모델 지정을 지원하지 않아 CLI 기본 모델을 씁니다.'
 
 
 def key_slot(provider_id):
@@ -146,6 +160,13 @@ class MainAiRoutes:
         rows = self.store.config(CHECKS, {})
         return dict(rows) if isinstance(rows, dict) else {}
 
+    def subscription_model(self, route_id):
+        """The owner's Work model for one CLI, or '' for the CLI's own default (#679)."""
+        from .decision_adapters import valid_model_id
+        rows = self.store.config(SUBSCRIPTION_MODELS, {})
+        model = rows.get(route_id) if isinstance(rows, dict) else None
+        return model if valid_model_id(model) else ''
+
     def _record_check(self, route_id, record):
         with self.service.lock:
             rows = self._checks()
@@ -158,6 +179,7 @@ class MainAiRoutes:
         model = self.store.config('model', {}) or {}
         meta, checks = self._meta(), self._checks()
         engines = {item['id']: item for item in self.service.subscription_engine_status()['engines']}
+        isolated = bool(getattr(self.service, 'isolated_engine_adapter', None))
         model_test = self.store.config('model_test')
         routes = []
         for route_id in CHOOSER_ORDER:
@@ -167,7 +189,14 @@ class MainAiRoutes:
                 login = engine.get('login') or {'state': 'unchecked'}
                 routes.append({'id': route_id, 'kind': 'subscription', 'name': ENGINE_NAMES[route_id],
                                'destination': ENGINE_DESTINATIONS[route_id], 'installed': bool(engine.get('installed')),
-                               'login': login, 'credential': bool(engine.get('credential')), 'check': check})
+                               'login': login, 'credential': bool(engine.get('credential')), 'check': check,
+                               # #679: '' means the CLI's own default.
+                               # Shown even when isolated, so a refused Work names it;
+                               # 확인하고 사용 there clears it.
+                               'model': self.subscription_model(route_id),
+                               'model_selectable': not isolated,
+                               'model_note': ISOLATED_MODEL_NOTE if isolated
+                               else CODEX_CONFIG_NOTE if route_id == 'codex' else ''})
                 continue
             preset = API_ROUTES[route_id]
             saved = bool(self.store.secret(key_slot(route_id)))
@@ -210,7 +239,7 @@ class MainAiRoutes:
                 raise MainAiError('사용할 기본 AI를 선택하세요.')
             self.migrate()
             if route_id in SUBSCRIPTION_ROUTES:
-                self._activate_subscription(route_id)
+                self._activate_subscription(route_id, body.get('model'))
             else:
                 self._activate_api(route_id, body.get('model'))
             judgment = self.service.decision_routes.follow_main_switched(route_id)
@@ -219,7 +248,16 @@ class MainAiRoutes:
         finally:
             self._switching.release()
 
-    def _activate_subscription(self, route_id):
+    def _activate_subscription(self, route_id, model_name=None):
+        # #679: an explicit Work model for this CLI ('' clears it to the CLI
+        # default); checked for shape before anything else changes.
+        from .decision_adapters import valid_model_id
+        if model_name is not None:
+            model_name = model_name.strip() if isinstance(model_name, str) else model_name
+            if model_name and not valid_model_id(model_name):
+                raise MainAiError('모델 이름 형식을 확인하세요. 현재 기본 AI와 판단 AI는 그대로입니다.')
+            if model_name and getattr(self.service, 'isolated_engine_adapter', None):
+                raise MainAiError(ISOLATED_MODEL_NOTE + ' 현재 기본 AI와 판단 AI는 그대로입니다.')
         try:
             # The owner's 확인하고 사용 is the login attestation; the CLI's own
             # login check runs first and a known sign-out refuses the switch.
@@ -227,6 +265,15 @@ class MainAiRoutes:
         except ValueError as exc:
             self._record_check(route_id, {'state': 'failed', 'failure': str(exc)[:300]})
             raise MainAiError(f'{exc} 현재 기본 AI와 판단 AI는 그대로입니다.') from None
+        if model_name is not None:
+            with self.service.lock:
+                rows = self.store.config(SUBSCRIPTION_MODELS, {})
+                rows = dict(rows) if isinstance(rows, dict) else {}
+                if model_name:
+                    rows[route_id] = model_name
+                else:
+                    rows.pop(route_id, None)
+                self.store.put(SUBSCRIPTION_MODELS, rows)
         self._record_check(route_id, {'state': 'ok'})
 
     def _activate_api(self, route_id, model_name):

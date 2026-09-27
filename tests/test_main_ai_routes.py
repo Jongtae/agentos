@@ -18,6 +18,8 @@ from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
 from personal_agent.subscription_engines import SubscriptionEngines
+from personal_agent.decision_qualification import CASE_IDS
+from test_decision_routes import careless, oracle, parse_prompt, schema_answer
 
 OPENAI_KEY = 'sk-fixture-openai-0001'
 ANTHROPIC_KEY = 'ak-fixture-anthropic-0001'
@@ -30,6 +32,7 @@ class Transport:
         self.calls = []
         self.refuse = set()  # hostnames that answer HTTP 401
         self.refuse_decide = set()  # hostnames that answer the probe but not a judgment
+        self.careless = set()  # models that answer every judgment carelessly (never qualify, #679)
 
     def __call__(self, url, body, headers=None, timeout=60):
         from urllib.parse import urlsplit
@@ -44,7 +47,13 @@ class Transport:
         if name == 'decide' and host in self.refuse_decide:
             raise ProviderError('HTTP 401', status=401)
         if name == 'decide':
-            arguments = {'choice': 'retry', 'confidence': 0.9}
+            # #679: the Judgment AI is qualified with the synthetic suite, so
+            # judgments are answered by the shared fixture oracle.
+            last = body['messages'][-1]['content']
+            text = last if isinstance(last, str) else ' '.join(part.get('text', '') for part in last)
+            schema = tools[0]['function']['parameters'] if 'function' in tools[0] else tools[0]['input_schema']
+            purpose, facts = parse_prompt(text)
+            arguments = schema_answer(schema, purpose, facts, careless if body.get('model') in self.careless else oracle)
         elif name:
             arguments = {}
         if url.endswith('/v1/messages'):
@@ -60,9 +69,11 @@ class Transport:
 class _Engine:
     def __init__(self):
         self.calls = 0
+        self.kwargs = []
 
-    def execute(self, engine, prompt, tools, **_kwargs):
+    def execute(self, engine, prompt, tools, **kwargs):
         self.calls += 1
+        self.kwargs.append(dict(kwargs))
         return ExecutionResult('engine answer', engine, 0)
 
     def login_status(self, engine_id, binary=None):
@@ -244,21 +255,27 @@ class MainAiRouteTests(unittest.TestCase):
         self.assertEqual(self.store.config('decision_route'), {'transport': 'off'})
         self.assertEqual(result['decision_route']['mode'], 'off')
 
-    # -- AC8 Codex cannot be followed ----------------------------------------------
-    def test_codex_main_makes_follow_unavailable_with_reason(self):
+    # -- AC8 (#679): Codex is followed under the strict profile ---------------------
+    def test_codex_main_is_followable_and_a_failed_strict_check_needs_attention(self):
         self._save('openai', OPENAI_KEY)
         self.service.activate_main_ai({'route': 'openai'})
+        calls = len(self.transport.calls)
         result = self.service.activate_main_ai({'route': 'codex'})
         self.assertEqual(self.service.main_ai.current(), 'codex')
-        self.assertEqual(result['judgment']['failure'], 'follow-unsupported')
         route = result['decision_route']
-        self.assertFalse(route['follow']['available'])
-        self.assertIn('Codex', route['follow']['reason'])
+        self.assertTrue(route['follow']['available'])
+        self.assertEqual((route['follow']['transport'], route['follow']['model_policy'], route['follow']['candidates']),
+                         ('subscription_cli', 'lowest_qualified', ['gpt-6-luna', 'gpt-5.6-luna', 'gpt-5.6-terra']))
+        # The fake execution adapter here cannot run the strict qualification:
+        # the follow row needs attention, and nothing falls back to OpenAI.
+        self.assertEqual(result['judgment']['state'], 'attention')
         self.assertFalse(route['active']['available'])
-        with self.assertRaises(DecisionRouteError):
-            self.service.activate_decision_route({'transport': MODE_FOLLOW})
+        self.assertEqual(route['effective']['state'], 'attention')
+        decision = self.service.decision_engine.choose(DecisionContext('p', {'a': 'b'}), ('x', 'y'), 'q')
+        self.assertNotEqual(decision.outcome, OUTCOME_DECIDED)
+        self.assertEqual(len(self.transport.calls), calls, 'no judgment reached api.openai.com')
 
-    def test_claude_code_follow_uses_lowest_qualified_light_candidate(self):
+    def test_claude_code_follow_uses_the_ranked_cheapest_first_list(self):
         seen = []
 
         def fake_cli(body, extra=None):
@@ -266,10 +283,42 @@ class MainAiRouteTests(unittest.TestCase):
             raise DecisionRouteError('fixture: not qualified')
         self.service.decision_routes._activate_cli = fake_cli
         result = self.service.activate_main_ai({'route': 'claude-code'})
-        self.assertEqual(seen, [({'engine': 'claude-code', 'model_policy': 'lowest_qualified', 'candidates': ['haiku']},
+        # No explicit candidates: activation qualifies the ranked list
+        # (haiku, then sonnet), filtered by its own capability check.
+        self.assertEqual(seen, [({'engine': 'claude-code', 'model_policy': 'lowest_qualified'},
                                  {'mode': MODE_FOLLOW, 'main': 'claude-code'})])
         self.assertEqual(result['judgment']['state'], 'attention')
         self.assertEqual(self.store.config('decision_route')['transport'], 'off')
+        self.assertEqual(result['decision_route']['follow']['candidates'], ['haiku', 'sonnet'])
+
+    # -- #679: API follow defaults are the cheapest qualified ranked model --------
+    def test_openai_follow_defaults_to_the_cheapest_qualified_model(self):
+        self._save('openai', OPENAI_KEY)
+        result = self.service.activate_main_ai({'route': 'openai'})
+        active = result['decision_route']['active']
+        self.assertEqual((active['model_policy'], active['requested_model'], active['destination']),
+                         ('lowest_qualified', 'gpt-4o-mini', 'api.openai.com'))
+        self.assertEqual(active['qualification']['model'], 'gpt-4o-mini')
+        judged = [call for call in self.transport.calls if call['model'] == 'gpt-4o-mini']
+        self.assertGreaterEqual(len(judged), len(CASE_IDS), 'the full suite, not a single probe')
+        self.assertFalse(any(call['model'] == 'gpt-6-luna' for call in self.transport.calls))
+        self.assertEqual(result['decision_route']['effective']['text'], '기본 AI(OpenAI API)를 따라가는 중 — gpt-4o-mini, 검증됨')
+
+    def test_openai_follow_tries_the_next_ranked_model_only_when_the_first_fails(self):
+        self._save('openai', OPENAI_KEY)
+        self.transport.careless.add('gpt-4o-mini')
+        active = self.service.activate_main_ai({'route': 'openai'})['decision_route']['active']
+        self.assertEqual(active['requested_model'], 'gpt-6-luna')
+        self.transport.careless.add('gpt-6-luna')
+        self.store.put('decision_route', None)
+        result = self.service.activate_main_ai({'route': 'openai'})
+        self.assertEqual((result['judgment']['state'], result['judgment']['failure']), ('attention', 'no-qualified-candidate'))
+        self.assertEqual(self.store.config('decision_route')['transport'], 'off', 'no other model, key or route')
+
+    def test_anthropic_follow_defaults_to_haiku(self):
+        self._save('anthropic', ANTHROPIC_KEY)
+        active = self.service.activate_main_ai({'route': 'anthropic'})['decision_route']['active']
+        self.assertEqual((active['model_policy'], active['requested_model']), ('lowest_qualified', 'claude-haiku-4-5'))
 
     def test_explicit_follow_failure_keeps_previous_judgment(self):
         self._save('openai', OPENAI_KEY)
@@ -279,6 +328,77 @@ class MainAiRouteTests(unittest.TestCase):
         with self.assertRaises(DecisionRouteError):
             self.service.activate_decision_route({'transport': MODE_FOLLOW})
         self.assertEqual(self.store.config('decision_route'), {'transport': 'off'})
+
+    # -- #679: the Work route passes the owner's CLI model -------------------------
+    def test_subscription_main_model_is_saved_shown_and_passed_to_work(self):
+        status = self.service.activate_main_ai({'route': 'codex', 'model': 'gpt-5.6-luna'})['main_ai']
+        codex = next(row for row in status['routes'] if row['id'] == 'codex')
+        self.assertEqual(codex['model'], 'gpt-5.6-luna')
+        self.assertIn('~/.codex/config.toml', codex['model_note'], 'Settings says the owner config model is not used')
+        self.assertEqual(next(row for row in status['routes'] if row['id'] == 'claude-code')['model_note'], '')
+        self.store.enqueue('do work', 'work-model-1')
+        self.assertTrue(self.service.run_one())
+        self.assertEqual(self.service.execution_adapter.kwargs[-1].get('model'), 'gpt-5.6-luna')
+        # An empty model clears the choice: the CLI's own default, no --model.
+        self.service.activate_main_ai({'route': 'codex', 'model': ''})
+        self.assertEqual(self.service.main_ai.subscription_model('codex'), '')
+        self.store.enqueue('do more work', 'work-model-2')
+        self.assertTrue(self.service.run_one())
+        self.assertNotIn('model', self.service.execution_adapter.kwargs[-1])
+
+    def test_the_isolated_sidecar_takes_no_work_model_so_it_is_hidden_refused_and_never_ignored(self):
+        # #679 review P1: the sidecar's closed contract (prompt, engine, bearer,
+        # task id) carries no model; nothing may silently drop the owner's choice.
+        from personal_agent.isolated_mcp_proxy import TaskCapabilityRegistry
+        from personal_agent.isolated_engine_sidecar import IsolatedEngineSidecar, SidecarError
+
+        class Isolated:
+            def __init__(self):
+                self.calls = []
+
+            def issue_task_token(self, **kwargs):
+                import secrets
+                return secrets.token_urlsafe(32)
+
+            def execute(self, **kwargs):
+                self.calls.append(kwargs)
+                return 'isolated answer'
+        # A Work model saved before isolation was configured.
+        self.service.activate_main_ai({'route': 'codex', 'model': 'gpt-5.6-luna'})
+        isolated = Isolated()
+        service = AgentService(self.store, adapter=ModelAdapter(self.transport),
+                               subscription_engines=SubscriptionEngines(finder=lambda _: '/runtime/cli', clock=lambda: 1),
+                               execution_adapter=_Engine(), isolated_engine_adapter=isolated,
+                               isolated_mcp_registry=TaskCapabilityRegistry())
+        codex = next(row for row in service.main_ai.status()['routes'] if row['id'] == 'codex')
+        self.assertFalse(codex['model_selectable'])
+        self.assertEqual(codex['model'], 'gpt-5.6-luna', 'the stored choice stays visible')
+        self.assertIn('격리 런타임', codex['model_note'])
+        job = self.store.enqueue('do work', 'isolated-work-model')
+        service.run_one()
+        self.assertEqual(isolated.calls, [], 'the Work is refused, not run on the CLI default')
+        self.assertEqual(self.store.job(job)['status'], 'failed')
+        self.assertIn('작업 모델', self.store.job(job)['error'] or '')
+        with self.assertRaisesRegex(MainAiError, '격리 런타임'):
+            service.activate_main_ai({'route': 'codex', 'model': 'gpt-5.6-terra'})
+        service.activate_main_ai({'route': 'codex', 'model': ''})
+        self.assertEqual(service.main_ai.subscription_model('codex'), '')
+        second = self.store.enqueue('do more work', 'isolated-work-model-2')
+        service.run_one()
+        self.assertEqual(len(isolated.calls), 1, self.store.job(second))
+        self.assertNotIn('model', isolated.calls[0])
+        # The sidecar itself still refuses any extra request field.
+        sidecar = IsolatedEngineSidecar('http://engine-callback.invalid/mcp')
+        with self.assertRaises(SidecarError):
+            sidecar._validate({'prompt': 'p', 'engine_id': 'codex', 'token': 't', 'task_id': 'j', 'model': 'gpt-5.6-luna'})
+
+    def test_a_malformed_work_model_changes_nothing(self):
+        self.service.activate_main_ai({'route': 'claude-code', 'model': 'sonnet'})
+        with self.assertRaisesRegex(MainAiError, '그대로'):
+            self.service.activate_main_ai({'route': 'codex', 'model': '--dangerously-bypass-approvals-and-sandbox'})
+        self.assertEqual(self.service.main_ai.current(), 'claude-code')
+        self.assertEqual(self.service.main_ai.subscription_model('claude-code'), 'sonnet')
+        self.assertEqual(self.service.main_ai.subscription_model('codex'), '')
 
     # -- AC9 / AC11 --------------------------------------------------------------
     def test_existing_ollama_config_renders_truthfully_and_is_not_offered(self):

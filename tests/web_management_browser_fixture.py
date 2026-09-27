@@ -47,21 +47,34 @@ class Fixture:
     pending_revocations = {}
     # Synthetic DecisionEngine route read model (#580): an owner-selected
     # subscription route with a qualified model, plus inactive choices.
+    # #679: Codex judgments carry their strict-isolation record, effort and
+    # the effective-route sentence Settings shows; model lists are absent
+    # until the owner presses 모델 목록 새로고침.
     decision_route = {
         "active": {"transport": "subscription_cli", "source": "owner", "engine": "codex", "model_policy": "lowest_qualified",
                    "requested_model": "fixture-small-model", "available": True, "destination": "OpenAI (Codex 구독 계정)",
-                   "cli_version": "codex-cli 0.153.4",
-                   "qualification": {"suite_version": "decision-qualification/1", "model": "fixture-small-model"}},
-        "direct_api": {"configured": True, "model": "gpt-4o-mini", "destination": "api.openai.com"},
+                   "cli_version": "codex-cli 0.153.4", "effort": "low",
+                   "strict_profile": {"version": "0.153.4", "platform": "darwin"}, "instruction_files_present": [],
+                   "qualification": {"suite_version": "decision-qualification/3", "model": "fixture-small-model"}},
+        "effective": {"state": "active", "transport": "subscription_cli", "model": "fixture-small-model",
+                      "destination": "OpenAI (Codex 구독 계정)",
+                      "template": "따로 지정한 판단 AI를 쓰는 중: {label} — {model}, {verified}",
+                      "params": {"label": "Codex", "model": "fixture-small-model", "verified": "검증됨"}},
+        "model_lists": {},
+        "direct_api": {"configured": True, "model": "gpt-4o-mini", "destination": "api.openai.com",
+                       "ranked_models": ["gpt-4o-mini", "gpt-6-luna"]},
         "jev": {"configured": False, "model": "jev-latest", "destination": "api.typesafe.ai",
                 "check": {"state": "failed", "failure": "auth", "checked_at": 1}},
         "subscription_cli": [
             {"id": "codex", "name": "Codex", "installed": True, "login": "signed-in", "model_selection": "supported",
              "destination": "OpenAI (Codex 구독 계정)", "isolated_deployment": False,
+             "ranked_models": ["gpt-5.6-luna", "gpt-5.6-terra"],
+             "model_efforts": {"gpt-5.6-luna": ["low", "medium", "high"], "gpt-5.6-terra": ["low", "medium", "high"]},
              "check": {"state": "active", "observed_model": "not reported", "checked_at": 1}},
             {"id": "claude-code", "name": "Claude Code", "installed": True, "login": "signed-out", "model_selection": "unchecked",
-             "destination": "Anthropic (Claude Code 구독 계정)", "isolated_deployment": False}],
-        "suite_version": "decision-qualification/1"}
+             "destination": "Anthropic (Claude Code 구독 계정)", "isolated_deployment": False,
+             "ranked_models": ["haiku", "sonnet"], "model_efforts": {"haiku": [], "sonnet": ["low", "medium", "high", "xhigh", "max"]}}],
+        "suite_version": "decision-qualification/3"}
     model = {"provider": "openai", "endpoint": "https://example.invalid/v1", "model": "fixture-model"}
     other_results = [{"id": f"other-{index}", "job_id": f"other-job-{index}", "workspace_id": "workspace-other", "content": f"other result {index}", "created": 100 + index} for index in range(30)]
     delay_state = False

@@ -803,6 +803,10 @@ class AgentService:
         engine=body.get('engine','') if isinstance(body,dict) else ''
         return self.decision_routes.check_cli_capabilities(engine)
 
+    def list_decision_models(self, route):
+        """#679: 모델 목록 새로고침 - explicit owner action only, never on page open."""
+        return self.decision_routes.list_models(route)
+
     # -- turn provenance (#570) ------------------------------------------------
     #: Stored secrets whose literal values are removed from any text AgentOS
     #: records or sends on the owner's behalf.
@@ -4677,6 +4681,12 @@ class AgentService:
                             'context_mode':engine_context.get('mode','shared-context')}))
                         try:
                             if isolated:
+                                # #679: the sidecar's closed contract carries no model; a Work
+                                # model stored before isolation was configured is refused, not
+                                # silently replaced by the CLI default.
+                                if self.main_ai.subscription_model(subscription['id']):
+                                    raise ExecutionError('격리 런타임 배포는 작업 모델 지정을 지원하지 않습니다. 설정에서 작업 모델을 비우거나 격리 없이 실행하세요.',
+                                                         failure_class='invalid-configuration')
                                 tools=ReadOnlyAgentOSMcpTools(capabilities)
                                 token=self.isolated_engine_adapter.issue_task_token(
                                     prompt=engine_prompt, engine_id=subscription['id'], task_id=job['id'])
@@ -4688,9 +4698,12 @@ class AgentService:
                                     self.isolated_mcp_registry.revoke(token)
                                 result=ExecutionResult(content,subscription['id'],0)
                             else:
+                                # #679: the owner's Main AI model for this CLI (none: the CLI's own default).
+                                work_model=self.main_ai.subscription_model(subscription['id'])
                                 served=facade(capabilities,**facade_options)
                                 served.native_search=native_search
-                                result=self.execution_adapter.execute(subscription['id'],engine_prompt,served,context=adapter_context)
+                                result=self.execution_adapter.execute(subscription['id'],engine_prompt,served,context=adapter_context,
+                                                                      **({'model':work_model} if work_model else {}))
                         except (ExecutionError,EngineGatewayError) as exc:
                             diagnostics=exc.diagnostics() if isinstance(exc,ExecutionError) else {}
                             # #678: searches the CLI reported before it failed are still observed.

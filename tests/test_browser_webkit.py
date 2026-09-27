@@ -493,6 +493,18 @@ class DriverProtocolTests(unittest.TestCase):
                                             'in_form': False, 'payment_form': False})
         self.assertEqual(ops[3]['tokens'], sorted(bs.PAYMENT_AUTOCOMPLETE))
         self.assertEqual(ops[4]['expect'], ops[3]['expect'])
+        self.assertEqual((ops[3]['approved'], ops[4]['approved']), (False, False), 'unapproved unless the session says so')
+        # #698: an element whose label forwards to the card form carries payment_form, and
+        # the worker's cancelled payment-form submit is the typed approval refusal.
+        with self.assertRaises(ToolError) as caught:
+            driver.click(9, 4)
+        self.assertEqual((caught.exception.code, caught.exception.requires), ('approval_required', 'browser-step-approval'))
+        self.assertEqual(self.commands()[-1]['expect']['payment_form'], True)
+        driver.click(9, 4, approved=True)
+        self.assertIs(self.commands()[-1]['approved'], True)
+        with self.assertRaises(ToolError):
+            driver.click(9, 4, approved='yes')
+        self.assertIs(self.commands()[-1]['approved'], False, 'only a literal True approves')
         with self.assertRaises(ToolError) as caught:
             driver.click(7, 4)   # the fake worker answers target_obscured for it
         self.assertEqual(caught.exception.code, 'target_unavailable')
@@ -893,6 +905,64 @@ class WebKitIntegrationTests(unittest.TestCase):
         finally:
             sess.close()
         self.assertFalse(self.profile.status()['in_use'])
+
+    def test_label_and_script_forwarded_payment_submits_need_an_approval(self):
+        """#698: repro of the #687 re-review gap on the real worker, and the approved and ordinary paths."""
+        approvals = Approvals()
+        sess = bs.BrowserSession(self.profile.driver_factory('work-698'), work_id='work-698', approvals=approvals, steps=40,
+                                 allowed_origins_for_tests=(self.fixture,))
+        page_url = self.origin + '/checkout-forwarded'
+
+        def number(target):
+            # The pay button is named by the same <label for=paybtn>: the span is addressed by number.
+            rows = [row for row in sess.last['_elements'] if row['name'] == target]
+            return str(next(row['n'] for row in rows if row['tag'] != 'button')) if len(rows) > 1 else target
+
+        def refused(target):
+            with self.assertRaises(ToolError) as caught:
+                sess.click({'target': number(target), 'effect': 'mutate'})
+            self.assertEqual(caught.exception.code, 'approval_required', target)
+            return approvals.requests[-1][0]
+        try:
+            sess.open({'url': page_url, 'effect': 'navigate'})
+            span = next(row for row in sess.last['_elements'] if row['tag'] == 'span')
+            self.assertTrue(span['submit_guarded'], 'the real snapshot reports the label control form')
+            # (a) the span inside <label for=paybtn>, (b) payForm.submit() and requestSubmit() from a div.
+            for target in ('빠른 구매', '바로 결제', '요청 결제'):
+                refused(target)
+                self.assertEqual(self.server.posts, [], target)
+                self.assertEqual(sess.read()['title'], '빠른 결제', 'the page stayed')
+            # An ordinary form still submits, by its button and by a script.
+            self.assertEqual(sess.click({'target': '쿠폰 바로 적용', 'effect': 'mutate'})['title'], '쿠폰')
+            sess.open({'url': page_url, 'effect': 'navigate'})
+            self.assertEqual(sess.click({'target': '쿠폰 적용', 'effect': 'mutate'})['title'], '쿠폰')
+            self.assertEqual(self.server.posts, ['/coupon', '/coupon'])
+            # The owner's approval of the refused step lets exactly that step submit, once.
+            for target in ('바로 결제', '빠른 구매'):
+                sess.open({'url': page_url, 'effect': 'navigate'})
+                approvals.issued.append(bs.binding_digest(refused(target)))
+                self.assertEqual(sess.click({'target': number(target), 'effect': 'mutate'})['title'], '결제 완료')
+                self.assertEqual(approvals.issued, [])
+            self.assertEqual(self.server.posts, ['/coupon', '/coupon', '/pay', '/pay'])
+            # The step's page-world wrapper is removed again after the step.
+            sess.open({'url': page_url, 'effect': 'navigate'})
+            refused('바로 결제')
+        finally:
+            sess.close()
+        self.assertEqual(self.server.posts, ['/coupon', '/coupon', '/pay', '/pay'])
+        # The worker's own guard, without the session's classification: a press on the span is cancelled.
+        worker = bs.WebKitWorkerDriver('p', cwd=self.tmp.name, allowed_origins_for_tests=(self.fixture,))
+        try:
+            worker.goto(page_url, 10)
+            page = worker.snapshot()
+            span = next(row for row in page['elements'] if row['tag'] == 'span')
+            self.assertIsNotNone(span['label_form'])
+            with self.assertRaises(ToolError) as caught:
+                worker.click(span['index'], 10)
+            self.assertEqual(caught.exception.code, 'approval_required')
+            self.assertEqual(self.server.posts, ['/coupon', '/coupon', '/pay', '/pay'], 'no POST')
+        finally:
+            worker.close()
 
     def test_sessions_survive_a_restart_only_through_the_encrypted_jar(self):
         value = self.server.cookie_value

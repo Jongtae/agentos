@@ -31,6 +31,17 @@ world cancels a trusted click that lands elsewhere) or ``INSERT`` (the held
 element must be the focused one and still match, then ``insertText`` runs in
 that same script turn).  The element is never resolved a second time.
 
+Submit guard (#698): a click or type the parent sends without ``approved``
+arms, from ``LOCATE`` to the step's answer, a capture-phase ``submit``
+listener (registered at document start in the client world) that cancels a
+submit of any form holding a card, CVC, card-expiry, one-time-code or password
+field, whatever triggered it (a label forwarding a press, a scripted click,
+``requestSubmit``).  ``form.submit()`` fires no ``submit`` event, so for the
+step ``HTMLFormElement.prototype.submit`` is wrapped in the page world to
+signal the same listener; a page script holding the original function is not
+covered (see ``SUBMIT_WRAP_SCRIPT``).  A cancelled submit answers
+``approval_required``.
+
 Destinations: every navigation (typed, redirect, form, ``window.open``, frame)
 passes ``decidePolicyForNavigationAction``: only http(s) to public addresses,
 after DNS resolution, reusing ``local_tools``' denied names and its
@@ -63,6 +74,10 @@ EMBEDDED_UA_TOKEN = 'AgentOS-Embedded/1'
 #: ``index`` is an element's position in ``document.querySelectorAll(SELECTOR)``.
 SELECTOR = ('a[href], button, input, select, textarea, summary, [role="button"], [role="link"], [role="textbox"], '
             '[role="checkbox"], [role="radio"], [role="combobox"], [role="menuitem"], [role="tab"]')
+
+#: The cancelable event the page-world ``form.submit()`` wrapper dispatches on
+#: the form so the client-world submit guard can refuse it (#698).
+SUBMIT_SIGNAL = 'agentos-guarded-submit'
 
 #: Helpers every page script shares.  Strings leaving the page are well-formed
 #: UTF-16 and cut at code-point boundaries.  ``describe`` mirrors the guard's
@@ -104,15 +119,39 @@ const autocompleteOf = (el) => (el.getAttribute('autocomplete') || '').toLowerCa
 const fieldToken = (el) => { const tokens = autocompleteOf(el).split(/\s+/).filter(Boolean);
   if (tokens.length && tokens[tokens.length - 1] === 'webauthn') tokens.pop(); return tokens.length ? tokens[tokens.length - 1] : ''; };
 const formOf = (el) => el.form || el.closest('form');
+// The control a <label> forwards a press to, for the label ``el`` is or sits in,
+// when that control is another element (#698): HTML's ``label.control`` (the
+// ``for`` target, else the first labelable descendant), resolved without ``el.labels``.
+const LABELABLE = 'button, input:not([type="hidden"]), meter, output, progress, select, textarea';
+const labelControl = (el) => { const label = el.closest('label'); if (!label) return null;
+  const id = label.getAttribute('for');
+  const control = id !== null ? document.getElementById(id) : label.querySelector(LABELABLE);
+  return control && control !== el ? control : null; };
 const paymentField = (el, tokens) => typeOf(el) === 'password' || tokens.includes(fieldToken(el));
-const paymentForm = (el, tokens) => { const form = formOf(el); if (!form) return false;
-  return Array.from(document.querySelectorAll(SELECTOR)).some((other) => formOf(other) === form && visible(other) && paymentField(other, tokens)); };
+const formHolds = (form, tokens) => !!form &&
+  Array.from(document.querySelectorAll(SELECTOR)).some((other) => formOf(other) === form && visible(other) && paymentField(other, tokens));
+const paymentForm = (el, tokens) => { if (formHolds(formOf(el), tokens)) return true;
+  const control = labelControl(el); return !!control && formHolds(formOf(control), tokens); };
 const describe = (el, tokens) => ({tag: el.tagName.toLowerCase(), type: typeOf(el), autocomplete: autocompleteOf(el), name: nameOf(el),
   in_form: !!formOf(el), payment_form: paymentForm(el, tokens)});
 const same = (actual, expect) => !!expect && ['tag', 'type', 'autocomplete', 'name', 'in_form', 'payment_form']
   .every((key) => key in expect && actual[key] === expect[key]);
-const state = () => (window.__agentos = window.__agentos || {targets: new Map(), guard: null, listening: false});
-""" % {'selector': json.dumps(SELECTOR)}
+const state = () => (window.__agentos = window.__agentos || {targets: new Map(), guard: null, listening: false,
+  submit: null, submitListening: false});
+// The submit guard (#698): while a step without an approval runs (``state().submit``),
+// a submit of a form holding a payment field (any field, shown or not) is cancelled
+// whatever triggered it: a trusted or scripted click, a label, ``requestSubmit``,
+// Enter, or ``form.submit()`` through the page-world signal (``SUBMIT_WRAP_SCRIPT``).
+const holdsPayment = (form, tokens) => [...Array.from(form.elements || []), ...Array.from(form.querySelectorAll(SELECTOR))]
+  .some((field) => paymentField(field, tokens));
+const armSubmitGuard = () => { const s = state(); if (s.submitListening) return; s.submitListening = true;
+  const cancel = (event) => { const g = state().submit; if (!g) return;
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement) || !holdsPayment(form, g.tokens)) return;
+    g.hit = true; event.preventDefault(); event.stopImmediatePropagation(); };
+  window.addEventListener('submit', cancel, true);
+  window.addEventListener(%(signal)s, cancel, true); };
+""" % {'selector': json.dumps(SELECTOR), 'signal': json.dumps(SUBMIT_SIGNAL)}
 
 #: The snapshot: elements the model can act on and the fields the guard
 #: reasons about.  Plain data only (no node handles, no HTML).
@@ -135,25 +174,28 @@ const roleOf = (el) => {
 };
 const NO_VALUE = ['submit', 'button', 'image', 'reset', 'checkbox', 'radio', 'file', 'password', 'hidden'];
 const forms = new Map();
+const idOf = (f) => { if (!f) return null; if (!forms.has(f)) forms.set(f, forms.size + 1); return forms.get(f); };
 const elements = [];
 Array.from(document.querySelectorAll(SELECTOR)).forEach((el, index) => {
   if (!visible(el)) return;
   const tag = el.tagName.toLowerCase();
   const form = formOf(el);
-  let formId = null;
-  if (form) { if (!forms.has(form)) forms.set(form, forms.size + 1); formId = forms.get(form); }
+  const formId = idOf(form);
+  const control = labelControl(el);
   const type = typeOf(el);
   const takesValue = (tag === 'input' && !NO_VALUE.includes(type)) || tag === 'textarea' || tag === 'select';
   elements.push({index, role: well(roleOf(el)), name: nameOf(el), href: tag === 'a' ? cut(el.href, 2000) : null, tag, type: well(type),
-    autocomplete: well(autocompleteOf(el)), value: takesValue ? cut(el.value || '', 200) : null, form: formId, disabled: !!el.disabled});
+    autocomplete: well(autocompleteOf(el)), value: takesValue ? cut(el.value || '', 200) : null, form: formId,
+    label_form: idOf(control ? formOf(control) : null), disabled: !!el.disabled});
 });
 return JSON.stringify({url: cut(location.href, 4000), title: cut(document.title, 400),
   text: cut(document.body ? document.body.innerText : '', 20000), elements: elements.slice(0, 300),
   forms: Array.from(forms.entries()).map(([form, id]) => ({id, text: cut(form.innerText || '', 6000)}))});
 """
 
-#: Arguments: index, expect, tokens, nonce.  Resolve once, check, hit-test,
-#: keep the handle and arm the click guard for it.
+#: Arguments: index, expect, tokens, nonce, approved.  Resolve once, check,
+#: hit-test, keep the handle and arm the click guard for it; without an
+#: approval, also arm the submit guard until ``DISARM_SCRIPT`` (#698).
 LOCATE_SCRIPT = PRELUDE + r"""
 const el = document.querySelectorAll(SELECTOR)[index];
 if (!el) return JSON.stringify({error: 'target_missing'});
@@ -181,18 +223,70 @@ if (!s.listening) {
   }, true);
   s.listening = true;
 }
+armSubmitGuard();
+s.submit = approved === true ? null : {tokens, hit: false};
 const tag = el.tagName.toLowerCase();
 return JSON.stringify({x, y, editable: el.isContentEditable || tag === 'textarea' ||
   (tag === 'input' && !['submit', 'button', 'image', 'reset', 'checkbox', 'radio', 'file', 'hidden', 'range', 'color'].includes(typeOf(el)))});
 """
 
-#: Arguments: nonce.  Did the press land on the held element?
+#: Arguments: nonce.  Did the press land on the held element?  (The submit
+#: guard stays armed; ``submit`` reports a submit it cancelled so far.)
 VERIFY_CLICK_SCRIPT = PRELUDE + r"""
-const s = state(), g = s.guard;
+const s = state(), g = s.guard, submit = !!(s.submit && s.submit.hit);
 s.guard = null;
-if (!g || g.nonce !== nonce) return JSON.stringify({error: 'target_changed'});
-return JSON.stringify(g.bad ? {error: 'target_changed'} : {ok: true});
+if (!g || g.nonce !== nonce) return JSON.stringify({error: 'target_changed', submit});
+return JSON.stringify(g.bad ? {error: 'target_changed', submit} : {ok: true, submit});
 """
+
+#: The end of a click/type step: disarm the submit guard and report whether it
+#: cancelled a submit of a payment form (#698).
+DISARM_SCRIPT = PRELUDE + r"""
+const s = state(), g = s.submit;
+s.submit = null;
+return JSON.stringify({submit: !!(g && g.hit)});
+"""
+
+#: Page world, for one unapproved step (#698).  ``form.submit()`` fires no
+#: ``submit`` event (HTML: the submit() method skips it), and the client world
+#: cannot wrap the page's own prototype, so ``HTMLFormElement.prototype.submit``
+#: is wrapped in the page world for the step: it dispatches ``signal`` on the
+#: form, and the client-world guard cancels it for a payment form.  Limits: a
+#: page script that kept the original function before the step, or that
+#: replaces ``dispatchEvent``/``CustomEvent``, is not covered; submits through
+#: ``requestSubmit``, clicks and labels fire the real ``submit`` event instead.
+SUBMIT_WRAP_SCRIPT = r"""
+const MARK = Symbol.for('agentos.guarded-submit');
+const proto = HTMLFormElement.prototype, current = proto.submit;
+if (typeof current !== 'function') return JSON.stringify({error: 'script_failed'});
+if (!current[MARK]) {
+  const original = current;
+  const submit = function submit() {
+    const event = new CustomEvent(signal, {cancelable: true});
+    this.dispatchEvent(event);
+    if (event.defaultPrevented) return undefined;
+    return original.apply(this, arguments);
+  };
+  Object.defineProperty(submit, MARK, {value: original});
+  Object.defineProperty(proto, 'submit', {value: submit, writable: true, enumerable: true, configurable: true});
+}
+return JSON.stringify({ok: true});
+"""
+
+#: Page world: put the page's own ``form.submit`` back after the step.
+SUBMIT_RESTORE_SCRIPT = r"""
+const MARK = Symbol.for('agentos.guarded-submit');
+const proto = HTMLFormElement.prototype, current = proto.submit;
+if (typeof current === 'function' && current[MARK]) {
+  Object.defineProperty(proto, 'submit', {value: current[MARK], writable: true, enumerable: true, configurable: true});
+}
+return JSON.stringify({ok: true});
+"""
+
+#: Client world, at document start of every main-frame page: the submit guard's
+#: listeners are registered before any page script can register its own
+#: capture listener on ``window`` (they do nothing until a step arms them).
+SUBMIT_GUARD_USER_SCRIPT = '(() => {\n' + PRELUDE + '\narmSubmitGuard();\n})();'
 
 #: Arguments: nonce, expect, tokens, text.  The held element must be the
 #: focused one and still match the classified descriptor; the text is then
@@ -360,7 +454,12 @@ class Worker:
         # page cannot replace the functions these scripts call.  (A named world
         # stopped answering after repeated password-form pages on macOS 26.)
         self.world = WebKit.WKContentWorld.defaultClientWorld()
-        self.view = WebKit.WKWebView.alloc().initWithFrame_configuration_(Foundation.NSMakeRect(0, 0, WIDTH, HEIGHT), config)
+        # Only the step's ``form.submit()`` wrapper runs in the page world (#698).
+        self.page_world = WebKit.WKContentWorld.pageWorld()
+        config.userContentController().addUserScript_(
+            WebKit.WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_inContentWorld_(
+                SUBMIT_GUARD_USER_SCRIPT, WebKit.WKUserScriptInjectionTimeAtDocumentStart, True, self.world))
+        self.view =WebKit.WKWebView.alloc().initWithFrame_configuration_(Foundation.NSMakeRect(0, 0, WIDTH, HEIGHT), config)
         delegate_class = _delegate_class()
         self.delegate = delegate_class.alloc().init()
         self.delegate.worker = self
@@ -396,8 +495,8 @@ class Worker:
         self.pending[ident] = True
         self.AppHelper.callLater(max(0.5, float(seconds)), expire)
 
-    def run(self, body, arguments, done):
-        """Run ``body`` (returns a JSON string) in the isolated world; ``done(value_or_None, error_or_None)``."""
+    def run(self, body, arguments, done, world=None):
+        """Run ``body`` (returns a JSON string) in the client world (or ``world``); ``done(value_or_None, error_or_None)``."""
         def handler(result, error):
             if error is not None:
                 done(None, 'script_failed')
@@ -407,7 +506,7 @@ class Worker:
             except (TypeError, ValueError, UnicodeError):
                 done(None, 'script_failed')
         self.view.callAsyncJavaScript_arguments_inFrame_inContentWorld_completionHandler_(
-            body, arguments or {}, None, self.world, handler)
+            body, arguments or {}, None, world or self.world, handler)
 
     def settle(self, ident, finish):
         """Wait until no navigation is loading for a short quiet period, then ``finish``."""
@@ -426,11 +525,35 @@ class Worker:
             self.AppHelper.callLater(POLL_SECONDS, poll)
         self.AppHelper.callLater(POLL_SECONDS, poll)
 
-    def finish_input(self, ident, blocked_before):
-        """Reply to a click/type once the page settled: refused when a navigation it caused was blocked."""
-        if self.blocked > blocked_before:
-            return self.fail(ident, 'blocked_destination')
-        self.reply(ident)
+    def disarm(self, done=None):
+        """End a click/type step: disarm the submit guard, put the page's ``form.submit`` back.
+
+        ``done(submit_cancelled)``.  A script error (the page navigated away)
+        reports nothing cancelled: that page and its guard are gone.
+        """
+        def disarmed(value, error):
+            cancelled = error is None and isinstance(value, dict) and value.get('submit') is True
+            self.run(SUBMIT_RESTORE_SCRIPT, {}, lambda *_: done and done(cancelled), world=self.page_world)
+        self.run(DISARM_SCRIPT, {}, disarmed)
+
+    def finish_input(self, ident, blocked_before=None, error=None, submitted=False):
+        """Answer a click/type after disarming its submit guard.
+
+        A payment-form submit the guard cancelled answers ``approval_required``
+        (#698), before any other error; then ``error``; then a navigation the
+        step caused that was blocked.
+        """
+        def answer(cancelled):
+            if ident not in self.pending:
+                return
+            if submitted or cancelled:
+                return self.fail(ident, 'approval_required')
+            if error:
+                return self.fail(ident, error)
+            if blocked_before is not None and self.blocked > blocked_before:
+                return self.fail(ident, 'blocked_destination')
+            self.reply(ident)
+        self.disarm(answer)
 
     # -- destinations ----------------------------------------------------------
     def decide(self, url, main_frame, decision):
@@ -544,19 +667,35 @@ class Worker:
         if not isinstance(expect, dict):
             return self.fail(ident, 'target_changed')   # never press an element nobody classified
         nonce = uuid.uuid4().hex
+        # Only a step the parent consumed an owner approval for may submit a payment form (#698).
+        approved = command.get('approved') is True
 
         def located(value, error):
             if ident not in self.pending:
                 return
             if error or not isinstance(value, dict):
-                return self.fail(ident, error or 'script_failed')
+                return self.finish_input(ident, error=error or 'script_failed')
             if value.get('error'):
-                return self.fail(ident, value['error'])
+                return self.finish_input(ident, error=value['error'])
             then(value, nonce, expect, tokens)
-        self.run(LOCATE_SCRIPT, {'index': index, 'expect': expect, 'tokens': tokens, 'nonce': nonce}, located)
+
+        def locate():
+            self.run(LOCATE_SCRIPT, {'index': index, 'expect': expect, 'tokens': tokens, 'nonce': nonce,
+                                     'approved': approved}, located)
+        if approved:
+            return locate()
+
+        def wrapped(value, error):
+            if ident not in self.pending:
+                return
+            if error or not isinstance(value, dict) or not value.get('ok'):
+                # Never press without the guard in place.
+                return self.finish_input(ident, error='script_failed')
+            locate()
+        self.run(SUBMIT_WRAP_SCRIPT, {'signal': SUBMIT_SIGNAL}, wrapped, world=self.page_world)
 
     def op_click(self, ident, command, timeout):
-        self.deadline(ident, timeout)
+        self.deadline(ident, timeout, on_timeout=self.disarm)
 
         def click(point, nonce, expect, tokens):
             blocked_before = self.blocked
@@ -565,11 +704,12 @@ class Worker:
             def verified(value, error):
                 if ident not in self.pending:
                     return
+                submitted = error is None and isinstance(value, dict) and value.get('submit') is True
                 if error is None and isinstance(value, dict) and value.get('error'):
-                    return self.fail(ident, value['error'])
+                    return self.finish_input(ident, blocked_before, value['error'], submitted)
                 # A script error here means the click already navigated away (the
-                # page and its guard are gone), which the guard allowed.
-                self.settle(ident, lambda: self.finish_input(ident, blocked_before))
+                # page and its guards are gone), which the guards allowed.
+                self.settle(ident, lambda: self.finish_input(ident, blocked_before, submitted=submitted))
             self.run(VERIFY_CLICK_SCRIPT, {'nonce': nonce}, verified)
         self._locate(ident, command, click)
 
@@ -577,11 +717,11 @@ class Worker:
         text = command.get('text')
         if not isinstance(text, str):
             return self.fail(ident, 'bad_text')
-        self.deadline(ident, timeout)
+        self.deadline(ident, timeout, on_timeout=self.disarm)
 
         def focus(point, nonce, expect, tokens):
             if not point.get('editable'):
-                return self.fail(ident, 'not_typable')
+                return self.finish_input(ident, error='not_typable')
             blocked_before = self.blocked
             self.press(point['x'], point['y'])
 
@@ -589,9 +729,9 @@ class Worker:
                 if ident not in self.pending:
                     return
                 if error or not isinstance(value, dict):
-                    return self.fail(ident, error or 'script_failed')
+                    return self.finish_input(ident, blocked_before, error or 'script_failed')
                 if value.get('error'):
-                    return self.fail(ident, value['error'])
+                    return self.finish_input(ident, blocked_before, value['error'])
                 self.settle(ident, lambda: self.finish_input(ident, blocked_before))
             self.AppHelper.callLater(FOCUS_SECONDS, lambda: self.run(
                 INSERT_SCRIPT, {'nonce': nonce, 'expect': expect, 'tokens': tokens, 'text': text}, inserted))

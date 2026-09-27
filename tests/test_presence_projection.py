@@ -551,11 +551,15 @@ class TerminalTextTests(unittest.TestCase):
     """Rows H/I at the renderer level; transcript-level partial cases live in
     tests/test_truthful_terminal_result.py (#476) and are unchanged."""
 
-    def test_partial_separates_verified_from_unverified_and_keeps_the_truth_header(self):
+    def test_partial_labels_the_model_text_after_the_truth_header_and_cause(self):
+        # #752: the AI answer is shown, but only after the header and the cause, under the label.
+        from personal_agent.conversation_projection import TERMINAL_ANSWER_LABEL, TERMINAL_NEXT_ACTION
         text = terminal_text('모델이 쓴 문장', '캘린더 조회 거부', 'partial')
-        self.assertTrue(text.startswith(TERMINAL_PARTIAL_HEADER))
-        self.assertIn('캘린더 조회 거부', text)
-        self.assertNotIn('모델이 쓴 문장', text)
+        self.assertEqual(text, TERMINAL_PARTIAL_HEADER + '\n\n캘린더 조회 거부\n\n'
+                         + TERMINAL_ANSWER_LABEL + '\n모델이 쓴 문장')
+        self.assertLess(text.index('캘린더 조회 거부'), text.index(TERMINAL_ANSWER_LABEL))
+        self.assertLess(text.index(TERMINAL_ANSWER_LABEL), text.index('모델이 쓴 문장'))
+        self.assertNotIn(TERMINAL_NEXT_ACTION, text)
 
     def test_a_specific_next_action_replaces_only_the_web_pointer(self):
         text = terminal_text(None, '연결이 끊어졌습니다', 'failed', next_action='다시 연결한 뒤 같은 요청을 보내 주세요.')
@@ -566,12 +570,27 @@ class TruthfulRepliesTests(unittest.TestCase):
     """#598 at the renderer level: verified portion, unknown outcome, owner words, particles."""
 
     def test_partial_states_the_verified_portion_before_the_unfinished_one(self):
-        from personal_agent.conversation_projection import TERMINAL_VERIFIED_LABEL
+        # Without an AI answer the verified portion precedes the unfinished one, then the pointer.
+        from personal_agent.conversation_projection import TERMINAL_NEXT_ACTION, TERMINAL_VERIFIED_LABEL
+        for response in (None, '', '  '):
+            with self.subTest(response=response):
+                text = terminal_text(response, '완료하지 못한 부분 — 파일 읽기: 거부', 'partial', verified='찾은 파일:\n- a.txt')
+                self.assertTrue(text.startswith(TERMINAL_PARTIAL_HEADER))
+                self.assertLess(text.index(TERMINAL_VERIFIED_LABEL), text.index('a.txt'))
+                self.assertLess(text.index('a.txt'), text.index('파일 읽기: 거부'))
+                self.assertTrue(text.endswith(TERMINAL_NEXT_ACTION))
+
+    def test_partial_with_an_answer_shows_it_labelled_instead_of_the_verified_portion(self):
+        # #752: with an AI answer, header -> cause -> label -> answer; no verified portion, no web pointer.
+        from personal_agent.conversation_projection import (TERMINAL_ANSWER_LABEL, TERMINAL_NEXT_ACTION,
+                                                            TERMINAL_VERIFIED_LABEL)
         text = terminal_text('모델이 쓴 문장', '완료하지 못한 부분 — 파일 읽기: 거부', 'partial', verified='찾은 파일:\n- a.txt')
         self.assertTrue(text.startswith(TERMINAL_PARTIAL_HEADER))
-        self.assertLess(text.index(TERMINAL_VERIFIED_LABEL), text.index('a.txt'))
-        self.assertLess(text.index('a.txt'), text.index('파일 읽기: 거부'))
-        self.assertNotIn('모델이 쓴 문장', text)
+        self.assertLess(text.index('파일 읽기: 거부'), text.index(TERMINAL_ANSWER_LABEL))
+        self.assertLess(text.index(TERMINAL_ANSWER_LABEL), text.index('모델이 쓴 문장'))
+        self.assertNotIn(TERMINAL_VERIFIED_LABEL, text)
+        self.assertNotIn('a.txt', text)
+        self.assertNotIn(TERMINAL_NEXT_ACTION, text)
 
     def test_verified_never_appears_for_failed_interrupted_or_succeeded(self):
         from personal_agent.conversation_projection import TERMINAL_VERIFIED_LABEL

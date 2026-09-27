@@ -1306,6 +1306,9 @@ def classify_failure(exc,action=None):
   return 'transient_failure',('transient' if action in EFFECT_FREE_READS else 'permanent'),'none'
  return ('provider_error' if isinstance(exc,ProviderError) else 'tool_failed'),'permanent','none'
 
+#: A failed call that the tool recorded as having had no effect (#752).
+NO_EFFECT_FAILED='failed-no-effect'
+
 def recovered(trail):
  """Whether a Work with failed attempts recovered to a fully satisfied result.
 
@@ -1334,7 +1337,9 @@ def event_trail(rows, tools=None):
   if status=='failed':
    reason=data.get('error') if isinstance(data.get('error'),str) else None
    refusals.append((tool,reason))
-   trail.append((action,'exhausted' if data.get('code') in BUDGET_CODES else 'failed'));continue
+   # #752: a failure the tool recorded as having done nothing (``effect: none``) is recoverable like a failed read.
+   state='exhausted' if data.get('code') in BUDGET_CODES else NO_EFFECT_FAILED if data.get('effect')=='none' else 'failed'
+   trail.append((action,state));continue
   evidence=data.get('evidence') if isinstance(data.get('evidence'),dict) else {}
   if evidence.get('refused_because') or (action in CALENDAR_DRAFT_TOOLS and evidence.get('requires_owner_approval') and not evidence.get('applied')):
    trail.append((action,'withheld'))
@@ -1356,7 +1361,7 @@ def goal_summary(rows, tools=None):
  failed=[index for index,(_action,state) in enumerate(trail) if state!='succeeded']
  fixed=recovered(trail)
  # A failed action stays unresolved unless the same action later succeeded.
- retried={action for index,(action,state) in enumerate(trail) if state=='failed'
+ retried={action for index,(action,state) in enumerate(trail) if state in ('failed',NO_EFFECT_FAILED)
           and not any(later==(action,'succeeded') for later in trail[index+1:])}
  unresolved=sorted({action for action,state in trail if state in ('withheld','incomplete','exhausted')}|
                    (set() if fixed else retried))
@@ -2303,7 +2308,10 @@ def evidence_qualifiers(result):
  return found
 
 #: Qualifiers that make a call that ran count as incomplete for the Work outcome.
-INCOMPLETE_QUALIFIERS=('truncated','partial')
+#: #752: ``truncated`` (a bounded view of a long page or result list) is not
+#: one: whether the part read was enough is the goal judgment's; it stays an
+#: Evidence qualifier.
+INCOMPLETE_QUALIFIERS=('partial',)
 
 #: What AgentOS says in its own voice about a qualified result it summarises.
 QUALIFIER_NOTES={

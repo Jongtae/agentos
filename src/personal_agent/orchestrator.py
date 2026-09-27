@@ -771,17 +771,18 @@ class Orchestration:
             return UNJUDGED
         return NOT_REACHED
 
-    def evaluate_answer(self, answer, observations, failed=''):
+    def evaluate_answer(self, answer, observations, failed='', final=False):
         """One ``goal_reached`` judgment over a CLI attempt's final answer and recorded tool evidence.
 
-        Not asked when the Work's deadline no longer allows another attempt:
-        the evaluation only serves a re-delegation (``NOT_JUDGED``, next step
-        ``budget``).
+        Not asked when the Work's deadline no longer allows another attempt
+        (``NOT_JUDGED``, next step ``budget``), unless ``final`` (#752): no
+        attempt can follow and the judgment only decides this attempt's
+        outcome, so the Work need only be neither stopped nor past its deadline.
         """
         goal_reached = getattr(self.judgments, 'goal_reached', None)
         if goal_reached is None:
             return UNJUDGED
-        if not self.budget_allows():
+        if not (self.may_judge() if final else self.budget_allows()):
             return NOT_JUDGED
         text = (f'The worker\'s final answer (model-stated, not an observation):\n{str(answer or "")[:1800]}\n\n'
                 f'Tool results AgentOS recorded for this attempt:\n{observations or "none"}')[:OBSERVATION_CHARS]

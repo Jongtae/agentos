@@ -26,14 +26,14 @@ from .search_providers import (SEARCH_FAILED_TEXT, ProviderRegistry, SearchProvi
 from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_UNVERIFIED, BLOCKER_NO_AI_ROUTE,
                                       TELEGRAM_RESULT_PREVIEW_CHARS, TERMINAL_FAILED_HEADER,
                                       TERMINAL_INTERRUPTED_HEADER, TERMINAL_NEXT_ACTION, TERMINAL_PARTIAL_HEADER,
-                                      TERMINAL_UNVERIFIED_MARKER, BlockedTurn, ConversationProjection, context_message,
+                                      BlockedTurn, ConversationProjection, context_message,
                                       owner_cause, report_statement, terminal_text, turn_qualifier,
                                       verified_portion)
 from .subscription_engines import SubscriptionEngines
 from .bounded_execution import TOOL_INCOMPLETE, TOOL_INCOMPLETE_TEXT, incomplete_bridge_calls
 from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, StrictIsolatedAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult, MAX_PROMPT_BYTES, BOUNDED_PROFILE, HOST_CLI_PROFILES, STRICT_PROFILE, private_read_actions, profile_actions, profile_status, route_unavailable
 from .orchestrator import model_refused, remember_model_refusal
-from .orchestrator import (EVENT_TOOL as ORCHESTRATION_EVENT, NOT_JUDGED, NOT_REACHED, OWNER_NEEDED, UNJUDGED, WORKER_FAILED,
+from .orchestrator import (EVENT_TOOL as ORCHESTRATION_EVENT, NOT_JUDGED, NOT_REACHED, OWNER_NEEDED, REACHED, UNJUDGED, WORKER_FAILED,
                            Orchestration, worker_catalogue)
 from .isolated_engine_gateway import EngineGatewayError
 from .service_control import build_identity
@@ -1582,7 +1582,7 @@ class AgentService:
                     waits.append('승인 대기')
             artifacts=[{'id':item['id'],'kind':'저장된 결과' if 'path' not in item else '파일 결과','path':item.get('path'),'workspace_id':item.get('workspace_id'),'created':item.get('created'),'state':item.get('state','current')} for item in self.store.task_artifacts(job['id'])]
             retained_rows.append((job['id'],events))
-            task={'id':job['id'],'title':self._progress_title(job.get('message'),job['id']),'status':job.get('status'),'status_kind':kind,'status_label':label,'started_at':job.get('created'),'observed_at':last,'result_available':bool(job.get('response')) and job.get('status') in ('succeeded','partial'),'workspace_id':job.get('workspace_id'),'events_count':len(events),'waits':waits,'configured':{'provider':configured.get('provider'),'model':configured.get('model'),'runtime':selected_subscription or (configured.get('provider') if configured else None)},'observed':{'provider':job.get('provider'),'model':job.get('model'),'runtime':job.get('provider') or None},'route':self._observed_route(job,events,model_events),'artifacts':artifacts}
+            task={'id':job['id'],'title':self._progress_title(job.get('message'),job['id']),'status':job.get('status'),'status_kind':kind,'status_label':label,'started_at':job.get('created'),'observed_at':last,'result_available':bool(job.get('response')) and job.get('status') in ('succeeded','partial','failed') and not self.answer_withheld(job),'workspace_id':job.get('workspace_id'),'events_count':len(events),'waits':waits,'configured':{'provider':configured.get('provider'),'model':configured.get('model'),'runtime':selected_subscription or (configured.get('provider') if configured else None)},'observed':{'provider':job.get('provider'),'model':job.get('model'),'runtime':job.get('provider') or None},'route':self._observed_route(job,events,model_events),'artifacts':artifacts}
             # The same typed qualifier the transcript and model context use
             # (#494), so the card cannot disagree with them.
             task['qualifier']=turn_qualifier(job.get('status'))
@@ -2423,6 +2423,29 @@ class AgentService:
         except Exception:
             return None
 
+    def answer_withheld(self, job):
+        """Whether a failed or partial Work's AI answer is kept from the owner, on every surface (#752).
+
+        A failed or partial Work's answer is shown under the truth header and
+        what did not complete.  It is withheld only when an action that
+        changes state - anything outside the effect-free reads and
+        internal-state actions - failed (including one that did nothing), was
+        withheld or left incomplete: the answer may claim that action (#476,
+        #488).  A delegation is judged by its own recorded steps, not by the
+        delegation call.  Other statuses are not decided here (an ``unknown``
+        effect keeps its own statement, #598 I1).
+        """
+        if job.get('status') not in ('partial','failed') or not (job.get('response') or '').strip():
+            return False
+        from .agent_runtime import INTERNAL_STATE_ACTIONS, NO_EFFECT_FAILED, event_trail
+        with self.store.db() as db:
+            rows=db.execute('SELECT tool,status,detail FROM tool_events WHERE job_id=? ORDER BY id',(job['id'],)).fetchall()
+        tools={tool['id']:tool for package in self.runtime_packages() for tool in package['tools']}
+        trail,_refusals=event_trail([(row['tool'],row['status'],row['detail']) for row in rows],tools)
+        reads=EFFECT_FREE_READS|INTERNAL_STATE_ACTIONS|{'delegate_agent'}
+        short=('failed',NO_EFFECT_FAILED,'withheld','incomplete')
+        return any(state in short and action not in reads for action,state in trail)
+
     def cli_work_outcome(self, job_id, tools, since=0):
         """``(outcome, refusals)`` of a CLI Work from its own tool events (#606 T3).
 
@@ -2568,9 +2591,9 @@ class AgentService:
         """
         if orchestration is None or attempt is None or not orchestration.orchestrated:return None
         from .agent_runtime import EFFECT_FREE_READS, INTERNAL_STATE_ACTIONS
-        # A navigation in the owner's browser session counts as an effect here,
-        # as it does for the retry rule (``safe_retry``): it is never repeated.
-        repeatable=(EFFECT_FREE_READS-{'browser_open'})|INTERNAL_STATE_ACTIONS
+        # #752: a page open is a read (``EFFECT_FREE_READS``) and a re-plan is not
+        # a replay; clicks, typing and every other action stay effects (C8).
+        repeatable=EFFECT_FREE_READS|INTERNAL_STATE_ACTIONS
         with self.store.db() as db:
             rows=db.execute('SELECT tool,status,detail FROM tool_events WHERE job_id=? AND id>? ORDER BY id',(job_id,since or 0)).fetchall()
         effect=outcome=='unknown' or self._work_has_unknown_effect(job_id)
@@ -2609,8 +2632,11 @@ class AgentService:
         elif owner_needed:
             evaluation='owner_needed'
         elif effect or not orchestration.budget_allows():
-            # Nothing may follow an effect, or the Work's time is short: no judgment is asked.
-            evaluation=NOT_JUDGED
+            # Nothing may follow an effect, or the Work's time is short.  #752: the goal
+            # judgment still decides the outcome of an attempt its steps left short of
+            # succeeded (a known effect only); it can end the Work, never repeat it.
+            evaluation=(orchestration.evaluate_answer(answer,'\n'.join(observed),failed_steps,final=True)
+                        if outcome in ('partial','failed') and orchestration.may_judge() else NOT_JUDGED)
         else:
             evaluation=orchestration.evaluate_answer(answer,'\n'.join(observed),failed_steps)
         return orchestration.next(attempt,evaluation,answer=str(answer or '')[:600],failed=summary,effect=effect)
@@ -5682,6 +5708,12 @@ class AgentService:
                         if following is None:break
                         attempt=following
                         refusals.clear();verified_parts.clear();agency_report=None;unknown_statement=None
+                    # #752: the goal decides, not the steps.  A CLI attempt whose steps left it
+                    # partial or failed (a truncated read, a failure it worked around) succeeded
+                    # when the goal judgment saw the request met; the steps stay in Evidence.
+                    if subscription.get('id') and outcome in ('partial','failed') and orchestration is not None \
+                            and orchestration.terminal==REACHED:
+                        outcome='succeeded';refusals.clear();resolved_blocker=True
                     # #710 review P1: a CLI attempt the orchestrator judged short and did not
                     # re-delegate (limit, budget, no new plan) is never stored as succeeded.
                     if subscription.get('id') and outcome=='succeeded' and orchestration is not None \
@@ -5717,8 +5749,10 @@ class AgentService:
                 self.record_work_sources(job['id'],work_sources)
                 with self.store.db() as db:
                     db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('assistant',response,job['channel'],time.time(),job.get('workspace_id'),job['id']))
-                    # #709: a run that reached a login page did not finish its request.
-                    if outcome=='succeeded' and (self._browser_login(job['id']) or {}).get('state')=='requested':
+                    # #709: a run that reached a login page did not finish its request -
+                    # unless (#752) the goal judgment saw it met another way.
+                    if outcome=='succeeded' and (self._browser_login(job['id']) or {}).get('state')=='requested' \
+                            and not (orchestration is not None and orchestration.terminal==REACHED):
                         outcome='partial';resolved_blocker=False
                         refusals.append(('browser_open','이 페이지는 로그인이 필요합니다.'))
                     cause=self._failure_cause(refusals) if outcome in ('failed','partial') else None
@@ -5769,8 +5803,9 @@ class AgentService:
                 self.record_turn_provenance(job['id'],goal=self.work_goal(job['id'],work_capabilities[0],outcome))
             self.update_task_card(job,outcome)
             # #709: a login page during this run: show the window now that the
-            # run released the profile, and ask the owner to log in.
-            self.offer_browser_login(job)
+            # run released the profile, and ask the owner to log in.  #752: only
+            # when the Work did not succeed; a reached goal did not need it.
+            if outcome!='succeeded':self.offer_browser_login(job)
             if resolved_blocker:
                 self.projection.clear(self.connector_owner_id(job))
             if approval_needed[0]:
@@ -5803,7 +5838,8 @@ class AgentService:
             blocked=self.store.blocked_delivery_reply(job['id'])
             # The owner-language cause when one was recorded (#598 X1); the
             # technical ``error`` remains the Task-detail record.
-            text=blocked or self.telegram_result_text(job['response'],job.get('owner_cause') or job['error'],job.get('status'),
+            text=blocked or self.telegram_result_text(None if self.answer_withheld(job) else job['response'],
+                                                      job.get('owner_cause') or job['error'],job.get('status'),
                                                       verified=job.get('owner_verified'))
             # #659: a prepared answer arrives without an owner turn; say what it is for.
             text=self.preparation_reply_prefix(job)+text

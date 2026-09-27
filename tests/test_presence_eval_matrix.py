@@ -49,8 +49,8 @@ from personal_agent.calendar import CALENDAR_SPEC, CALENDAR_WRITE_SPEC, Calendar
 from personal_agent.calendar_conversation import CREATED, OUTCOME_UNKNOWN, PREVIEW_HEADER
 from personal_agent.connector_contract import ConnectorRegistry, ConnectorState
 from personal_agent.conversation_handoff import FOLLOWUP_RETRY, LOCAL_AUTHORITY_PREVIEWS, LOCAL_FOLDER_READ
-from personal_agent.conversation_projection import (TERMINAL_FAILED_HEADER, TERMINAL_PARTIAL_HEADER,
-                                                    TERMINAL_UNVERIFIED_MARKER)
+from personal_agent.conversation_projection import (TERMINAL_ANSWER_LABEL, TERMINAL_FAILED_HEADER,
+                                                    TERMINAL_PARTIAL_HEADER)
 from personal_agent.decision import (OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine, SelectionDecision,
                                      UnavailableDecisionEngine, fixture_confidence)
 from personal_agent.gmail import (GMAIL_CONNECTOR, GMAIL_CONNECTOR_ID, GMAIL_READONLY_SCOPE,
@@ -1225,8 +1225,11 @@ class H_PartialResult(PresenceEval):
         [bubble] = self.bubbles()
         self.assertTrue(bubble['text'].startswith(TERMINAL_PARTIAL_HEADER))
         self.assertIn('일부 자료는 읽지 못했습니다', bubble['text'], 'the failed portion is named')
-        self.assertIn(TERMINAL_UNVERIFIED_MARKER, bubble['text'])
-        self.assertNotIn('모두 비교했습니다', bubble['text'], 'the unverified claim is not asserted')
+        # #752: the AI's answer is delivered, labelled, after the truth header and the failed portion.
+        text = bubble['text']
+        self.assertIn(TERMINAL_ANSWER_LABEL, text)
+        self.assertLess(text.index('일부 자료는 읽지 못했습니다'), text.index(TERMINAL_ANSWER_LABEL))
+        self.assertLess(text.index(TERMINAL_ANSWER_LABEL), text.index('모두 비교했습니다'))
         self.assertEqual([b['text'] for b in bubble['reply_markup']['inline_keyboard'][0]], ['상세'])
         self.assertEqual(bubble['reply_parameters']['message_id'], message_id)
         # Claim <-> Evidence: the call ran; its evidence is qualified partial.
@@ -1257,34 +1260,34 @@ class H_PartialResult(PresenceEval):
         controls = [[b['text'] for b in body.get('reply_markup', {}).get('inline_keyboard', [[]])[0]] for body in bubbles]
         self.assertEqual(controls, [[], ['다시 시도', '상세'], ['상세']])
 
-    def test_finding_h1_the_verified_portion_is_not_stated_in_conversation(self):
-        """FINDING H1 (fixed by #598): the partial bubble states what was verified.
+    def test_finding_h1_a_partial_answer_is_labelled_after_the_failed_portion(self):
+        """FINDING H1 (#598, re-scoped by #752): the partial bubble with an AI answer.
 
         Page A was read and supports "ships for 3,000 KRW"; page B failed.
-        The bubble now states the verified portion - the quoted fact from the
-        page that was read and its source, rendered by AgentOS from the
-        research result - separately from the failed portion.  Opposing
-        cases: the unread page contributes nothing, the model's unobserved
-        "compared both" claim is still not asserted, and the outcome stays
+        With an AI answer the bubble is the truth header, the failed portion,
+        then the AI's answer under ``TERMINAL_ANSWER_LABEL``; the AgentOS
+        verified portion is not added (the answer replaces it) and the record
+        still keeps it.  Opposing cases: nothing from the unread page, the
+        model's claim appears only after the label, and the outcome stays
         ``partial`` everywhere.
         """
         from personal_agent.conversation_projection import TERMINAL_VERIFIED_LABEL
         job, _ = self.partial_research()
         [bubble] = self.bubbles()
         text = bubble['text']
-        self.assertIn('일부 자료는 읽지 못했습니다', text, 'the failed portion')
-        self.assertIn('3,000', text, 'the verified fact from the page that was read')
-        self.assertIn('example.com/a', text, 'and its source')
-        verified_at, failed_at = text.index(TERMINAL_VERIFIED_LABEL), text.index('일부 자료는 읽지 못했습니다')
-        self.assertLess(text.index(TERMINAL_PARTIAL_HEADER), verified_at)
-        self.assertLess(verified_at, text.index('3,000'))
-        self.assertLess(text.index('example.com/a'), failed_at, 'verified and failed portions are separate')
-        # Opposing: nothing from the unread page, no unobserved claim, no upgrade.
+        self.assertTrue(text.startswith(TERMINAL_PARTIAL_HEADER))
+        failed_at, label_at = text.index('일부 자료는 읽지 못했습니다'), text.index(TERMINAL_ANSWER_LABEL)
+        self.assertLess(failed_at, label_at, 'the failed portion precedes the answer')
+        self.assertLess(label_at, text.index('모두 비교했습니다'), 'the claim appears only under the label')
+        self.assertNotIn(TERMINAL_VERIFIED_LABEL, text)
+        self.assertNotIn('3,000', text)
+        # Opposing: nothing from the unread page, no upgrade.
         self.assertNotIn('example.com/b', text)
         self.assertNotIn('Model B', text)
-        self.assertNotIn('모두 비교했습니다', text)
         self.assertEqual(self.store.job(job['id'])['status'], 'partial')
         self.assertEqual(self.task(job['id'])['qualifier']['outcome'], 'partial')
+        # The verified portion is still recorded for the Work (상세).
+        self.assertIn('3,000', self.store.job(job['id'])['owner_verified'] or '')
 
     def test_finding_h1_a_failed_or_succeeded_turn_gets_no_verified_portion(self):
         """Opposing outcomes: a failed turn verified nothing; a succeeded one is the answer itself."""

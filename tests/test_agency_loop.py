@@ -662,17 +662,24 @@ class AgencyReportEntryPointTests(unittest.TestCase):
         self.assertEqual(row['status'], 'partial')
         self.assertEqual([event['trace']['code'] for event in failed], ['tool_failed'])
         bubble = terminal_text(row['response'], row['owner_cause'], 'partial', verified=row['owner_verified'])
-        # One bubble, in order: the truth header, what was observed (AgentOS's
-        # rendering of the search result), what failed, what stayed unknown,
-        # and the proposed next step.
-        parts = ['일부 단계만 완료했습니다.', '확인된 부분:', 'https://weather.example/seongnam',
-                 '날씨 조회: ' + NOT_FOUND, '확인하지 못한 부분: 내일 강수 확률',
-                 '다음 단계 제안: 날씨 예보 페이지를 열어 강수 확률을 확인하기']
+        # One bubble, in order (#752): the truth header, what failed, what
+        # stayed unknown, the proposed next step, then the AI's own answer
+        # under the label, with its sources.
+        from personal_agent.conversation_projection import TERMINAL_ANSWER_LABEL, TERMINAL_VERIFIED_LABEL
+        # The tool reason is cut to its first sentence in the owner's bubble (#752).
+        parts = ['일부 단계만 완료했습니다.', '날씨 조회: 도시를 찾지 못했습니다.\n', '확인하지 못한 부분: 내일 강수 확률',
+                 '다음 단계 제안: 날씨 예보 페이지를 열어 강수 확률을 확인하기', TERMINAL_ANSWER_LABEL,
+                 '내일 성남은 22°C로 보입니다.', 'https://weather.example/seongnam']
         positions = [bubble.find(part) for part in parts]
         self.assertNotIn(-1, positions, bubble)
         self.assertEqual(positions, sorted(positions), bubble)
-        # The model's own sentence is not presented as observed.
-        self.assertNotIn('22°C로 보입니다', bubble)
+        # The model's own sentence appears only under the label, never as observed:
+        # no AgentOS verified portion is added once the answer is shown.
+        self.assertEqual(bubble.count('22°C로 보입니다'), 1, bubble)
+        self.assertNotIn(TERMINAL_VERIFIED_LABEL, bubble)
+        self.assertNotIn('도시와 국가를 함께 알려 주세요', bubble)
+        # The observed portion stays on the Work record.
+        self.assertIn('https://weather.example/seongnam', row['owner_verified'] or '')
         with self._store.db() as db:
             concluded = [json.loads(detail) for (detail,) in db.execute(
                 "SELECT detail FROM tool_events WHERE job_id=? AND tool='model' AND status='concluded'", (row['id'],))]

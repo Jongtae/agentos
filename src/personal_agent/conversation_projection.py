@@ -32,8 +32,12 @@ TERMINAL_NEXT_ACTION = 'AgentOS 웹에서 실행 기록과 다음 단계를 확�
 #: Used only when an ``unknown`` Work carries no statement of its own.
 TERMINAL_UNKNOWN_EFFECT = ('외부 결과를 확인할 수 없습니다. 실제 결과를 직접 확인해 주세요. '
                            '자동으로 다시 시도하지 않았습니다.')
-TERMINAL_UNVERIFIED_MARKER = ('AI가 작성한 답변 전체는 AgentOS 웹 기록에서 볼 수 있습니다. '
-                              '확인된 결과가 아니므로 그대로 신뢰하지 마세요.')
+#: #752: opens the AI's own answer in a failed/partial bubble, after the truth
+#: header and what did not complete.  The owner reads the answer, labelled.
+TERMINAL_ANSWER_LABEL = 'AI 답변 (위 부분은 확인되지 않았어요):'
+#: #752: one tool reason in the owner's bubble: its first sentence, bounded.
+#: The full model-facing text stays in the Work record (상세).
+OWNER_REASON_CHARS = 120
 #: Opens the portion of a partial Work that its own typed Evidence supports
 #: (#598 H1).  What follows is AgentOS's rendering of observed tool results,
 #: never the model's prose.
@@ -97,6 +101,14 @@ def object_particle(word):
     return '을(를)'
 
 
+def first_sentence(text, limit):
+    """The first sentence of ``text`` on one line, at most ``limit`` characters (#752)."""
+    text = ' '.join(str(text or '').split())
+    match = re.search(r'[.!?。](?=\s)', text)
+    text = text[:match.end()] if match else text
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + '…'
+
+
 def owner_cause(steps):
     """The owner-language cause of a failed/partial Work, or ``None``.
 
@@ -108,7 +120,7 @@ def owner_cause(steps):
     entries = []
     for tool, reason in steps:
         label = tool_label(tool)
-        text = (reason or '').strip()
+        text = first_sentence(reason, OWNER_REASON_CHARS)
         entry = f'{label}: {text}' if text else label
         if entry not in entries:
             entries.append(entry)
@@ -230,16 +242,15 @@ class BlockedTurn(ValueError):
 def terminal_text(response, error=None, outcome=None, next_action=None, verified=None):
     """The one readable terminal bubble for a paired owner.
 
-    * ``failed`` - no tool produced anything, so no model sentence is
-      attributable to an observed result.  The failure, its cause and the
-      next step go out; the model text does not.
-    * ``partial`` / ``interrupted`` - something may have completed, but
-      which model sentence rests on it cannot be decided here.  The bubble
-      states the portion the Work's own typed Evidence supports
-      (``verified``, rendered by AgentOS from observed tool results - never
-      the model's prose), then the portion that did not complete, and points
-      at the record for the rest (#598 H1).  The model text is not deleted;
-      the web card still offers it under 확인 필요.
+    * ``failed`` / ``partial`` with an AI answer (#752) - the truth header
+      and what did not complete come first, then the AI's own answer under
+      ``TERMINAL_ANSWER_LABEL``.  Hiding the answer protected nothing the
+      label does not, and left the owner without the result.
+    * ``failed`` without an answer - the failure, its cause and the next step.
+    * ``partial`` without an answer / ``interrupted`` - the portion the Work's
+      own typed Evidence supports (``verified``, rendered by AgentOS from
+      observed tool results), then the portion that did not complete, and
+      the pointer to the record (#598 H1).
     * ``unknown`` - a consequential external effect was attempted and its
       result could not be observed.  ``error`` is the effect owner's own
       complete statement (what could not be confirmed and what to check);
@@ -253,7 +264,14 @@ def terminal_text(response, error=None, outcome=None, next_action=None, verified
     """
     cause = (error or '').strip()
     action = next_action or TERMINAL_NEXT_ACTION
-    if outcome == 'failed':
+    answer = (response or '').strip()
+    if outcome in ('failed', 'partial') and answer:
+        body = [TERMINAL_FAILED_HEADER if outcome == 'failed' else TERMINAL_PARTIAL_HEADER]
+        if cause:
+            body.append(cause)
+        body.append(TERMINAL_ANSWER_LABEL + '\n' + answer)
+        text = '\n\n'.join(body)
+    elif outcome == 'failed':
         body = [TERMINAL_FAILED_HEADER]
         if cause:
             body.append(cause)
@@ -266,7 +284,7 @@ def terminal_text(response, error=None, outcome=None, next_action=None, verified
             body.append(TERMINAL_VERIFIED_LABEL + '\n' + observed)
         if cause:
             body.append(cause)
-        body.append(TERMINAL_UNVERIFIED_MARKER if (outcome == 'partial' and (response or '').strip()) else action)
+        body.append(action)
         text = '\n\n'.join(body)
     elif outcome == 'unknown':
         text = cause or TERMINAL_UNKNOWN_EFFECT

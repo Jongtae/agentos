@@ -108,6 +108,10 @@ Do not default to “open the web console” when recovery can be explained or i
 
 State the verified completed portion and the unavailable/failed portion separately. Never collapse partial into success.
 
+**The goal decides the outcome, and the owner gets the answer (#752, owner direction 2026-09-28).** A Work's outcome is whether the owner's request was met, not whether every intermediate step succeeded. A worker that reads a bounded view of a long page, retries a click that found nothing, or works around a login page has not failed. When the goal judgment (#657 direct route, #710 CLI route, including after an effect) sees the request met, the Work succeeded, and its steps stay in Task/Evidence detail. A `truncated` qualifier no longer makes a call incomplete, and a failure recorded with `effect: none` is recoverable.
+
+A failed or partial Work that has an AI answer delivers that answer after the truth header and a one-sentence note of each step that did not complete, under `AI 답변 (위 부분은 확인되지 않았어요):`. The answer is withheld, on web and in Telegram alike, only when a state-changing action failed, was withheld or was left incomplete, because the answer may claim that action (#476/#488). An `unknown` effect keeps its own statement. A login prompt is offered only when the Work did not succeed.
+
 ### Unknown external effect
 
 Say the external effect is unknown, explain duplicate-risk when relevant, and do not automatically retry a consequential effect without evidence/authority making that safe.
@@ -177,7 +181,7 @@ D. missing Gmail → contextual connect handoff + exactly-once resume;
 E. missing local folder → owner-local picker + scoped read/write grant + exactly-once resume;  
 F. Calendar effect → exact preview + approval boundary;  
 G. long research → selective semantic progress, not scheduler narration;  
-H. partial result → verified and failed portions separated;  
+H. partial result → truth header and failed portion first, then the labelled AI answer (withheld only after a failed state-changing action);  
 I. unknown effect → unknown wording + no unsafe automatic duplicate;  
 J. Memory correction → canonical/pending state reported truthfully.
 

@@ -449,15 +449,45 @@ class GoalSummaryTests(unittest.TestCase):
     def test_attempts_and_obligations_are_separate(self):
         rows = [('weather', 'failed', json.dumps({'host_action': 'weather', 'code': 'transient_failure'})),
                 ('weather', 'succeeded', json.dumps({'host_action': 'weather', 'evidence': {}})),
-                ('web_search', 'succeeded', json.dumps({'host_action': 'web_search', 'evidence': {'qualifiers': ['truncated']}}))]
+                ('web_search', 'succeeded', json.dumps({'host_action': 'web_search', 'evidence': {'qualifiers': ['partial']}}))]
         summary = goal_summary(rows)
         # Two attempts did not fully succeed; the recovered weather read does
-        # not make the truncated search a satisfied obligation.
+        # not make the partial search a satisfied obligation.
         self.assertEqual((summary['attempts'], summary['failed_attempts'], summary['recovered'], summary['unresolved']),
                          (3, 2, False, ['web_search']))
         recovered = goal_summary(rows[:2])
         self.assertEqual((recovered['recovered'], recovered['unresolved']), (True, []))
 
+    def test_a_truncated_result_is_not_an_unresolved_obligation(self):
+        """#752: ``truncated`` is an Evidence qualifier, not incompleteness; the goal judgment decides."""
+        from personal_agent.agent_runtime import INCOMPLETE_QUALIFIERS
+        self.assertEqual(INCOMPLETE_QUALIFIERS, ('partial',))
+        rows = [('weather', 'failed', json.dumps({'host_action': 'weather', 'code': 'transient_failure'})),
+                ('weather', 'succeeded', json.dumps({'host_action': 'weather', 'evidence': {}})),
+                ('web_search', 'succeeded', json.dumps({'host_action': 'web_search', 'evidence': {'qualifiers': ['truncated']}}))]
+        summary = goal_summary(rows)
+        self.assertEqual((summary['attempts'], summary['failed_attempts'], summary['recovered'], summary['unresolved']),
+                         (3, 1, True, []))
+        both = goal_summary(rows[:2] + [('web_search', 'succeeded', json.dumps(
+            {'host_action': 'web_search', 'evidence': {'qualifiers': ['truncated', 'partial']}}))])
+        self.assertEqual(both['unresolved'], ['web_search'], 'partial still counts alongside truncated')
+
+    def test_a_failure_recorded_without_effect_is_recoverable_like_a_failed_read(self):
+        """#752: ``effect: none`` on a failed call gives ``NO_EFFECT_FAILED``; it does not block recovery."""
+        from personal_agent.agent_runtime import NO_EFFECT_FAILED, event_trail
+        read = ('web_search', 'succeeded', json.dumps({'host_action': 'web_search', 'evidence': {}}))
+        no_effect = ('browser_click', 'failed', json.dumps({'host_action': 'browser_click', 'code': 'tool_failed', 'effect': 'none'}))
+        trail, refusals = event_trail([no_effect])
+        self.assertEqual(trail, [('browser_click', NO_EFFECT_FAILED)])
+        self.assertEqual(len(refusals), 1, 'the failure is still recorded')
+        self.assertEqual(goal_summary([no_effect])['unresolved'], ['browser_click'])
+        fixed = goal_summary([no_effect, read])
+        self.assertEqual((fixed['failed_attempts'], fixed['recovered'], fixed['unresolved']), (1, True, []))
+        # Opposing: the same failure without ``effect: none`` stays a failed effect.
+        plain = ('browser_click', 'failed', json.dumps({'host_action': 'browser_click', 'code': 'tool_failed'}))
+        self.assertEqual(event_trail([plain])[0], [('browser_click', 'failed')])
+        blocked = goal_summary([plain, read])
+        self.assertEqual((blocked['recovered'], blocked['unresolved']), (False, ['browser_click']))
 
 if __name__ == '__main__':
     unittest.main()

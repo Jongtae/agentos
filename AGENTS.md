@@ -1,5 +1,9 @@
 # AgentOS contribution workflow
 
+## AI is the engine — Constitution C16 (#712, 2026-09-27)
+
+**Read this before every proposal, issue and PR.** The owner's chosen AI does the work of meeting the owner's needs as a secretary. That can be a subscription CLI (Codex, Claude Code) or a configured model API. The **decision model orchestrates**: per request it chooses the AI tool and model, writes and adjusts the brief, evaluates the result, and re-delegates on shortfall. **AgentOS code never implements a specific owner request.** That rules out directions, cart or lookup logic, task-named guidance, and site/provider/category branches. AgentOS code only keeps owner-state, authority, secret, payment-approval and budget invariants, and **removes blockers** that stop the AI tools. Prefer known public code (C15) over self-implementation. Never make the owner operate the machinery. Ask on every change: *which AI does the work, and am I removing a blocker or scripting the task?* See [Development Constitution C16](docs/development-constitution.en.md).
+
 ## Secretary agency re-plan — #653 (2026-09-26)
 
 Owner decision 2026-09-27: the active top-level goal is **UX-RENEW-01 [#688](https://github.com/Jongtae/agentos/issues/688)**, with governance activation in #690 and sequential UI work units #691–#696. The owner explicitly lifted SECRETARY-01’s previous exclusion of revisiting merged Presence/Settings/Telegram/current-context presentation. This is presentation-only work; preserve all current API, state, Grant, approval, credential, privacy, connector, Work/Event/Evidence and external-effect contracts. PR #687 has merged and released its overlapping src/personal_agent/web files; implementation begins after governance #690 merges. **SECRETARY-01 #662 is owner-paused** by #690 with its ordered work and completion criteria preserved for a future explicit owner decision. PRESENCE-01 #508 remains paused; its merged work is regression input.

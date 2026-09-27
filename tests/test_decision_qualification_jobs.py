@@ -24,7 +24,7 @@ class FakeClock:
         return self.now
 
 
-class QualificationJobTests(ServiceFixture):
+class JobFixture(ServiceFixture):
     def setUp(self):
         super().setUp()
         self.clock = FakeClock()
@@ -41,6 +41,15 @@ class QualificationJobTests(ServiceFixture):
 
     def job(self, service):
         return service.decision_routes.qualification()
+
+    def crash_while_running(self, service):
+        """Claim the job, but the process 'dies' before the job thread runs."""
+        service.decision_routes.spawn = lambda run: None
+        self.assertTrue(service.run_due_qualification())
+        self.assertEqual(self.job(service)['state'], JOB_RUNNING)
+
+
+class QualificationJobTests(JobFixture):
 
     def follow_claude(self, service):
         service.activate_main_ai({'route': 'claude-code'})
@@ -280,12 +289,6 @@ class QualificationJobTests(ServiceFixture):
         self.assertIsNone(self.store.config('decision_route'))
 
     # -- AC2: restart -------------------------------------------------------------
-    def crash_while_running(self, service):
-        """Claim the job, but the process 'dies' before the job thread runs."""
-        service.decision_routes.spawn = lambda run: None
-        self.assertTrue(service.run_due_qualification())
-        self.assertEqual(self.job(service)['state'], JOB_RUNNING)
-
     def test_a_restart_requeues_a_running_job_once_then_fails_it_as_interrupted(self):
         service = self.service()
         service.activate_main_ai({'route': 'claude-code'})
@@ -347,3 +350,128 @@ class QualificationJobTests(ServiceFixture):
         self.assertIn("api('/api/decision-route/qualification/cancel',{})", app)
         self.assertIn("checking:'확인 중'", app)
         self.assertIn("judgment.state==='queued'", app)
+
+
+class ExplicitFollowJobTests(JobFixture):
+    """#760: an explicit 기본 AI 따라가기 queues the same background job."""
+
+    def claude_main(self):
+        self.store.put('subscription_engine', {'id': 'claude-code', 'connected_at': 1,
+                                               'authentication': 'owner-confirmed-official-login'})
+
+    def test_an_explicit_follow_returns_at_once_while_the_judgment_ai_is_off(self):
+        service = self.service()
+        self.claude_main()
+        service.activate_decision_route({'transport': 'off'})
+        status = service.activate_decision_route({'transport': MODE_FOLLOW})
+        self.assertEqual(self.judgments(), [], 'no qualification call inside the request')
+        self.assertEqual(self.store.config('decision_route')['transport'], 'off')
+        job = status['qualification']
+        self.assertEqual((job['state'], job['explicit']), (JOB_QUEUED, True))
+        self.assertEqual(status['effective']['state'], 'checking')
+        self.assertIn('건너뜁니다', status['effective']['text'], 'off answers nothing meanwhile')
+        again = service.activate_decision_route({'transport': MODE_FOLLOW})['qualification']
+        self.assertEqual(again['id'], job['id'], 'one job per route')
+        self.assertTrue(service.run_due_qualification())
+        route = self.store.config('decision_route')
+        self.assertEqual((route['mode'], route['requested_model']), (MODE_FOLLOW, 'haiku'))
+        self.assertEqual(service.decision_routes.status()['effective']['state'], 'active')
+
+    def test_the_previous_explicit_route_keeps_answering_until_the_job_passes(self):
+        service = self.service()
+        self.claude_main()
+        service.activate_decision_route({'transport': 'subscription_cli', 'engine': 'claude-code',
+                                         'model_policy': 'explicit', 'model': 'sonnet'})
+        before = self.store.config('decision_route')
+        status = service.activate_decision_route({'transport': MODE_FOLLOW})
+        self.assertEqual(status['effective']['state'], 'checking')
+        self.assertIn('그대로 씁니다', status['effective']['text'])
+        rows, answers = [], []
+        original = service.decision_routes._job_checkpoint
+
+        def checkpoint(job, model, case_id, index):
+            rows.append(self.store.config('decision_route'))
+            if index == 1 and not answers:
+                answers.append(self.judge(service).value)
+            original(job, model, case_id, index)
+        service.decision_routes._job_checkpoint = checkpoint
+        service.run_due_qualification()
+        self.assertTrue(rows and all(row == before for row in rows))
+        self.assertEqual(answers, ['retry'], 'the explicit route answered while the job ran')
+        self.assertEqual(self.store.config('decision_route')['mode'], MODE_FOLLOW)
+
+    def test_another_owner_choice_made_while_queued_supersedes_the_explicit_job(self):
+        service = self.service()
+        self.claude_main()
+        service.activate_decision_route({'transport': MODE_FOLLOW})
+        service.activate_decision_route({'transport': 'off'})
+        self.assertIsNone(service.decision_routes.status()['qualification'], 'no longer shown')
+        service.run_due_qualification()
+        self.assertEqual((self.job(service)['state'], self.job(service)['failure']), (JOB_CANCELLED, 'superseded'))
+        self.assertEqual(self.store.config('decision_route')['transport'], 'off')
+        self.assertEqual(self.judgments(), [])
+
+    def test_a_follow_request_is_refused_while_an_explicit_activation_runs(self):
+        # Review (#761): the older activation would commit first and supersede it.
+        service = self.service()
+        self.claude_main()
+        routes = service.decision_routes
+        self.assertTrue(routes._activating.acquire(blocking=False))  # an explicit activation in flight
+        try:
+            with self.assertRaisesRegex(DecisionRouteError, '이미'):
+                service.activate_decision_route({'transport': MODE_FOLLOW})
+        finally:
+            routes._activating.release()
+        self.assertIsNone(self.store.config(QUALIFICATION_JOBS))
+
+    def test_a_follow_request_while_a_background_job_runs_is_queued(self):
+        service = self.service()
+        self.claude_main()
+        first = service.activate_decision_route({'transport': MODE_FOLLOW})['qualification']
+        queued = []
+        original = service.decision_routes._job_checkpoint
+
+        def checkpoint(job, model, case_id, index):
+            if index == 1 and not queued:
+                queued.append(service.activate_decision_route({'transport': MODE_FOLLOW})['qualification'])
+            original(job, model, case_id, index)
+        service.decision_routes._job_checkpoint = checkpoint
+        service.run_due_qualification()
+        self.assertNotEqual(queued[0]['id'], first['id'], 'the running job of this route is replaced')
+        self.assertEqual(self.job(service)['state'], JOB_QUEUED)
+        service.decision_routes._job_checkpoint = original
+        self.assertTrue(service.run_due_qualification())
+        self.assertEqual(self.store.config('decision_route')['mode'], MODE_FOLLOW)
+
+    def test_cheap_refusals_stay_synchronous(self):
+        service = self.service()
+        with self.assertRaisesRegex(DecisionRouteError, '기본 AI가 아직 없어'):
+            service.activate_decision_route({'transport': MODE_FOLLOW})
+        self.assertIsNone(self.store.config(QUALIFICATION_JOBS))
+
+    def test_a_cancelled_explicit_follow_is_noted_next_to_the_unchanged_route(self):
+        service = self.service()
+        self.claude_main()
+        service.activate_decision_route({'transport': 'off'})
+        service.activate_decision_route({'transport': MODE_FOLLOW})
+        effective = service.cancel_decision_qualification()['effective']
+        self.assertEqual(effective['state'], 'off')
+        self.assertIn('취소됨', effective['note'])
+        self.assertEqual(self.store.config('decision_route')['transport'], 'off')
+
+    def test_a_restart_requeues_an_explicit_job_whose_route_is_unchanged(self):
+        service = self.service()
+        self.claude_main()
+        service.activate_decision_route({'transport': 'off'})
+        service.activate_decision_route({'transport': MODE_FOLLOW})
+        self.crash_while_running(service)
+        restarted = self.service()
+        self.assertEqual(restarted.decision_routes.recover_qualification(), [('follow_main:claude-code', JOB_QUEUED)])
+        self.assertTrue(restarted.run_due_qualification())
+        self.assertEqual(self.store.config('decision_route')['mode'], MODE_FOLLOW)
+
+    def test_settings_describe_the_background_request(self):
+        root = Path(__file__).resolve().parents[1] / 'src' / 'personal_agent'
+        app = (root / 'web' / 'app.js').read_text(encoding='utf-8')
+        self.assertEqual(app.count("t('판단 AI 확인을 백그라운드에서 시작했습니다. 통과하면 기본 AI를 따라갑니다.')"), 2)
+        self.assertIn('effective.note_template', app)

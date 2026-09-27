@@ -349,9 +349,16 @@ class MainAiRouteTests(unittest.TestCase):
         self._activate({'route': 'openai'})
         self.store.put('decision_route', {'transport': 'off'})
         self.transport.refuse_decide.add('api.openai.com')
-        with self.assertRaises(DecisionRouteError):
-            self.service.activate_decision_route({'transport': MODE_FOLLOW})
+        # #760: the request returns at once; the background job fails and the row stays.
+        status = self.service.activate_decision_route({'transport': MODE_FOLLOW})
+        self.assertEqual(status['qualification']['state'], 'queued')
+        self.assertEqual(status['effective']['state'], 'checking')
+        self.assertTrue(self.service.run_due_qualification())
         self.assertEqual(self.store.config('decision_route'), {'transport': 'off'})
+        status = self.service.decision_routes.status()
+        self.assertEqual(status['qualification']['state'], 'failed')
+        self.assertEqual(status['effective']['state'], 'off')
+        self.assertIn('적격 모델 없음', status['effective']['note'])
 
     # -- #679: the Work route passes the owner's CLI model -------------------------
     def test_subscription_main_model_is_saved_shown_and_passed_to_work(self):

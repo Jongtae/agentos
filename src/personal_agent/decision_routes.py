@@ -305,6 +305,9 @@ class DecisionRoutes:
         self._checkpoint = None
         #: Whether the running job may still commit (checked under service.lock), or None.
         self._job_live = None
+        #: True while a background job (not an explicit activation) holds
+        #: ``_activating``; written under ``service.lock``.
+        self._job_holds_lock = False
         self.jev_transport = jev_transport
         # The bounded HTTP transport for the explicit API model-list refresh.
         self.models_transport = models_transport or request_json
@@ -522,11 +525,23 @@ class DecisionRoutes:
             self._put_jobs(rows)
             return dict(row)
 
-    def queue_qualification(self, main_id):
-        """At most one open job per follow route; an older Main AI's open job is superseded."""
+    def _route_rev(self):
+        """The current ``decision_route`` row's revision (its ``activated_at``), or None."""
+        row = self.active()
+        return row.get('activated_at') if row else None
+
+    def queue_qualification(self, main_id, explicit=False):
+        """At most one open job per follow route; an older Main AI's open job is superseded.
+
+        ``route_rev`` records the Judgment AI row the job was queued against:
+        any other owner choice made before the job runs (or commits)
+        supersedes it (#760).  ``explicit`` marks an owner 기본 AI 따라가기
+        request, which may be queued while the Judgment AI is off or chosen.
+        """
         option = f'{MODE_FOLLOW}:{main_id}'
         now = self.clock()
         with self.service.lock:
+            rev = self._route_rev()
             rows = self._jobs()
             for key, row in rows.items():
                 if key == option or row.get('state') not in JOB_OPEN:
@@ -538,6 +553,8 @@ class DecisionRoutes:
             current = rows.get(option)
             if current and current.get('state') == JOB_QUEUED:
                 # Not started yet: it reads the Main AI's key and CLI when it runs.
+                current.update(route_rev=rev, explicit=bool(current.get('explicit') or explicit))
+                rows[option] = current
                 self._put_jobs(rows)
                 return dict(current)
             # A running or stopping job of this route is replaced (review P1):
@@ -545,7 +562,7 @@ class DecisionRoutes:
             # route.  Its next checkpoint - including the one right before the
             # commit - sees another id and stops without writing.
             job = {'id': f'{option}@{now}', 'option': option, 'main': main_id, 'state': JOB_QUEUED,
-                   'queued_at': now, 'requeued': 0}
+                   'queued_at': now, 'requeued': 0, 'route_rev': rev, 'explicit': bool(explicit)}
             rows[option] = job
             self._put_jobs(rows)
             return dict(job)
@@ -562,19 +579,39 @@ class DecisionRoutes:
                             key=lambda row: row.get('queued_at') or 0)
         if not queued or not self._activating.acquire(blocking=False):
             return False
+        with self.service.lock:
+            self._job_holds_lock = True
         try:
             # Only a job still queued is claimed: a cancel between the read
             # above and this update wins (review P2).
             claimed = self._update_job(queued[0]['option'], queued[0]['id'], expect=JOB_QUEUED, state=JOB_RUNNING,
                                        started_at=self.clock(), step=None)
             if not claimed:
-                self._activating.release()
+                self._release_job_lock()
                 return False
             self.spawn(lambda: self._run_job(claimed))
         except BaseException:
-            self._release_quietly()
+            self._release_job_lock()
             raise
         return True
+
+    def _job_current(self, row):
+        """Whether a job still matches the owner's latest decision (#760).
+
+        Its Main AI is current and the Judgment AI row is the one it was
+        queued against (a job stored before #760 has no revision: it still
+        needs the follow mode).
+        """
+        if self.service.main_ai.current() != row.get('main'):
+            return False
+        if 'route_rev' in row:
+            return self._route_rev() == row.get('route_rev')
+        return self.mode() == MODE_FOLLOW
+
+    def _release_job_lock(self):
+        with self.service.lock:
+            self._job_holds_lock = False
+        self._release_quietly()
 
     def _release_quietly(self):
         try:
@@ -597,14 +634,14 @@ class DecisionRoutes:
             self._update_job(option, job['id'], state=state, finished_at=self.clock(), **fields)
 
         try:
-            if self.mode() != MODE_FOLLOW or self.service.main_ai.current() != main_id:
+            if not self._job_current(job):
                 # The owner chose another Judgment AI, or switched again, meanwhile.
                 return finish(JOB_CANCELLED, failure='superseded')
             self._checkpoint = lambda model, case_id, index: self._job_checkpoint(job, model, case_id, index)
 
             def live():
                 row = self._jobs().get(option) or {}
-                return row.get('id') == job['id'] and row.get('state') == JOB_RUNNING
+                return row.get('id') == job['id'] and row.get('state') == JOB_RUNNING and self._job_current(row)
             self._job_live = live
             try:
                 # keep_previous: the decision_route row changes only on a pass.
@@ -627,7 +664,7 @@ class DecisionRoutes:
             return finish(JOB_PASSED, result={'state': 'active'})
         finally:
             self._checkpoint = self._job_live = None
-            self._release_quietly()
+            self._release_job_lock()
 
     def _latest_failure(self, main_id):
         """The failure code the qualification just recorded (follow or CLI check row)."""
@@ -673,7 +710,7 @@ class DecisionRoutes:
                 if row.get('state') not in (JOB_RUNNING, JOB_CANCELLING):
                     continue
                 requeue = (row['state'] == JOB_RUNNING and (row.get('requeued') or 0) < MAX_REQUEUES
-                           and self.mode() == MODE_FOLLOW and self.service.main_ai.current() == row.get('main'))
+                           and self._job_current(row))
                 if requeue:
                     row.update(state=JOB_QUEUED, requeued=(row.get('requeued') or 0) + 1, recovered_at=now, step=None)
                 elif row['state'] == JOB_CANCELLING:
@@ -936,7 +973,12 @@ class DecisionRoutes:
                 active.update(self._cli_active(route, engines))
         follow_check = checks.get(f'{MODE_FOLLOW}:{main}') if main else None
         # #685: the background qualification for the current Main AI, if any.
-        qualification = self.qualification(main) if self.mode(route) == MODE_FOLLOW else None
+        # #760: an explicit 기본 AI 따라가기 job is shown while the row it was
+        # queued against is still current, even when the mode is off/explicit.
+        qualification = self.qualification(main)
+        if qualification and self.mode(route) != MODE_FOLLOW and not (
+                qualification.get('explicit') and qualification.get('route_rev') == (route or {}).get('activated_at')):
+            qualification = None
         return {'active': active, 'direct_api': direct, 'jev': jev, 'subscription_cli': engines,
                 'suite_version': SUITE_VERSION, 'mode': self.mode(route), 'main': main, 'follow': follow,
                 'follow_candidates': {route_id: self.follow_preview(route_id) for route_id in CHOOSER_ORDER},
@@ -967,10 +1009,10 @@ class DecisionRoutes:
                     'text': template.format(**params, reason=reason_text)}
 
         verified = '검증됨' if active.get('qualification') else '확인됨'
-        if route is not None and route.get('transport') == ROUTE_OFF and route.get('mode') != MODE_FOLLOW:
-            return said('off', '판단 AI를 쓰지 않습니다. 판단이 필요한 기능은 건너뜁니다.')
         # #685: a background qualification for the current Main AI.  Until it
         # passes, whatever answered before still answers (or nothing does).
+        # #760: this includes an explicit 기본 AI 따라가기 while the Judgment
+        # AI is off or explicitly chosen.
         job = qualification or {}
         if job.get('state') in JOB_OPEN:
             step = job.get('step') or {}
@@ -987,6 +1029,17 @@ class DecisionRoutes:
                 active.get('source') == 'follow' and active.get('available') and route.get('main') == main):
             job_reason = ('기본 AI({main})에 맞는 판단 AI 확인이 끝나지 않았습니다: {detail}',
                           {'main': main_name, 'detail': JOB_FAILURE_TEXT.get(job.get('failure'), '확인 실패')})
+
+        def noted(result):
+            # #760: an off / explicitly chosen Judgment AI keeps its sentence;
+            # an explicit 기본 AI 따라가기 that did not pass is added as a note.
+            if job_reason:
+                template, params = job_reason
+                result.update(note_template=template, note_params=params, note=template.format(**params))
+            return result
+
+        if route is not None and route.get('transport') == ROUTE_OFF and route.get('mode') != MODE_FOLLOW:
+            return noted(said('off', '판단 AI를 쓰지 않습니다. 판단이 필요한 기능은 건너뜁니다.'))
         if active.get('source') == 'default':
             if job_reason:
                 reason = job_reason
@@ -1026,10 +1079,10 @@ class DecisionRoutes:
             reason = (('CLI가 바뀌어 다시 확인해야 합니다.' if active.get('requalification_needed')
                        else '엄격 격리 검증이 필요합니다.' if active.get('strict_profile_unqualified')
                        else '연결 정보가 없거나 확인이 필요합니다.'), {})
-            return said('attention', '따로 지정한 판단 AI({label})를 쓰지 못하는 중: {reason} 다른 경로로 자동 전환하지 않습니다.',
-                        reason, label=label)
-        return said('active', '따로 지정한 판단 AI를 쓰는 중: {label} — {model}, {verified}', label=label,
-                    model=model or '기본 모델', verified=verified)
+            return noted(said('attention', '따로 지정한 판단 AI({label})를 쓰지 못하는 중: {reason} 다른 경로로 자동 전환하지 않습니다.',
+                              reason, label=label))
+        return noted(said('active', '따로 지정한 판단 AI를 쓰는 중: {label} — {model}, {verified}', label=label,
+                          model=model or '기본 모델', verified=verified))
 
     def _model_lists(self):
         rows = self.store.config('decision_model_lists', {})
@@ -1230,7 +1283,11 @@ class DecisionRoutes:
         Explicit owner action only.  Any failure raises and leaves the
         previous route exactly as it was.  One activation runs at a time; a
         concurrent request is refused rather than racing the route row.
+        An explicit 기본 AI 따라가기 queues the background qualification
+        instead (#760).
         """
+        if isinstance(body, dict) and body.get('transport') == MODE_FOLLOW:
+            return self._request_follow()
         if not self._activating.acquire(blocking=False):
             raise DecisionRouteError('이미 대화 해석 경로를 확인하고 있습니다. 끝난 뒤 다시 시도하세요.')
         try:
@@ -1238,15 +1295,38 @@ class DecisionRoutes:
         finally:
             self._activating.release()
 
+    def _request_follow(self):
+        """Explicit owner choice of 기본 AI 따라가기 (#760): returns at once.
+
+        Refusals that need no call stay synchronous.  Otherwise the #685
+        background job is queued (one per route, cancellable, restart
+        recovered); the previous Judgment AI stays exactly as it was until
+        the job passes, and any other owner choice made meanwhile
+        supersedes it.
+        """
+        main = self.service.main_ai.current()
+        if not main:
+            raise DecisionRouteError('기본 AI가 아직 없어 따라갈 수 없습니다.')
+        if main not in FOLLOW_CANDIDATES:
+            self._fail(f'{MODE_FOLLOW}:{main}', 'follow-unsupported',
+                       FOLLOW_UNAVAILABLE.get(main, FOLLOW_UNAVAILABLE['other']))
+        # Review (#761): an explicit activation still running would commit
+        # after this request and supersede it, so it is refused like every
+        # other concurrent activation.  A background job holding the lock is
+        # fine: the request queues (a same-route running job is replaced).
+        if self._activating.acquire(blocking=False):
+            try:
+                self.queue_qualification(main, explicit=True)
+            finally:
+                self._activating.release()
+        else:
+            with self.service.lock:
+                if not self._job_holds_lock:
+                    raise DecisionRouteError('이미 대화 해석 경로를 확인하고 있습니다. 끝난 뒤 다시 시도하세요.')
+                self.queue_qualification(main, explicit=True)
+        return self.status()
+
     def _activate(self, body):
-        if isinstance(body, dict) and body.get('transport') == MODE_FOLLOW:
-            # Explicit owner choice of 기본 AI 따라가기: a failure keeps the
-            # previous Judgment AI exactly as it was.
-            main = self.service.main_ai.current()
-            if not main:
-                raise DecisionRouteError('기본 AI가 아직 없어 따라갈 수 없습니다.')
-            self._follow(main, keep_previous=True)
-            return self.status()
         if not isinstance(body, dict) or body.get('transport') not in TRANSPORTS:
             raise DecisionRouteError('대화 해석에 사용할 방식을 선택하세요.')
         transport = body['transport']

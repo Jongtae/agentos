@@ -14,10 +14,18 @@ independently of anything the model says (pilot posture, #653):
   page text; the raw DOM, cookies,
   ``localStorage`` and storage state have no accessor at all.
 * **Payment guard.**  Typing into a card-number, CVC, card-expiry, one-time
-  code or password field, and pressing a button of a form that contains such
-  a field, need an owner approval bound to (Work, action, page URL digest,
-  target element) and verified at execution.  The model's ``effect`` label can
-  only add a requirement (``payment`` always needs approval), never remove one.
+  code or password field, pressing a button of a form that contains such a
+  field, and pressing an element whose ``<label>`` forwards the press to a
+  control of such a form, need an owner approval bound to (Work, action, page
+  URL digest, target element) and verified at execution.  The model's
+  ``effect`` label can only add a requirement (``payment`` always needs
+  approval), never remove one.  The worker also cancels, for a page's whole
+  life, any submit of such a form that no approved step let through, whatever
+  element, script, timer or callback triggered it; the step, or for a later
+  submit the next snapshot, is refused as ``approval_required`` (#698).  Every
+  step's approval is bound to the target's own form or page state, the state
+  of the form its label forwards to, and the state of every payment form on
+  the page, each with that form's identity (position, method, action).
 
 Engine (#680): ``WebKitWorkerDriver`` drives ``personal_agent.browser_worker``,
 a subprocess that owns the Cocoa run loop and a ``WKWebView`` with an
@@ -51,6 +59,7 @@ from urllib.parse import urlsplit, urlunsplit
 from .agent_runtime import BROWSER_ACTIONS, ToolError, lookup_norm, lookup_text_violations, lookup_words
 from .bounded_execution import SECRET_PATTERN
 from .browser_jar import JAR_NAME, SERVICE as JAR_SERVICE, CookieJar, JarError, KeychainKey, store_account
+from .browser_worker import PAYMENT_TOKENS
 
 #: The model's declared effect class of one action.
 EFFECTS = ('read', 'navigate', 'mutate', 'payment')
@@ -58,7 +67,7 @@ EFFECTS = ('read', 'navigate', 'mutate', 'payment')
 GUARDED_AUTOCOMPLETE = frozenset({'current-password', 'new-password', 'one-time-code', 'cc-number', 'cc-csc',
                                   'cc-exp', 'cc-exp-month', 'cc-exp-year', 'cc-name'})
 #: Fields where typing (and any button of the enclosing form) needs approval.
-PAYMENT_AUTOCOMPLETE = frozenset({'cc-number', 'cc-csc', 'cc-exp', 'cc-exp-month', 'cc-exp-year', 'one-time-code'})
+PAYMENT_AUTOCOMPLETE = frozenset(PAYMENT_TOKENS)   # one set, shared with the worker's page-lifetime guard
 #: Actions the loop never memoises or deduplicates: the page is state.
 STATEFUL_ACTIONS = BROWSER_ACTIONS
 
@@ -72,6 +81,7 @@ ACTION_TIMEOUT_SECONDS = 20
 LOGIN_WINDOW_SECONDS = 1800
 REDACTED = '[가림]'
 
+CANCELLED_NOTE = '승인 없이 시도된 결제 양식 제출을 멈췄습니다'
 APPROVAL_TEXT = '결제 단계는 승인이 필요합니다. 소유자가 이 단계를 승인하면 이 요청을 한 번만 이어서 처리합니다.'
 LOGIN_REQUIRED_TEXT = '이 페이지는 로그인이 필요합니다. 설정의 브라우저 로그인 세션에서 "로그인 창 열기"로 먼저 로그인해 주세요. AgentOS는 비밀번호를 입력하지 않습니다.'
 STEP_BUDGET_TEXT = f'이 작업의 브라우저 단계 한도({STEPS_PER_WORK}회)에 도달해 더 실행하지 않았습니다.'
@@ -134,9 +144,31 @@ def payment_forms(elements):
     return {element.get('form') for element in elements if element.get('form') is not None and payment_field(element)}
 
 
+def cancelled_note(record):
+    """The owner-facing note naming the form whose submit was cancelled (its page, no query)."""
+    if not isinstance(record, dict):
+        return ''
+    where, _ = mediate_url(page_reference(record.get('action')))
+    return f' · {CANCELLED_NOTE}: {where[:200]}' if where else f' · {CANCELLED_NOTE}'
+
+
+def forwards_to_payment_form(element, forms):
+    """Its ``<label>`` forwards a press to a control of one of ``forms`` (#698).
+
+    ``label_form`` is the form of the labeled control of the ``<label>`` the
+    element is, or sits inside, when that control is another element: the
+    ``for`` target, else the first labelable descendant (HTML's
+    ``label.control``).  A click there activates that control, so a span inside
+    ``<label for=pay>`` presses the pay button even outside the pay form.
+    """
+    return element.get('label_form') is not None and element['label_form'] in forms
+
+
 def guarded_submit(element, elements):
-    """A button of a form that contains a payment/credential field."""
-    return button_like(element) and element.get('form') is not None and element['form'] in payment_forms(elements)
+    """A button of a form that contains a payment/credential field, or an element forwarding to one."""
+    forms = payment_forms(elements)
+    return ((button_like(element) and element.get('form') is not None and element['form'] in forms)
+            or forwards_to_payment_form(element, forms))
 
 
 USERNAME_TYPES = frozenset({'text', 'email', 'tel', ''})
@@ -312,12 +344,15 @@ def mediate_snapshot(raw, excluded=(), requested_url=None):
             redacted += count
             row['value'] = value
         visible.append(row)
-        internal.append({**{key: element.get(key) for key in ('index', 'role', 'name', 'tag', 'type', 'autocomplete', 'form')},
+        internal.append({**{key: element.get(key) for key in ('index', 'role', 'name', 'tag', 'type', 'autocomplete', 'form',
+                                                             'label_form')},
                          'n': row['n'], 'guarded': guarded_field(element), 'payment': payment_field(element)})
         if len(visible) >= ELEMENT_LIMIT:
             break
+    forms = payment_forms(elements)
     for row in internal:
         row['submit_guarded'] = guarded_submit(row, elements)
+        row['forwards_payment'] = forwards_to_payment_form(row, forms)
     url, count = mediate_url(raw.get('url'), excluded)
     redacted += count
     title, count = scrub(str(raw.get('title') or '')[:200], excluded)
@@ -329,28 +364,42 @@ def mediate_snapshot(raw, excluded=(), requested_url=None):
     # Internal only (never returned): the unmediated page reference the
     # approval binds to, and the page state a guarded step is bound to.
     snapshot['_page'] = page_reference(raw.get('url'))
-    snapshot['_states'] = page_states(raw, elements, text, excluded)
+    states, identities = page_states(raw, elements, text, excluded)
+    snapshot['_states'] = states
+    # Every payment form's identity and state (#698): part of every step's binding.
+    snapshot['_payment_states'] = {identities[form_id]: states[form_id]
+                                   for form_id in payment_forms(elements) if form_id in identities}
     return snapshot
 
 
-def page_states(raw, elements, text, excluded=()):
-    """``{form id: state, None: page state}`` a guarded step's approval is bound to.
+def form_identity(form):
+    """Which form: its position among the document's forms, its method and action page (no query)."""
+    form = form if isinstance(form, dict) else {}
+    return f"form {form.get('dom', '')}|{str(form.get('method') or '').lower()}|{page_reference(form.get('action'))}"
 
-    A form's state is its mediated visible text (price, quantity, terms) and
-    the mediated values of its non-guarded fields; guarded values (card, code,
-    password) are never part of it.  A target outside any form is bound to the
-    mediated page text.
+
+def page_states(raw, elements, text, excluded=()):
+    """``({form id: state, None: page state}, {form id: identity})`` approvals are bound to.
+
+    A form's state is its identity (``form_identity``), its mediated visible
+    text (price, quantity, terms) and the mediated values of its non-guarded
+    fields; guarded values (card, code, password) are never part of it.  A
+    target outside any form is bound to the mediated page text.
     """
-    forms = {}
+    forms, identities = {}, {}
     for form in raw.get('forms') or []:
         if isinstance(form, dict) and form.get('id') is not None:
             forms[form['id']] = scrub(str(form.get('text') or '')[:TEXT_LIMIT], excluded)[0]
+            identities[form['id']] = form_identity(form)
     states = {None: text}
-    for form_id in {element.get('form') for element in elements if element.get('form') is not None}:
+    referenced = {element.get(key) for element in elements for key in ('form', 'label_form')}
+    for form_id in referenced - {None}:
+        identities.setdefault(form_id, f'form ?{form_id}')
         values = sorted((target_key(element), scrub(str(element.get('value') or ''), excluded)[0])
                         for element in elements if element.get('form') == form_id and not guarded_field(element))
-        states[form_id] = forms.get(form_id, '') + '\n' + '\n'.join(f'{key}={value}' for key, value in values)
-    return states
+        states[form_id] = (identities[form_id] + '\n' + forms.get(form_id, '') + '\n'
+                           + '\n'.join(f'{key}={value}' for key, value in values))
+    return states, identities
 
 
 def public_view(snapshot):
@@ -429,6 +478,9 @@ class BrowserSession:
         self.steps, self.steps_used = steps, 0
         self.action_seconds = action_seconds
         self.last = None
+        # The last click/type sent to the page, as (binding, description): a
+        # payment-form submit cancelled after it answered is attributed to it (#698).
+        self._last_input = None
 
     # -- plumbing --
     def _driver(self):
@@ -478,7 +530,26 @@ class BrowserSession:
                 excluded = ()
         raw = self._call(lambda timeout: self._driver().snapshot())
         self.last = mediate_snapshot(raw, excluded, requested_url)
+        cancelled = raw.get('cancelled_submit') if isinstance(raw, dict) else None
+        if cancelled:
+            self._cancelled_between_steps(cancelled)
         return self.last
+
+    def _cancelled_between_steps(self, record):
+        """A payment-form submit the worker cancelled after a step answered (a timer, an async callback).
+
+        Asked of the owner as the last click/type (the resumed run repeats
+        it, and every step's binding already covers every payment form's
+        state); with no step yet, as a submit of that form.
+        """
+        note = cancelled_note(record)
+        if self._last_input is not None:
+            binding, description = self._last_input
+            self._refuse(binding, description + note)
+        identity = form_identity(record)
+        state = (self.last.get('_payment_states') or {}).get(identity, '')
+        self._refuse(step_binding(self.work_id, 'browser_submit', self.last.get('_page'), identity, '', state),
+                     '결제 양식 제출' + note)
 
     def _page_state(self, requested_url=None):
         snapshot = self._snapshot(requested_url)
@@ -496,24 +567,43 @@ class BrowserSession:
             raise ValueError('effect는 read, navigate, mutate, payment 중 하나여야 합니다.')
         return effect
 
-    def _guard(self, action, url, element_key, description, effect, deterministic, argument='', state=''):
+    def _guard(self, binding, description, required):
         """Refuse a guarded step unless an exact owner approval is consumed now.
 
-        ``deterministic`` is AgentOS's own classification of the target; the
-        model's ``effect`` label is consulted only to ADD the requirement.
-        The approval is bound to the step's arguments and the current page
-        state too, so different text or a changed form asks again.
+        ``required`` is AgentOS's own classification of the target, or the
+        model's ``payment`` label (which can only ADD the requirement).  The
+        binding covers the step's arguments and the current page state too, so
+        different text or a changed form asks again.  Returns True when an
+        approval was consumed: only then does the worker let a submit of a
+        payment form through.  An unguarded step still spends an approval the
+        owner gave for exactly it after the worker refused it (#698).
         """
-        if not (deterministic or effect == 'payment'):
-            return
-        binding = step_binding(self.work_id, action, url, element_key, argument, state)
         if self.approvals.consume(binding):
-            return
+            return True
+        if required:
+            self._refuse(binding, description)
+        return False
+
+    def _refuse(self, binding, description):
         try:
             self.approvals.request(binding, description)
         except Exception:
             pass
         raise ToolError(APPROVAL_TEXT, 'approval_required', requires='browser-step-approval')
+
+    def _input(self, operation, binding, description):
+        """Run one click or type; a payment-form submit the worker cancelled asks the owner (#698).
+
+        An approved step lets one such submit through; a second one is
+        cancelled and asked again like any other.
+        """
+        self._last_input = (binding, description)
+        try:
+            self._call(operation)
+        except ToolError as exc:
+            if exc.code == 'approval_required':
+                self._refuse(binding, description + cancelled_note(getattr(exc, 'cancelled_form', None)))
+            raise
 
     # -- the tools --
     def run(self, action, args):
@@ -541,7 +631,8 @@ class BrowserSession:
         if local_destination(url, self._allowed_origins):
             raise ToolError(BLOCKED_TEXT, 'blocked_destination')
         self._spend_step()
-        self._guard('browser_open', url, url, f'{_host(parts)} 페이지 열기', effect, False, argument=url)
+        self._guard(step_binding(self.work_id, 'browser_open', url, url, url), f'{_host(parts)} 페이지 열기',
+                    effect == 'payment')
         self._call(lambda timeout: self._driver().goto(url, timeout))
         return self._page_state(requested_url=url)
 
@@ -563,10 +654,11 @@ class BrowserSession:
         snapshot = self._snapshot()
         element = resolve_target(snapshot, args.get('target'))
         key = target_key(element)
-        self._guard('browser_click', snapshot['_page'], key,
-                    f"'{element.get('name') or element.get('role')}' 버튼 누르기", effect, element['submit_guarded'],
-                    argument=key, state=self._state_of(snapshot, element))
-        self._call(lambda timeout: self._driver().click(element['index'], timeout))
+        binding = step_binding(self.work_id, 'browser_click', snapshot['_page'], key, key, self._state_of(snapshot, element))
+        description = f"'{element.get('name') or element.get('role')}' 버튼 누르기"
+        approved = self._guard(binding, description, element['submit_guarded'] or effect == 'payment')
+        self._input(lambda timeout: self._driver().click(element['index'], timeout, approved=approved),
+                    binding, description)
         return self._page_state()
 
     def type(self, args):
@@ -578,16 +670,32 @@ class BrowserSession:
         self._spend_step()
         snapshot = self._snapshot()
         element = resolve_target(snapshot, args.get('target'))
-        self._guard('browser_type', snapshot['_page'], target_key(element),
-                    f"'{element.get('name') or element.get('role')}' 입력란에 입력", effect, element['payment'],
-                    argument=text, state=self._state_of(snapshot, element))
-        self._call(lambda timeout: self._driver().type(element['index'], text, timeout))
+        binding = step_binding(self.work_id, 'browser_type', snapshot['_page'], target_key(element), text,
+                               self._state_of(snapshot, element))
+        description = f"'{element.get('name') or element.get('role')}' 입력란에 입력"
+        # Typing presses the field first, so a label forwarding that press is guarded too.
+        required = element['payment'] or element.get('forwards_payment') or effect == 'payment'
+        approved = self._guard(binding, description, required)
+        self._input(lambda timeout: self._driver().type(element['index'], text, timeout, approved=approved),
+                    binding, description)
         return self._page_state()
 
     @staticmethod
     def _state_of(snapshot, element):
+        """The state a step on ``element`` is bound to (#698).
+
+        Its own form's state (else the page text), the state of the form its
+        label forwards a press to, and every payment form's state, each with
+        the form's identity: a changed non-card value of the payment form, or
+        a label pointed at another identical form, asks again.
+        """
         states = snapshot.get('_states') or {}
-        return states.get(element.get('form'), states.get(None, ''))
+        parts = [states.get(element.get('form'), states.get(None, ''))]
+        if element.get('label_form') is not None:
+            parts.append('label -> ' + states.get(element['label_form'], ''))
+        payment = snapshot.get('_payment_states') or {}
+        parts.extend(payment[identity] for identity in sorted(payment))
+        return '\n\x1e'.join(parts)
 
     def _require_page(self):
         if self.driver is None or self.last is None:
@@ -825,6 +933,11 @@ class WebKitWorkerDriver:
                 raise ToolError(TARGET_TEXT, 'target_unavailable')
             if code == 'blocked_destination':
                 raise ToolError(BLOCKED_TEXT, 'blocked_destination')
+            if code == 'approval_required':
+                # The worker cancelled a payment-form submit no approval let through (#698).
+                refusal = ToolError(APPROVAL_TEXT, 'approval_required', requires='browser-step-approval')
+                refusal.cancelled_form = message.get('form') if isinstance(message.get('form'), dict) else None
+                raise refusal
             raise WorkerError(code)
 
     def _request(self, op, timeout, **arguments):
@@ -848,7 +961,8 @@ class WebKitWorkerDriver:
                                            'autocomplete': str(element.get('autocomplete') or ''),
                                            'name': str(element.get('name') or ''),
                                            'in_form': element.get('form') is not None,
-                                           'payment_form': element.get('form') is not None and element.get('form') in guarded_forms}
+                                           'payment_form': (element.get('form') is not None and element.get('form') in guarded_forms)
+                                           or forwards_to_payment_form(element, guarded_forms)}
                         for element in elements if isinstance(element.get('index'), int) and not isinstance(element.get('index'), bool)}
         return page
 
@@ -858,11 +972,16 @@ class WebKitWorkerDriver:
             raise ToolError(TARGET_TEXT, 'target_unavailable')   # never an element nobody classified
         return {'index': index, 'expect': expect, 'tokens': sorted(PAYMENT_AUTOCOMPLETE)}
 
-    def click(self, index, timeout):
-        self._request('click', timeout, **self._target(index))
+    def click(self, index, timeout, approved=False):
+        """``approved``: the session consumed an owner approval for this step.
 
-    def type(self, index, text, timeout):
-        self._request('type', timeout, text=text, **self._target(index))
+        Only then does the worker let one payment-form submit through, until
+        the step answers; otherwise a cancelled one answers ``approval_required``.
+        """
+        self._request('click', timeout, approved=approved is True, **self._target(index))
+
+    def type(self, index, text, timeout, approved=False):
+        self._request('type', timeout, text=text, approved=approved is True, **self._target(index))
 
     # -- the owner's login window ---------------------------------------------------
     def show(self, url, timeout):

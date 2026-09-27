@@ -264,7 +264,8 @@ def _whole_number(value):
 def normalize_window(every_minutes, until, max_runs, due_at, timezone_name, now):
     """``(every_seconds, window_end, max_runs)`` of one watch (#719), or a typed refusal.
 
-    The window is ``[due_at, until]``; the run count is the number of slots
+    The window is ``[due_at, until)``: a slot runs strictly before the
+    deadline, never at or after it.  The run count is the number of slots
     in it, lowered by ``max_runs`` when given and never above
     ``MAX_WINDOW_RUNS``.  ``until`` is parsed like ``due`` (same zone rules).
     """
@@ -278,7 +279,7 @@ def normalize_window(every_minutes, until, max_runs, due_at, timezone_name, now)
     if window_end <= due_at or window_end - due_at > MAX_WINDOW_SECONDS:
         raise PreparationRefusal('invalid_window')
     every = minutes * 60
-    slots = int((window_end - due_at) // every) + 1
+    slots = math.ceil((window_end - due_at) / every)
     if max_runs in (None, ''):
         runs = min(slots, MAX_WINDOW_RUNS)
     else:
@@ -292,15 +293,15 @@ def normalize_window(every_minutes, until, max_runs, due_at, timezone_name, now)
 def next_window_slot(row, now):
     """The next slot of a watch strictly after ``now``, or None (#719).
 
-    None once ``max_runs`` Works have started or the next slot is after
-    ``window_end``.  Slots missed while AgentOS was down are skipped, as for
+    None once ``max_runs`` Works have started or the next slot is not
+    before ``window_end``.  Slots missed while AgentOS was down are skipped, as for
     the other recurrences.
     """
     every, end = row.get('every_seconds'), row.get('window_end')
     if not every or end is None or int(row.get('run_count') or 0) >= int(row.get('max_runs') or 0):
         return None
     slot = row['due_at'] + every * (int(max(0.0, now - row['due_at']) // every) + 1)
-    return slot if slot <= end else None
+    return slot if slot < end else None
 
 
 def next_due(due_at, timezone_name, recurrence, now):
@@ -590,7 +591,7 @@ class Preparations:
             current = dict(current)
             existing = db.execute('SELECT id FROM jobs WHERE request_key=?', (key,)).fetchone()
             window = current['recurrence'] == RECURRENCE_WINDOW
-            if window and not existing and (now > current['window_end'] + PAST_GRACE_SECONDS
+            if window and not existing and (now >= current['window_end']
                                             or int(current['run_count'] or 0) >= int(current['max_runs'] or 0)):
                 # #719: a watch never runs after its deadline or beyond its bound.
                 db.execute('UPDATE preparations SET state=?,updated_at=? WHERE id=? AND state=?',
@@ -678,12 +679,12 @@ class Preparations:
             if decision is not None and job:
                 updates.update(last_decision=decision[0], last_decision_reason=decision[1])
                 if decision[0] == DECISION_NOTIFY and notify_to:
+                    # Queued here; the "last notified" fields advance only once
+                    # Telegram confirms the send (``record_notified``).
                     chat_id, generation = notify_to
-                    digest_ = text_digest(answer)
                     db.execute('INSERT OR IGNORE INTO telegram_notifications VALUES (?,?,?,?,?,?,?,?,?)',
-                               (str(uuid.uuid4()), job['id'], chat_id, generation, NOTIFY_KIND, digest_, 'queued', None, now))
-                    updates.update(last_notified_digest=digest_, last_notified_text=bounded_text(answer),
-                                   last_notified_at=now)
+                               (str(uuid.uuid4()), job['id'], chat_id, generation, NOTIFY_KIND, text_digest(answer),
+                                'queued', None, now))
                     notified = True
             db.execute(f"UPDATE preparations SET {','.join(k + '=?' for k in updates)} WHERE id=? AND state=?",
                        (*updates.values(), current['id'], STATE_RUNNING))
@@ -697,6 +698,21 @@ class Preparations:
                            (job['id'], 'preparation', 'succeeded' if outcome == STATE_DELIVERED else 'failed',
                             json.dumps(detail), now))
             return {**current, **updates}
+
+    def record_notified(self, work_id, digest_, text, now):
+        """A ``notify`` message for run ``work_id`` was sent (#719).
+
+        Only a confirmed send becomes what the owner was last told: the
+        deduplication digest and the text the next judgment compares with.
+        A cancelled or uncertain send changes neither.
+        """
+        job = self.store.job(work_id)
+        preparation_id = preparation_of((job or {}).get('request_key'))
+        if not preparation_id:
+            return False
+        with self.store.db() as db:
+            return bool(db.execute('UPDATE preparations SET last_notified_digest=?,last_notified_text=?,last_notified_at=? '
+                                   'WHERE id=?', (digest_, bounded_text(text), now, preparation_id)).rowcount)
 
     # -- consumption -------------------------------------------------------
 

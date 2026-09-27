@@ -4943,6 +4943,14 @@ class AgentService:
                     result=self.telegram.send_message(notification['chat_id'],text,reply_markup)
                 message_id=result.get('message_id') if isinstance(result,dict) else None
                 self.store.update_notification(notification['id'],'sent',message_id if isinstance(message_id,int) else None)
+                if notification['kind']==prep.NOTIFY_KIND:
+                    # #719: only a confirmed send is what the owner was last told.
+                    try:
+                        job=self.store.job(notification['job_id'])
+                        self.preparations.record_notified(notification['job_id'],notification['fingerprint'],
+                                                          self.scrub_prepared_answer(job) if job else '',self.preparations.clock())
+                    except Exception as exc:
+                        LOG.warning('watch notification record failed work=%s kind=%s',notification['job_id'],type(exc).__name__)
             except ProviderError:
                 self.store.update_notification(notification['id'],'unknown')
         return True

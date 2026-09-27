@@ -751,7 +751,7 @@ class WindowTests(_WatchCase):
     def test_the_window_is_bounded_by_its_slots_max_runs_and_limits(self):
         due = self.now + 60
         until = lambda seconds: datetime.fromtimestamp(due + seconds, SEOUL).isoformat()
-        self.assertEqual(prep.normalize_window(10, until(3600), None, due, 'Asia/Seoul', self.now), (600, due + 3600, 7))
+        self.assertEqual(prep.normalize_window(10, until(3600), None, due, 'Asia/Seoul', self.now), (600, due + 3600, 6), 'slots before the deadline')
         self.assertEqual(prep.normalize_window('10', until(3600), 3, due, 'Asia/Seoul', self.now)[2], 3)
         self.assertEqual(prep.normalize_window(5, until(86400), None, due, 'Asia/Seoul', self.now)[2], prep.MAX_WINDOW_RUNS)
         for every, span, runs in ((4, 3600, None), (721, 3600, None), (10, 0, None), (10, -600, None),
@@ -777,18 +777,18 @@ class WindowTests(_WatchCase):
         self.assertEqual([(e['run'], e['max_runs']) for e in events], [(1, 3), (2, 3), (3, 3)])
 
     def test_a_watch_stops_at_its_deadline(self):
-        self.watched = self.watch(span=1800)  # slots at +0, +10, +20, +30 minutes
+        self.watched = self.watch(span=1800)  # slots at +0, +10, +20 minutes; none at the deadline
         slots = []
         while self.service.preparations.get(self.watched['id'])['state'] == 'scheduled':
             slots.append(self.service.preparations.get(self.watched['id'])['due_at'])
             row = self.run_slot('아직 괜찮습니다.')
         end = self.watched['window_end']
-        self.assertEqual(len(slots), 4)
-        self.assertTrue(all(slot <= end for slot in slots))
+        self.assertEqual(len(slots), 3)
+        self.assertTrue(all(slot < end for slot in slots))
         self.assertEqual(row['state'], 'delivered')
         self.now = end + 7200
         self.assertFalse(self.tick())
-        self.assertEqual(len(self.runs(row['id'])), 4)
+        self.assertEqual(len(self.runs(row['id'])), 3)
 
     def test_a_window_missed_while_down_expires_without_running(self):
         self.watched = self.watch(span=1800)
@@ -797,6 +797,13 @@ class WindowTests(_WatchCase):
         self.assertEqual(self.service.preparations.get(self.watched['id'])['state'], prep.STATE_EXPIRED)
         self.assertEqual((self.runs(self.watched['id']), self.model_calls), ([], []))
         self.assertFalse(self.tick())
+
+    def test_a_tick_just_after_the_deadline_does_not_run(self):
+        self.watched = self.watch(span=1800)
+        self.now = self.watched['window_end']
+        self.assertTrue(self.tick())
+        self.assertEqual(self.service.preparations.get(self.watched['id'])['state'], prep.STATE_EXPIRED)
+        self.assertEqual((self.runs(self.watched['id']), self.model_calls), ([], []))
 
     def test_missed_slots_run_once_then_the_next_slot_after_now(self):
         self.watched = self.watch(span=3600)
@@ -879,6 +886,31 @@ class SilentDeliveryTests(_WatchCase):
             restarted.deliver_notification()
             self.tick(restarted)
         self.assertEqual(len(self.notifications()), 1)
+
+    def test_only_a_confirmed_send_is_what_the_owner_was_last_told(self):
+        self.use([True, True])
+        self.watched = self.watch()
+        row = self.service.preparations.get(self.watched['id'])
+        self.now = row['due_at'] + 1
+        self.tick()
+        self.script = [{'content': '지금 출발하세요.'}] * 2
+        self.service.run_one()
+        self.tick()  # notify decided and queued
+        self.assertIsNone(self.service.preparations.get(row['id'])['last_notified_digest'], 'queued is not sent')
+        # The pairing changes before the send: the queued message is cancelled, never sent.
+        self.store.put('telegram', {'enabled': True, 'user_id': CHAT, 'generation': 'gen-2', 'cursor': 0})
+        self.service.deliver_notification()
+        self.assertEqual(self.notifications(), [])
+        row = self.service.preparations.get(row['id'])
+        self.assertEqual((row['last_notified_digest'], row['last_notified_text']), (None, None))
+        # The same result on the next slot is judged again and reaches the re-paired owner.
+        self.store.put('telegram', {'enabled': True, 'user_id': CHAT, 'generation': GENERATION, 'cursor': 0})
+        asked = len(self.watch_asks())
+        row = self.run_slot('지금 출발하세요.')
+        self.assertEqual((row['last_decision'], len(self.watch_asks())), ('notify', asked + 1))
+        self.assertEqual(len(self.notifications()), 1)
+        self.assertEqual(row['last_notified_digest'], prep.text_digest('지금 출발하세요.'))
+        self.assertIn('지금 출발하세요', row['last_notified_text'])
 
     def test_without_a_judgment_the_result_is_sent_once_then_kept_quiet(self):
         self.use([None, None, None])

@@ -814,7 +814,7 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                         return self.reply(400,{'error':'Open AgentOS on its local address to approve a calendar change.'})
                     try:return self.reply(200,service.calendar_draft_request(body))
                     except ValueError as exc:return self.reply(400,{'error':str(exc)})
-                if path in ('/api/browser/login','/api/browser/approval','/api/browser/sessions/delete'):
+                if path in ('/api/browser/login','/api/browser/approval','/api/browser/sessions/delete','/api/browser/login/decision'):
                     # #656: a headed window on this Mac, and the approval of a
                     # guarded step in the owner's session; #680: deleting saved
                     # sign-in sessions.  Owner session, loopback only.
@@ -822,6 +822,8 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                     try:
                         if path=='/api/browser/login':return self.reply(200,service.open_browser_for_login(body))
                         if path=='/api/browser/sessions/delete':return self.reply(200,service.delete_browser_sessions(body))
+                        # #709: 로그인 완료 / 건너뛰기 of one Work's in-flow login.
+                        if path=='/api/browser/login/decision':return self.reply(200,service.browser_login_decision(body))
                         return self.reply(200,service.browser_step_decision(body))
                     except ValueError as exc:return self.reply(400,{'error':str(exc)})
                 if path=='/api/context-inbox/telegram-policy':return self.reply(200,service.set_context_telegram_policy(body))

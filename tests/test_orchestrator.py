@@ -18,7 +18,7 @@ from unittest import mock
 
 from personal_agent import browser_session as bs
 from personal_agent import mcp_bridge
-from personal_agent.agent_runtime import WorkBudget, render_turn_prompt, turn_context
+from personal_agent.agent_runtime import GOAL_NOT_SHOWN, GOAL_UNJUDGED, WorkBudget, render_turn_prompt, turn_context
 from personal_agent.bounded_execution import (BOUNDED_PROFILE, AgentOSMcpTools, BoundedExecutionAdapter,
                                               ExecutionError, ExecutionResult, private_read_actions, turn_actions)
 from personal_agent.conversation_handoff import ConversationJudgments
@@ -236,6 +236,29 @@ class Redelegation(Harness):
         last = self.events(job, 'evaluated')[-1][1]
         self.assertEqual((last['attempt'], last['next'], last['stop']), (3, 'stop', 'limit'))
         self.assertEqual(row['response'], 'cli answer')
+        # Review P1: judged short and not re-delegated is never stored as succeeded;
+        # no tool result was observed, so it failed.
+        self.assertEqual(row['status'], 'failed')
+        self.assertIn(GOAL_NOT_SHOWN, row['owner_cause'])
+
+    def test_a_cli_attempt_judged_short_with_an_observation_is_partial(self):
+        def search(tools):
+            tools.capabilities.record('web_search', 'succeeded',
+                                      json.dumps({'host_action': 'web_search', 'evidence': {'sources': ['https://a.test']}}))
+        self.engine.before = search
+        self.script([plan('codex', 'Look it up.')], goals=[False])
+        job, row = self.run_work('찾아줘')
+        self.assertEqual(self.events(job, 'evaluated')[-1][1]['stop'], 'replan_failed')
+        self.assertEqual(row['status'], 'partial')
+        self.assertIn(GOAL_NOT_SHOWN, row['owner_cause'])
+
+    def test_a_cli_attempt_that_could_not_be_judged_is_partial_with_the_unknown_stated(self):
+        self.script([plan('codex', 'Look it up.')], goals=[])
+        job, row = self.run_work('찾아줘')
+        last = self.events(job, 'evaluated')[-1][1]
+        self.assertEqual((last['outcome'], last['stop']), ('unjudged', 'unjudged'))
+        self.assertEqual(row['status'], 'partial')
+        self.assertIn(GOAL_UNJUDGED, row['owner_cause'])
 
     def test_no_redelegation_when_the_work_budget_is_nearly_spent(self):
         clock = [0.0]
@@ -425,6 +448,58 @@ class PerRequestTools(Harness):
         self.assertEqual([tool['name'] for tool in replies[1]['result']['tools']], ['list_notes'])
 
 
+class PlannerHistory(Harness):
+    def test_rows_withheld_from_a_worker_are_withheld_from_the_planner(self):
+        """Review P1: document-job rows and rows of a Work that read a private store never reach the plan call."""
+        from personal_agent.agent_runtime import WORK_SOURCES_KEY
+        jobs = []
+        for text, answer in (('문서 질문', 'DOCUMENT-ANSWER'), ('메모 질문', 'NOTES-ANSWER'), ('일반 질문', 'PLAIN-ANSWER')):
+            self.engine.answers = [answer]
+            jobs.append(self.run_work(text)[0])
+        document, notes, plain = jobs
+        self.store.put('file_workspace_document_jobs', [document])
+        records = self.store.config(WORK_SOURCES_KEY, {})
+        records[notes] = [*records[notes], 'history:personal-space']
+        self.store.put(WORK_SOURCES_KEY, records)
+        self.script([plan('codex', 'Answer.')], goals=[True])
+        self.run_work('이어서')
+        excerpt = self.asked_plans[-1][0].facts['recent_conversation']
+        self.assertIn('PLAIN-ANSWER', excerpt)
+        self.assertIn('일반 질문', excerpt)
+        for withheld in ('DOCUMENT-ANSWER', '문서 질문', 'NOTES-ANSWER', '메모 질문'):
+            self.assertNotIn(withheld, excerpt)
+
+    def test_a_work_without_a_source_record_is_withheld(self):
+        from personal_agent.agent_runtime import WORK_SOURCES_KEY
+        self.engine.answers = ['UNRECORDED-ANSWER']
+        earlier, _row = self.run_work('예전 질문')
+        records = self.store.config(WORK_SOURCES_KEY, {})
+        records.pop(earlier)
+        self.store.put(WORK_SOURCES_KEY, records)
+        self.assertEqual(self.service.planner_history(
+            [{'role': 'assistant', 'content': 'x', 'job_id': earlier}, {'role': 'user', 'content': 'now'}], ()), [])
+
+
+class Preflight(Harness):
+    def test_an_explicit_search_preflight_honours_a_subset_without_web_search(self):
+        """Review P2: the /search preflight is a web_search call; a subset without it skips it."""
+        self.script([plan('codex', 'Answer from the saved notes.', tools=('list_notes',))], goals=[True])
+        job, row = self.run_work('/search 서울 날씨')
+        self.assertEqual(row['status'], 'succeeded')
+        self.assertEqual(len(self.engine.turns), 1)
+        with self.store.db() as db:
+            tools = [r['tool'] for r in db.execute('SELECT tool FROM tool_events WHERE job_id=?', (job,))]
+        self.assertNotIn('web_search', tools)
+
+    def test_the_preflight_still_runs_with_the_usual_tools(self):
+        self.script([plan('codex', 'Search it.')], goals=[True])
+        job, _row = self.run_work('/search 서울 날씨')
+        with self.store.db() as db:
+            scopes = [json.loads(r['detail']).get('scope') for r in db.execute(
+                "SELECT detail FROM tool_events WHERE job_id=? AND tool='web_search'", (job,))]
+        self.assertIn('subscription-preflight', scopes)
+
+
 class Pinned(Harness):
     def test_spliced_private_material_keeps_the_default_worker(self):
         self.store.save_note = None
@@ -457,6 +532,27 @@ class CatalogueData(Harness):
         from personal_agent.orchestrator import worker_catalogue
         self.service.save_main_ai_key({'provider': 'openai', 'key': 'sk-fixture-later-0710'})
         self.assertEqual(worker_catalogue(self.service).worker('openai')['reason'], 'not_verified')
+
+    def test_a_passing_recheck_keeps_the_route_offerable_after_a_switch(self):
+        """Review P2: 확인 on an API Main AI keeps its verified config and probe fields."""
+        from personal_agent.orchestrator import worker_catalogue
+        with mock.patch.object(self.service.decision_routes, 'follow_main_switched', return_value={'state': 'skipped'}):
+            self.service.activate_main_ai({'route': 'openai'})
+        self.service.check_main_ai()
+        check = self.store.config('main_ai_checks', {})['openai']
+        self.assertEqual((check['state'], check['config']['model']), ('ok', 'gpt-4o-mini'))
+        self.assertTrue(check['test']['tools_ok'])
+        self.assertNotIn(OPENAI_KEY, json.dumps(check))
+        with mock.patch.object(self.service.decision_routes, 'follow_main_switched', return_value={'state': 'skipped'}):
+            self.service.activate_main_ai({'route': 'codex'})
+        self.assertTrue(worker_catalogue(self.service).worker('openai')['available'])
+
+    def test_a_recheck_with_a_replaced_pending_key_does_not_verify_that_key(self):
+        with mock.patch.object(self.service.decision_routes, 'follow_main_switched', return_value={'state': 'skipped'}):
+            self.service.activate_main_ai({'route': 'openai'})
+        self.service.save_main_ai_key({'provider': 'openai', 'key': 'sk-fixture-pending-0710'})
+        self.service.check_main_ai()
+        self.assertNotIn('config', self.store.config('main_ai_checks', {})['openai'])
 
     def test_a_signed_out_cli_is_not_offered(self):
         from personal_agent.orchestrator import worker_catalogue

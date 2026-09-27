@@ -397,6 +397,9 @@ class Orchestration:
         self.history = []  # (attempt, evaluation, answer excerpt, failed steps)
         self.notice = ''
         self.orchestrated = False
+        #: The evaluation of the last attempt when no further attempt followed
+        #: (the caller keeps a CLI Work judged short from being stored as succeeded).
+        self.terminal = None
 
     # -- the plan call --------------------------------------------------------
     def _redact(self, text, private=True):
@@ -627,4 +630,6 @@ class Orchestration:
         if following is not None:
             self.attempts.append(following)
             self._planned(following)
+        else:
+            self.terminal = evaluation
         return following

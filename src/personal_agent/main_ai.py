@@ -395,6 +395,16 @@ class MainAiRoutes:
         else:
             result = self.service.test_model()
             if current in API_ROUTES:
-                self._record_check(current, {'state': 'ok' if result['ok'] else 'failed',
-                                             'failure': (result.get('error') or '')[:300]})
+                record = {'state': 'ok' if result['ok'] else 'failed', 'failure': (result.get('error') or '')[:300]}
+                # #710 review: a passing recheck keeps the verified config and the
+                # probe's content-free fields, so the route stays offerable as a
+                # worker after a later Main AI switch.  Only when the probed key is
+                # the route's saved key: a replaced key waiting for 확인하고 사용 is
+                # not the one that passed.
+                config, test = self.store.config('model', {}) or {}, self.store.config('model_test')
+                probed = self.store.secret('model_key') or ''
+                if result['ok'] and api_route_of(config) == current and isinstance(test, dict) \
+                        and probed and self.store.secret(key_slot(current)) == probed:
+                    record.update(config=dict(config), test=verified_test(test))
+                self._record_check(current, record)
         return {'main_ai': self.status()}

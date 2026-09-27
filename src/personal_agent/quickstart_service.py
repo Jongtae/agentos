@@ -30,7 +30,8 @@ from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_U
                                       verified_portion)
 from .subscription_engines import SubscriptionEngines
 from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, StrictIsolatedAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult, MAX_PROMPT_BYTES, BOUNDED_PROFILE, HOST_CLI_PROFILES, STRICT_PROFILE, private_read_actions, profile_actions, profile_status, route_unavailable
-from .orchestrator import EVENT_TOOL as ORCHESTRATION_EVENT, NOT_JUDGED, WORKER_FAILED, Orchestration, worker_catalogue
+from .orchestrator import (EVENT_TOOL as ORCHESTRATION_EVENT, NOT_JUDGED, NOT_REACHED, UNJUDGED, WORKER_FAILED,
+                           Orchestration, worker_catalogue)
 from .isolated_engine_gateway import EngineGatewayError
 from .service_control import build_identity
 from .isolated_mcp_proxy import IsolatedMcpProxy, TaskCapabilityRegistry
@@ -2379,11 +2380,35 @@ class AgentService:
         from .agent_runtime import PRIVATE_PROVENANCE
         return {label for label in labels or () if label!=PRIVATE_PROVENANCE.get('browser_read')}
 
-    def work_orchestration(self, job, request, history, sections, budget, pinned=False):
+    def planner_history(self, rows, document_jobs):
+        """The earlier stored messages the orchestrator's plan call may read (#710 review P1).
+
+        The Judgment AI is an external destination with no document-sharing
+        approval of its own, so every row a worker could have withheld is
+        withheld here too: file-workspace document jobs (as for a worker whose
+        ``document_boundary`` requires approval), and rows of a Work whose
+        recorded sources name a store whose turn envelope is withheld
+        (``PROVENANCE_WITHHELD_SOURCES``, including history-inherited labels).
+        A Work with no source record fails closed.  The current request is not
+        part of the excerpt.
+        """
+        records=work_source_records(self.store)
+        document_jobs=set(document_jobs or ())
+        kept=[]
+        for row in (rows or [])[:-1]:
+            job_id=row.get('job_id')
+            labels=records.get(job_id)
+            if row.get('role') not in ('user','assistant') or job_id in document_jobs or not isinstance(labels,list):continue
+            if {base_label(label) for label in labels}&self.PROVENANCE_WITHHELD_SOURCES:continue
+            kept.append(row)
+        return kept
+
+    def work_orchestration(self, job, request, rows, sections, budget, pinned=False, document_jobs=()):
         """The ``Orchestration`` of one Work, or None when no default Main AI exists.
 
         The catalogue is read from stored configuration only; a failure to
-        read it leaves the Work exactly as before #710.
+        read it leaves the Work exactly as before #710.  ``rows`` are the
+        stored history rows; the plan call reads only ``planner_history``.
         """
         try:
             catalogue=worker_catalogue(self)
@@ -2391,7 +2416,7 @@ class AgentService:
             LOG.warning('worker catalogue unavailable job=%s',job.get('id'))
             return None
         if not catalogue.default:return None
-        earlier=[message for message in (history or [])[:-1] if message.get('role') in ('user','assistant')][-4:]
+        earlier=[context_message(row) for row in self.planner_history(rows,document_jobs)][-4:]
         conversation='\n'.join(f"[{'owner' if message['role']=='user' else 'assistant'}] {message.get('content') or ''}"
                                for message in earlier)
         def event(status,detail):
@@ -2402,6 +2427,21 @@ class AgentService:
         return Orchestration(self.decision_judge,catalogue,request=request,conversation=conversation,
                              sections={**sections,'history':len(earlier)},budget=budget,record=event,state=state,
                              pinned=pinned,work_id=job['id'])
+
+    def cli_shortfall(self, job_id, since, request, evaluation):
+        """``(outcome, report)`` of a CLI attempt whose goal was judged not shown or not judgeable (#710 review).
+
+        Not reached: ``partial`` when the attempt observed a successful tool
+        result, else ``failed``; unjudged: ``partial``.  The report states the
+        unknown the way the direct route's completion rule does (#657).
+        """
+        from .agent_runtime import GOAL_NOT_SHOWN, GOAL_UNJUDGED, agency_report
+        with self.store.db() as db:
+            rows=db.execute("SELECT tool FROM tool_events WHERE job_id=? AND id>? AND status='succeeded'",(job_id,since or 0)).fetchall()
+        observed=any(row['tool'] not in ('model','subscription_engine',ORCHESTRATION_EVENT) for row in rows)
+        if evaluation==UNJUDGED:
+            return 'partial',agency_report(request,[],[],[GOAL_UNJUDGED],None)
+        return ('partial' if observed else 'failed'),agency_report(request,[],[],[GOAL_NOT_SHOWN],None)
 
     @staticmethod
     def attempt_route(orchestration, attempt, config, key, snapshot):
@@ -5051,7 +5091,7 @@ class AgentService:
                     base_history,base_rows,base_config,base_key=history,history_rows,config,key
                     # Material spliced into this turn (documents, Drive, the context inbox,
                     # notes) was approved for the default destination: the worker stays it.
-                    orchestration=self.work_orchestration(job,prompt,base_history,section_values,work_budget,
+                    orchestration=self.work_orchestration(job,prompt,base_rows,section_values,work_budget,document_jobs=document_jobs,
                                                           pinned=bool(turn_provenance or workspace_request or attachment))
                     attempt=orchestration.first() if orchestration else None
                     while True:
@@ -5106,6 +5146,10 @@ class AgentService:
                             # must send notes, never only the command literal.
                             current_request=history[-1]['content']
                             lookup_query=subscription_public_lookup_query(prompt)
+                            # #710 review: the preflight is a web_search call, so a tool subset without
+                            # it skips the preflight (the worker answers with the tools it was given).
+                            if lookup_query and 'web_search' not in allowed_tools:
+                                lookup_query=None
                             if lookup_query:
                                 record('web_search','running',json.dumps({'scope':'subscription-preflight','query':lookup_query},ensure_ascii=False))
                                 try:
@@ -5410,6 +5454,12 @@ class AgentService:
                         if following is None:break
                         attempt=following
                         refusals.clear();verified_parts.clear();agency_report=None;unknown_statement=None
+                    # #710 review P1: a CLI attempt the orchestrator judged short and did not
+                    # re-delegate (limit, budget, no new plan) is never stored as succeeded.
+                    if subscription.get('id') and outcome=='succeeded' and orchestration is not None \
+                            and orchestration.terminal in (NOT_REACHED,UNJUDGED):
+                        outcome,agency_report=self.cli_shortfall(job['id'],attempt_start,prompt,orchestration.terminal)
+                        resolved_blocker=False
                     # Said once when working orchestration fell back to the default Main AI.
                     if orchestration is not None and orchestration.notice:
                         response=response.rstrip()+'\n\n'+orchestration.notice

@@ -2097,15 +2097,22 @@ class AgentService:
         signals only; this writes the result under the service lock and marks
         the store so later turns read the same records instead of re-deriving.
         A legacy Work with any private signal stays unrecorded (private).
+        A store an earlier version already backfilled is corrected by
+        widening the records that version could have written (#703).
         Returns the number of records written.
         """
         marker=self.store.config(WORK_SOURCES_BACKFILL_KEY,{})
         if isinstance(marker,dict) and marker.get('version')==WORK_SOURCES_BACKFILL_VERSION:return 0
+        corrected_before=None
+        if isinstance(marker,dict) and marker.get('version') is not None:
+            at=marker.get('at')
+            # Without a usable run time every record may have been written by it.
+            corrected_before=float(at) if isinstance(at,(int,float)) and not isinstance(at,bool) else float('inf')
         if tools is None:tools={tool['id']:tool for package in self.runtime_packages() for tool in package['tools']}
         if document_jobs is None:document_jobs=set(self.store.config('file_workspace_document_jobs',[]) or [])
         try:
             with self.lock:
-                updates=backfill_work_sources(self.store,tools,document_jobs)
+                updates=backfill_work_sources(self.store,tools,document_jobs,corrected_before=corrected_before)
                 rows=self.store.config(WORK_SOURCES_KEY,{})
                 rows=rows if isinstance(rows,dict) else {}
                 # Backfilled legacy Works go first: they are the oldest, so the

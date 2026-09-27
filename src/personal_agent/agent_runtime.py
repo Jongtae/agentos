@@ -537,7 +537,10 @@ def history_provenance(store, rows, tools=None, document_jobs=()):
 # rule-handled `/notes`, settings or knowledge reply leaves no tool event),
 # stays unrecorded.
 WORK_SOURCES_BACKFILL_KEY='work_source_backfill'
-WORK_SOURCES_BACKFILL_VERSION=1
+#: 2 (#703): the window reaches a Work's last message (a parked Work that resumed,
+#: or a queued one, was shown later messages) and pre-#570 Drive splices stay
+#: private.  A store that ran version 1 is corrected by widening only.
+WORK_SOURCES_BACKFILL_VERSION=2
 #: The notes-summary commands whose prompt splices every note (the service's own literal check).
 NOTES_SUMMARY_COMMANDS=('/summarize','메모 요약')
 #: Turn-provenance labels that are record-only and never mean a private store was read:
@@ -550,14 +553,47 @@ _RECORD_ONLY_LABELS=frozenset({'owner-memory','owner-current-context','owner-pre
 #: Tool events that show the reply came from a model or CLI turn.
 _MODEL_TURN_TOOLS=('model','subscription_engine')
 _UNFINISHED=('queued','running')
+#: #703: the literal the service used, until #672, to splice the owner's
+#: Picker-selected Google Drive files into a turn (the removed
+#: ``AgentService.requests_drive_access``), kept verbatim.  A Work before #570
+#: left no durable trace of that splice -- no tool event, no turn record -- so
+#: the legacy classification re-applies the same literal to the prompt the Work
+#: ran and a match stays private.  It classifies stored history only; no
+#: request is routed by it.
+_LEGACY_DRIVE_NAMES=('google drive','구글 드라이브','드라이브')
+_LEGACY_DRIVE_WORDS=('연결','connect','찾','읽','자료','file','파일','요약','search')
+
+def legacy_drive_request(text):
+ """Whether the pre-#672 Drive literal matched ``text`` (the service's own former check)."""
+ if not isinstance(text,str):return False
+ normalized=text.lower()
+ return any(name in normalized for name in _LEGACY_DRIVE_NAMES) and any(word in normalized for word in _LEGACY_DRIVE_WORDS)
+
+def legacy_drive_splice(store, job_id):
+ """Whether a Work with no turn record may have had selected Drive files spliced in (#703).
+
+ The prompt a Work ran is its own message or, for an executed retry, the
+ earlier request its ``conversation_continuity`` event names; every one of
+ those is checked.  A Work with a #570 turn record is judged by that record.
+ """
+ if callable(getattr(store,'turn_provenance',None)) and isinstance(store.turn_provenance(job_id),dict):return False
+ prompts=[job_id]
+ with store.db() as db:
+  for row in db.execute("SELECT detail FROM tool_events WHERE job_id=? AND tool='conversation_continuity'",(job_id,)):
+   try:detail=json.loads(row['detail'] or '{}')
+   except ValueError:detail={}
+   if not isinstance(detail,dict):continue
+   prompts+=[detail.get(key) for key in ('related_work_id','source_work_id') if isinstance(detail.get(key),str)]
+ return any(legacy_drive_request((store.job(work) or {}).get('message')) for work in prompts)
 
 def legacy_work_sources(store, job_id, tools=None, document_jobs=()):
  """The base source labels of a Work that has no source record, or None when it stays private (#701).
 
  Deterministic signals only: its successful private tool events, the
  file-workspace document-job list, a context-inbox attachment, a note saved
- under its id, the notes-summary command, its turn-provenance record (#570)
- and whether a model or CLI produced its reply.  Clean is
+ under its id, the notes-summary command, the pre-#672 Drive literal when it
+ has no turn record (#703), its turn-provenance record (#570) and whether a
+ model or CLI produced its reply.  Clean is
  ``{owner-conversation}`` plus ``engine-unmediated-read`` for a subscription
  CLI turn (its CLI could read host files AgentOS never labels, #605 F1).
  """
@@ -567,6 +603,7 @@ def legacy_work_sources(store, job_id, tools=None, document_jobs=()):
  if job_id in set(document_jobs or ()):return None
  if recorded_private_sources(store,job_id,tools):return None
  if str(job.get('message') or '').strip() in NOTES_SUMMARY_COMMANDS:return None
+ if legacy_drive_splice(store,job_id):return None
  with store.db() as db:
   if db.execute('SELECT 1 FROM context_job_attachments WHERE job_id=?',(job_id,)).fetchone():return None
   if db.execute('SELECT 1 FROM notes WHERE id=?',(job_id,)).fetchone():return None
@@ -587,19 +624,38 @@ def legacy_work_sources(store, job_id, tools=None, document_jobs=()):
  if 'subscription_engine' in tools_seen:labels.add(ENGINE_UNMEDIATED)
  return labels
 
-def backfill_work_sources(store, tools=None, document_jobs=(), keep_messages=100, window=None):
+def backfill_work_sources(store, tools=None, document_jobs=(), keep_messages=100, window=None, corrected_before=None):
  """``{job_id: labels}`` to record so pre-#605 history stops reading as private (#701).
 
- Walks the transcript in order.  Each Work is resolved from its own record,
- or -- when it has none and is older than every recorded Work -- from
- ``legacy_work_sources``.  The history a Work was shown is approximated by
- the ``window`` messages before its first message (the size ``turn_context``
- packs, and no smaller): a legacy Work inherits those Works' sources as
- ``history:`` labels, and a recorded Work's ``history:unrecorded`` is
- replaced by them once every Work in that window is resolved.  A Work that
- stays private keeps closing everything shown after it.  Only Works among
- the last ``keep_messages`` messages (what ``QuickStore.history`` can show)
- are returned for recording.
+ Walks the transcript in order of each Work's first message.  Each Work is
+ resolved from its own record, or -- when it has none and is older than every
+ recorded Work -- from ``legacy_work_sources``.
+
+ The history a Work was shown is approximated by its *span*: the ``window``
+ messages before its first message (the size ``turn_context`` packs, and no
+ smaller) through its own last message (#703).  Every run of a Work is shown
+ the newest window when it starts (``store.history()[-16:]``), so a Work that
+ parked and resumed -- or waited queued behind later requests -- was shown
+ messages after its first one; the span covers every run.  A Work in the span
+ that is not resolved yet (it began later) counts as unknown, so a resumed
+ Work with interleaved messages keeps ``history:unrecorded`` instead of being
+ narrowed from the window before its first message only.
+
+ A legacy Work inherits its span's sources as ``history:`` labels, and a
+ recorded Work's ``history:unrecorded`` is replaced by them once every Work in
+ its span is resolved.  A Work that stays private keeps closing everything
+ shown after it.
+
+ ``corrected_before`` is the time a version-1 backfill ran on this store, if
+ one did.  Version 1 read only the window before a Work's first message and
+ did not know the pre-#570 Drive literal, so a record of a Work created
+ before then (or whose Work row is gone) may be too narrow.  Each such record
+ is widened -- never narrowed -- by its span's history labels and, for a
+ Drive splice, ``connected-drive-file``; later Works then inherit the widened
+ labels through the same walk.
+
+ Only Works among the last ``keep_messages`` messages (what
+ ``QuickStore.history`` can show) are returned for recording.
  """
  window=CONTEXT_MESSAGES if window is None else window
  records=work_source_records(store)
@@ -611,33 +667,42 @@ def backfill_work_sources(store, tools=None, document_jobs=(), keep_messages=100
    chunk=recorded[start:start+500]
    row=db.execute(f"SELECT MIN(created) AS created FROM jobs WHERE id IN ({','.join('?'*len(chunk))})",chunk).fetchone()
    if row and row['created'] is not None:earliest=row['created'] if earliest is None else min(earliest,row['created'])
- first={}
+ first={};last={}
  for index,job in enumerate(messages):
-  if isinstance(job,str) and job and job not in first:first[job]=index
+  if isinstance(job,str) and job:
+   first.setdefault(job,index);last[job]=index
  keep=set(job for job in messages[-keep_messages:] if isinstance(job,str) and job)
+ from .preparations import preparation_of
  resolved={};updates={}
  for job,index in sorted(first.items(),key=lambda item:item[1]):
-  in_window=messages[max(0,index-window):index]
-  shown={other for other in in_window if isinstance(other,str) and other and other!=job}
+  # The span, without this Work's own messages (#703).
+  in_window=[other for other in messages[max(0,index-window):last[job]+1] if other!=job]
+  shown={other for other in in_window if isinstance(other,str) and other}
   inherited=set()
   # A message without a valid Work id (older than the job_id column) is never
   # dropped: its provenance is unknown, so it counts as `unrecorded`.
   if any(not isinstance(other,str) or not other for other in in_window):inherited.add(UNRECORDED_PROVENANCE)
   for other in shown:inherited|=resolved.get(other,{UNRECORDED_PROVENANCE})
   history={HISTORY_PREFIX+label for label in inherited}
+  work=store.job(job) or {}
   raw=records.get(job)
   if isinstance(raw,list):
-   labels={str(label) for label in raw}
-   # A preparation's Work is shown its origin Work, not the recent window (#659):
-   # its unknown history is never resolved from the window.
-   from .preparations import preparation_of
-   preparation=preparation_of((store.job(job) or {}).get('request_key'))
+   labels={str(label) for label in raw};original=set(labels)
+   # A preparation's Work is shown its origin Work's owner request, not the
+   # recent window (#659): its history is never resolved or widened from it.
+   preparation=preparation_of(work.get('request_key'))
    if HISTORY_PREFIX+UNRECORDED_PROVENANCE in labels and UNRECORDED_PROVENANCE not in inherited and not preparation:
     labels=(labels-{HISTORY_PREFIX+UNRECORDED_PROVENANCE})|history
-    if job in keep:updates[job]=sorted(labels)
+   created=work.get('created')
+   if (corrected_before is not None and not preparation
+       and not (isinstance(created,(int,float)) and created>=corrected_before)):
+    # #703: a record version 1 may have written or narrowed; widen only.
+    labels|=history
+    if legacy_drive_splice(store,job):labels.add('connected-drive-file')
+   if labels!=original and job in keep:updates[job]=sorted(labels)
    resolved[job]={base_label(label) for label in labels}|recorded_private_sources(store,job,tools)
    continue
-  created=(store.job(job) or {}).get('created')
+  created=work.get('created')
   legacy=earliest is None or (isinstance(created,(int,float)) and created<earliest)
   derived=legacy_work_sources(store,job,tools,document_jobs) if legacy else None
   if derived is None:

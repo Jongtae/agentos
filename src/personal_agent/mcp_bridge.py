@@ -15,7 +15,9 @@ from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS, LATEST_HANDSHAKE_VERS
 
 from .agent_runtime import (CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, TRANSIENT_FAILURE_TEXT,
                             Capabilities, ToolError, WorkBudget, WorkLedger, classify_failure, evidence_summary,
-                            lookup_sources, recorded_private_sources, work_source_records, work_stop_requested)
+                            lookup_sources, progress_step, recorded_private_sources, split_status, work_source_records,
+                            work_stop_requested)
+from .current_context import redact_known_secrets
 from .providers import ProviderError
 from .bounded_execution import (AgentOSMcpTools, BOUNDED_PROFILE, HOST_CLI_PROFILES, STRICT_PROFILE, ExecutionError,  # noqa: F401
                                 profile_actions, redact_reason, turn_actions)
@@ -163,7 +165,9 @@ def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROF
                                 # #607 AX-10: the same durable attempt count and
                                 # deadline as the host serving this Work.
                                 budget=WorkBudget(stop=lambda: work_stop_requested(store, job_id),
-                                                  ledger=WorkLedger(store, job_id)))
+                                                  ledger=WorkLedger(store, job_id)),
+                                # #718: the same stored-secret pass as the host, for recorded step text.
+                                secret_redactor=lambda text: redact_known_secrets(store, text))
     capabilities.private_provenance.update(_recorded_private_sources(store, job_id, capabilities.tools))
     tools = AgentOSMcpTools(capabilities, native_search=native_search and profile == BOUNDED_PROFILE)
     tools.PROFILE = profile
@@ -192,12 +196,16 @@ def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROF
                     if not _work_running(store, job_id):
                         raise ToolError(WORK_NOT_RUNNING, 'stopped')
                     capabilities.private_provenance.update(_recorded_private_sources(store, job_id, capabilities.tools))
+                    arguments, status = split_status(params.get('arguments', {}))
                     if action:
                         # #607: a call is durably in flight before it runs, so a
                         # crash mid-call leaves an attempted (possibly effectful)
                         # action that retry/resume refuse to replay blindly.
-                        record(listed, 'running', json.dumps({'scope':'subscription-mcp-bridge','host_action':action}, ensure_ascii=False))
-                    value = tools.call(name, params.get('arguments', {}))
+                        # #718: with the call's bounded, redacted display step.
+                        record(listed, 'running', json.dumps({'scope':'subscription-mcp-bridge','host_action':action,
+                                                              'step':progress_step(action, arguments, status, capabilities.judgment_text)},
+                                                             ensure_ascii=False))
+                    value = tools.call(name, arguments)
                 except ExecutionError as exc:
                     # Invalid arguments stay a protocol error (MCP: invalid
                     # params).  Redacted: the reason, never the arguments.

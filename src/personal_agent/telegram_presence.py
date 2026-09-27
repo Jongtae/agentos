@@ -42,6 +42,7 @@ from dataclasses import dataclass, field
 from .conversation_handoff import (FOLLOWUP_CANCEL, FOLLOWUP_CORRECTION, FOLLOWUP_REFERENCE, FOLLOWUP_RETRY,
                                    INTENT_CONVERSATION, INTENT_DRIVE_READ, INTENT_GREETING, INTENT_KNOWLEDGE,
                                    INTENT_MAIL_SEARCH, INTENT_NOTE_LIST, INTENT_RESEARCH, INTENT_WORKSPACE_SEARCH)
+from .orchestrator import EVENT_TOOL, PLANNED
 
 # --- typed presentation vocabulary -------------------------------------------
 
@@ -69,6 +70,127 @@ WAIT_RICH_DRAFT = 'rich_draft'
 #: Telegram Desktop but renders as a blank bubble on the owner's iOS client
 #: (#581 live check, 2026-09-26); the dedicated thinking block names the wait.
 THINKING_DRAFT_TEXT = '생각 중…'
+
+# --- live step lines (SEC-PROGRESS-01 / #718) ----------------------------------
+#
+# While a tool call of the running Work is observed in flight (its ``running``
+# tool event, or a CLI's own streamed search item), the draft names that step
+# instead of THINKING_DRAFT_TEXT.  The wording is the model's own ``status``
+# (validated, bounded and redacted in ``agent_runtime.progress_step``); without
+# one, a generic line keyed only on the tool kind plus the host or query taken
+# from the observed arguments.  Nothing here names a site, provider or task
+# (Constitution C16), and no line is shown for a call that was not observed.
+
+#: Between two observed calls, once any call has run: the model is reading
+#: what the last call returned.  THINKING_DRAFT_TEXT stays for "before the
+#: first tool call" only.
+BETWEEN_STEPS_TEXT = '결과를 살펴보는 중…'
+#: Any other tool kind.
+DEFAULT_STEP_TEXT = '도구 실행 중'
+#: #710: the orchestrator's planned-attempt event (``orchestrator.EVENT_TOOL`` /
+#: ``PLANNED``), whose ``text`` announces the attempt, cut to this length.
+ORCHESTRATION_TOOL = EVENT_TOOL
+ORCHESTRATION_PLANNED = PLANNED
+ANNOUNCE_MAX = 80
+#: Host action -> (line with the observed target, line without one).  The
+#: target placeholder is ``{host}`` or ``{query}``.
+FALLBACK_STEP_LINES = {
+    'web_search': ('웹 검색 중: {query}', '웹 검색 중'),
+    'bounded_public_research': ('웹 검색 중: {query}', '웹 검색 중'),
+    'public_page_read': ('{host} 페이지 여는 중', '페이지 여는 중'),
+    'browser_open': ('{host} 페이지 여는 중', '페이지 여는 중'),
+    'browser_read': ('{host} 페이지 읽는 중', '페이지 읽는 중'),
+    'browser_find': ('{host} 페이지에서 찾는 중', '페이지에서 찾는 중'),
+    'browser_click': ('{host}에서 선택하는 중', '페이지에서 선택하는 중'),
+    'browser_type': ('{host}에서 입력 중', '페이지에서 입력 중'),
+    'weather': (None, '날씨 확인 중'),
+    'calendar_query': (None, '일정 확인 중'),
+    'calendar_draft_create': (None, '일정 변경안 만드는 중'),
+    'calendar_draft_update': (None, '일정 변경안 만드는 중'),
+    'calendar_draft_cancel': (None, '일정 변경안 만드는 중'),
+    'list_roots': (None, '연결된 폴더 확인 중'),
+    'find_files': (None, '파일 찾는 중'),
+    'read_file': (None, '파일 읽는 중'),
+    'list_notes': (None, '메모 확인 중'),
+    'save_note': (None, '메모 저장 중'),
+    'list_memory': (None, '기억 확인 중'),
+    'save_memory': (None, '기억 저장 중'),
+    'list_agents': (None, '에이전트 목록 확인 중'),
+    'delegate_agent': (None, '전문 에이전트에게 맡기는 중'),
+    'propose_current_state': (None, '현재 상황 기록 중'),
+    'schedule_preparation': (None, '예약 만드는 중'),
+}
+
+
+def step_line(step, last_host=None):
+    """The draft line for one observed running step, or None for an approval step.
+
+    ``step`` is the recorded ``progress_step`` dict.  The model's ``status``
+    wins; otherwise the generic line for its tool kind with the observed
+    host (the call's own, else ``last_host`` - the page an earlier observed
+    call of this Work opened) or query.
+    """
+    if not isinstance(step, dict) or step.get('approval'):
+        return None
+    if isinstance(step.get('announce'), str) and step['announce'].strip():
+        return step['announce'].strip()
+    status = step.get('status')
+    if isinstance(status, str) and status.strip():
+        return status.strip()
+    with_target, bare = FALLBACK_STEP_LINES.get(step.get('action'), (None, DEFAULT_STEP_TEXT))
+    host = step.get('host') or last_host
+    values = {'host': host if isinstance(host, str) else '',
+              'query': step.get('query') if isinstance(step.get('query'), str) else ''}
+    if with_target:
+        needed = 'host' if '{host}' in with_target else 'query'
+        if values[needed]:
+            return with_target.format(**values)
+    return bare
+
+
+def draft_step(events, live=None):
+    """``(text, approval)`` for the draft of one running Work, from observed events only.
+
+    ``events`` are the Work's tool events in order (``QuickStore.task_events``
+    shape).  The step in flight is the latest ``running`` event carrying a
+    ``step`` that no later terminal event of the same tool and call has
+    closed.  ``live`` is the CLI's own streamed step, ``{'at', 'running',
+    'id', 'step'}``, or None; it counts only when not older than that event.
+    ``approval`` is true while the step in flight is a payment step: then
+    the only surface is the existing approval prompt and ``text`` is None.
+    """
+    current = None          # (created, tool, call_id, step, host)
+    seen = False
+    last_host = None
+    for event in events or ():
+        trace = event.get('trace') if isinstance(event.get('trace'), dict) else {}
+        step = trace.get('step')
+        if event.get('tool') == ORCHESTRATION_TOOL:
+            # #710/#718: a planned attempt announces itself until its first
+            # observed step (the orchestrator's own redacted text).
+            text = ' '.join(str(trace.get('text') or '').split())
+            if event.get('status') == ORCHESTRATION_PLANNED and text:
+                cut = text if len(text) <= ANNOUNCE_MAX else text[:ANNOUNCE_MAX - 1] + '…'
+                current = (event.get('created') or 0, ORCHESTRATION_TOOL, None, {'announce': cut}, last_host)
+            continue
+        if event.get('status') == 'running' and isinstance(step, dict):
+            seen = True
+            current = (event.get('created') or 0, event.get('tool'), trace.get('call_id'), step,
+                       step.get('host') or last_host)
+            if step.get('host'):
+                last_host = step['host']
+        elif (event.get('status') != 'running' and current is not None and event.get('tool') == current[1]
+              and trace.get('call_id') == current[2]):
+            current = None
+    if isinstance(live, dict) and isinstance(live.get('step'), dict):
+        seen = True
+        if live.get('at', 0) >= (current[0] if current else float('-inf')):
+            current = (live.get('at', 0), None, None, live['step'], last_host) if live.get('running') else None
+    if current is not None:
+        if current[3].get('approval'):
+            return None, True
+        return step_line(current[3], current[4]), False
+    return (BETWEEN_STEPS_TEXT if seen else THINKING_DRAFT_TEXT), False
 
 ANCHOR_NONE = 'none'
 ANCHOR_OWNER_MESSAGE = 'owner_message'
@@ -173,6 +295,9 @@ class PresenceTiming:
     draft_after: float = 5.0
     chat_action_refresh: float = 4.0
     draft_refresh: float = 20.0
+    #: #718: at most one draft edit per this many seconds when the step line
+    #: changes; the next edit shows the latest step, never a queued old one.
+    step_refresh: float = 1.5
 
     def wait_surface(self, elapsed, *, durable_surface=False, draft_available=True):
         """The one wait surface for Work that has been waiting ``elapsed`` seconds.
@@ -209,6 +334,10 @@ class WaitState:
     rich_draft_failed: bool = False
     stopped: bool = False
     shown: set = field(default_factory=set)
+    #: #718: the line the draft last showed, and the (raw, displayed) pair of
+    #: the last display-time redaction.
+    draft_text: str = None
+    scrubbed: tuple = None
 
 
 # --- durable reply controls -----------------------------------------------------

@@ -8,6 +8,7 @@ on the authoritative state underneath (job status, folder grants, index).
 """
 import json
 import re
+import socket
 import tempfile
 import threading
 import unittest
@@ -27,7 +28,7 @@ from personal_agent.file_workspace import FileWorkspace
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart import make_handler
 from personal_agent.quickstart_service import (LOCAL_DOCUMENT_APPROVAL_TEXT, LOCAL_DOCUMENT_RESUMED_TEXT, LOCAL_KEPT_WORKSPACE_TEXT,
-                                              AgentService)
+                                              AgentService, GMAIL_CONNECT_PATH)
 from personal_agent.quickstart_store import QuickStore
 
 CHAT = 505
@@ -732,7 +733,7 @@ class PickerTests(unittest.TestCase):
 
 
 class HttpSurfaceTests(HandoffTestCase):
-    def serve(self):
+    def serve(self, claim=True):
         server = ThreadingHTTPServer(('127.0.0.1', 0), make_handler(self.service, (MOBILE_HOST,), 'pairing-token'))
         thread = threading.Thread(target=server.serve_forever)
         thread.start()
@@ -740,17 +741,41 @@ class HttpSurfaceTests(HandoffTestCase):
         def shutdown():
             server.shutdown(); thread.join(); server.server_close()
         self.addCleanup(shutdown)
+        if not claim:
+            return f'http://127.0.0.1:{server.server_port}', {}
         self.store.claim(self.store.bootstrap.read_text(), 'long-password-test')
         return f'http://127.0.0.1:{server.server_port}', {'Cookie': 'agentos_session=' + self.store.local_session()}
+
+    @staticmethod
+    def decode(raw):
+        try:
+            return json.loads(raw)
+        except ValueError:
+            return {'text': raw.decode('utf-8', 'replace')}
 
     def call(self, base, path, headers, body=None):
         data = None if body is None else json.dumps(body).encode()
         request = Request(base + path, data=data, headers={**headers, 'Content-Type': 'application/json'})
         try:
             with urlopen(request, timeout=5) as response:
-                return response.status, json.loads(response.read())
+                return response.status, self.decode(response.read())
         except HTTPError as error:
-            return error.code, json.loads(error.read())
+            return error.code, self.decode(error.read())
+
+    def raw_get(self, base, path, header_lines):
+        """Send hand-written header lines, which urllib would normalise away."""
+        host, port = base.split('//', 1)[1].split(':')
+        with socket.create_connection((host, int(port)), timeout=5) as conn:
+            conn.sendall((f'GET {path} HTTP/1.1\r\n' + ''.join(line + '\r\n' for line in header_lines)
+                          + 'Connection: close\r\n\r\n').encode())
+            chunks = []
+            while True:
+                chunk = conn.recv(65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+        head, _sep, payload = b''.join(chunks).partition(b'\r\n\r\n')
+        return int(head.split(b' ', 2)[1]), self.decode(payload)
 
     def test_mobile_or_tunnel_cannot_choose_or_approve_but_the_mac_can(self):
         job_id, _ = self.park_read()
@@ -817,9 +842,21 @@ class HttpSurfaceTests(HandoffTestCase):
                     status, reply = self.call(base, f'/api/folder-requests/{action}', relayed, body)
                     self.assertEqual(status, 403)
                     self.assertIn('Mac에서 계속', reply['error'])
-                # A "this device only" route refuses the relayed request too.
+                # Every "this device only" route refuses the relayed request too:
+                # Google revocations, Gmail connect, a Calendar apply (a real
+                # external effect) and a headed browser login on this Mac.
                 status, _reply = self.call(base, '/api/connections/google/revocations', relayed)
                 self.assertEqual(status, 403)
+                status, reply = self.call(base, GMAIL_CONNECT_PATH, relayed)
+                self.assertEqual(status, 400)
+                self.assertIn('local address', reply['text'])
+                status, reply = self.call(base, '/api/calendar/drafts/request', relayed,
+                                          {'operation': 'apply', 'draft_id': 'x'})
+                self.assertEqual(status, 400)
+                self.assertIn('local address', reply['error'])
+                status, reply = self.call(base, '/api/browser/login', relayed, {'url': 'https://example.com/'})
+                self.assertEqual(status, 403)
+                self.assertIn('이 기기에서만', reply['error'])
         self.assertEqual(self.roots(), [])
         self.assertEqual(self.job(job_id)['status'], 'awaiting_connection')
 
@@ -838,6 +875,41 @@ class HttpSurfaceTests(HandoffTestCase):
                 self.assertFalse(state['local_access'])
         status, reply = self.call(base, '/api/local-login', {}, {})
         self.assertEqual((status, reply), (200, {'ok': True}))
+
+    def test_a_malformed_header_line_cannot_hide_a_forwarding_header(self):
+        self.park_read()
+        base, session = self.serve()
+        host = base.split('//', 1)[1]
+        cookie = 'Cookie: ' + session['Cookie']
+        status, listing = self.raw_get(base, '/api/folder-requests', [f'Host: {host}', cookie])
+        self.assertEqual(status, 200)
+        self.assertTrue(listing['local_surface'])
+        # The stdlib parser stops at ``Name : v`` and keeps later lines as body,
+        # so the forwarding header after it is not a header at all.  Fail closed.
+        for lines in ([f'Host: {host}', cookie, 'X-Bad : 1', 'X-Forwarded-For: 198.51.100.7'],
+                      [f'Host: {host}', cookie, 'not a header line']):
+            with self.subTest(lines=lines[2:]):
+                status, listing = self.raw_get(base, '/api/folder-requests', lines)
+                self.assertEqual(status, 200)
+                self.assertFalse(listing['local_surface'])
+
+    def test_a_relayed_claim_gets_no_bootstrap_code_but_the_mac_does(self):
+        base, _none = self.serve(claim=False)
+        self.assertTrue(self.store.bootstrap.exists())
+        for headers in ({'Host': MOBILE_HOST}, {'X-Forwarded-For': '198.51.100.7'},
+                        {'CF-Connecting-IP': '198.51.100.7'}, {'Forwarded': 'for=198.51.100.7'}):
+            for body in ({'password': 'long-password-test'}, {}):
+                with self.subTest(headers=headers, body=body):
+                    status, reply = self.call(base, '/api/claim', headers, body)
+                    self.assertEqual(status, 400)
+                    self.assertNotIn('ok', reply)
+                    self.assertFalse(self.store.claimed())
+                    self.assertTrue(self.store.bootstrap.exists())
+        # The Mac itself still claims without typing the code or a password.
+        status, reply = self.call(base, '/api/claim', {}, {})
+        self.assertEqual((status, reply), (200, {'ok': True}))
+        self.assertTrue(self.store.claimed())
+        self.assertTrue(self.store.config('local_access'))
 
     def test_an_unauthenticated_caller_is_refused(self):
         self.park_read()

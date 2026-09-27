@@ -62,7 +62,18 @@ PROXY_HEADER_PREFIXES=('x-forwarded-','cf-','tailscale-','ngrok-')
 
 
 def relayed_request(headers):
-    """True when any proxy/tunnel forwarding header is present (fail closed)."""
+    """True when any proxy/tunnel forwarding header is present (fail closed).
+
+    ``http.client.parse_headers`` stops at the first malformed header line
+    (``Name : v``, a line without a colon) and keeps every later line as body,
+    where a forwarding header would be invisible.  A request whose headers did
+    not parse cleanly is therefore treated as relayed too.
+    """
+    if getattr(headers,'defects',None):return True
+    try:
+        if headers.get_payload():return True
+    except AttributeError:
+        pass
     for name in headers.keys():
         name=name.strip().lower()
         if name in PROXY_HEADERS or name.startswith(PROXY_HEADER_PREFIXES):return True

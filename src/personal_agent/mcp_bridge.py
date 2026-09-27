@@ -17,7 +17,7 @@ from .agent_runtime import (CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, TRANSIENT_FAILUR
                             Capabilities, ToolError, WorkBudget, WorkLedger, classify_failure, evidence_summary,
                             lookup_sources, recorded_private_sources, work_source_records, work_stop_requested)
 from .providers import ProviderError
-from .bounded_execution import AgentOSMcpTools, ExecutionError, profile_actions, redact_reason
+from .bounded_execution import AgentOSMcpTools, ExecutionError, profile_actions, redact_reason, turn_actions  # noqa: F401
 from .local_tools import LocalTools
 from .search_providers import ProviderRegistry
 from .quickstart_store import QuickStore
@@ -132,7 +132,7 @@ def tool_error_result(exc, action):
     return {'content': [{'type': 'text', 'text': text}], 'structuredContent': typed, 'isError': True}, typed
 
 
-def serve(data, job_id, provenance=()):
+def serve(data, job_id, provenance=(), native_search=False):
     store = QuickStore(data)
     def record(tool, status, detail):
         with store.db() as db:
@@ -140,7 +140,8 @@ def serve(data, job_id, provenance=()):
     # #604: the Work's allowed actions are the bounded CLI profile; names and
     # schemas come from Capabilities.definitions(), never a bridge-local list.
     capabilities = Capabilities(store, None, {}, '', job_id, record, network=LocalTools(providers=ProviderRegistry.from_store(store)), document_access=False,
-                                allowed_tools=set(profile_actions(AgentOSMcpTools.PROFILE)),
+                                # #678 P1: a turn that may search natively gets no private read.
+                                allowed_tools=set(turn_actions(AgentOSMcpTools.PROFILE, native_search)),
                                 inherited_provenance=_provenance(provenance), lookup_hint=CLI_LOOKUP_HINT,
                                 lookup_sources=_lookup_sources(store, job_id),
                                 # #607 AX-10: the same durable attempt count and
@@ -148,7 +149,7 @@ def serve(data, job_id, provenance=()):
                                 budget=WorkBudget(stop=lambda: work_stop_requested(store, job_id),
                                                   ledger=WorkLedger(store, job_id)))
     capabilities.private_provenance.update(_recorded_private_sources(store, job_id, capabilities.tools))
-    tools = AgentOSMcpTools(capabilities)
+    tools = AgentOSMcpTools(capabilities, native_search=native_search)
     for line in sys.stdin:
         try:
             request = json.loads(line)
@@ -211,4 +212,5 @@ def serve(data, job_id, provenance=()):
 if __name__ == '__main__':
     parser=argparse.ArgumentParser(); parser.add_argument('--data',required=True); parser.add_argument('--job',required=True)
     parser.add_argument('--provenance',action='append',default=[])
-    args=parser.parse_args(); serve(args.data, args.job, args.provenance)
+    parser.add_argument('--native-search',action='store_true')
+    args=parser.parse_args(); serve(args.data, args.job, args.provenance, native_search=args.native_search)

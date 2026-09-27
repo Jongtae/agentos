@@ -52,8 +52,9 @@ SCANNED_MODULES = ('agent_runtime.py', 'conversation_handoff.py', 'current_conte
 
 #: Modules whose job is to name providers.  Not scanned.
 ALLOWED_MODULES = {
-    'search_providers.py': 'provider registry and adapters (#655): implements Bing RSS, Naver and Brave by name; '
-                           'the model-facing provider enum is built from this registry at run time',
+    'search_providers.py': 'provider registry and adapters (#655, #678): implements the connected AI\'s native search '
+                           '(per owner-configured API route), Brave and the Bing RSS opt-in by name; the model-facing '
+                           'provider enum is built from this registry at run time',
 }
 
 #: Sites and providers from the probes and common Korean commerce/search hosts.

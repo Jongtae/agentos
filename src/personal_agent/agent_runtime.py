@@ -1,5 +1,6 @@
 """Capability registry and a provider-independent, bounded native tool loop."""
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -9,7 +10,7 @@ from collections import namedtuple
 from pathlib import Path
 from .providers import NOT_REPORTED, ModelResult, ProviderError
 from .local_tools import LocalTools
-from .search_providers import describe_options, search_arguments
+from .search_providers import NATIVE_REASONS, describe_options, search_arguments
 from .document_reader import read as read_document, supported as supported_document, MAX_FILE_BYTES
 from . import folder_grants
 from .manifests import BUILTIN_MANIFEST, CONTEXT_GATED_ACTIONS, runtime_packages
@@ -78,7 +79,7 @@ SEARCH_BACKED_ACTIONS=frozenset({'web_search','bounded_public_research'})
 #: #655: the model chooses the provider per call from the owner's configured
 #: set; `action_definitions` appends the configured list and the enum at run
 #: time.  The text names what each provider covers, never which to prefer.
-WEB_SEARCH_DESCRIPTION='Search public web snippets through one of the configured search providers. Use for current public information, not local files. provider selects the provider for this call (omit it for the owner\'s default); locale is an optional language tag such as ko-KR or en-US. If one provider\'s results do not fit, try another provider or another query rather than repeating the same call. Never include credentials or private file contents in search terms.'
+WEB_SEARCH_DESCRIPTION='Search the public web through the connected AI\'s own web search or one of the configured search providers. Use for current public information, not local files. Cite the result URLs; a result\'s answer field is the search model\'s own prose, not evidence, and a row without a snippet shows only that a page was cited: before relying on a fact no snippet shows, read a cited page with a page-reading tool you have, or finish partial naming the cited sources. provider selects the provider for this call (omit it for the owner\'s default); locale is an optional language tag such as ko-KR or en-US. If one provider\'s results do not fit, try another provider or another query rather than repeating the same call. Never include credentials or private file contents in search terms.'
 #: #627: ``location_ref`` is the alternative to ``city`` through this one
 #: declaration; the broker resolves it (``current_context``).
 WEATHER_DESCRIPTION='Get current weather and 3-day forecast. Prefer this over web_search for weather. Give EITHER city (English spelling, optional ISO country code) OR location_ref, never both. location_ref is an opaque ref from the current context section - obs:... for a location the owner shared, profile:place.... for a saved place - and AgentOS resolves it; use it for "here", home or work instead of asking again. A stale, paused or unknown ref is refused with the reason; then ask the owner once for the place.'
@@ -899,8 +900,13 @@ def action_definitions(tools,allowed,readonly=False,search_providers=None):
   function={**source['function'],'name':tool_id}
   if tool['host_action'] in SEARCH_BACKED_ACTIONS and search_providers is not None:
    options=search_providers.options()
-   properties={**function['parameters']['properties'],'provider':{'type':'string','enum':[row['id'] for row in options]}}
-   function={**function,'description':function['description']+describe_options(options,search_providers.default()),
+   # #678: with no configured option the parameter stays a string (an empty
+   # enum is not a valid schema); the call then fails with a typed reason.
+   provider={'type':'string','enum':[row['id'] for row in options]} if options else {'type':'string'}
+   properties={**function['parameters']['properties'],'provider':provider}
+   reason=search_providers.unavailable_reason() if callable(getattr(search_providers,'unavailable_reason',None)) else ''
+   function={**function,'description':function['description']+describe_options(options,search_providers.default(),
+                                                                                  NATIVE_REASONS.get(reason,'') if reason else ''),
              'parameters':{**function['parameters'],'properties':properties}}
   definitions.append({**source,'function':function})
  return definitions
@@ -1617,7 +1623,12 @@ class Capabilities:
   (so Stop, the deadline and the caps still apply).  Secret-bearing
   exception text is never recorded: the event carries a fixed text.
   """
-  try:return self.network.execute(plan)
+  # #678: a network that runs a native search charges its model sub-call to this Work.
+  # (A replaced ``execute`` without a budget parameter keeps working.)
+  try:takes_budget='budget' in inspect.signature(self.network.execute).parameters
+  except (TypeError,ValueError,AttributeError):takes_budget=False
+  extra={'budget':self.budget} if takes_budget else {}
+  try:return self.network.execute(plan,**extra)
   except (ValueError,TypeError,OSError,ProviderError) as exc:
    code,retry,_effect=classify_failure(exc,plan.get('tool'))
    if retry!='transient' or plan.get('tool') not in NETWORK_READS:raise
@@ -1627,7 +1638,7 @@ class Capabilities:
    self.record(plan['tool'],'failed',json.dumps({'scope':'transient-retry','host_action':plan['tool'],'code':code,
                                                  'retry':retry,'effect':'none','error':TRANSIENT_READ_TEXT},ensure_ascii=False))
    self.budget.spend_attempt()
-   return self.network.execute(plan)
+   return self.network.execute(plan,**extra)
  def execute(self,name,args):
   tool=self.tools.get(name)
   if not tool or name not in self.allowed_tools:raise ValueError('활성 패키지에 선언되지 않은 도구입니다.')
@@ -1870,6 +1881,8 @@ CORE_INSTRUCTIONS='''You are the owner's personal assistant inside Personal Agen
 API_TOOL_GUIDANCE='''For each NEW request select the relevant available tools, or answer directly for ordinary conversation. Tools actually run on the user's host. Use weather for weather, public_page_read for a user-supplied anonymous public URL, web_search for snippets, find_files/read_file for local documents, list_notes/save_note for notes, save_memory/list_memory only for explicit owner-authorized memory requests or corrections (a durable owner profile fact such as an allergy, food preference, home/work place or preferred store goes under a "profile." memory_key; the current profile facts, if any, are in the owner profile section of the context - use them without asking again), and list_agents/delegate_agent for explicit specialist tasks. Do not transmit file contents through web_search, public_page_read, bounded_public_research or weather. Use bounded_public_research for a product comparison or travel plan; it cannot purchase, book, reserve, create an account or sign in, and you must not claim it did. A specialist is a separate execution with its own context, not a human. No shell, external messages, arbitrary file writes or unlisted tools exist.'''
 # Tool guidance for a subscription CLI turn: the CLI sees only the AgentOS MCP bridge.
 CLI_TOOL_GUIDANCE='''For this turn use only the tools offered by the "agentos" MCP server; do not use built-in file, shell or web tools. Answer directly for ordinary conversation. Do not transmit note or document contents through web_search, weather or bounded_public_research.'''
+#: #678: appended when this CLI turn may use the CLI's own web search.
+CLI_NATIVE_SEARCH_GUIDANCE='''Exception: for current public information you may use your own built-in web search tool; cite the URLs of the pages it returned. If it is unavailable, use the agentos web_search tool instead. Never put note or document contents in a search query.'''
 POLICY=CORE_INSTRUCTIONS+' '+API_TOOL_GUIDANCE
 # Bounded recent conversation shared by every route: the last 16 messages,
 # newest first until the byte budget is spent, never cutting the current request.
@@ -1905,7 +1918,7 @@ def context_sections(context):
  appends to its system text: the same sections ``render_turn_prompt`` gives a CLI."""
  return '\n\n'.join(part for part in (profile_section(context),current_context_section(context),prepared_section(context)) if part)
 
-def turn_context(history,route,current_context=None,profile=None,prepared=None):
+def turn_context(history,route,current_context=None,profile=None,prepared=None,native_search=False):
  """The one Work-scoped turn context every route receives (#569).
 
  ``history`` is the prepared transcript whose last item is the current
@@ -1927,11 +1940,16 @@ def turn_context(history,route,current_context=None,profile=None,prepared=None):
  ``prepared`` is the bounded "Prepared for you" text
  (``preparations.render_prepared``, #659): fresh answers of owner-accepted
  preparations, counted against the same budget; None or empty sends nothing.
+
+ ``native_search`` (#678, CLI route only) adds the one sentence that lets
+ the CLI use its own web search in this turn, which the launch arguments
+ then enable; without it the guidance is unchanged.
  """
  items=[{'role':m['role'],'content':str(m.get('content') or '')} for m in (history or []) if m.get('role') in ('user','assistant')]
  if not items or items[-1]['role']!='user':raise ValueError('turn context needs a current user request')
  request=items[-1]['content']
  guidance=CLI_TOOL_GUIDANCE if route=='cli' else API_TOOL_GUIDANCE
+ if route=='cli' and native_search:guidance+=' '+CLI_NATIVE_SEARCH_GUIDANCE
  instructions=CORE_INSTRUCTIONS+' '+guidance
  profile=str(profile or '')
  budget=CONTEXT_BUDGET_BYTES-len(instructions.encode())-len(request.encode())
@@ -2086,6 +2104,11 @@ def _evidence_detail(name,result):
   if name in SEARCH_BACKED_ACTIONS and result.get('provider'):
    summary['provider']=result['provider']
    if result.get('locale'):summary['locale']=result['locale']
+   # #678: the connected AI's own search - its route and the queries it ran.
+   # Its answer text is model-generated and never part of the Evidence.
+   if isinstance(result.get('route'),str) and result['route']:summary['route']=result['route']
+   if isinstance(result.get('search_queries'),list):
+    summary['search_queries']=[str(query)[:200] for query in result['search_queries'][:5]]
   # #605: the owner-visible record says the call was composed by a separate
   # public task, not from the arguments the proposing worker wrote.
   if result.get('composed_by')=='agentos-public-task':
@@ -2389,12 +2412,24 @@ CLAIM_REJECTIONS={
  'goal_not_observed':'지정한 관찰 결과가 요청의 완료를 보여 주지 않습니다. 다른 경로로 목표를 확인하거나, 끝낼 수 없다면 partial 또는 needs_owner로 마치세요.',
 }
 
+#: Result fields that are model prose, not something the environment showed
+#: (#678: a native search's answer).  The completion judgment never reads them.
+MODEL_TEXT_FIELDS=('answer',)
+
+def observed_part(result):
+ """A tool result without its model-generated fields (#678)."""
+ if not isinstance(result,dict):return result
+ return {key:value for key,value in result.items() if key not in MODEL_TEXT_FIELDS}
+
 def _observation_text(ref,name,result):
  """One referenced observation, as the completion judgment reads it.
 
  One value per line, so the line-scoped private-value redaction
  (``redact_private_values``) withholds only the line that carries a value.
+ A native search's answer is model text and is left out (#678): only its
+ cited sources are observations.
  """
+ result=observed_part(result)
  try:body=json.dumps(result,ensure_ascii=False,default=str,indent=1)
  except (TypeError,ValueError):body=str(result)
  return f'[{ref}] {name}:\n{body}'

@@ -213,6 +213,12 @@ class ExposedToolWireBoundary(unittest.TestCase):
                                     subscription_engines=SubscriptionEngines(finder=lambda _: "/runtime/codex", clock=lambda: 1),
                                     execution_adapter=adapter)
         self.service.connect_subscription_engine({"engine": "codex", "officially_authenticated": True})
+        # #678: these wire checks exercise the private-read bridge tool, which a
+        # turn with the CLI's own web search does not get; they run search-off
+        # turns (the service's own gate, answered as for a private turn).
+        self.native = False
+        gate = self.service.cli_native_search
+        self.service.cli_native_search = lambda *args: gate(*args) if self.native else (False, "private_turn")
 
     def _run_bridge(self, args, requests):
         env = {**self.env, **self.server.get("env", {})}
@@ -246,6 +252,16 @@ class ExposedToolWireBoundary(unittest.TestCase):
         self.assertIn("result", replies[2])
         listed = json.loads(replies[3]["result"]["content"][0]["text"])
         self.assertIn("wire note", [note["content"] for note in listed["notes"]])
+
+    def test_a_native_search_turn_gets_no_private_read_over_the_real_bridge(self):
+        """#678 P1: the exact bridge command of a native-search turn neither lists nor serves list_notes."""
+        self.native = True
+        replies = self._wire({"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+                             {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "list_notes", "arguments": {}}})
+        self.assertIn("--native-search", self.server["args"])
+        self.assertEqual([tool["name"] for tool in replies[2]["result"]["tools"]],
+                         ["bounded_public_research", "save_note", "weather", "web_search"])
+        self.assertTrue(_refused(replies[3]))
 
     def test_an_unlisted_native_tool_is_refused_by_the_real_bridge(self):
         """Denied control: invocation never exceeds exposure."""

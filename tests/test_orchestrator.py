@@ -36,6 +36,9 @@ from personal_agent.quickstart_store import QuickStore
 from personal_agent.subscription_engines import SubscriptionEngines
 
 OPENAI_KEY = 'sk-fixture-openai-0710'
+#: A bundled listing without the ranked gpt-6-luna (codex-cli 0.153.4 shape).
+BUNDLED = ('gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5')
+SEARCH_TOOLS = ('bounded_public_research', 'web_search')
 
 
 def plan(worker, goal, *, model='', context=SECTIONS, criteria=('the answer states it',), tools=None, reason='fits',
@@ -119,6 +122,8 @@ class Harness(unittest.TestCase):
             self.service.activate_main_ai({'route': 'openai'})
             self.service.activate_main_ai({'route': 'codex'})
         self.assertEqual(self.service.main_ai.current(), 'codex')
+        # #735: what `codex debug models --bundled` lists for the installed binary.
+        self.service.decision_routes.bundled_models = lambda engine: list(BUNDLED)
         self.plans, self.goals = [], []
         self.asked_plans = []
 
@@ -145,6 +150,18 @@ class Harness(unittest.TestCase):
         job = self.store.enqueue(text, key or f'orch-{len(self.engine.turns)}-{len(self.transport.bodies)}-{text}')
         self.assertTrue(self.service.run_one())
         return job, self.store.job(job)
+
+    def codex_tools(self):
+        from personal_agent.orchestrator import worker_catalogue
+        return worker_catalogue(self.service).worker('codex')['tools']
+
+    def no_search(self):
+        """The one subset shape that keeps private reads: the web-search tools removed (#735)."""
+        return tuple(tool for tool in self.codex_tools() if tool not in SEARCH_TOOLS)
+
+    def no_private(self):
+        """The other kept shape: the private-read tools removed."""
+        return tuple(tool for tool in self.codex_tools() if tool != 'list_notes')
 
     def events(self, job, status=None):
         with self.store.db() as db:
@@ -306,7 +323,7 @@ class Redelegation(Harness):
                 tools.capabilities.record('list_notes', 'succeeded',
                                           json.dumps({'host_action': 'list_notes', 'evidence': {'count': 1}}))
         self.engine.before = read_notes
-        self.script([plan('codex', 'Read the saved notes.', tools=('list_notes',)), plan('codex', 'Answer from them.')],
+        self.script([plan('codex', 'Read the saved notes.', tools=self.no_search()), plan('codex', 'Answer from them.')],
                     goals=[False, True])
         job, row = self.run_work('메모 확인해줘')
         self.assertEqual(len(self.engine.turns), 2)
@@ -367,7 +384,6 @@ class Fallback(Harness):
 
     def test_an_invalid_plan_runs_the_default_with_the_raw_request(self):
         for bad, what in ((plan('codex', 'x', model='not-a-listed-model'), 'model'),
-                          (plan('codex', 'x', tools=('list_notes', 'calendar_query')), 'tools'),
                           (plan('codex', '   '), 'brief')):
             with self.subTest(what=what):
                 self.engine.turns.clear()
@@ -398,16 +414,18 @@ class Fallback(Harness):
 
 class PerRequestTools(Harness):
     def test_notes_with_search_off_or_search_without_notes_never_both(self):
-        self.script([plan('codex', 'Read the owner\'s saved notes and list the matching ones.', tools=('list_notes',)),
-                     plan('codex', 'Search the public web.', tools=('web_search',))], goals=[True, True])
+        self.script([plan('codex', 'Read the owner\'s saved notes and list the matching ones.', tools=self.no_search()),
+                     plan('codex', 'Search the public web.', tools=self.no_private())], goals=[True, True])
         self.run_work('메모에서 찾아줘')
         self.run_work('검색해줘')
         notes, search = self.engine.turns
         self.assertFalse(notes['native_search'])
         self.assertEqual(notes['reason'], 'orchestrated_private_tools')
-        self.assertEqual(notes['offered'], ['list_notes'])
+        self.assertIn('list_notes', notes['offered'])
+        self.assertFalse(set(notes['offered']) & set(SEARCH_TOOLS))
         self.assertTrue(search['native_search'])
-        self.assertEqual(search['offered'], [], 'the CLI\'s own search replaces the bridge search')
+        self.assertNotIn('list_notes', search['offered'])
+        self.assertFalse(set(search['offered']) & set(SEARCH_TOOLS), 'the CLI\'s own search replaces the bridge search')
         private = private_read_actions()
         for turn in (notes, search):
             self.assertFalse(turn['native_search'] and set(turn['offered']) & private)
@@ -459,7 +477,7 @@ class ToolsAndReplan(Harness):
     """ORCH-02 (#729): full toolset by default, learning from failed attempts, the bridge timeout."""
 
     def test_the_worker_keeps_its_full_toolset_unless_a_reason_narrows_it(self):
-        self.assertIn('defaults to "worker_default"', QUESTION)
+        self.assertIn('tools_mode is "worker_default"', QUESTION)
         self.script([plan('codex', 'Answer.')], goals=[True])
         job, _row = self.run_work('알려줘')
         [turn] = self.engine.turns
@@ -473,18 +491,40 @@ class ToolsAndReplan(Harness):
         self.assertTrue(all(len(line) < 260 for line in descriptions.splitlines()), 'one line per tool')
         self.assertIsNone(self.events(job, 'planned')[0][1]['tools_reason'])
 
-    def test_a_subset_without_a_stated_reason_is_refused(self):
-        self.script([plan('codex', 'Answer.', tools=('web_search',), tools_reason='')])
+    def test_a_subset_without_a_stated_reason_becomes_the_full_toolset(self):
+        self.script([plan('codex', 'Answer.', tools=self.no_search(), tools_reason='')], goals=[True])
         job, _row = self.run_work('알려줘')
-        [(status, detail)] = self.events(job)
-        self.assertEqual((status, detail['code'], detail['invalid']), ('fallback', 'plan_invalid', 'tools_reason'))
+        self.assertIsNone(self.engine.turns[0]['only'])
+        planned = self.events(job, 'planned')[0][1]
+        self.assertIsNone(planned['tools'])
+        self.assertEqual(planned['tools_replaced'], {'requested': sorted(self.no_search()), 'why': 'no_reason'})
 
     def test_a_subset_with_a_reason_is_kept_and_recorded(self):
-        self.script([plan('codex', 'Read the notes.', tools=('list_notes',), tools_reason='keep private reads apart')],
+        self.script([plan('codex', 'Read the notes.', tools=self.no_search(), tools_reason='keep private reads apart')],
                     goals=[True])
         job, _row = self.run_work('메모 봐줘')
-        self.assertEqual(self.engine.turns[0]['only'], ['list_notes'])
-        self.assertEqual(self.events(job, 'planned')[0][1]['tools_reason'], 'keep private reads apart')
+        self.assertEqual(self.engine.turns[0]['only'], sorted(self.no_search()))
+        planned = self.events(job, 'planned')[0][1]
+        self.assertEqual((planned['tools_reason'], planned['tools_replaced']), ('keep private reads apart', None))
+
+    def test_only_the_two_separation_shapes_survive_validation(self):
+        """#735 (Work a8e6aa7b): every one-tool subset became the full toolset."""
+        cases = {('bounded_public_research',): 'shape', ('web_search',): 'shape', ('list_notes',): 'shape',
+                 ('weather', 'web_search'): 'shape', ('calendar_query',): 'not_offered'}
+        for tools, why in cases.items():
+            with self.subTest(tools=tools):
+                self.engine.turns.clear()
+                self.script([plan('codex', 'Answer.', tools=tools)], goals=[True])
+                job, _row = self.run_work('알려줘', key=f'shape-{tools}')
+                self.assertIsNone(self.engine.turns[0]['only'])
+                self.assertEqual(self.events(job, 'planned')[0][1]['tools_replaced']['why'], why)
+        for tools in (self.no_search(), self.no_private()):
+            with self.subTest(kept=tools):
+                self.engine.turns.clear()
+                self.script([plan('codex', 'Answer.', tools=tools)], goals=[True])
+                job, _row = self.run_work('알려줘', key=f'kept-{tools}')
+                self.assertEqual(self.engine.turns[0]['only'], sorted(tools))
+                self.assertIsNone(self.events(job, 'planned')[0][1]['tools_replaced'])
 
     def test_a_replan_never_repeats_a_failed_combination_and_sees_the_incomplete_call(self):
         def hang(tools):
@@ -510,7 +550,7 @@ class ToolsAndReplan(Harness):
         self.assertNotEqual(row['status'], 'succeeded')
 
     def test_a_changed_tool_set_is_allowed_after_a_failure(self):
-        self.script([plan('codex', 'Research it.', tools=('bounded_public_research',)), plan('codex', 'Use all tools.')],
+        self.script([plan('codex', 'Research it.', tools=self.no_private()), plan('codex', 'Use all tools.')],
                     goals=[False, True])
         job, row = self.run_work('조사해줘')
         self.assertEqual(len(self.engine.turns), 2)
@@ -546,6 +586,238 @@ class ToolsAndReplan(Harness):
                       observations)
         self.assertIn('"sources": []', observations)
         self.assertIn('own web searches that reported no source URL: 1', self.asked_plans[1][0].facts['previous_attempts'])
+
+
+class RunnableModels(Harness):
+    """#735: only bundled models, and a model the account refused never comes back."""
+
+    def test_codex_offers_only_bundled_listed_models(self):
+        from personal_agent.orchestrator import worker_catalogue
+        models = worker_catalogue(self.service).worker('codex')['models']
+        self.assertEqual(set(models), set(BUNDLED))
+        self.assertNotIn('gpt-6-luna', models, 'ranked but not bundled by the installed binary')
+        self.service.decision_routes.bundled_models = lambda engine: None
+        self.assertEqual(worker_catalogue(self.service).worker('codex')['models'], [],
+                         'no listing: only the worker default')
+
+    def test_a_refused_model_is_remembered_and_never_repeated(self):
+        from personal_agent.orchestrator import MODEL_REFUSALS_KEY, worker_catalogue
+        refusal = "The 'gpt-5.6-luna' model is not supported when using Codex with a ChatGPT account."
+        self.engine.fail = [ExecutionError('Codex 엔진이 작업을 완료하지 못했습니다(종료 코드 1). 엔진 응답: ' + refusal,
+                                           failure_class='request-rejected', exit_code=1, reason=refusal,
+                                           meta={'unsupported_model': 'gpt-5.6-luna'})]
+        self.script([plan('codex', 'Answer.', model='gpt-5.6-luna'), plan('codex', 'Answer.', model='gpt-5.6-luna')])
+        job, row = self.run_work('알려줘')
+        self.assertEqual(len(self.engine.turns), 1, 'the refused model did not run again')
+        last = self.events(job, 'evaluated')[-1][1]
+        self.assertEqual((last['stop'], last['invalid']), ('replan_failed', 'model'))
+        stored = self.store.config(MODEL_REFUSALS_KEY, {})
+        self.assertEqual(set(stored['codex']), {'gpt-5.6-luna'})
+        self.assertNotIn(refusal, json.dumps(stored), 'no refusal text is kept')
+        self.assertNotIn('gpt-5.6-luna', worker_catalogue(self.service).worker('codex')['models'])
+        self.assertEqual(row['status'], 'failed')
+
+    def test_another_rejection_is_not_a_model_refusal(self):
+        """#735 review: a generic rejection that names the model (context length) is not a refusal."""
+        from personal_agent.orchestrator import MODEL_REFUSALS_KEY, model_refused
+        context = "This model's maximum context length for gpt-5.6-luna is exceeded."
+        self.engine.fail = [ExecutionError('rejected: ' + context, failure_class='request-rejected', reason=context)]
+        self.script([plan('codex', 'Answer.', model='gpt-5.6-luna')])
+        self.run_work('알려줘')
+        self.assertEqual(self.store.config(MODEL_REFUSALS_KEY, {}), {})
+        self.assertFalse(model_refused('gpt-5.5', {}))
+        self.assertFalse(model_refused('', {'unsupported_model': ''}))
+        self.assertFalse(model_refused('gpt-5.5', {'unsupported_model': 'gpt-5.6-luna'}))
+
+    def test_a_refused_configured_default_is_substituted_by_the_next_runnable_model(self):
+        """#735 review, choice recorded: "" runs the next runnable model; with none left the worker is unavailable."""
+        from personal_agent.main_ai import SUBSCRIPTION_MODELS
+        from personal_agent.orchestrator import remember_model_refusal, worker_catalogue
+        self.store.put(SUBSCRIPTION_MODELS, {'codex': 'gpt-5.6-luna'})
+        remember_model_refusal(self.store, 'codex', 'gpt-5.6-luna')
+        codex = worker_catalogue(self.service).worker('codex')
+        self.assertEqual((codex['default_model'], codex['default_refused'], codex['available']),
+                         ('gpt-5.6-terra', 'gpt-5.6-luna', True))
+        self.assertNotIn('gpt-5.6-luna', codex['models'])
+        self.script([plan('codex', 'Answer.')], goals=[True])
+        job, _row = self.run_work('알려줘')
+        self.assertEqual(self.engine.turns[0]['model'], 'gpt-5.6-terra', 'the refused default is never run')
+        self.assertEqual(self.events(job, 'planned')[0][1]['model'], 'gpt-5.6-terra')
+        for model in BUNDLED:
+            remember_model_refusal(self.store, 'codex', model)
+        codex = worker_catalogue(self.service).worker('codex')
+        self.assertEqual((codex['available'], codex['reason']), (False, 'default_model_refused'))
+
+    def test_a_default_refused_mid_work_is_not_resolved_again(self):
+        from personal_agent.main_ai import SUBSCRIPTION_MODELS
+        self.store.put(SUBSCRIPTION_MODELS, {'codex': 'gpt-5.6-luna'})
+        refusal = "The 'gpt-5.6-luna' model is not supported when using Codex with a ChatGPT account."
+        self.engine.fail = [ExecutionError(refusal, failure_class='request-rejected', reason=refusal,
+                                           meta={'unsupported_model': 'gpt-5.6-luna'})]
+        self.script([plan('codex', 'Answer.'), plan('codex', 'Answer again.')], goals=[True])
+        self.run_work('알려줘')
+        self.assertEqual([turn['model'] for turn in self.engine.turns], ['gpt-5.6-luna', 'gpt-5.6-terra'])
+
+    def test_a_refusal_expires(self):
+        from personal_agent.orchestrator import MODEL_REFUSAL_TTL_SECONDS, refused_models, remember_model_refusal
+        remember_model_refusal(self.store, 'codex', 'gpt-5.5', now=1000)
+        self.assertEqual(refused_models(self.store, now=1001), {'codex': {'gpt-5.5'}})
+        self.assertEqual(refused_models(self.store, now=1000 + MODEL_REFUSAL_TTL_SECONDS), {'codex': set()})
+
+
+class BundledListing(__import__('test_decision_routes').ServiceFixture):
+    """#735: `codex debug models --bundled` runs in an empty CODEX_HOME, once per installed binary."""
+
+    def test_the_bundled_listing_is_cached_per_binary(self):
+        service = self.service()
+        self.assertEqual(service.decision_routes.bundled_models('codex'), ['gpt-5.6-terra', 'gpt-5.6-luna'],
+                         'hidden models are not offered')
+        self.assertEqual(service.decision_routes.bundled_models('codex'), ['gpt-5.6-terra', 'gpt-5.6-luna'])
+        listings = [call for call in self.runner.calls if call['argv'][1:3] == ['debug', 'models']]
+        self.assertEqual([call['argv'][1:] for call in listings], [['debug', 'models', '--bundled']], 'run once')
+        self.assertTrue(all(call['env']['CODEX_HOME'] == call['env']['HOME'] == call['cwd'] for call in listings),
+                        'an empty per-call CODEX_HOME')
+        self.assertIsNone(service.decision_routes.bundled_models('claude-code'), 'no machine-readable listing')
+
+    def test_a_failed_listing_is_cached_per_binary_too(self):
+        """#735 review: a binary whose `--bundled` listing failed is not re-run on every Work."""
+        from test_decision_routes import CliRunner
+        service = self.service(runner=CliRunner(bundled=''))
+        self.assertIsNone(service.decision_routes.bundled_models('codex'))
+        self.assertIsNone(service.decision_routes.bundled_models('codex'))
+        listings = [call for call in self.runner.calls if call['argv'][1:3] == ['debug', 'models']]
+        self.assertEqual(len(listings), 1, 'the failed discovery is cached for this binary')
+        self.assertTrue(self.store.config(service.decision_routes.BUNDLED_CACHE)['failed'])
+
+
+class SubsetCategories(unittest.TestCase):
+    """#735 review: a subset removes a whole category or it is replaced."""
+
+    WORKER = {'tools': ['bounded_public_research', 'list_memory', 'list_notes', 'weather', 'web_search'],
+              'private_tools': ['list_memory', 'list_notes']}
+
+    def keep(self, removed, reason='keep them apart'):
+        from personal_agent.orchestrator import subset_or_default
+        return subset_or_default(self.WORKER, [tool for tool in self.WORKER['tools'] if tool not in removed], reason)
+
+    def test_whole_categories_are_kept(self):
+        self.assertEqual(self.keep({'list_memory', 'list_notes'})[1], None)
+        self.assertEqual(self.keep({'web_search', 'bounded_public_research'})[1], None)
+
+    def test_a_partial_private_category_is_replaced(self):
+        self.assertEqual(self.keep({'list_notes'}), (None, {'requested': ['bounded_public_research', 'list_memory',
+                                                                         'weather', 'web_search'], 'why': 'shape'}))
+
+    def test_a_partial_search_category_is_replaced(self):
+        self.assertEqual(self.keep({'web_search'})[1]['why'], 'shape')
+        self.assertEqual(self.keep({'bounded_public_research'})[1]['why'], 'shape')
+
+    def test_a_category_plus_anything_else_is_replaced(self):
+        self.assertEqual(self.keep({'web_search', 'bounded_public_research', 'weather'})[1]['why'], 'shape')
+
+
+class UnsupportedModelSignal(unittest.TestCase):
+    """#735 review: only the CLI's own unsupported-model signal marks a model refused."""
+
+    def run_codex(self, message, model='gpt-5.6-luna'):
+        error = json.dumps({'status': 400, 'error': {'type': 'invalid_request_error', 'message': message}})
+
+        class Failed:
+            returncode = 1
+            stdout = json.dumps({'type': 'turn.failed', 'error': {'message': error}})
+            stderr = ''
+        with tempfile.TemporaryDirectory() as folder:
+            store = QuickStore(Path(folder) / 'state')
+            from personal_agent.agent_runtime import Capabilities
+            adapter = BoundedExecutionAdapter(finder=lambda name: '/runtime/' + name, runner=lambda *a, **k: Failed(),
+                                              runtime_root=Path(folder) / 'turns', codex_home=Path(folder))
+            with self.assertRaises(ExecutionError) as caught:
+                adapter.execute('codex', 'hello', AgentOSMcpTools(Capabilities(store, None, {}, '', 'job', lambda *a: None,
+                                                                               document_access=False)), model=model)
+        return caught.exception
+
+    def test_the_codex_unsupported_model_message_is_remembered(self):
+        exc = self.run_codex("The 'gpt-5.6-luna' model is not supported when using Codex with a ChatGPT account.")
+        self.assertEqual((exc.failure_class, exc.meta.get('unsupported_model')), ('request-rejected', 'gpt-5.6-luna'))
+
+    def test_a_context_length_rejection_naming_the_model_is_not(self):
+        exc = self.run_codex("This model's maximum context length is 400000 tokens for gpt-5.6-luna.")
+        self.assertEqual(exc.failure_class, 'request-rejected')
+        self.assertNotIn('unsupported_model', exc.meta)
+
+    def test_another_models_refusal_is_not_this_models(self):
+        exc = self.run_codex("The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account.")
+        self.assertNotIn('unsupported_model', exc.meta)
+
+    def test_claude_codes_own_tag(self):
+        from personal_agent.bounded_execution import unsupported_model
+        self.assertEqual(unsupported_model('claude-code', 'opus', '', 'x [claude-code:unrecognized_model] y'), 'opus')
+        self.assertEqual(unsupported_model('claude-code', 'opus', "model 'opus' context too long", ''), '')
+
+
+class ResolverProcess(unittest.TestCase):
+    """#735 root cause: the page reader's resolver child must never end the caller with an EOFError."""
+
+    def test_macos_resolves_in_a_spawned_process(self):
+        from personal_agent.local_tools import resolver_start_method
+        self.assertEqual(resolver_start_method('darwin', ['fork', 'spawn', 'forkserver']), 'spawn')
+        self.assertEqual(resolver_start_method('linux', ['fork', 'spawn', 'forkserver']), 'fork')
+        self.assertEqual(resolver_start_method('win32', ['spawn']), 'spawn')
+
+    def test_a_resolver_child_that_dies_is_an_os_error(self):
+        from personal_agent.local_tools import _bounded_system_resolver
+        with self.assertRaises(OSError) as caught:
+            _bounded_system_resolver('localhost', 443, timeout=20, target=_resolver_child_dies)
+        self.assertIn('ended without an answer', str(caught.exception))
+
+
+def _resolver_child_dies(send_connection, host, port):
+    """A resolver child that crashes before answering (module level, so a spawned child can load it)."""
+    import os
+    os._exit(3)
+
+
+class BridgeSurvives(unittest.TestCase):
+    """#735: the real stdio bridge answers a call whose tool raised an unmapped exception, and keeps serving."""
+
+    def test_the_bridge_types_an_unexpected_exception_and_stays_up(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as folder:
+            store = QuickStore(Path(folder) / 'state')
+            store.put('subscription_engine', {'id': 'codex', 'connected_at': 0})
+            job = store.enqueue('요청', 'bridge-survives')
+            with store.db() as db:
+                db.execute("UPDATE jobs SET status='running' WHERE id=?", (job,))
+            # The research step raises what a dead resolver child used to raise.
+            launcher = Path(folder) / 'launch.py'
+            launcher.write_text(
+                'import runpy\n'
+                'from personal_agent import agent_runtime\n'
+                'def research(self, *args, **kwargs):\n'
+                '    raise EOFError()\n'
+                'agent_runtime.Capabilities._research = research\n'
+                'runpy.run_module("personal_agent.mcp_bridge", run_name="__main__")\n', encoding='utf-8')
+            requests = [{'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {}},
+                        {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call', 'params': {
+                            'name': 'bounded_public_research', 'arguments': {'mode': 'travel_plan', 'query': 'q'}}},
+                        {'jsonrpc': '2.0', 'id': 3, 'method': 'tools/list'}]
+            src = str(Path(__file__).resolve().parents[1] / 'src')
+            import os
+            env = {**os.environ, 'PYTHONPATH': os.pathsep.join(filter(None, (src, os.environ.get('PYTHONPATH'))))}
+            done = subprocess.run([sys.executable, str(launcher), '--data', str(store.root), '--job', job,
+                                   '--profile=trusted-local', '--only=bounded_public_research'],
+                                  input=''.join(json.dumps(r) + '\n' for r in requests), capture_output=True, text=True,
+                                  env=env, timeout=120)
+            self.assertEqual(done.returncode, 0, done.stderr[-2000:])
+            replies = {reply['id']: reply for reply in map(json.loads, done.stdout.splitlines())}
+            self.assertEqual(set(replies), {1, 2, 3}, 'the call was answered and the bridge kept serving')
+            typed = replies[2]['result']['structuredContent']
+            self.assertEqual((replies[2]['result']['isError'], typed['code'], typed['effect'], typed['exception']),
+                             (True, 'tool_failed', 'none', 'EOFError'))
+            with store.db() as db:
+                rows = [(r['status'], json.loads(r['detail'])) for r in db.execute(
+                    "SELECT status,detail FROM tool_events WHERE job_id=? AND tool='bounded_public_research' ORDER BY id", (job,))]
+            self.assertEqual([status for status, _detail in rows], ['running', 'failed'], 'a terminal record, not incomplete')
 
 
 class BridgeTimeout(unittest.TestCase):
@@ -679,7 +951,7 @@ class PlannerHistory(Harness):
 class Preflight(Harness):
     def test_an_explicit_search_preflight_honours_a_subset_without_web_search(self):
         """Review P2: the /search preflight is a web_search call; a subset without it skips it."""
-        self.script([plan('codex', 'Answer from the saved notes.', tools=('list_notes',))], goals=[True])
+        self.script([plan('codex', 'Answer from the saved notes.', tools=self.no_search())], goals=[True])
         job, row = self.run_work('/search 서울 날씨')
         self.assertEqual(row['status'], 'succeeded')
         self.assertEqual(len(self.engine.turns), 1)
@@ -784,9 +1056,13 @@ class OrchestrationUnit(unittest.TestCase):
         candidates = catalogue.available()
         self.assertEqual([row['id'] for row in candidates], ['a', 'b'], 'an unavailable worker is never offered')
         ok, _ = orchestration.validate(plan('b', 'g', tools=('weather',)), candidates, 1)
-        self.assertEqual((ok.worker, ok.tools), ('b', frozenset({'weather'})))
+        self.assertEqual((ok.worker, ok.tools, ok.replaced), ('b', None, None), 'the full set is no subset')
+        ok, _ = orchestration.validate(plan('a', 'g', tools=('web_search',)), candidates, 1)
+        self.assertEqual((ok.tools, ok.replaced), (frozenset({'web_search'}), None), 'private reads removed')
+        ok, _ = orchestration.validate(plan('b', 'g', tools=('list_notes',)), candidates, 1)
+        self.assertEqual((ok.tools, ok.replaced), (None, {'requested': ['list_notes'], 'why': 'not_offered'}))
         for data, what in ((plan('c', 'g'), 'worker'), (plan('zz', 'g'), 'worker'), (plan('a', 'g', model='m2'), 'model'),
-                           (plan('b', 'g', tools=('list_notes',)), 'tools'), ({'worker': 'a'}, 'shape'),
+                           ({'worker': 'a'}, 'shape'),
                            (plan('a', 'g', context=('everything',)), 'sections')):
             with self.subTest(what=what):
                 self.assertEqual(orchestration.validate(data, candidates, 1), (None, what))

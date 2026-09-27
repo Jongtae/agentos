@@ -32,6 +32,7 @@ from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_U
 from .subscription_engines import SubscriptionEngines
 from .bounded_execution import TOOL_INCOMPLETE, TOOL_INCOMPLETE_TEXT, incomplete_bridge_calls
 from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, StrictIsolatedAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult, MAX_PROMPT_BYTES, BOUNDED_PROFILE, HOST_CLI_PROFILES, STRICT_PROFILE, private_read_actions, profile_actions, profile_status, route_unavailable
+from .orchestrator import model_refused, remember_model_refusal
 from .orchestrator import (EVENT_TOOL as ORCHESTRATION_EVENT, NOT_JUDGED, NOT_REACHED, UNJUDGED, WORKER_FAILED,
                            Orchestration, worker_catalogue)
 from .isolated_engine_gateway import EngineGatewayError
@@ -5462,6 +5463,7 @@ class AgentService:
                             record('subscription_engine','running',json.dumps({'engine':subscription['id'],'mode':mode,
                                 'context_messages':len(engine_context['conversation']),'context_bytes':len(engine_prompt.encode()),
                                 'context_mode':engine_context.get('mode','shared-context')}))
+                            work_model=''
                             try:
                                 if isolated:
                                     # #679: the sidecar's closed contract carries no model; a Work
@@ -5515,6 +5517,11 @@ class AgentService:
                                 if not isolated:self.record_cli_native_searches(job['id'],subscription['id'],getattr(exc,'meta',None),record,native_search)
                                 # #729: a bridge call the CLI never saw completed is a typed failure.
                                 self.close_incomplete_bridge_calls(job['id'],attempt_start,record)
+                                # #735: a model the CLI refused for this account is not offered again.
+                                refused_model=work_model
+                                if model_refused(refused_model,getattr(exc,'meta',None)):
+                                    remember_model_refusal(self.store,subscription['id'],refused_model)
+                                    if orchestration is not None:orchestration.drop_model(subscription['id'],refused_model)
                                 self.record_turn_provenance(job['id'],status='failed',failure_class=diagnostics.get('failure_class'),egress_taint=sorted(capabilities.private_provenance),
                                                             exit_code=diagnostics.get('exit_code'),**(getattr(exc,'meta',None) or {}))
                                 # A run that the CLI rejected as signed out is the

@@ -17,7 +17,7 @@ Every material product change should progress through:
 - **Authority/Threat Model**: state what data, permissions, runtimes, packages, networks, secrets and external effects are involved; identify abuse/failure paths.
 - **Plan**: perform the Existing Solutions Review (already required before the proposal itself, see C15), then choose architecture, compatibility/migration strategy, implementation sequence and evidence plan.
 - **Tasks**: create bounded issue-linked work units with dependencies and explicit stopping rules.
-- **Implement**: change only the activated bounded goal, preserving existing state/evidence.
+- **Implement**: change only the activated bounded goal, preserving existing state/evidence. Per C16, implementation removes blockers or improves orchestration of the owner's AI; it never scripts a specific owner request.
 - **Verify**: map every acceptance criterion to current automated/operating evidence, including negative tests where authority/security is involved.
 - **Converge**: reconcile contradictions, stale docs/plans, open findings and current GitHub state before merge/closeout; use independent review only when the risk-based escalation policy below applies.
 
@@ -100,6 +100,18 @@ The issue or plan must record the internal repository candidates and search evid
 Reuse-first does **not** delegate Personal AgentOS sovereignty. AgentOS continues to own canonical owner state, Context/Memory authority, Grants and approvals, capability mediation, data/egress policy, Work/Event/Evidence semantics, Artifact provenance, recovery and revocation. External libraries remain subordinate implementation details behind these boundaries and never gain authority merely because they implement a transport or protocol.
 
 Reuse also carries supply-chain obligations: use exact supported versions where appropriate, review licence and provenance, track security/maintenance risk, keep replaceable adapters narrow, and define update/rollback behavior when dependency changes can affect authority or compatibility. Do not fork, vendor or copy an external project when a dependency or thin adapter provides the required behavior unless the issue records a concrete reason.
+
+### C16. AI is the engine; AgentOS orchestrates, it does not implement requests
+
+Owner direction 2026-09-27 (#712). An AI is always the engine. The owner's chosen AI does the work of meeting the owner's needs as a secretary: a subscription CLI such as Codex or Claude Code, or a configured model API. It searches, reads, browses, reasons, writes and acts through its tools. Personal AgentOS never re-implements that work.
+
+- **The decision model orchestrates.** Per request, it chooses which AI tool and model to use. It writes or adjusts the brief (goal, relevant owner context, completion criteria), evaluates the result, and re-delegates with an adjusted brief or a different worker when the goal is not met. It does not execute the task itself, and it is not a rule engine.
+- **AgentOS code keeps only what an AI must not own.** That is canonical owner state, Grants and approvals, secrets, payment and consequential-action approval, budgets, Work/Event/Evidence, and recovery. Its other job is to **remove blockers** that stop the AI tools: approval layers that duplicate AgentOS's own, login friction, rendering robustness, missing tool exposure, and wrong routing.
+- **Never implement a specific owner request in code.** No per-task features (directions, carts, lookups of a particular kind), no site-, provider-, category- or task-named branches, and no request-specific guidance text. When a request fails, fix the blocker or the orchestration decision, not the task.
+- **Prefer known, public code.** Adopt maintained public implementations and official tools (C15) over self-implementation. A custom Build needs a concrete unsupported contract.
+- **Do not make the owner operate the machinery.** No context-reset commands, setup rituals or manual steps that an AI or AgentOS could handle.
+
+Every proposal and PR answers: *Which AI does the work here, and is this change removing a blocker or orchestrating — or is it scripting the task?* Scripting the task is rejected.
 
 ## Independent review escalation
 

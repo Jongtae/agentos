@@ -333,3 +333,28 @@ def test_following_the_bootstrap_selects_nothing_while_no_goal_is_active() -> No
         states.append({"active": declared, "status": "running"})
     for state in states:
         assert DeliveryPlan(plan_path).select(state) is None, state
+
+
+def test_ai_is_the_engine_principle_is_pinned_in_governance() -> None:
+    """C16 (#712): the owner's AI is the engine; AgentOS orchestrates and removes blockers."""
+    constitution = _read("docs/development-constitution.en.md")
+    _assert_all(
+        constitution,
+        "### C16. AI is the engine; AgentOS orchestrates, it does not implement requests",
+        "The decision model orchestrates",
+        "Never implement a specific owner request in code",
+        "remove blockers",
+        "Prefer known, public code",
+        "Do not make the owner operate the machinery",
+        "is this change removing a blocker or orchestrating",
+    )
+    agents = _read("AGENTS.md")
+    _assert_all(
+        agents,
+        "## AI is the engine — Constitution C16",
+        "AgentOS code never implements a specific owner request",
+        "removes blockers",
+        "am I removing a blocker or scripting the task?",
+    )
+    assert agents.index("## AI is the engine") < agents.index("## Unit-test-first verification"), "C16 must stay near the top of AGENTS.md"
+    _assert_all(_read("CLAUDE.md"), "C16 AI is the engine", "never implements a specific owner request")

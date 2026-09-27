@@ -490,7 +490,8 @@ class DriverProtocolTests(unittest.TestCase):
         self.assertEqual(ops[1]['timeout'], 7.0)
         # The full descriptor the guard classified, and the guard's payment tokens.
         self.assertEqual(ops[3]['expect'], {'tag': 'button', 'type': 'submit', 'autocomplete': '', 'name': 'Go',
-                                            'own_text': '', 'label_name': '', 'in_form': False, 'payment_form': False})
+                                            'own_text': '', 'label_name': '', 'ancestor_text': '', 'in_form': False,
+                                            'payment_form': False})
         self.assertEqual(ops[3]['tokens'], sorted(bs.PAYMENT_AUTOCOMPLETE))
         self.assertEqual(ops[4]['expect'], ops[3]['expect'])
         self.assertEqual((ops[3]['approved'], ops[4]['approved']), (False, False), 'unapproved unless the session says so')
@@ -887,6 +888,17 @@ class SessionFixtureHandler(FixtureHandler):
                               + self.server.agentos_origin + '/\')">AgentOS 열기</button>'
                               + '<form action="' + self.server.agentos_origin + '/api/browser/approval" method="post">'
                               + '<button type="submit">승인 보내기</button></form></body></html>')
+        if path == '/one-click-names':
+            # Review of #763 P1/P2: names from aria-labelledby, a child image's alt, a role that
+            # hides the button, and a neutral child inside a pay link; no card field anywhere.
+            return self._send('''<html><head><title>이름</title></head><body>
+              <form action="/order" method="post"><span id="lbl">Place your order</span>
+                <input type="submit" name="placeOrder1" value="" aria-labelledby="lbl" style="width:80px;height:20px"></form>
+              <a href="/order" onclick="return true"><img alt="Buy now" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" width="40" height="20"></a>
+              <form action="/order" method="post"><input type="submit" value="Pay now" role="none"></form>
+              <a href="/order">Card <span role="button">Details</span> ₩12,900 결제하기</a>
+              <a href="/reviews">Best laptops to buy in 2026, compared</a>
+              </body></html>''')
         if path == '/checkout-realm':
             # #700 item 2 repro: the native submit of a fresh iframe's prototype bypasses the page-world wrapper.
             native = ("var f=document.createElement('iframe');document.body.appendChild(f);"
@@ -1275,6 +1287,29 @@ class WebKitIntegrationTests(unittest.TestCase):
             approvals.issued.append(bs.binding_digest(approvals.requests[[row['tag'] for row in committing].index('button')][0]))
             self.assertEqual(sess.click({'target': str(button['n']), 'effect': 'mutate'})['title'], '주문 완료')
             self.assertEqual(self.server.posts, ['/add', '/order'])
+        finally:
+            sess.close()
+
+    def test_accessible_names_images_hidden_roles_and_children_of_pay_controls_are_classified(self):
+        """Review of #763: aria-labelledby, a descendant image's alt, role=none, a child of a pay link."""
+        sess = bs.BrowserSession(self.profile.driver_factory('work-758b'), work_id='work-758b', approvals=Approvals(),
+                                 steps=40, allowed_origins_for_tests=(self.fixture,))
+        try:
+            sess.open({'url': self.origin + '/one-click-names', 'effect': 'navigate'})
+            rows = sess.last['_elements']
+            self.assertIn('Place your order', [row['name'] for row in rows], 'aria-labelledby names the input')
+            flagged = {row['name']: row['commit'] for row in rows}
+            self.assertEqual(flagged.get('Place your order'), True)
+            self.assertTrue(any(row['commit'] and row['tag'] == 'a' and 'Details' not in row['name'] for row in rows),
+                            'the image-only pay link')
+            self.assertEqual(flagged.get('Pay now'), True, 'role=none on a submit input')
+            self.assertEqual(flagged.get('Details'), True, 'a child of a pay link')
+            self.assertFalse(next(row for row in rows if row['name'].startswith('Best laptops'))['commit'])
+            for row in [row for row in rows if row['commit']]:
+                with self.assertRaises(ToolError) as caught:
+                    sess.click({'target': str(row['n']), 'effect': 'mutate'})
+                self.assertEqual(caught.exception.code, 'approval_required', row['name'])
+            self.assertEqual(self.server.posts, [])
         finally:
             sess.close()
 

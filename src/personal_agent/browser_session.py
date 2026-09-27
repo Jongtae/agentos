@@ -47,6 +47,7 @@ site, provider or category is named anywhere in this module.
 """
 import functools
 import hashlib
+import unicodedata
 import importlib.util
 import ipaddress
 import itertools
@@ -108,9 +109,9 @@ SUBMIT_REFUSED_TEXT = ('결제 양식일 수 있는 제출을 확인할 수 없�
                        '승인을 요청하세요.')
 LOGIN_WINDOW_TEXT = ('로그인 창에서 직접 로그인한 뒤 창을 닫아 주세요. AgentOS는 입력 내용을 보지 않으며, 창을 닫으면 '
                      '로그인 세션을 암호화해 저장합니다.')
-LIMITATION_TEXT = ('카드번호·CVC·일회용 코드 입력, 그 양식의 버튼, 이름이 결제·구매·주문을 뜻하는 버튼과 링크는 '
-                   '승인 없이 실행하지 않습니다. 저장된 결제수단으로 결제하는 버튼이라도 이름에 결제·구매·주문 뜻이 '
-                   '없으면(아이콘만 있는 버튼, “계속” 등) 감지하지 못합니다.')
+LIMITATION_TEXT = ('카드번호·CVC·일회용 코드 입력, 그 양식의 버튼, 한국어·영어·일본어·중국어의 흔한 결제·구매·주문 '
+                   '표현이 이름이나 글자에 있는 버튼과 링크는 승인 없이 실행하지 않습니다. 저장된 결제수단으로 결제하는 '
+                   '버튼이라도 그런 표현이 없으면(글자 없는 아이콘 버튼, “계속”, 다른 언어 등) 감지하지 못합니다.')
 
 
 # --- element classification (deterministic, site-independent) ---------------
@@ -150,47 +151,86 @@ def button_like(element):
 
 
 #: #758: language-level signals that pressing a control commits a purchase or
-#: a payment: a pay/buy/order/subscribe/donate/transfer verb in its accessible
-#: name.  A stored payment method (one-click checkout) or a card field hosted in
-#: another origin's frame leaves no card field on the page and the charge may be
-#: a ``fetch``, so the press itself needs the owner's approval.  Deliberately
-#: over-inclusive (a false match only asks the owner); no site, provider or
-#: task is named.  Nouns that name a history, method or policy page are left
-#: out so reading an account menu does not ask.
-COMMIT_PATTERNS = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (
-    r"\b(?:pay|buy|purchase)\b(?!\s+(?:history|methods?|options?|policy|protection|details|guide)\b)",
-    r"\bplace\s+(?:your\s+|the\s+)?order\b",
-    r"\border\s+now\b",
-    r"\b(?:confirm|complete|submit|finish)\s+(?:your\s+|the\s+)?(?:order|payment|purchase|checkout)\b",
+#: a payment.  A stored payment method (one-click checkout) or a card field hosted in
+#: another origin's frame leaves no card field on the page and the charge may be a
+#: ``fetch``, so the press itself needs the owner's approval.  Deliberately
+#: over-inclusive (a false match only asks the owner); no site, provider or task is
+#: named.  ``COMMIT_PHRASES`` match anywhere; ``COMMIT_VERBS`` (a bare verb, which
+#: article and search-result titles also carry) only in a short name or on a control
+#: that is not a link.  Nouns naming a history, method or policy page are left out.
+COMMIT_PHRASES = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (
+    r"\bplace\s+(?:your\s+|the\s+|an\s+)?order\b",
+    r"\b(?:order|buy|pay|upgrade|subscribe)\s+now\b",
+    r"\b(?:confirm|complete|submit|finish)\s+(?:your\s+|the\s+)?(?:order|payment|purchase|checkout|subscription)\b",
+    r"\bstart\s+(?:your\s+|a\s+|the\s+)?(?:free\s+)?(?:trial|subscription|membership)\b",
     r"\bexpress\s+checkout\b",
-    r"\b(?:subscribe|donate)\b",
-    r"\bstart\s+(?:your\s+|a\s+)?(?:free\s+)?trial\b",
-    r"\b(?:send|transfer)\s+(?:the\s+)?(?:money|funds)\b",
+    r"\b(?:send|transfer)\s+(?:the\s+)?(?:money|funds|[$€£¥₩]\s*\d)",
+    r"\b(?:pay|buy)\b\s*[$€£¥₩]?\s*\d",
     r"\btop\s*-?\s*up\b",
-    r"(?:결제|구매|주문|구독|후원|충전|송금|이체)\s*(?:하기|진행|완료|확정|신청)",
-    r"바로\s*(?:결제|구매|주문)|간편\s*결제",
-    r"(?:결제|구매|주문|송금|이체)\s*$",
-    r"購入(?!履歴)|注文(?:する|を確定|確定)|支払|決済|寄付|送金|チャージ",
-    r"支付|付款|购买|購買(?!紀錄)|下单|下單|提交订单|提交訂單|充值|转账|轉帳|捐款|订阅|訂閱",
+    r"(?:결제|구매|주문|구독|후원|충전|송금|이체)\s*(?:하기|진행|완료|확정|신청|시작)",
+    r"바로\s*(?:결제|구매|주문)|간편\s*결제|정기\s*결제",
+    r"(?:결제|구매|주문|송금|이체)\s*(?:$|[\d(₩])",
+    r"\d[\d,.]*\s*원\s*(?:결제|구매|주문)",
+    r"注文(?:する|を確定|確定)|購入(?:する|手続き|確定)",
+    r"立即(?:购买|購買|订购|訂購|支付|付款)|提交(?:订单|訂單)|确认(?:支付|付款)|確認(?:支付|付款)",
 ))
-#: Roles a press on which can commit (a styled link is a common pay button).
-COMMIT_ROLES = frozenset({'button', 'link', 'menuitem'})
+COMMIT_VERBS = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (
+    r"\b(?:pay|buy|purchase)\b(?!\s+(?:history|methods?|options?|policy|details|guide)\b)",
+    r"\b(?:subscribe|donate)\b",
+    r"^\s*(?:order|renew)\b(?!\s+(?:history|status|details|tracking|summary|number|info)\b)",
+    r"購入(?!履歴|方法)|支払(?!い?方法)|決済(?!方法)|寄付|送金|チャージ",
+    r"支付(?!方式|方法|宝|寶)|付款(?!方式|方法)|购买(?!方式|方法|记录)|購買(?!方式|方法|紀錄)|下单|下單|订购|訂購|充值|转账|轉帳|捐款|订阅|訂閱",
+))
+#: A name at most this long is a control's label, not an article or result title.
+COMMIT_SHORT = 24
+def _commit_text(text):
+    """NFKC, without format characters (zero-width and the like a page could hide inside a word)."""
+    text = unicodedata.normalize('NFKC', str(text or ''))
+    return ' '.join(''.join(char for char in text if unicodedata.category(char) != 'Cf').split())
 
 
-def commit_name(name):
-    """The accessible name carries a purchase or payment commitment signal (#758)."""
-    text = ' '.join(str(name or '').split())
-    return bool(text) and any(pattern.search(text) for pattern in COMMIT_PATTERNS)
+def commit_name(name, link=False):
+    """The text carries a purchase or payment commitment signal (#758).
+
+    NFKC-normalised with format characters removed, so full-width letters or a
+    zero-width character inside a word do not hide it.  On a link, a bare verb
+    counts only in a short name (a link titled with a verb is usually an article).
+    """
+    text = _commit_text(name)
+    if not text:
+        return False
+    if any(pattern.search(text) for pattern in COMMIT_PHRASES):
+        return True
+    return (not link or len(text) <= COMMIT_SHORT) and any(pattern.search(text) for pattern in COMMIT_VERBS)
+
+
+def _text_parts(value):
+    """A worker ``name | own text`` pair as its separate texts."""
+    return [part for part in str(value or '').split(' | ') if part.strip()]
 
 
 def commit_control(element):
-    """Pressing it can commit a payment (#758): a button-, link- or menu-like control whose
-    accessible name or own text carries a commitment signal, or an element whose
-    ``<label>`` forwards the press to such a control (``label_name`` is that control's
-    name and own text)."""
-    own = ((element.get('role') in COMMIT_ROLES or element.get('tag') in ('button', 'a'))
-           and (commit_name(element.get('name')) or commit_name(element.get('own_text'))))
-    return own or (bool(element.get('label_button')) and commit_name(element.get('label_name')))
+    """Pressing it can commit a payment (#758).
+
+    A pressable control (anything but a field that takes a value) whose accessible
+    name or own text (content, descendant image alt/svg title/aria-label, button
+    value) carries a commitment signal; or one whose ``<label>`` forwards the press
+    to such a control; or one inside such a control (a press bubbles to it).
+    """
+    link = element.get('role') == 'link' or element.get('tag') == 'a'
+    own = element.get('pressable', True) and any(commit_name(text, link) for text in
+                                                 (element.get('name'), *_text_parts(element.get('own_text'))))
+    forwarded = any(commit_name(text) for text in _text_parts(element.get('label_name')))
+    inside = any(commit_name(text) for text in _text_parts(element.get('ancestor_text')))
+    return bool(own or forwarded or inside)
+
+
+def commit_detail(element):
+    """The text that made a press a commitment and what is around it, for the owner's prompt (#758)."""
+    texts = [element.get('name'), *_text_parts(element.get('own_text')), *_text_parts(element.get('label_name')),
+             *_text_parts(element.get('ancestor_text'))]
+    matched = next((_commit_text(text) for text in texts if commit_name(text)), '')
+    return matched[:60], _commit_text(element.get('context'))[:160]
 
 
 def payment_forms(elements):
@@ -401,7 +441,7 @@ def mediate_snapshot(raw, excluded=(), requested_url=None):
         internal.append({**{key: element.get(key) for key in ('index', 'role', 'name', 'tag', 'type', 'autocomplete', 'form',
                                                              'label_form')},
                          'n': row['n'], 'guarded': guarded_field(element), 'payment': payment_field(element),
-                         'commit': commit_control(element)})
+                         'commit': commit_control(element), 'detail': commit_detail(element)})
         if len(visible) >= ELEMENT_LIMIT:
             break
     forms = payment_forms(elements)
@@ -560,6 +600,7 @@ class BrowserSession:
         # owner reads it with a payment-form submit cancelled after it answered
         # (#698).  Cleared by browser_open and a navigation (#700).
         self._last_input = None
+        self._refused_pending = False   # a between-steps refused form post not yet told (#758)
 
     # -- plumbing --
     def _driver(self):
@@ -600,18 +641,22 @@ class BrowserSession:
         except Exception as exc:
             raise ToolError(FAILED_TEXT, 'browser_failed') from exc
 
+    def _excluded(self):
+        if self.excluded is None:
+            return ()
+        try:
+            return list(self.excluded())
+        except Exception:
+            return ()
+
     def _snapshot(self, requested_url=None):
-        excluded = ()
-        if self.excluded is not None:
-            try:
-                excluded = list(self.excluded())
-            except Exception:
-                excluded = ()
+        excluded = self._excluded()
         raw = self._call(lambda timeout: self._driver().snapshot())
         self.last = mediate_snapshot(raw, excluded, requested_url)
         if isinstance(raw, dict) and raw.get('refused_submit'):
-            # #758: a form post the guard refused between steps, with nothing to hold.
-            self.last['submit_refused'] = SUBMIT_REFUSED_TEXT
+            # #758: a form post the guard refused between steps, with nothing to hold;
+            # the next result the model sees says so (``run``).
+            self._refused_pending = True
         cancelled = raw.get('cancelled_submit') if isinstance(raw, dict) else None
         if cancelled:
             # A payment-form submit the worker cancelled after a step answered (a
@@ -759,6 +804,13 @@ class BrowserSession:
 
     # -- the tools --
     def run(self, action, args):
+        result = self._run(action, args)
+        if self._refused_pending and isinstance(result, dict):
+            self._refused_pending = False
+            result = {**result, 'submit_refused': SUBMIT_REFUSED_TEXT}
+        return result
+
+    def _run(self, action, args):
         if action == 'browser_open':
             return self.open(args)
         if action == 'browser_read':
@@ -809,8 +861,19 @@ class BrowserSession:
         snapshot = self._snapshot()
         element = resolve_target(snapshot, args.get('target'))
         key = target_key(element)
-        binding = step_binding(self.work_id, 'browser_click', snapshot['_page'], key, key, self._state_of(snapshot, element))
+        state = self._state_of(snapshot, element)
         description = f"'{element.get('name') or element.get('role')}' 버튼 누르기"
+        if element.get('commit'):
+            # #758: the owner reads (and the approval binds) the purchase text that made it a
+            # commitment and what is around it, not only a possibly neutral accessible name.
+            matched, context = element.get('detail') or ('', '')
+            matched, context = scrub(matched, self._excluded())[0], scrub(context, self._excluded())[0]
+            state += '\n\x1ecommit ' + matched + '\n' + context
+            if matched and matched != element.get('name'):
+                description += f' ({matched})'
+            if context:
+                description += f' · {context[:80]}'
+        binding = step_binding(self.work_id, 'browser_click', snapshot['_page'], key, key, state)
         # #758: a control whose name commits a purchase needs approval whatever form it
         # is in (a stored payment method or a fetch charge leaves no card field to see).
         approved = self._guard(binding, description, element['submit_guarded'] or element['commit'] or effect == 'payment')
@@ -1205,6 +1268,7 @@ class WebKitWorkerDriver:
                                            # #758: the name of the control its label forwards to
                                            'own_text': str(element.get('own_text') or ''),
                                            'label_name': str(element.get('label_name') or ''),
+                                           'ancestor_text': str(element.get('ancestor_text') or ''),
                                            'in_form': element.get('form') is not None,
                                            'payment_form': (element.get('form') is not None and element.get('form') in guarded_forms)
                                            or forwards_to_payment_form(element, guarded_forms)}

@@ -245,8 +245,9 @@ class _PageParser(HTMLParser):
             control = self.control(element)
             element['label_form'] = control['form'] if control else None
             element['own_text'] = element['name'] or ''
-            element['label_name'] = (control['name'] + ' | ' + control['name']) if control else ''
-            element['label_button'] = bool(control) and (control['tag'] in ('button', 'a') or control['role'] in ('button', 'link'))
+            pressable = lambda e: e['role'] not in ('textbox', 'combobox', 'checkbox', 'radio') and e['tag'] not in ('select', 'textarea')
+            element['label_name'] = (control['name'] + ' | ' + control['name']) if control and pressable(control) else ''
+            element['ancestor_text'], element['pressable'], element['context'] = '', pressable(element), ''
         private = ('hidden', 'action', 'html_id', 'onclick', 'label', 'sent')
         elements = [{k: v for k, v in e.items() if k not in private} for e in self.elements if not e['hidden']]
         forms = [{'id': form['id'], 'text': '\n'.join(form.get('texts', [])), **self.record(form)} for form in self.forms]
@@ -940,16 +941,31 @@ class CommitControlTests(unittest.TestCase):
                      '간편결제', '송금하기', '충전하기', '購入手続きへ', '注文を確定する', '支払う', '立即购买',
                      '提交订单', '付款'):
             self.assertTrue(bs.commit_name(name), name)
-        for name in ('Purchase history', 'Payment methods', 'Add to wishlist', 'Buying guide', 'Checkout',
-                     '구매후기', '주문내역', '결제수단 변경', '담기', '購入履歴', '', None, 'Continue'):
+        # Review of #763: more phrasings, and text a page disguises with full-width or zero-width characters.
+        for name in ('Order', 'Order • $23.50', 'Buy protection plan', 'Start subscription', 'Send $20', 'Upgrade now',
+                     '결제 12,000원', '결제 (12,000원)', '구독 시작하기', '정기결제 시작', '立即订购', '立即訂購',
+                     'Ｂｕｙ ｎｏｗ', 'Bu\u200by now', '결\u200b제하기'):
+            self.assertTrue(bs.commit_name(name), name)
+        for name in ('Purchase history', 'Payment methods', 'Add to wishlist', 'Buying guide', 'Checkout', 'Order history',
+                     '구매후기', '주문내역', '결제수단 변경', '담기', '購入履歴', '支払い方法', '決済方法', '支付方式', '支付宝',
+                     '', None, 'Continue'):
             self.assertFalse(bs.commit_name(name), name)
+        # A bare verb in a long link title is an article, not a control; in a short one it counts.
+        self.assertFalse(bs.commit_name('Best laptops to buy in 2026', link=True))
+        self.assertTrue(bs.commit_name('Buy now', link=True))
+        self.assertTrue(bs.commit_name('Place your order and track it later from your account', link=True))
         self.assertTrue(bs.commit_control({'role': 'button', 'tag': 'div', 'name': 'Pay now'}))
         self.assertTrue(bs.commit_control({'role': 'link', 'tag': 'a', 'name': '바로구매'}))
-        self.assertFalse(bs.commit_control({'role': 'textbox', 'tag': 'input', 'name': 'Buy now'}), 'a field commits nothing')
+        self.assertFalse(bs.commit_control({'role': 'textbox', 'tag': 'input', 'name': 'Buy now', 'pressable': False}),
+                         'a field commits nothing')
+        self.assertTrue(bs.commit_control({'role': 'none', 'tag': 'input', 'type': 'submit', 'name': 'placeOrder1',
+                                           'own_text': 'Place order', 'pressable': True}), 'any role: its own text')
         self.assertTrue(bs.commit_control({'role': 'button', 'tag': 'span', 'name': '빠른 진행',
-                                           'label_name': 'Buy now', 'label_button': True}), 'a label forwarding to it')
-        self.assertFalse(bs.commit_control({'role': 'checkbox', 'tag': 'input', 'name': 'x',
-                                            'label_name': '구매 조건 동의', 'label_button': False}))
+                                           'label_name': 'Continue | Buy now'}), 'a label forwarding to it')
+        self.assertTrue(bs.commit_control({'role': 'button', 'tag': 'span', 'name': 'Details',
+                                           'ancestor_text': 'Card | Buy now ₩12,900'}), 'inside it: the press bubbles')
+        self.assertFalse(bs.commit_control({'role': 'checkbox', 'tag': 'input', 'name': 'x', 'pressable': False,
+                                            'label_name': ''}))
 
     def test_one_click_controls_need_approval_before_the_page_and_ordinary_ones_run(self):
         approvals = Approvals()
@@ -961,6 +977,7 @@ class CommitControlTests(unittest.TestCase):
             self.assertEqual((caught.exception.code, caught.exception.requires), ('approval_required', 'browser-step-approval'))
         self.assertEqual([entry for entry in driver.log if entry[0] == 'click'], [], 'refused before the page')
         self.assertEqual(len(approvals.requests), 4)
+        self.assertIn('(Buy now)', approvals.requests[3][1], 'the owner reads what the label forwards to')
         # Ordinary controls, and a history link that names a purchase, run without asking.
         self.assertEqual(sess.click({'target': '담기', 'effect': 'mutate'})['title'], '담음')
         sess.open({'url': ORIGIN + '/one-click', 'effect': 'navigate'})
@@ -981,10 +998,11 @@ class CommitControlTests(unittest.TestCase):
         sess.open({'url': ORIGIN + '/one-click', 'effect': 'navigate'})
         original = driver.snapshot
         driver.snapshot = lambda: {**original(), 'refused_submit': True}
-        page = sess.read()
+        # The click's own first snapshot reads the report; the result the model sees carries it.
+        page = sess.run('browser_click', {'target': '담기', 'effect': 'mutate'})
         self.assertEqual(page['submit_refused'], bs.SUBMIT_REFUSED_TEXT)
         driver.snapshot = original
-        self.assertNotIn('submit_refused', sess.read())
+        self.assertNotIn('submit_refused', sess.run('browser_read', {}))
 
 
 # ---------------------------------------------------------------- login, budget, targets

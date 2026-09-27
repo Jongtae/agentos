@@ -138,9 +138,13 @@ const labelOf = (el) => { const wrapping = el.closest('label');
   const id = el.getAttribute('id');
   const target = id ? document.querySelector('label[for="' + CSS.escape(id) + '"]') : null;
   return target ? target.innerText : ''; };
+// ``aria-labelledby`` names an element first (accname): the referenced elements' text.
+const labelledBy = (el) => (el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)
+  .map((id) => { const node = document.getElementById(id); return node ? (node.innerText || node.textContent || '') : ''; })
+  .join(' ').trim();
 const nameOf = (el) => {
   const tag = el.tagName.toLowerCase();
-  const label = el.getAttribute('aria-label') || labelOf(el) ||
+  const label = labelledBy(el) || el.getAttribute('aria-label') || labelOf(el) ||
     el.getAttribute('placeholder') || el.getAttribute('title') || el.getAttribute('alt') ||
     ((tag === 'input' && (el.type === 'submit' || el.type === 'button')) ? el.value : '') ||
     el.innerText || el.textContent || (tag === 'input' ? el.name : '') || '';
@@ -169,14 +173,43 @@ const paymentForm = (el, tokens) => { if (formHolds(formOf(el), tokens)) return 
 // control is one a press on which can commit (``browser_session.commit_control``).
 // A control's own text (its content or button value) besides its accessible name:
 // a ``<label for>`` can give a pay button a neutral name.
-const ownText = (el) => clean(el.innerText || ((el.tagName.toLowerCase() === 'input') ? el.value : '') || '');
-const labelName = (el) => { const control = labelControl(el); return control ? nameOf(control) + ' | ' + ownText(control) : ''; };
-const buttonish = (el) => { const tag = el.tagName.toLowerCase(), role = (el.getAttribute('role') || '').toLowerCase();
-  return tag === 'button' || tag === 'a' || ['button', 'link', 'menuitem'].includes(role) ||
-    (tag === 'input' && ['submit', 'button', 'image'].includes(typeOf(el))); };
+// Besides its accessible name: its text, its descendants' image alt, svg title and
+// aria-label, and a button input's value (never another input's value), bounded at
+// 600 characters, not the name's 160.
+const BUTTON_INPUTS = ['submit', 'button', 'image', 'reset'];
+const ownText = (el) => { const tag = el.tagName.toLowerCase(), parts = [el.innerText || ''];
+  if (tag === 'input' && BUTTON_INPUTS.includes(typeOf(el))) parts.push(el.value || '', el.getAttribute('alt') || '');
+  Array.from(el.querySelectorAll('img[alt], svg title, [aria-label]')).slice(0, 12).forEach((node) =>
+    parts.push(node.tagName.toLowerCase() === 'img' ? node.getAttribute('alt') : node.tagName.toLowerCase() === 'title'
+      ? node.textContent : node.getAttribute('aria-label')));
+  return cut(parts.join(' ').replace(/\s+/g, ' ').trim(), 600); };
+// A control a press on which can do something: anything the selector lists but a
+// field that takes a value (text, select, checkbox, radio and the like).
+const VALUE_ROLES = ['textbox', 'searchbox', 'combobox', 'listbox', 'checkbox', 'radio', 'switch', 'slider', 'spinbutton'];
+const buttonish = (el) => { const tag = el.tagName.toLowerCase();
+  const roles = (el.getAttribute('role') || '').toLowerCase().split(/\s+/).filter(Boolean);
+  if (tag === 'select' || tag === 'textarea') return false;
+  if (tag === 'input' && !BUTTON_INPUTS.includes(typeOf(el))) return false;
+  return !roles.some((role) => VALUE_ROLES.includes(role)); };
+const commitText = (el) => nameOf(el) + ' | ' + ownText(el);
+const labelName = (el) => { const control = labelControl(el); return control && buttonish(control) ? commitText(control) : ''; };
+// The nearest pressable ancestor a press on ``el`` also activates (a trusted click bubbles).
+const PRESSABLE = 'button, a[href], a[onclick], summary, input[type="submit"], input[type="image"], input[type="button"], ' +
+  '[role~="button"], [role~="link"], [role~="menuitem"], [onclick]';
+const ancestorText = (el) => { const parent = el.parentElement, up = parent ? parent.closest(PRESSABLE) : null;
+  return up && buttonish(up) ? commitText(up) : ''; };
+// What is around it (a product and its price), for the owner's approval prompt and binding.
+const contextOf = (el) => { let node = el.parentElement; const own = (el.innerText || '').length;
+  for (let depth = 0; node && depth < 4; depth += 1, node = node.parentElement) {
+    const text = (node.innerText || '').replace(/\s+/g, ' ').trim();
+    if (text.length > own + 12) return cut(text, 300);
+  }
+  return ''; };
 const describe = (el, tokens) => ({tag: el.tagName.toLowerCase(), type: typeOf(el), autocomplete: autocompleteOf(el), name: nameOf(el),
-  own_text: ownText(el), label_name: labelName(el), in_form: !!formOf(el), payment_form: paymentForm(el, tokens)});
-const same = (actual, expect) => !!expect && ['tag', 'type', 'autocomplete', 'name', 'own_text', 'label_name', 'in_form', 'payment_form']
+  own_text: ownText(el), label_name: labelName(el), ancestor_text: ancestorText(el), in_form: !!formOf(el),
+  payment_form: paymentForm(el, tokens)});
+const same = (actual, expect) => !!expect && ['tag', 'type', 'autocomplete', 'name', 'own_text', 'label_name', 'ancestor_text',
+  'in_form', 'payment_form']
   .every((key) => key in expect && actual[key] === expect[key]);
 const state = () => (window.__agentos = window.__agentos || {targets: new Map(), guard: null, listening: false,
   off: false, allow: null, cancelled: null, held: null, vetted: [], submitListening: false});
@@ -322,7 +355,7 @@ Array.from(document.querySelectorAll(SELECTOR)).forEach((el, index) => {
   elements.push({index, role: well(roleOf(el)), name: nameOf(el), href: tag === 'a' ? cut(el.href, 2000) : null, tag, type: well(type),
     autocomplete: well(autocompleteOf(el)), value: takesValue ? cut(el.value || '', 200) : null, form: formId,
     label_form: idOf(control ? formOf(control) : null), own_text: ownText(el), label_name: labelName(el),
-    label_button: !!control && buttonish(control), disabled: !!el.disabled});
+    ancestor_text: ancestorText(el), pressable: buttonish(el), context: contextOf(el), disabled: !!el.disabled});
 });
 return JSON.stringify({url: cut(location.href, 4000), title: cut(document.title, 400),
   text: cut(document.body ? document.body.innerText : '', 20000), elements: elements.slice(0, 300),

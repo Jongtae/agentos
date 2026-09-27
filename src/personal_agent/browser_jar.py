@@ -277,6 +277,25 @@ class CookieJar:
                 return
             self._write({'sites': sites})
 
+    def site_digest(self, host):
+        """A digest of the stored sign-in cookies of the site(s) ``host`` belongs to (#709).
+
+        Covers each cookie's site, name, domain, path and value (not its
+        expiry), so a new or changed sign-in changes it and an untouched
+        session does not.  Never returns a value.  Raises ``JarError`` when
+        the jar exists but cannot be read.
+        """
+        host = str(host or '').lower().rstrip('.')
+        with self._lock:
+            sites = self._read()['sites']
+        rows = []
+        for site, entry in sites.items():
+            if not isinstance(entry, dict) or not (host == site or host.endswith('.' + site) or site.endswith('.' + host)):
+                continue
+            rows.extend([site, str(row.get('name')), str(row.get('domain')), str(row.get('path')), str(row.get('value'))]
+                        for row in entry.get('cookies') or [] if isinstance(row, dict))
+        return hashlib.sha256(json.dumps(sorted(rows), separators=(',', ':')).encode()).hexdigest()
+
     def cached_sites(self):
         """``(state, sites)`` without touching the Keychain, or None when the file changed since it was read."""
         with self._lock:

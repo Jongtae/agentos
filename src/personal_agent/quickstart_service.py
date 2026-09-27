@@ -237,10 +237,11 @@ BROWSER_LOGIN_RESULT_TEXT={'resumed':'로그인 창을 닫고 요청을 한 번 
                            'skipped':'로그인을 건너뛰었습니다. 요청은 지금까지의 결과로 마칩니다.',
                            'expired':'로그인 요청 시간이 지나 창을 닫았습니다. 요청은 지금까지의 결과로 마칩니다.',
                            'not_resumed':'로그인 창을 닫았지만 요청을 이어서 처리할 수 없는 상태입니다. 다시 요청해 주세요.',
+                           'no_session':'로그인 세션이 저장되지 않아 요청을 이어서 처리하지 않았습니다.',
                            'close_failed':('로그인 창을 닫고 로그인 세션을 저장했는지 확인하지 못해 요청을 이어서 처리하지 '
                                            '않았습니다. 다시 요청하면 필요할 때 로그인을 다시 요청합니다.')}
 #: #709: a Work whose last login ended this way may be asked again at the next login page.
-BROWSER_LOGIN_REASK_STATES=('expired','unavailable')
+BROWSER_LOGIN_REASK_STATES=('expired','unavailable','not_logged_in')
 
 class AgentService:
     def __init__(self, store, adapter=None, telegram_transport=None, subscription_engines=None, execution_adapter=None,
@@ -3550,7 +3551,9 @@ class AgentService:
         row=self._browser_login(job['id'])
         if not row or row.get('state')!='requested':return False
         # Offered before the window can close, so an owner who closes it at once is still heard.
+        # The site's stored sign-in cookies before the window: a login is evidenced by their change.
         now=time.time()
+        row={**row,'cookies_before':self._login_cookie_digest(row)}
         self._put_browser_login(job['id'],{**row,'state':'offered','window':None,'offered_at':now,
                                            'deadline':now+BROWSER_LOGIN_SECONDS})
         try:
@@ -3571,6 +3574,18 @@ class AgentService:
         if (self._browser_login(job['id']) or {}).get('state')=='offered':
             self._arm_login_notification(job,row['nonce'])
         return True
+
+    def _login_cookie_digest(self, row):
+        """A keyed digest of the login host's stored sign-in cookies (never a value), or None when unreadable."""
+        digest=self.browser_profile.site_digest(row.get('host'))
+        if digest is None:return None
+        secret=self.store.secret('browser_step_secret',create=lambda:secrets.token_hex(32)).encode()
+        return hmac.new(secret,('login-cookies|'+digest).encode(),hashlib.sha256).hexdigest()
+
+    def _login_cookies_changed(self, row):
+        """Whether the site's stored sign-in cookies changed while its login window was open (#709)."""
+        after=self._login_cookie_digest(row)
+        return after is not None and row.get('cookies_before') is not None and after!=row['cookies_before']
 
     def _arm_login_notification(self, job, nonce):
         """Queue the optional Telegram prompt for this login (a Work asked again re-arms its row)."""
@@ -3626,7 +3641,8 @@ class AgentService:
             return self._settle_browser_login(work_id,nonce,'expire',closed=False)
         if row['state']=='closing':
             closed=self.browser_profile.close_login_window(window)
-            return self._settle_browser_login(work_id,nonce,row.get('intent'),closed=closed)
+            return self._settle_browser_login(work_id,nonce,row.get('intent'),closed=closed,
+                                              changed=closed and self._login_cookies_changed(row))
         outcome=self.browser_profile.login_window_outcome(window)
         if outcome is None:
             if now<float(row.get('deadline') or 0):return None
@@ -3634,11 +3650,19 @@ class AgentService:
             return self._settle_browser_login(work_id,nonce,'expire',closed=closed)
         reason,saved=outcome
         if reason=='owner':
-            return self._settle_browser_login(work_id,nonce,'resume',closed=saved)
+            return self._settle_browser_login(work_id,nonce,'owner_close',closed=saved,
+                                              changed=saved and self._login_cookies_changed(row))
         return self._settle_browser_login(work_id,nonce,'expire',closed=saved and reason=='timeout')
 
-    def _settle_browser_login(self, work_id, nonce, intent, closed):
-        """Finish one login exactly once.  Only a closed and saved window resumes the Work.
+    def _settle_browser_login(self, work_id, nonce, intent, closed, changed=False):
+        """Finish one login exactly once.  Only a closed and saved window whose login changed the
+        site's stored sign-in cookies (``changed``) resumes the Work.
+
+        ``intent`` is ``owner_close`` (the owner closed the window), ``resume``
+        (로그인 완료), ``skip`` (건너뛰기) or ``expire``.  A close or 로그인 완료
+        with no cookie change is not a login: the Work is not re-queued and a
+        later login page may ask again (``not_logged_in``); a close says so as
+        a skip, 로그인 완료 says the session was not saved.
 
         The row leaves ``offered``/``closing`` under the service lock (compared
         on its nonce), so a second tap, a stale message, the owner's close and
@@ -3650,9 +3674,11 @@ class AgentService:
             row=self._browser_login(work_id)
             if not row or row.get('state') not in ('offered','closing') or not hmac.compare_digest(str(row.get('nonce','')),str(nonce or '')):
                 return None
-            if not closed and intent in ('resume','expire'):
+            if not closed and intent in ('resume','owner_close','expire'):
                 final,shown='expired','close_failed'
-            elif intent=='resume':
+            elif intent in ('resume','owner_close') and not changed:
+                final,shown='not_logged_in',('no_session' if intent=='resume' else 'skipped')
+            elif intent in ('resume','owner_close'):
                 final=shown='resuming'
             elif intent=='skip':
                 final=shown='skipped'
@@ -3683,7 +3709,7 @@ class AgentService:
             return
         if note and note['fingerprint']==row.get('nonce') and note['state']=='queued':
             self.store.update_notification(note['id'],'cancelled')
-        if shown in ('expired','close_failed'):
+        if shown in ('expired','close_failed','no_session'):
             job=self.store.job(work_id)
             if job:
                 with self.store.db() as db:

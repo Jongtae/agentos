@@ -192,11 +192,17 @@ class JarDriver(FakeDriver):
     def __init__(self, log=None):
         super().__init__(log=log)
         self.fail_export = False
+        self.sites = {}
+
+    def login(self, site='fixture.test'):
+        """The owner signs in by hand in this window: the site now holds a new session cookie."""
+        self.sites = {site: [{'name': 'sid', 'value': 'session-' + str(time.time_ns()), 'domain': site, 'path': '/',
+                              'expires': None, 'secure': True, 'http_only': True, 'same_site': None}]}
 
     def cookies_export(self):
         if self.fail_export:
             raise RuntimeError('export failed')
-        return {}, []
+        return dict(self.sites), []
 
 
 def memory_jar(directory):
@@ -211,6 +217,22 @@ def wait_until(condition, seconds=5.0):
             return True
         time.sleep(0.02)
     return condition()
+
+
+class SiteCookieDigest(unittest.TestCase):
+    def test_a_login_changes_the_site_digest_and_an_expiry_refresh_does_not(self):
+        with tempfile.TemporaryDirectory() as folder:
+            jar = memory_jar(folder)
+            empty = jar.site_digest('accounts.example.org')
+            row = {'name': 'sid', 'value': 'v1', 'domain': '.example.org', 'path': '/', 'expires': 100}
+            jar.save_export({'example.org': [row], 'other.org': [{**row, 'domain': 'other.org'}]})
+            signed_in = jar.site_digest('accounts.example.org')
+            self.assertNotEqual(signed_in, empty)
+            self.assertNotIn('v1', signed_in)
+            jar.save_export({'example.org': [{**row, 'expires': 200}], 'other.org': [{**row, 'domain': 'other.org'}]})
+            self.assertEqual(jar.site_digest('accounts.example.org'), signed_in, 'an expiry refresh is not a login')
+            jar.save_export({'example.org': [row], 'other.org': [{**row, 'domain': 'other.org', 'value': 'v2'}]})
+            self.assertEqual(jar.site_digest('example.org'), signed_in, 'another site does not count')
 
 
 class LoginHarness(unittest.TestCase):
@@ -299,8 +321,10 @@ class LoginHarness(unittest.TestCase):
     def state(self, job_id):
         return (self.service._browser_login(job_id) or {}).get('state')
 
-    def owner_closes(self, job_id):
-        """The owner closes the login window (the worker's close event)."""
+    def owner_closes(self, job_id, logged_in=True):
+        """The owner (after signing in, unless ``logged_in`` is False) closes the login window (the worker's close event)."""
+        if logged_in:
+            self.window().login()
         self.window().closed = True
         self.assertTrue(wait_until(lambda: self.state(job_id) not in ('offered', 'closing')), self.state(job_id))
 
@@ -364,6 +388,7 @@ class InFlowLogin(LoginHarness):
 
     def test_telegram_done_is_settled_by_the_work_loop_and_resumes_once(self):
         job_id, _prompt, _buttons, notification = self.login_work()
+        self.window().login()
         self.tap(f"p7l:{notification['id']}:done", notification['message_id'])
         self.assertEqual(self.state(job_id), 'closing')
         self.assertFalse(self.window().closed, 'the poll thread never closes the window itself')
@@ -434,6 +459,7 @@ class InFlowLogin(LoginHarness):
         self.assertEqual(self.store.job(job_id)['status'], self.ended)
         self.assertEqual(self.state(job_id), 'offered')
         self.assertFalse(self.window().closed)
+        self.window().login()
         self.tap(f"p7l:{notification['id']}:done", message_id)
         self.service.process_browser_logins()
         self.assertEqual(self.store.job(job_id)['status'], 'queued')
@@ -455,6 +481,7 @@ class InFlowLogin(LoginHarness):
             self.service.browser_login_decision({'work_id': job_id, 'decision': 'maybe'})
         with self.assertRaises(ValueError):
             self.service.browser_login_decision({'work_id': 'other', 'decision': 'done'})
+        self.window().login()
         self.assertEqual(self.service.browser_login_decision({'work_id': job_id, 'decision': 'done'}),
                          {'work_id': job_id, 'state': 'closing', 'intent': 'resume'})
         with self.assertRaises(ValueError):
@@ -515,6 +542,37 @@ class InFlowLogin(LoginHarness):
         self.owner_closes(job_id)
         self.assertEqual(self.store.job(job_id)['status'], 'queued')
 
+    def test_closing_the_window_without_a_login_does_not_resume_and_a_later_login_page_asks_again(self):
+        job_id, _prompt, _buttons, notification = self.login_work()
+        self.owner_closes(job_id, logged_in=False)
+        self.assertEqual(self.state(job_id), 'not_logged_in')
+        self.assertEqual(self.store.job(job_id)['status'], self.ended, 'no cookie changed: not a login')
+        self.assertEqual(self.edits()[-1]['text'], BROWSER_LOGIN_RESULT_TEXT['skipped'])
+        self.ask_again(job_id, notification)
+
+    def test_closing_the_window_after_a_login_resumes_once(self):
+        job_id, _prompt, _buttons, notification = self.login_work()
+        self.owner_closes(job_id)
+        self.assertEqual((self.state(job_id), self.store.job(job_id)['status']), ('resumed', 'queued'))
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='partial' WHERE id=?", (job_id,))
+        self.window().login()
+        self.tap(f"p7l:{notification['id']}:done", notification['message_id'])
+        self.assertEqual(self.service.process_browser_logins(), [])
+        self.assertEqual(self.store.job(job_id)['status'], 'partial', 'resumed once only')
+
+    def test_done_with_no_cookie_change_does_not_resume(self):
+        job_id, _prompt, _buttons, notification = self.login_work()
+        self.tap(f"p7l:{notification['id']}:done", notification['message_id'])
+        self.service.process_browser_logins()
+        self.assertTrue(self.window().closed)
+        self.assertEqual(self.state(job_id), 'not_logged_in')
+        self.assertEqual(self.store.job(job_id)['status'], self.ended)
+        self.assertEqual(BROWSER_LOGIN_RESULT_TEXT['no_session'], '로그인 세션이 저장되지 않아 요청을 이어서 처리하지 않았습니다.')
+        self.assertEqual(self.edits()[-1]['text'], BROWSER_LOGIN_RESULT_TEXT['no_session'])
+        # The row keeps a keyed digest of the site's cookies, never a cookie value.
+        self.assertNotIn('session-', flat(self.service._browser_login(job_id)))
+
     def test_no_prompt_when_the_window_cannot_open(self):
         with mock.patch.object(self.profile, 'open_for_login', return_value={'state': 'busy', 'message': bs.BUSY_TEXT}):
             self.scripts = self.login_script()
@@ -567,6 +625,7 @@ class LoginThroughTheCliBridge(_BridgeHarness):
         notification = self.store.notification(prompt[0]['reply_markup']['inline_keyboard'][0][0]['callback_data'].split(':')[1])
         tap = {'id': 'cb', 'from': {'id': CHAT_BRIDGE}, 'data': f"p7l:{notification['id']}:done",
                'message': {'message_id': notification['message_id'], 'chat': {'id': CHAT_BRIDGE, 'type': 'private'}}}
+        self.drivers[1].login()
         self.service.ingest_callback(tap, GENERATION_BRIDGE)
         self.service.process_browser_logins()
         self.assertEqual(self.store.job(self.job)['status'], 'queued')

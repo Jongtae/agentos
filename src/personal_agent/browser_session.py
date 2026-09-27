@@ -1468,6 +1468,14 @@ class BrowserProfile:
         return {'state': 'closed' if wait else 'opened', 'url': page_reference(url), 'message': LOGIN_WINDOW_TEXT,
                 'window': window_id}
 
+    def site_digest(self, host):
+        """The jar's digest of ``host``'s stored sign-in cookies, or None when it cannot be read (#709)."""
+        try:
+            with self._jar_lock:
+                return self.jar.site_digest(host)
+        except Exception:
+            return None
+
     def login_window_known(self, window):
         """Whether ``window`` is a login window this process opened (a restart forgets every one)."""
         return bool(window) and window in self._login_windows

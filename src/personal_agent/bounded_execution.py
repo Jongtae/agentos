@@ -278,6 +278,56 @@ def codex_bridge_approval_argument():
     return f'mcp_servers.agentos.default_tools_approval_mode="{CODEX_BRIDGE_APPROVAL_MODE}"'
 
 
+#: #729: Codex's per-MCP-server tool-call timeout key (seconds, an f64).  Verified
+#: on codex-cli 0.153.4: the key is in the binary's ``RawMcpServerConfig``
+#: field list next to ``startup_timeout_sec`` ("timed out awaiting tools/call
+#: after"), and a parse-only ``codex -c mcp_servers.agentos.tool_timeout_sec=300
+#: mcp get agentos --json`` with an empty ``CODEX_HOME`` reports
+#: ``"tool_timeout_sec": 300.0`` (a string value is refused at config load; an
+#: unknown key is ignored silently, so only the reported value proves it).
+#: Unset, Codex cancels a bridge call after its own default (60 s), shorter
+#: than a bounded research call.
+CODEX_TOOL_TIMEOUT_KEY = 'tool_timeout_sec'
+#: Added to the longest offered tool's own bound: bridge start-up, the durable
+#: event writes and the reply.
+BRIDGE_TOOL_MARGIN_SECONDS = 30
+#: A bridge action with no bound of its own below: Codex's own default.
+DEFAULT_TOOL_SECONDS = 60
+
+
+def bridge_tool_bound(actions):
+    """The longest own bound, in seconds, of the AgentOS bridge ``actions`` one turn offers (#729).
+
+    Each figure is the tool's existing timeout, not a new one: a browser step
+    is bounded by the relay's call cap, a bounded research call by one search
+    plus its page reads, a search by the slower of the provider and native
+    search timeouts, the weather lookup by its two requests.
+    """
+    from .agent_runtime import BROWSER_ACTIONS
+    from .cli_browser_relay import CALL_SECONDS
+    from .local_tools import MAX_PAGE_SECONDS
+    from .research import MAX_RESEARCH_PAGES
+    from .search_providers import NATIVE_TIMEOUT_SECONDS, SEARCH_TIMEOUT_SECONDS
+    search = max(SEARCH_TIMEOUT_SECONDS, NATIVE_TIMEOUT_SECONDS)
+    own = {'web_search': search, 'bounded_public_research': search + MAX_RESEARCH_PAGES * MAX_PAGE_SECONDS,
+           # local_tools.LocalTools.weather: geocoding (10 s) then the forecast (15 s).
+           'weather': 10 + 15, 'public_page_read': MAX_PAGE_SECONDS}
+    bounds = [CALL_SECONDS if action in BROWSER_ACTIONS else own.get(action, DEFAULT_TOOL_SECONDS)
+              for action in actions or ()]
+    return max(bounds, default=DEFAULT_TOOL_SECONDS)
+
+
+def bridge_tool_timeout(actions, turn_seconds):
+    """The ``agentos`` server's tool-call timeout: the longest offered bound plus a margin,
+    never beyond the turn's own time (the Work's remaining budget, capped)."""
+    return max(1, min(int(turn_seconds), bridge_tool_bound(actions) + BRIDGE_TOOL_MARGIN_SECONDS))
+
+
+def codex_bridge_timeout_argument(seconds):
+    """The one ``-c`` override of the ``agentos`` server's tool-call timeout (#729); no other server."""
+    return f'mcp_servers.agentos.{CODEX_TOOL_TIMEOUT_KEY}={int(seconds)}'
+
+
 #: #701: bridge actions the CLI's own web search replaces on a native-search
 #: turn, so the model searches with Codex's or Claude's own tool instead.
 NATIVE_SEARCH_REPLACED = frozenset({'web_search', 'bounded_public_research'})
@@ -646,6 +696,36 @@ def display_argv(argv, prompt, instructions=''):
     return shown
 
 
+#: #729: a bridge call that started and never completed (the CLI cancelled it,
+#: timed out waiting, or the connection closed).
+TOOL_INCOMPLETE = 'tool_incomplete'
+TOOL_INCOMPLETE_TEXT = '도구 호출이 끝나기 전에 연결이 닫혀 결과를 받지 못했습니다.'
+
+
+def incomplete_bridge_calls(rows):
+    """``[(tool, host_action)]`` of bridge calls that went ``running`` with no result after (#729).
+
+    ``rows`` are ``(tool, status, detail)`` of one attempt, in order.  A call
+    is paired with the next ``succeeded``/``failed`` bridge event of the same
+    tool; what is left over never completed.
+    """
+    open_calls = []
+    for tool, status, detail in rows:
+        try:
+            data = json.loads(detail or '{}')
+        except (TypeError, ValueError):
+            data = {}
+        if not isinstance(data, dict) or data.get('scope') != 'subscription-mcp-bridge':
+            continue
+        if status == 'running':
+            open_calls.append((tool, data.get('host_action') or tool))
+        elif status in ('succeeded', 'failed'):
+            match = next((index for index, (name, _action) in enumerate(open_calls) if name == tool), None)
+            if match is not None:
+                open_calls.pop(match)
+    return open_calls
+
+
 def failure_details(engine_id, stdout, stderr, prompt=None):
     """Summarise a failed CLI turn from its official machine output.
 
@@ -937,7 +1017,7 @@ class BoundedExecutionAdapter:
         return {'state': 'unknown', 'detail': 'unparsed status'}
 
     def command(self, engine_id, binary, prompt, mcp_config, instructions='', profile=BOUNDED_PROFILE,
-                disabled_features=(), model=None, native_search=False, only=None):
+                disabled_features=(), model=None, native_search=False, only=None, tool_timeout=None):
         """The argv of one Work turn.
 
         ``native_search`` (#678) lets the trusted-local turn use the CLI's own
@@ -981,7 +1061,9 @@ class BoundedExecutionAdapter:
                     '-c', f'mcp_servers.agentos.command={json.dumps(sys.executable)}',
                     '-c', f'mcp_servers.agentos.args={json.dumps(bridge["args"])}',
                     # #709: AgentOS decides its own bridge tools (see CODEX_BRIDGE_APPROVAL_MODE).
-                    '-c', codex_bridge_approval_argument(), *model_args, prompt]
+                    '-c', codex_bridge_approval_argument(),
+                    # #729: the agentos server's own tool-call timeout (see CODEX_TOOL_TIMEOUT_KEY).
+                    *(['-c', codex_bridge_timeout_argument(tool_timeout)] if tool_timeout else []), *model_args, prompt]
         if engine_id == 'claude-code':
             # #570: stream-json (which requires --verbose with -p) reports the
             # session model and each tool_use; its last line is the same result
@@ -1377,8 +1459,12 @@ class BoundedExecutionAdapter:
             started = time.monotonic()
             LOG.info('engine turn started engine=%s profile=%s', engine_id, profile)
             # #678: the facade says whether this turn may use the CLI's own web search.
+            # #729: the bridge tools this turn offers bound Codex's per-call timeout.
+            offered = [action for action in turn_actions(profile, native_search, only)
+                       if relay is not None or action not in _BROWSER_ACTIONS]
             argv = self.command(engine_id, binary, prompt, config, instructions, profile=profile, disabled_features=disabled,
-                                model=model or None, native_search=native_search, only=only)
+                                model=model or None, native_search=native_search, only=only,
+                                tool_timeout=bridge_tool_timeout(offered, timeout))
             run_meta = {'argv': display_argv(argv, prompt, instructions), 'requested_model': model or None}
             try:
                 if self.runner is subprocess.run:

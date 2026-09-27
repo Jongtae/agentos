@@ -29,6 +29,7 @@ from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_U
                                       owner_cause, report_statement, terminal_text, turn_qualifier,
                                       verified_portion)
 from .subscription_engines import SubscriptionEngines
+from .bounded_execution import TOOL_INCOMPLETE, TOOL_INCOMPLETE_TEXT, incomplete_bridge_calls
 from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, StrictIsolatedAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult, MAX_PROMPT_BYTES, BOUNDED_PROFILE, HOST_CLI_PROFILES, STRICT_PROFILE, private_read_actions, profile_actions, profile_status, route_unavailable
 from .orchestrator import (EVENT_TOOL as ORCHESTRATION_EVENT, NOT_JUDGED, NOT_REACHED, UNJUDGED, WORKER_FAILED,
                            Orchestration, worker_catalogue)
@@ -2461,6 +2462,21 @@ class AgentService:
             return config,key,dict(route['subscription']),None
         return dict(route['config']),route['key'],{},route['test'] if isinstance(route['test'],dict) else {}
 
+    def close_incomplete_bridge_calls(self, job_id, since, record):
+        """Record each bridge call of this attempt that started and never completed (#729).
+
+        Typed ``tool_incomplete`` (transient).  The effect of an action outside
+        the effect-free reads is unknown: the call may have acted before the
+        connection closed, so it is never repeated blindly (C8).
+        """
+        from .agent_runtime import EFFECT_FREE_READS
+        with self.store.db() as db:
+            rows=db.execute('SELECT tool,status,detail FROM tool_events WHERE job_id=? AND id>? ORDER BY id',(job_id,since or 0)).fetchall()
+        for tool,action in incomplete_bridge_calls([(row['tool'],row['status'],row['detail']) for row in rows]):
+            record(tool,'failed',json.dumps({'scope':'subscription-mcp-bridge','host_action':action,'code':TOOL_INCOMPLETE,
+                                             'retry':'transient','effect':'none' if action in EFFECT_FREE_READS else 'unknown',
+                                             'error':TOOL_INCOMPLETE_TEXT},ensure_ascii=False))
+
     def orchestration_step(self, orchestration, attempt, job_id, since, *, result=None, answer='', outcome=None,
                            owner_needed=False, failed=None):
         """Evaluate one attempt and return the next one, or None (#710).
@@ -2481,6 +2497,8 @@ class AgentService:
             rows=db.execute('SELECT tool,status,detail FROM tool_events WHERE job_id=? AND id>? ORDER BY id',(job_id,since or 0)).fetchall()
         effect=outcome=='unknown' or self._work_has_unknown_effect(job_id)
         observed,failures=[],[]
+        # #729: the factual summary the next plan call reads (names and codes only).
+        called,failed_codes,incomplete,sourceless=[],[],[],0
         for row in rows:
             if row['tool'] in ('model','subscription_engine',ORCHESTRATION_EVENT) or row['status'] not in ('running','succeeded','failed'):
                 continue
@@ -2489,14 +2507,25 @@ class AgentService:
             data=data if isinstance(data,dict) else {}
             action=data.get('host_action') or row['tool']
             if action not in repeatable:effect=True
+            if row['tool'] not in called:called.append(row['tool'])
             if row['status']=='succeeded':
-                observed.append(f"- {row['tool']}: {json.dumps(data.get('evidence') or {},ensure_ascii=False)[:600]}")
+                evidence=data.get('evidence') if isinstance(data.get('evidence'),dict) else {}
+                observed.append(f"- {row['tool']}: {json.dumps(evidence,ensure_ascii=False)[:600]}")
+                if data.get('scope')=='cli-native' and not evidence.get('sources'):sourceless+=1
             elif row['status']=='failed':
                 failures.append(f"{row['tool']}: {data.get('error') or data.get('code') or 'failed'}")
+                if data.get('code')==TOOL_INCOMPLETE:incomplete.append(row['tool'])
+                else:failed_codes.append(f"{row['tool']} ({data.get('code') or 'failed'})")
         failed_steps='; '.join(failures)
+        summary='; '.join(part for part in (
+            f"tools called: {', '.join(called) or 'none'}",
+            f"failed: {', '.join(failed_codes)}" if failed_codes else '',
+            f"started but never completed (tool_incomplete): {', '.join(incomplete)}" if incomplete else '',
+            f"own web searches that reported no source URL: {sourceless}" if sourceless else '') if part)
         if failed is not None:
             evaluation=WORKER_FAILED
             failed_steps='; '.join(part for part in (failed_steps,self._redact_reason(failed) or '') if part)
+            summary+='; the worker itself failed: '+(self._redact_reason(failed) or 'failed')[:200]
         elif result is not None:
             evaluation=orchestration.evaluate_run(result,owner_needed=owner_needed)
         elif owner_needed:
@@ -2506,7 +2535,7 @@ class AgentService:
             evaluation=NOT_JUDGED
         else:
             evaluation=orchestration.evaluate_answer(answer,'\n'.join(observed),failed_steps)
-        return orchestration.next(attempt,evaluation,answer=str(answer or '')[:600],failed=failed_steps,effect=effect)
+        return orchestration.next(attempt,evaluation,answer=str(answer or '')[:600],failed=summary,effect=effect)
 
     def cancel_superseded_work(self, work_ids, notify=True):
         """Cancel parked Work whose resume path a newer request replaced.
@@ -5336,6 +5365,8 @@ class AgentService:
                                 diagnostics=exc.diagnostics() if isinstance(exc,ExecutionError) else {}
                                 # #678: searches the CLI reported before it failed are still observed.
                                 if not isolated:self.record_cli_native_searches(job['id'],subscription['id'],getattr(exc,'meta',None),record,native_search)
+                                # #729: a bridge call the CLI never saw completed is a typed failure.
+                                self.close_incomplete_bridge_calls(job['id'],attempt_start,record)
                                 self.record_turn_provenance(job['id'],status='failed',failure_class=diagnostics.get('failure_class'),egress_taint=sorted(capabilities.private_provenance),
                                                             exit_code=diagnostics.get('exit_code'),**(getattr(exc,'meta',None) or {}))
                                 # A run that the CLI rejected as signed out is the
@@ -5350,6 +5381,8 @@ class AgentService:
                                     attempt=following
                                     continue
                                 raise
+                            # #729: a bridge call the CLI never saw completed is a typed failure.
+                            self.close_incomplete_bridge_calls(job['id'],attempt_start,record)
                             record('subscription_engine','succeeded',json.dumps({'engine':result.engine,'exit_code':result.exit_code}))
                             self.record_turn_provenance(job['id'],status='answered',exit_code=result.exit_code,**(getattr(result,'meta',None) or {}))
                             self.record_observed_tools(job['id'])

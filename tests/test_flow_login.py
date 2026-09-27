@@ -221,6 +221,8 @@ class JarDriver(FakeDriver):
     def cookies_export(self):
         if self.hold_export is not None and self.closed_requested():
             self.hold_export.wait(10)
+        if getattr(self, 'navigate_while_closing', False) and self.closed:
+            self.navigated += 1   # a sign-in navigation that commits while the final save runs
         if self.fail_export:
             raise RuntimeError('export failed')
         return dict(self.sites), []
@@ -1111,6 +1113,25 @@ class SignInEvidence(LoginHarness):
         self.owner_closes(job_id, logged_in=False)
         self.assertEqual((self.state(job_id), self.store.job(job_id)['status']), ('resumed', 'queued'))
         self.assertTrue(wait_until(lambda: list(self.signins()) == ['fixture.test']))
+
+    def test_a_baseline_cookie_that_expired_and_was_re_set_is_not_added(self):
+        # Codex P2 on #773: expiry plus a background refresh of the same cookie is not a new cookie.
+        clock = [time.time()]
+        self.profile.jar.clock = lambda: clock[0]
+        short = {**self.cookie('sid', 'stale-1'), 'expires': clock[0] + 100}
+        job_id, _prompt, _buttons, _notification = self.window_work({'fixture.test': [short]})
+        clock[0] += 200
+        self.window().sites = {'fixture.test': [{**short, 'value': 'refreshed', 'expires': clock[0] + 3600}]}
+        self.owner_closes(job_id, logged_in=False)
+        self.assertEqual(self.state(job_id), 'not_logged_in')
+
+    def test_a_navigation_that_commits_during_the_final_save_counts(self):
+        # Codex P2 on #773: the count is taken after the final save, with the cookies it stored.
+        job_id, _prompt, _buttons, _notification = self.window_work({'fixture.test': [self.cookie('sid', 'stale')]})
+        self.window().sites = {'fixture.test': [self.cookie('sid', 'session-fresh')]}
+        self.window().navigate_while_closing = True
+        self.owner_closes(job_id, logged_in=False)
+        self.assertEqual(self.state(job_id), 'resumed')
 
     def test_a_cookie_the_landing_page_set_on_the_requested_site_is_not_a_sign_in(self):
         # The requested site's baseline is re-read after the landing's own save, not taken before the window.

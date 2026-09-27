@@ -1771,9 +1771,11 @@ class BrowserProfile:
             finally:
                 stored = False
                 if driver is not None:
+                    stored = bool(self._save(driver))
+                    # After the final save (Codex P2 on #773): a sign-in navigation that committed while
+                    # the save ran is counted with the cookies that save stored.
                     after, before = _navigations(driver), record.get('navigations')
                     record['navigated'] = after is not None and before is not None and after > before
-                    stored = bool(self._save(driver))
                     try:
                         driver.close()
                     except Exception:

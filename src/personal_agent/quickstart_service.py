@@ -4142,7 +4142,8 @@ class AgentService:
         The sites are the requested host and, when the window landed on
         another site, that landed host, each read against its own baseline
         (#762).  Only the unexpired cookies count (``browser_jar.unexpired``,
-        the rule the worker import applies), compared at the close's jar time.
+        the rule the worker import applies): the close's at its jar time, and
+        for an added cookie the baseline's at the baseline's jar time.
 
         * A site that gained a cookie (a new name, domain or path) since its
           baseline is signed in.  A cookie whose value rotated or was refreshed
@@ -4164,7 +4165,10 @@ class AgentService:
             after=self._login_cookie_marks({'host':host})
             if after is None:continue
             now=after['at']
-            added=isinstance(before.get('ids'),list) and bool(unexpired(after['ids'],now)-unexpired(before['ids'],now))
+            # A baseline cookie counts as it was then (Codex P2 on #773): one that expired while the window
+            # was open and a background refresh re-set under the same name, domain and path is not new.
+            added=isinstance(before.get('ids'),list) and bool(
+                unexpired(after['ids'],now)-unexpired(before['ids'],before.get('at',now)))
             changed=unexpired(before.get('marks'),now)!=unexpired(after['marks'],now)
             readings.append((host,before,added,changed))
         signed=[(host,before) for host,before,added,_changed in readings if added]

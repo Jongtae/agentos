@@ -499,9 +499,18 @@ class DriverProtocolTests(unittest.TestCase):
         with self.assertRaises(ToolError) as caught:
             driver.click(9, 4)
         self.assertEqual((caught.exception.code, caught.exception.requires), ('approval_required', 'browser-step-approval'))
-        self.assertEqual(caught.exception.cancelled_form, {'dom': 0, 'method': 'post', 'action': 'https://shop.test/pay'},
-                         'the refusal names the form whose submit was cancelled')
+        held = {'dom': 0, 'method': 'post', 'action': 'https://shop.test/pay', 'page': 'https://shop.test/p', 'state': 'a' * 64}
+        self.assertEqual(caught.exception.cancelled_form, held,
+                         'the refusal names the form whose submit was cancelled and the digest of what it would send')
         self.assertEqual(self.commands()[-1]['expect']['payment_form'], True)
+        # #700: the approved held submit is released by its record, once; any other is typed.
+        with self.assertRaises(ToolError) as caught:
+            driver.release_submit(dict(held, state='b' * 64), 4)
+        self.assertEqual(caught.exception.code, 'target_unavailable')
+        self.assertEqual(driver.release_submit(dict(held, extra='never sent'), 4), {'navigated': True})
+        self.assertEqual(self.commands()[-1]['form'], held, 'only the record fields cross')
+        with self.assertRaises(ToolError):
+            driver.release_submit(held, 4)
         driver.click(9, 4, approved=True)
         self.assertIs(self.commands()[-1]['approved'], True)
         with self.assertRaises(ToolError):
@@ -606,6 +615,102 @@ class DriverProtocolTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------- destinations, output encoding, the UI marker (unit)
+
+class WorkerGuardLogicTests(unittest.TestCase):
+    """#700: the worker's own Python side of the submit guard, without WebKit (any platform)."""
+
+    def worker(self, **fields):
+        from personal_agent import browser_worker as bw
+        worker = object.__new__(bw.Worker)   # no Cocoa objects: only the guard's bookkeeping
+        worker.guard_off, worker.cancelled, worker.reported, worker.held = False, None, [], None
+        worker.pending, worker.deciding, worker.failed, worker.ran = {}, 0, [], []
+        worker.fail = lambda ident, code: worker.failed.append((ident, code))
+        worker.run = lambda body, arguments, done, world=None: worker.ran.append((body, arguments, done))
+        for key, value in fields.items():
+            setattr(worker, key, value)
+        return bw, worker
+
+    def test_a_cancelled_submit_crosses_as_a_digest_of_what_it_would_send(self):
+        bw, worker = self.worker()
+        state = 'who=홍길동\namount=990000\ncard=<guarded>\n\x1e결제 금액 990,000원'
+        raw = {'id': 'x1', 'dom': 1, 'method': 'post', 'action': 'https://shop.test/pay', 'page': 'https://shop.test/c?q=1',
+               'state': state}
+        record = worker.take_cancelled(raw)
+        import hashlib
+        self.assertEqual(record, {'dom': 1, 'method': 'post', 'action': 'https://shop.test/pay',
+                                  'page': 'https://shop.test/c?q=1', 'state': hashlib.sha256(state.encode()).hexdigest()})
+        self.assertNotIn('990000', json.dumps(record), 'field values never leave the worker')
+        self.assertEqual(worker.held['id'], 'x1', 'what an approval may release')
+        self.assertIsNone(worker.take_cancelled(), 'reported once')
+        self.assertIsNone(worker.take_cancelled(raw), 'the same page record is not reported twice')
+
+    def test_release_only_the_held_submit_it_reported_once(self):
+        bw, worker = self.worker()
+        worker.take_cancelled({'id': 'h1', 'dom': 0, 'method': 'post', 'action': 'https://shop.test/pay',
+                               'page': 'https://shop.test/c', 'state': 's'})
+        reported = {key: worker.held[key] for key in ('dom', 'method', 'action', 'page', 'state')}
+        worker.op_release_submit(1, {'form': dict(reported, state='0' * 64)}, 5)
+        self.assertEqual((worker.failed, worker.ran), ([(1, 'submit_changed')], []), 'another state is not released')
+        worker.deadline = lambda *args, **kwargs: None
+        worker.blocked, worker.main_navigations, worker.landed = 0, 0, 0
+        worker.op_release_submit(2, {'form': reported}, 5)
+        self.assertEqual(worker.ran[-1][:2], (bw.RELEASE_SCRIPT, {'id': 'h1'}))
+        self.assertIsNone(worker.held)
+        worker.op_release_submit(3, {'form': reported}, 5)
+        self.assertEqual(worker.failed[-1], (3, 'submit_changed'), 'released at most once')
+
+    def test_the_page_wrapper_is_not_installed_while_the_owner_signs_in(self):
+        bw, worker = self.worker()
+        added = []
+
+        class Script:
+            @classmethod
+            def alloc(cls):
+                return cls()
+
+            def initWithSource_injectionTime_forMainFrameOnly_inContentWorld_(self, source, when, main, world):
+                return (source, world)
+
+        class Controller:
+            def removeAllUserScripts(self):
+                added.clear()
+
+            def addUserScript_(self, script):
+                added.append(script)
+        worker.WebKit = type('WebKit', (), {'WKUserScriptInjectionTimeAtDocumentStart': 0, 'WKUserScript': Script})
+        worker.controller, worker.world, worker.page_world = Controller(), 'client', 'page'
+        worker._install_guard_scripts()
+        self.assertEqual([world for _, world in added], ['client', 'page'])
+        worker.guard_off = True
+        worker._install_guard_scripts()
+        self.assertEqual([world for _, world in added], ['client'], 'no detectable wrapper in the login window')
+        self.assertIn('state().off = true', added[0][0])
+
+    def test_a_form_navigation_the_page_does_not_vouch_for_is_refused_and_reported(self):
+        bw, worker = self.worker()
+        later = []
+        worker.AppHelper = type('AppHelper', (), {'callLater': staticmethod(lambda seconds, fn: later.append(fn))})
+        answers = []
+        worker.check_form_navigation('https://shop.test/pay', 'POST', answers.append)
+        self.assertEqual(worker.ran[-1][:2], (bw.FORM_NAVIGATION_SCRIPT, {'url': 'https://shop.test/pay', 'method': 'POST'}))
+        self.assertEqual(worker.deciding, 1, 'a click waits for this decision')
+        worker.ran[-1][2]({'allow': False, 'cancelled': {'id': 'n1', 'dom': 0, 'method': 'post',
+                                                         'action': 'https://shop.test/pay', 'page': 'p', 'state': 's'}}, None)
+        self.assertEqual((answers, worker.deciding), ([False], 0))
+        self.assertEqual(worker.take_cancelled()['action'], 'https://shop.test/pay')
+        later[-1]()
+        self.assertEqual(answers, [False], 'answered once')
+        worker.check_form_navigation('https://shop.test/search', 'GET', answers.append)
+        worker.ran[-1][2]({'allow': True}, None)
+        self.assertEqual(answers[-1], True)
+        # A script error, or no answer in time, is a refusal reported with only the destination.
+        worker.check_form_navigation('https://shop.test/pay', 'POST', answers.append)
+        worker.ran[-1][2](None, 'script_failed')
+        worker.check_form_navigation('https://shop.test/pay', 'POST', answers.append)
+        later[-1]()
+        self.assertEqual((answers[-2:], worker.deciding), ([False, False], 0))
+        self.assertEqual(worker.take_cancelled()['dom'], -1)
+
 
 class DestinationTests(unittest.TestCase):
     def test_local_and_private_destinations_are_refused_by_name_literal_and_dns(self):
@@ -751,6 +856,18 @@ class SessionFixtureHandler(FixtureHandler):
                               + self.server.agentos_origin + '/\')">AgentOS 열기</button>'
                               + '<form action="' + self.server.agentos_origin + '/api/browser/approval" method="post">'
                               + '<button type="submit">승인 보내기</button></form></body></html>')
+        if path == '/checkout-realm':
+            # #700 item 2 repro: the native submit of a fresh iframe's prototype bypasses the page-world wrapper.
+            native = ("var f=document.createElement('iframe');document.body.appendChild(f);"
+                      "f.contentWindow.HTMLFormElement.prototype.submit.call(document.getElementById('{0}'))")
+            return self._send('''<html><head><title>다른 창</title></head><body>
+              <form id="payForm" action="/pay" method="post"><p>결제 금액 12,900원</p>
+                <label>카드번호 <input type="text" autocomplete="cc-number" name="card"></label>
+                <input type="hidden" name="amount" value="12900"></form>
+              <form id="couponForm" action="/coupon" method="post"><input type="hidden" name="coupon" value="SAVE"></form>
+              <div role="button" onclick="''' + native.format('payForm') + '''">다른 창 결제</div>
+              <div role="button" onclick="''' + native.format('couponForm') + '''">다른 창 쿠폰</div>
+              </body></html>''')
         if path == '/trusted':
             return self._send('''<html><head><title>입력</title></head><body>
               <button type="button" onclick="document.getElementById('r').textContent='click trusted='+event.isTrusted">누르기</button>
@@ -992,7 +1109,8 @@ class WebKitIntegrationTests(unittest.TestCase):
                 self.fail(f'{target}: the payment submit was not refused')
             self.assertEqual(len(approvals.requests), asked + 1, 'asked once')
             binding, description = approvals.requests[-1]
-            self.assertEqual(binding['action'], 'browser_click', 'attributed to the step, which the resumed run repeats')
+            self.assertEqual(binding['action'], 'browser_submit', 'bound to the cancelled form and what it would send (#700)')
+            self.assertIn(target, description, 'the owner reads the step that caused it')
             self.assertIn(bs.CANCELLED_NOTE, description)
             return binding
         try:
@@ -1011,15 +1129,54 @@ class WebKitIntegrationTests(unittest.TestCase):
             binding = refused_eventually('메모 후 결제')
             changed = sess.read()
             self.assertIn('처리 중', [row.get('value') for row in changed['elements']])
-            # ... and the resumed run, which opens the page again, still matches the approval.
+            # ... and the repeated step on the changed page (#700 item 4), not reopened, still
+            # matches: the handler renamed its own button, the form it submits is the same.
             approvals.issued.append(bs.binding_digest(binding))
-            sess.open({'url': page_url, 'effect': 'navigate'})
-            self.assertEqual(sess.click({'target': '메모 후 결제', 'effect': 'mutate'})['title'], '결제 완료')
+            self.assertEqual(sess.click({'target': '처리 중…', 'effect': 'mutate'})['title'], '결제 완료')
             self.assertEqual(approvals.issued, [])
             self.assertEqual(self.server.posts, ['/coupon', '/coupon', '/pay'], 'the approved step posted exactly once')
+            # #700 P2-2: an approved async checkout (validate, then submit after the step) is
+            # released when its deferred submit is cancelled again, not asked again.
+            binding = refused_eventually('확인 후 결제')
+            approvals.issued.append(bs.binding_digest(binding))
+            asked = len(approvals.requests)
+            sess.open({'url': page_url, 'effect': 'navigate'})
+            sess.click({'target': '확인 후 결제', 'effect': 'mutate'})
+            time.sleep(2.5)
+            self.assertEqual(sess.read()['title'], '결제 완료')
+            self.assertEqual((len(approvals.requests), approvals.issued), (asked, []))
+            self.assertEqual(self.server.posts, ['/coupon', '/coupon', '/pay', '/pay'])
         finally:
             sess.close()
-        self.assertEqual(self.server.posts, ['/coupon', '/coupon', '/pay'])
+        self.assertEqual(self.server.posts, ['/coupon', '/coupon', '/pay', '/pay'])
+
+    def test_a_native_submit_from_another_realm_is_refused_as_a_navigation(self):
+        """#700 item 2: a fresh iframe's unwrapped ``HTMLFormElement.prototype.submit`` on the payment form."""
+        worker = bs.WebKitWorkerDriver('p', cwd=self.tmp.name, allowed_origins_for_tests=(self.fixture,))
+        try:
+            worker.goto(self.origin + '/checkout-realm', 10)
+            index = next(row['index'] for row in worker.snapshot()['elements'] if row['name'] == '다른 창 결제')
+            with self.assertRaises(ToolError) as caught:
+                worker.click(index, 10)
+            self.assertEqual(caught.exception.code, 'approval_required')
+            record = caught.exception.cancelled_form
+            self.assertEqual((record['dom'], record['method']), (0, 'post'))
+            self.assertTrue(record['action'].endswith('/pay'))
+            self.assertEqual(self.server.posts, [], 'no POST')
+            # An ordinary form submitted the same way still goes.
+            worker.goto(self.origin + '/checkout-realm', 10)
+            index = next(row['index'] for row in worker.snapshot()['elements'] if row['name'] == '다른 창 쿠폰')
+            worker.click(index, 10)
+            self.assertEqual(self.server.posts, ['/coupon'])
+            # The owner's approval of that form in that state releases the held submit.
+            worker.goto(self.origin + '/checkout-realm', 10)
+            index = next(row['index'] for row in worker.snapshot()['elements'] if row['name'] == '다른 창 결제')
+            with self.assertRaises(ToolError) as caught:
+                worker.click(index, 10)
+            self.assertEqual(worker.release_submit(caught.exception.cancelled_form, 10), {'navigated': True})
+            self.assertEqual(self.server.posts, ['/coupon', '/pay'])
+        finally:
+            worker.close()
 
     def test_the_owner_login_window_turns_the_guard_off_and_back_on(self):
         page_url = self.origin + '/checkout-forwarded'

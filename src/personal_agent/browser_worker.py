@@ -10,8 +10,8 @@ Request:  ``{"id": 7, "op": "navigate", "timeout": 20, ...arguments}``
 Response: ``{"id": 7, "ok": true, ...result}`` or ``{"id": 7, "ok": false, "error": "<code>"}``
 Events:   ``{"event": "ready" | "hidden" | "unavailable"}`` (no ``id``).
 
-Ops: ``navigate``, ``settle``, ``snapshot``, ``click``, ``type``, ``show``, ``hide``,
-``state``, ``cookies_export``, ``cookies_import``, ``cookies_delete``,
+Ops: ``navigate``, ``settle``, ``snapshot``, ``click``, ``type``, ``release_submit``,
+``show``, ``hide``, ``state``, ``cookies_export``, ``cookies_import``, ``cookies_delete``,
 ``cookies_clear``, ``quit``.  Every op carries a deadline; the worker answers
 ``timeout`` when it passes.  Errors are AgentOS codes, never library text,
 and every line is ASCII JSON (a page's lone surrogate cannot break the pipe).
@@ -38,12 +38,21 @@ whatever triggered it and whenever: a label forwarding a press, a scripted
 click, ``requestSubmit``, a timer or an async-validation callback after the
 step answered.  ``form.submit()`` fires no ``submit`` event, so a page-world
 user script wraps ``HTMLFormElement.prototype.submit`` at document start to
-signal the same listener (see ``PAGE_WRAP_USER_SCRIPT`` for its limits).  Only
-a step the parent sends with ``approved`` lets one such submit through, until
-the step answers; the owner's login window turns the guard off while shown.
-A cancelled submit is recorded with its form (method, action, position): a
-step answers ``approval_required``, and one cancelled between steps is
-reported by the next snapshot (``cancelled_submit``) or step.
+signal the same listener (see ``PAGE_WRAP_USER_SCRIPT`` for its limits).  A
+native ``submit`` neither sees (saved from another realm, such as a fresh
+iframe's prototype) still starts a main-frame form-submission navigation,
+which is refused while the guard is armed when it targets a payment form's
+action (``FORM_NAVIGATION_SCRIPT``, #700).  The owner's login window turns the
+guard off while shown.
+
+Approvals (#700): a step the parent sends with ``approved`` lets a submit of
+its target's payment form through (``LOCATE_SCRIPT`` names which), during the
+step and for ``SUBMIT_WINDOW_SECONDS`` after it, for that form's own deferred
+submit.  A cancelled submit is recorded with its form (position, method,
+action, page) and the digest of what it would send, and held in the page: a
+step answers ``approval_required``, one cancelled between steps is reported by
+the next snapshot (``cancelled_submit``) or step, and ``release_submit`` makes
+exactly that held submit again once the owner approved that form in that state.
 
 Destinations: every navigation (typed, redirect, form, ``window.open``, frame)
 passes ``decidePolicyForNavigationAction``: only http(s) to public addresses,
@@ -57,6 +66,7 @@ engine; ``WKWebsiteDataRecord.displayName`` is WebKit's own per-site
 (registrable domain) grouping.  No site, provider or category is named here.
 """
 import argparse
+import hashlib
 import ipaddress
 import json
 import os
@@ -86,6 +96,21 @@ GUARD_HANDLER = 'agentosGuard'
 #: ``autocomplete`` field names of a payment form (with ``password`` inputs).
 #: ``browser_session.PAYMENT_AUTOCOMPLETE`` is this same set.
 PAYMENT_TOKENS = ('cc-csc', 'cc-exp', 'cc-exp-month', 'cc-exp-year', 'cc-number', 'one-time-code')
+#: ``autocomplete`` field names whose values never leave the page, not even
+#: inside a submitted form's state (#700).  ``browser_session.GUARDED_AUTOCOMPLETE``
+#: is this same set.
+SECRET_TOKENS = frozenset({'current-password', 'new-password', 'one-time-code', 'cc-number', 'cc-csc', 'cc-exp',
+                           'cc-exp-month', 'cc-exp-year', 'cc-name'})
+#: #700: how long an approval's allowance outlives its step (or the release of a
+#: held submit), for that same form's own deferred submit (async validation, then
+#: ``form.submit()``).  A later click or type step ends it at once.
+SUBMIT_WINDOW_SECONDS = 15
+#: #700: how long a payment-form submit the guard let through keeps the navigation
+#: it starts (and that navigation's redirects) from being refused.
+VETTED_SECONDS = 30
+#: #700: the longest a form-submission navigation waits for the page to answer
+#: which form it submits; no answer is a refusal.
+FORM_CHECK_SECONDS = 2.0
 
 #: Helpers every page script shares.  Strings leaving the page are well-formed
 #: UTF-16 and cut at code-point boundaries.  ``describe`` mirrors the guard's
@@ -145,36 +170,87 @@ const describe = (el, tokens) => ({tag: el.tagName.toLowerCase(), type: typeOf(e
 const same = (actual, expect) => !!expect && ['tag', 'type', 'autocomplete', 'name', 'in_form', 'payment_form']
   .every((key) => key in expect && actual[key] === expect[key]);
 const state = () => (window.__agentos = window.__agentos || {targets: new Map(), guard: null, listening: false,
-  off: false, allow: null, cancelled: null, submitListening: false});
-// The submit guard (#698), armed for the page's whole life: a submit of a form holding
-// a payment field (any field, shown or not) is cancelled whatever triggered it and
-// whenever -- a trusted or scripted click, a label, ``requestSubmit``, Enter, a timer,
-// an async callback, or ``form.submit()`` through the page-world signal.  Only an
-// approved step lets ONE through (``allow``); the owner's login window sets ``off``.
+  off: false, allow: null, cancelled: null, held: null, vetted: [], submitListening: false});
+// A form's named controls shadow its own properties (``<input name="action">`` is
+// ``form.action``), so forms are read through the prototype getters (#700).
+const FORM = HTMLFormElement.prototype, own = (proto, key) => Object.getOwnPropertyDescriptor(proto, key);
+const formControls = own(FORM, 'elements').get, formAction = own(FORM, 'action').get, formMethod = own(FORM, 'method').get;
+const documentForms = own(Document.prototype, 'forms').get, textOf = own(HTMLElement.prototype, 'innerText').get;
+const qsa = (node, selector) => Element.prototype.querySelectorAll.call(node, selector);
+const attr = (node, name) => Element.prototype.getAttribute.call(node, name);
+// The submit guard (#698, #700), armed for the page's whole life: a submit of a form
+// holding a payment field (any field, shown or not) is cancelled whatever triggered it
+// and whenever -- a trusted or scripted click, a label, ``requestSubmit``, Enter, a
+// timer, an async callback, or ``form.submit()`` through the page-world signal.  Only
+// an approval's allowance lets one through: ``allow`` names the forms (position,
+// method, action) and lasts until ``until``.  The owner's login window sets ``off``.
+// A cancelled submit is held, so an approval of exactly it can release it.
 const GUARD_TOKENS = %(tokens)s;
-const formFields = (form) => { const own = Array.from(form.querySelectorAll('input, select, textarea, ' + SELECTOR));
-  const id = form.getAttribute('id');
-  return id ? own.concat(Array.from(document.querySelectorAll('[form="' + CSS.escape(id) + '"]'))) : own; };
+const SECRET_TOKENS = %(secret)s;
+const WINDOW_MS = %(window)d, VETTED_MS = %(vetted)d, ORDINARY_MS = 2000;
+const formFields = (form) => { const seen = new Set(Array.from(formControls.call(form)));
+  qsa(form, SELECTOR).forEach((el) => seen.add(el)); return Array.from(seen); };
 const holdsPayment = (form) => formFields(form).some((field) => paymentField(field, GUARD_TOKENS));
+const paymentForms = () => Array.from(documentForms.call(document)).filter(holdsPayment);
 // Which form: its position among the document's forms, its method and resolved action.
-const formRecord = (form) => { const action = form.getAttribute('action'); let url = location.href;
-  try { url = new URL(action === null ? '' : action, location.href).href; } catch (error) { url = location.href; }
-  return {dom: Array.prototype.indexOf.call(document.forms, form),
-    method: String(form.getAttribute('method') || 'get').toLowerCase().slice(0, 16), action: cut(url, 2000)}; };
+const formRecord = (form) => ({dom: Array.prototype.indexOf.call(documentForms.call(document), form),
+  method: cut(String(formMethod.call(form) || 'get').toLowerCase(), 16),
+  action: cut(String(formAction.call(form) || location.href), 2000)});
+const sameForm = (a, b) => !!a && !!b && a.dom === b.dom && a.method === b.method && a.action === b.action;
+// What a submit of the form sends (#700): the name and value of every control the
+// submission includes (hidden inputs too), in order, then the form's visible text.
+// A credential, card or code value is never part of it, only its name.
+const secretField = (el) => typeOf(el) === 'password' || SECRET_TOKENS.includes(fieldToken(el));
+const NOT_SENT = ['submit', 'image', 'reset', 'button'];
+const formState = (form, submitter) => { const rows = [];
+  for (const el of Array.from(formControls.call(form))) {
+    const name = attr(el, 'name'), tag = el.tagName.toLowerCase(), type = typeOf(el);
+    if (!name || !['input', 'select', 'textarea', 'button'].includes(tag) || el.matches(':disabled')) continue;
+    if (tag === 'button' || NOT_SENT.includes(type)) {
+      if (el === submitter) rows.push(cut(name, 200) + '=' + cut(el.value, 500));
+      continue;
+    }
+    if ((type === 'checkbox' || type === 'radio') && !el.checked) continue;
+    const value = secretField(el) ? '<guarded>' : type === 'file' ? '<file>'
+      : tag === 'select' ? Array.from(el.selectedOptions).map((option) => cut(option.value, 500)).join(',') : cut(el.value, 500);
+    rows.push(cut(name, 200) + '=' + value);
+  }
+  return cut(rows.join('\n'), 20000) + '\n\u001e' + cut(textOf.call(form) || '', 6000); };
+const allows = (g, record) => !!g.allow && Date.now() <= g.allow.until && g.allow.forms.some((f) => sameForm(f, record));
+// A submit the guard let through (``payment``: of a payment form, by an allowance):
+// the form-submission navigation it starts is not refused.  ``effective`` is where
+// the submit goes: a submitter's ``formaction``/``formmethod`` override the form's.
+const vet = (g, record, payment = true) => {
+  g.vetted = (g.vetted || []).concat([{...record, payment, t: Date.now()}]).slice(-8); };
+const effective = (form, submitter) => { const record = formRecord(form);
+  if (submitter && submitter.hasAttribute('formaction')) record.action = cut(String(submitter.formAction), 2000);
+  if (submitter && submitter.hasAttribute('formmethod')) record.method = cut(String(submitter.formMethod).toLowerCase(), 16);
+  return record; };
+const hold = (g, form, submitter, kind) => {
+  const record = {...formRecord(form), id: Math.random().toString(36).slice(2) + Date.now().toString(36),
+    page: cut(location.href, 2000), state: formState(form, submitter)};
+  g.held = {id: record.id, form: new WeakRef(form), submitter: submitter ? new WeakRef(submitter) : null, kind,
+    state: record.state, record: {dom: record.dom, method: record.method, action: record.action}};
+  g.cancelled = record;
+  try { window.webkit.messageHandlers[%(handler)s].postMessage(record); } catch (error) { /* read by the next script */ }
+  return record; };
 const armSubmitGuard = () => { const s = state(); if (s.submitListening) return; s.submitListening = true;
   const cancel = (event) => { const g = state(); if (g.off) return;
     const form = event.target;
-    if (!(form instanceof HTMLFormElement) || !holdsPayment(form)) return;
-    if (g.allow && g.allow.left > 0) { g.allow.left -= 1; return; }
-    event.preventDefault(); event.stopImmediatePropagation();
-    const record = {...formRecord(form), id: Math.random().toString(36).slice(2) + Date.now().toString(36)};
-    g.cancelled = record;
-    try { window.webkit.messageHandlers[%(handler)s].postMessage(record); } catch (error) { /* read by the next script */ } };
+    if (!(form instanceof HTMLFormElement)) return;
+    try {
+      if (!holdsPayment(form)) { vet(g, effective(form, event.submitter || null), false); return; }
+      const record = formRecord(form);
+      if (allows(g, record)) { vet(g, record); return; }
+      event.preventDefault(); event.stopImmediatePropagation();
+      hold(g, form, event.submitter || null, event.type === %(signal)s ? 'signal' : 'event');
+    } catch (error) { event.preventDefault(); event.stopImmediatePropagation(); } };   // fail closed
   window.addEventListener('submit', cancel, true);
   window.addEventListener(%(signal)s, cancel, true); };
 const takeCancelled = () => { const s = state(), c = s.cancelled; s.cancelled = null; return c; };
 """ % {'selector': json.dumps(SELECTOR), 'signal': json.dumps(SUBMIT_SIGNAL), 'handler': json.dumps(GUARD_HANDLER),
-       'tokens': json.dumps(list(PAYMENT_TOKENS))}
+       'tokens': json.dumps(list(PAYMENT_TOKENS)), 'secret': json.dumps(sorted(SECRET_TOKENS)),
+       'window': SUBMIT_WINDOW_SECONDS * 1000, 'vetted': VETTED_SECONDS * 1000}
 
 #: The snapshot: elements the model can act on and the fields the guard
 #: reasons about.  Plain data only (no node handles, no HTML).
@@ -213,13 +289,17 @@ Array.from(document.querySelectorAll(SELECTOR)).forEach((el, index) => {
 });
 return JSON.stringify({url: cut(location.href, 4000), title: cut(document.title, 400),
   text: cut(document.body ? document.body.innerText : '', 20000), elements: elements.slice(0, 300),
-  forms: Array.from(forms.entries()).map(([form, id]) => ({id, text: cut(form.innerText || '', 6000), ...formRecord(form)})),
+  forms: Array.from(forms.entries()).map(([form, id]) => ({id, text: cut(textOf.call(form) || '', 6000), ...formRecord(form)})),
   cancelled: takeCancelled()});
 """
 
 #: Arguments: index, expect, tokens, nonce, approved.  Resolve once, check,
-#: hit-test, keep the handle and arm the click guard for it; an approved step
-#: may let one payment-form submit through until ``STEP_END_SCRIPT`` (#698).
+#: hit-test, keep the handle and arm the click guard for it.  An approved step
+#: lets a submit of its target's payment form through (#700): the target's own
+#: form or the form its label forwards to when either holds a payment field,
+#: else the page's payment forms (the approval covered every payment form's
+#: state); until ``STEP_END_SCRIPT`` shortens it to ``WINDOW_MS``.  Any other
+#: step ends an earlier allowance.
 LOCATE_SCRIPT = PRELUDE + r"""
 const el = document.querySelectorAll(SELECTOR)[index];
 if (!el) return JSON.stringify({error: 'target_missing'});
@@ -248,7 +328,13 @@ if (!s.listening) {
   s.listening = true;
 }
 armSubmitGuard();
-s.allow = approved === true ? {left: 1} : null;
+s.allow = null;
+if (approved === true) {
+  const control = labelControl(el);
+  let forms = [formOf(el), control ? formOf(control) : null].filter((form) => form instanceof HTMLFormElement && holdsPayment(form));
+  if (!forms.length) forms = paymentForms();
+  s.allow = {forms: forms.map(formRecord), until: Infinity};
+}
 const tag = el.tagName.toLowerCase();
 return JSON.stringify({x, y, editable: el.isContentEditable || tag === 'textarea' ||
   (tag === 'input' && !['submit', 'button', 'image', 'reset', 'checkbox', 'radio', 'file', 'hidden', 'range', 'color'].includes(typeOf(el)))});
@@ -262,10 +348,12 @@ if (!g || g.nonce !== nonce) return JSON.stringify({error: 'target_changed'});
 return JSON.stringify(g.bad ? {error: 'target_changed'} : {ok: true});
 """
 
-#: The end of a click/type step: an approval's allowance ends (the guard is
-#: whole again) and a submit the guard cancelled is reported (#698).
+#: The end of a click/type step: an approval's allowance lasts ``WINDOW_MS``
+#: more, for the same form's own deferred submit, then the guard is whole again
+#: (#700); a submit the guard cancelled is reported (#698).
 STEP_END_SCRIPT = PRELUDE + r"""
-state().allow = null;
+const s = state();
+if (s.allow) s.allow.until = Math.min(s.allow.until, Date.now() + WINDOW_MS);
 return JSON.stringify({cancelled: takeCancelled()});
 """
 
@@ -275,7 +363,64 @@ armSubmitGuard();
 const s = state();
 s.off = off === true;
 s.allow = null;
+s.held = null;
 return JSON.stringify({ok: true});
+"""
+
+#: Arguments: id.  #700: the owner approved exactly the held submit ``id`` (its
+#: form and the state it would send).  The same form must still be connected, at
+#: the same position with the same method and action, and would send the same
+#: state; then its allowance is opened for ``WINDOW_MS`` (the same form's own
+#: deferred submit included) and the submit is made again as it was made: a
+#: ``submit`` event (``requestSubmit`` with its submitter, so the page's own
+#: handlers run) or the native ``submit()`` (this world's unwrapped one).
+RELEASE_SCRIPT = PRELUDE + r"""
+armSubmitGuard();
+const s = state(), h = s.held;
+if (s.off || !h || h.id !== id) return JSON.stringify({error: 'submit_changed'});
+const form = h.form.deref(), submitter = h.submitter ? h.submitter.deref() : null;
+if (!form || !form.isConnected) return JSON.stringify({error: 'submit_changed'});
+const record = formRecord(form);
+if (!sameForm(record, h.record) || formState(form, h.kind === 'event' ? submitter : null) !== h.state)
+  return JSON.stringify({error: 'submit_changed'});
+s.held = null;
+s.allow = {forms: [record], until: Date.now() + WINDOW_MS};
+if (h.kind === 'event') {
+  const use = submitter && submitter.isConnected && submitter.form === form ? submitter : undefined;
+  FORM.requestSubmit.call(form, use);
+} else {
+  vet(s, record);
+  FORM.submit.call(form);
+}
+return JSON.stringify({ok: true});
+"""
+
+#: Arguments: url, method.  #700: a main-frame form-submission navigation
+#: (``WKNavigationTypeFormSubmitted``) while the guard is armed.  The page's
+#: payment forms that submit to that URL (origin and path) with that method are
+#: the candidates; none, and it proceeds.  It also proceeds when the guard let
+#: a submit of one of them through (``vetted``) or an allowance covers one.
+#: Otherwise the submit bypassed the ``submit`` event and the wrapped
+#: ``form.submit`` (a native ``submit`` saved before the wrapper or taken from
+#: another realm, such as a fresh iframe's prototype): it is refused and held.
+FORM_NAVIGATION_SCRIPT = PRELUDE + r"""
+armSubmitGuard();
+const s = state();
+if (s.off) return JSON.stringify({allow: true});
+const bare = (value) => { try { const u = new URL(String(value), location.href); return u.origin + u.pathname; } catch (error) { return ''; } };
+const verb = String(method || 'get').toLowerCase(), target = bare(url);
+const forms = Array.from(documentForms.call(document)).filter((form) => { const record = formRecord(form);
+  return record.method === verb && bare(record.action) === target && holdsPayment(form); });
+if (!forms.length) return JSON.stringify({allow: true});
+const now = Date.now(), records = forms.map(formRecord);
+// A payment form the guard let through (and its redirects), or, just now, an
+// ordinary form that submits to the same place.
+if ((s.vetted || []).some((v) => v.payment ? now - v.t <= VETTED_MS && records.some((record) => sameForm(record, v))
+    : now - v.t <= ORDINARY_MS && v.method === verb && bare(v.action) === target))
+  return JSON.stringify({allow: true});
+const covered = records.find((record) => allows(s, record));
+if (covered) { vet(s, covered); return JSON.stringify({allow: true}); }
+return JSON.stringify({allow: false, cancelled: hold(s, forms[0], null, 'native')});
 """
 
 
@@ -293,10 +438,12 @@ def client_guard_user_script(off=False):
 #: ``HTMLFormElement.prototype.submit`` is wrapped before any page script runs:
 #: it dispatches the signal on the form with the ``dispatchEvent``,
 #: ``CustomEvent`` and ``defaultPrevented`` captured at that moment, and the
-#: client-world guard cancels it for a payment form.  Limits: the prototype of
-#: another realm (a new iframe's ``HTMLFormElement.prototype.submit`` called on
-#: this page's form) is not wrapped, and a page can detect the wrapper
-#: (``toString``); ``fetch``/XHR posts are not form submits at all.
+#: client-world guard cancels it for a payment form.  The prototype of another
+#: realm (a new iframe's ``HTMLFormElement.prototype.submit`` called on this
+#: page's form) is not wrapped: that submit is refused as a navigation instead
+#: (``FORM_NAVIGATION_SCRIPT``, #700).  A page can detect the wrapper
+#: (``toString``), so it is not installed while the owner's login window shows
+#: (#700); ``fetch``/XHR posts are not form submits at all.
 PAGE_WRAP_USER_SCRIPT = r"""(() => {
   const proto = HTMLFormElement.prototype, original = proto.submit;
   if (typeof original !== 'function') return;
@@ -529,6 +676,7 @@ class Worker:
         self.guard_off = False
         self.cancelled = None      # the last cancelled submit not yet reported
         self.reported = []         # ids of cancelled submits already reported
+        self.held = None           # the last reported one: what an approval may release (#700)
         self.controller = config.userContentController()
         self._install_guard_scripts()
         self.controller.addScriptMessageHandler_contentWorld_name_(self.delegate, self.world, GUARD_HANDLER)
@@ -578,15 +726,16 @@ class Worker:
         self.view.callAsyncJavaScript_arguments_inFrame_inContentWorld_completionHandler_(
             body, arguments or {}, None, world or self.world, handler)
 
-    def settle_click(self, ident, finish):
+    def settle_click(self, ident, finish, baseline=None):
         """After a click: wait, bounded, for any navigation it started to land, then for quiet (#736).
 
         ``finish(navigated)`` is called once; ``navigated`` is True when a
         main-frame navigation (a same-view new-window load included) started
-        after the press.
+        after the press, or after ``baseline`` (``(main_navigations, landed)``
+        read before the action).
         """
         started_at = time.monotonic()
-        navigations, landed = self.main_navigations, self.landed
+        navigations, landed = baseline or (self.main_navigations, self.landed)
         quiet_since = [None]
 
         def poll():
@@ -626,12 +775,16 @@ class Worker:
     # -- the submit guard (#698) ----------------------------------------------
     def _install_guard_scripts(self):
         """The document-start scripts: the client-world guard (armed, or off while
-        the owner's login window shows) and the page-world ``form.submit`` wrapper."""
+        the owner's login window shows) and, only while armed, the page-world
+        ``form.submit`` wrapper (a page's bot detection must not see it while the
+        owner signs in, #700)."""
         WebKit = self.WebKit
         start = WebKit.WKUserScriptInjectionTimeAtDocumentStart
         self.controller.removeAllUserScripts()
-        for source, world in ((client_guard_user_script(self.guard_off), self.world),
-                              (PAGE_WRAP_USER_SCRIPT, self.page_world)):
+        scripts = [(client_guard_user_script(self.guard_off), self.world)]
+        if not self.guard_off:
+            scripts.append((PAGE_WRAP_USER_SCRIPT, self.page_world))
+        for source, world in scripts:
             self.controller.addUserScript_(
                 WebKit.WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_inContentWorld_(
                     source, start, True, world))
@@ -639,6 +792,7 @@ class Worker:
     def set_guard_off(self, off):
         """The owner's login window: the guard is off while it shows, for this page and the next ones."""
         self.guard_off = bool(off)
+        self.held = None
         self._install_guard_scripts()
         self.run(GUARD_SWITCH_SCRIPT, {'off': self.guard_off}, lambda *_: None)
 
@@ -656,7 +810,36 @@ class Worker:
         if found is None:
             return None
         self.reported = (self.reported + [found['id']])[-64:]
-        return {key: found[key] for key in ('dom', 'method', 'action')}
+        self.held = found
+        return {key: found[key] for key in ('dom', 'method', 'action', 'page', 'state')}
+
+    def check_form_navigation(self, url, method, then):
+        """A main-frame form-submission navigation while the guard is armed (#700): ``then(allowed)``.
+
+        The page answers which of its payment forms that navigation submits
+        (``FORM_NAVIGATION_SCRIPT``); a refused one is held and reported as a
+        cancelled submit.  No answer in ``FORM_CHECK_SECONDS`` (or a script
+        error) is a refusal, reported with only the destination.
+        """
+        answered = []
+        self.deciding += 1   # a click waits for this decision (#736)
+
+        def answer(allowed, record=None):
+            if answered:
+                return
+            answered.append(True)
+            self.deciding -= 1
+            if not allowed:
+                self.receive_cancelled(record if isinstance(record, dict) else
+                                       {'dom': -1, 'method': str(method or '').lower(), 'action': url})
+            then(allowed)
+
+        def done(value, error):
+            if error is None and isinstance(value, dict) and value.get('allow') is True:
+                return answer(True)
+            answer(False, value.get('cancelled') if error is None and isinstance(value, dict) else None)
+        self.run(FORM_NAVIGATION_SCRIPT, {'url': url, 'method': str(method or 'GET')}, done)
+        self.AppHelper.callLater(FORM_CHECK_SECONDS, lambda: answered or answer(False))
 
     def end_step(self, done=None):
         """End a click/type step: the approval's allowance ends; ``done(cancelled record or None)``.
@@ -908,6 +1091,34 @@ class Worker:
                 INSERT_SCRIPT, {'nonce': nonce, 'expect': expect, 'tokens': tokens, 'text': text}, inserted))
         self._locate(ident, command, focus)
 
+    def op_release_submit(self, ident, command, timeout):
+        """Release the held payment-form submit an owner approval covers exactly (#700).
+
+        ``form`` must be the cancelled submit this worker last reported (form
+        position, method, action, page and the digest of what it would send);
+        the page then checks the same form would still send the same state
+        and makes the submit again (``RELEASE_SCRIPT``).  Answers like a
+        click: ``navigated``, or ``approval_required`` for another cancelled
+        submit, or ``submit_changed``.
+        """
+        form = command.get('form') if isinstance(command.get('form'), dict) else {}
+        held = self.held
+        if held is None or any(str(form.get(key)) != str(held.get(key)) for key in ('dom', 'method', 'action', 'page', 'state')):
+            return self.fail(ident, 'submit_changed')
+        self.held = None   # released at most once
+        self.deadline(ident, timeout, on_timeout=self.end_step)
+        blocked_before, baseline = self.blocked, (self.main_navigations, self.landed)
+
+        def released(value, error):
+            if ident not in self.pending:
+                return
+            if error is None and isinstance(value, dict) and value.get('error'):
+                return self.finish_input(ident, blocked_before, value['error'])
+            # A script error here means the submit already navigated away.
+            self.settle_click(ident, lambda navigated: self.finish_input(ident, blocked_before, navigated=navigated),
+                              baseline)
+        self.run(RELEASE_SCRIPT, {'id': held['id']}, released)
+
     def op_show(self, ident, command, timeout):
         url = command.get('url')
         # The owner signs in by hand: the guard is off while the window shows (#698).
@@ -1014,12 +1225,19 @@ class Worker:
 
 
 def _form_record(value):
-    """A cancelled submit's form, from page data: ``{id, dom, method, action}`` of bounded plain values, or None."""
+    """A cancelled submit's form, from page data, or None.
+
+    ``{id, dom, method, action, page, state}`` of bounded plain values.
+    ``state`` is the SHA-256 of what the submit would have sent (#700); the
+    field values themselves stop here, inside the worker.
+    """
     try:
         get = value.get if isinstance(value, dict) else value.objectForKey_
         dom, method, action, ident = get('dom'), get('method'), get('action'), get('id')
+        page, state = get('page'), get('state')
         return {'id': str(ident or '')[:64] or uuid.uuid4().hex, 'dom': int(dom) if dom is not None else -1,
-                'method': str(method or '')[:16], 'action': str(action or '')[:2000]}
+                'method': str(method or '')[:16], 'action': str(action or '')[:2000], 'page': str(page or '')[:2000],
+                'state': hashlib.sha256(str(state or '').encode('utf-8', 'replace')).hexdigest()}
     except Exception:
         return None
 
@@ -1094,6 +1312,20 @@ def _delegate_class():
                     worker.navigation_refused(main_frame)
                 elif main_frame:
                     worker.main_navigations += 1   # a click waits for it to land (#736)
+            # #700: a form submission in the main frame while the guard is armed is
+            # checked against the page's payment forms first (a native ``submit``
+            # that no ``submit`` event or wrapper saw); a refusal is a cancelled
+            # submit, not a blocked destination.
+            if main_frame and not worker.guard_off and action.navigationType() in (
+                    WebKit.WKNavigationTypeFormSubmitted, WebKit.WKNavigationTypeFormResubmitted):
+                method = str(request.HTTPMethod() or 'GET') if request is not None else 'GET'
+
+                def checked(allowed):
+                    if allowed:
+                        worker.decide(url, main_frame, decision)
+                    else:
+                        handler(WebKit.WKNavigationActionPolicyCancel)
+                return worker.check_form_navigation(url, method, checked)
             worker.decide(url, main_frame, decision)
 
         def webView_didCommitNavigation_(self, view, navigation):

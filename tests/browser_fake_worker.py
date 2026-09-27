@@ -15,6 +15,7 @@ import time
 LOG = sys.argv[1]
 cookies = []
 page = {'url': 'about:blank'}
+held = None
 
 
 def emit(message):
@@ -79,13 +80,21 @@ for line in sys.stdin:
         elif command.get('index') == 7:
             emit({'id': ident, 'ok': False, 'error': 'target_obscured'})
         elif command.get('index') == 9 and command.get('approved') is not True:
-            # As the real worker: the press submitted the payment form, which was cancelled (#698).
-            emit({'id': ident, 'ok': False, 'error': 'approval_required',
-                  'form': {'dom': 0, 'method': 'post', 'action': 'https://shop.test/pay'}})
+            # As the real worker: the press submitted the payment form, which was cancelled
+            # and held (#698, #700): its record, page and the digest of what it would send.
+            held = {'dom': 0, 'method': 'post', 'action': 'https://shop.test/pay', 'page': page['url'], 'state': 'a' * 64}
+            emit({'id': ident, 'ok': False, 'error': 'approval_required', 'form': held})
         else:
             emit({'id': ident, 'ok': True})
     elif op == 'type':
         emit({'id': ident, 'ok': True})
+    elif op == 'release_submit':
+        # As the real worker (#700): only the submit it last reported, once.
+        if held is not None and command.get('form') == held:
+            held = None
+            emit({'id': ident, 'ok': True, 'navigated': True})
+        else:
+            emit({'id': ident, 'ok': False, 'error': 'submit_changed'})
     elif op == 'show':
         if 'closefirst' in str(command.get('url')):
             emit({'event': 'hidden'})

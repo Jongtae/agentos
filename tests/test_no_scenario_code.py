@@ -48,6 +48,7 @@ SRC = Path(__file__).resolve().parents[1] / 'src' / 'personal_agent'
 #: Decision and runtime modules.  ``decision*.py`` is globbed; ``preparations.py``
 #: is scanned once it exists (SEC-ATTN-01 #659).
 SCANNED_MODULES = ('agent_runtime.py', 'conversation_handoff.py', 'current_context.py', 'browser_session.py',
+                   'browser_worker.py', 'browser_jar.py',
                    'preparations.py', 'local_tools.py', 'quickstart_service.py')
 
 #: Modules whose job is to name providers.  Not scanned.
@@ -253,6 +254,7 @@ class NoScenarioCodeTests(unittest.TestCase):
     def test_scope_is_the_decision_and_runtime_modules(self):
         names = {path.name for path in scanned_paths()}
         for required in ('agent_runtime.py', 'conversation_handoff.py', 'current_context.py', 'browser_session.py',
+                         'browser_worker.py', 'browser_jar.py',
                          'local_tools.py', 'quickstart_service.py', 'decision.py', 'decision_adapters.py',
                          'decision_routes.py'):
             self.assertIn(required, names)

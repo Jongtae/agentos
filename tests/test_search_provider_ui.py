@@ -1,4 +1,4 @@
-"""SEC-SEARCH-01 #655: Settings › 외부 연결 › 웹 검색 제공자 rendering.
+"""SEC-SEARCH-01 #655 / SEC-SEARCH-02 #678: Settings › 외부 연결 › 웹 검색 제공자 rendering.
 
 Evidence class: static markup checks plus a node-driven render of the
 section's own functions with a fake DOM and a recording ``api``.  No
@@ -49,52 +49,73 @@ const calls=[];let refreshes=0,fail=false;
 const ctx={document,$,console,api:async(path,body)=>{calls.push({path,body});if(fail)throw new Error('synthetic refusal');return {};},refresh:async()=>{refreshes++;},busy:async(button,fn)=>fn()};
 vm.createContext(ctx);vm.runInContext(source,ctx);vm.runInContext("setLanguage('ko')",ctx);
 const text=id=>$(id).textContent,buttons=()=>descendants($('search-providers')).filter(node=>node.tag==='button'),inputs=()=>descendants($('search-providers')).filter(node=>node.tag==='input');
-const provider=(id,name,fields,saved)=>({id,name,destination:id==='naver'?'openapi.naver.com':'api.search.brave.com',setup:'setup '+id,fields,key:{saved,saved_at:saved?1700000000:null}});
-const naverFields=[{id:'client_id',label:'Client ID'},{id:'client_secret',label:'Client Secret'}],braveFields=[{id:'key',label:'API key'}];
-const view=(overrides={})=>({default:'bing',configured_default:'bing',keyless:[{id:'bing',name:'Bing (RSS)',destination:'www.bing.com'}],
- options:[{id:'bing',provider:'bing',kind:'web',label:'Bing web search (RSS, no key)'}],
- providers:[provider('naver','Naver Open API',naverFields,false),provider('brave','Brave Search API',braveFields,false)],...overrides});
+const provider=(id,name,fields,saved)=>({id,name,destination:'api.search.brave.com',setup:'setup '+id,fields,key:{saved,saved_at:saved?1700000000:null}});
+const braveFields=[{id:'key',label:'API key'}];
+const bingRow=(enabled=false)=>({id:'bing',name:'Bing RSS (개인 용도·비상업 전용 — Microsoft 서비스 약관)',destination:'www.bing.com',note:'personal use note',enabled});
+const native=(overrides={})=>({route:'openai',route_name:'OpenAI API',state:'unknown',reason:'',reason_text:'',cost:'per-call cost note',where:'sub-call',...overrides});
+const view=(overrides={})=>({native:native(),default:'ai-native',configured_default:'',bing:bingRow(),
+ options:[{id:'ai-native',provider:'ai-native',kind:'web',label:"The connected AI's own web search"}],
+ providers:[provider('brave','Brave Search API',braveFields,false)],...overrides});
 const checks=[];
 (async()=>{
  ctx.renderSearchProviders(view());
- assert(text('search-providers').includes('Bing (RSS)'));assert(text('search-providers').includes('사용 가능'));
- assert(text('search-providers').includes('Naver Open API'));assert(text('search-providers').includes('Brave Search API'));
- assert.equal(text('search-providers').split('키 없음').length-1,2);
+ const first=descendants($('search-providers')).find(node=>node.className==='settings-row');
+ assert(first.textContent.startsWith('연결된 AI의 웹 검색 (기본)'),'the connected AI row comes first');
+ assert(text('search-providers').includes('첫 사용 때 확인'));assert(text('search-providers').includes('경로: OpenAI API'));
+ assert(text('search-providers').includes('per-call cost note'));
+ assert(text('search-providers').includes('Brave Search API'));assert.equal(text('search-providers').split('키 없음').length-1,1);
+ assert(text('search-providers').includes('개인 용도·비상업 전용 — Microsoft 서비스 약관'));assert(text('search-providers').includes('꺼짐'));
+ assert(!text('search-providers').includes('Naver'));
  assert.equal(inputs().length,0);assert.equal(calls.length,0);
- checks.push('unkeyed providers render as 키 없음 with no inputs and no provider call');
+ checks.push('native search first with route and cost, Brave unkeyed, Bing off with its terms; no provider call');
 
+ $('search-providers').dataset.state='';ctx.renderSearchProviders(view({native:native({route:'',route_name:'',state:'unavailable',reason:'no_native_search',reason_text:'no native search here',cost:''})}));
+ assert(text('search-providers').includes('사용할 수 없음'));assert(text('search-providers').includes('no native search here'));
+ $('search-providers').dataset.state='';ctx.renderSearchProviders(view({native:native({route:'codex',route_name:'Codex CLI',state:'available',where:'work-turn'})}));
+ assert(text('search-providers').includes('사용 가능'));assert(text('search-providers').includes('CLI 작업 턴 안에서 CLI가 직접 검색합니다.'));
+ checks.push('unavailable shows the reason; a CLI route says it searches inside its own turn');
+
+ $('search-providers').dataset.state='';ctx.renderSearchProviders(view());
  buttons().find(node=>node.textContent==='키 입력').onclick();
  const form=descendants($('search-providers')).find(node=>node.tag==='form');
- assert(form);assert.equal(inputs().length,2);assert(inputs().every(node=>node.type==='password'));
- assert(form.textContent.includes('setup naver'));
- inputs()[0].value='naver-id-fixture-0001';
+ assert(form);assert.equal(inputs().length,1);assert(inputs().every(node=>node.type==='password'));
+ assert(form.textContent.includes('setup brave'));
  await form.onsubmit({preventDefault(){}});
  assert.equal(calls.length,0);assert(text('search-providers-feedback').includes('모든 키 값'));
- inputs()[1].value='naver-secret-fixture-0001';
+ inputs()[0].value='brave-token-fixture-0001';
  await form.onsubmit({preventDefault(){}});
  assert.equal(calls.length,1);assert.equal(calls[0].path,'/api/search-providers/key');
- assert.equal(JSON.stringify(calls[0].body),JSON.stringify({provider:'naver',client_id:'naver-id-fixture-0001',client_secret:'naver-secret-fixture-0001'}));
- assert.equal(refreshes,1);assert(text('search-providers-feedback').includes('Naver Open API 키를 저장했습니다.'));
- assert(!text('search-providers').includes('naver-secret-fixture-0001'));assert(!text('search-providers-feedback').includes('naver-secret-fixture-0001'));
- checks.push('the key form sends both Naver values once, as password fields, and never echoes them');
+ assert.equal(JSON.stringify(calls[0].body),JSON.stringify({provider:'brave',key:'brave-token-fixture-0001'}));
+ assert.equal(refreshes,1);assert(text('search-providers-feedback').includes('Brave Search API 키를 저장했습니다.'));
+ assert(!text('search-providers').includes('brave-token-fixture-0001'));assert(!text('search-providers-feedback').includes('brave-token-fixture-0001'));
+ checks.push('the key form sends the Brave key once, as a password field, and never echoes it');
 
- const keyed=view({options:[{id:'bing',label:'Bing web search (RSS, no key)'},{id:'naver',label:'Naver web'},{id:'naver-book',label:'Naver book'}],
-  providers:[provider('naver','Naver Open API',naverFields,true),provider('brave','Brave Search API',braveFields,false)]});
+ $('search-providers').dataset.state='';ctx.renderSearchProviders(view());
+ await buttons().find(node=>node.textContent==='켜기').onclick({currentTarget:new Element('button')});
+ assert.equal(calls[1].path,'/api/search-providers/bing');assert.equal(JSON.stringify(calls[1].body),JSON.stringify({enabled:true}));
+ $('search-providers').dataset.state='';ctx.renderSearchProviders(view({bing:bingRow(true)}));
+ assert(text('search-providers').includes('켜짐'));
+ await buttons().find(node=>node.textContent==='끄기').onclick({currentTarget:new Element('button')});
+ assert.equal(JSON.stringify(calls[2].body),JSON.stringify({enabled:false}));
+ checks.push('Bing RSS is switched on and off only by an explicit press');
+
+ const keyed=view({options:[{id:'ai-native',label:'native'},{id:'brave',label:'Brave'},{id:'bing',label:'Bing'}],bing:bingRow(true),
+  providers:[provider('brave','Brave Search API',braveFields,true)]});
  $('search-providers').dataset.state='';ctx.renderSearchProviders(keyed);
  assert(text('search-providers').includes('키 저장됨'));
  const select=descendants($('search-providers')).find(node=>node.tag==='select');
- assert(select);assert.equal(JSON.stringify(select.children.map(node=>node.value)),JSON.stringify(['bing','naver','naver-book']));
- assert.equal(select.children.find(node=>node.selected).value,'bing');
- select.value='naver-book';await select.onchange();
- assert.equal(calls[1].path,'/api/search-providers/default');assert.equal(JSON.stringify(calls[1].body),JSON.stringify({provider:'naver-book'}));
+ assert(select);assert.equal(JSON.stringify(select.children.map(node=>node.value)),JSON.stringify(['ai-native','brave','bing']));
+ assert.equal(select.children.find(node=>node.selected).value,'ai-native');
+ select.value='brave';await select.onchange();
+ assert.equal(calls[3].path,'/api/search-providers/default');assert.equal(JSON.stringify(calls[3].body),JSON.stringify({provider:'brave'}));
  checks.push('the default selector lists exactly the configured options and sends one explicit choice');
 
  $('search-providers').dataset.state='';ctx.renderSearchProviders(keyed);
  buttons().find(node=>node.textContent==='지우기').onclick();
  assert(text('search-providers-feedback').includes('다시 누르면'));
  const before=calls.length;await buttons().find(node=>node.textContent==='지우기 확인').onclick({currentTarget:new Element('button')});
- assert.equal(calls.length,before+1);assert.equal(JSON.stringify(calls[before].body),JSON.stringify({provider:'naver',client_id:'',client_secret:''}));
- checks.push('removal needs a second explicit press and clears both Naver slots');
+ assert.equal(calls.length,before+1);assert.equal(JSON.stringify(calls[before].body),JSON.stringify({provider:'brave',key:''}));
+ checks.push('removal needs a second explicit press and clears the Brave slot');
 
  fail=true;$('search-providers').dataset.state='';ctx.renderSearchProviders(view());
  buttons().find(node=>node.textContent==='키 입력').onclick();
@@ -128,7 +149,7 @@ class SearchProviderUiTests(unittest.TestCase):
         result = subprocess.run([node, "-e", DOM_CHECKS, str(WEB / "app.js")], capture_output=True, text=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout.strip().splitlines()[-1])
-        self.assertEqual(report["passed"], 5, report)
+        self.assertEqual(report["passed"], 7, report)
 
 
 if __name__ == "__main__":

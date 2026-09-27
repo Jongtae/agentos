@@ -1468,6 +1468,14 @@ class BrowserProfile:
         return {'state': 'closed' if wait else 'opened', 'url': page_reference(url), 'message': LOGIN_WINDOW_TEXT,
                 'window': window_id}
 
+    def site_cookie_marks(self, host):
+        """``(marks, now)`` of ``host``'s stored sign-in cookies (``CookieJar.site_cookie_marks``), or None when unreadable (#709)."""
+        try:
+            with self._jar_lock:
+                return self.jar.site_cookie_marks(host)
+        except Exception:
+            return None
+
     def login_window_known(self, window):
         """Whether ``window`` is a login window this process opened (a restart forgets every one)."""
         return bool(window) and window in self._login_windows

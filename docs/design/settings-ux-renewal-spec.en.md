@@ -6,7 +6,7 @@
 - Owner request, 2026-09-28: document UI/UX improvements and how to implement them.
 - Evidence class: design specification based on owner feedback, two supplied screenshots, and source inspection at `00ccf640e69208c7d911469e7521bda5b54392c4`.
 - English is canonical; [Korean companion](settings-ux-renewal-spec.ko.md) presents the same decisions for owner review.
-- This delivery changes documentation only. The implementation units in section 12 are proposed, not activated by this document. Previously merged work remains historical evidence, not proof that this specification is implemented.
+- This delivery changes documentation and a standalone design prototype only; production application files are unchanged. The implementation units in section 12 are proposed, not activated by this document. Previously merged work remains historical evidence, not proof that this specification is implemented.
 
 **Outcome:** the owner can understand the current configuration, make the intended change, and return to work without reading execution internals or assembling the AI workflow.
 
@@ -16,7 +16,7 @@ The owner-local web remains a management application. Preserve the current conve
 
 ## 2. Evidence and problem inventory
 
-The owner screenshots show an older title (`AI 연결`) and large outlined provider cards. Inspected main already has `AI 설정`, an `AI` tab and flatter chooser rows. Screenshot build identity is unknown; do not report every screenshot defect as a reproduced defect in current main. The local URL refused connection during the preceding inspection. No authenticated interaction or current-browser visual pass is claimed.
+The owner screenshots show an older title (`AI 연결`) and large outlined provider cards. Inspected main already has `AI 설정`, an `AI` tab and flatter chooser rows. Screenshot build identity is unknown; do not report every screenshot defect as a reproduced defect in current main. The local URL refused connection during the preceding inspection. No authenticated interaction or live product visual pass is claimed. The later standalone prototype is separately identified design evidence.
 
 | ID / priority | Evidence and current source location | User cost | Required correction |
 | --- | --- | --- | --- |
@@ -51,7 +51,7 @@ AgentOS-owned authority and canonical state stay outside all presentation helper
 
 ## 4. Information architecture and visual grammar
 
-Preserve the current top-level destinations: `작업 현황`, `설정`. Preserve settings routes: `#settings/ai`, files, external connections and privacy. Use `AI`, `파일 · 저장`, `외부 연결`, `개인정보 · 진단` as the settings navigation labels.
+Preserve the current conceptual destinations: `작업 현황`, `설정`. Following the owner’s macOS Settings reference, expose them in one sidebar: Activity, then a Settings group containing its panes. Do not add a second settings navigation column, an in-content logo, provider emblem, or repeated Settings heading. The browser/window title may still identify AgentOS. Preserve settings routes: `#settings/ai`, files, external connections and privacy. Use `AI`, `파일 · 저장`, `외부 연결`, `개인정보 · 진단` as the settings navigation labels.
 
 | Surface | Default content | On demand |
 | --- | --- | --- |
@@ -66,40 +66,43 @@ No new navigation destination, global chat composer, dashboard, marketplace, onb
 Visual targets are project choices, not standards:
 
 - Reuse system fonts, the 14px base, existing 12/13/14/16/19/23 scale and 4/8/12/16/24/32 spacing. Do not shrink text to fit long diagnostics.
-- Reuse neutral canvas `#f3f4f6`, rail `#e9ebef`, white surface, ink `#161a20`, muted `#5f6772` and action blue `#1f3d6d`.
-- Retain one quiet application rail and one settings navigator; content remains left aligned. Keep the useful settings pane around 720–800 CSS px, within the existing shell, rather than stretching descriptions across a large monitor.
-- Normal rows align item, state and action; spacing conveys grouping. Use dividers and at most one containing surface for the AI pair. Avoid a nested card around each paragraph or provider.
+- Adapt the existing neutral palette: white content canvas, quiet gray sidebar and `#f7f8fa` grouped rows, existing ink/muted tokens and action blue `#1f3d6d`. The owner’s system-settings reference motivates restrained grouping; do not imitate OS window buttons or add decorative branding.
+- Use one sidebar and one content pane. Item labels align left; current values and controls align right. Keep the useful settings pane around 720–840 CSS px. Show one title for the selected pane.
+- Normal rows align item, current value and action. Main AI and Judgment AI are independent peer groups. Following the Main AI is a configuration option, not a parent/child role hierarchy; Judgment AI orchestrates the workers. Use quiet grouped rows with separators. Normal verification is plain text; reserve stronger state emphasis for meaningful exceptions.
 - Desktop controls retain the 36px default height. Touch layouts target 44px hit areas without making every input visually oversized. Selected radio state and keyboard focus have different treatments; only the actual focused control needs a focus ring.
 - Common-path labels and descriptions should fit in one or two lines at the desktop target. This is a copy budget, never a rule to truncate errors, destinations or essential access implications.
 
 ## 5. AI overview and terminology
 
-The page title is `AI 설정`. Stable row titles are `기본 AI` and `판단 AI`; empty/error states do not replace them. `AI 연결 안 됨` is not a global description of this page. Use connection language only for an actual connection check or service connection.
+The content title is `AI`; `AI 설정` remains a descriptive name for the destination, not a second visible heading. Stable row titles are `기본 AI` and `판단 AI`; empty/error states do not replace them. `AI 연결 안 됨` is not a global description of this page. Use connection language only for an actual connection check or service connection.
 
 Illustrative synthetic wireframe, not a screenshot or a claim about the owner's configuration:
 
 ```text
-AI 설정
+AI
 
-기본 AI                                               [변경]
-Codex · 구독                       기본으로 설정됨
-모델       CLI 기본값              로그인 확인됨
-전송 대상  OpenAI
-웹 검색 사용 가능 · 브라우저 사용 가능       [상태 확인]
+기본 AI                              Codex · 구독  [변경]
+모델                                         CLI 기본값
+로그인                                확인됨  [상태 확인]
+전송 대상                                       OpenAI
+사용 가능한 도구                         웹 검색, 브라우저
 
-판단 AI                            기본 AI 따라가기      [설정]
-모델       <확인된 모델명>
-상태       확인됨
+판단 AI                            기본 AI 따라가기 [설정]
+모델                                <확인된 AI·모델명>
+상태                                            확인됨
+요청에 맞는 AI와 도구를 고르고 결과를 확인합니다.
 
-실행 환경                          신뢰된 로컬           [관리]
+파일 접근 범위                  작업 폴더 밖 접근 가능 [변경]
 AI 도구가 작업 폴더 밖의 파일을 읽을 수 있습니다.
 
 › 기술 정보
 ```
 
-`기본으로 설정됨` describes `main_ai.current`, not every Work's worker. C16 orchestration can choose another eligible worker; actual Work details own the observed execution identity. Do not advertise all tasks as running through the default route.
+The value of the `기본 AI` row (or explicit `기본으로 설정됨` where needed for disambiguation) describes `main_ai.current`, not every Work's worker. A redundant selected badge is unnecessary in the default overview. C16 orchestration can choose another eligible worker; actual Work details own the observed execution identity. Do not advertise all tasks as running through the default route.
 
 The default page has no general setup tutorial. When nothing is selected, the `기본 AI` row shows `선택된 AI 없음`, one short instruction and `AI 선택`. Optional unused providers do not create global warnings. An attention state for the selected route remains visible with its repair action.
+
+With no Main AI, do not mark Judgment AI as waiting if an independently configured/effective route still exists. Project its own observed state.
 
 Judgment AI help: `요청에 맞는 AI와 도구를 고르고 결과를 확인합니다.` Keep its configured mode and actual effective route distinguishable. Show `기본 AI 따라가기` only as the preference when its effective state is still fallback/checking; show the actual fallback/destination alongside that preference. Preserve the existing `대화 해석` navigation/help association where relied upon; changing the short visible heading does not authorize semantic routing changes.
 
@@ -181,9 +184,9 @@ This is a layout example. Readiness/eligibility still comes from current contrac
 
 ## 8. Execution environment, help and other settings
 
-The execution-environment row remains visible when applicable. A short truthful consequence is mandatory even with details collapsed: trusted-local AI tools may read host files outside the managed work folder. Strict isolation and stale/unknown verification have distinct summaries; blocked execution and its recovery action stay visible.
+The owner-facing row is `파일 접근 범위`, visible when applicable. Map `trusted-local` to `작업 폴더 밖 접근 가능`, verified `strict-isolated` to `작업 폴더로 제한`, stale verification to `격리 다시 확인 필요`, and unknown profile to `접근 범위 확인 필요`. Raw profile names belong in technical details. These labels describe observed access conditions, not a security endorsement or blanket unrestricted file permission. A short truthful consequence is mandatory even with details collapsed: trusted-local AI tools may read host files outside the managed work folder. Strict isolation and stale/unknown verification have distinct summaries; blocked execution and its recovery action stay visible.
 
-`관리` expands profile choices within the same page using current isolation actions. Exact versions, probe output and raw `limitation` go in `기술 정보`. Choosing a trust profile continues to require its existing verification and explicit action. Hiding the profile's effect or relaxing isolation to simplify setup is outside scope.
+`변경` expands profile choices within the same page using current isolation actions. Exact versions, probe output and raw `limitation` go in `기술 정보`. Choosing a trust profile continues to require its existing verification and explicit action. Hiding the profile's effect or relaxing isolation to simplify setup is outside scope.
 
 Prefer short inline help or a native disclosure for multi-sentence explanations. A tooltip is optional for a short definition only: it must work with keyboard focus, be dismissible and have a touch-accessible equivalent. Never put required login instructions, transmission destinations, permission consequences, validation errors or interactive controls only in a hover tooltip. The APG tooltip pattern is still marked work in progress; it is not a reason to build a custom tooltip subsystem.
 
@@ -210,6 +213,7 @@ Work/activity receives only consistency fixes demonstrated by the audit. This pl
 - Use labelled native radios, associated helper/error text and a titled native modal. Preserve keyboard entry, arrow selection, Tab traversal and return focus. Existing settings tabs keep their arrow/Home/End behavior and URL state.
 - Errors are textual and associated with their fields. Use a restrained polite status region for async feedback; polling must not repeatedly announce unchanged state. Honour reduced motion; no decorative entrance animation is required.
 - Keep visible focus unobscured. Verify text/control contrast against the applicable WCAG criteria; this specification is not a conformance certification. Project touch targets are 44px; the WCAG 2.2 minimum target guidance is 24 CSS px subject to its stated exceptions.
+- Preserve the existing language picker as a visible sidebar-footer preference (responsive top-row placement is allowed). Keep `language-select`, `welcome-language`, `data-language-select`, `LANGUAGES`, `storedLanguage`, `setLanguage`, `translateStatic`, and the existing `agentos-language` persistence/default behavior. Keep authenticated logout reachable when applicable. Choosing a simpler shell must not remove existing preferences or auth actions.
 - Ship changed copy in Korean, English, Japanese and Chinese together using existing dictionaries. Preserve placeholders, provider/model identifiers and locale-aware dates. Use long localized strings in layout evidence. No change to the current default-language policy.
 
 ## 10. Implementation mapping and protected contracts
@@ -242,7 +246,7 @@ Each criterion requires an artifact at the implementation revision, not merely a
 | A06 | Input, caret, model draft, selection, disclosure and error survive refresh; stale completion does not alter a new draft | Browser walkthrough with refresh and delayed responses |
 | A07 | Cancel/close/discard and credential save/delete have the stated different consequences | Keyboard/pointer walkthrough; no real secrets or credential mutation |
 | A08 | Access implications and blocking isolation errors remain visible; long technical evidence is available on demand | Trusted-local, strict, stale and unknown screenshots; unchanged isolation regressions |
-| A09 | Dialog/tab/radio keyboard behavior, focus restoration, labels and errors are accessible | Keyboard walkthrough, accessibility-tree inspection; no blanket certification claim |
+| A09 | Dialog/tab/radio keyboard behavior, focus restoration, labels and errors are accessible; all four language choices remain reachable and the production language preference survives reload | Keyboard walkthrough, accessibility-tree inspection; no blanket certification claim |
 | A10 | No clipped fields/actions or horizontal page overflow across required sizes/locales | Matched desktop/mobile/zoom/short-height screenshots, keyboard check |
 | A11 | Other settings retain data/action distinctions and existing Work/history access | Targeted walkthrough for changed surfaces and existing relevant regressions |
 | A12 | UI rollback and local deployed revision are identifiable; all required CI passes on the merge candidate | PR checks, commit/revert boundary, local startup/static-asset provenance when operated |
@@ -270,7 +274,7 @@ Parallel work is useful for read-only fixture inventory, copy/accessibility revi
 
 ## 13. Delivery, rollout and rollback
 
-Specification acceptance means the two documents and plan entry are reviewable and required checks pass. It does not mean any screenshot defect is fixed. The documentation issue closes only for those deliverables.
+Specification acceptance means the two documents and plan entry are reviewable and required checks pass. It does not mean any screenshot defect is fixed. The documentation issue closes only for those deliverables and the separately requested design prototype. The owner subsequently requested: no logo, one system-settings-style sidebar, independent AI roles, plain file-access wording and restored language selection. Those decisions are included here; the earlier subordinate-card wording is superseded for this proposal only.
 
 For implementation, retain the existing backend and persistence formats. Commit each coherent unit separately. Before local acceptance, identify the served checkout/revision and static assets, then reload the existing route. If a long-running process serves old assets, restart only the intended app instance through its normal mechanism and preserve owner data. A stale screenshot is neither implementation evidence nor a reason to dismiss the user's observation. Keep build identifiers in development evidence rather than adding repository workflow controls to the product.
 
@@ -290,3 +294,11 @@ Checked 2026-09-28. External guidance supports the interaction choices; dimensio
 - [WCAG 2.2 — Reflow](https://www.w3.org/WAI/WCAG22/Understanding/reflow.html) and [Target Size (Minimum)](https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html): reference criteria; project targets above do not establish full WCAG conformance.
 - [Radix introduction](https://www.radix-ui.com/primitives/docs/overview/introduction), [repository](https://github.com/radix-ui/primitives), [releases](https://github.com/radix-ui/primitives/releases), [MIT licence](https://github.com/radix-ui/primitives/blob/main/LICENSE): considered candidate, not adopted.
 - Repository review aids: [frontend-design](../../.claude/skills/frontend-design/SKILL.md) and [pinned web-interface-guidelines](../../.claude/skills/web-interface-guidelines/SKILL.md).
+
+## 15. Interactive prototype and observed design evidence
+
+Open [the self-contained prototype](settings-ux-renewal-preview.html). The preview toolbar selects configured/unconfigured/login-needed/checking/fallback examples. The sidebar selects existing settings panes and the language control demonstrates Korean, English, Japanese and Simplified Chinese. The AI chooser demonstrates fixed ordering and one account panel. Credential inputs are readonly sample values. No API transport, credentials, external request, storage write or production file is used; CSP blocks connections and form submissions. Language changes here are in memory only and do not touch the real app's preference.
+
+The prototype illustrates layout and selected interactions; it does not implement the production verification/activation/cancellation pipeline, full credential lifecycle, dirty-state recovery, or all locale strings in sample feedback. Sidebar screens use fictional folder/session values. Product acceptance A01–A12 remains future work.
+
+Captured design states: [overview](settings-ux-renewal-preview/overview.png), [chooser](settings-ux-renewal-preview/chooser.png), [account panel](settings-ux-renewal-preview/account.png), [mobile](settings-ux-renewal-preview/mobile.png). These are prototype screenshots, not shipped UI screenshots. Browser observations cover these layouts, language selection, sidebar changes, modal Escape/focus return, and 320px reflow. They do not establish full accessibility or production conformance.

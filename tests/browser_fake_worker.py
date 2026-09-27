@@ -84,6 +84,8 @@ for line in sys.stdin:
         if 'autoclose' in str(command.get('url')):
             time.sleep(0.2)
             emit({'event': 'hidden'})
+    elif op == 'settle':
+        emit({'id': ident, 'ok': True, 'settled': True, 'waited': 0})
     elif op == 'cookies_import':
         cookies.extend(command.get('cookies') or [])
         emit({'id': ident, 'ok': True, 'imported': len(command.get('cookies') or [])})

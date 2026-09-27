@@ -259,6 +259,25 @@ def strict_launch_arguments(engine_id, disabled_features=()):
     raise ExecutionError('지원하는 구독 엔진을 선택하세요.')
 
 
+#: #709: Codex's per-MCP-server approval mode for the ``agentos`` bridge only.
+#: Codex's documented ``mcp_servers.<id>.default_tools_approval_mode``
+#: accepts ``auto | prompt | writes | approve`` (0.153.4 rejects any other
+#: value at config load: "unknown variant ... expected one of `auto`,
+#: `prompt`, `writes`, `approve`").  ``approve`` resolves Codex's own MCP
+#: approval prompt for these tools as approved, so Codex's Guardian/auto-review
+#: no longer denies an AgentOS bridge call.  The decision stays with AgentOS:
+#: every bridge tool runs through ``Capabilities.execute`` (mediation, the
+#: payment guard, exact per-step owner approvals, the Work budget).  Other MCP
+#: servers do not exist in this turn (``--ignore-user-config``), and shell
+#: commands and sandbox escalations keep Codex's own policy.
+CODEX_BRIDGE_APPROVAL_MODE = 'approve'
+
+
+def codex_bridge_approval_argument():
+    """The one ``-c`` override that lets AgentOS, not Codex's reviewer, decide bridge tool calls (#709)."""
+    return f'mcp_servers.agentos.default_tools_approval_mode="{CODEX_BRIDGE_APPROVAL_MODE}"'
+
+
 #: #701: bridge actions the CLI's own web search replaces on a native-search
 #: turn, so the model searches with Codex's or Claude's own tool instead.
 NATIVE_SEARCH_REPLACED = frozenset({'web_search', 'bounded_public_research'})
@@ -942,7 +961,9 @@ class BoundedExecutionAdapter:
             return [binary, 'exec', '--json', *sandbox, '--skip-git-repo-check',
                     '--ignore-user-config', '--ephemeral',
                     '-c', f'mcp_servers.agentos.command={json.dumps(sys.executable)}',
-                    '-c', f'mcp_servers.agentos.args={json.dumps(bridge["args"])}', *model_args, prompt]
+                    '-c', f'mcp_servers.agentos.args={json.dumps(bridge["args"])}',
+                    # #709: AgentOS decides its own bridge tools (see CODEX_BRIDGE_APPROVAL_MODE).
+                    '-c', codex_bridge_approval_argument(), *model_args, prompt]
         if engine_id == 'claude-code':
             # #570: stream-json (which requires --verbose with -p) reports the
             # session model and each tool_use; its last line is the same result
@@ -955,7 +976,10 @@ class BoundedExecutionAdapter:
                 argv += ['--append-system-prompt', instructions]
             # #623: trusted-local pre-approves only its declared bridge tools;
             # strict also removes every built-in tool.  --allowedTools is variadic,
-            # so it must stay the last argument.
+            # so it must stay the last argument.  #709: nothing else is needed for
+            # AgentOS to decide its own bridge tools here: HOME is the turn's own
+            # directory (no owner settings, so no other permission mode), and an
+            # exact allow rule is the approval Claude Code's -p mode checks.
             if strict:
                 argv += strict_launch_arguments('claude-code')
             elif native_search:

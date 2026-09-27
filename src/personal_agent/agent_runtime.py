@@ -16,6 +16,7 @@ from . import folder_grants
 from .manifests import BUILTIN_MANIFEST, CONTEXT_GATED_ACTIONS, runtime_packages
 from .memory_service import PROFILE_KEY_GUIDANCE
 from .preparations import PREPARED_HEADING
+from .conversation_projection import clip_keeping_links
 
 AGENTS={role['id']:{key:value for key,value in role.items() if key!='id'} for role in BUILTIN_MANIFEST['roles']}
 BUILTIN_TOOLS={tool['id']:tool['host_action'] for tool in BUILTIN_MANIFEST['tools']}
@@ -73,6 +74,9 @@ def recorded_calls(calls,tools,redact=None):
 
 #: #627: a lookup whose only terms were withdrawn current-context location text.
 CONTEXT_WITHDRAWN_TEXT='이 조회에 들어 있던 현재 맥락 위치·장소를 소유자가 멈추거나 지웠거나 바뀌어서 보내지 않았습니다. 남은 검색어가 없으니 소유자에게 지역을 한 번 물어보세요.'
+#: #709: the one generic sentence about results that live in the embedded browser session.
+BROWSER_SESSION_NOTE=(' If a result depends on state inside AgentOS\'s embedded browser session, say so, and include a link '
+                      'the owner can open when that helps them continue.')
 BROWSER_EFFECT_NOTE=' Declare effect: read (only looking), navigate (moving between pages), mutate (changes account state such as a cart or a form), payment (pays or enters card data; always needs owner approval). AgentOS refuses card/one-time-code/password fields and their form buttons without the owner\'s approval whatever the label says.'
 #: #655: actions whose one public search takes the model's provider/locale.
 SEARCH_BACKED_ACTIONS=frozenset({'web_search','bounded_public_research'})
@@ -108,7 +112,7 @@ DEFINITIONS=[
  schema('save_memory','Save or correct one explicitly owner-authorized memory item. Use a stable short key; correction supersedes the prior value. '+PROFILE_KEY_GUIDANCE,{'memory_key':STRING,'content':STRING},['memory_key','content']),
  schema('list_memory','Read current explicitly saved owner memory items. Do not infer or create memory without explicit owner request.'),
  schema('list_agents','List available specialist agents and their roles.'),
- schema('browser_open','Open a URL in the owner\'s own logged-in browser profile and return the page state: bounded visible text and a numbered list of interactive elements. Use for sites where the owner is signed in (shopping carts, account pages); public_page_read is enough for anonymous pages. A login_required state means the owner must log in first; never enter credentials.'+BROWSER_EFFECT_NOTE,{'url':STRING,'effect':EFFECT},['url','effect']),
+ schema('browser_open','Open a URL in the owner\'s own logged-in browser profile and return the page state: bounded visible text and a numbered list of interactive elements. Use for sites where the owner is signed in (shopping carts, account pages); public_page_read is enough for anonymous pages. A login_required state means the owner must log in first; never enter credentials.'+BROWSER_SESSION_NOTE+BROWSER_EFFECT_NOTE,{'url':STRING,'effect':EFFECT},['url','effect']),
  schema('browser_read','Return the current page state of the owner\'s browser session again (visible text and numbered interactive elements), for example after the page changed.'),
  schema('browser_find','Find visible text on the current browser page. Returns the matching lines and interactive elements. Use it to confirm the right item or price before acting.',{'text':STRING},['text']),
  schema('browser_click','Click one interactive element of the current browser page. target is the element number from the page state or its exact visible name. Returns the resulting page state.'+BROWSER_EFFECT_NOTE,{'target':STRING,'effect':EFFECT},['target','effect']),
@@ -2522,9 +2526,10 @@ def check_claim(args,observations):
   return None,'invalid_claim'
  refs=list(dict.fromkeys(refs))
  claim={'status':status,'evidence_refs':refs,'summary':summary.strip(),
-        'failed':[item.strip()[:REPORT_ITEM_CHARS] for item in lists[0] if item.strip()][:REPORT_ITEMS],
-        'unknown':[item.strip()[:REPORT_ITEM_CHARS] for item in lists[1] if item.strip()][:REPORT_ITEMS],
-        'next':(args.get('next') or '').strip()[:REPORT_ITEM_CHARS]}
+        # #709: a bounded item never cuts a public link the model wrote in half.
+        'failed':[clip_keeping_links(item.strip(),REPORT_ITEM_CHARS) for item in lists[0] if item.strip()][:REPORT_ITEMS],
+        'unknown':[clip_keeping_links(item.strip(),REPORT_ITEM_CHARS) for item in lists[1] if item.strip()][:REPORT_ITEMS],
+        'next':clip_keeping_links((args.get('next') or '').strip(),REPORT_ITEM_CHARS)}
  if status!='done':
   claim['evidence_refs']=[ref for ref in refs if ref in observations and observations[ref][2]=='succeeded']
   return claim,None
@@ -2598,7 +2603,7 @@ def agency_report(goal,verified,failures,unknown,next_step,question=None):
  return {'requested':str(goal or '')[:300],'observed':list(verified),
          'failed':[[tool,reason] for tool,reason in failures],
          'unknown':list(dict.fromkeys(item for item in unknown if item))[:REPORT_ITEMS+2],
-         'next':next_step or None,'question':(question or '')[:600] or None}
+         'next':next_step or None,'question':clip_keeping_links(question or '',600) or None}
 
 def _budget_end(exc,executions,sources,successful,incomplete,verified,config,actual):
  """End a run whose budget, deadline or Stop ran out, keeping what was observed.

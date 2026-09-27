@@ -19,13 +19,17 @@ independently of anything the model says (pilot posture, #653):
   control of such a form, need an owner approval bound to (Work, action, page
   URL digest, target element) and verified at execution.  The model's
   ``effect`` label can only add a requirement (``payment`` always needs
-  approval), never remove one.  The worker also cancels, for a page's whole
-  life, any submit of such a form that no approved step let through, whatever
-  element, script, timer or callback triggered it; the step, or for a later
-  submit the next snapshot, is refused as ``approval_required`` (#698).  Every
-  step's approval is bound to the target's own form or page state, the state
-  of the form its label forwards to, and the state of every payment form on
-  the page, each with that form's identity (position, method, action).
+  approval), never remove one.  Every step's approval is bound to the
+  target's own form or page state, the state of the form its label forwards
+  to, and the state of every payment form on the page, each with that form's
+  identity (position, method, action).  The worker also cancels, for a page's
+  whole life, any submit of such a form that no approval lets through,
+  whatever element, script, timer, callback or native ``submit`` triggered it
+  (#698, #700).  An approved step lets only its target's payment form through,
+  briefly past the step for that form's deferred submit.  A cancelled submit
+  is asked of the owner bound to that form and the digest of what it would
+  send (hidden amounts included); once exactly that is approved, the worker
+  releases the held submit (``release_submit``).
 
 Engine (#680): ``WebKitWorkerDriver`` drives ``personal_agent.browser_worker``,
 a subprocess that owns the Cocoa run loop and a ``WKWebView`` with an
@@ -64,13 +68,12 @@ from urllib.parse import urlsplit, urlunsplit
 from .agent_runtime import BROWSER_ACTIONS, ToolError, lookup_norm, lookup_text_violations, lookup_words
 from .bounded_execution import SECRET_PATTERN
 from .browser_jar import JAR_NAME, SERVICE as JAR_SERVICE, CookieJar, JarError, KeychainKey, store_account
-from .browser_worker import PAYMENT_TOKENS
+from .browser_worker import PAYMENT_TOKENS, SECRET_TOKENS
 
 #: The model's declared effect class of one action.
 EFFECTS = ('read', 'navigate', 'mutate', 'payment')
 #: Field ``autocomplete`` tokens whose values never reach the model or Evidence.
-GUARDED_AUTOCOMPLETE = frozenset({'current-password', 'new-password', 'one-time-code', 'cc-number', 'cc-csc',
-                                  'cc-exp', 'cc-exp-month', 'cc-exp-year', 'cc-name'})
+GUARDED_AUTOCOMPLETE = frozenset(SECRET_TOKENS)   # one set, shared with the worker's submitted-state digest
 #: Fields where typing (and any button of the enclosing form) needs approval.
 PAYMENT_AUTOCOMPLETE = frozenset(PAYMENT_TOKENS)   # one set, shared with the worker's page-lifetime guard
 #: Actions the loop never memoises or deduplicates: the page is state.
@@ -101,6 +104,8 @@ KEY_DELETE_FAILED_TEXT = ('로그인 세션은 삭제했지만 macOS 키체인�
 BLOCKED_TEXT = ('이 컴퓨터나 내부 네트워크(루프백·사설·링크 로컬·.local) 주소는 브라우저로 열지 않습니다. '
                 '공개 웹 주소만 열 수 있습니다.')
 UNAVAILABLE_TEXT = '이 작업 경로에는 브라우저 기능이 연결되어 있지 않습니다.'
+SUBMIT_REFUSED_TEXT = ('결제 양식일 수 있는 제출을 확인할 수 없어 멈췄습니다. 페이지를 다시 읽고 결제 버튼을 직접 눌러 '
+                       '승인을 요청하세요.')
 LOGIN_WINDOW_TEXT = ('로그인 창에서 직접 로그인한 뒤 창을 닫아 주세요. AgentOS는 입력 내용을 보지 않으며, 창을 닫으면 '
                      '로그인 세션을 암호화해 저장합니다.')
 LIMITATION_TEXT = ('카드번호·CVC·일회용 코드 입력과 그 양식의 버튼은 승인 없이 실행하지 않습니다. '
@@ -506,8 +511,9 @@ class BrowserSession:
         self.steps, self.steps_used = steps, 0
         self.action_seconds = action_seconds
         self.last = None
-        # The last click/type sent to the page, as (binding, description): a
-        # payment-form submit cancelled after it answered is attributed to it (#698).
+        # The description of the last click/type sent to the current page: the
+        # owner reads it with a payment-form submit cancelled after it answered
+        # (#698).  Cleared by browser_open and a navigation (#700).
         self._last_input = None
 
     # -- plumbing --
@@ -560,24 +566,48 @@ class BrowserSession:
         self.last = mediate_snapshot(raw, excluded, requested_url)
         cancelled = raw.get('cancelled_submit') if isinstance(raw, dict) else None
         if cancelled:
-            self._cancelled_between_steps(cancelled)
+            # A payment-form submit the worker cancelled after a step answered (a
+            # timer, an async callback).  Released only when the owner approved
+            # exactly it; the page it led to is then read instead.
+            self._cancelled_submit(cancelled, self._last_input or '결제 양식 제출')
+            self._last_input = None
+            self._settle()
+            return self._snapshot(requested_url)
         return self.last
 
-    def _cancelled_between_steps(self, record):
-        """A payment-form submit the worker cancelled after a step answered (a timer, an async callback).
+    def _submit_binding(self, record):
+        """What the approval of a cancelled payment-form submit is bound to (#700).
 
-        Asked of the owner as the last click/type (the resumed run repeats
-        it, and every step's binding already covers every payment form's
-        state); with no step yet, as a submit of that form.
+        That form (position, method, action page) on its page, and the digest
+        of what its submit would send (every submitted control's name and
+        value, hidden amounts included, card/code/password values excluded,
+        and the form's visible text), read when the worker cancelled it.
         """
-        note = cancelled_note(record)
-        if self._last_input is not None:
-            binding, description = self._last_input
-            self._refuse(binding, description + note)
-        identity = form_identity(record)
-        state = (self.last.get('_payment_states') or {}).get(identity, '')
-        self._refuse(step_binding(self.work_id, 'browser_submit', self.last.get('_page'), identity, '', state),
-                     '결제 양식 제출' + note)
+        page = record.get('page') or (self.last or {}).get('_page')
+        return step_binding(self.work_id, 'browser_submit', page, form_identity(record), '', str(record.get('state') or ''))
+
+    def _cancelled_submit(self, record, description, depth=0):
+        """A payment-form submit the worker cancelled and holds (#698, #700).
+
+        When the owner already approved exactly that form in that state, the
+        worker releases the held submit and the step goes on (the answer is
+        the release's); otherwise the owner is asked, bound to that form's
+        submitted state rather than to the step that caused it, so the
+        resumed run matches however the page changed on the way to the submit.
+        """
+        record = record if isinstance(record, dict) else {}
+        binding = self._submit_binding(record)
+        if depth < 2 and self.approvals.consume(binding):
+            release = getattr(self._driver(), 'release_submit', None)
+            if not callable(release):
+                raise ToolError(FAILED_TEXT, 'browser_failed')
+            try:
+                return self._call(lambda timeout: release(record, timeout))
+            except ToolError as exc:
+                if exc.code != 'approval_required':
+                    raise
+                return self._cancelled_submit(getattr(exc, 'cancelled_form', None), description, depth + 1)
+        self._refuse(binding, description + cancelled_note(record))
 
     def _settle(self):
         """Let a page that renders its content after load finish rendering, bounded (#709).
@@ -646,9 +676,11 @@ class BrowserSession:
         model's ``payment`` label (which can only ADD the requirement).  The
         binding covers the step's arguments and the current page state too, so
         different text or a changed form asks again.  Returns True when an
-        approval was consumed: only then does the worker let a submit of a
-        payment form through.  An unguarded step still spends an approval the
-        owner gave for exactly it after the worker refused it (#698).
+        approval was consumed: only then does the worker let a submit of the
+        target's payment form through (#700).  An unguarded step still spends
+        an approval the owner gave for exactly it.  A guarded step always
+        needs its own approval, even while an approval of a cancelled submit
+        is issued: a press can pay by ``fetch`` without any submit (#700 review).
         """
         if self.approvals.consume(binding):
             return True
@@ -663,19 +695,19 @@ class BrowserSession:
             pass
         raise ToolError(APPROVAL_TEXT, 'approval_required', requires='browser-step-approval')
 
-    def _input(self, operation, binding, description):
+    def _input(self, operation, description):
         """Run one click or type; a payment-form submit the worker cancelled asks the owner (#698).
 
-        An approved step lets one such submit through; a second one is
-        cancelled and asked again like any other.
+        An approved step lets a submit of its target's payment form through;
+        any other one is cancelled and handled by ``_cancelled_submit`` (#700).
         """
-        self._last_input = (binding, description)
+        self._last_input = description
         try:
             return self._call(operation)
         except ToolError as exc:
-            if exc.code == 'approval_required':
-                self._refuse(binding, description + cancelled_note(getattr(exc, 'cancelled_form', None)))
-            raise
+            if exc.code != 'approval_required':
+                raise
+            return self._cancelled_submit(getattr(exc, 'cancelled_form', None), description)
 
     # -- the tools --
     def run(self, action, args):
@@ -705,6 +737,7 @@ class BrowserSession:
         self._spend_step()
         self._guard(step_binding(self.work_id, 'browser_open', url, url, url), f'{_host(parts)} 페이지 열기',
                     effect == 'payment')
+        self._last_input = None   # a submit cancelled on the new page is not that step's (#700)
         self._call(lambda timeout: self._driver().goto(url, timeout))
         self._settle()
         return self._page_state(requested_url=url)
@@ -733,13 +766,16 @@ class BrowserSession:
         approved = self._guard(binding, description, element['submit_guarded'] or effect == 'payment')
         before = page_reference(snapshot.get('url'))
         answer = self._input(lambda timeout: self._driver().click(element['index'], timeout, approved=approved),
-                             binding, description)
+                             description)
+        if isinstance(answer, dict) and answer.get('navigated'):
+            self._last_input = None   # #700: the page it was sent to is gone
         # #736: the worker answers once any navigation the click started has
         # committed; the content of the page it landed on is then settled too.
         self._settle()
         page = self._page_state()
         if (isinstance(answer, dict) and answer.get('navigated')) or page_reference(page.get('url')) != before:
             page['navigated'] = True
+            self._last_input = None
         return page
 
     def type(self, args):
@@ -758,7 +794,7 @@ class BrowserSession:
         required = element['payment'] or element.get('forwards_payment') or effect == 'payment'
         approved = self._guard(binding, description, required)
         self._input(lambda timeout: self._driver().type(element['index'], text, timeout, approved=approved),
-                    binding, description)
+                    description)
         return self._page_state()
 
     @staticmethod
@@ -877,7 +913,7 @@ def worker_environment(base=None):
 
 #: Worker error codes that mean "the element the guard classified is not what the pointer would hit".
 TARGET_ERRORS = frozenset({'target_missing', 'target_changed', 'target_hidden', 'target_obscured', 'not_typable',
-                           'not_focusable', 'bad_target'})
+                           'not_focusable', 'bad_target', 'submit_changed'})
 WORKER_START_SECONDS = 30
 WORKER_GRACE_SECONDS = 5
 WORKER_QUIT_SECONDS = 5
@@ -1069,6 +1105,10 @@ class WebKitWorkerDriver:
                 raise ToolError(TARGET_TEXT, 'target_unavailable')
             if code == 'blocked_destination':
                 raise ToolError(BLOCKED_TEXT, 'blocked_destination')
+            if code == 'submit_refused':
+                # #700: a form post the guard refused with no page form to hold (a
+                # resubmitted POST, or the page did not answer which form it was).
+                raise ToolError(SUBMIT_REFUSED_TEXT, 'submit_refused')
             if code == 'approval_required':
                 # The worker cancelled a payment-form submit no approval let through (#698).
                 refusal = ToolError(APPROVAL_TEXT, 'approval_required', requires='browser-step-approval')
@@ -1115,8 +1155,9 @@ class WebKitWorkerDriver:
     def click(self, index, timeout, approved=False):
         """``approved``: the session consumed an owner approval for this step.
 
-        Only then does the worker let one payment-form submit through, until
-        the step answers; otherwise a cancelled one answers ``approval_required``.
+        Only then does the worker let a submit of the target's payment form
+        through, during the step and briefly after it (#700); otherwise a
+        cancelled one answers ``approval_required`` with its form record.
         Returns ``{'navigated': bool}``: whether the click started a main-frame
         navigation (a same-view new-window load included) that the worker
         waited for (#736).  No URL crosses here; the next snapshot is mediated.
@@ -1126,6 +1167,19 @@ class WebKitWorkerDriver:
 
     def type(self, index, text, timeout, approved=False):
         self._request('type', timeout, text=text, approved=approved is True, **self._target(index))
+
+    def release_submit(self, record, timeout):
+        """Release the cancelled payment-form submit ``record`` names, which the owner approved (#700).
+
+        ``record`` is the ``cancelled_form``/``cancelled_submit`` the worker
+        reported (form position, method, action, page, state digest); the
+        worker releases only that held submit, and only when the same form
+        would still send the same state.  Answers like ``click``.
+        """
+        record = record if isinstance(record, dict) else {}
+        form = {key: record.get(key) for key in ('dom', 'method', 'action', 'page', 'state')}
+        message = self._request('release_submit', timeout, form=form)
+        return {'navigated': bool(message.get('navigated'))}
 
     # -- the owner's login window ---------------------------------------------------
     def show(self, url, timeout):

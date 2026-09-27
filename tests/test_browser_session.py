@@ -112,6 +112,15 @@ PAGES = {
         <button type="submit" id="payB">결제하기</button></form>
       <label for="payA"><span role="button">빠른 구매</span></label>
       </body></html>''',
+    # #700 P2-1: the pay button of one payment form whose handler submits another payment form.
+    '/checkout-cross': '''<html><head><title>교차 결제</title></head><body><h1>교차 결제</h1>
+      <form id="payA" action="/pay" method="post"><p>결제 금액 12,900원</p>
+        <label>카드번호 <input type="text" autocomplete="cc-number" name="card"></label>
+        <button type="button" onclick="payB.submit()">결제하기</button></form>
+      <form id="payB" action="/pay-other" method="post"><p>결제 금액 990,000원</p>
+        <label>카드번호 <input type="text" autocomplete="cc-number" name="card"></label>
+        <input type="hidden" name="amount" value="990000"></form>
+      </body></html>''',
     '/validate': '<html><head><title>확인</title></head><body>ok</body></html>',
     '/reset/' + PASSPORT:'''<html><head><title>Reset token=abcDEF123456secret</title></head><body><h1>재설정</h1>
       <a href="https://owner:hunter2@fixture.test/reset/''' + PASSPORT + '''?code=1#x">다시 열기</a>
@@ -164,7 +173,7 @@ class _PageParser(HTMLParser):
                        'tag': tag, 'type': kind, 'autocomplete': (attrs.get('autocomplete') or '').lower(),
                        'value': value if takes_value else None, 'form': self.form['id'] if self.form else None,
                        'disabled': 'disabled' in attrs, 'hidden': hidden or kind == 'hidden', 'action': dict(self.form) if self.form else None,
-                       'html_id': attrs.get('id'), 'onclick': attrs.get('onclick') or '', 'label': self.label_info}
+                       'html_id': attrs.get('id'), 'onclick': attrs.get('onclick') or '', 'label': self.label_info, 'sent': value}
             if self.label_info is not None:
                 self.label_info['elements'].append(element)
             self.elements.append(element)
@@ -211,11 +220,19 @@ class _PageParser(HTMLParser):
         """As the page script's ``formRecord``: position, method and resolved action."""
         return {'dom': form['id'] - 1, 'method': form['method'].lower(), 'action': urljoin(self.url, form['action'])}
 
+    def cancelled(self, form):
+        """As the worker's report of a cancelled submit (#700): the record, its page and the
+        digest of what it would send (non-credential values and the form's text)."""
+        rows = [f"{e.get('html_id') or e['index']}={'<guarded>' if bs.guarded_field(e) else e.get('sent') or ''}"
+                for e in self.elements if e['form'] == form['id'] and e['tag'] in ('input', 'select', 'textarea')]
+        state = '\n'.join(rows) + '\n\x1e' + '\n'.join(form.get('texts', []))
+        return {**self.record(form), 'page': self.url, 'state': bs.digest(state)}
+
     def result(self, title):
         for element in self.elements:
             control = self.control(element)
             element['label_form'] = control['form'] if control else None
-        private = ('hidden', 'action', 'html_id', 'onclick', 'label')
+        private = ('hidden', 'action', 'html_id', 'onclick', 'label', 'sent')
         elements = [{k: v for k, v in e.items() if k not in private} for e in self.elements if not e['hidden']]
         forms = [{'id': form['id'], 'text': '\n'.join(form.get('texts', [])), **self.record(form)} for form in self.forms]
         return {'url': self.url, 'title': title, 'text': '\n'.join(self.text), 'elements': elements, 'forms': forms}, self.elements
@@ -235,6 +252,8 @@ class FakeDriver:
         #: A payment-form submit the page's guard cancelled between steps (a
         #: test sets it, as a timer would); the next snapshot reports it once.
         self.cancelled = None
+        #: The last cancelled submit, which ``release_submit`` may release once (#700).
+        self.held = None
 
     def _path(self, url):
         return urlsplit(url).path or '/'
@@ -272,23 +291,59 @@ class FakeDriver:
             return next((form for form in parser.forms if form.get('html_id') == called.group(1)), None)
         return None
 
+    def _run_script(self, element, parser):
+        """The DOM changes an onclick handler makes before it submits: ``getElementById('x').value = 'v'``."""
+        for html_id, value in re.findall(r"getElementById\('(\w+)'\)\.value = '([^']*)'", element.get('onclick') or ''):
+            target = next((e for e in parser.elements if e['html_id'] == html_id), None)
+            if target is not None:
+                self.values.setdefault(self.url, {})[target['index']] = value
+
     def click(self, index, timeout, approved=False):
-        """As the worker: without ``approved``, a submit of a payment form is cancelled (#698)."""
+        """As the worker: a submit of a payment form is cancelled and held unless an approved
+        step's allowance names that form (its own or its label's payment form, else any, #700)."""
         self.log.append(('click', index, timeout))
         self.approved.append(approved)
         _, elements, parser = self._parse()
         element = next(e for e in elements if e['index'] == index)
         if element['tag'] == 'a':
             return self.goto(element['href'], timeout)
+        self._run_script(element, parser)
+        _, elements, parser = self._parse()
+        element = next(e for e in elements if e['index'] == index)
         form = self._submitted(element, parser)
         if form is None:
             return None
-        if not approved and any(e['form'] == form['id'] and bs.payment_field(e) for e in elements):
-            refusal = ToolError(bs.APPROVAL_TEXT, 'approval_required', requires='browser-step-approval')
-            refusal.cancelled_form = parser.record(form)
-            raise refusal
+        holds = lambda form_id: any(e['form'] == form_id and bs.payment_field(e) for e in elements)
+        if holds(form['id']):
+            control = parser.control(element)
+            own = [f for f in (element['form'], control['form'] if control else None) if f is not None and holds(f)]
+            allowed = own or [f['id'] for f in parser.forms if holds(f['id'])]
+            if not approved or form['id'] not in allowed:
+                self.held = parser.cancelled(form)
+                refusal = ToolError(bs.APPROVAL_TEXT, 'approval_required', requires='browser-step-approval')
+                refusal.cancelled_form = dict(self.held)
+                raise refusal
+        return self._post(form, timeout)
+
+    def _post(self, form, timeout):
         self.posts.append((form['method'], form['action']))
         return self.goto(urljoin(self.url, form['action']), timeout)
+
+    def hold(self, form_id):
+        """A payment-form submit the page's guard cancelled between steps (as a timer would): the next snapshot reports it."""
+        _, _, parser = self._parse()
+        self.held = self.cancelled = parser.cancelled(next(f for f in parser.forms if f['id'] == form_id))
+
+    def release_submit(self, record, timeout):
+        """As the worker (#700): only the held submit, and only while its form would send the same state."""
+        self.log.append(('release', dict(record)))
+        held, self.held = self.held, None
+        _, _, parser = self._parse()
+        form = next((f for f in parser.forms if held and parser.record(f)['dom'] == held['dom']), None)
+        if held is None or record != held or form is None or parser.cancelled(form) != held:
+            raise ToolError(bs.TARGET_TEXT, 'target_unavailable')
+        self._post(form, timeout)
+        return {'navigated': True}
 
     def type(self, index, text, timeout, approved=False):
         self.log.append(('type', index, text, timeout))
@@ -308,6 +363,9 @@ class Approvals:
     def __init__(self, *issued):
         self.issued = [bs.binding_digest(b) for b in issued]
         self.requests = []
+
+    def issue(self, binding):
+        self.issued.append(bs.binding_digest(binding))
 
     def consume(self, binding):
         key = bs.binding_digest(binding)
@@ -640,11 +698,16 @@ class ForwardedSubmitTests(unittest.TestCase):
     def test_a_scripted_submit_of_the_payment_form_is_refused_by_the_driver_and_asks_the_owner(self):
         for target in ('바로 결제', '요청 결제'):
             binding = self.refused(target)
-            self.assertEqual((binding['action'], binding['target_digest']),
-                             ('browser_click', bs.digest(f'button|{target}|div|||')))
+            # #700: bound to the cancelled form and what it would send, not to the step.
+            self.assertEqual((binding['action'], binding['page_digest'], binding['target_digest']),
+                             ('browser_submit', bs.digest(ORIGIN + '/checkout-forwarded'),
+                              bs.digest(f'form 0|post|{ORIGIN}/pay')))
+            self.assertIn(target, self.approvals.requests[-1][1], 'the owner reads the step that caused it')
+            self.assertIn(bs.CANCELLED_NOTE, self.approvals.requests[-1][1])
         self.assertEqual(self.driver.approved, [False, False], 'the driver was told the steps had no approval')
         self.assertEqual(self.driver.posts, [], 'no payment form was submitted')
         self.assertEqual(len(self.approvals.requests), 2)
+        self.assertEqual(self.approvals.requests[0][0], self.approvals.requests[1][0], 'the same form in the same state')
 
     def test_a_scripted_submit_of_an_ordinary_form_still_runs(self):
         page = self.sess.click({'target': '쿠폰 바로 적용', 'effect': 'mutate'})
@@ -655,17 +718,42 @@ class ForwardedSubmitTests(unittest.TestCase):
         self.assertEqual(self.approvals.requests, [])
 
     def test_an_approved_forwarded_submit_runs_once(self):
-        for target in ('바로 결제', '빠른 구매'):
+        # The label's span is refused before the page (a click binding): the approved click
+        # carries the allowance.  The scripted div's submit is cancelled and held (a submit
+        # binding): the approved form in that state is released by the worker (#700).
+        for target, action, approved in (('바로 결제', 'browser_submit', False), ('빠른 구매', 'browser_click', True)):
             binding = self.refused(target)
+            self.assertEqual(binding['action'], action)
             self.approvals.issued.append(bs.binding_digest(binding))
             self.sess.open({'url': ORIGIN + '/checkout-forwarded', 'effect': 'navigate'})
             page = self.sess.click({'target': target, 'effect': 'mutate'})
             self.assertEqual(page['title'], '결제 완료')
-            self.assertEqual(self.driver.approved[-1], True)
+            self.assertTrue(page['navigated'])
+            self.assertEqual(self.driver.approved[-1], approved)
             self.assertEqual(self.approvals.issued, [], 'one approval, one step')
             self.sess.open({'url': ORIGIN + '/checkout-forwarded', 'effect': 'navigate'})
             self.refused(target)
         self.assertEqual(self.driver.posts, [('post', '/pay'), ('post', '/pay')])
+        self.assertEqual(len([entry for entry in self.driver.log if entry[0] == 'release']), 1)
+
+    def test_an_approved_step_lets_only_its_own_payment_form_through(self):
+        # #700 P2-1: the approved pay button of one form cannot carry a submit of another.
+        approvals = Approvals()
+        sess, driver = session(approvals=approvals, steps=40)
+        sess.open({'url': ORIGIN + '/checkout-cross', 'effect': 'navigate'})
+        with self.assertRaises(ToolError):
+            sess.click({'target': '결제하기', 'effect': 'mutate'})
+        click = approvals.requests[-1][0]
+        self.assertEqual(click['action'], 'browser_click')
+        approvals.issued.append(bs.binding_digest(click))
+        with self.assertRaises(ToolError) as caught:
+            sess.click({'target': '결제하기', 'effect': 'mutate'})
+        self.assertEqual(caught.exception.code, 'approval_required')
+        self.assertEqual(driver.approved[-1], True, 'the step was approved')
+        submit = approvals.requests[-1][0]
+        self.assertEqual((submit['action'], submit['target_digest']),
+                         ('browser_submit', bs.digest(f'form 1|post|{ORIGIN}/pay-other')), 'the other form is asked for')
+        self.assertEqual((approvals.issued, driver.posts), ([], []))
 
     def approved_binding(self, target, pages=PAGES, path='/checkout-forwarded'):
         """The binding a fresh session is refused on for ``target`` (what the owner then approves)."""
@@ -713,13 +801,14 @@ class ForwardedSubmitTests(unittest.TestCase):
     def test_a_submit_cancelled_after_the_step_answered_is_reported_by_the_next_snapshot(self):
         # Review P1-1: a timer or async callback submits the payment form after the step.
         self.sess.type({'target': '쿠폰', 'text': 'SAVE', 'effect': 'mutate'})
-        self.driver.cancelled = {'dom': 0, 'method': 'post', 'action': ORIGIN + '/pay'}
+        self.driver.hold(1)
         with self.assertRaises(ToolError) as caught:
             self.sess.read()
         self.assertEqual(caught.exception.code, 'approval_required')
         binding, description = self.approvals.requests[-1]
-        self.assertEqual((binding['action'], binding['argument_digest']), ('browser_type', bs.digest('SAVE')),
-                         'attributed to the step that triggered it, which the resumed run repeats')
+        # #700: bound to the cancelled form's own submitted state; the owner reads the step.
+        self.assertEqual((binding['action'], binding['target_digest']), ('browser_submit', bs.digest(f'form 0|post|{ORIGIN}/pay')))
+        self.assertIn("'쿠폰' 입력란에 입력", description)
         self.assertIn(bs.CANCELLED_NOTE, description)
         self.assertIn('/pay', description)
         self.assertEqual(self.sess.read()['title'], '빠른 결제', 'reported once')
@@ -727,11 +816,103 @@ class ForwardedSubmitTests(unittest.TestCase):
         approvals = Approvals()
         sess, driver = session(approvals=approvals)
         sess.open({'url': ORIGIN + '/checkout-forwarded', 'effect': 'navigate'})
-        driver.cancelled = {'dom': 0, 'method': 'post', 'action': ORIGIN + '/pay'}
+        driver.hold(1)
         with self.assertRaises(ToolError):
             sess.read()
         self.assertEqual(approvals.requests[-1][0]['action'], 'browser_submit')
+        self.assertTrue(approvals.requests[-1][1].startswith('결제 양식 제출'))
         self.assertEqual(driver.posts, [])
+
+    def test_an_approved_deferred_submit_is_released_instead_of_asked_again(self):
+        # #700 P2-2: async validation submits after the step; once the owner approved that
+        # form in that state, the next cancelled submit of it is released, not asked again.
+        self.sess.click({'target': '쿠폰 적용', 'effect': 'mutate'})
+        self.sess.open({'url': ORIGIN + '/checkout-forwarded', 'effect': 'navigate'})
+        self.driver.hold(1)
+        with self.assertRaises(ToolError):
+            self.sess.read()
+        self.approvals.issued.append(bs.binding_digest(self.approvals.requests[-1][0]))
+        asked = len(self.approvals.requests)
+        # The resumed run repeats the step; its deferred submit is cancelled again and reported.
+        sess, driver = session(self.driver, approvals=self.approvals, steps=40)
+        sess.open({'url': ORIGIN + '/checkout-forwarded', 'effect': 'navigate'})
+        driver.hold(1)
+        page = sess.read()
+        self.assertEqual(page['title'], '결제 완료', 'the released submit landed and that page is read')
+        self.assertEqual((len(self.approvals.requests), self.approvals.issued), (asked, []), 'not asked again')
+        self.assertEqual(driver.posts, [('post', '/coupon'), ('post', '/pay')])
+        # A released submit is spent: the next one asks again.
+        sess.open({'url': ORIGIN + '/checkout-forwarded', 'effect': 'navigate'})
+        driver.hold(1)
+        with self.assertRaises(ToolError):
+            sess.read()
+        self.assertEqual(driver.posts, [('post', '/coupon'), ('post', '/pay')])
+
+    def test_a_handler_that_changes_the_form_before_submitting_matches_on_the_resumed_step(self):
+        # #700 item 4: the unapproved click's handler changes the form (a recipient
+        # value) and its own text, then submits.  The approval is bound to what the
+        # submit sends, so the repeated step matches whether or not the page was reloaded.
+        before = self.sess.last['_states']
+        binding = self.refused('메모 후 결제')
+        self.assertEqual(binding['action'], 'browser_submit')
+        changed = self.sess.read()
+        self.assertIn('처리 중', [row.get('value') for row in changed['elements']], 'the handler changed the form')
+        self.assertNotEqual(self.sess.last['_states'], before, 'a binding to the pre-click page would no longer match')
+        self.approvals.issued.append(bs.binding_digest(binding))
+        # The same run repeats the step on the changed page: it matches.
+        page = self.sess.click({'target': '메모 후 결제', 'effect': 'mutate'})
+        self.assertEqual(page['title'], '결제 완료')
+        self.assertEqual((self.approvals.issued, self.driver.posts), ([], [('post', '/pay')]))
+        # A resumed run that opens the page again matches too.
+        approvals = Approvals(binding)
+        sess, driver = session(approvals=approvals, steps=40)
+        sess.open({'url': ORIGIN + '/checkout-forwarded', 'effect': 'navigate'})
+        self.assertEqual(sess.click({'target': '메모 후 결제', 'effect': 'mutate'})['title'], '결제 완료')
+        self.assertEqual((approvals.issued, driver.posts), ([], [('post', '/pay')]))
+
+    def test_a_hidden_amount_is_part_of_the_submitted_state(self):
+        # #700 item 5: a hidden input the owner never sees (the amount) is bound too.
+        approvals = Approvals()
+        sess, driver = session(approvals=approvals, steps=40)
+        sess.open({'url': ORIGIN + '/checkout-cross', 'effect': 'navigate'})
+        driver.hold(2)
+        with self.assertRaises(ToolError):
+            sess.read()
+        approvals.issued.append(bs.binding_digest(approvals.requests[-1][0]))
+        cheaper = dict(PAGES)
+        cheaper['/checkout-cross'] = PAGES['/checkout-cross'].replace('value="990000"', 'value="1"')
+        driver.pages = cheaper
+        driver.hold(2)
+        with self.assertRaises(ToolError):
+            sess.read()
+        self.assertEqual(len(approvals.issued), 1, 'another amount is another approval')
+        self.assertNotEqual(approvals.requests[-1][0]['state_digest'], approvals.requests[-2][0]['state_digest'])
+        self.assertEqual(driver.posts, [])
+
+    def test_an_issued_submit_approval_never_lifts_a_guarded_press(self):
+        # #700 re-review P1: a press can pay by fetch with no submit to hold, so a guarded
+        # press needs its own approval even while an approval of a cancelled submit is issued.
+        # (A pay button whose submit comes after its window therefore asks again: fail closed.)
+        self.driver.hold(1)
+        with self.assertRaises(ToolError):
+            self.sess.read()
+        self.approvals.issue(self.approvals.requests[-1][0])
+        pay = next(row for row in self.sess.last['_elements'] if row['tag'] == 'button' and row['submit_guarded'])
+        binding = self.refused(str(pay['n']))
+        self.assertEqual(binding['action'], 'browser_click')
+        self.assertEqual(len(self.approvals.issued), 1, 'the submit approval is left unspent')
+        self.assertEqual([entry for entry in self.driver.log if entry[0] == 'click'], [], 'refused before the page')
+        self.assertEqual(self.driver.posts, [])
+
+    def test_a_release_the_worker_refuses_fails_typed_and_spends_the_approval(self):
+        binding = self.refused('바로 결제')
+        self.approvals.issued.append(bs.binding_digest(binding))
+        self.driver.hold(1)
+        self.driver.held = dict(self.driver.held, state='changed')   # the page's held submit changed since
+        with self.assertRaises(ToolError) as caught:
+            self.sess.read()
+        self.assertEqual(caught.exception.code, 'target_unavailable')
+        self.assertEqual((self.approvals.issued, self.driver.posts), ([], []))
 
 
 # ---------------------------------------------------------------- login, budget, targets

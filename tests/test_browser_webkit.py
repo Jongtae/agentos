@@ -898,6 +898,9 @@ class SessionFixtureHandler(FixtureHandler):
               <form action="/order" method="post"><input type="submit" value="Pay now" role="none"></form>
               <a href="/order">Card <span role="button">Details</span> ₩12,900 결제하기</a>
               <a href="/reviews">Best laptops to buy in 2026, compared</a>
+              <a href="#" onclick="return false">Purchase this song for $0.99</a>
+              <div onclick="void 0">Our plans and a long description you can subscribe to later on
+                <span role="button">Read more</span></div>
               </body></html>''')
         if path == '/checkout-realm':
             # #700 item 2 repro: the native submit of a fresh iframe's prototype bypasses the page-world wrapper.
@@ -1305,6 +1308,8 @@ class WebKitIntegrationTests(unittest.TestCase):
             self.assertEqual(flagged.get('Pay now'), True, 'role=none on a submit input')
             self.assertEqual(flagged.get('Details'), True, 'a child of a pay link')
             self.assertFalse(next(row for row in rows if row['name'].startswith('Best laptops'))['commit'])
+            self.assertEqual(flagged.get('Purchase this song for $0.99'), True, 'a styled link that runs a script')
+            self.assertEqual(flagged.get('Read more'), False, "a wrapper's long text is content")
             for row in [row for row in rows if row['commit']]:
                 with self.assertRaises(ToolError) as caught:
                     sess.click({'target': str(row['n']), 'effect': 'mutate'})

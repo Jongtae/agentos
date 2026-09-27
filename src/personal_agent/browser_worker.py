@@ -188,16 +188,29 @@ const ownText = (el) => { const tag = el.tagName.toLowerCase(), parts = [el.inne
 const VALUE_ROLES = ['textbox', 'searchbox', 'combobox', 'listbox', 'checkbox', 'radio', 'switch', 'slider', 'spinbutton'];
 const buttonish = (el) => { const tag = el.tagName.toLowerCase();
   const roles = (el.getAttribute('role') || '').toLowerCase().split(/\s+/).filter(Boolean);
+  // The tag decides first: a role attribute never makes a button or a link a field.
+  if (tag === 'button' || tag === 'summary' || (tag === 'a' && el.hasAttribute('href'))) return true;
+  if (tag === 'input') return BUTTON_INPUTS.includes(typeOf(el));
   if (tag === 'select' || tag === 'textarea') return false;
-  if (tag === 'input' && !BUTTON_INPUTS.includes(typeOf(el))) return false;
   return !roles.some((role) => VALUE_ROLES.includes(role)); };
+// A link that goes somewhere (a styled ``href="#"`` or ``javascript:`` link runs a script instead).
+const navLink = (el) => el.tagName.toLowerCase() === 'a' && el.hasAttribute('href') &&
+  !/^\s*(?:#|javascript:)/i.test(el.getAttribute('href') || '');
 const commitText = (el) => nameOf(el) + ' | ' + ownText(el);
 const labelName = (el) => { const control = labelControl(el); return control && buttonish(control) ? commitText(control) : ''; };
 // The nearest pressable ancestor a press on ``el`` also activates (a trusted click bubbles).
 const PRESSABLE = 'button, a[href], a[onclick], summary, input[type="submit"], input[type="image"], input[type="button"], ' +
   '[role~="button"], [role~="link"], [role~="menuitem"], [onclick]';
-const ancestorText = (el) => { const parent = el.parentElement, up = parent ? parent.closest(PRESSABLE) : null;
-  return up && buttonish(up) ? commitText(up) : ''; };
+// Up to three pressable ancestors (a neutral wrapper can sit between it and a pay
+// control); never ``body`` or ``html``.
+const ancestorText = (el) => { const texts = []; let node = el.parentElement;
+  while (node && texts.length < 3) {
+    const up = node.closest(PRESSABLE);
+    if (!up || up === document.body || up === document.documentElement) break;
+    if (buttonish(up)) texts.push(commitText(up));
+    node = up.parentElement;
+  }
+  return texts.join(' | '); };
 // What is around it (a product and its price), for the owner's approval prompt and binding.
 const contextOf = (el) => { let node = el.parentElement; const own = (el.innerText || '').length;
   for (let depth = 0; node && depth < 4; depth += 1, node = node.parentElement) {
@@ -355,7 +368,8 @@ Array.from(document.querySelectorAll(SELECTOR)).forEach((el, index) => {
   elements.push({index, role: well(roleOf(el)), name: nameOf(el), href: tag === 'a' ? cut(el.href, 2000) : null, tag, type: well(type),
     autocomplete: well(autocompleteOf(el)), value: takesValue ? cut(el.value || '', 200) : null, form: formId,
     label_form: idOf(control ? formOf(control) : null), own_text: ownText(el), label_name: labelName(el),
-    ancestor_text: ancestorText(el), pressable: buttonish(el), context: contextOf(el), disabled: !!el.disabled});
+    ancestor_text: ancestorText(el), pressable: buttonish(el), nav_link: navLink(el), context: contextOf(el),
+    disabled: !!el.disabled});
 });
 return JSON.stringify({url: cut(location.href, 4000), title: cut(document.title, 400),
   text: cut(document.body ? document.body.innerText : '', 20000), elements: elements.slice(0, 300),

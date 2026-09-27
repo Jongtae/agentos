@@ -111,7 +111,8 @@ LOGIN_WINDOW_TEXT = ('로그인 창에서 직접 로그인한 뒤 창을 닫아 
                      '로그인 세션을 암호화해 저장합니다.')
 LIMITATION_TEXT = ('카드번호·CVC·일회용 코드 입력, 그 양식의 버튼, 한국어·영어·일본어·중국어의 흔한 결제·구매·주문 '
                    '표현이 이름이나 글자에 있는 버튼과 링크는 승인 없이 실행하지 않습니다. 저장된 결제수단으로 결제하는 '
-                   '버튼이라도 그런 표현이 없으면(글자 없는 아이콘 버튼, “계속”, 다른 언어 등) 감지하지 못합니다.')
+                   '버튼이라도 그런 표현이 없으면(글자 없는 아이콘 버튼, “계속”, 다른 언어, 긴 링크 제목 속 단어 등) '
+                   '감지하지 못하며, 예약(“예약하기”)은 결제로 보지 않습니다.')
 
 
 # --- element classification (deterministic, site-independent) ---------------
@@ -217,20 +218,40 @@ def commit_control(element):
     value) carries a commitment signal; or one whose ``<label>`` forwards the press
     to such a control; or one inside such a control (a press bubbles to it).
     """
-    link = element.get('role') == 'link' or element.get('tag') == 'a'
-    own = element.get('pressable', True) and any(commit_name(text, link) for text in
-                                                 (element.get('name'), *_text_parts(element.get('own_text'))))
-    forwarded = any(commit_name(text) for text in _text_parts(element.get('label_name')))
-    inside = any(commit_name(text) for text in _text_parts(element.get('ancestor_text')))
-    return bool(own or forwarded or inside)
+    return bool(_commit_match(element))
+
+
+def _is_link(element):
+    """A link that goes somewhere; a styled ``href="#"``/``javascript:`` link is a button (#758)."""
+    if 'nav_link' in element:
+        return bool(element.get('nav_link'))
+    return element.get('role') == 'link' or element.get('tag') == 'a'
+
+
+def _commit_match(element):
+    """The text that makes a press a commitment (#758), or ''.
+
+    Its own name and text (a bare verb on a navigating link only in a short name),
+    the control its label forwards to, and its pressable ancestors (a bare verb there
+    only in a short text: a wrapper's long text is content, not a control's label).
+    """
+    if element.get('pressable', True):
+        link = _is_link(element)
+        for text in (element.get('name'), *_text_parts(element.get('own_text'))):
+            if commit_name(text, link):
+                return _commit_text(text)
+    for text in _text_parts(element.get('label_name')):
+        if commit_name(text):
+            return _commit_text(text)
+    for text in _text_parts(element.get('ancestor_text')):
+        if commit_name(text, link=True):
+            return _commit_text(text)
+    return ''
 
 
 def commit_detail(element):
     """The text that made a press a commitment and what is around it, for the owner's prompt (#758)."""
-    texts = [element.get('name'), *_text_parts(element.get('own_text')), *_text_parts(element.get('label_name')),
-             *_text_parts(element.get('ancestor_text'))]
-    matched = next((_commit_text(text) for text in texts if commit_name(text)), '')
-    return matched[:60], _commit_text(element.get('context'))[:160]
+    return _commit_match(element)[:60], _commit_text(element.get('context'))[:160]
 
 
 def payment_forms(elements):

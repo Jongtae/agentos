@@ -966,6 +966,17 @@ class CommitControlTests(unittest.TestCase):
                                            'ancestor_text': 'Card | Buy now ₩12,900'}), 'inside it: the press bubbles')
         self.assertFalse(bs.commit_control({'role': 'checkbox', 'tag': 'input', 'name': 'x', 'pressable': False,
                                             'label_name': ''}))
+        # Review of 0008f29: a styled link that runs a script is a button; a wrapper's long text
+        # is content (only a phrase there counts); a pay control a few wrappers up still counts.
+        song = {'role': 'link', 'tag': 'a', 'name': 'Purchase this song for $0.99', 'pressable': True}
+        self.assertTrue(bs.commit_control({**song, 'nav_link': False}))
+        self.assertFalse(bs.commit_control({**song, 'nav_link': True}))
+        self.assertFalse(bs.commit_control({'role': 'button', 'tag': 'span', 'name': 'Read more',
+                                            'ancestor_text': 'Plans | Read more about our plans, then Subscribe to the newsletter'}))
+        self.assertTrue(bs.commit_control({'role': 'button', 'tag': 'span', 'name': 'Read more',
+                                           'ancestor_text': 'Plans | Read more about our plans and place your order today'}))
+        self.assertTrue(bs.commit_control({'role': 'button', 'tag': 'span', 'name': 'Details',
+                                           'ancestor_text': 'Card | Card view | Buy now | Buy now'}))
 
     def test_one_click_controls_need_approval_before_the_page_and_ordinary_ones_run(self):
         approvals = Approvals()

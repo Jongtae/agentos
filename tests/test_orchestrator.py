@@ -245,7 +245,51 @@ class Redelegation(Harness):
         job, _row = self.run_work('시간 걸리는 일')
         self.assertEqual(len(self.engine.turns), 1)
         self.assertEqual(self.transport.bodies, [])
-        self.assertEqual(self.events(job, 'evaluated')[-1][1]['stop'], 'budget')
+        # Review P2-3: the deadline is checked before each call, so neither the
+        # goal judgment nor a re-plan is asked once the time is short.
+        self.assertEqual(self.goals, [False], 'no goal_reached call')
+        self.assertEqual(len(self.asked_plans), 1, 'no plan call')
+        last = self.events(job, 'evaluated')[-1][1]
+        self.assertEqual((last['outcome'], last['stop']), ('not_judged', 'budget'))
+
+    def test_the_deadline_is_checked_again_before_the_replan(self):
+        clock = [0.0]
+        self.service.work_budget = lambda job_id: WorkBudget(clock=lambda: clock[0], seconds=600)
+        self.script([plan('codex', 'Look it up.'), plan('openai', 'Other path.')])
+
+        def judge(context, proposition):
+            # The goal judgment itself uses up the Work's remaining time.
+            clock[0] += 590
+            return BinaryDecision(OUTCOME_DECIDED, False, fixture_confidence())
+        self.service.decision_engine._judge = judge
+        job, _row = self.run_work('시간 걸리는 일')
+        self.assertEqual(len(self.asked_plans), 1, 'the re-plan call was not made')
+        self.assertEqual(self.transport.bodies, [])
+        last = self.events(job, 'evaluated')[-1][1]
+        self.assertEqual((last['outcome'], last['stop']), ('not_reached', 'budget'))
+
+    def test_a_later_attempt_keeps_this_works_private_reads(self):
+        """Review P2-1: attempt 1 read notes; attempt 2 on a CLI with its usual tools
+        gets no own web search, no private-read-and-search pair, and a size/digest-only envelope."""
+        def read_notes(tools):
+            if len(self.engine.turns) == 1:
+                tools.capabilities.record('list_notes', 'succeeded',
+                                          json.dumps({'host_action': 'list_notes', 'evidence': {'count': 1}}))
+        self.engine.before = read_notes
+        self.script([plan('codex', 'Read the saved notes.', tools=('list_notes',)), plan('codex', 'Answer from them.')],
+                    goals=[False, True])
+        job, row = self.run_work('메모 확인해줘')
+        self.assertEqual(len(self.engine.turns), 2)
+        first, second = self.engine.turns
+        self.assertIsNone(second['only'], 'worker_default')
+        self.assertFalse(second['native_search'])
+        self.assertEqual(second['reason'], 'private_turn')
+        self.assertIn('list_notes', second['offered'])
+        record = self.store.turn_provenance(job)
+        self.assertTrue(record['prompt_envelope'].startswith('[not stored'), record['prompt_envelope'])
+        self.assertIn('personal-space', record['prompt_withheld'])
+        self.assertIn('personal-space', record['egress_taint'])
+        self.assertEqual(row['status'], 'succeeded')
 
     def test_no_redelegation_after_an_attempt_that_ran_an_effect(self):
         def effect(tools):
@@ -456,6 +500,17 @@ class OrchestrationUnit(unittest.TestCase):
                 self.assertEqual(orchestration.validate(data, candidates, 1), (None, what))
         spent = Orchestration(None, catalogue, request='r', budget=WorkBudget(seconds=10))
         self.assertEqual(spent.validate(plan('a', 'g'), candidates, 1), (None, 'budget'))
+
+    def test_no_plan_or_goal_call_once_the_deadline_is_short(self):
+        asked = []
+        engine = FixtureDecisionEngine(structured=lambda *a: asked.append('plan'),
+                                       judge=lambda *a: asked.append('goal'))
+        orchestration = Orchestration(ConversationJudgments(engine), self.catalogue(), request='r',
+                                      budget=WorkBudget(seconds=30))
+        attempt = orchestration.first()
+        self.assertEqual((attempt.fallback, asked), ('budget_short', []))
+        self.assertEqual(orchestration.evaluate_answer('answer', 'none'), 'not_judged')
+        self.assertEqual(asked, [])
 
     def test_pinned_offers_only_the_default(self):
         self.assertEqual([row['id'] for row in self.catalogue().available(pinned=True)], ['a'])

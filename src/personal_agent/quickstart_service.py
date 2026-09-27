@@ -15,7 +15,7 @@ from .agent_runtime import (Capabilities, ToolError, run_agent, AGENTS, evidence
                             MEMORY_OWNER, context_sections, CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, OWNER_CONVERSATION, lookup_sources, work_written_values, WORK_SOURCES_KEY, WORK_SOURCES_LIMIT, base_label,
                             history_provenance, WorkBudget, EFFECT_FREE_READS, explicit_search_query, outcome_from_events,
                             WORK_STOP_KEY, WORK_STOP_KEEP, work_stop_requested, WorkLedger, goal_summary, work_source_records,
-                            backfill_work_sources, NOTES_SUMMARY_COMMANDS, WORK_SOURCES_BACKFILL_KEY, WORK_SOURCES_BACKFILL_VERSION)
+                            backfill_work_sources, recorded_private_sources, NOTES_SUMMARY_COMMANDS, WORK_SOURCES_BACKFILL_KEY, WORK_SOURCES_BACKFILL_VERSION)
 from .plugins import PluginRegistry
 from .providers import NOT_REPORTED, ModelAdapter, ProviderError, request_json, validate_model
 from .decision import DEFAULT_DECISION_PROVIDER, RoutedDecisionEngine
@@ -2341,6 +2341,22 @@ class AgentService:
             row=db.execute('SELECT MAX(id) FROM tool_events WHERE job_id=?',(job_id,)).fetchone()
         return (row[0] if row else None) or 0
 
+    def earlier_attempt_private_sources(self, job_id):
+        """Private-store labels this Work's own earlier attempts recorded (#710 review P2-1)."""
+        tools={tool['id']:tool for package in self.runtime_packages() for tool in package['tools']}
+        return set(recorded_private_sources(self.store,job_id,tools))
+
+    @staticmethod
+    def native_search_blocking(labels):
+        """Labels that keep the CLI's own search off in a later attempt of the same Work.
+
+        Every private-store read or write label; the owner-logged-in browser
+        session is excluded, as on the first attempt (#701: its output is
+        mediated and the browser tools stay on native-search turns).
+        """
+        from .agent_runtime import PRIVATE_PROVENANCE
+        return {label for label in labels or () if label!=PRIVATE_PROVENANCE.get('browser_read')}
+
     def work_orchestration(self, job, request, history, sections, budget, pinned=False):
         """The ``Orchestration`` of one Work, or None when no default Main AI exists.
 
@@ -2421,8 +2437,8 @@ class AgentService:
             evaluation=orchestration.evaluate_run(result,owner_needed=owner_needed)
         elif owner_needed:
             evaluation='owner_needed'
-        elif effect:
-            # Nothing may follow an effect, so no judgment is asked for it.
+        elif effect or not orchestration.budget_allows():
+            # Nothing may follow an effect, or the Work's time is short: no judgment is asked.
             evaluation=NOT_JUDGED
         else:
             evaluation=orchestration.evaluate_answer(answer,'\n'.join(observed),failed_steps)
@@ -4759,6 +4775,10 @@ class AgentService:
                         section=(lambda name,value:attempt.section(name,value)) if attempt is not None else (lambda name,value:value)
                         brief=attempt.brief(adjusted=attempt.number>1) if attempt is not None else None
                         attempt_start=self.last_event_id(job['id'])
+                        # #710 review P2-1: what earlier attempts of this Work read from a private
+                        # store stays with the Work: it closes AgentOS-composed egress, keeps the
+                        # CLI's own search off and keeps the local envelope to size and digest.
+                        work_private=self.earlier_attempt_private_sources(job['id']) if attempt is not None and attempt.number>1 else set()
                         history,history_rows=base_history,base_rows
                         boundary=self.document_boundary(config)
                         if document_history and (boundary['requires_approval'] or subscription.get('id')):
@@ -4788,7 +4808,7 @@ class AgentService:
                             cli_browser=(not isolated and facade.PROFILE==BOUNDED_PROFILE)
                             capabilities=Capabilities(self.store,None,{},'',job['id'],record,network=self.local_tools,
                                                       document_access=False,packages=self.runtime_packages(),
-                                                      allowed_tools=allowed_tools,inherited_provenance=turn_provenance,
+                                                      allowed_tools=allowed_tools,inherited_provenance=set(turn_provenance)|work_private,
                                                       current_packages=self.runtime_packages,budget=work_budget,
                                                       current_context=self.current_state,
                                                       **({'browser':self.browser_profile.driver_factory(job['id']),
@@ -4859,6 +4879,8 @@ class AgentService:
                             # own search off for this attempt; the two are never on in the same turn.
                             if attempt is not None:
                                 native_search,native_reason=attempt.native_search(native_search,native_reason,private_read_actions())
+                            if native_search and self.native_search_blocking(work_private):
+                                native_search,native_reason=False,'private_turn'
                             engine_context,engine_prompt,adapter_context,sent,shown_sources=cli_context(native_search)
                             capabilities.private_provenance.update(shown_sources)
                             work_sources|=capabilities.private_provenance
@@ -5010,7 +5032,7 @@ class AgentService:
                                                       # #605 F4: read on every use, so a page approval revoked
                                                       # during this Work refuses a read that starts afterwards.
                                                       public_page_scope=lambda:self.public_page_boundary(config)['urls'],
-                                                      memory_request=owner_memory_request,inherited_provenance=set(turn_provenance)|shown_sources,calendar=self.calendar_for(job),calendar_owner=self.connector_owner_id(job),current_packages=self.runtime_packages,
+                                                      memory_request=owner_memory_request,inherited_provenance=set(turn_provenance)|shown_sources|work_private,calendar=self.calendar_for(job),calendar_owner=self.connector_owner_id(job),current_packages=self.runtime_packages,
                                                       budget=work_budget,
                                                       # #710: the orchestrator's validated subset (None: every tool).
                                                       allowed_tools=attempt.tools if attempt is not None else None,

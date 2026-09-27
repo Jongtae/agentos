@@ -83,6 +83,7 @@ FALLBACK_UNAVAILABLE = 'judgment_unavailable'
 FALLBACK_MALFORMED = 'plan_malformed'
 FALLBACK_UNCONFIDENT = 'plan_unconfident'
 FALLBACK_INVALID = 'plan_invalid'
+FALLBACK_BUDGET = 'budget_short'
 #: What an evaluation found.
 REACHED, NOT_REACHED, UNJUDGED, OWNER_NEEDED, WORKER_FAILED, NOT_JUDGED = (
     'reached', 'not_reached', 'unjudged', 'owner_needed', 'worker_failed', 'not_judged')
@@ -96,6 +97,7 @@ FALLBACK_TEXT = {
     FALLBACK_UNAVAILABLE: '판단 AI를 사용할 수 없어 요청별 AI 선택 없이 기본 AI가 요청을 그대로 처리했습니다.',
     FALLBACK_MALFORMED: '판단 AI의 작업 계획을 읽을 수 없어 기본 AI가 요청을 그대로 처리했습니다.',
     FALLBACK_UNCONFIDENT: '판단 AI가 작업 계획을 확신하지 못해 기본 AI가 요청을 그대로 처리했습니다.',
+    FALLBACK_BUDGET: '남은 작업 시간이 부족해 판단 AI에 묻지 않고 기본 AI가 요청을 그대로 처리했습니다.',
     FALLBACK_INVALID: ('판단 AI의 작업 계획이 사용 가능한 AI·모델·도구 또는 남은 작업 예산과 맞지 않아 '
                        '기본 AI가 요청을 그대로 처리했습니다.'),
 }
@@ -108,7 +110,7 @@ EVALUATED_TEXT = {
     UNJUDGED: '목표 달성 여부를 판단할 수 없었습니다.',
     OWNER_NEEDED: '소유자의 확인이나 정보가 필요합니다.',
     WORKER_FAILED: '작업 AI가 이 시도를 끝내지 못했습니다.',
-    NOT_JUDGED: '다시 맡길 수 없는 시도라 목표 달성 여부를 따로 판단하지 않았습니다.',
+    NOT_JUDGED: '더 맡길 수 없는 시도라 목표 달성 여부를 따로 판단하지 않았습니다.',
 }
 NEXT_TEXT = {
     'redelegate': '계획을 조정해 다시 맡깁니다.',
@@ -401,7 +403,9 @@ class Orchestration:
         redact = getattr(self.judgments, 'redact', None)
         return redact(text, private=private) if redact else str(text or '')
 
-    def _budget_allows(self):
+    def budget_allows(self):
+        """Whether the Work's deadline, Stop and turns still allow another model call
+        and an attempt after it (checked before every plan and evaluation call)."""
         budget = self.budget
         if budget is None:
             return True
@@ -451,6 +455,9 @@ class Orchestration:
         method = getattr(engine, 'structured', None)
         if method is None or not candidates:
             return None, FALLBACK_UNAVAILABLE
+        # The Work's deadline is checked before the call, never after spending it.
+        if not self.budget_allows():
+            return None, FALLBACK_BUDGET
         request = self._redact(self.request, private=False)
         workers = render_catalogue(candidates)
         facts = {'owner_request': request,
@@ -496,7 +503,7 @@ class Orchestration:
             tools = frozenset(data['tools'])
             if not tools <= frozenset(worker['tools']):
                 return None, 'tools'
-        if not self._budget_allows():
+        if not self.budget_allows():
             return None, 'budget'
         return Attempt(number, worker['id'], model=model, goal=goal, criteria=criteria, sections=brief['context'],
                        tools=tools, reason=one_line(data['reason'], MAX_REASON_CHARS), planned=True), ''
@@ -560,10 +567,17 @@ class Orchestration:
         return NOT_REACHED
 
     def evaluate_answer(self, answer, observations, failed=''):
-        """One ``goal_reached`` judgment over a CLI attempt's final answer and recorded tool evidence."""
+        """One ``goal_reached`` judgment over a CLI attempt's final answer and recorded tool evidence.
+
+        Not asked when the Work's deadline no longer allows another attempt:
+        the evaluation only serves a re-delegation (``NOT_JUDGED``, next step
+        ``budget``).
+        """
         goal_reached = getattr(self.judgments, 'goal_reached', None)
         if goal_reached is None:
             return UNJUDGED
+        if not self.budget_allows():
+            return NOT_JUDGED
         text = (f'The worker\'s final answer (its own text):\n{str(answer or "")[:1800]}\n\n'
                 f'Tool results AgentOS recorded for this attempt:\n{observations or "none"}')[:OBSERVATION_CHARS]
         try:
@@ -586,24 +600,25 @@ class Orchestration:
             stop = STOP_REACHED
         elif evaluation == OWNER_NEEDED:
             stop = STOP_OWNER
-        elif effect or evaluation == NOT_JUDGED:
+        elif effect:
             stop = STOP_EFFECT
-        elif evaluation == UNJUDGED:
-            stop = STOP_UNJUDGED
         elif len(self.attempts) > MAX_REDELEGATIONS:
             stop = STOP_LIMIT
-        elif not self._budget_allows():
+        elif evaluation == NOT_JUDGED or not self.budget_allows():
+            # Not judged because the Work's time or turns ran short (an effect is named above).
             stop = STOP_BUDGET
+        elif evaluation == UNJUDGED:
+            stop = STOP_UNJUDGED
         else:
             stop = ''
         following = None
         if not stop:
             candidates = self.catalogue.available(self.pinned)
-            data, _failure = self._ask(candidates)
+            data, failure = self._ask(candidates)
             following, _invalid = (self.validate(data, candidates, len(self.attempts) + 1) if data is not None
                                    else (None, ''))
             if following is None:
-                stop = STOP_REPLAN
+                stop = STOP_BUDGET if failure == FALLBACK_BUDGET else STOP_REPLAN
         after = NEXT_TEXT['redelegate'] if following is not None else NEXT_TEXT[stop]
         self.record(EVALUATED, {'attempt': attempt.number, 'worker': attempt.worker, 'model': attempt.model or None,
                                 'brief_digest': attempt.digest or None, 'outcome': evaluation,

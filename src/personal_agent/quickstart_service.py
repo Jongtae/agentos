@@ -5519,7 +5519,7 @@ class AgentService:
                                 self.close_incomplete_bridge_calls(job['id'],attempt_start,record)
                                 # #735: a model the CLI refused for this account is not offered again.
                                 refused_model=work_model
-                                if model_refused(refused_model,diagnostics.get('failure_class'),' '.join((str(exc),str(diagnostics.get('reason') or '')))):
+                                if model_refused(refused_model,getattr(exc,'meta',None)):
                                     remember_model_refusal(self.store,subscription['id'],refused_model)
                                     if orchestration is not None:orchestration.drop_model(subscription['id'],refused_model)
                                 self.record_turn_provenance(job['id'],status='failed',failure_class=diagnostics.get('failure_class'),egress_taint=sorted(capabilities.private_provenance),

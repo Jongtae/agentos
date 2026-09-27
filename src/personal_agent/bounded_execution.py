@@ -534,6 +534,30 @@ def is_not_signed_in(text):
     return bool(_NOT_SIGNED_IN.search(text or ''))
 
 
+#: #735: the CLIs' own "this model is not available to this account" signals,
+#: as they print them (protocol classification, not a judgment of text).
+#: Codex 0.153.4 (observed, Work a8e6aa7b): ``The '<model>' model is not
+#: supported when using Codex with a ChatGPT account.``  Claude Code 2.1.x
+#: tags an unknown or inaccessible ``--model`` on stderr (observed, #580).
+CLAUDE_UNRECOGNIZED_MODEL_TAG = '[claude-code:unrecognized_model]'
+
+
+def unsupported_model(engine_id, model, reason, stderr=''):
+    """``model`` when the CLI's own failure says that model is unsupported for the account, else ''.
+
+    Only the CLI's specific signal counts; a generic rejection that merely
+    mentions the model (a context-length or content error) does not.
+    """
+    if not model:
+        return ''
+    if engine_id == 'codex':
+        signal = re.compile(r"\bThe '" + re.escape(model) + r"' model is not supported\b")
+        return model if signal.search(str(reason or '')) else ''
+    if engine_id == 'claude-code':
+        return model if CLAUDE_UNRECOGNIZED_MODEL_TAG in str(stderr or '')[-8000:] else ''
+    return ''
+
+
 LOGIN_COMMANDS = {'claude-code': 'claude setup-token', 'codex': 'codex login'}
 
 #: Claude Code's built-in web search tool name (``claude --help``, 2.1.280).
@@ -1709,10 +1733,13 @@ class BoundedExecutionAdapter:
                     message += ' ' + hint
                 if reason:
                     message += f' 엔진 응답: {reason}'
+                # #735: the CLI's own unsupported-model signal, for the requested model only.
+                refused = unsupported_model(engine_id, model, reason, stderr)
                 raise ExecutionError(message, failure_class=failure_class,
                                      exit_code=completed.returncode, reason=reason,
                                      meta={**run_meta, **cli_metadata(engine_id, stdout),
-                                           'duration_ms': int(elapsed * 1000)})
+                                           'duration_ms': int(elapsed * 1000),
+                                           **({'unsupported_model': refused} if refused else {})})
             try:
                 content = self._content(engine_id, completed.stdout)
             except ExecutionError as exc:

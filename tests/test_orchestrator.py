@@ -604,7 +604,8 @@ class RunnableModels(Harness):
         from personal_agent.orchestrator import MODEL_REFUSALS_KEY, worker_catalogue
         refusal = "The 'gpt-5.6-luna' model is not supported when using Codex with a ChatGPT account."
         self.engine.fail = [ExecutionError('Codex 엔진이 작업을 완료하지 못했습니다(종료 코드 1). 엔진 응답: ' + refusal,
-                                           failure_class='request-rejected', exit_code=1, reason=refusal)]
+                                           failure_class='request-rejected', exit_code=1, reason=refusal,
+                                           meta={'unsupported_model': 'gpt-5.6-luna'})]
         self.script([plan('codex', 'Answer.', model='gpt-5.6-luna'), plan('codex', 'Answer.', model='gpt-5.6-luna')])
         job, row = self.run_work('알려줘')
         self.assertEqual(len(self.engine.turns), 1, 'the refused model did not run again')
@@ -617,13 +618,45 @@ class RunnableModels(Harness):
         self.assertEqual(row['status'], 'failed')
 
     def test_another_rejection_is_not_a_model_refusal(self):
+        """#735 review: a generic rejection that names the model (context length) is not a refusal."""
         from personal_agent.orchestrator import MODEL_REFUSALS_KEY, model_refused
-        self.engine.fail = [ExecutionError('usage limit', failure_class='usage-limit', reason='gpt-5.6-luna busy')]
+        context = "This model's maximum context length for gpt-5.6-luna is exceeded."
+        self.engine.fail = [ExecutionError('rejected: ' + context, failure_class='request-rejected', reason=context)]
         self.script([plan('codex', 'Answer.', model='gpt-5.6-luna')])
         self.run_work('알려줘')
         self.assertEqual(self.store.config(MODEL_REFUSALS_KEY, {}), {})
-        self.assertFalse(model_refused('gpt-5.5', 'request-rejected', 'invalid prompt'))
-        self.assertFalse(model_refused('', 'request-rejected', 'anything'))
+        self.assertFalse(model_refused('gpt-5.5', {}))
+        self.assertFalse(model_refused('', {'unsupported_model': ''}))
+        self.assertFalse(model_refused('gpt-5.5', {'unsupported_model': 'gpt-5.6-luna'}))
+
+    def test_a_refused_configured_default_is_substituted_by_the_next_runnable_model(self):
+        """#735 review, choice recorded: "" runs the next runnable model; with none left the worker is unavailable."""
+        from personal_agent.main_ai import SUBSCRIPTION_MODELS
+        from personal_agent.orchestrator import remember_model_refusal, worker_catalogue
+        self.store.put(SUBSCRIPTION_MODELS, {'codex': 'gpt-5.6-luna'})
+        remember_model_refusal(self.store, 'codex', 'gpt-5.6-luna')
+        codex = worker_catalogue(self.service).worker('codex')
+        self.assertEqual((codex['default_model'], codex['default_refused'], codex['available']),
+                         ('gpt-5.6-terra', 'gpt-5.6-luna', True))
+        self.assertNotIn('gpt-5.6-luna', codex['models'])
+        self.script([plan('codex', 'Answer.')], goals=[True])
+        job, _row = self.run_work('알려줘')
+        self.assertEqual(self.engine.turns[0]['model'], 'gpt-5.6-terra', 'the refused default is never run')
+        self.assertEqual(self.events(job, 'planned')[0][1]['model'], 'gpt-5.6-terra')
+        for model in BUNDLED:
+            remember_model_refusal(self.store, 'codex', model)
+        codex = worker_catalogue(self.service).worker('codex')
+        self.assertEqual((codex['available'], codex['reason']), (False, 'default_model_refused'))
+
+    def test_a_default_refused_mid_work_is_not_resolved_again(self):
+        from personal_agent.main_ai import SUBSCRIPTION_MODELS
+        self.store.put(SUBSCRIPTION_MODELS, {'codex': 'gpt-5.6-luna'})
+        refusal = "The 'gpt-5.6-luna' model is not supported when using Codex with a ChatGPT account."
+        self.engine.fail = [ExecutionError(refusal, failure_class='request-rejected', reason=refusal,
+                                           meta={'unsupported_model': 'gpt-5.6-luna'})]
+        self.script([plan('codex', 'Answer.'), plan('codex', 'Answer again.')], goals=[True])
+        self.run_work('알려줘')
+        self.assertEqual([turn['model'] for turn in self.engine.turns], ['gpt-5.6-luna', 'gpt-5.6-terra'])
 
     def test_a_refusal_expires(self):
         from personal_agent.orchestrator import MODEL_REFUSAL_TTL_SECONDS, refused_models, remember_model_refusal
@@ -645,6 +678,81 @@ class BundledListing(__import__('test_decision_routes').ServiceFixture):
         self.assertTrue(all(call['env']['CODEX_HOME'] == call['env']['HOME'] == call['cwd'] for call in listings),
                         'an empty per-call CODEX_HOME')
         self.assertIsNone(service.decision_routes.bundled_models('claude-code'), 'no machine-readable listing')
+
+    def test_a_failed_listing_is_cached_per_binary_too(self):
+        """#735 review: a binary whose `--bundled` listing failed is not re-run on every Work."""
+        from test_decision_routes import CliRunner
+        service = self.service(runner=CliRunner(bundled=''))
+        self.assertIsNone(service.decision_routes.bundled_models('codex'))
+        self.assertIsNone(service.decision_routes.bundled_models('codex'))
+        listings = [call for call in self.runner.calls if call['argv'][1:3] == ['debug', 'models']]
+        self.assertEqual(len(listings), 1, 'the failed discovery is cached for this binary')
+        self.assertTrue(self.store.config(service.decision_routes.BUNDLED_CACHE)['failed'])
+
+
+class SubsetCategories(unittest.TestCase):
+    """#735 review: a subset removes a whole category or it is replaced."""
+
+    WORKER = {'tools': ['bounded_public_research', 'list_memory', 'list_notes', 'weather', 'web_search'],
+              'private_tools': ['list_memory', 'list_notes']}
+
+    def keep(self, removed, reason='keep them apart'):
+        from personal_agent.orchestrator import subset_or_default
+        return subset_or_default(self.WORKER, [tool for tool in self.WORKER['tools'] if tool not in removed], reason)
+
+    def test_whole_categories_are_kept(self):
+        self.assertEqual(self.keep({'list_memory', 'list_notes'})[1], None)
+        self.assertEqual(self.keep({'web_search', 'bounded_public_research'})[1], None)
+
+    def test_a_partial_private_category_is_replaced(self):
+        self.assertEqual(self.keep({'list_notes'}), (None, {'requested': ['bounded_public_research', 'list_memory',
+                                                                         'weather', 'web_search'], 'why': 'shape'}))
+
+    def test_a_partial_search_category_is_replaced(self):
+        self.assertEqual(self.keep({'web_search'})[1]['why'], 'shape')
+        self.assertEqual(self.keep({'bounded_public_research'})[1]['why'], 'shape')
+
+    def test_a_category_plus_anything_else_is_replaced(self):
+        self.assertEqual(self.keep({'web_search', 'bounded_public_research', 'weather'})[1]['why'], 'shape')
+
+
+class UnsupportedModelSignal(unittest.TestCase):
+    """#735 review: only the CLI's own unsupported-model signal marks a model refused."""
+
+    def run_codex(self, message, model='gpt-5.6-luna'):
+        error = json.dumps({'status': 400, 'error': {'type': 'invalid_request_error', 'message': message}})
+
+        class Failed:
+            returncode = 1
+            stdout = json.dumps({'type': 'turn.failed', 'error': {'message': error}})
+            stderr = ''
+        with tempfile.TemporaryDirectory() as folder:
+            store = QuickStore(Path(folder) / 'state')
+            from personal_agent.agent_runtime import Capabilities
+            adapter = BoundedExecutionAdapter(finder=lambda name: '/runtime/' + name, runner=lambda *a, **k: Failed(),
+                                              runtime_root=Path(folder) / 'turns', codex_home=Path(folder))
+            with self.assertRaises(ExecutionError) as caught:
+                adapter.execute('codex', 'hello', AgentOSMcpTools(Capabilities(store, None, {}, '', 'job', lambda *a: None,
+                                                                               document_access=False)), model=model)
+        return caught.exception
+
+    def test_the_codex_unsupported_model_message_is_remembered(self):
+        exc = self.run_codex("The 'gpt-5.6-luna' model is not supported when using Codex with a ChatGPT account.")
+        self.assertEqual((exc.failure_class, exc.meta.get('unsupported_model')), ('request-rejected', 'gpt-5.6-luna'))
+
+    def test_a_context_length_rejection_naming_the_model_is_not(self):
+        exc = self.run_codex("This model's maximum context length is 400000 tokens for gpt-5.6-luna.")
+        self.assertEqual(exc.failure_class, 'request-rejected')
+        self.assertNotIn('unsupported_model', exc.meta)
+
+    def test_another_models_refusal_is_not_this_models(self):
+        exc = self.run_codex("The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account.")
+        self.assertNotIn('unsupported_model', exc.meta)
+
+    def test_claude_codes_own_tag(self):
+        from personal_agent.bounded_execution import unsupported_model
+        self.assertEqual(unsupported_model('claude-code', 'opus', '', 'x [claude-code:unrecognized_model] y'), 'opus')
+        self.assertEqual(unsupported_model('claude-code', 'opus', "model 'opus' context too long", ''), '')
 
 
 class ResolverProcess(unittest.TestCase):

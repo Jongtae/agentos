@@ -202,13 +202,14 @@ def remember_model_refusal(store, route, model, now=None):
     store.put(MODEL_REFUSALS_KEY, rows)
 
 
-def model_refused(model, failure_class, text):
-    """Whether one CLI failure refused ``model`` itself: a rejected request whose own error names it.
+def model_refused(model, meta):
+    """Whether one CLI failure refused ``model`` itself (#735 review).
 
-    Deterministic: the CLI's typed rejection (``request-rejected``) plus the
-    exact model id in its error text; nothing else about the text is read.
+    Only the CLI's own unsupported-model signal, classified at the execution
+    boundary (``bounded_execution.unsupported_model``) into the failure's
+    ``meta``; a generic rejection that mentions the model does not count.
     """
-    return bool(model) and failure_class == 'request-rejected' and model in str(text or '')
+    return bool(model) and isinstance(meta, dict) and meta.get('unsupported_model') == model
 
 
 def runnable_models(service, route_id, configured, known, refused):
@@ -292,9 +293,16 @@ def worker_catalogue(service):
                     reason = '' if options.get('qualification') else 'strict_unqualified'
                 tools = [*profile_actions(host_profile), 'web_search']
                 models = runnable_models(service, route_id, configured, known_models(route_id, listed), refused)
+                if configured and configured in (refused.get(route_id) or set()):
+                    # #735 review: the owner's configured model was refused for this
+                    # account; "" resolves to the next runnable model instead.
+                    reason = reason or ('' if models else 'default_model_refused')
             if not browser:
                 tools = [tool for tool in tools if tool not in BROWSER_ACTIONS]
-            worker.update(available=not reason, reason=reason, default_model=configured, models=models)
+            substitute = configured and configured in (refused.get(route_id) or set())
+            worker.update(available=not reason, reason=reason, models=models,
+                          default_model=(models[0] if models else '') if substitute else configured,
+                          default_refused=configured if substitute else '')
             routes[route_id] = {'kind': KIND_SUBSCRIPTION, 'subscription': {'id': route_id}}
         else:
             if route_id == current:
@@ -447,8 +455,10 @@ def subset_or_default(worker, requested, reason):
     """``(tools, replaced)`` for a planned subset: kept, or replaced by the full toolset (#735).
 
     Validation, not a judgment: a subset stands only when it removes the
-    private-read tools, or removes the web-search tools, to keep the two apart
-    (the one reason to narrow), removes nothing else, and states that reason.
+    whole private-read category, or the whole web-search category, of the
+    worker's offered tools (to keep the two apart, the one reason to narrow),
+    removes nothing else, and states that reason.  Removing part of a
+    category is not a separation and is replaced too.
     Every other subset becomes the worker's full offered toolset (None) and
     ``replaced`` records what was asked for and why it was not kept.
     """
@@ -459,7 +469,7 @@ def subset_or_default(worker, requested, reason):
         why = SUBSET_UNKNOWN
     elif not removed:
         return None, None
-    elif not (removed <= frozenset(worker.get('private_tools') or ()) or removed <= search_tools()):
+    elif removed not in (offered & frozenset(worker.get('private_tools') or ()), offered & search_tools()):
         why = SUBSET_SHAPE
     elif not reason:
         why = SUBSET_NO_REASON
@@ -477,7 +487,7 @@ class Attempt:
     """
 
     __slots__ = ('number', 'worker', 'model', 'goal', 'criteria', 'sections', 'tools', 'reason', 'planned',
-                 'fallback', 'digest', 'tools_reason', 'replaced')
+                 'fallback', 'digest', 'tools_reason', 'replaced', 'signature')
 
     def __init__(self, number, worker, *, model='', goal='', criteria=(), sections=SECTIONS, tools=None, reason='',
                  planned=False, fallback='', tools_reason='', replaced=None):
@@ -485,6 +495,8 @@ class Attempt:
         self.tools_reason = tools_reason
         #: #735: the subset the plan asked for when validation replaced it with the full toolset.
         self.replaced = replaced
+        #: The worker, effective model and tool set this attempt ran with, fixed at validation.
+        self.signature = None
         self.goal, self.criteria, self.sections = goal, tuple(criteria), frozenset(sections)
         self.tools = None if tools is None else frozenset(tools)
         self.reason, self.planned, self.fallback = reason, planned, fallback
@@ -648,6 +660,10 @@ class Orchestration:
         model = data['model'].strip()
         if model and model not in worker['models']:
             return None, 'model'
+        if not model and worker.get('default_refused'):
+            # #735 review: the worker's default was refused for this account;
+            # this attempt runs the substitute the catalogue chose, explicitly.
+            model = worker['default_model']
         brief = data['brief']
         goal = brief['goal'].strip()[:MAX_GOAL_CHARS]
         if not goal:
@@ -664,9 +680,11 @@ class Orchestration:
             return None, 'repeat'
         if not self.budget_allows():
             return None, 'budget'
-        return Attempt(number, worker['id'], model=model, goal=goal, criteria=criteria, sections=brief['context'],
-                       tools=tools, reason=one_line(data['reason'], MAX_REASON_CHARS), planned=True,
-                       tools_reason=tools_reason if tools is not None else '', replaced=replaced), ''
+        attempt = Attempt(number, worker['id'], model=model, goal=goal, criteria=criteria, sections=brief['context'],
+                          tools=tools, reason=one_line(data['reason'], MAX_REASON_CHARS), planned=True,
+                          tools_reason=tools_reason if tools is not None else '', replaced=replaced)
+        attempt.signature = self.signature(worker, model, tools)
+        return attempt, ''
 
     def drop_model(self, worker_id, model):
         """The CLI refused ``model`` for this account: never offer it again in this Work (#735)."""
@@ -675,6 +693,13 @@ class Orchestration:
             return
         worker['models'] = [item for item in worker['models'] if item != model]
         worker['model_tiers'] = {key: value for key, value in worker['model_tiers'].items() if key != model}
+        if worker.get('default_model') == model:
+            # #735 review: "" must not resolve to a refused default.  The next
+            # runnable model stands in; with none left the worker is unavailable.
+            worker['default_refused'] = model
+            worker['default_model'] = worker['models'][0] if worker['models'] else ''
+            if not worker['models']:
+                worker.update(available=False, reason='default_model_refused')
 
     @staticmethod
     def signature(worker, model, tools):
@@ -774,7 +799,8 @@ class Orchestration:
         self.history.append((attempt, evaluation, answer, failed))
         worker = self.catalogue.worker(attempt.worker)
         if evaluation != REACHED and worker is not None:
-            self.failed.add(self.signature(worker, attempt.model, attempt.tools))
+            # The combination it actually ran with, even if the worker's default changed since (#735 review).
+            self.failed.add(attempt.signature or self.signature(worker, attempt.model, attempt.tools))
         if evaluation == REACHED:
             stop = STOP_REACHED
         elif evaluation == OWNER_NEEDED:

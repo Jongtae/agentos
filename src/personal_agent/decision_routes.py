@@ -871,17 +871,17 @@ class DecisionRoutes:
         if not fingerprint:
             return None
         cached = self.store.config(self.BUNDLED_CACHE, {})
-        if isinstance(cached, dict) and cached.get('fingerprint') == fingerprint and isinstance(cached.get('models'), list):
-            return list(cached['models'])
+        if isinstance(cached, dict) and cached.get('fingerprint') == fingerprint:
+            # A listing that failed for this binary is not retried per Work (#735 review).
+            return list(cached['models']) if isinstance(cached.get('models'), list) else None
         try:
             rows = self._with_local_run('codex', binary, lambda run: self._codex_bundled_models(run, binary))
         except DecisionRouteError:
             rows = None
-        if rows is None:
-            return None
-        models = [row['id'] for row in rows if row.get('visible')]
+        models = None if rows is None else [row['id'] for row in rows if row.get('visible')]
         with self.service.lock:
-            self.store.put(self.BUNDLED_CACHE, {'fingerprint': fingerprint, 'models': models, 'checked_at': self.clock()})
+            self.store.put(self.BUNDLED_CACHE, {'fingerprint': fingerprint, 'models': models,
+                                                'failed': models is None, 'checked_at': self.clock()})
         return models
 
     @staticmethod

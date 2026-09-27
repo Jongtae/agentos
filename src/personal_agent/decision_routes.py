@@ -303,6 +303,8 @@ class DecisionRoutes:
         self.spawn = spawn or _spawn_thread
         #: The running job's checkpoint (progress + cancellation), or None.
         self._checkpoint = None
+        #: Whether the running job may still commit (checked under service.lock), or None.
+        self._job_live = None
         self.jev_transport = jev_transport
         # The bounded HTTP transport for the explicit API model-list refresh.
         self.models_transport = models_transport or request_json
@@ -508,12 +510,12 @@ class DecisionRoutes:
             rows.pop(key, None)
         self.store.put(QUALIFICATION_JOBS, rows)
 
-    def _update_job(self, option, job_id, **fields):
-        """Update one job row while it is still ``job_id``; the updated row, or None."""
+    def _update_job(self, option, job_id, expect=None, **fields):
+        """Update one job row while it is still ``job_id`` (in state ``expect``); the updated row, or None."""
         with self.service.lock:
             rows = self._jobs()
             row = rows.get(option)
-            if not row or row.get('id') != job_id:
+            if not row or row.get('id') != job_id or (expect is not None and row.get('state') != expect):
                 return None
             row.update(fields)
             rows[option] = row
@@ -534,11 +536,14 @@ class DecisionRoutes:
                 else:
                     row.update(state=JOB_CANCELLING, failure='superseded')
             current = rows.get(option)
-            if current and current.get('state') in (JOB_QUEUED, JOB_RUNNING):
+            if current and current.get('state') == JOB_QUEUED:
+                # Not started yet: it reads the Main AI's key and CLI when it runs.
                 self._put_jobs(rows)
                 return dict(current)
-            # A job of this route that is still stopping is replaced: its
-            # next checkpoint sees another id and stops without writing.
+            # A running or stopping job of this route is replaced (review P1):
+            # it may have captured the previous key or login of this same
+            # route.  Its next checkpoint - including the one right before the
+            # commit - sees another id and stops without writing.
             job = {'id': f'{option}@{now}', 'option': option, 'main': main_id, 'state': JOB_QUEUED,
                    'queued_at': now, 'requeued': 0}
             rows[option] = job
@@ -558,7 +563,9 @@ class DecisionRoutes:
         if not queued or not self._activating.acquire(blocking=False):
             return False
         try:
-            claimed = self._update_job(queued[0]['option'], queued[0]['id'], state=JOB_RUNNING,
+            # Only a job still queued is claimed: a cancel between the read
+            # above and this update wins (review P2).
+            claimed = self._update_job(queued[0]['option'], queued[0]['id'], expect=JOB_QUEUED, state=JOB_RUNNING,
                                        started_at=self.clock(), step=None)
             if not claimed:
                 self._activating.release()
@@ -594,6 +601,11 @@ class DecisionRoutes:
                 # The owner chose another Judgment AI, or switched again, meanwhile.
                 return finish(JOB_CANCELLED, failure='superseded')
             self._checkpoint = lambda model, case_id, index: self._job_checkpoint(job, model, case_id, index)
+
+            def live():
+                row = self._jobs().get(option) or {}
+                return row.get('id') == job['id'] and row.get('state') == JOB_RUNNING
+            self._job_live = live
             try:
                 # keep_previous: the decision_route row changes only on a pass.
                 self._follow(main_id, keep_previous=True)
@@ -614,7 +626,7 @@ class DecisionRoutes:
                               result={'state': 'attention', 'failure': 'probe-failed', 'message': message})
             return finish(JOB_PASSED, result={'state': 'active'})
         finally:
-            self._checkpoint = None
+            self._checkpoint = self._job_live = None
             self._release_quietly()
 
     def _latest_failure(self, main_id):
@@ -1200,8 +1212,13 @@ class DecisionRoutes:
 
     def _commit(self, option, route, check):
         route = {**route, 'activated_at': self.clock()}
-        self._record_check(option, {'state': 'active', **check})
         with self.service.lock:
+            # #685: a background job commits only while it is still the
+            # route's current, uncancelled job (checked under the same lock
+            # a replacing switch or a cancel writes under).
+            if self._job_live is not None and not self._job_live():
+                raise QualificationCancelled()
+            self._record_check(option, {'state': 'active', **check})
             # Only the decision route row.  The Work-execution rows
             # (`subscription_engine`, `model`) are never written here.
             self.store.put('decision_route', route)

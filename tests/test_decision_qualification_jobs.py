@@ -149,6 +149,64 @@ class QualificationJobTests(ServiceFixture):
         self.assertIsNone(self.store.config('decision_route'))
         self.assertEqual(jobs['follow_main:codex']['state'], JOB_QUEUED)
 
+    def test_a_same_route_switch_while_running_replaces_the_running_job(self):
+        # Review P1: the running job may hold the previous key/login of this
+        # route; it must not commit, and a fresh job runs instead.
+        service = self.service()
+        first = service.activate_main_ai({'route': 'claude-code'})['judgment']['job']
+        replaced = []
+        original = service.decision_routes._job_checkpoint
+
+        def checkpoint(job, model, case_id, index):
+            if index == 1 and not replaced:
+                replaced.append(service.activate_main_ai({'route': 'claude-code'})['judgment']['job'])
+            original(job, model, case_id, index)
+        service.decision_routes._job_checkpoint = checkpoint
+        service.run_due_qualification()
+        self.assertNotEqual(replaced[0]['id'], first['id'])
+        self.assertIsNone(self.store.config('decision_route'), 'the replaced job committed nothing')
+        job = self.job(service)
+        self.assertEqual((job['id'], job['state']), (replaced[0]['id'], JOB_QUEUED))
+        service.decision_routes._job_checkpoint = original
+        self.assertTrue(service.run_due_qualification())
+        self.assertEqual(self.job(service)['state'], JOB_PASSED)
+
+    def test_a_replacement_after_the_last_checkpoint_still_blocks_the_commit(self):
+        service = self.service()
+        service.activate_main_ai({'route': 'claude-code'})
+        original = service.decision_routes._job_checkpoint
+
+        def checkpoint(job, model, case_id, index):
+            original(job, model, case_id, index)
+            if case_id == 'commit':
+                service.activate_main_ai({'route': 'claude-code'})
+        service.decision_routes._job_checkpoint = checkpoint
+        service.run_due_qualification()
+        self.assertIsNone(self.store.config('decision_route'))
+        self.assertEqual(self.job(service)['state'], JOB_QUEUED)
+
+    def test_a_cancel_between_the_queued_read_and_the_claim_wins(self):
+        # Review P2: claiming requires the row to still be queued.
+        service = self.service()
+        service.activate_main_ai({'route': 'claude-code'})
+        routes = service.decision_routes
+        real_lock = routes._activating
+
+        class CancelOnAcquire:
+            def acquire(self, blocking=True):
+                service.cancel_decision_qualification()
+                return real_lock.acquire(blocking)
+
+            def release(self):
+                real_lock.release()
+        routes._activating = CancelOnAcquire()
+        self.assertFalse(service.run_due_qualification())
+        routes._activating = real_lock
+        self.assertEqual(self.job(service)['state'], JOB_CANCELLED)
+        self.assertEqual(self.judgments(), [])
+        self.assertTrue(real_lock.acquire(blocking=False), 'the lock was released')
+        real_lock.release()
+
     def test_an_explicit_choice_made_while_queued_wins_over_the_job(self):
         service = self.service()
         service.activate_main_ai({'route': 'claude-code'})

@@ -51,7 +51,7 @@ from .decision import (DEFAULT_DECISION_MODEL, DEFAULT_DECISION_PROVIDER, OUTCOM
 import re
 import threading
 
-from .decision_adapters import (CLI_BINARIES, JEV_DEFAULT_MODEL, JEV_DESTINATION, JevDecisionEngine,
+from .decision_adapters import (CLI_BINARIES, JEV_DEFAULT_MODEL, JEV_DESTINATION, JEV_MODELS_ENDPOINT, JevDecisionEngine,
                                 SubscriptionCliDecisionEngine, bounded_run, cli_fingerprint, codex_disable_plan,
                                 codex_still_enabled, parse_codex_features, valid_effort, valid_model_id)
 from .bounded_execution import parse_cli_version, strict_allowed_features
@@ -138,8 +138,13 @@ ANTHROPIC_CONFIG = {'provider': 'anthropic', 'endpoint': 'https://api.anthropic.
 API_MODEL_LISTS = {
     'openai': {'url': 'https://api.openai.com/v1/models', 'config': dict(DEFAULT_DECISION_PROVIDER)},
     'anthropic': {'url': 'https://api.anthropic.com/v1/models', 'config': dict(ANTHROPIC_CONFIG)},
+    # #609: TypeSafe's own listing for the Jev decision route.  Every listed
+    # name is offered (no AgentOS catalogue); `jev-latest` stays the default.
+    ROUTE_JEV: {'url': JEV_MODELS_ENDPOINT},
 }
-MODEL_LIST_ROUTES = ('codex', 'claude-code', 'openai', 'anthropic')
+MODEL_LIST_ROUTES = ('codex', 'claude-code', 'openai', 'anthropic', ROUTE_JEV)
+#: Bounds for the secondary, technical metadata a Jev listing may carry.
+JEV_LIST_TEXT_LIMIT = 200
 
 #: Built-in Judgment candidates per Main AI route.  Direct API routes use the
 #: Main AI's own saved provider key; the subscription CLIs use their own login.
@@ -1094,6 +1099,16 @@ class DecisionRoutes:
         if not isinstance(body, dict):
             raise DecisionRouteError('저장할 연결 정보를 확인하세요.')
         transport, key = body.get('transport'), body.get('key')
+        if transport == ROUTE_JEV and key is None and 'model' in body:
+            # #609: choose a (discovered) Jev model without re-entering the
+            # key.  Stored only; the active route keeps its own model until
+            # the owner presses 사용 again.
+            model = body.get('model') or JEV_DEFAULT_MODEL
+            if not valid_model_id(model):
+                raise DecisionRouteError('Jev 모델 이름 형식을 확인하세요.')
+            with self.service.lock:
+                self.store.put('decision_jev', {'model': model})
+            return self.status()
         if not isinstance(key, str) or len(key) > 4096 or any(ch.isspace() for ch in key.strip()):
             raise DecisionRouteError('API 키 한 줄을 그대로 붙여 넣으세요.')
         key = key.strip()
@@ -1562,6 +1577,41 @@ class DecisionRoutes:
             key = self.store.secret('model_key') or ''
         return key
 
+    def _jev_models(self):
+        """#609: TypeSafe's ``GET /v1/models`` with the saved Jev key.
+
+        Every provider-listed name is offered as-is (no AgentOS catalogue,
+        no ranking); description/release date stay secondary technical text.
+        A failure raises before anything is stored, so the active route and
+        the configured Jev model are untouched.
+        """
+        key = self.store.secret('decision_jev_key') or ''
+        if not key:
+            raise DecisionRouteError('Jev(TypeSafe) API 키가 저장되어 있지 않아 모델 목록을 가져올 수 없습니다.')
+        try:
+            reply = self.models_transport(API_MODEL_LISTS[ROUTE_JEV]['url'], None,
+                                          {'Authorization': 'Bearer ' + key}, 15)
+        except ProviderError as exc:
+            raise DecisionRouteError(f'Jev(TypeSafe) 모델 목록을 가져오지 못했습니다({exc.status or "연결 오류"}). '
+                                     '현재 판단 AI와 Jev 모델 설정은 그대로입니다.') from None
+        rows = reply.get('models') if isinstance(reply, dict) else None
+        if not isinstance(rows, list):
+            raise DecisionRouteError('Jev(TypeSafe)가 모델 목록 형식으로 답하지 않았습니다. '
+                                     '현재 판단 AI와 Jev 모델 설정은 그대로입니다.')
+        models, seen = [], set()
+        for row in rows:
+            name = row.get('name') if isinstance(row, dict) else None
+            if not valid_model_id(name) or name in seen:
+                continue
+            seen.add(name)
+            entry = {'id': name, 'efforts': []}
+            for field in ('description', 'release_date'):
+                value = row.get(field)
+                if isinstance(value, str) and value.strip():
+                    entry[field] = value.strip()[:JEV_LIST_TEXT_LIMIT]
+            models.append(entry)
+        return models
+
     def list_models(self, route_id):
         """모델 목록 새로고침: what one route lists, labelled 목록에 있음(검증 전).
 
@@ -1575,8 +1625,10 @@ class DecisionRoutes:
         """
         if route_id not in MODEL_LIST_ROUTES:
             raise DecisionRouteError('모델 목록을 볼 경로를 선택하세요.')
-        ranked = list(RANKED_MODELS[route_id])
-        if route_id == 'claude-code':
+        ranked = [JEV_DEFAULT_MODEL] if route_id == ROUTE_JEV else list(RANKED_MODELS[route_id])
+        if route_id == ROUTE_JEV:
+            models, source = self._jev_models(), 'GET /v1/models'
+        elif route_id == 'claude-code':
             models, source = [{'id': alias, 'efforts': list(levels)} for alias, levels in CLAUDE_CODE_MODELS.items()], \
                 'documented-aliases'
         elif route_id == 'codex':

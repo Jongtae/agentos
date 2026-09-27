@@ -1225,9 +1225,97 @@ class JudgmentModelTests(ServiceFixture):
         self.assertEqual(seen[-1]['headers']['anthropic-version'], '2023-06-01')
         self.assertNotIn(OPENAI_KEY, json.dumps(service.settings()))
         self.assertEqual(self.openai.calls, [], 'no model call to list models')
-        for route in ('jev', 'shell', ''):
+        for route in ('typesafe', 'shell', ''):
             with self.subTest(route=route), self.assertRaises(ValueError):
                 service.list_decision_models(route)
+
+    # -- #609: Jev model discovery (TypeSafe GET /v1/models) ---------------------
+    def jev_listing(self, reply=None, fail=None):
+        seen = []
+
+        def transport(url, body, headers=None, timeout=60):
+            seen.append({'url': url, 'body': body, 'headers': dict(headers or {})})
+            if fail:
+                raise fail
+            return reply if reply is not None else {'models': [
+                {'name': 'jev-1.13.0', 'description': 'Current Jev release', 'release_date': '2026-09-01'},
+                {'name': 'jev-latest', 'description': 'Alias', 'release_date': ''},
+                {'name': 'jev-1.12.0'}, {'name': 'bad name'}, {'name': 'jev-1.13.0'}, 'not-a-row']}
+        return seen, transport
+
+    def test_jev_model_list_is_typesafes_own_listing_on_explicit_action(self):
+        service = self.service()
+        seen, transport = self.jev_listing()
+        service.decision_routes.models_transport = transport
+        with self.assertRaises(DecisionRouteError):
+            service.list_decision_models('jev')
+        self.assertEqual(seen, [], 'no key, no request')
+        service.save_decision_route_credential({'transport': 'jev', 'key': JEV_KEY})
+        service.settings()
+        service.decision_routes.status()
+        self.assertEqual(seen, [], 'opening or polling Settings makes no TypeSafe request')
+        result = service.list_decision_models('jev')
+        self.assertEqual(seen, [{'url': 'https://api.typesafe.ai/v1/models', 'body': None,
+                                 'headers': {'Authorization': 'Bearer ' + JEV_KEY}}])
+        self.assertEqual([row['id'] for row in result['models']], ['jev-latest', 'jev-1.13.0', 'jev-1.12.0'],
+                         'provider-listed names only, default alias first, no invented catalogue')
+        self.assertEqual({row['label'] for row in result['models']}, {'목록에 있음(검증 전)'})
+        self.assertEqual((result['source'], result['ranked']), ('GET /v1/models', ['jev-latest']))
+        technical = result['models'][1]
+        self.assertEqual((technical['description'], technical['release_date']), ('Current Jev release', '2026-09-01'))
+        self.assertEqual(self.jev.calls, [], 'listing invokes no model')
+        self.assertIsNone(self.store.config('decision_route'), 'listing never activates Jev')
+        self.assertEqual(self.store.config('decision_jev'), {'model': 'jev-latest'}, 'listing never changes the model')
+        settings = service.settings()
+        self.assertEqual(settings['decision_route']['model_lists']['jev']['models'], result['models'])
+        self.assertNotIn(JEV_KEY, json.dumps(settings))
+        self.assertNotIn(JEV_KEY, json.dumps(result))
+        self.assertEqual(len(seen), 1)
+
+    def test_a_listed_jev_model_is_saved_without_activation(self):
+        service = self.service()
+        seen, transport = self.jev_listing()
+        service.decision_routes.models_transport = transport
+        service.save_decision_route_credential({'transport': 'jev', 'key': JEV_KEY})
+        service.activate_decision_route({'transport': 'off'})
+        service.list_decision_models('jev')
+        status = service.save_decision_route_credential({'transport': 'jev', 'model': 'jev-1.13.0'})
+        self.assertEqual(status['jev']['model'], 'jev-1.13.0')
+        self.assertEqual(self.store.secret('decision_jev_key'), JEV_KEY, 'choosing a model keeps the key')
+        self.assertEqual(self.store.config('decision_route')['transport'], 'off', 'saving never activates Jev')
+        self.assertEqual(self.jev.calls, [])
+        with self.assertRaises(DecisionRouteError):
+            service.save_decision_route_credential({'transport': 'jev', 'model': 'bad name'})
+        self.assertEqual(self.store.config('decision_jev'), {'model': 'jev-1.13.0'})
+        service.save_decision_route_credential({'transport': 'jev', 'model': ''})
+        self.assertEqual(self.store.config('decision_jev'), {'model': 'jev-latest'}, 'jev-latest stays the default')
+        # An active Jev route keeps its activated model until 사용 is pressed again.
+        service.save_decision_route_credential({'transport': 'jev', 'model': 'jev-1.13.0'})
+        service.activate_decision_route({'transport': 'jev'})
+        self.assertEqual(self.jev.calls[-1]['body']['model'], 'jev-1.13.0')
+        service.save_decision_route_credential({'transport': 'jev', 'model': 'jev-1.12.0'})
+        route = self.store.config('decision_route')
+        self.assertEqual((route['transport'], route['requested_model']), ('jev', 'jev-1.13.0'))
+
+    def test_a_failed_jev_model_list_keeps_the_route_and_the_model(self):
+        for label, reply, fail in (('401', None, ProviderError('HTTP 401', status=401)),
+                                   ('offline', None, ProviderError('offline')),
+                                   ('shape', {'data': [{'id': 'jev-9'}]}, None)):
+            with self.subTest(label):
+                self.store = QuickStore(tempfile.mkdtemp(dir=self.root))
+                service = self.service()
+                seen, transport = self.jev_listing(reply, fail)
+                service.save_decision_route_credential({'transport': 'jev', 'key': JEV_KEY, 'model': 'jev-1.12.0'})
+                service.activate_decision_route({'transport': 'jev'})
+                before = (self.store.config('decision_route'), self.store.config('decision_jev'))
+                service.decision_routes.models_transport = transport
+                with self.assertRaises(DecisionRouteError) as raised:
+                    service.list_decision_models('jev')
+                self.assertIn('그대로', str(raised.exception))
+                self.assertNotIn(JEV_KEY, str(raised.exception))
+                self.assertEqual((self.store.config('decision_route'), self.store.config('decision_jev')), before)
+                self.assertNotIn('jev', service.settings()['decision_route']['model_lists'])
+                self.assertEqual(len(seen), 1)
 
     def test_a_failed_model_list_keeps_the_route(self):
         service = self.service()

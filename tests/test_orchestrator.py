@@ -127,9 +127,11 @@ class Harness(unittest.TestCase):
         self.plans, self.goals = [], []
         self.asked_plans = []
 
-    def script(self, plans, goals=()):
-        """The Judgment AI: ``plans`` answer the plan calls in order, ``goals`` the CLI goal judgments."""
-        self.plans, self.goals = list(plans), list(goals)
+    def script(self, plans, goals=(), owner_inputs=()):
+        """The Judgment AI: ``plans`` answer the plan calls in order, ``goals`` the CLI goal judgments,
+        ``owner_inputs`` the #740 owner-input judgments asked after a goal judged no."""
+        self.plans, self.goals, self.owner_inputs = list(plans), list(goals), list(owner_inputs)
+        self.asked_owner_inputs = []
 
         def structured(context, question, schema):
             self.asked_plans.append((context, question, schema))
@@ -139,6 +141,11 @@ class Harness(unittest.TestCase):
             return item if isinstance(item, StructuredDecision) or item is None else decided(item)
 
         def judge(context, proposition):
+            if context.purpose == 'owner-input-needed':
+                self.asked_owner_inputs.append(context)
+                if self.owner_inputs:
+                    return BinaryDecision(OUTCOME_DECIDED, self.owner_inputs.pop(0), fixture_confidence())
+                return None
             if context.purpose != 'goal-reached' or not self.goals:
                 return None
             return BinaryDecision(OUTCOME_DECIDED, self.goals.pop(0), fixture_confidence())
@@ -917,35 +924,71 @@ class BridgeTimeout(unittest.TestCase):
 
 
 class PlannerHistory(Harness):
-    def test_rows_withheld_from_a_worker_are_withheld_from_the_planner(self):
-        """Review P1: document-job rows and rows of a Work that read a private store never reach the plan call."""
+    def test_the_plan_call_reads_the_conversation_the_worker_is_shown(self):
+        """#740: only document-job rows are withheld, as from the worker; source labels no longer hide a row."""
         from personal_agent.agent_runtime import WORK_SOURCES_KEY
         jobs = []
-        for text, answer in (('문서 질문', 'DOCUMENT-ANSWER'), ('메모 질문', 'NOTES-ANSWER'), ('일반 질문', 'PLAIN-ANSWER')):
+        for text, answer in (('문서 질문', 'DOCUMENT-ANSWER'), ('브라우저 질문', 'BROWSER-ANSWER'), ('일반 질문', 'PLAIN-ANSWER')):
             self.engine.answers = [answer]
             jobs.append(self.run_work(text)[0])
-        document, notes, plain = jobs
+        document, browsed, _plain = jobs
         self.store.put('file_workspace_document_jobs', [document])
         records = self.store.config(WORK_SOURCES_KEY, {})
-        records[notes] = [*records[notes], 'history:personal-space']
+        records[browsed] = [*records[browsed], 'owner-browser-session', 'history:personal-space']
         self.store.put(WORK_SOURCES_KEY, records)
         self.script([plan('codex', 'Answer.')], goals=[True])
         self.run_work('이어서')
         excerpt = self.asked_plans[-1][0].facts['recent_conversation']
-        self.assertIn('PLAIN-ANSWER', excerpt)
-        self.assertIn('일반 질문', excerpt)
-        for withheld in ('DOCUMENT-ANSWER', '문서 질문', 'NOTES-ANSWER', '메모 질문'):
+        for shown in ('PLAIN-ANSWER', '일반 질문', 'BROWSER-ANSWER', '브라우저 질문'):
+            self.assertIn(shown, excerpt)
+        for withheld in ('DOCUMENT-ANSWER', '문서 질문'):
             self.assertNotIn(withheld, excerpt)
 
-    def test_a_work_without_a_source_record_is_withheld(self):
+    def test_a_work_without_a_source_record_is_still_shown(self):
         from personal_agent.agent_runtime import WORK_SOURCES_KEY
         self.engine.answers = ['UNRECORDED-ANSWER']
         earlier, _row = self.run_work('예전 질문')
         records = self.store.config(WORK_SOURCES_KEY, {})
         records.pop(earlier)
         self.store.put(WORK_SOURCES_KEY, records)
-        self.assertEqual(self.service.planner_history(
-            [{'role': 'assistant', 'content': 'x', 'job_id': earlier}, {'role': 'user', 'content': 'now'}], ()), [])
+        row = {'role': 'assistant', 'content': 'x', 'job_id': earlier}
+        self.assertEqual(self.service.planner_history([row, {'role': 'user', 'content': 'now'}], ()), [row])
+
+    def test_the_question_asks_the_brief_to_resolve_the_conversation(self):
+        self.assertIn('recent_conversation', QUESTION)
+        self.assertIn('do not brief the worker to ask the owner for something the conversation already says', QUESTION)
+
+
+class OwnerQuestion(Harness):
+    """#740: a worker's question the owner must answer ends the Work with that question."""
+
+    def test_a_needed_question_is_the_reply_and_is_not_re_delegated(self):
+        self.engine.answers = ['출발 위치를 알려 주시겠어요?']
+        self.script([plan('codex', 'Answer.'), plan('openai', 'Other path.')], goals=[False], owner_inputs=[True])
+        job, row = self.run_work('얼마나 걸려?')
+        self.assertEqual(len(self.engine.turns), 1, 'no re-delegation')
+        self.assertEqual(row['status'], 'succeeded')
+        self.assertIn('출발 위치를 알려 주시겠어요?', row['response'])
+        [(_status, evaluated)] = self.events(job, 'evaluated')
+        self.assertEqual((evaluated['outcome'], evaluated['stop']), ('owner_needed', 'owner'))
+        [context] = self.asked_owner_inputs
+        self.assertEqual(context.facts['worker_answer'], '출발 위치를 알려 주시겠어요?')
+        self.assertIn('owner_request', context.facts)
+        self.assertIn('recent_conversation', context.facts)
+
+    def test_an_unneeded_question_stays_short_and_is_re_delegated(self):
+        self.engine.answers = ['어디서 출발하세요?', 'answer']
+        self.script([plan('codex', 'Answer.'), plan('openai', 'Other path.')], goals=[False, True],
+                    owner_inputs=[False])
+        job, _row = self.run_work('얼마나 걸려?')
+        outcomes = [detail['outcome'] for _status, detail in self.events(job, 'evaluated')]
+        self.assertEqual(outcomes[0], 'not_reached')
+        self.assertEqual(len(self.asked_plans), 2, 'the attempt was re-delegated')
+
+    def test_a_goal_reached_attempt_asks_no_owner_input_judgment(self):
+        self.script([plan('codex', 'Answer.')], goals=[True])
+        self.run_work('질문')
+        self.assertEqual(self.asked_owner_inputs, [])
 
 
 class Preflight(Harness):

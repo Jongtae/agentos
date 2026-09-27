@@ -544,6 +544,14 @@ GOAL_REACHED_PROPOSITION = ('The observations - results that tools actually retu
                             'false when a tool merely ran without an error, when the observations show something '
                             'else or only part of the request, when a failed step was needed for it, or when it is '
                             'unclear. Judge only from the observations and failed steps listed, not from any claim.')
+#: ORCH-04 (#740): is the worker's answer a question the owner must answer first?
+OWNER_INPUT_PROPOSITION = ('The worker\'s answer does not fulfil the owner\'s request because it asks the owner for '
+                           'information or a decision the request needs - a missing detail, a choice between real '
+                           'options, or a confirmation - and neither the owner\'s request nor the recent conversation '
+                           'already provides it. It is false when the answer asks for something the request or the '
+                           'recent conversation already says or clearly implies, when the answer only offers further '
+                           'help after answering, when it reports a failure or inability instead of asking, or when '
+                           'it is unclear.')
 UNSUPPORTED_JUDGMENT_UNAVAILABLE = ('요청을 안전하게 구분할 판단 기능을 사용할 수 없어 메일을 검색하거나 다른 처리를 하지 않았습니다. '
                                    '메일을 찾으려는 요청이라면 검색할 내용을 다시 구체적으로 적어 주세요.')
 MIXED_MAIL_ACTION_CLARIFICATION = ('지원하지 않는 메일 발송 요청과 다른 작업이 함께 있어 아무 작업도 실행하지 않았습니다. '
@@ -709,6 +717,22 @@ class ConversationJudgments:
                                                  'failed_steps': failed_steps or 'none'}, work_id=work_id,
                                 uncut='owner_request')
         decision = self.engine.judge(context, GOAL_REACHED_PROPOSITION)
+        verdict = self.policy.binary(decision)
+        return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
+                        source=decision.confidence.provider or decision.outcome)
+
+    def owner_input_needed(self, request, conversation, answer, work_id=None):
+        """Does the worker's ``answer`` ask the owner for input the request needs (#740)?
+
+        One ``judge`` call over the owner's request (never cut), the recent
+        conversation and the worker's answer.  Only a confident yes counts.
+        """
+        request = str(request or '')
+        context = self._context('owner-input-needed', {'owner_request': request,
+                                                       'recent_conversation': conversation or 'none',
+                                                       'worker_answer': answer or ''}, work_id=work_id,
+                                uncut='owner_request')
+        decision = self.engine.judge(context, OWNER_INPUT_PROPOSITION)
         verdict = self.policy.binary(decision)
         return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
                         source=decision.confidence.provider or decision.outcome)

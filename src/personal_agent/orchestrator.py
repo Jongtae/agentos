@@ -140,7 +140,10 @@ QUESTION = (
     'worker and model and write the brief the worker receives; you do not do the work yourself. Choose an '
     'available worker whose capabilities and tools fit what the request needs; when several fit, prefer lower '
     'cost and latency. model is "" for the worker\'s default or one of the models listed for it. brief.goal says '
-    'what the worker must achieve, specific and self-contained, in the owner\'s language; brief.context lists only '
+    'what the worker must achieve, specific and self-contained, in the owner\'s language. The owner\'s request '
+    'may continue recent_conversation: resolve what it refers to or leaves unsaid from that conversation and write '
+    'it into brief.goal, and select history when the request continues it; do not brief the worker to ask the '
+    'owner for something the conversation already says. brief.context lists only '
     'the AgentOS context sections the worker needs; brief.completion_criteria lists observable results that show '
     'the goal is met. tools_mode is "worker_default": the worker keeps its full offered toolset and chooses among '
     'the tools itself; tools is then [] and tools_reason "". The only subset AgentOS keeps is one that keeps '
@@ -786,7 +789,29 @@ class Orchestration:
         except Exception:
             return UNJUDGED
         verdict = getattr(judged, 'outcome', None)
+        if verdict == 'no' and self.owner_input_needed(answer):
+            # #740: the worker asked the owner for what the request needs; another
+            # worker cannot supply it, so the question is the reply.
+            return OWNER_NEEDED
         return REACHED if verdict == 'yes' else NOT_REACHED if verdict == 'no' else UNJUDGED
+
+    def owner_input_needed(self, answer):
+        """Does the worker's final answer ask the owner for input the request needs (#740)?
+
+        One judgment over the owner's request, the recent conversation and the
+        answer, asked only after ``goal_reached`` said no.  A question the
+        request or the conversation already answers is not needed; unavailable
+        or unsure is no, so the attempt stays short.
+        """
+        judge = getattr(self.judgments, 'owner_input_needed', None)
+        if judge is None or not str(answer or '').strip() or not self.budget_allows():
+            return False
+        try:
+            judged = judge(self.request, self.conversation[-CONVERSATION_CHARS:],
+                           str(answer)[:ANSWER_EXCERPT_CHARS * 3], work_id=self.work_id)
+        except Exception:
+            return False
+        return getattr(judged, 'outcome', None) == 'yes'
 
     def next(self, attempt, evaluation, *, answer='', failed='', effect=False):
         """The next attempt after ``attempt`` was evaluated, or None (recorded either way).

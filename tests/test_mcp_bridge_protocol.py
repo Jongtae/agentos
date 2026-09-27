@@ -209,9 +209,13 @@ class ExposedToolWireBoundary(unittest.TestCase):
         profile.mkdir()
         adapter = BoundedExecutionAdapter(finder=lambda name: "/runtime/" + name, runner=runner,
                                           runtime_root=Path(tmp.name) / "turns", codex_home=profile)
+        # #701: no browser profile on this computer, whatever the platform (the
+        # browser relay has its own wire tests in test_cli_browser_relay.py).
+        from personal_agent.browser_session import BrowserProfile
         self.service = AgentService(self.store, adapter=ModelAdapter(lambda *a: {"choices": [{"message": {"content": "x"}}]}),
                                     subscription_engines=SubscriptionEngines(finder=lambda _: "/runtime/codex", clock=lambda: 1),
-                                    execution_adapter=adapter)
+                                    execution_adapter=adapter,
+                                    browser_profile=BrowserProfile(Path(tmp.name) / "browser", available=lambda: False))
         self.service.connect_subscription_engine({"engine": "codex", "officially_authenticated": True})
         # #678: these wire checks exercise the private-read bridge tool, which a
         # turn with the CLI's own web search does not get; they run search-off
@@ -254,13 +258,15 @@ class ExposedToolWireBoundary(unittest.TestCase):
         self.assertIn("wire note", [note["content"] for note in listed["notes"]])
 
     def test_a_native_search_turn_gets_no_private_read_over_the_real_bridge(self):
-        """#678 P1: the exact bridge command of a native-search turn neither lists nor serves list_notes."""
+        """#678 P1: the exact bridge command of a native-search turn neither lists nor serves list_notes.
+
+        #701: nor the bridge's own search tools, which the CLI's own search replaces.
+        """
         self.native = True
         replies = self._wire({"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
                              {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "list_notes", "arguments": {}}})
         self.assertIn("--native-search", self.server["args"])
-        self.assertEqual([tool["name"] for tool in replies[2]["result"]["tools"]],
-                         ["bounded_public_research", "save_note", "weather", "web_search"])
+        self.assertEqual([tool["name"] for tool in replies[2]["result"]["tools"]], ["save_note", "weather"])
         self.assertTrue(_refused(replies[3]))
 
     def test_an_unlisted_native_tool_is_refused_by_the_real_bridge(self):

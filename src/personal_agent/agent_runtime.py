@@ -430,6 +430,125 @@ def history_provenance(store, rows, tools=None, document_jobs=()):
   labels|=work_sources(store,row.get('job_id'),tools,records,document_jobs)
  return {HISTORY_PREFIX+label for label in labels}
 
+# -- #701: deterministic provenance for Works recorded before #605 -------------
+#
+# Every Work before #605 is `unrecorded`, and every later Work shown one of its
+# messages carries `history:unrecorded`, so one old conversation kept public
+# egress and the CLI's own web search closed for good.  The backfill below
+# derives a legacy Work's sources from what it durably left behind -- never
+# from a judgment about its text -- and records them once, so every later turn
+# agrees.  A legacy Work is clean only when every signal below is absent; any
+# private signal, or a Work whose reply did not come from a model turn (a
+# rule-handled `/notes`, settings or knowledge reply leaves no tool event),
+# stays unrecorded.
+WORK_SOURCES_BACKFILL_KEY='work_source_backfill'
+WORK_SOURCES_BACKFILL_VERSION=1
+#: The notes-summary commands whose prompt splices every note (the service's own literal check).
+NOTES_SUMMARY_COMMANDS=('/summarize','메모 요약')
+#: Turn-provenance labels that are record-only and never mean a private store was read:
+#: the owner profile, current context and prepared answers sections (#658/#627/#659),
+#: the CLI's unmediated-read note, unknown history, and the pre-#605
+#: `conversation-history` flag (set whenever earlier conversation was shown, the
+#: #603 finding).  What earlier conversation carried is resolved through the window.
+_RECORD_ONLY_LABELS=frozenset({'owner-memory','owner-current-context','owner-preparations',OWNER_CONVERSATION,
+                               'engine-unmediated-read',UNRECORDED_PROVENANCE,'conversation-history'})
+#: Tool events that show the reply came from a model or CLI turn.
+_MODEL_TURN_TOOLS=('model','subscription_engine')
+_UNFINISHED=('queued','running')
+
+def legacy_work_sources(store, job_id, tools=None, document_jobs=()):
+ """The base source labels of a Work that has no source record, or None when it stays private (#701).
+
+ Deterministic signals only: its successful private tool events, the
+ file-workspace document-job list, a context-inbox attachment, a note saved
+ under its id, the notes-summary command, its turn-provenance record (#570)
+ and whether a model or CLI produced its reply.  Clean is
+ ``{owner-conversation}`` plus ``engine-unmediated-read`` for a subscription
+ CLI turn (its CLI could read host files AgentOS never labels, #605 F1).
+ """
+ if not isinstance(job_id,str) or not job_id:return None
+ job=store.job(job_id)
+ if not job or job.get('status') in _UNFINISHED:return None
+ if job_id in set(document_jobs or ()):return None
+ if recorded_private_sources(store,job_id,tools):return None
+ if str(job.get('message') or '').strip() in NOTES_SUMMARY_COMMANDS:return None
+ with store.db() as db:
+  if db.execute('SELECT 1 FROM context_job_attachments WHERE job_id=?',(job_id,)).fetchone():return None
+  if db.execute('SELECT 1 FROM notes WHERE id=?',(job_id,)).fetchone():return None
+  tools_seen={row['tool'] for row in db.execute('SELECT DISTINCT tool FROM tool_events WHERE job_id=?',(job_id,))}
+ if not tools_seen&set(_MODEL_TURN_TOOLS):
+  # A rule-handled reply is clean only for the owner-explicit greeting form
+  # (`/start`, `/help`), read with AgentOS's own deterministic parser; every
+  # other rule reply (notes, settings, knowledge, ...) may carry a store.
+  from .conversation_handoff import INTENT_GREETING, IntentClassifier
+  explicit=IntentClassifier().explicit(str(job.get('message') or '').strip())
+  if getattr(explicit,'intent',None)!=INTENT_GREETING:return None
+  return {OWNER_CONVERSATION}
+ record=store.turn_provenance(job_id) if callable(getattr(store,'turn_provenance',None)) else None
+ if isinstance(record,dict):
+  seen={base_label(label) for label in [*(record.get('prompt_withheld') or []),*(record.get('egress_taint') or [])]}
+  if seen-_RECORD_ONLY_LABELS:return None
+ labels={OWNER_CONVERSATION}
+ if 'subscription_engine' in tools_seen:labels.add(ENGINE_UNMEDIATED)
+ return labels
+
+def backfill_work_sources(store, tools=None, document_jobs=(), keep_messages=100, window=None):
+ """``{job_id: labels}`` to record so pre-#605 history stops reading as private (#701).
+
+ Walks the transcript in order.  Each Work is resolved from its own record,
+ or -- when it has none and is older than every recorded Work -- from
+ ``legacy_work_sources``.  The history a Work was shown is approximated by
+ the ``window`` messages before its first message (the size ``turn_context``
+ packs, and no smaller): a legacy Work inherits those Works' sources as
+ ``history:`` labels, and a recorded Work's ``history:unrecorded`` is
+ replaced by them once every Work in that window is resolved.  A Work that
+ stays private keeps closing everything shown after it.  Only Works among
+ the last ``keep_messages`` messages (what ``QuickStore.history`` can show)
+ are returned for recording.
+ """
+ window=CONTEXT_MESSAGES if window is None else window
+ records=work_source_records(store)
+ with store.db() as db:
+  messages=[row['job_id'] for row in db.execute('SELECT job_id FROM messages ORDER BY id')]
+  recorded=[job for job in records if isinstance(job,str)]
+  earliest=None
+  for start in range(0,len(recorded),500):
+   chunk=recorded[start:start+500]
+   row=db.execute(f"SELECT MIN(created) AS created FROM jobs WHERE id IN ({','.join('?'*len(chunk))})",chunk).fetchone()
+   if row and row['created'] is not None:earliest=row['created'] if earliest is None else min(earliest,row['created'])
+ first={}
+ for index,job in enumerate(messages):
+  if isinstance(job,str) and job and job not in first:first[job]=index
+ keep=set(job for job in messages[-keep_messages:] if isinstance(job,str) and job)
+ resolved={};updates={}
+ for job,index in sorted(first.items(),key=lambda item:item[1]):
+  shown={other for other in messages[max(0,index-window):index] if isinstance(other,str) and other and other!=job}
+  inherited=set()
+  for other in shown:inherited|=resolved.get(other,{UNRECORDED_PROVENANCE})
+  history={HISTORY_PREFIX+label for label in inherited}
+  raw=records.get(job)
+  if isinstance(raw,list):
+   labels={str(label) for label in raw}
+   # A preparation's Work is shown its origin Work, not the recent window (#659):
+   # its unknown history is never resolved from the window.
+   from .preparations import preparation_of
+   preparation=preparation_of((store.job(job) or {}).get('request_key'))
+   if HISTORY_PREFIX+UNRECORDED_PROVENANCE in labels and UNRECORDED_PROVENANCE not in inherited and not preparation:
+    labels=(labels-{HISTORY_PREFIX+UNRECORDED_PROVENANCE})|history
+    if job in keep:updates[job]=sorted(labels)
+   resolved[job]={base_label(label) for label in labels}|recorded_private_sources(store,job,tools)
+   continue
+  created=(store.job(job) or {}).get('created')
+  legacy=earliest is None or (isinstance(created,(int,float)) and created<earliest)
+  derived=legacy_work_sources(store,job,tools,document_jobs) if legacy else None
+  if derived is None:
+   resolved[job]={UNRECORDED_PROVENANCE}
+   continue
+  labels=derived|history
+  resolved[job]={base_label(label) for label in labels}
+  if job in keep:updates[job]=sorted(labels)
+ return updates
+
 #: Owner-facing names for a refusal.  A refusal names the source that closed
 #: the destination; it used to blame connected documents whatever the source.
 SOURCE_NAMES={'connected-document':'연결 문서','connected-drive-file':'Google Drive 파일','personal-space':'저장된 메모',
@@ -1887,7 +2006,7 @@ API_TOOL_GUIDANCE='''For each NEW request select the relevant available tools, o
 # Tool guidance for a subscription CLI turn: the CLI sees only the AgentOS MCP bridge.
 CLI_TOOL_GUIDANCE='''For this turn use only the tools offered by the "agentos" MCP server; do not use built-in file, shell or web tools. Answer directly for ordinary conversation. Do not transmit note or document contents through web_search, weather or bounded_public_research.'''
 #: #678: appended when this CLI turn may use the CLI's own web search.
-CLI_NATIVE_SEARCH_GUIDANCE='''Exception: for current public information you may use your own built-in web search tool; cite the URLs of the pages it returned. If it is unavailable, use the agentos web_search tool instead. Never put note or document contents in a search query.'''
+CLI_NATIVE_SEARCH_GUIDANCE='''Exception: for current public information you may use your own built-in web search tool; cite the URLs of the pages it returned. The agentos web_search tool is not offered in this turn; if your own search is unavailable, say so, or use a site's own search through the agentos browser tools where offered. Never put note or document contents in a search query.'''
 POLICY=CORE_INSTRUCTIONS+' '+API_TOOL_GUIDANCE
 # Bounded recent conversation shared by every route: the last 16 messages,
 # newest first until the byte budget is spent, never cutting the current request.

@@ -83,9 +83,14 @@ class StrictProfileDeclaration(unittest.TestCase):
         self.assertEqual(CLI_PROFILES[STRICT_PROFILE]['runtimes']['claude-code']['tested_versions'], ('2.1.280',))
 
     def test_strict_offers_what_the_bridge_serves(self):
-        """The bridge serves the bounded action set; strict must equal it."""
-        self.assertEqual(profile_actions(STRICT_PROFILE), profile_actions(BOUNDED_PROFILE))
-        self.assertEqual(route_unavailable(STRICT_PROFILE), route_unavailable(BOUNDED_PROFILE))
+        """#701: the bridge is told its profile; strict is trusted-local minus the browser tools."""
+        from personal_agent.agent_runtime import BROWSER_ACTIONS
+        self.assertEqual(profile_actions(STRICT_PROFILE),
+                         tuple(action for action in profile_actions(BOUNDED_PROFILE) if action not in BROWSER_ACTIONS))
+        self.assertFalse(BROWSER_ACTIONS & set(profile_actions(STRICT_PROFILE)))
+        self.assertTrue(BROWSER_ACTIONS <= set(route_unavailable(STRICT_PROFILE)), 'declared, never silently missing')
+        self.assertEqual({k: v for k, v in route_unavailable(STRICT_PROFILE).items() if k not in BROWSER_ACTIONS},
+                         route_unavailable(BOUNDED_PROFILE))
         self.assertEqual(StrictIsolatedAgentOSMcpTools.PROFILE, STRICT_PROFILE)
 
     def test_cli_versions_are_parsed_exactly(self):
@@ -143,11 +148,14 @@ class StrictLaunchArguments(unittest.TestCase):
         allow = ['--allowedTools', 'mcp__agentos__bounded_public_research,mcp__agentos__list_notes,'
                                    'mcp__agentos__propose_current_state,'
                                    'mcp__agentos__save_note,mcp__agentos__weather,mcp__agentos__web_search']
-        # #623: both pre-approve exactly the same bridge tools; strict also
-        # removes every built-in tool.
-        self.assertEqual(trusted[-2:], allow)
+        # #623: both pre-approve exactly their bridge tools; strict also removes
+        # every built-in tool.  #701: trusted-local adds the browser tools.
+        browser = ',mcp__agentos__browser_open,mcp__agentos__browser_read,mcp__agentos__browser_find,' \
+                  'mcp__agentos__browser_click,mcp__agentos__browser_type'
+        self.assertEqual(trusted[-2:], [allow[0], allow[1] + browser])
         self.assertEqual(strict[-2:], allow, 'the variadic --allowedTools stays last')
         self.assertEqual(strict[:len(trusted) - 2], trusted[:-2])
+        self.assertNotIn('browser', ' '.join(strict), 'strict never pre-approves a browser tool')
         self.assertEqual(strict[len(trusted) - 2:], ['--tools', '', '--restricted', *allow])
         self.assertNotIn('--tools', trusted)
         self.assertNotIn('--restricted', trusted)

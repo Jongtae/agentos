@@ -363,8 +363,10 @@ class PreparedAnswerTests(_Case):
         self.assertIn('국수집', item['answer'])
         self.assertEqual(item['age_min'], 30)
         record = self.store.turn_provenance(asked)
-        self.assertIn('owner-preparations', record['prompt_withheld'], 'the record keeps size/digest only')
-        self.assertNotIn('국수집', json.dumps(record, ensure_ascii=False))
+        # #701 (pilot posture): the prepared section no longer withholds the local
+        # record; the envelope is kept after deterministic redaction.
+        self.assertNotIn('prompt_withheld', record)
+        self.assertIn('국수집', record['prompt_envelope'])
 
         self.script = [lambda body: seen.append(body['messages'][0]['content']) or {'content': '다시 찾아볼게요.'}]
         self.now += prep.FRESH_SECONDS

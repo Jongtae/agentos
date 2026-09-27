@@ -67,6 +67,8 @@ ISOLATED_MODEL_NOTE = '격리 런타임 배포는 작업 모델 지정을 지원
 ISOLATED_AGENCY_TEXT = '격리 런타임 배포에서는 CLI 자체 웹 검색과 브라우저 도구를 제공하지 않습니다'
 STRICT_BROWSER_TEXT = '엄격 격리 실행 프로필에서는 브라우저 도구를 제공하지 않습니다'
 CLI_SEARCH_NOTE = '개인 자료가 포함된 작업에서는 그 작업에 한해 꺼집니다'
+CLI_NOT_INSTALLED_TEXT = '이 컴퓨터에서 CLI를 찾지 못해 실행할 수 없습니다'
+CLI_SIGNED_OUT_TEXT = 'CLI가 로그인되어 있지 않아 실행할 수 없습니다'
 
 
 def key_slot(provider_id):
@@ -177,13 +179,15 @@ class MainAiRoutes:
             rows[route_id] = {**record, 'checked_at': self.clock()}
             self.store.put(CHECKS, rows)
 
-    def agency(self, route_id, isolated, saved_key=False):
+    def agency(self, route_id, isolated, saved_key=False, engine=None):
         """#701: whether this route's own web search and the browser tools are available, and why not.
 
         Read-only: stored configuration and remembered observations only, no
         subprocess and no model call.  A CLI's own search that is available can
         still be off for a single Work whose prompt carries private material
-        (the per-turn gate); ``note`` says so.
+        (the per-turn gate); ``note`` says so.  ``engine`` is the CLI's row
+        from ``subscription_engine_status`` (installed, login): a CLI that is
+        not installed or is signed out cannot run, so neither is available.
         """
         from .bounded_execution import BOUNDED_PROFILE
         from .search_providers import NATIVE_REASONS, ProviderRegistry
@@ -204,6 +208,13 @@ class MainAiRoutes:
                 else BOUNDED_PROFILE
             if isolated:
                 return {'search': row(False, 'isolated', ISOLATED_AGENCY_TEXT), 'browser': row(False, 'isolated', ISOLATED_AGENCY_TEXT)}
+            engine = engine if isinstance(engine, dict) else {}
+            if not engine.get('installed'):
+                return {'search': row(False, 'not_installed', CLI_NOT_INSTALLED_TEXT),
+                        'browser': row(False, 'not_installed', CLI_NOT_INSTALLED_TEXT)}
+            if (engine.get('login') or {}).get('state') == 'signed-out':
+                return {'search': row(False, 'signed_out', CLI_SIGNED_OUT_TEXT),
+                        'browser': row(False, 'signed_out', CLI_SIGNED_OUT_TEXT)}
             if host_profile != BOUNDED_PROFILE:
                 return {'search': row(False, 'strict_profile', NATIVE_REASONS['strict_profile']),
                         'browser': row(False, 'strict_profile', STRICT_BROWSER_TEXT)}
@@ -248,7 +259,7 @@ class MainAiRoutes:
                                'model_selectable': not isolated,
                                'model_note': ISOLATED_MODEL_NOTE if isolated
                                else CODEX_CONFIG_NOTE if route_id == 'codex' else '',
-                               'agency': self.agency(route_id, isolated)})
+                               'agency': self.agency(route_id, isolated, engine=engine)})
                 continue
             preset = API_ROUTES[route_id]
             saved = bool(self.store.secret(key_slot(route_id)))

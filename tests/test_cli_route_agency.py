@@ -184,6 +184,30 @@ class LegacyProvenanceBackfill(unittest.TestCase):
         self.assertNotIn(private, self.store.config(WORK_SOURCES_KEY, {}))
 
 
+class NullWorkIdRows(unittest.TestCase):
+    """Codex P1 on #702: a message without a Work id (older than the job_id column) is unknown, never dropped."""
+
+    def test_a_null_job_id_message_in_the_window_keeps_later_history_unresolved(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        store = QuickStore(Path(tmp.name) / 'state')
+        service = AgentService(store, browser_profile=bs.BrowserProfile(Path(tmp.name) / 'b', available=lambda: False))
+        base = time.time() - 5000
+        with store.db() as db:
+            db.execute('INSERT INTO messages(role,content,channel,created,job_id) VALUES (?,?,?,?,?)', ('user', 'old', 'web', base, None))
+            db.execute('INSERT INTO messages(role,content,channel,created,job_id) VALUES (?,?,?,?,?)', ('assistant', 'old reply', 'web', base + 1, None))
+        legacy = _legacy_work(store, '질문', '답', created=base + 10)
+        current = _legacy_work(store, 'new', 'new answer', created=base + 100)
+        store.put(WORK_SOURCES_KEY, {current: ['history:unrecorded', 'owner-conversation']})
+        service.backfill_legacy_work_sources()
+        records = store.config(WORK_SOURCES_KEY, {})
+        self.assertIn(HISTORY_PREFIX + 'unrecorded', records[legacy], 'the legacy Work was shown the id-less messages')
+        self.assertIn(HISTORY_PREFIX + 'unrecorded', records[current], 'nothing in its window resolves the unknown')
+        rows = [{'job_id': None}, {'job_id': legacy}]
+        self.assertIn('unrecorded', service.native_search_blocked(service.shown_direct_provenance(rows, set())))
+        self.assertIn('unrecorded', service.native_search_blocked(history_provenance(store, rows)))
+
+
 class NativeSearchOnBackfilledHistory(unittest.TestCase):
     """Coordinator scope: history of only engine-unmediated-read and backfilled-clean messages keeps native search on."""
 
@@ -298,6 +322,27 @@ class NonTransitiveNativeSearchGate(unittest.TestCase):
             db.execute('INSERT INTO context_job_attachments VALUES (?,?,?,?,?)', (later[1], '[]', 'a', 1, 1))
         self.assertIn('owner-context-inbox',
                       self.service.native_search_blocked(self.service.shown_direct_provenance(outside[1:2], set())))
+
+    def test_a_turn_after_a_browser_read_keeps_native_search(self):
+        """Reviewer P2-1 (owner direction): mediated browser output does not close the gate."""
+        test = self
+
+        def browse(job_id):
+            with test.store.db() as db:
+                db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                           (job_id, 'browser_read', 'succeeded',
+                            json.dumps({'scope': 'subscription-mcp-bridge', 'host_action': 'browser_read'}), time.time()))
+        self.read_notes = False
+        job, native, _reason = self.run_turn('장바구니 확인해줘')
+        self.assertTrue(native, 'the browser tools stay on a native-search turn')
+        browse(job)
+        self.assertIn('owner-browser-session', work_direct_sources(self.store, job))
+        later, native, reason = self.run_turn()
+        self.assertTrue(native, reason)
+        # #605 inheritance is unchanged: the later Work still carries the label for other uses.
+        self.assertIn('history:owner-browser-session', self.store.config(WORK_SOURCES_KEY, {})[later])
+        # ...and a turn record that carried it still keeps size/digest only.
+        self.assertIn('owner-browser-session', self.store.turn_provenance(later).get('prompt_withheld') or [])
 
     def test_the_current_turns_own_splice_still_blocks(self):
         with self.store.db() as db:
@@ -773,6 +818,24 @@ class PromptEnvelopeStorage(unittest.TestCase):
         for value in (secret, 'PASSPORT-M7010101', 'sk-live-ABCDEFGHIJKLMNOP1234'):
             self.assertNotIn(value, flat(record), value)
 
+    def test_the_whole_lookup_exclusion_set_is_redacted(self):
+        """Reviewer P2-3: Memory candidates, notes and calendar drafts of the Work (``lookup_sources``)."""
+        job = self.store.enqueue('기억해줘', 'k-excl')
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='running' WHERE id=?", (job,))
+            db.execute('INSERT INTO notes VALUES (?,?,?)', (job, 'NOTE-VALUE-7011', 1))
+            db.execute('INSERT INTO memory_candidates(id,job_id,memory_key,content,created,state,owner_key,work_key,content_digest) '
+                       'VALUES (?,?,?,?,?,?,?,?,?)', ('c1', None, 'profile.id', 'MEMORY-VALUE-7012', 1, 'pending', 'o',
+                                                      self.store._work_binding(job), 'd'))
+        from personal_agent.agent_runtime import lookup_sources
+        self.assertEqual(set(lookup_sources(self.store, job)['excluded']), {'NOTE-VALUE-7011', 'MEMORY-VALUE-7012'})
+        self.service.record_turn_sent(job, sent='keep NOTE-VALUE-7011 and MEMORY-VALUE-7012 visible', instructions='',
+                                      instructions_channel='prompt')
+        envelope = self.store.turn_provenance(job)['prompt_envelope']
+        self.assertIn('visible', envelope)
+        self.assertNotIn('NOTE-VALUE-7011', envelope)
+        self.assertNotIn('MEMORY-VALUE-7012', envelope)
+
     def test_a_notes_turn_still_keeps_size_and_digest_only(self):
         for label in ('personal-space', 'connected-document', 'connected-drive-file', 'owner-context-inbox',
                       'owner-memory', 'owner-calendar'):
@@ -866,6 +929,24 @@ class SettingsAgency(unittest.TestCase):
         service, _store = self.service(available=False)
         codex = self.routes(service)['codex']['agency']
         self.assertFalse(codex['browser']['available'])
+        self.assertTrue(codex['browser']['reason_text'])
+
+    def test_a_cli_that_cannot_run_offers_neither(self):
+        """Codex P2 on #702: not installed or signed out is unavailable, with the reason."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        store = QuickStore(Path(tmp.name) / 'state')
+        service = AgentService(store, subscription_engines=SubscriptionEngines(finder=lambda _: None, clock=lambda: 1),
+                               browser_profile=bs.BrowserProfile(Path(tmp.name) / 'b', launcher=lambda d, h: None, available=lambda: True))
+        codex = self.routes(service)['codex']
+        self.assertFalse(codex['installed'])
+        self.assertEqual((codex['agency']['search']['reason'], codex['agency']['browser']['reason']), ('not_installed', 'not_installed'))
+        self.assertFalse(codex['agency']['browser']['available'])
+        service, store = self.service()
+        store.put('engine_login', {'codex': {'state': 'signed-out', 'checked_at': 1}})
+        codex = self.routes(service)['codex']['agency']
+        self.assertEqual((codex['search']['available'], codex['search']['reason']), (False, 'signed_out'))
+        self.assertEqual((codex['browser']['available'], codex['browser']['reason']), (False, 'signed_out'))
         self.assertTrue(codex['browser']['reason_text'])
 
     def test_a_cli_whose_own_search_was_refused_says_so(self):

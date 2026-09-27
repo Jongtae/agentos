@@ -737,9 +737,15 @@ class AgentService:
 
     #: #678 P1: sources whose presence anywhere in a CLI prompt keeps the CLI's own
     #: web search off (its queries are not composed or redacted by AgentOS).
+    #: #701 (owner decision, pilot posture): the owner-logged-in browser session is
+    #: not on this list.  Its output reaches the CLI only mediated (credential,
+    #: one-time-code and card fields withheld, saved private values redacted),
+    #: and the browser tools stay on native-search turns; a later turn that was
+    #: shown a browser read keeps native search.  #605 inheritance of the label is
+    #: unchanged for every other use (public lookups, envelope storage).
     NATIVE_SEARCH_PRIVATE_SOURCES=frozenset({'personal-space','owner-context-inbox','connected-drive-file','connected-document',
                                              'owner-memory','owner-folder-names','owner-calendar','owner-mail','owner-settings',
-                                             'owner-browser-session','conversation-history','unrecorded','unattributed-tool-evidence'})
+                                             'conversation-history','unrecorded','unattributed-tool-evidence'})
 
     def native_search_blocked(self, labels):
         """The private-store labels (without route prefixes) that keep CLI native search off."""
@@ -885,7 +891,7 @@ class AgentService:
     # sections no longer withhold the envelope: it is stored locally, after the
     # deterministic secret and saved-private-value redaction in
     # ``record_turn_sent``, and never exported (``portable_state``).
-    PROVENANCE_WITHHELD_SOURCES=NATIVE_SEARCH_PRIVATE_SOURCES-frozenset({'unrecorded'})
+    PROVENANCE_WITHHELD_SOURCES=(NATIVE_SEARCH_PRIVATE_SOURCES|frozenset({'owner-browser-session'}))-frozenset({'unrecorded'})
 
     def record_turn_sent(self, job_id, *, sent, instructions, instructions_channel, private_sources=(), **fields):
         """Record what a turn sent; computed inside the guard so it can never break the turn."""
@@ -896,9 +902,11 @@ class AgentService:
                 envelope=(f'[not stored: this turn included {", ".join(withheld)}; '
                           f'{size} bytes, sha256 {hashlib.sha256(sent.encode()).hexdigest()[:16]}]')
             else:
-                # #701: stored secrets, credential shapes and the values this Work
-                # saved to a private store are removed before it is kept.
-                envelope=self.scrub_work_text(job_id,sent)
+                # #701: the Work's whole lookup-exclusion set (``lookup_sources``:
+                # its Memory candidates, notes and calendar drafts), then the
+                # stored secrets' values and credential shapes, are removed
+                # before it is kept.
+                envelope=self.scrub_envelope(job_id,sent)
             fields.update(prompt_envelope=envelope,prompt_bytes=size,prompt_withheld=withheld or None,instructions_channel=instructions_channel)
             if instructions:
                 fields.update(instructions=instructions,instructions_digest=hashlib.sha256(instructions.encode()).hexdigest()[:16])
@@ -907,6 +915,25 @@ class AgentService:
             self.record_turn_provenance(job_id,**fields)
         except Exception:
             LOG.warning('turn provenance could not be recorded job=%s',job_id)
+
+    def scrub_envelope(self, job_id, text):
+        """A prompt envelope as the local turn record may keep it (#701).
+
+        Deterministic, no judgment: the values of the Work's lookup-exclusion
+        set (``agent_runtime.lookup_sources(...)['excluded']``, read while the
+        Work runs; the same ``work_written_values`` otherwise), then stored
+        secrets and credential shapes.  Earlier Works' private-store content
+        never reaches a stored envelope: a turn shown it carries their
+        ``history:`` store label and keeps size/digest only.  Profile values
+        have no identifier marker to key on and are kept as sent (a value
+        equal to a stored secret is already redacted in the snapshot).
+        """
+        from .browser_session import redact_private_values
+        tools={tool['id']:tool for package in self.runtime_packages() for tool in package['tools']}
+        try:excluded=lookup_sources(self.store,job_id,tools)['excluded']
+        except Exception:excluded=work_written_values(self.store,job_id,tools)
+        text,_count=redact_private_values(str(text or ''),excluded)
+        return self._redact_known_secrets(text)
 
     def record_observed_tools(self, job_id):
         """Tool calls AgentOS itself executed for this Work (its own events)."""

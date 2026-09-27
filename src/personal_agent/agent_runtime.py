@@ -541,8 +541,12 @@ def backfill_work_sources(store, tools=None, document_jobs=(), keep_messages=100
  keep=set(job for job in messages[-keep_messages:] if isinstance(job,str) and job)
  resolved={};updates={}
  for job,index in sorted(first.items(),key=lambda item:item[1]):
-  shown={other for other in messages[max(0,index-window):index] if isinstance(other,str) and other and other!=job}
+  in_window=messages[max(0,index-window):index]
+  shown={other for other in in_window if isinstance(other,str) and other and other!=job}
   inherited=set()
+  # A message without a valid Work id (older than the job_id column) is never
+  # dropped: its provenance is unknown, so it counts as `unrecorded`.
+  if any(not isinstance(other,str) or not other for other in in_window):inherited.add(UNRECORDED_PROVENANCE)
   for other in shown:inherited|=resolved.get(other,{UNRECORDED_PROVENANCE})
   history={HISTORY_PREFIX+label for label in inherited}
   raw=records.get(job)

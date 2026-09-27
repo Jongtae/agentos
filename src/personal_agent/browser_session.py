@@ -879,6 +879,18 @@ def ascii_host(host):
                     for label in host.split('.'))
 
 
+def landed_host(url):
+    """The host of the page a login window landed on (``show``/``goto``'s final URL), or None (#749).
+
+    Only the host leaves the window: never its path, query or fragment.
+    """
+    try:
+        parts = urlsplit(str(url or ''))
+    except ValueError:
+        return None
+    return parts.hostname if parts.scheme in ('http', 'https') and parts.hostname else None
+
+
 def registrable_domain(host):
     """The registrable domain (eTLD+1) of ``host`` by the Public Suffix List, in ASCII form (#716).
 
@@ -1183,14 +1195,16 @@ class WebKitWorkerDriver:
 
     # -- the owner's login window ---------------------------------------------------
     def show(self, url, timeout):
+        """Show the window at ``url``; returns the URL its first navigation landed on (after redirects, #749)."""
         # Visible before the request: a ``hidden`` event that arrives while the
         # request is pending (the owner closed the window at once) must win.
         self._visible = True
         try:
-            self._request('show', timeout, url=url)
+            message = self._request('show', timeout, url=url)
         except Exception:
             self._visible = False
             raise
+        return message.get('url') if isinstance(message, dict) else None
 
     def hide(self):
         self._request('hide', ACTION_TIMEOUT_SECONDS)
@@ -1534,9 +1548,11 @@ class BrowserProfile:
 
         #716: with ``on_opened`` the caller does not wait for the window to
         show: the profile is taken here (``busy`` is still answered at once)
-        and the result is ``opening``; ``on_opened(window)`` is called on the
-        window's thread once it shows, and a window that never showed calls
-        only ``on_closed(window, 'failed', False)``.
+        and the result is ``opening``; ``on_opened(window, host)`` is called on
+        the window's thread once it shows, and a window that never showed calls
+        only ``on_closed(window, 'failed', False)``.  #749: ``host`` is the
+        host its first navigation landed on after redirects (``landed_host``),
+        or None when the engine did not say.
         """
         if not self.available():
             return {'state': 'unavailable', 'reason': self.unavailable_reason(), 'message': self.unavailable_message()}
@@ -1569,13 +1585,14 @@ class BrowserProfile:
                 self._live = driver
                 show = getattr(driver, 'show', None)
                 if show is not None:
-                    show(url, LOGIN_OPEN_SECONDS)
+                    landed = show(url, LOGIN_OPEN_SECONDS)
                 else:
-                    driver.goto(url, ACTION_TIMEOUT_SECONDS)
+                    landed = driver.goto(url, ACTION_TIMEOUT_SECONDS)
+                record['landed_host'] = landed_host(landed)
                 opened.set()
                 if on_opened is not None:
                     try:
-                        on_opened(window_id)
+                        on_opened(window_id, record['landed_host'])
                     except Exception:
                         pass
                 deadline = self.clock() + lifetime

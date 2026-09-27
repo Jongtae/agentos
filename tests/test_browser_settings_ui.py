@@ -104,6 +104,16 @@ const checks=[];
  assert(text().includes('읽지 못했습니다'));assert(all(),'an unreadable jar can still be reset');
  render(available({login_window_open:true}));assert(text().includes('로그인 창이 열려 있습니다'));
  render(available({storage:{...storage,state:'checking'}}));assert(text().includes('확인하고 있습니다'));assert(!text().includes('저장된 로그인 세션이 없습니다'));
+ // #749: the request answers 'opening'; the observed outcome replaces the pending line, never a guessed success.
+ for(const [outcome,expected] of [['failed','열지 못했습니다'],['opened','로그인 창을 열었습니다']]){
+  ctx.api=async(path,body)=>{calls.push({path,body});return {state:'opening'};};
+  $('browser-login-url').value='https://shop.test/login';
+  await $('browser-login-form').onsubmit({preventDefault(){},submitter:null});
+  assert($('browser-feedback').textContent.includes('여는 중'),'opening is shown as pending');
+  render(available({settings_login:{state:'opening',at:1}}));assert($('browser-feedback').textContent.includes('여는 중'));
+  render(available({settings_login:{state:outcome,at:2}}));assert($('browser-feedback').textContent.includes(expected),outcome);
+ }
+ checks.push('an opening Settings login window reports its observed outcome');
  render(available({storage:{...storage,save_error:'key_missing'}}));assert(text().includes('키체인이 잠겨 있지 않은지'));
  render(available({legacy_profile_removed_at:Date.now()/1000}));assert(text().includes('이전 브라우저 프로필을 삭제했습니다'));
  assert(text().includes('/usr/bin/security'),'the Keychain limit is stated');
@@ -133,7 +143,7 @@ class BrowserSettingsUiTests(unittest.TestCase):
         result = subprocess.run([node, "-e", DOM_CHECKS, str(WEB / "app.js")], capture_output=True, text=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout.strip().splitlines()[-1])
-        self.assertEqual(report["passed"], 6, report)
+        self.assertEqual(report["passed"], 7, report)
 
 
 if __name__ == "__main__":

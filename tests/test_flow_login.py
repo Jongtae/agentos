@@ -43,9 +43,10 @@ from personal_agent.bounded_execution import (AgentOSMcpTools, BoundedExecutionA
                                               CODEX_BRIDGE_APPROVAL_MODE, STRICT_PROFILE, profile_actions)
 from personal_agent.conversation_projection import TELEGRAM_RESULT_PREVIEW_CHARS, clip_keeping_links, terminal_text
 from personal_agent.providers import ModelAdapter
-from personal_agent.quickstart_service import (AgentService, BROWSER_LOGIN_CLOSE_SECONDS, BROWSER_LOGIN_NO_SESSION_LINE,
-                                               BROWSER_LOGIN_OFFERED_TEXT, BROWSER_LOGIN_RESULT_TEXT, BROWSER_LOGIN_SECONDS,
-                                               BROWSER_LOGIN_SKIP_LABEL)
+from personal_agent.quickstart_service import (AgentService, BROWSER_LOGIN_CLOSE_SECONDS, BROWSER_LOGIN_MOVED_LINE,
+                                               BROWSER_LOGIN_NO_SESSION_LINE, BROWSER_LOGIN_OFFERED_TEXT,
+                                               BROWSER_LOGIN_RESULT_TEXT, BROWSER_LOGIN_SECONDS, BROWSER_LOGIN_SKIP_LABEL,
+                                               BROWSER_OWNER_SIGNINS_KEY)
 from personal_agent.quickstart_store import QuickStore
 
 from test_bounded_execution import _Capabilities
@@ -202,7 +203,9 @@ class JarDriver(FakeDriver):
             self.hold_goto.wait(10)
             if getattr(self, 'fail_goto', False):
                 raise RuntimeError('the window did not show')
-        return super().goto(url, timeout)
+        super().goto(url, timeout)
+        #: #749: the URL the navigation landed on (a redirect when ``lands_on`` is set).
+        return getattr(self, 'lands_on', None) or url
 
     def login(self, site='fixture.test'):
         """The owner signs in by hand in this window: the site now holds a new session cookie."""
@@ -348,7 +351,7 @@ class LoginHarness(unittest.TestCase):
         self.assertIn(self.ended, ('failed', 'partial'))
         self.shown(job_id)
         self.service.deliver_one()
-        self.assertTrue(self.service.deliver_notification())
+        self.assertTrue(wait_until(self.service.deliver_notification), "the prompt is armed on the window thread (#716)")
         prompts = self.prompts()
         self.assertEqual(len(prompts), 1)
         buttons = prompts[-1]['reply_markup']['inline_keyboard'][0]
@@ -369,15 +372,24 @@ class LoginHarness(unittest.TestCase):
     def settle(self, job_id, now=None):
         """One work-loop pass, then the window's own thread settling the login (nothing waits for it)."""
         self.service.process_browser_logins(now=now)
-        self.assertTrue(wait_until(lambda: self.state(job_id) not in ('offered', 'closing')), self.state(job_id))
+        self.assertTrue(wait_until(lambda: self.state(job_id) not in ('offered', 'closing', 'resuming')), self.state(job_id))
+        self.assertTrue(wait_until(lambda: self.notice_done(job_id)), 'the window thread finished telling the owner')
         return self.state(job_id)
+
+    def notice_done(self, job_id):
+        """The settle's owner message is out: the login prompt left 'sent'/'queued' (edited or cancelled)."""
+        with self.store.db() as db:
+            rows = db.execute("SELECT state FROM telegram_notifications WHERE job_id=? AND kind='browser_login_needed'",
+                              (job_id,)).fetchall()
+        return all(row['state'] not in ('sent', 'queued') for row in rows)
 
     def owner_closes(self, job_id, logged_in=True):
         """The owner (after signing in, unless ``logged_in`` is False) closes the login window (the worker's close event)."""
         if logged_in:
             self.window().login()
         self.window().closed = True
-        self.assertTrue(wait_until(lambda: self.state(job_id) not in ('offered', 'closing')), self.state(job_id))
+        self.assertTrue(wait_until(lambda: self.state(job_id) not in ('offered', 'closing', 'resuming')), self.state(job_id))
+        self.assertTrue(wait_until(lambda: self.notice_done(job_id)), 'the window thread finished telling the owner')
 
     def failed_errors(self, job_id):
         with self.store.db() as db:
@@ -586,7 +598,7 @@ class InFlowLogin(LoginHarness):
         self.assertTrue(self.service.run_one())
         self.assertEqual(self.failed_errors(job_id)[-1], BROWSER_LOGIN_OFFERED_TEXT)
         self.shown(job_id)
-        self.assertTrue(self.service.deliver_notification())
+        self.assertTrue(wait_until(self.service.deliver_notification), "the prompt is armed on the window thread (#716)")
         fresh = self.store.notification(old['id'])
         self.assertEqual(fresh['state'], 'sent')
         self.assertNotEqual(fresh['message_id'], old['message_id'], 'a new message; the old one no longer binds')
@@ -722,12 +734,128 @@ class LoginPromptAndThreads(LoginHarness):
         self.assertTrue(self.profile.jar.site_cookie_marks('fixture.test')[0], 'the run saved the page cookie')
         self.assertIn(BROWSER_LOGIN_NO_SESSION_LINE, prompt['text'])
 
-    def test_a_site_with_a_stored_session_gets_no_note(self):
+    def store_cookie(self):
         self.profile.jar.save_export({'fixture.test': [{'name': 'sid', 'value': 'old-session', 'domain': 'fixture.test', 'path': '/',
                                                         'expires': time.time() + 86400, 'secure': True, 'http_only': True,
                                                         'same_site': None}]})
+
+    def test_a_cookie_an_earlier_work_left_is_not_a_stored_session(self):
+        # #749: a stored cookie with no owner sign-in through a login window (an earlier Work's browsing).
+        self.store_cookie()
+        _job_id, prompt, _buttons, _notification = self.login_work()
+        self.assertIn(BROWSER_LOGIN_NO_SESSION_LINE, prompt['text'])
+
+    def test_a_site_the_owner_signed_in_to_and_still_holds_gets_no_note(self):
+        self.store_cookie()
+        self.service._record_owner_signin('fixture.test', None)   # that cookie came from the owner's sign-in
+        record = self.store.config(BROWSER_OWNER_SIGNINS_KEY, {})['fixture.test']
+        self.assertNotIn('old-session', flat(record), 'keyed digests only, never a cookie value')
         _job_id, prompt, _buttons, _notification = self.login_work()
         self.assertNotIn(BROWSER_LOGIN_NO_SESSION_LINE, prompt['text'])
+
+    def test_a_recorded_sign_in_whose_cookies_are_gone_gets_the_note(self):
+        self.store_cookie()
+        self.service._record_owner_signin('fixture.test', None)
+        self.profile.jar.save_export({'fixture.test': []})
+        _job_id, prompt, _buttons, _notification = self.login_work()
+        self.assertIn(BROWSER_LOGIN_NO_SESSION_LINE, prompt['text'], 'signed out or deleted since: no claim of a session')
+
+    def test_a_cookie_set_after_the_sign_in_ended_does_not_stand_in_for_it(self):
+        # Codex P2 on #756: the sign-in cookie is gone and a Work (or the site) left another one.
+        self.store_cookie()
+        self.service._record_owner_signin('fixture.test', None)
+        self.profile.jar.save_export({'fixture.test': [{'name': 'csrf', 'value': 'work-set', 'domain': 'fixture.test', 'path': '/',
+                                                        'expires': time.time() + 3600, 'secure': True, 'http_only': True,
+                                                        'same_site': None}]})
+        _job_id, prompt, _buttons, _notification = self.login_work()
+        self.assertIn(BROWSER_LOGIN_NO_SESSION_LINE, prompt['text'])
+
+    def test_a_login_through_the_window_records_the_sign_in_and_the_next_prompt_has_no_note(self):
+        job_id, _prompt, _buttons, notification = self.login_work()
+        self.owner_closes(job_id)
+        self.assertEqual(self.state(job_id), 'resumed')
+        self.assertTrue(wait_until(lambda: list(self.store.config(BROWSER_OWNER_SIGNINS_KEY, {})) == ['fixture.test']))
+        # A later Work meets the site's login page again: the owner is asked without the note.
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='succeeded' WHERE id=?", (job_id,))
+        self.scripts = self.login_script()
+        later = self.receive('다른 계정 페이지 확인해줘')
+        self.assertNotEqual(later, job_id)
+        self.assertTrue(self.service.run_one())
+        self.shown(later)
+        self.service.deliver_one()
+        self.assertTrue(wait_until(self.service.deliver_notification), "the prompt is armed on the window thread (#716)")
+        self.assertNotIn(BROWSER_LOGIN_NO_SESSION_LINE, self.prompts()[-1]['text'])
+
+    def test_a_close_without_a_login_records_no_sign_in(self):
+        job_id, _prompt, _buttons, _notification = self.login_work()
+        self.owner_closes(job_id, logged_in=False)
+        self.assertEqual(self.store.config(BROWSER_OWNER_SIGNINS_KEY, {}), {})
+
+    def test_a_redirected_window_names_the_site_it_landed_on(self):
+        self.window_holds = {'lands_on': 'https://accounts.lookalike.io/signin?token=secret#frag'}
+        job_id, prompt, _buttons, _notification = self.login_work()
+        text = prompt['text']
+        self.assertTrue(text.startswith('로그인 요청 사이트: lookalike.io\n'), text)
+        self.assertIn('전체 주소: accounts.lookalike.io\n', text)
+        self.assertIn(BROWSER_LOGIN_MOVED_LINE.format(site='fixture.test'), text)
+        self.assertIn(BROWSER_LOGIN_NO_SESSION_LINE, text)
+        self.assertNotIn('token', text, 'only the host leaves the window')
+        self.assertNotIn('secret', flat(self.service._browser_login(job_id)))
+        status = self.service.browser_status()['pending_logins'][0]
+        self.assertEqual((status['landed_host'], status['landed_site']), ('accounts.lookalike.io', 'lookalike.io'))
+
+    def test_a_window_that_lands_where_it_was_asked_shows_no_move(self):
+        _job_id, prompt, _buttons, _notification = self.login_work()
+        self.assertNotIn('이동했습니다', prompt['text'])
+
+    def test_a_legacy_row_with_no_window_id_expires_and_is_never_re_queued(self):
+        job_id = self.store.enqueue('계정 페이지 확인해줘', 'web-legacy')
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='partial' WHERE id=?", (job_id,))
+        for state in ('offered', 'closing'):
+            self.service._put_browser_login(job_id, {'work_id': job_id, 'host': 'fixture.test', 'state': state, 'window': None,
+                                                     'nonce': 'legacy', 'intent': 'resume', 'offered_at': time.time()})
+            self.assertEqual(self.service.process_browser_logins(), [job_id])
+            self.assertEqual(self.state(job_id), 'expired')
+            self.assertEqual(self.store.job(job_id)['status'], 'partial')
+
+    def test_the_settings_login_window_does_not_block_the_request_and_records_a_sign_in(self):
+        gate = threading.Event()
+        self.addCleanup(gate.set)
+        self.window_holds = {'hold_goto': gate}
+        self.drivers.append(JarDriver(log=[]))   # the holds apply to the next window
+        started = time.monotonic()
+        receipt = self.service.open_browser_for_login({'url': ORIGIN + '/login'})
+        self.assertEqual(receipt['state'], 'opening')
+        self.assertLess(time.monotonic() - started, 2, 'the HTTP request never waits for the window')
+        self.assertEqual(self.service.browser_status()['settings_login']['state'], 'opening', 'Settings shows it pending')
+        gate.set()
+        self.assertTrue(wait_until(lambda: self.service.browser_status()['settings_login']['state'] == 'opened'))
+        self.assertTrue(wait_until(lambda: len(self.drivers) == 2 and self.drivers[-1].url is not None))
+        self.drivers[-1].login()
+        self.drivers[-1].closed = True
+        self.assertTrue(wait_until(lambda: 'fixture.test' in self.store.config(BROWSER_OWNER_SIGNINS_KEY, {})))
+
+    def test_a_settings_window_that_never_shows_is_reported_failed(self):
+        gate = threading.Event()
+        self.addCleanup(gate.set)
+        self.window_holds = {'hold_goto': gate}
+        self.drivers.append(JarDriver(log=[]))
+        self.assertEqual(self.service.open_browser_for_login({'url': ORIGIN + '/login'})['state'], 'opening')
+        self.assertTrue(wait_until(lambda: len(self.drivers) == 2))
+        self.drivers[-1].fail_goto = True
+        gate.set()
+        self.assertTrue(wait_until(lambda: self.service.browser_status()['settings_login']['state'] == 'failed'))
+        self.assertFalse(self.profile.status()['login_window_open'])
+
+    def test_a_settings_window_closed_without_a_login_records_nothing(self):
+        receipt = self.service.open_browser_for_login({'url': ORIGIN + '/login'})
+        self.assertEqual(receipt['state'], 'opening')
+        self.assertTrue(wait_until(lambda: self.drivers and self.drivers[-1].url is not None))
+        self.drivers[-1].closed = True
+        self.assertTrue(wait_until(lambda: not self.profile.status()['login_window_open']))
+        self.assertEqual(self.store.config(BROWSER_OWNER_SIGNINS_KEY, {}), {})
 
     def test_the_run_does_not_wait_for_the_window_and_the_prompt_waits_for_it(self):
         gate = threading.Event()
@@ -743,7 +871,7 @@ class LoginPromptAndThreads(LoginHarness):
         self.assertEqual(self.prompts(), [])
         gate.set()
         self.shown(job_id)
-        self.assertTrue(self.service.deliver_notification())
+        self.assertTrue(wait_until(self.service.deliver_notification), "the prompt is armed on the window thread (#716)")
         self.assertEqual(len(self.prompts()), 1)
 
     def test_a_window_that_never_shows_asks_nothing_and_a_later_login_page_asks_again(self):
@@ -829,7 +957,7 @@ class LoginThroughTheCliBridge(_BridgeHarness):
         self.assertTrue(self.profile.status()['login_window_open'])
         self.assertTrue(self.drivers[0].closed, 'the turn released the profile before the window opened')
         self.assertTrue(wait_until(lambda: (self.service._browser_login(self.job) or {}).get('state') == 'offered'))
-        self.assertTrue(self.service.deliver_notification())
+        self.assertTrue(wait_until(self.service.deliver_notification), "the prompt is armed on the window thread (#716)")
         prompt = [body for method, body in self.calls if method == 'sendMessage' and 'p7l:' in flat(body.get('reply_markup'))]
         notification = self.store.notification(prompt[0]['reply_markup']['inline_keyboard'][0][0]['callback_data'].split(':')[1])
         tap = {'id': 'cb', 'from': {'id': CHAT_BRIDGE}, 'data': f"p7l:{notification['id']}:done",
@@ -955,7 +1083,7 @@ class RealWorkerInFlowLogin(_BridgeHarness):
             self.assertEqual(self.store.job(self.job)['status'], 'partial', 'the CLI turn ended; its request did not')
             status = self.profile.status()
             self.assertTrue(status['login_window_open'], 'the real window is shown on this Mac')
-            self.assertTrue(self.service.deliver_notification())
+            self.assertTrue(wait_until(self.service.deliver_notification), "the prompt is armed on the window thread (#716)")
             prompt = [body for method, body in self.calls if method == 'sendMessage' and 'p7l:' in flat(body.get('reply_markup'))]
             self.assertEqual(len(prompt), 1)
             # The owner signs in by hand in that window (here: the fixture's session page in the same

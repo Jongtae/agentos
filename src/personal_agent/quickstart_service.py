@@ -2722,6 +2722,12 @@ class AgentService:
             summary+='; the worker itself failed: '+(self._redact_reason(failed) or 'failed')[:200]
         elif result is not None:
             evaluation=orchestration.evaluate_run(result,owner_needed=owner_needed)
+            # #767 review: a direct-route run its own #657 rule accepted (often ordinary
+            # conversation, no tool) is held to the brief's completion criteria too.  Only a
+            # verdict that the criteria are not met changes it; an unavailable one keeps it.
+            if evaluation==REACHED and attempt.criteria and not effect and orchestration.budget_allows():
+                checked=orchestration.evaluate_answer(answer,'\n'.join(observed),failed_steps)
+                if checked in (NOT_REACHED,OWNER_NEEDED):evaluation=checked
         elif owner_needed:
             evaluation='owner_needed'
         elif effect or not orchestration.budget_allows():
@@ -5956,11 +5962,11 @@ class AgentService:
                             and orchestration.terminal==REACHED and not (approval_needed[0] or context_approval_needed[0]) \
                             and self.goal_upgrade_allowed(job['id']):
                         outcome='succeeded';refusals.clear();resolved_blocker=True
-                    # #710 review P1: a CLI attempt the orchestrator judged short and did not
+                    # #710 review P1 (#767: either route): an attempt the orchestrator judged short and did not
                     # re-delegate (limit, budget, no new plan) is never stored as succeeded.
                     owner_question=(orchestration is not None and orchestration.terminal==OWNER_NEEDED
                                     and not (approval_needed[0] or context_approval_needed[0]))
-                    if subscription.get('id') and outcome=='succeeded' and orchestration is not None \
+                    if outcome=='succeeded' and orchestration is not None \
                             and (orchestration.terminal in (NOT_REACHED,UNJUDGED) or owner_question):
                         shortfall=self.cli_shortfall(job['id'],attempt_start,prompt,orchestration.terminal,response)
                         if shortfall is not None:

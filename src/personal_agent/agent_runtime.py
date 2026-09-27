@@ -423,6 +423,25 @@ def work_sources(store, job_id, tools=None, records=None, document_jobs=()):
  if job_id in set(document_jobs or ()):labels.add('connected-document')
  return labels
 
+def work_direct_sources(store, job_id, tools=None, records=None, document_jobs=()):
+ """The sources one Work read or wrote itself, without the ``history:*`` labels it inherited (#701).
+
+ Its record's own labels (this turn's splices and reads), its durable
+ private tool events, the file-workspace document-job list and a
+ context-inbox attachment; ``{'unrecorded'}`` when it has no record.  Used
+ only by the CLI native-search gate; the #605 inheritance rule
+ (``work_sources``) is unchanged for every other purpose.
+ """
+ records=work_source_records(store) if records is None else records
+ raw=records.get(job_id) if isinstance(job_id,str) and job_id else None
+ if not isinstance(raw,list):return {UNRECORDED_PROVENANCE}
+ labels={base_label(label) for label in raw if not str(label).startswith(HISTORY_PREFIX)}|recorded_private_sources(store,job_id,tools)
+ if job_id in set(document_jobs or ()):labels.add('connected-document')
+ if hasattr(store,'db'):
+  with store.db() as db:
+   if db.execute('SELECT 1 FROM context_job_attachments WHERE job_id=?',(job_id,)).fetchone():labels.add('owner-context-inbox')
+ return labels
+
 def history_provenance(store, rows, tools=None, document_jobs=()):
  """History-window labels for exactly the earlier messages a Work is shown."""
  records=work_source_records(store);labels=set()

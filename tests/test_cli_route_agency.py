@@ -38,7 +38,7 @@ from personal_agent import browser_session as bs
 from personal_agent import mcp_bridge
 from personal_agent.agent_runtime import (BROWSER_ACTIONS, ENGINE_UNMEDIATED, HISTORY_PREFIX, OWNER_CONVERSATION,
                                           WORK_SOURCES_BACKFILL_KEY, WORK_SOURCES_KEY, backfill_work_sources,
-                                          history_provenance, legacy_work_sources)
+                                          history_provenance, legacy_work_sources, work_direct_sources)
 from personal_agent.bounded_execution import (AgentOSMcpTools, BoundedExecutionAdapter, ExecutionResult,
                                               ReadOnlyAgentOSMcpTools, StrictIsolatedAgentOSMcpTools, BOUNDED_PROFILE,
                                               STRICT_PROFILE, profile_actions)
@@ -218,6 +218,95 @@ class NativeSearchOnBackfilledHistory(unittest.TestCase):
 
 
 # ---------------------------------------------------------------- native-search argv and bridge lists
+
+class NonTransitiveNativeSearchGate(unittest.TestCase):
+    """Owner decision on #701: the #678 gate reads what the shown messages' own Works read,
+    not the inherited ``history:*`` chain; the #605 inheritance itself is unchanged."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.store = QuickStore(Path(tmp.name) / 'state')
+        test = self
+        self.native, self.read_notes = [], False
+
+        class Cli:
+            def execute(self, engine, prompt, tools, **kwargs):
+                test.native.append(tools.native_search)
+                if test.read_notes:
+                    # What the bridge records for a CLI-chosen list_notes (mcp_bridge.serve).
+                    with test.store.db() as db:
+                        db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                                   (tools.capabilities.job_id, 'list_notes', 'succeeded',
+                                    json.dumps({'scope': 'subscription-mcp-bridge', 'host_action': 'list_notes'}), time.time()))
+                return ExecutionResult('engine answer', engine, 0)
+
+        self.service = AgentService(self.store, subscription_engines=SubscriptionEngines(finder=lambda _: '/runtime/codex', clock=lambda: 1),
+                                    execution_adapter=Cli(),
+                                    browser_profile=bs.BrowserProfile(Path(tmp.name) / 'b', available=lambda: False))
+        self.service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
+        self.turn = 0
+
+    def run_turn(self, text='다음 질문', search_off=False):
+        self.turn += 1
+        job = self.store.enqueue(f'{text} {self.turn}', f'k{self.turn}')
+        gate = self.service.cli_native_search
+        if search_off:
+            self.service.cli_native_search = lambda *args: (False, 'private_turn')
+        try:
+            self.assertTrue(self.service.run_one())
+        finally:
+            self.service.cli_native_search = gate
+        return job, self.native[-1], self.store.turn_provenance(job).get('native_search_reason')
+
+    def test_codex_own_list_notes_blocks_only_while_it_is_shown(self):
+        self.read_notes = True
+        notes_job, native, _reason = self.run_turn('메모 보고 답해줘', search_off=True)
+        self.read_notes = False
+        self.assertFalse(native)
+        self.assertIn('personal-space', work_direct_sources(self.store, notes_job))
+        outcomes = [self.run_turn() for _ in range(9)]
+        # history()[-16:] holds the current request and 15 earlier messages: the notes
+        # Work's two messages are shown to the next 8 turns and gone at the 9th.
+        self.assertEqual([native for _job, native, _reason in outcomes], [False] * 8 + [True])
+        self.assertEqual({reason for _job, native, reason in outcomes if not native}, {'private_history'})
+        last = outcomes[-1][0]
+        # The #605 inheritance rule is unchanged: the 9th Work still inherits the label.
+        self.assertIn('history:personal-space', self.store.config(WORK_SOURCES_KEY, {})[last])
+        self.assertNotIn('personal-space', work_direct_sources(self.store, last))
+
+    def test_a_notes_work_inside_the_window_blocks_and_outside_does_not(self):
+        base = time.time() - 5000
+        notes = _legacy_work(self.store, '메모', 'NOTE', created=base,
+                             events=(('list_notes', 'succeeded', {'host_action': 'list_notes'}),
+                                     ('subscription_engine', 'succeeded', {})))
+        later = [_legacy_work(self.store, f'q{n}', f'a{n}', created=base + 10 + n) for n in range(8)]
+        inherited = ['engine-unmediated-read', 'history:personal-space', 'owner-conversation']
+        self.store.put(WORK_SOURCES_KEY, {notes: ['engine-unmediated-read', 'owner-conversation'],
+                                          **{job: list(inherited) for job in later}})
+        self.store.put(WORK_SOURCES_BACKFILL_KEY, {'version': 1})
+        rows = [{'job_id': job} for job in (notes, *later)]
+        self.assertIn('personal-space', self.service.native_search_blocked(self.service.shown_direct_provenance(rows, set())))
+        outside = rows[1:]
+        self.assertEqual(self.service.native_search_blocked(self.service.shown_direct_provenance(outside, set())), [])
+        # Other egress purposes keep the inherited chain (#605 unchanged).
+        self.assertIn('personal-space', self.service.native_search_blocked(self.service.shown_history_provenance(outside, set())))
+        # Document jobs and attachments of a shown Work count as its own reads.
+        self.assertIn('connected-document',
+                      self.service.native_search_blocked(self.service.shown_direct_provenance(outside[:1], {later[0]})))
+        with self.store.db() as db:
+            db.execute('INSERT INTO context_job_attachments VALUES (?,?,?,?,?)', (later[1], '[]', 'a', 1, 1))
+        self.assertIn('owner-context-inbox',
+                      self.service.native_search_blocked(self.service.shown_direct_provenance(outside[1:2], set())))
+
+    def test_the_current_turns_own_splice_still_blocks(self):
+        with self.store.db() as db:
+            db.execute('INSERT INTO notes VALUES (?,?,?)', ('n1', 'NOTE-701', 1))
+        self.store.enqueue('/summarize', 'k-sum')
+        self.assertTrue(self.service.run_one())
+        self.assertFalse(self.native[-1])
+        self.assertEqual(self.store.turn_provenance(self.store.jobs()[0]['id'])['native_search_reason'], 'private_turn')
+
 
 class NativeSearchTurnArgv(unittest.TestCase):
     """Fix 2: on a native-search turn the CLI gets its own search and no bridge search, for both CLIs."""

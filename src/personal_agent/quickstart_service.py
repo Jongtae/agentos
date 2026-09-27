@@ -15,7 +15,7 @@ from .agent_runtime import (Capabilities, ToolError, run_agent, AGENTS, evidence
                             MEMORY_OWNER, context_sections, CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, OWNER_CONVERSATION, lookup_sources, work_written_values, WORK_SOURCES_KEY, WORK_SOURCES_LIMIT, base_label,
                             history_provenance, WorkBudget, EFFECT_FREE_READS, explicit_search_query, outcome_from_events,
                             WORK_STOP_KEY, WORK_STOP_KEEP, work_stop_requested, WorkLedger, goal_summary, work_source_records,
-                            backfill_work_sources, NOTES_SUMMARY_COMMANDS, WORK_SOURCES_BACKFILL_KEY, WORK_SOURCES_BACKFILL_VERSION)
+                            backfill_work_sources, work_direct_sources, NOTES_SUMMARY_COMMANDS, WORK_SOURCES_BACKFILL_KEY, WORK_SOURCES_BACKFILL_VERSION)
 from .plugins import PluginRegistry
 from .providers import NOT_REPORTED, ModelAdapter, ProviderError, request_json, validate_model
 from .decision import DEFAULT_DECISION_PROVIDER, RoutedDecisionEngine
@@ -1951,6 +1951,22 @@ class AgentService:
         tools={tool['id']:tool for package in self.runtime_packages() for tool in package['tools']}
         self.backfill_legacy_work_sources(tools,document_jobs)
         return history_provenance(self.store,rows,tools,document_jobs)
+
+    def shown_direct_provenance(self, rows, document_jobs):
+        """The native-search gate's view of the shown messages (#701): each one's own Work sources.
+
+        Only what the shown messages' own Works read or wrote (their own private
+        tool events, spliced sources, document jobs and attachments), never the
+        ``history:*`` labels those Works inherited.  The #605 inheritance rule is
+        unchanged for every other purpose (``shown_history_provenance``).
+        """
+        if not rows:return set()
+        tools={tool['id']:tool for package in self.runtime_packages() for tool in package['tools']}
+        self.backfill_legacy_work_sources(tools,document_jobs)
+        records=work_source_records(self.store);labels=set()
+        for job_id in {row.get('job_id') for row in rows}:
+            labels|=work_direct_sources(self.store,job_id,tools,records,document_jobs)
+        return labels
 
     def backfill_legacy_work_sources(self, tools=None, document_jobs=None):
         """Record deterministic sources for pre-#605 Works once per store (#701).
@@ -4696,16 +4712,22 @@ class AgentService:
                             # greeting no longer does.  The AgentOS preflight lookup
                             # above ran first, from this turn's raw request only.
                             conversation=context['conversation']
-                            labels=self.shown_history_provenance(history_rows[:-1][-len(conversation):] if conversation else [],document_jobs)
+                            shown_rows[:]=history_rows[:-1][-len(conversation):] if conversation else []
+                            labels=self.shown_history_provenance(shown_rows,document_jobs)
                             return context,prompt_text,adapter,sent_text,labels
                         # #678 P1: the CLI's own web search is decided from the whole
                         # prompt's provenance - this turn's spliced sources and the
                         # sources of every earlier message the CLI is shown - and is
-                        # off when any of them is a private store.
+                        # off when any of them is a private store.  #701: for this gate
+                        # only, a shown message counts with what its own Work read
+                        # (``shown_direct_provenance``), not the inherited history chain,
+                        # so a private read blocks while its messages are shown.
+                        shown_rows=[]
                         native_search,native_reason=self.cli_native_search(subscription['id'],facade.PROFILE,isolated,turn_provenance)
                         engine_context,engine_prompt,adapter_context,sent,shown_sources=cli_context(native_search)
                         if native_search:
-                            blocked=self.native_search_blocked(set(turn_provenance)|set(capabilities.private_provenance)|set(shown_sources))
+                            blocked=self.native_search_blocked(set(turn_provenance)|set(capabilities.private_provenance)
+                                                               |self.shown_direct_provenance(shown_rows,document_jobs))
                             if blocked:
                                 native_search,native_reason=False,'private_history'
                                 engine_context,engine_prompt,adapter_context,sent,shown_sources=cli_context(False)

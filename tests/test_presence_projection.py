@@ -393,6 +393,7 @@ class ContinuityTests(ProjectionTestCase):
         self.assertOneVoice(first_bubbles + bubbles)
 
     def test_retry_judgment_cannot_replay_unknown_external_effect(self):
+        """#730: the unknown-effect Work is never replayed; the current message runs as a fresh Work."""
         first, _ = self.turn('원래 요청을 처리해줘')
         self.assertEqual(first['status'], 'failed')
         with self.store.db() as db:
@@ -401,18 +402,19 @@ class ContinuityTests(ProjectionTestCase):
                         json.dumps({'effect':'unknown','state':'outcome-unknown'}), time.time()))
         self.connect_model()
         self.retry_engine()
-        self.text = '이 문장은 실행되면 안 됩니다.'
+        self.text = '이번 메시지를 새로 처리했습니다.'
 
         retried, bubbles = self.turn('그거 다시 해줘')
 
         self.assertEqual(retried['status'], 'succeeded')
-        self.assertEqual(retried['relation_kind'], 'retry')
+        self.assertEqual(retried['relation_kind'], 'reference', 'linked, not a replay')
         self.assertEqual(retried['related_job_id'], first['id'])
         self.assertEqual(len(bubbles), 1)
-        self.assertIn('외부 결과가 불확실', bubbles[0][1])
-        self.assertNotIn(self.text, bubbles[0][1])
+        self.assertIn('외부 결과가 불확실', bubbles[0][1], 'the owner is still told to check the earlier effect')
+        self.assertIn(self.text, bubbles[0][1], 'the current message ran')
         event = next(item for item in self.store.task_events(retried['id'])
                      if item['tool'] == 'conversation_continuity')
+        self.assertEqual(event['trace']['relation'], 'retry-refused-ran-current')
         self.assertFalse(event['trace']['executed'])
         self.assertIn('외부 결과가 불확실', event['trace']['reason'])
 
@@ -699,14 +701,16 @@ class ConversationContinuityTests(ProjectionTestCase):
         self.service.use_decision_engine(self.relation_engine({'그거 다시 해줘': FOLLOWUP_RETRY}))
         second, bubbles = self.turn('그거 다시 해줘')
 
-        self.assertEqual(second['status'], 'succeeded')
-        self.assertEqual(second['relation_kind'], FOLLOWUP_RETRY)
+        # #730: the current message ran as a fresh Work.  No AI route is connected in
+        # this fixture, so it is blocked exactly like any new request; the owner is
+        # still told about the earlier uncertain effect first.
+        self.assertEqual(second['status'], 'failed')
+        self.assertEqual(second['relation_kind'], FOLLOWUP_REFERENCE, '#730: linked, never replayed')
         self.assertEqual(second['related_job_id'], first['id'])
-        self.assertIn('외부 결과가 불확실', second['response'])
-        self.assertIn('실제 결과를 확인', second['response'])
-        self.assertTrue(any('외부 결과가 불확실' in text for _kind, text in bubbles))
+        self.assertTrue(any('외부 결과가 불확실' in text and '실제 결과를 확인' in text for _kind, text in bubbles), bubbles)
         event = [e for e in self.store.task_events(second['id'])
                  if e['tool'] == 'conversation_continuity'][-1]
+        self.assertEqual(event['trace']['relation'], 'retry-refused-ran-current')
         self.assertFalse(event['trace']['executed'])
 
     def test_local_note_correction_never_reaches_the_remote_followup_judge(self):

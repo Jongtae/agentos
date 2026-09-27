@@ -526,9 +526,13 @@ class C_RetryContinuity(PresenceEval):
         notes = len(self.store.notes())
         self.relations = {'다시 해줘': FOLLOWUP_RETRY}
         job, _ = self.turn('다시 해줘')
-        self.assertIn('상태를 바꾸는 작업을 시도해', job['response'])
+        # #730: the old request is not replayed; the owner's current message runs as a
+        # fresh Work and the refusal is Evidence, not the answer.
+        self.assertNotIn('상태를 바꾸는 작업을 시도해', job['response'])
         continuity = [e for e in self.events(job['id']) if e['tool'] == 'conversation_continuity']
+        self.assertEqual(continuity[-1]['trace']['relation'], 'retry-refused-ran-current')
         self.assertEqual(continuity[-1]['trace']['executed'], False)
+        self.assertIn('상태를 바꾸는 작업을 시도해', continuity[-1]['trace']['reason'])
         self.assertEqual(len(self.store.notes()), notes, 'the note is never saved twice')
 
 
@@ -1164,8 +1168,10 @@ class I_UnknownExternalEffect(CalendarEval):
         self.relations = {'다시 해줘': FOLLOWUP_RETRY}
         retry_at = len(self.wire)
         retry, _ = self.turn('다시 해줘')
-        self.assertIn('외부 결과가 불확실', retry['response'], 'the refusal names the unknown effect')
+        # #730: the current message ran as a fresh Work; the owner is still told first.
+        self.assertIn('외부 결과가 불확실', retry['response'], 'the notice names the unknown effect')
         self.assertIn('중복', retry['response'], 'and its duplicate risk')
+        self.assertIn('새 요청으로 처리했습니다', retry['response'])
         self.assertNotIn('실패 또는 중단 상태가 아니어서', retry['response'])
         self.assertIn('외부 결과가 불확실', ' '.join(self.texts(retry_at)))
         self.assertEqual(self.transport.calls, 1, 'no unsafe automatic duplicate')

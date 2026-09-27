@@ -215,6 +215,9 @@ def subscription_public_evidence(result):
 
 
 #: Retry refusal for a Work whose external effect was not observed (#447/#598).
+#: #730: said before the answer when the current message ran instead of replaying a Work whose effect is unknown.
+UNKNOWN_EFFECT_RAN_CURRENT_NOTICE=('이전 요청의 외부 결과가 불확실해 그 요청은 다시 실행하지 않았습니다. '
+                                   '중복으로 만들어질 수 있으니 실제 결과를 확인해 주세요. 이번 메시지는 새 요청으로 처리했습니다.')
 UNKNOWN_EFFECT_RETRY_REFUSAL=('이전 요청의 외부 결과가 불확실해 자동으로 다시 실행하지 않았습니다. '
                               '중복으로 만들어질 수 있으니 먼저 실제 결과를 확인해 주세요.')
 
@@ -223,6 +226,23 @@ UNKNOWN_EFFECT_RETRY_REFUSAL=('이전 요청의 외부 결과가 불확실해 �
 BROWSER_REQUESTS_KEY='browser_step_requests'
 #: #680: when the legacy plaintext Playwright profile was deleted (Settings shows it).
 BROWSER_LEGACY_KEY='browser_legacy_profile_removed_at'
+#: #730: the continuity relation of a Work judged a retry whose old request was
+#: not safe to replay: the owner's current message ran instead, as a fresh Work.
+RETRY_REFUSED_RAN_CURRENT='retry-refused-ran-current'
+#: Tools whose call may have changed state outside this conversation; an earlier
+#: Work that called one is never replayed (``safe_retry``).
+RETRY_EFFECT_TOOLS=frozenset({'save_note','save_memory','delegate_agent',
+                              'calendar_draft_create','calendar_draft_update','calendar_draft_cancel',
+                              # #656: a browser step in the owner's session may have added to a cart or submitted a form.
+                              'browser_open','browser_click','browser_type'})
+EFFECT_RETRY_REFUSAL='이전 요청이 상태를 바꾸는 작업을 시도해 자동으로 다시 실행하지 않았습니다.'
+ALREADY_RETRIED_REFUSAL='이 요청은 이미 한 번 다시 시도했습니다. 같은 요청을 중복으로 실행하지 않았습니다.'
+#: #730 review: the factual note the worker reads before the owner's current
+#: message when the earlier Work called effect tools (names, hosts, outcome only).
+RETRY_EFFECT_NOTE_HEAD=('AgentOS note (not from the owner): the owner\'s message below was judged a retry of an earlier '
+                        'request, which AgentOS did not replay because that earlier Work called tools that may have '
+                        'changed state:')
+RETRY_EFFECT_NOTE_TAIL='Check the current state before repeating any of these; ask the owner if unsure.'
 BROWSER_APPROVAL_PROMPT='결제 단계는 승인이 필요합니다. 승인하면 이 요청을 한 번만 이어서 처리하고, 승인한 단계 하나만 실행합니다.'
 #: #709: owner-private config row of in-flow login requests, by Work id.  At
 #: most one per Work: a row stays (resumed/skipped/expired) until it is pruned.
@@ -1075,15 +1095,61 @@ class AgentService:
         """
         with self.store.db() as db:
             rows=db.execute("SELECT j.id,e.detail FROM jobs j JOIN tool_events e ON e.job_id=j.id "
-                            "WHERE j.related_job_id=? AND j.relation_kind='retry' AND j.id!=? AND e.tool='conversation_continuity'",
+                            "WHERE j.related_job_id=? AND j.relation_kind IN ('retry','reference') AND j.id!=? "
+                            "AND e.tool='conversation_continuity'",
                             (work_id,current_work_id or '')).fetchall()
         for row in rows:
             try:detail=json.loads(row['detail'])
             except (TypeError,ValueError):continue
-            if isinstance(detail,dict) and detail.get('relation')=='retry' and detail.get('executed') \
-                    and detail.get('related_work_id')==work_id:
+            if not isinstance(detail,dict) or detail.get('related_work_id')!=work_id:continue
+            # #730 review: a refused retry that ran the owner's current message
+            # instead is this Work's retry attempt too (same once-only guard).
+            if (detail.get('relation')=='retry' and detail.get('executed')) or detail.get('relation')==RETRY_REFUSED_RAN_CURRENT:
                 return True
         return False
+
+    def _refused_retry_parent(self, work_id):
+        """The earlier Work id when ``work_id`` ran as a refused retry (``retry-refused-ran-current``), else None."""
+        for event in self.store.task_events(work_id):
+            trace=event.get('trace') or {}
+            if event.get('tool')=='conversation_continuity' and trace.get('relation')==RETRY_REFUSED_RAN_CURRENT:
+                return trace.get('related_work_id')
+        return None
+
+    @staticmethod
+    def _event_host(trace):
+        """The host an effect tool event named, from its recorded URL, never its arguments."""
+        for holder in (trace, trace.get('arguments'), trace.get('evidence')):
+            url=holder.get('url') if isinstance(holder,dict) else None
+            if isinstance(url,str) and url:
+                try:return urlsplit(url).hostname or None
+                except ValueError:return None
+        return None
+
+    def retry_effect_note(self, previous):
+        """The factual note for a refused retry whose earlier Work called effect tools (#730 review).
+
+        Lists the effect tools the earlier Work called - names and hosts only,
+        never arguments or results - and whether each outcome was observed
+        (succeeded or failed) or is unknown, from its recorded tool events.
+        None when that Work called none.  Generic: no task, site or category.
+        """
+        calls={}
+        for event in self.store.task_events(previous['id']):
+            trace=event.get('trace') if isinstance(event.get('trace'),dict) else {}
+            name=trace.get('host_action') if trace.get('host_action') in RETRY_EFFECT_TOOLS else event.get('tool')
+            unknown=self._unknown_effect(trace)
+            if name not in RETRY_EFFECT_TOOLS and not unknown:continue
+            key=(str(name),self._event_host(trace))
+            state=calls.setdefault(key,set())
+            state.add('unknown' if unknown else event.get('status'))
+        if not calls:return None
+        lines=[]
+        for (name,host),states in calls.items():
+            outcome=('unknown' if 'unknown' in states or not states&{'succeeded','failed'}
+                     else 'observed: succeeded' if 'succeeded' in states else 'observed: failed')
+            lines.append(f'- {name}'+(f' (host: {host})' if host else '')+f': outcome {outcome}')
+        return '\n'.join([RETRY_EFFECT_NOTE_HEAD,*lines,RETRY_EFFECT_NOTE_TAIL])
 
     def safe_retry(self, previous, current_work_id=None):
         """Whether replaying this Work's original request is demonstrably safe."""
@@ -1095,8 +1161,10 @@ class AgentService:
             return False,UNKNOWN_EFFECT_RETRY_REFUSAL
         if previous.get('status') not in ('failed','interrupted'):
             return False,'이전 요청이 실패 또는 중단 상태가 아니어서 자동으로 다시 실행하지 않았습니다.'
-        if self._already_retried(previous['id'],current_work_id):
-            return False,'이 요청은 이미 한 번 다시 시도했습니다. 같은 요청을 중복으로 실행하지 않았습니다.'
+        # #730 review: a Work that itself ran as a refused retry is part of a retry
+        # chain; its retry attempt was already spent, so it is not retried again.
+        if self._already_retried(previous['id'],current_work_id) or self._refused_retry_parent(previous['id']):
+            return False,ALREADY_RETRIED_REFUSAL
         if previous.get('delivery')=='unknown':
             return False,'이전 Telegram 전달 여부를 확인할 수 없어 자동으로 다시 실행하지 않았습니다.'
         if self.store.context_attachment(previous['id']):
@@ -1111,10 +1179,7 @@ class AgentService:
         sources=work_source_records(self.store).get(previous['id'])
         if isinstance(sources,list) and ({'owner-settings',ENGINE_UNMEDIATED}&set(sources)):
             return False,'이전 요청이 설정 변경 또는 AgentOS가 중개하지 않은 엔진 작업을 포함해 자동으로 다시 실행하지 않았습니다.'
-        effectful={'save_note','save_memory','delegate_agent',
-                   'calendar_draft_create','calendar_draft_update','calendar_draft_cancel',
-                   # #656: a browser step in the owner's session may have added to a cart or submitted a form.
-                   'browser_open','browser_click','browser_type'}
+        effectful=RETRY_EFFECT_TOOLS
         for event in events:
             trace=event.get('trace') or {}
             # AgentPackage tool ids may alias an AgentOS write through
@@ -1122,7 +1187,7 @@ class AgentService:
             # accidentally replay a completed mutation.
             host_action=trace.get('host_action') if isinstance(trace,dict) else None
             if event.get('tool') in effectful or host_action in effectful:
-                return False,'이전 요청이 상태를 바꾸는 작업을 시도해 자동으로 다시 실행하지 않았습니다.'
+                return False,EFFECT_RETRY_REFUSAL
         return True,None
 
     def canonical_retry_source(self, previous):
@@ -1153,7 +1218,14 @@ class AgentService:
             current=parent
         return None
 
-    def record_continuity(self, job_id, previous_id, relation, *, executed=False, reason=None, source_work_id=None, db=None):
+    def record_continuity(self, job_id, previous_id, relation, *, executed=False, reason=None, source_work_id=None, db=None,
+                          link_kind=None):
+        """Link this Work to the previous one and record the continuity Evidence.
+
+        ``link_kind`` is the stored Work relation when it differs from the
+        recorded ``relation`` (#730: ``retry-refused-ran-current`` is stored
+        as a ``reference``, since the new message ran and nothing replayed).
+        """
         detail={'relation':relation,'related_work_id':previous_id,'executed':bool(executed)}
         if source_work_id and source_work_id!=previous_id:
             detail['source_work_id']=source_work_id
@@ -1162,8 +1234,8 @@ class AgentService:
             with self.store.db() as conn:
                 conn.execute('BEGIN IMMEDIATE')
                 return self.record_continuity(job_id,previous_id,relation,executed=executed,reason=reason,
-                                              source_work_id=source_work_id,db=conn)
-        self.store.link_work_relation(job_id,previous_id,relation,db=db)
+                                              source_work_id=source_work_id,db=conn,link_kind=link_kind)
+        self.store.link_work_relation(job_id,previous_id,link_kind or relation,db=db)
         db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
                    (job_id,'conversation_continuity','succeeded',json.dumps(detail,ensure_ascii=False),time.time()))
 
@@ -4891,6 +4963,8 @@ class AgentService:
             #: effect could not be observed (#598 I1).
             unknown_statement=None
             calendar_notice=''
+            #: #730 review: the factual note a refused retry's worker reads first.
+            retry_note=None
             # #605: the sources that enter this Work's context, recorded with
             # its reply.  Each branch adds a source *before* reading it.
             work_sources={OWNER_CONVERSATION}
@@ -4918,13 +4992,27 @@ class AgentService:
                         if allowed and not source:
                             allowed=False
                             reason='이전 요청의 재시도 연결 기록을 확인할 수 없어 자동으로 다시 실행하지 않았습니다.'
-                        self.record_continuity(job['id'],previous['id'],relation,
-                                               executed=allowed,reason=reason,
-                                               source_work_id=source['id'] if source else None)
-                        if not allowed:
-                            return self.complete_continuity_turn(job,reason)
-                        prompt=source['message'].strip()
-                        prompt_work_id=source['id']
+                        if allowed:
+                            self.record_continuity(job['id'],previous['id'],relation,executed=True,
+                                                   source_work_id=source['id'])
+                            prompt=source['message'].strip()
+                            prompt_work_id=source['id']
+                        else:
+                            # #730: the refusal protects only against replaying the old
+                            # request blindly.  The owner's new message is itself an
+                            # instruction: it runs as this fresh Work with its normal
+                            # context (the worker sees the history and decides), under the
+                            # same approvals and effect guards.  The old request is never
+                            # replayed, and the refusal is Evidence, not the answer.
+                            self.record_continuity(job['id'],previous['id'],RETRY_REFUSED_RAN_CURRENT,
+                                                   executed=False,reason=reason,link_kind=FOLLOWUP_REFERENCE)
+                            # The AI decides; AgentOS tells it, from recorded events, what the
+                            # earlier Work may already have changed.  Its effects stay gated
+                            # by AgentOS's approvals as for any request.
+                            retry_note=self.retry_effect_note(previous)
+                            if reason==UNKNOWN_EFFECT_RETRY_REFUSAL:
+                                # The owner still needs to check the earlier uncertain effect.
+                                calendar_notice=UNKNOWN_EFFECT_RAN_CURRENT_NOTICE+'\n\n'
                     elif relation==FOLLOWUP_CANCEL:
                         cancelled,response=self.cancel_focused_work(previous,connector_owner)
                         self.record_continuity(job['id'],previous['id'],relation,
@@ -4962,9 +5050,9 @@ class AgentService:
                     # draft itself (``handle(fresh=True)`` says so); anything
                     # else drops it here.
                     if decision.intent!=INTENT_CALENDAR_CREATE and self.calendar_conversation.clear(connector_owner):
-                        calendar_notice=CALENDAR_DROPPED_NOTICE+'\n\n'
+                        calendar_notice+=CALENDAR_DROPPED_NOTICE+'\n\n'
                 elif decision.intent not in (INTENT_CALENDAR_CREATE,INTENT_AMBIGUOUS) and self.calendar_conversation.has_pending(connector_owner):
-                    if self.calendar_conversation.clear(connector_owner):calendar_notice=CALENDAR_DROPPED_NOTICE+'\n\n'
+                    if self.calendar_conversation.clear(connector_owner):calendar_notice+=CALENDAR_DROPPED_NOTICE+'\n\n'
                 self.conversation_focus.record(decision,job['id'])
                 self.present_turn(job,decision=decision)
                 owner=f"channel:{job['channel']}:{job.get('chat_id') or 'local'}"
@@ -5124,6 +5212,8 @@ class AgentService:
                         history[-1]={'role':'user','content':prompt}
                     if fallthrough_note and history:
                         history[-1]={'role':'user','content':history[-1]['content']+fallthrough_note}
+                    if retry_note and history:
+                        history[-1]={'role':'user','content':retry_note+'\n\n'+history[-1]['content']}
                     # Provenance for material this turn splices straight into
                     # the prompt.  None of the four branches below leaves a
                     # `Capabilities.evidence` entry or sets `document_context`

@@ -384,7 +384,7 @@ function mainAiRoutes(settings){const main=settings?.main_ai||{};return Object.f
 function mainAiView(settings){
  const main=settings?.main_ai||{},current=main.current||'',route=mainAiRoutes(settings)[current],last=main.last_check||{};
  const checked=last.checked_at?t('마지막 확인 {time}',{time:TIME_MINUTE.format(new Date(last.checked_at*1000))}):'';
- if(!current)return {title:t('선택 필요'),description:t('작업을 실행할 기본 AI가 아직 선택되지 않았습니다. 연결을 선택하고 확인한 뒤 사용하세요.'),state:t('설정 필요'),kind:'neutral',checkable:false};
+ if(!current)return {title:t('선택 필요'),description:t('작업을 실행할 AI가 없습니다. 변경에서 하나를 고르세요.'),state:t('설정 필요'),kind:'neutral',checkable:false};
  if(current==='other'){const other=main.other||{};return {title:directRouteName(other),description:t('{model} 모델. 이 연결은 변경 목록에 없습니다. 계속 쓰려면 확인하고, 바꾸려면 변경을 누르세요.',{model:other.model||'-'})+' '+t('전송 대상: {destination}',{destination:other.destination||'-'}),state:t('확인 필요'),kind:'attention',checkable:true};}
  if(!route)return {title:current,description:t('선택된 연결을 이 컴퓨터에서 확인할 수 없습니다. 자동 전환하지 않습니다.'),state:t('확인 필요'),kind:'attention',checkable:false};
  const destination=t('전송 대상: {destination}',{destination:t(route.destination)});

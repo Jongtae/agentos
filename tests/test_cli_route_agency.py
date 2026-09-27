@@ -241,7 +241,7 @@ NOTES_EVENTS = (('list_notes', 'succeeded', {'host_action': 'list_notes'}), ('su
 
 
 class BackfillSpanAndDriveSplices(unittest.TestCase):
-    """#703: a resumed Work's window covers what it was shown at resume; pre-#570 Drive splices stay private."""
+    """#703: a resumed Work's window covers what it was shown at resume; untraced connector splices stay unknown."""
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -303,61 +303,70 @@ class BackfillSpanAndDriveSplices(unittest.TestCase):
         for job in clean:
             self.assertEqual(inherited_private(records[job]), [], job)
 
-    def test_a_pre_570_drive_splice_stays_private(self):
-        drive = _legacy_work(self.store, '드라이브 파일 요약해줘', 'DRIVE-SUMMARY', created=self.base)
-        english = _legacy_work(self.store, 'Summarize my Google Drive file', 'DRIVE', created=self.base + 1)
-        mention = _legacy_work(self.store, '드라이브 가자', '좋아요', created=self.base + 2)
-        spliced = {OWNER_CONVERSATION, ENGINE_UNMEDIATED, 'connected-drive-file'}
-        self.assertEqual(legacy_work_sources(self.store, drive), spliced)
-        self.assertEqual(legacy_work_sources(self.store, english), spliced)
-        self.assertEqual(legacy_work_sources(self.store, mention), {OWNER_CONVERSATION, ENGINE_UNMEDIATED},
-                         'the historical literal needed both a Drive name and a read word')
+    def chat_work(self, text, created, chat=CHAT):
+        job = _job(self.store, text, created, chat_id=chat)
+        _say(self.store, job, 'user', text)
+        _say(self.store, job, 'assistant', 'answer')
+        return job
+
+    def drive_set_up_for(self, chat=CHAT):
+        """Durable Drive handoff state as an offer and a Picker selection leave it (connector state, not text)."""
+        from personal_agent.drive_web_oauth import SELECTED_FILES_KEY, STATUS_KEY
+        self.store.put(STATUS_KEY, {'state': 'disconnected', 'owner': chat, 'audit': ['connection-offered']})
+        self.store.put(SELECTED_FILES_KEY, {})
+
+    def test_a_chat_the_drive_handoff_served_keeps_its_untraced_works_unknown(self):
+        self.drive_set_up_for()
+        chat = self.chat_work('이 파일 정리해줘', self.base)
+        web = _legacy_work(self.store, '날씨 알려줘', '맑음', created=self.base + 1)
+        other = self.chat_work('안녕', self.base + 2, chat=CHAT + 1)
+        self.assertEqual(self.service.legacy_splice_chats(), frozenset({CHAT}))
+        self.assertEqual(legacy_work_sources(self.store, chat, splice_chats={CHAT}),
+                         {OWNER_CONVERSATION, ENGINE_UNMEDIATED, 'unrecorded'},
+                         'unknown, with the known labels kept beside it; the message text is never read')
+        self.assertEqual(legacy_work_sources(self.store, web, splice_chats={CHAT}), {OWNER_CONVERSATION, ENGINE_UNMEDIATED})
+        self.assertEqual(legacy_work_sources(self.store, other, splice_chats={CHAT}), {OWNER_CONVERSATION, ENGINE_UNMEDIATED})
         later = _legacy_work(self.store, '고마워', '천만에요', created=self.base + 3)
         self.service.backfill_legacy_work_sources()
         records = self.store.config(WORK_SOURCES_KEY, {})
-        self.assertIn('connected-drive-file', records[drive])
-        self.assertIn(HISTORY_PREFIX + 'connected-drive-file', records[later], 'what it was shown stays private too')
-        self.assertIn('connected-drive-file', inherited_private(history_provenance(self.store, [{'job_id': drive}])))
-        # A #570 turn record is authoritative: it names a Drive splice when one happened.
-        self.store.put_turn_provenance(mention, {'prompt_withheld': None, 'egress_taint': []})
-        self.store.put_turn_provenance(english, {'prompt_withheld': None, 'egress_taint': []})
-        self.assertEqual(legacy_work_sources(self.store, english), {OWNER_CONVERSATION, ENGINE_UNMEDIATED})
+        self.assertIn('unrecorded', records[chat])
+        self.assertIn(HISTORY_PREFIX + 'unrecorded', records[later], 'what it was shown stays unknown too')
+        self.assertEqual(inherited_private(history_provenance(self.store, [{'job_id': chat}])), ['unrecorded'])
 
-    def test_an_executed_retry_of_a_drive_request_stays_private(self):
-        drive = _legacy_work(self.store, '드라이브 파일 읽어줘', 'failed', created=self.base)
-        retry = _legacy_work(self.store, '다시 해줘', 'DRIVE-SUMMARY', created=self.base + 10,
-                             events=(('conversation_continuity', 'succeeded',
-                                      {'relation': 'retry', 'related_work_id': drive, 'executed': True}),
-                                     ('subscription_engine', 'succeeded', {})))
-        self.assertIn('connected-drive-file', legacy_work_sources(self.store, retry),
-                      'the retry ran the earlier Drive request as its prompt')
-        self.service.backfill_legacy_work_sources()
-        records = self.store.config(WORK_SOURCES_KEY, {})
-        self.assertIn('connected-drive-file', records[drive])
-        self.assertIn('connected-drive-file', records[retry])
+    def test_a_turn_record_is_authoritative_and_no_drive_state_means_no_splice(self):
+        chat = self.chat_work('이 파일 정리해줘', self.base)
+        self.assertEqual(self.service.legacy_splice_chats(), frozenset(), 'the handoff never served a chat')
+        self.assertEqual(legacy_work_sources(self.store, chat, splice_chats=self.service.legacy_splice_chats()),
+                         {OWNER_CONVERSATION, ENGINE_UNMEDIATED})
+        # A #570 turn record names a Drive splice when one happened, so it decides.
+        self.store.put_turn_provenance(chat, {'prompt_withheld': None, 'egress_taint': []})
+        self.assertEqual(legacy_work_sources(self.store, chat, splice_chats={CHAT}), {OWNER_CONVERSATION, ENGINE_UNMEDIATED})
+        self.store.put_turn_provenance(chat, {'prompt_withheld': ['connected-drive-file']})
+        self.assertIsNone(legacy_work_sources(self.store, chat, splice_chats={CHAT}))
 
     def test_a_store_backfilled_by_version_1_is_widened_never_narrowed(self):
-        """Records version 1 wrote from the short window or without the Drive literal are corrected."""
+        """Records version 1 wrote from the short window or without the splice evidence are corrected."""
+        self.drive_set_up_for()
         parked, between = self.parked_and_resumed(NOTES_EVENTS)
-        drive = _legacy_work(self.store, '구글 드라이브 자료 찾아줘', 'DRIVE', created=self.base + 20)
+        chat = self.chat_work('이 파일 정리해줘', self.base + 20)
         shown = _legacy_work(self.store, '고마워', '천만에요', created=self.base + 30)
         v1_ran = time.time()
         # A genuine record written after version 1 ran is left exactly as recorded.
-        fresh = _job(self.store, '새 질문', v1_ran + 10)
+        fresh = _job(self.store, '새 질문', v1_ran + 10, chat_id=CHAT)
         _say(self.store, fresh, 'user', '새 질문')
         _say(self.store, fresh, 'assistant', '새 답')
         clean = ['engine-unmediated-read', 'history:owner-conversation', 'owner-conversation']
         self.store.put(WORK_SOURCES_KEY, {parked: ['engine-unmediated-read', 'owner-conversation'],
-                                          drive: list(clean), shown: list(clean),
+                                          chat: list(clean), shown: list(clean),
                                           fresh: ['history:owner-conversation', 'owner-conversation']})
         self.store.put(WORK_SOURCES_BACKFILL_KEY, {'version': 1, 'at': v1_ran, 'recorded': 3})
         self.service.backfill_legacy_work_sources()
         records = self.store.config(WORK_SOURCES_KEY, {})
         self.assertIn(HISTORY_PREFIX + 'unrecorded', records[parked], 'its resume was shown the notes reply')
-        self.assertIn('connected-drive-file', records[drive])
-        self.assertIn(HISTORY_PREFIX + 'connected-drive-file', records[shown], 'the widening reaches later Works')
+        self.assertIn('unrecorded', records[chat])
+        self.assertIn(HISTORY_PREFIX + 'unrecorded', records[shown], 'the widening reaches later Works')
         self.assertEqual(records[fresh], ['history:owner-conversation', 'owner-conversation'])
-        for job in (parked, drive, shown):
+        for job in (parked, chat, shown):
             self.assertLessEqual({'engine-unmediated-read', 'owner-conversation'}, set(records[job]), 'never narrowed')
         self.assertEqual(self.store.config(WORK_SOURCES_BACKFILL_KEY)['version'], 2)
         self.assertEqual(self.service.backfill_legacy_work_sources(), 0, 'corrected once')

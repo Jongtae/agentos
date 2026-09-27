@@ -538,8 +538,9 @@ def history_provenance(store, rows, tools=None, document_jobs=()):
 # stays unrecorded.
 WORK_SOURCES_BACKFILL_KEY='work_source_backfill'
 #: 2 (#703): the window reaches a Work's last message (a parked Work that resumed,
-#: or a queued one, was shown later messages) and pre-#570 Drive splices stay
-#: private.  A store that ran version 1 is corrected by widening only.
+#: or a queued one, was shown later messages), and a Work a connector file splice
+#: could have reached without a trace stays unknown.  A store that ran version 1
+#: is corrected by widening only.
 WORK_SOURCES_BACKFILL_VERSION=2
 #: The notes-summary commands whose prompt splices every note (the service's own literal check).
 NOTES_SUMMARY_COMMANDS=('/summarize','메모 요약')
@@ -553,51 +554,34 @@ _RECORD_ONLY_LABELS=frozenset({'owner-memory','owner-current-context','owner-pre
 #: Tool events that show the reply came from a model or CLI turn.
 _MODEL_TURN_TOOLS=('model','subscription_engine')
 _UNFINISHED=('queued','running')
-#: #703: the literal the service used, until #672, to splice the owner's
-#: Picker-selected Google Drive files into a turn (the removed
-#: ``AgentService.requests_drive_access``), kept verbatim.  A Work before #570
-#: left no durable trace of that splice -- no tool event, no turn record -- so
-#: the legacy classification re-applies the same literal to the prompt the Work
-#: ran and a match stays private.  It classifies stored history only; no
-#: request is routed by it.
-_LEGACY_DRIVE_NAMES=('google drive','구글 드라이브','드라이브')
-_LEGACY_DRIVE_WORDS=('연결','connect','찾','읽','자료','file','파일','요약','search')
+def legacy_splice_possible(store, job_id, splice_chats=()):
+ """Whether a connector file splice could have reached a Work that left no trace of one (#703).
 
-def legacy_drive_request(text):
- """Whether the pre-#672 Drive literal matched ``text`` (the service's own former check)."""
- if not isinstance(text,str):return False
- normalized=text.lower()
- return any(name in normalized for name in _LEGACY_DRIVE_NAMES) and any(word in normalized for word in _LEGACY_DRIVE_WORDS)
-
-def legacy_drive_splice(store, job_id):
- """Whether a Work with no turn record may have had selected Drive files spliced in (#703).
-
- The prompt a Work ran is its own message or, for an executed retry, the
- earlier request its ``conversation_continuity`` event names; every one of
- those is checked.  A Work with a #570 turn record is judged by that record.
+ Before #570 a turn could have the owner's selected connector files spliced
+ into its prompt without any durable record.  That was possible only for a
+ chat the connector had been set up for, so ``splice_chats`` -- supplied by
+ the service from durable connector state, never from message text -- names
+ them.  A Work with a #570 turn record is judged by that record instead.
  """
- if callable(getattr(store,'turn_provenance',None)) and isinstance(store.turn_provenance(job_id),dict):return False
- prompts=[job_id]
- with store.db() as db:
-  for row in db.execute("SELECT detail FROM tool_events WHERE job_id=? AND tool='conversation_continuity'",(job_id,)):
-   try:detail=json.loads(row['detail'] or '{}')
-   except ValueError:detail={}
-   if not isinstance(detail,dict):continue
-   prompts+=[detail.get(key) for key in ('related_work_id','source_work_id') if isinstance(detail.get(key),str)]
- return any(legacy_drive_request((store.job(work) or {}).get('message')) for work in prompts)
+ chats={chat for chat in (splice_chats or ()) if isinstance(chat,int) and not isinstance(chat,bool)}
+ if not chats:return False
+ chat=(store.job(job_id) or {}).get('chat_id')
+ if chat not in chats:return False
+ return not (callable(getattr(store,'turn_provenance',None)) and isinstance(store.turn_provenance(job_id),dict))
 
-def legacy_work_sources(store, job_id, tools=None, document_jobs=()):
+
+def legacy_work_sources(store, job_id, tools=None, document_jobs=(), splice_chats=()):
  """The base source labels of a Work that has no source record, or None when it stays private (#701).
 
  Deterministic signals only: its successful private tool events, the
  file-workspace document-job list, a context-inbox attachment, a note saved
- under its id, the notes-summary command, the pre-#672 Drive literal when it
- has no turn record (#703), its turn-provenance record (#570) and whether a
- model or CLI produced its reply.  Clean is
+ under its id, the notes-summary command, its turn-provenance record (#570)
+ and whether a model or CLI produced its reply.  Clean is
  ``{owner-conversation}`` plus ``engine-unmediated-read`` for a subscription
  CLI turn (its CLI could read host files AgentOS never labels, #605 F1).
- A Work the pre-#672 Drive literal matches, with no turn record, also
- carries ``connected-drive-file`` (#703), so it is private, not clean.
+ A Work a connector file splice could have reached without a trace
+ (``legacy_splice_possible``, #703) also carries ``unrecorded``: its sources
+ are unknown, so it is private, not clean.
  """
  if not isinstance(job_id,str) or not job_id:return None
  job=store.job(job_id)
@@ -623,12 +607,12 @@ def legacy_work_sources(store, job_id, tools=None, document_jobs=()):
   if seen-_RECORD_ONLY_LABELS:return None
  labels={OWNER_CONVERSATION}
  if 'subscription_engine' in tools_seen:labels.add(ENGINE_UNMEDIATED)
- # #703: a pre-#570 Drive splice is labelled as a #570+ Work records it, so the
- # Work and everything shown it stay private under that store's own label.
- if legacy_drive_splice(store,job_id):labels.add('connected-drive-file')
+ # #703: unknown, not clean -- and the known labels are kept beside it.
+ if legacy_splice_possible(store,job_id,splice_chats):labels.add(UNRECORDED_PROVENANCE)
  return labels
 
-def backfill_work_sources(store, tools=None, document_jobs=(), keep_messages=100, window=None, corrected_before=None):
+def backfill_work_sources(store, tools=None, document_jobs=(), keep_messages=100, window=None, corrected_before=None,
+                          splice_chats=()):
  """``{job_id: labels}`` to record so pre-#605 history stops reading as private (#701).
 
  Walks the transcript in order of each Work's first message.  Each Work is
@@ -652,11 +636,11 @@ def backfill_work_sources(store, tools=None, document_jobs=(), keep_messages=100
 
  ``corrected_before`` is the time a version-1 backfill ran on this store, if
  one did.  Version 1 read only the window before a Work's first message and
- did not know the pre-#570 Drive literal, so a record of a Work created
- before then (or whose Work row is gone) may be too narrow.  Each such record
- is widened -- never narrowed -- by its span's history labels and, for a
- Drive splice, ``connected-drive-file``; later Works then inherit the widened
- labels through the same walk.
+ did not know which Works a connector file splice could have reached, so a
+ record of a Work created before then (or whose Work row is gone) may be too
+ narrow.  Each such record is widened -- never narrowed -- by its span's
+ history labels and, where ``legacy_splice_possible``, ``unrecorded``; later
+ Works then inherit the widened labels through the same walk.
 
  Only Works among the last ``keep_messages`` messages (what
  ``QuickStore.history`` can show) are returned for recording.
@@ -705,13 +689,13 @@ def backfill_work_sources(store, tools=None, document_jobs=(), keep_messages=100
        and not (isinstance(created,(int,float)) and created>=corrected_before)):
     # #703: a record version 1 may have written or narrowed; widen only.
     labels|=history
-    if legacy_drive_splice(store,job):labels.add('connected-drive-file')
+    if legacy_splice_possible(store,job,splice_chats):labels.add(UNRECORDED_PROVENANCE)
    if labels!=original and job in keep:updates[job]=sorted(labels)
    resolved[job]={base_label(label) for label in labels}|recorded_private_sources(store,job,tools)
    continue
   created=work.get('created')
   legacy=earliest is None or (isinstance(created,(int,float)) and created<earliest)
-  derived=legacy_work_sources(store,job,tools,document_jobs) if legacy else None
+  derived=legacy_work_sources(store,job,tools,document_jobs,splice_chats) if legacy else None
   if derived is None:
    resolved[job]={UNRECORDED_PROVENANCE}
    continue

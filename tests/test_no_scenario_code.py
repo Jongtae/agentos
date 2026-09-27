@@ -97,10 +97,6 @@ CLASSIFIED = {
     # _CALENDAR_VERBS, "google it" in _RESEARCH_CUES, "google drive" in
     # AgentService.requests_drive_access); calendar create and Drive read are
     # now the DecisionEngine's capability-need judgment, research the loop's.
-    ('agent_runtime.py', 'google drive'): (
-        'allowed', '#703: a verbatim, frozen copy of the removed pre-#672 requests_drive_access literal, used only '
-                   'to classify stored pre-#570 Works (which left no durable trace of a Drive splice) as private; '
-                   'it routes no request and can only make history provenance more conservative'),
 }
 
 

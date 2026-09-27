@@ -21,7 +21,10 @@ from .manifests import CONTEXT_GATED_ACTIONS  # noqa: F401 (#627: re-exported fo
 
 MAX_PROMPT_BYTES = 48_000
 MAX_OUTPUT_BYTES = 96_000
-MAX_TIMEOUT_SECONDS = 120
+# One CLI turn may use up to the Work's whole shared budget (agent_runtime
+# WORK_DEADLINE_SECONDS); the remaining budget always bounds it (#607 AX-10).
+# The earlier fixed 120 s cap (#118) cut off multi-step browser work.
+MAX_TIMEOUT_SECONDS = 600
 MAX_REASON_CHARS = 300
 
 LOG = logging.getLogger('personal_agent.engine')

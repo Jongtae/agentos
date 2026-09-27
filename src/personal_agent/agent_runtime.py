@@ -10,7 +10,7 @@ from collections import namedtuple
 from pathlib import Path
 from .providers import NOT_REPORTED, ModelResult, ProviderError
 from .local_tools import LocalTools
-from .search_providers import NATIVE_REASONS, describe_options, search_arguments
+from .search_providers import ISO_COUNTRY_CODES, NATIVE_REASONS, describe_options, search_arguments
 from .document_reader import read as read_document, supported as supported_document, MAX_FILE_BYTES
 from . import folder_grants
 from .manifests import BUILTIN_MANIFEST, CONTEXT_GATED_ACTIONS, runtime_packages
@@ -677,17 +677,6 @@ PUBLIC_TASK_ACTIONS=frozenset({'web_search','weather','public_page_read','bounde
 #: own preflight of an explicit request (`subscription_public_lookup_query`).
 CLI_LOOKUP_HINT="대화 내용 없이 따로 조회하려면 '/search 검색어'처럼 검색어를 직접 적어 보내 주세요."
 PUBLIC_TASK_UNRESOLVED='요청과 대화에서 공개 조회에 보낼 수 있는 내용이 남지 않았습니다. 개인 자료는 공개 조회에 보내지 않으므로, 조회할 내용(검색어, 도시 등)을 요청에 직접 적어 주세요.'
-#: #605 P3-1: ISO 3166-1 alpha-2 codes (tz database `iso3166.tab`, public domain).
-ISO_COUNTRY_CODES=frozenset('''
- AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT
- BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH
- ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT
- HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS
- LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI
- NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG
- SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG
- UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW
-'''.split())
 #: #605 D1: the explicit owner command whose typed query is sent as typed
 #: (a convenience since #654; an ordinary request needs no command).
 EXPLICIT_SEARCH_PREFIX='/search '

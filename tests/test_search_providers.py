@@ -270,6 +270,35 @@ class NativeSearchRoutes(unittest.TestCase):
                 self.assertEqual(reg.native_status()['state'], 'unavailable')
                 self.assertEqual(reg.unavailable_reason(), 'rejected')
 
+    def test_only_the_tools_list_or_a_tool_type_param_is_remembered_as_unsupported(self):
+        # #686: a field inside the tool (the locale-derived country) is a per-call rejection.
+        for param, remembered in (('tools', True), ('tools[0].type', True), ('tools[12].type', True),
+                                  ('tools[0].user_location.country', False), ('tools[0].user_location', False),
+                                  ('tools[0].max_uses', False), ('tools[0].typed', False)):
+            with self.subTest(param=param):
+                error = http_error(400, type='invalid_request_error', param=param,
+                                   message="Invalid value: 'UK'. Hosted tool 'web_search' is not supported here.")
+                reg = registry(transport=Transport(error), main=main_ai(OPENAI))
+                with self.assertRaises(SearchProviderError) as failed:
+                    reg.search('x')
+                self.assertEqual(failed.exception.code,
+                                 'native_search_unavailable' if remembered else 'native_search_rejected')
+                self.assertEqual(reg.native_status()['state'], 'unavailable' if remembered else 'unknown')
+
+    def test_only_an_iso_3166_alpha_2_country_is_sent_as_the_user_location(self):
+        # #686: `en-UK` (UK is not ISO 3166-1) or a non-country subtag is dropped, not sent.
+        for locale, country in (('en-GB', 'GB'), ('ko_kr', 'KR'), ('en-UK', None), ('zh-Hans', None),
+                                ('en-419', None), ('en', None)):
+            for config in (OPENAI, ANTHROPIC, OPENROUTER):
+                with self.subTest(locale=locale, route=config['endpoint']):
+                    answer = {OPENAI['endpoint']: OPENAI_OK, ANTHROPIC['endpoint']: ANTHROPIC_DONE,
+                              OPENROUTER['endpoint']: OPENROUTER_OK}[config['endpoint']]
+                    transport = Transport(answer)
+                    registry(transport=transport, main=main_ai(config)).search('x', locale=locale)
+                    tool = transport.requests[0]['body']['tools'][0]
+                    location = (tool.get('parameters') or {}).get('user_location') or tool.get('user_location')
+                    self.assertEqual(location, {'type': 'approximate', 'country': country} if country else None)
+
     def test_another_4xx_is_a_per_call_failure_and_is_not_remembered(self):
         for error in (http_error(400, type='invalid_request_error', message='max_tokens is too large'),
                       http_error(404), http_error(422, message='query too long')):
@@ -314,21 +343,43 @@ class NativeSearchRoutes(unittest.TestCase):
                 self.assertEqual((failed.exception.code, failed.exception.reason), ('native_search_unavailable', 'no_api_key'))
                 self.assertEqual(transport.requests, [])
 
-    def test_each_request_is_a_work_turn_with_the_remaining_time_as_its_timeout(self):
+    def test_one_sub_call_is_one_work_turn_with_the_remaining_time_as_each_timeout(self):
+        # #686: pause_turn resumes do not spend the main loop's turns.
         clock = [0.0]
         budget = WorkBudget(turns=2, seconds=20, clock=lambda: clock[0])
-        transport = Transport(ANTHROPIC_PAUSED, ANTHROPIC_DONE)
+        second_pause = json.loads(json.dumps(ANTHROPIC_PAUSED))
+        second_pause['content'][0]['id'] = 'srvtoolu_2'
+        transport = Transport(ANTHROPIC_PAUSED, second_pause, ANTHROPIC_DONE)
         timeouts = []
 
         def timed(url, body, headers=None, timeout=60):
             timeouts.append(timeout)
+            clock[0] += 5
             return transport(url, body, headers)
         registry(transport=timed, main=main_ai(ANTHROPIC)).search('x', budget=budget)
+        self.assertEqual(budget.turns_used, 1)
+        self.assertEqual(timeouts, [20, 15, 10])
+        registry(transport=Transport(OPENAI_OK), main=main_ai(OPENAI)).search('x', budget=budget)
         self.assertEqual(budget.turns_used, 2)
-        self.assertEqual(timeouts, [20, 20])
         with self.assertRaises(ToolError) as spent:
             registry(transport=Transport(OPENAI_OK), main=main_ai(OPENAI)).search('x', budget=budget)
         self.assertEqual(spent.exception.code, 'turn_budget')
+
+    def test_a_resume_still_stops_on_the_owner_stop_and_the_deadline(self):
+        for stop, clock_after, code in ((True, 0, 'stopped'), (False, 30, 'deadline_exceeded')):
+            with self.subTest(code=code):
+                clock, stopped = [0.0], [False]
+                budget = WorkBudget(turns=5, seconds=20, clock=lambda: clock[0], stop=lambda: stopped[0])
+                transport = Transport(ANTHROPIC_PAUSED, ANTHROPIC_DONE)
+
+                def paused_then_stopped(url, body, headers=None, timeout=60):
+                    answer = transport(url, body, headers)
+                    stopped[0], clock[0] = stop, clock_after
+                    return answer
+                with self.assertRaises(ToolError) as halted:
+                    registry(transport=paused_then_stopped, main=main_ai(ANTHROPIC)).search('x', budget=budget)
+                self.assertEqual(halted.exception.code, code)
+                self.assertEqual(len(transport.requests), 1)
 
     def test_pause_turn_resends_every_assistant_block_and_counts_searches_across_resumes(self):
         second_pause = {'model': 'claude-sonnet-4-5', 'stop_reason': 'pause_turn', 'content': [

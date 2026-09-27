@@ -110,7 +110,23 @@ _TOOL_UNSUPPORTED = re.compile(
     r'(web[ _]?search|hosted tool|server tool|\btools?\b).{0,80}(not supported|unsupported|not available|not enabled|'
     r'not allowed|not permitted|does not support)|(not supported|unsupported|does not support|not enabled).{0,80}'
     r'(web[ _]?search|hosted tool|server tool|\btools?\b)', re.I | re.S)
+#: The provider naming the whole ``tools`` list or one tool's ``type`` as the
+#: problem (#686): only this, not a field inside the tool such as
+#: ``tools[0].user_location.country``, says the hosted tool itself is unsupported.
+_TOOL_TYPE_PARAM = re.compile(r'tools(\[\d+\]\.type)?')
 _TAGS = re.compile(r'<[^>]+>')
+#: #605 P3-1: ISO 3166-1 alpha-2 codes (tz database `iso3166.tab`, public domain).
+#: #686: a native-search ``user_location`` carries only one of these.
+ISO_COUNTRY_CODES = frozenset('''
+ AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT
+ BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH
+ ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT
+ HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS
+ LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI
+ NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG
+ SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG
+ UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW
+'''.split())
 
 #: Why native search is unavailable on a route; owner- and model-facing text.
 NATIVE_REASONS = {
@@ -336,14 +352,19 @@ def tool_unsupported(exc):
     """Whether a provider error says the hosted search tool is unsupported here.
 
     Read from the provider's own error body (``request_json`` keeps a bounded
-    ``error_detail``): a ``tools`` parameter error or a message naming the
-    tool as unsupported/not enabled.  Any other 4xx is not this.
+    ``error_detail``): a ``tools`` or ``tools[N].type`` parameter error, or a
+    message naming the tool as unsupported/not enabled.  A parameter error on
+    a field inside the tool (``tools[0].user_location.country``) is a per-call
+    rejection, never remembered (#686).  Any other 4xx is not this.
     """
     detail = getattr(exc, 'error_detail', None)
     if not isinstance(detail, dict) or not detail:
         return False
-    if str(detail.get('param') or '').split('[')[0] == 'tools':
+    param = str(detail.get('param') or '')
+    if _TOOL_TYPE_PARAM.fullmatch(param):
         return True
+    if param.startswith('tools'):
+        return False
     return bool(_TOOL_UNSUPPORTED.search(' '.join(str(detail.get(key) or '') for key in ('code', 'message'))))
 
 
@@ -424,7 +445,7 @@ class AiNativeProvider:
     def __init__(self, route, config, key, transport=None, budget=None):
         self.route, self.config, self.key = route, dict(config), key or ''
         self.transport = transport or request_json
-        # #607 WorkBudget of the calling Work: every request is a model turn.
+        # #607 WorkBudget of the calling Work: one sub-call is one model turn (#686).
         self.budget = budget
         self.destination = NATIVE_DESTINATIONS[route]
         self.label = f"The connected AI's own web search ({NATIVE_ROUTE_NAMES[route]}; cited sources)"
@@ -432,9 +453,10 @@ class AiNativeProvider:
     def _send(self, url, body, headers):
         timeout = NATIVE_TIMEOUT_SECONDS
         if self.budget is not None:
-            # One more model request of this Work: spent before it is sent and
-            # bounded by the Work's remaining time (Stop and deadline apply).
-            self.budget.spend_turn()
+            # The sub-call's turn was spent in ``search``; every request of it
+            # (first and ``pause_turn`` resumes) still honours the owner's Stop
+            # and is bounded by the Work's remaining time (#686).
+            self.budget.check()
             remaining = self.budget.remaining() if callable(getattr(self.budget, 'remaining', None)) else timeout
             timeout = max(1, min(timeout, int(remaining)))
         try:
@@ -448,6 +470,14 @@ class AiNativeProvider:
     def search(self, query, *, kind='web', locale=None, limit=NATIVE_RESULT_LIMIT, opener=None):
         del kind, opener  # one kind; the model transport is not the search opener
         _language, region = split_locale(locale)
+        # #686: only a real ISO 3166-1 alpha-2 country is sent (``en-UK`` is
+        # not one); an invalid one is dropped rather than failing the search.
+        region = region if region in ISO_COUNTRY_CODES else ''
+        if self.budget is not None:
+            # #686: one native sub-call is one Work turn, however many
+            # ``pause_turn`` resumes it needs (those are capped by
+            # NATIVE_MAX_REQUESTS and max_uses), so the main loop keeps its turns.
+            self.budget.spend_turn()
         prompt = NATIVE_PROMPT.format(query=query)
         collected = _Collected()
         reported = getattr(self, '_' + self.route.replace('-', '_'))(prompt, region, collected)

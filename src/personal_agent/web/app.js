@@ -94,6 +94,9 @@ Object.assign(I18N["ja"],{"AI 설정":"AI 設定","작업에서 사용하는 AI�
 Object.assign(I18N["en"],{"AI 설정":"AI settings","작업에서 사용하는 AI입니다. 현재 선택과 상태가 여기에 표시됩니다.":"Choose the AI used for work. Its current selection and status appear here.","작업에 사용할 AI를 선택하면 시작할 수 있습니다.":"Choose an AI to run work.","선택되지 않음":"Not selected","대화 이해 AI는 기본 AI가 선택되면 기본 경로로 사용됩니다.":"The conversation-understanding AI follows the Main AI once one is selected.","기본 AI 대기":"Waiting for Main AI","기본 AI가 아직 없습니다.":"No Main AI is selected yet.","설정 › AI에서 로그인 상태를 확인하세요.":"Check sign-in under Settings › AI.","AI 설정 열기":"Open AI settings","기본 AI 선택":"Choose a Main AI","사용할 AI를 고르고, 각 행에서 구독 로그인을 확인하거나 API 키를 준비하세요. 아래 확인을 통과한 뒤에만 기본 AI가 바뀝니다.":"Choose an AI, then use its row to check sign-in or prepare an API key. The Main AI changes only after the final check succeeds.","후속 요청이나 가리키는 대상을 이해할 때 쓰는 AI입니다. 기본값은 기본 AI를 따라갑니다.":"The AI used to understand follow-up requests and references. By default, it follows the Main AI."});
 Object.assign(I18N["zh-CN"],{"AI 설정":"AI 设置","작업에서 사용하는 AI입니다. 현재 선택과 상태가 여기에 표시됩니다.":"选择执行工作的 AI；此处显示当前选择和状态。","작업에 사용할 AI를 선택하면 시작할 수 있습니다.":"请选择一个执行工作的 AI。","선택되지 않음":"尚未选择","대화 이해 AI는 기본 AI가 선택되면 기본 경로로 사용됩니다.":"选择主要 AI 后，对话理解 AI 将默认使用该 AI。","기본 AI 대기":"等待主要 AI","기본 AI가 아직 없습니다.":"尚未选择主要 AI。","설정 › AI에서 로그인 상태를 확인하세요.":"请在“设置 › AI”中检查登录状态。","AI 설정 열기":"打开 AI 设置","기본 AI 선택":"选择主要 AI","사용할 AI를 고르고, 각 행에서 구독 로그인을 확인하거나 API 키를 준비하세요. 아래 확인을 통과한 뒤에만 기본 AI가 바뀝니다.":"先选择 AI，再通过对应行检查订阅登录或准备 API 密钥。最后的检查通过后才会切换主要 AI。","후속 요청이나 가리키는 대상을 이해할 때 쓰는 AI입니다. 기본값은 기본 AI를 따라갑니다.":"用于理解后续请求和指代内容的 AI，默认使用主要 AI。"});
 Object.assign(I18N["ja"],{"AI 설정":"AI 設定","작업에서 사용하는 AI입니다. 현재 선택과 상태가 여기에 표시됩니다.":"作業に使う AI を選びます。現在の選択と状態をここに表示します。","작업에 사용할 AI를 선택하면 시작할 수 있습니다.":"作業に使う AI を選択してください。","선택되지 않음":"未選択","대화 이해 AI는 기본 AI가 선택되면 기본 경로로 사용됩니다.":"メイン AI を選択すると、会話理解 AI は既定でその AI に従います。","기본 AI 대기":"メイン AI 待ち","기본 AI가 아직 없습니다.":"メイン AI がまだ選択されていません。","설정 › AI에서 로그인 상태를 확인하세요.":"設定 › AI でログイン状態を確認してください。","AI 설정 열기":"AI 設定を開く","기본 AI 선택":"メイン AI を選択","사용할 AI를 고르고, 각 행에서 구독 로그인을 확인하거나 API 키를 준비하세요. 아래 확인을 통과한 뒤에만 기본 AI가 바뀝니다.":"AI を選び、各行からサインイン確認または API キーの準備を行います。最後の確認に成功するとメイン AI が切り替わります。","후속 요청이나 가리키는 대상을 이해할 때 쓰는 AI입니다. 기본값은 기본 AI를 따라갑니다.":"フォローアップや指示対象の理解に使う AI です。既定ではメイン AI に従います。"});
+Object.assign(I18N["en"],{"모델 저장":"Save model","모델을 저장했습니다. 아직 대화 해석 경로는 바뀌지 않았습니다.":"Model saved. The conversation interpretation route has not changed yet."});
+Object.assign(I18N["zh-CN"],{"모델 저장":"保存模型","모델을 저장했습니다. 아직 대화 해석 경로는 바뀌지 않았습니다.":"已保存模型。对话解读路径尚未改变。"});
+Object.assign(I18N["ja"],{"모델 저장":"モデルを保存","모델을 저장했습니다. 아직 대화 해석 경로는 바뀌지 않았습니다.":"モデルを保存しました。会話の解釈経路はまだ変わっていません。"});
 // I18N-CATALOG-END
 let currentLanguage='en',TIME_MINUTE,TIME_CLOCK,TIME_ABSOLUTE,TIME_RELATIVE,TIME_DAY,TIME_YEAR;
 function t(source,vars){let text=String(source??'');if(currentLanguage!=='ko'){const entry=I18N[currentLanguage]?.[text];if(entry!==undefined)text=entry;}if(vars)text=text.replace(/\{(\w+)\}/g,(match,key)=>key in vars?String(vars[key]):match);return text;}
@@ -599,6 +602,13 @@ function decisionDirectModelForm(direct){const form=element('form',undefined,'en
  const submit=element('button',t('확인 후 사용'),'small');submit.type='submit';form.append(element('span',t('사용 전에 개인 정보가 없는 적격성 검사 질문을 보냅니다. 통과하지 못하면 지금 경로를 그대로 둡니다.'),'settings-technical-line'),submit);
  form.onsubmit=event=>{event.preventDefault();const model=picker.model();return decisionActivate(model?{transport:'direct_api',model}:{transport:'direct_api'},submit);};
  return form;}
+// #609: Jev's model is chosen from TypeSafe's own list (모델 목록 새로고침, never on page open); saving only stores it.
+function decisionJevModelForm(jev){const form=element('form',undefined,'engine-token');const current=jev.model||'jev-latest';
+ form.append(element('span',t('Jev 모델'),'settings-technical-line'));
+ const picker=decisionModelPicker('jev',['jev-latest'],{},false);picker.input.value=current;form.append(...picker.nodes);
+ const submit=element('button',t('모델 저장'),'small');submit.type='submit';form.append(element('span',t('저장만 합니다. 대화 해석에 쓰려면 저장 후 사용을 따로 누르세요.'),'settings-technical-line'),submit);
+ form.onsubmit=event=>{event.preventDefault();return busy(submit,async()=>{setError('decision-route-feedback','');try{await api('/api/decision-route/credential',{transport:'jev',model:picker.model()||'jev-latest'});decisionChooser='';setFeedback('decision-route-feedback',t('모델을 저장했습니다. 아직 대화 해석 경로는 바뀌지 않았습니다.'));$('decision-route').dataset.state='';await refresh();}catch(error){setError('decision-route-feedback',error);}});};
+ return form;}
 function renderDecisionRoute(settings){
  decisionSettings=settings;const route=settings?.decision_route,box=$('decision-route');if(!box||!route)return;
  const fingerprint=JSON.stringify([route,decisionChooser]);if(box.dataset.state===fingerprint)return;box.dataset.state=fingerprint;box.replaceChildren();
@@ -609,10 +619,11 @@ function renderDecisionRoute(settings){
  const direct=route.direct_api||{},methodActions=element('div',undefined,'settings-inline-confirm');
  // The active direct route keeps its key manageable here, since it is not listed again below.
  if(own==='direct_api')methodActions.append(settingsAction(direct.has_decision_key?t('키 변경'):t('전용 키 설정'),()=>openDecisionChooser('direct_api')),settingsAction(t('모델 선택'),()=>openDecisionChooser('direct_api:model')));
+ const jev=route.jev||{};if(own==='jev')methodActions.append(settingsAction(t('키 변경'),()=>openDecisionChooser('jev')),settingsAction(t('모델 선택'),()=>openDecisionChooser('jev:model')));
  if(!['none','off'].includes(transport))methodActions.append(settingsAction(t('끄기'),event=>decisionActivate({transport:'off'},event.currentTarget)));
  const requalify=active.requalification_needed?' '+t('CLI가 바뀌어 다시 확인해야 합니다. 판단 모델에서 변경을 눌러 다시 확인하세요.'):'';
  box.append(settingsRow(t('사용 방식'),decisionActiveTitle(active)+' — '+activeDescription+requalify,activeState[0],activeState[1],methodActions.children.length?methodActions:null,
-  own==='direct_api'&&decisionChooser==='direct_api'?decisionKeyForm('direct_api',false,direct.has_decision_key):own==='direct_api'&&decisionChooser==='direct_api:model'?decisionDirectModelForm(direct):null));
+  own==='direct_api'&&decisionChooser==='direct_api'?decisionKeyForm('direct_api',false,direct.has_decision_key):own==='direct_api'&&decisionChooser==='direct_api:model'?decisionDirectModelForm(direct):own==='jev'&&decisionChooser==='jev'?decisionKeyForm('jev',true,jev.configured):own==='jev'&&decisionChooser==='jev:model'?decisionJevModelForm(jev):null));
  if(own==='subscription_cli'){
   // The model policy is changed in place; the active engine is not listed again under 다른 선택지,
   // so its instruction-file limitation (#624) is shown here.
@@ -625,9 +636,9 @@ function renderDecisionRoute(settings){
   const actions=element('div',undefined,'settings-inline-confirm');actions.append(settingsAction(direct.has_decision_key?t('키 변경'):direct.configured?t('전용 키 설정'):t('설정'),()=>openDecisionChooser('direct_api')));
   if(direct.configured)actions.append(settingsAction(t('사용'),event=>decisionActivate({transport:'direct_api'},event.currentTarget)),settingsAction(t('모델 선택'),()=>openDecisionChooser('direct_api:model')));
   box.append(settingsRow(title,description,direct.configured?t('선택 가능'):t('키 필요'),'neutral',actions,decisionChooser==='direct_api'?decisionKeyForm('direct_api',false,direct.has_decision_key):decisionChooser==='direct_api:model'?decisionDirectModelForm(direct):null));}
- const jev=route.jev||{};if(own!=='jev'){const title=t('Jev (TypeSafe) · {model}',{model:jev.model||'jev-latest'}),description=t('전송 대상: {destination}',{destination:jev.destination||'api.typesafe.ai'})+' · '+t('한국어 정확도는 적격성 검사로 확인하세요.')+decisionFailedSuffix(jev.check);
-  const actions=element('div',undefined,'settings-inline-confirm');actions.append(settingsAction(jev.configured?t('키 변경'):t('설정'),()=>openDecisionChooser('jev')));if(jev.configured)actions.append(settingsAction(t('사용'),event=>decisionActivate({transport:'jev'},event.currentTarget)));
-  box.append(settingsRow(title,description,jev.configured?t('선택 가능'):t('키 필요'),'neutral',actions,decisionChooser==='jev'?decisionKeyForm('jev',true,jev.configured):null));}
+ if(own!=='jev'){const title=t('Jev (TypeSafe) · {model}',{model:jev.model||'jev-latest'}),description=t('전송 대상: {destination}',{destination:jev.destination||'api.typesafe.ai'})+' · '+t('한국어 정확도는 적격성 검사로 확인하세요.')+decisionFailedSuffix(jev.check);
+  const actions=element('div',undefined,'settings-inline-confirm');actions.append(settingsAction(jev.configured?t('키 변경'):t('설정'),()=>openDecisionChooser('jev')));if(jev.configured)actions.append(settingsAction(t('사용'),event=>decisionActivate({transport:'jev'},event.currentTarget)),settingsAction(t('모델 선택'),()=>openDecisionChooser('jev:model')));
+  box.append(settingsRow(title,description,jev.configured?t('선택 가능'):t('키 필요'),'neutral',actions,decisionChooser==='jev'?decisionKeyForm('jev',true,jev.configured):decisionChooser==='jev:model'&&jev.configured?decisionJevModelForm(jev):null));}
  for(const engine of route.subscription_cli||[]){if(own==='subscription_cli'&&active.engine===engine.id)continue;
   const title=t('구독 AI · {engine}',{engine:engine.name}),description=t('전송 대상: {destination}',{destination:t(engine.destination||'-')})+(engine.instruction_files?' '+t(engine.instruction_files):'')+decisionFailedSuffix(engine.check);let state,kind='neutral',action=null;
   // A CLI whose tool features could not all be turned off (e.g. Codex 0.153.4 keeps `unified_exec` on) is shown

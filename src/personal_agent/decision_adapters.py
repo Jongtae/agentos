@@ -356,6 +356,10 @@ def _json_object(text):
 
 # --- Jev (TypeSafe System One) ------------------------------------------------
 JEV_ENDPOINT = 'https://api.typesafe.ai/v1/systemone'
+#: #609: the official model listing (typesafe-sdk-js ``client.models.list()``:
+#: ``GET /v1/models`` answering ``{"models": [{name, description,
+#: release_date}]}``), same Bearer key as System One.
+JEV_MODELS_ENDPOINT = 'https://api.typesafe.ai/v1/models'
 JEV_DESTINATION = 'api.typesafe.ai'
 #: The documented alias.  It moves with new releases, so the response's
 #: versioned ``model`` is what provenance records as observed.

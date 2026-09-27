@@ -222,6 +222,21 @@ class QuickStore:
                 fcntl.flock(lock_fd,fcntl.LOCK_UN)
                 os.close(lock_fd)
 
+    def remove_secret(self, key):
+        """Delete one secret slot entirely; True when it existed (#678 retired providers)."""
+        with self.secret_lock:
+            lock_fd=os.open(self.secret_lock_path,os.O_RDWR|os.O_CREAT,0o600)
+            try:
+                fcntl.flock(lock_fd,fcntl.LOCK_EX)
+                values=json.loads(self.secret_path.read_text()) if self.secret_path.exists() else {}
+                if key not in values:return False
+                values.pop(key)
+                self.write_private(self.secret_path,json.dumps(values))
+                return True
+            finally:
+                fcntl.flock(lock_fd,fcntl.LOCK_UN)
+                os.close(lock_fd)
+
     def enqueue(self, message, request_key, channel='web', chat_id=None, workspace_id=None, db=None):
         if not isinstance(message,str) or not message.strip() or len(message)>12000:
             raise ValueError('메시지는 1~12,000자로 입력하세요.')

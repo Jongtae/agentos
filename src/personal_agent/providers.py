@@ -31,7 +31,12 @@ def request_json(url, body, headers=None, timeout=60):
                 raise ProviderError('응답이 너무 큽니다. 요청 범위를 줄여 주세요.')
             return json.loads(raw)
     except HTTPError as exc:
-        raise ProviderError('무료 모델의 호출 한도에 도달했습니다. 잠시 후 다시 시도하거나 다른 모델을 선택하세요.' if exc.code==429 else f'연결 대상이 HTTP {exc.code} 오류를 반환했습니다. 주소·모델·인증 설정을 확인하세요.', status=exc.code) from None
+        error=ProviderError('무료 모델의 호출 한도에 도달했습니다. 잠시 후 다시 시도하거나 다른 모델을 선택하세요.' if exc.code==429 else f'연결 대상이 HTTP {exc.code} 오류를 반환했습니다. 주소·모델·인증 설정을 확인하세요.', status=exc.code)
+        # #678: the provider's own error type/code/param/message, bounded, for
+        # protocol classification by a caller (a hosted tool the model does not
+        # support).  Never part of the message, a log line or Evidence.
+        error.error_detail=_error_detail(exc)
+        raise error from None
     except (URLError, TimeoutError, OSError) as exc:
         # A timeout is reported distinctly so a caller with its own time
         # budget (the decision layer) can name it; the owner-facing text is
@@ -41,6 +46,19 @@ def request_json(url, body, headers=None, timeout=60):
                             status='timeout' if timed_out else None) from None
     except (ValueError, TypeError):
         raise ProviderError('연결 대상이 올바른 JSON 응답을 반환하지 않았습니다.') from None
+
+
+def _error_detail(exc):
+    """``{type, code, param, message}`` of an HTTP error body, each bounded; ``{}`` when unreadable."""
+    try:
+        raw=exc.read(8_192)
+        data=json.loads(raw.decode('utf-8','replace'))
+    except Exception:
+        return {}
+    error=data.get('error') if isinstance(data,dict) else None
+    if isinstance(error,str):error={'message':error}
+    if not isinstance(error,dict):return {}
+    return {key:str(error.get(key))[:300] for key in ('type','code','param','message') if isinstance(error.get(key),(str,int))}
 
 
 def validate_model(config):

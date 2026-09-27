@@ -124,10 +124,12 @@ class StrictLaunchArguments(unittest.TestCase):
         self.assertIn('web_search="disabled"', strict, 'provider-hosted search stays off')
         self.assertEqual(CODEX_STRICT_TABLE, 'permissions.agentos-strict-isolated={filesystem={":minimal"="read", '
                                              '":workspace_roots"={"."="read"}}, network={enabled=false}}')
-        self.assertEqual(strict[:3] + strict[3 + len(expected):], trusted[:3] + trusted[6:],
+        self.assertEqual(strict[:3] + strict[3 + len(expected):], trusted[:3] + trusted[8:],
                          'everything else is the trusted-local argv')
         self.assertEqual(trusted[3:6], ['--sandbox', 'read-only', '--ignore-rules'],
                          'trusted-local keeps the read-only sandbox and ignores CODEX_HOME exec rules (#636)')
+        # #678: trusted-local states its web search explicitly; off unless the turn enables it.
+        self.assertEqual(trusted[6:8], ['-c', 'web_search="disabled"'])
 
     def test_codex_strict_without_a_verified_feature_plan_is_refused(self):
         for plan in ((), None, ['apps', 'unified_exec'], ['personality']):

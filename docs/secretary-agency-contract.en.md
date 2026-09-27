@@ -119,7 +119,7 @@ Each capability is a generic interface with replaceable providers; the model sel
 
 | Capability | Interface (model-facing) | Providers in this program | Owner setup |
 | --- | --- | --- | --- |
-| Web search | `search(query, provider?, locale?)` returning ranked results with source URLs | existing Bing RSS read; Naver Search API (web, book); Brave Search API | Naver client id/secret, Brave key in Settings |
+| Web search | `search(query, provider?, locale?)` returning ranked results with source URLs | the connected AI's own web search (default; OpenAI Responses `web_search`, Anthropic `web_search` server tool, OpenRouter `openrouter:web_search`, or the Codex / Claude Code CLI's own search inside its Work turn); Brave Search API; Bing RSS read as an owner opt-in for personal, non-commercial use (SEC-SEARCH-02 #678; Naver removed by #677) | none by default; optional Brave key; Bing RSS toggle in Settings |
 | Page read | `read_page(url)` returning extracted text and links | existing public page reader; the browser profile for logged-in pages | none |
 | Browser action | `browser.act(site_session, steps)` for navigate, click, type, read within the owner's logged-in profile; output is mediated (see below) | Playwright with a persistent profile owned by the execution environment | owner logs in once per site in that profile |
 | Calendar | existing calendar read/create/reminder operations | existing Google Calendar connector | existing OAuth |

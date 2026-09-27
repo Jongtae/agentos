@@ -255,9 +255,12 @@ class ServiceProvenance(unittest.TestCase):
         self.assertTrue(service.run_one())
         record = self._selected(service)['provenance']
         # #627: current context is off here, so its gated action is not offered.
-        from personal_agent.bounded_execution import CONTEXT_GATED_ACTIONS
+        from personal_agent.bounded_execution import CONTEXT_GATED_ACTIONS, native_search_withheld
+        # #678: a clean turn may use the CLI's own web search, so the record says
+        # so and no private-read bridge tool is offered to it.
         self.assertEqual(record['exposed_tools'], [tool['name'] for tool in profile_mcp_tools('trusted-local')
-                                                   if tool['name'] not in CONTEXT_GATED_ACTIONS])
+                                                   if tool['name'] not in CONTEXT_GATED_ACTIONS | native_search_withheld()])
+        self.assertEqual(record['cli_native_tools'], ['web_search'])
         self.assertEqual(record['capability_profile'], 'trusted-local')
         self.assertEqual(record['capability_trust'], 'trusted-local')
         self.assertIn('outside AgentOS provenance', record['capability_limitation'])

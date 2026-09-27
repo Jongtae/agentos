@@ -94,13 +94,13 @@ PAGES = {
       <form id="couponForm" action="/coupon" method="post"><label>쿠폰 <input type="text" name="coupon"></label>
         <button type="submit">쿠폰 적용</button></form>
       <label for="paybtn"><span role="button">빠른 구매</span></label>
-      <div role="button" onclick="payForm.submit()">바로 결제</div>
-      <div role="button" onclick="payForm.requestSubmit()">요청 결제</div>
+      <div role="button" onclick="payForm.submit()">바로 진행</div>
+      <div role="button" onclick="payForm.requestSubmit()">요청 진행</div>
       <div role="button" onclick="couponForm.submit()">쿠폰 바로 적용</div>
-      <div role="button" onclick="setTimeout(() => payForm.submit(), 1500)">나중에 결제</div>
-      <div role="button" onclick="fetch('/validate').then(() => new Promise((ok) => setTimeout(ok, 800))).then(() => payForm.requestSubmit())">확인 후 결제</div>
+      <div role="button" onclick="setTimeout(() => payForm.submit(), 1500)">나중에 진행</div>
+      <div role="button" onclick="fetch('/validate').then(() => new Promise((ok) => setTimeout(ok, 800))).then(() => payForm.requestSubmit())">확인 후 진행</div>
       <div role="button" onclick="setTimeout(() => couponForm.submit(), 1500)">나중에 쿠폰</div>
-      <div role="button" onclick="document.getElementById('who').value = '처리 중'; this.textContent = '처리 중…'; payForm.submit()">메모 후 결제</div>
+      <div role="button" onclick="document.getElementById('who').value = '처리 중'; this.textContent = '처리 중…'; payForm.submit()">메모 후 진행</div>
       </body></html>''',
     # #698 P1-2: two identical payment forms; the label points at the first ...
     '/checkout-twins': '''<html><head><title>빠른 결제</title></head><body><h1>빠른 결제</h1>
@@ -121,6 +121,18 @@ PAGES = {
         <label>카드번호 <input type="text" autocomplete="cc-number" name="card"></label>
         <input type="hidden" name="amount" value="990000"></form>
       </body></html>''',
+    # #758: a stored payment method (no card field anywhere) behind controls named for a purchase.
+    '/one-click': '''<html><head><title>원클릭</title></head><body><h1>세제 3L</h1><p>12,900원</p>
+      <form action="/add" method="post"><button type="submit">담기</button></form>
+      <form action="/order" method="post"><button type="submit" id="buyBtn">Buy now</button></form>
+      <a href="/order" role="button">바로구매</a>
+      <div role="button" onclick="fetch('/charge', {method: 'POST'})">Pay ₩12,900</div>
+      <label for="buyBtn"><span role="button">빠른 진행</span></label>
+      <a href="/reviews">구매후기</a>
+      </body></html>''',
+    '/order': '<html><head><title>주문 완료</title></head><body><h1>주문 완료</h1></body></html>',
+    '/add': '<html><head><title>담음</title></head><body><h1>담았습니다</h1></body></html>',
+    '/reviews': '<html><head><title>후기</title></head><body><h1>후기</h1></body></html>',
     '/validate': '<html><head><title>확인</title></head><body>ok</body></html>',
     '/reset/' + PASSPORT:'''<html><head><title>Reset token=abcDEF123456secret</title></head><body><h1>재설정</h1>
       <a href="https://owner:hunter2@fixture.test/reset/''' + PASSPORT + '''?code=1#x">다시 열기</a>
@@ -232,6 +244,9 @@ class _PageParser(HTMLParser):
         for element in self.elements:
             control = self.control(element)
             element['label_form'] = control['form'] if control else None
+            element['own_text'] = element['name'] or ''
+            element['label_name'] = (control['name'] + ' | ' + control['name']) if control else ''
+            element['label_button'] = bool(control) and (control['tag'] in ('button', 'a') or control['role'] in ('button', 'link'))
         private = ('hidden', 'action', 'html_id', 'onclick', 'label', 'sent')
         elements = [{k: v for k, v in e.items() if k not in private} for e in self.elements if not e['hidden']]
         forms = [{'id': form['id'], 'text': '\n'.join(form.get('texts', [])), **self.record(form)} for form in self.forms]
@@ -696,7 +711,7 @@ class ForwardedSubmitTests(unittest.TestCase):
         self.assertTrue(bs.forwards_to_payment_form(elements[2], bs.payment_forms(elements)))
 
     def test_a_scripted_submit_of_the_payment_form_is_refused_by_the_driver_and_asks_the_owner(self):
-        for target in ('바로 결제', '요청 결제'):
+        for target in ('바로 진행', '요청 진행'):
             binding = self.refused(target)
             # #700: bound to the cancelled form and what it would send, not to the step.
             self.assertEqual((binding['action'], binding['page_digest'], binding['target_digest']),
@@ -721,7 +736,7 @@ class ForwardedSubmitTests(unittest.TestCase):
         # The label's span is refused before the page (a click binding): the approved click
         # carries the allowance.  The scripted div's submit is cancelled and held (a submit
         # binding): the approved form in that state is released by the worker (#700).
-        for target, action, approved in (('바로 결제', 'browser_submit', False), ('빠른 구매', 'browser_click', True)):
+        for target, action, approved in (('바로 진행', 'browser_submit', False), ('빠른 구매', 'browser_click', True)):
             binding = self.refused(target)
             self.assertEqual(binding['action'], action)
             self.approvals.issued.append(bs.binding_digest(binding))
@@ -766,7 +781,7 @@ class ForwardedSubmitTests(unittest.TestCase):
 
     def test_a_changed_non_card_value_of_the_payment_form_asks_again(self):
         # Review P1-2: the label's span and the scripted div sit outside the form.
-        for target in ('빠른 구매', '바로 결제'):
+        for target in ('빠른 구매', '바로 진행'):
             approvals = Approvals(self.approved_binding(target))
             sess, driver = session(approvals=approvals, steps=40)
             sess.open({'url': ORIGIN + '/checkout-forwarded', 'effect': 'navigate'})
@@ -853,21 +868,21 @@ class ForwardedSubmitTests(unittest.TestCase):
         # value) and its own text, then submits.  The approval is bound to what the
         # submit sends, so the repeated step matches whether or not the page was reloaded.
         before = self.sess.last['_states']
-        binding = self.refused('메모 후 결제')
+        binding = self.refused('메모 후 진행')
         self.assertEqual(binding['action'], 'browser_submit')
         changed = self.sess.read()
         self.assertIn('처리 중', [row.get('value') for row in changed['elements']], 'the handler changed the form')
         self.assertNotEqual(self.sess.last['_states'], before, 'a binding to the pre-click page would no longer match')
         self.approvals.issued.append(bs.binding_digest(binding))
         # The same run repeats the step on the changed page: it matches.
-        page = self.sess.click({'target': '메모 후 결제', 'effect': 'mutate'})
+        page = self.sess.click({'target': '메모 후 진행', 'effect': 'mutate'})
         self.assertEqual(page['title'], '결제 완료')
         self.assertEqual((self.approvals.issued, self.driver.posts), ([], [('post', '/pay')]))
         # A resumed run that opens the page again matches too.
         approvals = Approvals(binding)
         sess, driver = session(approvals=approvals, steps=40)
         sess.open({'url': ORIGIN + '/checkout-forwarded', 'effect': 'navigate'})
-        self.assertEqual(sess.click({'target': '메모 후 결제', 'effect': 'mutate'})['title'], '결제 완료')
+        self.assertEqual(sess.click({'target': '메모 후 진행', 'effect': 'mutate'})['title'], '결제 완료')
         self.assertEqual((approvals.issued, driver.posts), ([], [('post', '/pay')]))
 
     def test_a_hidden_amount_is_part_of_the_submitted_state(self):
@@ -905,7 +920,7 @@ class ForwardedSubmitTests(unittest.TestCase):
         self.assertEqual(self.driver.posts, [])
 
     def test_a_release_the_worker_refuses_fails_typed_and_spends_the_approval(self):
-        binding = self.refused('바로 결제')
+        binding = self.refused('바로 진행')
         self.approvals.issued.append(bs.binding_digest(binding))
         self.driver.hold(1)
         self.driver.held = dict(self.driver.held, state='changed')   # the page's held submit changed since
@@ -913,6 +928,63 @@ class ForwardedSubmitTests(unittest.TestCase):
             self.sess.read()
         self.assertEqual(caught.exception.code, 'target_unavailable')
         self.assertEqual((self.approvals.issued, self.driver.posts), ([], []))
+
+
+class CommitControlTests(unittest.TestCase):
+    """#758: a press whose control commits a purchase needs approval with no card field on the page."""
+
+    def test_commitment_signals_across_languages_and_what_they_leave_out(self):
+        for name in ('Buy now', 'Pay ₩12,900', 'Pay with Apple Pay', 'Place your order', 'Complete purchase',
+                     'Confirm order', 'Order now', 'Subscribe', 'Donate', 'Start your free trial', 'Send money',
+                     'Top up', 'Express checkout', '결제하기', '바로구매', '주문하기', '구매 확정', '12,900원 결제',
+                     '간편결제', '송금하기', '충전하기', '購入手続きへ', '注文を確定する', '支払う', '立即购买',
+                     '提交订单', '付款'):
+            self.assertTrue(bs.commit_name(name), name)
+        for name in ('Purchase history', 'Payment methods', 'Add to wishlist', 'Buying guide', 'Checkout',
+                     '구매후기', '주문내역', '결제수단 변경', '담기', '購入履歴', '', None, 'Continue'):
+            self.assertFalse(bs.commit_name(name), name)
+        self.assertTrue(bs.commit_control({'role': 'button', 'tag': 'div', 'name': 'Pay now'}))
+        self.assertTrue(bs.commit_control({'role': 'link', 'tag': 'a', 'name': '바로구매'}))
+        self.assertFalse(bs.commit_control({'role': 'textbox', 'tag': 'input', 'name': 'Buy now'}), 'a field commits nothing')
+        self.assertTrue(bs.commit_control({'role': 'button', 'tag': 'span', 'name': '빠른 진행',
+                                           'label_name': 'Buy now', 'label_button': True}), 'a label forwarding to it')
+        self.assertFalse(bs.commit_control({'role': 'checkbox', 'tag': 'input', 'name': 'x',
+                                            'label_name': '구매 조건 동의', 'label_button': False}))
+
+    def test_one_click_controls_need_approval_before_the_page_and_ordinary_ones_run(self):
+        approvals = Approvals()
+        sess, driver = session(approvals=approvals, steps=40)
+        sess.open({'url': ORIGIN + '/one-click', 'effect': 'navigate'})
+        for target in ('Buy now', '바로구매', 'Pay ₩12,900', '빠른 진행'):
+            with self.assertRaises(ToolError) as caught:
+                sess.click({'target': target, 'effect': 'mutate'})
+            self.assertEqual((caught.exception.code, caught.exception.requires), ('approval_required', 'browser-step-approval'))
+        self.assertEqual([entry for entry in driver.log if entry[0] == 'click'], [], 'refused before the page')
+        self.assertEqual(len(approvals.requests), 4)
+        # Ordinary controls, and a history link that names a purchase, run without asking.
+        self.assertEqual(sess.click({'target': '담기', 'effect': 'mutate'})['title'], '담음')
+        sess.open({'url': ORIGIN + '/one-click', 'effect': 'navigate'})
+        self.assertEqual(sess.click({'target': '구매후기', 'effect': 'read'})['title'], '후기')
+        self.assertEqual(len(approvals.requests), 4)
+        # The owner's approval of exactly that press runs it once, with the step's allowance.
+        sess.open({'url': ORIGIN + '/one-click', 'effect': 'navigate'})
+        approvals.issue(approvals.requests[0][0])
+        self.assertEqual(sess.click({'target': 'Buy now', 'effect': 'mutate'})['title'], '주문 완료')
+        self.assertIs(driver.approved[-1], True)
+        sess.open({'url': ORIGIN + '/one-click', 'effect': 'navigate'})
+        with self.assertRaises(ToolError):
+            sess.click({'target': 'Buy now', 'effect': 'mutate'})
+        self.assertEqual(driver.posts, [('post', '/add'), ('post', '/order')])
+
+    def test_a_form_post_refused_between_steps_is_reported_to_the_model(self):
+        sess, driver = session()
+        sess.open({'url': ORIGIN + '/one-click', 'effect': 'navigate'})
+        original = driver.snapshot
+        driver.snapshot = lambda: {**original(), 'refused_submit': True}
+        page = sess.read()
+        self.assertEqual(page['submit_refused'], bs.SUBMIT_REFUSED_TEXT)
+        driver.snapshot = original
+        self.assertNotIn('submit_refused', sess.read())
 
 
 # ---------------------------------------------------------------- login, budget, targets

@@ -165,9 +165,18 @@ const formHolds = (form, tokens) => !!form &&
   Array.from(document.querySelectorAll(SELECTOR)).some((other) => formOf(other) === form && visible(other) && paymentField(other, tokens));
 const paymentForm = (el, tokens) => { if (formHolds(formOf(el), tokens)) return true;
   const control = labelControl(el); return !!control && formHolds(formOf(control), tokens); };
+// #758: the name of the control a label forwards a press to, and whether that
+// control is one a press on which can commit (``browser_session.commit_control``).
+// A control's own text (its content or button value) besides its accessible name:
+// a ``<label for>`` can give a pay button a neutral name.
+const ownText = (el) => clean(el.innerText || ((el.tagName.toLowerCase() === 'input') ? el.value : '') || '');
+const labelName = (el) => { const control = labelControl(el); return control ? nameOf(control) + ' | ' + ownText(control) : ''; };
+const buttonish = (el) => { const tag = el.tagName.toLowerCase(), role = (el.getAttribute('role') || '').toLowerCase();
+  return tag === 'button' || tag === 'a' || ['button', 'link', 'menuitem'].includes(role) ||
+    (tag === 'input' && ['submit', 'button', 'image'].includes(typeOf(el))); };
 const describe = (el, tokens) => ({tag: el.tagName.toLowerCase(), type: typeOf(el), autocomplete: autocompleteOf(el), name: nameOf(el),
-  in_form: !!formOf(el), payment_form: paymentForm(el, tokens)});
-const same = (actual, expect) => !!expect && ['tag', 'type', 'autocomplete', 'name', 'in_form', 'payment_form']
+  own_text: ownText(el), label_name: labelName(el), in_form: !!formOf(el), payment_form: paymentForm(el, tokens)});
+const same = (actual, expect) => !!expect && ['tag', 'type', 'autocomplete', 'name', 'own_text', 'label_name', 'in_form', 'payment_form']
   .every((key) => key in expect && actual[key] === expect[key]);
 const state = () => (window.__agentos = window.__agentos || {targets: new Map(), guard: null, listening: false,
   off: false, allow: null, cancelled: null, held: null, vetted: [], submitListening: false});
@@ -236,8 +245,8 @@ const allows = (g, form) => { const a = g.allow; if (!a || a.spent || Date.now()
 // A submit the guard let through (``payment``: of a payment form, by an allowance):
 // the form-submission navigation it starts is not refused.  ``effective`` is where
 // the submit goes: a submitter's ``formaction``/``formmethod`` override the form's.
-const vet = (g, record, payment = true) => {
-  g.vetted = (g.vetted || []).concat([{...record, payment, t: Date.now()}]).slice(-8); };
+const vet = (g, record, payment = true) => { const entry = {...record, payment, t: Date.now()};
+  g.vetted = (g.vetted || []).concat([entry]).slice(-8); return entry; };
 const effective = (form, submitter) => { const record = formRecord(form);
   if (submitter && submitter.hasAttribute('formaction')) record.action = cut(String(submitter.formAction), 2000);
   if (submitter && submitter.hasAttribute('formmethod')) record.method = cut(String(submitter.formMethod).toLowerCase(), 16);
@@ -260,11 +269,13 @@ const armSubmitGuard = () => { const s = state(); if (s.submitListening) return;
       if (!holdsPayment(form)) { vet(g, effective(form, submitter), false); return; }
       const allowance = allows(g, form);
       if (allowance) {
-        vet(g, effective(form, submitter));
+        const entry = vet(g, effective(form, submitter));
         // Spent once the submit goes ahead: at once for ``form.submit()``, after the
-        // event for a ``submit`` event no page handler prevented.
+        // event for a ``submit`` event no page handler prevented.  A prevented one
+        // vouches for no navigation either (#758 item 10).
         if (event.type === %(signal)s) allowance.spent = true;
-        else setTimeout(() => { if (!event.defaultPrevented) allowance.spent = true; }, 0);
+        else setTimeout(() => { if (!event.defaultPrevented) allowance.spent = true;
+          else g.vetted = (g.vetted || []).filter((v) => v !== entry); }, 0);
         return;
       }
       event.preventDefault(); event.stopImmediatePropagation();
@@ -310,7 +321,8 @@ Array.from(document.querySelectorAll(SELECTOR)).forEach((el, index) => {
   const takesValue = (tag === 'input' && !NO_VALUE.includes(type)) || tag === 'textarea' || tag === 'select';
   elements.push({index, role: well(roleOf(el)), name: nameOf(el), href: tag === 'a' ? cut(el.href, 2000) : null, tag, type: well(type),
     autocomplete: well(autocompleteOf(el)), value: takesValue ? cut(el.value || '', 200) : null, form: formId,
-    label_form: idOf(control ? formOf(control) : null), disabled: !!el.disabled});
+    label_form: idOf(control ? formOf(control) : null), own_text: ownText(el), label_name: labelName(el),
+    label_button: !!control && buttonish(control), disabled: !!el.disabled});
 });
 return JSON.stringify({url: cut(location.href, 4000), title: cut(document.title, 400),
   text: cut(document.body ? document.body.innerText : '', 20000), elements: elements.slice(0, 300),
@@ -694,6 +706,7 @@ class Worker:
         self.blocked = 0           # main-frame navigations refused so far
         self.refused_submits = 0   # form navigations refused with no page form to hold (#700 review)
         self.step_refused = 0      # ``refused_submits`` when the current step began
+        self.reported_refused = 0  # ``refused_submits`` last reported (step answer or snapshot, #758)
         self.hosts = set()         # hosts of committed main-frame navigations in this worker's life
         self.main_navigations = 0  # main-frame navigations allowed so far (#736)
         self.landed = 0            # main-frame navigations committed or failed so far (#736)
@@ -922,6 +935,7 @@ class Worker:
             if error:
                 return self.fail(ident, error)
             if self.refused_submits > self.step_refused:
+                self.reported_refused = self.refused_submits
                 return self.fail(ident, 'submit_refused')
             if blocked_before is not None and self.blocked > blocked_before:
                 return self.fail(ident, 'blocked_destination')
@@ -1038,6 +1052,10 @@ class Worker:
             cancelled = self.take_cancelled(value.pop('cancelled', None))
             if cancelled is not None:
                 value['cancelled_submit'] = cancelled
+            # A form post refused with nothing to hold since the last report (#758 item 9).
+            if self.refused_submits > self.reported_refused:
+                self.reported_refused = self.refused_submits
+                value['refused_submit'] = True
             self.reply(ident, page=value)
         self.run(SNAPSHOT_SCRIPT, {}, done)
 

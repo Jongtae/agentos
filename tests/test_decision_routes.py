@@ -543,7 +543,16 @@ class ServiceFixture(Temp):
                                subscription_engines=SubscriptionEngines(finder=finder),
                                execution_adapter=cli_adapter(self.runner, self.root, finder=finder))
         service.decision_routes.jev_transport = self.jev
+        # #685/#760: a claimed background qualification runs synchronously here.
+        service.decision_routes.spawn = lambda run: run()
         return service
+
+    def follow(self, service):
+        """Explicit 기본 AI 따라가기 (#760): it queues the background job; one work-loop tick runs it."""
+        queued = service.activate_decision_route({'transport': 'follow_main'})
+        self.assertEqual(queued['qualification']['state'], 'queued')
+        self.assertTrue(service.run_due_qualification())
+        return service.decision_routes.status()
 
     def judge(self, service):
         return service.decision_judge.followup_relation('다시 해봐', 'research', 'failed')
@@ -930,7 +939,7 @@ class JudgmentModelTests(ServiceFixture):
     def test_codex_follow_defaults_to_the_cheapest_bundled_qualified_model_under_the_strict_profile(self):
         service = self.service()
         self.main('codex')
-        status = service.activate_decision_route({'transport': 'follow_main'})
+        status = self.follow(service)
         active = status['active']
         self.assertEqual((active['source'], active['transport'], active['engine']), ('follow', 'subscription_cli', 'codex'))
         self.assertEqual((active['model_policy'], active['requested_model'], active['effort']),
@@ -957,21 +966,21 @@ class JudgmentModelTests(ServiceFixture):
     def test_a_newer_codex_that_bundles_gpt_6_luna_makes_it_the_default(self):
         service = self.service(runner=CliRunner(bundled=bundled_listing(('gpt-6-luna', 'gpt-5.6-luna', 'gpt-5.6-terra'))))
         self.main('codex')
-        active = service.activate_decision_route({'transport': 'follow_main'})['active']
+        active = self.follow(service)['active']
         self.assertEqual(active['requested_model'], 'gpt-6-luna')
         self.assertEqual(RANKED_MODELS['codex'], ('gpt-6-luna', 'gpt-5.6-luna', 'gpt-5.6-terra'))
 
     def test_claude_code_follow_defaults_to_haiku_and_sends_no_effort_it_does_not_support(self):
         service = self.service()
         self.main('claude-code')
-        active = service.activate_decision_route({'transport': 'follow_main'})['active']
+        active = self.follow(service)['active']
         self.assertEqual((active['requested_model'], active['effort']), ('haiku', None))
         self.assertTrue(all('--effort' not in argv for argv in self.judgments('claude')))
 
     def test_claude_code_falls_to_sonnet_with_low_effort_only_when_haiku_does_not_qualify(self):
         service = self.service(runner=CliRunner({None: oracle, 'haiku': careless, 'sonnet': oracle}))
         self.main('claude-code')
-        status = service.activate_decision_route({'transport': 'follow_main'})
+        status = self.follow(service)
         self.assertEqual((status['active']['requested_model'], status['active']['effort']), ('sonnet', 'low'))
         argv = self.judgments('claude')[-1]
         self.assertEqual(argv[argv.index('--effort') + 1], 'low')
@@ -1140,7 +1149,7 @@ class JudgmentModelTests(ServiceFixture):
         # The judgment that answers is exactly the one Settings names.
         self.judge(service)
         self.assertEqual(self.store.config('decision_audit')[-1]['requested_model'], 'gpt-4o-mini')
-        service.activate_decision_route({'transport': 'follow_main'})
+        self.follow(service)
         effective = service.settings()['decision_route']['effective']
         self.assertEqual((effective['state'], effective['text']), ('active', '기본 AI(Codex)를 따라가는 중 — gpt-5.6-luna, 검증됨'))
         # A Main AI switch the Judgment AI was not re-resolved for: attention, not a fallback.

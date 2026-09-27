@@ -2423,28 +2423,40 @@ class AgentService:
         except Exception:
             return None
 
+    def work_trail(self, job_id):
+        """The ordered ``(host_action, state)`` trail of one Work's tool events."""
+        from .agent_runtime import event_trail
+        with self.store.db() as db:
+            rows=db.execute('SELECT tool,status,detail FROM tool_events WHERE job_id=? ORDER BY id',(job_id,)).fetchall()
+        tools={tool['id']:tool for package in self.runtime_packages() for tool in package['tools']}
+        return event_trail([(row['tool'],row['status'],row['detail']) for row in rows],tools)[0]
+
     def answer_withheld(self, job):
-        """Whether a failed or partial Work's AI answer is kept from the owner, on every surface (#752).
+        """Whether a failed or partial Work's AI answer is kept out of its Telegram bubble (#752).
 
         A failed or partial Work's answer is shown under the truth header and
-        what did not complete.  It is withheld only when an action that
-        changes state - anything outside the effect-free reads and
-        internal-state actions - failed (including one that did nothing), was
-        withheld or left incomplete: the answer may claim that action (#476,
-        #488).  A delegation is judged by its own recorded steps, not by the
-        delegation call.  Other statuses are not decided here (an ``unknown``
-        effect keeps its own statement, #598 I1).
+        what did not complete.  It is withheld only when a state-changing
+        action fell short (``agent_runtime.state_change_short``): the answer
+        may claim that action (#476, #488).  The web card's
+        ``result_available`` follows the same rule.  Other statuses are not
+        decided here (an ``unknown`` effect keeps its own statement, #598 I1).
         """
         if job.get('status') not in ('partial','failed') or not (job.get('response') or '').strip():
             return False
-        from .agent_runtime import INTERNAL_STATE_ACTIONS, NO_EFFECT_FAILED, event_trail
-        with self.store.db() as db:
-            rows=db.execute('SELECT tool,status,detail FROM tool_events WHERE job_id=? ORDER BY id',(job['id'],)).fetchall()
-        tools={tool['id']:tool for package in self.runtime_packages() for tool in package['tools']}
-        trail,_refusals=event_trail([(row['tool'],row['status'],row['detail']) for row in rows],tools)
-        reads=EFFECT_FREE_READS|INTERNAL_STATE_ACTIONS|{'delegate_agent'}
-        short=('failed',NO_EFFECT_FAILED,'withheld','incomplete')
-        return any(state in short and action not in reads for action,state in trail)
+        from .agent_runtime import state_change_short
+        return state_change_short(self.work_trail(job['id']))
+
+    def goal_upgrade_allowed(self, job_id):
+        """Whether a ``reached`` goal verdict may make a partial/failed CLI Work succeeded (#752 review).
+
+        Not while an owner approval for this Work is pending (a guarded browser
+        step: approving it resumes only a failed/partial Work, C14), and not
+        when a state-changing action fell short: the verdict never outranks it.
+        """
+        from .agent_runtime import state_change_short
+        if (self._browser_request(job_id) or {}).get('state')=='requested':
+            return False
+        return not state_change_short(self.work_trail(job_id))
 
     def cli_work_outcome(self, job_id, tools, since=0):
         """``(outcome, refusals)`` of a CLI Work from its own tool events (#606 T3).
@@ -2591,9 +2603,9 @@ class AgentService:
         """
         if orchestration is None or attempt is None or not orchestration.orchestrated:return None
         from .agent_runtime import EFFECT_FREE_READS, INTERNAL_STATE_ACTIONS
-        # #752: a page open is a read (``EFFECT_FREE_READS``) and a re-plan is not
-        # a replay; clicks, typing and every other action stay effects (C8).
-        repeatable=EFFECT_FREE_READS|INTERNAL_STATE_ACTIONS
+        # A navigation in the owner's browser session counts as an effect here,
+        # as it does for the retry rule (``safe_retry``): it is never repeated.
+        repeatable=(EFFECT_FREE_READS-{'browser_open'})|INTERNAL_STATE_ACTIONS
         with self.store.db() as db:
             rows=db.execute('SELECT tool,status,detail FROM tool_events WHERE job_id=? AND id>? ORDER BY id',(job_id,since or 0)).fetchall()
         effect=outcome=='unknown' or self._work_has_unknown_effect(job_id)
@@ -5712,7 +5724,8 @@ class AgentService:
                     # partial or failed (a truncated read, a failure it worked around) succeeded
                     # when the goal judgment saw the request met; the steps stay in Evidence.
                     if subscription.get('id') and outcome in ('partial','failed') and orchestration is not None \
-                            and orchestration.terminal==REACHED:
+                            and orchestration.terminal==REACHED and not (approval_needed[0] or context_approval_needed[0]) \
+                            and self.goal_upgrade_allowed(job['id']):
                         outcome='succeeded';refusals.clear();resolved_blocker=True
                     # #710 review P1: a CLI attempt the orchestrator judged short and did not
                     # re-delegate (limit, budget, no new plan) is never stored as succeeded.
@@ -5758,7 +5771,8 @@ class AgentService:
                     cause=self._failure_cause(refusals) if outcome in ('failed','partial') else None
                     # #598: the conversation reads the cause in owner words and,
                     # for a partial Work, the portion its typed Evidence supports.
-                    spoken=owner_cause([(tool,self._redact_reason(reason)) for tool,reason in refusals]) if outcome in ('failed','partial') else None
+                    # #752 review: scrubbed before owner_cause cuts each reason, so no cut splits a value.
+                    spoken=owner_cause([(tool,scrub(self._redact_reason(reason))) for tool,reason in refusals]) if outcome in ('failed','partial') else None
                     # #657: what stayed unverified and the proposed next step follow the failed steps.
                     statement=report_statement(agency_report) if outcome in ('failed','partial') else None
                     if statement:

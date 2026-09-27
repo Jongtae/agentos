@@ -472,22 +472,22 @@ class GoalSummaryTests(unittest.TestCase):
             {'host_action': 'web_search', 'evidence': {'qualifiers': ['truncated', 'partial']}}))])
         self.assertEqual(both['unresolved'], ['web_search'], 'partial still counts alongside truncated')
 
-    def test_a_failure_recorded_without_effect_is_recoverable_like_a_failed_read(self):
-        """#752: ``effect: none`` on a failed call gives ``NO_EFFECT_FAILED``; it does not block recovery."""
-        from personal_agent.agent_runtime import NO_EFFECT_FAILED, event_trail
-        read = ('web_search', 'succeeded', json.dumps({'host_action': 'web_search', 'evidence': {}}))
-        no_effect = ('browser_click', 'failed', json.dumps({'host_action': 'browser_click', 'code': 'tool_failed', 'effect': 'none'}))
-        trail, refusals = event_trail([no_effect])
-        self.assertEqual(trail, [('browser_click', NO_EFFECT_FAILED)])
-        self.assertEqual(len(refusals), 1, 'the failure is still recorded')
-        self.assertEqual(goal_summary([no_effect])['unresolved'], ['browser_click'])
-        fixed = goal_summary([no_effect, read])
-        self.assertEqual((fixed['failed_attempts'], fixed['recovered'], fixed['unresolved']), (1, True, []))
-        # Opposing: the same failure without ``effect: none`` stays a failed effect.
-        plain = ('browser_click', 'failed', json.dumps({'host_action': 'browser_click', 'code': 'tool_failed'}))
-        self.assertEqual(event_trail([plain])[0], [('browser_click', 'failed')])
-        blocked = goal_summary([plain, read])
-        self.assertEqual((blocked['recovered'], blocked['unresolved']), (False, ['browser_click']))
+    def test_a_failed_state_changing_action_is_never_recovered_by_a_later_read(self):
+        """#752 review P1: ``effect: none`` (a payment step awaiting approval, a refused write)
+        does not make a failed action recoverable; only the goal judgment may decide such a Work."""
+        from personal_agent.agent_runtime import outcome_from_events, state_change_short, event_trail
+        read = ('browser_read', 'succeeded', json.dumps({'host_action': 'browser_read', 'evidence': {}}))
+        for code in ('approval_required', 'target_not_found', 'tool_failed'):
+            with self.subTest(code=code):
+                click = ('browser_click', 'failed', json.dumps({'host_action': 'browser_click', 'code': code, 'effect': 'none'}))
+                self.assertEqual(outcome_from_events([click, read])[0], 'partial')
+                self.assertEqual(goal_summary([click, read])['unresolved'], ['browser_click'])
+                trail = event_trail([click, read])[0]
+                self.assertTrue(state_change_short(trail))
+        retried = ('browser_click', 'succeeded', json.dumps({'host_action': 'browser_click', 'evidence': {}}))
+        miss = ('browser_click', 'failed', json.dumps({'host_action': 'browser_click', 'code': 'target_not_found', 'effect': 'none'}))
+        self.assertFalse(state_change_short(event_trail([miss, retried])[0]), 'the same action succeeded later')
+        self.assertFalse(state_change_short(event_trail([('weather', 'failed', '{}'), read])[0]), 'reads never count')
 
 if __name__ == '__main__':
     unittest.main()

@@ -1303,12 +1303,30 @@ class GoalDecidesOutcome(Harness):
         self.assertEqual(self.goals, [True], 'no goal judgment was asked')
         self.assertNotEqual(row['status'], 'succeeded')
 
-    def test_a_page_open_is_a_read_and_does_not_block_re_delegation(self):
-        self.engine.before = lambda tools: self.step(tools, 'browser_open', 'succeeded', evidence={})
-        self.script([plan('codex', 'Answer.'), plan('openai', 'Other path.')], goals=[False])
-        job, _row = self.run_work('찾아줘')
-        first = self.events(job, 'evaluated')[0][1]
-        self.assertEqual((first['outcome'], first['next']), ('not_reached', 'redelegate'))
+    def test_a_reached_verdict_never_outranks_a_failed_state_changing_action(self):
+        """#752 review: a refused click or write with no later success keeps the Work short."""
+        for code in ('approval_required', 'tool_failed'):
+            with self.subTest(code=code):
+                def work(tools, code=code):
+                    self.step(tools, 'browser_click', 'succeeded', evidence={})
+                    self.step(tools, 'browser_type', 'failed', code=code, effect='none')
+                    self.step(tools, 'browser_read', 'succeeded', evidence={})
+                self.engine.before = work
+                self.script([plan('codex', 'Answer.')], goals=[True])
+                job, row = self.run_work('주문해줘', key=f'short-{code}')
+                self.assertEqual(self.events(job, 'evaluated')[-1][1]['outcome'], 'reached')
+                self.assertEqual(row['status'], 'partial')
+
+    def test_a_pending_browser_approval_blocks_the_upgrade(self):
+        from personal_agent.quickstart_service import BROWSER_REQUESTS_KEY
+        def work(tools):
+            self.step(tools, 'browser_click', 'succeeded', evidence={})
+            self.step(tools, 'weather', 'failed', code='transient_failure')
+            self.store.put(BROWSER_REQUESTS_KEY, {tools.capabilities.job_id: {'state': 'requested', 'action': 'browser_click'}})
+        self.engine.before = work
+        self.script([plan('codex', 'Answer.')], goals=[True])
+        _job, row = self.run_work('결제해줘')
+        self.assertEqual(row['status'], 'partial', 'approving the step must still resume this Work (C14)')
 
     def test_a_reached_goal_is_not_demoted_by_a_login_page_and_asks_no_login(self):
         from personal_agent.quickstart_service import BROWSER_LOGINS_KEY
@@ -1324,15 +1342,3 @@ class GoalDecidesOutcome(Harness):
             job, row = self.run_work('찾아줘')
         self.assertEqual(row['status'], 'succeeded')
         offer.assert_not_called()
-
-
-class NoEffectFailureRecovery(unittest.TestCase):
-    def test_a_failure_recorded_with_no_effect_is_recoverable(self):
-        from personal_agent.agent_runtime import outcome_from_events
-        click = json.dumps({'host_action': 'browser_click', 'code': 'target_not_found', 'effect': 'none'})
-        opened = json.dumps({'host_action': 'browser_open', 'evidence': {'qualifiers': ['truncated']}})
-        self.assertEqual(outcome_from_events([('browser_click', 'failed', click), ('browser_open', 'succeeded', opened)])[0],
-                         'succeeded')
-        unknown = json.dumps({'host_action': 'browser_click', 'code': 'tool_incomplete', 'effect': 'unknown'})
-        self.assertEqual(outcome_from_events([('browser_click', 'failed', unknown), ('browser_open', 'succeeded', opened)])[0],
-                         'partial')

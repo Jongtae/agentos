@@ -1552,7 +1552,9 @@ class BrowserProfile:
         the window's thread once it shows, and a window that never showed calls
         only ``on_closed(window, 'failed', False)``.  #749: ``host`` is the
         host its first navigation landed on after redirects (``landed_host``),
-        or None when the engine did not say.
+        or None when the engine did not say.  #762: the window's cookies are
+        saved into the jar once before ``on_opened``, so a jar reading taken
+        there is the state before the owner could sign in.
         """
         if not self.available():
             return {'state': 'unavailable', 'reason': self.unavailable_reason(), 'message': self.unavailable_message()}
@@ -1589,6 +1591,9 @@ class BrowserProfile:
                 else:
                     landed = driver.goto(url, ACTION_TIMEOUT_SECONDS)
                 record['landed_host'] = landed_host(landed)
+                # #762: what the landing itself set (a sign-in domain's CSRF or anonymous cookies) is
+                # in the jar before the owner can act, so a later change there is the owner's doing.
+                self._save(driver)
                 opened.set()
                 if on_opened is not None:
                     try:

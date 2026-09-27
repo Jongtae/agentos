@@ -401,6 +401,8 @@ class AgentService:
         self.drive_read=None
         self.drive_picker_config=None
         self.lock=threading.RLock()
+        #: #749: the Settings login window's observed outcome (in memory; a restart forgets it).
+        self._settings_login=None
         self.worker_lock=threading.Lock()
         # #655: the owner's configured search providers, read at call time.
         # #678: the connected AI's own search runs over this service's model
@@ -3740,6 +3742,9 @@ class AgentService:
                                   'host':row.get('host',''),'state':row.get('state'),'requested_at':row.get('requested_at')}
                                  for row in self.browser_step_requests()]
         # #709: logins waiting for the owner (host and times only); decided at /api/browser/login/decision.
+        # #749: the Settings login window's observed outcome after its request answered ``opening``.
+        settings_login=self._settings_login or {}
+        status['settings_login']={'state':settings_login.get('state'),'at':settings_login.get('at')} if settings_login else None
         status['pending_logins']=[{'work_id':row['work_id'],'host':row.get('host',''),'site':row.get('site'),
                                    'landed_host':row.get('landed_host'),'landed_site':row.get('landed_site'),
                                    'stored_session':row.get('stored_session'),'offered_at':row.get('offered_at'),
@@ -3762,9 +3767,21 @@ class AgentService:
         except ValueError:
             host=None
         row={'host':host,'cookies_before':self._login_cookie_marks({'host':host}) if host else None}
+        # What Settings shows after answering ``opening``: the window's observed outcome (in memory only).
+        token=secrets.token_hex(8)
+        def mark(state):
+            with self.lock:
+                if state=='opening' or (self._settings_login or {}).get('token')==token:
+                    self._settings_login={'token':token,'state':state,'at':time.time()}
+        def opened(window,landed=None):mark('opened')
         def closed(window,reason,saved):
-            if saved and host and self._login_cookies_changed(row):self._record_owner_signin(host)
-        return self.browser_profile.open_for_login(url.strip(),on_opened=lambda window,landed=None:None,on_closed=closed)
+            mark('failed' if reason=='failed' and (self._settings_login or {}).get('state')=='opening' else 'closed')
+            if saved and host and self._login_cookies_changed(row):self._record_owner_signin(host,row['cookies_before'])
+        mark('opening')
+        result=self.browser_profile.open_for_login(url.strip(),on_opened=opened,on_closed=closed)
+        if not isinstance(result,dict) or result.get('state')!='opening':
+            mark((result or {}).get('state') or 'failed')
+        return result
 
     def delete_browser_sessions(self, body):
         """Delete one site's saved sign-in cookies, or all of them (#680).
@@ -3994,23 +4011,31 @@ class AgentService:
         if job:self._arm_login_notification(job,nonce)
 
     def _owner_signed_in(self, site):
-        """Whether the owner signed in to ``site`` through an AgentOS login window and its sign-in
-        cookies are still stored (#749).  False with no such sign-in (a cookie a Work's browsing left
-        is not one); None when the jar cannot be read, so the prompt makes no claim."""
+        """Whether a cookie the owner's own login-window sign-in to ``site`` produced is still stored,
+        unexpired and unchanged (#749).  False otherwise: a cookie a Work's browsing left, or one the
+        site set after that sign-in's session ended, is not it.  None when the jar cannot be read, so
+        the prompt makes no claim."""
         signins=self.store.config(BROWSER_OWNER_SIGNINS_KEY,{})
-        if not site or not isinstance(signins,dict) or site not in signins:return False
-        marks=self._login_cookie_marks({'host':site})
-        if marks is None:return None
-        return bool(unexpired(marks['marks'],marks['at']))
+        record=signins.get(site) if site and isinstance(signins,dict) else None
+        if not isinstance(record,dict) or not record.get('marks'):return False
+        current=self._login_cookie_marks({'host':site})
+        if current is None:return None
+        return bool(set(record['marks'])&unexpired(current['marks'],current['at']))
 
-    def _record_owner_signin(self, host):
-        """Record the site of ``host`` as one the owner signed in to through a login window (#749)."""
+    def _record_owner_signin(self, host, before=None):
+        """Record the owner's login-window sign-in to the site of ``host`` (#749): the keyed digests
+        of the cookies that sign-in added or changed (never a value), compared with ``before``
+        (``_login_cookie_marks`` taken before the window)."""
         site=registrable_domain(host)
-        if not site:return
+        after=self._login_cookie_marks({'host':host}) if site else None
+        if after is None:return
+        now=after['at']
+        added=unexpired(after['marks'],now)-unexpired((before or {}).get('marks'),now)
+        if not added:return
         with self.lock:
             signins=self.store.config(BROWSER_OWNER_SIGNINS_KEY,{})
             signins=signins if isinstance(signins,dict) else {}
-            signins[site]=time.time()
+            signins[site]={'at':time.time(),'marks':sorted(added)}
             self.store.put(BROWSER_OWNER_SIGNINS_KEY,signins)
 
     def _login_cookie_marks(self, row):
@@ -4165,14 +4190,14 @@ class AgentService:
                 final,shown='not_logged_in',('no_session' if intent=='resume' else 'skipped')
             elif intent in ('resume','owner_close'):
                 final=shown='resuming'
-                # #749: the owner signed in to this site through the window (its cookies changed).
-                self._record_owner_signin(row.get('host'))
             elif intent=='skip':
                 final=shown='skipped'
             else:
                 final=shown='expired'
             self._put_browser_login(work_id,{**row,'state':final,'cause':shown,'closed_at':time.time()})
         if final=='resuming':
+            # #749: the owner signed in to this site through the window (its sign-in cookies changed).
+            self._record_owner_signin(row.get('host'),row.get('cookies_before'))
             with self.store.db() as db:
                 db.execute('BEGIN IMMEDIATE')
                 resumed=db.execute("UPDATE jobs SET status='queued',error=NULL,delivery='none' WHERE id=? AND status IN ('failed','partial')",(work_id,)).rowcount==1

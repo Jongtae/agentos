@@ -738,14 +738,28 @@ class LoginPromptAndThreads(LoginHarness):
 
     def test_a_site_the_owner_signed_in_to_and_still_holds_gets_no_note(self):
         self.store_cookie()
-        self.store.put(BROWSER_OWNER_SIGNINS_KEY, {'fixture.test': time.time() - 60})
+        self.service._record_owner_signin('fixture.test', None)   # that cookie came from the owner's sign-in
+        record = self.store.config(BROWSER_OWNER_SIGNINS_KEY, {})['fixture.test']
+        self.assertNotIn('old-session', flat(record), 'keyed digests only, never a cookie value')
         _job_id, prompt, _buttons, _notification = self.login_work()
         self.assertNotIn(BROWSER_LOGIN_NO_SESSION_LINE, prompt['text'])
 
     def test_a_recorded_sign_in_whose_cookies_are_gone_gets_the_note(self):
-        self.store.put(BROWSER_OWNER_SIGNINS_KEY, {'fixture.test': time.time() - 60})
+        self.store_cookie()
+        self.service._record_owner_signin('fixture.test', None)
+        self.profile.jar.save_export({'fixture.test': []})
         _job_id, prompt, _buttons, _notification = self.login_work()
         self.assertIn(BROWSER_LOGIN_NO_SESSION_LINE, prompt['text'], 'signed out or deleted since: no claim of a session')
+
+    def test_a_cookie_set_after_the_sign_in_ended_does_not_stand_in_for_it(self):
+        # Codex P2 on #756: the sign-in cookie is gone and a Work (or the site) left another one.
+        self.store_cookie()
+        self.service._record_owner_signin('fixture.test', None)
+        self.profile.jar.save_export({'fixture.test': [{'name': 'csrf', 'value': 'work-set', 'domain': 'fixture.test', 'path': '/',
+                                                        'expires': time.time() + 3600, 'secure': True, 'http_only': True,
+                                                        'same_site': None}]})
+        _job_id, prompt, _buttons, _notification = self.login_work()
+        self.assertIn(BROWSER_LOGIN_NO_SESSION_LINE, prompt['text'])
 
     def test_a_login_through_the_window_records_the_sign_in_and_the_next_prompt_has_no_note(self):
         job_id, _prompt, _buttons, notification = self.login_work()
@@ -806,11 +820,25 @@ class LoginPromptAndThreads(LoginHarness):
         receipt = self.service.open_browser_for_login({'url': ORIGIN + '/login'})
         self.assertEqual(receipt['state'], 'opening')
         self.assertLess(time.monotonic() - started, 2, 'the HTTP request never waits for the window')
+        self.assertEqual(self.service.browser_status()['settings_login']['state'], 'opening', 'Settings shows it pending')
         gate.set()
+        self.assertTrue(wait_until(lambda: self.service.browser_status()['settings_login']['state'] == 'opened'))
         self.assertTrue(wait_until(lambda: len(self.drivers) == 2 and self.drivers[-1].url is not None))
         self.drivers[-1].login()
         self.drivers[-1].closed = True
         self.assertTrue(wait_until(lambda: 'fixture.test' in self.store.config(BROWSER_OWNER_SIGNINS_KEY, {})))
+
+    def test_a_settings_window_that_never_shows_is_reported_failed(self):
+        gate = threading.Event()
+        self.addCleanup(gate.set)
+        self.window_holds = {'hold_goto': gate}
+        self.drivers.append(JarDriver(log=[]))
+        self.assertEqual(self.service.open_browser_for_login({'url': ORIGIN + '/login'})['state'], 'opening')
+        self.assertTrue(wait_until(lambda: len(self.drivers) == 2))
+        self.drivers[-1].fail_goto = True
+        gate.set()
+        self.assertTrue(wait_until(lambda: self.service.browser_status()['settings_login']['state'] == 'failed'))
+        self.assertFalse(self.profile.status()['login_window_open'])
 
     def test_a_settings_window_closed_without_a_login_records_nothing(self):
         receipt = self.service.open_browser_for_login({'url': ORIGIN + '/login'})

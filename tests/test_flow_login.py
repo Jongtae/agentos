@@ -43,8 +43,9 @@ from personal_agent.bounded_execution import (AgentOSMcpTools, BoundedExecutionA
                                               CODEX_BRIDGE_APPROVAL_MODE, STRICT_PROFILE, profile_actions)
 from personal_agent.conversation_projection import TELEGRAM_RESULT_PREVIEW_CHARS, clip_keeping_links, terminal_text
 from personal_agent.providers import ModelAdapter
-from personal_agent.quickstart_service import (AgentService, BROWSER_LOGIN_NO_SESSION_LINE, BROWSER_LOGIN_OFFERED_TEXT,
-                                               BROWSER_LOGIN_RESULT_TEXT, BROWSER_LOGIN_SECONDS, BROWSER_LOGIN_SKIP_LABEL)
+from personal_agent.quickstart_service import (AgentService, BROWSER_LOGIN_CLOSE_SECONDS, BROWSER_LOGIN_NO_SESSION_LINE,
+                                               BROWSER_LOGIN_OFFERED_TEXT, BROWSER_LOGIN_RESULT_TEXT, BROWSER_LOGIN_SECONDS,
+                                               BROWSER_LOGIN_SKIP_LABEL)
 from personal_agent.quickstart_store import QuickStore
 
 from test_bounded_execution import _Capabilities
@@ -289,9 +290,15 @@ class LoginHarness(unittest.TestCase):
 
         #: #716: holds applied to the next login window (the second and later drivers).
         self.window_holds = {}
+        #: #716 review P1-2: the Work's own page sets a cookie its close saves into the jar.
+        self.run_sets_cookie = False
 
         def launcher(profile_dir, headless):
             driver = JarDriver(log=self.driver_log)
+            if not self.drivers and self.run_sets_cookie:
+                driver.sites = {'fixture.test': [{'name': 'csrf', 'value': 'page-set', 'domain': 'fixture.test', 'path': '/',
+                                                  'expires': time.time() + 3600, 'secure': True, 'http_only': True,
+                                                  'same_site': None}]}
             if self.drivers:
                 for name, value in self.window_holds.items():
                     setattr(driver, name, value)
@@ -672,6 +679,15 @@ class LoginPromptAndThreads(LoginHarness):
         self.assertEqual(bs.registrable_domain('co.kr'), 'co.kr', 'a bare suffix is shown whole')
         # A Unicode lookalike is shown as it is spelled (punycode), never as the look it imitates.
         self.assertEqual(bs.registrable_domain('login.exаmple.com'), 'xn--exmple-4nf.com')
+        # Review P1-1: never an IDNA2003 mapping to another real domain, never raw Unicode on a label
+        # the stdlib codec rejects (an Arabic label ending in a digit).
+        self.assertEqual(bs.ascii_host('maßmutual.com'), 'xn--mamutual-rya.com')
+        for host in ('مثال1.аpple.com', 'аpple.com', 'ex\u200dample.com'):
+            self.assertTrue(bs.ascii_host(host).isascii(), host)
+            self.assertTrue(bs.registrable_domain(host).isascii(), host)
+        self.assertEqual(bs.registrable_domain('مثال1.аpple.com'), 'xn--pple-43d.com')
+        # The folding WebKit's UTS #46 also applies: fullwidth letters, the ideographic full stop.
+        self.assertEqual(bs.ascii_host('ｅｘａｍｐｌｅ。com'), 'example.com')
         with mock.patch.object(bs, '_public_suffix_list', return_value=None):
             self.assertEqual(bs.registrable_domain('accounts.example.com.lookalike.io'), 'accounts.example.com.lookalike.io',
                              'without the list the whole host is shown, never a guessed shorter name')
@@ -697,6 +713,14 @@ class LoginPromptAndThreads(LoginHarness):
         self.assertIn(BROWSER_LOGIN_NO_SESSION_LINE, prompt['text'])
         status = self.service.browser_status()['pending_logins'][0]
         self.assertEqual((status['site'], status['stored_session']), ('fixture.test', False))
+
+    def test_cookies_the_login_page_set_during_the_run_are_not_a_stored_session(self):
+        # Review P1-2: the run's own close exports what the login page set (a CSRF or anonymous
+        # cookie a phishing page can set on purpose); that must not suppress the note.
+        self.run_sets_cookie = True
+        _job_id, prompt, _buttons, _notification = self.login_work()
+        self.assertTrue(self.profile.jar.site_cookie_marks('fixture.test')[0], 'the run saved the page cookie')
+        self.assertIn(BROWSER_LOGIN_NO_SESSION_LINE, prompt['text'])
 
     def test_a_site_with_a_stored_session_gets_no_note(self):
         self.profile.jar.save_export({'fixture.test': [{'name': 'sid', 'value': 'old-session', 'domain': 'fixture.test', 'path': '/',
@@ -757,8 +781,8 @@ class LoginPromptAndThreads(LoginHarness):
         self.assertLess(time.monotonic() - started, 2, 'neither the poll thread nor the work loop waits for the close')
         self.assertEqual(self.state(job_id), 'closing')
         decided = self.service._browser_login(job_id)['decided_at']
-        self.assertEqual(self.service.process_browser_logins(now=decided + bs.LOGIN_CLOSE_SECONDS - 1), [])
-        self.assertEqual(self.service.process_browser_logins(now=decided + bs.LOGIN_CLOSE_SECONDS + 1), [job_id])
+        self.assertEqual(self.service.process_browser_logins(now=decided + BROWSER_LOGIN_CLOSE_SECONDS - 1), [])
+        self.assertEqual(self.service.process_browser_logins(now=decided + BROWSER_LOGIN_CLOSE_SECONDS + 1), [job_id])
         self.assertEqual((self.state(job_id), self.service._browser_login(job_id)['cause']), ('expired', 'close_failed'))
         self.assertEqual(self.store.job(job_id)['status'], self.ended, 'not re-queued while the window may hold the profile')
         # The window finishes closing later: the settled login stays settled.

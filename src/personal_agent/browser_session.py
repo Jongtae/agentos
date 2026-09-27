@@ -47,6 +47,7 @@ import importlib.util
 import ipaddress
 import itertools
 import json
+import logging
 import os
 import queue
 import shutil
@@ -56,6 +57,7 @@ import subprocess
 import sys
 import threading
 import time
+import unicodedata
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -813,23 +815,32 @@ def local_destination(url, allowed_origins=()):
     return local_url(url, allowed_origins)
 
 
+LOG = logging.getLogger(__name__)
+
+
 @functools.lru_cache(maxsize=1)
 def _public_suffix_list():
     """The Mozilla Public Suffix List (``publicsuffixlist``'s bundled copy; never fetched), or None when absent."""
     try:
         from publicsuffixlist import PublicSuffixList
     except ImportError:
+        LOG.warning('publicsuffixlist is not installed: login prompts show the whole host (pip install -e .)')
         return None
     return PublicSuffixList()
 
 
 def ascii_host(host):
-    """``host`` lowercased in its ASCII (punycode) form, so a lookalike Unicode host is shown as it is spelled."""
-    host = str(host or '').strip().lower().rstrip('.')
-    try:
-        return host.encode('idna').decode('ascii')
-    except UnicodeError:
-        return host
+    """``host`` in ASCII, every non-ASCII label as its raw punycode (RFC 3492), so a lookalike is shown as spelled (#716).
+
+    Never raw Unicode and never an IDNA2003 mapping (the stdlib ``idna``
+    codec turns ``ß`` into ``ss``, another real domain, and rejects labels
+    WebKit's UTS #46 processing loads).  Only the compatibility folding UTS
+    #46 also applies is kept: NFKC, lowercase, the ideographic full stop as
+    a dot and a dropped soft hyphen; a label is never otherwise rewritten.
+    """
+    host = unicodedata.normalize('NFKC', str(host or '')).replace('\u3002', '.').replace('\u00ad', '').strip().lower().rstrip('.')
+    return '.'.join(label if label.isascii() else 'xn--' + label.encode('punycode').decode('ascii')
+                    for label in host.split('.'))
 
 
 def registrable_domain(host):

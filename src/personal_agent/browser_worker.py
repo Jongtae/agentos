@@ -10,7 +10,7 @@ Request:  ``{"id": 7, "op": "navigate", "timeout": 20, ...arguments}``
 Response: ``{"id": 7, "ok": true, ...result}`` or ``{"id": 7, "ok": false, "error": "<code>"}``
 Events:   ``{"event": "ready" | "hidden" | "unavailable"}`` (no ``id``).
 
-Ops: ``navigate``, ``snapshot``, ``click``, ``type``, ``show``, ``hide``,
+Ops: ``navigate``, ``settle``, ``snapshot``, ``click``, ``type``, ``show``, ``hide``,
 ``state``, ``cookies_export``, ``cookies_import``, ``cookies_delete``,
 ``cookies_clear``, ``quit``.  Every op carries a deadline; the worker answers
 ``timeout`` when it passes.  Errors are AgentOS codes, never library text,
@@ -328,8 +328,20 @@ if (!done) return JSON.stringify({error: 'not_typable'});
 return JSON.stringify({ok: true});
 """
 
+#: #709: how much rendered content a page shows now (no text leaves the page).
+RENDER_PROBE_SCRIPT = r"""
+const body = document.body;
+return JSON.stringify({text: body ? (body.innerText || '').length : 0,
+  nodes: document.getElementsByTagName('*').length, ready: document.readyState});
+"""
+
 WIDTH, HEIGHT = 1280, 900
 SETTLE_QUIET_SECONDS = 0.4
+#: #709: a client-rendered page is read once its visible content stops
+#: changing for ``RENDER_QUIET_SECONDS`` (and shows some text), or when
+#: ``RENDER_SETTLE_SECONDS`` have passed, whichever comes first.
+RENDER_QUIET_SECONDS = 0.5
+RENDER_SETTLE_SECONDS = 4.0
 POLL_SECONDS = 0.05
 FOCUS_SECONDS = 0.1
 RESOLVE_SECONDS = 3.0
@@ -729,6 +741,41 @@ class Worker:
                 value['cancelled_submit'] = cancelled
             self.reply(ident, page=value)
         self.run(SNAPSHOT_SCRIPT, {}, done)
+
+    def op_settle(self, ident, command, timeout):
+        """Wait, bounded, until the page's rendered content stops changing (#709).
+
+        Client-rendered pages finish their navigation long before their
+        content exists.  The probe measures only the length of the visible
+        text and the element count; the page is settled once that measure and
+        the loading state stayed unchanged for ``RENDER_QUIET_SECONDS`` with
+        some text shown, and in any case after ``seconds`` (at most
+        ``RENDER_SETTLE_SECONDS``).  Always answers ``ok`` with ``settled``;
+        the snapshot that follows reads whatever the page shows then.
+        """
+        try:
+            cap = float(command.get('seconds') or RENDER_SETTLE_SECONDS)
+        except (TypeError, ValueError):
+            cap = RENDER_SETTLE_SECONDS
+        cap = max(0.0, min(cap, RENDER_SETTLE_SECONDS, float(timeout)))
+        self.deadline(ident, cap + 2)
+        started = time.monotonic()
+        last, since = [None], [started]
+
+        def measured(value, error):
+            if ident not in self.pending:
+                return
+            now = time.monotonic()
+            measure = (value.get('text'), value.get('nodes'), value.get('ready')) \
+                if error is None and isinstance(value, dict) else None
+            if measure != last[0] or self.view.isLoading():
+                last[0], since[0] = measure, now
+            elif now - since[0] >= RENDER_QUIET_SECONDS and measure and isinstance(measure[0], int) and measure[0] > 0:
+                return self.reply(ident, settled=True, waited=round(now - started, 2))
+            if now - started >= cap:
+                return self.reply(ident, settled=False, waited=round(now - started, 2))
+            self.AppHelper.callLater(POLL_SECONDS * 2, lambda: self.run(RENDER_PROBE_SCRIPT, {}, measured))
+        self.run(RENDER_PROBE_SCRIPT, {}, measured)
 
     def _locate(self, ident, command, then):
         index = command.get('index')

@@ -20,6 +20,7 @@ Two things live here:
   one-line reminder instead of the same failure again.  Which blocker it is
   comes from typed state at the raise site, not from reading the wording.
 """
+import re
 import time
 
 TELEGRAM_RESULT_PREVIEW_CHARS = 3200
@@ -124,6 +125,53 @@ REPORT_QUESTION_LABEL = '확인이 필요한 질문:'
 REPORT_STATEMENT_CHARS = 1200
 
 
+#: #709: an http(s) link inside owner-facing report text.
+_LINK = re.compile(r'https?://[^\s<>"\']+')
+#: A link is kept whole past a bound by at most this many characters.
+LINK_KEEP_CHARS = 2000
+#: The preview may grow by at most this much, so it stays under Telegram's 4096 characters.
+TELEGRAM_LINK_KEEP_CHARS = 800
+
+
+def _public_link(url):
+    """Whether ``url`` passes the existing public-URL checks (``search_providers.public_http_url``
+    and ``local_tools.normalize_public_url``: http(s), a host, no userinfo, no private address)."""
+    from .local_tools import normalize_public_url
+    from .search_providers import public_http_url
+    if not public_http_url(url):
+        return False
+    try:
+        normalize_public_url(url)
+    except ValueError:
+        return False
+    return True
+
+
+def clip_keeping_links(text, limit, keep=LINK_KEEP_CHARS):
+    """``text`` bounded to about ``limit`` characters without cutting a link in half (#709).
+
+    A public link the bound would split is kept whole (up to
+    ``keep`` more), so it stays clickable; any other link the
+    bound would split is dropped rather than left broken.  Text within the
+    bound is returned unchanged.
+    """
+    text = str(text or '')
+    if len(text) <= limit:
+        return text
+    for match in _LINK.finditer(text):
+        if match.start() >= limit:
+            break
+        if match.end() > limit:
+            url = match.group(0).rstrip('.,;:)]}')
+            end = match.start() + len(url)
+            if end <= limit:
+                break
+            if end - limit <= keep and _public_link(url):
+                return text[:end]
+            return text[:match.start()].rstrip()
+    return text[:limit]
+
+
 def report_statement(report):
     """The unknown / next part of a run's typed report (#657), or ``None``.
 
@@ -149,7 +197,7 @@ def report_statement(report):
     step = str(report.get('next') or '').strip()
     if step:
         lines.append(REPORT_NEXT_LABEL + ' ' + step)
-    return '\n'.join(lines)[:REPORT_STATEMENT_CHARS] if lines else None
+    return clip_keeping_links('\n'.join(lines), REPORT_STATEMENT_CHARS) if lines else None
 
 
 def verified_portion(parts):
@@ -225,7 +273,8 @@ def terminal_text(response, error=None, outcome=None, next_action=None, verified
     else:
         text = response or (TERMINAL_FAILED_HEADER + ' ' + (cause or action))
     if len(text) > TELEGRAM_RESULT_PREVIEW_CHARS:
-        return text[:TELEGRAM_RESULT_PREVIEW_CHARS] + '\n\n전체 결과는 AgentOS 웹에서 확인하세요.'
+        # #709: a link the preview bound would split stays whole (Telegram's 4096-character limit holds).
+        return clip_keeping_links(text, TELEGRAM_RESULT_PREVIEW_CHARS, keep=TELEGRAM_LINK_KEEP_CHARS) + '\n\n전체 결과는 AgentOS 웹에서 확인하세요.'
     return text
 
 

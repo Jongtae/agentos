@@ -261,8 +261,8 @@ console.log(JSON.stringify({ok:true}));
 class ReviewRegressions(unittest.TestCase):
     """Findings from the independent review of PR #563."""
 
-    def test_ready_badge_requires_a_connected_ai_and_unknown_state_is_not_green(self):
-        self.assertIn("home.state==='ready'?(home.model_connected?['준비됨','ok']:['AI 연결 안 됨','attention']):['상태 알 수 없음','unknown']", APP)
+    def test_ready_badge_reports_agent_state_without_conflating_ai_setup(self):
+        self.assertIn("home.state==='ready'?['준비됨','neutral']:['상태 알 수 없음','unknown']", APP)
 
     def test_sharing_policy_allowed_only_for_the_model_it_was_approved_for(self):
         self.assertIn("contextPolicyApprovedFor===contextPolicyModelKey()", APP)

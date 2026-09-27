@@ -258,8 +258,17 @@ class ServiceProvenance(unittest.TestCase):
         from personal_agent.bounded_execution import CONTEXT_GATED_ACTIONS, native_search_withheld
         # #678: a clean turn may use the CLI's own web search, so the record says
         # so and no private-read bridge tool is offered to it.
+        # #701: the browser tools are offered only where the service's browser profile can
+        # run (the same check `Capabilities.offered_tools` applies: no factory, no tools).
+        from personal_agent.agent_runtime import BROWSER_ACTIONS
+        hidden = CONTEXT_GATED_ACTIONS | native_search_withheld() | (set() if service.browser_profile.available() else BROWSER_ACTIONS)
         self.assertEqual(record['exposed_tools'], [tool['name'] for tool in profile_mcp_tools('trusted-local')
-                                                   if tool['name'] not in CONTEXT_GATED_ACTIONS | native_search_withheld()])
+                                                   if tool['name'] not in hidden])
+        if service.browser_profile.available():
+            # macOS with PyObjC: the embedded engine runs, so the CLI is offered the five browser tools.
+            self.assertTrue(BROWSER_ACTIONS <= set(record['exposed_tools']))
+        else:
+            self.assertFalse(BROWSER_ACTIONS & set(record['exposed_tools']))
         self.assertEqual(record['cli_native_tools'], ['web_search'])
         self.assertEqual(record['capability_profile'], 'trusted-local')
         self.assertEqual(record['capability_trust'], 'trusted-local')

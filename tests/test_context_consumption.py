@@ -120,6 +120,9 @@ class _ConsumptionCase:
         self.store.put('telegram', {'enabled': True, 'user_id': CHAT, 'generation': GENERATION, 'cursor': 0})
         if self.ROUTE == 'cli':
             self.service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
+            # #701: these checks exercise the bridge web_search, which a native-search
+            # turn no longer offers (the CLI's own search replaces it).
+            self.service.cli_native_search = lambda *args: (False, 'private_turn')
         else:
             self.store.put('model', self.CONFIG)
             self.store.put('model_test', {'ok': True, 'tools_ok': True, 'time': 9999999999,
@@ -243,8 +246,10 @@ class _ConsumptionCase:
         self.assertEqual(result['sent'], {'latitude': 37.57, 'longitude': 126.98}, 'checked payload = sent payload')
         self.assertNotIn('location_ref', json.dumps(self.network.plans), 'the opaque ref never leaves')
         record = self.store.turn_provenance(job)
-        self.assertIn('owner-current-context', record['prompt_withheld'], 'the record keeps size/digest only')
-        self.assertNotIn('37.57', json.dumps(record))
+        # #701 (pilot posture): the current-context section no longer withholds the
+        # local record; the envelope is kept after deterministic redaction.
+        self.assertNotIn('prompt_withheld', record)
+        self.assertNotIn('bot-token-value-1234', json.dumps(record))
 
     def test_a_stale_location_is_not_presented_as_current(self):
         """CT-12: an old point is last-known; the broker refuses it for "here"."""

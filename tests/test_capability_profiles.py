@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 
 from personal_agent import isolated_engine_mcp_bridge
-from personal_agent.agent_runtime import DEFINITIONS, Capabilities, check_arguments
+from personal_agent.agent_runtime import BROWSER_ACTIONS, DEFINITIONS, Capabilities, check_arguments
 from personal_agent.bounded_execution import (
     BOUNDED_PROFILE,
     CLI_PROFILES,
@@ -76,7 +76,8 @@ class OneActionSource(_Store):
         # #627: with current context on, every declared action is on the wire.
         self.enable_context()
         for profile, facade in FACADES.items():
-            listed = facade(self.caps()).definitions()
+            # #701: with a browser profile registered, trusted-local lists its browser tools too.
+            listed = facade(self.caps(browser=lambda: None)).definitions()
             with self.subTest(profile=profile):
                 self.assertEqual([tool['name'] for tool in listed], sorted(profile_actions(profile)))
                 for tool in listed:
@@ -209,11 +210,12 @@ class EffectiveAvailability(_Store):
         self.assertIn('weather', native)
         # #627: current context off (the default) keeps the pre-#627 surface.
         self.assertNotIn('propose_current_state', native)
+        # #701: no registered browser profile hides the browser tools (as on the direct route).
         self.assertEqual([t['name'] for t in AgentOSMcpTools(self.caps()).definitions()],
-                         sorted(set(profile_actions(BOUNDED_PROFILE)) - CONTEXT_GATED_ACTIONS))
+                         sorted(set(profile_actions(BOUNDED_PROFILE)) - CONTEXT_GATED_ACTIONS - BROWSER_ACTIONS))
         self.enable_context()
         self.assertIn('propose_current_state', [d['function']['name'] for d in self.caps().definitions()])
-        self.assertEqual([t['name'] for t in AgentOSMcpTools(self.caps()).definitions()],
+        self.assertEqual([t['name'] for t in AgentOSMcpTools(self.caps(browser=lambda: None)).definitions()],
                          sorted(profile_actions(BOUNDED_PROFILE)))
         self.assertEqual([t['name'] for t in ReadOnlyAgentOSMcpTools(self.caps()).definitions()], ['list_notes'])
 
@@ -297,7 +299,8 @@ class SettingsProjection(_Store):
         self.assertEqual(profile, {'profile': 'trusted-local', 'mode': 'bounded-agentos-mcp', 'trust': 'trusted-local',
                                    'limitation': CLI_PROFILES[BOUNDED_PROFILE]['limitation'],
                                    'tools': ['bounded_public_research', 'list_notes', 'propose_current_state',
-                                             'save_note', 'weather', 'web_search'],
+                                             'save_note', 'weather', 'web_search', 'browser_open', 'browser_read',
+                                             'browser_find', 'browser_click', 'browser_type'],
                                    'unavailable': route_unavailable(BOUNDED_PROFILE),
                                    # #616: the owner can choose; nothing is qualified by default.
                                    'selectable': ['trusted-local', 'strict-isolated'], 'qualified': {}})

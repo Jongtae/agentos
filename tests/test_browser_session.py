@@ -363,10 +363,18 @@ class ToolSchemaTests(unittest.TestCase):
         modes = {t['id']: t['mode'] for t in BUILTIN_MANIFEST['tools']}
         self.assertEqual((modes['browser_click'], modes['browser_read']), ('bounded_write', 'read_only'))
 
-    def test_cli_profiles_declare_the_browser_unavailable(self):
+    def test_only_the_trusted_local_cli_profile_offers_the_browser(self):
+        # #701: trusted-local serves the browser through the service relay; the
+        # strict and isolated profiles declare it unavailable.
+        from personal_agent.bounded_execution import BOUNDED_PROFILE, profile_actions
         for profile in CLI_PROFILES:
             unavailable = route_unavailable(profile)
-            self.assertTrue(BROWSER_ACTIONS <= set(unavailable), profile)
+            if profile == BOUNDED_PROFILE:
+                self.assertTrue(BROWSER_ACTIONS <= set(profile_actions(profile)), profile)
+                self.assertFalse(BROWSER_ACTIONS & set(unavailable), profile)
+            else:
+                self.assertTrue(BROWSER_ACTIONS <= set(unavailable), profile)
+                self.assertFalse(BROWSER_ACTIONS & set(profile_actions(profile)), profile)
 
     def test_tools_are_offered_only_when_a_profile_is_registered(self):
         store = QuickStore(tempfile.mkdtemp())

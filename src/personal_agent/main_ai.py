@@ -63,6 +63,12 @@ CODEX_CONFIG_NOTE = ('AgentOS는 Codex 개인 설정을 격리하므로 ~/.codex
 #: CLI image, so it takes no model: the setting is hidden and refused there
 #: instead of being silently ignored (#679 review).
 ISOLATED_MODEL_NOTE = '격리 런타임 배포는 작업 모델 지정을 지원하지 않아 CLI 기본 모델을 씁니다.'
+#: #701: owner-facing reasons of the per-route agency line (Settings › AI 연결).
+ISOLATED_AGENCY_TEXT = '격리 런타임 배포에서는 CLI 자체 웹 검색과 브라우저 도구를 제공하지 않습니다'
+STRICT_BROWSER_TEXT = '엄격 격리 실행 프로필에서는 브라우저 도구를 제공하지 않습니다'
+CLI_SEARCH_NOTE = '개인 자료가 포함된 작업에서는 그 작업에 한해 꺼집니다'
+CLI_NOT_INSTALLED_TEXT = '이 컴퓨터에서 CLI를 찾지 못해 실행할 수 없습니다'
+CLI_SIGNED_OUT_TEXT = 'CLI가 로그인되어 있지 않아 실행할 수 없습니다'
 
 
 def key_slot(provider_id):
@@ -173,6 +179,62 @@ class MainAiRoutes:
             rows[route_id] = {**record, 'checked_at': self.clock()}
             self.store.put(CHECKS, rows)
 
+    def agency(self, route_id, isolated, saved_key=False, engine=None):
+        """#701: whether this route's own web search and the browser tools are available, and why not.
+
+        Read-only: stored configuration and remembered observations only, no
+        subprocess and no model call.  A CLI's own search that is available can
+        still be off for a single Work whose prompt carries private material
+        (the per-turn gate); ``note`` says so.  ``engine`` is the CLI's row
+        from ``subscription_engine_status`` (installed, login): a CLI that is
+        not installed or is signed out cannot run, so neither is available.
+        """
+        from .bounded_execution import BOUNDED_PROFILE
+        from .search_providers import NATIVE_REASONS, ProviderRegistry
+        profile = getattr(self.service, 'browser_profile', None)
+        browser_reason = None
+        try:
+            browser_reason = profile.unavailable_reason() if profile is not None else 'platform'
+        except Exception:
+            browser_reason = 'platform'
+        browser_text = profile.unavailable_message() if browser_reason and profile is not None else ''
+
+        def row(available, reason='', text='', note=''):
+            return {'available': bool(available), 'reason': '' if available else reason,
+                    'reason_text': '' if available else text, 'note': note if available else ''}
+        registry = ProviderRegistry.from_store(self.store)
+        if route_id in SUBSCRIPTION_ROUTES:
+            host_profile = self.service.subscription_isolation()['profile'] if hasattr(self.service, 'subscription_isolation') \
+                else BOUNDED_PROFILE
+            if isolated:
+                return {'search': row(False, 'isolated', ISOLATED_AGENCY_TEXT), 'browser': row(False, 'isolated', ISOLATED_AGENCY_TEXT)}
+            engine = engine if isinstance(engine, dict) else {}
+            if not engine.get('installed'):
+                return {'search': row(False, 'not_installed', CLI_NOT_INSTALLED_TEXT),
+                        'browser': row(False, 'not_installed', CLI_NOT_INSTALLED_TEXT)}
+            if (engine.get('login') or {}).get('state') == 'signed-out':
+                return {'search': row(False, 'signed_out', CLI_SIGNED_OUT_TEXT),
+                        'browser': row(False, 'signed_out', CLI_SIGNED_OUT_TEXT)}
+            if host_profile != BOUNDED_PROFILE:
+                return {'search': row(False, 'strict_profile', NATIVE_REASONS['strict_profile']),
+                        'browser': row(False, 'strict_profile', STRICT_BROWSER_TEXT)}
+            recorded = registry.recorded_native(route_id, route_id) or {}
+            refused = recorded.get('state') == 'unavailable'
+            search = row(not refused, recorded.get('reason') or 'refused',
+                         NATIVE_REASONS.get(recorded.get('reason') or 'refused', ''), CLI_SEARCH_NOTE)
+            return {'search': search, 'browser': row(browser_reason is None, browser_reason or '', browser_text)}
+        preset = API_ROUTES.get(route_id) or {}
+        if not saved_key:
+            search = row(False, 'no_api_key', NATIVE_REASONS['no_api_key'])
+        else:
+            fingerprint = registry.fingerprint(route_id, {'endpoint': preset.get('endpoint', ''),
+                                                          'model': preset.get('model', '')})
+            status = registry.native_status()
+            recorded = status if status.get('route') == route_id else (registry.recorded_native(route_id, fingerprint) or {})
+            refused = recorded.get('state') == 'unavailable'
+            search = row(not refused, recorded.get('reason') or 'rejected', NATIVE_REASONS.get(recorded.get('reason') or 'rejected', ''))
+        return {'search': search, 'browser': row(browser_reason is None, browser_reason or '', browser_text)}
+
     def status(self):
         self.migrate()
         current = self.current()
@@ -196,7 +258,8 @@ class MainAiRoutes:
                                'model': self.subscription_model(route_id),
                                'model_selectable': not isolated,
                                'model_note': ISOLATED_MODEL_NOTE if isolated
-                               else CODEX_CONFIG_NOTE if route_id == 'codex' else ''})
+                               else CODEX_CONFIG_NOTE if route_id == 'codex' else '',
+                               'agency': self.agency(route_id, isolated, engine=engine)})
                 continue
             preset = API_ROUTES[route_id]
             saved = bool(self.store.secret(key_slot(route_id)))
@@ -207,7 +270,7 @@ class MainAiRoutes:
                            'key': {'saved': saved, 'saved_at': (meta.get(route_id) or {}).get('saved_at') if saved else None,
                                    # A replaced key of the current route is used only after 확인하고 사용.
                                    'pending': bool(current == route_id and saved and not active_key)},
-                           'check': check})
+                           'check': check, 'agency': self.agency(route_id, isolated, saved)})
         last = None
         if current in SUBSCRIPTION_ROUTES:
             login = (engines.get(current) or {}).get('login') or {}

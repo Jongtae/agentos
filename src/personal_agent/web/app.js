@@ -82,6 +82,9 @@ Object.assign(I18N["ja"],{"확인 중":"確認中","확인 취소":"確認を取
 Object.assign(I18N["en"],{"판단 AI 확인을 백그라운드에서 시작했습니다. 통과하면 기본 AI를 따라갑니다.":"Started the Judgment AI check in the background. If it passes, the Judgment AI follows the Main AI.","판단 AI 확인을 요청하는 중…":"Requesting the Judgment AI check…"});
 Object.assign(I18N["zh-CN"],{"판단 AI 확인을 백그라운드에서 시작했습니다. 통과하면 기본 AI를 따라갑니다.":"已在后台开始检查判断 AI。通过后，判断 AI 将跟随默认 AI。","판단 AI 확인을 요청하는 중…":"正在请求检查判断 AI…"});
 Object.assign(I18N["ja"],{"판단 AI 확인을 백그라운드에서 시작했습니다. 통과하면 기본 AI를 따라갑니다.":"判断 AI の確認をバックグラウンドで開始しました。合格すると判断 AI は基本 AI に従います。","판단 AI 확인을 요청하는 중…":"判断 AI の確認を依頼しています…"});
+Object.assign(I18N["en"],{"AI 설정":"AI settings","작업에서 사용하는 AI입니다. 현재 선택과 상태가 여기에 표시됩니다.":"Choose the AI used for work. Its current selection and status appear here.","작업에 사용할 AI를 선택하면 시작할 수 있습니다.":"Choose an AI to run work.","선택되지 않음":"Not selected","대화 이해 AI는 기본 AI가 선택되면 기본 경로로 사용됩니다.":"The conversation-understanding AI follows the Main AI once one is selected.","기본 AI 대기":"Waiting for Main AI","기본 AI가 아직 없습니다.":"No Main AI is selected yet.","설정 › AI에서 로그인 상태를 확인하세요.":"Check sign-in under Settings › AI.","AI 설정 열기":"Open AI settings","기본 AI 선택":"Choose a Main AI","구독 AI는 로그인 상태를 확인하고, API는 키를 저장해야 선택할 수 있습니다. 확인을 통과해야 기본 AI로 바뀝니다.":"Check a subscription sign-in or save an API key first. The Main AI switches only after a successful check."});
+Object.assign(I18N["zh-CN"],{"AI 설정":"AI 设置","작업에서 사용하는 AI입니다. 현재 선택과 상태가 여기에 표시됩니다.":"选择执行工作的 AI；此处显示当前选择和状态。","작업에 사용할 AI를 선택하면 시작할 수 있습니다.":"请选择一个执行工作的 AI。","선택되지 않음":"尚未选择","대화 이해 AI는 기본 AI가 선택되면 기본 경로로 사용됩니다.":"选择主要 AI 后，对话理解 AI 将默认使用该 AI。","기본 AI 대기":"等待主要 AI","기본 AI가 아직 없습니다.":"尚未选择主要 AI。","설정 › AI에서 로그인 상태를 확인하세요.":"请在“设置 › AI”中检查登录状态。","AI 설정 열기":"打开 AI 设置","기본 AI 선택":"选择主要 AI","구독 AI는 로그인 상태를 확인하고, API는 키를 저장해야 선택할 수 있습니다. 확인을 통과해야 기본 AI로 바뀝니다.":"订阅账号需先检查登录状态，API 需先保存密钥。检查通过后才会切换主要 AI。"});
+Object.assign(I18N["ja"],{"AI 설정":"AI 設定","작업에서 사용하는 AI입니다. 현재 선택과 상태가 여기에 표시됩니다.":"作業に使う AI を選びます。現在の選択と状態をここに表示します。","작업에 사용할 AI를 선택하면 시작할 수 있습니다.":"作業に使う AI を選択してください。","선택되지 않음":"未選択","대화 이해 AI는 기본 AI가 선택되면 기본 경로로 사용됩니다.":"メイン AI を選択すると、会話理解 AI は既定でその AI に従います。","기본 AI 대기":"メイン AI 待ち","기본 AI가 아직 없습니다.":"メイン AI がまだ選択されていません。","설정 › AI에서 로그인 상태를 확인하세요.":"設定 › AI でログイン状態を確認してください。","AI 설정 열기":"AI 設定を開く","기본 AI 선택":"メイン AI を選択","구독 AI는 로그인 상태를 확인하고, API는 키를 저장해야 선택할 수 있습니다. 확인을 통과해야 기본 AI로 바뀝니다.":"サブスクリプションはサインイン確認、API はキーの保存が必要です。確認に成功するとメイン AI が切り替わります。"});
 // I18N-CATALOG-END
 let currentLanguage='en',TIME_MINUTE,TIME_CLOCK,TIME_ABSOLUTE,TIME_RELATIVE,TIME_DAY,TIME_YEAR;
 function t(source,vars){let text=String(source??'');if(currentLanguage!=='ko'){const entry=I18N[currentLanguage]?.[text];if(entry!==undefined)text=entry;}if(vars)text=text.replace(/\{(\w+)\}/g,(match,key)=>key in vars?String(vars[key]):match);return text;}
@@ -367,16 +370,17 @@ function renderExecutionConnection(settings){
  aiSettings=settings;const main=settings?.main_ai||{},box=$('active-ai'),execution=settings?.subscription_execution||{};
  const fingerprint=JSON.stringify([main,settings?.decision_route,execution,settings?.model,settings?.model_ready]);if(box.dataset.state===fingerprint)return;box.dataset.state=fingerprint;
  const focused=rememberFocus(box),notice=$('active-ai-feedback')?[$('active-ai-feedback').textContent,$('active-ai-feedback').classList.contains('error')]:null;box.replaceChildren();
- const heading=element('div',undefined,'settings-section-heading');heading.append(element('h3',t('기본 AI')),element('p',t('작업을 실행하는 AI입니다. 판단 AI는 기본값으로 기본 AI를 따라갑니다. 키를 저장하는 것만으로는 바뀌지 않으며, 실제 실행은 작업에서 확인합니다.')));box.append(heading);
+ const heading=element('div',undefined,'settings-section-heading ai-settings-intro');heading.append(element('h3',t('기본 AI')),element('p',t('작업에서 사용하는 AI입니다. 현재 선택과 상태가 여기에 표시됩니다.')));box.append(heading);
  const view=mainAiView(settings),actions=element('div',undefined,'settings-inline-confirm');
  if(view.checkable)actions.append(focusKey(settingsAction(t('확인'),event=>checkMainAi(event.currentTarget)),'ai-check'));
  actions.append(focusKey(settingsAction(main.current?t('변경'):t('선택'),event=>openAiChooser(event.currentTarget)),'ai-change'));
- box.append(settingsRow(view.title,view.description,view.state,view.kind,actions));
+ const routes=element('div',undefined,'ai-route-grid');
+ const mainCard=settingsRow(view.title,view.description,view.state,view.kind,actions);mainCard.className='settings-row ai-route-card ai-route-card-main';if(!main.current)mainCard.dataset.routeState='unconfigured';routes.append(mainCard);
  const judgment=judgmentView(settings),judgmentActions=element('div',undefined,'settings-inline-confirm');
  if(judgment.followable)judgmentActions.append(focusKey(settingsAction(t('확인'),event=>followMainAi(event.currentTarget)),'judgment-check'));
  if(judgment.cancelable)judgmentActions.append(focusKey(settingsAction(t('확인 취소'),event=>cancelJudgmentCheck(event.currentTarget)),'judgment-cancel'));
  judgmentActions.append(focusKey(settingsAction(t('고급'),event=>openJudgmentChooser(event.currentTarget)),'judgment-advanced'));
- const judgmentRow=settingsRow(t('판단 AI (대화 해석)'),judgment.description,judgment.state,judgment.kind,judgmentActions);judgmentRow.className+=' subordinate';box.append(judgmentRow);
+ const judgmentRow=settingsRow(t('판단 AI (대화 해석)'),judgment.description,judgment.state,judgment.kind,judgmentActions);judgmentRow.className='settings-row ai-route-card ai-route-card-judgment';routes.append(judgmentRow);box.append(routes);
  // #616: the host CLI's trust profile, from the route declaration; switching is explicit and strict isolation is saved only after it verifies.
  const selectedId=(settings?.subscription_engines||{}).selected||'';
  if(selectedId&&Array.isArray(execution.selectable)&&execution.selectable.includes('strict-isolated')){const strict=execution.trust==='strict-isolated',unknown=execution.trust==='unknown',stale=unknown||(strict&&execution.requalify_needed===true),versions=Object.entries(execution.qualified||{}).map(([id,row])=>id+' '+(row?.version||'?')).join(', ');const choose=(profile,label,done)=>settingsAction(label,event=>busy(event.currentTarget,async()=>{aiFeedback('');try{await api('/api/subscription-engines/isolation',{profile});box.dataset.state='';await refresh();aiFeedback(done);}catch(error){aiFeedback(error.message,true);}}));const isolation=element('div',undefined,'settings-inline-confirm');if(!strict||stale)isolation.append(choose('strict-isolated',stale?t('다시 검증'):t('검증 후 엄격 격리 사용'),t('엄격 격리를 검증했습니다. 다음 요청부터 적용됩니다.')));if(strict||unknown)isolation.append(choose('trusted-local',t('신뢰된 로컬 사용'),t('신뢰된 로컬로 전환했습니다. 다음 요청부터 적용됩니다.')));const description=unknown?t('저장된 실행 프로필을 알 수 없어 요청을 실행하지 않습니다. 프로필을 다시 선택하세요.'):stale?t('엄격 격리를 검증할 때와 CLI·플랫폼·경로가 달라져 요청을 실행하지 않습니다. 다시 검증하거나 신뢰된 로컬을 선택하세요.'):strict?t('엄격 격리: CLI는 작업 폴더와 AgentOS가 전달한 도구 결과만 읽습니다. 검증한 CLI 버전에서만 실행합니다.'):t('신뢰된 로컬: CLI의 자체 도구가 AgentOS가 추적하지 않는 이 컴퓨터의 파일을 읽을 수 있습니다.');const state=unknown?t('프로필 확인 필요'):stale?t('검증 다시 필요'):strict?t('엄격 격리'):t('신뢰된 로컬');const row=settingsRow(t('CLI 실행 격리'),description+' '+t('제한: {limitation}',{limitation:execution.limitation||'-'})+' '+t('검증한 CLI 버전: {versions}',{versions:versions||t('검증 전')}),state,stale?'attention':strict?'active':'neutral',isolation);row.className+=' subordinate';box.append(row);}
@@ -387,9 +391,9 @@ function renderExecutionConnection(settings){
  lines.push(t('현재 사용 중 표시는 작업을 실행하는 기본 AI만 가리킵니다. 판단 AI는 따로 표시합니다.'));
  box.append(settingsDisclosure(t('기술 세부 정보'),lines));restoreFocus(box,focused);
 }
-// #619: Settings › AI 연결 is one card - the Main AI (기본 AI) that runs Work and, as a subordinate line, the
-// Judgment AI (판단 AI, 대화 해석) that follows it by default. Changing either happens in a <dialog> whose order is
-// fixed; nothing re-sorts. Rendering calls no model and runs no CLI; only the owner's explicit actions call the server.
+// #619: Settings › AI shows the Main AI (기본 AI) that runs Work before the subordinate Judgment AI
+// (판단 AI, 대화 해석) that follows it by default. Changing either happens in a <dialog> whose order is fixed;
+// nothing re-sorts. Rendering calls no model and runs no CLI; only the owner's explicit actions call the server.
 const MAIN_AI_GROUPS=[['구독',['codex','claude-code']],['API',['openai','anthropic','openrouter']]];
 let aiSettings=null,aiChoice='',aiKeyEditing='',aiKeyRemoving='',aiNotice=null;const aiModelDraft={};
 function aiDate(value){return value?TIME_DAY.format(new Date(value*1000)):'';}
@@ -404,7 +408,7 @@ function mainAiRoutes(settings){const main=settings?.main_ai||{};return Object.f
 function mainAiView(settings){
  const main=settings?.main_ai||{},current=main.current||'',route=mainAiRoutes(settings)[current],last=main.last_check||{};
  const checked=last.checked_at?t('마지막 확인 {time}',{time:TIME_MINUTE.format(new Date(last.checked_at*1000))}):'';
- if(!current)return {title:t('선택 필요'),description:t('작업을 실행할 AI가 없습니다. 변경에서 하나를 고르세요.'),state:t('설정 필요'),kind:'neutral',checkable:false};
+ if(!current)return {title:t('선택되지 않음'),description:t('작업에 사용할 AI를 선택하면 시작할 수 있습니다.'),state:t('설정 필요'),kind:'neutral',checkable:false};
  if(current==='other'){const other=main.other||{};return {title:directRouteName(other),description:t('{model} 모델. 이 연결은 변경 목록에 없습니다. 계속 쓰려면 확인하고, 바꾸려면 변경을 누르세요.',{model:other.model||'-'})+' '+t('전송 대상: {destination}',{destination:other.destination||'-'}),state:t('확인 필요'),kind:'attention',checkable:true};}
  if(!route)return {title:current,description:t('선택된 연결을 이 컴퓨터에서 확인할 수 없습니다. 자동 전환하지 않습니다.'),state:t('확인 필요'),kind:'attention',checkable:false};
  const destination=t('전송 대상: {destination}',{destination:t(route.destination)});
@@ -426,6 +430,8 @@ function judgmentView(settings){
  // #679: Settings names the route actually in use and why - including the #417 OpenAI default that answers while
  // a subscription Judgment AI is not yet checked, which used to read as "follow Main AI".
  const effective=route.effective;
+ const effectiveAnswers=effective&&['active','fallback','checking'].includes(effective.state);
+ if(mode==='follow_main'&&!settings?.main_ai?.current&&!follow.available&&!effectiveAnswers)return {description:t('대화 이해 AI는 기본 AI가 선택되면 기본 경로로 사용됩니다.'),state:t('기본 AI 대기'),kind:'neutral'};
  if(effective){const kinds={active:'active',fallback:'attention',attention:'attention',off:'neutral',checking:'neutral'},states={active:'사용 중',fallback:'대체 경로 사용 중',attention:'확인 필요',off:'사용 안 함',checking:'확인 중'};
   const where=effective.destination&&effective.state!=='off'?' · '+destination(effective.destination):'';
   // #685: the Main AI switch queues the Judgment AI qualification; it runs in the background and can be cancelled.
@@ -641,13 +647,13 @@ function focusTurn(id){let turn=[...document.querySelectorAll('#task-list .turn-
 function minuteNode(value){const parts=formatTimeParts(value),node=element('time',value?TIME_MINUTE.format(new Date(value*1000)):t('시각 없음'));if(parts.iso){node.dateTime=parts.iso;node.title=parts.absolute;}return node;}
 // #571: a not-signed-in CLI failure explains the next step and offers an
 // explicit switch to another usable route; nothing switches on its own.
-function authRecovery(task){const engineId=task.route?.engine,box=element('div',undefined,'turn-recovery');box.append(element('p',t('이 CLI가 로그인되어 있지 않아 답하지 못했습니다.'),'turn-outcome'),element('p',t(ENGINE_LOGIN_HELP[engineId]||'설정 › AI 연결에서 로그인을 확인하세요.')));
+function authRecovery(task){const engineId=task.route?.engine,box=element('div',undefined,'turn-recovery');box.append(element('p',t('이 CLI가 로그인되어 있지 않아 답하지 못했습니다.'),'turn-outcome'),element('p',t(ENGINE_LOGIN_HELP[engineId]||'설정 › AI에서 로그인 상태를 확인하세요.')));
  const actions=element('div',undefined,'button-row'),settings=lastState?.settings||{},feedback=element('p',undefined,'field-feedback');feedback.setAttribute('role','status');
  const sidecar=(settings.subscription_engines?.engines||[]).some(engine=>engine.id===engineId&&engine.login?.state==='sidecar');
  if(ENGINE_LOGIN_COMMAND[engineId]&&!sidecar){const check=element('button',t('로그인 확인'),'small');check.type='button';check.onclick=()=>busy(check,async()=>{try{const result=await api('/api/subscription-engines/login-status',{engine:engineId});setFeedback(feedback.id||(feedback.id='recovery-'+task.id),t(ENGINE_LOGIN_TEXT[result.state]||'로그인 확인 안 됨'));await refresh();}catch(error){feedback.textContent=error.message;}});actions.append(check);}
  if(settings.model_ready&&settings.model?.model){const api_=element('button',t('직접 API로 전환'),'small');api_.type='button';api_.onclick=()=>busy(api_,async()=>{try{await api('/api/ai-route',{route:'direct-api'});feedback.textContent=t('직접 API로 전환했습니다. 요청을 다시 보내 주세요.');await refresh();}catch(error){feedback.textContent=error.message;}});actions.append(api_);}
  for(const engine of settings.subscription_engines?.engines||[]){if(engine.id===engineId||engine.login?.state!=='signed-in')continue;const other=element('button',t('{name}로 전환',{name:engine.name}),'small');other.type='button';other.onclick=()=>busy(other,async()=>{try{await api('/api/subscription-engines/connect',{engine:engine.id,officially_authenticated:true});feedback.textContent=t('{name}로 전환했습니다. 요청을 다시 보내 주세요.',{name:engine.name});await refresh();}catch(error){feedback.textContent=error.message;}});actions.append(other);}
- const open=element('button',t('AI 연결 설정 열기'),'link-button');open.type='button';open.onclick=()=>navigate('settings','ai');actions.append(open);box.append(actions,feedback);return box;}
+ const open=element('button',t('AI 설정 열기'),'link-button');open.type='button';open.onclick=()=>navigate('settings','ai');actions.append(open);box.append(actions,feedback);return box;}
 function turnHead(name,time,tone,label){const head=element('div',undefined,'turn-head');head.append(element('strong',name,'turn-name'),minuteNode(time));if(label)head.append(badge(label,tone));return head;}
 function traceDisclosure(task,kind,summaryText,openSet,fill){const box=element('details',undefined,'turn-'+kind),summary=element('summary',summaryText);summary.dataset.focusKey=kind+':'+task.id;box.append(summary);const paint=()=>{for(const node of [...box.children])if(node!==summary)node.remove();if(!box.open)return;if(!task.events)box.append(element('p',taskDetailFailures.has(task.id)?t('처리 과정을 불러오지 못했습니다. 자동으로 다시 시도합니다.'):t('불러오는 중…'),'empty'));else fill(box);};box.open=openSet.has(task.id);paint();
  // Setting .open above queues a toggle event; ignore it unless the owner changed the state.

@@ -172,7 +172,8 @@ console.log('settings DOM regressions passed');
 
 
 def test_settings_uses_goal_oriented_owner_language():
-    assert "AI 연결" in HTML
+    assert "AI 설정" in HTML
+    assert ">AI</button>" in HTML
     assert "파일 · 저장" in HTML
     assert "외부 연결" in HTML
     assert "내 기록" not in HTML

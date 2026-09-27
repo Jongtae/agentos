@@ -487,8 +487,19 @@ details.technical details>summary{color:var(--muted)}
 .decision-choice{display:flex;align-items:center;gap:8px;min-height:32px;font-size:var(--fs-2)}
 .decision-choice input{margin:0}
 
-/* #619 AI 연결: one card, a subordinate Judgment AI line and fixed-order chooser dialogs. */
-.settings-row.subordinate{padding-left:var(--sp-4);border-left:2px solid var(--line)}
+/* AI route settings: show the Work route first and keep its dependent judgment route quieter. */
+.ai-settings-intro{border:0;padding:8px 0 4px}
+.ai-route-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(220px,1fr);gap:12px;align-items:start;margin-top:10px}
+.ai-route-card{grid-template-columns:minmax(0,1fr) auto;gap:10px 12px;align-content:start;align-items:start;min-width:0;margin:0;padding:16px;border:1px solid var(--line);border-radius:var(--r-2);background:var(--surface)}
+.ai-route-card-main{border-top:3px solid var(--accent);padding-top:14px}
+.ai-route-card-main[data-route-state="unconfigured"]>.settings-state{display:none}
+.ai-route-card .settings-row-main{grid-column:1;grid-row:1}
+.ai-route-card>.settings-state{grid-column:2;grid-row:1;justify-self:end}
+.ai-route-card .settings-row-actions{grid-column:1/-1;grid-row:2;justify-content:flex-start}
+.ai-route-card-judgment{grid-template-columns:minmax(0,1fr);gap:10px;background:var(--surface-2)}
+.ai-route-card-judgment>.settings-state,.ai-route-card-judgment .settings-row-main,.ai-route-card-judgment .settings-row-actions{grid-column:1;grid-row:auto;justify-self:start}
+.ai-route-card-judgment .settings-row-title{font-size:var(--fs-2)}
+.ai-route-card-judgment .settings-row-description{max-width:68ch}
 .settings-dialog{width:min(640px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:0;border:1px solid var(--line-strong);border-radius:12px;background:var(--surface);color:var(--ink);overscroll-behavior:contain}
 .settings-dialog::backdrop{background:rgb(15 23 42 / .4)}
 .dialog-body{display:grid;gap:var(--sp-3);padding:var(--sp-5)}
@@ -496,7 +507,9 @@ details.technical details>summary{color:var(--muted)}
 .dialog-actions{justify-self:stretch;justify-content:flex-end;position:sticky;bottom:0;padding:var(--sp-2) 0 0;border-top:1px solid var(--line);background:var(--surface)}
 .chooser-group{display:grid;gap:var(--sp-2);margin:0 0 var(--sp-3);padding:0;border:0;min-width:0}
 .chooser-group legend{margin-bottom:var(--sp-1);padding:0;font-size:var(--fs-2);font-weight:600;color:var(--muted)}
-.chooser-row{display:grid;gap:var(--sp-2);padding:10px var(--sp-3);border:1px solid var(--line);border-radius:8px;min-width:0}
+.chooser-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px 12px;padding:10px var(--sp-3);border:1px solid var(--line);border-radius:8px;min-width:0}
+.chooser-row>.field-hint,.chooser-row>.chooser-key,.chooser-row>.chooser-model{grid-column:1/-1}
+.chooser-row>.chooser-actions{grid-column:2;grid-row:1;justify-content:flex-end}
 .chooser-row:has(input[name="main-ai"]:checked){border-color:var(--accent)}
 .chooser-row:focus-within{outline:2px solid var(--accent);outline-offset:2px}
 .chooser-row:not(:has(input:disabled)){cursor:pointer}
@@ -509,7 +522,8 @@ details.technical details>summary{color:var(--muted)}
 .chooser-key input{flex:1 1 220px;min-width:0}
 .chooser-model{display:grid;gap:var(--sp-1)}
 .chooser-consequence{display:grid;gap:var(--sp-1);margin:0;font-size:var(--fs-2)}
-@media(max-width:620px){.settings-dialog{width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;margin:0;border:0;border-radius:0}.dialog-body{padding:var(--sp-4)}}
+@media(max-width:760px){.ai-route-grid{grid-template-columns:minmax(0,1fr)}.ai-route-card-judgment{grid-template-columns:minmax(0,1fr) auto}.ai-route-card-judgment>.settings-state{grid-column:2;grid-row:1;justify-self:end}.ai-route-card-judgment .settings-row-main{grid-column:1;grid-row:1}.ai-route-card-judgment .settings-row-actions{grid-column:1/-1;grid-row:2}}
+@media(max-width:620px){.ai-route-card{grid-template-columns:minmax(0,1fr);padding:12px}.ai-route-card .settings-row-main,.ai-route-card>.settings-state,.ai-route-card .settings-row-actions{grid-column:1;grid-row:auto;justify-self:start}.ai-route-card-judgment{grid-template-columns:minmax(0,1fr)}.chooser-row{grid-template-columns:minmax(0,1fr);align-items:start}.chooser-row>.chooser-actions{grid-column:1;grid-row:auto;justify-content:flex-start}.settings-dialog{width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;margin:0;border:0;border-radius:0}.dialog-body{padding:var(--sp-4)}}
 #ai-chooser .dialog-body{max-height:calc(100dvh - 34px);overflow:auto;overscroll-behavior:contain}
 #ai-chooser-list{padding-bottom:calc(var(--sp-4) + 56px)}
 @media(max-width:620px){#ai-chooser .dialog-body{max-height:100dvh}}

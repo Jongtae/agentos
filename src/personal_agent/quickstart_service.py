@@ -2460,27 +2460,20 @@ class AgentService:
         return {label for label in labels or () if label!=PRIVATE_PROVENANCE.get('browser_read')}
 
     def planner_history(self, rows, document_jobs):
-        """The earlier stored messages the orchestrator's plan call may read (#710 review P1).
+        """The earlier stored messages the orchestrator's plan call may read (#710, #740).
 
-        The Judgment AI is an external destination with no document-sharing
-        approval of its own, so every row a worker could have withheld is
-        withheld here too: file-workspace document jobs (as for a worker whose
-        ``document_boundary`` requires approval), and rows of a Work whose
-        recorded sources name a store whose turn envelope is withheld
-        (``PROVENANCE_WITHHELD_SOURCES``, including history-inherited labels).
-        A Work with no source record fails closed.  The current request is not
-        part of the excerpt.
+        The same earlier conversation a CLI worker is shown: every owner and
+        assistant row except file-workspace document jobs, which a worker
+        whose ``document_boundary`` requires approval never gets either.
+        #740: rows are no longer withheld by their Work's source labels.  The
+        Judgment AI is an owner-configured AI (pilot posture, #653), and a
+        follow-up planned without the conversation it continues loses what it
+        refers to.  Every fact is still redacted by ``Orchestration._redact``
+        before the plan call.  The current request is not part of the excerpt.
         """
-        records=work_source_records(self.store)
         document_jobs=set(document_jobs or ())
-        kept=[]
-        for row in (rows or [])[:-1]:
-            job_id=row.get('job_id')
-            labels=records.get(job_id)
-            if row.get('role') not in ('user','assistant') or job_id in document_jobs or not isinstance(labels,list):continue
-            if {base_label(label) for label in labels}&self.PROVENANCE_WITHHELD_SOURCES:continue
-            kept.append(row)
-        return kept
+        return [row for row in (rows or [])[:-1]
+                if row.get('role') in ('user','assistant') and row.get('job_id') not in document_jobs]
 
     def work_orchestration(self, job, request, rows, sections, budget, pinned=False, document_jobs=()):
         """The ``Orchestration`` of one Work, or None when no default Main AI exists.

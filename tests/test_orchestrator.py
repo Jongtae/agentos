@@ -127,9 +127,11 @@ class Harness(unittest.TestCase):
         self.plans, self.goals = [], []
         self.asked_plans = []
 
-    def script(self, plans, goals=()):
-        """The Judgment AI: ``plans`` answer the plan calls in order, ``goals`` the CLI goal judgments."""
-        self.plans, self.goals = list(plans), list(goals)
+    def script(self, plans, goals=(), owner_questions=()):
+        """The Judgment AI: ``plans`` answer the plan calls in order, ``goals`` the CLI goal judgments,
+        ``owner_questions`` the #740 owner-input judgments."""
+        self.plans, self.goals, self.owner_questions = list(plans), list(goals), list(owner_questions)
+        self.asked_owner_input = []
 
         def structured(context, question, schema):
             self.asked_plans.append((context, question, schema))
@@ -139,6 +141,11 @@ class Harness(unittest.TestCase):
             return item if isinstance(item, StructuredDecision) or item is None else decided(item)
 
         def judge(context, proposition):
+            if context.purpose == 'owner-input-needed':
+                self.asked_owner_input.append(context)
+                if not self.owner_questions:
+                    return None
+                return BinaryDecision(OUTCOME_DECIDED, self.owner_questions.pop(0), fixture_confidence())
             if context.purpose != 'goal-reached' or not self.goals:
                 return None
             return BinaryDecision(OUTCOME_DECIDED, self.goals.pop(0), fixture_confidence())
@@ -917,35 +924,85 @@ class BridgeTimeout(unittest.TestCase):
 
 
 class PlannerHistory(Harness):
-    def test_rows_withheld_from_a_worker_are_withheld_from_the_planner(self):
-        """Review P1: document-job rows and rows of a Work that read a private store never reach the plan call."""
-        from personal_agent.agent_runtime import WORK_SOURCES_KEY
+    def test_the_planner_reads_the_conversation_a_worker_is_shown(self):
+        """#740: only document-job rows are withheld; rows of a Work that used the browser or a private store stay."""
+        from personal_agent.agent_runtime import PRIVATE_PROVENANCE, WORK_SOURCES_KEY
         jobs = []
-        for text, answer in (('문서 질문', 'DOCUMENT-ANSWER'), ('메모 질문', 'NOTES-ANSWER'), ('일반 질문', 'PLAIN-ANSWER')):
+        # The document job sits between the others, so only its exclusion keeps it out of the last four rows.
+        for text, answer in (('페이지 질문', 'BROWSER-ANSWER'), ('문서 질문', 'DOCUMENT-ANSWER'),
+                             ('메모 질문', 'NOTES-ANSWER')):
             self.engine.answers = [answer]
             jobs.append(self.run_work(text)[0])
-        document, notes, plain = jobs
+        browser, document, notes = jobs
         self.store.put('file_workspace_document_jobs', [document])
         records = self.store.config(WORK_SOURCES_KEY, {})
+        records[browser] = [*records[browser], PRIVATE_PROVENANCE['browser_read']]
         records[notes] = [*records[notes], 'history:personal-space']
         self.store.put(WORK_SOURCES_KEY, records)
         self.script([plan('codex', 'Answer.')], goals=[True])
         self.run_work('이어서')
         excerpt = self.asked_plans[-1][0].facts['recent_conversation']
-        self.assertIn('PLAIN-ANSWER', excerpt)
-        self.assertIn('일반 질문', excerpt)
-        for withheld in ('DOCUMENT-ANSWER', '문서 질문', 'NOTES-ANSWER', '메모 질문'):
+        for shown in ('BROWSER-ANSWER', '페이지 질문', 'NOTES-ANSWER', '메모 질문'):
+            self.assertIn(shown, excerpt)
+        for withheld in ('DOCUMENT-ANSWER', '문서 질문'):
             self.assertNotIn(withheld, excerpt)
+        self.assertNotIn('이어서', excerpt, 'the current request is not part of the excerpt')
 
-    def test_a_work_without_a_source_record_is_withheld(self):
+    def test_a_work_without_a_source_record_is_shown_and_secrets_stay_redacted(self):
         from personal_agent.agent_runtime import WORK_SOURCES_KEY
-        self.engine.answers = ['UNRECORDED-ANSWER']
+        self.engine.answers = [f'UNRECORDED-ANSWER {OPENAI_KEY}']
         earlier, _row = self.run_work('예전 질문')
         records = self.store.config(WORK_SOURCES_KEY, {})
         records.pop(earlier)
         self.store.put(WORK_SOURCES_KEY, records)
-        self.assertEqual(self.service.planner_history(
-            [{'role': 'assistant', 'content': 'x', 'job_id': earlier}, {'role': 'user', 'content': 'now'}], ()), [])
+        rows = [{'role': 'assistant', 'content': 'x', 'job_id': earlier}, {'role': 'user', 'content': 'now'}]
+        self.assertEqual(self.service.planner_history(rows, ()), rows[:1])
+        self.script([plan('codex', 'Answer.')], goals=[True])
+        self.run_work('이어서')
+        excerpt = self.asked_plans[-1][0].facts['recent_conversation']
+        self.assertIn('UNRECORDED-ANSWER', excerpt)
+        self.assertNotIn(OPENAI_KEY, excerpt)
+
+    def test_the_plan_question_resolves_the_request_from_the_conversation(self):
+        self.assertIn('resolve what it refers to', QUESTION)
+        self.assertIn('select history when the request continues it', QUESTION)
+
+
+class OwnerQuestion(Harness):
+    """#740: a worker's question the request needs is the reply, not a shortfall to re-delegate."""
+
+    def test_a_needed_question_stops_redelegation_and_is_delivered(self):
+        self.engine.answers = ['PLAIN-EARLIER']
+        self.run_work('앞선 질문')
+        question = '어디에서 출발하시나요?'
+        self.engine.answers = [question]
+        self.script([plan('codex', 'Answer.'), plan('openai', 'Other path.')], goals=[False], owner_questions=[True])
+        job, row = self.run_work('얼마나 걸려?')
+        self.assertEqual(len(self.engine.turns), 2, 'one attempt for this Work')
+        self.assertEqual(self.transport.bodies, [], 'not re-delegated')
+        self.assertEqual(len(self.asked_plans), 1)
+        self.assertEqual(row['status'], 'succeeded')
+        self.assertEqual(row['response'], question)
+        last = self.events(job, 'evaluated')[-1][1]
+        self.assertEqual((last['outcome'], last['next'], last['stop']), ('owner_needed', 'stop', 'owner'))
+        [context] = self.asked_owner_input
+        self.assertEqual(context.facts['owner_request'], '얼마나 걸려?')
+        self.assertIn(question, context.facts['worker_answer'])
+        self.assertIn('PLAIN-EARLIER', context.facts['recent_conversation'])
+
+    def test_an_unneeded_question_is_still_redelegated(self):
+        self.engine.answers = ['어디에서 출발하시나요?']
+        self.script([plan('codex', 'Answer.'), plan('openai', 'Resolve it from the conversation.')],
+                    goals=[False], owner_questions=[False])
+        job, row = self.run_work('얼마나 걸려?')
+        self.assertEqual(row['response'], 'api answer')
+        self.assertEqual([detail['outcome'] for _s, detail in self.events(job, 'evaluated')],
+                         ['not_reached', 'reached'])
+
+    def test_no_owner_input_judgment_when_the_goal_was_reached(self):
+        self.script([plan('codex', 'Answer.')], goals=[True], owner_questions=[True])
+        self.run_work('알려줘')
+        self.assertEqual(self.asked_owner_input, [])
 
 
 class Preflight(Harness):

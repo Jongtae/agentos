@@ -4,7 +4,8 @@ Evidence classes, named separately:
 
 * unit (model-free, temporary stores): the deterministic legacy-provenance
   backfill over synthetic pre-#605 rows, the native-search gate, the CLI argv
-  and bridge tool lists of native-search turns, the search-off tool note, the
+  and bridge tool lists of native-search turns (#705: earlier conversation
+  never turns native search off, on both CLI routes), the search-off tool note, the
   local prompt-envelope storage and its exclusion from export, Settings'
   per-route agency line;
 * model-free integration through the real stdio MCP bridge subprocess (the
@@ -37,12 +38,13 @@ from unittest import mock
 from personal_agent import browser_session as bs
 from personal_agent import mcp_bridge
 from personal_agent.agent_runtime import (BROWSER_ACTIONS, ENGINE_UNMEDIATED, HISTORY_PREFIX, OWNER_CONVERSATION,
-                                          WORK_SOURCES_BACKFILL_KEY, WORK_SOURCES_KEY, backfill_work_sources,
-                                          history_provenance, legacy_work_sources, work_direct_sources)
+                                          WORK_SOURCES_BACKFILL_KEY, WORK_SOURCES_KEY, backfill_work_sources, base_label,
+                                          history_provenance, legacy_work_sources)
 from personal_agent.bounded_execution import (AgentOSMcpTools, BoundedExecutionAdapter, ExecutionResult,
                                               ReadOnlyAgentOSMcpTools, StrictIsolatedAgentOSMcpTools, BOUNDED_PROFILE,
                                               STRICT_PROFILE, profile_actions)
 from personal_agent.cli_browser_relay import BrowserRelay, RelayClient
+from personal_agent.isolated_mcp_proxy import TaskCapabilityRegistry
 from personal_agent.portable_state import export_owner_state
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService
@@ -66,6 +68,15 @@ def _value(reply):
 
 def flat(value):
     return json.dumps(value, ensure_ascii=False)
+
+
+def inherited_private(labels):
+    """The #605 history labels (without route prefixes) other than clean owner conversation.
+
+    What still closes AgentOS-composed third-party lookups and keeps a turn
+    record to size and digest; since #705 it never turns the CLI's own search off.
+    """
+    return sorted({base_label(label) for label in labels} - {OWNER_CONVERSATION, ENGINE_UNMEDIATED})
 
 
 # ---------------------------------------------------------------- legacy provenance backfill
@@ -103,7 +114,7 @@ class LegacyProvenanceBackfill(unittest.TestCase):
         base = time.time() - 5000
         clean = [_legacy_work(self.store, f'질문 {n}', f'답 {n}', created=base + n * 10) for n in range(4)]
         before = history_provenance(self.store, self.rows(*clean))
-        self.assertEqual(self.service.native_search_blocked(before), ['unrecorded'], 'the #678 gate today')
+        self.assertEqual(inherited_private(before), ['unrecorded'], 'unknown history before the backfill')
         self.assertEqual(self.service.backfill_legacy_work_sources(), 4)
         records = self.store.config(WORK_SOURCES_KEY, {})
         for job in clean:
@@ -111,7 +122,7 @@ class LegacyProvenanceBackfill(unittest.TestCase):
             self.assertIn(ENGINE_UNMEDIATED, records[job], 'a CLI reply keeps the unmediated-read label')
             self.assertNotIn(HISTORY_PREFIX + 'unrecorded', records[job])
         after = history_provenance(self.store, self.rows(*clean))
-        self.assertEqual(self.service.native_search_blocked(after), [])
+        self.assertEqual(inherited_private(after), [])
         self.assertEqual(self.service.backfill_legacy_work_sources(), 0, 'recorded once; later turns read the records')
 
     def test_a_legacy_work_that_used_notes_stays_private_and_taints_what_it_was_shown_to(self):
@@ -126,9 +137,9 @@ class LegacyProvenanceBackfill(unittest.TestCase):
         self.assertNotIn(notes, records, 'a private legacy Work is never recorded as clean')
         self.assertIn(clean, records)
         self.assertIn(HISTORY_PREFIX + 'unrecorded', records[later], 'the next Work was shown the notes reply')
-        self.assertEqual(self.service.native_search_blocked(history_provenance(self.store, self.rows(notes))), ['unrecorded'])
-        self.assertTrue(self.service.native_search_blocked(history_provenance(self.store, self.rows(later))))
-        self.assertEqual(self.service.native_search_blocked(history_provenance(self.store, self.rows(clean))), [])
+        self.assertEqual(inherited_private(history_provenance(self.store, self.rows(notes))), ['unrecorded'])
+        self.assertTrue(inherited_private(history_provenance(self.store, self.rows(later))))
+        self.assertEqual(inherited_private(history_provenance(self.store, self.rows(clean))), [])
 
     def test_every_private_signal_keeps_a_legacy_work_private(self):
         """No judgment: document job, context attachment, saved note, notes summary, rule reply, turn record, unfinished."""
@@ -167,12 +178,12 @@ class LegacyProvenanceBackfill(unittest.TestCase):
         current = _legacy_work(self.store, 'new', 'new answer', created=base + 100)
         self.store.put(WORK_SOURCES_KEY, {current: ['engine-unmediated-read', 'history:owner-conversation',
                                                     'history:unrecorded', 'owner-conversation']})
-        self.assertEqual(self.service.native_search_blocked(history_provenance(self.store, self.rows(current))), ['unrecorded'])
+        self.assertEqual(inherited_private(history_provenance(self.store, self.rows(current))), ['unrecorded'])
         self.service.backfill_legacy_work_sources()
         record = self.store.config(WORK_SOURCES_KEY, {})[current]
         self.assertNotIn('history:unrecorded', record)
         self.assertIn('history:engine-unmediated-read', record)
-        self.assertEqual(self.service.native_search_blocked(history_provenance(self.store, self.rows(*legacy, current))), [])
+        self.assertEqual(inherited_private(history_provenance(self.store, self.rows(*legacy, current))), [])
         self.assertTrue(self.store.config(WORK_SOURCES_BACKFILL_KEY)['version'])
 
     def test_a_recorded_work_newer_than_a_private_legacy_work_keeps_its_unknown_history(self):
@@ -204,8 +215,7 @@ class NullWorkIdRows(unittest.TestCase):
         self.assertIn(HISTORY_PREFIX + 'unrecorded', records[legacy], 'the legacy Work was shown the id-less messages')
         self.assertIn(HISTORY_PREFIX + 'unrecorded', records[current], 'nothing in its window resolves the unknown')
         rows = [{'job_id': None}, {'job_id': legacy}]
-        self.assertIn('unrecorded', service.native_search_blocked(service.shown_direct_provenance(rows, set())))
-        self.assertIn('unrecorded', service.native_search_blocked(history_provenance(store, rows)))
+        self.assertIn('unrecorded', inherited_private(history_provenance(store, rows)))
 
 
 class NativeSearchOnBackfilledHistory(unittest.TestCase):
@@ -243,114 +253,234 @@ class NativeSearchOnBackfilledHistory(unittest.TestCase):
 
 # ---------------------------------------------------------------- native-search argv and bridge lists
 
-class NonTransitiveNativeSearchGate(unittest.TestCase):
-    """Owner decision on #701: the #678 gate reads what the shown messages' own Works read,
-    not the inherited ``history:*`` chain; the #605 inheritance itself is unchanged."""
+class _TurnCapture(BoundedExecutionAdapter):
+    """The real per-turn argv and bridge configuration, with a fake CLI process (#705).
 
-    def setUp(self):
+    ``execute`` is the production adapter's; only the process is replaced, so
+    the captured argv, bridge arguments and offered tool list are exactly what
+    a CLI would get on this turn.
+    """
+
+    def __init__(self, root, seen):
+        self.seen = seen
+        super().__init__(finder=lambda name: '/runtime/' + name, runner=self.process, runtime_root=root / 'turns',
+                         codex_home=root)
+
+    def login_status(self, engine_id, binary=None):
+        return {'state': 'signed-in'}
+
+    def execute(self, engine_id, prompt, tools, **kwargs):
+        self.seen['listed'] = [tool['name'] for tool in tools.definitions()]
+        return super().execute(engine_id, prompt, tools, **kwargs)
+
+    def process(self, argv, **kwargs):
+        self.seen['argv'] = list(argv)
+        if argv[1] == 'exec':
+            value = next(item for item in argv if item.startswith('mcp_servers.agentos.args='))
+            self.seen['bridge'] = json.loads(value.split('=', 1)[1])
+            stdout = json.dumps({'item': {'type': 'agent_message', 'text': 'engine answer'}})
+        else:
+            config = json.loads(Path(argv[argv.index('--mcp-config') + 1]).read_text())
+            self.seen['bridge'] = config['mcpServers']['agentos']['args']
+            stdout = json.dumps({'result': 'engine answer'})
+        return type('Done', (), {'returncode': 0, 'stdout': stdout, 'stderr': ''})()
+
+
+#: #705 history kinds: how each is seeded, and the #605 label it still passes to the bridge.
+HISTORY_KINDS = ('notes-work', 'codex-list-notes', 'unrecorded', ENGINE_UNMEDIATED, 'owner-browser-session')
+HISTORY_LABEL = {'notes-work': 'personal-space', 'codex-list-notes': 'personal-space', 'unrecorded': 'unrecorded',
+                 ENGINE_UNMEDIATED: ENGINE_UNMEDIATED, 'owner-browser-session': 'owner-browser-session'}
+PRIVATE_READS = {'list_notes', 'web_search', 'bounded_public_research'}
+
+
+class HistoryNeverTurnsNativeSearchOff(unittest.TestCase):
+    """#705 (owner direction, pilot posture): prior conversation never turns the CLI's own search off.
+
+    Only this turn's own splices, the strict or isolated profile and a
+    remembered CLI refusal do.  The private-read bridge tools stay withheld
+    on a native-search turn, and the #605 history labels still reach the
+    bridge (AgentOS-composed third-party lookups) and the turn record.
+    Both CLI routes, through the production argv and bridge configuration.
+    """
+
+    def service(self, engine):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        self.store = QuickStore(Path(tmp.name) / 'state')
+        root = Path(tmp.name)
+        self.store = QuickStore(root / 'state')
+        self.seen = {}
+        service = AgentService(self.store, subscription_engines=SubscriptionEngines(finder=lambda _: '/runtime/cli', clock=lambda: 1),
+                               execution_adapter=_TurnCapture(root, self.seen),
+                               browser_profile=bs.BrowserProfile(root / 'b', available=lambda: False))
+        self.store.put('subscription_engine', {'id': engine, 'connected_at': 0})
+        return service
+
+    def seed(self, kind):
+        """One earlier Work of ``kind`` plus a clean one after it, as they sit in an owner store."""
+        base = time.time() - 5000
+        records = {}
+        if kind == 'notes-work':
+            job = _legacy_work(self.store, '/summarize', 'NOTE-705 요약', created=base)
+            records[job] = ['owner-conversation', 'personal-space']
+        elif kind == 'codex-list-notes':
+            # What the bridge records for a CLI-chosen list_notes (mcp_bridge.serve).
+            job = _legacy_work(self.store, '메모 보고 답해줘', 'NOTE-705', created=base,
+                               events=(('list_notes', 'succeeded', {'scope': 'subscription-mcp-bridge', 'host_action': 'list_notes'}),
+                                       ('subscription_engine', 'succeeded', {})))
+            records[job] = [ENGINE_UNMEDIATED, 'owner-conversation']
+        elif kind == 'unrecorded':
+            # Id-less rows and a rule-handled legacy reply: both stay unrecorded after the backfill.
+            with self.store.db() as db:
+                db.execute('INSERT INTO messages(role,content,channel,created,job_id) VALUES (?,?,?,?,?)', ('user', 'old', 'web', base - 5, None))
+                db.execute('INSERT INTO messages(role,content,channel,created,job_id) VALUES (?,?,?,?,?)', ('assistant', 'NOTE-705', 'web', base - 4, None))
+            job = _legacy_work(self.store, '/notes', 'NOTE-705', created=base, events=())
+        elif kind == ENGINE_UNMEDIATED:
+            job = _legacy_work(self.store, '이 폴더 봐줘', 'host file answer', created=base)
+            records[job] = [ENGINE_UNMEDIATED, 'owner-conversation']
+        else:
+            job = _legacy_work(self.store, '장바구니 확인해줘', 'cart page', created=base,
+                               events=(('browser_read', 'succeeded', {'scope': 'subscription-mcp-bridge', 'host_action': 'browser_read'}),
+                                       ('subscription_engine', 'succeeded', {})))
+            records[job] = [ENGINE_UNMEDIATED, 'owner-conversation']
+        if records:
+            self.store.put(WORK_SOURCES_KEY, records)
+        return job
+
+    def run_turn(self, service, text):
+        job = self.store.enqueue(text, 'k-' + str(uuid.uuid4()))
+        self.assertTrue(service.run_one())
+        self.assertEqual(self.store.job(job)['status'], 'succeeded', self.store.job(job).get('error'))
+        return job, self.store.turn_provenance(job)
+
+    def assert_native(self, engine, record):
+        argv, bridge, listed = self.seen['argv'], self.seen['bridge'], set(self.seen['listed'])
+        self.assertIsNone(record.get('native_search_reason'))
+        self.assertEqual(record['cli_native_tools'], ['web_search'])
+        self.assertIn('--native-search', bridge)
+        self.assertFalse([arg for arg in bridge if arg.startswith('--search-off-reason')])
+        self.assertFalse(PRIVATE_READS & listed, 'private reads and bridge search stay withheld')
+        if engine == 'codex':
+            self.assertIn('web_search="live"', argv)
+        else:
+            self.assertEqual(argv[argv.index('--tools') + 1], 'WebSearch')
+            allowed = argv[argv.index('--allowedTools') + 1].split(',')
+            self.assertIn('WebSearch', allowed)
+            self.assertFalse({'mcp__agentos__' + name for name in PRIVATE_READS} & set(allowed))
+
+    def assert_off(self, engine, record, reason):
+        argv, bridge = self.seen['argv'], self.seen['bridge']
+        self.assertEqual(record.get('native_search_reason'), reason)
+        self.assertEqual(record['cli_native_tools'], [])
+        self.assertNotIn('--native-search', bridge)
+        self.assertIn('--search-off-reason=' + reason, bridge)
+        self.assertIn('list_notes', self.seen['listed'], 'a search-off turn may read notes')
+        if engine == 'codex':
+            self.assertIn('web_search="disabled"', argv)
+        else:
+            self.assertNotIn('--tools', argv)
+            self.assertNotIn('WebSearch', argv[argv.index('--allowedTools') + 1].split(','))
+
+    def test_no_history_kind_turns_native_search_off_on_either_cli(self):
+        for engine in ('codex', 'claude-code'):
+            for kind in HISTORY_KINDS:
+                with self.subTest(engine=engine, history=kind):
+                    service = self.service(engine)
+                    self.seed(kind)
+                    later, record = self.run_turn(service, '오늘 서울 날씨 알려줘')
+                    self.assert_native(engine, record)
+                    label = HISTORY_PREFIX + HISTORY_LABEL[kind]
+                    # #605 inheritance is unchanged: the label reaches the bridge's own
+                    # (AgentOS-composed) lookups and this Work's source record.
+                    self.assertIn('--provenance=' + label, self.seen['bridge'])
+                    self.assertIn(label, self.store.config(WORK_SOURCES_KEY, {})[later])
+                    if HISTORY_LABEL[kind] in ('personal-space', 'owner-browser-session'):
+                        # ...and a turn that carried a private store keeps size and digest only.
+                        self.assertIn(HISTORY_LABEL[kind], record.get('prompt_withheld') or [])
+
+    def test_codex_own_list_notes_turns_search_off_for_that_turn_only(self):
+        service = self.service('codex')
+        with self.store.db() as db:
+            db.execute('INSERT INTO notes VALUES (?,?,?)', ('n1', 'NOTE-705', 1))
+        notes, record = self.run_turn(service, '/summarize')
+        self.assert_off('codex', record, 'private_turn')
+        # The CLI itself reads notes on a later search-off turn: recorded by the bridge.
+        with self.store.db() as db:
+            db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                       (notes, 'list_notes', 'succeeded',
+                        json.dumps({'scope': 'subscription-mcp-bridge', 'host_action': 'list_notes'}), time.time()))
+        for _ in range(3):
+            _later, record = self.run_turn(service, '다음 질문')
+            self.assert_native('codex', record)
+            self.assertIn('--provenance=history:personal-space', self.seen['bridge'])
+
+    def test_the_current_turns_own_splice_still_turns_it_off_on_either_cli(self):
+        for engine in ('codex', 'claude-code'):
+            with self.subTest(engine=engine):
+                service = self.service(engine)
+                with self.store.db() as db:
+                    db.execute('INSERT INTO notes VALUES (?,?,?)', ('n1', 'NOTE-705', 1))
+                _job, record = self.run_turn(service, '/summarize')
+                self.assert_off(engine, record, 'private_turn')
+                _job, record = self.run_turn(service, '오늘 서울 날씨 알려줘')
+                self.assert_native(engine, record)
+
+    def test_a_remembered_cli_refusal_still_turns_it_off(self):
+        from personal_agent.search_providers import ProviderRegistry
+        for engine in ('codex', 'claude-code'):
+            with self.subTest(engine=engine):
+                service = self.service(engine)
+                ProviderRegistry.from_store(self.store).record_native(engine, engine, 'unavailable', 'refused')
+                _job, record = self.run_turn(service, '오늘 서울 날씨 알려줘')
+                self.assert_off(engine, record, 'refused')
+
+    def test_strict_and_isolated_profiles_never_enable_it_whatever_the_history(self):
         test = self
-        self.native, self.read_notes = [], False
 
         class Cli:
             def execute(self, engine, prompt, tools, **kwargs):
-                test.native.append(tools.native_search)
-                if test.read_notes:
-                    # What the bridge records for a CLI-chosen list_notes (mcp_bridge.serve).
-                    with test.store.db() as db:
-                        db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
-                                   (tools.capabilities.job_id, 'list_notes', 'succeeded',
-                                    json.dumps({'scope': 'subscription-mcp-bridge', 'host_action': 'list_notes'}), time.time()))
+                test.seen['native'] = tools.native_search
                 return ExecutionResult('engine answer', engine, 0)
 
-        self.service = AgentService(self.store, subscription_engines=SubscriptionEngines(finder=lambda _: '/runtime/codex', clock=lambda: 1),
-                                    execution_adapter=Cli(),
-                                    browser_profile=bs.BrowserProfile(Path(tmp.name) / 'b', available=lambda: False))
-        self.service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
-        self.turn = 0
+        class Sidecar:
+            def issue_task_token(self, **kwargs):
+                import secrets
+                return secrets.token_urlsafe(32)
 
-    def run_turn(self, text='다음 질문', search_off=False):
-        self.turn += 1
-        job = self.store.enqueue(f'{text} {self.turn}', f'k{self.turn}')
-        gate = self.service.cli_native_search
-        if search_off:
-            self.service.cli_native_search = lambda *args: (False, 'private_turn')
-        try:
-            self.assertTrue(self.service.run_one())
-        finally:
-            self.service.cli_native_search = gate
-        return job, self.native[-1], self.store.turn_provenance(job).get('native_search_reason')
+            def execute(self, **kwargs):
+                test.seen['sidecar'] = True
+                return 'engine answer'
 
-    def test_codex_own_list_notes_blocks_only_while_it_is_shown(self):
-        self.read_notes = True
-        notes_job, native, _reason = self.run_turn('메모 보고 답해줘', search_off=True)
-        self.read_notes = False
-        self.assertFalse(native)
-        self.assertIn('personal-space', work_direct_sources(self.store, notes_job))
-        outcomes = [self.run_turn() for _ in range(9)]
-        # history()[-16:] holds the current request and 15 earlier messages: the notes
-        # Work's two messages are shown to the next 8 turns and gone at the 9th.
-        self.assertEqual([native for _job, native, _reason in outcomes], [False] * 8 + [True])
-        self.assertEqual({reason for _job, native, reason in outcomes if not native}, {'private_history'})
-        last = outcomes[-1][0]
-        # The #605 inheritance rule is unchanged: the 9th Work still inherits the label.
-        self.assertIn('history:personal-space', self.store.config(WORK_SOURCES_KEY, {})[last])
-        self.assertNotIn('personal-space', work_direct_sources(self.store, last))
-
-    def test_a_notes_work_inside_the_window_blocks_and_outside_does_not(self):
-        base = time.time() - 5000
-        notes = _legacy_work(self.store, '메모', 'NOTE', created=base,
-                             events=(('list_notes', 'succeeded', {'host_action': 'list_notes'}),
-                                     ('subscription_engine', 'succeeded', {})))
-        later = [_legacy_work(self.store, f'q{n}', f'a{n}', created=base + 10 + n) for n in range(8)]
-        inherited = ['engine-unmediated-read', 'history:personal-space', 'owner-conversation']
-        self.store.put(WORK_SOURCES_KEY, {notes: ['engine-unmediated-read', 'owner-conversation'],
-                                          **{job: list(inherited) for job in later}})
-        self.store.put(WORK_SOURCES_BACKFILL_KEY, {'version': 1})
-        rows = [{'job_id': job} for job in (notes, *later)]
-        self.assertIn('personal-space', self.service.native_search_blocked(self.service.shown_direct_provenance(rows, set())))
-        outside = rows[1:]
-        self.assertEqual(self.service.native_search_blocked(self.service.shown_direct_provenance(outside, set())), [])
-        # Other egress purposes keep the inherited chain (#605 unchanged).
-        self.assertIn('personal-space', self.service.native_search_blocked(self.service.shown_history_provenance(outside, set())))
-        # Document jobs and attachments of a shown Work count as its own reads.
-        self.assertIn('connected-document',
-                      self.service.native_search_blocked(self.service.shown_direct_provenance(outside[:1], {later[0]})))
-        with self.store.db() as db:
-            db.execute('INSERT INTO context_job_attachments VALUES (?,?,?,?,?)', (later[1], '[]', 'a', 1, 1))
-        self.assertIn('owner-context-inbox',
-                      self.service.native_search_blocked(self.service.shown_direct_provenance(outside[1:2], set())))
-
-    def test_a_turn_after_a_browser_read_keeps_native_search(self):
-        """Reviewer P2-1 (owner direction): mediated browser output does not close the gate."""
-        test = self
-
-        def browse(job_id):
-            with test.store.db() as db:
-                db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
-                           (job_id, 'browser_read', 'succeeded',
-                            json.dumps({'scope': 'subscription-mcp-bridge', 'host_action': 'browser_read'}), time.time()))
-        self.read_notes = False
-        job, native, _reason = self.run_turn('장바구니 확인해줘')
-        self.assertTrue(native, 'the browser tools stay on a native-search turn')
-        browse(job)
-        self.assertIn('owner-browser-session', work_direct_sources(self.store, job))
-        later, native, reason = self.run_turn()
-        self.assertTrue(native, reason)
-        # #605 inheritance is unchanged: the later Work still carries the label for other uses.
-        self.assertIn('history:owner-browser-session', self.store.config(WORK_SOURCES_KEY, {})[later])
-        # ...and a turn record that carried it still keeps size/digest only.
-        self.assertIn('owner-browser-session', self.store.turn_provenance(later).get('prompt_withheld') or [])
-
-    def test_the_current_turns_own_splice_still_blocks(self):
-        with self.store.db() as db:
-            db.execute('INSERT INTO notes VALUES (?,?,?)', ('n1', 'NOTE-701', 1))
-        self.store.enqueue('/summarize', 'k-sum')
-        self.assertTrue(self.service.run_one())
-        self.assertFalse(self.native[-1])
-        self.assertEqual(self.store.turn_provenance(self.store.jobs()[0]['id'])['native_search_reason'], 'private_turn')
+        for isolated in (False, True):
+            with self.subTest(isolated=isolated):
+                tmp = tempfile.TemporaryDirectory()
+                self.addCleanup(tmp.cleanup)
+                self.store = QuickStore(Path(tmp.name) / 'state')
+                self.seen = {}
+                options = {'isolated_engine_adapter': Sidecar(), 'isolated_mcp_registry': TaskCapabilityRegistry()} if isolated else {}
+                service = AgentService(self.store, subscription_engines=SubscriptionEngines(finder=lambda _: '/runtime/codex', clock=lambda: 1),
+                                       execution_adapter=Cli(), browser_profile=bs.BrowserProfile(Path(tmp.name) / 'b', available=lambda: False),
+                                       **options)
+                self.store.put('subscription_engine', {'id': 'codex', 'connected_at': 0})
+                if not isolated:
+                    self.store.put('subscription_isolation', {'profile': STRICT_PROFILE, 'qualified': {}})
+                self.seed(ENGINE_UNMEDIATED)
+                job = self.store.enqueue('오늘 서울 날씨 알려줘', 'k-strict')
+                self.assertTrue(service.run_one())
+                record = self.store.turn_provenance(job)
+                self.assertEqual(record.get('native_search_reason'), 'strict_profile')
+                self.assertEqual(record.get('cli_native_tools'), [])
+                self.assertTrue(self.seen.get('sidecar') if isolated else self.seen['native'] is False)
+        service = self.service('codex')
+        for profile, isolated in ((STRICT_PROFILE, False), (BOUNDED_PROFILE, True)):
+            self.assertEqual(service.cli_native_search('codex', profile, isolated, set()), (False, 'strict_profile'))
+        adapter = BoundedExecutionAdapter(finder=lambda name: '/runtime/' + name)
+        config = Path(tempfile.mkdtemp()) / 'agentos-mcp.json'
+        self.addCleanup(lambda: config.unlink(missing_ok=True))
+        config.write_text(json.dumps({'mcpServers': {'agentos': {'command': sys.executable, 'args': ['-m', 'x']}}}))
+        strict = adapter.command('claude-code', '/runtime/claude', 'prompt', config, 'instructions', profile=STRICT_PROFILE,
+                                 native_search=True)
+        self.assertEqual(strict[strict.index('--tools') + 1], '', 'no built-in tool, WebSearch included')
+        self.assertNotIn('WebSearch', strict[strict.index('--allowedTools') + 1].split(','))
 
 
 class NativeSearchTurnArgv(unittest.TestCase):
@@ -390,11 +520,11 @@ class NativeSearchTurnArgv(unittest.TestCase):
         network = type('Network', (), {'providers': ProviderRegistry.from_config({'bing_enabled': True, 'native': {'subscription': 'codex'}})})()
         caps = _caps(network=network)
         tools = AgentOSMcpTools(caps)
-        tools.native_search_reason = 'private_history'
+        tools.native_search_reason = 'private_turn'
         described = {tool['name']: tool['description'] for tool in tools.definitions()}
         for name in ('web_search', 'bounded_public_research'):
             self.assertIn("The CLI's own web search is off for this turn", described[name])
-            self.assertIn('이전 대화', described[name], 'the owner-facing reason')
+            self.assertIn('개인 자료', described[name], 'the owner-facing reason')
             self.assertIn('bing = Bing web search', described[name])
             self.assertIn('poor or off-topic for Korean', described[name], "the provider's own caveat")
         self.assertNotIn('off for this turn', described['save_note'])

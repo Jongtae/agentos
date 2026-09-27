@@ -3,7 +3,7 @@
 @AGENTS.md
 @docs/development-constitution.en.md
 
-The imported files are the canonical repository execution contract and Development Constitution. This file is intentionally short: it is a Claude Code compatibility/bootstrap entrypoint, not an independent source of policy. Apply the canonical **Reuse first: Adopt → Adapt → Build** and Existing Solutions Review rules from those files rather than restating them here.
+The imported files are the canonical repository execution contract and Development Constitution. This file is intentionally short: it is a Claude Code compatibility/bootstrap entrypoint, not an independent source of policy. Apply the canonical **Reuse first: Adopt → Adapt → Build** and Existing Solutions Review rules from those files rather than restating them here. Likewise apply **C16 AI is the engine**: the owner's chosen AI does the work, the decision model orchestrates, and AgentOS code never implements a specific owner request.
 
 1. Read `AGENTS.md` before broad repository or GitHub inspection.
 2. Follow `docs/goal-execution-contract.en.md` and the active program contract referenced by the delivery plan.

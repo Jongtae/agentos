@@ -326,6 +326,10 @@ class CrossTurnEgressGuard(unittest.TestCase):
     def test_a_prior_note_listing_taints_the_cli_work_but_does_not_close_web_search(self):
         self._run('/note PRIVATE-XYZ', 'n1')
         self._run('/notes', 'n2')
+        # #705: earlier conversation no longer turns the CLI's own search off, so
+        # the AgentOS-composed bridge lookup this test covers runs on a turn whose
+        # search is off for another reason.
+        self.service.cli_native_search = lambda *args: (False, 'private_turn')
         self._run('search the web for today news', 'k3')
         # #605: the label names the earlier Work's actual source.
         self.assertIn('history:personal-space', self.engine.taint[-1])

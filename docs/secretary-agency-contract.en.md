@@ -34,6 +34,15 @@ SEC-SEARCH-03, by owner direction under the pilot posture (#705; runtime-only sc
 
 ORCH-01 (Constitution C16): for each Work the Judgment AI returns one validated plan choosing the worker (a configured, verified Main AI route) and model, the brief (goal, selected context sections, completion criteria) and optionally a tool subset; after the attempt the existing `goal_reached` judgment evaluates it and the orchestrator may re-delegate at most twice within the Work budget, never after an effect. Without a usable plan the default Main AI runs the raw request as before. The "Roles" below now include this orchestration step; see [Decision Layer — Orchestration](decision-layer.en.md#orchestration-orch-01--710).
 
+## Amendment — #719 (2026-09-28)
+
+SEC-ATTN-02 extends owner-accepted preparations (#659) with two generic capabilities; it adds no scheduler, tool or task-specific code:
+- **Watch window.** A `prepare` preparation may repeat every N minutes (5–720) from `due` until `until` (at most 24 hours later), never more than `max_runs` Works (at most 48) and never at or after `until`. It runs on the existing service tick; a tick with nothing due makes no model call. A window that closed while AgentOS was down ends as `expired` without running. Each run is an ordinary Work under the existing per-Work budget.
+- **Silent unless needed.** With delivery `when_needed`, each run stays in AgentOS (작업 현황). After it finishes, the Judgment AI answers one bounded proposition over the accepted goal, the run's scrubbed result and the last notification: does the owner need this now, and is it new? The typed decision (`notify` / `quiet`) and its reason code are recorded on the preparation and in the run's Evidence. Only `notify` queues one Telegram message, in the same transaction that settles the run. A result identical to the last notification is quiet without a judgment; without an available judgment the result is sent once and later unjudged runs stay quiet.
+- **Owner control.** A watch is proposed and accepted with the #659 flow; the proposal states the interval, deadline, run bound and delivery. It is cancelled in Settings or with the 그만 지켜보기 button on its own notification.
+
+Live-data tools (such as directions or traffic) remain an owner decision recorded on #719; none is added.
+
 ## Status and purpose
 
 This is the canonical product and execution contract for the **SECRETARY-01** program, activated by the owner on 2026-09-26 through [GOV-SECRETARY-01 #653](https://github.com/Jongtae/agentos/issues/653). It distills the owner's product specification, preserved as [research](research/secretary-agency-spec-2026-09-26.ko.md), and the owner decisions recorded in #653.

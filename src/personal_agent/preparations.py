@@ -22,6 +22,17 @@ docs/secretary-agency-contract.en.md ("Attention in this program"):
   kept as the prepared answer.
 * Recurrence advances after the run from *now*, so a missed window after
   downtime runs once, not once per missed slot.
+* A **watch** (SEC-ATTN-02, #719) is a windowed recurrence: every N minutes
+  from ``due`` until ``until``, never more than ``max_runs`` Works and never
+  after ``until``.  Each run is an ordinary Work under the existing per-Work
+  budget, so a watch costs at most ``max_runs`` bounded Works plus one
+  judgment each.
+* ``delivery_mode`` ``when_needed`` keeps every run in AgentOS (작업 현황) and
+  asks the DecisionEngine one bounded question per finished run - does this
+  result need the owner now, and is it new since the last notification?  The
+  typed decision (``notify`` / ``quiet``) and its reason are recorded on the
+  row and in the run's Evidence; only ``notify`` queues one Telegram message,
+  in the same transaction that settles the run.
 
 Nothing here knows about calendars, sites, providers or question kinds: the
 model reads the calendar with ``calendar_query`` and schedules with
@@ -40,10 +51,32 @@ KIND_REMINDER, KIND_PREPARE = 'reminder', 'prepare'
 KINDS = (KIND_REMINDER, KIND_PREPARE)
 #: The whole recurrence language: deterministic, owner-readable, no cron.
 RECURRENCES = ('daily', 'weekdays', 'weekly')
+#: #719: "every N minutes from due until a deadline" (the model passes
+#: ``every_minutes``/``until``; this value is stored, never offered).
+RECURRENCE_WINDOW = 'window'
+MIN_EVERY_MINUTES, MAX_EVERY_MINUTES = 5, 12 * 60
+#: A watch never spans more than a day and never runs more than this often.
+MAX_WINDOW_SECONDS = 24 * 3600
+MAX_WINDOW_RUNS = 48
+#: ``delivery_mode``: every result is delivered, or only a ``notify`` decision is.
+DELIVERY_ALWAYS, DELIVERY_WHEN_NEEDED = 'always', 'when_needed'
+DECISION_NOTIFY, DECISION_QUIET = 'notify', 'quiet'
+#: Typed reasons of one run's decision (recorded, shown in Settings).
+REASON_JUDGED_NEEDED = 'judged-needed'
+REASON_JUDGED_NOT_NEEDED = 'judged-not-needed'
+REASON_UNCHANGED = 'same-as-last-notification'
+REASON_RUN_FAILED = 'run-did-not-finish'
+REASON_UNJUDGED = 'judgment-unavailable'
+REASON_UNJUDGED_REPEAT = 'judgment-unavailable-already-notified'
+#: The Telegram notification kind of a ``notify`` decision.
+NOTIFY_KIND = 'preparation_notify'
+NOTIFIED_TEXT_BYTES = 1500
 CHANNEL_TELEGRAM, CHANNEL_WEB = 'telegram', 'web'
 
 STATE_PROPOSED, STATE_SCHEDULED, STATE_RUNNING = 'proposed', 'scheduled', 'running'
 STATE_DELIVERED, STATE_UNKNOWN, STATE_FAILED, STATE_CANCELLED = 'delivered', 'unknown', 'failed', 'cancelled'
+#: #719: a watch whose window closed before its slot could run (downtime).
+STATE_EXPIRED = 'expired'
 #: States whose row may still cause a run.
 ACTIVE_STATES = (STATE_PROPOSED, STATE_SCHEDULED, STATE_RUNNING)
 
@@ -79,6 +112,22 @@ CREATE TABLE IF NOT EXISTS preparations(id TEXT PRIMARY KEY, owner TEXT NOT NULL
     accepted_by TEXT, created_at REAL NOT NULL, updated_at REAL NOT NULL);
 CREATE INDEX IF NOT EXISTS preparations_state_due ON preparations(state, due_at);
 '''
+#: Columns added after #659 (``ALTER TABLE`` on an existing store, in order).
+COLUMN_MIGRATIONS = (('prepared_text', 'TEXT'),
+                     # #719: the watch window and its bound.
+                     ('every_seconds', 'INTEGER'), ('window_end', 'REAL'), ('max_runs', 'INTEGER'),
+                     ('run_count', 'INTEGER NOT NULL DEFAULT 0'),
+                     # #719: silent-unless-needed delivery and its last decision.
+                     ('delivery_mode', 'TEXT'), ('last_decision', 'TEXT'), ('last_decision_reason', 'TEXT'),
+                     ('last_notified_digest', 'TEXT'), ('last_notified_text', 'TEXT'), ('last_notified_at', 'REAL'))
+
+
+def migrate(db):
+    """Add the post-#659 columns an older store lacks."""
+    present = {row[1] for row in db.execute('PRAGMA table_info(preparations)')}
+    for name, kind in COLUMN_MIGRATIONS:
+        if name not in present:
+            db.execute(f'ALTER TABLE preparations ADD COLUMN {name} {kind}')
 
 REFUSALS = {
     'invalid_kind': 'kind는 reminder(정해진 때에 이 문장을 알려 주기) 또는 prepare(정해진 때에 이 목표를 미리 처리해 두기)입니다.',
@@ -88,6 +137,10 @@ REFUSALS = {
     'due_in_past': '이 시각은 이미 지났습니다.',
     'due_too_far': '1년 이내의 시각만 예약할 수 있습니다.',
     'invalid_recurrence': 'recurrence는 비우거나 daily, weekdays, weekly 중 하나입니다.',
+    'invalid_window': (f'every_minutes는 {MIN_EVERY_MINUTES}~{MAX_EVERY_MINUTES} 사이의 정수이고, until은 due보다 늦고 '
+                       f'due부터 {MAX_WINDOW_SECONDS // 3600}시간 이내인 RFC3339 시각입니다. recurrence와 함께 쓰지 않습니다.'),
+    'invalid_max_runs': f'max_runs는 1~{MAX_WINDOW_RUNS} 사이의 정수입니다.',
+    'invalid_delivery': 'delivery when_needed는 kind prepare에만 쓸 수 있습니다.',
     'too_many': f'진행 중인 준비가 {MAX_ACTIVE}개를 넘어 더 만들지 않았습니다. 설정에서 필요 없는 준비를 정리해 주세요.',
     'not_found': '이 준비를 찾지 못했습니다.',
     'not_proposed': '이미 처리된 준비입니다.',
@@ -195,6 +248,62 @@ def normalize_goal(goal):
     return goal
 
 
+def _whole_number(value):
+    """An integer argument (a JSON number or its digits), or None."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+def normalize_window(every_minutes, until, max_runs, due_at, timezone_name, now):
+    """``(every_seconds, window_end, max_runs)`` of one watch (#719), or a typed refusal.
+
+    The window is ``[due_at, until)``: a slot runs strictly before the
+    deadline, never at or after it.  The run count is the number of slots
+    in it, lowered by ``max_runs`` when given and never above
+    ``MAX_WINDOW_RUNS``.  ``until`` is parsed like ``due`` (same zone rules).
+    """
+    minutes = _whole_number(every_minutes)
+    if minutes is None or not MIN_EVERY_MINUTES <= minutes <= MAX_EVERY_MINUTES:
+        raise PreparationRefusal('invalid_window')
+    try:
+        window_end, _zone = parse_due(until, timezone_name, timezone_name, now)
+    except PreparationRefusal:
+        raise PreparationRefusal('invalid_window') from None
+    if window_end <= due_at or window_end - due_at > MAX_WINDOW_SECONDS:
+        raise PreparationRefusal('invalid_window')
+    every = minutes * 60
+    slots = math.ceil((window_end - due_at) / every)
+    if max_runs in (None, ''):
+        runs = min(slots, MAX_WINDOW_RUNS)
+    else:
+        runs = _whole_number(max_runs)
+        if runs is None or not 1 <= runs <= MAX_WINDOW_RUNS:
+            raise PreparationRefusal('invalid_max_runs')
+        runs = min(runs, slots)
+    return every, window_end, runs
+
+
+def next_window_slot(row, now):
+    """The next slot of a watch strictly after ``now``, or None (#719).
+
+    None once ``max_runs`` Works have started or the next slot is not
+    before ``window_end``.  Slots missed while AgentOS was down are skipped, as for
+    the other recurrences.
+    """
+    every, end = row.get('every_seconds'), row.get('window_end')
+    if not every or end is None or int(row.get('run_count') or 0) >= int(row.get('max_runs') or 0):
+        return None
+    slot = row['due_at'] + every * (int(max(0.0, now - row['due_at']) // every) + 1)
+    return slot if slot < end else None
+
+
 def next_due(due_at, timezone_name, recurrence, now):
     """The first slot of ``recurrence`` strictly after ``now`` (and ``due_at``), or None.
 
@@ -250,6 +359,46 @@ def run_outcome(kind, job):
     return STATE_DELIVERED if job.get('status') in ('succeeded', 'partial') else STATE_FAILED
 
 
+def text_digest(text):
+    """A whitespace-insensitive digest of one result text."""
+    return hashlib.sha256(' '.join(str(text or '').split()).encode()).hexdigest()[:32]
+
+
+def bounded_text(text, limit=NOTIFIED_TEXT_BYTES):
+    raw = str(text or '').encode()
+    return raw[:limit].decode('utf-8', 'ignore') + (' [...]' if len(raw) > limit else '')
+
+
+def watch_decision(row, answer, decide=None):
+    """``(decision, reason)`` of one finished ``when_needed`` run (#719).
+
+    Deterministic only where no judgment is needed: a run with no result is
+    quiet, and a result identical to the last notification is quiet.
+    Otherwise ``decide(row, answer)`` - the DecisionEngine's bounded
+    judgment, never a text rule - says whether the owner needs it now.
+    When no judgment is available the result is sent once, and later
+    unjudged runs stay quiet until a judgment is available again: an
+    outage neither hides the watch nor repeats it every slot.
+    """
+    if not str(answer or '').strip():
+        return DECISION_QUIET, REASON_RUN_FAILED
+    if text_digest(answer) == row.get('last_notified_digest'):
+        return DECISION_QUIET, REASON_UNCHANGED
+    verdict = None
+    if decide is not None:
+        try:
+            verdict = decide(row, answer)
+        except Exception:
+            verdict = None
+    if verdict == 'yes':
+        return DECISION_NOTIFY, REASON_JUDGED_NEEDED
+    if verdict == 'no':
+        return DECISION_QUIET, REASON_JUDGED_NOT_NEEDED
+    if row.get('last_decision_reason') in (REASON_UNJUDGED, REASON_UNJUDGED_REPEAT):
+        return DECISION_QUIET, REASON_UNJUDGED_REPEAT
+    return DECISION_NOTIFY, REASON_UNJUDGED
+
+
 def reminder_text(goal, due_at, timezone_name, now):
     text = '알림: ' + goal
     if now - due_at > LATE_NOTE_SECONDS:
@@ -261,6 +410,11 @@ def proposal_summary(row):
     """One owner-readable line for a proposal (Telegram, judgment context)."""
     kind = '알림' if row['kind'] == KIND_REMINDER else '미리 준비'
     repeat = {'daily': ' · 매일', 'weekdays': ' · 평일마다', 'weekly': ' · 매주'}.get(row.get('recurrence') or '', '')
+    if row.get('recurrence') == RECURRENCE_WINDOW:
+        repeat = (f" · {int(row['every_seconds']) // 60}분마다 {local_text(row['window_end'], row['timezone'])}까지"
+                  f" · 최대 {int(row['max_runs'])}회")
+    if row.get('delivery_mode') == DELIVERY_WHEN_NEEDED:
+        repeat += ' · 알려야 할 때만 Telegram으로 알림'
     return f"[{kind}] {local_text(row['due_at'], row['timezone'])}{repeat} — {row['goal_text']}"
 
 
@@ -295,7 +449,10 @@ def proposal_text(shown, remaining):
 
 def digest(rows):
     """The exact set of proposals one Telegram message offers."""
-    material = json.dumps(sorted((row['id'], row['kind'], row['goal_text'], row['due_at'], row.get('recurrence'))
+    material = json.dumps(sorted((row['id'], row['kind'], row['goal_text'], row['due_at'], row.get('recurrence'),
+                                  # #719: the watch's window, bound and delivery are part of what was offered.
+                                  row.get('every_seconds'), row.get('window_end'), row.get('max_runs'),
+                                  row.get('delivery_mode'))
                                  for row in rows), ensure_ascii=False)
     return hashlib.sha256(material.encode()).hexdigest()[:32]
 
@@ -314,10 +471,24 @@ class Preparations:
             return dict(row) if row else None
 
     def create(self, *, kind, goal, due_at, timezone, recurrence, channel, created_from, state,
-               accepted_by=None, owner=OWNER):
-        """One new row (idempotent for the same Work, kind, goal and slot)."""
+               accepted_by=None, owner=OWNER, window=None, delivery_mode=None):
+        """One new row (idempotent for the same Work, kind, goal and slot).
+
+        ``window`` is ``(every_seconds, window_end, max_runs)`` from
+        ``normalize_window`` (#719); it replaces ``recurrence``.
+        """
         if kind not in KINDS:
             raise PreparationRefusal('invalid_kind')
+        if delivery_mode not in (None, DELIVERY_ALWAYS, DELIVERY_WHEN_NEEDED):
+            raise ValueError('unknown delivery mode')
+        if delivery_mode == DELIVERY_WHEN_NEEDED and kind != KIND_PREPARE:
+            raise PreparationRefusal('invalid_delivery')
+        every_seconds = window_end = max_runs = None
+        if window is not None:
+            if recurrence:
+                raise PreparationRefusal('invalid_window')
+            every_seconds, window_end, max_runs = window
+            recurrence = RECURRENCE_WINDOW
         if state not in (STATE_PROPOSED, STATE_SCHEDULED):
             raise ValueError('a preparation starts proposed or scheduled')
         now = self.clock()
@@ -333,7 +504,10 @@ class Preparations:
             row = {'id': uuid.uuid4().hex[:16], 'owner': owner, 'kind': kind, 'goal_text': goal, 'due_at': due_at,
                    'timezone': timezone, 'recurrence': recurrence, 'channel': channel, 'state': state,
                    'last_run_job_id': None, 'last_outcome': None, 'prepared_result_ref': None, 'prepared_at': None, 'prepared_text': None,
-                   'created_from': created_from, 'accepted_by': accepted_by, 'created_at': now, 'updated_at': now}
+                   'created_from': created_from, 'accepted_by': accepted_by, 'created_at': now, 'updated_at': now,
+                   'every_seconds': every_seconds, 'window_end': window_end, 'max_runs': max_runs, 'run_count': 0,
+                   'delivery_mode': delivery_mode, 'last_decision': None, 'last_decision_reason': None,
+                   'last_notified_digest': None, 'last_notified_text': None, 'last_notified_at': None}
             db.execute(f"INSERT INTO preparations({','.join(row)}) VALUES ({','.join('?' * len(row))})", tuple(row.values()))
             return row
 
@@ -416,6 +590,13 @@ class Preparations:
                 return None
             current = dict(current)
             existing = db.execute('SELECT id FROM jobs WHERE request_key=?', (key,)).fetchone()
+            window = current['recurrence'] == RECURRENCE_WINDOW
+            if window and not existing and (now >= current['window_end']
+                                            or int(current['run_count'] or 0) >= int(current['max_runs'] or 0)):
+                # #719: a watch never runs after its deadline or beyond its bound.
+                db.execute('UPDATE preparations SET state=?,updated_at=? WHERE id=? AND state=?',
+                           (STATE_EXPIRED, now, current['id'], STATE_SCHEDULED))
+                return None
             if existing:
                 job_id = existing['id']
             elif current['kind'] == KIND_REMINDER:
@@ -435,27 +616,43 @@ class Preparations:
                     job_id = self.store.enqueue(current['goal_text'], key, channel, chat_id, db=db)
                 except ValueError:
                     return None
-            db.execute('UPDATE preparations SET state=?,last_run_job_id=?,updated_at=? WHERE id=?',
-                       (STATE_RUNNING, job_id, now, current['id']))
+            run = int(current['run_count'] or 0) + (0 if existing else 1)
+            db.execute('UPDATE preparations SET state=?,last_run_job_id=?,run_count=?,updated_at=? WHERE id=?',
+                       (STATE_RUNNING, job_id, run, now, current['id']))
             # Evidence: preparation id -> Work id; the Work's delivery is the receipt.
+            detail = {'preparation_id': current['id'], 'kind': current['kind'], 'slot': iso(current['due_at']),
+                      'recurrence': current['recurrence'], 'accepted_by': current['accepted_by'],
+                      'channel': channel.split(':', 1)[0]}
+            if window:
+                detail.update(run=run, max_runs=current['max_runs'], until=iso(current['window_end']))
+            if current.get('delivery_mode') == DELIVERY_WHEN_NEEDED:
+                detail['delivery_mode'] = DELIVERY_WHEN_NEEDED
             db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
-                       (job_id, 'preparation', 'succeeded', json.dumps(
-                           {'preparation_id': current['id'], 'kind': current['kind'], 'slot': iso(current['due_at']),
-                            'recurrence': current['recurrence'], 'accepted_by': current['accepted_by'],
-                            'channel': channel.split(':', 1)[0]}), now))
+                       (job_id, 'preparation', 'succeeded', json.dumps(detail), now))
             return job_id
 
-    def settle(self, row, now, scrub=None):
+    def settle(self, row, now, scrub=None, decide=None, notify_to=None):
         """Record one finished run and schedule the next slot, if any.
 
         A prepared answer is kept as ``scrub(job)`` - the service removes the
         Work's saved private values and stored secrets - never raw.
+
+        #719: for a ``when_needed`` row, ``decide(row, answer)`` is the
+        service's DecisionEngine judgment (``'yes'``, ``'no'`` or None when
+        unavailable), asked before the transaction.  The typed decision is
+        recorded with the run; a ``notify`` decision queues exactly one
+        Telegram notification to ``notify_to`` (``(chat_id, generation)``)
+        in the same transaction, so a restart can neither lose nor repeat it.
         """
-        answer = None
+        answer = finished = None
         if row['kind'] == KIND_PREPARE:
             finished = self.store.job(row['last_run_job_id']) if row.get('last_run_job_id') else None
             if finished and finished['status'] in ('succeeded', 'partial'):
                 answer = scrub(finished) if scrub is not None else str(finished.get('response') or '')
+        decision = None
+        if (row.get('delivery_mode') == DELIVERY_WHEN_NEEDED and finished
+                and finished['status'] not in ('queued', 'running') and finished['delivery'] not in ('pending', 'sending')):
+            decision = watch_decision(row, answer, decide)
         with self.store.db() as db:
             db.execute('BEGIN IMMEDIATE')
             current = db.execute('SELECT * FROM preparations WHERE id=?', (row['id'],)).fetchone()
@@ -470,19 +667,52 @@ class Preparations:
             updates = {'last_outcome': outcome, 'updated_at': now}
             if current['kind'] == KIND_PREPARE and job and job['status'] in ('succeeded', 'partial') and answer is not None:
                 updates.update(prepared_result_ref=job['id'], prepared_at=now, prepared_text=answer)
-            following = next_due(current['due_at'], current['timezone'], current['recurrence'], now)
+            if current['recurrence'] == RECURRENCE_WINDOW:
+                following = next_window_slot(current, now)
+            else:
+                following = next_due(current['due_at'], current['timezone'], current['recurrence'], now)
             if following is None:
                 updates['state'] = outcome
             else:
                 updates.update(state=STATE_SCHEDULED, due_at=following)
+            notified = False
+            if decision is not None and job:
+                updates.update(last_decision=decision[0], last_decision_reason=decision[1])
+                if decision[0] == DECISION_NOTIFY and notify_to:
+                    # Queued here; the "last notified" fields advance only once
+                    # Telegram confirms the send (``record_notified``).
+                    chat_id, generation = notify_to
+                    db.execute('INSERT OR IGNORE INTO telegram_notifications VALUES (?,?,?,?,?,?,?,?,?)',
+                               (str(uuid.uuid4()), job['id'], chat_id, generation, NOTIFY_KIND, text_digest(answer),
+                                'queued', None, now))
+                    notified = True
             db.execute(f"UPDATE preparations SET {','.join(k + '=?' for k in updates)} WHERE id=? AND state=?",
                        (*updates.values(), current['id'], STATE_RUNNING))
             if job:
+                detail = {'preparation_id': current['id'], 'outcome': outcome, 'delivery': job['delivery'],
+                          'next_due': iso(following) if following else None}
+                if decision is not None:
+                    # #719: the typed decision is the run's Evidence; the answer is not.
+                    detail.update(decision=decision[0], reason=decision[1], notification_queued=notified)
                 db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
-                           (job['id'], 'preparation', 'succeeded' if outcome == STATE_DELIVERED else 'failed', json.dumps(
-                               {'preparation_id': current['id'], 'outcome': outcome, 'delivery': job['delivery'],
-                                'next_due': iso(following) if following else None}), now))
+                           (job['id'], 'preparation', 'succeeded' if outcome == STATE_DELIVERED else 'failed',
+                            json.dumps(detail), now))
             return {**current, **updates}
+
+    def record_notified(self, work_id, digest_, text, now):
+        """A ``notify`` message for run ``work_id`` was sent (#719).
+
+        Only a confirmed send becomes what the owner was last told: the
+        deduplication digest and the text the next judgment compares with.
+        A cancelled or uncertain send changes neither.
+        """
+        job = self.store.job(work_id)
+        preparation_id = preparation_of((job or {}).get('request_key'))
+        if not preparation_id:
+            return False
+        with self.store.db() as db:
+            return bool(db.execute('UPDATE preparations SET last_notified_digest=?,last_notified_text=?,last_notified_at=? '
+                                   'WHERE id=?', (digest_, bounded_text(text), now, preparation_id)).rowcount)
 
     # -- consumption -------------------------------------------------------
 

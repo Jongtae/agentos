@@ -49,7 +49,7 @@ from .connector_revocation import (GoogleConnectionRevoker, RevocationError, dri
                                    google_revoke_transport, registry_connection)
 from .calendar import CALENDAR_CONNECTOR_ID, CALENDAR_WRITE_CONNECTOR_ID, CalendarError
 from .calendar_conversation import DROPPED_NOTICE as CALENDAR_DROPPED_NOTICE, CalendarConversation
-from .conversation_handoff import (CONNECTOR_LABELS, JUDGMENT_YES,
+from .conversation_handoff import (CONNECTOR_LABELS, JUDGMENT_NO, JUDGMENT_YES,
                                    FOLLOWUP_CANCEL, FOLLOWUP_CORRECTION, FOLLOWUP_REFERENCE,
                                    FOLLOWUP_RETRY, eligible_for_followup_judgment,
                                    ConversationJudgments, TelegramChannel, TelegramRejected, telegram_request_json,
@@ -542,10 +542,23 @@ class AgentService:
                 zone_name=self.context_observations.settings().get('timezone') or ''
                 due_at,timezone=prep.parse_due(args.get('due'),args.get('timezone') or '',zone_name,now)
                 recurrence=prep.normalize_recurrence(args.get('recurrence'))
+                # #719: a watch - every N minutes from due until a deadline, bounded.
+                window=None
+                if args.get('every_minutes') not in (None,'') or args.get('until') not in (None,''):
+                    if recurrence:raise prep.PreparationRefusal('invalid_window')
+                    window=prep.normalize_window(args.get('every_minutes'),args.get('until'),args.get('max_runs'),
+                                                 due_at,timezone,now)
+                when_needed=args.get('delivery')==prep.DELIVERY_WHEN_NEEDED
+                if when_needed and kind!=prep.KIND_PREPARE:raise prep.PreparationRefusal('invalid_delivery')
             except prep.PreparationRefusal as exc:
                 raise ToolError(str(exc),exc.code) from None
-            channel=prep.CHANNEL_TELEGRAM if kind==prep.KIND_REMINDER or args.get('delivery')=='send' else prep.CHANNEL_WEB
-            summary=prep.proposal_summary({'kind':kind,'goal_text':goal,'due_at':due_at,'timezone':timezone,'recurrence':recurrence})
+            channel=(prep.CHANNEL_TELEGRAM if kind==prep.KIND_REMINDER or args.get('delivery') in ('send',prep.DELIVERY_WHEN_NEEDED)
+                     else prep.CHANNEL_WEB)
+            delivery_mode=prep.DELIVERY_WHEN_NEEDED if when_needed else None
+            summary=prep.proposal_summary({'kind':kind,'goal_text':goal,'due_at':due_at,'timezone':timezone,
+                                           'recurrence':prep.RECURRENCE_WINDOW if window else recurrence,
+                                           'every_seconds':window and window[0],'window_end':window and window[1],
+                                           'max_runs':window and window[2],'delivery_mode':delivery_mode})
             own_request=(isinstance(prompt,str) and prompt==job.get('message')
                          and prep.preparation_of(job.get('request_key')) is None)
             accepted=own_request and self.decision_judge.explicit_preparation_request(prompt,summary).outcome==JUDGMENT_YES
@@ -553,21 +566,32 @@ class AgentService:
                 row=self.preparations.create(kind=kind,goal=goal,due_at=due_at,timezone=timezone,recurrence=recurrence,
                                              channel=channel,created_from=job['id'],
                                              state=prep.STATE_SCHEDULED if accepted else prep.STATE_PROPOSED,
-                                             accepted_by=prep.ACCEPTED_OWNER_REQUEST if accepted else None)
+                                             accepted_by=prep.ACCEPTED_OWNER_REQUEST if accepted else None,
+                                             window=window,delivery_mode=delivery_mode)
             except prep.PreparationRefusal as exc:
                 raise ToolError(str(exc),exc.code) from None
             LOG.info('preparation %s id=%s work=%s kind=%s',row['state'],row['id'],job['id'],kind)
             scheduled=row['state']==prep.STATE_SCHEDULED
             when=prep.local_text(row['due_at'],row['timezone'])
             label='알림' if kind==prep.KIND_REMINDER else '준비'
-            return {'preparation_id':row['id'],'kind':kind,'state':row['state'],'scheduled':scheduled,
+            result={'preparation_id':row['id'],'kind':kind,'state':row['state'],'scheduled':scheduled,
                     'requires_owner_acceptance':row['state']==prep.STATE_PROPOSED,
                     'due':prep.iso(row['due_at'],row['timezone']),'due_local':when,'now_local':prep.local_text(now,row['timezone']),
-                    'recurrence':row['recurrence'] or 'none','delivery':'send' if row['channel']==prep.CHANNEL_TELEGRAM else 'keep',
+                    'recurrence':row['recurrence'] or 'none','delivery':self.preparation_delivery(row),
                     'accepted_by':row['accepted_by'],
                     'next_step':(f'{when}에 {label}을 예약했습니다. 설정 > 준비해 둔 일에서 취소할 수 있습니다.' if scheduled else
                                  f'{when} {label}을 제안했습니다. 소유자가 수락해야 예약됩니다(Telegram의 수락 버튼 또는 설정 > 준비해 둔 일).')}
+            if window:
+                result.update(every_minutes=row['every_seconds']//60,until=prep.iso(row['window_end'],row['timezone']),
+                              max_runs=row['max_runs'])
+            return result
         return schedule
+
+    @staticmethod
+    def preparation_delivery(row):
+        """``send`` / ``keep`` / ``when_needed`` (#719) for one preparation row."""
+        if row.get('delivery_mode')==prep.DELIVERY_WHEN_NEEDED:return prep.DELIVERY_WHEN_NEEDED
+        return 'send' if row['channel']==prep.CHANNEL_TELEGRAM else 'keep'
 
     def run_due_preparation(self, now=None):
         """One tick of owner-accepted preparations (#659).
@@ -582,19 +606,52 @@ class AgentService:
         if not rows:return False
         for row in rows:
             try:
-                if row['state']==prep.STATE_RUNNING:
-                    settled=self.preparations.settle(row,now,scrub=self.scrub_prepared_answer)
-                    if settled:LOG.info('preparation settled id=%s outcome=%s next=%s',row['id'],settled['last_outcome'],settled['state'])
-                    continue
                 cfg=self.store.config('telegram',{})
-                send=(row['channel']==prep.CHANNEL_TELEGRAM and cfg.get('enabled') and isinstance(cfg.get('user_id'),int)
-                      and cfg.get('generation'))
+                paired=(row['channel']==prep.CHANNEL_TELEGRAM and cfg.get('enabled') and isinstance(cfg.get('user_id'),int)
+                        and cfg.get('generation'))
+                when_needed=row.get('delivery_mode')==prep.DELIVERY_WHEN_NEEDED
+                if row['state']==prep.STATE_RUNNING:
+                    # #719: a when_needed run is judged once; only notify queues a message.
+                    settled=self.preparations.settle(row,now,scrub=self.scrub_prepared_answer,decide=self.watch_judgment,
+                                                     notify_to=(cfg['user_id'],cfg['generation']) if paired else None)
+                    if settled:LOG.info('preparation settled id=%s outcome=%s next=%s decision=%s',row['id'],settled['last_outcome'],
+                                        settled['state'],settled.get('last_decision') if when_needed else '-')
+                    continue
+                # #719: a when_needed run is kept in AgentOS; only its notify decision reaches Telegram.
+                send=paired and not when_needed
                 work_id=self.preparations.start(row,channel=f"telegram:{cfg['generation']}" if send else 'web',
                                                 chat_id=cfg['user_id'] if send else None,now=now)
                 if work_id:LOG.info('preparation started id=%s work=%s kind=%s',row['id'],work_id,row['kind'])
             except Exception as exc:
                 LOG.warning('preparation tick failed id=%s kind=%s',row['id'],type(exc).__name__)
         return True
+
+    #: #719: bounds of the texts one watch judgment is asked over.
+    WATCH_RESULT_CHARS=3000
+
+    def watch_judgment(self, row, answer):
+        """``'yes'`` / ``'no'`` / None: should this watch run reach the owner (#719)?
+
+        The DecisionEngine's bounded judgment over the accepted goal, the
+        run's scrubbed result and the last notification; never a text rule.
+        """
+        result=str(answer or '')
+        if len(result)>self.WATCH_RESULT_CHARS:result=result[:self.WATCH_RESULT_CHARS]+' [...]'
+        judged=self.decision_judge.watch_notification_needed(row['goal_text'],result,row.get('last_notified_text'),
+                                                             work_id=row.get('last_run_job_id'))
+        return {JUDGMENT_YES:'yes',JUDGMENT_NO:'no'}.get(judged.outcome)
+
+    def watch_notification_text(self, notification):
+        """The one Telegram message of a ``notify`` decision, or None when it no longer applies (#719)."""
+        job=self.store.job(notification.get('job_id'))
+        row=self.preparations.get(prep.preparation_of((job or {}).get('request_key')))
+        if not job or not row or row['state']==prep.STATE_CANCELLED:return None
+        goal=str(row['goal_text'])
+        body=self.telegram_result_text(None if self.answer_withheld(job) else job['response'],
+                                       job.get('owner_cause') or job.get('error'),job.get('status'),
+                                       verified=job.get('owner_verified'))
+        return (f"지켜보던 일에서 알려 드립니다 ({goal[:120]}{'…' if len(goal)>120 else ''}).\n\n"+body+
+                '\n\n더 알릴 필요가 없으면 아래 버튼으로 지켜보기를 멈출 수 있습니다.')
 
     def scrub_prepared_answer(self, job):
         """A prepared answer as it may be kept for later turns (#659).
@@ -659,11 +716,16 @@ class AgentService:
             last=str(row.get('last_response') or '')
             rows.append({'id':row['id'],'kind':row['kind'],'goal':row['goal_text'],'state':row['state'],
                          'due':row['due_at'],'due_local':prep.local_text(row['due_at'],row['timezone']),
-                         'timezone':row['timezone'],'recurrence':row['recurrence'],'delivery':'send' if row['channel']==prep.CHANNEL_TELEGRAM else 'keep',
+                         'timezone':row['timezone'],'recurrence':row['recurrence'],'delivery':self.preparation_delivery(row),
                          'accepted_by':row['accepted_by'],'last_outcome':row['last_outcome'],'last_work_id':row['last_run_job_id'],
                          'last_status':row.get('last_status'),'last_delivery':row.get('last_delivery'),
                          'last_result':last[:280]+('…' if len(last)>280 else ''),'prepared_at':row['prepared_at'],
-                         'created_at':row['created_at']})
+                         'created_at':row['created_at'],
+                         # #719: the watch window, its bound and the last typed decision.
+                         'every_minutes':(row['every_seconds']//60) if row.get('every_seconds') else None,
+                         'until_local':prep.local_text(row['window_end'],row['timezone']) if row.get('window_end') else None,
+                         'max_runs':row.get('max_runs'),'run_count':row.get('run_count') or 0,
+                         'last_decision':row.get('last_decision'),'last_decision_reason':row.get('last_decision_reason')})
         return {'preparations':rows}
 
     def preparation_request(self, body):
@@ -4853,16 +4915,42 @@ class AgentService:
                     {'text':'수락','callback_data':f"p7p:{notification['id']}:accept"},
                     {'text':'예약 안 함','callback_data':f"p7p:{notification['id']}:deny"},
                 ]]}
+            elif notification['kind']==prep.NOTIFY_KIND:
+                # #719: one watch run the owner needs; the watch can be stopped from here.
+                watch_text=self.watch_notification_text(notification)
+                if watch_text is None:
+                    self.store.update_notification(notification['id'],'cancelled')
+                    return True
+                reply_markup={'inline_keyboard':[[
+                    {'text':'그만 지켜보기','callback_data':f"p7q:{notification['id']}:stop"},
+                ]]}
             try:
                 text=(prep.proposal_text(proposals,remaining) if notification['kind']=='preparation_proposed' else
+                      watch_text if notification['kind']==prep.NOTIFY_KIND else
                       LOCAL_DOCUMENT_APPROVAL_TEXT if notification['kind']=='approval_needed'
                       and self.document_resume_eligible(notification.get('job_id'))
                       else self.browser_step_prompt(notification.get('job_id')) if notification['kind']=='browser_approval_needed'
                       else self.browser_login_prompt(notification.get('job_id')) if notification['kind']=='browser_login_needed'
                       else self.notification_text(notification['kind']))
-                result=self.telegram.send_message(notification['chat_id'],text,reply_markup)
+                if notification['kind']==prep.NOTIFY_KIND:
+                    # #719: a result bubble, rendered like deliver_one's (#581); a parse refusal is a definite non-delivery.
+                    try:
+                        result=self.telegram.send_message(notification['chat_id'],render_telegram_html(text),reply_markup,parse_mode='HTML')
+                    except TelegramRejected as exc:
+                        if not exc.entity_parse_error:raise
+                        result=self.telegram.send_message(notification['chat_id'],text,reply_markup)
+                else:
+                    result=self.telegram.send_message(notification['chat_id'],text,reply_markup)
                 message_id=result.get('message_id') if isinstance(result,dict) else None
                 self.store.update_notification(notification['id'],'sent',message_id if isinstance(message_id,int) else None)
+                if notification['kind']==prep.NOTIFY_KIND:
+                    # #719: only a confirmed send is what the owner was last told.
+                    try:
+                        job=self.store.job(notification['job_id'])
+                        self.preparations.record_notified(notification['job_id'],notification['fingerprint'],
+                                                          self.scrub_prepared_answer(job) if job else '',self.preparations.clock())
+                    except Exception as exc:
+                        LOG.warning('watch notification record failed work=%s kind=%s',notification['job_id'],type(exc).__name__)
             except ProviderError:
                 self.store.update_notification(notification['id'],'unknown')
         return True
@@ -5128,6 +5216,29 @@ class AgentService:
                         try:self.telegram.edit_message_text(sender,notification['message_id'],self.notification_text(result_kind),{'inline_keyboard':[]})
                         except ProviderError:pass
                         changed=True
+            elif authorized and isinstance(data,str) and data.startswith('p7q:'):
+                # #719: stop one watch from its own notification.  Exact: this
+                # notification, sent, this chat and message; the same cancel
+                # as Settings, so a running Work finishes as its own Work.
+                parts=data.split(':')
+                if len(parts)==3 and parts[2]=='stop':
+                    notification=self.store.notification(parts[1])
+                    job=self.store.job(notification['job_id']) if notification else None
+                    preparation_id=prep.preparation_of((job or {}).get('request_key'))
+                    exact=(notification and notification['kind']==prep.NOTIFY_KIND and notification['state']=='sent'
+                           and notification['generation']==generation and notification['chat_id']==sender
+                           and notification['message_id']==message.get('message_id') and preparation_id)
+                    if exact:
+                        try:
+                            stopped=self.preparations.cancel(preparation_id)
+                        except prep.PreparationRefusal:
+                            stopped=None
+                        if stopped is not None:
+                            LOG.info('preparation cancel by owner button id=%s changed=%s',preparation_id,stopped['changed'])
+                            alert=('지켜보기를 멈췄습니다. 더 알리지 않습니다.' if stopped['changed'] else '이미 멈춘 지켜보기입니다.',False)
+                            try:self.telegram.edit_message_reply_markup(sender,notification['message_id'],{'inline_keyboard':[]})
+                            except ProviderError:pass
+                            changed=True
             elif authorized and isinstance(data,str) and data.startswith('v1c:'):
                 parts=data.split(':')
                 if len(parts)==3 and parts[2] in ('approve','deny'):

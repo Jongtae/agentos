@@ -14,7 +14,7 @@ import unicodedata
 import uuid
 
 from .conversation_projection import qualify_transcript, turn_qualifier
-from .preparations import TABLE_SQL as PREPARATIONS_TABLE_SQL
+from .preparations import TABLE_SQL as PREPARATIONS_TABLE_SQL, migrate as migrate_preparations
 
 
 _SECRET_STATE_LOCK = threading.RLock()
@@ -59,8 +59,8 @@ class QuickStore:
             ''')
             # SEC-ATTN-01 (#659): owner-accepted preparations, one indexed tick query.
             db.executescript(PREPARATIONS_TABLE_SQL)
-            if 'prepared_text' not in {row['name'] for row in db.execute('PRAGMA table_info(preparations)')}:
-                db.execute('ALTER TABLE preparations ADD COLUMN prepared_text TEXT')
+            # #719: the watch window and silent-unless-needed columns, among others.
+            migrate_preparations(db)
             columns={row['name'] for row in db.execute('PRAGMA table_info(messages)')}
             if 'workspace_id' not in columns: db.execute('ALTER TABLE messages ADD COLUMN workspace_id TEXT')
             if 'job_id' not in columns: db.execute('ALTER TABLE messages ADD COLUMN job_id TEXT')

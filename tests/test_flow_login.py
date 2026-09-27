@@ -351,7 +351,7 @@ class LoginHarness(unittest.TestCase):
         self.assertIn(self.ended, ('failed', 'partial'))
         self.shown(job_id)
         self.service.deliver_one()
-        self.assertTrue(self.service.deliver_notification())
+        self.assertTrue(wait_until(self.service.deliver_notification), "the prompt is armed on the window thread (#716)")
         prompts = self.prompts()
         self.assertEqual(len(prompts), 1)
         buttons = prompts[-1]['reply_markup']['inline_keyboard'][0]
@@ -589,7 +589,7 @@ class InFlowLogin(LoginHarness):
         self.assertTrue(self.service.run_one())
         self.assertEqual(self.failed_errors(job_id)[-1], BROWSER_LOGIN_OFFERED_TEXT)
         self.shown(job_id)
-        self.assertTrue(self.service.deliver_notification())
+        self.assertTrue(wait_until(self.service.deliver_notification), "the prompt is armed on the window thread (#716)")
         fresh = self.store.notification(old['id'])
         self.assertEqual(fresh['state'], 'sent')
         self.assertNotEqual(fresh['message_id'], old['message_id'], 'a new message; the old one no longer binds')
@@ -761,7 +761,7 @@ class LoginPromptAndThreads(LoginHarness):
         self.assertTrue(self.service.run_one())
         self.shown(later)
         self.service.deliver_one()
-        self.assertTrue(self.service.deliver_notification())
+        self.assertTrue(wait_until(self.service.deliver_notification), "the prompt is armed on the window thread (#716)")
         self.assertNotIn(BROWSER_LOGIN_NO_SESSION_LINE, self.prompts()[-1]['text'])
 
     def test_a_close_without_a_login_records_no_sign_in(self):
@@ -834,7 +834,7 @@ class LoginPromptAndThreads(LoginHarness):
         self.assertEqual(self.prompts(), [])
         gate.set()
         self.shown(job_id)
-        self.assertTrue(self.service.deliver_notification())
+        self.assertTrue(wait_until(self.service.deliver_notification), "the prompt is armed on the window thread (#716)")
         self.assertEqual(len(self.prompts()), 1)
 
     def test_a_window_that_never_shows_asks_nothing_and_a_later_login_page_asks_again(self):
@@ -920,7 +920,7 @@ class LoginThroughTheCliBridge(_BridgeHarness):
         self.assertTrue(self.profile.status()['login_window_open'])
         self.assertTrue(self.drivers[0].closed, 'the turn released the profile before the window opened')
         self.assertTrue(wait_until(lambda: (self.service._browser_login(self.job) or {}).get('state') == 'offered'))
-        self.assertTrue(self.service.deliver_notification())
+        self.assertTrue(wait_until(self.service.deliver_notification), "the prompt is armed on the window thread (#716)")
         prompt = [body for method, body in self.calls if method == 'sendMessage' and 'p7l:' in flat(body.get('reply_markup'))]
         notification = self.store.notification(prompt[0]['reply_markup']['inline_keyboard'][0][0]['callback_data'].split(':')[1])
         tap = {'id': 'cb', 'from': {'id': CHAT_BRIDGE}, 'data': f"p7l:{notification['id']}:done",
@@ -1046,7 +1046,7 @@ class RealWorkerInFlowLogin(_BridgeHarness):
             self.assertEqual(self.store.job(self.job)['status'], 'partial', 'the CLI turn ended; its request did not')
             status = self.profile.status()
             self.assertTrue(status['login_window_open'], 'the real window is shown on this Mac')
-            self.assertTrue(self.service.deliver_notification())
+            self.assertTrue(wait_until(self.service.deliver_notification), "the prompt is armed on the window thread (#716)")
             prompt = [body for method, body in self.calls if method == 'sendMessage' and 'p7l:' in flat(body.get('reply_markup'))]
             self.assertEqual(len(prompt), 1)
             # The owner signs in by hand in that window (here: the fixture's session page in the same

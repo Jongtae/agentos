@@ -17,6 +17,7 @@ test's own.
 """
 import html
 import json
+import re
 import shutil
 import tempfile
 import threading
@@ -82,7 +83,37 @@ PAGES = {
         <label>메모 <input type="text" autocomplete="section-a shipping street-address" name="addr" value="서울"></label>
         <button type="submit">주문하기</button>
       </form></body></html>''',
-    '/reset/' + PASSPORT: '''<html><head><title>Reset token=abcDEF123456secret</title></head><body><h1>재설정</h1>
+    # #698: controls outside the payment form that submit it through a label or a script.
+    '/checkout-forwarded': '''<html><head><title>빠른 결제</title></head><body><h1>빠른 결제</h1>
+      <form id="payForm" action="/pay" method="post">
+        <p>결제 금액 12,900원</p>
+        <label>카드번호 <input type="text" autocomplete="cc-number" name="card"></label>
+        <label>받는 사람 <input type="text" autocomplete="name" name="who" id="who"></label>
+        <button type="submit" id="paybtn">결제하기</button>
+      </form>
+      <form id="couponForm" action="/coupon" method="post"><label>쿠폰 <input type="text" name="coupon"></label>
+        <button type="submit">쿠폰 적용</button></form>
+      <label for="paybtn"><span role="button">빠른 구매</span></label>
+      <div role="button" onclick="payForm.submit()">바로 결제</div>
+      <div role="button" onclick="payForm.requestSubmit()">요청 결제</div>
+      <div role="button" onclick="couponForm.submit()">쿠폰 바로 적용</div>
+      <div role="button" onclick="setTimeout(() => payForm.submit(), 1500)">나중에 결제</div>
+      <div role="button" onclick="fetch('/validate').then(() => new Promise((ok) => setTimeout(ok, 800))).then(() => payForm.requestSubmit())">확인 후 결제</div>
+      <div role="button" onclick="setTimeout(() => couponForm.submit(), 1500)">나중에 쿠폰</div>
+      <div role="button" onclick="document.getElementById('who').value = '처리 중'; this.textContent = '처리 중…'; payForm.submit()">메모 후 결제</div>
+      </body></html>''',
+    # #698 P1-2: two identical payment forms; the label points at the first ...
+    '/checkout-twins': '''<html><head><title>빠른 결제</title></head><body><h1>빠른 결제</h1>
+      <form action="/pay" method="post"><p>결제 금액 12,900원</p>
+        <label>카드번호 <input type="text" autocomplete="cc-number" name="card"></label>
+        <button type="submit" id="payA">결제하기</button></form>
+      <form action="/pay" method="post"><p>결제 금액 12,900원</p>
+        <label>카드번호 <input type="text" autocomplete="cc-number" name="card"></label>
+        <button type="submit" id="payB">결제하기</button></form>
+      <label for="payA"><span role="button">빠른 구매</span></label>
+      </body></html>''',
+    '/validate': '<html><head><title>확인</title></head><body>ok</body></html>',
+    '/reset/' + PASSPORT:'''<html><head><title>Reset token=abcDEF123456secret</title></head><body><h1>재설정</h1>
       <a href="https://owner:hunter2@fixture.test/reset/''' + PASSPORT + '''?code=1#x">다시 열기</a>
       <a href="https://fixture.test/help">도움말</a></body></html>''',
     '/pay': '''<html><head><title>결제 완료</title></head><body><h1>결제 완료</h1></body></html>''',
@@ -103,16 +134,18 @@ class _PageParser(HTMLParser):
         self.url, self.values = url, values
         self.text, self.elements, self.forms = [], [], []
         self.form, self.form_count, self.index = None, 0, -1
-        self.pending, self.label, self.skip = [], None, 0
+        self.pending, self.label, self.label_info, self.skip = [], None, None, 0
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
         if tag == 'form':
             self.form_count += 1
-            self.form = {'id': self.form_count, 'action': attrs.get('action', ''), 'method': attrs.get('method', 'get')}
+            self.form = {'id': self.form_count, 'action': attrs.get('action', ''), 'method': attrs.get('method', 'get'),
+                         'html_id': attrs.get('id')}
             self.forms.append(self.form)
         if tag == 'label':
             self.label = []
+            self.label_info = {'for': attrs.get('for'), 'elements': []}
         if tag in ('script', 'style', 'head'):
             self.skip += 1
         if tag in INTERACTIVE or attrs.get('role'):
@@ -130,7 +163,10 @@ class _PageParser(HTMLParser):
                        (value if tag == 'input' and kind in ('submit', 'button') else ''), 'href': urljoin(self.url, attrs['href']) if tag == 'a' else None,
                        'tag': tag, 'type': kind, 'autocomplete': (attrs.get('autocomplete') or '').lower(),
                        'value': value if takes_value else None, 'form': self.form['id'] if self.form else None,
-                       'disabled': 'disabled' in attrs, 'hidden': hidden or kind == 'hidden', 'action': dict(self.form) if self.form else None}
+                       'disabled': 'disabled' in attrs, 'hidden': hidden or kind == 'hidden', 'action': dict(self.form) if self.form else None,
+                       'html_id': attrs.get('id'), 'onclick': attrs.get('onclick') or '', 'label': self.label_info}
+            if self.label_info is not None:
+                self.label_info['elements'].append(element)
             self.elements.append(element)
             if not element['name'] and self.label is not None and self.label:
                 element['name'] = ' '.join(self.label).strip()
@@ -140,7 +176,7 @@ class _PageParser(HTMLParser):
         if tag == 'form':
             self.form = None
         if tag == 'label':
-            self.label = None
+            self.label = self.label_info = None
         if tag in ('script', 'style', 'head'):
             self.skip -= 1
         if tag in INTERACTIVE and self.pending:
@@ -159,9 +195,29 @@ class _PageParser(HTMLParser):
             if not element['name']:
                 element['name'] = text
 
+    def control(self, element):
+        """The control the element's <label> forwards a press to, when it is another element (as the page script)."""
+        label = element.get('label')
+        if label is None:
+            return None
+        if label['for'] is not None:
+            control = next((e for e in self.elements if e['html_id'] == label['for']), None)
+        else:
+            control = next((e for e in label['elements'] if e['tag'] in ('input', 'button', 'select', 'textarea')
+                            and e['type'] != 'hidden'), None)
+        return control if control is not element else None
+
+    def record(self, form):
+        """As the page script's ``formRecord``: position, method and resolved action."""
+        return {'dom': form['id'] - 1, 'method': form['method'].lower(), 'action': urljoin(self.url, form['action'])}
+
     def result(self, title):
-        elements = [{k: v for k, v in e.items() if k not in ('hidden', 'action')} for e in self.elements if not e['hidden']]
-        forms = [{'id': form['id'], 'text': '\n'.join(form.get('texts', []))} for form in self.forms]
+        for element in self.elements:
+            control = self.control(element)
+            element['label_form'] = control['form'] if control else None
+        private = ('hidden', 'action', 'html_id', 'onclick', 'label')
+        elements = [{k: v for k, v in e.items() if k not in private} for e in self.elements if not e['hidden']]
+        forms = [{'id': form['id'], 'text': '\n'.join(form.get('texts', [])), **self.record(form)} for form in self.forms]
         return {'url': self.url, 'title': title, 'text': '\n'.join(self.text), 'elements': elements, 'forms': forms}, self.elements
 
 
@@ -175,7 +231,10 @@ class FakeDriver:
         self.pages, self.origin = pages, origin
         self.url, self.values, self.closed = None, {}, False
         self.log = log if log is not None else []
-        self.posts = []
+        self.posts, self.approved = [], []
+        #: A payment-form submit the page's guard cancelled between steps (a
+        #: test sets it, as a timer would); the next snapshot reports it once.
+        self.cancelled = None
 
     def _path(self, url):
         return urlsplit(url).path or '/'
@@ -191,24 +250,49 @@ class FakeDriver:
         page = self.pages[self._path(self.url)]
         parser.feed(page)
         title = page.split('<title>')[1].split('</title>')[0] if '<title>' in page else ''
-        return parser.result(title)
+        return parser.result(title) + (parser,)
 
     def snapshot(self):
         self.log.append(('snapshot', self.url))
-        return self._parse()[0]
+        page = self._parse()[0]
+        if self.cancelled is not None:
+            page['cancelled_submit'], self.cancelled = self.cancelled, None
+        return page
 
-    def click(self, index, timeout):
+    @staticmethod
+    def _submitted(element, parser):
+        """The form a press on ``element`` submits: its own, through its label, or by its onclick script."""
+        if element['type'] == 'submit' and element.get('action'):
+            return element['action']
+        control = parser.control(element)
+        if control is not None and control['type'] == 'submit' and control.get('action'):
+            return control['action']
+        called = re.search(r'(\w+)\.(?:submit|requestSubmit)\(\)', element.get('onclick') or '')
+        if called:
+            return next((form for form in parser.forms if form.get('html_id') == called.group(1)), None)
+        return None
+
+    def click(self, index, timeout, approved=False):
+        """As the worker: without ``approved``, a submit of a payment form is cancelled (#698)."""
         self.log.append(('click', index, timeout))
-        element = next(e for e in self._parse()[1] if e['index'] == index)
+        self.approved.append(approved)
+        _, elements, parser = self._parse()
+        element = next(e for e in elements if e['index'] == index)
         if element['tag'] == 'a':
             return self.goto(element['href'], timeout)
-        form = element.get('action')
-        if form and element['type'] == 'submit':
-            self.posts.append((form['method'], form['action']))
-            return self.goto(urljoin(self.url, form['action']), timeout)
+        form = self._submitted(element, parser)
+        if form is None:
+            return None
+        if not approved and any(e['form'] == form['id'] and bs.payment_field(e) for e in elements):
+            refusal = ToolError(bs.APPROVAL_TEXT, 'approval_required', requires='browser-step-approval')
+            refusal.cancelled_form = parser.record(form)
+            raise refusal
+        self.posts.append((form['method'], form['action']))
+        return self.goto(urljoin(self.url, form['action']), timeout)
 
-    def type(self, index, text, timeout):
+    def type(self, index, text, timeout, approved=False):
         self.log.append(('type', index, text, timeout))
+        self.approved.append(approved)
         self.values.setdefault(self.url, {})[index] = text
 
     def is_open(self):
@@ -508,6 +592,138 @@ class PaymentGuardTests(unittest.TestCase):
             sess.type({'target': '인증 코드', 'text': '000000', 'effect': 'mutate'})
         self.assertEqual(caught.exception.code, 'approval_required')
         sess.type({'target': '이름', 'text': '김철수', 'effect': 'mutate'})
+
+
+class ForwardedSubmitTests(unittest.TestCase):
+    """#698: a label or a script outside the payment form that submits it needs the same approval."""
+
+    def setUp(self):
+        self.approvals = Approvals()
+        self.sess, self.driver = session(approvals=self.approvals, steps=40)
+        self.page = self.sess.open({'url': ORIGIN + '/checkout-forwarded', 'effect': 'navigate'})
+
+    def refused(self, target):
+        with self.assertRaises(ToolError) as caught:
+            self.sess.click({'target': target, 'effect': 'mutate'})
+        self.assertEqual((caught.exception.code, caught.exception.requires), ('approval_required', 'browser-step-approval'))
+        return self.approvals.requests[-1][0]
+
+    def test_a_label_forwarding_to_the_pay_button_is_classified_and_never_reaches_the_page(self):
+        rows = {row['name']: row for row in self.sess.last['_elements']}
+        self.assertTrue(rows['빠른 구매']['submit_guarded'], 'the span inside <label for=paybtn> presses the pay button')
+        self.assertTrue(rows['빠른 구매']['forwards_payment'])
+        self.assertFalse(rows['쿠폰 적용']['submit_guarded'])
+        for name in ('카드번호', '쿠폰'):
+            self.assertFalse(rows[name]['forwards_payment'], 'a field inside its own label forwards nothing')
+        binding = self.refused('빠른 구매')
+        self.assertEqual(binding['action'], 'browser_click')
+        self.assertEqual([entry for entry in self.driver.log if entry[0] == 'click'], [], 'refused before the driver')
+        self.assertEqual(self.driver.posts, [])
+
+    def test_the_label_control_is_part_of_the_descriptor_the_worker_checks(self):
+        elements = [{'index': 0, 'tag': 'input', 'autocomplete': 'cc-number', 'form': 1},
+                    {'index': 1, 'tag': 'button', 'role': 'button', 'form': 1},
+                    {'index': 2, 'tag': 'span', 'role': 'button', 'form': None, 'label_form': 1},
+                    {'index': 3, 'tag': 'span', 'role': 'button', 'form': None, 'label_form': 2}]
+        self.assertTrue(bs.guarded_submit(elements[2], elements))
+        self.assertFalse(bs.guarded_submit(elements[3], elements), 'a label into an ordinary form')
+        self.assertTrue(bs.forwards_to_payment_form(elements[2], bs.payment_forms(elements)))
+
+    def test_a_scripted_submit_of_the_payment_form_is_refused_by_the_driver_and_asks_the_owner(self):
+        for target in ('바로 결제', '요청 결제'):
+            binding = self.refused(target)
+            self.assertEqual((binding['action'], binding['target_digest']),
+                             ('browser_click', bs.digest(f'button|{target}|div|||')))
+        self.assertEqual(self.driver.approved, [False, False], 'the driver was told the steps had no approval')
+        self.assertEqual(self.driver.posts, [], 'no payment form was submitted')
+        self.assertEqual(len(self.approvals.requests), 2)
+
+    def test_a_scripted_submit_of_an_ordinary_form_still_runs(self):
+        page = self.sess.click({'target': '쿠폰 바로 적용', 'effect': 'mutate'})
+        self.assertEqual(page['title'], '쿠폰')
+        self.sess.open({'url': ORIGIN + '/checkout-forwarded', 'effect': 'navigate'})
+        self.sess.click({'target': '쿠폰 적용', 'effect': 'mutate'})
+        self.assertEqual(self.driver.posts, [('post', '/coupon'), ('post', '/coupon')])
+        self.assertEqual(self.approvals.requests, [])
+
+    def test_an_approved_forwarded_submit_runs_once(self):
+        for target in ('바로 결제', '빠른 구매'):
+            binding = self.refused(target)
+            self.approvals.issued.append(bs.binding_digest(binding))
+            self.sess.open({'url': ORIGIN + '/checkout-forwarded', 'effect': 'navigate'})
+            page = self.sess.click({'target': target, 'effect': 'mutate'})
+            self.assertEqual(page['title'], '결제 완료')
+            self.assertEqual(self.driver.approved[-1], True)
+            self.assertEqual(self.approvals.issued, [], 'one approval, one step')
+            self.sess.open({'url': ORIGIN + '/checkout-forwarded', 'effect': 'navigate'})
+            self.refused(target)
+        self.assertEqual(self.driver.posts, [('post', '/pay'), ('post', '/pay')])
+
+    def approved_binding(self, target, pages=PAGES, path='/checkout-forwarded'):
+        """The binding a fresh session is refused on for ``target`` (what the owner then approves)."""
+        probe = Approvals()
+        sess, _ = session(FakeDriver(pages), approvals=probe, steps=40)
+        sess.open({'url': ORIGIN + path, 'effect': 'navigate'})
+        with self.assertRaises(ToolError):
+            sess.click({'target': target, 'effect': 'mutate'})
+        return probe.requests[-1][0]
+
+    def test_a_changed_non_card_value_of_the_payment_form_asks_again(self):
+        # Review P1-2: the label's span and the scripted div sit outside the form.
+        for target in ('빠른 구매', '바로 결제'):
+            approvals = Approvals(self.approved_binding(target))
+            sess, driver = session(approvals=approvals, steps=40)
+            sess.open({'url': ORIGIN + '/checkout-forwarded', 'effect': 'navigate'})
+            sess.type({'target': '받는 사람', 'text': '다른 사람', 'effect': 'mutate'})
+            with self.assertRaises(ToolError) as caught:
+                sess.click({'target': target, 'effect': 'mutate'})
+            self.assertEqual(caught.exception.code, 'approval_required', target)
+            self.assertEqual(len(approvals.issued), 1, 'the approval of the unchanged form is not spent')
+            self.assertEqual(driver.posts, [])
+            driver.values.clear()
+            sess.open({'url': ORIGIN + '/checkout-forwarded', 'effect': 'navigate'})
+            self.assertEqual(sess.click({'target': target, 'effect': 'mutate'})['title'], '결제 완료')
+            self.assertEqual((approvals.issued, driver.posts), ([], [('post', '/pay')]))
+
+    def test_a_label_pointed_at_another_identical_payment_form_asks_again(self):
+        retargeted = dict(PAGES)
+        retargeted['/checkout-twins'] = PAGES['/checkout-twins'].replace('for="payA"', 'for="payB"')
+        approved = self.approved_binding('빠른 구매', PAGES, '/checkout-twins')
+        approvals = Approvals(approved)
+        sess, driver = session(FakeDriver(retargeted), approvals=approvals)
+        sess.open({'url': ORIGIN + '/checkout-twins', 'effect': 'navigate'})
+        with self.assertRaises(ToolError):
+            sess.click({'target': '빠른 구매', 'effect': 'mutate'})
+        self.assertEqual(len(approvals.issued), 1)
+        self.assertNotEqual(approvals.requests[-1][0]['state_digest'], approved['state_digest'])
+        self.assertEqual(driver.posts, [])
+        sess, driver = session(approvals=approvals)
+        sess.open({'url': ORIGIN + '/checkout-twins', 'effect': 'navigate'})
+        sess.click({'target': '빠른 구매', 'effect': 'mutate'})
+        self.assertEqual((approvals.issued, driver.posts), ([], [('post', '/pay')]), 'the original label spends it')
+
+    def test_a_submit_cancelled_after_the_step_answered_is_reported_by_the_next_snapshot(self):
+        # Review P1-1: a timer or async callback submits the payment form after the step.
+        self.sess.type({'target': '쿠폰', 'text': 'SAVE', 'effect': 'mutate'})
+        self.driver.cancelled = {'dom': 0, 'method': 'post', 'action': ORIGIN + '/pay'}
+        with self.assertRaises(ToolError) as caught:
+            self.sess.read()
+        self.assertEqual(caught.exception.code, 'approval_required')
+        binding, description = self.approvals.requests[-1]
+        self.assertEqual((binding['action'], binding['argument_digest']), ('browser_type', bs.digest('SAVE')),
+                         'attributed to the step that triggered it, which the resumed run repeats')
+        self.assertIn(bs.CANCELLED_NOTE, description)
+        self.assertIn('/pay', description)
+        self.assertEqual(self.sess.read()['title'], '빠른 결제', 'reported once')
+        # With no step of this session yet, the form's own submit is asked.
+        approvals = Approvals()
+        sess, driver = session(approvals=approvals)
+        sess.open({'url': ORIGIN + '/checkout-forwarded', 'effect': 'navigate'})
+        driver.cancelled = {'dom': 0, 'method': 'post', 'action': ORIGIN + '/pay'}
+        with self.assertRaises(ToolError):
+            sess.read()
+        self.assertEqual(approvals.requests[-1][0]['action'], 'browser_submit')
+        self.assertEqual(driver.posts, [])
 
 
 # ---------------------------------------------------------------- login, budget, targets

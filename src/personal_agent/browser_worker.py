@@ -31,6 +31,20 @@ world cancels a trusted click that lands elsewhere) or ``INSERT`` (the held
 element must be the focused one and still match, then ``insertText`` runs in
 that same script turn).  The element is never resolved a second time.
 
+Submit guard (#698): for a page's whole life, from document start, a
+capture-phase ``submit`` listener in the client world cancels a submit of any
+form holding a card, CVC, card-expiry, one-time-code or password field,
+whatever triggered it and whenever: a label forwarding a press, a scripted
+click, ``requestSubmit``, a timer or an async-validation callback after the
+step answered.  ``form.submit()`` fires no ``submit`` event, so a page-world
+user script wraps ``HTMLFormElement.prototype.submit`` at document start to
+signal the same listener (see ``PAGE_WRAP_USER_SCRIPT`` for its limits).  Only
+a step the parent sends with ``approved`` lets one such submit through, until
+the step answers; the owner's login window turns the guard off while shown.
+A cancelled submit is recorded with its form (method, action, position): a
+step answers ``approval_required``, and one cancelled between steps is
+reported by the next snapshot (``cancelled_submit``) or step.
+
 Destinations: every navigation (typed, redirect, form, ``window.open``, frame)
 passes ``decidePolicyForNavigationAction``: only http(s) to public addresses,
 after DNS resolution, reusing ``local_tools``' denied names and its
@@ -63,6 +77,15 @@ EMBEDDED_UA_TOKEN = 'AgentOS-Embedded/1'
 #: ``index`` is an element's position in ``document.querySelectorAll(SELECTOR)``.
 SELECTOR = ('a[href], button, input, select, textarea, summary, [role="button"], [role="link"], [role="textbox"], '
             '[role="checkbox"], [role="radio"], [role="combobox"], [role="menuitem"], [role="tab"]')
+
+#: The cancelable event the page-world ``form.submit()`` wrapper dispatches on
+#: the form so the client-world submit guard can refuse it (#698).
+SUBMIT_SIGNAL = 'agentos-guarded-submit'
+#: The client-world message handler a cancelled submit is reported through.
+GUARD_HANDLER = 'agentosGuard'
+#: ``autocomplete`` field names of a payment form (with ``password`` inputs).
+#: ``browser_session.PAYMENT_AUTOCOMPLETE`` is this same set.
+PAYMENT_TOKENS = ('cc-csc', 'cc-exp', 'cc-exp-month', 'cc-exp-year', 'cc-number', 'one-time-code')
 
 #: Helpers every page script shares.  Strings leaving the page are well-formed
 #: UTF-16 and cut at code-point boundaries.  ``describe`` mirrors the guard's
@@ -104,15 +127,54 @@ const autocompleteOf = (el) => (el.getAttribute('autocomplete') || '').toLowerCa
 const fieldToken = (el) => { const tokens = autocompleteOf(el).split(/\s+/).filter(Boolean);
   if (tokens.length && tokens[tokens.length - 1] === 'webauthn') tokens.pop(); return tokens.length ? tokens[tokens.length - 1] : ''; };
 const formOf = (el) => el.form || el.closest('form');
+// The control a <label> forwards a press to, for the label ``el`` is or sits in,
+// when that control is another element (#698): HTML's ``label.control`` (the
+// ``for`` target, else the first labelable descendant), resolved without ``el.labels``.
+const LABELABLE = 'button, input:not([type="hidden"]), meter, output, progress, select, textarea';
+const labelControl = (el) => { const label = el.closest('label'); if (!label) return null;
+  const id = label.getAttribute('for');
+  const control = id !== null ? document.getElementById(id) : label.querySelector(LABELABLE);
+  return control && control !== el ? control : null; };
 const paymentField = (el, tokens) => typeOf(el) === 'password' || tokens.includes(fieldToken(el));
-const paymentForm = (el, tokens) => { const form = formOf(el); if (!form) return false;
-  return Array.from(document.querySelectorAll(SELECTOR)).some((other) => formOf(other) === form && visible(other) && paymentField(other, tokens)); };
+const formHolds = (form, tokens) => !!form &&
+  Array.from(document.querySelectorAll(SELECTOR)).some((other) => formOf(other) === form && visible(other) && paymentField(other, tokens));
+const paymentForm = (el, tokens) => { if (formHolds(formOf(el), tokens)) return true;
+  const control = labelControl(el); return !!control && formHolds(formOf(control), tokens); };
 const describe = (el, tokens) => ({tag: el.tagName.toLowerCase(), type: typeOf(el), autocomplete: autocompleteOf(el), name: nameOf(el),
   in_form: !!formOf(el), payment_form: paymentForm(el, tokens)});
 const same = (actual, expect) => !!expect && ['tag', 'type', 'autocomplete', 'name', 'in_form', 'payment_form']
   .every((key) => key in expect && actual[key] === expect[key]);
-const state = () => (window.__agentos = window.__agentos || {targets: new Map(), guard: null, listening: false});
-""" % {'selector': json.dumps(SELECTOR)}
+const state = () => (window.__agentos = window.__agentos || {targets: new Map(), guard: null, listening: false,
+  off: false, allow: null, cancelled: null, submitListening: false});
+// The submit guard (#698), armed for the page's whole life: a submit of a form holding
+// a payment field (any field, shown or not) is cancelled whatever triggered it and
+// whenever -- a trusted or scripted click, a label, ``requestSubmit``, Enter, a timer,
+// an async callback, or ``form.submit()`` through the page-world signal.  Only an
+// approved step lets ONE through (``allow``); the owner's login window sets ``off``.
+const GUARD_TOKENS = %(tokens)s;
+const formFields = (form) => { const own = Array.from(form.querySelectorAll('input, select, textarea, ' + SELECTOR));
+  const id = form.getAttribute('id');
+  return id ? own.concat(Array.from(document.querySelectorAll('[form="' + CSS.escape(id) + '"]'))) : own; };
+const holdsPayment = (form) => formFields(form).some((field) => paymentField(field, GUARD_TOKENS));
+// Which form: its position among the document's forms, its method and resolved action.
+const formRecord = (form) => { const action = form.getAttribute('action'); let url = location.href;
+  try { url = new URL(action === null ? '' : action, location.href).href; } catch (error) { url = location.href; }
+  return {dom: Array.prototype.indexOf.call(document.forms, form),
+    method: String(form.getAttribute('method') || 'get').toLowerCase().slice(0, 16), action: cut(url, 2000)}; };
+const armSubmitGuard = () => { const s = state(); if (s.submitListening) return; s.submitListening = true;
+  const cancel = (event) => { const g = state(); if (g.off) return;
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement) || !holdsPayment(form)) return;
+    if (g.allow && g.allow.left > 0) { g.allow.left -= 1; return; }
+    event.preventDefault(); event.stopImmediatePropagation();
+    const record = {...formRecord(form), id: Math.random().toString(36).slice(2) + Date.now().toString(36)};
+    g.cancelled = record;
+    try { window.webkit.messageHandlers[%(handler)s].postMessage(record); } catch (error) { /* read by the next script */ } };
+  window.addEventListener('submit', cancel, true);
+  window.addEventListener(%(signal)s, cancel, true); };
+const takeCancelled = () => { const s = state(), c = s.cancelled; s.cancelled = null; return c; };
+""" % {'selector': json.dumps(SELECTOR), 'signal': json.dumps(SUBMIT_SIGNAL), 'handler': json.dumps(GUARD_HANDLER),
+       'tokens': json.dumps(list(PAYMENT_TOKENS))}
 
 #: The snapshot: elements the model can act on and the fields the guard
 #: reasons about.  Plain data only (no node handles, no HTML).
@@ -135,25 +197,29 @@ const roleOf = (el) => {
 };
 const NO_VALUE = ['submit', 'button', 'image', 'reset', 'checkbox', 'radio', 'file', 'password', 'hidden'];
 const forms = new Map();
+const idOf = (f) => { if (!f) return null; if (!forms.has(f)) forms.set(f, forms.size + 1); return forms.get(f); };
 const elements = [];
 Array.from(document.querySelectorAll(SELECTOR)).forEach((el, index) => {
   if (!visible(el)) return;
   const tag = el.tagName.toLowerCase();
   const form = formOf(el);
-  let formId = null;
-  if (form) { if (!forms.has(form)) forms.set(form, forms.size + 1); formId = forms.get(form); }
+  const formId = idOf(form);
+  const control = labelControl(el);
   const type = typeOf(el);
   const takesValue = (tag === 'input' && !NO_VALUE.includes(type)) || tag === 'textarea' || tag === 'select';
   elements.push({index, role: well(roleOf(el)), name: nameOf(el), href: tag === 'a' ? cut(el.href, 2000) : null, tag, type: well(type),
-    autocomplete: well(autocompleteOf(el)), value: takesValue ? cut(el.value || '', 200) : null, form: formId, disabled: !!el.disabled});
+    autocomplete: well(autocompleteOf(el)), value: takesValue ? cut(el.value || '', 200) : null, form: formId,
+    label_form: idOf(control ? formOf(control) : null), disabled: !!el.disabled});
 });
 return JSON.stringify({url: cut(location.href, 4000), title: cut(document.title, 400),
   text: cut(document.body ? document.body.innerText : '', 20000), elements: elements.slice(0, 300),
-  forms: Array.from(forms.entries()).map(([form, id]) => ({id, text: cut(form.innerText || '', 6000)}))});
+  forms: Array.from(forms.entries()).map(([form, id]) => ({id, text: cut(form.innerText || '', 6000), ...formRecord(form)})),
+  cancelled: takeCancelled()});
 """
 
-#: Arguments: index, expect, tokens, nonce.  Resolve once, check, hit-test,
-#: keep the handle and arm the click guard for it.
+#: Arguments: index, expect, tokens, nonce, approved.  Resolve once, check,
+#: hit-test, keep the handle and arm the click guard for it; an approved step
+#: may let one payment-form submit through until ``STEP_END_SCRIPT`` (#698).
 LOCATE_SCRIPT = PRELUDE + r"""
 const el = document.querySelectorAll(SELECTOR)[index];
 if (!el) return JSON.stringify({error: 'target_missing'});
@@ -181,6 +247,8 @@ if (!s.listening) {
   }, true);
   s.listening = true;
 }
+armSubmitGuard();
+s.allow = approved === true ? {left: 1} : null;
 const tag = el.tagName.toLowerCase();
 return JSON.stringify({x, y, editable: el.isContentEditable || tag === 'textarea' ||
   (tag === 'input' && !['submit', 'button', 'image', 'reset', 'checkbox', 'radio', 'file', 'hidden', 'range', 'color'].includes(typeOf(el)))});
@@ -193,6 +261,55 @@ s.guard = null;
 if (!g || g.nonce !== nonce) return JSON.stringify({error: 'target_changed'});
 return JSON.stringify(g.bad ? {error: 'target_changed'} : {ok: true});
 """
+
+#: The end of a click/type step: an approval's allowance ends (the guard is
+#: whole again) and a submit the guard cancelled is reported (#698).
+STEP_END_SCRIPT = PRELUDE + r"""
+state().allow = null;
+return JSON.stringify({cancelled: takeCancelled()});
+"""
+
+#: Arguments: off.  The owner's login window turns the guard off, and back on.
+GUARD_SWITCH_SCRIPT = PRELUDE + r"""
+armSubmitGuard();
+const s = state();
+s.off = off === true;
+s.allow = null;
+return JSON.stringify({ok: true});
+"""
+
+
+def client_guard_user_script(off=False):
+    """Client world, at document start of every main-frame page: the guard is
+    registered before any page script can add its own capture listener on
+    ``window``, armed (or off while the owner's login window shows)."""
+    return ('(() => {\n' + PRELUDE + '\nstate().off = ' + ('true' if off else 'false') +
+            ';\narmSubmitGuard();\n})();')
+
+
+#: Page world, at document start of every main-frame page (#698).
+#: ``form.submit()`` fires no ``submit`` event (HTML: the method skips it) and
+#: the client world cannot wrap the page's own prototype, so the page's
+#: ``HTMLFormElement.prototype.submit`` is wrapped before any page script runs:
+#: it dispatches the signal on the form with the ``dispatchEvent``,
+#: ``CustomEvent`` and ``defaultPrevented`` captured at that moment, and the
+#: client-world guard cancels it for a payment form.  Limits: the prototype of
+#: another realm (a new iframe's ``HTMLFormElement.prototype.submit`` called on
+#: this page's form) is not wrapped, and a page can detect the wrapper
+#: (``toString``); ``fetch``/XHR posts are not form submits at all.
+PAGE_WRAP_USER_SCRIPT = r"""(() => {
+  const proto = HTMLFormElement.prototype, original = proto.submit;
+  if (typeof original !== 'function') return;
+  const dispatch = EventTarget.prototype.dispatchEvent, Signal = CustomEvent, apply = Reflect.apply;
+  const prevented = Object.getOwnPropertyDescriptor(Event.prototype, 'defaultPrevented').get;
+  const submit = function submit() {
+    const event = new Signal(%s, {cancelable: true});
+    apply(dispatch, this, [event]);
+    if (apply(prevented, event, [])) return undefined;
+    return apply(original, this, arguments);
+  };
+  Object.defineProperty(proto, 'submit', {value: submit, writable: true, enumerable: true, configurable: true});
+})();""" % json.dumps(SUBMIT_SIGNAL)
 
 #: Arguments: nonce, expect, tokens, text.  The held element must be the
 #: focused one and still match the classified descriptor; the text is then
@@ -360,10 +477,20 @@ class Worker:
         # page cannot replace the functions these scripts call.  (A named world
         # stopped answering after repeated password-form pages on macOS 26.)
         self.world = WebKit.WKContentWorld.defaultClientWorld()
-        self.view = WebKit.WKWebView.alloc().initWithFrame_configuration_(Foundation.NSMakeRect(0, 0, WIDTH, HEIGHT), config)
+        # Only the ``form.submit()`` wrapper runs in the page world (#698).
+        self.page_world = WebKit.WKContentWorld.pageWorld()
         delegate_class = _delegate_class()
         self.delegate = delegate_class.alloc().init()
         self.delegate.worker = self
+        # The submit guard (#698): document-start scripts, and the client-world
+        # handler a cancelled submit is reported through (never the page world).
+        self.guard_off = False
+        self.cancelled = None      # the last cancelled submit not yet reported
+        self.reported = []         # ids of cancelled submits already reported
+        self.controller = config.userContentController()
+        self._install_guard_scripts()
+        self.controller.addScriptMessageHandler_contentWorld_name_(self.delegate, self.world, GUARD_HANDLER)
+        self.view = WebKit.WKWebView.alloc().initWithFrame_configuration_(Foundation.NSMakeRect(0, 0, WIDTH, HEIGHT), config)
         self.view.setNavigationDelegate_(self.delegate)
         self.view.setUIDelegate_(self.delegate)
         style = (AppKit.NSWindowStyleMaskTitled | AppKit.NSWindowStyleMaskClosable |
@@ -396,8 +523,8 @@ class Worker:
         self.pending[ident] = True
         self.AppHelper.callLater(max(0.5, float(seconds)), expire)
 
-    def run(self, body, arguments, done):
-        """Run ``body`` (returns a JSON string) in the isolated world; ``done(value_or_None, error_or_None)``."""
+    def run(self, body, arguments, done, world=None):
+        """Run ``body`` (returns a JSON string) in the client world (or ``world``); ``done(value_or_None, error_or_None)``."""
         def handler(result, error):
             if error is not None:
                 done(None, 'script_failed')
@@ -407,7 +534,7 @@ class Worker:
             except (TypeError, ValueError, UnicodeError):
                 done(None, 'script_failed')
         self.view.callAsyncJavaScript_arguments_inFrame_inContentWorld_completionHandler_(
-            body, arguments or {}, None, self.world, handler)
+            body, arguments or {}, None, world or self.world, handler)
 
     def settle(self, ident, finish):
         """Wait until no navigation is loading for a short quiet period, then ``finish``."""
@@ -426,11 +553,75 @@ class Worker:
             self.AppHelper.callLater(POLL_SECONDS, poll)
         self.AppHelper.callLater(POLL_SECONDS, poll)
 
-    def finish_input(self, ident, blocked_before):
-        """Reply to a click/type once the page settled: refused when a navigation it caused was blocked."""
-        if self.blocked > blocked_before:
-            return self.fail(ident, 'blocked_destination')
-        self.reply(ident)
+    # -- the submit guard (#698) ----------------------------------------------
+    def _install_guard_scripts(self):
+        """The document-start scripts: the client-world guard (armed, or off while
+        the owner's login window shows) and the page-world ``form.submit`` wrapper."""
+        WebKit = self.WebKit
+        start = WebKit.WKUserScriptInjectionTimeAtDocumentStart
+        self.controller.removeAllUserScripts()
+        for source, world in ((client_guard_user_script(self.guard_off), self.world),
+                              (PAGE_WRAP_USER_SCRIPT, self.page_world)):
+            self.controller.addUserScript_(
+                WebKit.WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_inContentWorld_(
+                    source, start, True, world))
+
+    def set_guard_off(self, off):
+        """The owner's login window: the guard is off while it shows, for this page and the next ones."""
+        self.guard_off = bool(off)
+        self._install_guard_scripts()
+        self.run(GUARD_SWITCH_SCRIPT, {'off': self.guard_off}, lambda *_: None)
+
+    def receive_cancelled(self, record):
+        """A cancelled submit, reported by the client-world guard (message handler or a script result)."""
+        record = _form_record(record)
+        if record is not None and record['id'] not in self.reported:
+            self.cancelled = record
+
+    def take_cancelled(self, record=None):
+        """The cancelled submit not yet reported, once; ``record`` is one a script just read."""
+        if record is not None:
+            self.receive_cancelled(record)
+        found, self.cancelled = self.cancelled, None
+        if found is None:
+            return None
+        self.reported = (self.reported + [found['id']])[-64:]
+        return {key: found[key] for key in ('dom', 'method', 'action')}
+
+    def end_step(self, done=None):
+        """End a click/type step: the approval's allowance ends; ``done(cancelled record or None)``.
+
+        A script error (the page navigated away) reads nothing from the page;
+        a submit that page's guard cancelled still arrived through the handler.
+        """
+        def ended(value, error):
+            record = value.get('cancelled') if error is None and isinstance(value, dict) else None
+            if record is not None:
+                self.receive_cancelled(record)
+            if done is not None:
+                done(self.take_cancelled())
+        self.run(STEP_END_SCRIPT, {}, ended)
+
+    def finish_input(self, ident, blocked_before=None, error=None):
+        """Answer a click/type once its approval's allowance ended.
+
+        A payment-form submit the guard cancelled answers ``approval_required``
+        with its form (#698), before any other error; then ``error``; then a
+        navigation the step caused that was blocked.
+        """
+        def answer(cancelled):
+            if ident not in self.pending:
+                if cancelled is not None:
+                    self.cancelled = {**cancelled, 'id': uuid.uuid4().hex}   # reported by the next snapshot
+                return
+            if cancelled is not None:
+                return self.reply(ident, False, error='approval_required', form=cancelled)
+            if error:
+                return self.fail(ident, error)
+            if blocked_before is not None and self.blocked > blocked_before:
+                return self.fail(ident, 'blocked_destination')
+            self.reply(ident)
+        self.end_step(answer)
 
     # -- destinations ----------------------------------------------------------
     def decide(self, url, main_frame, decision):
@@ -532,6 +723,10 @@ class Worker:
                 return
             if error or not isinstance(value, dict):
                 return self.fail(ident, error or 'script_failed')
+            # A payment-form submit cancelled since the last report (#698).
+            cancelled = self.take_cancelled(value.pop('cancelled', None))
+            if cancelled is not None:
+                value['cancelled_submit'] = cancelled
             self.reply(ident, page=value)
         self.run(SNAPSHOT_SCRIPT, {}, done)
 
@@ -544,19 +739,23 @@ class Worker:
         if not isinstance(expect, dict):
             return self.fail(ident, 'target_changed')   # never press an element nobody classified
         nonce = uuid.uuid4().hex
+        # Only a step the parent consumed an owner approval for may let one
+        # payment-form submit through (#698).
+        approved = command.get('approved') is True
 
         def located(value, error):
             if ident not in self.pending:
                 return
             if error or not isinstance(value, dict):
-                return self.fail(ident, error or 'script_failed')
+                return self.finish_input(ident, error=error or 'script_failed')
             if value.get('error'):
-                return self.fail(ident, value['error'])
+                return self.finish_input(ident, error=value['error'])
             then(value, nonce, expect, tokens)
-        self.run(LOCATE_SCRIPT, {'index': index, 'expect': expect, 'tokens': tokens, 'nonce': nonce}, located)
+        self.run(LOCATE_SCRIPT, {'index': index, 'expect': expect, 'tokens': tokens, 'nonce': nonce,
+                                 'approved': approved}, located)
 
     def op_click(self, ident, command, timeout):
-        self.deadline(ident, timeout)
+        self.deadline(ident, timeout, on_timeout=self.end_step)
 
         def click(point, nonce, expect, tokens):
             blocked_before = self.blocked
@@ -566,9 +765,9 @@ class Worker:
                 if ident not in self.pending:
                     return
                 if error is None and isinstance(value, dict) and value.get('error'):
-                    return self.fail(ident, value['error'])
+                    return self.finish_input(ident, blocked_before, value['error'])
                 # A script error here means the click already navigated away (the
-                # page and its guard are gone), which the guard allowed.
+                # page and its guards are gone), which the guards allowed.
                 self.settle(ident, lambda: self.finish_input(ident, blocked_before))
             self.run(VERIFY_CLICK_SCRIPT, {'nonce': nonce}, verified)
         self._locate(ident, command, click)
@@ -577,11 +776,11 @@ class Worker:
         text = command.get('text')
         if not isinstance(text, str):
             return self.fail(ident, 'bad_text')
-        self.deadline(ident, timeout)
+        self.deadline(ident, timeout, on_timeout=self.end_step)
 
         def focus(point, nonce, expect, tokens):
             if not point.get('editable'):
-                return self.fail(ident, 'not_typable')
+                return self.finish_input(ident, error='not_typable')
             blocked_before = self.blocked
             self.press(point['x'], point['y'])
 
@@ -589,9 +788,9 @@ class Worker:
                 if ident not in self.pending:
                     return
                 if error or not isinstance(value, dict):
-                    return self.fail(ident, error or 'script_failed')
+                    return self.finish_input(ident, blocked_before, error or 'script_failed')
                 if value.get('error'):
-                    return self.fail(ident, value['error'])
+                    return self.finish_input(ident, blocked_before, value['error'])
                 self.settle(ident, lambda: self.finish_input(ident, blocked_before))
             self.AppHelper.callLater(FOCUS_SECONDS, lambda: self.run(
                 INSERT_SCRIPT, {'nonce': nonce, 'expect': expect, 'tokens': tokens, 'text': text}, inserted))
@@ -599,6 +798,8 @@ class Worker:
 
     def op_show(self, ident, command, timeout):
         url = command.get('url')
+        # The owner signs in by hand: the guard is off while the window shows (#698).
+        self.set_guard_off(True)
         self.window.center()
         self.window.makeKeyAndOrderFront_(None)
         self.app.activateIgnoringOtherApps_(True)
@@ -608,10 +809,12 @@ class Worker:
 
     def op_hide(self, ident, command, timeout):
         self.window.orderOut_(None)
+        self.set_guard_off(False)
         self.reply(ident)
 
     def window_closed_by_owner(self):
         self.window.orderOut_(None)
+        self.set_guard_off(False)
         self.emit({'event': 'hidden'})
 
     def op_state(self, ident, command, timeout):
@@ -698,6 +901,17 @@ class Worker:
         self.AppHelper.stopEventLoop()
 
 
+def _form_record(value):
+    """A cancelled submit's form, from page data: ``{id, dom, method, action}`` of bounded plain values, or None."""
+    try:
+        get = value.get if isinstance(value, dict) else value.objectForKey_
+        dom, method, action, ident = get('dom'), get('method'), get('action'), get('id')
+        return {'id': str(ident or '')[:64] or uuid.uuid4().hex, 'dom': int(dom) if dom is not None else -1,
+                'method': str(method or '')[:16], 'action': str(action or '')[:2000]}
+    except Exception:
+        return None
+
+
 def _cookie_row(cookie):
     expires = cookie.expiresDate()
     same_site = None
@@ -744,8 +958,15 @@ def _delegate_class():
     import WebKit
     import objc
 
-    class AgentOSBrowserDelegate(Foundation.NSObject):
+    class AgentOSBrowserDelegate(Foundation.NSObject, protocols=[objc.protocolNamed('WKScriptMessageHandler')]):
         worker = objc.ivar()
+
+        def userContentController_didReceiveScriptMessage_(self, controller, message):
+            # Registered for the client world only: the page world cannot post here (#698).
+            try:
+                self.worker.receive_cancelled(message.body())
+            except Exception:
+                pass
 
         def webView_decidePolicyForNavigationAction_decisionHandler_(self, view, action, handler):
             # Every navigation: typed, redirect, form, window.open, frame.

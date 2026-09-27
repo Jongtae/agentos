@@ -73,7 +73,7 @@ from .context_observations import ContextObservations
 from .current_context import CurrentContext, KNOWN_SECRET_NAMES, redact_known_secrets
 # SEC-ATTN-01 (#659): owner-accepted preparations (reminders, prepared answers).
 from . import preparations as prep
-from .browser_session import BrowserProfile, binding_digest
+from .browser_session import BrowserProfile, ascii_host, binding_digest, registrable_domain
 from .browser_jar import unexpired
 from .cli_browser_relay import BrowserRelay
 from .telegram_presence import (BETWEEN_STEPS_TEXT, CONTROL_DETAILS, CONTROL_RETRY, THINKING_DRAFT_TEXT, WAIT_CHAT_ACTION, WAIT_DRAFT, PresenceTiming,
@@ -252,13 +252,25 @@ BROWSER_LOGINS_KEY='browser_login_requests'
 BROWSER_LOGIN_SECONDS=600
 #: #709: finished login rows are kept this long so a Work is asked only once.
 BROWSER_LOGIN_KEEP_SECONDS=86400
+#: #716: how long an asked close may take (final cookie export, worker quit) before the login
+#: settles as not closed.  Nothing waits for it; the Work is never re-queued before it finished.
+BROWSER_LOGIN_CLOSE_SECONDS=60
 #: What the model reads for a login_required page when the owner will be asked in-flow.
 BROWSER_LOGIN_OFFERED_TEXT=('이 페이지는 로그인이 필요합니다. 이 실행이 끝나면 AgentOS가 이 Mac에 로그인 창을 열고 소유자에게 '
                             '로그인을 요청합니다. 소유자가 로그인하고 창을 닫으면 이 요청을 한 번 이어서 처리합니다. '
                             '비밀번호는 입력하지 말고, 지금까지 확인한 내용으로 이번 답을 마치세요.')
-BROWSER_LOGIN_PROMPT=('{host} 로그인이 필요합니다. 이 Mac에 열린 AgentOS 로그인 창에서 직접 로그인한 뒤 창을 닫거나 '
-                      '"로그인 완료"를 누르면 요청을 한 번 이어서 처리합니다. "건너뛰기"를 누르면 지금까지의 결과로 마칩니다. '
+#: #716: the site (registrable domain) leads the prompt, so a lookalike host
+#: (``example.com.lookalike.io``) reads as the site it is (``lookalike.io``).
+BROWSER_LOGIN_PROMPT=('로그인 요청 사이트: {site}\n'
+                      '{address}{session}'
+                      '이 Mac에 열린 AgentOS 로그인 창에서 직접 로그인한 뒤 창을 닫거나 "로그인 완료"를 누르면 요청을 한 번 '
+                      '이어서 처리합니다. 예상한 사이트가 아니면 로그인하지 말고 건너뛰세요. 지금까지의 결과로 마칩니다. '
                       '10분 안에 응답이 없으면 창을 닫습니다. AgentOS는 로그인 창의 입력 내용을 보지 않습니다.')
+#: The full host, shown only when it is longer than the site.
+BROWSER_LOGIN_ADDRESS_LINE='전체 주소: {host}\n'
+#: #716: shown when AgentOS holds no stored sign-in for that site (a first login, or a lookalike).
+BROWSER_LOGIN_NO_SESSION_LINE='주의: 이 사이트에는 저장된 로그인 세션이 없습니다. 처음 로그인하는 사이트가 맞는지 확인하세요.\n'
+BROWSER_LOGIN_SKIP_LABEL='예상한 사이트가 아니면 건너뛰기'
 BROWSER_LOGIN_RESULT_TEXT={'resumed':'로그인 창을 닫고 요청을 한 번 이어서 처리합니다.',
                            'skipped':'로그인을 건너뛰었습니다. 요청은 지금까지의 결과로 마칩니다.',
                            'expired':'로그인 요청 시간이 지나 창을 닫았습니다. 요청은 지금까지의 결과로 마칩니다.',
@@ -3678,7 +3690,8 @@ class AgentService:
                                   'host':row.get('host',''),'state':row.get('state'),'requested_at':row.get('requested_at')}
                                  for row in self.browser_step_requests()]
         # #709: logins waiting for the owner (host and times only); decided at /api/browser/login/decision.
-        status['pending_logins']=[{'work_id':row['work_id'],'host':row.get('host',''),'offered_at':row.get('offered_at'),
+        status['pending_logins']=[{'work_id':row['work_id'],'host':row.get('host',''),'site':row.get('site'),
+                                   'stored_session':row.get('stored_session'),'offered_at':row.get('offered_at'),
                                    'deadline':row.get('deadline')}
                                   for row in self.browser_login_requests().values()
                                   if isinstance(row,dict) and row.get('state')=='offered']
@@ -3816,8 +3829,10 @@ class AgentService:
     # cookies were saved into the encrypted jar and the profile was released,
     # the Work is re-queued once by compare-and-set.  Telegram 로그인 완료 /
     # 건너뛰기 (``p7l:``) and the web decision are optional: they mark the row
-    # and the work loop (``process_browser_logins``, never a poll or HTTP
-    # thread) closes the window and settles it.  A window that could not be
+    # and ask the window to close.  No thread waits for a window (#716): the
+    # window shows and closes on its own thread, which settles the login once
+    # it closed and saved (the work loop's ``process_browser_logins`` covers
+    # the deadline, a close that never finished and a restart).  A window that could not be
     # closed and saved (or that a restart forgot) expires the row instead: the
     # Work is not re-queued, the owner is told once, and the next login page
     # may ask again.  ``BROWSER_LOGIN_SECONDS`` without a decision closes the
@@ -3853,10 +3868,14 @@ class AgentService:
         if parts.scheme not in ('http','https') or not host or not self.browser_profile.available():
             return None
         target=url if '[가림]' not in url else f'{parts.scheme}://{parts.netloc}/'
+        # #716: whether a sign-in for this site was stored before this Work: read now, while the
+        # run still holds its session, before its close exports the login page's own cookies.
+        before=self._login_cookie_marks({'host':host})
+        stored=None if before is None else bool(unexpired(before['marks'],before['at']))
         with self.lock:
             existing=self._browser_login(job['id'])
             if existing is not None and existing.get('state') not in BROWSER_LOGIN_REASK_STATES:return None
-            self._put_browser_login(job['id'],{'work_id':job['id'],'url':target,'host':host,
+            self._put_browser_login(job['id'],{'work_id':job['id'],'url':target,'host':host,'stored_session':stored,
                                                'state':'requested','requested_at':time.time(),
                                                'nonce':secrets.token_hex(16)})
         return BROWSER_LOGIN_OFFERED_TEXT
@@ -3864,36 +3883,46 @@ class AgentService:
     def offer_browser_login(self, job):
         """After a Work's run: show the login window it asked for and ask the owner (#709).
 
-        Returns True when the window opened.  A window that cannot open
+        Never waits for the window (#716): the profile is taken here, so the
+        next Work cannot take it first, and the window shows on its own
+        thread (``_browser_login_opened``), which then arms the prompt.
+        Returns True when the window is opening.  A window that cannot open
         (another holder, no engine) records the row as ``unavailable``; the
         Work keeps its ended state.
         """
         row=self._browser_login(job['id'])
         if not row or row.get('state')!='requested':return False
-        # Offered before the window can close, so an owner who closes it at once is still heard.
         # The site's stored sign-in cookies before the window: a login is evidenced by their change.
         now=time.time()
-        row={**row,'cookies_before':self._login_cookie_marks(row)}
-        self._put_browser_login(job['id'],{**row,'state':'offered','window':None,'offered_at':now,
-                                           'deadline':now+BROWSER_LOGIN_SECONDS})
+        row={**row,'cookies_before':self._login_cookie_marks(row),'site':registrable_domain(row['host'])}
+        work_id,nonce=job['id'],row['nonce']
+        self._put_browser_login(work_id,{**row,'state':'opening','window':None,'offered_at':now,
+                                         'deadline':now+BROWSER_LOGIN_SECONDS})
         try:
-            opened=self.browser_profile.open_for_login(row['url'],seconds=BROWSER_LOGIN_SECONDS,
-                                                       on_closed=self._browser_login_window_closed)
+            opened=self.browser_profile.open_for_login(
+                row['url'],seconds=BROWSER_LOGIN_SECONDS,
+                on_opened=lambda window:self._browser_login_opened(work_id,nonce,window),
+                on_closed=lambda window,reason,saved:self._browser_login_window_closed(work_id,nonce,window))
         except (ValueError,OSError):
             opened={'state':'failed'}
-        if not isinstance(opened,dict) or opened.get('state')!='opened':
-            self._put_browser_login(job['id'],{**row,'state':'unavailable','closed_at':time.time()})
-            LOG.info('browser login window not shown work=%s state=%s',job['id'],opened.get('state') if isinstance(opened,dict) else None)
+        if not isinstance(opened,dict) or opened.get('state')!='opening':
+            self._put_browser_login(work_id,{**row,'state':'unavailable','closed_at':time.time()})
+            LOG.info('browser login window not shown work=%s state=%s',work_id,opened.get('state') if isinstance(opened,dict) else None)
             return False
         with self.lock:
-            current=self._browser_login(job['id']) or {}
-            if current.get('state')=='offered' and current.get('nonce')==row['nonce']:
-                self._put_browser_login(job['id'],{**current,'window':opened.get('window')})
-        # Settle a window the owner already closed while it was being recorded.
-        self._reconcile_browser_login(job['id'])
-        if (self._browser_login(job['id']) or {}).get('state')=='offered':
-            self._arm_login_notification(job,row['nonce'])
+            current=self._browser_login(work_id) or {}
+            if current.get('nonce')==nonce and current.get('state') in ('opening','offered') and not current.get('window'):
+                self._put_browser_login(work_id,{**current,'window':opened.get('window')})
         return True
+
+    def _browser_login_opened(self, work_id, nonce, window):
+        """``open_for_login``'s ``on_opened`` (the window's thread): the window shows, ask the owner."""
+        with self.lock:
+            row=self._browser_login(work_id)
+            if not row or row.get('state')!='opening' or row.get('nonce')!=nonce:return
+            self._put_browser_login(work_id,{**row,'state':'offered','window':window})
+        job=self.store.job(work_id)
+        if job:self._arm_login_notification(job,nonce)
 
     def _login_cookie_marks(self, row):
         """``{'at': jar time, 'marks': [[keyed digest, expires], ...]}`` of the login host's stored
@@ -3927,8 +3956,14 @@ class AgentService:
                        (nonce,time.time(),job['id'],nonce))
 
     def browser_login_prompt(self, work_id):
+        """The owner's login prompt: the site first, the full host when longer, and a note when no
+        sign-in for that site is stored (#716).  Names only; never the page path."""
         row=self._browser_login(work_id) or {}
-        return BROWSER_LOGIN_PROMPT.format(host=row.get('host') or '이 사이트')
+        host=ascii_host(row.get('host'))
+        site=row.get('site') or registrable_domain(host) or '이 사이트'
+        return BROWSER_LOGIN_PROMPT.format(
+            site=site,address=BROWSER_LOGIN_ADDRESS_LINE.format(host=host) if host and host!=site else '',
+            session=BROWSER_LOGIN_NO_SESSION_LINE if row.get('stored_session') is False else '')
 
     def browser_login_decision(self, body):
         """The owner's optional web decision on one offered login: ``done`` resumes once, ``skip`` finishes.
@@ -3948,21 +3983,35 @@ class AgentService:
             if not row or row.get('state')!='offered' or not hmac.compare_digest(str(row.get('nonce','')),str(nonce or '')):
                 return {'work_id':work_id,'state':None}
             self._put_browser_login(work_id,{**row,'state':'closing','intent':intent,'decided_at':time.time()})
+        # #716: only asks the window to close (never waits); its own thread settles it once closed and saved.
+        self.browser_profile.close_login_window(row.get('window'),timeout=0)
         return {'work_id':work_id,'state':'closing','intent':intent}
 
-    def _browser_login_window_closed(self, window, reason, saved):
-        """``BrowserProfile.open_for_login``'s ``on_closed``: the window closed, was saved and released."""
-        for work_id,row in list(self.browser_login_requests().items()):
-            if isinstance(row,dict) and window and row.get('window')==window:
-                self._reconcile_browser_login(work_id)
+    def _browser_login_window_closed(self, work_id, nonce, window):
+        """``BrowserProfile.open_for_login``'s ``on_closed`` (the window's thread): the window closed,
+        was saved and released.  One that never showed leaves its login ``unavailable``."""
+        with self.lock:
+            row=self._browser_login(work_id)
+            if not row or row.get('nonce')!=nonce:return
+            if row.get('state')=='opening':
+                self._put_browser_login(work_id,{**row,'state':'unavailable','window':window,'closed_at':time.time()})
+                return
+        self._reconcile_browser_login(work_id)
 
     def _reconcile_browser_login(self, work_id, now=None):
         """Settle one waiting login from what its window did (#709).  Returns the final state or None.
 
         * a window this process does not know (a restart) -> ``expired``;
-        * a decision was recorded -> close the window now, then settle it;
+        * a decision was recorded (or the deadline passed, recorded as an
+          ``expire`` decision) -> ask the window to close, and settle it once
+          it has closed and saved: its ``on_closed`` or a later pass does;
         * the owner closed the window -> resume (only if its cookies were saved);
-        * the window timed out or failed, or the deadline passed -> ``expired``.
+        * the window timed out or failed -> ``expired``.
+
+        Never waits for the window (#716): this runs on the work loop and on
+        the window's own thread.  A close that has not finished
+        ``BROWSER_LOGIN_CLOSE_SECONDS`` after it was asked settles as not closed, so
+        the Work is never re-queued while the window may still hold the profile.
         """
         now=time.time() if now is None else now
         row=self._browser_login(work_id)
@@ -3970,15 +4019,24 @@ class AgentService:
         window,nonce=row['window'],row.get('nonce')
         if not self.browser_profile.login_window_known(window):
             return self._settle_browser_login(work_id,nonce,'expire',closed=False)
-        if row['state']=='closing':
-            closed=self.browser_profile.close_login_window(window)
-            return self._settle_browser_login(work_id,nonce,row.get('intent'),closed=closed,
-                                              changed=closed and self._login_cookies_changed(row))
         outcome=self.browser_profile.login_window_outcome(window)
-        if outcome is None:
-            if now<float(row.get('deadline') or 0):return None
-            closed=self.browser_profile.close_login_window(window)
-            return self._settle_browser_login(work_id,nonce,'expire',closed=closed)
+        if row['state']=='offered' and outcome is None and now>=float(row.get('deadline') or 0):
+            with self.lock:
+                current=self._browser_login(work_id)
+                if current and current.get('state')=='offered' and current.get('nonce')==nonce:
+                    row={**current,'state':'closing','intent':'expire','decided_at':now}
+                    self._put_browser_login(work_id,row)
+        if row['state']=='closing':
+            if outcome is None:
+                self.browser_profile.close_login_window(window,timeout=0)
+                outcome=self.browser_profile.login_window_outcome(window)
+            if outcome is None:
+                if now<float(row.get('decided_at') or 0)+BROWSER_LOGIN_CLOSE_SECONDS:return None
+                return self._settle_browser_login(work_id,nonce,row.get('intent'),closed=False)
+            closed=outcome[1]
+            return self._settle_browser_login(work_id,nonce,row.get('intent'),closed=closed,
+                                              changed=closed and row.get('intent')!='expire' and self._login_cookies_changed(row))
+        if outcome is None:return None
         reason,saved=outcome
         if reason=='owner':
             return self._settle_browser_login(work_id,nonce,'owner_close',closed=saved,
@@ -4063,10 +4121,18 @@ class AgentService:
             state=row.get('state')
             if state in ('offered','closing'):
                 if self._reconcile_browser_login(work_id,now=now):settled.append(work_id)
+            elif state=='opening' and (not self.browser_profile.login_window_known(row.get('window'))
+                                       or now-float(row.get('offered_at') or 0)>=BROWSER_LOGIN_SECONDS):
+                # A window a restart forgot, or one that never showed: nothing to settle, ask again later.
+                if row.get('window'):self.browser_profile.close_login_window(row['window'],timeout=0)
+                with self.lock:
+                    current=self._browser_login(work_id)
+                    if current and current.get('state')=='opening' and current.get('nonce')==row.get('nonce'):
+                        self._put_browser_login(work_id,{**current,'state':'unavailable','closed_at':now})
             elif state=='requested' and now-float(row.get('requested_at') or 0)>=BROWSER_LOGIN_SECONDS:
                 # The run that asked never finished (a restart): nothing to show.
                 self._put_browser_login(work_id,{**row,'state':'expired','cause':'expired','closed_at':now})
-            elif state not in ('requested','offered','closing','resuming') and now-float(row.get('closed_at') or 0)>=BROWSER_LOGIN_KEEP_SECONDS:
+            elif state not in ('requested','opening','offered','closing','resuming') and now-float(row.get('closed_at') or 0)>=BROWSER_LOGIN_KEEP_SECONDS:
                 self._put_browser_login(work_id,None)
         return settled
 
@@ -4497,7 +4563,7 @@ class AgentService:
                     return True
                 reply_markup={'inline_keyboard':[[
                     {'text':'로그인 완료','callback_data':f"p7l:{notification['id']}:done"},
-                    {'text':'건너뛰기','callback_data':f"p7l:{notification['id']}:skip"},
+                    {'text':BROWSER_LOGIN_SKIP_LABEL,'callback_data':f"p7l:{notification['id']}:skip"},
                 ]]}
             elif notification['kind']=='preparation_proposed':
                 # #659: the exact proposals of one Work; changed since -> not offered.

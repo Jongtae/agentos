@@ -41,10 +41,13 @@ the macOS Keychain for the jar; ``ToolError``, the Work budget, the lookup
 redactor and the exact-approval binding are the existing AgentOS symbols.  No
 site, provider or category is named anywhere in this module.
 """
+import functools
 import hashlib
 import importlib.util
+import ipaddress
 import itertools
 import json
+import logging
 import os
 import queue
 import shutil
@@ -54,6 +57,7 @@ import subprocess
 import sys
 import threading
 import time
+import unicodedata
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -811,6 +815,51 @@ def local_destination(url, allowed_origins=()):
     return local_url(url, allowed_origins)
 
 
+LOG = logging.getLogger(__name__)
+
+
+@functools.lru_cache(maxsize=1)
+def _public_suffix_list():
+    """The Mozilla Public Suffix List (``publicsuffixlist``'s bundled copy; never fetched), or None when absent."""
+    try:
+        from publicsuffixlist import PublicSuffixList
+    except ImportError:
+        LOG.warning('publicsuffixlist is not installed: login prompts show the whole host (pip install -e .)')
+        return None
+    return PublicSuffixList()
+
+
+def ascii_host(host):
+    """``host`` in ASCII, every non-ASCII label as its raw punycode (RFC 3492), so a lookalike is shown as spelled (#716).
+
+    Never raw Unicode and never an IDNA2003 mapping (the stdlib ``idna``
+    codec turns ``ß`` into ``ss``, another real domain, and rejects labels
+    WebKit's UTS #46 processing loads).  Only the compatibility folding UTS
+    #46 also applies is kept: NFKC, lowercase, the ideographic full stop as
+    a dot and a dropped soft hyphen; a label is never otherwise rewritten.
+    """
+    host = unicodedata.normalize('NFKC', str(host or '')).replace('\u3002', '.').replace('\u00ad', '').strip().lower().rstrip('.')
+    return '.'.join(label if label.isascii() else 'xn--' + label.encode('punycode').decode('ascii')
+                    for label in host.split('.'))
+
+
+def registrable_domain(host):
+    """The registrable domain (eTLD+1) of ``host`` by the Public Suffix List, in ASCII form (#716).
+
+    ``accounts.example.com.lookalike.io`` -> ``lookalike.io``; ``shop.example.co.kr``
+    -> ``example.co.kr``.  An IP literal, a bare public suffix, or a missing
+    list gives the whole host back: never a shorter name than the list supports.
+    """
+    host = ascii_host(host)
+    try:
+        ipaddress.ip_address(host.strip('[]'))
+        return host
+    except ValueError:
+        pass
+    psl = _public_suffix_list()
+    return (psl.privatesuffix(host) if psl is not None and host else None) or host
+
+
 #: Environment names a worker inherits: nothing else (no provider keys, tokens
 #: or AgentOS settings).  ``PYTHONPATH`` lets a source checkout find the package.
 WORKER_ENVIRONMENT = ('PATH', 'HOME', 'USER', 'LOGNAME', 'TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE', 'PYTHONPATH')
@@ -1414,7 +1463,7 @@ class BrowserProfile:
         return result
 
     # -- the owner's login window ------------------------------------------------------
-    def open_for_login(self, url, wait=False, seconds=None, on_closed=None):
+    def open_for_login(self, url, wait=False, seconds=None, on_closed=None, on_opened=None):
         """Show the worker window at ``url`` for the owner to log in by hand.
 
         AgentOS navigates to ``url`` and does nothing else: no typing, no
@@ -1428,6 +1477,12 @@ class BrowserProfile:
         on the window's thread.  ``reason`` is ``owner`` (the owner closed the
         window), ``closed`` (``close_login_window``), ``timeout`` or
         ``failed``; ``saved`` is whether the final save into the jar succeeded.
+
+        #716: with ``on_opened`` the caller does not wait for the window to
+        show: the profile is taken here (``busy`` is still answered at once)
+        and the result is ``opening``; ``on_opened(window)`` is called on the
+        window's thread once it shows, and a window that never showed calls
+        only ``on_closed(window, 'failed', False)``.
         """
         if not self.available():
             return {'state': 'unavailable', 'reason': self.unavailable_reason(), 'message': self.unavailable_message()}
@@ -1464,6 +1519,11 @@ class BrowserProfile:
                 else:
                     driver.goto(url, ACTION_TIMEOUT_SECONDS)
                 opened.set()
+                if on_opened is not None:
+                    try:
+                        on_opened(window_id)
+                    except Exception:
+                        pass
                 deadline = self.clock() + lifetime
                 saved = self.clock()
                 while driver.is_open() and self.clock() < deadline and not stop.is_set():
@@ -1495,6 +1555,8 @@ class BrowserProfile:
         self._login_thread.start()
         if wait:
             self._login_thread.join()
+        elif on_opened is not None:
+            return {'state': 'opening', 'url': page_reference(url), 'message': LOGIN_WINDOW_TEXT, 'window': window_id}
         else:
             opened.wait(LOGIN_OPEN_SECONDS + WORKER_START_SECONDS + 5)
         if failure:
@@ -1529,6 +1591,8 @@ class BrowserProfile:
         final cookie save into the jar succeeded and the profile was
         released.  False when this process never opened it (a restart), it
         did not finish closing in ``timeout`` seconds, or the save failed.
+        ``timeout=0`` only asks it to close and never waits (#716): the
+        caller reads ``login_window_outcome`` later.
         """
         record = self._login_windows.get(window) if window else None
         if record is None:

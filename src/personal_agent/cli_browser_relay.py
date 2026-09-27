@@ -176,6 +176,12 @@ class BrowserRelay:
                 return {'error': _error_payload(exc)}
             if action in BROWSER_ACTIONS:
                 self._page = result_page_digest(value) or self._page
+            else:
+                # #774 review: the service reads typed owner-state results (a missing
+                # connector's ``needs_setup``) after the turn, as the direct route's memo.
+                memo = getattr(self.tools.capabilities, 'memo', None)
+                if isinstance(memo, dict):
+                    memo[(name, json.dumps(arguments, sort_keys=True, ensure_ascii=False))] = value
             return {'ok': value}
 
     def close(self):

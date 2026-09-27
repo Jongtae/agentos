@@ -1485,3 +1485,54 @@ class HostRelayRouting(unittest.TestCase):
         facade.relay = Relay()
         self.assertEqual(facade.call('save_memory', {'memory_key': 'k', 'content': 'v'}), {'relayed': 'save_memory'})
         self.assertEqual(facade.relay.calls, ['save_memory'])
+
+
+class RelayAuthority(Harness):
+    """#774 review: the relay grants nothing beyond the turn's own offered set."""
+
+    def test_a_direct_relay_call_to_a_withheld_private_read_is_refused_by_the_service(self):
+        from personal_agent.cli_browser_relay import BrowserRelay, RelayClient
+        seen = {}
+
+        def work(tools):
+            # A native-search turn: list_memory is withheld (#678).  The CLI can read the relay key,
+            # so it tries the socket directly; the service-side facade refuses it.
+            relay = BrowserRelay(tools)
+            try:
+                try:
+                    RelayClient(relay.address).call('list_memory', {})
+                    seen['result'] = 'ran'
+                except Exception as exc:
+                    seen['result'] = type(exc).__name__
+            finally:
+                relay.close()
+        self.engine.before = work
+        self.script([plan('codex', 'Answer.')], goals=[True])
+        self.run_work('알려줘')
+        self.assertTrue(self.engine.turns[0]['native_search'])
+        self.assertNotIn('list_memory', self.engine.turns[0]['offered'])
+        self.assertEqual(seen['result'], 'ExecutionError')
+
+    def test_a_relayed_owner_state_result_reaches_the_service_memo(self):
+        """The CLI route's connector park reads the same typed result the direct route's memo holds."""
+        from personal_agent.cli_browser_relay import BrowserRelay, RelayClient
+        needs = {'needs_setup': True, 'requires': 'google-calendar'}
+
+        class Tools:
+            def __init__(self):
+                self.capabilities = type('C', (), {'tools': {'calendar_query': {'host_action': 'calendar_query'}},
+                                                   'memo': {}})()
+
+            def call(self, name, arguments):
+                return needs
+        tools = Tools()
+        relay = BrowserRelay(tools)
+        try:
+            RelayClient(relay.address).call('calendar_query', {'start': 's', 'end': 'e', 'timezone': 'Asia/Seoul'})
+        finally:
+            relay.close()
+        self.assertEqual(list(tools.capabilities.memo.values()), [needs])
+        # The service's own park decision reads it (#606 T5 logic, unchanged).
+        self.service.connector_handoff = type('H', (), {'known': staticmethod(lambda cid: cid == 'google-calendar')})()
+        self.service.attempted_only_reads = lambda job_id: True
+        self.assertEqual(self.service.connector_read_need(tools.capabilities, 'job'), 'google-calendar')

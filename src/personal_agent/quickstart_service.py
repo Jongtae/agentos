@@ -5837,6 +5837,14 @@ class AgentService:
                             # request was satisfied; the Work's own events decide.
                             outcome,cli_refusals=self.cli_work_outcome(job['id'],capabilities.tools,since=attempt_start)
                             refusals.extend(cli_refusals)
+                            # #774 review: a relayed calendar read with no connection parks the Work
+                            # for the connector handoff and resumes it once, as on the direct route.
+                            connector_need=self.connector_read_need(capabilities,job['id']) if cli_browser else None
+                            if connector_need:
+                                self.record_work_sources(job['id'],work_sources|capabilities.private_provenance)
+                                self.record_turn_provenance(job['id'],status='setup-required')
+                                if self.park_for_connector_read(job,connector_need,calendar_notice):
+                                    return True
                             if self._work_has_unknown_effect(job['id']):
                                 outcome='unknown';unknown_statement=response
                             resolved_blocker=result.exit_code==0 and outcome=='succeeded'

@@ -327,7 +327,10 @@ def bridge_tool_bound(actions):
     search = max(SEARCH_TIMEOUT_SECONDS, NATIVE_MAX_REQUESTS * NATIVE_TIMEOUT_SECONDS)
     own = {'web_search': search, 'bounded_public_research': search + MAX_RESEARCH_PAGES * MAX_PAGE_SECONDS,
            # local_tools.LocalTools.weather: geocoding (10 s) then the forecast (15 s).
-           'weather': 10 + 15, 'public_page_read': MAX_PAGE_SECONDS}
+           'weather': 10 + 15, 'public_page_read': MAX_PAGE_SECONDS,
+           # #774 review: a relayed write asks the Judgment AI (explicit memory / preparation
+           # request) before it commits; one decision call is bounded by DEFAULT_TOOL_SECONDS.
+           'save_memory': 2 * DEFAULT_TOOL_SECONDS, 'schedule_preparation': 2 * DEFAULT_TOOL_SECONDS}
     bounds = [CALL_SECONDS if action in BROWSER_ACTIONS else own.get(action, DEFAULT_TOOL_SECONDS)
               for action in actions or ()]
     return max(bounds, default=DEFAULT_TOOL_SECONDS)
@@ -1720,7 +1723,7 @@ class BoundedExecutionAdapter:
             # #678: the facade says whether this turn may use the CLI's own web search.
             # #729: the bridge tools this turn offers bound Codex's per-call timeout.
             offered = [action for action in turn_actions(profile, native_search, only)
-                       if relay is not None or action not in _BROWSER_ACTIONS]
+                       if (relay is not None and getattr(tools, 'relay_browser', True)) or action not in _BROWSER_ACTIONS]
             argv = self.command(engine_id, binary, prompt, config, instructions, profile=profile, disabled_features=disabled,
                                 model=model or None, native_search=native_search, only=only,
                                 tool_timeout=bridge_tool_timeout(offered, timeout))

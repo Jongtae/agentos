@@ -15,7 +15,7 @@ from .agent_runtime import (Capabilities, ToolError, run_agent, AGENTS, evidence
                             MEMORY_OWNER, context_sections, CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, OWNER_CONVERSATION, lookup_sources, work_written_values, WORK_SOURCES_KEY, WORK_SOURCES_LIMIT, base_label,
                             history_provenance, WorkBudget, EFFECT_FREE_READS, explicit_search_query, outcome_from_events,
                             WORK_STOP_KEY, WORK_STOP_KEEP, work_stop_requested, WorkLedger, goal_summary, work_source_records,
-                            backfill_work_sources, work_direct_sources, NOTES_SUMMARY_COMMANDS, WORK_SOURCES_BACKFILL_KEY, WORK_SOURCES_BACKFILL_VERSION)
+                            backfill_work_sources, NOTES_SUMMARY_COMMANDS, WORK_SOURCES_BACKFILL_KEY, WORK_SOURCES_BACKFILL_VERSION)
 from .plugins import PluginRegistry
 from .providers import NOT_REPORTED, ModelAdapter, ProviderError, request_json, validate_model
 from .decision import DEFAULT_DECISION_PROVIDER, RoutedDecisionEngine
@@ -753,36 +753,27 @@ class AgentService:
         # #678: forget a remembered "unavailable"; the next use checks again.
         return self.search_settings.recheck_native(_body)
 
-    #: #678 P1: sources whose presence anywhere in a CLI prompt keeps the CLI's own
-    #: web search off (its queries are not composed or redacted by AgentOS).
-    #: #701 (owner decision, pilot posture): the owner-logged-in browser session is
-    #: not on this list.  Its output reaches the CLI only mediated (credential,
-    #: one-time-code and card fields withheld, saved private values redacted),
-    #: and the browser tools stay on native-search turns; a later turn that was
-    #: shown a browser read keeps native search.  #605 inheritance of the label is
-    #: unchanged for every other use (public lookups, envelope storage).
-    NATIVE_SEARCH_PRIVATE_SOURCES=frozenset({'personal-space','owner-context-inbox','connected-drive-file','connected-document',
-                                             'owner-memory','owner-folder-names','owner-calendar','owner-mail','owner-settings',
-                                             'conversation-history','unrecorded','unattributed-tool-evidence'})
-
-    def native_search_blocked(self, labels):
-        """The private-store labels (without route prefixes) that keep CLI native search off."""
-        return sorted({base_label(label) for label in labels or ()} & self.NATIVE_SEARCH_PRIVATE_SOURCES)
-
     def cli_native_search(self, engine, profile, isolated, turn_provenance):
-        """``(enabled, reason)`` for the CLI's own web search in one Work turn (#678).
+        """``(enabled, reason)`` for the CLI's own web search in one Work turn (#678, #705).
 
-        Enabled on the trusted-local host route unless this turn carries
-        spliced private material (a document, Drive file, context inbox or
-        notes: the CLI's own search query is not composed by AgentOS), or the
-        last observed run showed it unavailable on this CLI.  Never under the
-        strict-isolated profile or the isolated engine.
+        Enabled on the trusted-local host route unless this turn itself
+        carries spliced private material (``turn_provenance``: a document,
+        Drive file, context inbox, ``/summarize`` or notes pasted into the
+        prompt at turn start), or the last observed run showed it unavailable
+        on this CLI.  Never under the strict-isolated profile or the isolated
+        engine.
+
+        #705 (owner direction, pilot posture): earlier conversation the CLI is
+        shown never turns it off.  The CLI's own search runs at the owner's
+        configured AI provider, whose egress the pilot posture accepts.  The
+        private-read bridge tools stay withheld on a native-search turn
+        (``bounded_execution.native_search_withheld``), and the #605 history
+        inheritance is unchanged for AgentOS-composed third-party lookups and
+        turn-record storage.
         """
         if isolated:return False,'strict_profile'
         if profile!=BOUNDED_PROFILE:return False,'strict_profile'
         if turn_provenance:return False,'private_turn'
-        # The shown history is checked by the caller once the prompt is built
-        # (``native_search_blocked``), before the CLI starts.
         status=ProviderRegistry.from_store(self.store).native_status()
         if status.get('route')==engine and status.get('state')=='unavailable':return False,status.get('reason') or 'refused'
         return True,''
@@ -903,13 +894,16 @@ class AgentService:
     # records (Drive excerpts, the expiring context inbox, notes, documents,
     # Memory reads, calendar). A turn that carried any of them keeps only a
     # size and digest of what was sent, never the text (#570 review, major 1).
-    # #701 (pilot posture): the same private-store set that keeps the CLI's own
-    # web search off.  Unknown history (`unrecorded`), a CLI's unmediated-read
-    # note and the record-only profile / current-context / prepared-answers
-    # sections no longer withhold the envelope: it is stored locally, after the
-    # deterministic secret and saved-private-value redaction in
-    # ``record_turn_sent``, and never exported (``portable_state``).
-    PROVENANCE_WITHHELD_SOURCES=(NATIVE_SEARCH_PRIVATE_SOURCES|frozenset({'owner-browser-session'}))-frozenset({'unrecorded'})
+    # #701 (pilot posture): the private stores, including history-inherited
+    # ones (#605) and the owner-logged-in browser session.  Unknown history
+    # (`unrecorded`), a CLI's unmediated-read note and the record-only profile /
+    # current-context / prepared-answers sections no longer withhold the
+    # envelope: it is stored locally, after the deterministic secret and
+    # saved-private-value redaction in ``record_turn_sent``, and never exported
+    # (``portable_state``).
+    PROVENANCE_WITHHELD_SOURCES=frozenset({'personal-space','owner-context-inbox','connected-drive-file','connected-document',
+                                           'owner-memory','owner-folder-names','owner-calendar','owner-mail','owner-settings',
+                                           'conversation-history','unattributed-tool-evidence','owner-browser-session'})
 
     def record_turn_sent(self, job_id, *, sent, instructions, instructions_channel, private_sources=(), **fields):
         """Record what a turn sent; computed inside the guard so it can never break the turn."""
@@ -1996,22 +1990,6 @@ class AgentService:
         tools={tool['id']:tool for package in self.runtime_packages() for tool in package['tools']}
         self.backfill_legacy_work_sources(tools,document_jobs)
         return history_provenance(self.store,rows,tools,document_jobs)
-
-    def shown_direct_provenance(self, rows, document_jobs):
-        """The native-search gate's view of the shown messages (#701): each one's own Work sources.
-
-        Only what the shown messages' own Works read or wrote (their own private
-        tool events, spliced sources, document jobs and attachments), never the
-        ``history:*`` labels those Works inherited.  The #605 inheritance rule is
-        unchanged for every other purpose (``shown_history_provenance``).
-        """
-        if not rows:return set()
-        tools={tool['id']:tool for package in self.runtime_packages() for tool in package['tools']}
-        self.backfill_legacy_work_sources(tools,document_jobs)
-        records=work_source_records(self.store);labels=set()
-        for job_id in {row.get('job_id') for row in rows}:
-            labels|=work_direct_sources(self.store,job_id,tools,records,document_jobs)
-        return labels
 
     def backfill_legacy_work_sources(self, tools=None, document_jobs=None):
         """Record deterministic sources for pre-#605 Works once per store (#701).
@@ -4928,29 +4906,21 @@ class AgentService:
                                 prompt_text,adapter=current_request,None
                             # #605: the sources of exactly the earlier messages this
                             # CLI is shown, read from their Works' records.  An
-                            # unrecorded earlier Work closes public egress; a
-                            # greeting no longer does.  The AgentOS preflight lookup
-                            # above ran first, from this turn's raw request only.
+                            # unrecorded earlier Work closes AgentOS-composed public
+                            # egress; a greeting no longer does.  The AgentOS preflight
+                            # lookup above ran first, from this turn's raw request only.
                             conversation=context['conversation']
-                            shown_rows[:]=history_rows[:-1][-len(conversation):] if conversation else []
+                            shown_rows=history_rows[:-1][-len(conversation):] if conversation else []
                             labels=self.shown_history_provenance(shown_rows,document_jobs)
                             return context,prompt_text,adapter,sent_text,labels
-                        # #678 P1: the CLI's own web search is decided from the whole
-                        # prompt's provenance - this turn's spliced sources and the
-                        # sources of every earlier message the CLI is shown - and is
-                        # off when any of them is a private store.  #701: for this gate
-                        # only, a shown message counts with what its own Work read
-                        # (``shown_direct_provenance``), not the inherited history chain,
-                        # so a private read blocks while its messages are shown.
-                        shown_rows=[]
+                        # #678/#705: the CLI's own web search is decided before the
+                        # prompt is built, from this turn's own splices, the profile
+                        # and a remembered refusal only.  Earlier conversation never
+                        # turns it off (#705, pilot posture); its #605 labels still
+                        # close AgentOS-composed third-party lookups and are kept
+                        # for turn-record storage below.
                         native_search,native_reason=self.cli_native_search(subscription['id'],facade.PROFILE,isolated,turn_provenance)
                         engine_context,engine_prompt,adapter_context,sent,shown_sources=cli_context(native_search)
-                        if native_search:
-                            blocked=self.native_search_blocked(set(turn_provenance)|set(capabilities.private_provenance)
-                                                               |self.shown_direct_provenance(shown_rows,document_jobs))
-                            if blocked:
-                                native_search,native_reason=False,'private_history'
-                                engine_context,engine_prompt,adapter_context,sent,shown_sources=cli_context(False)
                         capabilities.private_provenance.update(shown_sources)
                         work_sources|=capabilities.private_provenance
                         # #605 F1: a trusted-local CLI may read host files AgentOS never

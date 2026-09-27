@@ -892,7 +892,8 @@ class ServiceIntegration(unittest.TestCase):
         self.assertEqual(preflight[1]['trace']['code'], 'native_search_unavailable')
         self.assertNotIn('AgentOS public search evidence', engine.calls[0]['prompt'])
 
-    def test_a_notes_answer_in_the_shown_history_turns_native_search_off(self):
+    def test_a_notes_answer_in_the_shown_history_no_longer_turns_native_search_off(self):
+        """#705 (pilot posture): earlier conversation never turns the CLI's own search off."""
         engine = _Engine()
         service = self.service(engine)
         store = service.store
@@ -905,10 +906,13 @@ class ServiceIntegration(unittest.TestCase):
         second = store.enqueue('오늘 서울 날씨 알려줘', 'after-notes')
         self.assertTrue(service.run_one())
         [launched] = engine.calls
-        self.assertFalse(launched['native_search'])
-        self.assertNotIn('built-in web search', launched['prompt'])
-        self.assertEqual(store.turn_provenance(second)['native_search_reason'], 'private_history')
-        self.assertEqual(store.turn_provenance(second)['cli_native_tools'], [])
+        self.assertTrue(launched['native_search'])
+        self.assertIn('built-in web search', launched['prompt'])
+        self.assertIsNone(store.turn_provenance(second).get('native_search_reason'))
+        self.assertEqual(store.turn_provenance(second)['cli_native_tools'], ['web_search'])
+        # #605 inheritance is unchanged for AgentOS-composed lookups and the turn record.
+        self.assertIn('history:personal-space', store.config('work_source_provenance', {}).get(second, []))
+        self.assertIn('personal-space', store.turn_provenance(second).get('prompt_withheld') or [])
 
     def test_a_turn_with_a_notes_read_keeps_native_search_off(self):
         engine = _Engine()

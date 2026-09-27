@@ -480,7 +480,7 @@ class LocalTools:
         # #655: the configured search providers; without an owner store none
         # is configured (#678: Bing RSS is an owner opt-in).
         self.providers=providers or ProviderRegistry.from_config({})
-    def search(self, query, provider=None, kind=None, locale=None):
+    def search(self, query, provider=None, kind=None, locale=None, budget=None):
         """One public web search through the provider the model named (#655).
 
         ``provider`` is an option id from ``self.providers.options()``
@@ -491,7 +491,9 @@ class LocalTools:
         if not isinstance(query,str) or not 1<=len(query.strip())<=500:raise ValueError('검색어는 1~500자로 입력하세요.')
         if provider is not None and not isinstance(provider,str):raise ValueError('검색 제공자 이름은 문자열이어야 합니다.')
         if kind is not None and not isinstance(kind,str):raise ValueError('검색 종류는 문자열이어야 합니다.')
-        return self.providers.search(query.strip(),provider=provider or None,kind=kind or None,locale=validate_locale(locale))
+        # #678: the Work budget reaches a native search, whose sub-call is a model turn.
+        return self.providers.search(query.strip(),provider=provider or None,kind=kind or None,locale=validate_locale(locale),
+                                     **({'budget':budget} if budget is not None else {}))
 
     def weather(self, city, country=''):
         if not isinstance(city,str) or not 1<=len(city.strip())<=100:raise ValueError('날씨를 조회할 도시를 알려 주세요.')
@@ -521,9 +523,12 @@ class LocalTools:
         location=dict(location or {'name':None,'latitude':latitude,'longitude':longitude})
         return {'tool':'weather','location':location,'retrieved_at':time.time(),'forecast':data,'sources':[url,'https://open-meteo.com/'],'scope':'Open-Meteo model-derived current weather and three-day forecast; report units and timestamps.'}
 
-    def execute(self, plan):
+    def execute(self, plan, budget=None):
         if plan.get('tool')=='web_search':
-            return self.search(plan.get('query'),provider=plan.get('provider'),kind=plan.get('kind'),locale=plan.get('locale'))
+            # A replaced ``search`` (a test stub) without a budget parameter keeps working.
+            import inspect
+            extra={'budget':budget} if budget is not None and 'budget' in inspect.signature(self.search).parameters else {}
+            return self.search(plan.get('query'),provider=plan.get('provider'),kind=plan.get('kind'),locale=plan.get('locale'),**extra)
         if plan.get('tool')=='public_page_read':return self.page_reader.read(plan.get('url'),plan.get('approved_urls'))
         if plan.get('tool')=='weather' and 'latitude' in plan:return self.forecast(plan.get('latitude'),plan.get('longitude'))
         if plan.get('tool')=='weather':return self.weather(plan.get('city'),plan.get('country',''))

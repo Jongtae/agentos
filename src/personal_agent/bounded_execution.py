@@ -254,7 +254,29 @@ def strict_launch_arguments(engine_id, disabled_features=()):
     raise ExecutionError('지원하는 구독 엔진을 선택하세요.')
 
 
-def claude_bridge_allowlist(profile):
+def native_search_withheld():
+    """Bridge actions a turn with the CLI's own web search never offers (#678 P1).
+
+    Every action whose result carries owner-private provenance
+    (``agent_runtime.PRIVATE_PROVENANCE``: notes, Memory, documents, folder
+    names, calendar, browser session).  The CLI writes its own search queries,
+    which AgentOS cannot compose or redact, so a turn that may search natively
+    cannot read those sources mid-turn.
+    """
+    from .agent_runtime import PRIVATE_PROVENANCE
+    return frozenset(PRIVATE_PROVENANCE)
+
+
+def turn_actions(profile, native_search=False):
+    """The bridge actions one turn offers: the profile's, minus private reads when native search is on."""
+    actions = profile_actions(profile)
+    if native_search:
+        withheld = native_search_withheld()
+        actions = tuple(action for action in actions if action not in withheld)
+    return actions
+
+
+def claude_bridge_allowlist(profile, native_search=False):
     """Claude Code's official ``--allowedTools`` rule for exactly the
     profile's AgentOS bridge tools (#623).
 
@@ -264,7 +286,7 @@ def claude_bridge_allowlist(profile):
     profile does not declare stays denied, and no built-in tool (Read, Bash,
     WebFetch, ...) is named, so their permission behaviour is unchanged.
     """
-    return ['--allowedTools', ','.join(f'mcp__agentos__{action}' for action in profile_actions(profile))]
+    return ['--allowedTools', ','.join(f'mcp__agentos__{action}' for action in turn_actions(profile, native_search))]
 
 
 _VERSION_PATTERNS = {'codex': re.compile(r'^codex-cli (\d+\.\d+\.\d+)\s*$'),
@@ -410,17 +432,25 @@ LOGIN_COMMANDS = {'claude-code': 'claude setup-token', 'codex': 'codex login'}
 CLAUDE_NATIVE_SEARCH_TOOL = 'WebSearch'
 MAX_NATIVE_SEARCHES = 10
 MAX_NATIVE_RESULTS = 10
-_HTTP_URL = re.compile(r'https?://[^\s/?#]+')
+#: A CLI's own words that its web search cannot run for this account or region
+#: (protocol classification of its tool error, as ``_NOT_SIGNED_IN``).  Any
+#: other tool error is a per-call failure, never a remembered refusal.
+_NATIVE_REFUSAL = re.compile(r'only available in|not available (?:in|for) (?:your|this) (?:region|country|location|account|plan)|'
+                             r'not supported in your (?:region|country)|web ?search (?:is )?(?:not enabled|disabled|unavailable|'
+                             r'not available)', re.I)
 
 
 def _native_row(value):
-    """``{title, url}`` of one reported search result, or None; URLs are never invented."""
-    if not isinstance(value, dict):
+    """``{title, url}`` of one reported search result, or None; URLs are never invented.
+
+    The URL must be a public http(s) URL with no whitespace or control
+    character (``search_providers.public_http_url``); a value carrying a
+    newline and appended text is refused whole.
+    """
+    from .search_providers import public_http_url
+    if not isinstance(value, dict) or not public_http_url(value.get('url')):
         return None
-    url = value.get('url')
-    if not isinstance(url, str) or len(url) > 2000 or not _HTTP_URL.match(url):
-        return None
-    return {'title': str(value.get('title') or '')[:300], 'url': url}
+    return {'title': ' '.join(str(value.get('title') or '').replace('\x7f', ' ').split())[:300], 'url': value['url']}
 
 
 def _codex_searches(records):
@@ -437,9 +467,10 @@ def _codex_searches(records):
         opened = _native_row({'url': action.get('url')})
         if opened and opened['url'] not in {row['url'] for row in rows}:
             rows.append(opened)
+        failed = str(item.get('status') or '') == 'failed'
         found.append({'id': str(item.get('id') or '')[:80], 'engine': 'codex', 'action': str(action.get('type') or 'search')[:20],
-                      'queries': list(dict.fromkeys(queries))[:5], 'results': rows[:MAX_NATIVE_RESULTS],
-                      'state': 'succeeded', 'reason': ''})
+                      'queries': list(dict.fromkeys(queries))[:5], 'results': [] if failed else rows[:MAX_NATIVE_RESULTS],
+                      'state': 'failed' if failed else 'succeeded', 'reason': ''})
     return found
 
 
@@ -470,12 +501,16 @@ def _claude_searches(records):
                             rows += [row for row in (_native_row(value) for value in block.get('content') or []) if row]
                 text = part.get('content') if isinstance(part.get('content'), str) else (reported if isinstance(reported, str) else '')
                 if part.get('is_error') is True or not isinstance(reported, dict):
-                    call.update(state='unavailable', reason=redact_reason(str(text or 'web search error')))
+                    # Only the CLI's own availability refusal is 'unavailable';
+                    # any other tool error is a failed call.
+                    state = 'unavailable' if _NATIVE_REFUSAL.search(str(text or '')) else 'failed'
+                    call.update(state=state, reason=redact_reason(str(text or 'web search error')))
                 else:
                     call.update(state='succeeded', results=rows[:MAX_NATIVE_RESULTS])
         for denial in record.get('permission_denials') or []:
             if isinstance(denial, dict) and denial.get('tool_name') == CLAUDE_NATIVE_SEARCH_TOOL:
-                call_for(str(denial.get('tool_use_id') or 'denied')).update(state='unavailable', reason='permission denied')
+                # A permission denial is AgentOS's own setting, not the CLI's availability.
+                call_for(str(denial.get('tool_use_id') or 'denied')).update(state='denied', reason='permission denied')
     return [call for call in calls.values() if call['state'] != 'requested']
 
 
@@ -487,11 +522,12 @@ def native_searches(engine_id, records):
     find_in_page with ``query``/``queries``/``url``, optional ``results``).
     Claude Code ``stream-json``: an assistant ``tool_use`` named
     ``WebSearch`` and the user record's ``tool_use_result`` (``query``,
-    ``results`` of ``{tool_use_id, content: [{title, url}]}`` or text).  A
-    tool result marked ``is_error``, a text-only result or a permission
-    denial is ``unavailable`` with the CLI's own redacted words as the
-    reason (the installed Claude Code says web search is US-only).  Only what
-    the CLI reported is kept: a search that reported no URL has none.
+    ``results`` of ``{tool_use_id, content: [{title, url}]}`` or text).
+    States: ``succeeded``; ``unavailable`` only for the CLI's own availability
+    refusal (the installed Claude Code says web search is US-only); ``failed``
+    for any other tool error; ``denied`` for a permission denial.  Only what
+    the CLI reported is kept: a search that reported no URL has none, and a
+    reported URL with whitespace or control characters is dropped.
     """
     if engine_id == 'codex':
         return _codex_searches(records)[:MAX_NATIVE_SEARCHES]
@@ -664,12 +700,15 @@ class AgentOSMcpTools:
     tool removed from the Work after discovery is refused, not remembered.
     """
     PROFILE = BOUNDED_PROFILE
+    #: #678: set for a turn that may use the CLI's own web search; private reads are then not offered.
+    native_search = False
 
-    def __init__(self, capabilities):
+    def __init__(self, capabilities, native_search=False):
         self.capabilities = capabilities
+        self.native_search = bool(native_search)
 
     def _offered(self):
-        allowed = set(profile_actions(self.PROFILE))
+        allowed = set(turn_actions(self.PROFILE, self.native_search and self.PROFILE == BOUNDED_PROFILE))
         return {definition['function']['name']: definition for definition in self.capabilities.definitions()
                 if definition['function']['name'] in allowed}
 
@@ -865,7 +904,8 @@ class BoundedExecutionAdapter:
                 argv += strict_launch_arguments('claude-code')
             elif native_search:
                 # Only WebSearch among the built-in tools, pre-approved by its exact name.
-                allow = claude_bridge_allowlist(BOUNDED_PROFILE)
+                # The private-read bridge tools are neither listed nor pre-approved (#678 P1).
+                allow = claude_bridge_allowlist(BOUNDED_PROFILE, native_search=True)
                 argv += ['--tools', CLAUDE_NATIVE_SEARCH_TOOL, allow[0], allow[1] + ',' + CLAUDE_NATIVE_SEARCH_TOOL]
             else:
                 argv += claude_bridge_allowlist(BOUNDED_PROFILE)
@@ -1172,6 +1212,9 @@ class BoundedExecutionAdapter:
         with tempfile.TemporaryDirectory(dir=self.runtime_root, prefix='turn-') as folder:
             run_dir = Path(folder)
             config = run_dir / 'agentos-mcp.json'
+            profile = getattr(tools, 'PROFILE', BOUNDED_PROFILE)
+            # #678: a native-search turn's bridge never serves private reads.
+            native_search = bool(getattr(tools, 'native_search', False)) and profile == BOUNDED_PROFILE
             # Both supported CLIs receive this per-turn bridge configuration.
             # The engine gets no store handle; the bridge alone owns validated
             # access to the AgentOS tool facade.
@@ -1183,10 +1226,10 @@ class BoundedExecutionAdapter:
                          # The bridge is a separate process: hand it this Work's
                          # private-source provenance so its public egress closes
                          # exactly as the in-process Capabilities would.
-                         *[f'--provenance={label}' for label in sorted(getattr(tools.capabilities, 'private_provenance', ()) or ())]],
+                         *[f'--provenance={label}' for label in sorted(getattr(tools.capabilities, 'private_provenance', ()) or ())],
+                         *(['--native-search'] if native_search else [])],
             }}}, ensure_ascii=False), encoding='utf-8')
             env = self.environment(engine_id, binary, run_dir)
-            profile = getattr(tools, 'PROFILE', BOUNDED_PROFILE)
             disabled = ()
             if profile == STRICT_PROFILE:
                 # #616: never launch an unqualified CLI under the strict
@@ -1225,7 +1268,7 @@ class BoundedExecutionAdapter:
             LOG.info('engine turn started engine=%s profile=%s', engine_id, profile)
             # #678: the facade says whether this turn may use the CLI's own web search.
             argv = self.command(engine_id, binary, prompt, config, instructions, profile=profile, disabled_features=disabled,
-                                native_search=bool(getattr(tools, 'native_search', False)))
+                                native_search=native_search)
             run_meta = {'argv': display_argv(argv, prompt, instructions), 'requested_model': None}
             try:
                 if self.runner is subprocess.run:

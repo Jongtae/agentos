@@ -44,6 +44,7 @@ provenance redactor and are absent from the portable owner-state export,
 which never includes the secret file.
 """
 import json
+import math
 import re
 import time
 import xml.etree.ElementTree as ET
@@ -74,8 +75,13 @@ SEARCH_TIMEOUT_SECONDS = 15
 RESULT_LIMIT = 5
 #: Rows a native search may return: its cited sources first, then the rest.
 NATIVE_RESULT_LIMIT = 8
+#: Searches one native sub-call may make, counted across ``pause_turn`` resumes.
 NATIVE_MAX_USES = 3
 NATIVE_CONTINUATIONS = 3
+#: Seconds for one native sub-call request, further capped by the Work's remaining time.
+NATIVE_TIMEOUT_SECONDS = 45
+#: A recorded availability whose time is this far in the future is not trusted (clock change).
+CLOCK_SKEW_SECONDS = 300
 NATIVE_ANSWER_CHARS = 4000
 USER_AGENT = 'Mozilla/5.0 (compatible; AgentOS/0.1 personal search)'
 #: A BCP 47-shaped tag such as ``ko``, ``ko-KR`` or ``en_US``; nothing longer
@@ -84,24 +90,36 @@ LOCALE_PATTERN = re.compile(r'[A-Za-z]{2,3}(?:[-_][A-Za-z]{2})?')
 SEARCH_SCOPE = 'Search snippets only; full pages have not been read.'
 NATIVE_SCOPE = ("Sources cited or consulted by the connected AI's own web search; snippets are source text the "
                 'provider returned (empty when it returned none). The answer field is model-generated text, not an '
-                'observation; AgentOS has not read the pages.')
+                'observation; AgentOS has not read the pages. A fact that no row snippet shows is not observed: read a '
+                'cited page with a page-reading tool you have before relying on it, or finish partial naming the '
+                'cited sources.')
 ANSWER_LABEL = 'model-generated; not an observation'
 SEARCH_FAILED_TEXT = '웹 검색 결과를 가져오지 못했습니다. 잠시 후 다시 요청하세요.'
 PROVIDER_UNAVAILABLE_TEXT = '선택한 검색 제공자는 설정되어 있지 않습니다. 사용할 수 있는 제공자 중에서 고르세요.'
 PROVIDER_AUTH_TEXT = '검색 제공자가 저장된 키를 거부했습니다. 설정에서 키를 확인하세요.'
 PROVIDER_RATE_LIMITED_TEXT = '검색 제공자의 요청 한도에 도달했습니다. 다른 제공자를 쓰거나 잠시 후 다시 요청하세요.'
 NATIVE_EMPTY_TEXT = '연결된 AI의 웹 검색이 출처를 하나도 돌려주지 않았습니다. 검색어를 바꾸거나 다른 경로를 쓰세요.'
+NATIVE_REJECTED_TEXT = '연결된 AI가 이번 웹 검색 요청을 거부했습니다. 검색어를 바꾸거나 다른 경로를 쓰세요.'
+_CONTROL_OR_SPACE = re.compile(r'[\s\x00-\x1f\x7f]')
+#: A provider's own statement that the hosted search tool is not supported for
+#: this model/account (protocol classification of its error body, #678 P2-1).
+_TOOL_UNSUPPORTED = re.compile(
+    r'(web[ _]?search|hosted tool|server tool|\btools?\b).{0,80}(not supported|unsupported|not available|not enabled|'
+    r'not allowed|not permitted|does not support)|(not supported|unsupported|does not support|not enabled).{0,80}'
+    r'(web[ _]?search|hosted tool|server tool|\btools?\b)', re.I | re.S)
 _TAGS = re.compile(r'<[^>]+>')
 
 #: Why native search is unavailable on a route; owner- and model-facing text.
 NATIVE_REASONS = {
     'cli_route': 'CLI 구독 엔진은 자기 작업 턴 안에서 자체 웹 검색을 씁니다',
     'no_main_ai': '연결된 기본 AI가 없습니다',
+    'no_api_key': 'API 키가 없어 사용할 수 없음',
     'no_native_search': '이 AI 연결(Ollama·로컬·기타 호환 서버)에는 기본 웹 검색이 없습니다',
-    'rejected': '제공자가 이 모델의 웹 검색 도구를 거부했습니다',
-    'refused': 'CLI가 자체 웹 검색을 거부했습니다',
+    'rejected': '제공자가 이 모델에서는 웹 검색 도구를 지원하지 않는다고 답했습니다',
+    'refused': 'CLI가 자체 웹 검색을 쓸 수 없다고 답했습니다',
     'strict_profile': '엄격 격리 실행 프로필에서는 CLI 자체 웹 검색을 켜지 않습니다',
     'private_turn': '이 작업에는 개인 자료가 포함돼 CLI 자체 웹 검색을 켜지 않았습니다',
+    'private_history': 'CLI에 보이는 이전 대화에 개인 자료에서 나온 답이 있어 CLI 자체 웹 검색을 켜지 않았습니다',
 }
 #: Per-call billing the owner should know about, per API route (Settings).
 NATIVE_COSTS = {
@@ -137,14 +155,30 @@ class SearchProviderError(ProviderError):
 
 
 def _text(value, limit):
-    """Plain text from a provider field: tags removed, entities decoded, bounded."""
+    """Plain text from a provider field: tags removed, entities decoded, whitespace and
+    control characters collapsed to single spaces, bounded."""
     if not isinstance(value, str):
         return ''
-    return unescape(_TAGS.sub('', value)).strip()[:limit]
+    return ' '.join(unescape(_TAGS.sub('', value)).replace('\x7f', ' ').split())[:limit]
 
 
 def _public_http_url(value):
-    return isinstance(value, str) and urlsplit(value).scheme in ('https', 'http') and bool(urlsplit(value).hostname)
+    """An http(s) URL with a host and no whitespace or control character (#678 P2-4).
+
+    Used for every URL a provider or CLI reports: a value carrying a newline
+    and appended text is refused whole rather than trimmed, so it cannot
+    smuggle instructions into a transcript line or Evidence.
+    """
+    if not isinstance(value, str) or not value or len(value) > 2000 or _CONTROL_OR_SPACE.search(value):
+        return False
+    try:
+        parts = urlsplit(value)
+        return parts.scheme in ('https', 'http') and bool(parts.hostname)
+    except ValueError:
+        return False
+
+
+public_http_url = _public_http_url
 
 
 def result_row(title, url, snippet, provider):
@@ -291,15 +325,49 @@ def native_route(model_config, subscription_id='', model_test=None):
     return '', 'no_native_search'
 
 
+def tool_unsupported(exc):
+    """Whether a provider error says the hosted search tool is unsupported here.
+
+    Read from the provider's own error body (``request_json`` keeps a bounded
+    ``error_detail``): a ``tools`` parameter error or a message naming the
+    tool as unsupported/not enabled.  Any other 4xx is not this.
+    """
+    detail = getattr(exc, 'error_detail', None)
+    if not isinstance(detail, dict) or not detail:
+        return False
+    if str(detail.get('param') or '').split('[')[0] == 'tools':
+        return True
+    return bool(_TOOL_UNSUPPORTED.search(' '.join(str(detail.get(key) or '') for key in ('code', 'message'))))
+
+
+def keyed_route(found, reason, config, key, engine=''):
+    """The Main AI mapping for the registry; an API route with no active key cannot search.
+
+    ``MainAiRoutes.save_key`` clears the active ``model_key`` when the owner
+    removes the active provider's key: native search is then unavailable
+    (``no_api_key``), neither listed nor the default, and Settings still names
+    the route (``display``).
+    """
+    if found and not key:
+        return {'route': '', 'reason': 'no_api_key', 'config': config, 'key': '', 'engine': engine, 'display': found}
+    return {'route': found, 'reason': reason, 'config': config, 'key': key, 'engine': engine}
+
+
 def _native_failure(exc):
-    """A typed failure from one native-search HTTP error (``request_json``'s ProviderError)."""
+    """A typed failure from one native-search HTTP error (``request_json``'s ProviderError).
+
+    Only an explicit tool-unsupported answer is ``native_search_unavailable``
+    (and remembered); another 4xx is a per-call ``native_search_rejected``.
+    """
     status = getattr(exc, 'status', None)
-    if status in (400, 404, 405, 422):
-        return SearchProviderError(native_unavailable_text('rejected', ()), 'native_search_unavailable', status, 'rejected')
     if status in (401, 403):
         return SearchProviderError(PROVIDER_AUTH_TEXT, 'provider_auth', status)
     if status == 429:
         return SearchProviderError(PROVIDER_RATE_LIMITED_TEXT, 'provider_rate_limited', status)
+    if isinstance(status, int) and 400 <= status < 500:
+        if tool_unsupported(exc):
+            return SearchProviderError(native_unavailable_text('rejected', ()), 'native_search_unavailable', status, 'rejected')
+        return SearchProviderError(NATIVE_REJECTED_TEXT, 'native_search_rejected', status)
     return ProviderError(SEARCH_FAILED_TEXT, status)
 
 
@@ -346,15 +414,24 @@ class AiNativeProvider:
     id = AI_NATIVE
     kinds = ('web',)
 
-    def __init__(self, route, config, key, transport=None):
+    def __init__(self, route, config, key, transport=None, budget=None):
         self.route, self.config, self.key = route, dict(config), key or ''
         self.transport = transport or request_json
+        # #607 WorkBudget of the calling Work: every request is a model turn.
+        self.budget = budget
         self.destination = NATIVE_DESTINATIONS[route]
         self.label = f"The connected AI's own web search ({NATIVE_ROUTE_NAMES[route]}; cited sources)"
 
     def _send(self, url, body, headers):
+        timeout = NATIVE_TIMEOUT_SECONDS
+        if self.budget is not None:
+            # One more model request of this Work: spent before it is sent and
+            # bounded by the Work's remaining time (Stop and deadline apply).
+            self.budget.spend_turn()
+            remaining = self.budget.remaining() if callable(getattr(self.budget, 'remaining', None)) else timeout
+            timeout = max(1, min(timeout, int(remaining)))
         try:
-            data = self.transport(url, body, headers)
+            data = self.transport(url, body, headers, timeout)
         except ProviderError as exc:
             raise _native_failure(exc) from None
         if not isinstance(data, dict):
@@ -413,13 +490,22 @@ class AiNativeProvider:
     def _anthropic(self, prompt, region, collected):
         if not self.key:
             raise SearchProviderError(PROVIDER_AUTH_TEXT, 'provider_auth')
-        tool = {'type': 'web_search_20250305', 'name': 'web_search', 'max_uses': NATIVE_MAX_USES}
-        if region:
-            tool['user_location'] = {'type': 'approximate', 'country': region}
-        messages = [{'role': 'user', 'content': prompt}]
+        location = {'type': 'approximate', 'country': region} if region else None
+        user = {'role': 'user', 'content': prompt}
         headers = {'x-api-key': self.key, 'anthropic-version': '2023-06-01'}
-        errors, results, data = [], 0, {}
+        errors, results, data, assistant, used = [], 0, {}, [], 0
         for _ in range(NATIVE_CONTINUATIONS + 1):
+            # max_uses is counted across resumes: a paused turn may not start
+            # a fresh allowance of searches.
+            remaining = NATIVE_MAX_USES - used
+            if remaining <= 0:
+                break
+            tool = {'type': 'web_search_20250305', 'name': 'web_search', 'max_uses': remaining}
+            if location:
+                tool['user_location'] = location
+            # pause_turn: the whole conversation is resent with every assistant
+            # block so far, and no extra user message; the server resumes.
+            messages = [user, {'role': 'assistant', 'content': list(assistant)}] if assistant else [user]
             data = self._send(self.config['endpoint'] + '/v1/messages',
                               {'model': self.config['model'], 'max_tokens': 2048, 'messages': messages, 'tools': [tool]},
                               headers)
@@ -429,8 +515,10 @@ class AiNativeProvider:
             for block in blocks:
                 if not isinstance(block, dict):
                     continue
-                if block.get('type') == 'server_tool_use' and isinstance(block.get('input'), dict):
-                    collected.query(block['input'].get('query'))
+                if block.get('type') == 'server_tool_use':
+                    used += 1
+                    if isinstance(block.get('input'), dict):
+                        collected.query(block['input'].get('query'))
                 elif block.get('type') == 'web_search_tool_result':
                     content = block.get('content')
                     # Server-tool errors arrive in a 200 response as an object, not a list.
@@ -446,10 +534,9 @@ class AiNativeProvider:
                     for citation in block.get('citations') or []:
                         if isinstance(citation, dict) and citation.get('type') == 'web_search_result_location':
                             collected.cite(citation.get('url'), citation.get('title'), citation.get('cited_text'))
+            assistant.extend(blocks)
             if data.get('stop_reason') != 'pause_turn':
                 break
-            # The server paused its own sampling loop: resend the turn as is to resume.
-            messages = [messages[0], {'role': 'assistant', 'content': blocks}]
         if errors and not results:
             if 'too_many_requests' in errors:
                 raise SearchProviderError(PROVIDER_RATE_LIMITED_TEXT, 'provider_rate_limited')
@@ -524,8 +611,7 @@ class ProviderRegistry:
 
         def route():
             found, reason = native_route(native.get('config'), native.get('subscription', ''))
-            return {'route': found, 'reason': reason, 'config': native.get('config') or {}, 'key': native.get('key', ''),
-                    'engine': native.get('subscription', '')}
+            return keyed_route(found, reason, native.get('config') or {}, native.get('key', ''), native.get('subscription', ''))
 
         def write(value):
             state['status'] = dict(value)
@@ -554,8 +640,7 @@ class ProviderRegistry:
                 config['model'] = checked['runtime_model']
             subscription = (store.config('subscription_engine', {}) or {}).get('id', '')
             found, reason = native_route(config, subscription)
-            return {'route': found, 'reason': reason, 'config': config,
-                    'key': (store.secret('model_key') or '') if found else '', 'engine': subscription}
+            return keyed_route(found, reason, config, (store.secret('model_key') or '') if found else '', subscription)
 
         def read_status():
             value = store.config(NATIVE_STATUS_KEY, {}) or {}
@@ -586,14 +671,23 @@ class ProviderRegistry:
             row = None
         if not isinstance(row, dict) or row.get('fingerprint') != fingerprint:
             return None
-        if row.get('state') == 'unavailable' and self._clock() - float(row.get('checked_at') or 0) > NATIVE_UNAVAILABLE_TTL_SECONDS:
+        # A malformed time, or one in the future (the clock moved back), is
+        # not a memo: the next call checks again.
+        try:
+            checked = float(row.get('checked_at'))
+        except (TypeError, ValueError):
+            return None
+        now = self._clock()
+        if not math.isfinite(checked) or checked > now + CLOCK_SKEW_SECONDS:
+            return None
+        if row.get('state') == 'unavailable' and now - checked > NATIVE_UNAVAILABLE_TTL_SECONDS:
             return None
         return row
 
     def native_status(self):
         """What Settings shows about the connected AI's search: route, state, reason, cost note."""
         main = self._native()
-        route = main.get('route') or main.get('engine') or ''
+        route = main.get('route') or main.get('display') or main.get('engine') or ''
         if main.get('route'):
             fingerprint = self.fingerprint(main['route'], main.get('config'))
         else:
@@ -606,9 +700,17 @@ class ProviderRegistry:
         else:
             state, reason = 'unknown', ''
         return {'route': route, 'route_name': NATIVE_ROUTE_NAMES.get(route, ''), 'state': state, 'reason': reason,
+                'recheckable': bool(recorded) and state == 'unavailable',
                 'reason_text': NATIVE_REASONS.get(reason, '') if reason else '',
                 'checked_at': (recorded or {}).get('checked_at'), 'cost': NATIVE_COSTS.get(route, ''),
                 'where': 'work-turn' if main.get('reason') == 'cli_route' else 'sub-call'}
+
+    def clear_native(self):
+        """Forget every recorded native-search availability (Settings "다시 확인")."""
+        try:
+            self._write_status({})
+        except Exception:
+            pass
 
     def _native_provider(self):
         """``(provider, reason)``: the AiNativeProvider when it can run, else the typed reason."""
@@ -683,9 +785,11 @@ class ProviderRegistry:
                                       reason=reason)
         raise SearchProviderError(PROVIDER_UNAVAILABLE_TEXT, 'provider_unavailable')
 
-    def search(self, query, *, provider=None, kind=None, locale=None, limit=RESULT_LIMIT):
+    def search(self, query, *, provider=None, kind=None, locale=None, limit=RESULT_LIMIT, budget=None):
         chosen, chosen_kind = self.resolve(provider, kind)
         native = isinstance(chosen, AiNativeProvider)
+        if native:
+            chosen.budget = budget
         fingerprint = self.fingerprint(chosen.route, chosen.config) if native else ''
         try:
             found = chosen.search(query, kind=chosen_kind, locale=locale or None, limit=limit, opener=self._opener)
@@ -839,6 +943,12 @@ class SearchProviderSettings:
             row = self._row()
             row['bing_enabled'] = enabled
             self.store.put(CONFIG_KEY, row)
+        return self.status()
+
+    def recheck_native(self, _body=None):
+        """Clear the remembered native-search availability; the next use checks again."""
+        with self._locked():
+            self.registry.clear_native()
         return self.status()
 
     def set_default(self, body):

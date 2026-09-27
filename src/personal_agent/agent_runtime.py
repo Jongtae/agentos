@@ -1,5 +1,6 @@
 """Capability registry and a provider-independent, bounded native tool loop."""
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -78,7 +79,7 @@ SEARCH_BACKED_ACTIONS=frozenset({'web_search','bounded_public_research'})
 #: #655: the model chooses the provider per call from the owner's configured
 #: set; `action_definitions` appends the configured list and the enum at run
 #: time.  The text names what each provider covers, never which to prefer.
-WEB_SEARCH_DESCRIPTION='Search the public web through the connected AI\'s own web search or one of the configured search providers. Use for current public information, not local files. Cite the result URLs; a result\'s answer field is the search model\'s own prose, not evidence. provider selects the provider for this call (omit it for the owner\'s default); locale is an optional language tag such as ko-KR or en-US. If one provider\'s results do not fit, try another provider or another query rather than repeating the same call. Never include credentials or private file contents in search terms.'
+WEB_SEARCH_DESCRIPTION='Search the public web through the connected AI\'s own web search or one of the configured search providers. Use for current public information, not local files. Cite the result URLs; a result\'s answer field is the search model\'s own prose, not evidence, and a row without a snippet shows only that a page was cited: before relying on a fact no snippet shows, read a cited page with a page-reading tool you have, or finish partial naming the cited sources. provider selects the provider for this call (omit it for the owner\'s default); locale is an optional language tag such as ko-KR or en-US. If one provider\'s results do not fit, try another provider or another query rather than repeating the same call. Never include credentials or private file contents in search terms.'
 #: #627: ``location_ref`` is the alternative to ``city`` through this one
 #: declaration; the broker resolves it (``current_context``).
 WEATHER_DESCRIPTION='Get current weather and 3-day forecast. Prefer this over web_search for weather. Give EITHER city (English spelling, optional ISO country code) OR location_ref, never both. location_ref is an opaque ref from the current context section - obs:... for a location the owner shared, profile:place.... for a saved place - and AgentOS resolves it; use it for "here", home or work instead of asking again. A stale, paused or unknown ref is refused with the reason; then ask the owner once for the place.'
@@ -1622,7 +1623,12 @@ class Capabilities:
   (so Stop, the deadline and the caps still apply).  Secret-bearing
   exception text is never recorded: the event carries a fixed text.
   """
-  try:return self.network.execute(plan)
+  # #678: a network that runs a native search charges its model sub-call to this Work.
+  # (A replaced ``execute`` without a budget parameter keeps working.)
+  try:takes_budget='budget' in inspect.signature(self.network.execute).parameters
+  except (TypeError,ValueError,AttributeError):takes_budget=False
+  extra={'budget':self.budget} if takes_budget else {}
+  try:return self.network.execute(plan,**extra)
   except (ValueError,TypeError,OSError,ProviderError) as exc:
    code,retry,_effect=classify_failure(exc,plan.get('tool'))
    if retry!='transient' or plan.get('tool') not in NETWORK_READS:raise
@@ -1632,7 +1638,7 @@ class Capabilities:
    self.record(plan['tool'],'failed',json.dumps({'scope':'transient-retry','host_action':plan['tool'],'code':code,
                                                  'retry':retry,'effect':'none','error':TRANSIENT_READ_TEXT},ensure_ascii=False))
    self.budget.spend_attempt()
-   return self.network.execute(plan)
+   return self.network.execute(plan,**extra)
  def execute(self,name,args):
   tool=self.tools.get(name)
   if not tool or name not in self.allowed_tools:raise ValueError('활성 패키지에 선언되지 않은 도구입니다.')

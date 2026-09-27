@@ -75,6 +75,14 @@ const checks=[];
  assert(text('search-providers').includes('사용 가능'));assert(text('search-providers').includes('CLI 작업 턴 안에서 CLI가 직접 검색합니다.'));
  checks.push('unavailable shows the reason; a CLI route says it searches inside its own turn');
 
+ $('search-providers').dataset.state='';ctx.renderSearchProviders(view({native:native({state:'unavailable',reason:'rejected',reason_text:'provider said unsupported',recheckable:true})}));
+ const recheckAt=calls.length;await buttons().find(node=>node.textContent==='다시 확인').onclick({currentTarget:new Element('button')});
+ assert.equal(calls.length,recheckAt+1);assert.equal(calls[recheckAt].path,'/api/search-providers/native/recheck');
+ $('search-providers').dataset.state='';ctx.renderSearchProviders(view({native:native({state:'unavailable',reason:'no_api_key',reason_text:'API 키가 없어 사용할 수 없음'})}));
+ assert(text('search-providers').includes('API 키가 없어 사용할 수 없음'));assert(!buttons().some(node=>node.textContent==='다시 확인'));
+ calls.length=0;refreshes=0;
+ checks.push('a remembered unavailable offers 다시 확인; a missing key is stated and has no recheck');
+
  $('search-providers').dataset.state='';ctx.renderSearchProviders(view());
  buttons().find(node=>node.textContent==='키 입력').onclick();
  const form=descendants($('search-providers')).find(node=>node.tag==='form');
@@ -149,7 +157,7 @@ class SearchProviderUiTests(unittest.TestCase):
         result = subprocess.run([node, "-e", DOM_CHECKS, str(WEB / "app.js")], capture_output=True, text=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout.strip().splitlines()[-1])
-        self.assertEqual(report["passed"], 7, report)
+        self.assertEqual(report["passed"], 8, report)
 
 
 if __name__ == "__main__":

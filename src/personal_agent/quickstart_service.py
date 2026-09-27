@@ -20,7 +20,7 @@ from .providers import NOT_REPORTED, ModelAdapter, ProviderError, request_json, 
 from .decision import DEFAULT_DECISION_PROVIDER, RoutedDecisionEngine
 from .decision_routes import DecisionRoutes
 from .main_ai import MainAiRoutes
-from .search_providers import (SEARCH_FAILED_TEXT, ProviderRegistry, SearchProviderSettings)
+from .search_providers import (SEARCH_FAILED_TEXT, ProviderRegistry, SearchProviderSettings, public_http_url)
 from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_UNVERIFIED, BLOCKER_NO_AI_ROUTE,
                                       TELEGRAM_RESULT_PREVIEW_CHARS, TERMINAL_FAILED_HEADER,
                                       TERMINAL_INTERRUPTED_HEADER, TERMINAL_NEXT_ACTION, TERMINAL_PARTIAL_HEADER,
@@ -712,10 +712,28 @@ class AgentService:
         return self.search_settings.set_bing(body)
 
     def _native_search_transport(self, url, body, headers=None, timeout=60):
-        """The model adapter's transport for the connected AI's own web search (#678)."""
+        """The model adapter's transport for the connected AI's own web search (#678).
+
+        The timeout is passed on exactly as ``ModelAdapter`` does (the default
+        60 s keeps the three-argument call existing transports accept).
+        """
         transport=getattr(self.adapter,'transport',None)
         if not callable(transport):raise ProviderError(SEARCH_FAILED_TEXT)
-        return transport(url,body,headers)
+        return transport(url,body,headers) if timeout==60 else transport(url,body,headers,timeout)
+
+    def recheck_native_search(self, _body=None):
+        # #678: forget a remembered "unavailable"; the next use checks again.
+        return self.search_settings.recheck_native(_body)
+
+    #: #678 P1: sources whose presence anywhere in a CLI prompt keeps the CLI's own
+    #: web search off (its queries are not composed or redacted by AgentOS).
+    NATIVE_SEARCH_PRIVATE_SOURCES=frozenset({'personal-space','owner-context-inbox','connected-drive-file','connected-document',
+                                             'owner-memory','owner-folder-names','owner-calendar','owner-mail','owner-settings',
+                                             'owner-browser-session','conversation-history','unrecorded','unattributed-tool-evidence'})
+
+    def native_search_blocked(self, labels):
+        """The private-store labels (without route prefixes) that keep CLI native search off."""
+        return sorted({base_label(label) for label in labels or ()} & self.NATIVE_SEARCH_PRIVATE_SOURCES)
 
     def cli_native_search(self, engine, profile, isolated, turn_provenance):
         """``(enabled, reason)`` for the CLI's own web search in one Work turn (#678).
@@ -729,19 +747,22 @@ class AgentService:
         if isolated:return False,'strict_profile'
         if profile!=BOUNDED_PROFILE:return False,'strict_profile'
         if turn_provenance:return False,'private_turn'
+        # The shown history is checked by the caller once the prompt is built
+        # (``native_search_blocked``), before the CLI starts.
         status=ProviderRegistry.from_store(self.store).native_status()
         if status.get('route')==engine and status.get('state')=='unavailable':return False,status.get('reason') or 'refused'
         return True,''
 
-    def record_cli_native_searches(self, job_id, engine, meta, record):
+    def record_cli_native_searches(self, job_id, engine, meta, record, enabled=True):
         """Durable events for the CLI's own web searches, in the web_search evidence shape (#678).
 
         Each reported search becomes one ``web_search`` event with
         ``scope: cli-native``: its queries (redacted), the URLs the CLI
-        reported (none invented) and the engine.  A search the CLI could not
-        run is an ``unavailable`` event with a typed code, not a failed
-        attempt, and marks native search unavailable for this CLI in Settings.
-        Returns the reported URLs.
+        reported (none invented) and the engine.  Only when AgentOS enabled
+        native search for this turn (``enabled``) and the CLI answered with
+        its own availability refusal is native search remembered as
+        unavailable for this CLI; a permission denial (AgentOS's own setting)
+        and any other tool error are never remembered.  Returns the URLs.
         """
         urls=[]
         searches=(meta or {}).get('native_searches') if isinstance(meta,dict) else None
@@ -753,19 +774,29 @@ class AgentService:
             base={'scope':'cli-native','call_id':call_id,'host_action':'web_search','engine':engine,
                   'arguments':{'query':queries[0] if queries else '','provider':f'{engine}-native'}}
             record('web_search','running',json.dumps(base,ensure_ascii=False))
-            if search.get('state')!='succeeded':
-                reason=self._redact_provenance(str(search.get('reason') or ''))[:200]
+            state=search.get('state')
+            reason=self._redact_provenance(str(search.get('reason') or ''))[:200]
+            if state=='unavailable' and enabled:
                 record('web_search','unavailable',json.dumps({**base,'code':'native_search_unavailable','reason':reason},ensure_ascii=False))
                 registry.record_native(engine,engine,'unavailable','refused')
                 continue
-            rows=[row for row in search.get('results') or [] if isinstance(row,dict) and isinstance(row.get('url'),str)]
+            if state in ('unavailable','denied'):
+                # Search was off for this turn or AgentOS's permission setting
+                # refused it: nothing about the CLI's availability was learned.
+                record('web_search','unavailable',json.dumps({**base,'code':'native_search_off','reason':reason},ensure_ascii=False))
+                continue
+            if state!='succeeded':
+                record('web_search','failed',json.dumps({**base,'code':'tool_failed','retry':'permanent','effect':'none',
+                                                         'error':reason or 'web search failed'},ensure_ascii=False))
+                continue
+            rows=[row for row in search.get('results') or [] if isinstance(row,dict) and public_http_url(row.get('url'))]
             found=[row['url'] for row in rows]
             urls.extend(found)
             evidence={'sources':found[:8],'result_count':len(rows),'retrieved_at':time.time(),'provider':f'{engine}-native',
                       'route':engine,'search_queries':queries}
             if not found:evidence['sources_not_reported']=True
             record('web_search','succeeded',json.dumps({**base,'evidence':evidence},ensure_ascii=False))
-            registry.record_native(engine,engine,'available')
+            if enabled:registry.record_native(engine,engine,'available')
         return list(dict.fromkeys(urls))
 
     def check_decision_cli_capabilities(self, body):
@@ -4572,30 +4603,41 @@ class AgentService:
                         # same bounded recent conversation as the direct-API route.
                         # #627: the same current-context snapshot as the direct route.
                         # #678: the CLI's own web search, when this turn may use it.
+                        def cli_context(native):
+                            context=turn_context([*history[:-1],{'role':'user','content':current_request}],'cli',
+                                                 current_context=self.current_context_text(job),profile=self.owner_profile_snapshot(),
+                                                 prepared=self.prepared_text(job),native_search=native)
+                            prompt_text,adapter=render_turn_prompt(context),context
+                            # Bounded Claude Code gets the instructions as a separate
+                            # argv element, so only conversation + request count
+                            # against the prompt limit there.
+                            sent_text=render_turn_prompt(context,include_instructions=not (subscription['id']=='claude-code' and not isolated))
+                            if len(sent_text.encode())>MAX_PROMPT_BYTES:
+                                # The shared envelope cannot fit next to a request this
+                                # large. Send the request exactly as before rather than
+                                # fail a previously valid turn; the event records it.
+                                context={**context,'conversation':[],'mode':'bare-request'}
+                                prompt_text,adapter=current_request,None
+                            # #605: the sources of exactly the earlier messages this
+                            # CLI is shown, read from their Works' records.  An
+                            # unrecorded earlier Work closes public egress; a
+                            # greeting no longer does.  The AgentOS preflight lookup
+                            # above ran first, from this turn's raw request only.
+                            conversation=context['conversation']
+                            labels=self.shown_history_provenance(history_rows[:-1][-len(conversation):] if conversation else [],document_jobs)
+                            return context,prompt_text,adapter,sent_text,labels
+                        # #678 P1: the CLI's own web search is decided from the whole
+                        # prompt's provenance - this turn's spliced sources and the
+                        # sources of every earlier message the CLI is shown - and is
+                        # off when any of them is a private store.
                         native_search,native_reason=self.cli_native_search(subscription['id'],facade.PROFILE,isolated,turn_provenance)
-                        engine_context=turn_context([*history[:-1],{'role':'user','content':current_request}],'cli',
-                                                    current_context=self.current_context_text(job),profile=self.owner_profile_snapshot(),
-                                                    prepared=self.prepared_text(job),native_search=native_search)
-                        engine_prompt=render_turn_prompt(engine_context)
-                        adapter_context=engine_context
-                        # Bounded Claude Code gets the instructions as a separate
-                        # argv element, so only conversation + request count
-                        # against the prompt limit there.
-                        sent=render_turn_prompt(engine_context,include_instructions=not (subscription['id']=='claude-code' and not isolated))
-                        if len(sent.encode())>MAX_PROMPT_BYTES:
-                            # The shared envelope cannot fit next to a request this
-                            # large. Send the request exactly as before rather than
-                            # fail a previously valid turn; the event records it.
-                            engine_context={**engine_context,'conversation':[],'mode':'bare-request'}
-                            engine_prompt,adapter_context=current_request,None
-                        # #605: the sources of exactly the earlier messages this
-                        # CLI is shown, read from their Works' records.  An
-                        # unrecorded earlier Work closes public egress; a
-                        # greeting no longer does.  The AgentOS preflight lookup
-                        # above ran first, from this turn's raw request only.
-                        shown=engine_context['conversation']
-                        capabilities.private_provenance.update(
-                            self.shown_history_provenance(history_rows[:-1][-len(shown):] if shown else [],document_jobs))
+                        engine_context,engine_prompt,adapter_context,sent,shown_sources=cli_context(native_search)
+                        if native_search:
+                            blocked=self.native_search_blocked(set(turn_provenance)|set(capabilities.private_provenance)|set(shown_sources))
+                            if blocked:
+                                native_search,native_reason=False,'private_history'
+                                engine_context,engine_prompt,adapter_context,sent,shown_sources=cli_context(False)
+                        capabilities.private_provenance.update(shown_sources)
                         work_sources|=capabilities.private_provenance
                         # #605 F1: a trusted-local CLI may read host files AgentOS never
                         # labels, so its reply is never permitted public context for a
@@ -4610,7 +4652,8 @@ class AgentService:
                         separate=subscription['id']=='claude-code' and not isolated and adapter_context is not None
                         # AX-11 (#603): the tool names this route actually offers the
                         # CLI, from the same facade class that serves it below.
-                        offered=facade(capabilities).definitions()
+                        listing=facade(capabilities);listing.native_search=native_search
+                        offered=listing.definitions()
                         self.record_turn_sent(job['id'],sent=sent if separate else engine_prompt,
                             exposed_tools=[tool.get('name') for tool in offered],build=self.build,
                             capability_profile=facade.PROFILE,unavailable_tools=route_unavailable(facade.PROFILE),
@@ -4651,7 +4694,7 @@ class AgentService:
                         except (ExecutionError,EngineGatewayError) as exc:
                             diagnostics=exc.diagnostics() if isinstance(exc,ExecutionError) else {}
                             # #678: searches the CLI reported before it failed are still observed.
-                            if not isolated:self.record_cli_native_searches(job['id'],subscription['id'],getattr(exc,'meta',None),record)
+                            if not isolated:self.record_cli_native_searches(job['id'],subscription['id'],getattr(exc,'meta',None),record,native_search)
                             self.record_turn_provenance(job['id'],status='failed',failure_class=diagnostics.get('failure_class'),egress_taint=sorted(capabilities.private_provenance),
                                                         exit_code=diagnostics.get('exit_code'),**(getattr(exc,'meta',None) or {}))
                             # A run that the CLI rejected as signed out is the
@@ -4672,7 +4715,7 @@ class AgentService:
                         response,provider,model=result.content,'subscription',result.engine
                         # #678: the CLI's own searches become web_search evidence, and
                         # the URLs it reported are listed under the answer.
-                        native_urls=[] if isolated else self.record_cli_native_searches(job['id'],subscription['id'],getattr(result,'meta',None),record)
+                        native_urls=[] if isolated else self.record_cli_native_searches(job['id'],subscription['id'],getattr(result,'meta',None),record,native_search)
                         missing=[url for url in native_urls if url not in response]
                         if missing:response=response.rstrip()+'\n\n조회 출처:\n'+'\n'.join(missing[:8])
                         # #606 T3: a zero exit says the CLI ended, not that the

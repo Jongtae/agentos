@@ -308,7 +308,9 @@ class SubscriptionServiceTests(unittest.TestCase):
             self.assertTrue(service.run_one())
             self.assertEqual(adapter.call[0], 'codex')
             # The real service route with current context off (#627): no gated action.
-            self.assertEqual(adapter.call[2], [name for name in BOUNDED_NAMES if name != 'propose_current_state'])
+            # #678 P1: this clean turn may use the CLI's own web search, so no
+            # private-read bridge tool (list_notes) is offered to it.
+            self.assertEqual(adapter.call[2], [name for name in BOUNDED_NAMES if name not in ('propose_current_state', 'list_notes')])
             self.assertEqual(store.job(job)['response'], 'engine answer')
 
     def test_summary_regression_sends_approved_notes_to_subscription_engine(self):

@@ -1,9 +1,9 @@
-"""Browser action capability inside an owner-logged-in profile (SEC-BROWSER-01 #656).
+"""Browser action capability inside an owner-logged-in profile (SEC-BROWSER-01 #656, SEC-BROWSER-02 #680).
 
-The owner logs in once, by hand, in a browser window AgentOS opens on a
-persistent Chromium profile that the execution environment owns.  The model
-then opens, reads, finds, clicks and types on pages in that profile through
-five generic tools.  Two boundaries are enforced here, deterministically and
+The owner logs in once, by hand, in a window of the embedded macOS system
+WebKit engine that AgentOS opens (no browser install, #680).  The model then
+opens, reads, finds, clicks and types on pages in that profile through five
+generic tools.  Two boundaries are enforced here, deterministically and
 independently of anything the model says (pilot posture, #653):
 
 * **Output mediation.**  Nothing leaves ``PageDriver.snapshot`` before
@@ -19,14 +19,28 @@ independently of anything the model says (pilot posture, #653):
   target element) and verified at execution.  The model's ``effect`` label can
   only add a requirement (``payment`` always needs approval), never remove one.
 
-Reuse: Playwright (Apache-2.0, optional ``browser`` extra) is adopted for the
-commodity browser mechanics behind ``PlaywrightDriver``; ``ToolError``, the
-Work budget, the lookup redactor and the exact-approval binding are the
-existing AgentOS symbols.  No site, provider or category is named anywhere in
-this module.
+Engine (#680): ``WebKitWorkerDriver`` drives ``personal_agent.browser_worker``,
+a subprocess that owns the Cocoa run loop and a ``WKWebView`` with an
+in-memory website data store.  Sign-in cookies live only in that memory and
+in the encrypted jar (``browser_jar``) whose key is in the macOS Keychain.
+The capability is macOS-only during the pilot; elsewhere, or without PyObjC,
+it is reported unavailable (``browser_unavailable_platform``) with no
+fallback engine.
+
+Reuse: Apple's WebKit through PyObjC (MIT) for the commodity browser
+mechanics; ``cryptography`` Fernet (as ``EncryptedCalendarSecretStore``) and
+the macOS Keychain for the jar; ``ToolError``, the Work budget, the lookup
+redactor and the exact-approval binding are the existing AgentOS symbols.  No
+site, provider or category is named anywhere in this module.
 """
 import hashlib
+import importlib.util
+import itertools
+import json
+import queue
 import re
+import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -34,6 +48,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from .agent_runtime import BROWSER_ACTIONS, ToolError, lookup_norm, lookup_text_violations, lookup_words
 from .bounded_execution import SECRET_PATTERN
+from .browser_jar import JAR_NAME, SERVICE as JAR_SERVICE, CookieJar, KeychainKey, store_account
 
 #: The model's declared effect class of one action.
 EFFECTS = ('read', 'navigate', 'mutate', 'payment')
@@ -56,14 +71,15 @@ LOGIN_WINDOW_SECONDS = 1800
 REDACTED = '[가림]'
 
 APPROVAL_TEXT = '결제 단계는 승인이 필요합니다. 소유자가 이 단계를 승인하면 이 요청을 한 번만 이어서 처리합니다.'
-LOGIN_REQUIRED_TEXT = '이 페이지는 로그인이 필요합니다. 설정의 "브라우저 열어 로그인"으로 먼저 로그인해 주세요. AgentOS는 비밀번호를 입력하지 않습니다.'
+LOGIN_REQUIRED_TEXT = '이 페이지는 로그인이 필요합니다. 설정의 브라우저 로그인 세션에서 "로그인 창 열기"로 먼저 로그인해 주세요. AgentOS는 비밀번호를 입력하지 않습니다.'
 STEP_BUDGET_TEXT = f'이 작업의 브라우저 단계 한도({STEPS_PER_WORK}회)에 도달해 더 실행하지 않았습니다.'
 TIMEOUT_TEXT = '브라우저 동작이 시간 안에 끝나지 않았습니다.'
 FAILED_TEXT = '브라우저 동작을 실행하지 못했습니다.'
 BUSY_TEXT = '브라우저 프로필을 다른 작업 또는 로그인 창이 사용하고 있어 지금은 실행하지 않았습니다.'
 NO_PAGE_TEXT = '열린 페이지가 없습니다. 먼저 browser_open으로 페이지를 여세요.'
-UNAVAILABLE_TEXT = '브라우저 기능이 설치되어 있지 않습니다. 설정의 브라우저 항목에서 설치 방법을 확인해 주세요.'
-INSTALL_HINT = "pip install 'personal-agentos[browser]' && playwright install chromium"
+UNAVAILABLE_TEXT = '이 작업 경로에는 브라우저 기능이 연결되어 있지 않습니다.'
+LOGIN_WINDOW_TEXT = ('로그인 창에서 직접 로그인한 뒤 창을 닫아 주세요. AgentOS는 입력 내용을 보지 않으며, 창을 닫으면 '
+                     '로그인 세션을 암호화해 저장합니다.')
 LIMITATION_TEXT = ('카드번호·CVC·일회용 코드 입력과 그 양식의 버튼은 승인 없이 실행하지 않습니다. '
                    '저장된 결제수단으로 카드 입력 없이 결제되는 사이트의 결제 버튼은 감지하지 못하므로, '
                    '결제수단을 연결하지 않은 계정에서만 사용하세요.')
@@ -385,7 +401,7 @@ class NoApprovals:
 class BrowserSession:
     """One Work's page state over an injectable ``PageDriver``.
 
-    ``driver_factory`` returns the driver on first use (Chromium is launched
+    ``driver_factory`` returns the driver on first use (the engine is started
     only when a browser tool actually runs); ``budget`` is the Work's shared
     ``WorkBudget``; ``excluded`` returns the private values to redact;
     ``approvals`` has ``consume(binding)`` and ``request(binding, text)``.
@@ -570,169 +586,291 @@ class BrowserSession:
                 pass
 
 
-# --- the profile the execution environment owns --------------------------------
+# --- the embedded engine (SEC-BROWSER-02 #680) ----------------------------------
 
-def playwright_available():
-    try:
-        import playwright.sync_api  # noqa: F401
-    except Exception:
-        return False
-    return True
-
-
-#: Elements the model can act on and the fields the guard reasons about.  Run
-#: in the page; returns plain data only (no node handles, no HTML).
-SNAPSHOT_SCRIPT = r"""
-() => {
-  const SELECTOR = 'a[href], button, input, select, textarea, summary, [role="button"], [role="link"], [role="textbox"], [role="checkbox"], [role="radio"], [role="combobox"], [role="menuitem"], [role="tab"]';
-  const NO_VALUE = ['submit', 'button', 'image', 'reset', 'checkbox', 'radio', 'file', 'password', 'hidden'];
-  const forms = new Map();
-  const visible = (el) => {
-    if (el.type === 'hidden') return false;
-    const style = getComputedStyle(el);
-    if (style.visibility === 'hidden' || style.display === 'none') return false;
-    const rect = el.getBoundingClientRect();
-    return rect.width > 0 || rect.height > 0;
-  };
-  const clean = (text) => String(text || '').replace(/\s+/g, ' ').trim().slice(0, 160);
-  const nameOf = (el) => {
-    const tag = el.tagName.toLowerCase();
-    const label = el.getAttribute('aria-label') || (el.labels && el.labels[0] && el.labels[0].innerText) ||
-      el.getAttribute('placeholder') || el.getAttribute('title') || el.getAttribute('alt') ||
-      ((tag === 'input' && (el.type === 'submit' || el.type === 'button')) ? el.value : '') ||
-      el.innerText || el.textContent || (tag === 'input' ? el.name : '') || '';
-    return clean(label);
-  };
-  const roleOf = (el) => {
-    const role = el.getAttribute('role');
-    if (role) return role;
-    const tag = el.tagName.toLowerCase();
-    if (tag === 'a') return 'link';
-    if (tag === 'button' || tag === 'summary') return 'button';
-    if (tag === 'select') return 'combobox';
-    if (tag === 'textarea') return 'textbox';
-    if (tag === 'input') {
-      const type = (el.type || 'text').toLowerCase();
-      if (['submit', 'button', 'image', 'reset'].includes(type)) return 'button';
-      if (type === 'checkbox' || type === 'radio') return type;
-      return 'textbox';
-    }
-    return tag;
-  };
-  const elements = [];
-  Array.from(document.querySelectorAll(SELECTOR)).forEach((el, index) => {
-    if (!visible(el)) return;
-    const tag = el.tagName.toLowerCase();
-    const form = el.form || el.closest('form');
-    let formId = null;
-    if (form) { if (!forms.has(form)) forms.set(form, forms.size + 1); formId = forms.get(form); }
-    const type = tag === 'input' ? (el.type || 'text').toLowerCase() : (tag === 'button' ? (el.type || 'submit').toLowerCase() : '');
-    const takesValue = (tag === 'input' && !NO_VALUE.includes(type)) || tag === 'textarea' || tag === 'select';
-    elements.push({index, role: roleOf(el), name: nameOf(el), href: tag === 'a' ? el.href : null, tag, type,
-      autocomplete: (el.getAttribute('autocomplete') || '').toLowerCase().trim(),
-      value: takesValue ? String(el.value || '').slice(0, 200) : null, form: formId, disabled: !!el.disabled});
-  });
-  return {url: location.href, title: document.title, text: (document.body ? document.body.innerText : '').slice(0, 20000),
-    elements: elements.slice(0, 300),
-    forms: Array.from(forms.entries()).map(([form, id]) => ({id, text: String(form.innerText || '').slice(0, 6000)}))};
-}
-"""
-INTERACTIVE_SELECTOR = ('a[href], button, input, select, textarea, summary, [role="button"], [role="link"], [role="textbox"], '
-                        '[role="checkbox"], [role="radio"], [role="combobox"], [role="menuitem"], [role="tab"]')
+#: The typed refusal when this computer cannot run the embedded engine.
+UNAVAILABLE_CODE = 'browser_unavailable_platform'
+PLATFORM_TEXT = ('브라우저 기능은 시범 기간 동안 macOS에서만 제공됩니다. 이 컴퓨터에서는 브라우저가 필요한 단계를 '
+                 '실행하지 않습니다.')
+DEPENDENCY_TEXT = ('macOS 시스템 WebKit 연결 구성요소(pyobjc-framework-WebKit)가 없어 브라우저 기능을 사용할 수 '
+                   '없습니다. AgentOS를 다시 설치한 뒤 다시 시작하세요.')
+GOOGLE_NOTE = 'Google 로그인은 내장 브라우저에서 지원되지 않습니다.'
+TARGET_TEXT = ('대상 요소가 바뀌었거나 다른 요소에 가려져 있어 실행하지 않았습니다. browser_read로 페이지를 다시 '
+               '확인하세요.')
+#: Worker error codes that mean "the element the guard classified is not what the pointer would hit".
+TARGET_ERRORS = frozenset({'target_missing', 'target_changed', 'target_hidden', 'target_obscured', 'not_typable',
+                           'not_focusable', 'bad_target'})
+WORKER_START_SECONDS = 30
+WORKER_GRACE_SECONDS = 5
+WORKER_QUIT_SECONDS = 5
+LOGIN_OPEN_SECONDS = 45
+LOGIN_SAVE_SECONDS = 15
 
 
-class PlaywrightDriver:
-    """The real ``PageDriver`` over Playwright's sync API and a persistent context.
+def webkit_unavailable_reason(platform=None, find_spec=None):
+    """None when the embedded macOS WebKit engine can run here, else ``platform`` or ``dependency``.
 
-    Every call happens on the thread that created the driver (Playwright's
-    sync API is thread-bound).  Errors are re-raised as ``TimeoutError`` or
-    ``RuntimeError`` with AgentOS's own text: the library's messages can quote
-    selectors and URLs.  There is no method that returns HTML, cookies or
-    storage state.
+    Only the presence of the PyObjC modules is checked; nothing is imported
+    into the server process (AppKit belongs to the worker's main thread).
+    """
+    platform = sys.platform if platform is None else platform
+    find_spec = importlib.util.find_spec if find_spec is None else find_spec
+    if platform != 'darwin':
+        return 'platform'
+    for module in ('objc', 'AppKit', 'WebKit', 'PyObjCTools'):
+        try:
+            if find_spec(module) is None:
+                return 'dependency'
+        except (ImportError, ValueError):
+            return 'dependency'
+    return None
+
+
+def unavailable_text(reason):
+    return DEPENDENCY_TEXT if reason == 'dependency' else PLATFORM_TEXT
+
+
+class WorkerError(RuntimeError):
+    """A worker op failed; ``code`` is the worker's AgentOS code, never library or page text."""
+
+    def __init__(self, code):
+        super().__init__(code)
+        self.code = code
+
+
+class WebKitWorkerDriver:
+    """The real ``PageDriver``: the embedded WebKit worker process (``browser_worker``).
+
+    The worker owns its own main thread and Cocoa run loop; this object owns
+    the subprocess and speaks its JSON-lines protocol.  Every request carries
+    a timeout the worker enforces, and this side waits that long plus a grace
+    period before it kills an unresponsive worker.  A worker that exited or
+    was killed is restarted on the next call, with the jar's cookies imported
+    again (``seed``); the page it had open is gone, so the next target
+    lookup fails typed rather than acting on a different page.
+
+    Clicks and typing carry the descriptor (tag, type, autocomplete) of the
+    element the last snapshot listed at that index, so the worker refuses to
+    press a different element than the one the payment guard classified.
+    Nothing here returns HTML, and cookie rows go only to the jar.  The
+    worker's stderr is discarded so no library trace can carry page or
+    session text into a log.
     """
 
-    def __init__(self, profile_dir, headless=True):
-        from playwright.sync_api import sync_playwright
-        self._playwright = sync_playwright().start()
-        try:
-            self._context = self._playwright.chromium.launch_persistent_context(str(profile_dir), headless=headless)
-        except Exception:
-            self._playwright.stop()
-            raise
-        self._page = self._context.pages[0] if self._context.pages else self._context.new_page()
+    def __init__(self, profile_id='default', *, seed=None, command=None, start_seconds=WORKER_START_SECONDS,
+                 grace_seconds=WORKER_GRACE_SECONDS):
+        self.profile_id = str(profile_id)
+        self._seed = seed
+        self._command = list(command) if command else [sys.executable, '-m', 'personal_agent.browser_worker',
+                                                       '--profile', self.profile_id]
+        self.start_seconds, self.grace_seconds = start_seconds, grace_seconds
+        self._lock = threading.RLock()
+        self._proc = None
+        self._queue = None
+        self._ids = itertools.count(1)
+        self._visible = False
+        self._expect = {}
+        self.starts = 0
+        with self._lock:
+            self._start()
 
-    @staticmethod
-    def _wrap(exc):
-        if 'Timeout' in type(exc).__name__:
-            return TimeoutError('browser timeout')
-        return RuntimeError(type(exc).__name__)
+    @property
+    def restarts(self):
+        return max(0, self.starts - 1)
 
-    def goto(self, url, timeout):
-        try:
-            self._page.goto(url, wait_until='domcontentloaded', timeout=timeout * 1000)
-        except Exception as exc:
-            raise self._wrap(exc) from None
+    # -- process ---------------------------------------------------------------
+    def _start(self):
+        self.starts += 1
+        proc = subprocess.Popen(self._command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                text=True, encoding='utf-8', bufsize=1, close_fds=True)
+        messages = queue.Queue()
 
-    def snapshot(self):
-        try:
-            return self._page.evaluate(SNAPSHOT_SCRIPT)
-        except Exception as exc:
-            raise self._wrap(exc) from None
+        def read():
+            try:
+                for line in proc.stdout:
+                    try:
+                        message = json.loads(line)
+                    except ValueError:
+                        continue
+                    if not isinstance(message, dict):
+                        continue
+                    if message.get('event') == 'hidden':
+                        self._visible = False
+                        continue
+                    messages.put(message)
+            except (OSError, ValueError):
+                pass
+            messages.put(None)
+        threading.Thread(target=read, name='agentos-browser-worker-pipe', daemon=True).start()
+        self._proc, self._queue, self._visible, self._expect = proc, messages, False, {}
+        deadline = time.monotonic() + self.start_seconds
+        while True:
+            try:
+                message = messages.get(timeout=max(0.01, deadline - time.monotonic()))
+            except queue.Empty:
+                message = None
+            if message is None or message.get('event') == 'unavailable':
+                self._kill()
+                raise WorkerError('worker_unavailable')
+            if message.get('event') == 'ready':
+                break
+        rows = []
+        if self._seed is not None:
+            try:
+                rows = list(self._seed() or [])
+            except Exception:
+                rows = []
+        if rows:
+            self._send('cookies_import', ACTION_TIMEOUT_SECONDS, cookies=rows)
 
-    def _settle(self, timeout):
+    def _kill(self):
+        proc, self._proc = self._proc, None
+        self._visible = False
+        if proc is None:
+            return
         try:
-            self._page.wait_for_load_state('domcontentloaded', timeout=timeout * 1000)
+            proc.kill()
+            proc.wait(WORKER_QUIT_SECONDS)
         except Exception:
             pass
+        for stream in (proc.stdin, proc.stdout):
+            try:
+                stream.close()
+            except Exception:
+                pass
+
+    def alive(self):
+        return self._proc is not None and self._proc.poll() is None
+
+    def _send(self, op, timeout, **arguments):
+        proc, messages = self._proc, self._queue
+        ident = next(self._ids)
+        timeout = max(1.0, float(timeout))
+        try:
+            proc.stdin.write(json.dumps({'id': ident, 'op': op, 'timeout': timeout, **arguments}, ensure_ascii=False) + '\n')
+            proc.stdin.flush()
+        except (OSError, ValueError, AttributeError):
+            self._kill()
+            raise WorkerError('worker_exited') from None
+        deadline = time.monotonic() + timeout + self.grace_seconds
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                # Unresponsive: kill it; the next call starts a fresh worker.
+                self._kill()
+                raise TimeoutError('browser timeout')
+            try:
+                message = messages.get(timeout=remaining)
+            except queue.Empty:
+                continue
+            if message is None:
+                self._kill()
+                raise WorkerError('worker_exited')
+            if message.get('id') != ident:
+                continue
+            if message.get('ok'):
+                return message
+            code = str(message.get('error') or 'worker_error')
+            if code == 'timeout':
+                raise TimeoutError('browser timeout')
+            if code in TARGET_ERRORS:
+                raise ToolError(TARGET_TEXT, 'target_unavailable')
+            raise WorkerError(code)
+
+    def _request(self, op, timeout, **arguments):
+        with self._lock:
+            if not self.alive():
+                self._kill()
+                self._start()   # restart after a crash, with the jar's cookies
+            return self._send(op, timeout, **arguments)
+
+    # -- PageDriver ------------------------------------------------------------
+    def goto(self, url, timeout):
+        self._request('navigate', timeout, url=url)
+
+    def snapshot(self):
+        page = self._request('snapshot', ACTION_TIMEOUT_SECONDS).get('page') or {}
+        self._expect = {element['index']: {key: str(element.get(key) or '') for key in ('tag', 'type', 'autocomplete')}
+                        for element in page.get('elements') or []
+                        if isinstance(element, dict) and isinstance(element.get('index'), int)}
+        return page
 
     def click(self, index, timeout):
-        try:
-            self._page.locator(INTERACTIVE_SELECTOR).nth(index).click(timeout=timeout * 1000)
-        except Exception as exc:
-            raise self._wrap(exc) from None
-        self._settle(timeout)
+        self._request('click', timeout, index=index, expect=self._expect.get(index))
 
     def type(self, index, text, timeout):
-        try:
-            self._page.locator(INTERACTIVE_SELECTOR).nth(index).fill(text, timeout=timeout * 1000)
-        except Exception as exc:
-            raise self._wrap(exc) from None
+        self._request('type', timeout, index=index, text=text, expect=self._expect.get(index))
+
+    # -- the owner's login window ---------------------------------------------------
+    def show(self, url, timeout):
+        self._request('show', timeout, url=url)
+        self._visible = True
+
+    def hide(self):
+        self._request('hide', ACTION_TIMEOUT_SECONDS)
+        self._visible = False
 
     def is_open(self):
-        try:
-            return bool(self._context.pages)
-        except Exception:
-            return False
+        return self.alive() and self._visible
+
+    # -- session material: to and from the encrypted jar only ------------------------
+    def cookies_export(self):
+        """``({site: [cookie rows]}, [hosts opened])``: for ``CookieJar.save_export`` only."""
+        message = self._request('cookies_export', ACTION_TIMEOUT_SECONDS)
+        sites = message.get('sites') if isinstance(message.get('sites'), dict) else {}
+        return sites, [host for host in message.get('hosts') or [] if isinstance(host, str)]
+
+    def cookies_import(self, rows):
+        return self._request('cookies_import', ACTION_TIMEOUT_SECONDS, cookies=list(rows or [])).get('imported', 0)
+
+    def cookies_delete(self, site):
+        return self._request('cookies_delete', ACTION_TIMEOUT_SECONDS, site=site).get('deleted', 0)
+
+    def cookies_clear(self):
+        self._request('cookies_clear', ACTION_TIMEOUT_SECONDS)
 
     def close(self):
-        try:
-            self._context.close()
-        finally:
-            self._playwright.stop()
+        with self._lock:
+            if self.alive():
+                try:
+                    self._send('quit', WORKER_QUIT_SECONDS)
+                    self._proc.wait(WORKER_QUIT_SECONDS)
+                except Exception:
+                    pass
+            self._kill()
 
 
-def playwright_launcher(profile_dir, headless):
-    return PlaywrightDriver(profile_dir, headless=headless)
-
+# --- the profile the execution environment owns --------------------------------
 
 class BrowserProfile:
-    """The one persistent profile: who may hold it now, and the owner's login window.
+    """The one browser profile: who may hold it now, its encrypted sessions and the login window.
 
-    Chromium allows one process per profile directory, so a Work's session
-    and the login window are serialized by one non-blocking lock.  ``launcher``
-    is injectable (``(profile_dir, headless) -> PageDriver``); the default
-    needs the optional Playwright extra and is imported lazily.
+    One Work session or the owner's login window holds the profile at a time
+    (one non-blocking lock), so two workers never race to save the jar.
+    ``launcher`` is injectable (``(profile_dir, headless) -> PageDriver``);
+    the default starts the embedded WebKit worker with the jar's cookies.
+    When a driver closes, its cookies are exported into the jar first.
+    ``profile_dir`` (under ``store.private``) holds only the encrypted jar.
     """
 
-    def __init__(self, profile_dir, *, launcher=None, headless=True, available=None, clock=time.time):
+    def __init__(self, profile_dir, *, launcher=None, headless=True, available=None, clock=time.time, jar=None):
         self.profile_dir = Path(profile_dir)
-        self.launcher = launcher or playwright_launcher
+        self.jar = jar if jar is not None else CookieJar(self.profile_dir / JAR_NAME,
+                                                         KeychainKey(store_account(self.profile_dir)), clock)
+        self.launcher = launcher or self._launch_webkit
         self.headless = headless
-        self._available = available if available is not None else (lambda: playwright_available()) if launcher is None else (lambda: True)
+        self._available = available if available is not None else (
+            (lambda: webkit_unavailable_reason() is None) if launcher is None else (lambda: True))
         self.clock = clock
         self._lock = threading.Lock()
+        self._jar_lock = threading.RLock()
         self._holder = None
+        self._live = None
+        self._suppressed = set()
         self._login_thread = None
+
+    def _launch_webkit(self, profile_dir, headless):
+        return WebKitWorkerDriver(self.profile_dir.name, seed=self.jar.cookies)
 
     def available(self):
         try:
@@ -740,24 +878,59 @@ class BrowserProfile:
         except Exception:
             return False
 
-    def status(self):
-        available = self.available()
-        return {'available': available, 'install_hint': None if available else INSTALL_HINT,
-                'profile_exists': self.profile_dir.is_dir() and any(self.profile_dir.iterdir()),
-                'login_window_open': self._holder == 'login', 'in_use': self._holder is not None and self._holder != 'login',
-                'last_login_at': None, 'headless': self.headless, 'limitation': LIMITATION_TEXT}
+    def unavailable_reason(self):
+        """None, or ``platform`` / ``dependency`` (the typed refusal ``browser_unavailable_platform``)."""
+        if self.available():
+            return None
+        return webkit_unavailable_reason() or 'platform'
 
+    def unavailable_message(self):
+        reason = self.unavailable_reason()
+        return unavailable_text(reason) if reason else None
+
+    def status(self):
+        reason = self.unavailable_reason()
+        status = {'available': reason is None, 'unavailable_reason': reason, 'engine': 'macos-webkit',
+                  'message': unavailable_text(reason) if reason else None,
+                  'login_window_open': self._holder == 'login', 'in_use': self._holder is not None and self._holder != 'login',
+                  'limitation': LIMITATION_TEXT, 'google_note': GOOGLE_NOTE, 'sessions': []}
+        if reason is None:
+            status['storage'] = {'what': 'site-sign-in-cookies', 'path': str(self.jar.path),
+                                 'key': getattr(self.jar.key, 'location', 'macos-keychain'), 'key_service': JAR_SERVICE,
+                                 'sent_to_ai': False, 'state': self.jar.state()}
+            status['sessions'] = self.jar.sites()
+        return status
+
+    # -- holding the profile ---------------------------------------------------
     def _acquire(self, holder):
         if not self._lock.acquire(blocking=False):
             raise ToolError(BUSY_TEXT, 'browser_busy')
         self._holder = holder
+        self._suppressed = set()
 
     def _release(self):
         self._holder = None
+        self._live = None
         try:
             self._lock.release()
         except RuntimeError:
             pass
+
+    def _save(self, driver):
+        """Export the driver's cookies into the jar (never elsewhere).  A failure keeps the old jar."""
+        if not hasattr(driver, 'cookies_export'):
+            return False
+        with self._jar_lock:
+            try:
+                sites, hosts = driver.cookies_export()
+            except Exception:
+                return False
+            sites = {site: rows for site, rows in sites.items() if site not in self._suppressed}
+            try:
+                self.jar.save_export(sites, hosts)
+            except Exception:
+                return False
+            return True
 
     def driver_factory(self, work_id):
         """A zero-argument factory a ``BrowserSession`` calls on first use, or None when unavailable."""
@@ -771,18 +944,53 @@ class BrowserProfile:
             except Exception:
                 self._release()
                 raise
-            return _ReleasingDriver(driver, self._release)
+            self._live = driver
+            return _ReleasingDriver(driver, self._save, self._release)
         return launch
 
+    # -- the owner's sessions (Settings) -------------------------------------------
+    def delete_site(self, site):
+        """Remove one site's sign-in cookies from the jar and from a running worker."""
+        site = str(site or '').strip().lower()
+        if not site:
+            raise ValueError('삭제할 사이트를 지정하세요.')
+        with self._jar_lock:
+            live = self._live
+            if live is not None and hasattr(live, 'cookies_delete'):
+                try:
+                    live.cookies_delete(site)
+                except Exception:
+                    # The running worker could not drop it: never save it back from this session.
+                    self._suppressed.add(site)
+            try:
+                removed = self.jar.remove(site)
+            except Exception:
+                raise ValueError('저장된 로그인 세션을 읽지 못했습니다. "모두 삭제"로 초기화할 수 있습니다.') from None
+        return {'deleted': bool(removed), 'site': site}
+
+    def delete_all(self):
+        """Delete the jar file and its Keychain key, and clear a running worker's store."""
+        with self._jar_lock:
+            live = self._live
+            if live is not None and hasattr(live, 'cookies_clear'):
+                try:
+                    live.cookies_clear()
+                except Exception:
+                    self._suppressed |= {row['site'] for row in self.jar.sites()}
+            existed = self.jar.clear()
+        return {'deleted': existed, 'all': True}
+
+    # -- the owner's login window ------------------------------------------------------
     def open_for_login(self, url, wait=False):
-        """Open a headed window on the profile for the owner to log in by hand.
+        """Show the worker window at ``url`` for the owner to log in by hand.
 
         AgentOS navigates to ``url`` and does nothing else: no typing, no
-        reading.  The window is the owner's; the profile is released when
-        every page is closed (or after ``LOGIN_WINDOW_SECONDS``).
+        reading.  The window's title shows the host it is on.  Cookies are
+        exported into the encrypted jar while it is open and when the owner
+        closes it (or after ``LOGIN_WINDOW_SECONDS``).
         """
         if not self.available():
-            return {'state': 'unavailable', 'install_hint': INSTALL_HINT}
+            return {'state': 'unavailable', 'reason': self.unavailable_reason(), 'message': self.unavailable_message()}
         parts = urlsplit(str(url or ''))
         if parts.scheme not in ('http', 'https') or not parts.netloc:
             raise ValueError('http 또는 https 주소를 입력하세요.')
@@ -797,15 +1005,25 @@ class BrowserProfile:
             try:
                 self.profile_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
                 driver = self.launcher(self.profile_dir, False)
-                driver.goto(url, ACTION_TIMEOUT_SECONDS)
+                self._live = driver
+                show = getattr(driver, 'show', None)
+                if show is not None:
+                    show(url, LOGIN_OPEN_SECONDS)
+                else:
+                    driver.goto(url, ACTION_TIMEOUT_SECONDS)
                 opened.set()
                 deadline = self.clock() + LOGIN_WINDOW_SECONDS
+                saved = self.clock()
                 while driver.is_open() and self.clock() < deadline:
                     time.sleep(0.5)
+                    if self.clock() - saved >= LOGIN_SAVE_SECONDS:
+                        self._save(driver)
+                        saved = self.clock()
             except Exception as exc:
                 failure.append(type(exc).__name__)
             finally:
                 if driver is not None:
+                    self._save(driver)
                     try:
                         driver.close()
                     except Exception:
@@ -817,25 +1035,28 @@ class BrowserProfile:
         if wait:
             self._login_thread.join()
         else:
-            opened.wait(ACTION_TIMEOUT_SECONDS + 5)
+            opened.wait(LOGIN_OPEN_SECONDS + WORKER_START_SECONDS + 5)
         if failure:
             return {'state': 'failed', 'message': FAILED_TEXT}
-        return {'state': 'closed' if wait else 'opened', 'url': page_reference(url),
-                'message': '브라우저 창에서 직접 로그인한 뒤 창을 닫아 주세요. AgentOS는 입력 내용을 보지 않습니다.'}
+        return {'state': 'closed' if wait else 'opened', 'url': page_reference(url), 'message': LOGIN_WINDOW_TEXT}
 
 
 class _ReleasingDriver:
-    """A driver whose ``close`` also releases the profile lock (once)."""
+    """A driver whose ``close`` saves its cookies to the jar, closes it, and releases the profile (once)."""
 
-    def __init__(self, driver, release):
-        self._driver, self._release = driver, release
+    def __init__(self, driver, save, release):
+        self._driver, self._save, self._release = driver, save, release
 
     def __getattr__(self, name):
         return getattr(self._driver, name)
 
     def close(self):
+        save, self._save = self._save, lambda driver: None
         try:
-            self._driver.close()
+            save(self._driver)
         finally:
-            release, self._release = self._release, lambda: None
-            release()
+            try:
+                self._driver.close()
+            finally:
+                release, self._release = self._release, lambda: None
+                release()

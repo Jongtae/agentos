@@ -12,14 +12,14 @@ license = {text = "AGPL-3.0-only"}
 # envelope models are deliberately not adopted - see the bridge docstrings.
 # oauthlib: RFC 6749/7636 authorization-request construction (REUSE-R1b #427).
 # BSD-3-Clause, zero mandatory dependencies, imports no HTTP library.
-dependencies = ["pypdf>=5.0", "python-docx>=1.1", "openpyxl>=3.1", "cryptography>=42.0", "mcp-types>=2.2,<3", "oauthlib>=3.3.1,<4"]
+# pyobjc-framework-WebKit: SEC-BROWSER-02 #680 embedded macOS system WebKit
+# browser (MIT, Ronald Oussoren; 12.2.2 reviewed). macOS only; it pulls
+# pyobjc-core and pyobjc-framework-Cocoa (MIT). No browser download.
+dependencies = ["pypdf>=5.0", "python-docx>=1.1", "openpyxl>=3.1", "cryptography>=42.0", "mcp-types>=2.2,<3", "oauthlib>=3.3.1,<4",
+                "pyobjc-framework-WebKit>=12.2,<13; sys_platform == 'darwin'"]
 
 [project.optional-dependencies]
 schema-validation = ["jsonschema[format]>=4.23"]
-# browser: SEC-BROWSER-01 #656 owner-logged-in browser profile (Apache-2.0,
-# Microsoft-maintained). Imported lazily; the owner also runs
-# `playwright install chromium`. Without it the browser tools are not offered.
-browser = ["playwright>=1.47,<2"]
 
 [project.scripts]
 agentos = "personal_agent.quickstart:main"

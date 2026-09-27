@@ -222,9 +222,9 @@ class AgentService:
                  drive_web_oauth=None, connector_registry=None, gmail=None, calendar=None, calendar_oauth=None, calendar_factory=None,
                  browser_profile=None):
         self.store=store
-        # #656: the one persistent browser profile this installation owns,
-        # under the owner-only private directory.  Chromium is launched only
-        # when a Work's browser tool runs or the owner opens the login window.
+        # #656/#680: the one browser profile this installation owns (its encrypted session jar),
+        # under the owner-only private directory.  The embedded WebKit worker
+        # starts only when a Work's browser tool runs or the owner opens the login window.
         self.browser_profile=browser_profile or BrowserProfile(store.private/'browser-profile')
         # AX-11 (#603): identity of the code this process loaded, taken once
         # near start-up and recorded with each turn's provenance, so a stale
@@ -3268,10 +3268,23 @@ class AgentService:
         return status
 
     def open_browser_for_login(self, body):
-        """Open the headed login window on the profile; AgentOS types nothing in it."""
+        """Show the embedded engine's login window; AgentOS types nothing in it (#680)."""
         url=(body or {}).get('url') if isinstance(body,dict) else None
         if not isinstance(url,str) or not url.strip():raise ValueError('로그인할 사이트 주소를 입력하세요.')
         return self.browser_profile.open_for_login(url.strip())
+
+    def delete_browser_sessions(self, body):
+        """Delete one site's saved sign-in cookies, or all of them (#680).
+
+        Deletion removes the site from the encrypted jar and from a running
+        worker; ``all`` also deletes the jar's Keychain key.  Returns names
+        only, never cookie values.
+        """
+        body=body if isinstance(body,dict) else {}
+        if body.get('all') is True:return self.browser_profile.delete_all()
+        site=body.get('site')
+        if not isinstance(site,str) or not site.strip():raise ValueError('삭제할 사이트를 지정하세요.')
+        return self.browser_profile.delete_site(site)
 
     def browser_step_requests(self):
         rows=self.store.config(BROWSER_REQUESTS_KEY,{})
@@ -4752,6 +4765,7 @@ class AgentService:
                                                   budget=self.work_budget(job['id']),
                                                   # #656: the owner-logged-in browser profile and its per-step approvals.
                                                   browser=self.browser_profile.driver_factory(job['id']),browser_approvals=self.browser_approvals_for(job),
+                                                  browser_unavailable=self.browser_profile.unavailable_message(),
                                                   current_context=self.current_state,
                                                   # #659: owner-accepted preparations (proposal or owner-request acceptance).
                                                   preparations=self.preparation_scheduler(job,prompt),

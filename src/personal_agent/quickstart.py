@@ -799,12 +799,14 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                         return self.reply(400,{'error':'Open AgentOS on its local address to approve a calendar change.'})
                     try:return self.reply(200,service.calendar_draft_request(body))
                     except ValueError as exc:return self.reply(400,{'error':str(exc)})
-                if path in ('/api/browser/login','/api/browser/approval'):
+                if path in ('/api/browser/login','/api/browser/approval','/api/browser/sessions/delete'):
                     # #656: a headed window on this Mac, and the approval of a
-                    # guarded step in the owner's session: owner session, loopback only.
+                    # guarded step in the owner's session; #680: deleting saved
+                    # sign-in sessions.  Owner session, loopback only.
                     if self.public_host():return self.reply(403,{'error':'이 작업은 이 기기에서만 할 수 있습니다.'})
                     try:
                         if path=='/api/browser/login':return self.reply(200,service.open_browser_for_login(body))
+                        if path=='/api/browser/sessions/delete':return self.reply(200,service.delete_browser_sessions(body))
                         return self.reply(200,service.browser_step_decision(body))
                     except ValueError as exc:return self.reply(400,{'error':str(exc)})
                 if path=='/api/context-inbox/telegram-policy':return self.reply(200,service.set_context_telegram_policy(body))
@@ -906,22 +908,23 @@ def _write_local_oauth_secret_file(parser, target, values, label):
 
 
 def browser_login_main(argv):
-    """Open the owner's persistent browser profile in a headed window for manual login (#656).
+    """Show the embedded browser's login window for a manual login (#656, #680).
 
     The window belongs to the owner: AgentOS navigates to the address and
-    types nothing.  The command returns when every page of the window is
-    closed.  While the AgentOS service is running, prefer the same action in
-    Settings; Chromium allows one process per profile directory.
+    types nothing.  The command returns when the owner closes the window; the
+    sign-in cookies are then saved to the encrypted jar (key in the macOS
+    Keychain).  While the AgentOS service is running, prefer the same action
+    in Settings so one process owns the jar.
     """
-    from .browser_session import BrowserProfile, INSTALL_HINT
-    parser=argparse.ArgumentParser(prog='agentos browser-login',description='Open the AgentOS browser profile for manual login.')
+    from .browser_session import BrowserProfile
+    parser=argparse.ArgumentParser(prog='agentos browser-login',description='Open the AgentOS embedded browser window for manual login.')
     parser.add_argument('--url',required=True,help='The site to log in to (http or https).')
     parser.add_argument('--data',default=os.environ.get('AGENTOS_DATA',str(Path.home()/'.local/share/agentos')))
     args=parser.parse_args(argv)
     os.umask(0o077)
     profile=BrowserProfile(QuickStore(args.data).private/'browser-profile')
     if not profile.available():
-        parser.exit(2,f'브라우저 기능이 설치되어 있지 않습니다: {INSTALL_HINT}\n')
+        parser.exit(2,f'{profile.unavailable_message()}\n')
     receipt=profile.open_for_login(args.url,wait=True)
     print(json.dumps(receipt,ensure_ascii=False,sort_keys=True))
     return 0 if receipt.get('state') in ('opened','closed') else 1

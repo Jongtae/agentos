@@ -212,7 +212,7 @@ class KeychainKeyTests(unittest.TestCase):
         self.assertEqual(store_account('/tmp/x'), store_account('/tmp/x/'))
 
 
-@unittest.skipUnless(sys.platform == 'darwin' and Path('/usr/bin/security').exists(), 'macOS Keychain only')
+@unittest.skipUnless(sys.platform == 'darwin' and Path('/usr/bin/security').exists() and __import__('os').environ.get('AGENTOS_REAL_BROWSER_TESTS') == '1', 'real macOS Keychain; set AGENTOS_REAL_BROWSER_TESTS=1')
 class KeychainIntegrationTests(unittest.TestCase):
     """Real ``/usr/bin/security`` with a test-only service name that is deleted afterwards."""
 
@@ -697,8 +697,13 @@ class DestinationTests(unittest.TestCase):
 
 # ---------------------------------------------------------------- the real worker (macOS + PyObjC)
 
+# Real WebKit windows and real Keychain items open on the owner's screen, so these
+# tests run only when explicitly requested: AGENTOS_REAL_BROWSER_TESTS=1.
+REAL_BROWSER_TESTS = __import__('os').environ.get('AGENTOS_REAL_BROWSER_TESTS') == '1'
+
+
 def _webkit_ready():
-    return bs.webkit_unavailable_reason() is None and Path('/usr/bin/security').exists()
+    return REAL_BROWSER_TESTS and bs.webkit_unavailable_reason() is None and Path('/usr/bin/security').exists()
 
 
 class SessionFixtureHandler(FixtureHandler):

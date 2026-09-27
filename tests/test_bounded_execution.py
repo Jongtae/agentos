@@ -535,8 +535,8 @@ class BoundedExecutionPreservedBoundaryTests(unittest.TestCase):
                                     codex_home=profile).execute(
                 'codex', 'hello', AgentOSMcpTools(_Capabilities()))
         argv = seen['argv']
-        self.assertEqual(argv[1:7], ['exec', '--json', '--sandbox', 'read-only', '--ignore-rules',
-                                     '--skip-git-repo-check'])
+        self.assertEqual(argv[1:9], ['exec', '--json', '--sandbox', 'read-only', '--ignore-rules',
+                                     '-c', 'web_search="disabled"', '--skip-git-repo-check'])
         # No generic argv/approval hook: the caller cannot relax these.
         self.assertNotIn('--dangerously-bypass-approvals-and-sandbox', argv)
         self.assertNotIn('workspace-write', argv)

@@ -405,6 +405,99 @@ def is_not_signed_in(text):
 
 
 LOGIN_COMMANDS = {'claude-code': 'claude setup-token', 'codex': 'codex login'}
+
+#: Claude Code's built-in web search tool name (``claude --help``, 2.1.280).
+CLAUDE_NATIVE_SEARCH_TOOL = 'WebSearch'
+MAX_NATIVE_SEARCHES = 10
+MAX_NATIVE_RESULTS = 10
+_HTTP_URL = re.compile(r'https?://[^\s/?#]+')
+
+
+def _native_row(value):
+    """``{title, url}`` of one reported search result, or None; URLs are never invented."""
+    if not isinstance(value, dict):
+        return None
+    url = value.get('url')
+    if not isinstance(url, str) or len(url) > 2000 or not _HTTP_URL.match(url):
+        return None
+    return {'title': str(value.get('title') or '')[:300], 'url': url}
+
+
+def _codex_searches(records):
+    found = []
+    for record in records:
+        item = record.get('item')
+        if record.get('type') != 'item.completed' or not isinstance(item, dict) or item.get('type') != 'web_search':
+            continue
+        action = item.get('action') if isinstance(item.get('action'), dict) else {}
+        queries = [str(value)[:200] for value in [item.get('query'), action.get('query'), *(action.get('queries') or [])]
+                   if isinstance(value, str) and value.strip()]
+        results = item.get('results') if isinstance(item.get('results'), list) else []
+        rows = [row for row in (_native_row(value) for value in results) if row]
+        opened = _native_row({'url': action.get('url')})
+        if opened and opened['url'] not in {row['url'] for row in rows}:
+            rows.append(opened)
+        found.append({'id': str(item.get('id') or '')[:80], 'engine': 'codex', 'action': str(action.get('type') or 'search')[:20],
+                      'queries': list(dict.fromkeys(queries))[:5], 'results': rows[:MAX_NATIVE_RESULTS],
+                      'state': 'succeeded', 'reason': ''})
+    return found
+
+
+def _claude_searches(records):
+    calls = {}
+
+    def call_for(call_id):
+        return calls.setdefault(call_id, {'id': call_id[:80], 'engine': 'claude-code', 'action': 'search', 'queries': [],
+                                          'results': [], 'state': 'requested', 'reason': ''})
+    for record in records:
+        message = record.get('message') if isinstance(record.get('message'), dict) else {}
+        content = message.get('content') if isinstance(message.get('content'), list) else []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            if record.get('type') == 'assistant' and part.get('type') == 'tool_use' and part.get('name') == CLAUDE_NATIVE_SEARCH_TOOL:
+                query = part.get('input', {}).get('query') if isinstance(part.get('input'), dict) else None
+                call = call_for(str(part.get('id') or ''))
+                if isinstance(query, str) and query.strip():
+                    call['queries'] = [query[:200]]
+            elif record.get('type') == 'user' and part.get('type') == 'tool_result' and str(part.get('tool_use_id') or '') in calls:
+                call = calls[str(part.get('tool_use_id'))]
+                reported = record.get('tool_use_result')
+                rows = []
+                if isinstance(reported, dict):
+                    for block in reported.get('results') or []:
+                        if isinstance(block, dict):
+                            rows += [row for row in (_native_row(value) for value in block.get('content') or []) if row]
+                text = part.get('content') if isinstance(part.get('content'), str) else (reported if isinstance(reported, str) else '')
+                if part.get('is_error') is True or not isinstance(reported, dict):
+                    call.update(state='unavailable', reason=redact_reason(str(text or 'web search error')))
+                else:
+                    call.update(state='succeeded', results=rows[:MAX_NATIVE_RESULTS])
+        for denial in record.get('permission_denials') or []:
+            if isinstance(denial, dict) and denial.get('tool_name') == CLAUDE_NATIVE_SEARCH_TOOL:
+                call_for(str(denial.get('tool_use_id') or 'denied')).update(state='unavailable', reason='permission denied')
+    return [call for call in calls.values() if call['state'] != 'requested']
+
+
+def native_searches(engine_id, records):
+    """The CLI's own web searches in one turn's machine output (#678).
+
+    Codex ``exec --json``: ``item.completed`` with ``item.type ==
+    'web_search'`` (``query``, ``action`` of type search/open_page/
+    find_in_page with ``query``/``queries``/``url``, optional ``results``).
+    Claude Code ``stream-json``: an assistant ``tool_use`` named
+    ``WebSearch`` and the user record's ``tool_use_result`` (``query``,
+    ``results`` of ``{tool_use_id, content: [{title, url}]}`` or text).  A
+    tool result marked ``is_error``, a text-only result or a permission
+    denial is ``unavailable`` with the CLI's own redacted words as the
+    reason (the installed Claude Code says web search is US-only).  Only what
+    the CLI reported is kept: a search that reported no URL has none.
+    """
+    if engine_id == 'codex':
+        return _codex_searches(records)[:MAX_NATIVE_SEARCHES]
+    if engine_id == 'claude-code':
+        return _claude_searches(records)[:MAX_NATIVE_SEARCHES]
+    return []
 AUTH_HINT = '엔진 로그인이 필요합니다. 설정 › AI 연결에서 로그인을 확인하세요.'
 
 
@@ -450,6 +543,7 @@ def cli_metadata(engine_id, raw):
             name = item.get('tool') or item.get('name') or item.get('type')
             meta['tool_calls'].append({'type': item.get('type'), 'name': str(name)[:80], 'status': str(item.get('status') or '')[:20]})
     meta['tool_calls'] = meta['tool_calls'][:30]
+    meta['native_searches'] = native_searches(engine_id, records)
     return meta
 
 
@@ -720,10 +814,22 @@ class BoundedExecutionAdapter:
         return {'state': 'unknown', 'detail': 'unparsed status'}
 
     def command(self, engine_id, binary, prompt, mcp_config, instructions='', profile=BOUNDED_PROFILE,
-                disabled_features=()):
+                disabled_features=(), native_search=False):
+        """The argv of one Work turn.
+
+        ``native_search`` (#678) lets the trusted-local turn use the CLI's own
+        web search: Codex ``-c web_search="live"`` (``exec`` has no
+        ``--search`` flag), Claude Code ``--tools WebSearch`` with
+        ``WebSearch`` added to the exact ``--allowedTools`` list.  Without it
+        Codex gets ``web_search="disabled"`` and the Claude Code argv is
+        unchanged.  The strict-isolated profile never enables it: its qualified
+        feature plan keeps every non-allowlisted feature off.  Judgment calls
+        (``decision_adapters``) are a separate argv and keep search disabled.
+        """
         if profile not in HOST_CLI_PROFILES:
             raise ExecutionError('지원하지 않는 구독 엔진 실행 프로필입니다.')
         strict = profile == STRICT_PROFILE
+        native_search = bool(native_search) and not strict
         if engine_id == 'codex':
             # `exec` is non-interactive and JSON output is required so prose
             # around an answer cannot be mistaken for execution evidence.
@@ -736,7 +842,8 @@ class BoundedExecutionAdapter:
             # the #616 review P1 finding); an older CLI rejects the unknown
             # flag and the turn fails instead of running without it.
             sandbox = (strict_launch_arguments('codex', disabled_features) if strict
-                       else ['--sandbox', 'read-only', '--ignore-rules'])
+                       else ['--sandbox', 'read-only', '--ignore-rules',
+                             '-c', 'web_search="live"' if native_search else 'web_search="disabled"'])
             return [binary, 'exec', '--json', *sandbox, '--skip-git-repo-check',
                     '--ignore-user-config', '--ephemeral',
                     '-c', f'mcp_servers.agentos.command={json.dumps(sys.executable)}',
@@ -754,7 +861,14 @@ class BoundedExecutionAdapter:
             # #623: trusted-local pre-approves only its declared bridge tools;
             # strict also removes every built-in tool.  --allowedTools is variadic,
             # so it must stay the last argument.
-            argv += strict_launch_arguments('claude-code') if strict else claude_bridge_allowlist(BOUNDED_PROFILE)
+            if strict:
+                argv += strict_launch_arguments('claude-code')
+            elif native_search:
+                # Only WebSearch among the built-in tools, pre-approved by its exact name.
+                allow = claude_bridge_allowlist(BOUNDED_PROFILE)
+                argv += ['--tools', CLAUDE_NATIVE_SEARCH_TOOL, allow[0], allow[1] + ',' + CLAUDE_NATIVE_SEARCH_TOOL]
+            else:
+                argv += claude_bridge_allowlist(BOUNDED_PROFILE)
             return argv
         raise ExecutionError('지원하는 구독 엔진을 선택하세요.')
 
@@ -1109,7 +1223,9 @@ class BoundedExecutionAdapter:
             interrupted = getattr(budget, 'interrupted', None)
             started = time.monotonic()
             LOG.info('engine turn started engine=%s profile=%s', engine_id, profile)
-            argv = self.command(engine_id, binary, prompt, config, instructions, profile=profile, disabled_features=disabled)
+            # #678: the facade says whether this turn may use the CLI's own web search.
+            argv = self.command(engine_id, binary, prompt, config, instructions, profile=profile, disabled_features=disabled,
+                                native_search=bool(getattr(tools, 'native_search', False)))
             run_meta = {'argv': display_argv(argv, prompt, instructions), 'requested_model': None}
             try:
                 if self.runner is subprocess.run:

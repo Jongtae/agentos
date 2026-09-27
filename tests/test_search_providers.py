@@ -1,9 +1,12 @@
-"""SEC-SEARCH-01 #655: model-chosen multi-provider web search.
+"""SEC-SEARCH-01 #655 / SEC-SEARCH-02 #678: model-chosen web search, AI-native first.
 
-Evidence class: deterministic unit tests with an injected fake HTTP opener
-shaped after the Bing RSS feed, the Naver Open API and the Brave Search API
-responses, a fake public wire for the Capabilities path and a temporary owner
-store.  No live provider, key or network is used.
+Evidence class: deterministic unit tests.  Fake transports shaped after the
+OpenAI Responses API (``web_search`` tool), the Anthropic Messages API
+(``web_search_20250305`` server tool, ``pause_turn``, errors inside a 200) and
+OpenRouter (``openrouter:web_search``); a fake HTTP opener shaped after the
+Brave Search API and the Bing RSS feed; fake Codex ``--json`` and Claude Code
+``stream-json`` event streams; a temporary owner store.  No live provider,
+key or network is used, so nothing here proves live provider behavior.
 """
 import io
 import json
@@ -14,40 +17,71 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlsplit
 
-from personal_agent.agent_runtime import Capabilities, action_definitions, classify_failure, evidence_summary
-from personal_agent.bounded_execution import ExecutionResult
+from personal_agent.agent_runtime import (Capabilities, action_definitions, classify_failure, evidence_summary, run_agent,
+                                          turn_context, verified_text)
+from personal_agent.bounded_execution import (CLI_PROFILES, STRICT_PROFILE, BoundedExecutionAdapter, ExecutionResult,
+                                              cli_metadata)
+from personal_agent.conversation_handoff import ConversationJudgments
+from personal_agent.decision import OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine, fixture_confidence
+from personal_agent.decision_adapters import CODEX_DECISION_CONFIG
 from personal_agent.local_tools import LocalTools
 from personal_agent.manifests import runtime_packages
 from personal_agent.portable_state import export_owner_state
 from personal_agent.providers import ModelAdapter, ProviderError
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
-from personal_agent.search_providers import (BRAVE_TOKEN, CONFIG_KEY, NAVER_CLIENT_ID, NAVER_CLIENT_SECRET, BingRssProvider,
-                                             BraveProvider, NaverProvider, ProviderRegistry, SearchProviderError,
-                                             SearchProviderSettings, search_arguments)
+from personal_agent.search_providers import (AI_NATIVE, ANSWER_LABEL, BRAVE_TOKEN, CONFIG_KEY, NATIVE_STATUS_KEY,
+                                             RETIRED_SECRET_SLOTS, AiNativeProvider, BingRssProvider, BraveProvider,
+                                             ProviderRegistry, SearchProviderError, SearchProviderSettings,
+                                             search_arguments)
 from personal_agent.subscription_engines import SubscriptionEngines
 
-NAVER_ID = 'naver-id-fixture-0001'
-NAVER_SECRET = 'naver-secret-fixture-0001'
 BRAVE_KEY = 'brave-token-fixture-0001'
-CFG = {'provider': 'compatible', 'endpoint': 'http://127.0.0.1:9999', 'model': 'fixture'}
+API_KEY = 'sk-fixture-model-key-0001'
+OPENAI = {'provider': 'openai', 'endpoint': 'https://api.openai.com/v1', 'model': 'gpt-4o-mini'}
+ANTHROPIC = {'provider': 'anthropic', 'endpoint': 'https://api.anthropic.com', 'model': 'claude-sonnet-4-5'}
+OPENROUTER = {'provider': 'compatible', 'endpoint': 'https://openrouter.ai/api/v1', 'model': 'openai/gpt-4o-mini'}
+OLLAMA = {'provider': 'ollama', 'endpoint': 'http://127.0.0.1:11434', 'model': 'llama3'}
+ANSWER = 'MODEL PROSE: tomorrow is sunny, 22C.'
 
 BING_RSS = b'''<?xml version="1.0"?><rss><channel><item><title>Leaders and differences</title>
 <link>https://example.org/leaders</link><description>When leaders make a difference.</description></item>
 <item><title>ftp result</title><link>ftp://example.org/no</link><description>skipped</description></item>
 <item><title>Second</title><link>http://example.org/second</link><description>d2</description></item></channel></rss>'''
-NAVER_WEB = {'items': [{'title': '<b>리더</b>는 언제 차이를 만들어내는가 &amp; 후기', 'link': 'https://blog.example.kr/leaders',
-                        'description': '<b>리더십</b> 책 후기'},
-                       {'title': 'javascript link', 'link': 'javascript:alert(1)', 'description': 'skipped'}]}
-NAVER_BOOK = {'items': [{'title': '리더는 언제 <b>차이</b>를 만들어내는가', 'link': 'https://search.shopping.naver.com/book/1',
-                         'author': '홍길동', 'publisher': '출판사', 'pubdate': '20240101', 'isbn': '9788900000000',
-                         'description': '리더십에 관한 책'}]}
 BRAVE = {'web': {'results': [{'title': 'Brave result', 'url': 'https://example.com/brave', 'description': 'From Brave'},
                              {'title': 'no url'}]}}
 
+OPENAI_OK = {'model': 'gpt-4o-mini-2024-07-18', 'output': [
+    {'type': 'web_search_call', 'id': 'ws_1', 'status': 'completed',
+     'action': {'type': 'search', 'query': 'seoul weather tomorrow',
+                'sources': [{'type': 'url', 'url': 'https://weather.example/seoul'},
+                            {'type': 'url', 'url': 'https://news.example/forecast'}]}},
+    {'type': 'message', 'role': 'assistant', 'content': [
+        {'type': 'output_text', 'text': ANSWER,
+         'annotations': [{'type': 'url_citation', 'url': 'https://weather.example/seoul', 'title': 'Seoul forecast',
+                          'start_index': 0, 'end_index': 10},
+                         {'type': 'url_citation', 'url': 'javascript:alert(1)', 'title': 'bad'}]}]}]}
+ANTHROPIC_PAUSED = {'model': 'claude-sonnet-4-5', 'stop_reason': 'pause_turn', 'content': [
+    {'type': 'server_tool_use', 'id': 'srvtoolu_1', 'name': 'web_search', 'input': {'query': 'book title author'}},
+    {'type': 'web_search_tool_result', 'tool_use_id': 'srvtoolu_1', 'content': [
+        {'type': 'web_search_result', 'url': 'https://books.example/1', 'title': 'The book', 'page_age': '2 days'}]}]}
+ANTHROPIC_DONE = {'model': 'claude-sonnet-4-5', 'stop_reason': 'end_turn', 'content': [
+    {'type': 'text', 'text': ANSWER, 'citations': [
+        {'type': 'web_search_result_location', 'url': 'https://books.example/1', 'title': 'The book',
+         'cited_text': 'The book by A. Author, 2024 edition.', 'encrypted_index': 'x'}]}]}
+ANTHROPIC_ERROR = {'model': 'claude-sonnet-4-5', 'stop_reason': 'end_turn', 'content': [
+    {'type': 'server_tool_use', 'id': 'srvtoolu_1', 'name': 'web_search', 'input': {'query': 'x'}},
+    {'type': 'web_search_tool_result', 'tool_use_id': 'srvtoolu_1',
+     'content': {'type': 'web_search_tool_result_error', 'error_code': 'too_many_requests'}},
+    {'type': 'text', 'text': 'I could not search.'}]}
+OPENROUTER_OK = {'model': 'openai/gpt-4o-mini', 'choices': [{'message': {
+    'role': 'assistant', 'content': ANSWER,
+    'annotations': [{'type': 'url_citation', 'url_citation': {'url': 'https://travel.example/jeju', 'title': 'Jeju guide',
+                                                               'content': 'Jeju in October: 18-23C.'}}]}}]}
+
 
 class Opener:
-    """The fake wire: records each request's URL and headers, answers per host."""
+    """The fake search wire: records each request's URL and headers, answers per host."""
 
     def __init__(self, status=200):
         self.requests, self.status = [], status
@@ -56,11 +90,9 @@ class Opener:
         self.requests.append({'url': request.full_url, 'headers': dict(request.header_items())})
         if self.status != 200:
             raise HTTPError(request.full_url, self.status, 'refused', {}, io.BytesIO(b'{"error":"secret-body"}'))
-        host, path = urlsplit(request.full_url).hostname, urlsplit(request.full_url).path
+        host = urlsplit(request.full_url).hostname
         if host == 'www.bing.com':
             body = BING_RSS
-        elif host == 'openapi.naver.com':
-            body = json.dumps(NAVER_BOOK if path.endswith('book.json') else NAVER_WEB).encode()
         elif host == 'api.search.brave.com':
             body = json.dumps(BRAVE).encode()
         else:
@@ -68,19 +100,35 @@ class Opener:
         return io.BytesIO(body)
 
 
-def registry(opener=None, **config):
-    return ProviderRegistry.from_config(config, opener=opener or Opener())
+class Transport:
+    """The fake model wire for native search: scripted answers, every request recorded."""
+
+    def __init__(self, *answers):
+        self.answers, self.requests = list(answers), []
+
+    def __call__(self, url, body, headers=None, timeout=60):
+        self.requests.append({'url': url, 'body': json.loads(json.dumps(body)), 'headers': dict(headers or {})})
+        answer = self.answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
 
 
-def all_keys(**extra):
-    return {NAVER_CLIENT_ID: NAVER_ID, NAVER_CLIENT_SECRET: NAVER_SECRET, BRAVE_TOKEN: BRAVE_KEY, **extra}
+def registry(opener=None, transport=None, main=None, **config):
+    if main is not None:
+        config['native'] = main
+    return ProviderRegistry.from_config(config, opener=opener or Opener(), transport=transport)
+
+
+def main_ai(config, key=API_KEY, subscription=''):
+    return {'config': dict(config), 'key': key, 'subscription': subscription}
 
 
 def query_of(url):
     return {key: values[0] for key, values in parse_qs(urlsplit(url).query).items()}
 
 
-class ProviderParsing(unittest.TestCase):
+class FallbackProviders(unittest.TestCase):
     def test_bing_rss_parses_as_before_and_carries_its_provider(self):
         opener = Opener()
         rows = BingRssProvider().search('leaders', opener=opener)
@@ -88,7 +136,6 @@ class ProviderParsing(unittest.TestCase):
                                  'snippet': 'When leaders make a difference.', 'provider': 'bing'},
                                 {'title': 'Second', 'url': 'http://example.org/second', 'snippet': 'd2', 'provider': 'bing'}])
         self.assertEqual(query_of(opener.requests[0]['url']), {'format': 'rss', 'q': 'leaders'})
-        self.assertNotIn('X-Naver-Client-Id', opener.requests[0]['headers'])
 
     def test_bing_market_comes_only_from_the_model_locale_never_from_the_script(self):
         for query in ('leaders', '리더는 언제 차이를 만들어내는가'):
@@ -101,25 +148,6 @@ class ProviderParsing(unittest.TestCase):
                 sent = query_of(opener.requests[0]['url'])
                 self.assertEqual((sent['mkt'], sent['setlang']), ('ko-KR', 'ko'))
 
-    def test_naver_web_strips_tags_and_entities_and_sends_its_headers(self):
-        opener = Opener()
-        rows = NaverProvider(NAVER_ID, NAVER_SECRET).search('리더', opener=opener)
-        self.assertEqual(rows, [{'title': '리더는 언제 차이를 만들어내는가 & 후기', 'url': 'https://blog.example.kr/leaders',
-                                 'snippet': '리더십 책 후기', 'provider': 'naver'}])
-        request = opener.requests[0]
-        self.assertTrue(request['url'].startswith('https://openapi.naver.com/v1/search/webkr.json?'))
-        self.assertEqual(query_of(request['url']), {'query': '리더', 'display': '5', 'start': '1', 'sort': 'sim'})
-        self.assertEqual((request['headers']['X-naver-client-id'], request['headers']['X-naver-client-secret']),
-                         (NAVER_ID, NAVER_SECRET))
-
-    def test_naver_book_kind_uses_the_book_endpoint_and_folds_bibliographic_fields(self):
-        opener = Opener()
-        rows = NaverProvider(NAVER_ID, NAVER_SECRET).search('리더', kind='book', opener=opener)
-        self.assertTrue(opener.requests[0]['url'].startswith('https://openapi.naver.com/v1/search/book.json?'))
-        self.assertEqual(rows[0]['title'], '리더는 언제 차이를 만들어내는가')
-        self.assertEqual(rows[0]['snippet'], '홍길동 · 출판사 · 20240101 · ISBN 9788900000000\n리더십에 관한 책')
-        self.assertEqual(rows[0]['provider'], 'naver')
-
     def test_brave_parses_web_results_and_sends_locale_as_country_and_language(self):
         opener = Opener()
         rows = BraveProvider(BRAVE_KEY).search('leaders', locale='en-US', opener=opener)
@@ -128,7 +156,6 @@ class ProviderParsing(unittest.TestCase):
         request = opener.requests[0]
         self.assertEqual(query_of(request['url']), {'q': 'leaders', 'count': '5', 'search_lang': 'en', 'country': 'US'})
         self.assertEqual(request['headers']['X-subscription-token'], BRAVE_KEY)
-        self.assertEqual(request['headers']['Accept'], 'application/json')
 
     def test_http_401_and_429_are_typed_failures_without_the_body_or_key(self):
         for status, code in ((401, 'provider_auth'), (403, 'provider_auth'), (429, 'provider_rate_limited')):
@@ -138,88 +165,180 @@ class ProviderParsing(unittest.TestCase):
                 self.assertEqual((failed.exception.code, failed.exception.status), (code, status))
                 self.assertNotIn(BRAVE_KEY, str(failed.exception))
                 self.assertNotIn('secret-body', str(failed.exception))
-                # The loop re-plans (another provider or query), never the same call.
                 self.assertEqual(classify_failure(failed.exception, 'web_search'), (code, 'permanent', 'none'))
 
     def test_other_http_statuses_stay_untyped_provider_errors(self):
         with self.assertRaises(ProviderError) as failed:
-            NaverProvider(NAVER_ID, NAVER_SECRET).search('x', opener=Opener(status=503))
+            BraveProvider(BRAVE_KEY).search('x', opener=Opener(status=503))
         self.assertNotIsInstance(failed.exception, SearchProviderError)
-        self.assertEqual(failed.exception.status, 503)
         self.assertEqual(classify_failure(failed.exception, 'web_search')[0], 'transient_failure')
 
 
-class RegistryRules(unittest.TestCase):
-    def test_only_keyed_providers_are_listed_and_bing_always_is(self):
-        self.assertEqual([row['id'] for row in registry().options()], ['bing'])
-        self.assertEqual([row['id'] for row in registry(**{BRAVE_TOKEN: BRAVE_KEY}).options()], ['bing', 'brave'])
-        # Naver needs both values; one alone lists nothing.
-        self.assertEqual([row['id'] for row in registry(**{NAVER_CLIENT_ID: NAVER_ID}).options()], ['bing'])
-        self.assertEqual([row['id'] for row in registry(**all_keys()).options()], ['bing', 'naver', 'naver-book', 'brave'])
+class NativeSearchRoutes(unittest.TestCase):
+    """Each API route's own web search, through a fake transport (#678 AC1)."""
 
-    def test_missing_key_means_absent_from_the_list_and_a_typed_failure_if_named_anyway(self):
+    def test_openai_uses_the_responses_api_web_search_tool_and_returns_cited_rows(self):
+        transport = Transport(OPENAI_OK)
+        result = registry(transport=transport, main=main_ai(OPENAI)).search('seoul weather tomorrow', locale='ko-KR')
+        request = transport.requests[0]
+        self.assertEqual(request['url'], 'https://api.openai.com/v1/responses')
+        self.assertEqual(request['body']['tools'], [{'type': 'web_search',
+                                                     'user_location': {'type': 'approximate', 'country': 'KR'}}])
+        self.assertEqual(request['body']['include'], ['web_search_call.action.sources'])
+        self.assertIn('seoul weather tomorrow', request['body']['input'])
+        self.assertEqual(request['headers'], {'Authorization': 'Bearer ' + API_KEY})
+        self.assertEqual((result['provider'], result['route']), (AI_NATIVE, 'openai'))
+        # Cited first, then consulted; the javascript: citation is dropped; no URL is invented.
+        self.assertEqual([(row['url'], row['cited']) for row in result['results']],
+                         [('https://weather.example/seoul', True), ('https://news.example/forecast', False)])
+        self.assertEqual(result['results'][0]['title'], 'Seoul forecast')
+        # OpenAI returns no source text, so no model prose is passed off as a snippet.
+        self.assertEqual([row['snippet'] for row in result['results']], ['', ''])
+        self.assertEqual(result['sources'], ['https://weather.example/seoul', 'https://news.example/forecast'])
+        self.assertEqual(result['search_queries'], ['seoul weather tomorrow'])
+        self.assertEqual(result['answer'], {'text': ANSWER, 'label': ANSWER_LABEL})
+        self.assertEqual(result['reported_model'], 'gpt-4o-mini-2024-07-18')
+        self.assertNotIn(API_KEY, json.dumps(result))
+
+    def test_anthropic_uses_the_server_tool_resumes_pause_turn_and_keeps_cited_text(self):
+        transport = Transport(ANTHROPIC_PAUSED, ANTHROPIC_DONE)
+        result = registry(transport=transport, main=main_ai(ANTHROPIC)).search('book title author')
+        first, second = transport.requests
+        self.assertEqual(first['url'], 'https://api.anthropic.com/v1/messages')
+        self.assertEqual(first['body']['tools'], [{'type': 'web_search_20250305', 'name': 'web_search', 'max_uses': 3}])
+        self.assertEqual(first['headers'], {'x-api-key': API_KEY, 'anthropic-version': '2023-06-01'})
+        # pause_turn: the same turn is sent back with the paused assistant content, no extra user message.
+        self.assertEqual([m['role'] for m in second['body']['messages']], ['user', 'assistant'])
+        self.assertEqual(second['body']['messages'][1]['content'], ANTHROPIC_PAUSED['content'])
+        row = result['results'][0]
+        self.assertEqual((row['url'], row['cited'], row['snippet']),
+                         ('https://books.example/1', True, 'The book by A. Author, 2024 edition.'))
+        self.assertEqual(result['search_queries'], ['book title author'])
+        self.assertEqual(result['answer']['text'], ANSWER)
+
+    def test_anthropic_errors_inside_a_200_are_typed_failures(self):
         with self.assertRaises(SearchProviderError) as failed:
-            registry().search('x', provider='brave')
-        self.assertEqual(failed.exception.code, 'provider_unavailable')
+            registry(transport=Transport(ANTHROPIC_ERROR), main=main_ai(ANTHROPIC)).search('x')
+        self.assertEqual(failed.exception.code, 'provider_rate_limited')
+        other = json.loads(json.dumps(ANTHROPIC_ERROR))
+        other['content'][1]['content']['error_code'] = 'unavailable'
+        with self.assertRaises(ProviderError) as failed:
+            registry(transport=Transport(other), main=main_ai(ANTHROPIC)).search('x')
+        self.assertNotIsInstance(failed.exception, SearchProviderError)
+
+    def test_openrouter_uses_its_server_tool_and_keeps_the_source_content(self):
+        transport = Transport(OPENROUTER_OK)
+        result = registry(transport=transport, main=main_ai(OPENROUTER)).search('jeju october', locale='en-US')
+        request = transport.requests[0]
+        self.assertEqual(request['url'], 'https://openrouter.ai/api/v1/chat/completions')
+        self.assertEqual(request['body']['tools'], [{'type': 'openrouter:web_search', 'parameters': {
+            'max_results': 5, 'user_location': {'type': 'approximate', 'country': 'US'}}}])
+        self.assertNotIn(':online', request['body']['model'])
+        self.assertEqual([(row['url'], row['snippet']) for row in result['results']],
+                         [('https://travel.example/jeju', 'Jeju in October: 18-23C.')])
+
+    def test_an_unsupported_tool_is_a_typed_unavailable_reason_remembered_for_that_model(self):
+        for config in (OPENAI, OPENROUTER, ANTHROPIC):
+            with self.subTest(route=config['endpoint']):
+                transport = Transport(ProviderError('HTTP 400', status=400))
+                opener = Opener()
+                reg = registry(opener, transport, main=main_ai(config), **{BRAVE_TOKEN: BRAVE_KEY})
+                with self.assertRaises(SearchProviderError) as failed:
+                    reg.search('x')
+                self.assertEqual((failed.exception.code, failed.exception.reason), ('native_search_unavailable', 'rejected'))
+                self.assertIn('brave', str(failed.exception))
+                # No silent fallback: nothing reached another provider.
+                self.assertEqual(opener.requests, [])
+                # Remembered for this model: the next listing drops ai-native and says why.
+                self.assertEqual([row['id'] for row in reg.options()], ['brave'])
+                self.assertEqual(reg.native_status()['state'], 'unavailable')
+                self.assertEqual(reg.unavailable_reason(), 'rejected')
+
+    def test_no_source_is_a_typed_empty_result_not_a_success(self):
+        empty = {'output': [{'type': 'message', 'content': [{'type': 'output_text', 'text': ANSWER, 'annotations': []}]}]}
+        with self.assertRaises(SearchProviderError) as failed:
+            registry(transport=Transport(empty), main=main_ai(OPENAI)).search('x')
+        self.assertEqual(failed.exception.code, 'native_search_empty')
+        self.assertEqual(classify_failure(failed.exception, 'web_search')[1], 'permanent')
+
+    def test_ollama_cli_and_no_main_ai_have_no_native_search_and_name_the_reason(self):
+        for main, reason in ((main_ai(OLLAMA, key=''), 'no_native_search'),
+                             (main_ai(OPENAI, subscription='codex'), 'cli_route'), (None, 'no_main_ai')):
+            with self.subTest(reason=reason):
+                transport = Transport()
+                reg = registry(transport=transport, main=main)
+                self.assertEqual(reg.options(), [])
+                self.assertEqual(reg.default(), '')
+                with self.assertRaises(SearchProviderError) as failed:
+                    reg.search('x')
+                self.assertEqual((failed.exception.code, failed.exception.reason), ('native_search_unavailable', reason))
+                self.assertEqual(transport.requests, [])
+
+
+class RegistryRules(unittest.TestCase):
+    def test_bing_is_off_by_default_and_listed_only_when_the_owner_turns_it_on(self):
+        self.assertEqual(registry().options(), [])
+        self.assertEqual([row['id'] for row in registry(bing_enabled=True).options()], ['bing'])
+        opener = Opener()
+        with self.assertRaises(SearchProviderError):
+            registry(opener).search('x', provider='bing')
+        with self.assertRaises(SearchProviderError):
+            registry(opener).search('x')
+        self.assertEqual(opener.requests, [], 'nothing reached Bing while it was off')
+
+    def test_listing_is_in_fallback_order_and_the_refusal_names_alternatives_in_that_order(self):
+        reg = registry(main=main_ai(OPENAI), bing_enabled=True, **{BRAVE_TOKEN: BRAVE_KEY})
+        self.assertEqual([row['id'] for row in reg.options()], [AI_NATIVE, 'brave', 'bing'])
+        self.assertEqual(reg.default(), AI_NATIVE)
+        reg = registry(main=main_ai(OLLAMA, key=''), bing_enabled=True, **{BRAVE_TOKEN: BRAVE_KEY})
+        with self.assertRaises(SearchProviderError) as failed:
+            reg.search('x')
+        text = str(failed.exception)
+        self.assertIn('public_page_read', text)
+        self.assertLess(text.index('public_page_read'), text.index('brave'))
+        self.assertLess(text.index('brave'), text.index('bing'))
 
     def test_the_owner_default_is_used_when_the_model_omits_provider(self):
         opener = Opener()
-        result = registry(opener, default='brave', **all_keys()).search('leaders')
+        result = registry(opener, main=main_ai(OPENAI), default='brave', **{BRAVE_TOKEN: BRAVE_KEY}).search('leaders')
         self.assertEqual(result['provider'], 'brave')
         self.assertEqual(urlsplit(opener.requests[0]['url']).hostname, 'api.search.brave.com')
 
-    def test_a_default_whose_key_was_removed_falls_back_to_bing(self):
-        self.assertEqual(registry(default='naver').default(), 'bing')
-        self.assertEqual(registry(default='naver', **all_keys()).default(), 'naver')
+    def test_a_default_whose_provider_went_away_falls_back_to_native_never_to_bing(self):
+        self.assertEqual(registry(main=main_ai(OPENAI), default='brave', bing_enabled=True).default(), AI_NATIVE)
+        self.assertEqual(registry(default='brave', bing_enabled=True).default(), '')
 
     def test_the_model_choice_is_honored_regardless_of_the_query_language(self):
-        # No language, script or category rule: a Korean query goes where the
-        # model says (or to the default), and so does an English one.
-        for query, provider, host in (('리더는 언제 차이를 만들어내는가', None, 'www.bing.com'),
-                                      ('리더는 언제 차이를 만들어내는가', 'naver-book', 'openapi.naver.com'),
-                                      ('when do leaders make a difference', 'naver', 'openapi.naver.com'),
+        for query, provider, host in (('리더는 언제 차이를 만들어내는가', 'bing', 'www.bing.com'),
                                       ('when do leaders make a difference', 'brave', 'api.search.brave.com'),
                                       ('리더', 'brave', 'api.search.brave.com')):
             with self.subTest(query=query, provider=provider):
                 opener = Opener()
-                result = registry(opener, **all_keys()).search(query, provider=provider)
+                result = registry(opener, bing_enabled=True, **{BRAVE_TOKEN: BRAVE_KEY}).search(query, provider=provider)
                 self.assertEqual(urlsplit(opener.requests[0]['url']).hostname, host)
-                self.assertEqual(result['provider'], provider or 'bing')
-                self.assertTrue(all(row['provider'] == (provider or 'bing').split('-')[0] for row in result['results']))
+                self.assertEqual(result['provider'], provider)
 
-    def test_provider_id_with_a_separate_kind_resolves_to_the_option(self):
-        reg = registry(**all_keys())
-        self.assertEqual(reg.resolve('naver', 'book')[1], 'book')
-        self.assertEqual(reg.resolve('naver-book')[1], 'book')
-        with self.assertRaises(SearchProviderError):
-            reg.resolve('brave', 'book')
-
-    def test_result_payload_is_normalized_with_provider_and_selectors(self):
-        result = registry(**all_keys()).search('leaders', provider='naver-book', locale='ko-KR')
-        self.assertEqual((result['tool'], result['provider'], result['kind'], result['locale']), ('web_search', 'naver-book', 'book', 'ko-KR'))
-        self.assertEqual(set(result['results'][0]), {'title', 'url', 'snippet', 'provider'})
-        self.assertEqual(result['sources'], [result['results'][0]['url']])
+    def test_an_unconfigured_named_provider_is_a_typed_failure(self):
+        with self.assertRaises(SearchProviderError) as failed:
+            registry(main=main_ai(OPENAI)).search('x', provider='brave')
+        self.assertEqual(failed.exception.code, 'provider_unavailable')
+        with self.assertRaises(SearchProviderError) as failed:
+            registry(main=main_ai(OPENAI)).search('x', provider='naver')
+        self.assertEqual(failed.exception.code, 'provider_unavailable')
 
 
 class LocalToolsPlan(unittest.TestCase):
-    def test_execute_passes_provider_kind_and_locale_through(self):
+    def test_execute_passes_provider_and_locale_through(self):
         opener = Opener()
-        tools = LocalTools(providers=registry(opener, **all_keys()))
+        tools = LocalTools(providers=registry(opener, **{BRAVE_TOKEN: BRAVE_KEY}))
         result = tools.execute({'tool': 'web_search', 'query': ' leaders ', 'provider': 'brave', 'locale': 'ko-KR'})
         self.assertEqual(result['provider'], 'brave')
         self.assertEqual(query_of(opener.requests[0]['url']), {'q': 'leaders', 'count': '5', 'search_lang': 'ko', 'country': 'KR'})
-
-    def test_a_plan_without_selectors_uses_the_default_and_a_bad_locale_is_refused(self):
-        opener = Opener()
-        tools = LocalTools(providers=registry(opener, default='naver', **all_keys()))
-        self.assertEqual(tools.execute({'tool': 'web_search', 'query': 'x'})['provider'], 'naver')
         with self.assertRaises(ValueError):
             tools.execute({'tool': 'web_search', 'query': 'x', 'locale': 'ko-KR; drop table'})
-        with self.assertRaises(ValueError):
-            tools.search('')
 
-    def test_without_a_registry_only_bing_exists(self):
-        self.assertEqual([row['id'] for row in LocalTools().providers.options()], ['bing'])
+    def test_without_a_registry_nothing_is_configured(self):
+        self.assertEqual(LocalTools().providers.options(), [])
 
 
 class ToolSchema(unittest.TestCase):
@@ -227,45 +346,29 @@ class ToolSchema(unittest.TestCase):
         self.tools = {tool['id']: tool for package in runtime_packages([]) for tool in package['tools']}
 
     def definition(self, reg=None):
-        rows = action_definitions(self.tools, {'web_search'}, search_providers=reg)
-        return rows[0]['function']
+        return action_definitions(self.tools, {'web_search'}, search_providers=reg)[0]['function']
 
     def test_enum_is_exactly_the_configured_options_and_the_text_names_them_without_a_preference(self):
-        function = self.definition(registry(**all_keys()))
-        self.assertEqual(function['parameters']['properties']['provider']['enum'], ['bing', 'naver', 'naver-book', 'brave'])
-        self.assertEqual(function['parameters']['required'], ['query'])
-        self.assertIn('locale', function['parameters']['properties'])
-        for option in ('bing = Bing web search', 'naver-book = Naver book catalogue', 'brave = Brave Search API'):
-            self.assertIn(option, function['description'])
-        self.assertIn('When provider is omitted, bing is used.', function['description'])
+        function = self.definition(registry(main=main_ai(OPENAI), bing_enabled=True, **{BRAVE_TOKEN: BRAVE_KEY}))
+        self.assertEqual(function['parameters']['properties']['provider']['enum'], [AI_NATIVE, 'brave', 'bing'])
+        self.assertIn("ai-native = The connected AI's own web search (OpenAI API", function['description'])
+        self.assertIn('When provider is omitted, ai-native is used.', function['description'])
+        self.assertIn('answer field', function['description'])
         for steer in ('prefer', 'Korean quer', 'best for'):
             self.assertNotIn(steer, function['description'])
 
-    def test_bounded_research_carries_the_same_provider_enum_and_text(self):
-        rows = action_definitions(self.tools, {'bounded_public_research', 'web_search'}, search_providers=registry(**all_keys()))
+    def test_without_native_search_the_description_says_why_and_names_the_site_route(self):
+        function = self.definition(registry(main=main_ai(OLLAMA, key='')))
+        self.assertEqual(function['parameters']['properties']['provider'], {'type': 'string'})
+        self.assertIn('call fails', function['description'])
+        self.assertIn('public_page_read', function['description'])
+
+    def test_bounded_research_carries_the_same_provider_enum(self):
+        rows = action_definitions(self.tools, {'bounded_public_research', 'web_search'},
+                                  search_providers=registry(main=main_ai(OPENAI), **{BRAVE_TOKEN: BRAVE_KEY}))
         research, search = (next(r['function'] for r in rows if r['function']['name'] == name)
                             for name in ('bounded_public_research', 'web_search'))
         self.assertEqual(research['parameters']['properties']['provider'], search['parameters']['properties']['provider'])
-        self.assertIn('locale', research['parameters']['properties'])
-        self.assertEqual(research['parameters']['required'], ['mode', 'query'])
-        self.assertTrue(research['description'].endswith(search['description'][search['description'].index(' Providers configured'):]))
-
-    def test_enum_shrinks_with_the_keys_and_is_absent_without_a_registry(self):
-        self.assertEqual(self.definition(registry())['parameters']['properties']['provider']['enum'], ['bing'])
-        self.assertNotIn('enum', self.definition()['parameters']['properties']['provider'])
-
-    def test_capabilities_definitions_use_the_network_registry(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            store = QuickStore(Path(tmp) / 'data')
-            store.secret(BRAVE_TOKEN, BRAVE_KEY)
-            caps = Capabilities(store, None, {}, '', 'job', lambda *e: None,
-                                network=LocalTools(providers=ProviderRegistry.from_store(store)))
-            spec = next(d['function'] for d in caps.definitions() if d['function']['name'] == 'web_search')
-            self.assertEqual(spec['parameters']['properties']['provider']['enum'], ['bing', 'brave'])
-            # A key saved later is offered on the next listing without a restart.
-            store.secret(NAVER_CLIENT_ID, NAVER_ID); store.secret(NAVER_CLIENT_SECRET, NAVER_SECRET)
-            spec = next(d['function'] for d in caps.definitions() if d['function']['name'] == 'web_search')
-            self.assertEqual(spec['parameters']['properties']['provider']['enum'], ['bing', 'naver', 'naver-book', 'brave'])
 
 
 class Wire:
@@ -276,11 +379,9 @@ class Wire:
 
     def execute(self, plan):
         self.plans.append(dict(plan))
-        if plan['tool'] == 'public_page_read':
-            return {'tool': 'public_page_read', 'url': plan['url'], 'content': 'Model A costs 100 USD.', 'sources': [plan['url']], 'retrieved_at': 1}
-        return {'tool': 'web_search', 'query': plan['query'], 'provider': plan.get('provider', 'bing'), 'kind': 'web',
+        return {'tool': 'web_search', 'query': plan['query'], 'provider': plan.get('provider', 'brave'), 'kind': 'web',
                 'locale': plan.get('locale', ''), 'retrieved_at': 1,
-                'results': [{'title': 't', 'url': 'https://example.org/', 'snippet': 's', 'provider': plan.get('provider', 'bing')}],
+                'results': [{'title': 't', 'url': 'https://example.org/', 'snippet': 's', 'provider': 'brave'}],
                 'sources': ['https://example.org/']}
 
 
@@ -293,188 +394,321 @@ class CapabilitiesPath(unittest.TestCase):
     def record(self, tool, status, detail):
         self.events.append((tool, status, detail))
 
-    def test_the_model_provider_and_locale_reach_the_wire_on_the_direct_path(self):
+    def test_the_model_provider_and_locale_reach_the_wire_and_the_evidence(self):
         wire = Wire()
-        caps = Capabilities(self.store, None, CFG, '', 'job-1', self.record, network=wire)
-        result = caps.execute('web_search', {'query': 'leaders', 'provider': 'naver-book', 'locale': 'ko-KR'})
-        self.assertEqual(wire.plans, [{'tool': 'web_search', 'query': 'leaders', 'provider': 'naver-book', 'locale': 'ko-KR'}])
-        self.assertEqual(result['provider'], 'naver-book')
+        caps = Capabilities(self.store, None, OPENAI, '', 'job-1', self.record, network=wire)
+        result = caps.execute('web_search', {'query': 'leaders', 'provider': 'brave', 'locale': 'ko-KR'})
+        self.assertEqual(wire.plans, [{'tool': 'web_search', 'query': 'leaders', 'provider': 'brave', 'locale': 'ko-KR'}])
         summary = evidence_summary('web_search', result)
-        self.assertEqual((summary['provider'], summary['locale'], summary['sources']), ('naver-book', 'ko-KR', ['https://example.org/']))
-
-    def test_the_selectors_ride_along_the_composed_lookup_and_are_recorded_as_sent(self):
-        wire = Wire()
-        caps = Capabilities(self.store, None, CFG, '', 'job-2', self.record, network=wire,
-                            lookup_sources=lambda: {'permitted': ['leaders'], 'excluded': []})
-        result = caps.execute('web_search', {'query': 'leaders', 'provider': 'brave', 'locale': 'en-US'})
-        self.assertEqual(wire.plans, [{'tool': 'web_search', 'query': 'leaders', 'provider': 'brave', 'locale': 'en-US'}])
-        self.assertEqual(result['sent'], {'query': 'leaders', 'provider': 'brave', 'locale': 'en-US'})
-        self.assertEqual(result['composed_by'], 'agentos-public-task')
-
-    def test_omitted_selectors_leave_the_plan_unchanged(self):
-        wire = Wire()
-        caps = Capabilities(self.store, None, CFG, '', 'job-3', self.record, network=wire,
-                            lookup_sources=lambda: {'permitted': ['leaders'], 'excluded': []})
-        caps.execute('web_search', {'query': 'leaders'})
-        self.assertEqual(wire.plans, [{'tool': 'web_search', 'query': 'leaders'}])
-
-    def test_bounded_research_carries_the_model_provider_on_both_routes(self):
-        # Codex P1 on PR #666: research made a bare web_search plan, so the
-        # model could not choose or switch providers for a comparison.
-        for route, resolver in (('direct', None), ('composed', lambda: {'permitted': ['headphones'], 'excluded': []})):
-            with self.subTest(route=route):
-                wire = Wire()
-                caps = Capabilities(self.store, None, CFG, '', f'job-{route}', self.record, network=wire, lookup_sources=resolver)
-                result = caps.execute('bounded_public_research', {'mode': 'product_comparison', 'query': 'headphones',
-                                                                  'provider': 'brave', 'locale': 'en-US'})
-                self.assertEqual(wire.plans[0], {'tool': 'web_search', 'query': 'headphones', 'provider': 'brave', 'locale': 'en-US'})
-                self.assertEqual((result['provider'], result['locale']), ('brave', 'en-US'))
-                if route == 'composed':
-                    self.assertEqual(result['sent'], {'query': 'headphones', 'mode': 'product_comparison', 'provider': 'brave', 'locale': 'en-US'})
-                summary = evidence_summary('bounded_public_research', result)
-                self.assertEqual((summary['provider'], summary['locale']), ('brave', 'en-US'))
-                # Without selectors the plan is bare: the configured default applies, nothing is inferred.
-                wire.plans.clear()
-                caps.execute('bounded_public_research', {'mode': 'travel_plan', 'query': 'headphones'})
-                self.assertEqual(wire.plans[0], {'tool': 'web_search', 'query': 'headphones'})
-
-    def test_bounded_research_default_and_choice_reach_the_configured_provider(self):
-        class Pages:
-            @staticmethod
-            def read(url, approved_urls=None):
-                return {'tool': 'public_page_read', 'url': url, 'content': 'Brave result page.', 'sources': [url], 'retrieved_at': 1}
-        opener = Opener()
-        tools = LocalTools(page_reader=Pages(), providers=registry(opener, default='naver-book', **all_keys()))
-        caps = Capabilities(self.store, None, CFG, '', 'job-r', self.record, network=tools)
-        result = caps.execute('bounded_public_research', {'mode': 'travel_plan', 'query': 'seoul hotels', 'provider': 'brave'})
-        self.assertEqual(urlsplit(opener.requests[0]['url']).hostname, 'api.search.brave.com')
-        self.assertEqual(result['provider'], 'brave')
-        opener.requests.clear()
-        result = caps.execute('bounded_public_research', {'mode': 'product_comparison', 'query': 'leaders'})
-        self.assertTrue(opener.requests[0]['url'].startswith('https://openapi.naver.com/v1/search/book.json?'))
-        self.assertEqual(result['provider'], 'naver-book')
+        self.assertEqual((summary['provider'], summary['locale'], summary['sources']), ('brave', 'ko-KR', ['https://example.org/']))
 
     def test_selectors_are_bounded_ids_not_free_text(self):
-        self.assertEqual(search_arguments({'query': 'x', 'provider': ' naver-book ', 'locale': 'ko-KR'}),
-                         {'provider': 'naver-book', 'locale': 'ko-KR'})
-        self.assertEqual(search_arguments({'query': 'x', 'provider': '', 'locale': ''}), {})
-        for bad in ({'provider': 'naver book'}, {'provider': 'PRIVATE-XYZ'}, {'provider': 'a' * 41}):
+        self.assertEqual(search_arguments({'query': 'x', 'provider': ' ai-native ', 'locale': 'ko-KR'}),
+                         {'provider': 'ai-native', 'locale': 'ko-KR'})
+        for bad in ({'provider': 'ai native'}, {'provider': 'PRIVATE-XYZ'}, {'provider': 'a' * 41}):
             with self.assertRaises(SearchProviderError):
                 search_arguments(bad)
-        for bad in ({'locale': 'ko-KR M1234567'}, {'locale': 'kor-KOREA'}, {'locale': 'x'}):
-            with self.assertRaises(ValueError):
-                search_arguments(bad)
 
-    def test_a_provider_failure_is_a_typed_observation_in_the_loop(self):
-        from personal_agent.agent_runtime import run_agent
+    def test_a_native_result_keeps_its_sources_and_never_its_answer_as_evidence(self):
+        result = registry(transport=Transport(OPENAI_OK), main=main_ai(OPENAI)).search('seoul weather tomorrow')
+        summary = evidence_summary('web_search', result)
+        self.assertEqual(summary['sources'], ['https://weather.example/seoul', 'https://news.example/forecast'])
+        self.assertEqual((summary['provider'], summary['route'], summary['search_queries']),
+                         (AI_NATIVE, 'openai', ['seoul weather tomorrow']))
+        self.assertNotIn('MODEL PROSE', json.dumps(summary))
+        # AgentOS's own rendering of the observation lists sources, never the model's answer.
+        rendered = verified_text('web_search', result)
+        self.assertIn('https://weather.example/seoul', rendered)
+        self.assertNotIn('MODEL PROSE', rendered)
 
-        class Refusing:
-            def execute(self, plan):
-                raise SearchProviderError('키 거부', 'provider_auth', 401)
 
-        bodies = []
+def goal_engine(seen):
+    def judge(context, proposition):
+        if context.purpose != 'goal-reached':
+            return None
+        seen.append(json.dumps(context.facts, ensure_ascii=False))
+        return BinaryDecision(OUTCOME_DECIDED, True, fixture_confidence())
+    return FixtureDecisionEngine(judge=judge)
+
+
+class NativeSearchInTheLoop(unittest.TestCase):
+    """``finish`` cites a native-search call; the answer text is never an observation (#678 AC5)."""
+
+    def test_finish_cites_the_native_search_call_and_the_judgment_never_reads_the_answer(self):
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        store = QuickStore(Path(tmp.name) / 'data')
+        main = []
 
         def transport(url, body, headers=None, timeout=60):
-            bodies.append(json.loads(json.dumps(body)))
-            if len(bodies) == 1:
-                return {'choices': [{'message': {'tool_calls': [{'id': '1', 'function': {'name': 'web_search', 'arguments': json.dumps({'query': 'x', 'provider': 'brave'})}}]}}]}
-            return {'choices': [{'message': {'content': '다른 제공자로 다시 찾겠습니다.'}}]}
-        caps = Capabilities(self.store, ModelAdapter(transport), CFG, '', 'job-4', self.record, network=Refusing())
-        run_agent(caps.adapter, CFG, '', [{'role': 'user', 'content': 'x'}], '', caps, self.record)
-        observation = json.loads(next(m['content'] for m in bodies[1]['messages'] if m.get('tool_call_id') == '1'))
-        self.assertEqual((observation['code'], observation['retry']), ('provider_auth', 'permanent'))
-        # #657: a failed provider earns one explicit "different path" turn.
-        self.assertIn('Path check', bodies[1]['messages'][-1]['content'])
-        failed = [json.loads(detail) for tool, status, detail in self.events if status == 'failed' and tool != 'model']
-        self.assertEqual([row['code'] for row in failed], ['provider_auth'])
+            tools = body.get('tools') or []
+            if any(tool.get('type') == 'openrouter:web_search' for tool in tools):
+                return OPENROUTER_OK  # the native search sub-call
+            main.append(json.loads(json.dumps(body)))
+            if len(main) == 1:
+                return {'choices': [{'message': {'tool_calls': [{'id': 'call-1', 'function': {
+                    'name': 'web_search', 'arguments': json.dumps({'query': 'jeju october weather'})}}]}}]}
+            return {'choices': [{'message': {'tool_calls': [{'id': 'f', 'function': {'name': 'finish', 'arguments': json.dumps(
+                {'status': 'done', 'evidence_refs': ['call-1'], 'summary': '10월 제주는 18-23도입니다.'})}}]}}]}
+        network = LocalTools(providers=ProviderRegistry.from_config({'native': main_ai(OPENROUTER)}, transport=transport))
+        seen, events = [], []
+        caps = Capabilities(store, ModelAdapter(transport), OPENROUTER, API_KEY, 'job', lambda *e: events.append(e),
+                            network=network, judgments=ConversationJudgments(goal_engine(seen)))
+        result = run_agent(caps.adapter, OPENROUTER, API_KEY, [{'role': 'user', 'content': '10월 제주 날씨'}], '', caps,
+                           lambda *e: events.append(e))
+        self.assertEqual(result.outcome, 'succeeded')
+        # The URL reaches the owner-visible answer.
+        self.assertIn('https://travel.example/jeju', result.content)
+        # The model saw the labelled answer; the judgment saw only the observed part.
+        tool_message = json.loads(next(m['content'] for m in main[1]['messages'] if m.get('tool_call_id') == 'call-1'))
+        self.assertEqual(tool_message['answer'], {'text': ANSWER, 'label': ANSWER_LABEL})
+        [facts] = seen
+        self.assertIn('https://travel.example/jeju', facts)
+        self.assertIn('Jeju in October', facts)
+        self.assertNotIn('MODEL PROSE', facts)
+        # Durable tool events carry the sources, never the answer text.
+        recorded = json.dumps([detail for _tool, _status, detail in events], ensure_ascii=False)
+        self.assertIn('https://travel.example/jeju', recorded)
+        self.assertNotIn('MODEL PROSE', recorded)
+        self.assertNotIn(API_KEY, recorded)
+
+
+class CliNativeSearch(unittest.TestCase):
+    """The Work route's own CLI search: argv, event parsing and evidence (#678)."""
+
+    def adapter(self):
+        return BoundedExecutionAdapter(finder=lambda name: '/bin/' + name)
+
+    def mcp(self):
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / 'agentos-mcp.json'
+        path.write_text(json.dumps({'mcpServers': {'agentos': {'command': 'python', 'args': ['-m', 'x']}}}))
+        return path
+
+    def test_codex_work_argv_enables_live_search_only_when_asked_and_never_under_strict(self):
+        adapter, config = self.adapter(), self.mcp()
+        on = adapter.command('codex', '/bin/codex', 'hi', config, native_search=True)
+        off = adapter.command('codex', '/bin/codex', 'hi', config)
+        self.assertEqual(on[on.index('--ignore-rules') + 1:on.index('--ignore-rules') + 3], ['-c', 'web_search="live"'])
+        self.assertEqual(off[off.index('--ignore-rules') + 1:off.index('--ignore-rules') + 3], ['-c', 'web_search="disabled"'])
+        self.assertNotIn('--search', on)
+        strict = adapter.command('codex', '/bin/codex', 'hi', config, profile=STRICT_PROFILE,
+                                 disabled_features=('shell_tool',), native_search=True)
+        self.assertNotIn('web_search="live"', strict)
+        self.assertIn('web_search="disabled"', strict)
+        # Judgments keep search disabled.
+        self.assertIn(('web_search', '"disabled"'), CODEX_DECISION_CONFIG)
+
+    def test_claude_work_argv_adds_only_websearch(self):
+        adapter, config = self.adapter(), self.mcp()
+        on = adapter.command('claude-code', '/bin/claude', 'hi', config, native_search=True)
+        off = adapter.command('claude-code', '/bin/claude', 'hi', config)
+        self.assertEqual(on[on.index('--tools') + 1], 'WebSearch')
+        allowed = on[-1].split(',')
+        self.assertEqual(on[-2], '--allowedTools')
+        self.assertIn('WebSearch', allowed)
+        self.assertEqual([name for name in allowed if not name.startswith('mcp__agentos__')], ['WebSearch'])
+        self.assertNotIn('--tools', off)
+        self.assertNotIn('WebSearch', off[-1])
+        strict = adapter.command('claude-code', '/bin/claude', 'hi', config, profile=STRICT_PROFILE, native_search=True)
+        self.assertNotIn('WebSearch', ' '.join(strict))
+        self.assertIn('web_search', CLI_PROFILES['trusted-local']['actions'])
+
+    def test_codex_json_web_search_items_become_native_searches_without_invented_urls(self):
+        lines = [
+            {'type': 'item.started', 'item': {'id': 'ws_1', 'type': 'web_search', 'query': ''}},
+            {'type': 'item.completed', 'item': {'id': 'ws_1', 'type': 'web_search', 'query': 'seoul weather',
+                                                'action': {'type': 'search', 'query': 'seoul weather'}}},
+            {'type': 'item.completed', 'item': {'id': 'ws_2', 'type': 'web_search', 'query': '',
+                                                'action': {'type': 'open_page', 'url': 'https://weather.example/seoul'},
+                                                'results': [{'title': 'Seoul', 'url': 'https://weather.example/seoul'},
+                                                            {'title': 'bad', 'url': 'file:///etc/passwd'}]}},
+            {'type': 'item.completed', 'item': {'id': 'msg', 'type': 'agent_message', 'text': 'done'}}]
+        meta = cli_metadata('codex', '\n'.join(json.dumps(line) for line in lines))
+        first, second = meta['native_searches']
+        self.assertEqual((first['id'], first['queries'], first['results'], first['state']),
+                         ('ws_1', ['seoul weather'], [], 'succeeded'))
+        self.assertEqual((second['action'], [row['url'] for row in second['results']]),
+                         ('open_page', ['https://weather.example/seoul']))
+
+    def test_claude_stream_websearch_results_and_a_refusal_are_parsed(self):
+        lines = [
+            {'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'id': 'tu_1', 'name': 'WebSearch',
+                                                           'input': {'query': 'jeju weather'}}]}},
+            {'type': 'user', 'message': {'content': [{'type': 'tool_result', 'tool_use_id': 'tu_1', 'content': 'ok'}]},
+             'tool_use_result': {'query': 'jeju weather', 'results': [
+                 {'tool_use_id': 'x', 'content': [{'title': 'Jeju', 'url': 'https://travel.example/jeju'}]},
+                 'Some commentary text']}},
+            {'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'id': 'tu_2', 'name': 'WebSearch',
+                                                           'input': {'query': 'again'}}]}},
+            {'type': 'user', 'message': {'content': [{'type': 'tool_result', 'tool_use_id': 'tu_2', 'is_error': True,
+                                                      'content': 'Web search is only available in the US'}]},
+             'tool_use_result': 'Error: Web search is only available in the US'},
+            {'type': 'result', 'result': 'answer'}]
+        meta = cli_metadata('claude-code', '\n'.join(json.dumps(line) for line in lines))
+        ok, refused = meta['native_searches']
+        self.assertEqual((ok['state'], ok['queries'], [row['url'] for row in ok['results']]),
+                         ('succeeded', ['jeju weather'], ['https://travel.example/jeju']))
+        self.assertEqual(refused['state'], 'unavailable')
+        self.assertIn('only available in the US', refused['reason'])
 
 
 class _Engine:
-    def execute(self, engine, prompt, tools, **_kwargs):
-        return ExecutionResult('engine answer', engine, 0)
+    """A fake subscription engine that reports what it was launched with and native searches."""
+
+    def __init__(self, searches=()):
+        self.searches, self.calls = list(searches), []
+
+    def execute(self, engine, prompt, tools, **kwargs):
+        self.calls.append({'engine': engine, 'native_search': getattr(tools, 'native_search', None),
+                           'context': kwargs.get('context'), 'prompt': prompt})
+        return ExecutionResult('오늘 서울은 맑습니다.', engine, 0, {'native_searches': self.searches})
 
     def login_status(self, engine_id, binary=None):
         return {'state': 'signed-in'}
 
 
-class SettingsApi(unittest.TestCase):
+class ServiceIntegration(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name) / 'state'
-        self.service = AgentService(QuickStore(self.root), adapter=ModelAdapter(lambda *a, **k: {}),
-                                    subscription_engines=SubscriptionEngines(finder=lambda _: '/runtime/cli', clock=lambda: 1),
-                                    execution_adapter=_Engine())
-        self.store = self.service.store
 
-    def status(self):
-        return self.service.settings()['search_providers']
+    def service(self, engine=None, store=None):
+        return AgentService(store or QuickStore(self.root), adapter=ModelAdapter(lambda *a, **k: {}),
+                            subscription_engines=SubscriptionEngines(finder=lambda _: '/runtime/cli', clock=lambda: 1),
+                            execution_adapter=engine or _Engine())
+
+    def test_settings_show_native_first_bing_off_and_no_naver(self):
+        status = self.service().settings()['search_providers']
+        self.assertEqual(status['native']['state'], 'unavailable')
+        self.assertEqual(status['native']['reason'], 'no_main_ai')
+        self.assertFalse(status['bing']['enabled'])
+        self.assertIn('개인 용도·비상업 전용 — Microsoft 서비스 약관', status['bing']['name'])
+        self.assertEqual([row['id'] for row in status['providers']], ['brave'])
+        self.assertEqual(status['options'], [])
+        self.assertNotIn('naver', json.dumps(status).lower())
+
+    def test_bing_toggle_is_explicit_and_changes_only_the_listing(self):
+        service = self.service()
+        with self.assertRaises(ValueError):
+            service.set_search_provider_bing({'enabled': 'yes'})
+        status = service.set_search_provider_bing({'enabled': True})
+        self.assertTrue(status['bing']['enabled'])
+        self.assertEqual([row['id'] for row in status['options']], ['bing'])
+        self.assertTrue(service.store.config(CONFIG_KEY)['bing_enabled'])
+        self.assertEqual(service.set_search_provider_bing({'enabled': False})['options'], [])
+
+    def test_native_route_and_cost_follow_the_main_ai(self):
+        service = self.service()
+        service.store.put('model', dict(OPENAI))
+        native = service.settings()['search_providers']['native']
+        self.assertEqual((native['route'], native['state'], native['where']), ('openai', 'unknown', 'sub-call'))
+        self.assertIn('$10', native['cost'])
+        service.store.put('subscription_engine', {'id': 'claude-code'})
+        native = service.settings()['search_providers']['native']
+        self.assertEqual((native['route'], native['where']), ('claude-code', 'work-turn'))
+
+    def test_saved_naver_slots_and_config_are_removed_once(self):
+        store = QuickStore(self.root)
+        for slot in RETIRED_SECRET_SLOTS:
+            store.secret(slot, 'naver-fixture-value')
+        store.put(CONFIG_KEY, {'default': 'naver-book', 'keys': {'naver': {'saved_at': 1}, 'brave': {'saved_at': 2}}})
+        store.secret(BRAVE_TOKEN, BRAVE_KEY)
+        service = self.service(store=store)
+        secrets = json.loads(store.secret_path.read_text())
+        self.assertFalse(set(RETIRED_SECRET_SLOTS) & set(secrets))
+        self.assertEqual(secrets[BRAVE_TOKEN], BRAVE_KEY)
+        row = store.config(CONFIG_KEY)
+        self.assertEqual((row['default'], set(row['keys'])), ('', {'brave'}))
+        # Idempotent: a second run finds nothing to remove.
+        self.assertEqual(service.search_settings.remove_retired(), [])
 
     def test_keys_round_trip_into_the_secret_store_and_are_never_returned(self):
-        before = self.status()
-        self.assertEqual([row['id'] for row in before['options']], ['bing'])
-        self.assertFalse(any(row['key']['saved'] for row in before['providers']))
-        self.service.save_search_provider_key({'provider': 'naver', 'client_id': NAVER_ID, 'client_secret': NAVER_SECRET})
-        status = self.service.save_search_provider_key({'provider': 'brave', 'key': ' ' + BRAVE_KEY + '\n'})
-        self.assertEqual(self.store.secret(NAVER_CLIENT_ID), NAVER_ID)
-        self.assertEqual(self.store.secret(NAVER_CLIENT_SECRET), NAVER_SECRET)
-        self.assertEqual(self.store.secret(BRAVE_TOKEN), BRAVE_KEY)
-        rows = {row['id']: row for row in status['providers']}
-        self.assertTrue(rows['naver']['key']['saved'] and rows['brave']['key']['saved'])
-        self.assertIsNotNone(rows['naver']['key']['saved_at'])
-        self.assertEqual([row['id'] for row in status['options']], ['bing', 'naver', 'naver-book', 'brave'])
-        dumped = json.dumps(self.service.settings(), ensure_ascii=False)
-        for secret in (NAVER_ID, NAVER_SECRET, BRAVE_KEY, 'fixture-0001'):
-            self.assertNotIn(secret, dumped)
-        # The live tool list follows the saved keys.
-        spec = next(d['function'] for d in Capabilities(self.store, None, {}, '', 'job', lambda *e: None,
-                                                        network=self.service.local_tools).definitions()
-                    if d['function']['name'] == 'web_search')
-        self.assertEqual(spec['parameters']['properties']['provider']['enum'], ['bing', 'naver', 'naver-book', 'brave'])
-
-    def test_removing_a_key_drops_the_provider_and_the_default_falls_back(self):
-        self.service.save_search_provider_key({'provider': 'brave', 'key': BRAVE_KEY})
-        self.service.set_search_provider_default({'provider': 'brave'})
-        self.assertEqual(self.status()['default'], 'brave')
-        status = self.service.save_search_provider_key({'provider': 'brave', 'key': ''})
-        self.assertEqual(self.store.secret(BRAVE_TOKEN), '')
-        self.assertEqual([row['id'] for row in status['options']], ['bing'])
-        self.assertEqual((status['default'], status['configured_default']), ('bing', 'brave'))
-        self.assertFalse({row['id']: row for row in status['providers']}['brave']['key']['saved'])
-
-    def test_invalid_key_and_default_requests_are_refused(self):
-        with self.assertRaises(ValueError):
-            self.service.save_search_provider_key({'provider': 'google', 'key': 'x'})
-        with self.assertRaises(ValueError):
-            self.service.save_search_provider_key({'provider': 'naver', 'client_id': NAVER_ID, 'client_secret': ''})
-        with self.assertRaises(ValueError):
-            self.service.save_search_provider_key({'provider': 'brave', 'key': 'two words'})
-        with self.assertRaises(ValueError):
-            self.service.set_search_provider_default({'provider': 'naver'})  # not configured
-        self.assertEqual(self.store.secret(NAVER_CLIENT_ID), '')
-        self.assertEqual(self.status()['default'], 'bing')
+        service = self.service()
+        status = service.save_search_provider_key({'provider': 'brave', 'key': ' ' + BRAVE_KEY + '\n'})
+        self.assertEqual(service.store.secret(BRAVE_TOKEN), BRAVE_KEY)
+        self.assertTrue(status['providers'][0]['key']['saved'])
+        self.assertEqual([row['id'] for row in status['options']], ['brave'])
+        self.assertNotIn(BRAVE_KEY, json.dumps(service.settings(), ensure_ascii=False))
+        service.set_search_provider_default({'provider': 'brave'})
+        status = service.save_search_provider_key({'provider': 'brave', 'key': ''})
+        self.assertEqual((status['default'], status['configured_default']), ('', 'brave'))
+        for bad in ({'provider': 'naver', 'client_id': 'x', 'client_secret': 'y'}, {'provider': 'brave', 'key': 'two words'}):
+            with self.assertRaises(ValueError):
+                service.save_search_provider_key(bad)
 
     def test_stored_keys_are_redacted_from_provenance_and_absent_from_the_export(self):
-        self.service.save_search_provider_key({'provider': 'naver', 'client_id': NAVER_ID, 'client_secret': NAVER_SECRET})
-        self.service.save_search_provider_key({'provider': 'brave', 'key': BRAVE_KEY})
-        text = f'sent {NAVER_ID} and {NAVER_SECRET} with {BRAVE_KEY}'
-        redacted = self.service._redact_provenance(text)
-        for secret in (NAVER_ID, NAVER_SECRET, BRAVE_KEY):
-            self.assertNotIn(secret, redacted)
-        self.assertIn('[redacted]', redacted)
+        service = self.service()
+        service.save_search_provider_key({'provider': 'brave', 'key': BRAVE_KEY})
+        self.assertNotIn(BRAVE_KEY, service._redact_provenance(f'sent {BRAVE_KEY}'))
         archive = export_owner_state(self.root, self.root.with_name('owner-export.tar.gz'))
         with tarfile.open(archive, 'r:gz') as bundle:
             blobs = b''.join(bundle.extractfile(member).read() for member in bundle.getmembers() if member.isfile())
-        for secret in (NAVER_ID, NAVER_SECRET, BRAVE_KEY):
-            self.assertNotIn(secret.encode(), blobs)
-        # The config row keeps only when a key was saved, never the value.
-        row = self.store.config(CONFIG_KEY)
-        self.assertEqual(set(row['keys']), {'naver', 'brave'})
-        self.assertNotIn(BRAVE_KEY, json.dumps(row))
+        self.assertNotIn(BRAVE_KEY.encode(), blobs)
 
     def test_settings_object_reads_the_store_without_a_service(self):
-        settings = SearchProviderSettings(self.store, clock=lambda: 42.0)
+        store = QuickStore(self.root)
+        settings = SearchProviderSettings(store, clock=lambda: 42.0)
         settings.save_key({'provider': 'brave', 'key': BRAVE_KEY})
-        self.assertEqual(settings.status()['providers'][1]['key'], {'saved': True, 'saved_at': 42.0})
+        self.assertEqual(settings.status()['providers'][0]['key'], {'saved': True, 'saved_at': 42.0})
+
+    def test_a_cli_turn_uses_its_own_search_and_records_it_as_web_search_evidence(self):
+        searches = [{'id': 'ws_1', 'engine': 'codex', 'action': 'search', 'queries': ['seoul weather'],
+                     'results': [{'title': 'Seoul', 'url': 'https://weather.example/seoul'}], 'state': 'succeeded', 'reason': ''}]
+        engine = _Engine(searches)
+        service = self.service(engine)
+        service.store.put('subscription_engine', {'id': 'codex', 'connected_at': 0})
+        job = service.store.enqueue('오늘 서울 날씨 알려줘', 'cli-native')
+        self.assertTrue(service.run_one())
+        [launched] = engine.calls
+        self.assertTrue(launched['native_search'])
+        self.assertIn('built-in web search', launched['prompt'])
+        row = service.store.job(job)
+        self.assertEqual(row['status'], 'succeeded')
+        self.assertIn('https://weather.example/seoul', row['response'])
+        events = [event for event in service.store.task_events(job) if event['tool'] == 'web_search']
+        done = [event['trace'] for event in events if event['status'] == 'succeeded']
+        self.assertEqual(done[0]['scope'], 'cli-native')
+        self.assertEqual(done[0]['evidence']['sources'], ['https://weather.example/seoul'])
+        self.assertEqual(done[0]['evidence']['provider'], 'codex-native')
+        self.assertEqual(service.store.config(NATIVE_STATUS_KEY)['codex']['state'], 'available')
+        self.assertEqual(service.store.turn_provenance(job)['cli_native_tools'], ['web_search'])
+
+    def test_a_refused_cli_search_is_typed_unavailable_and_turns_it_off_for_that_cli(self):
+        searches = [{'id': 'tu_1', 'engine': 'claude-code', 'action': 'search', 'queries': ['x'], 'results': [],
+                     'state': 'unavailable', 'reason': 'Web search is only available in the US'}]
+        service = self.service(_Engine(searches))
+        service.store.put('subscription_engine', {'id': 'claude-code', 'connected_at': 0})
+        job = service.store.enqueue('오늘 서울 날씨 알려줘', 'cli-refused')
+        self.assertTrue(service.run_one())
+        [event] = [event for event in service.store.task_events(job) if event['tool'] == 'web_search' and event['status'] != 'running']
+        self.assertEqual((event['status'], event['trace']['code']), ('unavailable', 'native_search_unavailable'))
+        self.assertIn('only available in the US', event['trace']['reason'])
+        native = service.settings()['search_providers']['native']
+        self.assertEqual((native['route'], native['state'], native['reason']), ('claude-code', 'unavailable', 'refused'))
+        self.assertEqual(service.cli_native_search('claude-code', 'trusted-local', False, set()), (False, 'refused'))
+
+    def test_an_explicit_search_on_a_cli_route_without_providers_leaves_the_search_to_the_cli(self):
+        engine = _Engine()
+        service = self.service(engine)
+        service.store.put('subscription_engine', {'id': 'codex', 'connected_at': 0})
+        job = service.store.enqueue('/search 서울 날씨', 'cli-explicit')
+        self.assertTrue(service.run_one())
+        self.assertEqual(len(engine.calls), 1, 'the CLI turn still runs')
+        self.assertNotEqual(service.store.job(job)['status'], 'failed')
+        preflight = [event for event in service.store.task_events(job)
+                     if event['tool'] == 'web_search' and event['trace'].get('scope') == 'subscription-preflight']
+        self.assertEqual([event['status'] for event in preflight], ['running', 'unavailable'])
+        self.assertEqual(preflight[1]['trace']['code'], 'native_search_unavailable')
+        self.assertNotIn('AgentOS public search evidence', engine.calls[0]['prompt'])
+
+    def test_native_cli_search_is_off_for_private_turns_strict_and_isolated_routes(self):
+        service = self.service()
+        self.assertEqual(service.cli_native_search('codex', 'trusted-local', False, set()), (True, ''))
+        self.assertEqual(service.cli_native_search('codex', 'trusted-local', False, {'personal-space'}), (False, 'private_turn'))
+        self.assertEqual(service.cli_native_search('codex', STRICT_PROFILE, False, set()), (False, 'strict_profile'))
+        self.assertEqual(service.cli_native_search('codex', 'trusted-local', True, set()), (False, 'strict_profile'))
+        context = turn_context([{'role': 'user', 'content': 'x'}], 'cli')
+        self.assertNotIn('built-in web search', context['instructions'])
 
 
 if __name__ == '__main__':

@@ -477,15 +477,15 @@ class PublicPageReader:
 class LocalTools:
     def __init__(self, page_reader=None, providers=None):
         self.page_reader=page_reader or PublicPageReader()
-        # #655: the configured search providers; without an owner store only
-        # the keyless Bing RSS read exists.
+        # #655: the configured search providers; without an owner store none
+        # is configured (#678: Bing RSS is an owner opt-in).
         self.providers=providers or ProviderRegistry.from_config({})
     def search(self, query, provider=None, kind=None, locale=None):
         """One public web search through the provider the model named (#655).
 
         ``provider`` is an option id from ``self.providers.options()``
-        (``bing``, ``naver``, ``naver-book``, ``brave``); absent means the
-        owner's configured default.  No provider is chosen here from the
+        (``ai-native``, ``brave``, ``bing`` when the owner enabled it, #678);
+        absent means the owner's configured default.  No provider is chosen here from the
         query's language, script or subject.
         """
         if not isinstance(query,str) or not 1<=len(query.strip())<=500:raise ValueError('검색어는 1~500자로 입력하세요.')

@@ -96,15 +96,15 @@ def _synthetic_probe_work(root):
                                                  'arguments': {'query': '리더는 언제 차이를 만들어내는가'}})
     _event(store, job, 'web_search', 'succeeded', {'scope': 'main', 'call_id': '1', 'attempt': 1, 'host_action': 'web_search',
                                                    'evidence': {'sources': ['https://events.example/x'], 'result_count': 1,
-                                                                'provider': 'bing'}})
+                                                                'provider': 'ai-native'}})
     _event(store, job, 'web_search', 'failed', {'scope': 'main', 'call_id': '2', 'attempt': 1, 'error': '같은 경로',
                                                 'code': 'repeat_path', 'retry': 'permanent'})
     _event(store, job, 'web_search', 'running', {'scope': 'main', 'call_id': '3', 'attempt': 1, 'host_action': 'web_search',
-                                                 'arguments': {'query': '리더는 언제 차이를 만들어내는가', 'provider': 'naver'},
+                                                 'arguments': {'query': '리더는 언제 차이를 만들어내는가', 'provider': 'brave'},
                                                  'alternative': 'provider_switch'})
     _event(store, job, 'web_search', 'succeeded', {'scope': 'main', 'call_id': '3', 'attempt': 1, 'host_action': 'web_search',
                                                    'evidence': {'sources': ['https://books.example/42'], 'result_count': 3,
-                                                                'provider': 'naver', 'locale': 'ko-KR'}})
+                                                                'provider': 'brave', 'locale': 'ko-KR'}})
     # An older-format running event whose typed text was not yet a placeholder.
     _event(store, job, 'browser_type', 'running', {'scope': 'main', 'call_id': '4', 'attempt': 1, 'host_action': 'browser_type',
                                                    'arguments': {'target': '3', 'text': PASSWORD, 'effect': 'mutate'}})
@@ -154,8 +154,8 @@ class ProbeRecordTests(unittest.TestCase):
         calls = record['tool_calls']
         self.assertEqual([row['call_id'] for row in calls], ['1', '2', '3', '4', '5'])
         self.assertEqual([row.get('status') for row in calls], ['succeeded', 'failed', 'succeeded', 'failed', 'succeeded'])
-        self.assertEqual(calls[0]['provider'], 'bing')
-        self.assertEqual((calls[2]['provider'], calls[2]['alternative']), ('naver', 'provider_switch'))
+        self.assertEqual(calls[0]['provider'], 'ai-native')
+        self.assertEqual((calls[2]['provider'], calls[2]['alternative']), ('brave', 'provider_switch'))
         self.assertEqual(calls[1]['code'], 'repeat_path')
         self.assertEqual(calls[4]['alternative'], 'route_change')
         self.assertEqual(record['alternatives_tried'], {'count': 2, 'kinds': {'provider_switch': 1, 'route_change': 1}})
@@ -194,9 +194,9 @@ class ProbeRecordTests(unittest.TestCase):
         self.assertTrue(record['tool_calls'][2]['arguments']['query'].startswith('[omitted: '))
         self.assertTrue(record['report']['reply'].startswith('[omitted: '))
         # Selectors stay readable: they show which path was taken, not what was asked.
-        self.assertEqual(record['tool_calls'][2]['arguments']['provider'], 'naver')
+        self.assertEqual(record['tool_calls'][2]['arguments']['provider'], 'brave')
         self.assertEqual(record['tool_calls'][4]['arguments'], {'target': '7', 'effect': 'mutate'})
-        self.assertEqual(record['tool_calls'][2]['provider'], 'naver')
+        self.assertEqual(record['tool_calls'][2]['provider'], 'brave')
         self.assertEqual(record['finish']['evidence_refs'], ['3', '5'])
 
     def test_omit_text_covers_evidence_titles_text_names_and_url_paths(self):
@@ -208,7 +208,7 @@ class ProbeRecordTests(unittest.TestCase):
                                    'title': title, 'characters': 120, 'found': '땅콩 알레르기',
                                    'files': [{'root_id': 'r1', 'path': 'notes/allergy.md'}],
                                    'sources': ['https://blog.example/lunch/peanut-free', 'https://maps.example/'],
-                                   'qualifiers': ['partial'], 'provider': 'naver', 'result_count': 2},
+                                   'qualifiers': ['partial'], 'provider': 'brave', 'result_count': 2},
                       'error': f'{title} 페이지를 읽지 못했습니다'}
             for status in ('running', 'failed'):
                 db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
@@ -229,7 +229,7 @@ class ProbeRecordTests(unittest.TestCase):
         # Structure stays readable.
         self.assertEqual((evidence['state'], evidence['provider'], evidence['qualifiers'], evidence['characters'],
                           evidence['result_count'], evidence['files'][0]['root_id']),
-                         ('page', 'naver', ['partial'], 120, 2, 'r1'))
+                         ('page', 'brave', ['partial'], 120, 2, 'r1'))
         cited = record['finish']['cited'][1]['evidence']
         self.assertEqual((cited['state'], cited['element_count']), ('page', 12))
         self.assertTrue(cited['title'].startswith('[omitted: '))

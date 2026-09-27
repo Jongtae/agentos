@@ -218,6 +218,160 @@ class NullWorkIdRows(unittest.TestCase):
         self.assertIn('unrecorded', inherited_private(history_provenance(store, rows)))
 
 
+def _job(store, text, created, events=(('subscription_engine', 'succeeded', {}),), chat_id=None):
+    """One Work row and its tool events, without messages (the test orders the transcript)."""
+    job = str(uuid.uuid4())
+    with store.db() as db:
+        db.execute('INSERT INTO jobs(id,request_key,message,channel,chat_id,status,response,error,delivery,provider,model,created) '
+                   'VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', (job, 'legacy-' + job, text, 'web', chat_id, 'succeeded', 'answer', None,
+                                                         'none', 'subscription', 'codex', created))
+        for tool, state, detail in events:
+            db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                       (job, tool, state, json.dumps(detail), created))
+    return job
+
+
+def _say(store, job, role, content):
+    with store.db() as db:
+        db.execute('INSERT INTO messages(role,content,channel,created,job_id) VALUES (?,?,?,?,?)',
+                   (role, content, 'web', time.time(), job))
+
+
+NOTES_EVENTS = (('list_notes', 'succeeded', {'host_action': 'list_notes'}), ('subscription_engine', 'succeeded', {}))
+
+
+class BackfillSpanAndDriveSplices(unittest.TestCase):
+    """#703: a resumed Work's window covers what it was shown at resume; untraced connector splices stay unknown."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.store = QuickStore(Path(tmp.name) / 'state')
+        self.service = AgentService(self.store, browser_profile=bs.BrowserProfile(Path(tmp.name) / 'b', available=lambda: False))
+        self.base = time.time() - 5000
+
+    def parked_and_resumed(self, between_events):
+        """X parks (guidance reply), Y runs in between, X resumes and answers: X's resume was shown Y."""
+        parked = _job(self.store, '예약 가능한지 확인해줘', self.base)
+        between = _job(self.store, '메모 보여줘', self.base + 10, events=between_events)
+        _say(self.store, parked, 'user', '예약 가능한지 확인해줘')
+        _say(self.store, parked, 'assistant', '연결이 필요합니다. 연결하면 이어서 처리합니다.')
+        _say(self.store, between, 'user', '메모 보여줘')
+        _say(self.store, between, 'assistant', 'PRIVATE-NOTE')
+        _say(self.store, parked, 'assistant', '확인했습니다.')
+        return parked, between
+
+    def test_a_resumed_legacy_work_shown_a_private_reply_at_resume_is_not_clean(self):
+        parked, between = self.parked_and_resumed(NOTES_EVENTS)
+        self.service.backfill_legacy_work_sources()
+        records = self.store.config(WORK_SOURCES_KEY, {})
+        self.assertNotIn(between, records)
+        self.assertIn(HISTORY_PREFIX + 'unrecorded', records[parked],
+                      'its resume was shown the notes reply; version 1 read only the empty window before its first message')
+        self.assertIn('unrecorded', inherited_private(history_provenance(self.store, [{'job_id': parked}])))
+
+    def test_a_resumed_work_is_not_narrowed_from_messages_it_shared_its_span_with(self):
+        """Even a clean interleaved Work resolves only after the resumed one began: the resumed Work stays unknown."""
+        parked, between = self.parked_and_resumed((('subscription_engine', 'succeeded', {}),))
+        later = _legacy_work(self.store, '고마워', '천만에요', created=self.base + 20)
+        self.service.backfill_legacy_work_sources()
+        records = self.store.config(WORK_SOURCES_KEY, {})
+        self.assertIn(HISTORY_PREFIX + 'unrecorded', records[parked])
+        self.assertIn(HISTORY_PREFIX + 'unrecorded', records[later], 'what the resumed Work carried reaches later Works')
+
+    def test_a_recorded_resumed_work_keeps_its_unknown_history(self):
+        legacy = _legacy_work(self.store, '질문', '답', created=self.base - 100)
+        parked = _job(self.store, '확인해줘', self.base + 100)
+        between = _job(self.store, '다른 질문', self.base + 110)
+        _say(self.store, parked, 'user', '확인해줘')
+        _say(self.store, parked, 'assistant', '연결이 필요합니다.')
+        _say(self.store, between, 'user', '다른 질문')
+        _say(self.store, between, 'assistant', '다른 답')
+        _say(self.store, parked, 'assistant', '확인했습니다.')
+        self.store.put(WORK_SOURCES_KEY, {parked: ['history:unrecorded', 'owner-conversation'],
+                                          between: ['history:owner-conversation', 'owner-conversation']})
+        self.service.backfill_legacy_work_sources()
+        records = self.store.config(WORK_SOURCES_KEY, {})
+        self.assertIn(legacy, records)
+        self.assertIn(HISTORY_PREFIX + 'unrecorded', records[parked], 'never narrowed from the window before its first message only')
+        self.assertIn(HISTORY_PREFIX + ENGINE_UNMEDIATED, records[parked], 'known span labels are kept beside the unknown')
+
+    def test_a_normal_work_keeps_the_version_1_window(self):
+        clean = [_legacy_work(self.store, f'질문 {n}', f'답 {n}', created=self.base + n) for n in range(3)]
+        self.service.backfill_legacy_work_sources()
+        records = self.store.config(WORK_SOURCES_KEY, {})
+        for job in clean:
+            self.assertEqual(inherited_private(records[job]), [], job)
+
+    def chat_work(self, text, created, chat=CHAT):
+        job = _job(self.store, text, created, chat_id=chat)
+        _say(self.store, job, 'user', text)
+        _say(self.store, job, 'assistant', 'answer')
+        return job
+
+    def drive_set_up_for(self, chat=CHAT):
+        """Durable Drive handoff state as an offer and a Picker selection leave it (connector state, not text)."""
+        from personal_agent.drive_web_oauth import SELECTED_FILES_KEY, STATUS_KEY
+        self.store.put(STATUS_KEY, {'state': 'disconnected', 'owner': chat, 'audit': ['connection-offered']})
+        self.store.put(SELECTED_FILES_KEY, {})
+
+    def test_a_chat_the_drive_handoff_served_keeps_its_untraced_works_unknown(self):
+        self.drive_set_up_for()
+        chat = self.chat_work('이 파일 정리해줘', self.base)
+        web = _legacy_work(self.store, '날씨 알려줘', '맑음', created=self.base + 1)
+        other = self.chat_work('안녕', self.base + 2, chat=CHAT + 1)
+        self.assertEqual(self.service.legacy_splice_chats(), frozenset({CHAT}))
+        self.assertEqual(legacy_work_sources(self.store, chat, splice_chats={CHAT}),
+                         {OWNER_CONVERSATION, ENGINE_UNMEDIATED, 'unrecorded'},
+                         'unknown, with the known labels kept beside it; the message text is never read')
+        self.assertEqual(legacy_work_sources(self.store, web, splice_chats={CHAT}), {OWNER_CONVERSATION, ENGINE_UNMEDIATED})
+        self.assertEqual(legacy_work_sources(self.store, other, splice_chats={CHAT}), {OWNER_CONVERSATION, ENGINE_UNMEDIATED})
+        later = _legacy_work(self.store, '고마워', '천만에요', created=self.base + 3)
+        self.service.backfill_legacy_work_sources()
+        records = self.store.config(WORK_SOURCES_KEY, {})
+        self.assertIn('unrecorded', records[chat])
+        self.assertIn(HISTORY_PREFIX + 'unrecorded', records[later], 'what it was shown stays unknown too')
+        self.assertEqual(inherited_private(history_provenance(self.store, [{'job_id': chat}])), ['unrecorded'])
+
+    def test_a_turn_record_is_authoritative_and_no_drive_state_means_no_splice(self):
+        chat = self.chat_work('이 파일 정리해줘', self.base)
+        self.assertEqual(self.service.legacy_splice_chats(), frozenset(), 'the handoff never served a chat')
+        self.assertEqual(legacy_work_sources(self.store, chat, splice_chats=self.service.legacy_splice_chats()),
+                         {OWNER_CONVERSATION, ENGINE_UNMEDIATED})
+        # A #570 turn record names a Drive splice when one happened, so it decides.
+        self.store.put_turn_provenance(chat, {'prompt_withheld': None, 'egress_taint': []})
+        self.assertEqual(legacy_work_sources(self.store, chat, splice_chats={CHAT}), {OWNER_CONVERSATION, ENGINE_UNMEDIATED})
+        self.store.put_turn_provenance(chat, {'prompt_withheld': ['connected-drive-file']})
+        self.assertIsNone(legacy_work_sources(self.store, chat, splice_chats={CHAT}))
+
+    def test_a_store_backfilled_by_version_1_is_widened_never_narrowed(self):
+        """Records version 1 wrote from the short window or without the splice evidence are corrected."""
+        self.drive_set_up_for()
+        parked, between = self.parked_and_resumed(NOTES_EVENTS)
+        chat = self.chat_work('이 파일 정리해줘', self.base + 20)
+        shown = _legacy_work(self.store, '고마워', '천만에요', created=self.base + 30)
+        v1_ran = time.time()
+        # A genuine record written after version 1 ran is left exactly as recorded.
+        fresh = _job(self.store, '새 질문', v1_ran + 10, chat_id=CHAT)
+        _say(self.store, fresh, 'user', '새 질문')
+        _say(self.store, fresh, 'assistant', '새 답')
+        clean = ['engine-unmediated-read', 'history:owner-conversation', 'owner-conversation']
+        self.store.put(WORK_SOURCES_KEY, {parked: ['engine-unmediated-read', 'owner-conversation'],
+                                          chat: list(clean), shown: list(clean),
+                                          fresh: ['history:owner-conversation', 'owner-conversation']})
+        self.store.put(WORK_SOURCES_BACKFILL_KEY, {'version': 1, 'at': v1_ran, 'recorded': 3})
+        self.service.backfill_legacy_work_sources()
+        records = self.store.config(WORK_SOURCES_KEY, {})
+        self.assertIn(HISTORY_PREFIX + 'unrecorded', records[parked], 'its resume was shown the notes reply')
+        self.assertIn('unrecorded', records[chat])
+        self.assertIn(HISTORY_PREFIX + 'unrecorded', records[shown], 'the widening reaches later Works')
+        self.assertEqual(records[fresh], ['history:owner-conversation', 'owner-conversation'])
+        for job in (parked, chat, shown):
+            self.assertLessEqual({'engine-unmediated-read', 'owner-conversation'}, set(records[job]), 'never narrowed')
+        self.assertEqual(self.store.config(WORK_SOURCES_BACKFILL_KEY)['version'], 2)
+        self.assertEqual(self.service.backfill_legacy_work_sources(), 0, 'corrected once')
+
+
 class NativeSearchOnBackfilledHistory(unittest.TestCase):
     """Coordinator scope: history of only engine-unmediated-read and backfilled-clean messages keeps native search on."""
 

@@ -2097,15 +2097,23 @@ class AgentService:
         signals only; this writes the result under the service lock and marks
         the store so later turns read the same records instead of re-deriving.
         A legacy Work with any private signal stays unrecorded (private).
+        A store an earlier version already backfilled is corrected by
+        widening the records that version could have written (#703).
         Returns the number of records written.
         """
         marker=self.store.config(WORK_SOURCES_BACKFILL_KEY,{})
         if isinstance(marker,dict) and marker.get('version')==WORK_SOURCES_BACKFILL_VERSION:return 0
+        corrected_before=None
+        if isinstance(marker,dict) and marker.get('version') is not None:
+            at=marker.get('at')
+            # Without a usable run time every record may have been written by it.
+            corrected_before=float(at) if isinstance(at,(int,float)) and not isinstance(at,bool) else float('inf')
         if tools is None:tools={tool['id']:tool for package in self.runtime_packages() for tool in package['tools']}
         if document_jobs is None:document_jobs=set(self.store.config('file_workspace_document_jobs',[]) or [])
         try:
             with self.lock:
-                updates=backfill_work_sources(self.store,tools,document_jobs)
+                updates=backfill_work_sources(self.store,tools,document_jobs,corrected_before=corrected_before,
+                                              splice_chats=self.legacy_splice_chats())
                 rows=self.store.config(WORK_SOURCES_KEY,{})
                 rows=rows if isinstance(rows,dict) else {}
                 # Backfilled legacy Works go first: they are the oldest, so the
@@ -2120,6 +2128,23 @@ class AgentService:
             LOG.warning('legacy work source backfill failed')
             return 0
         return len(updates)
+
+    def legacy_splice_chats(self):
+        """Chats a pre-#570 connector file splice could have reached (#703).
+
+        The Drive handoff spliced the owner's Picker-selected files into a turn
+        of the chat it was offered to, and before #570 left no trace of it.
+        Its durable state names that chat (the offer's owner and the
+        selection's owner) and survives disconnect.  Connector state only; no
+        message text is read.
+        """
+        from .drive_web_oauth import SELECTED_FILES_KEY, STATUS_KEY
+        chats=set()
+        for key in (STATUS_KEY,SELECTED_FILES_KEY):
+            value=self.store.config(key,{})
+            owner=value.get('owner') if isinstance(value,dict) else None
+            if isinstance(owner,int) and not isinstance(owner,bool):chats.add(owner)
+        return frozenset(chats)
 
     def record_file_workspace_document_job(self, job_id):
         rows=self.store.config('file_workspace_document_jobs',[])

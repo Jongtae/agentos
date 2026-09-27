@@ -1,8 +1,12 @@
 # Personal AgentOS Presence Experience Contract
 
-## Secretary agency re-plan — #653 (2026-09-26)
+## Current goal selection — UX-RENEW-01 / #688 (2026-09-27)
 
-Owner decision 2026-09-26: the active top-level goal is **SECRETARY-01 [#662](https://github.com/Jongtae/agentos/issues/662)** under the canonical [Secretary Agency Contract](secretary-agency-contract.en.md), activated by GOV-SECRETARY-01 [#653](https://github.com/Jongtae/agentos/issues/653). The center of the product is the secretary agency loop: the decision model chooses providers, sites, queries and recovery paths from the owner's context; deterministic code enforces only Grants, approvals, secret exclusion, idempotency and Evidence. PRESENCE-01 #508 is owner-paused; its merged work is regression input.
+The owner selected UX-RENEW-01 as the current top-level goal, with governance activation in #690 and sequential presentation-only work in #691–#696. The owner explicitly lifted the earlier Secretary program exclusion of revisiting merged Presence/Settings/Telegram/current-context presentation. This contract remains the owner-facing experience contract for those slices; all state, Grant, approval, privacy, connector, Work/Event/Evidence, and external-effect rules below remain in force. PR #687 has merged and released its overlapping `src/personal_agent/web` files; implementation starts after governance PR #697 merges. SECRETARY-01 / #662 is owner-paused by #690; its agency scope and completion criteria remain preserved for a future explicit owner decision.
+
+## Secretary agency re-plan — #653 (2026-09-26, historical selection)
+
+Owner decision 2026-09-26 originally activated **SECRETARY-01 [#662](https://github.com/Jongtae/agentos/issues/662)** under the canonical [Secretary Agency Contract](secretary-agency-contract.en.md), activated by GOV-SECRETARY-01 [#653](https://github.com/Jongtae/agentos/issues/653). On 2026-09-27, #690 paused it in favor of UX-RENEW-01. The center of that program is the secretary agency loop: the decision model chooses providers, sites, queries and recovery paths from the owner's context; deterministic code enforces only Grants, approvals, secret exclusion, idempotency and Evidence. PRESENCE-01 #508 is owner-paused; its merged work is regression input.
 
 **Pilot posture.** One owner, own machine, own accounts. Enforced at request time: secrets never enter a model prompt, log or Evidence; payment needs per-action owner approval. Per-request sensitivity judgments, re-asks, per-provider gating and the "no cart authority" rule are removed from the request path and deferred to a separately activated hardening program. The #625 paragraph below and the AGENCY/#605 egress-composition rules are historical for this program; Attention preparations and phase-2 family delegation are explicitly selected, not deferred.
 

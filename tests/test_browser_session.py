@@ -1318,8 +1318,13 @@ class ServiceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.service.open_browser_for_login({'url': ''})
         receipt = self.service.open_browser_for_login({'url': ORIGIN + '/login?next=x'})
-        self.assertEqual(receipt['state'], 'opened')
+        # #749: the request never waits for the window; it shows on its own thread.
+        self.assertEqual(receipt['state'], 'opening')
         self.assertEqual(receipt['url'], ORIGIN + '/login')
+        for _ in range(100):
+            if self.driver_log:
+                break
+            time.sleep(0.02)
         self.assertEqual(self.driver_log[0], ('goto', ORIGIN + '/login?next=x', bs.ACTION_TIMEOUT_SECONDS))
         self.assertEqual(self.service.browser_status()['login_window_open'], True)
         # While the owner's window is open a Work cannot take the profile: typed, not crashed.
@@ -1432,7 +1437,7 @@ class HttpAndCliTests(unittest.TestCase):
                 request('/api/browser/login', {'url': ''})
             self.assertEqual(error.exception.code, 400)
             receipt = request('/api/browser/login', {'url': ORIGIN + '/login'})
-            self.assertEqual(receipt['state'], 'opened')
+            self.assertEqual(receipt['state'], 'opening', '#749: the HTTP request never waits for the window')
             with self.assertRaises(HTTPError) as error:
                 request('/api/browser/sessions/delete', {'site': ''})
             self.assertEqual(error.exception.code, 400)

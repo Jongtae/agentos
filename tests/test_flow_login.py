@@ -43,9 +43,10 @@ from personal_agent.bounded_execution import (AgentOSMcpTools, BoundedExecutionA
                                               CODEX_BRIDGE_APPROVAL_MODE, STRICT_PROFILE, profile_actions)
 from personal_agent.conversation_projection import TELEGRAM_RESULT_PREVIEW_CHARS, clip_keeping_links, terminal_text
 from personal_agent.providers import ModelAdapter
-from personal_agent.quickstart_service import (AgentService, BROWSER_LOGIN_CLOSE_SECONDS, BROWSER_LOGIN_NO_SESSION_LINE,
-                                               BROWSER_LOGIN_OFFERED_TEXT, BROWSER_LOGIN_RESULT_TEXT, BROWSER_LOGIN_SECONDS,
-                                               BROWSER_LOGIN_SKIP_LABEL)
+from personal_agent.quickstart_service import (AgentService, BROWSER_LOGIN_CLOSE_SECONDS, BROWSER_LOGIN_MOVED_LINE,
+                                               BROWSER_LOGIN_NO_SESSION_LINE, BROWSER_LOGIN_OFFERED_TEXT,
+                                               BROWSER_LOGIN_RESULT_TEXT, BROWSER_LOGIN_SECONDS, BROWSER_LOGIN_SKIP_LABEL,
+                                               BROWSER_OWNER_SIGNINS_KEY)
 from personal_agent.quickstart_store import QuickStore
 
 from test_bounded_execution import _Capabilities
@@ -202,7 +203,9 @@ class JarDriver(FakeDriver):
             self.hold_goto.wait(10)
             if getattr(self, 'fail_goto', False):
                 raise RuntimeError('the window did not show')
-        return super().goto(url, timeout)
+        super().goto(url, timeout)
+        #: #749: the URL the navigation landed on (a redirect when ``lands_on`` is set).
+        return getattr(self, 'lands_on', None) or url
 
     def login(self, site='fixture.test'):
         """The owner signs in by hand in this window: the site now holds a new session cookie."""
@@ -722,12 +725,100 @@ class LoginPromptAndThreads(LoginHarness):
         self.assertTrue(self.profile.jar.site_cookie_marks('fixture.test')[0], 'the run saved the page cookie')
         self.assertIn(BROWSER_LOGIN_NO_SESSION_LINE, prompt['text'])
 
-    def test_a_site_with_a_stored_session_gets_no_note(self):
+    def store_cookie(self):
         self.profile.jar.save_export({'fixture.test': [{'name': 'sid', 'value': 'old-session', 'domain': 'fixture.test', 'path': '/',
                                                         'expires': time.time() + 86400, 'secure': True, 'http_only': True,
                                                         'same_site': None}]})
+
+    def test_a_cookie_an_earlier_work_left_is_not_a_stored_session(self):
+        # #749: a stored cookie with no owner sign-in through a login window (an earlier Work's browsing).
+        self.store_cookie()
+        _job_id, prompt, _buttons, _notification = self.login_work()
+        self.assertIn(BROWSER_LOGIN_NO_SESSION_LINE, prompt['text'])
+
+    def test_a_site_the_owner_signed_in_to_and_still_holds_gets_no_note(self):
+        self.store_cookie()
+        self.store.put(BROWSER_OWNER_SIGNINS_KEY, {'fixture.test': time.time() - 60})
         _job_id, prompt, _buttons, _notification = self.login_work()
         self.assertNotIn(BROWSER_LOGIN_NO_SESSION_LINE, prompt['text'])
+
+    def test_a_recorded_sign_in_whose_cookies_are_gone_gets_the_note(self):
+        self.store.put(BROWSER_OWNER_SIGNINS_KEY, {'fixture.test': time.time() - 60})
+        _job_id, prompt, _buttons, _notification = self.login_work()
+        self.assertIn(BROWSER_LOGIN_NO_SESSION_LINE, prompt['text'], 'signed out or deleted since: no claim of a session')
+
+    def test_a_login_through_the_window_records_the_sign_in_and_the_next_prompt_has_no_note(self):
+        job_id, _prompt, _buttons, notification = self.login_work()
+        self.owner_closes(job_id)
+        self.assertEqual(self.state(job_id), 'resumed')
+        self.assertEqual(list(self.store.config(BROWSER_OWNER_SIGNINS_KEY, {})), ['fixture.test'])
+        # A later Work meets the site's login page again: the owner is asked without the note.
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='succeeded' WHERE id=?", (job_id,))
+        self.scripts = self.login_script()
+        later = self.receive('다른 계정 페이지 확인해줘')
+        self.assertNotEqual(later, job_id)
+        self.assertTrue(self.service.run_one())
+        self.shown(later)
+        self.service.deliver_one()
+        self.assertTrue(self.service.deliver_notification())
+        self.assertNotIn(BROWSER_LOGIN_NO_SESSION_LINE, self.prompts()[-1]['text'])
+
+    def test_a_close_without_a_login_records_no_sign_in(self):
+        job_id, _prompt, _buttons, _notification = self.login_work()
+        self.owner_closes(job_id, logged_in=False)
+        self.assertEqual(self.store.config(BROWSER_OWNER_SIGNINS_KEY, {}), {})
+
+    def test_a_redirected_window_names_the_site_it_landed_on(self):
+        self.window_holds = {'lands_on': 'https://accounts.lookalike.io/signin?token=secret#frag'}
+        job_id, prompt, _buttons, _notification = self.login_work()
+        text = prompt['text']
+        self.assertTrue(text.startswith('로그인 요청 사이트: lookalike.io\n'), text)
+        self.assertIn('전체 주소: accounts.lookalike.io\n', text)
+        self.assertIn(BROWSER_LOGIN_MOVED_LINE.format(site='fixture.test'), text)
+        self.assertIn(BROWSER_LOGIN_NO_SESSION_LINE, text)
+        self.assertNotIn('token', text, 'only the host leaves the window')
+        self.assertNotIn('secret', flat(self.service._browser_login(job_id)))
+        status = self.service.browser_status()['pending_logins'][0]
+        self.assertEqual((status['landed_host'], status['landed_site']), ('accounts.lookalike.io', 'lookalike.io'))
+
+    def test_a_window_that_lands_where_it_was_asked_shows_no_move(self):
+        _job_id, prompt, _buttons, _notification = self.login_work()
+        self.assertNotIn('이동했습니다', prompt['text'])
+
+    def test_a_legacy_row_with_no_window_id_expires_and_is_never_re_queued(self):
+        job_id = self.store.enqueue('계정 페이지 확인해줘', 'web-legacy')
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='partial' WHERE id=?", (job_id,))
+        for state in ('offered', 'closing'):
+            self.service._put_browser_login(job_id, {'work_id': job_id, 'host': 'fixture.test', 'state': state, 'window': None,
+                                                     'nonce': 'legacy', 'intent': 'resume', 'offered_at': time.time()})
+            self.assertEqual(self.service.process_browser_logins(), [job_id])
+            self.assertEqual(self.state(job_id), 'expired')
+            self.assertEqual(self.store.job(job_id)['status'], 'partial')
+
+    def test_the_settings_login_window_does_not_block_the_request_and_records_a_sign_in(self):
+        gate = threading.Event()
+        self.addCleanup(gate.set)
+        self.window_holds = {'hold_goto': gate}
+        self.drivers.append(JarDriver(log=[]))   # the holds apply to the next window
+        started = time.monotonic()
+        receipt = self.service.open_browser_for_login({'url': ORIGIN + '/login'})
+        self.assertEqual(receipt['state'], 'opening')
+        self.assertLess(time.monotonic() - started, 2, 'the HTTP request never waits for the window')
+        gate.set()
+        self.assertTrue(wait_until(lambda: len(self.drivers) == 2 and self.drivers[-1].url is not None))
+        self.drivers[-1].login()
+        self.drivers[-1].closed = True
+        self.assertTrue(wait_until(lambda: 'fixture.test' in self.store.config(BROWSER_OWNER_SIGNINS_KEY, {})))
+
+    def test_a_settings_window_closed_without_a_login_records_nothing(self):
+        receipt = self.service.open_browser_for_login({'url': ORIGIN + '/login'})
+        self.assertEqual(receipt['state'], 'opening')
+        self.assertTrue(wait_until(lambda: self.drivers and self.drivers[-1].url is not None))
+        self.drivers[-1].closed = True
+        self.assertTrue(wait_until(lambda: not self.profile.status()['login_window_open']))
+        self.assertEqual(self.store.config(BROWSER_OWNER_SIGNINS_KEY, {}), {})
 
     def test_the_run_does_not_wait_for_the_window_and_the_prompt_waits_for_it(self):
         gate = threading.Event()

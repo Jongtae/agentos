@@ -2,7 +2,7 @@
 
 ## Current goal selection — UX-RENEW-01 / #688 (2026-09-27)
 
-The owner selected UX-RENEW-01 as the current top-level goal, with governance activation in #690 and sequential presentation-only work in #691–#696. The owner explicitly lifted the earlier Secretary program exclusion of revisiting merged Presence/Settings/Telegram/current-context presentation. This contract remains the owner-facing experience contract for those slices; all state, Grant, approval, privacy, connector, Work/Event/Evidence, and external-effect rules below remain in force. Implementation starts after governance PR #697 merges and overlapping `src/personal_agent/web` ownership from PR #687 is released. SECRETARY-01 / #662 is owner-paused by #690; its agency scope and completion criteria remain preserved for a future explicit owner decision.
+The owner selected UX-RENEW-01 as the current top-level goal, with governance activation in #690 and sequential presentation-only work in #691–#696. The owner explicitly lifted the earlier Secretary program exclusion of revisiting merged Presence/Settings/Telegram/current-context presentation. This contract remains the owner-facing experience contract for those slices; all state, Grant, approval, privacy, connector, Work/Event/Evidence, and external-effect rules below remain in force. PR #687 has merged and released its overlapping `src/personal_agent/web` files; implementation starts after governance PR #697 merges. SECRETARY-01 / #662 is owner-paused by #690; its agency scope and completion criteria remain preserved for a future explicit owner decision.
 
 ## Secretary agency re-plan — #653 (2026-09-26, historical selection)
 

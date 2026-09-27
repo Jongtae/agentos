@@ -511,6 +511,13 @@ class DriverProtocolTests(unittest.TestCase):
         self.assertEqual(self.commands()[-1]['form'], held, 'only the record fields cross')
         with self.assertRaises(ToolError):
             driver.release_submit(held, 4)
+        driver.goto('https://shop.test/refusedpost', 4)
+        driver.snapshot()
+        with self.assertRaises(ToolError) as caught:
+            driver.click(3, 4)
+        self.assertEqual((caught.exception.code, str(caught.exception)), ('submit_refused', bs.SUBMIT_REFUSED_TEXT))
+        driver.goto('https://shop.test/p', 4)
+        driver.snapshot()
         driver.click(9, 4, approved=True)
         self.assertIs(self.commands()[-1]['approved'], True)
         with self.assertRaises(ToolError):
@@ -624,6 +631,7 @@ class WorkerGuardLogicTests(unittest.TestCase):
         worker = object.__new__(bw.Worker)   # no Cocoa objects: only the guard's bookkeeping
         worker.guard_off, worker.cancelled, worker.reported, worker.held = False, None, [], None
         worker.pending, worker.deciding, worker.failed, worker.ran = {}, 0, [], []
+        worker.refused_submits = worker.step_refused = 0
         worker.fail = lambda ident, code: worker.failed.append((ident, code))
         worker.run = lambda body, arguments, done, world=None: worker.ran.append((body, arguments, done))
         for key, value in fields.items():
@@ -670,10 +678,16 @@ class WorkerGuardLogicTests(unittest.TestCase):
         self.assertEqual(worker.take_cancelled()['action'], 'https://shop.test/pay')
         self.assertEqual(worker.held['id'], 'page-hold')
 
-    def test_a_refused_destination_record_carries_no_query(self):
-        from personal_agent import browser_worker as bw
-        self.assertEqual(bw.destination_record('https://u:p@shop.test/s?q=4111#x', 'GET'),
-                         {'dom': -1, 'method': 'get', 'action': 'https://shop.test/s'})
+    def test_a_form_post_refused_with_nothing_held_is_a_typed_refusal(self):
+        # #700 re-review P2-1: never an approval request the owner could not have released.
+        bw, worker = self.worker()
+        worker.refused_submits, worker.step_refused, worker.blocked = 1, 0, 0
+        worker.pending[5] = True
+        worker.reply = lambda ident, ok=True, **fields: worker.failed.append((ident, fields.get('error')))
+        worker.run = lambda body, arguments, done, world=None: done({'cancelled': None}, None)
+        worker.finish_input(5, 0)
+        self.assertEqual(worker.failed, [(5, 'submit_refused')])
+        self.assertIsNone(worker.cancelled)
 
     def test_the_page_wrapper_is_not_installed_while_the_owner_signs_in(self):
         bw, worker = self.worker()
@@ -719,13 +733,14 @@ class WorkerGuardLogicTests(unittest.TestCase):
         worker.check_form_navigation('https://shop.test/search', 'GET', answers.append)
         worker.ran[-1][2]({'allow': True}, None)
         self.assertEqual(answers[-1], True)
-        # A script error, or no answer in time, is a refusal reported with only the destination.
+        # A script error, or no answer in time, is a refusal with nothing held: not an approval request.
+        worker.refused_submits = 0
         worker.check_form_navigation('https://shop.test/pay', 'POST', answers.append)
         worker.ran[-1][2](None, 'script_failed')
         worker.check_form_navigation('https://shop.test/pay', 'POST', answers.append)
         later[-1]()
-        self.assertEqual((answers[-2:], worker.deciding), ([False, False], 0))
-        self.assertEqual(worker.take_cancelled()['dom'], -1)
+        self.assertEqual((answers[-2:], worker.deciding, worker.refused_submits), ([False, False], 0, 2))
+        self.assertIsNone(worker.take_cancelled())
 
 
 class DestinationTests(unittest.TestCase):

@@ -100,6 +100,8 @@ KEY_DELETE_FAILED_TEXT = ('로그인 세션은 삭제했지만 macOS 키체인�
 BLOCKED_TEXT = ('이 컴퓨터나 내부 네트워크(루프백·사설·링크 로컬·.local) 주소는 브라우저로 열지 않습니다. '
                 '공개 웹 주소만 열 수 있습니다.')
 UNAVAILABLE_TEXT = '이 작업 경로에는 브라우저 기능이 연결되어 있지 않습니다.'
+SUBMIT_REFUSED_TEXT = ('결제 양식일 수 있는 제출을 확인할 수 없어 멈췄습니다. 페이지를 다시 읽고 결제 버튼을 직접 눌러 '
+                       '승인을 요청하세요.')
 LOGIN_WINDOW_TEXT = ('로그인 창에서 직접 로그인한 뒤 창을 닫아 주세요. AgentOS는 입력 내용을 보지 않으며, 창을 닫으면 '
                      '로그인 세션을 암호화해 저장합니다.')
 LIMITATION_TEXT = ('카드번호·CVC·일회용 코드 입력과 그 양식의 버튼은 승인 없이 실행하지 않습니다. '
@@ -663,15 +665,7 @@ class BrowserSession:
             raise ValueError('effect는 read, navigate, mutate, payment 중 하나여야 합니다.')
         return effect
 
-    def _submit_approval_issued(self):
-        """The owner approved a cancelled payment-form submit of this Work that is not yet released (#700)."""
-        issued = getattr(self.approvals, 'issued_action', None)
-        try:
-            return callable(issued) and issued() == 'browser_submit'
-        except Exception:
-            return False
-
-    def _guard(self, binding, description, required, holdable=False):
+    def _guard(self, binding, description, required):
         """Refuse a guarded step unless an exact owner approval is consumed now.
 
         ``required`` is AgentOS's own classification of the target, or the
@@ -680,19 +674,13 @@ class BrowserSession:
         different text or a changed form asks again.  Returns True when an
         approval was consumed: only then does the worker let a submit of the
         target's payment form through (#700).  An unguarded step still spends
-        an approval the owner gave for exactly it.
-
-        ``holdable``: the step is guarded only because it presses a control of
-        a payment form, so the only guarded effect it can have is that form's
-        submit, which the worker cancels and holds.  While the owner's approval
-        of a cancelled submit is issued and unspent, such a step runs without
-        an allowance instead of asking for itself (which would replace that
-        approval): the submit it makes is held and released only when it is
-        exactly the approved form in the approved state (#700 review).
+        an approval the owner gave for exactly it.  A guarded step always
+        needs its own approval, even while an approval of a cancelled submit
+        is issued: a press can pay by ``fetch`` without any submit (#700 review).
         """
         if self.approvals.consume(binding):
             return True
-        if required and not (holdable and self._submit_approval_issued()):
+        if required:
             self._refuse(binding, description)
         return False
 
@@ -771,8 +759,7 @@ class BrowserSession:
         key = target_key(element)
         binding = step_binding(self.work_id, 'browser_click', snapshot['_page'], key, key, self._state_of(snapshot, element))
         description = f"'{element.get('name') or element.get('role')}' 버튼 누르기"
-        approved = self._guard(binding, description, element['submit_guarded'] or effect == 'payment',
-                               holdable=element['submit_guarded'])
+        approved = self._guard(binding, description, element['submit_guarded'] or effect == 'payment')
         before = page_reference(snapshot.get('url'))
         answer = self._input(lambda timeout: self._driver().click(element['index'], timeout, approved=approved),
                              description)
@@ -1069,6 +1056,10 @@ class WebKitWorkerDriver:
                 raise ToolError(TARGET_TEXT, 'target_unavailable')
             if code == 'blocked_destination':
                 raise ToolError(BLOCKED_TEXT, 'blocked_destination')
+            if code == 'submit_refused':
+                # #700: a form post the guard refused with no page form to hold (a
+                # resubmitted POST, or the page did not answer which form it was).
+                raise ToolError(SUBMIT_REFUSED_TEXT, 'submit_refused')
             if code == 'approval_required':
                 # The worker cancelled a payment-form submit no approval let through (#698).
                 refusal = ToolError(APPROVAL_TEXT, 'approval_required', requires='browser-step-approval')

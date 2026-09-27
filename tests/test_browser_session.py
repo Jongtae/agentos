@@ -362,15 +362,10 @@ class Approvals:
 
     def __init__(self, *issued):
         self.issued = [bs.binding_digest(b) for b in issued]
-        self.actions = {bs.binding_digest(b): b['action'] for b in issued}
         self.requests = []
 
     def issue(self, binding):
         self.issued.append(bs.binding_digest(binding))
-        self.actions[bs.binding_digest(binding)] = binding['action']
-
-    def issued_action(self):
-        return self.actions.get(self.issued[0]) if self.issued else None
 
     def consume(self, binding):
         key = bs.binding_digest(binding)
@@ -894,32 +889,20 @@ class ForwardedSubmitTests(unittest.TestCase):
         self.assertNotEqual(approvals.requests[-1][0]['state_digest'], approvals.requests[-2][0]['state_digest'])
         self.assertEqual(driver.posts, [])
 
-    def test_an_approved_late_submit_of_a_pay_button_is_released_not_asked_for_the_button_again(self):
-        # #700 review P2-3: the pay button's submit came after its window; the owner approved
-        # that submit.  Repeating the guarded press must not replace that approval with a new
-        # request for the button: it runs without an allowance, its submit is held and released.
+    def test_an_issued_submit_approval_never_lifts_a_guarded_press(self):
+        # #700 re-review P1: a press can pay by fetch with no submit to hold, so a guarded
+        # press needs its own approval even while an approval of a cancelled submit is issued.
+        # (A pay button whose submit comes after its window therefore asks again: fail closed.)
         self.driver.hold(1)
         with self.assertRaises(ToolError):
             self.sess.read()
         self.approvals.issue(self.approvals.requests[-1][0])
-        asked = len(self.approvals.requests)
         pay = next(row for row in self.sess.last['_elements'] if row['tag'] == 'button' and row['submit_guarded'])
-        page = self.sess.click({'target': str(pay['n']), 'effect': 'payment'})
-        self.assertEqual(page['title'], '결제 완료')
-        self.assertEqual((len(self.approvals.requests), self.approvals.issued), (asked, []))
-        self.assertEqual(self.driver.approved[-1], False, 'no allowance: the release is the only way through')
-        self.assertEqual(self.driver.posts, [('post', '/pay')])
-        # Without an issued submit approval the button asks for itself, before the page.
-        self.sess.open({'url': ORIGIN + '/checkout-forwarded', 'effect': 'navigate'})
-        self.refused(str(pay['n']))
-        # An issued submit approval never lifts a requirement that only the model's label adds.
-        self.driver.hold(1)
-        with self.assertRaises(ToolError):
-            self.sess.read()
-        self.approvals.issue(self.approvals.requests[-1][0])
-        with self.assertRaises(ToolError):
-            self.sess.click({'target': '쿠폰 적용', 'effect': 'payment'})
-        self.assertEqual(self.driver.posts, [('post', '/pay')])
+        binding = self.refused(str(pay['n']))
+        self.assertEqual(binding['action'], 'browser_click')
+        self.assertEqual(len(self.approvals.issued), 1, 'the submit approval is left unspent')
+        self.assertEqual([entry for entry in self.driver.log if entry[0] == 'click'], [], 'refused before the page')
+        self.assertEqual(self.driver.posts, [])
 
     def test_a_release_the_worker_refuses_fails_typed_and_spends_the_approval(self):
         binding = self.refused('바로 결제')
@@ -1316,13 +1299,9 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(self.service.browser_status()['pending_steps'], [])
         self.assertEqual(self.store.job(job_id)['status'], 'partial')
         job_id = self.refused_work()
-        approvals = self.service.browser_approvals_for(self.store.job(job_id))
-        self.assertIsNone(approvals.issued_action(), 'requested, not yet issued')
-        pending = self.service._browser_request(job_id)['action']
         self.assertEqual(self.service.browser_step_decision({'work_id': job_id, 'decision': 'approve'}),
                          {'approved': True, 'resumed': True, 'work_id': job_id})
         self.assertEqual(self.store.job(job_id)['status'], 'queued')
-        self.assertEqual(approvals.issued_action(), pending, '#700: the issued approval names its action only')
 
     def test_settings_status_and_login_window(self):
         status = self.service.settings()['browser']

@@ -73,7 +73,10 @@ for line in sys.stdin:
         # view) answers only once that navigation has landed, with navigated=true.
         # ``/lateresolve``: the navigation's destination check (DNS) takes longer than the
         # click grace; the real worker waits while that policy decision is pending.
-        if command.get('index') == 3 and page['url'].endswith(('/delayed', '/popup', '/lateresolve')):
+        if command.get('index') == 3 and page['url'].endswith('/refusedpost'):
+            # #700: a form post refused with no page form to hold.
+            emit({'id': ident, 'ok': False, 'error': 'submit_refused'})
+        elif command.get('index') == 3 and page['url'].endswith(('/delayed', '/popup', '/lateresolve')):
             time.sleep(1.5 if page['url'].endswith('/lateresolve') else 0.2)
             page['url'] = page['url'].rsplit('/', 1)[0] + ('/opened' if page['url'].endswith('/popup') else '/landed')
             emit({'id': ident, 'ok': True, 'navigated': True})

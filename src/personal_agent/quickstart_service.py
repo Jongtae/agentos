@@ -3729,10 +3729,6 @@ class AgentService:
         class Approvals:
             def consume(self,binding):return service._consume_browser_step(job,binding)
             def request(self,binding,description):return service._request_browser_step(job,binding,description)
-            # #700: the action of this Work's issued, unspent approval (None when there is none).
-            def issued_action(self):
-                row=service._browser_request(job['id'])
-                return row.get('action') if row and row.get('state')=='issued' else None
             # #709: a login page during this Work asks the owner in-flow.
             def login_required(self,url):return service._request_browser_login(job,url)
         return Approvals()

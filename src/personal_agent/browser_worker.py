@@ -333,8 +333,13 @@ s.vetted = [];
 if (approved === true) {
   const control = labelControl(el);
   let forms = [formOf(el), control ? formOf(control) : null].filter((form) => form instanceof HTMLFormElement && holdsPayment(form));
-  // Else the forms whose state the approval covered: those with a shown payment field.
-  if (!forms.length) forms = Array.from(documentForms.call(document)).filter((form) => formHolds(form, GUARD_TOKENS));
+  // Else the forms whose state the approval covered: those of a shown payment field
+  // among the elements a snapshot lists (the first 300 shown, as SNAPSHOT_SCRIPT).
+  if (!forms.length) {
+    const shown = Array.from(document.querySelectorAll(SELECTOR)).filter(visible).slice(0, 300);
+    forms = Array.from(new Set(shown.filter((field) => paymentField(field, GUARD_TOKENS)).map(formOf)))
+      .filter((form) => form instanceof HTMLFormElement);
+  }
   s.allow = {forms: forms.map(formRecord), until: Date.now() + lasts};
 }
 const tag = el.tagName.toLowerCase();
@@ -657,6 +662,8 @@ class Worker:
         self.pending = {}          # op id -> True while the op has not answered
         self.navigation = None     # (id, WKNavigation) the navigate op waits for
         self.blocked = 0           # main-frame navigations refused so far
+        self.refused_submits = 0   # form navigations refused with no page form to hold (#700 review)
+        self.step_refused = 0      # ``refused_submits`` when the current step began
         self.hosts = set()         # hosts of committed main-frame navigations in this worker's life
         self.main_navigations = 0  # main-frame navigations allowed so far (#736)
         self.landed = 0            # main-frame navigations committed or failed so far (#736)
@@ -828,7 +835,7 @@ class Worker:
         The page answers which of its payment forms that navigation submits
         (``FORM_NAVIGATION_SCRIPT``); a refused one is held and reported as a
         cancelled submit.  No answer in ``FORM_CHECK_SECONDS`` (or a script
-        error) is a refusal, reported with only the destination.
+        error) is a refusal with nothing held, answered ``submit_refused``.
         """
         answered = []
         self.deciding += 1   # a click waits for this decision (#736)
@@ -839,7 +846,10 @@ class Worker:
             answered.append(True)
             self.deciding -= 1
             if not allowed:
-                self.receive_cancelled(record if isinstance(record, dict) else destination_record(url, method))
+                if isinstance(record, dict):
+                    self.receive_cancelled(record)   # held: an approval of it can release it
+                else:
+                    self.refused_submits += 1        # nothing held: a typed refusal, never an approval request
             then(allowed)
 
         def done(value, error):
@@ -881,6 +891,8 @@ class Worker:
                 return self.reply(ident, False, error='approval_required', form=cancelled)
             if error:
                 return self.fail(ident, error)
+            if self.refused_submits > self.step_refused:
+                return self.fail(ident, 'submit_refused')
             if blocked_before is not None and self.blocked > blocked_before:
                 return self.fail(ident, 'blocked_destination')
             self.reply(ident, **({'navigated': True} if navigated else {}))
@@ -1043,6 +1055,7 @@ class Worker:
         if not isinstance(expect, dict):
             return self.fail(ident, 'target_changed')   # never press an element nobody classified
         nonce = uuid.uuid4().hex
+        self.step_refused = self.refused_submits
         # Only a step the parent consumed an owner approval for may let a
         # payment-form submit through (#698); its allowance ends by itself even
         # if the step's end never reaches the page (#700 review).
@@ -1121,6 +1134,7 @@ class Worker:
         if held is None or any(str(form.get(key)) != str(held.get(key)) for key in ('dom', 'method', 'action', 'page', 'state')):
             return self.fail(ident, 'submit_changed')
         self.held = None   # released at most once
+        self.step_refused = self.refused_submits
         self.deadline(ident, timeout, on_timeout=self.end_step)
         blocked_before, baseline = self.blocked, (self.main_navigations, self.landed)
 
@@ -1239,20 +1253,6 @@ class Worker:
         self.AppHelper.stopEventLoop()
 
 
-def destination_record(url, method):
-    """A refused form navigation no page form was found for: only its method and destination.
-
-    The query and fragment are dropped (a GET form's query is its submitted
-    values).  Nothing is held for it, so no approval can release it.
-    """
-    try:
-        parts = urlsplit(str(url or ''))
-        action = f'{parts.scheme}://{parts.netloc.rpartition("@")[2]}{parts.path}' if parts.scheme else ''
-    except ValueError:
-        action = ''
-    return {'dom': -1, 'method': str(method or '').lower()[:16], 'action': action[:2000]}
-
-
 def _form_record(value):
     """A cancelled submit's form, from page data, or None.
 
@@ -1353,7 +1353,7 @@ def _delegate_class():
                     WebKit.WKNavigationTypeFormSubmitted, WebKit.WKNavigationTypeFormResubmitted):
                 method = str(request.HTTPMethod() or 'GET') if request is not None else 'GET'
                 if kind == WebKit.WKNavigationTypeFormResubmitted and method.upper() != 'GET':
-                    worker.receive_cancelled(destination_record(url, method))
+                    worker.refused_submits += 1
                     return handler(WebKit.WKNavigationActionPolicyCancel)
 
                 def checked(allowed):

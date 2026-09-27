@@ -1,152 +1,225 @@
 """Embedded macOS system WebKit browser worker (SEC-BROWSER-02 #680).
 
-Run as ``python -m personal_agent.browser_worker --profile <id>``.  The worker
-owns the process's main thread and the Cocoa run loop (AppKit and WebKit
-objects may only be created and used there); a reader thread hands every
-command to the main thread with ``AppHelper.callAfter``.  It speaks JSON
+Run as ``python -P -m personal_agent.browser_worker --profile <id>``.  The
+worker owns the process's main thread and the Cocoa run loop (AppKit and
+WebKit objects may only be created and used there); a reader thread hands
+every command to the main thread with ``AppHelper.callAfter``.  It speaks JSON
 lines: one request per stdin line, one response per stdout line.
 
 Request:  ``{"id": 7, "op": "navigate", "timeout": 20, ...arguments}``
 Response: ``{"id": 7, "ok": true, ...result}`` or ``{"id": 7, "ok": false, "error": "<code>"}``
-Events:   ``{"event": "ready" | "hidden"}`` (no ``id``).
+Events:   ``{"event": "ready" | "hidden" | "unavailable"}`` (no ``id``).
 
 Ops: ``navigate``, ``snapshot``, ``click``, ``type``, ``show``, ``hide``,
 ``state``, ``cookies_export``, ``cookies_import``, ``cookies_delete``,
 ``cookies_clear``, ``quit``.  Every op carries a deadline; the worker answers
-``timeout`` when it passes.  Errors are AgentOS codes, never library text.
+``timeout`` when it passes.  Errors are AgentOS codes, never library text,
+and every line is ASCII JSON (a page's lone surrogate cannot break the pipe).
 
 Session material: the web view uses ``WKWebsiteDataStore.nonPersistentDataStore()``
 so WebKit keeps cookies in memory only and never writes a cookie file.  The
 parent exports cookies over the pipe and keeps them in the encrypted jar
-(``browser_jar``); the worker writes nothing to disk and prints nothing but
-protocol lines.  Input is native: mouse events and ``insertText:`` at the
-element's rectangle, so pages see ``isTrusted`` events, and the element under
-the pointer is verified to be the intended target before any click.
+(``browser_jar``); the worker writes nothing to disk.
+
+Page scripts run in ``WKContentWorld.defaultClientWorld()`` (the page cannot replace
+the DOM functions they call).  Input is native and bound to one element:
+``LOCATE`` resolves the element by index, checks the descriptor the payment
+guard classified (tag, type, autocomplete, name, form membership, whether its
+form holds a payment field), hit-tests it and keeps a handle; the native
+press is followed by ``VERIFY_CLICK`` (a capture-phase guard in the same
+world cancels a trusted click that lands elsewhere) or ``INSERT`` (the held
+element must be the focused one and still match, then ``insertText`` runs in
+that same script turn).  The element is never resolved a second time.
+
+Destinations: every navigation (typed, redirect, form, ``window.open``, frame)
+passes ``decidePolicyForNavigationAction``: only http(s) to public addresses,
+after DNS resolution, reusing ``local_tools``' denied names and its
+private-network table (``local_host``).  Loopback, private, link-local and ``.local`` hosts
+(the AgentOS UI included) are refused.  Tests may allow one exact fixture
+origin with ``--test-allow-origin``, an argument only a test constructor sets.
 
 Reuse: Apple's WebKit (``WKWebView``) through PyObjC (MIT) is the adopted
 engine; ``WKWebsiteDataRecord.displayName`` is WebKit's own per-site
 (registrable domain) grouping.  No site, provider or category is named here.
 """
 import argparse
+import ipaddress
 import json
 import os
 import platform
 import plistlib
+import socket
 import sys
 import threading
 import time
+import uuid
 from urllib.parse import urlsplit
 
-#: Elements the model can act on and the fields the guard reasons about.  Run
-#: in the page; returns plain data only (no node handles, no HTML).  ``index``
-#: is the element's position in ``document.querySelectorAll(SELECTOR)``, the
-#: same list ``LOCATE_SCRIPT`` resolves a click or typing target in.
+#: Appended to the user agent.  AgentOS's own HTTP server refuses every
+#: request that carries it, so a page in the embedded browser can never use
+#: the owner's AgentOS UI or API (#680 review P1-2).
+EMBEDDED_UA_TOKEN = 'AgentOS-Embedded/1'
+
+#: ``index`` is an element's position in ``document.querySelectorAll(SELECTOR)``.
 SELECTOR = ('a[href], button, input, select, textarea, summary, [role="button"], [role="link"], [role="textbox"], '
             '[role="checkbox"], [role="radio"], [role="combobox"], [role="menuitem"], [role="tab"]')
-SNAPSHOT_SCRIPT = r"""
-(() => {
-  const SELECTOR = %(selector)s;
-  const NO_VALUE = ['submit', 'button', 'image', 'reset', 'checkbox', 'radio', 'file', 'password', 'hidden'];
-  const forms = new Map();
-  const visible = (el) => {
-    if (el.type === 'hidden') return false;
-    const style = getComputedStyle(el);
-    if (style.visibility === 'hidden' || style.display === 'none') return false;
-    const rect = el.getBoundingClientRect();
-    return rect.width > 0 || rect.height > 0;
-  };
-  const clean = (text) => String(text || '').replace(/\s+/g, ' ').trim().slice(0, 160);
-  const nameOf = (el) => {
-    const tag = el.tagName.toLowerCase();
-    const label = el.getAttribute('aria-label') || (el.labels && el.labels[0] && el.labels[0].innerText) ||
-      el.getAttribute('placeholder') || el.getAttribute('title') || el.getAttribute('alt') ||
-      ((tag === 'input' && (el.type === 'submit' || el.type === 'button')) ? el.value : '') ||
-      el.innerText || el.textContent || (tag === 'input' ? el.name : '') || '';
-    return clean(label);
-  };
-  const roleOf = (el) => {
-    const role = el.getAttribute('role');
-    if (role) return role;
-    const tag = el.tagName.toLowerCase();
-    if (tag === 'a') return 'link';
-    if (tag === 'button' || tag === 'summary') return 'button';
-    if (tag === 'select') return 'combobox';
-    if (tag === 'textarea') return 'textbox';
-    if (tag === 'input') {
-      const type = (el.type || 'text').toLowerCase();
-      if (['submit', 'button', 'image', 'reset'].includes(type)) return 'button';
-      if (type === 'checkbox' || type === 'radio') return type;
-      return 'textbox';
-    }
-    return tag;
-  };
-  const elements = [];
-  Array.from(document.querySelectorAll(SELECTOR)).forEach((el, index) => {
-    if (!visible(el)) return;
-    const tag = el.tagName.toLowerCase();
-    const form = el.form || el.closest('form');
-    let formId = null;
-    if (form) { if (!forms.has(form)) forms.set(form, forms.size + 1); formId = forms.get(form); }
-    const type = tag === 'input' ? (el.type || 'text').toLowerCase() : (tag === 'button' ? (el.type || 'submit').toLowerCase() : '');
-    const takesValue = (tag === 'input' && !NO_VALUE.includes(type)) || tag === 'textarea' || tag === 'select';
-    elements.push({index, role: roleOf(el), name: nameOf(el), href: tag === 'a' ? el.href : null, tag, type,
-      autocomplete: (el.getAttribute('autocomplete') || '').toLowerCase().trim(),
-      value: takesValue ? String(el.value || '').slice(0, 200) : null, form: formId, disabled: !!el.disabled});
-  });
-  return JSON.stringify({url: location.href, title: document.title, text: (document.body ? document.body.innerText : '').slice(0, 20000),
-    elements: elements.slice(0, 300),
-    forms: Array.from(forms.entries()).map(([form, id]) => ({id, text: String(form.innerText || '').slice(0, 6000)}))});
-})()
+
+#: Helpers every page script shares.  Strings leaving the page are well-formed
+#: UTF-16 and cut at code-point boundaries.  ``describe`` mirrors the guard's
+#: classification in ``browser_session`` (the payment tokens are passed in).
+PRELUDE = r"""
+const SELECTOR = %(selector)s;
+const well = (value) => { const s = String(value == null ? '' : value);
+  return typeof s.toWellFormed === 'function' ? s.toWellFormed()
+    : s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '�'); };
+const cut = (value, n) => { let s = well(value); if (s.length <= n) return s; s = s.slice(0, n);
+  return /[\uD800-\uDBFF]$/.test(s) ? s.slice(0, -1) : s; };
+const visible = (el) => {
+  if (el.type === 'hidden') return false;
+  const style = getComputedStyle(el);
+  if (style.visibility === 'hidden' || style.display === 'none') return false;
+  const rect = el.getBoundingClientRect();
+  return rect.width > 0 || rect.height > 0;
+};
+const clean = (text) => cut(String(text || '').replace(/\s+/g, ' ').trim(), 160);
+// The element's <label> without touching ``el.labels``: reading a label through
+// that list on password-form pages left WebKit (macOS 26) unable to evaluate any
+// further script in the document.
+const labelOf = (el) => { const wrapping = el.closest('label');
+  if (wrapping) return wrapping.innerText;
+  const id = el.getAttribute('id');
+  const target = id ? document.querySelector('label[for="' + CSS.escape(id) + '"]') : null;
+  return target ? target.innerText : ''; };
+const nameOf = (el) => {
+  const tag = el.tagName.toLowerCase();
+  const label = el.getAttribute('aria-label') || labelOf(el) ||
+    el.getAttribute('placeholder') || el.getAttribute('title') || el.getAttribute('alt') ||
+    ((tag === 'input' && (el.type === 'submit' || el.type === 'button')) ? el.value : '') ||
+    el.innerText || el.textContent || (tag === 'input' ? el.name : '') || '';
+  return clean(label);
+};
+const typeOf = (el) => { const tag = el.tagName.toLowerCase();
+  return tag === 'input' ? (el.type || 'text').toLowerCase() : (tag === 'button' ? (el.type || 'submit').toLowerCase() : ''); };
+const autocompleteOf = (el) => (el.getAttribute('autocomplete') || '').toLowerCase().trim();
+const fieldToken = (el) => { const tokens = autocompleteOf(el).split(/\s+/).filter(Boolean);
+  if (tokens.length && tokens[tokens.length - 1] === 'webauthn') tokens.pop(); return tokens.length ? tokens[tokens.length - 1] : ''; };
+const formOf = (el) => el.form || el.closest('form');
+const paymentField = (el, tokens) => typeOf(el) === 'password' || tokens.includes(fieldToken(el));
+const paymentForm = (el, tokens) => { const form = formOf(el); if (!form) return false;
+  return Array.from(document.querySelectorAll(SELECTOR)).some((other) => formOf(other) === form && visible(other) && paymentField(other, tokens)); };
+const describe = (el, tokens) => ({tag: el.tagName.toLowerCase(), type: typeOf(el), autocomplete: autocompleteOf(el), name: nameOf(el),
+  in_form: !!formOf(el), payment_form: paymentForm(el, tokens)});
+const same = (actual, expect) => !!expect && ['tag', 'type', 'autocomplete', 'name', 'in_form', 'payment_form']
+  .every((key) => key in expect && actual[key] === expect[key]);
+const state = () => (window.__agentos = window.__agentos || {targets: new Map(), guard: null, listening: false});
 """ % {'selector': json.dumps(SELECTOR)}
 
-#: Resolve one target: the element at ``index``, checked against the
-#: descriptor the guard classified (tag, type, autocomplete), scrolled into
-#: view, and hit-tested so the native pointer lands on that element and not on
-#: an overlay.  Returns the viewport point to press, or an error code.
-LOCATE_SCRIPT = r"""
-((index, expect) => {
-  const el = document.querySelectorAll(%(selector)s)[index];
-  if (!el) return JSON.stringify({error: 'target_missing'});
+#: The snapshot: elements the model can act on and the fields the guard
+#: reasons about.  Plain data only (no node handles, no HTML).
+SNAPSHOT_SCRIPT = PRELUDE + r"""
+const roleOf = (el) => {
+  const role = el.getAttribute('role');
+  if (role) return role;
   const tag = el.tagName.toLowerCase();
-  const type = tag === 'input' ? (el.type || 'text').toLowerCase() : (tag === 'button' ? (el.type || 'submit').toLowerCase() : '');
-  const autocomplete = (el.getAttribute('autocomplete') || '').toLowerCase().trim();
-  if (expect && (expect.tag !== tag || (expect.type || '') !== type || (expect.autocomplete || '') !== autocomplete)) {
-    return JSON.stringify({error: 'target_changed'});
+  if (tag === 'a') return 'link';
+  if (tag === 'button' || tag === 'summary') return 'button';
+  if (tag === 'select') return 'combobox';
+  if (tag === 'textarea') return 'textbox';
+  if (tag === 'input') {
+    const type = typeOf(el);
+    if (['submit', 'button', 'image', 'reset'].includes(type)) return 'button';
+    if (type === 'checkbox' || type === 'radio') return type;
+    return 'textbox';
   }
-  el.scrollIntoView({block: 'center', inline: 'center'});
-  const rect = el.getBoundingClientRect();
-  const top = Math.max(rect.top, 0), bottom = Math.min(rect.bottom, window.innerHeight);
-  const left = Math.max(rect.left, 0), right = Math.min(rect.right, window.innerWidth);
-  if (right - left < 1 || bottom - top < 1) return JSON.stringify({error: 'target_hidden'});
-  const x = (left + right) / 2, y = (top + bottom) / 2;
-  const hit = document.elementFromPoint(x, y);
-  if (!hit || !(hit === el || el.contains(hit) || hit.control === el)) return JSON.stringify({error: 'target_obscured'});
-  return JSON.stringify({x, y, tag, editable: el.isContentEditable || tag === 'input' || tag === 'textarea'});
-})(%(index)s, %(expect)s)
+  return tag;
+};
+const NO_VALUE = ['submit', 'button', 'image', 'reset', 'checkbox', 'radio', 'file', 'password', 'hidden'];
+const forms = new Map();
+const elements = [];
+Array.from(document.querySelectorAll(SELECTOR)).forEach((el, index) => {
+  if (!visible(el)) return;
+  const tag = el.tagName.toLowerCase();
+  const form = formOf(el);
+  let formId = null;
+  if (form) { if (!forms.has(form)) forms.set(form, forms.size + 1); formId = forms.get(form); }
+  const type = typeOf(el);
+  const takesValue = (tag === 'input' && !NO_VALUE.includes(type)) || tag === 'textarea' || tag === 'select';
+  elements.push({index, role: well(roleOf(el)), name: nameOf(el), href: tag === 'a' ? cut(el.href, 2000) : null, tag, type: well(type),
+    autocomplete: well(autocompleteOf(el)), value: takesValue ? cut(el.value || '', 200) : null, form: formId, disabled: !!el.disabled});
+});
+return JSON.stringify({url: cut(location.href, 4000), title: cut(document.title, 400),
+  text: cut(document.body ? document.body.innerText : '', 20000), elements: elements.slice(0, 300),
+  forms: Array.from(forms.entries()).map(([form, id]) => ({id, text: cut(form.innerText || '', 6000)}))});
 """
 
-#: After the trusted click focused the field: make sure the focus is on it and
-#: select its current content so the inserted text replaces it (``fill``).
-SELECT_SCRIPT = r"""
-((index) => {
-  const el = document.querySelectorAll(%(selector)s)[index];
-  if (!el) return JSON.stringify({error: 'target_missing'});
-  if (document.activeElement !== el && !el.contains(document.activeElement)) el.focus();
-  if (document.activeElement !== el && !el.contains(document.activeElement)) return JSON.stringify({error: 'not_focusable'});
-  if (typeof el.select === 'function') { el.select(); }
-  else if (el.isContentEditable) { const range = document.createRange(); range.selectNodeContents(el);
-    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); }
-  return JSON.stringify({ok: true});
-})(%(index)s)
+#: Arguments: index, expect, tokens, nonce.  Resolve once, check, hit-test,
+#: keep the handle and arm the click guard for it.
+LOCATE_SCRIPT = PRELUDE + r"""
+const el = document.querySelectorAll(SELECTOR)[index];
+if (!el) return JSON.stringify({error: 'target_missing'});
+if (!same(describe(el, tokens), expect)) return JSON.stringify({error: 'target_changed'});
+el.scrollIntoView({block: 'center', inline: 'center'});
+const rect = el.getBoundingClientRect();
+const top = Math.max(rect.top, 0), bottom = Math.min(rect.bottom, window.innerHeight);
+const left = Math.max(rect.left, 0), right = Math.min(rect.right, window.innerWidth);
+if (right - left < 1 || bottom - top < 1) return JSON.stringify({error: 'target_hidden'});
+const x = (left + right) / 2, y = (top + bottom) / 2;
+const hit = document.elementFromPoint(x, y);
+if (!hit || !(hit === el || el.contains(hit) || hit.control === el)) return JSON.stringify({error: 'target_obscured'});
+const s = state();
+s.targets.clear();
+s.targets.set(nonce, new WeakRef(el));
+s.guard = {nonce, bad: false};
+if (!s.listening) {
+  // A trusted click that lands anywhere but the held element is cancelled.
+  window.addEventListener('click', (event) => {
+    const g = state().guard; if (!g || !event.isTrusted) return;
+    const ref = state().targets.get(g.nonce), target = ref && ref.deref();
+    if (!target || !(event.target === target || target.contains(event.target) || event.target.control === target)) {
+      g.bad = true; event.preventDefault(); event.stopImmediatePropagation();
+    }
+  }, true);
+  s.listening = true;
+}
+const tag = el.tagName.toLowerCase();
+return JSON.stringify({x, y, editable: el.isContentEditable || tag === 'textarea' ||
+  (tag === 'input' && !['submit', 'button', 'image', 'reset', 'checkbox', 'radio', 'file', 'hidden', 'range', 'color'].includes(typeOf(el)))});
+"""
+
+#: Arguments: nonce.  Did the press land on the held element?
+VERIFY_CLICK_SCRIPT = PRELUDE + r"""
+const s = state(), g = s.guard;
+s.guard = null;
+if (!g || g.nonce !== nonce) return JSON.stringify({error: 'target_changed'});
+return JSON.stringify(g.bad ? {error: 'target_changed'} : {ok: true});
+"""
+
+#: Arguments: nonce, expect, tokens, text.  The held element must be the
+#: focused one and still match the classified descriptor; the text is then
+#: inserted in this same turn (no page script runs in between).
+INSERT_SCRIPT = PRELUDE + r"""
+const s = state(), g = s.guard, ref = s.targets.get(nonce), el = ref && ref.deref();
+s.guard = null;
+if (!g || g.nonce !== nonce || g.bad) return JSON.stringify({error: 'target_changed'});
+if (!el || !el.isConnected || document.activeElement !== el) return JSON.stringify({error: 'target_changed'});
+if (!same(describe(el, tokens), expect)) return JSON.stringify({error: 'target_changed'});
+if (typeof el.select === 'function') { el.select(); }
+else { const range = document.createRange(); range.selectNodeContents(el);
+  const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); }
+const done = text ? document.execCommand('insertText', false, text) : document.execCommand('delete', false);
+if (!done) return JSON.stringify({error: 'not_typable'});
+return JSON.stringify({ok: true});
 """
 
 WIDTH, HEIGHT = 1280, 900
 SETTLE_QUIET_SECONDS = 0.4
 POLL_SECONDS = 0.05
+FOCUS_SECONDS = 0.1
+RESOLVE_SECONDS = 3.0
 
 
 def safari_application_name():
-    """``Version/<n> Safari/605.1.15`` from this Mac's Safari, for a Safari-form user agent.
+    """``Version/<n> Safari/605.1.15`` from this Mac's Safari, plus the embedded marker.
 
     WebKit's default user agent lacks the ``Version/... Safari/...`` part and
     some sites refuse it.  The version is read from the installed Safari's
@@ -162,7 +235,7 @@ def safari_application_name():
     if not version:
         major = (platform.mac_ver()[0] or '').split('.')[0]
         version = f'{major}.0' if major.isdigit() and int(major) >= 26 else '17.0'
-    return f'Version/{version} Safari/605.1.15'
+    return f'Version/{version} Safari/605.1.15 {EMBEDDED_UA_TOKEN}'
 
 
 def _host(url):
@@ -170,6 +243,85 @@ def _host(url):
         return (urlsplit(str(url or '')).hostname or '').lower()
     except ValueError:
         return ''
+
+
+def origin_key(url):
+    """``host:port`` of an http(s) URL (default ports filled), or ''."""
+    try:
+        parts = urlsplit(str(url or ''))
+        port = parts.port or (443 if parts.scheme == 'https' else 80)
+    except ValueError:
+        return ''
+    host = (parts.hostname or '').lower()
+    return f'{host}:{port}' if host and parts.scheme in ('http', 'https') else ''
+
+
+def local_host(host):
+    """True when ``host`` names this computer or a private network by name or literal address.
+
+    Reuses the public-page guard's tables (``local_tools``): the denied names
+    (localhost, metadata hosts), suffixes (``.localhost``, ``.local``,
+    ``.internal``, ``.home.arpa``) and the private/loopback/link-local/
+    reserved/multicast address check.
+    """
+    from .local_tools import DENIED_PUBLIC_HOST_SUFFIXES, DENIED_PUBLIC_HOSTS, _denied_address
+    host = str(host or '').strip('[]').casefold().rstrip('.')
+    if not host or host in DENIED_PUBLIC_HOSTS or host.endswith(DENIED_PUBLIC_HOST_SUFFIXES):
+        return True
+    try:
+        return _denied_address(ipaddress.ip_address(host.split('%')[0]))
+    except ValueError:
+        return False
+
+
+def local_url(url, allowed_origins=()):
+    """True when an http(s) ``url`` names a local/private host (no DNS); False for anything allowed."""
+    key = origin_key(url)
+    if key and key in set(allowed_origins or ()):
+        return False
+    try:
+        parts = urlsplit(str(url or ''))
+        host = parts.hostname or ''
+    except ValueError:
+        return True
+    return parts.scheme not in ('http', 'https') or local_host(host)
+
+
+def destination_refusal(url, allowed_origins=(), resolver=None):
+    """None when ``url`` may be loaded, else ``blocked_destination``.
+
+    Only http(s).  The name or literal is checked with ``local_host``; a name
+    is then resolved and refused when any address it resolves to is local or
+    private (a public name pointing at 127.0.0.1 included).  A resolution
+    error is not a refusal (WebKit cannot load it either).
+    ``allowed_origins`` is a test-only exact ``host:port`` allowance.
+    """
+    from .local_tools import _denied_address
+    key = origin_key(url)
+    if key and key in set(allowed_origins or ()):
+        return None
+    if local_url(url):
+        return 'blocked_destination'
+    parts = urlsplit(str(url))
+    host = (parts.hostname or '').rstrip('.')
+    try:
+        ipaddress.ip_address(host)
+        return None   # a literal was already checked
+    except ValueError:
+        pass
+    resolver = resolver or socket.getaddrinfo
+    try:
+        records = resolver(host, parts.port or (443 if parts.scheme == 'https' else 80), type=socket.SOCK_STREAM)
+    except (OSError, UnicodeError, ValueError):
+        return None
+    for record in records or []:
+        try:
+            address = ipaddress.ip_address(str(record[4][0]).split('%')[0])
+        except (ValueError, IndexError, TypeError):
+            continue
+        if _denied_address(address):
+            return 'blocked_destination'
+    return None
 
 
 def site_of(domain, sites):
@@ -184,16 +336,19 @@ def site_of(domain, sites):
 class Worker:
     """The main-thread state: one hidden window, one web view, one in-memory store."""
 
-    def __init__(self, profile, emit):
+    def __init__(self, profile, emit, allowed_origins=()):
         import AppKit
         import Foundation
         import WebKit
         from PyObjCTools import AppHelper
         self.AppKit, self.Foundation, self.WebKit, self.AppHelper = AppKit, Foundation, WebKit, AppHelper
         self.profile, self.emit = profile, emit
-        self.pending = {}          # op id -> finisher, for ops that complete asynchronously
-        self.navigation = None     # (id, WKNavigation) awaiting didFinish
+        self.allowed_origins = frozenset(allowed_origins)
+        self.pending = {}          # op id -> True while the op has not answered
+        self.navigation = None     # (id, WKNavigation) the navigate op waits for
+        self.blocked = 0           # main-frame navigations refused so far
         self.hosts = set()         # hosts of committed main-frame navigations in this worker's life
+        self.resolved = {}         # url origin -> refusal code or None (this worker's life)
         self.app = AppKit.NSApplication.sharedApplication()
         self.app.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)   # no Dock icon
         config = WebKit.WKWebViewConfiguration.alloc().init()
@@ -201,6 +356,10 @@ class Worker:
         self.store = WebKit.WKWebsiteDataStore.nonPersistentDataStore()
         config.setWebsiteDataStore_(self.store)
         config.setApplicationNameForUserAgent_(safari_application_name())
+        # The client world: shares the DOM, not the page's JavaScript globals, so a
+        # page cannot replace the functions these scripts call.  (A named world
+        # stopped answering after repeated password-form pages on macOS 26.)
+        self.world = WebKit.WKContentWorld.defaultClientWorld()
         self.view = WebKit.WKWebView.alloc().initWithFrame_configuration_(Foundation.NSMakeRect(0, 0, WIDTH, HEIGHT), config)
         delegate_class = _delegate_class()
         self.delegate = delegate_class.alloc().init()
@@ -237,21 +396,21 @@ class Worker:
         self.pending[ident] = True
         self.AppHelper.callLater(max(0.5, float(seconds)), expire)
 
-    def evaluate(self, script, done):
-        """Evaluate ``script`` (which returns a JSON string); ``done(value_or_None, error_code_or_None)``."""
+    def run(self, body, arguments, done):
+        """Run ``body`` (returns a JSON string) in the isolated world; ``done(value_or_None, error_or_None)``."""
         def handler(result, error):
             if error is not None:
                 done(None, 'script_failed')
                 return
             try:
                 done(json.loads(str(result)) if result is not None else None, None)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, UnicodeError):
                 done(None, 'script_failed')
-        self.view.evaluateJavaScript_completionHandler_(script, handler)
+        self.view.callAsyncJavaScript_arguments_inFrame_inContentWorld_completionHandler_(
+            body, arguments or {}, None, self.world, handler)
 
-    def settle(self, ident, finish, started=None):
+    def settle(self, ident, finish):
         """Wait until no navigation is loading for a short quiet period, then ``finish``."""
-        started = started or time.monotonic()
         quiet_since = [None]
 
         def poll():
@@ -266,6 +425,54 @@ class Worker:
                 return
             self.AppHelper.callLater(POLL_SECONDS, poll)
         self.AppHelper.callLater(POLL_SECONDS, poll)
+
+    def finish_input(self, ident, blocked_before):
+        """Reply to a click/type once the page settled: refused when a navigation it caused was blocked."""
+        if self.blocked > blocked_before:
+            return self.fail(ident, 'blocked_destination')
+        self.reply(ident)
+
+    # -- destinations ----------------------------------------------------------
+    def decide(self, url, main_frame, decision):
+        """Allow or refuse one navigation; ``decision(bool)`` may be called later (after DNS)."""
+        scheme = str(urlsplit(url).scheme or '').lower() if url else ''
+        if scheme == 'about' and url in ('about:blank', 'about:srcdoc'):
+            return decision(True)
+        if scheme in ('data', 'blob') and not main_frame:
+            return decision(True)
+        if scheme not in ('http', 'https'):
+            return decision(False)
+        key = origin_key(url)
+        if key in self.resolved:
+            return decision(self.resolved[key] is None)
+        answered = []
+
+        def answer(refusal):
+            if answered:
+                return
+            answered.append(True)
+            self.resolved[key] = refusal
+            decision(refusal is None)
+
+        def resolve():
+            try:
+                refusal = destination_refusal(url, self.allowed_origins)
+            except Exception:
+                refusal = 'blocked_destination'
+            self.AppHelper.callAfter(answer, refusal)
+        threading.Thread(target=resolve, name='agentos-browser-resolve', daemon=True).start()
+        # A resolver that does not answer in time is a refusal (never a guess).
+        self.AppHelper.callLater(RESOLVE_SECONDS, lambda: answered or answer('blocked_destination'))
+
+    def navigation_refused(self, main_frame):
+        if not main_frame:
+            return
+        self.blocked += 1
+        if self.navigation is not None:
+            ident, _ = self.navigation
+            self.navigation = None
+            if ident in self.pending:
+                self.fail(ident, 'blocked_destination')
 
     # -- native input --------------------------------------------------------
     def press(self, x, y):
@@ -290,8 +497,7 @@ class Worker:
                 return self.fail(ident, 'unknown_op')
             method(ident, command, timeout)
         except Exception:
-            if ident in self.pending or ident is not None:
-                self.fail(ident, 'worker_error')
+            self.fail(ident, 'worker_error')
 
     def op_navigate(self, ident, command, timeout):
         url = str(command.get('url') or '')
@@ -299,13 +505,18 @@ class Worker:
             return self.fail(ident, 'bad_url')
         request = self.Foundation.NSURLRequest.requestWithURL_(self.Foundation.NSURL.URLWithString_(url))
         self.deadline(ident, timeout, on_timeout=self.view.stopLoading)
+        self.navigation = (ident, None)
         navigation = self.view.loadRequest_(request)
-        self.navigation = (ident, navigation)
+        if self.navigation is not None and self.navigation[0] == ident:
+            self.navigation = (ident, navigation)
 
     def navigation_finished(self, navigation, error=None):
+        """Answer the navigate op only for the navigation it started (P3)."""
         if self.navigation is None:
             return
-        ident, _ = self.navigation
+        ident, expected = self.navigation
+        if expected is None or navigation is None or not (navigation is expected or navigation.isEqual_(expected)):
+            return
         self.navigation = None
         if ident not in self.pending:
             return
@@ -322,14 +533,17 @@ class Worker:
             if error or not isinstance(value, dict):
                 return self.fail(ident, error or 'script_failed')
             self.reply(ident, page=value)
-        self.evaluate(SNAPSHOT_SCRIPT, done)
+        self.run(SNAPSHOT_SCRIPT, {}, done)
 
     def _locate(self, ident, command, then):
         index = command.get('index')
-        if not isinstance(index, int) or index < 0:
+        expect = command.get('expect')
+        tokens = [str(token) for token in command.get('tokens') or [] if isinstance(token, str)]
+        if not isinstance(index, int) or isinstance(index, bool) or index < 0:
             return self.fail(ident, 'bad_target')
-        expect = command.get('expect') if isinstance(command.get('expect'), dict) else None
-        script = LOCATE_SCRIPT % {'selector': json.dumps(SELECTOR), 'index': index, 'expect': json.dumps(expect)}
+        if not isinstance(expect, dict):
+            return self.fail(ident, 'target_changed')   # never press an element nobody classified
+        nonce = uuid.uuid4().hex
 
         def located(value, error):
             if ident not in self.pending:
@@ -338,16 +552,25 @@ class Worker:
                 return self.fail(ident, error or 'script_failed')
             if value.get('error'):
                 return self.fail(ident, value['error'])
-            then(value)
-        self.evaluate(script, located)
+            then(value, nonce, expect, tokens)
+        self.run(LOCATE_SCRIPT, {'index': index, 'expect': expect, 'tokens': tokens, 'nonce': nonce}, located)
 
     def op_click(self, ident, command, timeout):
         self.deadline(ident, timeout)
 
-        def click(point):
-            started = time.monotonic()
+        def click(point, nonce, expect, tokens):
+            blocked_before = self.blocked
             self.press(point['x'], point['y'])
-            self.settle(ident, lambda: self.reply(ident), started)
+
+            def verified(value, error):
+                if ident not in self.pending:
+                    return
+                if error is None and isinstance(value, dict) and value.get('error'):
+                    return self.fail(ident, value['error'])
+                # A script error here means the click already navigated away (the
+                # page and its guard are gone), which the guard allowed.
+                self.settle(ident, lambda: self.finish_input(ident, blocked_before))
+            self.run(VERIFY_CLICK_SCRIPT, {'nonce': nonce}, verified)
         self._locate(ident, command, click)
 
     def op_type(self, ident, command, timeout):
@@ -356,24 +579,22 @@ class Worker:
             return self.fail(ident, 'bad_text')
         self.deadline(ident, timeout)
 
-        def focus(point):
+        def focus(point, nonce, expect, tokens):
             if not point.get('editable'):
                 return self.fail(ident, 'not_typable')
+            blocked_before = self.blocked
             self.press(point['x'], point['y'])
-            self.AppHelper.callLater(0.1, lambda: self.evaluate(SELECT_SCRIPT % {'selector': json.dumps(SELECTOR),
-                                                                                  'index': command['index']}, insert))
 
-        def insert(value, error):
-            if ident not in self.pending:
-                return
-            if error or not isinstance(value, dict) or value.get('error'):
-                return self.fail(ident, (value or {}).get('error') if isinstance(value, dict) else (error or 'script_failed'))
-            self.window.makeFirstResponder_(self.view)
-            if text:
-                self.view.insertText_(text)
-            else:
-                self.view.doCommandBySelector_('deleteBackward:')
-            self.settle(ident, lambda: self.reply(ident))
+            def inserted(value, error):
+                if ident not in self.pending:
+                    return
+                if error or not isinstance(value, dict):
+                    return self.fail(ident, error or 'script_failed')
+                if value.get('error'):
+                    return self.fail(ident, value['error'])
+                self.settle(ident, lambda: self.finish_input(ident, blocked_before))
+            self.AppHelper.callLater(FOCUS_SECONDS, lambda: self.run(
+                INSERT_SCRIPT, {'nonce': nonce, 'expect': expect, 'tokens': tokens, 'text': text}, inserted))
         self._locate(ident, command, focus)
 
     def op_show(self, ident, command, timeout):
@@ -396,8 +617,10 @@ class Worker:
     def op_state(self, ident, command, timeout):
         self.reply(ident, visible=bool(self.window.isVisible()))
 
-    def _records(self, done):
-        types = self.Foundation.NSSet.setWithObject_(self.WebKit.WKWebsiteDataTypeCookies)
+    def _all_types(self):
+        return self.WebKit.WKWebsiteDataStore.allWebsiteDataTypes()
+
+    def _records(self, types, done):
         self.store.fetchDataRecordsOfTypes_completionHandler_(types, lambda records: done(list(records or [])))
 
     def op_cookies_export(self, ident, command, timeout):
@@ -416,7 +639,7 @@ class Worker:
                     grouped.setdefault(site_of(row['domain'], sites), []).append(row)
                 self.reply(ident, sites=grouped, hosts=sorted(self.hosts))
             self.store.httpCookieStore().getAllCookies_(with_cookies)
-        self._records(with_records)
+        self._records(self.Foundation.NSSet.setWithObject_(self.WebKit.WKWebsiteDataTypeCookies), with_records)
 
     def op_cookies_import(self, ident, command, timeout):
         rows = [row for row in command.get('cookies') or [] if isinstance(row, dict)]
@@ -435,15 +658,15 @@ class Worker:
             store.setCookie_completionHandler_(cookie, one_done)
 
     def op_cookies_delete(self, ident, command, timeout):
-        """Remove one site's data record (WebKit's own per-site grouping) and any cookie of it."""
+        """Remove every kind of website data of one site (WebKit's own per-site records), then any cookie of it."""
         site = str(command.get('site') or '').lower()
         if not site:
             return self.fail(ident, 'bad_site')
         self.deadline(ident, timeout)
+        types = self._all_types()
 
         def with_records(records):
             matched = [record for record in records if str(record.displayName() or '').lower() == site]
-            types = self.Foundation.NSSet.setWithObject_(self.WebKit.WKWebsiteDataTypeCookies)
 
             def then_cookies():
                 def with_cookies(cookies):
@@ -463,13 +686,12 @@ class Worker:
                 self.store.removeDataOfTypes_forDataRecords_completionHandler_(types, matched, then_cookies)
             else:
                 then_cookies()
-        self._records(with_records)
+        self._records(types, with_records)
 
     def op_cookies_clear(self, ident, command, timeout):
         self.deadline(ident, timeout)
-        types = self.WebKit.WKWebsiteDataStore.allWebsiteDataTypes()
         self.store.removeDataOfTypes_modifiedSince_completionHandler_(
-            types, self.Foundation.NSDate.distantPast(), lambda: self.reply(ident))
+            self._all_types(), self.Foundation.NSDate.distantPast(), lambda: self.reply(ident))
 
     def op_quit(self, ident, command, timeout):
         self.reply(ident)
@@ -519,10 +741,25 @@ def _delegate_class():
     if _DELEGATE:
         return _DELEGATE[0]
     import Foundation
+    import WebKit
     import objc
 
     class AgentOSBrowserDelegate(Foundation.NSObject):
         worker = objc.ivar()
+
+        def webView_decidePolicyForNavigationAction_decisionHandler_(self, view, action, handler):
+            # Every navigation: typed, redirect, form, window.open, frame.
+            worker = self.worker
+            request = action.request()
+            url = str(request.URL().absoluteString()) if request is not None and request.URL() is not None else ''
+            frame = action.targetFrame()
+            main_frame = frame is None or bool(frame.isMainFrame())
+
+            def decision(allowed):
+                handler(WebKit.WKNavigationActionPolicyAllow if allowed else WebKit.WKNavigationActionPolicyCancel)
+                if not allowed:
+                    worker.navigation_refused(main_frame)
+            worker.decide(url, main_frame, decision)
 
         def webView_didCommitNavigation_(self, view, navigation):
             url = view.URL()
@@ -543,9 +780,9 @@ def _delegate_class():
             self.worker.navigation_finished(navigation, error)
 
         def webView_createWebViewWithConfiguration_forNavigationAction_windowFeatures_(self, view, config, action, features):
-            # A link that asks for a new window opens in this one: one page, one session.
-            # Only http(s): a native load bypasses the page's own origin rules, so a
-            # page must never reach file:, data: or any other scheme through it.
+            # A link that asks for a new window opens in this one: one page, one
+            # session.  The load still passes the navigation policy above; only
+            # http(s) is handed to it at all.
             request = action.request()
             url = request.URL() if request is not None else None
             if url is not None and str(url.scheme() or '').lower() in ('http', 'https'):
@@ -561,31 +798,48 @@ def _delegate_class():
     return AgentOSBrowserDelegate
 
 
+def make_emit(stream):
+    """A line writer that can never raise: ASCII JSON, and an encoding failure becomes an error reply."""
+    lock = threading.Lock()
+
+    def emit(message):
+        try:
+            line = json.dumps(message, ensure_ascii=True)
+        except (TypeError, ValueError):
+            line = json.dumps({'id': message.get('id') if isinstance(message, dict) else None, 'ok': False,
+                               'error': 'encode_failed'}) if isinstance(message, dict) and 'id' in message else None
+        if line is None:
+            return
+        with lock:
+            try:
+                stream.write(line + '\n')
+                stream.flush()
+            except (OSError, ValueError):
+                pass
+    return emit
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog='personal_agent.browser_worker')
     parser.add_argument('--profile', default='default')
+    # Test-only: an exact fixture origin (host:port) the destination policy
+    # allows.  Only a test constructor passes it; no config or environment does.
+    parser.add_argument('--test-allow-origin', action='append', default=[])
     args = parser.parse_args(argv)
+    emit = make_emit(sys.stdout)
     if sys.platform != 'darwin':
-        sys.stdout.write(json.dumps({'event': 'unavailable', 'error': 'unsupported_platform'}) + '\n')
+        emit({'event': 'unavailable', 'error': 'unsupported_platform'})
         return 2
     try:
         from PyObjCTools import AppHelper
     except ImportError:
-        sys.stdout.write(json.dumps({'event': 'unavailable', 'error': 'missing_dependency'}) + '\n')
+        emit({'event': 'unavailable', 'error': 'missing_dependency'})
         return 2
-    out_lock = threading.Lock()
-    stdout = sys.stdout
-
-    def emit(message):
-        with out_lock:
-            stdout.write(json.dumps(message, ensure_ascii=False) + '\n')
-            stdout.flush()
-
     state = {}
 
     def setup():
         try:
-            state['worker'] = Worker(args.profile, emit)
+            state['worker'] = Worker(args.profile, emit, allowed_origins=args.test_allow_origin)
         except Exception:
             emit({'event': 'unavailable', 'error': 'webkit_failed'})
             AppHelper.stopEventLoop()

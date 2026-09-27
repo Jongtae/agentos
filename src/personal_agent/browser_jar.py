@@ -13,6 +13,17 @@ the login window, and keeps them here:
   line: it is written through ``security -i`` on standard input and read from
   ``find-generic-password -w`` output.
 
+What the Keychain does and does not protect (#680 review P2-7): a copy of
+the data folder (a backup, a synced folder, another account's access to the
+disk) is useless without the key.  It does **not** protect against a program
+running as the same macOS user: the item's access list trusts
+``/usr/bin/security``, the tool that created it, so any such process can run
+``security find-generic-password -w`` and read the key without a prompt.
+Narrowing the access list with ``-T`` to the Python interpreter would not
+change that, because AgentOS itself reads the key through
+``/usr/bin/security``.  When the login keychain is locked a read fails (or
+macOS prompts); the jar is then reported unreadable and never overwritten.
+
 Nothing here logs, returns to the model or records as Evidence a cookie value
 or the key; ``sites()`` returns names, counts and times only.  The jar is not
 part of the portable export or the backup (they copy the database and plugin
@@ -85,8 +96,13 @@ class KeychainKey:
         return key
 
     def delete(self):
+        """True when the item was deleted, False when there was none; raises ``JarError`` otherwise."""
         result = self._run(['delete-generic-password', '-a', self.account, '-s', self.service])
-        return result.returncode == 0
+        if result.returncode == 0:
+            return True
+        if result.returncode == NOT_FOUND:
+            return False
+        raise JarError('keychain_delete_failed')
 
 
 class MemoryKey:
@@ -197,38 +213,59 @@ class CookieJar:
                 index = self._load_index()
             except JarError:
                 return []
-            return sorted(({'site': site, **row} for site, row in index.items()),
-                          key=lambda row: (-(row.get('last_used') or 0), row['site']))
+            return self._sorted(index)
 
     # -- the worker side ---------------------------------------------------------
     def cookies(self):
-        """Every unexpired cookie row, for import into a new worker.  Empty when unreadable."""
-        with self._lock:
-            try:
-                sites = self._read()['sites']
-            except JarError:
-                return []
-            now = self.clock()
-            return [row for entry in sites.values() if isinstance(entry, dict)
-                    for row in entry.get('cookies') or []
-                    if isinstance(row, dict) and not (isinstance(row.get('expires'), (int, float)) and row['expires'] <= now)]
+        """Every unexpired cookie row.  Empty when unreadable (use ``import_rows`` to see why)."""
+        try:
+            return self.import_rows()[1]
+        except JarError:
+            return []
 
-    def save_export(self, grouped, hosts=()):
-        """Replace the jar with a worker export ``{site: [cookie rows]}``.
+    def import_rows(self):
+        """``(sites, rows)`` for a new worker: every stored site name and its unexpired rows.
 
-        The worker held every imported cookie, so its export is the whole
-        session.  A site's ``last_used`` becomes now when this worker opened
-        a page of it (``hosts``) or it is new; otherwise it is kept.  An
-        unreadable old jar is replaced (its sessions are already lost).
+        Raises ``JarError`` when the jar exists but cannot be read (locked or
+        missing Keychain key, damaged file): the caller must then not save
+        over it.  An absent jar is ``(set(), [])``.
         """
         with self._lock:
-            try:
+            sites = self._read()['sites']
+            now = self.clock()
+            rows = [row for entry in sites.values() if isinstance(entry, dict)
+                    for row in entry.get('cookies') or []
+                    if isinstance(row, dict) and not (isinstance(row.get('expires'), (int, float)) and row['expires'] <= now)]
+            return set(sites), rows
+
+    def save_export(self, grouped, hosts=(), imported=None):
+        """Merge a worker export ``{site: [cookie rows]}`` into the jar.
+
+        ``imported`` is the set of sites the worker was given at start.  A
+        site in the export replaces its stored rows; an imported site missing
+        from the export (signed out, expired, deleted in the worker) is
+        dropped; a stored site that was never imported (the import failed for
+        it, or another process added it meanwhile) is kept untouched.  With
+        ``imported=None`` the export is the whole jar (every stored site
+        counts as imported) and an unreadable old jar is replaced.  With a set
+        an unreadable old jar raises ``JarError`` and nothing is written.
+
+        A site's ``last_used`` becomes now when this worker opened a page of
+        it (``hosts``) or it is new; otherwise it is kept.
+        """
+        with self._lock:
+            if imported is None:
+                try:
+                    old = self._read()['sites']
+                except JarError:
+                    old = {}
+                imported = set(old)
+            else:
                 old = self._read()['sites']
-            except JarError:
-                old = {}
+                imported = set(imported)
             now = self.clock()
             hosts = [str(host).lower() for host in hosts or ()]
-            sites = {}
+            sites = {site: entry for site, entry in old.items() if site not in imported and isinstance(entry, dict)}
             for site, rows in (grouped or {}).items():
                 rows = [row for row in rows or [] if isinstance(row, dict) and row.get('name')]
                 if not site or not rows:
@@ -239,6 +276,20 @@ class CookieJar:
             if not sites and not self.path.is_file():
                 return
             self._write({'sites': sites})
+
+    def cached_sites(self):
+        """``(state, sites)`` without touching the Keychain, or None when the file changed since it was read."""
+        with self._lock:
+            if not self.path.is_file():
+                return 'empty', []
+            if self._index is None or self._stamp() != self._index_stamp:
+                return None
+            return 'stored', self._sorted(self._index)
+
+    @staticmethod
+    def _sorted(index):
+        return sorted(({'site': site, **row} for site, row in index.items()),
+                      key=lambda row: (-(row.get('last_used') or 0), row['site']))
 
     def remove(self, site):
         """Remove one site's cookies; True when it was stored."""
@@ -251,17 +302,20 @@ class CookieJar:
             return True
 
     def clear(self):
-        """Delete the jar file and the Keychain key this jar owns."""
+        """Delete the jar file and the Keychain key this jar owns.
+
+        Returns ``{'jar_deleted': bool, 'key_deleted': bool, 'key_error': code or None}``:
+        a key that could not be removed is reported, never hidden.
+        """
         with self._lock:
             existed = self.path.is_file()
             if existed:
                 self.path.unlink()
             self._index = self._index_stamp = None
             try:
-                self.key.delete()
-            except JarError:
-                pass
-            return existed
+                return {'jar_deleted': existed, 'key_deleted': bool(self.key.delete()), 'key_error': None}
+            except JarError as exc:
+                return {'jar_deleted': existed, 'key_deleted': False, 'key_error': str(exc)}
 
 
 def _index(payload):

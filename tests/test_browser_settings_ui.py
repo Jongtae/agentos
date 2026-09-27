@@ -90,9 +90,23 @@ const checks=[];
  assert.equal(JSON.stringify(calls.at(-1)),JSON.stringify({path:'/api/browser/sessions/delete',body:{all:true}}));
  checks.push('delete all asks once more, then deletes every session and the key');
 
+ ctx.api=async(path,body)=>{calls.push({path,body});return {all:true,deleted:false,jar_deleted:true,key_deleted:false,key_error:'keychain_delete_failed'};};
+ render(available({sessions:[{site:'shop.test',cookies:1,last_used:null}]}));
+ await all().onclick({currentTarget:all()});await all().onclick({currentTarget:all()});
+ assert($('browser-feedback').textContent.includes('암호화 키는 지우지 못했습니다 (keychain_delete_failed)'),'a key that stayed is reported');
+ assert(!$('browser-feedback').textContent.includes('모두 삭제했습니다'));
+ ctx.api=async(path,body)=>{calls.push({path,body});return {deleted:false,site:'shop.test',removed_from_jar:true,running_browser:'failed'};};
+ render(available({sessions:[{site:'shop.test',cookies:1,last_used:null}]}));
+ await del().onclick({currentTarget:del()});await del().onclick({currentTarget:del()});
+ assert($('browser-feedback').textContent.includes('실행 중인 브라우저에서 지우지 못했습니다'));
+ checks.push('a partial delete (key kept, running browser failed) is reported, never acknowledged');
  render(available({storage:{...storage,state:'unreadable'}}));
  assert(text().includes('읽지 못했습니다'));assert(all(),'an unreadable jar can still be reset');
  render(available({login_window_open:true}));assert(text().includes('로그인 창이 열려 있습니다'));
+ render(available({storage:{...storage,state:'checking'}}));assert(text().includes('확인하고 있습니다'));assert(!text().includes('저장된 로그인 세션이 없습니다'));
+ render(available({storage:{...storage,save_error:'key_missing'}}));assert(text().includes('키체인이 잠겨 있지 않은지'));
+ render(available({legacy_profile_removed_at:Date.now()/1000}));assert(text().includes('이전 브라우저 프로필을 삭제했습니다'));
+ assert(text().includes('/usr/bin/security'),'the Keychain limit is stated');
  checks.push('an unreadable jar is shown and can be reset; an open login window is shown');
  console.log(JSON.stringify({passed:checks.length,checks}));
 })().catch(error=>{console.error(error);process.exit(1);});
@@ -119,7 +133,7 @@ class BrowserSettingsUiTests(unittest.TestCase):
         result = subprocess.run([node, "-e", DOM_CHECKS, str(WEB / "app.js")], capture_output=True, text=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout.strip().splitlines()[-1])
-        self.assertEqual(report["passed"], 5, report)
+        self.assertEqual(report["passed"], 6, report)
 
 
 if __name__ == "__main__":

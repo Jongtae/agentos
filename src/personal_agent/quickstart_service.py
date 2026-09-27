@@ -214,6 +214,8 @@ UNKNOWN_EFFECT_RETRY_REFUSAL=('이전 요청의 외부 결과가 불확실해 �
 
 #: #656: owner-private config row of refused/approved browser steps, by Work id.
 BROWSER_REQUESTS_KEY='browser_step_requests'
+#: #680: when the legacy plaintext Playwright profile was deleted (Settings shows it).
+BROWSER_LEGACY_KEY='browser_legacy_profile_removed_at'
 BROWSER_APPROVAL_PROMPT='결제 단계는 승인이 필요합니다. 승인하면 이 요청을 한 번만 이어서 처리하고, 승인한 단계 하나만 실행합니다.'
 
 class AgentService:
@@ -226,6 +228,12 @@ class AgentService:
         # under the owner-only private directory.  The embedded WebKit worker
         # starts only when a Work's browser tool runs or the owner opens the login window.
         self.browser_profile=browser_profile or BrowserProfile(store.private/'browser-profile')
+        # #680 review P2-4: the pre-#680 Playwright Chromium profile in that
+        # folder kept cookies in plaintext; it is deleted once and recorded.
+        try:
+            if self.browser_profile.remove_legacy_profile():store.put(BROWSER_LEGACY_KEY,time.time())
+        except Exception:
+            pass
         # AX-11 (#603): identity of the code this process loaded, taken once
         # near start-up and recorded with each turn's provenance, so a stale
         # running build is distinguishable from a missing route binding.
@@ -3266,6 +3274,7 @@ class AgentService:
     # consume_browser_step_approval` (the exact-approval row Memory uses).
     def browser_status(self):
         status=self.browser_profile.status()
+        status['legacy_profile_removed_at']=self.store.config(BROWSER_LEGACY_KEY)
         status['pending_steps']=[{'work_id':row['work_id'],'action':row['action'],'label':row.get('label',''),
                                   'host':row.get('host',''),'state':row.get('state'),'requested_at':row.get('requested_at')}
                                  for row in self.browser_step_requests()]
@@ -3285,7 +3294,10 @@ class AgentService:
         only, never cookie values.
         """
         body=body if isinstance(body,dict) else {}
-        if body.get('all') is True:return self.browser_profile.delete_all()
+        if body.get('all') is True:
+            result=self.browser_profile.delete_all()
+            self.store.put(BROWSER_LEGACY_KEY,None)
+            return result
         site=body.get('site')
         if not isinstance(site,str) or not site.strip():raise ValueError('삭제할 사이트를 지정하세요.')
         return self.browser_profile.delete_site(site)

@@ -37,7 +37,9 @@ import hashlib
 import importlib.util
 import itertools
 import json
+import os
 import queue
+import shutil
 import re
 import subprocess
 import sys
@@ -48,7 +50,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from .agent_runtime import BROWSER_ACTIONS, ToolError, lookup_norm, lookup_text_violations, lookup_words
 from .bounded_execution import SECRET_PATTERN
-from .browser_jar import JAR_NAME, SERVICE as JAR_SERVICE, CookieJar, KeychainKey, store_account
+from .browser_jar import JAR_NAME, SERVICE as JAR_SERVICE, CookieJar, JarError, KeychainKey, store_account
 
 #: The model's declared effect class of one action.
 EFFECTS = ('read', 'navigate', 'mutate', 'payment')
@@ -77,6 +79,12 @@ TIMEOUT_TEXT = '브라우저 동작이 시간 안에 끝나지 않았습니다.'
 FAILED_TEXT = '브라우저 동작을 실행하지 못했습니다.'
 BUSY_TEXT = '브라우저 프로필을 다른 작업 또는 로그인 창이 사용하고 있어 지금은 실행하지 않았습니다.'
 NO_PAGE_TEXT = '열린 페이지가 없습니다. 먼저 browser_open으로 페이지를 여세요.'
+WORKER_DELETE_FAILED_TEXT = ('저장된 로그인 세션은 지웠지만 실행 중인 브라우저에서 지우지 못했습니다. 그 브라우저를 멈췄고 '
+                             '그 안의 내용은 저장하지 않습니다.')
+KEY_DELETE_FAILED_TEXT = ('로그인 세션은 삭제했지만 macOS 키체인의 암호화 키는 지우지 못했습니다. 키체인 접근 앱에서 '
+                          '"personal-agentos.browser-jar" 항목을 직접 삭제할 수 있습니다.')
+BLOCKED_TEXT = ('이 컴퓨터나 내부 네트워크(루프백·사설·링크 로컬·.local) 주소는 브라우저로 열지 않습니다. '
+                '공개 웹 주소만 열 수 있습니다.')
 UNAVAILABLE_TEXT = '이 작업 경로에는 브라우저 기능이 연결되어 있지 않습니다.'
 LOGIN_WINDOW_TEXT = ('로그인 창에서 직접 로그인한 뒤 창을 닫아 주세요. AgentOS는 입력 내용을 보지 않으며, 창을 닫으면 '
                      '로그인 세션을 암호화해 저장합니다.')
@@ -408,8 +416,11 @@ class BrowserSession:
     """
 
     def __init__(self, driver_factory, *, work_id, budget=None, excluded=None, approvals=None,
-                 steps=STEPS_PER_WORK, action_seconds=ACTION_TIMEOUT_SECONDS):
+                 steps=STEPS_PER_WORK, action_seconds=ACTION_TIMEOUT_SECONDS, allowed_origins_for_tests=()):
         self._factory = driver_factory
+        # Test-only exact ``host:port`` allowance for a local fixture site; only
+        # a test constructor sets it (never config or environment).
+        self._allowed_origins = frozenset(allowed_origins_for_tests)
         self.driver = None
         self.work_id = work_id
         self.budget = budget
@@ -524,6 +535,11 @@ class BrowserSession:
         parts = urlsplit(url)
         if parts.scheme not in ('http', 'https') or not parts.netloc:
             raise ValueError('http 또는 https 주소만 열 수 있습니다.')
+        # #680 review P1-2: never this computer or its private network (the
+        # AgentOS UI included).  Name and literal here; the worker checks every
+        # navigation again after DNS resolution (redirects, forms, new windows).
+        if local_destination(url, self._allowed_origins):
+            raise ToolError(BLOCKED_TEXT, 'blocked_destination')
         self._spend_step()
         self._guard('browser_open', url, url, f'{_host(parts)} 페이지 열기', effect, False, argument=url)
         self._call(lambda timeout: self._driver().goto(url, timeout))
@@ -597,6 +613,31 @@ DEPENDENCY_TEXT = ('macOS 시스템 WebKit 연결 구성요소(pyobjc-framework-
 GOOGLE_NOTE = 'Google 로그인은 내장 브라우저에서 지원되지 않습니다.'
 TARGET_TEXT = ('대상 요소가 바뀌었거나 다른 요소에 가려져 있어 실행하지 않았습니다. browser_read로 페이지를 다시 '
                '확인하세요.')
+def local_destination(url, allowed_origins=()):
+    """True when ``url`` names this computer or a private network by name or literal address.
+
+    ``browser_worker.local_url`` over the public-page guard's tables
+    (``local_tools``): localhost, ``.local``/``.localhost``/``.internal``/
+    ``.home.arpa``, loopback, private, link-local, reserved and multicast.  No
+    DNS here; the worker resolves every navigation it performs.
+    ``allowed_origins`` is the test-only exact ``host:port`` allowance.
+    """
+    from .browser_worker import local_url
+    return local_url(url, allowed_origins)
+
+
+#: Environment names a worker inherits: nothing else (no provider keys, tokens
+#: or AgentOS settings).  ``PYTHONPATH`` lets a source checkout find the package.
+WORKER_ENVIRONMENT = ('PATH', 'HOME', 'USER', 'LOGNAME', 'TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE', 'PYTHONPATH')
+
+
+def worker_environment(base=None):
+    base = os.environ if base is None else base
+    env = {name: base[name] for name in WORKER_ENVIRONMENT if base.get(name)}
+    env.setdefault('PATH', '/usr/bin:/bin')
+    return env
+
+
 #: Worker error codes that mean "the element the guard classified is not what the pointer would hit".
 TARGET_ERRORS = frozenset({'target_missing', 'target_changed', 'target_hidden', 'target_obscured', 'not_typable',
                            'not_focusable', 'bad_target'})
@@ -658,11 +699,17 @@ class WebKitWorkerDriver:
     """
 
     def __init__(self, profile_id='default', *, seed=None, command=None, start_seconds=WORKER_START_SECONDS,
-                 grace_seconds=WORKER_GRACE_SECONDS):
+                 grace_seconds=WORKER_GRACE_SECONDS, cwd=None, allowed_origins_for_tests=()):
         self.profile_id = str(profile_id)
         self._seed = seed
-        self._command = list(command) if command else [sys.executable, '-m', 'personal_agent.browser_worker',
+        # ``-P``: the working directory is never on the worker's import path.
+        self._command = list(command) if command else [sys.executable, '-P', '-m', 'personal_agent.browser_worker',
                                                        '--profile', self.profile_id]
+        if not command:
+            for origin in allowed_origins_for_tests:
+                self._command += ['--test-allow-origin', str(origin)]
+        # A fixed working directory (the profile's private folder) and a minimal environment.
+        self._cwd = str(cwd) if cwd else os.path.expanduser('~')
         self.start_seconds, self.grace_seconds = start_seconds, grace_seconds
         self._lock = threading.RLock()
         self._proc = None
@@ -682,7 +729,8 @@ class WebKitWorkerDriver:
     def _start(self):
         self.starts += 1
         proc = subprocess.Popen(self._command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                text=True, encoding='utf-8', bufsize=1, close_fds=True)
+                                text=True, encoding='utf-8', bufsize=1, close_fds=True, cwd=self._cwd,
+                                env=worker_environment())
         messages = queue.Queue()
 
         def read():
@@ -775,6 +823,8 @@ class WebKitWorkerDriver:
                 raise TimeoutError('browser timeout')
             if code in TARGET_ERRORS:
                 raise ToolError(TARGET_TEXT, 'target_unavailable')
+            if code == 'blocked_destination':
+                raise ToolError(BLOCKED_TEXT, 'blocked_destination')
             raise WorkerError(code)
 
     def _request(self, op, timeout, **arguments):
@@ -790,21 +840,40 @@ class WebKitWorkerDriver:
 
     def snapshot(self):
         page = self._request('snapshot', ACTION_TIMEOUT_SECONDS).get('page') or {}
-        self._expect = {element['index']: {key: str(element.get(key) or '') for key in ('tag', 'type', 'autocomplete')}
-                        for element in page.get('elements') or []
-                        if isinstance(element, dict) and isinstance(element.get('index'), int)}
+        elements = [element for element in page.get('elements') or [] if isinstance(element, dict)]
+        guarded_forms = payment_forms(elements)
+        # The full descriptor the payment guard classified: the worker refuses
+        # to press or type into an element that no longer matches it.
+        self._expect = {element['index']: {'tag': str(element.get('tag') or ''), 'type': str(element.get('type') or ''),
+                                           'autocomplete': str(element.get('autocomplete') or ''),
+                                           'name': str(element.get('name') or ''),
+                                           'in_form': element.get('form') is not None,
+                                           'payment_form': element.get('form') is not None and element.get('form') in guarded_forms}
+                        for element in elements if isinstance(element.get('index'), int) and not isinstance(element.get('index'), bool)}
         return page
 
+    def _target(self, index):
+        expect = self._expect.get(index)
+        if expect is None:
+            raise ToolError(TARGET_TEXT, 'target_unavailable')   # never an element nobody classified
+        return {'index': index, 'expect': expect, 'tokens': sorted(PAYMENT_AUTOCOMPLETE)}
+
     def click(self, index, timeout):
-        self._request('click', timeout, index=index, expect=self._expect.get(index))
+        self._request('click', timeout, **self._target(index))
 
     def type(self, index, text, timeout):
-        self._request('type', timeout, index=index, text=text, expect=self._expect.get(index))
+        self._request('type', timeout, text=text, **self._target(index))
 
     # -- the owner's login window ---------------------------------------------------
     def show(self, url, timeout):
-        self._request('show', timeout, url=url)
+        # Visible before the request: a ``hidden`` event that arrives while the
+        # request is pending (the owner closed the window at once) must win.
         self._visible = True
+        try:
+            self._request('show', timeout, url=url)
+        except Exception:
+            self._visible = False
+            raise
 
     def hide(self):
         self._request('hide', ACTION_TIMEOUT_SECONDS)
@@ -828,6 +897,11 @@ class WebKitWorkerDriver:
 
     def cookies_clear(self):
         self._request('cookies_clear', ACTION_TIMEOUT_SECONDS)
+
+    def discard(self):
+        """Stop the worker without exporting anything; the next call starts a fresh one from the jar."""
+        with self._lock:
+            self._kill()
 
     def close(self):
         with self._lock:
@@ -868,9 +942,61 @@ class BrowserProfile:
         self._live = None
         self._suppressed = set()
         self._login_thread = None
+        # What the running worker was given from the jar (#680 review P2-3):
+        # sites imported, or why the import failed (then nothing is saved).
+        self._imported = set()
+        self._import_error = None
+        self.save_error = None
+        # #680 review (Codex P1): after a delete/clear the running worker could
+        # not perform, nothing that worker instance holds is ever saved.
+        self._unsavable = None
+        # Settings reads the jar through this cache so a locked Keychain never
+        # blocks a poll (#680 review P2-7).
+        self._view = None
+        self._view_refreshing = False
+        self._allowed_origins = ()
+
+    def allow_origins_for_tests(self, *origins):
+        """Test-only: exact ``host:port`` fixture origins the worker may load.  Never set by config."""
+        self._allowed_origins = tuple(origins)
+
+    def _seed(self):
+        """The jar's rows for a (re)starting worker; records what was imported or why it failed."""
+        try:
+            sites, rows = self.jar.import_rows()
+        except JarError as exc:
+            self._import_error = str(exc)
+            return []
+        self._imported |= sites
+        return rows
 
     def _launch_webkit(self, profile_dir, headless):
-        return WebKitWorkerDriver(self.profile_dir.name, seed=self.jar.cookies)
+        return WebKitWorkerDriver(self.profile_dir.name, seed=self._seed, cwd=self.profile_dir,
+                                  allowed_origins_for_tests=self._allowed_origins)
+
+    def remove_legacy_profile(self):
+        """Delete the pre-#680 Playwright Chromium profile (plaintext cookies) from ``profile_dir``.
+
+        Everything in that folder except the encrypted jar is the old profile.
+        Returns True when something was removed.
+        """
+        removed = False
+        try:
+            entries = list(self.profile_dir.iterdir()) if self.profile_dir.is_dir() else []
+        except OSError:
+            return False
+        for entry in entries:
+            if entry.name == JAR_NAME or entry.name.startswith(JAR_NAME + '.tmp-'):
+                continue
+            try:
+                if entry.is_dir() and not entry.is_symlink():
+                    shutil.rmtree(entry)
+                else:
+                    entry.unlink()
+                removed = True
+            except OSError:
+                continue
+        return removed
 
     def available(self):
         try:
@@ -895,11 +1021,43 @@ class BrowserProfile:
                   'login_window_open': self._holder == 'login', 'in_use': self._holder is not None and self._holder != 'login',
                   'limitation': LIMITATION_TEXT, 'google_note': GOOGLE_NOTE, 'sessions': []}
         if reason is None:
+            state, sessions = self._jar_view()
             status['storage'] = {'what': 'site-sign-in-cookies', 'path': str(self.jar.path),
                                  'key': getattr(self.jar.key, 'location', 'macos-keychain'), 'key_service': JAR_SERVICE,
-                                 'sent_to_ai': False, 'state': self.jar.state()}
-            status['sessions'] = self.jar.sites()
+                                 'sent_to_ai': False, 'state': state, 'save_error': self.save_error}
+            status['sessions'] = sessions
         return status
+
+    def _jar_view(self):
+        """``(state, sessions)`` for Settings without blocking on the Keychain.
+
+        No file or a jar this process already read: answered at once.  Otherwise
+        the jar is decrypted on a background thread and Settings shows
+        ``checking`` until it finishes; a failure is shown for a minute before
+        the next attempt.
+        """
+        cached = self.jar.cached_sites()
+        if cached is not None:
+            self._view = None
+            return cached
+        view = self._view
+        if view is not None and view[0] != 'checking' and self.clock() - view[2] < 60:
+            return view[0], view[1]
+        if not self._view_refreshing:
+            self._view_refreshing = True
+            self._view = ('checking', [], self.clock())
+
+            def refresh():
+                try:
+                    state = self.jar.state()
+                    self._view = (state, self.jar.sites() if state == 'stored' else [], self.clock())
+                except Exception:
+                    self._view = ('unreadable', [], self.clock())
+                finally:
+                    self._view_refreshing = False
+            threading.Thread(target=refresh, name='agentos-browser-jar-view', daemon=True).start()
+        view = self._view or ('checking', [], self.clock())
+        return view[0], view[1]
 
     # -- holding the profile ---------------------------------------------------
     def _acquire(self, holder):
@@ -907,6 +1065,9 @@ class BrowserProfile:
             raise ToolError(BUSY_TEXT, 'browser_busy')
         self._holder = holder
         self._suppressed = set()
+        self._imported = set()
+        self._import_error = None
+        self._unsavable = None
 
     def _release(self):
         self._holder = None
@@ -921,15 +1082,28 @@ class BrowserProfile:
         if not hasattr(driver, 'cookies_export') or not _alive(driver):
             return False   # a crashed worker has nothing new; never restart one just to export
         with self._jar_lock:
+            if self._unsavable is not None and self._unsavable == _generation(driver):
+                self.save_error = 'worker_delete_failed'
+                return False
+            if self._import_error:
+                # The jar could not be read when this worker started (e.g. a
+                # locked Keychain): saving could replace sessions it never
+                # held.  Keep the jar as it is and tell the owner why.
+                self.save_error = self._import_error
+                return False
             try:
                 sites, hosts = driver.cookies_export()
             except Exception:
                 return False
             sites = {site: rows for site, rows in sites.items() if site not in self._suppressed}
             try:
-                self.jar.save_export(sites, hosts)
+                self.jar.save_export(sites, hosts, imported=self._imported)
+            except JarError as exc:
+                self.save_error = str(exc)
+                return False
             except Exception:
                 return False
+            self.save_error = None
             return True
 
     def driver_factory(self, work_id):
@@ -949,36 +1123,78 @@ class BrowserProfile:
         return launch
 
     # -- the owner's sessions (Settings) -------------------------------------------
+    def _worker_failed(self, live):
+        """A running worker could not drop sessions: never save from it, and stop it.
+
+        The worker is discarded (no export), so the Work's next step starts a
+        fresh worker from the jar, which no longer holds the deleted sessions.
+        """
+        self._unsavable = _generation(live)
+        discard = getattr(live, 'discard', None)
+        if callable(discard):
+            try:
+                discard()
+            except Exception:
+                pass
+
     def delete_site(self, site):
-        """Remove one site's sign-in cookies from the jar and from a running worker."""
+        """Remove one site's sign-in data from the jar and from a running worker.
+
+        ``deleted`` is True only when both succeeded.  When the running worker
+        could not delete it, the jar entry is still removed, that worker is
+        stopped without saving, and the reply says so (``running_browser``).
+        """
         site = str(site or '').strip().lower()
         if not site:
             raise ValueError('삭제할 사이트를 지정하세요.')
         with self._jar_lock:
             live = self._live
+            worker = None
             if live is not None and hasattr(live, 'cookies_delete') and _alive(live):
                 try:
                     live.cookies_delete(site)
+                    worker = 'deleted'
                 except Exception:
-                    # The running worker could not drop it: never save it back from this session.
                     self._suppressed.add(site)
+                    self._worker_failed(live)
+                    worker = 'failed'
             try:
                 removed = self.jar.remove(site)
             except Exception:
                 raise ValueError('저장된 로그인 세션을 읽지 못했습니다. "모두 삭제"로 초기화할 수 있습니다.') from None
-        return {'deleted': bool(removed), 'site': site}
+        if worker == 'failed':
+            return {'deleted': False, 'site': site, 'removed_from_jar': bool(removed), 'running_browser': 'failed',
+                    'message': WORKER_DELETE_FAILED_TEXT}
+        return {'deleted': bool(removed) or worker == 'deleted', 'site': site}
 
     def delete_all(self):
-        """Delete the jar file and its Keychain key, and clear a running worker's store."""
+        """Delete the jar file, its Keychain key and the legacy profile, and clear a running worker.
+
+        Every part is reported: a running worker that could not clear, or a
+        Keychain key that could not be removed, makes ``deleted`` False with
+        the reason; nothing is acknowledged that did not happen.
+        """
         with self._jar_lock:
             live = self._live
+            worker = None
             if live is not None and hasattr(live, 'cookies_clear') and _alive(live):
                 try:
                     live.cookies_clear()
+                    worker = 'cleared'
                 except Exception:
-                    self._suppressed |= {row['site'] for row in self.jar.sites()}
-            existed = self.jar.clear()
-        return {'deleted': existed, 'all': True}
+                    self._worker_failed(live)
+                    worker = 'failed'
+            cleared = self.jar.clear()
+            legacy = self.remove_legacy_profile()
+            self.save_error = None
+        result = {'all': True, 'jar_deleted': cleared['jar_deleted'] or legacy, 'key_deleted': cleared['key_deleted'],
+                  'key_error': cleared['key_error'], 'running_browser': worker}
+        result['deleted'] = cleared['key_error'] is None and worker != 'failed'
+        if cleared['key_error']:
+            result['message'] = KEY_DELETE_FAILED_TEXT
+        elif worker == 'failed':
+            result['message'] = WORKER_DELETE_FAILED_TEXT
+        return result
 
     # -- the owner's login window ------------------------------------------------------
     def open_for_login(self, url, wait=False):
@@ -994,6 +1210,8 @@ class BrowserProfile:
         parts = urlsplit(str(url or ''))
         if parts.scheme not in ('http', 'https') or not parts.netloc:
             raise ValueError('http 또는 https 주소를 입력하세요.')
+        if local_destination(url, self._allowed_origins):
+            raise ValueError(BLOCKED_TEXT)
         try:
             self._acquire('login')
         except ToolError:
@@ -1039,6 +1257,11 @@ class BrowserProfile:
         if failure:
             return {'state': 'failed', 'message': FAILED_TEXT}
         return {'state': 'closed' if wait else 'opened', 'url': page_reference(url), 'message': LOGIN_WINDOW_TEXT}
+
+
+def _generation(driver):
+    """Which worker process a driver runs now (a restart is a new generation)."""
+    return (id(driver), getattr(driver, 'starts', 0))
 
 
 def _alive(driver):

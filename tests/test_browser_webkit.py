@@ -103,7 +103,7 @@ class JarTests(unittest.TestCase):
         self.assertTrue(self.jar.remove('shop.test'))
         self.assertFalse(self.jar.remove('shop.test'))
         self.assertEqual([row['site'] for row in self.jar.sites()], ['news.test'])
-        self.assertTrue(self.jar.clear())
+        self.assertEqual(self.jar.clear(), {'jar_deleted': True, 'key_deleted': True, 'key_error': None})
         self.assertFalse(self.jar.path.exists())
         self.assertIsNone(self.key.get(), 'delete-all also deletes the key this jar owns')
         self.assertEqual(self.jar.state(), 'empty')
@@ -126,6 +126,33 @@ class JarTests(unittest.TestCase):
         with self.assertRaises(JarError):
             broken.save_export({'shop.test': [cookie('shop.test', value='secret-value')]})
         self.assertFalse(broken.path.exists())
+
+    def test_a_key_that_cannot_be_removed_is_reported_not_hidden(self):
+        class Stuck(MemoryKey):
+            def delete(self):
+                raise JarError('keychain_delete_failed')
+        jar = CookieJar(Path(self.tmp.name) / 'stuck' / JAR_NAME, Stuck(), self.clock)
+        jar.save_export({'shop.test': [cookie('shop.test')]})
+        self.assertEqual(jar.clear(), {'jar_deleted': True, 'key_deleted': False, 'key_error': 'keychain_delete_failed'})
+        self.assertFalse(jar.path.exists(), 'the sessions themselves are gone')
+
+    def test_saving_merges_and_never_drops_sites_that_were_not_imported(self):
+        self.jar.save_export({'shop.test': [cookie('shop.test')], 'news.test': [cookie('news.test')],
+                              'mail.test': [cookie('mail.test')]})
+        sites, rows = self.jar.import_rows()
+        self.assertEqual(sites, {'shop.test', 'news.test', 'mail.test'})
+        # This worker was given shop and news only; it signed out of news and signed in to docs.
+        self.jar.save_export({'shop.test': [cookie('shop.test', value='new')], 'docs.test': [cookie('docs.test')]},
+                             imported={'shop.test', 'news.test'})
+        self.assertEqual(sorted(row['site'] for row in self.jar.sites()), ['docs.test', 'mail.test', 'shop.test'])
+        # With a set, an unreadable jar is never overwritten.
+        other = CookieJar(self.jar.path, MemoryKey(MemoryKey().create()), self.clock)
+        with self.assertRaises(JarError):
+            other.import_rows()
+        before = self.jar.path.read_bytes()
+        with self.assertRaises(JarError):
+            other.save_export({'x.test': [cookie('x.test')]}, imported=set())
+        self.assertEqual(self.jar.path.read_bytes(), before)
 
     def test_an_empty_export_does_not_create_a_file(self):
         self.jar.save_export({})
@@ -169,9 +196,15 @@ class KeychainKeyTests(unittest.TestCase):
         self.assertIn('-a store-abc ', run.calls[1][1])
 
     def test_errors_are_typed_and_tokens_are_plain(self):
-        run, _ = self.runner([(1, '')])
+        run, _ = self.runner([(1, ''), (0, ''), (44, ''), (51, '')])
+        key = KeychainKey('store-abc', runner=run)
         with self.assertRaises(JarError):
-            KeychainKey('store-abc', runner=run).get()
+            key.get()
+        self.assertTrue(key.delete())
+        self.assertFalse(key.delete(), 'no item: nothing to delete')
+        with self.assertRaises(JarError) as caught:
+            key.delete()
+        self.assertEqual(str(caught.exception), 'keychain_delete_failed')
         for bad in ('store abc', 'x;rm', '', 'a\nb'):
             with self.assertRaises(ValueError):
                 KeychainKey(bad)
@@ -218,7 +251,12 @@ class CookieDriver:
 
     def cookies_clear(self):
         self.calls.append(('clear',))
+        if self.fail_delete:
+            raise RuntimeError('worker gone')
         self.rows = []
+
+    def discard(self):
+        self.calls.append(('discard',))
 
     def close(self):
         self.closed = True
@@ -254,17 +292,118 @@ class ProfileTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.profile.delete_site('  ')
 
-    def test_a_worker_that_cannot_delete_never_saves_that_site_back(self):
+    def test_a_worker_that_cannot_delete_is_stopped_and_nothing_it_holds_is_saved(self):
+        self.jar.save_export({'shop.test': [cookie('shop.test')]})
         self.driver.fail_delete = True
         session = self.profile.driver_factory('w1')()
-        self.profile.delete_site('shop.test')
+        reply = self.profile.delete_site('shop.test')
+        self.assertEqual((reply['deleted'], reply['running_browser'], reply['removed_from_jar']), (False, 'failed', True),
+                         'the deletion is not acknowledged')
+        self.assertEqual(reply['message'], bs.WORKER_DELETE_FAILED_TEXT)
+        self.assertIn(('discard',), self.driver.calls, 'the worker is stopped without an export')
+        self.driver.rows.append(cookie('late.test'))   # acquired after the failed delete
         session.close()
-        self.assertEqual([row['site'] for row in self.profile.status()['sessions']], ['news.test'])
+        self.assertEqual(self.profile.status()['sessions'], [], 'no site of that worker was saved, the late one included')
+        self.assertEqual(self.profile.status()['storage']['save_error'], 'worker_delete_failed')
+
+    def test_a_failed_clear_in_the_running_worker_is_reported_and_blocks_its_export(self):
+        self.jar.save_export({'shop.test': [cookie('shop.test')]})
+        self.driver.fail_delete = True
+        session = self.profile.driver_factory('w1')()
+        reply = self.profile.delete_all()
+        self.assertFalse(reply['deleted'])
+        self.assertEqual((reply['running_browser'], reply['jar_deleted'], reply['key_error']), ('failed', True, None))
+        self.assertEqual(reply['message'], bs.WORKER_DELETE_FAILED_TEXT)
+        self.driver.rows.append(cookie('late.test', value='late-secret'))
+        session.close()
+        self.assertFalse(self.jar.path.exists(), 'nothing from that worker was saved after the clear')
+
+    def test_delete_all_reports_a_key_that_could_not_be_removed(self):
+        class Stuck(MemoryKey):
+            def delete(self):
+                raise JarError('keychain_delete_failed')
+        jar = CookieJar(Path(self.tmp.name) / 'stuck' / JAR_NAME, Stuck(), Clock())
+        jar.save_export({'shop.test': [cookie('shop.test')]})
+        profile = bs.BrowserProfile(Path(self.tmp.name) / 'stuck', launcher=lambda d, h: self.driver, jar=jar)
+        reply = profile.delete_all()
+        self.assertEqual((reply['deleted'], reply['jar_deleted'], reply['key_deleted'], reply['key_error']),
+                         (False, True, False, 'keychain_delete_failed'))
+        self.assertEqual(reply['message'], bs.KEY_DELETE_FAILED_TEXT)
+
+    def test_a_jar_that_cannot_be_read_at_start_is_never_saved_over(self):
+        from unittest import mock
+        self.jar.save_export({'shop.test': [cookie('shop.test')], 'news.test': [cookie('news.test')]})
+        before = self.jar.path.read_bytes()
+        locked = CookieJar(self.jar.path, MemoryKey(), Clock())   # the Keychain key cannot be read
+
+        class Worker(CookieDriver):
+            def __init__(self, profile_id, seed=None, **kwargs):
+                super().__init__([cookie('only.test')])
+                self.seeded = seed()
+        with mock.patch.object(bs, 'WebKitWorkerDriver', Worker):
+            profile = bs.BrowserProfile(Path(self.tmp.name), jar=locked, available=lambda: True)
+            session = profile.driver_factory('w1')()
+            self.assertEqual(session.seeded, [])
+            session.close()
+        self.assertEqual(self.jar.path.read_bytes(), before, 'the jar was left as it was')
+        self.assertEqual(profile.save_error, 'key_missing')
+        # With a readable jar the import is recorded and the save merges.
+        with mock.patch.object(bs, 'WebKitWorkerDriver', Worker):
+            profile = bs.BrowserProfile(Path(self.tmp.name), jar=self.jar, available=lambda: True)
+            session = profile.driver_factory('w2')()
+            self.assertEqual(len(session.seeded), 2)
+            session.close()
+        self.assertEqual([row['site'] for row in self.jar.sites()], ['only.test'],
+                         'imported sites the worker no longer had were dropped, the new one kept')
+
+    def test_the_legacy_playwright_profile_is_deleted_once_and_by_delete_all(self):
+        from personal_agent.quickstart_service import AgentService
+        store = QuickStore(Path(self.tmp.name) / 'data')
+        legacy = store.private / 'browser-profile'
+        (legacy / 'Default').mkdir(parents=True)
+        (legacy / 'Default' / 'Cookies').write_bytes(b'plaintext-legacy-cookie')
+        (legacy / 'Local State').write_text('{}')
+        jar = CookieJar(legacy / JAR_NAME, MemoryKey(), Clock())
+        jar.save_export({'shop.test': [cookie('shop.test')]})
+        profile = bs.BrowserProfile(legacy, launcher=lambda d, h: self.driver, jar=jar)
+        service = AgentService(store, browser_profile=profile)
+        self.assertEqual(sorted(path.name for path in legacy.iterdir()), [JAR_NAME], 'only the encrypted jar is left')
+        self.assertIsNotNone(service.browser_status()['legacy_profile_removed_at'])
+        (legacy / 'Default').mkdir()
+        service.delete_browser_sessions({'all': True})
+        self.assertFalse(any(legacy.iterdir()))
+        self.assertIsNone(service.browser_status()['legacy_profile_removed_at'])
+
+    def test_settings_never_waits_on_the_keychain(self):
+        import threading as _threading
+        gate = _threading.Event()
+
+        class Slow(MemoryKey):
+            def get(self):
+                gate.wait(5)
+                return super().get()
+        key = Slow(MemoryKey().create())
+        writer = CookieJar(self.jar.path, MemoryKey(key.key), Clock())
+        writer.save_export({'shop.test': [cookie('shop.test')]})
+        profile = bs.BrowserProfile(Path(self.tmp.name), launcher=lambda d, h: self.driver,
+                                    jar=CookieJar(self.jar.path, key, Clock()))
+        started = time.monotonic()
+        self.assertEqual(profile.status()['storage']['state'], 'checking')
+        self.assertLess(time.monotonic() - started, 1.0)
+        gate.set()
+        for _ in range(100):
+            if profile.status()['storage']['state'] != 'checking':
+                break
+            time.sleep(0.02)
+        self.assertEqual(profile.status()['storage']['state'], 'stored')
+        self.assertEqual([row['site'] for row in profile.status()['sessions']], ['shop.test'])
 
     def test_delete_all_clears_the_worker_the_jar_and_the_key(self):
         self.jar.save_export({'shop.test': [cookie('shop.test')]})
         session = self.profile.driver_factory('w1')()
-        self.assertEqual(self.profile.delete_all(), {'deleted': True, 'all': True})
+        reply = self.profile.delete_all()
+        self.assertEqual((reply['deleted'], reply['all'], reply['key_deleted'], reply['running_browser']),
+                         (True, True, True, 'cleared'))
         self.assertIn(('clear',), self.driver.calls)
         self.assertIsNone(self.jar.key.get())
         session.close()
@@ -349,11 +488,48 @@ class DriverProtocolTests(unittest.TestCase):
         ops = self.commands()
         self.assertEqual([c['op'] for c in ops], ['cookies_import', 'navigate', 'snapshot', 'click', 'type'])
         self.assertEqual(ops[1]['timeout'], 7.0)
-        self.assertEqual(ops[3]['expect'], {'tag': 'button', 'type': 'submit', 'autocomplete': ''})
+        # The full descriptor the guard classified, and the guard's payment tokens.
+        self.assertEqual(ops[3]['expect'], {'tag': 'button', 'type': 'submit', 'autocomplete': '', 'name': 'Go',
+                                            'in_form': False, 'payment_form': False})
+        self.assertEqual(ops[3]['tokens'], sorted(bs.PAYMENT_AUTOCOMPLETE))
+        self.assertEqual(ops[4]['expect'], ops[3]['expect'])
         with self.assertRaises(ToolError) as caught:
-            driver.click(7, 4)
+            driver.click(7, 4)   # the fake worker answers target_obscured for it
         self.assertEqual(caught.exception.code, 'target_unavailable')
+        self.assertEqual(self.commands()[-1]['expect']['payment_form'], True, "the pay button's form holds a card field")
+        sent = len(self.commands())
+        with self.assertRaises(ToolError) as caught:
+            driver.type(5, 'x', 4)   # index 5 was never in a snapshot: nothing is sent
+        self.assertEqual(caught.exception.code, 'target_unavailable')
+        self.assertEqual(len(self.commands()), sent)
+        with self.assertRaises(ToolError) as caught:
+            driver.goto('https://shop.test/blocked', 3)
+        self.assertEqual(caught.exception.code, 'blocked_destination')
         self.assertEqual(driver.cookies_export(), ({'shop.test': self.seeded}, []))
+
+    def test_the_worker_runs_with_a_minimal_environment_a_fixed_cwd_and_no_cwd_on_its_path(self):
+        from unittest import mock
+        seen = {}
+
+        class Stop(Exception):
+            pass
+
+        def popen(command, **kwargs):
+            seen['command'], seen['kwargs'] = command, kwargs
+            raise Stop()
+        planted = {'OPENAI_API_KEY': 'sk-planted', 'ANTHROPIC_API_KEY': 'planted', 'GITHUB_API_KEY': 'planted',
+                   'GH_TOKEN': 'planted', 'AGENTOS_DATA': '/planted', 'TELEGRAM_BOT_TOKEN': 'planted',
+                   'AWS_SECRET_ACCESS_KEY': 'planted', 'HOME': '/Users/owner', 'PATH': '/usr/bin:/bin', 'LANG': 'ko_KR.UTF-8'}
+        with mock.patch.dict(os.environ, planted), mock.patch.object(bs.subprocess, 'Popen', popen):
+            with self.assertRaises(Stop):
+                bs.WebKitWorkerDriver('p', cwd=self.tmp.name)
+        env = seen['kwargs']['env']
+        self.assertLessEqual(set(env), set(bs.WORKER_ENVIRONMENT))
+        self.assertNotIn('planted', json.dumps(env))
+        self.assertEqual((env['HOME'], env['LANG']), ('/Users/owner', 'ko_KR.UTF-8'))
+        self.assertEqual(seen['kwargs']['cwd'], self.tmp.name)
+        self.assertEqual(seen['command'][:4], [sys.executable, '-P', '-m', 'personal_agent.browser_worker'])
+        self.assertNotIn('--test-allow-origin', seen['command'], 'production never allows a local origin')
 
     def test_worker_timeout_hang_and_crash_are_typed_and_the_next_call_restarts(self):
         driver = self.driver(grace_seconds=0.5)
@@ -398,6 +574,11 @@ class DriverProtocolTests(unittest.TestCase):
                 bs.WebKitWorkerDriver('p', command=[sys.executable, str(FAKE_WORKER), str(self.log)])
         self.assertEqual(caught.exception.code, 'worker_unavailable')
 
+    def test_a_close_that_arrives_while_show_is_pending_is_not_lost(self):
+        driver = self.driver()
+        driver.show('https://shop.test/closefirst', 5)   # the worker reports 'hidden' before answering
+        self.assertFalse(driver.is_open())
+
     def test_the_login_window_state_follows_the_owner_closing_it(self):
         driver = self.driver()
         driver.show('https://shop.test/login', 5)
@@ -408,6 +589,96 @@ class DriverProtocolTests(unittest.TestCase):
                 break
             time.sleep(0.05)
         self.assertFalse(driver.is_open())
+
+
+# ---------------------------------------------------------------- destinations, output encoding, the UI marker (unit)
+
+class DestinationTests(unittest.TestCase):
+    def test_local_and_private_destinations_are_refused_by_name_literal_and_dns(self):
+        from personal_agent import browser_worker as bw
+        for url in ('http://127.0.0.1:8765/', 'http://localhost:8765/api/state', 'http://agentos.localhost:8765/',
+                    'http://[::1]:8765/', 'http://10.0.0.2/', 'http://192.168.1.1/', 'http://169.254.169.254/latest',
+                    'http://printer.local/', 'http://0.0.0.0/', 'file:///etc/hosts', 'ftp://shop.test/'):
+            self.assertTrue(bw.local_url(url), url)
+            self.assertEqual(bw.destination_refusal(url, resolver=lambda *a, **k: []), 'blocked_destination', url)
+        public = lambda *a, **k: [(2, 1, 6, '', ('93.184.215.14', 443))]
+        loop = lambda *a, **k: [(2, 1, 6, '', ('93.184.215.14', 443)), (2, 1, 6, '', ('127.0.0.1', 443))]
+        self.assertIsNone(bw.destination_refusal('https://shop.example/', resolver=public))
+        self.assertEqual(bw.destination_refusal('https://rebind.example/', resolver=loop), 'blocked_destination',
+                         'a public name that resolves to loopback is refused')
+        def fails(*a, **k):
+            raise OSError('nxdomain')
+        self.assertIsNone(bw.destination_refusal('https://missing.example/', resolver=fails))
+        # The test-only allowance is one exact origin.
+        self.assertIsNone(bw.destination_refusal('http://127.0.0.1:5000/x', ('127.0.0.1:5000',)))
+        self.assertEqual(bw.destination_refusal('http://127.0.0.1:5001/x', ('127.0.0.1:5000',)), 'blocked_destination')
+
+    def test_a_session_refuses_this_computer_before_any_driver_runs(self):
+        from test_browser_session import FakeDriver
+        driver = FakeDriver()
+        sess = bs.BrowserSession(lambda: driver, work_id='w')
+        for url in ('http://127.0.0.1:8765/', 'http://localhost:8765/', 'http://[::1]/', 'http://192.168.0.10/admin'):
+            with self.assertRaises(ToolError) as caught:
+                sess.open({'url': url, 'effect': 'read'})
+            self.assertEqual(caught.exception.code, 'blocked_destination')
+        self.assertEqual(driver.log, [])
+        self.assertEqual(sess.steps_used, 0)
+        allowed = bs.BrowserSession(lambda: driver, work_id='w', allowed_origins_for_tests=('127.0.0.1:9',))
+        with self.assertRaises(ToolError) as caught:
+            allowed.open({'url': 'http://127.0.0.1:10/', 'effect': 'read'})
+        self.assertEqual(caught.exception.code, 'blocked_destination')
+        profile = bs.BrowserProfile(Path(tempfile.mkdtemp()), launcher=lambda d, h: driver, jar=CookieJar(Path(tempfile.mkdtemp()) / JAR_NAME, MemoryKey()))
+        with self.assertRaises(ValueError):
+            profile.open_for_login('http://127.0.0.1:8765/')
+
+    def test_worker_lines_are_ascii_and_emit_never_raises(self):
+        import io
+        from personal_agent.browser_worker import make_emit
+        out = io.StringIO()
+        emit = make_emit(out)
+        emit({'id': 1, 'ok': True, 'page': {'title': 'a\ud800b', 'name': 'a' * 159 + '\U0001F600'}})
+        emit({'id': 2, 'ok': True, 'bad': object()})
+        lines = out.getvalue().splitlines()
+        self.assertTrue(all(line.isascii() for line in lines))
+        self.assertEqual(json.loads(lines[0])['page']['name'], 'a' * 159 + '\U0001F600')
+        self.assertEqual(json.loads(lines[1]), {'id': 2, 'ok': False, 'error': 'encode_failed'})
+
+        class Broken:
+            def write(self, text):
+                raise OSError('pipe closed')
+            flush = write
+        make_emit(Broken())({'id': 3, 'ok': True})   # does not raise
+
+    def test_the_owner_ui_and_api_refuse_the_embedded_browser(self):
+        from urllib.error import HTTPError
+        from urllib.request import Request, urlopen
+        from personal_agent.browser_worker import EMBEDDED_UA_TOKEN, safari_application_name
+        from personal_agent.quickstart import make_handler
+        from personal_agent.quickstart_service import AgentService
+        self.assertIn(EMBEDDED_UA_TOKEN, safari_application_name())
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        store = QuickStore(tmp.name)
+        service = AgentService(store, browser_profile=bs.BrowserProfile(Path(tmp.name) / 'p', launcher=lambda d, h: None))
+        server = ThreadingHTTPServer(('127.0.0.1', 0), make_handler(service))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        base = f'http://127.0.0.1:{server.server_port}'
+        agent = 'Mozilla/5.0 (Macintosh) AppleWebKit/605.1.15 (KHTML, like Gecko) ' + safari_application_name()
+        for path, body in (('/', None), ('/api/state', None), ('/api/browser/approval', b'{"work_id":"x","decision":"approve"}'),
+                           ('/api/local-login', b'{}')):
+            request = Request(base + path, data=body, headers={'User-Agent': agent, 'Content-Type': 'application/json',
+                                                                 'Origin': base})
+            with self.assertRaises(HTTPError) as caught:
+                urlopen(request, timeout=3)
+            self.assertEqual(caught.exception.code, 403, path)
+        try:
+            with urlopen(Request(base + '/healthz', headers={'User-Agent': 'Mozilla/5.0 Safari/605.1.15'}), timeout=3) as response:
+                status = response.status
+        except HTTPError as error:
+            status = error.code
+        self.assertNotEqual(status, 403, 'an ordinary browser is unaffected')
 
 
 # ---------------------------------------------------------------- the real worker (macOS + PyObjC)
@@ -438,6 +709,29 @@ class SessionFixtureHandler(FixtureHandler):
             return self._send('''<html><head><title>새 창</title></head><body>
               <a href="/cart" target="_blank">새 창 장바구니</a>
               <a href="file:///etc/hosts" target="_blank">로컬 파일</a></body></html>''')
+        if path == '/memo-trap':
+            # Review P1-1 repro: focusing the memo inserts a card field at the top of <body>.
+            return self._send('''<html><head><title>메모</title></head><body>
+              <p id="leak">없음</p>
+              <label>메모 <input id="memo" type="text" onfocus="if(!window.armed){window.armed=1;var c=document.createElement('input');
+                c.setAttribute('autocomplete','cc-number');c.setAttribute('aria-label','카드');
+                c.oninput=function(){document.getElementById('leak').textContent='카드 입력됨:'+c.value;};document.body.prepend(c);}"></label>
+              </body></html>''')
+        if path == '/wide':
+            # Review P2-1 repro: a surrogate pair at the label cut and a lone surrogate in the title.
+            return self._send('<html><head><title>넓은 글자</title></head><body><button type="button" aria-label="'
+                              + '가' * 159 + '\U0001F600' + '">버튼</button><script>document.title = "x\\uD800y";</script></body></html>')
+        if path == '/to-agentos':
+            self.send_response(302)
+            self.send_header('Location', self.server.agentos_origin + '/api/state')
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
+        if path == '/open-agentos':
+            return self._send('<html><head><title>열기</title></head><body><button type="button" onclick="window.open(\''
+                              + self.server.agentos_origin + '/\')">AgentOS 열기</button>'
+                              + '<form action="' + self.server.agentos_origin + '/api/browser/approval" method="post">'
+                              + '<button type="submit">승인 보내기</button></form></body></html>')
         if path == '/trusted':
             return self._send('''<html><head><title>입력</title></head><body>
               <button type="button" onclick="document.getElementById('r').textContent='click trusted='+event.isTrusted">누르기</button>
@@ -458,6 +752,16 @@ class WebKitIntegrationTests(unittest.TestCase):
         self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)
         self.origin = f'http://127.0.0.1:{self.server.server_address[1]}'
+        # A stand-in for the owner's AgentOS on another loopback port: it must never be reached.
+        self.agentos = ThreadingHTTPServer(('127.0.0.1', 0), SessionFixtureHandler)
+        self.agentos.posts, self.agentos.cookie_value, self.agentos.hits = [], 'unused', []
+        self.agentos.agentos_origin = ''
+        threading.Thread(target=self.agentos.serve_forever, daemon=True).start()
+        self.addCleanup(self.agentos.server_close)
+        self.addCleanup(self.agentos.shutdown)
+        self.agentos_origin = f'http://127.0.0.1:{self.agentos.server_address[1]}'
+        self.server.agentos_origin = self.agentos_origin
+        self.fixture = f'127.0.0.1:{self.server.server_address[1]}'
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.store = QuickStore(Path(self.tmp.name) / 'data')
@@ -467,10 +771,79 @@ class WebKitIntegrationTests(unittest.TestCase):
         self.addCleanup(self.key.delete)
         self.jar = CookieJar(profile_dir / JAR_NAME, self.key)
         self.profile = bs.BrowserProfile(profile_dir, jar=self.jar)
+        # Test-only: the fixture origin (and only it) may be loaded from loopback.
+        self.profile.allow_origins_for_tests(self.fixture)
 
     def session(self, work_id):
         return bs.BrowserSession(self.profile.driver_factory(work_id), work_id=work_id, approvals=Approvals(), steps=40,
-                                 excluded=lambda: [PASSPORT])
+                                 excluded=lambda: [PASSPORT], allowed_origins_for_tests=(self.fixture,))
+
+    def test_typing_never_lands_in_a_field_the_page_inserts_on_focus(self):
+        sess = self.session('work-trap')
+        try:
+            sess.open({'url': self.origin + '/memo-trap', 'effect': 'navigate'})
+            try:
+                page = sess.type({'target': '메모', 'text': '장보기 목록', 'effect': 'mutate'})
+            except ToolError as refused:
+                self.assertEqual(refused.code, 'target_unavailable')
+                page = sess.read()
+            self.assertNotIn('카드 입력됨', page['text'], 'nothing was typed into the inserted card field')
+            self.assertIn('없음', page['text'])
+            values = {row['name']: row.get('value') for row in page['elements']}
+            # Either the text is in the memo, or the step was refused because the
+            # page moved the pointer's target (the click guard): never elsewhere.
+            self.assertIn(values.get('메모'), ('장보기 목록', None), page['elements'])
+            if values.get('메모') is None:
+                self.assertNotIn('장보기', flat(page))
+        finally:
+            sess.close()
+
+    def test_emoji_at_the_cut_and_a_lone_surrogate_do_not_break_the_worker(self):
+        sess = self.session('work-wide')
+        try:
+            page = sess.open({'url': self.origin + '/wide', 'effect': 'read'})
+            self.assertEqual(page['state'], 'page')
+            self.assertIn('\ufffd', page['title'], 'the lone surrogate is replaced, not passed on')
+            json.dumps(page, ensure_ascii=False).encode('utf-8')
+            names = [row['name'] for row in page['elements']]
+            self.assertTrue(any(name.startswith('가' * bs.NAME_LIMIT) for name in names), names)
+            again = sess.open({'url': self.origin + '/product', 'effect': 'read'})
+            self.assertIn('세탁세제 3L', again['text'], 'the same worker keeps working')
+        finally:
+            sess.close()
+
+    def test_the_production_policy_refuses_the_agentos_port_by_redirect_and_window_open(self):
+        agentos_port = self.agentos.server_address[1]
+        plain = bs.BrowserSession(lambda: None, work_id='w')   # no test allowance at all
+        with self.assertRaises(ToolError) as caught:
+            plain.open({'url': f'http://127.0.0.1:{agentos_port}/', 'effect': 'read'})
+        self.assertEqual(caught.exception.code, 'blocked_destination')
+        sess = self.session('work-policy')
+        try:
+            with self.assertRaises(ToolError) as caught:
+                sess.open({'url': self.origin + '/to-agentos', 'effect': 'read'})
+            self.assertEqual(caught.exception.code, 'blocked_destination', 'a redirect to the AgentOS port is refused')
+            sess.open({'url': self.origin + '/open-agentos', 'effect': 'read'})
+            with self.assertRaises(ToolError) as caught:
+                sess.click({'target': 'AgentOS 열기', 'effect': 'navigate'})
+            self.assertEqual(caught.exception.code, 'blocked_destination', 'window.open to the AgentOS port is refused')
+            sess.read()
+            with self.assertRaises(ToolError) as caught:
+                sess.click({'target': '승인 보내기', 'effect': 'navigate'})
+            self.assertEqual(caught.exception.code, 'blocked_destination', 'a form posting to it is refused')
+            page = sess.read()
+            self.assertEqual(page['title'], '열기', 'the page stayed on the fixture site')
+        finally:
+            sess.close()
+        self.assertEqual(self.agentos.posts, [], 'the stand-in AgentOS received no request')
+        # Only the exact test origin was allowed; the worker in production has no allowance at all.
+        worker = bs.WebKitWorkerDriver('p', cwd=self.tmp.name)
+        try:
+            with self.assertRaises(ToolError) as caught:
+                worker.goto(self.origin + '/product', 10)
+            self.assertEqual(caught.exception.code, 'blocked_destination')
+        finally:
+            worker.close()
 
     def test_product_to_cart_guard_login_and_trusted_input_through_the_real_worker(self):
         sess = self.session('work-int')

@@ -22,6 +22,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, unquote, urlencode, urlsplit, urlunsplit
+from .browser_worker import EMBEDDED_UA_TOKEN
 from .quickstart_store import QuickStore
 from .calendar import CalendarConnector
 from .calendar_oauth import CalendarOAuth, EncryptedCalendarSecretStore, calendar_transport
@@ -476,6 +477,11 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             return self.server.server_address[0] in ('127.0.0.1', '::1') and self.client_address[0] in ('127.0.0.1', '::1')
 
         def valid_host(self):
+            # #680 review P1-2: the embedded browser marks every request with a
+            # user-agent token; no page it shows may use this owner's UI or API.
+            if EMBEDDED_UA_TOKEN in self.headers.get('User-Agent',''):
+                self.reply(403,{'error':'AgentOS 내장 브라우저에서는 AgentOS 화면을 열 수 없습니다.'})
+                return False
             if self.server.server_address[0] not in ('127.0.0.1', '::1'):return True
             allowed={f'127.0.0.1:{self.server.server_port}',f'localhost:{self.server.server_port}',f'agentos.localhost:{self.server.server_port}',f'[::1]:{self.server.server_port}'}
             if self.headers.get('Host','').lower() in allowed | public_hosts:return True

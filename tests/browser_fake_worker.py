@@ -4,7 +4,8 @@ Used by ``tests/test_browser_webkit.py`` to exercise ``WebKitWorkerDriver``'s
 process boundary (timeouts, crash restart, seed import, typed target errors)
 on any platform.  ``argv[1]`` is a log file: every received command is
 appended as one JSON line.  The URL of a ``navigate`` selects a behaviour:
-``/crash`` exits, ``/hang`` never answers, ``/slow`` answers ``timeout``.
+``/crash`` exits, ``/hang`` never answers, ``/slow`` answers ``timeout``,
+``/blocked`` answers ``blocked_destination``.
 """
 import json
 import os
@@ -42,6 +43,9 @@ for line in sys.stdin:
         if '/hang' in url:
             time.sleep(60)
             continue
+        if '/blocked' in url:
+            emit({'id': ident, 'ok': False, 'error': 'blocked_destination'})
+            continue
         if '/slow' in url:
             emit({'id': ident, 'ok': False, 'error': 'timeout'})
             continue
@@ -51,12 +55,21 @@ for line in sys.stdin:
         emit({'id': ident, 'ok': True, 'page': {'url': page['url'], 'title': 't', 'text': 'x', 'forms': [],
                                                  'elements': [{'index': 3, 'role': 'button', 'name': 'Go', 'tag': 'button',
                                                                'type': 'submit', 'autocomplete': '', 'form': None,
+                                                               'href': None, 'value': None, 'disabled': False},
+                                                              {'index': 7, 'role': 'button', 'name': 'Pay', 'tag': 'button',
+                                                               'type': 'submit', 'autocomplete': '', 'form': 1,
+                                                               'href': None, 'value': None, 'disabled': False},
+                                                              {'index': 8, 'role': 'textbox', 'name': 'Card', 'tag': 'input',
+                                                               'type': 'text', 'autocomplete': 'billing cc-number', 'form': 1,
                                                                'href': None, 'value': None, 'disabled': False}]}})
     elif op == 'click':
         emit({'id': ident, 'ok': False, 'error': 'target_obscured'} if command.get('index') == 7 else {'id': ident, 'ok': True})
     elif op == 'type':
         emit({'id': ident, 'ok': True})
     elif op == 'show':
+        if 'closefirst' in str(command.get('url')):
+            emit({'event': 'hidden'})
+            time.sleep(0.1)
         emit({'id': ident, 'ok': True})
         if 'autoclose' in str(command.get('url')):
             time.sleep(0.2)

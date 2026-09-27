@@ -303,15 +303,18 @@ def bridge_tool_bound(actions):
 
     Each figure is the tool's existing timeout, not a new one: a browser step
     is bounded by the relay's call cap, a bounded research call by one search
-    plus its page reads, a search by the slower of the provider and native
-    search timeouts, the weather lookup by its two requests.
+    plus its page reads, a search by the slower of a provider search and a
+    native search, the weather lookup by its two requests.  A native search
+    may send ``NATIVE_MAX_REQUESTS`` sequential requests (the first plus each
+    ``pause_turn`` continuation), each capped by ``NATIVE_TIMEOUT_SECONDS``
+    (#729 review).
     """
     from .agent_runtime import BROWSER_ACTIONS
     from .cli_browser_relay import CALL_SECONDS
     from .local_tools import MAX_PAGE_SECONDS
     from .research import MAX_RESEARCH_PAGES
-    from .search_providers import NATIVE_TIMEOUT_SECONDS, SEARCH_TIMEOUT_SECONDS
-    search = max(SEARCH_TIMEOUT_SECONDS, NATIVE_TIMEOUT_SECONDS)
+    from .search_providers import NATIVE_MAX_REQUESTS, NATIVE_TIMEOUT_SECONDS, SEARCH_TIMEOUT_SECONDS
+    search = max(SEARCH_TIMEOUT_SECONDS, NATIVE_MAX_REQUESTS * NATIVE_TIMEOUT_SECONDS)
     own = {'web_search': search, 'bounded_public_research': search + MAX_RESEARCH_PAGES * MAX_PAGE_SECONDS,
            # local_tools.LocalTools.weather: geocoding (10 s) then the forecast (15 s).
            'weather': 10 + 15, 'public_page_read': MAX_PAGE_SECONDS}

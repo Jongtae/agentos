@@ -596,6 +596,32 @@ class BridgeTimeout(unittest.TestCase):
         timeouts = [value for value in self.overrides(self.argv(budget=budget)) if 'tool_timeout_sec' in value]
         self.assertEqual(timeouts, ['mcp_servers.agentos.tool_timeout_sec=45'])
 
+    def test_a_native_search_bound_covers_every_continuation_request(self):
+        """#729 review: an ai-native search may resend after pause_turn; each request has its own timeout."""
+        from personal_agent.bounded_execution import bridge_tool_bound
+        from personal_agent.local_tools import MAX_PAGE_SECONDS
+        from personal_agent.research import MAX_RESEARCH_PAGES
+        from personal_agent.search_providers import (NATIVE_CONTINUATIONS, NATIVE_MAX_REQUESTS, NATIVE_TIMEOUT_SECONDS,
+                                                     SEARCH_TIMEOUT_SECONDS)
+        self.assertEqual(NATIVE_MAX_REQUESTS, NATIVE_CONTINUATIONS + 1)
+        search = NATIVE_MAX_REQUESTS * NATIVE_TIMEOUT_SECONDS
+        self.assertGreater(search, SEARCH_TIMEOUT_SECONDS)
+        self.assertEqual(bridge_tool_bound(['web_search']), search)
+        self.assertEqual(bridge_tool_bound(['bounded_public_research']), search + MAX_RESEARCH_PAGES * MAX_PAGE_SECONDS)
+
+    def test_the_anthropic_search_sends_at_most_the_bounded_number_of_requests(self):
+        from personal_agent.search_providers import NATIVE_MAX_REQUESTS, AiNativeProvider, SearchProviderError
+        sent = []
+
+        def transport(url, body, headers, timeout):
+            sent.append(timeout)
+            # Always paused and never using a search: only the request cap ends it.
+            return {'type': 'message', 'stop_reason': 'pause_turn', 'content': [{'type': 'text', 'text': 'x'}]}
+        search = AiNativeProvider('anthropic', {'endpoint': 'https://api.anthropic.com', 'model': 'm'}, 'k', transport=transport)
+        with self.assertRaises(SearchProviderError):
+            search.search('q')  # nothing cited: an empty native search
+        self.assertEqual(len(sent), NATIVE_MAX_REQUESTS)
+
     def test_the_longest_offered_tool_sets_the_bound(self):
         from personal_agent.bounded_execution import bridge_tool_bound, bridge_tool_timeout
         from personal_agent.cli_browser_relay import CALL_SECONDS

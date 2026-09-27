@@ -81,7 +81,9 @@ def telegram_request_json(url, body, headers=None, timeout=TELEGRAM_TIMEOUT):
             except (ValueError, TypeError, OSError):
                 envelope = None
             if isinstance(envelope, dict) and envelope.get('ok') is False:
-                return {'ok': False, 'error_code': envelope.get('error_code', exc.code),
+                # #594 item 3: the HTTP status is the classification source;
+                # the body's own ``error_code`` is not trusted over it.
+                return {'ok': False, 'error_code': exc.code,
                         'description': str(envelope.get('description', ''))[:512]}
         raise ProviderError(f'연결 대상이 HTTP {exc.code} 오류를 반환했습니다. 주소·모델·인증 설정을 확인하세요.',
                             status=exc.code) from None

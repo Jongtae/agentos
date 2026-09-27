@@ -1978,6 +1978,36 @@ class AgentService:
         self.store.put('document_sharing',{'approved':True,'fingerprint':self.document_fingerprint(model),'approved_at':time.time()})
         return self.document_boundary(model)
 
+    def approve_document_sharing_from_settings(self, body):
+        """Settings 전송 승인: the same standing approval as the Telegram button, and the same resume.
+
+        #594 item 11: the approval the Settings row sets is exactly the one the
+        `p7a` button sets, but only the button continued the folder-resumed
+        Work that was parked on it.  Approving here instead stranded that Work
+        and made its Telegram button inert (sharing no longer required).  The
+        parked Work now continues through the same once-only claim
+        (`resume_after_document_approval`: eligible, unexpired, unwithdrawn,
+        read-only, still failed), and its pending approval prompt is closed.
+        No new authority: any new request would use this approval too.
+        """
+        # One lock with the worker's continuation registration and with prompt
+        # delivery, so neither can interleave with approval and strand the Work.
+        with self.lock:
+            boundary=self.set_document_approval(body)
+            if not boundary.get('approved'):return boundary
+            for work_id in list(self._document_resume_rows()):
+                if not self.resume_after_document_approval(work_id):continue
+                with self.store.db() as db:
+                    prompts=[dict(row) for row in db.execute(
+                        "SELECT id,state,chat_id,message_id FROM telegram_notifications WHERE job_id=? AND kind='approval_needed' AND state IN ('queued','sent')",
+                        (work_id,))]
+                for prompt in prompts:
+                    self.store.update_notification(prompt['id'],'approved')
+                    if prompt['state']=='sent' and prompt.get('message_id'):
+                        try:self.telegram.edit_message_text(prompt['chat_id'],prompt['message_id'],LOCAL_DOCUMENT_RESUMED_TEXT,{'inline_keyboard':[]})
+                        except ProviderError:pass
+            return boundary
+
     def public_page_boundary(self, model=None):
         model=self.store.config('model',{}) if model is None else model
         saved=self.store.config('public_page_sharing',{})
@@ -4747,6 +4777,11 @@ class AgentService:
             if not allowed:return True
             reply_markup=None
             if notification['kind']=='approval_needed':
+                # #594 item 11: sharing was approved (e.g. in Settings) after
+                # this prompt was queued; its buttons could only be inert.
+                if not self.document_boundary()['requires_approval']:
+                    self.store.update_notification(notification['id'],'cancelled')
+                    return True
                 reply_markup={'inline_keyboard':[[
                     {'text':'문서 공유 승인','callback_data':f"p7a:{notification['id']}:approve"},
                     {'text':'허용 안 함','callback_data':f"p7a:{notification['id']}:deny"},
@@ -6064,8 +6099,13 @@ class AgentService:
             if resolved_blocker:
                 self.projection.clear(self.connector_owner_id(job))
             if approval_needed[0]:
-                self.mark_document_resume(job)
-                self.queue_notification(job,'approval_needed')
+                # #594 item 11: under the lock the Settings approval also takes,
+                # so an approval that landed while this run was ending continues
+                # the Work now instead of stranding it behind an inert prompt.
+                with self.lock:
+                    if not (self.mark_document_resume(job) and not self.document_boundary()['requires_approval']
+                            and self.resume_after_document_approval(job['id'])):
+                        self.queue_notification(job,'approval_needed')
             if context_approval_needed[0]:self.queue_notification(job,'context_approval_needed')
             # #659: preparations this Work proposed wait for the owner's yes.
             self.queue_preparation_proposal(job)

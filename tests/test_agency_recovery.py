@@ -21,7 +21,7 @@ from unittest import mock
 
 import test_agency_loop as loop
 from personal_agent import mcp_bridge
-from personal_agent.agent_runtime import (WORK_STOP_KEEP, WORK_STOP_KEY, WORK_LEDGER_KEY, Capabilities, ToolError,
+from personal_agent.agent_runtime import (WORK_TOOL_ATTEMPTS, WORK_STOP_KEEP, WORK_STOP_KEY, WORK_LEDGER_KEY, Capabilities, ToolError,
                                           WorkBudget, WorkLedger, classify_failure, goal_summary)
 from personal_agent.bounded_execution import BoundedExecutionAdapter, EngineInterrupted, ExecutionError, bounded_run
 from personal_agent.calendar import CalendarError
@@ -204,12 +204,12 @@ class SharedBudgetTests(unittest.TestCase):
         self.assertEqual(AgentService(store).work_budget(job).ledger.used(), 0)
 
     def test_the_real_bridge_process_spends_the_hosts_budget(self):
-        """Through the service's CLI broker: 10 host attempts leave the bridge 2."""
+        """Through the service's CLI broker: all but 2 host attempts spent leave the bridge 2."""
         store, _ = _store(self)
 
         class HostThenBridge(loop.BridgeCli):
             def execute(self, engine, prompt, tools, **kwargs):
-                for _ in range(10):
+                for _ in range(WORK_TOOL_ATTEMPTS - 2):
                     tools.capabilities.budget.spend_attempt()
                 return super().execute(engine, prompt, tools, **kwargs)
 

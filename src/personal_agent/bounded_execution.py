@@ -20,7 +20,15 @@ from .manifests import CONTEXT_GATED_ACTIONS  # noqa: F401 (#627: re-exported fo
 
 
 MAX_PROMPT_BYTES = 48_000
+#: The final answer record of one CLI turn (#736: the record, never the whole stream).
 MAX_OUTPUT_BYTES = 96_000
+#: #736: a runaway guard on the whole machine-output stream of one CLI turn.  The
+#: stream carries every tool result (mediated browser pages included), so it is
+#: far larger than the answer; only the final record is bounded by
+#: ``MAX_OUTPUT_BYTES``.
+MAX_STREAM_BYTES = 8_000_000
+FINAL_RECORD_TOO_LARGE = f'엔진의 최종 응답 기록이 안전한 크기 제한({MAX_OUTPUT_BYTES // 1000}KB)을 초과했습니다.'
+STREAM_TOO_LARGE = f'엔진 출력 전체가 안전한 크기 제한({MAX_STREAM_BYTES // 1_000_000}MB)을 초과했습니다.'
 # One CLI turn may use up to the Work's whole shared budget (agent_runtime
 # WORK_DEADLINE_SECONDS); the remaining budget always bounds it (#607 AX-10).
 # The earlier fixed 120 s cap (#118) cut off multi-step browser work.
@@ -1522,40 +1530,50 @@ class BoundedExecutionAdapter:
 
     @staticmethod
     def _content(engine_id, raw):
+        """The final answer text of one CLI turn's machine output.
+
+        #736: both CLIs stream every tool result before the answer, so only
+        the final answer record is bounded by ``MAX_OUTPUT_BYTES``; the whole
+        stream has the larger runaway guard ``MAX_STREAM_BYTES``.  The error
+        names which bound was hit.
+        """
+        raw = raw or ''
+        if len(raw.encode()) > MAX_STREAM_BYTES:
+            raise ExecutionError(STREAM_TOO_LARGE)
+        lines = [line for line in raw.splitlines() if line.strip()]
         if engine_id == 'claude-code':
-            # The stream carries tool results before the result record; bound
-            # the answer record itself rather than the whole event stream.
-            lines = [line for line in (raw or '').splitlines() if line.strip()]
-            raw = lines[-1] if lines else ''
-        if len(raw.encode()) > MAX_OUTPUT_BYTES:
-            raise ExecutionError('엔진 응답이 안전한 크기 제한을 초과했습니다.')
+            # The result record is the last line of the stream.
+            lines = lines[-1:]
         try:
-            # Codex's machine output is JSONL.  Only examine its last complete
-            # event, never concatenate progress/event text into an answer.
-            records = [json.loads(line) for line in raw.splitlines() if line.strip()]
-            data = records[-1]
+            # Machine output is JSONL.  Only structured records are examined;
+            # progress/event text is never concatenated into an answer.
+            records = [(json.loads(line), line) for line in lines]
+            data = records[-1][0]
         except (TypeError, ValueError, IndexError):
             raise ExecutionError('엔진이 요구된 구조화된 응답을 반환하지 않았습니다.') from None
+        answer_line = records[-1][1]
         if engine_id == 'codex':
             # Codex ends JSONL with usage/completion metadata. Select the last
             # structured agent message instead of treating that terminal event
             # as response text or exposing the event stream to the owner.
             content = None
-            for candidate in reversed(records):
+            for candidate, line in reversed(records):
                 if not isinstance(candidate, dict):
                     continue
                 item = candidate.get('item')
                 if isinstance(item, dict) and item.get('type') == 'agent_message':
                     text = item.get('text')
                     if isinstance(text, str) and text.strip():
-                        content = text
+                        content, answer_line = text, line
                         break
                 text = candidate.get('content') or candidate.get('output')
                 if isinstance(text, str) and text.strip():
-                    content = text
+                    content, answer_line = text, line
                     break
         else:
             content = data.get('result') if isinstance(data, dict) else None
+        if len(answer_line.encode()) > MAX_OUTPUT_BYTES:
+            raise ExecutionError(FINAL_RECORD_TOO_LARGE)
         if not isinstance(content, str) or not content.strip():
             raise ExecutionError('엔진 응답에 최종 텍스트 결과가 없습니다.')
         return content[:24_000]

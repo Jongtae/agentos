@@ -11,6 +11,7 @@ import re
 import tempfile
 import threading
 import unittest
+from unittest import mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError
@@ -474,6 +475,41 @@ class HostedModelDocumentApprovalTests(HandoffTestCase):
         self.assertEqual(self.job(job_id)['status'], 'succeeded', self.job(job_id).get('error'))
         self.assertFalse(self.service.approve_document_sharing_from_settings({'approved': True})['requires_approval'])
         self.assertFalse(self.service.run_one(), 'continues once only')
+
+    def test_settings_approval_landing_as_the_run_ends_still_continues_the_work(self):
+        """Review P2: approval between the run's boundary check and its continuation registration."""
+        job_id, _ = self.park_read()
+        self.approve_picked(self.folder('contracts', {'renewal.txt': '계약서 갱신일: 10월 1일'}))
+        original = self.service.mark_document_resume
+
+        def approve_first(job):
+            self.service.approve_document_sharing_from_settings({'approved': True})
+            return original(job)
+
+        self.service.mark_document_resume = approve_first
+        self.plan = [('find_files', {'query': '계약서'})]
+        self.service.run_one()
+        self.assertEqual(self.job(job_id)['status'], 'queued', 'continued, not stranded')
+        with self.store.db() as db:
+            prompts = db.execute("SELECT COUNT(*) FROM telegram_notifications WHERE job_id=? AND kind='approval_needed'",
+                                 (job_id,)).fetchone()[0]
+        self.assertEqual(prompts, 0, 'no inert approval prompt is queued')
+
+    def test_a_queued_prompt_is_not_published_once_sharing_is_approved(self):
+        """Review P2: delivery that picked the prompt before a Settings approval does not publish it."""
+        job_id, _ = self.park_read()
+        self.approve_picked(self.folder('contracts', {'renewal.txt': '계약서 갱신일: 10월 1일'}))
+        self.plan = [('find_files', {'query': '계약서'})]
+        self.service.run_one()
+        picked = self.store.next_notification()
+        self.assertEqual((picked['job_id'], picked['kind']), (job_id, 'approval_needed'))
+        self.service.approve_document_sharing_from_settings({'approved': True})
+        before = len(self.sent)
+        with mock.patch.object(self.store, 'next_notification', return_value=picked):
+            self.assertTrue(self.service.deliver_notification())
+        self.assertEqual(self.sent[before:], [])
+        self.assertEqual(self.store.notification(picked['id'])['state'], 'cancelled')
+        self.assertEqual(self.job(job_id)['status'], 'queued')
 
     def test_settings_approval_does_not_revive_a_withdrawn_work(self):
         job_id, _notification, _ = self.stop_at_sharing()

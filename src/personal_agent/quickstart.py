@@ -767,6 +767,8 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 # DecisionEngine route (#580): explicit owner actions, separate from the Work route above.
                 if path=='/api/decision-route/activate':return self.reply(200,service.activate_decision_route(body))
                 if path=='/api/decision-route/credential':return self.reply(200,service.save_decision_route_credential(body))
+                # #685: stop the background Judgment AI qualification; the current route stays.
+                if path=='/api/decision-route/qualification/cancel':return self.reply(200,service.cancel_decision_qualification(body))
                 if path=='/api/decision-route/capabilities':return self.reply(200,service.check_decision_cli_capabilities(body))
                 if path=='/api/decision-route/models':
                     # #679 (review P2-2): 모델 목록 새로고침 runs a CLI or sends

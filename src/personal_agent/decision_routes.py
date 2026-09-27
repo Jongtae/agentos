@@ -31,7 +31,11 @@ Invariants (tested in tests/test_decision_routes.py):
   qualification suite in order; none passing is an explicit failure, never a
   jump to another model or route;
 * listing models (#679) runs only on the owner's explicit 모델 목록 새로고침,
-  never on opening Settings; a listed model is not a verified model.
+  never on opening Settings; a listed model is not a verified model;
+* the Main AI switch never waits for the Judgment AI qualification (#685):
+  it queues one ``decision_qualification_jobs`` row per follow route, the
+  service work loop dispatches it, and the ``decision_route`` row changes
+  only when that qualification passes (a failed or cancelled job leaves it).
 """
 import json
 import subprocess
@@ -51,7 +55,7 @@ from .decision_adapters import (CLI_BINARIES, JEV_DEFAULT_MODEL, JEV_DESTINATION
                                 SubscriptionCliDecisionEngine, bounded_run, cli_fingerprint, codex_disable_plan,
                                 codex_still_enabled, parse_codex_features, valid_effort, valid_model_id)
 from .bounded_execution import parse_cli_version, strict_allowed_features
-from .decision_qualification import SUITE_VERSION, qualify
+from .decision_qualification import CASE_IDS, SUITE_VERSION, qualify
 from .main_ai import CHOOSER_ORDER, api_route_of, key_slot
 from .providers import ProviderError, request_json
 
@@ -257,6 +261,32 @@ class DecisionRouteError(ValueError):
     """An owner-facing refusal; the previous route stays active."""
 
 
+class QualificationCancelled(Exception):
+    """A background qualification job stopped at a checkpoint (#685)."""
+
+
+def _spawn_thread(target):
+    threading.Thread(target=target, name='agentos-judgment-qualification', daemon=True).start()
+
+
+#: #685: background Judgment AI qualification jobs, one row per follow route.
+QUALIFICATION_JOBS = 'decision_qualification_jobs'
+JOB_QUEUED, JOB_RUNNING, JOB_CANCELLING = 'queued', 'running', 'cancelling'
+JOB_PASSED, JOB_FAILED, JOB_CANCELLED = 'passed', 'failed', 'cancelled'
+JOB_OPEN = (JOB_QUEUED, JOB_RUNNING, JOB_CANCELLING)
+#: A job interrupted by a restart is queued again at most this many times;
+#: after that it fails with ``interrupted`` instead of looping.
+MAX_REQUEUES = 1
+JOB_HISTORY = 5
+#: Owner-visible reason of a job that ended without passing (Settings translates it).
+JOB_FAILURE_TEXT = {
+    'interrupted': 'AgentOS가 다시 시작되어 중단됨', 'cancelled': '취소됨', 'superseded': '다른 선택으로 대체됨',
+    'no-qualified-candidate': '적격 모델 없음', 'not-configured': '설정 필요', 'auth': '로그인 또는 인증 실패',
+    'cli-not-found': 'CLI 없음', 'strict-profile-unqualified': '엄격 격리 검증 실패', 'timeout': '시간 초과',
+    'usage-limit': '사용량 한도', 'follow-unsupported': '기본 AI를 따라갈 수 없음', 'probe-failed': '확인 실패',
+}
+
+
 class DecisionRoutes:
     """The decision route read model, resolver and explicit owner actions.
 
@@ -266,8 +296,13 @@ class DecisionRoutes:
     is the HTTP transport for Jev (tests inject a fixture).
     """
 
-    def __init__(self, service, *, jev_transport=None, models_transport=None, clock=time.time):
+    def __init__(self, service, *, jev_transport=None, models_transport=None, clock=time.time, spawn=None):
         self.service, self.clock = service, clock
+        # #685: how a claimed qualification job runs off the work loop thread
+        # (tests pass a synchronous runner).
+        self.spawn = spawn or _spawn_thread
+        #: The running job's checkpoint (progress + cancellation), or None.
+        self._checkpoint = None
         self.jev_transport = jev_transport
         # The bounded HTTP transport for the explicit API model-list refresh.
         self.models_transport = models_transport or request_json
@@ -438,27 +473,213 @@ class DecisionRoutes:
         return [model for model in ranked if model in listed]
 
     def follow_main_switched(self, main_id):
-        """Called after a successful Main AI switch.  Never raises.
+        """Called after a successful Main AI switch.  Never raises, never waits (#685).
 
         An explicit or ``off`` Judgment AI is left exactly as it was.  A
-        following Judgment AI is re-resolved for the new Main AI; a failure
-        leaves it needing attention (no fallback to the previous route).
+        following Judgment AI gets a queued qualification job for the new
+        Main AI; the service work loop runs it (``run_due_qualification``).
+        The ``decision_route`` row is not touched here: it changes only when
+        that qualification passes, so a failure never falls back anywhere.
         """
         if self.mode() != MODE_FOLLOW:
             return {'state': 'unchanged', 'mode': self.mode()}
-        with self._activating:
-            # Re-check under the lock: an explicit choice that finished while
-            # this switch waited is the owner's latest decision (#643 review).
-            if self.mode() != MODE_FOLLOW:
-                return {'state': 'unchanged', 'mode': self.mode()}
+        try:
+            job = self.queue_qualification(main_id)
+        except Exception:  # never report a committed Main AI switch as failed
+            return {'state': 'attention', 'failure': 'probe-failed',
+                    'message': '판단 AI 확인을 시작하지 못했습니다.'}
+        return {'state': 'queued', 'job': job}
+
+    # -- background qualification jobs (#685) --------------------------------
+    # Adopted, not a new scheduler: the job is a config row like the other
+    # decision rows, and the existing service work loop claims it each tick.
+    # It runs off that thread only so owner Work is not blocked for minutes.
+    def _jobs(self):
+        rows = self.store.config(QUALIFICATION_JOBS, {})
+        if not isinstance(rows, dict):
+            return {}
+        return {key: dict(row) for key, row in rows.items() if isinstance(row, dict)}
+
+    def _put_jobs(self, rows):
+        # Open jobs are always kept; finished ones only the newest few.
+        finished = sorted((key for key, row in rows.items() if row.get('state') not in JOB_OPEN),
+                          key=lambda key: rows[key].get('finished_at') or 0, reverse=True)
+        for key in finished[JOB_HISTORY:]:
+            rows.pop(key, None)
+        self.store.put(QUALIFICATION_JOBS, rows)
+
+    def _update_job(self, option, job_id, **fields):
+        """Update one job row while it is still ``job_id``; the updated row, or None."""
+        with self.service.lock:
+            rows = self._jobs()
+            row = rows.get(option)
+            if not row or row.get('id') != job_id:
+                return None
+            row.update(fields)
+            rows[option] = row
+            self._put_jobs(rows)
+            return dict(row)
+
+    def queue_qualification(self, main_id):
+        """At most one open job per follow route; an older Main AI's open job is superseded."""
+        option = f'{MODE_FOLLOW}:{main_id}'
+        now = self.clock()
+        with self.service.lock:
+            rows = self._jobs()
+            for key, row in rows.items():
+                if key == option or row.get('state') not in JOB_OPEN:
+                    continue
+                if row['state'] == JOB_QUEUED:
+                    row.update(state=JOB_CANCELLED, failure='superseded', finished_at=now)
+                else:
+                    row.update(state=JOB_CANCELLING, failure='superseded')
+            current = rows.get(option)
+            if current and current.get('state') in (JOB_QUEUED, JOB_RUNNING):
+                self._put_jobs(rows)
+                return dict(current)
+            # A job of this route that is still stopping is replaced: its
+            # next checkpoint sees another id and stops without writing.
+            job = {'id': f'{option}@{now}', 'option': option, 'main': main_id, 'state': JOB_QUEUED,
+                   'queued_at': now, 'requeued': 0}
+            rows[option] = job
+            self._put_jobs(rows)
+            return dict(job)
+
+    def run_due_qualification(self):
+        """One work-loop tick (#685): claim the oldest queued job and run it off-thread.
+
+        Only a config read when nothing is queued: no model call, no
+        subprocess.  One qualification (or explicit activation) runs at a
+        time; while one does, a queued job waits for a later tick.
+        """
+        with self.service.lock:
+            queued = sorted((row for row in self._jobs().values() if row.get('state') == JOB_QUEUED),
+                            key=lambda row: row.get('queued_at') or 0)
+        if not queued or not self._activating.acquire(blocking=False):
+            return False
+        try:
+            claimed = self._update_job(queued[0]['option'], queued[0]['id'], state=JOB_RUNNING,
+                                       started_at=self.clock(), step=None)
+            if not claimed:
+                self._activating.release()
+                return False
+            self.spawn(lambda: self._run_job(claimed))
+        except BaseException:
+            self._release_quietly()
+            raise
+        return True
+
+    def _release_quietly(self):
+        try:
+            self._activating.release()
+        except RuntimeError:  # already released by the job itself
+            pass
+
+    def _job_checkpoint(self, job, model, case_id, index):
+        """Record progress; stop when the owner cancelled or a newer switch replaced the job."""
+        row = self._update_job(job['option'], job['id'],
+                               step={'model': model, 'case': case_id, 'index': index + 1, 'cases': len(CASE_IDS)})
+        if row is None or row.get('state') == JOB_CANCELLING:
+            raise QualificationCancelled()
+
+    def _run_job(self, job):
+        """Run one claimed job.  It holds ``_activating``, which is released here."""
+        option, main_id = job['option'], job['main']
+
+        def finish(state, **fields):
+            self._update_job(option, job['id'], state=state, finished_at=self.clock(), **fields)
+
+        try:
+            if self.mode() != MODE_FOLLOW or self.service.main_ai.current() != main_id:
+                # The owner chose another Judgment AI, or switched again, meanwhile.
+                return finish(JOB_CANCELLED, failure='superseded')
+            self._checkpoint = lambda model, case_id, index: self._job_checkpoint(job, model, case_id, index)
             try:
-                return self._follow(main_id, keep_previous=False)
-            except Exception:  # never report a committed Main AI switch as failed
-                with self.service.lock:
-                    self.store.put('decision_route', {'mode': MODE_FOLLOW, 'main': main_id, 'transport': ROUTE_OFF,
-                                                      'failure': 'probe-failed', 'activated_at': self.clock()})
-                return {'state': 'attention', 'failure': 'probe-failed',
-                        'message': '판단 AI를 확인하는 중 오류가 났습니다.'}
+                # keep_previous: the decision_route row changes only on a pass.
+                self._follow(main_id, keep_previous=True)
+            except QualificationCancelled:
+                row = self._jobs().get(option) or {}
+                return finish(JOB_CANCELLED, failure=row.get('failure') or 'cancelled')
+            except DecisionRouteError as exc:
+                failure = self._latest_failure(main_id)
+                self._record_check(option, {'state': 'failed', 'failure': failure})
+                message = str(exc)[:300]
+                return finish(JOB_FAILED, failure=failure, message=message,
+                              result={'state': 'attention', 'failure': failure, 'message': message})
+            except Exception as exc:  # noqa: BLE001 - reported as a failure, never a pass
+                self._record_check(option, {'state': 'failed', 'failure': 'probe-failed'})
+                message = (f'판단 AI를 확인하는 중 오류가 났습니다({type(exc).__name__}). '
+                           '현재 대화 해석 경로는 그대로 유지됩니다.')
+                return finish(JOB_FAILED, failure='probe-failed', message=message,
+                              result={'state': 'attention', 'failure': 'probe-failed', 'message': message})
+            return finish(JOB_PASSED, result={'state': 'active'})
+        finally:
+            self._checkpoint = None
+            self._release_quietly()
+
+    def _latest_failure(self, main_id):
+        """The failure code the qualification just recorded (follow or CLI check row)."""
+        checks = self._checks()
+        options = [f'{MODE_FOLLOW}:{main_id}']
+        engine = (FOLLOW_CANDIDATES.get(main_id) or {}).get('engine')
+        if engine:
+            options.append(f'{ROUTE_SUBSCRIPTION_CLI}:{engine}')
+        rows = [checks[key] for key in options
+                if isinstance(checks.get(key), dict) and checks[key].get('state') == 'failed']
+        rows.sort(key=lambda row: row.get('checked_at') or 0, reverse=True)
+        return (rows[0].get('failure') if rows else '') or 'probe-failed'
+
+    def cancel_qualification(self, main_id=None):
+        """Owner cancellation: a queued job stops now, a running one at its next checkpoint."""
+        main_id = main_id or self.service.main_ai.current()
+        option = f'{MODE_FOLLOW}:{main_id}'
+        with self.service.lock:
+            rows = self._jobs()
+            row = rows.get(option)
+            if not row or row.get('state') not in JOB_OPEN:
+                raise DecisionRouteError('취소할 판단 AI 확인이 없습니다.')
+            if row['state'] == JOB_QUEUED:
+                row.update(state=JOB_CANCELLED, failure='cancelled', finished_at=self.clock())
+            else:
+                row.update(state=JOB_CANCELLING, failure='cancelled')
+            rows[option] = row
+            self._put_jobs(rows)
+        return self.status()
+
+    def recover_qualification(self):
+        """Restart recovery (#685): a job that was running is requeued once, else ``failed: interrupted``.
+
+        A job is requeued only while its Main AI is current and the Judgment
+        AI still follows it; a job that was being cancelled ends cancelled.
+        Returns ``[(option, new_state)]``.
+        """
+        now = self.clock()
+        changed = []
+        with self.service.lock:
+            rows = self._jobs()
+            for option, row in rows.items():
+                if row.get('state') not in (JOB_RUNNING, JOB_CANCELLING):
+                    continue
+                requeue = (row['state'] == JOB_RUNNING and (row.get('requeued') or 0) < MAX_REQUEUES
+                           and self.mode() == MODE_FOLLOW and self.service.main_ai.current() == row.get('main'))
+                if requeue:
+                    row.update(state=JOB_QUEUED, requeued=(row.get('requeued') or 0) + 1, recovered_at=now, step=None)
+                elif row['state'] == JOB_CANCELLING:
+                    row.update(state=JOB_CANCELLED, finished_at=now, recovered_at=now)
+                else:
+                    row.update(state=JOB_FAILED, failure='interrupted', finished_at=now, recovered_at=now,
+                               message='판단 AI 확인 중 AgentOS가 다시 시작되어 중단되었습니다. '
+                                       '현재 대화 해석 경로는 그대로 유지됩니다.')
+                changed.append((option, row['state']))
+            if changed:
+                self._put_jobs(rows)
+        return changed
+
+    def qualification(self, main_id=None):
+        """The current Main AI's follow job, content free, or None.  Read-only."""
+        main_id = self.service.main_ai.current() if main_id is None else main_id
+        row = self._jobs().get(f'{MODE_FOLLOW}:{main_id}') if main_id else None
+        return dict(row) if row else None
 
     def _follow(self, main_id, keep_previous):
         option = f'{MODE_FOLLOW}:{main_id}'
@@ -568,10 +789,14 @@ class DecisionRoutes:
         no other model is tried.
         """
         tried = []
+        # #685: a background job records progress and can stop between cases.
+        job_checkpoint = self._checkpoint
         for model in candidates:
             seen = []  # content-free records of the qualification calls, for observed identity only
             engine = make_engine(model, seen.append)
-            result = qualify(engine)
+            checkpoint = (None if job_checkpoint is None
+                          else lambda case_id, index, model=model: job_checkpoint(model, case_id, index))
+            result = qualify(engine, checkpoint=checkpoint)
             observed = sorted({row.get('observed_model') for row in seen
                                if row.get('observed_model') and row.get('observed_model') != 'not reported'})
             failures = [row.get('failure') for row in seen if row.get('failure')]
@@ -580,6 +805,9 @@ class DecisionRoutes:
                           (failures[-1] if failures else ''),
                           'observed_model': ', '.join(observed) or 'not reported'})
             if result['qualified']:
+                if job_checkpoint is not None:
+                    # A cancellation that arrived during the last case wins over the commit.
+                    job_checkpoint(model, 'commit', len(CASE_IDS) - 1)
                 return model, result, tried
         return None, None, tried
 
@@ -695,20 +923,23 @@ class DecisionRoutes:
             elif route['transport'] == ROUTE_SUBSCRIPTION_CLI:
                 active.update(self._cli_active(route, engines))
         follow_check = checks.get(f'{MODE_FOLLOW}:{main}') if main else None
+        # #685: the background qualification for the current Main AI, if any.
+        qualification = self.qualification(main) if self.mode(route) == MODE_FOLLOW else None
         return {'active': active, 'direct_api': direct, 'jev': jev, 'subscription_cli': engines,
                 'suite_version': SUITE_VERSION, 'mode': self.mode(route), 'main': main, 'follow': follow,
                 'follow_candidates': {route_id: self.follow_preview(route_id) for route_id in CHOOSER_ORDER},
-                'follow_check': follow_check,
-                'effective': self.effective(active, route, main, follow, follow_check),
+                'follow_check': follow_check, 'qualification': qualification,
+                'effective': self.effective(active, route, main, follow, follow_check, qualification),
                 'model_lists': self._model_lists()}
 
-    def effective(self, active, route, main, follow, follow_check=None):
+    def effective(self, active, route, main, follow, follow_check=None, qualification=None):
         """What answers the next judgment, in words the owner can check (#679).
 
         ``state`` is ``active`` (a route is in use), ``fallback`` (the #417
         default OpenAI API answers although the Judgment AI is meant to follow
         the Main AI - said out loud, never silent), ``attention`` (nothing
-        answers until the owner acts) or ``off``.  ``template``/``params``
+        answers until the owner acts), ``checking`` (a background
+        qualification runs, #685) or ``off``.  ``template``/``params``
         (and ``reason_template``/``reason_params``) let Settings translate
         the sentence; ``text`` is the Korean rendering.  Read-only; no call.
         """
@@ -726,8 +957,28 @@ class DecisionRoutes:
         verified = '검증됨' if active.get('qualification') else '확인됨'
         if route is not None and route.get('transport') == ROUTE_OFF and route.get('mode') != MODE_FOLLOW:
             return said('off', '판단 AI를 쓰지 않습니다. 판단이 필요한 기능은 건너뜁니다.')
+        # #685: a background qualification for the current Main AI.  Until it
+        # passes, whatever answered before still answers (or nothing does).
+        job = qualification or {}
+        if job.get('state') in JOB_OPEN:
+            step = job.get('step') or {}
+            progress = ('취소하는 중' if job['state'] == JOB_CANCELLING
+                        else f'{step.get("model")} {step.get("index")}/{step.get("cases")}'
+                        if job['state'] == JOB_RUNNING and step.get('model') else '대기 중')
+            if active.get('available'):
+                return said('checking', '판단 AI를 확인하는 중({progress}) — 통과할 때까지 지금 판단 경로를 그대로 씁니다.',
+                            progress=progress)
+            return said('checking', '판단 AI를 확인하는 중({progress}) — 끝날 때까지 판단이 필요한 기능은 건너뜁니다. '
+                        '다른 경로로 자동 전환하지 않습니다.', progress=progress)
+        job_reason = None
+        if job.get('state') in (JOB_FAILED, JOB_CANCELLED) and not (
+                active.get('source') == 'follow' and active.get('available') and route.get('main') == main):
+            job_reason = ('기본 AI({main})에 맞는 판단 AI 확인이 끝나지 않았습니다: {detail}',
+                          {'main': main_name, 'detail': JOB_FAILURE_TEXT.get(job.get('failure'), '확인 실패')})
         if active.get('source') == 'default':
-            if follow.get('available') and follow.get('transport') == ROUTE_SUBSCRIPTION_CLI:
+            if job_reason:
+                reason = job_reason
+            elif follow.get('available') and follow.get('transport') == ROUTE_SUBSCRIPTION_CLI:
                 reason = ('기본 AI({main})를 따르는 구독 판단을 아직 확인하지 않았습니다. 확인을 누르면 가장 저렴한 모델부터 검증합니다.',
                           {'main': main_name})
             elif follow.get('available'):
@@ -743,7 +994,9 @@ class DecisionRoutes:
             if active.get('available'):
                 return said('active', '기본 AI({main})를 따라가는 중 — {model}, {verified}',
                             main=main_name, model=model or '-', verified=verified)
-            if active.get('stale'):
+            if job_reason:
+                reason = job_reason
+            elif active.get('stale'):
                 reason = ('기본 AI가 {main}(으)로 바뀌어 판단 AI를 다시 확인해야 합니다.', {'main': main_name})
             elif active.get('transport') == ROUTE_OFF:
                 reason = ('기본 AI({main})를 따르는 판단 AI 확인에 실패했습니다.', {'main': main_name})

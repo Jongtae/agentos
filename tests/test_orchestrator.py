@@ -1416,3 +1416,29 @@ class SecretaryStandard(Harness):
         self.assertIn('completion criteria are listed, each of them is met', GOAL_REACHED_PROPOSITION)
         self.assertIn('no observation sources them', GOAL_REACHED_PROPOSITION)
 
+    def test_a_direct_route_answer_short_of_the_criteria_is_re_delegated(self):
+        """#767 review P1: the direct route's ordinary-conversation success is held to the criteria."""
+        self.transport.answers = ['일반적인 조언입니다.']
+        self.engine.answers = ['구체적인 선택지와 출처입니다.']
+        self.script([plan('openai', 'Name options.', criteria=('names specific options with sources',)),
+                     plan('codex', 'Look them up.')], goals=[False, True])
+        job, row = self.run_work('추천해줘')
+        outcomes = [detail['outcome'] for _status, detail in self.events(job, 'evaluated')]
+        self.assertEqual(outcomes, ['not_reached', 'reached'])
+        self.assertEqual(len(self.engine.turns), 1, 'the second attempt ran')
+        self.assertEqual(row['status'], 'succeeded')
+        self.assertEqual(row['response'], '구체적인 선택지와 출처입니다.')
+        self.assertIn('names specific options with sources', self.asked_goals[0].facts['completion_criteria'])
+
+    def test_a_direct_route_answer_is_kept_when_the_criteria_judgment_is_unavailable(self):
+        self.transport.answers = ['답입니다.']
+        self.script([plan('openai', 'Answer.')], goals=[])
+        job, row = self.run_work('질문')
+        self.assertEqual(self.events(job, 'evaluated')[-1][1]['outcome'], 'reached')
+        self.assertEqual(row['status'], 'succeeded')
+
+    def test_an_owner_request_not_to_look_things_up_is_honoured_by_the_standard(self):
+        from personal_agent.agent_runtime import CORE_INSTRUCTIONS
+        self.assertIn('unless the owner asked you not to', CORE_INSTRUCTIONS)
+        self.assertIn('unless the owner asked not to look anything up', QUESTION)
+

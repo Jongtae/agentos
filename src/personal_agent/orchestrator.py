@@ -144,7 +144,7 @@ QUESTION = (
     'personal secretary would deliver for the owner\'s situation: the specific options or result, the current '
     'facts they depend on from cited sources, and their fit to what the conversation says; when the answer depends '
     'on facts that change over time or depend on place, the brief asks the worker to look them up and never rules '
-    'that out. The owner\'s request '
+    'that out unless the owner asked not to look anything up. The owner\'s request '
     'may continue recent_conversation: resolve what it refers to or leaves unsaid from that conversation and write '
     'it into brief.goal, and select history when the request continues it; do not brief the worker to ask the '
     'owner for something the conversation already says. brief.context lists only '

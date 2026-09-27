@@ -135,14 +135,15 @@ def tool_error_result(exc, action):
 
 
 def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROFILE, browser_relay=None,
-          search_off_reason=''):
+          search_off_reason='', only=None):
     """Serve one Work's AgentOS tools over stdio for the route profile the host named (#701).
 
     ``profile`` is ``trusted-local`` or ``strict-isolated``; anything else
     serves the strict set.  ``browser_relay`` (trusted-local only) is the
     service's relay directory: the browser tools are then listed and every
     browser call is executed by the service (``cli_browser_relay``); without
-    it no browser tool is offered.
+    it no browser tool is offered.  ``only`` (#710) is the orchestrator's
+    validated tool subset for this turn (None: the profile's set); it only narrows.
     """
     profile = profile if profile in HOST_CLI_PROFILES else STRICT_PROFILE
     relay = RelayClient(browser_relay) if browser_relay and profile == BOUNDED_PROFILE else None
@@ -154,7 +155,7 @@ def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROF
     # schemas come from Capabilities.definitions(), never a bridge-local list.
     capabilities = Capabilities(store, None, {}, '', job_id, record, network=LocalTools(providers=ProviderRegistry.from_store(store)), document_access=False,
                                 # #678 P1: a turn that may search natively gets no private read.
-                                allowed_tools=set(turn_actions(profile, native_search and profile == BOUNDED_PROFILE)),
+                                allowed_tools=set(turn_actions(profile, native_search and profile == BOUNDED_PROFILE, only)),
                                 # #701: a placeholder that lists the browser tools; their calls go to the service.
                                 browser=unused_browser_factory if relay is not None else None,
                                 inherited_provenance=_provenance(provenance), lookup_hint=CLI_LOOKUP_HINT,
@@ -168,6 +169,7 @@ def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROF
     tools.PROFILE = profile
     tools.relay = relay
     tools.native_search_reason = str(search_off_reason or '')
+    tools.only = only
     for line in sys.stdin:
         try:
             request = json.loads(line)
@@ -237,6 +239,9 @@ if __name__ == '__main__':
     parser.add_argument('--profile',default=BOUNDED_PROFILE)
     parser.add_argument('--search-off-reason',default='')
     parser.add_argument('--browser-relay',default=None)
+    # #710: the orchestrator's per-request tool subset (comma-separated; absent: the profile's set).
+    parser.add_argument('--only',default=None)
     args=parser.parse_args()
+    only=None if args.only is None else frozenset(name for name in args.only.split(',') if name)
     serve(args.data, args.job, args.provenance, native_search=args.native_search, profile=args.profile,
-          browser_relay=args.browser_relay, search_off_reason=args.search_off_reason)
+          browser_relay=args.browser_relay, search_off_reason=args.search_off_reason, only=only)

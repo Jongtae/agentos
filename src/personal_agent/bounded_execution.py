@@ -800,6 +800,18 @@ def cli_metadata(engine_id, raw):
             meta['tool_calls'].append({'type': item.get('type'), 'name': str(name)[:80], 'status': str(item.get('status') or '')[:20]})
     meta['tool_calls'] = meta['tool_calls'][:30]
     meta['native_searches'] = native_searches(engine_id, records)
+    # #795: how the stream ended, content-free, so a run with no final answer is
+    # diagnosable: the last event types and any error text the CLI itself reported.
+    meta['stream_tail'] = [str(record.get('type') or '')[:40] for record in records[-12:]]
+    errors = []
+    for record in records:
+        error = record.get('error') if record.get('type') in ('turn.failed', 'error') else None
+        text = error.get('message') if isinstance(error, dict) else (error if isinstance(error, str) else record.get('message') if record.get('type') == 'error' else None)
+        if isinstance(text, str) and text.strip():
+            # The same redaction ``failure_details`` applies to this text (secrets, control characters).
+            errors.append(' '.join(redact_reason(text).split())[:300])
+    if errors:
+        meta['stream_errors'] = errors[-3:]
     return meta
 
 

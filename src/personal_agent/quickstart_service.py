@@ -1032,6 +1032,13 @@ class AgentService:
             for key in ('tool_calls','agentos_tool_calls'):
                 if isinstance(fields.get(key),list):
                     fields[key]=[{k:self._redact_provenance(v)[:80] for k,v in call.items() if isinstance(v,str)} for call in fields[key] if isinstance(call,dict)]
+            if isinstance(fields.get('stream_errors'),list):
+                # #792 review: a CLI error may echo the request or owner values: withheld when it
+                # echoes the request, then the Work's saved values, stored secrets and paths removed.
+                from .bounded_execution import redact_reason
+                request=(self.store.job(job_id) or {}).get('message') or None
+                fields['stream_errors']=[self.scrub_work_text(job_id,self._redact_provenance(redact_reason(str(text),request)))[:300]
+                                         for text in fields['stream_errors'][:3]]
             self.store.put_turn_provenance(job_id,{**current,**{k:v for k,v in fields.items() if v is not None},'recorded_at':time.time()})
         except Exception:
             LOG.warning('turn provenance could not be recorded job=%s',job_id)

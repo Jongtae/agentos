@@ -503,13 +503,23 @@ class ToolsAndReplan(Harness):
         self.assertTrue(all(len(line) < 260 for line in descriptions.splitlines()), 'one line per tool')
         self.assertIsNone(self.events(job, 'planned')[0][1]['tools_reason'])
 
-    def test_a_subset_without_a_stated_reason_becomes_the_full_toolset(self):
+    def test_a_subset_without_a_stated_reason_keeps_its_private_reads(self):
+        """#795: an unreasoned subset that asks for private reads keeps them (search removed), never the default
+        toolset that would hide them again on a native-search turn."""
         self.script([plan('codex', 'Answer.', tools=self.no_search(), tools_reason='')], goals=[True])
         job, _row = self.run_work('알려줘')
+        self.assertEqual(self.engine.turns[0]['only'], sorted(self.no_search()))
+        self.assertFalse(self.engine.turns[0]['native_search'])
+        planned = self.events(job, 'planned')[0][1]
+        self.assertEqual(planned['tools_replaced'], {'requested': sorted(self.no_search()), 'why': 'no_reason',
+                                                     'kept': 'private_reads'})
+
+    def test_a_subset_without_private_reads_and_without_a_reason_becomes_the_full_toolset(self):
+        self.script([plan('codex', 'Answer.', tools=self.no_private(), tools_reason='')], goals=[True])
+        job, _row = self.run_work('알려줘', key='no-private-no-reason')
         self.assertIsNone(self.engine.turns[0]['only'])
         planned = self.events(job, 'planned')[0][1]
-        self.assertIsNone(planned['tools'])
-        self.assertEqual(planned['tools_replaced'], {'requested': sorted(self.no_search()), 'why': 'no_reason'})
+        self.assertEqual(planned['tools_replaced'], {'requested': sorted(self.no_private()), 'why': 'no_reason'})
 
     def test_a_subset_with_a_reason_is_kept_and_recorded(self):
         self.script([plan('codex', 'Read the notes.', tools=self.no_search(), tools_reason='keep private reads apart')],
@@ -521,7 +531,8 @@ class ToolsAndReplan(Harness):
 
     def test_only_the_two_separation_shapes_survive_validation(self):
         """#735 (Work a8e6aa7b): every one-tool subset became the full toolset."""
-        cases = {('bounded_public_research',): 'shape', ('web_search',): 'shape', ('list_notes',): 'shape',
+        # #795: ('list_notes',) asks for a private read, so it keeps the private reads (tested separately).
+        cases = {('bounded_public_research',): 'shape', ('web_search',): 'shape',
                  ('weather', 'web_search'): 'shape', ('read_file',): 'not_offered'}
         for tools, why in cases.items():
             with self.subTest(tools=tools):
@@ -706,7 +717,7 @@ class SubsetCategories(unittest.TestCase):
     """#735 review: a subset removes a whole category or it is replaced."""
 
     WORKER = {'tools': ['bounded_public_research', 'list_memory', 'list_notes', 'weather', 'web_search'],
-              'private_tools': ['list_memory', 'list_notes']}
+              'private_tools': ['list_memory', 'list_notes'], 'native_search': True}
 
     def keep(self, removed, reason='keep them apart'):
         from personal_agent.orchestrator import subset_or_default
@@ -716,9 +727,23 @@ class SubsetCategories(unittest.TestCase):
         self.assertEqual(self.keep({'list_memory', 'list_notes'})[1], None)
         self.assertEqual(self.keep({'web_search', 'bounded_public_research'})[1], None)
 
-    def test_a_partial_private_category_is_replaced(self):
+    def test_a_partial_private_category_with_search_asked_for_is_replaced(self):
+        """The plan asked for web search too, so the mix is the full toolset's (#795 review)."""
         self.assertEqual(self.keep({'list_notes'}), (None, {'requested': ['bounded_public_research', 'list_memory',
                                                                          'weather', 'web_search'], 'why': 'shape'}))
+
+    def test_a_worker_without_its_own_search_or_a_plan_asking_for_search_keeps_the_old_rule(self):
+        """#795 review: only a native-search worker hides private reads; a requested search is honoured."""
+        from personal_agent.orchestrator import subset_or_default
+        api = {**self.WORKER, 'native_search': False}
+        self.assertIsNone(subset_or_default(api, ['list_memory', 'weather'], 'why')[0])
+        self.assertIsNone(self.keep({'bounded_public_research', 'list_notes'})[0], 'web_search was asked for')
+
+    def test_a_single_private_read_request_keeps_every_private_read(self):
+        """The 2026-09-28 live case: the plan asked for calendar_query alone; it must not become the default set."""
+        tools, replaced = self.keep({'bounded_public_research', 'list_notes', 'weather', 'web_search'})
+        self.assertEqual(tools, frozenset({'list_memory', 'list_notes', 'weather'}))
+        self.assertEqual(replaced['kept'], 'private_reads')
 
     def test_a_partial_search_category_is_replaced(self):
         self.assertEqual(self.keep({'web_search'})[1]['why'], 'shape')
@@ -1749,3 +1774,39 @@ class SecretaryStandard(Harness):
         self.assertIn('unless the owner asked you not to', CORE_INSTRUCTIONS)
         self.assertIn('unless the owner asked not to look anything up', QUESTION)
 
+
+
+class StreamDiagnostics(unittest.TestCase):
+    def test_the_end_of_a_codex_stream_is_recorded_without_content(self):
+        from personal_agent.bounded_execution import cli_metadata
+        raw = '\n'.join(json.dumps(line) for line in (
+            {'type': 'thread.started'}, {'type': 'item.started', 'item': {'type': 'mcp_tool_call', 'tool': 'browser_open'}},
+            {'type': 'error', 'message': 'stream disconnected before completion'},
+            {'type': 'turn.failed', 'error': {'message': 'model   stream ended'}}))
+        meta = cli_metadata('codex', raw)
+        self.assertEqual(meta['stream_tail'], ['thread.started', 'item.started', 'error', 'turn.failed'])
+        self.assertEqual(meta['stream_errors'], ['stream disconnected before completion', 'model stream ended'])
+
+class StreamRedaction(unittest.TestCase):
+    def test_stream_errors_are_redacted_like_failure_details(self):
+        from personal_agent.bounded_execution import cli_metadata
+        raw = json.dumps({'type': 'error', 'message': 'bad key sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX1234 \x07 rejected'})
+        [error] = cli_metadata('codex', raw)['stream_errors']
+        self.assertNotIn('ABCDEFGHIJKLMNOPQRSTUVWX1234', error)
+
+
+
+class StreamErrorsInTheTurnRecord(Harness):
+    def test_a_stream_error_echoing_the_request_or_a_secret_is_not_stored(self):
+        """#792 review: the stored turn record passes the service redaction, not only the pattern pass."""
+        self.engine.fail = [ExecutionError('no answer', failure_class='invalid-output',
+                                           meta={'stream_errors': [f'rejected: 비밀 요청 문장 그대로 반복 key {OPENAI_KEY}',
+                                                                   f'bad key {OPENAI_KEY}']})]
+        self.script([plan('codex', 'Answer.')], goals=[True])
+        job, _row = self.run_work('비밀 요청 문장 그대로 반복')
+        errors = self.store.turn_provenance(job).get('stream_errors')
+        self.assertEqual(len(errors or []), 2, 'the errors are recorded, redacted')
+        self.assertIn('bad key', errors[1])
+        stored = json.dumps(errors, ensure_ascii=False)
+        self.assertNotIn(OPENAI_KEY, stored)
+        self.assertNotIn('비밀 요청 문장 그대로 반복', stored)

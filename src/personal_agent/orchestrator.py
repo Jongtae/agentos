@@ -468,7 +468,11 @@ def subset_or_default(worker, requested, reason):
     removes nothing else, and states that reason.  Removing part of a
     category is not a separation and is replaced too.
     Every other subset becomes the worker's full offered toolset (None) and
-    ``replaced`` records what was asked for and why it was not kept.
+    ``replaced`` records what was asked for and why it was not kept - except
+    (#795) a subset that asks for a private-read tool: the full toolset would
+    hide it again on a turn with the CLI's own web search (#678), so it
+    becomes the kept shape that keeps the private reads (the web-search tools
+    removed) and ``replaced['kept']`` says so.
     """
     offered = frozenset(worker['tools'])
     requested = frozenset(requested or ())
@@ -483,6 +487,11 @@ def subset_or_default(worker, requested, reason):
         why = SUBSET_NO_REASON
     else:
         return requested, None
+    private = offered & frozenset(worker.get('private_tools') or ())
+    # #795 review: only where the worker's own web search would hide the reads (#678), and
+    # never when the plan asked for a search tool itself (that mix is the full toolset's).
+    if worker.get('native_search') and requested & private and not requested & search_tools() and offered & search_tools():
+        return offered - search_tools(), {'requested': sorted(requested), 'why': why, 'kept': 'private_reads'}
     return None, {'requested': sorted(requested), 'why': why}
 
 

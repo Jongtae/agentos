@@ -1890,3 +1890,28 @@ class OwnerModelUnit(unittest.TestCase):
         self.assertIn('the worker always receives them', QUESTION)
         self.assertIn('brief.context lists only the extra AgentOS context sections the worker needs (history, prepared)',
                       QUESTION)
+
+
+class StatedProfileInLookups(unittest.TestCase):
+    """#804 review: an owner-stated, accepted profile fact may shape a lookup; other written values stay out (#605 N4)."""
+
+    def test_only_an_accepted_profile_fact_is_not_a_lookup_exclusion(self):
+        from personal_agent.agent_runtime import owner_stated_profile
+        self.assertTrue(owner_stated_profile('profile.place.work', {'state': 'current', 'id': 'm1'}))
+        self.assertFalse(owner_stated_profile('profile.place.work', {'state': 'pending', 'requires_owner_approval': True}))
+        self.assertFalse(owner_stated_profile('passport', {'state': 'current', 'id': 'm2'}))
+
+    def test_work_written_values_skips_only_accepted_profile_facts(self):
+        from personal_agent.agent_runtime import work_written_values
+        with tempfile.TemporaryDirectory() as tmp:
+            store = QuickStore(Path(tmp) / 's')
+            job = store.enqueue('판교 카카오뱅크로 출근했어', 'k1')
+            stated = store.save_memory_candidate(job, 'profile.place.work', '판교 카카오뱅크')
+            store.save_memory_candidate(job, 'profile.food.likes', '추론된 선호')
+            store.save_memory_candidate(job, 'passport', '여권번호 M1234')
+            with store.db() as db:
+                db.execute("UPDATE memory_candidates SET state='accepted' WHERE id=?", (stated['id'],))
+            written = work_written_values(store, job)
+            self.assertNotIn('판교 카카오뱅크', written)
+            self.assertIn('추론된 선호', written, 'a pending inference stays excluded')
+            self.assertIn('여권번호 M1234', written)

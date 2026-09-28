@@ -1069,13 +1069,22 @@ def _work_draft_values(store, events, tools=None):
   if isinstance(payload,dict):values.extend(str(value) for value in payload.values() if isinstance(value,str))
  return values
 
+PROFILE_PREFIX='profile.'
+
+def owner_stated_profile(memory_key, result):
+ """Whether a save_memory result is an owner-stated ``profile.`` fact #597 accepted as Memory (#804)."""
+ return (str(memory_key or '').startswith(PROFILE_PREFIX) and isinstance(result,dict)
+         and result.get('state')=='current' and not result.get('requires_owner_approval'))
+
 def work_written_values(store, job_id, tools=None):
  """The values one Work wrote to a private store: Memory candidates, notes
  and calendar drafts (#605).  The lookup exclusion set; also removed from a
  prepared answer before it is kept for later turns (#659)."""
  import hashlib
  with store.db() as db:
-  written=[row['content'] for row in db.execute('SELECT content FROM memory_candidates WHERE work_key=?',(store._work_binding(job_id),))]
+  # #804: a ``profile.`` fact the owner stated and #597 accepted is not a lookup exclusion (see save_memory).
+  written=[row['content'] for row in db.execute('SELECT content,memory_key,state FROM memory_candidates WHERE work_key=?',(store._work_binding(job_id),))
+           if not (row['state']=='accepted' and str(row['memory_key'] or '').startswith(PROFILE_PREFIX))]
   # A note this Work saved: `/note` stores it under the Work id, `save_note`
   # under sha256(Work id + content).  Survives a restarted bridge (#605 N2).
   for row in db.execute('SELECT id,content FROM notes'):
@@ -2119,7 +2128,7 @@ class Capabilities:
    # Every model-proposed write becomes a value-scoped MemoryCandidate first.
    # Only a write the owner's own request covers is then accepted through the
    # owner's exact-approval path; everything else stays pending for them.
-   self.written_private.append(args['content']);self.written_labels.add('owner-memory')
+   self.written_labels.add('owner-memory')
    candidate=self.store.save_memory_candidate(self.job_id,args['memory_key'],args['content'])
    refusal=self.memory_write_refusal(candidate['memory_key'],candidate['content'])
    if refusal is None:
@@ -2127,6 +2136,10 @@ class Capabilities:
     result=self.store.accept_memory_candidate(MEMORY_OWNER,self.job_id,candidate['id'],candidate['content_digest'],approval['approval_token'])
    else:
     result={**candidate,'requires_owner_approval':True,'refused_because':refusal}
+   # #605 N4: a written value is kept out of this Work's public lookups - except (#804) a
+   # ``profile.`` fact the owner stated and #597 accepted: the owner gave it to be used
+   # (their workplace, their home), so it may shape a lookup like the request itself.
+   if not owner_stated_profile(candidate['memory_key'],result):self.written_private.append(args['content'])
    self.evidence.append({'tool':name,'result':result}); return result
   if name=='list_memory':
    result={'memories':self.store.memories()}; self.evidence.append({'tool':name,'result':result}); return result

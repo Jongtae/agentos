@@ -80,9 +80,11 @@ from . import information_use
 from .browser_session import BrowserProfile, ascii_host, binding_digest, registrable_domain
 from .browser_jar import unexpired
 from .cli_browser_relay import BrowserRelay
-from .telegram_presence import (CONTROL_DETAILS, CONTROL_RETRY, NO_STEP_LINE, RECEIVED_REACTION, WAIT_CHAT_ACTION, WAIT_DRAFT,
-                                PresenceTiming, TelegramTurnAddressing, WaitState, draft_frame, draft_id_for, draft_step,
-                                outcome_reaction, render_telegram_html, reply_controls_markup, without_consumed)
+from .telegram_presence import (ATTENTION_ACTION, ATTENTION_ASK, ATTENTION_COOLDOWN, ATTENTION_PREPARED, ATTENTION_REMINDER,
+                                ATTENTION_REMINDER_HORIZON, ATTENTION_TOOL, CONTROL_DETAILS, CONTROL_RETRY, NO_STEP_LINE,
+                                RECEIVED_REACTION, WAIT_CHAT_ACTION, WAIT_DRAFT, PresenceTiming, TelegramTurnAddressing,
+                                WaitState, draft_frame, draft_id_for, draft_step, outcome_reaction, pick_attention,
+                                render_telegram_html, reply_controls_markup, without_consumed)
 LOCAL_RESUMED_KEY='local_authority_resumed_jobs'
 LOCAL_DOCUMENT_RESUME_KEY='local_authority_document_resume_jobs'
 LOCAL_DOCUMENT_APPROVAL_TEXT=('폴더를 허용한 방금 요청을 계속하려면 연결 문서 발췌문을 외부 모델에 보내는 승인이 필요합니다. '
@@ -4280,13 +4282,19 @@ class AgentService:
                     if line is None:
                         continue  # a payment/approval step: the approval prompt is the only surface
                     if state.draft_at is None or now-state.draft_at>=timing.dots_refresh:
-                        text=draft_frame(line,state.dots_frame)
+                        # #839: one already-prepared item may ride along, chosen once per Work.
+                        if state.attention is None:
+                            state.attention=self.waiting_attention(job,now) or {}
+                        text=draft_frame(line,state.dots_frame,state.attention.get('line'))
                         if self._send_draft(job,text):
                             state.draft_at=now
                             state.draft_text=text
                             state.dots_frame+=1
                             state.shown.add(WAIT_DRAFT)
                             shown.append((job['id'],WAIT_DRAFT))
+                            if state.attention and not state.attention_shown:
+                                state.attention_shown=True
+                                self._record_attention(job,state.attention,now)
                             continue
                         # Unsupported/rejected draft: fall back to typing for this Work.
                         state.draft_failed=True
@@ -4296,6 +4304,98 @@ class AgentService:
                         state.shown.add(WAIT_CHAT_ACTION)
                         shown.append((job['id'],WAIT_CHAT_ACTION))
         return shown
+
+    # -- ATTN-WAIT-01 (#839): one prepared item while the owner waits ----------
+
+    #: Config row: item ref -> the time it was last surfaced (bounded).
+    ATTENTION_SURFACED_KEY='attention_surfaced'
+    ATTENTION_SURFACED_LIMIT=200
+
+    def waiting_attention(self, job, now):
+        """The one existing owner-facing item to show on this Work's draft, or None (#839).
+
+        Deterministic from state only, no model call: a fresh prepared answer
+        that did not reach the owner as a message, else an accepted reminder
+        due within ATTENTION_REMINDER_HORIZON, else an ask still waiting for
+        the owner (a proposed preparation, an open memory ask).  Items this
+        Work is itself about (its own preparation, its own proposals or ask)
+        are excluded, and an item surfaced within ATTENTION_COOLDOWN is not
+        repeated.  Words come from the item's own text, redacted like any
+        draft line.  A failure here only means no line.
+        """
+        try:
+            items=self._attention_items(job,now)
+            chosen=pick_attention(items,now,self.store.config(self.ATTENTION_SURFACED_KEY,{}),ATTENTION_COOLDOWN)
+            if not chosen:return None
+            shown=' '.join(str(self.scrub_work_text(job['id'],chosen['line'])).split())
+            return {**chosen,'line':shown} if shown else None
+        except Exception as exc:  # presentation only
+            LOG.info('waiting attention skipped job=%s: %s',job.get('id'),type(exc).__name__)
+            return None
+
+    def _attention_items(self, job, now):
+        own=prep.preparation_of(job.get('request_key'))
+        items=[]
+        with self.store.db() as db:
+            # Unread: a fresh ``prepare`` answer whose run did not reach the owner as a
+            # message.  A when_needed watch (#719) is never one: its judgment already
+            # decided whether the owner hears it (a notify was sent; quiet stays quiet).
+            # The predicate runs before the limit (review: three delivered newest rows
+            # must not hide a fourth unread one).
+            prepared=[dict(row) for row in db.execute(
+                "SELECT p.id,p.goal_text,p.prepared_at FROM preparations p JOIN jobs j ON j.id=p.prepared_result_ref "
+                "WHERE p.kind=? AND p.prepared_at>=? AND j.id IS NOT ? AND p.id IS NOT ? AND j.delivery IS NOT 'sent' "
+                "AND (p.delivery_mode IS NULL OR p.delivery_mode!=?) ORDER BY p.prepared_at DESC LIMIT ?",
+                (prep.KIND_PREPARE,now-prep.FRESH_SECONDS,job['id'],own,prep.DELIVERY_WHEN_NEEDED,prep.SECTION_MAX_ITEMS)).fetchall()]
+            reminders=[dict(row) for row in db.execute(
+                "SELECT id,goal_text,due_at,timezone FROM preparations WHERE kind=? AND state=? AND due_at>? AND due_at<=? ORDER BY due_at",
+                (prep.KIND_REMINDER,prep.STATE_SCHEDULED,now,now+ATTENTION_REMINDER_HORIZON)).fetchall()]
+            proposed=[dict(row) for row in db.execute(
+                "SELECT id,kind,goal_text,due_at,timezone,recurrence,every_seconds,window_end,max_runs,delivery_mode,created_at "
+                "FROM preparations WHERE state=? AND created_from IS NOT ? ORDER BY created_at",
+                (prep.STATE_PROPOSED,job['id'])).fetchall()]
+            asks=[dict(row) for row in db.execute(
+                "SELECT job_id,kind,fingerprint,created FROM telegram_notifications WHERE kind IN (?,?) AND state='sent' AND job_id IS NOT ? "
+                "ORDER BY created",(*MEMORY_PROMPT_KINDS,job['id'])).fetchall()]
+        for row in prepared:
+            items.append({'ref':'prep:'+row['id'],'kind':ATTENTION_PREPARED,'text':row['goal_text'],'at':row['prepared_at']})
+        for row in reminders:
+            if row['id']==own:continue
+            items.append({'ref':'prep:'+row['id'],'kind':ATTENTION_REMINDER,'at':row['due_at'],
+                          'text':f"{prep.local_text(row['due_at'],row['timezone'])} {row['goal_text']}"})
+        for row in proposed:
+            if row['id']==own:continue
+            items.append({'ref':'prep:'+row['id'],'kind':ATTENTION_ASK,'at':row['created_at'],'text':prep.proposal_summary(row)})
+        for row in asks:
+            binding=self.memory_binding(row)
+            if not binding or not self.memory_open(binding):continue
+            first=binding['candidates'][self.memory_open(binding)[0]-1]
+            candidate=self.memory_candidate_still(row['job_id'],first.get('id'),first.get('digest'))
+            if not candidate:continue
+            fact=self.memory_fact(candidate['content'],MEMORY_CANDIDATE_CHARS,candidate['memory_key'])[0]
+            items.append({'ref':'memory-ask:'+row['job_id'],'kind':ATTENTION_ASK,'at':row['created'],'text':f'"{fact}" 기억해 둘까요?'})
+        return items
+
+    def _record_attention(self, job, item, now):
+        """Remember the surfacing (cooldown) and record it in the Work's Evidence (#839).
+
+        The event names the item by reference and its shown line (already
+        redacted), so the Work's information-use audit lists it.  Best-effort.
+        """
+        try:
+            surfaced=self.store.config(self.ATTENTION_SURFACED_KEY,{})
+            surfaced=surfaced if isinstance(surfaced,dict) else {}
+            surfaced[item['ref']]=now
+            if len(surfaced)>self.ATTENTION_SURFACED_LIMIT:
+                surfaced=dict(sorted(surfaced.items(),key=lambda pair:pair[1])[-self.ATTENTION_SURFACED_LIMIT:])
+            self.store.put(self.ATTENTION_SURFACED_KEY,surfaced)
+            detail={'host_action':ATTENTION_ACTION,'ref':item['ref'],'kind':item['kind'],
+                    'evidence':{'ref':item['ref'],'kind':item['kind'],'label':item['line']}}
+            with self.store.db() as db:
+                db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                           (job['id'],ATTENTION_TOOL,'succeeded',json.dumps(detail,ensure_ascii=False),now))
+        except Exception as exc:
+            LOG.info('waiting attention record skipped job=%s: %s',job.get('id'),type(exc).__name__)
 
     def _send_draft(self, job, text):
         """One Stop-able plain `sendMessageDraft`: the dots after any step line (#718/#835).

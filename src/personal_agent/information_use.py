@@ -46,6 +46,8 @@ READ_CATEGORIES = {
     'information_use': 'records',
     'browser_open': 'browser', 'browser_read': 'browser', 'browser_find': 'browser', 'browser_click': 'browser',
     'browser_type': 'browser',
+    # ATTN-WAIT-01 (#839): an item AgentOS reminded the owner of on the waiting draft.
+    'attention_surface': 'attention',
 }
 #: Public destinations AgentOS or the CLI sent a lookup to.
 LOOKUP_ACTIONS = frozenset({'web_search', 'bounded_public_research', 'weather', 'public_page_read'})
@@ -54,7 +56,7 @@ CATEGORY_NAMES = {
     'profile': '프로필', 'memory': '기억', 'calendar': '캘린더', 'files': '파일',
     'current_context': '현재 상황', 'notes': '메모', 'browser': '로그인한 브라우저 페이지',
     'settings': '설정', 'spliced': '요청에 붙인 자료', 'prepared': '준비해 둔 답변',
-    'records': '이전 답변의 사용 기록',
+    'records': '이전 답변의 사용 기록', 'attention': '기다리는 동안 알린 것',
 }
 #: Turn-provenance events that are not tools the worker called.
 _NOT_TOOLS = frozenset({'model', 'subscription_engine', 'orchestrator'})
@@ -158,6 +160,8 @@ def _event_items(action, evidence):
         return [f"상태 제안: {_text(evidence.get('predicate'), 60)}"]
     if action == 'settings_read':
         return [f"설정 {_text(evidence.get('category'), 40)}"]
+    if action == 'attention_surface':
+        return [f"{_text(evidence.get('label'))} ({_text(evidence.get('ref'), 60)})"]
     if action == 'information_use':
         names = ', '.join(CATEGORY_NAMES.get(name, name) for name in evidence.get('categories') or ())
         lookups = int(evidence.get('lookup_count') or 0)

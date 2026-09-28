@@ -114,7 +114,7 @@ QUESTION = ('From this one finished request, propose durable facts about the own
             'already covers, even in other words or under another key. Never propose health, finances, '
             'relationships, beliefs, credentials or anything about other '
             'people unless the owner stated it about themselves for a purpose (then kind "stated"). Do not repeat '
-            'what owner_profile already says. Use clock only to turn relative time into an absolute date, or to '
+            'what owner_profile already says. A fact is never the request: what the owner asked for, wished for or wanted watched in owner_request is the task of that request, not a durable fact about the owner, so never turn the request sentence into content. Use clock only to turn relative time into an absolute date, or to '
             'leave out what is only about today. Propose at most 5, and an empty list when nothing durable and '
             'new was said. This judgment writes nothing.')
 
@@ -174,7 +174,7 @@ def key_digest(key):
     return hashlib.sha256(str(key).encode()).hexdigest()[:12]
 
 
-def validate(proposals, known, pending, noted_keys=()):
+def validate(proposals, known, pending, noted_keys=(), request=''):
     """``(kept, dropped)`` of the proposals AgentOS may apply (deterministic).
 
     ``known`` is the normalized content of every current ``profile.`` Memory
@@ -183,16 +183,21 @@ def validate(proposals, known, pending, noted_keys=()):
     duplicate.  ``pending`` is ``{(memory_key, normalized content)}`` of the
     pending candidates.  ``noted_keys`` are the keys the source Work already
     wrote or proposed (#836: one ask per owner message, so upkeep never adds
-    a second fact under a key that Work already covers).  ``dropped`` keeps a
-    key only as a digest.
+    a second fact under a key that Work already covers).  ``request`` is the
+    owner's request text: content that is that sentence is the request, not a
+    fact about the owner (#846; an equality check on the value's shape, no
+    intent detection).  ``dropped`` keeps a key only as a digest.
     """
+    request_text = normalized(request)
     kept, dropped, keys, contents = [], [], set(), set()
     for index, item in enumerate(proposals if isinstance(proposals, list) else ()):
         reason = 'over-limit' if index >= MAX_PROPOSALS else _refusal(item)
         key = item.get('memory_key') if isinstance(item, dict) and isinstance(item.get('memory_key'), str) else None
         if reason is None:
             content = normalized(item['content'])
-            if (key in keys or key in noted_keys or content in contents or content in known
+            if request_text and content == request_text:
+                reason = 'request'
+            elif (key in keys or key in noted_keys or content in contents or content in known
                     or (key, content) in pending):
                 reason = 'duplicate'
         if reason is not None:
@@ -409,7 +414,7 @@ class Upkeep:
         if data is None:
             return STATE_UNAVAILABLE, calls, EVENT_UNAVAILABLE, detail
         known, pending = self.known_values(MEMORY_OWNER, job['id'])
-        kept, dropped = validate(data.get('proposals'), known, pending, noted_keys)
+        kept, dropped = validate(data.get('proposals'), known, pending, noted_keys, request=request)
         applied, verdicts, stopped = [], [], None
         for index, item in enumerate(kept):
             key, content = item['memory_key'], item['content']

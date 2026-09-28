@@ -650,6 +650,17 @@ class Unit(unittest.TestCase):
         for key in ('profile.', 'profile.a b', 'Profile.a', 'profile.' + 'k' * 160):
             self.assertFalse(om.profile_key(key), key)
 
+    def test_the_request_sentence_is_never_a_value(self):
+        """#846: content equal to the owner's request is dropped as 'request'; other values pass."""
+        request = ' 가격이 내려가면  알려줘. '
+        kept, dropped = om.validate([proposal('profile.a', '가격이 내려가면 알려줘.'), proposal('profile.b', '무선 청소기')],
+                                    set(), set(), request=request)
+        self.assertEqual([item['content'] for item in kept], ['무선 청소기'])
+        self.assertEqual([item['reason'] for item in dropped], ['request'])
+        kept, _dropped = om.validate([proposal('profile.a', '가격이 내려가면 알려줘.')], set(), set())
+        self.assertEqual(len(kept), 1, 'without a request there is nothing to compare against')
+        self.assertIn('never turn the request sentence into content', om.QUESTION)
+
     def test_the_question_names_no_task(self):
         from test_no_scenario_code import scenario_tokens
         self.assertEqual(scenario_tokens(om.QUESTION), [])

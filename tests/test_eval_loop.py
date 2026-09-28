@@ -341,6 +341,21 @@ class ScoringTest(unittest.TestCase):
         checks, failures = scoring.deterministic_checks(item, run)
         self.assertFalse(checks['memory'])
 
+    def test_no_memory_of_request_rejects_the_owner_sentence_as_a_value(self):
+        """#846: a standing wish is a watch; the request sentence must not become a memory."""
+        item = scenario(turns=[{'say': '가격이 내려가면 알려줘.'}], expect={'no_memory_of_request': True})
+        run = {'turns': [turn(say='가격이 내려가면 알려줘.')],
+               'diff': {'memories': [], 'candidates': [{'content': '가격이  내려가면 알려줘.'}], 'preparations': [{'id': 'p1'}]}}
+        checks, failures = scoring.deterministic_checks(item, run)
+        self.assertFalse(checks['no_memory_of_request'])
+        self.assertEqual([row['name'] for row in failures], ['no_memory_of_request'])
+        run['diff']['candidates'] = [{'content': '무선 청소기'}]
+        checks, failures = scoring.deterministic_checks(item, run)
+        self.assertTrue(checks['no_memory_of_request'])
+        self.assertEqual(failures, [])
+        self.assertNotIn('no_memory_of_request', scoring.deterministic_checks(scenario(), run)[0])
+        self.assertIn('check_no_memory_of_request', scoring.combine(item, run, checks, failures)[0])
+
     def test_unqualified_judgment_ai_is_an_infra_failure(self):
         run = {'turns': [turn()], 'judgment': {'requalified': True, 'ready': False, 'waited': 300.0}}
         checks, failures = scoring.deterministic_checks(scenario(), run)

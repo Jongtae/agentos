@@ -1008,6 +1008,22 @@ class WatchAcceptanceTests(_WatchCase):
                          (10, 6, 0, 'when_needed'))
         self.assertIn('Asia/Seoul', listed['until_local'])
 
+    def test_a_three_a_day_watch_until_a_deadline_is_accepted_as_a_proposal(self):
+        """#846: the guidance's default cadence (every_minutes ~420 with until) is within the validated window."""
+        self.judge = watch_engine([], preparation=False)
+        self.service.use_decision_engine(self.judge)
+        self.script = [{'content': None, 'tool_calls': [call('1', 'schedule_preparation', kind='prepare',
+                                                             goal='바뀌었는지 확인', due=self.due_iso(600),
+                                                             every_minutes='420', until=self.due_iso(600 + 20 * 3600),
+                                                             delivery='when_needed')]},
+                       {'content': '하루 세 번 확인하고 필요할 때만 알려 드릴까요?'}]
+        self.receive('바뀌면 알려줘')
+        [row] = self.rows()
+        [result] = [json.loads(m['content']) for m in self.model_calls[-1]['messages'] if m['role'] == 'tool']
+        self.assertEqual((row['state'], row['every_seconds'], row['delivery_mode']), ('proposed', 420 * 60, 'when_needed'))
+        self.assertEqual((result['every_minutes'], result['delivery']), (420, 'when_needed'))
+        self.assertNotIn('refused_because', json.dumps(result))
+
     def test_the_owners_own_request_schedules_it(self):
         _work, row, _result = self.propose_watch(preparation=True)
         self.assertEqual((row['state'], row['accepted_by']), ('scheduled', 'owner-request'))

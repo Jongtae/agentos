@@ -650,7 +650,7 @@ function decisionDraftState(form){return JSON.stringify([...form.querySelectorAl
 function decisionDraftDirty(form=$('decision-route')?.querySelector('form')){return Boolean(form&&([...form.querySelectorAll('input[type="password"]')].some(input=>input.value)||form.dataset.initialDraft!==decisionDraftState(form)));}
 function decisionEditorContract(settings,chooser){const route=settings?.decision_route||{};
  if(chooser.startsWith('cli:')){const engine=(route.subscription_cli||[]).find(item=>item.id===chooser.slice(4));return JSON.stringify(engine?[engine.installed,engine.login==='signed-out',engine.isolated_deployment,engine.tool_surface,engine.model_selection,engine.ranked_models,engine.model_efforts,decisionModelList(engine.id)?.models]:null);}
- const provider=route[chooser.split(':')[0]]||{};return JSON.stringify([provider.configured,provider.has_decision_key,provider.ranked_models,chooser.endsWith(':model')?decisionModelList(chooser.startsWith('jev:')?'jev':'openai')?.models:null]);
+ const provider=route[chooser.split(':')[0]]||{};return JSON.stringify([provider.configured,provider.has_decision_key,provider.ranked_models,provider.model,chooser.endsWith(':model')?decisionModelList(chooser.startsWith('jev:')?'jev':'openai')?.models:null]);
 }
 function decisionClearDiscard(){decisionDiscardTarget=null;$('decision-discard')?.remove();}
 function renderDecisionDiscard(){
@@ -783,7 +783,8 @@ function renderDecisionRoute(settings){
  const generatedForm=box.querySelector('form'),contract=decisionEditorContract(settings,decisionChooser);
  if(generatedForm){generatedForm.dataset.initialDraft=decisionDraftState(generatedForm);generatedForm.dataset.contract=contract;}
  if(retainedForm){const changed=retainedForm.dataset.contract!==contract;
-  if(generatedForm&&!changed)generatedForm.replaceWith(retainedForm);
+  if(generatedForm&&changed&&!decisionDraftDirty(retainedForm)){const index=[...retainedForm.querySelectorAll('input,select,textarea')].indexOf(activeInput);if(index>=0)generatedForm.querySelectorAll('input,select,textarea')[index]?.focus({preventScroll:true});}
+  else if(generatedForm&&!changed)generatedForm.replaceWith(retainedForm);
   else{generatedForm?.remove();const unavailable=element('fieldset',undefined,'engine-token');unavailable.disabled=true;unavailable.dataset.retainedDecisionDraft='true';
    unavailable.append(element('legend',t('입력 보관 중')),element('p',changed?t('설정 정보가 바뀌어 이 입력을 바로 적용할 수 없습니다. 입력은 보관되며, 현재 설정으로 다시 열 수 있습니다.'):t('선택한 설정을 지금 사용할 수 없습니다. 입력은 이 창에 남아 있으며, 다시 사용할 수 있게 되면 이어서 편집할 수 있습니다.'),'field-hint'),retainedForm);box.append(unavailable,settingsAction(t('현재 설정으로 다시 열기'),()=>openDecisionChooser(decisionChooser,false,true)));}
  }

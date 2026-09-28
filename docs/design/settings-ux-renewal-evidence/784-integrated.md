@@ -41,7 +41,7 @@ Revert the relevant implementation PR through the normal branch/check workflow, 
 Compared byte-for-byte to the running local fixture after the final source change:
 
 - `index.html`: `8ed6828ec581167db12fc6368cf7d1b110bd36e8fa2c8b886c39946e838256e2`
-- `app.js`: `397f606bf631f45de62d1a7367464e22ad77370956b67f26faed3ef29566ea14`
+- `app.js`: `782276d8504e0f955b55b7529f140e91448e0f48333da9d07b0a53c51d3ab448`
 - `style.css`: `2547bdd6909c128f65ef6ca15270f30f178e5815fae26ea4a8557fa64c7ff4f8`
 
 ## Captures and reproduction
@@ -54,3 +54,7 @@ Compared byte-for-byte to the running local fixture after the final source chang
 - Existing surfaces: [substantive Work](784-work.png), [exact Memory item](784-item.png), [welcome languages](784-welcome.png).
 
 Start only the synthetic fixture: `python3 tests/web_management_browser_fixture.py --port 18789`. In the Playwright CLI session, run the companion async scripts in this order: `784-judgment-browser.js`, `784-browser.js`, `784-states.js`, `784-records-browser.js`. They use synthetic input and local interceptors; do not repoint them at owner data. Captures are written to `output/playwright`. The Judgment walkthrough records one explicit intercepted credential save; the navigation/locale chooser walkthrough records zero mutations. Existing #782/#783 walkthroughs cover Main AI and other-settings mutation semantics.
+
+## Consolidated review remediation
+
+The #806 review identified an omitted saved-model field in the Judgment editor contract. Clean editors now rebase to the observed saved model while preserving field focus; dirty editors retain the original draft in a disabled fieldset until explicit reopening. The focused 38-test group passed after remediation, and the real-browser Judgment walkthrough exercised an independent saved-model change followed by a dirty draft conflict. All final captures were refreshed and served bytes compared again. This requires one post-remediation exact-head CI run; no authority boundary changed and no duplicate review was requested.

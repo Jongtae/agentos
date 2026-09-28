@@ -256,6 +256,15 @@ const base=(active,extra={})=>({decision_route:{active,suite_version:'decision-q
  await jevForm2.onsubmit({preventDefault(){}});
  assert.deepEqual(JSON.parse(JSON.stringify(calls)),[{path:'/api/decision-route/credential',body:{transport:'jev',model:'jev-1.12.0'}}],'saving a model never activates');
  assert($('decision-route-feedback').textContent.includes('아직 대화 해석 경로는 바뀌지 않았습니다'));
+ // #806 review: another tab's saved model rebases a clean editor but cannot overwrite a dirty draft.
+ switchEditor('');box().dataset.state='';ctx.renderDecisionRoute(jevActive('jev-before'));switchEditor('jev:model');
+ const cleanJev=box().querySelector('form'),cleanJevInput=cleanJev.querySelector('input');cleanJevInput.focus();calls.length=0;
+ ctx.renderDecisionRoute(jevActive('jev-from-other-tab'));
+ const freshJev=box().querySelector('form'),freshJevInput=freshJev.querySelector('input');
+ assert.notEqual(freshJev,cleanJev);assert.equal(freshJevInput.value,'jev-from-other-tab');assert.equal(document.activeElement,freshJevInput,'clean rebase retains focus');
+ freshJevInput.value='unsaved-owner-choice';freshJevInput.setSelectionRange(2,5);
+ ctx.renderDecisionRoute(jevActive('jev-later-tab'));
+ assert.equal(box().querySelector('form'),freshJev);assert.equal(freshJevInput.value,'unsaved-owner-choice');assert.equal(freshJev.parentNode.tag,'fieldset');assert.equal(freshJev.parentNode.disabled,true);assert.equal(calls.length,0,'polling never saves a stale or draft model');
  // #784: changed polling refreshes the observed summary without replacing the active editor.
  switchEditor('');box().dataset.state='';calls.length=0;
  let polling=base({transport:'direct_api',source:'owner',requested_model:'server-before',destination:'api.openai.com',available:true},{selection:'supported'});

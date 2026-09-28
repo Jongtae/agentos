@@ -503,13 +503,23 @@ class ToolsAndReplan(Harness):
         self.assertTrue(all(len(line) < 260 for line in descriptions.splitlines()), 'one line per tool')
         self.assertIsNone(self.events(job, 'planned')[0][1]['tools_reason'])
 
-    def test_a_subset_without_a_stated_reason_becomes_the_full_toolset(self):
+    def test_a_subset_without_a_stated_reason_keeps_its_private_reads(self):
+        """#795: an unreasoned subset that asks for private reads keeps them (search removed), never the default
+        toolset that would hide them again on a native-search turn."""
         self.script([plan('codex', 'Answer.', tools=self.no_search(), tools_reason='')], goals=[True])
         job, _row = self.run_work('알려줘')
+        self.assertEqual(self.engine.turns[0]['only'], sorted(self.no_search()))
+        self.assertFalse(self.engine.turns[0]['native_search'])
+        planned = self.events(job, 'planned')[0][1]
+        self.assertEqual(planned['tools_replaced'], {'requested': sorted(self.no_search()), 'why': 'no_reason',
+                                                     'kept': 'private_reads'})
+
+    def test_a_subset_without_private_reads_and_without_a_reason_becomes_the_full_toolset(self):
+        self.script([plan('codex', 'Answer.', tools=self.no_private(), tools_reason='')], goals=[True])
+        job, _row = self.run_work('알려줘', key='no-private-no-reason')
         self.assertIsNone(self.engine.turns[0]['only'])
         planned = self.events(job, 'planned')[0][1]
-        self.assertIsNone(planned['tools'])
-        self.assertEqual(planned['tools_replaced'], {'requested': sorted(self.no_search()), 'why': 'no_reason'})
+        self.assertEqual(planned['tools_replaced'], {'requested': sorted(self.no_private()), 'why': 'no_reason'})
 
     def test_a_subset_with_a_reason_is_kept_and_recorded(self):
         self.script([plan('codex', 'Read the notes.', tools=self.no_search(), tools_reason='keep private reads apart')],
@@ -521,7 +531,8 @@ class ToolsAndReplan(Harness):
 
     def test_only_the_two_separation_shapes_survive_validation(self):
         """#735 (Work a8e6aa7b): every one-tool subset became the full toolset."""
-        cases = {('bounded_public_research',): 'shape', ('web_search',): 'shape', ('list_notes',): 'shape',
+        # #795: ('list_notes',) asks for a private read, so it keeps the private reads (tested separately).
+        cases = {('bounded_public_research',): 'shape', ('web_search',): 'shape',
                  ('weather', 'web_search'): 'shape', ('read_file',): 'not_offered'}
         for tools, why in cases.items():
             with self.subTest(tools=tools):
@@ -716,9 +727,18 @@ class SubsetCategories(unittest.TestCase):
         self.assertEqual(self.keep({'list_memory', 'list_notes'})[1], None)
         self.assertEqual(self.keep({'web_search', 'bounded_public_research'})[1], None)
 
-    def test_a_partial_private_category_is_replaced(self):
-        self.assertEqual(self.keep({'list_notes'}), (None, {'requested': ['bounded_public_research', 'list_memory',
-                                                                         'weather', 'web_search'], 'why': 'shape'}))
+    def test_a_partial_private_category_keeps_the_private_reads(self):
+        """#795: the subset asked for list_memory, so the private reads stay and web search goes."""
+        self.assertEqual(self.keep({'list_notes'}), (frozenset({'list_memory', 'list_notes', 'weather'}),
+                                                    {'requested': ['bounded_public_research', 'list_memory', 'weather',
+                                                                   'web_search'], 'why': 'shape',
+                                                     'kept': 'private_reads'}))
+
+    def test_a_single_private_read_request_keeps_every_private_read(self):
+        """The 2026-09-28 live case: the plan asked for calendar_query alone; it must not become the default set."""
+        tools, replaced = self.keep({'bounded_public_research', 'list_notes', 'weather', 'web_search'})
+        self.assertEqual(tools, frozenset({'list_memory', 'list_notes', 'weather'}))
+        self.assertEqual(replaced['kept'], 'private_reads')
 
     def test_a_partial_search_category_is_replaced(self):
         self.assertEqual(self.keep({'web_search'})[1]['why'], 'shape')
@@ -1591,3 +1611,45 @@ class SecretaryStandard(Harness):
         self.assertIn('unless the owner asked you not to', CORE_INSTRUCTIONS)
         self.assertIn('unless the owner asked not to look anything up', QUESTION)
 
+
+
+class DeclaredPageReads(Harness):
+    """#795 (Works 81b261a9, c32d135d): a page read does not block a re-plan after the CLI ended with no answer."""
+
+    def run_with(self, declared):
+        def work(tools, declared=declared):
+            detail = {'scope': 'subscription-mcp-bridge', 'host_action': 'browser_open'}
+            if declared:
+                detail['declared_effect'] = declared
+            tools.capabilities.record('browser_open', 'running', json.dumps(detail))
+            tools.capabilities.record('browser_open', 'succeeded', json.dumps(
+                {'scope': 'subscription-mcp-bridge', 'host_action': 'browser_open', 'evidence': {'state': 'page'}}))
+        self.engine.before = work
+        self.engine.fail = [ExecutionError('엔진이 요구된 구조화된 응답을 반환하지 않았습니다.', failure_class='invalid-output')]
+        self.script([plan('codex', 'Answer.'), plan('openai', 'Other path.')], goals=[True])
+        job, _row = self.run_work('알려줘', key=f'declared-{declared}')
+        return self.events(job, 'evaluated')[0][1]
+
+    def test_a_declared_page_read_or_navigation_is_re_delegated(self):
+        for declared in ('read', 'navigate'):
+            with self.subTest(declared=declared):
+                first = self.run_with(declared)
+                self.assertEqual((first['outcome'], first['next']), ('worker_failed', 'redelegate'))
+
+    def test_a_mutating_or_undeclared_open_stays_an_effect(self):
+        for declared in ('mutate', None):
+            with self.subTest(declared=declared):
+                first = self.run_with(declared)
+                self.assertEqual((first['next'], first['stop']), ('stop', 'effect'))
+
+
+class StreamDiagnostics(unittest.TestCase):
+    def test_the_end_of_a_codex_stream_is_recorded_without_content(self):
+        from personal_agent.bounded_execution import cli_metadata
+        raw = '\n'.join(json.dumps(line) for line in (
+            {'type': 'thread.started'}, {'type': 'item.started', 'item': {'type': 'mcp_tool_call', 'tool': 'browser_open'}},
+            {'type': 'error', 'message': 'stream disconnected before completion'},
+            {'type': 'turn.failed', 'error': {'message': 'model   stream ended'}}))
+        meta = cli_metadata('codex', raw)
+        self.assertEqual(meta['stream_tail'], ['thread.started', 'item.started', 'error', 'turn.failed'])
+        self.assertEqual(meta['stream_errors'], ['stream disconnected before completion', 'model stream ended'])

@@ -13,7 +13,7 @@ import time
 
 from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS, LATEST_HANDSHAKE_VERSION
 
-from .agent_runtime import (CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, OWNER_STATE_ACTIONS, TRANSIENT_FAILURE_TEXT,
+from .agent_runtime import (BROWSER_ACTIONS, CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, OWNER_STATE_ACTIONS, TRANSIENT_FAILURE_TEXT,
                             Capabilities, ToolError, WorkBudget, WorkLedger, classify_failure, evidence_summary,
                             lookup_sources, progress_step, recorded_private_sources, split_status, work_source_records,
                             work_stop_requested)
@@ -220,8 +220,12 @@ def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROF
                         # crash mid-call leaves an attempted (possibly effectful)
                         # action that retry/resume refuse to replay blindly.
                         # #718: with the call's bounded, redacted display step.
+                        # #795: a browser step's declared effect (read/navigate/mutate/payment), so a
+                        # re-plan can tell a page read from an action; AgentOS's own guard still decides.
+                        declared = arguments.get('effect') if action in BROWSER_ACTIONS else None
                         record(listed, 'running', json.dumps({'scope':'subscription-mcp-bridge','host_action':action,
-                                                              'step':progress_step(action, arguments, status, capabilities.judgment_text)},
+                                                              'step':progress_step(action, arguments, status, capabilities.judgment_text),
+                                                              **({'declared_effect':declared} if isinstance(declared, str) else {})},
                                                              ensure_ascii=False))
                     value = tools.call(name, arguments)
                 except ExecutionError as exc:

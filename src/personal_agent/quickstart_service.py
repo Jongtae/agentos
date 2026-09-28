@@ -2777,12 +2777,15 @@ class AgentService:
         if orchestration is None or attempt is None or not orchestration.orchestrated:return None
         from .agent_runtime import EFFECT_FREE_READS, INTERNAL_STATE_ACTIONS
         # A navigation in the owner's browser session counts as an effect here,
-        # as it does for the retry rule (``safe_retry``): it is never repeated.
+        # as it does for the retry rule (``safe_retry``): it is never repeated -
+        # unless (#795) the bridge recorded the step's declared effect as a page read
+        # or navigation; ``mutate``/``payment`` or an undeclared open stays an effect.
         repeatable=(EFFECT_FREE_READS-{'browser_open'})|INTERNAL_STATE_ACTIONS
         with self.store.db() as db:
             rows=db.execute('SELECT tool,status,detail FROM tool_events WHERE job_id=? AND id>? ORDER BY id',(job_id,since or 0)).fetchall()
         effect=outcome=='unknown' or self._work_has_unknown_effect(job_id)
         observed,failures=[],[]
+        open_declared=[False]
         # #729: the factual summary the next plan call reads (names and codes only).
         called,failed_codes,incomplete,sourceless=[],[],[],0
         for row in rows:
@@ -2792,7 +2795,12 @@ class AgentService:
             except (TypeError,ValueError):data={}
             data=data if isinstance(data,dict) else {}
             action=data.get('host_action') or row['tool']
-            if action not in repeatable:effect=True
+            declared_read=(action=='browser_open' and data.get('declared_effect') in ('read','navigate'))
+            if row['status']=='running' and action=='browser_open':
+                open_declared[0]=declared_read
+            if action=='browser_open' and row['status']!='running':
+                declared_read=open_declared[0]
+            if action not in repeatable and not declared_read:effect=True
             if row['tool'] not in called:called.append(row['tool'])
             if row['status']=='succeeded':
                 evidence=data.get('evidence') if isinstance(data.get('evidence'),dict) else {}

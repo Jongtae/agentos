@@ -1428,16 +1428,17 @@ class AgentService:
         return redact_known_secrets(self.store,text)
 
     def redact_judgment_text(self, text, private=True):
-        """Text as it may reach a DecisionEngine judgment (#672 review).
+        """Text as it may reach a DecisionEngine judgment (#672 review, #826).
 
-        The stored secrets' literal values and credential shapes, plus - with
-        ``private`` and while a Work is being processed - the values that Work
-        saved to a private store (the #605 exclusion set).  Deterministic, no
-        judgment.
+        The stored secrets' literal values and credential shapes, removed
+        deterministically.  #826 (owner decision 2026-09-28): the values a
+        Work saved to a private store (the #605 exclusion set) are no longer
+        masked. The Judgment AI is an owner-configured model, the same egress
+        class as the worker, and a masked workplace or allergy left it unable
+        to judge whether the reply served the owner.  ``private`` is kept
+        only as the ``ConversationJudgments`` redactor interface; both kinds
+        of fact get this one pass.
         """
-        work_id=getattr(self,'current_work_id',None)
-        if private and work_id:
-            return self.scrub_work_text(work_id,text)
         return self._redact_known_secrets(text)
 
     def _redact_provenance(self, text):

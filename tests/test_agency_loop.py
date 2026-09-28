@@ -601,8 +601,11 @@ class AlternativesAndCompletionTests(unittest.TestCase):
         self.assertFalse(any(m['role'] == 'system' and m['content'].startswith('Path check')
                              for m in script.bodies[-1]['messages']))
 
-    def test_secrets_and_saved_private_values_are_redacted_before_the_judgment(self):
-        """Pilot boundary 1: the judgment provider may be separate; it never reads a secret."""
+    def test_secrets_are_redacted_before_the_judgment_and_saved_values_are_not(self):
+        """Pilot boundary 1: the judgment provider may be separate; it never reads a secret.
+
+        #826 (owner decision): the Work's saved private values are no longer masked from the
+        owner's Judgment AI, which needs them to judge whether the reply served the owner."""
         secret, private = 'stored-fixture-secret-9f8e7d6c', 'M12345678'
         with self.store.db() as db:
             db.execute('INSERT INTO notes VALUES (?,?,?)', ('n1', f'여권 {private} / 키 {secret}', 1))
@@ -618,8 +621,8 @@ class AlternativesAndCompletionTests(unittest.TestCase):
         [facts] = seen
         judged = json.dumps(facts, ensure_ascii=False)
         self.assertNotIn(secret, judged)
-        self.assertNotIn(private, judged)
-        self.assertIn('공항 3시', facts['observations'], 'only the excluded values are removed')
+        self.assertIn(private, facts['observations'], '#826: a saved value reaches the owner\'s Judgment AI')
+        self.assertIn('공항 3시', facts['observations'])
         self.assertIn('[redacted]', facts['owner_request'])
 
     def test_the_whole_request_reaches_the_judgment_and_its_last_part_counts(self):

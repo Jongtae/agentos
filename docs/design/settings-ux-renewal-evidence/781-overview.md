@@ -8,7 +8,11 @@ Issue #781, owner program #780. This is the real checked-out web HTML/CSS/JS ser
 - Shared shell: one sidebar, no logo, four-language selector and authenticated logout retained. Korean preference reload observed.
 - Focused regressions: 65 passed (settings UI, AI connection UI, UI quality/locales, Main AI routes). Required CI is recorded on the PR. Existing chooser behavior is preserved here and redesigned in #782.
 
-## Asset provenance
+## Historical asset record
+
+These screenshots were captured before the final wrapping adjustment. The hashes below were updated afterward, so they do not establish exact screenshot-to-source identity. Use the final build-matched captures and asset comparison in [784-integrated.md](784-integrated.md) for final layout acceptance.
+
+### Recorded source hashes
 
 - `index.html` SHA-256 `7a7e284d2369ecd213df4f0dda5630ab643bf14ed20eaa622659ea71e75b3457`
 - `app.js` SHA-256 `5736b946989f4c5d959782a8b35fe76c3b3aa35b894d69d81cbdda46136e109c`

@@ -69,7 +69,7 @@ from .conversation_handoff import (LOCAL_AUTHORITY_KIND, LOCAL_AUTHORITY_LABELS,
                                    local_authority_handoff, local_refusal_text, LOCAL_RESUME_TTL_SECONDS)
 from . import local_folder_picker
 # PRESENCE-TG-01 / #581: native Telegram presence (reaction, typing, draft, anchor).
-from .context_observations import ContextObservations
+from .context_observations import ContextObservations, answerable_work, continuation_key, continuation_request
 from .current_context import CurrentContext, KNOWN_SECRET_NAMES, redact_known_secrets
 # SEC-ATTN-01 (#659): owner-accepted preparations (reminders, prepared answers).
 from . import preparations as prep
@@ -249,7 +249,9 @@ RETRY_EFFECT_TOOLS=frozenset({'save_note','save_memory','delegate_agent',
                               'calendar_draft_create','calendar_draft_update','calendar_draft_cancel',
                               # #656: a browser step in the owner's session may have added to a cart or submitted a form.
                               # #787: a browser_open declared read/navigate only loaded a page (``effect_calls``).
-                              'browser_open','browser_click','browser_type'})
+                              'browser_open','browser_click','browser_type',
+                              # #774: a Telegram prompt already reached the owner.
+                              'ask_location'})
 EFFECT_RETRY_REFUSAL='이전 요청이 상태를 바꾸는 작업을 시도해 자동으로 다시 실행하지 않았습니다.'
 #: #787: the next step of a Work whose last worker attempt failed, chosen from
 #: its own recorded state: a typed setup/approval need, the ``safe_retry`` gate.
@@ -263,6 +265,13 @@ RETRY_EFFECT_NOTE_HEAD=('AgentOS note (not from the owner): the owner\'s message
                         'request, which AgentOS did not replay because that earlier Work called tools that may have '
                         'changed state:')
 RETRY_EFFECT_NOTE_TAIL='Check the current state before repeating any of these; ask the owner if unsure.'
+#: #774: the same factual note for a location continuation, whose request is the
+#: asking Work's message run again once the owner shared a position.
+CONTINUATION_EFFECT_NOTE_HEAD=('AgentOS note (not from the owner): the request below continues an earlier Work that '
+                               'asked the owner for their current location, which the owner has now shared. That '
+                               'earlier Work called tools that may have changed state:')
+#: #774 review: an answered location request whose continuation could not be queued.
+LOCATION_NOT_CONTINUED_TEXT='대기 중인 작업이 많아 보내 주신 위치로 요청을 이어서 처리하지 못했습니다. 잠시 후 위치를 다시 보내 주세요.'
 BROWSER_APPROVAL_PROMPT='결제 단계는 승인이 필요합니다. 승인하면 이 요청을 한 번만 이어서 처리하고, 승인한 단계 하나만 실행합니다.'
 #: #709: owner-private config row of in-flow login requests, by Work id.  At
 #: most one per Work: a row stays (resumed/skipped/expired) until it is pruned.
@@ -579,7 +588,10 @@ class AgentService:
                                            'every_seconds':window and window[0],'window_end':window and window[1],
                                            'max_runs':window and window[2],'delivery_mode':delivery_mode})
             own_request=(isinstance(prompt,str) and prompt==job.get('message')
-                         and prep.preparation_of(job.get('request_key')) is None)
+                         and prep.preparation_of(job.get('request_key')) is None
+                         # #774: a location continuation re-runs an earlier message; the owner's own
+                         # latest message was the location, so it never accepts a preparation.
+                         and continuation_request(job.get('request_key')) is None)
             accepted=own_request and self.decision_judge.explicit_preparation_request(prompt,summary).outcome==JUDGMENT_YES
             try:
                 row=self.preparations.create(kind=kind,goal=goal,due_at=due_at,timezone=timezone,recurrence=recurrence,
@@ -630,6 +642,11 @@ class AgentService:
                         and cfg.get('generation'))
                 when_needed=row.get('delivery_mode')==prep.DELIVERY_WHEN_NEEDED
                 if row['state']==prep.STATE_RUNNING:
+                    if row.get('last_run_job_id') and self.context_observations.awaiting_answer(row['last_run_job_id'],now):
+                        # #774: the run asked the owner for a location; its answer's
+                        # continuation settles this slot (``continue_run``).  Unanswered,
+                        # the request expires and the asking run settles as it is.
+                        continue
                     # #719: a when_needed run is judged once; only notify queues a message.
                     settled=self.preparations.settle(row,now,scrub=self.scrub_prepared_answer,decide=self.watch_judgment,
                                                      notify_to=(cfg['user_id'],cfg['generation']) if paired else None)
@@ -747,6 +764,17 @@ class AgentService:
                          'last_decision':row.get('last_decision'),'last_decision_reason':row.get('last_decision_reason')})
         return {'preparations':rows}
 
+    def cancel_preparation(self, preparation_id):
+        """``Preparations.cancel`` plus withdrawing its run's pending location request (#774).
+
+        A run that asked the owner for a location would otherwise continue on
+        the answer and run the cancelled preparation's goal again.
+        """
+        row=self.preparations.cancel(preparation_id)
+        if row['state']==prep.STATE_CANCELLED and row.get('last_run_job_id'):
+            self.context_observations.cancel_work_requests(row['last_run_job_id'])
+        return row
+
     def preparation_request(self, body):
         """Owner Settings operations on one preparation: list, accept, cancel, delete (#659)."""
         if not isinstance(body,dict):raise ValueError('준비 요청을 확인하세요.')
@@ -755,7 +783,7 @@ class AgentService:
         preparation_id=body.get('id')
         if not isinstance(preparation_id,str) or not preparation_id:raise ValueError('준비를 선택하세요.')
         if operation=='accept':self.preparations.accept(preparation_id,prep.ACCEPTED_OWNER_SETTINGS)
-        elif operation=='cancel':self.preparations.cancel(preparation_id)
+        elif operation=='cancel':self.cancel_preparation(preparation_id)
         elif operation=='delete':self.preparations.delete(preparation_id)
         else:raise ValueError('지원하지 않는 준비 작업입니다.')
         LOG.info('preparation %s id=%s by owner settings',operation,preparation_id)
@@ -1247,18 +1275,21 @@ class AgentService:
                 except ValueError:return None
         return None
 
-    def retry_effect_note(self, previous):
+    def retry_effect_note(self, previous, head=RETRY_EFFECT_NOTE_HEAD, ignore=()):
         """The factual note for a refused retry whose earlier Work called effect tools (#730 review).
 
         Lists the effect tools the earlier Work called - names and hosts only,
         never arguments or results - and whether each outcome was observed
         (succeeded or failed) or is unknown, from its recorded tool events.
         None when that Work called none.  Generic: no task, site or category.
+        #774: a location continuation passes its own ``head`` and ignores the
+        ``ask_location`` call its answer already resolved.
         """
         calls={}
         for event in self.store.task_events(previous['id']):
             trace=event.get('trace') if isinstance(event.get('trace'),dict) else {}
             name=trace.get('host_action') if trace.get('host_action') in RETRY_EFFECT_TOOLS else event.get('tool')
+            if name in ignore:continue
             unknown=self._unknown_effect(trace)
             if not self.effect_calls(event) and not unknown:continue
             key=(str(name),self._event_host(trace))
@@ -1270,7 +1301,7 @@ class AgentService:
             outcome=('unknown' if 'unknown' in states or not states&{'succeeded','failed'}
                      else 'observed: succeeded' if 'succeeded' in states else 'observed: failed')
             lines.append(f'- {name}'+(f' (host: {host})' if host else '')+f': outcome {outcome}')
-        return '\n'.join([RETRY_EFFECT_NOTE_HEAD,*lines,RETRY_EFFECT_NOTE_TAIL])
+        return '\n'.join([head,*lines,RETRY_EFFECT_NOTE_TAIL])
 
     def failed_attempt_report(self, job, failure):
         """The owner report of a Work whose last worker attempt failed and nothing followed (#787), or None.
@@ -1429,8 +1460,13 @@ class AgentService:
                 changed=db.execute("UPDATE jobs SET status='cancelled',error=?,delivery='cancelled' WHERE id=? AND status='queued'",
                                    ('소유자가 후속 대화에서 취소했습니다.',work_id)).rowcount
             if changed:
+                self.context_observations.cancel_work_requests(work_id)
                 self.update_task_card(self.store.job(work_id),'cancelled')
                 return True,'이전 요청을 취소했습니다.'
+        if previous.get('status') not in ('queued','running') and self.context_observations.cancel_work_requests(work_id):
+            # #774: a finished Work that asked for a location continues only on its
+            # answer; cancelling it withdraws the request, so the answer continues nothing.
+            return True,'이전 요청을 취소했습니다. 위치를 보내도 이어서 처리하지 않습니다.'
         return False,'이전 요청은 이미 실행 중이거나 끝난 상태라 여기서 취소하지 않았습니다.'
 
     def complete_continuity_turn(self, job, response):
@@ -2197,6 +2233,10 @@ class AgentService:
         """
         def resolve():
             if not isinstance(prompt,str) or prompt!=job.get('message'):
+                return None
+            # #774: a location continuation runs the asking Work's message again;
+            # the owner's own latest message was the location, so it issues none.
+            if continuation_request(job.get('request_key')) is not None:
                 return None
             if self.decision_judge.explicit_memory_request(prompt).outcome!=JUDGMENT_YES:
                 return None
@@ -3615,6 +3655,8 @@ class AgentService:
                 # #606 T1: durable, so the CLI's separate MCP bridge process
                 # refuses its next call too, not only this process's loop.
                 self.store.append_config_list(WORK_STOP_KEY,job['id'],WORK_STOP_KEEP)
+                # #774: a stopped Work's location request continues nothing.
+                self.context_observations.cancel_work_requests(job['id'])
                 text=self.STOP_RUNNING_TEXT
             else:
                 return 'finished'
@@ -4973,7 +5015,8 @@ class AgentService:
                 'browser_approved':'이 단계를 승인했습니다. 요청을 한 번만 이어서 처리합니다.',
                 'browser_denied':'이 단계를 허용하지 않았습니다. 요청은 여기서 멈춥니다.',
                 'preparation_accepted':'준비를 예약했습니다. 설정 > 준비해 둔 일에서 취소할 수 있습니다.',
-                'preparation_denied':'준비를 예약하지 않았습니다.'}.get(kind,'AgentOS 상태 알림')
+                'preparation_denied':'준비를 예약하지 않았습니다.',
+                'location_not_continued':LOCATION_NOT_CONTINUED_TEXT}.get(kind,'AgentOS 상태 알림')
 
     def queue_notification(self, job, kind, fingerprint=None):
         cfg=self.store.config('telegram',{})
@@ -5215,7 +5258,9 @@ class AgentService:
                         db.execute("UPDATE jobs SET status='cancelled',error='소유자가 작업 카드를 통해 취소했습니다.',delivery='cancelled' WHERE id=? AND status='queued'",(job_id,))
                         changed=db.total_changes==1
                         job=dict(job)
-                if changed:self.update_task_card(job,'cancelled')
+                if changed:
+                    self.context_observations.cancel_work_requests(job_id)
+                    self.update_task_card(job,'cancelled')
             elif authorized and isinstance(data,str) and data.startswith('p7x:'):
                 choice=self.store.telegram_context_choice(data[4:])
                 exact=(choice and choice['state']=='offered' and choice['generation']==generation
@@ -5328,7 +5373,7 @@ class AgentService:
                     if exact:
                         for row in proposals:
                             if parts[2]=='accept':self.preparations.accept(row['id'],prep.ACCEPTED_OWNER_BUTTON)
-                            else:self.preparations.cancel(row['id'])
+                            else:self.cancel_preparation(row['id'])
                         result_kind='preparation_accepted' if parts[2]=='accept' else 'preparation_denied'
                         LOG.info('preparation %s by owner button work=%s count=%s',parts[2],notification['job_id'],len(proposals))
                         self.store.update_notification(notification['id'],result_kind)
@@ -5349,7 +5394,7 @@ class AgentService:
                            and notification['message_id']==message.get('message_id') and preparation_id)
                     if exact:
                         try:
-                            stopped=self.preparations.cancel(preparation_id)
+                            stopped=self.cancel_preparation(preparation_id)
                         except prep.PreparationRefusal:
                             stopped=None
                         if stopped is not None:
@@ -5401,7 +5446,8 @@ class AgentService:
 
         A one-time reply keyboard with ``request_location``; the matching
         answer is a sender-reported current position bound to this Work, not
-        verified GPS.  The owner may type a place instead.
+        verified GPS.  Only a shared location answers it: a typed reply is an
+        ordinary new Work, so the keyboard offers no typed alternative.
         """
         job=self.store.job(job_id)
         cfg=self.store.config('telegram',{})
@@ -5412,14 +5458,88 @@ class AgentService:
             raise ValueError('위치를 요청하는 목적을 짧게 적어 주세요.')
         request_id=self.context_observations.open_location_request(job_id,cfg['user_id'],cfg.get('generation'))
         markup={'keyboard':[[{'text':'현재 위치 보내기','request_location':True}]],
-                'one_time_keyboard':True,'resize_keyboard':True,
-                'input_field_placeholder':'또는 장소 이름을 입력하세요'}
+                'one_time_keyboard':True,'resize_keyboard':True}
         try:
             self.telegram.send_message(cfg['user_id'],prompt.strip(),markup)
         except ProviderError:
             self.context_observations.cancel_location_request(request_id)
             raise
         return request_id
+
+    def location_requester(self, job):
+        """The ``ask_location`` handler bound to one Work (#774): one Telegram prompt.
+
+        The owner's reply continues this Work once (``continue_located_work``).
+        None (the tool is not offered) for a Work that did not come from the
+        paired Telegram chat: it could never be answered.  A pairing lost since
+        is a typed refusal the model reads.
+        """
+        if not answerable_work(job):
+            return None
+        def ask(reason):
+            try:
+                # Pilot boundary 1: a stored secret never reaches the prompt text.
+                return self.request_current_location(job['id'],self._redact_known_secrets(reason))
+            except ToolError:
+                raise
+            except ValueError as exc:
+                raise ToolError(str(exc),'location_unavailable') from None
+            except ProviderError:
+                raise ToolError('Telegram으로 위치 요청을 보내지 못했습니다.','location_unavailable') from None
+        return ask
+
+    def _stopped_in(self, db, job_id):
+        """``work_stopped`` read inside the caller's transaction (#774)."""
+        state=self.presence.get(job_id)
+        if state is not None and state.stopped:
+            return True
+        row=db.execute('SELECT value FROM config WHERE key=?',(WORK_STOP_KEY,)).fetchone()
+        try:rows=json.loads(row['value']) if row else []
+        except ValueError:rows=[]
+        return isinstance(rows,list) and job_id in rows
+
+    def continue_located_work(self, db, answer, message, generation, sender):
+        """Continue the Work whose location request the owner just answered, once (#774).
+
+        Inside the ingress transaction: one new Work with the same request,
+        channel, chat and workspace, keyed by the consumed request (a replayed
+        update cannot make a second), related to the asking Work, with the
+        reported position rebound to it so its current context shows it.  The
+        asking Work is not re-run.  A Work the owner stopped or cancelled, or
+        a run of a preparation no longer active, is never continued.  A preparation run's continuation stays that
+        preparation's run: same slot key, and the slot settles from it.  False
+        when the continuation could not be queued: the request is pending again
+        and the position stays with the asking Work, so resending continues it.
+        """
+        work=db.execute('SELECT * FROM jobs WHERE id=?',(answer['job_id'],)).fetchone()
+        if not work:
+            return None
+        if work['status']=='cancelled' or self._stopped_in(db,work['id']):
+            # The position stays recorded for the asking Work; nothing runs again.
+            LOG.info('location continuation skipped work=%s reason=stopped',work['id'])
+            return None
+        preparation_id=prep.preparation_of(work['request_key'])
+        if preparation_id:
+            row=db.execute('SELECT state FROM preparations WHERE id=?',(preparation_id,)).fetchone()
+            if not row or row['state'] not in prep.ACTIVE_STATES:
+                # A cancelled or removed preparation's goal never runs again.
+                LOG.info('location continuation skipped work=%s reason=preparation_inactive',work['id'])
+                return None
+        try:
+            task_id=self.store.enqueue(work['message'],continuation_key(answer['request_id'],work['request_key']),
+                                       work['channel'],work['chat_id'],work['workspace_id'],db=db)
+        except ValueError as exc:
+            # #774 review: the owner's answer is not lost silently; the cursor still advances.
+            LOG.warning('location continuation not queued work=%s reason=%s',work['id'],exc)
+            self.context_observations.reopen_request(db,answer['request_id'])
+            return False
+        self.store.link_work_relation(task_id,work['id'],'reference',db=db)
+        prep.Preparations.continue_run(db,work['id'],task_id,self.preparations.clock())
+        self.context_observations.rebind_task_observation(db,answer['observation_id'],task_id)
+        # The owner's location message is this Work's source and reply anchor.
+        self.telegram_turns.record_source(task_id,sender,message.get('message_id'),db=db)
+        self.context_observations.note_text_source(db,task_id,message,generation)
+        return task_id
 
     def ingest_update(self, update, generation):
         with self.lock:
@@ -5445,6 +5565,7 @@ class AgentService:
                     text='/start'
             guided_context_requested=(authorized and isinstance(text,str) and self.requests_guided_context(text)
                                       and bool(self.context_inbox().list()))
+            unqueued=[]
             with self.store.db() as db:
                 db.execute('BEGIN IMMEDIATE')
                 guided_context=False
@@ -5468,10 +5589,20 @@ class AgentService:
                 if authorized and not paired:
                     # #626: a location or an edit is recorded (or refused) in
                     # this same transaction as the cursor; it never becomes
-                    # a Work, a model call or a reply.
-                    self.context_observations.ingest_telegram(db,update,generation,sender)
+                    # a Work, a model call or a reply - except (#774) a
+                    # location answering a pending request, which continues
+                    # the asking Work once.
+                    answered=[]
+                    self.context_observations.ingest_telegram(db,update,generation,sender,answered)
+                    for answer in answered:
+                        if self.continue_located_work(db,answer,message,generation,sender) is False:
+                            unqueued.append(answer['job_id'])
                 cfg['cursor']=update_id+1
                 db.execute('INSERT INTO config VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',('telegram',json.dumps(cfg)))
+            for job_id in unqueued:
+                # #774 review: told once per asking Work, after the commit; the worker sends it.
+                job=self.store.job(job_id)
+                if job:self.queue_notification(job,'location_not_continued')
             if paired:
                 self.store.put('telegram_status',{'state':'connected','message':'개인 계정이 연결되었습니다. AgentOS가 연결을 자동으로 확인합니다.'})
                 self.queue_telegram_connection_verification()
@@ -5559,7 +5690,12 @@ class AgentService:
                 resumed_decision=None
                 if resumed:
                     prompt,prompt_work_id,resumed_decision=resumed
-                continuity=None if resumed else self.continuity_relation(owner_prompt,connector_owner,current_work_id=job['id'])
+                # #774: a location continuation re-runs the asking Work's message; the
+                # owner's own latest message was the location, so like a resumed Work
+                # it skips the owner-utterance judgments (relation, calendar draft,
+                # parked withdrawal) that would read the replayed words as a new turn.
+                continued=continuation_request(job.get('request_key'))
+                continuity=None if resumed or continued else self.continuity_relation(owner_prompt,connector_owner,current_work_id=job['id'])
                 if continuity:
                     relation,previous=continuity['relation'],continuity['previous']
                     self.present_turn(job,relation=relation)
@@ -5602,10 +5738,18 @@ class AgentService:
                         # Calendar, Memory and connector state machines remain
                         # the authority for any actual change.
                         self.record_continuity(job['id'],previous['id'],relation,executed=False)
+                if continued and retry_note is None:
+                    # #774 (C8): the continuation runs the asking Work's message again.
+                    # Nothing is replayed blindly: the worker reads, before it, which
+                    # effect tools that Work already called, and checks before repeating.
+                    asking=self.store.job(self.context_observations.request_work(continued))
+                    if asking:
+                        retry_note=self.retry_effect_note(asking,head=CONTINUATION_EFFECT_NOTE_HEAD,
+                                                          ignore=('ask_location',))
                 # #505: a newer request withdraws any folder-resumed Work still
                 # waiting for document-sharing approval; approving sharing later
                 # never revives it.
-                if not self._answered_before(job['id']):
+                if not continued and not self._answered_before(job['id']):
                     self.drop_document_resume(owner_id=connector_owner,except_work_id=job['id'])
                 owner_memory_request=self.owner_memory_approval(job,prompt)
                 # Routing decision, made by AgentOS before any capability is
@@ -5613,14 +5757,18 @@ class AgentService:
                 # said it literally or an AgentOS rule derived it; a
                 # DecisionEngine answer can only pick among AgentOS-declared
                 # candidates (#417) and reaches no other branch here.
-                decision=resumed_decision or self.classify_intent(prompt,owner_id=connector_owner)
+                decision=resumed_decision or self.classify_intent(prompt,calendar_pending=False if continued else None,
+                                                                  owner_id=connector_owner)
                 # A pending calendar draft claims cue-free follow-ups ("치과",
                 # "오후 4시", "승인").  Anything it does not recognise as its
                 # own - and any other intent - drops the draft, says so, and
                 # is routed exactly as if no draft had been pending.  The
                 # dropped draft can never execute: its approval was never
                 # minted.
-                if decision.intent==INTENT_CALENDAR_CREATE and decision.continuation \
+                # #774: a continuation's replayed words neither answer nor drop a draft.
+                if continued:
+                    pass
+                elif decision.intent==INTENT_CALENDAR_CREATE and decision.continuation \
                         and not self.calendar_conversation.claims(connector_owner,prompt):
                     decision=self.classify_intent(prompt,calendar_pending=False,owner_id=connector_owner)
                     # A new create request judged for this turn replaces the
@@ -5645,7 +5793,7 @@ class AgentService:
                 # the first time it ran.
                 parked=self.resume_index.parked_for(connector_owner) if self.resume_index else ()
                 if parked and not (decision.intent==INTENT_CALENDAR_CREATE and decision.continuation) \
-                        and not resumed and not self._answered_before(job['id']) \
+                        and not resumed and not continued and not self._answered_before(job['id']) \
                         and self.decision_judge.parked_work_withdrawn(prompt,parked).outcome==JUDGMENT_YES:
                     self.supersede_pending_handoffs(job['id'],owner_id=connector_owner)
                 # Prerequisite detection runs before `decision.executes` is
@@ -5929,10 +6077,12 @@ class AgentService:
                                                          if cli_browser else {}),
                                                       # #774: the owner-state actions the trusted-local bridge relays run
                                                       # here under the direct route's gates: #597 memory approval, the
-                                                      # calendar connector and its previews, #659 preparation acceptance.
+                                                      # calendar connector and its previews, #659 preparation acceptance,
+                                                      # the paired Telegram chat for ask_location.
                                                       **({'memory_request':owner_memory_request,'calendar':self.calendar_for(job),
                                                           'calendar_owner':self.connector_owner_id(job),
                                                           'preparations':self.preparation_scheduler(job,prompt),
+                                                          'location_request':self.location_requester(job),
                                                           'judgments':self.decision_judge,'secret_redactor':self._redact_known_secrets}
                                                          if cli_browser else {}),
                                                       **self.work_lookup_options(job,prompt,CLI_LOOKUP_HINT))
@@ -6193,6 +6343,8 @@ class AgentService:
                                                       current_context=self.current_state,
                                                       # #659: owner-accepted preparations (proposal or owner-request acceptance).
                                                       preparations=self.preparation_scheduler(job,prompt),
+                                                      # #774: ask the owner for a current position in the paired chat.
+                                                      location_request=self.location_requester(job),
                                                       # #657: completion is judged from observations.
                                                       judgments=self.decision_judge,
                                                       # Pilot boundary 1: stored secrets never reach the judgment.

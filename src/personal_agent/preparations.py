@@ -91,6 +91,10 @@ MAX_AHEAD_SECONDS = 366 * 86400
 #: A reminder delivered this much after its slot says it is late.
 LATE_NOTE_SECONDS = 10 * 60
 REQUEST_KEY_PREFIX = 'preparation:'
+#: #774: a run continued after the owner answered its location request keeps
+#: its slot's key before this separator (``preparation:<id>:<slot>/loc:<request>``),
+#: so the continuation is the same preparation and slot everywhere it is read.
+CONTINUATION_SEPARATOR = '/'
 
 #: Prepared answers younger than this enter the next turns' context.
 FRESH_SECONDS = 6 * 3600
@@ -332,9 +336,14 @@ def request_key(preparation_id, due_at):
     return f'{REQUEST_KEY_PREFIX}{preparation_id}:{int(due_at)}'
 
 
+def slot_key(work_request_key):
+    """The slot's own request key of a run or of its continuation (#774)."""
+    return str(work_request_key or '').split(CONTINUATION_SEPARATOR, 1)[0]
+
+
 def preparation_of(work_request_key):
-    """The preparation id a Work was started for, or None."""
-    key = str(work_request_key or '')
+    """The preparation id a Work was started for (or continues, #774), or None."""
+    key = slot_key(work_request_key)
     if not key.startswith(REQUEST_KEY_PREFIX):
         return None
     return key[len(REQUEST_KEY_PREFIX):].rsplit(':', 1)[0] or None
@@ -630,6 +639,27 @@ class Preparations:
             db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
                        (job_id, 'preparation', 'succeeded', json.dumps(detail), now))
             return job_id
+
+    @staticmethod
+    def continue_run(db, work_id, continuation_id, now):
+        """The running slot of Work ``work_id`` is now settled from ``continuation_id`` (#774).
+
+        Inside the caller's transaction, when the owner's location answer
+        continues a run that asked for it: the slot stays ``running`` and its
+        one settlement keeps the continuation's answer, not the asking run's.
+        A slot already settled, cancelled or run by another Work is unchanged.
+        """
+        preparation_id = preparation_of((db.execute('SELECT request_key FROM jobs WHERE id=?', (work_id,)).fetchone()
+                                         or {'request_key': None})['request_key'])
+        if not preparation_id:
+            return False
+        changed = db.execute('UPDATE preparations SET last_run_job_id=?,updated_at=? WHERE id=? AND state=? '
+                             'AND last_run_job_id=?', (continuation_id, now, preparation_id, STATE_RUNNING, work_id)).rowcount
+        if changed:
+            db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                       (continuation_id, 'preparation', 'succeeded',
+                        json.dumps({'preparation_id': preparation_id, 'continues_work': work_id}), now))
+        return bool(changed)
 
     def settle(self, row, now, scrub=None, decide=None, notify_to=None):
         """Record one finished run and schedule the next slot, if any.

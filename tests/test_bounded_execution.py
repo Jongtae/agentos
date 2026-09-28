@@ -33,7 +33,7 @@ class _Capabilities:
 # The fixture's definitions are ungated: #627's propose_current_state is a
 # declared profile action (Capabilities offers it only while context is on).
 # #774: the owner-state tools are relayed to the service on the trusted-local route.
-BOUNDED_NAMES = ['bounded_public_research', 'browser_click', 'browser_find', 'browser_open', 'browser_read', 'browser_type',
+BOUNDED_NAMES = ['ask_location', 'bounded_public_research', 'browser_click', 'browser_find', 'browser_open', 'browser_read', 'browser_type',
                  'calendar_draft_cancel', 'calendar_draft_create', 'calendar_draft_update', 'calendar_query', 'list_memory',
                  'list_notes', 'propose_current_state', 'save_memory', 'save_note', 'schedule_preparation', 'weather',
                  'web_search']
@@ -364,7 +364,9 @@ class SubscriptionServiceTests(unittest.TestCase):
             # #804: save_memory is a write with no stored content in its result, so it stays offered.
             self.assertEqual(adapter.call[2], [name for name in BOUNDED_NAMES if name not in
                                                ('propose_current_state', 'list_notes', 'web_search', 'bounded_public_research',
-                                                'calendar_query', 'list_memory')])
+                                                'calendar_query', 'list_memory',
+                                                # #774: a non-Telegram Work could never be answered.
+                                                'ask_location')])
             self.assertEqual(store.job(job)['response'], 'engine answer')
 
     def test_summary_regression_sends_approved_notes_to_subscription_engine(self):

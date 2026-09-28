@@ -99,7 +99,9 @@ _BROWSER_ACTIONS = ('browser_open', 'browser_read', 'browser_find', 'browser_cli
 _PREPARATIONS = 'owner-preparations-not-bound-to-cli-route'
 #: #774: relayed to the service on the trusted-local route only.
 _OWNER_STATE_RELAYED = ('calendar_query', 'calendar_draft_create', 'calendar_draft_update', 'calendar_draft_cancel',
-                        'list_memory', 'save_memory', 'schedule_preparation')
+                        'list_memory', 'save_memory', 'schedule_preparation', 'ask_location')
+#: #774: the owner's paired Telegram chat is held by the service, reached only through its relay.
+_LOCATION = 'owner-telegram-location-request-served-on-trusted-local-route-only'
 
 #: The verified limitation of the trusted-local profile (owner decision on
 #: #604).  The CLI's own built-in tools can read local host files that AgentOS
@@ -167,7 +169,7 @@ CLI_PROFILES = {
         # #701: the five browser tools, executed by the AgentOS service's own
         # BrowserSession (mediation, payment guard, approvals, budget) and
         # relayed by the bridge; offered only while the profile is available.
-        # #774: the owner-state actions (Memory, calendar, preparations) are
+        # #774: the owner-state actions (Memory, calendar, preparations, location request) are
         # relayed the same way and run under the service's unchanged gates:
         # #597 memory approval, calendar previews, #659 preparation acceptance.
         'actions': ('bounded_public_research', 'list_notes', 'propose_current_state', 'save_note', 'weather', 'web_search',
@@ -197,7 +199,8 @@ CLI_PROFILES = {
             'bounded_public_research', 'save_note', 'weather', 'web_search', 'public_page_read',
             'find_files', 'read_file', 'list_roots', 'calendar_query', 'calendar_draft_create',
             'calendar_draft_update', 'calendar_draft_cancel', 'save_memory', 'list_memory',
-            'list_agents', 'delegate_agent', 'propose_current_state', 'schedule_preparation', *_BROWSER_ACTIONS)},
+            'list_agents', 'delegate_agent', 'propose_current_state', 'schedule_preparation', 'ask_location',
+            *_BROWSER_ACTIONS)},
         # Pinned in Dockerfile.engine; a test keeps the two in step.
         'runtimes': {'codex': {'pinned_version': '0.153.4', 'live_tested_version': None}},
     },
@@ -221,6 +224,7 @@ CLI_PROFILES = {
             'list_agents': _SPECIALISTS, 'delegate_agent': _SPECIALISTS,
             **{action: _BROWSER for action in _BROWSER_ACTIONS},
             'schedule_preparation': _PREPARATIONS,
+            'ask_location': _LOCATION,
         },
         # Only these exact CLI versions passed the process-level tests; any
         # other version is refused until requalified (no silent downgrade).

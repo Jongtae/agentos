@@ -5,7 +5,7 @@
 :root{
  --font:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Pretendard Variable",Pretendard,"Noto Sans KR","PingFang SC","Hiragino Sans","Noto Sans SC","Noto Sans JP","Microsoft YaHei","Yu Gothic",sans-serif;
  /* surfaces */
- --canvas:#f3f4f6;--rail:#e9ebef;--surface:#fff;--surface-2:#f7f8fa;--surface-3:#eef0f3;
+ --canvas:#fff;--rail:#f3f4f6;--surface:#fff;--surface-2:#f7f8fa;--surface-3:#eef0f3;
  /* ink */
  --ink:#161a20;--ink-2:#3b424c;--muted:#5f6772;--faint:#8a919b;
  /* lines */
@@ -259,22 +259,15 @@ details.technical details>summary{color:var(--muted)}
 /* ---------- 6. Settings ---------- */
 .settings-layout{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--sp-4)}
 .settings-panes,.settings-pane{min-width:0}
-.settings-nav{display:flex;gap:2px;padding:3px;border-radius:var(--r-2);background:var(--surface-3);width:max-content;max-width:100%}
-.settings-nav button{min-height:32px;padding:0 14px;border:1px solid transparent;background:transparent;color:var(--ink-2);font-size:var(--fs-2);font-weight:500;border-radius:7px}
-.settings-nav button:hover{background:rgba(255,255,255,.6);border-color:transparent}
-.settings-nav button[aria-selected="true"]{background:var(--surface);color:var(--ink);font-weight:600;border-color:var(--line);box-shadow:0 1px 1px rgba(20,25,35,.05)}
-.settings-pane{max-width:760px;padding-top:var(--sp-3)}
-@media(min-width:1041px){
- .settings-layout{grid-template-columns:172px minmax(0,1fr);gap:var(--sp-6);align-items:start}
- .settings-nav{display:grid;align-content:start;gap:2px;width:auto;max-width:none;padding:0;border-radius:0;background:transparent}
- .settings-nav button{justify-content:flex-start;min-height:38px;padding:0 12px;border:1px solid transparent;background:transparent;text-align:left;white-space:normal}
- .settings-nav button:hover{background:var(--surface-2);border-color:transparent}
- .settings-nav button[aria-selected="true"]{position:relative;background:var(--surface);border-color:var(--line);box-shadow:none}
- .settings-nav button[aria-selected="true"]::before{content:"";position:absolute;top:7px;bottom:7px;left:-1px;width:2px;border-radius:1px;background:var(--accent)}
- .settings-pane{padding-top:0}
-}
-.settings-pane>h2{margin:0 0 4px}
-.settings-pane>h2+p{margin:0 0 var(--sp-4);color:var(--muted)}
+.settings-nav-group{display:grid;gap:var(--sp-2)}
+.nav-group-label{padding:0 10px;font-size:var(--fs-1);color:var(--muted);display:flex;align-items:center;gap:8px}
+.settings-nav{display:grid;gap:2px;min-width:0}
+.settings-nav button{justify-content:flex-start;min-height:38px;padding:8px 10px;border:1px solid transparent;background:transparent;color:var(--ink-2);font-size:var(--fs-2);font-weight:500;text-align:left;white-space:normal}
+.settings-nav button:hover{background:var(--surface);border-color:transparent}
+.settings-nav button[aria-selected="true"]{background:var(--accent);color:#fff;font-weight:600}
+.settings-pane{max-width:840px}
+.settings-pane>h1{margin:0 0 var(--sp-5)}
+.settings-pane>h1+p{margin:0 0 var(--sp-4);color:var(--muted)}
 .settings-section{margin-top:var(--sp-6)}
 .settings-section:first-of-type{margin-top:var(--sp-4)}
 .settings-section-heading{padding:0 0 10px;border-bottom:1px solid var(--line)}
@@ -346,7 +339,7 @@ details.technical details>summary{color:var(--muted)}
  .app{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr);background:var(--canvas)}
  .rail{position:static;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;gap:var(--sp-2) var(--sp-3);padding:10px var(--sp-4);border-right:0;border-bottom:1px solid var(--line)}
  .brand{padding:0;flex:1 1 auto}
- .primary-nav{order:3;flex:1 0 100%;grid-auto-flow:column;grid-auto-columns:max-content;gap:4px;overflow-x:auto;padding-bottom:2px}
+ .primary-nav{flex:1;min-width:0}
  .primary-nav button{min-height:32px;white-space:nowrap;gap:8px}
  .rail-foot{margin:0;padding:0;display:flex;align-items:center;gap:var(--sp-3)}
  .rail-foot p{display:none}
@@ -363,8 +356,10 @@ details.technical details>summary{color:var(--muted)}
  .stack>button{justify-self:stretch}
  .workspace-browser{grid-template-columns:1fr;margin-left:0}
  .workspace-browser .detail{display:block}
- .settings-nav{width:100%;overflow-x:auto}
- .settings-nav button{flex:1 0 auto;white-space:nowrap}
+ .settings-nav-group{order:3;flex:1 0 100%}
+ .settings-nav{grid-template-columns:repeat(2,minmax(0,1fr));width:100%}
+ .settings-nav button{min-height:44px}
+ .nav-group-label{display:none}
  .settings-row{grid-template-columns:minmax(0,1fr) auto;gap:6px var(--sp-3)}
  .settings-row-main{grid-column:1;grid-row:1}
  .settings-state{grid-column:1;grid-row:2}
@@ -487,20 +482,26 @@ details.technical details>summary{color:var(--muted)}
 .decision-choice{display:flex;align-items:center;gap:8px;min-height:32px;font-size:var(--fs-2)}
 .decision-choice input{margin:0}
 
-/* AI route settings: show Main AI first and nest the dependent Judgment AI line inside the same card. */
-.ai-settings-intro{border:0;padding:8px 0 4px}
-.ai-route-card{margin-top:10px;border:1px solid var(--line);border-top:3px solid var(--accent);border-radius:var(--r-2);background:var(--surface);overflow:hidden}
-.ai-route-main{grid-template-columns:minmax(0,1fr) auto;gap:8px 16px;align-items:start;padding:16px;border:0;border-bottom:1px solid var(--line)}
-.ai-route-main .settings-row-main{grid-column:1;grid-row:1}
-.ai-route-main>.settings-state{grid-column:2;grid-row:1;justify-self:end}
-.ai-route-main .settings-row-actions{grid-column:1/-1;grid-row:2;justify-content:flex-start}
-.ai-route-main[data-route-state="unconfigured"]>.settings-state{display:none}
-.ai-route-judgment{grid-template-columns:minmax(0,1fr) auto;gap:8px 12px;margin:10px 12px 12px 24px;padding:12px;border:0;border-left:2px solid var(--line-strong);border-radius:var(--r-1);background:var(--surface-2)}
-.ai-route-judgment .settings-row-main{grid-column:1;grid-row:1}
-.ai-route-judgment>.settings-state{grid-column:2;grid-row:1;justify-self:end}
-.ai-route-judgment .settings-row-actions{grid-column:1/-1;grid-row:2;justify-content:flex-start}
-.ai-route-judgment .settings-row-title{font-size:var(--fs-2)}
-.ai-route-judgment .settings-row-description{max-width:68ch}
+/* Compact peer AI preferences; values reflect current server evidence. */
+#active-ai{display:grid;gap:var(--sp-4)}
+.ai-preference-group{min-width:0;padding:0 var(--sp-4);background:var(--surface-2);border-radius:var(--r-2)}
+.ai-fact{grid-template-columns:minmax(100px,.65fr) minmax(0,1.35fr) auto;gap:8px 12px;padding:12px 0;min-height:48px}
+.ai-fact:last-child{border-bottom:0}
+.ai-fact .settings-row-title{font-weight:500}
+.ai-fact .settings-row-main{display:contents}
+.ai-fact .settings-row-title{grid-column:1;grid-row:1}
+.ai-fact>.settings-state{grid-column:2;grid-row:1;justify-self:end;text-align:right;display:block;background:none;color:var(--muted);padding:0;font-size:var(--fs-3);font-weight:400;line-height:1.5;border-radius:0}
+.ai-fact>.settings-state::before{display:none}
+.ai-fact>.settings-state.attention{color:var(--attn);font-weight:600}
+.ai-fact .settings-row-actions{grid-column:3;grid-row:1}
+.ai-fact .settings-row-description{grid-column:1/-1;grid-row:2}
+.ai-fact .settings-row-action{min-height:36px;background:var(--surface-3);border-color:transparent;white-space:normal}
+.ai-group-note{padding:10px 0 14px;font-size:var(--fs-2);color:var(--muted)}
+.ai-access-options{margin:0;min-width:0}
+.ai-access-options>summary{min-height:36px;padding:0 10px;background:var(--surface-3);border-radius:var(--r-1)}
+.ai-access-options[open]{max-width:240px}
+.ai-access-options button{margin-top:8px;white-space:normal;text-align:left}
+#active-ai-feedback:empty{display:none}
 .settings-dialog{width:min(640px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:0;border:1px solid var(--line-strong);border-radius:12px;background:var(--surface);color:var(--ink);overscroll-behavior:contain}
 .settings-dialog::backdrop{background:rgb(15 23 42 / .4)}
 .dialog-body{display:grid;gap:var(--sp-3);padding:var(--sp-5)}
@@ -524,7 +525,7 @@ details.technical details>summary{color:var(--muted)}
 .chooser-key input{flex:1 1 220px;min-width:0}
 .chooser-model{display:grid;gap:var(--sp-1)}
 .chooser-consequence{display:grid;gap:var(--sp-1);margin:0;font-size:var(--fs-2)}
-@media(max-width:620px){.ai-route-main{grid-template-columns:minmax(0,1fr) auto;padding:12px}.ai-route-judgment{grid-template-columns:minmax(0,1fr);margin:10px 8px 8px 14px;padding:10px}.ai-route-judgment .settings-row-main,.ai-route-judgment>.settings-state,.ai-route-judgment .settings-row-actions{grid-column:1;grid-row:auto;justify-self:start}.chooser-row{grid-template-columns:minmax(0,1fr) auto;align-items:center}.chooser-row>.chooser-actions{grid-column:1/-1;grid-row:2;justify-content:flex-start;padding-left:28px}.chooser-row>.field-hint{padding-left:28px}.settings-dialog{width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;margin:0;border:0;border-radius:0}.dialog-body{padding:var(--sp-4)}}
+@media(max-width:620px){.chooser-row{grid-template-columns:minmax(0,1fr) auto;align-items:center}.chooser-row>.chooser-actions{grid-column:1/-1;grid-row:2;justify-content:flex-start;padding-left:28px}.chooser-row>.field-hint{padding-left:28px}.settings-dialog{width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;margin:0;border:0;border-radius:0}.dialog-body{padding:var(--sp-4)}}
 #ai-chooser .dialog-body{max-height:calc(100dvh - 34px);overflow:auto;overscroll-behavior:contain}
 #ai-chooser-consequence:empty,#ai-chooser-feedback:empty{display:none}
 #ai-chooser-list{padding-bottom:var(--sp-2)}
@@ -535,3 +536,14 @@ details.technical details>summary{color:var(--muted)}
 .disconnect-effects-group ul{display:grid;gap:var(--sp-1);margin:0;padding-left:1.25rem}
 .effect-line.ok::marker{color:var(--ok)}
 .effect-line.attention{font-weight:600}
+
+@media(max-width:620px){
+ .rail-foot .runtime{display:none}
+ .ai-fact{grid-template-columns:minmax(70px,.7fr) minmax(0,1.3fr);gap:8px}
+ .ai-fact .settings-row-actions{grid-column:2;grid-row:2}
+ .ai-fact .settings-row-description{grid-column:1/-1;grid-row:3}
+ .ai-fact>.settings-state{grid-column:2;grid-row:1}
+ .ai-fact .settings-row-title{grid-column:1;grid-row:1}
+ .ai-fact .settings-row-action{min-height:44px}
+ .rail-foot .language-picker select{min-height:44px}
+}
